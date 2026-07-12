@@ -1,0 +1,328 @@
+@import "tailwindcss";
+
+:root {
+  /* Official crest palette — navy + gold */
+  --brand-deep: #203050;
+  --brand-mid: #384870;
+  --brand-accent: #c5a028;
+  --brand-accent-soft: #d4b84a;
+  --brand-gold: #c5a028;
+  --brand-gold-soft: #e0c96a;
+  --brand-cream: #f8f8f0;
+  --surface: #f6f5ef;
+  --panel: rgba(248, 248, 240, 0.94);
+  --ink: #203050;
+  --muted: #5c6478;
+  --danger: #b42318;
+  --ok: #0f7a4c;
+  --ring: #c5a028;
+  --background: var(--surface);
+  --foreground: var(--ink);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-brand: var(--brand-deep);
+  --color-accent: var(--brand-accent);
+  --font-sans: var(--font-sans-face), "Plus Jakarta Sans", system-ui, sans-serif;
+  --font-display: var(--font-display-face), Fraunces, Georgia, serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01" on, "cv11" on;
+  letter-spacing: -0.011em;
+  line-height: 1.5;
+}
+
+.font-display {
+  font-family: var(--font-display);
+  font-optical-sizing: auto;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.font-tagline {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 500;
+  color: var(--brand-gold);
+  letter-spacing: 0.01em;
+}
+
+.font-brand-name {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--brand-deep);
+}
+
+h1,
+h2,
+h3,
+.heading {
+  font-family: var(--font-display);
+  font-optical-sizing: auto;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
+  font-weight: 600;
+}
+
+@layer base {
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  button,
+  input {
+    font: inherit;
+  }
+}
+
+:focus-visible {
+  outline: 2px solid var(--brand-gold);
+  outline-offset: 2px;
+}
+
+@keyframes kenburns {
+  from {
+    transform: scale(1);
+  }
+  to {
+    transform: scale(1.06);
+  }
+}
+
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.atmosphere {
+  animation: kenburns 20s ease-in-out infinite alternate;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .atmosphere {
+    animation: none;
+  }
+  .panel-enter {
+    animation: none !important;
+  }
+}
+
+.panel-enter {
+  animation: panel-in 280ms ease-out both;
+}
+
+.glass {
+  background: var(--panel);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(32, 48, 80, 0.12);
+  box-shadow:
+    0 18px 50px rgba(32, 48, 80, 0.14),
+    0 0 0 1px rgba(197, 160, 40, 0.12);
+}
+
+.btn-accent {
+  background: var(--brand-deep);
+  color: #fff;
+  box-shadow: 0 0 0 1px rgba(197, 160, 40, 0.35);
+  transition: background 160ms ease, box-shadow 160ms ease, transform 100ms ease;
+}
+
+.btn-accent:hover {
+  background: var(--brand-mid);
+  box-shadow: 0 0 0 1px var(--brand-gold), 0 4px 14px rgba(197, 160, 40, 0.25);
+}
+
+.btn-accent:active {
+  transform: scale(0.98);
+}
+
+.field {
+  width: 100%;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(32, 48, 80, 0.18);
+  background: rgba(255, 255, 255, 0.9);
+  padding: 0.55rem 0.85rem;
+  outline: none;
+}
+
+.field:focus {
+  box-shadow: 0 0 0 2px rgba(197, 160, 40, 0.35);
+  border-color: var(--brand-gold);
+}
+
+/* Crest highlight — punch + soft gold halo */
+.logo-mark {
+  filter:
+    brightness(1.08)
+    contrast(1.12)
+    saturate(1.18)
+    drop-shadow(0 0 1px rgba(248, 248, 240, 0.55))
+    drop-shadow(0 0 10px rgba(197, 160, 40, 0.55))
+    drop-shadow(0 6px 16px rgba(32, 48, 80, 0.35));
+}
+
+.logo-mark-lg {
+  filter:
+    brightness(1.1)
+    contrast(1.14)
+    saturate(1.22)
+    drop-shadow(0 0 2px rgba(248, 248, 240, 0.7))
+    drop-shadow(0 0 14px rgba(197, 160, 40, 0.65))
+    drop-shadow(0 0 28px rgba(197, 160, 40, 0.28))
+    drop-shadow(0 10px 22px rgba(15, 22, 40, 0.45));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .logo-mark,
+  .logo-mark-lg {
+    filter:
+      brightness(1.08)
+      contrast(1.12)
+      saturate(1.15)
+      drop-shadow(0 2px 8px rgba(32, 48, 80, 0.25));
+  }
+}
+
+/* Fee Take — print only the selected receipt, not the whole page */
+@media print {
+  @page {
+    margin: 10mm;
+    size: A4;
+  }
+
+  body.printing-fee-receipt {
+    background: white !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body.printing-fee-receipt * {
+    visibility: hidden !important;
+  }
+
+  body.printing-fee-receipt .fee-receipt-sheet.print-target,
+  body.printing-fee-receipt .fee-receipt-sheet.print-target * {
+    visibility: visible !important;
+  }
+
+  body.printing-fee-receipt .fee-receipt-sheet.print-target {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: 190mm !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: white !important;
+    opacity: 1 !important;
+    overflow: visible !important;
+  }
+
+  body.printing-fee-receipt .fee-receipt-sheet .print-hide {
+    display: none !important;
+  }
+
+  body.printing-fee-receipt .fee-receipt-inner {
+    margin: 0 !important;
+  }
+
+  body.printing-fee-receipt .fee-receipt-watermark span {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color: rgba(15, 122, 76, 0.16) !important;
+  }
+
+  body.printing-fee-receipt
+    .fee-receipt-sheet.print-target[data-voided="true"]
+    .fee-receipt-watermark
+    span {
+    color: rgba(180, 35, 24, 0.18) !important;
+  }
+
+  body.printing-fee-receipt .print-hide {
+    display: none !important;
+  }
+
+  /* Certificates — print only the selected sheet */
+  body.printing-certificate {
+    background: white !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body.printing-certificate * {
+    visibility: hidden !important;
+  }
+
+  body.printing-certificate .certificate-sheet.print-target,
+  body.printing-certificate .certificate-sheet.print-target * {
+    visibility: visible !important;
+  }
+
+  body.printing-certificate .certificate-sheet.print-target {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: 190mm !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: white !important;
+    opacity: 1 !important;
+    overflow: visible !important;
+  }
+
+  body.printing-certificate .certificate-sheet .print-hide,
+  body.printing-certificate .print-hide {
+    display: none !important;
+  }
+
+  body.printing-certificate .certificate-inner {
+    margin: 0 !important;
+  }
+
+  body.printing-certificate .certificate-watermark span {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color: rgba(32, 48, 80, 0.06) !important;
+  }
+
+  body.printing-certificate
+    .certificate-sheet.print-target[data-voided="true"]
+    .certificate-watermark
+    span {
+    color: rgba(180, 35, 24, 0.18) !important;
+  }
+}
+

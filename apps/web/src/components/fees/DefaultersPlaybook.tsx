@@ -1,0 +1,750 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import {
+  buildPlaybook,
+  composeEscalationNotice,
+  composeWhatsAppDefaulterReminder,
+  formatInrFromPaise,
+  listLiveDefaulters,
+  stageLabel,
+  type LiveDefaulter,
+} from "@/lib/playbook";
+import {
+  buildPaymentSharePayload,
+  buildPaymentShareUrl,
+  composeWhatsAppPaymentLinkMessage,
+  createPaymentLink,
+  whatsAppPaymentLinkUrl,
+} from "@/lib/payments";
+import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
+import {
+  householdOf,
+  householdWhatsApp,
+  isValidMobile,
+  loadSis,
+  type SisState,
+} from "@/lib/sis";
+import { TENANT, type OverdueStage } from "@/lib/types";
+import { useDemoSession } from "@/components/shell/SessionContext";
+import { StudentTypeBadge } from "@/components/students/StudentAvatar";
+import { FilterExportButtons } from "@/components/reports/FilterExportButtons";
+import { describeFilters } from "@/lib/reportExport";
+import { InstallmentPlanDialog } from "@/components/fees/InstallmentPlanDialog";
+import { PrincipalHoldOverrideDialog } from "@/components/fees/PrincipalHoldOverrideDialog";
+import {
+  checkHold,
+  listPolicyHoldRows,
+  type HoldCheck,
+} from "@/lib/holds";
+import type { HoldCode } from "@/lib/types";
+
+const STAGE_FILTERS: { value: "" | OverdueStage; label: string }[] = [
+  { value: "", label: "All stages" },
+  { value: "S1", label: "S1 Due" },
+  { value: "S2", label: "S2 Overdue" },
+  { value: "S3", label: "S3 Serious" },
+  { value: "S4", label: "S4 Hard" },
+  { value: "S0", label: "S0 Upcoming" },
+];
+
+export function DefaultersPlaybook() {
+  const session = useDemoSession();
+  const [sis, setSis] = useState<SisState | null>(null);
+  const [masters, setMasters] = useState<MastersState | null>(null);
+  const [rows, setRows] = useState<LiveDefaulter[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [classId, setClassId] = useState("");
+  const [stageFilter, setStageFilter] = useState<"" | OverdueStage>("");
+  const [includeUpcoming, setIncludeUpcoming] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [tick, setTick] = useState(0);
+  const [planOpen, setPlanOpen] = useState(false);
+  const [holdDialog, setHoldDialog] = useState(false);
+  const [holdTarget, setHoldTarget] = useState<{
+    code: HoldCode;
+    mode: "unhold" | "rehold";
+    block: Extract<HoldCheck, { allowed: false }> | null;
+  } | null>(null);
+
+  function refresh() {
+    const s = loadSis();
+    const m = loadMasters();
+    const list = listLiveDefaulters({
+      sis: s,
+      masters: m,
+      includeUpcoming,
+    });
+    setSis(s);
+    setMasters(m);
+    setRows(list);
+    setTick((t) => t + 1);
+    setSelectedId((prev) => {
+      if (prev && list.some((r) => r.studentId === prev)) return prev;
+      return list[0]?.studentId ?? null;
+    });
+  }
+
+  useEffect(() => {
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [includeUpcoming]);
+
+  const classOptions = useMemo(() => {
+    if (!masters) return [];
+    return masters.classes.filter((c) => c.isActive);
+  }, [masters]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return rows.filter((r) => {
+      if (stageFilter && r.stage !== stageFilter) return false;
+      if (classId && r.student.classId !== classId) return false;
+      if (!q) return true;
+      return (
+        r.fullName.toLowerCase().includes(q) ||
+        r.admissionNo.toLowerCase().includes(q) ||
+        r.classLabel.toLowerCase().includes(q)
+      );
+    });
+  }, [rows, query, classId, stageFilter]);
+
+  const selected =
+    filtered.find((r) => r.studentId === selectedId) ??
+    filtered[0] ??
+    null;
+
+  useEffect(() => {
+    if (selected && selected.studentId !== selectedId) {
+      setSelectedId(selected.studentId);
+    }
+  }, [filtered, selected, selectedId]);
+
+  const playbook = useMemo(() => {
+    if (!selected) return null;
+    return buildPlaybook({
+      overdueDays: selected.overdueDays,
+      amountPaise: selected.overdueAmountPaise,
+      studentName: selected.fullName,
+    });
+  }, [selected]);
+
+  const policyHolds = useMemo(() => {
+    if (!selected || !playbook) return [];
+    return listPolicyHoldRows(selected.studentId, playbook.holds);
+  }, [selected, playbook, tick]);
+
+  const totals = useMemo(() => {
+    const amount = filtered.reduce((s, r) => s + r.overdueAmountPaise, 0);
+    const byStage: Partial<Record<OverdueStage, number>> = {};
+    for (const r of filtered) {
+      byStage[r.stage] = (byStage[r.stage] ?? 0) + 1;
+    }
+    return { count: filtered.length, amount, byStage };
+  }, [filtered]);
+
+  function flash(msg: string) {
+    setNotice(msg);
+    setError(null);
+    window.setTimeout(() => setNotice(null), 3200);
+  }
+
+  function guardianMobile(row: LiveDefaulter): string {
+    if (!sis) return "";
+    return householdWhatsApp(householdOf(sis, row.householdId));
+  }
+
+  function createLinkForRow(row: LiveDefaulter) {
+    const dues =
+      row.overdueDues.length > 0 ? row.overdueDues : row.openDues;
+    return createPaymentLink({
+      householdId: row.householdId,
+      studentId: row.studentId,
+      studentName: row.fullName,
+      classLabel: row.classLabel,
+      dues,
+      createdBy: session.fullName,
+      academicYearCode: row.academicYearCode || DEFAULT_AY,
+      note: `Defaulter ${row.stageLabel}`,
+    });
+  }
+
+  function sendPayLink(row: LiveDefaulter) {
+    const created = createLinkForRow(row);
+    if (!created.ok) {
+      setError(created.error);
+      return;
+    }
+    const payload = buildPaymentSharePayload(
+      created.link,
+      TENANT.nameDisplay,
+    );
+    const url = buildPaymentShareUrl(payload);
+    const mobile = guardianMobile(row);
+    if (mobile && isValidMobile(mobile)) {
+      const msg = composeWhatsAppPaymentLinkMessage(
+        created.link,
+        url,
+        TENANT.nameDisplay,
+      );
+      window.open(whatsAppPaymentLinkUrl(mobile, msg), "_blank", "noopener");
+      flash(`UPI link ${created.link.code} — WhatsApp opened`);
+    } else {
+      void navigator.clipboard.writeText(url).then(
+        () =>
+          flash(
+            `UPI link ${created.link.code} copied — set WhatsApp on household`,
+          ),
+        () => flash(url),
+      );
+    }
+    refresh();
+  }
+
+  function sendReminder(row: LiveDefaulter, withLink: boolean) {
+    const mobile = guardianMobile(row);
+    let payUrl = "";
+    if (withLink) {
+      const created = createLinkForRow(row);
+      if (!created.ok) {
+        setError(created.error);
+        return;
+      }
+      payUrl = buildPaymentShareUrl(
+        buildPaymentSharePayload(created.link, TENANT.nameDisplay),
+      );
+    }
+    const msg = composeWhatsAppDefaulterReminder({
+      schoolName: TENANT.nameDisplay,
+      studentName: row.fullName,
+      classLabel: row.classLabel,
+      amountPaise: row.overdueAmountPaise,
+      overdueDays: row.overdueDays,
+      stageLabel: row.stageLabel,
+      payUrl: payUrl || undefined,
+    });
+    if (mobile && isValidMobile(mobile)) {
+      window.open(whatsAppPaymentLinkUrl(mobile, msg), "_blank", "noopener");
+      flash(`Reminder sent via WhatsApp (${mobile})`);
+    } else {
+      void navigator.clipboard.writeText(msg).then(
+        () => flash("Reminder copied — no WhatsApp on household"),
+        () => setError("Could not copy reminder"),
+      );
+    }
+    if (withLink) refresh();
+  }
+
+  function onAction(actionId: string, row: LiveDefaulter) {
+    setError(null);
+    if (actionId === "paylink" || actionId === "remind") {
+      sendPayLink(row);
+      return;
+    }
+    if (actionId === "whatsapp") {
+      sendReminder(row, true);
+      return;
+    }
+    if (actionId === "call") {
+      const mobile = guardianMobile(row);
+      if (mobile) {
+        void navigator.clipboard.writeText(mobile).then(
+          () => flash(`Guardian mobile copied: ${mobile}`),
+          () => flash(mobile),
+        );
+      } else {
+        setError("No mobile on household — update in Students");
+      }
+      return;
+    }
+    if (actionId === "escalate") {
+      const text = composeEscalationNotice({
+        schoolName: TENANT.nameDisplay,
+        studentName: row.fullName,
+        classLabel: row.classLabel,
+        admissionNo: row.admissionNo,
+        amountPaise: row.overdueAmountPaise,
+        overdueDays: row.overdueDays,
+        earliestDueOn: row.earliestDueOn,
+      });
+      void navigator.clipboard.writeText(text).then(
+        () => flash("Escalation notice copied"),
+        () => setError("Could not copy notice"),
+      );
+      return;
+    }
+    if (actionId === "plan") {
+      setPlanOpen(true);
+      return;
+    }
+    if (actionId === "meeting") {
+      flash("Parent meeting task (coming soon)");
+      return;
+    }
+  }
+
+  void tick;
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-[var(--brand-deep)]">
+            Defaulters
+          </h1>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            Live Fee Take ledger · stage coach · WhatsApp / UPI link — attendance
+            never held
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
+            onClick={() => refresh()}
+          >
+            Refresh
+          </button>
+          <Link
+            href="/fees"
+            className="btn-accent rounded-lg px-3 py-1.5 text-xs font-semibold"
+          >
+            Open Fee Take
+          </Link>
+        </div>
+      </div>
+
+      {error ? (
+        <p className="mt-3 rounded-lg bg-[#dc2626]/10 px-3 py-2 text-sm text-[#dc2626]">
+          {error}
+        </p>
+      ) : null}
+      {notice ? (
+        <p className="mt-3 rounded-lg bg-[rgba(32,48,80,0.06)] px-3 py-2 text-sm text-[var(--brand-deep)]">
+          {notice}
+        </p>
+      ) : null}
+
+      <div className="mt-4 flex flex-wrap gap-3 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3 text-sm">
+        <div>
+          <span className="text-[var(--muted)]">Students </span>
+          <span className="font-bold text-[var(--brand-deep)]">
+            {totals.count}
+          </span>
+        </div>
+        <div>
+          <span className="text-[var(--muted)]">Overdue </span>
+          <span className="font-bold text-[var(--danger)]">
+            {formatInrFromPaise(totals.amount)}
+          </span>
+        </div>
+        {(["S4", "S3", "S2", "S1"] as OverdueStage[]).map((s) =>
+          totals.byStage[s] ? (
+            <div key={s} className="text-[var(--muted)]">
+              {stageLabel(s)}{" "}
+              <span className="font-semibold text-[var(--brand-deep)]">
+                {totals.byStage[s]}
+              </span>
+            </div>
+          ) : null,
+        )}
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,0.7fr)_minmax(0,0.7fr)_auto]">
+        <label className="block text-sm">
+          <span className="mb-1 block text-[11px] text-[var(--muted)]">
+            Search
+          </span>
+          <input
+            className="field !py-1.5"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Name, admission no, class…"
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="mb-1 block text-[11px] text-[var(--muted)]">
+            Class
+          </span>
+          <select
+            className="field !py-1.5"
+            value={classId}
+            onChange={(e) => setClassId(e.target.value)}
+          >
+            <option value="">All classes</option>
+            {classOptions.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block text-sm">
+          <span className="mb-1 block text-[11px] text-[var(--muted)]">
+            Stage
+          </span>
+          <select
+            className="field !py-1.5"
+            value={stageFilter}
+            onChange={(e) =>
+              setStageFilter(e.target.value as "" | OverdueStage)
+            }
+          >
+            {STAGE_FILTERS.map((s) => (
+              <option key={s.label} value={s.value}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex items-end gap-2 pb-2 text-sm text-[var(--brand-deep)]">
+          <input
+            type="checkbox"
+            checked={includeUpcoming}
+            onChange={(e) => setIncludeUpcoming(e.target.checked)}
+          />
+          Include upcoming (not yet due)
+        </label>
+        <div className="flex items-end pb-1 sm:col-span-4 lg:col-span-1">
+          <FilterExportButtons
+            title="Fee defaulters"
+            subtitle={`${TENANT.shortName} · ${DEFAULT_AY}`}
+            filterNote={describeFilters([
+              classOptions.find((c) => c.id === classId)?.name
+                ? `Class ${classOptions.find((c) => c.id === classId)?.name}`
+                : "",
+              stageFilter ? stageLabel(stageFilter) : "",
+              includeUpcoming ? "Incl. upcoming" : "",
+              query.trim() ? `Search “${query.trim()}”` : "",
+            ])}
+            fileBaseName="fee_defaulters"
+            columns={[
+              { key: "admissionNo", header: "Adm no", width: 1 },
+              { key: "fullName", header: "Name", width: 1.5 },
+              { key: "classLabel", header: "Class", width: 0.8 },
+              { key: "stage", header: "Stage", width: 0.9 },
+              { key: "days", header: "Days", width: 0.6, align: "right" },
+              {
+                key: "overdue",
+                header: "Overdue",
+                width: 1,
+                align: "right",
+              },
+              { key: "mobile", header: "WhatsApp", width: 1 },
+            ]}
+            rows={filtered.map((d) => ({
+              admissionNo: d.admissionNo,
+              fullName: d.fullName,
+              classLabel: d.classLabel,
+              stage: stageLabel(d.stage),
+              days: d.overdueDays,
+              overdue: formatInrFromPaise(d.overdueAmountPaise),
+              mobile: sis
+                ? householdWhatsApp(householdOf(sis, d.householdId))
+                : "",
+            }))}
+            onMessage={flash}
+          />
+        </div>
+      </div>
+
+      <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_1.1fr]">
+        <section>
+          <h2 className="text-sm font-bold text-[var(--brand-deep)]">
+            Live ledger
+          </h2>
+          {filtered.length === 0 ? (
+            <p className="mt-3 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-4 py-10 text-center text-sm text-[var(--muted)]">
+              {rows.length === 0
+                ? "No overdue open dues on the Fee Take ledger. Collect or wait for due dates."
+                : "No students match these filters."}
+            </p>
+          ) : (
+            <ul className="mt-3 divide-y divide-[rgba(32,48,80,0.1)] overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
+              {filtered.map((d) => {
+                const active = d.studentId === selected?.studentId;
+                return (
+                  <li key={d.studentId}>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedId(d.studentId)}
+                      className={`flex w-full items-center gap-3 px-4 py-3 text-left transition ${
+                        active
+                          ? "bg-[rgba(32,48,80,0.06)]"
+                          : "hover:bg-[rgba(32,48,80,0.03)]"
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-medium text-[var(--ink)]">
+                          <StudentTypeBadge type={d.student.studentType} />
+                          {d.fullName}{" "}
+                          <span className="font-normal text-[var(--muted)]">
+                            {d.classLabel}
+                          </span>
+                        </div>
+                        <div className="text-xs text-[var(--muted)]">
+                          {d.admissionNo} · {d.stageLabel} · due{" "}
+                          {d.earliestDueOn}
+                          {d.planCode ? (
+                            <span className="ml-1 font-semibold text-[var(--brand-mid)]">
+                              · {d.planCode}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div className="text-right text-sm">
+                        <div className="font-semibold text-[var(--danger)]">
+                          {formatInrFromPaise(d.overdueAmountPaise)}
+                        </div>
+                        <div className="text-xs text-[var(--muted)]">
+                          {d.overdueDays < 0
+                            ? "Upcoming"
+                            : d.overdueDays === 0
+                              ? "Due today"
+                              : `${d.overdueDays}d overdue`}
+                        </div>
+                      </div>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+
+        <section className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-5 shadow-sm">
+          {!selected || !playbook ? (
+            <p className="text-sm text-[var(--muted)]">
+              Select a student to open the fee action coach.
+            </p>
+          ) : (
+            <>
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <h3 className="text-base font-semibold text-[var(--brand-deep)]">
+                    Fee action coach — {selected.fullName}{" "}
+                    {selected.classLabel}
+                  </h3>
+                  <p className="mt-1 text-sm text-[var(--muted)]">
+                    Overdue: {formatInrFromPaise(playbook.amountPaise)} ·{" "}
+                    {playbook.overdueDays < 0
+                      ? "upcoming"
+                      : `${playbook.overdueDays} days`}{" "}
+                    · {playbook.stageLabel}
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-[var(--muted)]">
+                    Open (incl. future):{" "}
+                    {formatInrFromPaise(selected.openAmountPaise)} · WhatsApp{" "}
+                    {guardianMobile(selected) || "not set"}
+                  </p>
+                </div>
+                <span className="rounded-md bg-[rgba(180,35,24,0.1)] px-2 py-1 text-xs font-semibold text-[var(--danger)]">
+                  {playbook.stage}
+                </span>
+              </div>
+
+              <div className="mt-4 max-h-36 overflow-y-auto rounded-lg border border-[rgba(32,48,80,0.1)]">
+                <ul className="divide-y divide-[rgba(32,48,80,0.08)] text-[11px]">
+                  {selected.overdueDues.slice(0, 12).map((due) => (
+                    <li
+                      key={due.dueKey}
+                      className="flex justify-between gap-2 px-3 py-1.5"
+                    >
+                      <span className="min-w-0 truncate text-[var(--brand-deep)]">
+                        {due.label}
+                      </span>
+                      <span className="shrink-0 font-semibold tabular-nums">
+                        {formatInrFromPaise(due.balancePaise)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div className="mt-5">
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+                  DO NOW
+                </h4>
+                <ul className="mt-2 space-y-2">
+                  {selected.planCode &&
+                  !playbook.doNow.some((a) => a.id === "plan") ? (
+                    <li className="flex items-center justify-between gap-3 rounded-lg bg-[var(--surface)] px-3 py-2 text-sm">
+                      <span>Manage installment plan {selected.planCode}</span>
+                      <button
+                        type="button"
+                        className="btn-accent shrink-0 rounded-lg px-2.5 py-1 text-xs font-semibold"
+                        onClick={() => setPlanOpen(true)}
+                      >
+                        Plan
+                      </button>
+                    </li>
+                  ) : null}
+                  {playbook.doNow.map((a) => (
+                    <li
+                      key={a.id}
+                      className="flex items-center justify-between gap-3 rounded-lg bg-[var(--surface)] px-3 py-2 text-sm"
+                    >
+                      <span>
+                        {a.id === "plan" && selected.planCode
+                          ? `Manage installment plan ${selected.planCode}`
+                          : a.label}
+                      </span>
+                      <button
+                        type="button"
+                        className="btn-accent shrink-0 rounded-lg px-2.5 py-1 text-xs font-semibold"
+                        onClick={() => onAction(a.id, selected)}
+                      >
+                        {a.cta}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div className="mt-5">
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+                  STOP / HOLD (policy)
+                </h4>
+                <p className="mt-1 text-[11px] text-[var(--muted)]">
+                  Unhold / Re-hold each policy with Principal PIN (
+                  demo 2468)
+                </p>
+                <ul className="mt-2 space-y-2">
+                  {policyHolds.map((h) => {
+                    const isHeld = h.status === "held";
+                    const isUnheld = h.status === "unheld";
+                    const isClear = h.status === "clear";
+                    return (
+                      <li
+                        key={h.code}
+                        className="rounded-lg bg-[var(--surface)] px-3 py-2 text-sm"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="font-medium text-[var(--brand-deep)]">
+                              {h.label}
+                            </div>
+                            <div className="mt-0.5 text-[11px] text-[var(--muted)]">
+                              {isClear
+                                ? "Not triggered at this stage"
+                                : isUnheld
+                                  ? `Unheld until ${h.override?.expiresOn ?? "—"}${
+                                      h.override?.reason
+                                        ? ` · ${h.override.reason}`
+                                        : ""
+                                    }`
+                                  : h.mode === "auto"
+                                    ? "Held · enforced"
+                                    : "Held · suggest"}
+                            </div>
+                          </div>
+                          <div className="flex shrink-0 flex-col items-end gap-1">
+                            <span
+                              className={`text-[10px] font-bold uppercase tracking-wide ${
+                                isUnheld
+                                  ? "text-[#15803d]"
+                                  : isHeld
+                                    ? "text-[var(--danger)]"
+                                    : "text-[var(--muted)]"
+                              }`}
+                            >
+                              {isUnheld ? "Unheld" : isHeld ? "Held" : "Clear"}
+                            </span>
+                            {isHeld ? (
+                              <button
+                                type="button"
+                                className="btn-accent rounded-md px-2 py-0.5 text-[11px] font-semibold"
+                                onClick={() => {
+                                  const check = checkHold(
+                                    selected.studentId,
+                                    h.code,
+                                  );
+                                  setHoldTarget({
+                                    code: h.code,
+                                    mode: "unhold",
+                                    block: check.allowed ? null : check,
+                                  });
+                                  setHoldDialog(true);
+                                }}
+                              >
+                                Unhold
+                              </button>
+                            ) : null}
+                            {isUnheld ? (
+                              <button
+                                type="button"
+                                className="rounded-md border border-[#dc2626]/35 px-2 py-0.5 text-[11px] font-semibold text-[#dc2626]"
+                                onClick={() => {
+                                  setHoldTarget({
+                                    code: h.code,
+                                    mode: "rehold",
+                                    block: null,
+                                  });
+                                  setHoldDialog(true);
+                                }}
+                              >
+                                Re-hold
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+
+              <div className="mt-5">
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+                  Still ALLOWED
+                </h4>
+                <p className="mt-2 text-sm text-[var(--muted)]">
+                  {playbook.stillAllowed.join(" · ")}
+                </p>
+              </div>
+            </>
+          )}
+        </section>
+      </div>
+
+      {planOpen && selected ? (
+        <InstallmentPlanDialog
+          row={selected}
+          createdBy={session.fullName}
+          onClose={() => setPlanOpen(false)}
+          onSaved={(msg) => {
+            setPlanOpen(false);
+            flash(msg);
+            refresh();
+          }}
+        />
+      ) : null}
+
+      {holdDialog && selected && holdTarget ? (
+        <PrincipalHoldOverrideDialog
+          studentId={selected.studentId}
+          studentName={selected.fullName}
+          holdCode={holdTarget.code}
+          mode={holdTarget.mode}
+          block={holdTarget.block}
+          overriddenBy={session.fullName}
+          onClose={() => {
+            setHoldDialog(false);
+            setHoldTarget(null);
+          }}
+          onGranted={() => {
+            const action =
+              holdTarget.mode === "rehold" ? "re-held" : "unheld";
+            setHoldDialog(false);
+            setHoldTarget(null);
+            flash(`Policy ${action} with Principal PIN`);
+            refresh();
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
