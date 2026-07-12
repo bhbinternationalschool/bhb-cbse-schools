@@ -1,0 +1,13 @@
+# Keep Cloud Build / Docker context small and avoid overwriting image node_modules
+node_modules
+**/node_modules
+.git
+.next
+**/.next
+backups
+*.log
+.DS_Store
+apps/web/.env*
+.env*
+.cursor
+agent-transcripts

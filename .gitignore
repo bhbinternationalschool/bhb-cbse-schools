@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+apps/*/node_modules/
+packages/*/node_modules/
+.pnpm-store/
+
+# Next.js
+apps/web/.next/
+apps/web/out/
+
+# Env
+.env
+.env.local
+apps/web/.env.local
+*.pem
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+*.log
+
+# Misc
+coverage/
+dist/
+backups/
+tsconfig.tsbuildinfo
+apps/web/tsconfig.tsbuildinfo

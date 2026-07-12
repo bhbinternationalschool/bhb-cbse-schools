@@ -1,0 +1,17 @@
+{
+  "name": "bhb-school-erp",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w web",
+    "build": "npm run build -w web",
+    "lint": "npm run lint -w web",
+    "typecheck": "npm run typecheck -w @bhb/time && npm run typecheck -w web"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
