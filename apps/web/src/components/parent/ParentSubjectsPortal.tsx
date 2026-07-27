@@ -23,7 +23,7 @@ import {
   validateCurriculum,
 } from "@/lib/studentCurriculum";
 import { StudentCurriculumEditor } from "@/components/students/StudentCurriculumEditor";
-import { StudentTypeBadge } from "@/components/students/StudentAvatar";
+import { StudentNameLabel } from "@/components/students/StudentAvatar";
 
 export function ParentSubjectsPortal({
   guardianDisplayName,
@@ -180,8 +180,7 @@ export function ParentSubjectsPortal({
             }`}
           >
             <div className="text-sm font-semibold text-[var(--brand-deep)]">
-              <StudentTypeBadge type={c.studentType} />
-              {c.fullName}
+              <StudentNameLabel student={c} />
             </div>
             <div className="text-[10px] text-[var(--muted)]">
               {classLabelForStudent(c, masters)}

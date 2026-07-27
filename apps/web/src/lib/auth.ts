@@ -6,6 +6,10 @@ export type DemoSession = {
   fullName: string;
   roleCode: string;
   email?: string;
+  /** Linked staff roster id when signed in via Staff → Login */
+  staffId?: string;
+  /** Linked SIS household when signed in as parent */
+  householdId?: string;
   tenantSlug: string;
   academicYearCode: string;
 };
@@ -32,9 +36,9 @@ export const DEMO_USERS: Record<
   { fullName: string; roleCode: string; email?: string }
 > = {
   staff: {
-    fullName: "Priya Sharma",
-    roleCode: "accounts",
-    email: "accounts@bhbinternational.school",
+    fullName: "Sujata Bajpayee",
+    roleCode: "principal",
+    email: "principal@bhbinternational.school",
   },
   parent: {
     fullName: "Ramesh Singh",

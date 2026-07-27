@@ -141,7 +141,7 @@ export function buildPlaybook(input: {
     doNow.push({
       id: "meeting",
       label: "Book parent meeting",
-      cta: "Note",
+      cta: "Book",
     });
   }
 
@@ -209,22 +209,37 @@ function classLabelOf(
  */
 export function listLiveDefaulters(options?: {
   asOf?: string;
+  academicYearCode?: string;
   includeUpcoming?: boolean;
+  /** When true, only inactive students with open dues (TC / left). */
+  inactiveOnly?: boolean;
   sis?: SisState;
   masters?: MastersState;
 }): LiveDefaulter[] {
   const today = options?.asOf ?? new Date().toISOString().slice(0, 10);
   const includeUpcoming = options?.includeUpcoming ?? false;
+  const inactiveOnly = options?.inactiveOnly ?? false;
   const sis = options?.sis ?? loadSis();
   const masters = options?.masters ?? loadMasters();
   const fees = loadFees();
   const out: LiveDefaulter[] = [];
 
   for (const student of sis.students) {
-    if (student.status !== "active") continue;
+    if (
+      options?.academicYearCode &&
+      student.academicYearCode !== options.academicYearCode
+    ) {
+      continue;
+    }
+    if (inactiveOnly) {
+      if (student.status === "active") continue;
+    } else if (student.status !== "active") {
+      continue;
+    }
     const dues = computeStudentDues(student, masters, fees, {
       asOf: today,
       includeFuture: true,
+      includeInactive: inactiveOnly,
     });
     const open = openFeeDues(dues);
     if (open.length === 0) continue;

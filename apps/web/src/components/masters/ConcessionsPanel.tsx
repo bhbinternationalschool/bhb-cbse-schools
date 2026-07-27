@@ -1,14 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { Printer, X } from "lucide-react";
 import {
-  DEFAULT_AY,
+  CONCESSION_ALL_SESSIONS,
+  currentAcademicYearCode,
   checkConcessionKindRemoval,
   checkConcessionRemoval,
   concessionApprovalHint,
   defaultSiblingTiers,
   formatConcessionValue,
   formatInr,
+  grantsForConcessionPolicy,
+  listConcessionPolicies,
   newId,
   normalizeSiblingTier,
   ordinalChildLabel,
@@ -29,10 +33,28 @@ import {
   siblingGrantHint,
   suggestStudentsForConcession,
 } from "@/lib/concessionSuggest";
+import {
+  buildConcessionStudentList,
+  type ConcessionStudentListRow,
+} from "@/lib/concessionStudentList";
 import { EditControl } from "@/components/masters/EditControl";
 import { RemoveControl } from "@/components/masters/RemoveControl";
+import { useDemoSessionOptional } from "@/components/shell/SessionContext";
 
 type Commit = (s: MastersState, msg?: string) => void;
+
+/** Header-selected session, falling back to the masters "current" year. */
+function useSetupAy(state: MastersState): string {
+  const session = useDemoSessionOptional();
+  return session?.academicYearCode || currentAcademicYearCode(state);
+}
+
+function ayNorm(code: string): string {
+  const t = (code || "").trim().replace(/\s+/g, "").replace(/–/g, "-");
+  const full = t.match(/^(20\d{2})-(20\d{2})$/);
+  if (full) return `${full[1]}-${full[2]!.slice(2)}`;
+  return t;
+}
 
 export function ConcessionsPanel({
   state,
@@ -41,7 +63,11 @@ export function ConcessionsPanel({
   state: MastersState;
   commit: Commit;
 }) {
-  const concessions = state.concessions ?? [];
+  const ay = useSetupAy(state);
+  const concessions = useMemo(
+    () => listConcessionPolicies(state, { preferAy: ay }),
+    [state, ay],
+  );
   const kinds = useMemo(() => resolveConcessionKinds(state), [state]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState(concessions[0]?.id ?? "");
@@ -66,15 +92,20 @@ export function ConcessionsPanel({
   const [showKindForm, setShowKindForm] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [kindsOpen, setKindsOpen] = useState(false);
+  const [listRule, setListRule] = useState<ConcessionRule | null>(null);
+
+  useEffect(() => {
+    if (concessions.some((c) => c.id === selectedId)) return;
+    setSelectedId(concessions[0]?.id ?? "");
+    setEditingId(null);
+    setFormOpen(false);
+  }, [concessions, selectedId]);
 
   const selected = concessions.find((c) => c.id === selectedId);
-  const grantsForSelected = useMemo(
-    () =>
-      (state.concessionGrants ?? []).filter(
-        (g) => g.concessionId === selectedId,
-      ),
-    [state.concessionGrants, selectedId],
-  );
+  const grantsForSelected = useMemo(() => {
+    if (!selected) return [];
+    return grantsForConcessionPolicy(state, selected);
+  }, [state, selected]);
 
   const activeHeads = state.feeHeads.filter((h) => h.isActive);
 
@@ -188,7 +219,7 @@ export function ConcessionsPanel({
     if (!code.trim() || !name.trim()) return;
     const nextCode = code.trim().toUpperCase();
     if (
-      concessions.some(
+      (state.concessions ?? []).some(
         (c) => c.code.toUpperCase() === nextCode && c.id !== editingId,
       )
     ) {
@@ -219,7 +250,7 @@ export function ConcessionsPanel({
       code: nextCode,
       name: name.trim(),
       kind,
-      academicYearCode: DEFAULT_AY,
+      academicYearCode: CONCESSION_ALL_SESSIONS,
       mode,
       value,
       siblingTiers:
@@ -239,8 +270,10 @@ export function ConcessionsPanel({
       commit(
         {
           ...state,
-          concessions: concessions.map((c) =>
-            c.id === editingId ? { ...c, ...payload } : c,
+          concessions: (state.concessions ?? []).map((c) =>
+            c.id === editingId
+              ? { ...c, ...payload, academicYearCode: c.academicYearCode || ay }
+              : c,
           ),
         },
         "Concession updated",
@@ -255,7 +288,7 @@ export function ConcessionsPanel({
       isActive: true,
     };
     commit(
-      { ...state, concessions: [...concessions, rule] },
+      { ...state, concessions: [...(state.concessions ?? []), rule] },
       "Concession policy added",
     );
     setSelectedId(rule.id);
@@ -275,8 +308,9 @@ export function ConcessionsPanel({
   return (
     <div className="space-y-4">
       <p className="text-sm text-[var(--muted)]">
-        Select a policy on the left, grant students on the right. Fee Take
-        applies approved grants automatically.
+        Concession policies apply in every session. Use the print button on a
+        rule to open its student list for PDF. Discounts recalculate from each
+        student&apos;s fee structure for the active session ({ay}) in Fee Take.
       </p>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(280px,0.85fr)_minmax(0,1.25fr)] lg:items-start">
@@ -285,7 +319,7 @@ export function ConcessionsPanel({
           <div className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
             <div className="flex items-center justify-between gap-2 border-b border-[rgba(32,48,80,0.08)] px-3 py-2.5">
               <div className="text-sm font-semibold text-[var(--brand-deep)]">
-                Policies · {DEFAULT_AY}
+                Policies · all sessions
               </div>
               <button
                 type="button"
@@ -301,9 +335,7 @@ export function ConcessionsPanel({
             <ul className="max-h-[min(52vh,420px)] divide-y divide-[rgba(32,48,80,0.08)] overflow-y-auto">
               {concessions.map((c) => {
                 const on = c.id === selectedId;
-                const grantN = (state.concessionGrants ?? []).filter(
-                  (g) => g.concessionId === c.id,
-                ).length;
+                const grantN = grantsForConcessionPolicy(state, c).length;
                 return (
                   <li
                     key={c.id}
@@ -333,6 +365,20 @@ export function ConcessionsPanel({
                       </div>
                     </button>
                     <div className="flex shrink-0 flex-col items-end gap-0.5">
+                      <button
+                        type="button"
+                        title={`Print student list · ${c.code}`}
+                        aria-label={`Print student list for ${c.name}`}
+                        className="inline-flex items-center gap-1 rounded-md border border-[rgba(32,48,80,0.14)] bg-white px-1.5 py-0.5 text-[10px] font-semibold text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.04)]"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedId(c.id);
+                          setListRule(c);
+                        }}
+                      >
+                        <Printer className="h-3 w-3" />
+                        Print
+                      </button>
                       <EditControl
                         active={editingId === c.id}
                         onEdit={() => startEdit(c)}
@@ -344,7 +390,7 @@ export function ConcessionsPanel({
                           commit(
                             {
                               ...state,
-                              concessions: concessions.map((x) =>
+                              concessions: (state.concessions ?? []).map((x) =>
                                 x.id === c.id
                                   ? { ...x, isActive: !x.isActive }
                                   : x,
@@ -887,6 +933,15 @@ export function ConcessionsPanel({
           )}
         </div>
       </div>
+
+      {listRule ? (
+        <ConcessionStudentListDrawer
+          rule={listRule}
+          state={state}
+          ay={ay}
+          onClose={() => setListRule(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -903,6 +958,7 @@ function GrantStudentsCard({
   grants: MastersState["concessionGrants"];
 }) {
   const sis = useMemo(() => loadSis(), [grants.length, state.concessionGrants]);
+  const ay = useSetupAy(state);
   const [selectMode, setSelectMode] = useState<"single" | "multiple">(
     concession.kind === "sibling" ? "multiple" : "single",
   );
@@ -955,13 +1011,17 @@ function GrantStudentsCard({
   };
 
   const suggestions = useMemo(
-    () => suggestStudentsForConcession(concession, sis, grants ?? []),
-    [concession, sis, grants],
+    () => suggestStudentsForConcession(concession, sis, grants ?? [], ay, state),
+    [concession, sis, grants, ay, state],
   );
 
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
-    let list = sis.students.filter((s) => s.status === "active");
+    // Scope to the current session so a child promoted across years shows once.
+    let list = sis.students.filter(
+      (s) =>
+        s.status === "active" && ayNorm(s.academicYearCode) === ayNorm(ay),
+    );
     if (classId) list = list.filter((s) => s.classId === classId);
     if (sectionId) list = list.filter((s) => s.sectionId === sectionId);
     if (q) {
@@ -975,10 +1035,10 @@ function GrantStudentsCard({
     }
     return list
       .filter(
-        (s) => !isStudentAlreadyGranted(s.id, concession.id, grants ?? []),
+        (s) => !isStudentAlreadyGranted(s.id, concession, grants ?? [], state),
       )
       .slice(0, 20);
-  }, [sis.students, query, classId, sectionId, concession.id, grants]);
+  }, [sis.students, query, classId, sectionId, concession, grants, ay, state]);
 
   const selectedStudents = useMemo(
     () =>
@@ -1085,7 +1145,7 @@ function GrantStudentsCard({
     const now = new Date().toISOString();
     const rows = selectedIds
       .filter(
-        (id) => !isStudentAlreadyGranted(id, concession.id, grants ?? []),
+        (id) => !isStudentAlreadyGranted(id, concession, grants ?? [], state),
       )
       .map((id) => {
         const st = sis.students.find((s) => s.id === id);
@@ -1187,8 +1247,8 @@ function GrantStudentsCard({
             Student grants · {concession.code}
           </h3>
           <p className="mt-1 text-xs text-[var(--muted)]">
-            Approved grants reduce dues in Fee Take (
-            {formatConcessionValue(concession)}).
+            Approved grants reduce dues in Fee Take using the current session
+            fee structure ({formatConcessionValue(concession)}).
           </p>
         </div>
         <div
@@ -1610,6 +1670,178 @@ function GrantStudentsCard({
           </li>
         ) : null}
       </ul>
+    </div>
+  );
+}
+
+function ConcessionStudentListDrawer({
+  rule,
+  state,
+  ay,
+  onClose,
+}: {
+  rule: ConcessionRule;
+  state: MastersState;
+  ay: string;
+  onClose: () => void;
+}) {
+  const titleId = useId();
+  const printRef = useRef<HTMLDivElement>(null);
+  const sis = useMemo(() => loadSis(), []);
+  const kinds = useMemo(() => resolveConcessionKinds(state), [state]);
+  const kindLabel =
+    kinds.find((k) => k.code === rule.kind)?.label ?? rule.kind;
+
+  const rows = useMemo(
+    () => buildConcessionStudentList(state, rule, sis, { sessionAy: ay }),
+    [state, rule, sis, ay],
+  );
+
+  const printedAt = new Date().toLocaleString("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+
+  function handlePrint() {
+    const node = printRef.current;
+    if (!node) return;
+    const title = `${rule.name} (${rule.code})`;
+    const w = window.open("", "_blank", "width=960,height=720");
+    if (!w) return;
+    w.document.write(`<!DOCTYPE html><html><head><title>${title}</title>
+      <style>
+        body { font-family: system-ui, sans-serif; padding: 24px; color: #203050; }
+        h1 { font-size: 20px; margin: 0 0 4px; }
+        .meta { color: #64748b; margin-bottom: 16px; font-size: 13px; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        th, td { border: 1px solid #e2e8f0; padding: 7px 9px; text-align: left; }
+        th { background: #f8fafc; font-weight: 600; }
+        td.num { text-align: center; width: 36px; }
+        .status { text-transform: capitalize; }
+      </style></head><body>
+      ${node.innerHTML}
+      </body></html>`);
+    w.document.close();
+    w.focus();
+    w.print();
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-[rgba(32,48,80,0.45)] p-3 sm:items-center"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      onClick={onClose}
+    >
+      <div
+        className="max-h-[88vh] w-full max-w-3xl overflow-auto rounded-2xl bg-[var(--brand-cream)] shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="sticky top-0 z-10 flex items-start gap-3 border-b border-[rgba(32,48,80,0.1)] bg-[var(--brand-cream)] px-5 py-4">
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">
+              Discount students
+            </p>
+            <h2
+              id={titleId}
+              className="text-xl font-bold text-[var(--brand-deep)] sm:text-2xl"
+            >
+              {rule.name}{" "}
+              <span className="text-base font-normal text-[var(--muted)]">
+                {rule.code}
+              </span>
+            </h2>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              {kindLabel} · {formatConcessionValue(rule)} · Session {ay} ·{" "}
+              {rows.length} student{rows.length === 1 ? "" : "s"}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[rgba(32,48,80,0.15)] text-[var(--brand-deep)] hover:bg-white"
+            aria-label="Close"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="p-4 sm:p-5">
+          <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={handlePrint}
+              disabled={rows.length === 0}
+              className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-[rgba(32,48,80,0.15)] bg-white px-3.5 text-sm font-semibold text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.04)] disabled:opacity-50"
+            >
+              <Printer className="h-4 w-4" />
+              Print / PDF
+            </button>
+          </div>
+
+          <div ref={printRef}>
+            <h3 className="text-lg font-bold text-[var(--brand-deep)]">
+              {rule.name} ({rule.code})
+            </h3>
+            <p className="meta text-sm text-[var(--muted)]">
+              {kindLabel} · {formatConcessionValue(rule)} · Session {ay} ·{" "}
+              {rows.length} students · Printed {printedAt}
+            </p>
+            <ConcessionStudentPrintTable rows={rows} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ConcessionStudentPrintTable({
+  rows,
+}: {
+  rows: ConcessionStudentListRow[];
+}) {
+  if (rows.length === 0) {
+    return (
+      <p className="rounded-xl border border-dashed border-[rgba(32,48,80,0.2)] bg-white/70 px-4 py-10 text-center text-sm text-[var(--muted)]">
+        No students assigned to this discount yet.
+      </p>
+    );
+  }
+
+  return (
+    <div className="overflow-x-auto rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
+      <table className="w-full min-w-[640px] border-collapse text-sm">
+        <thead>
+          <tr className="bg-[rgba(32,48,80,0.04)] text-left text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+            <th className="px-3 py-2.5">#</th>
+            <th className="px-3 py-2.5">Admission no.</th>
+            <th className="px-3 py-2.5">Student</th>
+            <th className="px-3 py-2.5">Class</th>
+            <th className="px-3 py-2.5">Status</th>
+            <th className="px-3 py-2.5">From</th>
+            <th className="px-3 py-2.5">Reason</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, idx) => (
+            <tr
+              key={row.id}
+              className="border-t border-[rgba(32,48,80,0.06)] text-[var(--brand-deep)]"
+            >
+              <td className="num px-3 py-2 tabular-nums text-[var(--muted)]">
+                {idx + 1}
+              </td>
+              <td className="px-3 py-2 font-medium">{row.admissionNo}</td>
+              <td className="px-3 py-2">{row.studentName}</td>
+              <td className="px-3 py-2">{row.classLabel}</td>
+              <td className="status px-3 py-2 capitalize">{row.status}</td>
+              <td className="px-3 py-2 whitespace-nowrap">{row.effectiveFrom}</td>
+              <td className="px-3 py-2 text-[var(--muted)]">{row.reason}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

@@ -3,17 +3,23 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  DEFAULT_AY,
   STUDENT_TYPES,
   STUDENT_TYPE_HINTS,
   annualTotalForGroup,
+  checkClearFeeGroupStructure,
   checkStructureLineRemoval,
   classesForFeeGroup,
+  clearFeeGroupStructure,
+  currentAcademicYearCode,
   ensureAprToMarInstallments,
+  feeFrequencyScheduleLabel,
   formatInr,
+  groupFeeGroupsByClassBand,
+  installmentCodesForFeeFrequency,
   newId,
   parseInrToPaise,
   publishFeeGroupStructure,
+  sortFeeGroupsByClassBand,
   type FeeStructureLine,
   type FeeStudentType,
   type MastersState,
@@ -24,7 +30,13 @@ import {
   syncAllStudentFeeGroups,
 } from "@/lib/fees";
 import { RemoveControl } from "@/components/masters/RemoveControl";
+import {
+  MastersEmptyRow,
+  MastersTableCard,
+} from "@/components/masters/MastersLayout";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { CopyFeeSetupBanner } from "@/components/masters/FeeSetupPanels";
 
 type Commit = (s: MastersState, msg?: string) => void;
 
@@ -33,6 +45,7 @@ type StructureTab = FeeStudentType;
 /**
  * Fee structure board:
  * - Tabs by student type (New / Promoted / Mid-year / RTE)
+ * - Groups list (left) sorted by class band · month editor (right)
  * - Class scope: all classes (default) or class-specific override amounts
  * - Apr–Mar month cards; publish marks group ready for Fee Take
  */
@@ -44,19 +57,29 @@ export function FeeStructurePanel({
   commit: Commit;
 }) {
   const session = useDemoSession();
+  // Follow the header session selector; fall back to the masters current year.
+  const ay = session.academicYearCode || currentAcademicYearCode(state);
   const [tab, setTab] = useState<StructureTab>("NEW");
   const [classScope, setClassScope] = useState<string>(""); // "" = all / default
   const [sisTick, setSisTick] = useState(0);
 
   const groupsForTab = useMemo(
     () =>
-      state.feeGroups.filter(
-        (g) =>
-          g.isActive &&
-          g.academicYearCode === DEFAULT_AY &&
-          g.studentType === tab,
+      sortFeeGroupsByClassBand(
+        state,
+        state.feeGroups.filter(
+          (g) =>
+            g.isActive &&
+            g.academicYearCode === ay &&
+            g.studentType === tab,
+        ),
       ),
-    [state.feeGroups, tab],
+    [state, ay, tab],
+  );
+
+  const bandSections = useMemo(
+    () => groupFeeGroupsByClassBand(state, groupsForTab),
+    [state, groupsForTab],
   );
 
   const [groupId, setGroupId] = useState(groupsForTab[0]?.id ?? "");
@@ -72,12 +95,12 @@ export function FeeStructurePanel({
   }, [groupId]);
 
   const months = useMemo(() => {
-    const next = ensureAprToMarInstallments(state, DEFAULT_AY);
+    const next = ensureAprToMarInstallments(state, ay);
     return next.installments
-      .filter((i) => i.academicYearCode === DEFAULT_AY)
+      .filter((i) => i.academicYearCode === ay)
       .slice()
       .sort((a, b) => a.sortOrder - b.sortOrder);
-  }, [state]);
+  }, [state, ay]);
 
   const firstMonth = months[0];
   const group = state.feeGroups.find((g) => g.id === groupId);
@@ -129,11 +152,28 @@ export function FeeStructurePanel({
   ) {
     if (!groupId || !feeHeadId) return;
     const scopeClassId = classScope === "" ? null : classScope;
+    const head = state.feeHeads.find((h) => h.id === feeHeadId);
 
-    let next = ensureAprToMarInstallments(state, DEFAULT_AY);
-    const targetMonths = copyToAll
-      ? next.installments.filter((i) => i.academicYearCode === DEFAULT_AY)
-      : next.installments.filter((i) => i.id === installmentId);
+    let next = ensureAprToMarInstallments(state, ay);
+    const ayMonths = next.installments.filter(
+      (i) => i.academicYearCode === ay,
+    );
+
+    let targetMonths = ayMonths.filter((i) => i.id === installmentId);
+    if (copyToAll) {
+      const codes = installmentCodesForFeeFrequency(head?.frequency);
+      if (codes.length === 0) {
+        // as_needed — stay on the source month only
+        targetMonths = ayMonths.filter((i) => i.id === installmentId);
+      } else {
+        const codeSet = new Set(codes);
+        targetMonths = ayMonths.filter((i) => codeSet.has(i.code));
+        // If schedule months missing (odd calendar), fall back to source
+        if (targetMonths.length === 0) {
+          targetMonths = ayMonths.filter((i) => i.id === installmentId);
+        }
+      }
+    }
 
     next = {
       ...next,
@@ -143,6 +183,20 @@ export function FeeStructurePanel({
     };
 
     let lines = [...next.feeStructureLines];
+    const targetIds = new Set(targetMonths.map((m) => m.id));
+
+    // When spreading by frequency, clear this head from other months in the AY
+    // so monthly→quarterly etc. does not leave stale copies.
+    if (copyToAll) {
+      lines = lines.filter((l) => {
+        if (l.feeGroupId !== groupId || l.feeHeadId !== feeHeadId) return true;
+        if ((l.classId ?? null) !== scopeClassId) return true;
+        if (!l.installmentId) return true;
+        const inst = ayMonths.find((i) => i.id === l.installmentId);
+        if (!inst) return true;
+        return targetIds.has(l.installmentId);
+      });
+    }
 
     for (const m of targetMonths) {
       const existing = lines.find(
@@ -168,12 +222,13 @@ export function FeeStructurePanel({
       }
     }
 
+    const schedule = feeFrequencyScheduleLabel(head?.frequency);
     commit(
       { ...next, feeStructureLines: lines },
       copyToAll
-        ? `Head added to all ${targetMonths.length} months${
-            scopeClassId ? " (class override)" : ""
-          }`
+        ? `Placed on ${schedule} (${targetMonths.length} month${
+            targetMonths.length === 1 ? "" : "s"
+          })${scopeClassId ? " · class override" : ""}`
         : scopeClassId
           ? "Class override amount saved"
           : "Head added to month",
@@ -267,8 +322,31 @@ export function FeeStructurePanel({
     setSisTick((x) => x + 1);
   }
 
+  function onClearAllFees() {
+    if (!groupId) return;
+    const result = clearFeeGroupStructure(
+      state,
+      groupId,
+      impact.studentCount,
+    );
+    if (!result.ok) {
+      commit(state, result.reason);
+      return;
+    }
+    commit(
+      result.state,
+      `Cleared ${result.removed} fee line${result.removed === 1 ? "" : "s"} — no students on this group`,
+    );
+  }
+
   const usableHeads = state.feeHeads.filter(
     (h) => h.isActive && h.code !== "LATE",
+  );
+
+  const structureLineCount = linesForGroup.length;
+  const clearCheck = checkClearFeeGroupStructure(
+    impact.studentCount,
+    structureLineCount,
   );
 
   const classNameOf = (id: string | null) =>
@@ -278,59 +356,129 @@ export function FeeStructurePanel({
 
   return (
     <div className="space-y-4">
+      <CopyFeeSetupBanner state={state} commit={commit} ay={ay} />
       <p className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] px-3 py-2 text-[11px] leading-snug text-[var(--muted)]">
-        <strong className="text-[var(--brand-deep)]">New vs old assignment:</strong>{" "}
+        <strong className="text-[var(--brand-deep)]">
+          Session {ay} · New vs old assignment:
+        </strong>{" "}
         {STUDENT_TYPE_HINTS[tab]} Configure mid-year April / skip / transport
         under Masters → Mid-year. Promote in Exams switches to Promoted groups.
+        Groups list in class-band order (Pre-Primary → Senior).
       </p>
-      <div
-        className="flex flex-wrap gap-1 border-b border-[rgba(32,48,80,0.12)]"
-        role="tablist"
-      >
-        {STUDENT_TYPES.map((t) => {
-          const on = tab === t.value;
+      <ModuleTabs
+        aria-label="Fee structure by student type"
+        size="lg"
+        value={tab}
+        onChange={(id) => setTab(id as FeeStudentType)}
+        items={STUDENT_TYPES.map((t, i) => {
           const n = state.feeGroups.filter(
             (g) =>
               g.isActive &&
-              g.academicYearCode === DEFAULT_AY &&
+              g.academicYearCode === ay &&
               g.studentType === t.value,
           ).length;
-          return (
-            <button
-              key={t.value}
-              type="button"
-              role="tab"
-              aria-selected={on}
-              onClick={() => setTab(t.value)}
-              className={`relative px-3 pb-2.5 text-sm font-semibold ${
-                on
-                  ? "text-[var(--brand-deep)]"
-                  : "text-[var(--muted)] hover:text-[var(--brand-deep)]"
-              }`}
-            >
-              {t.label}
-              <span className="ml-1 text-[10px] font-normal text-[var(--muted)]">
-                {n}
-              </span>
-              <span
-                className={`absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-[var(--brand-gold)] ${
-                  on ? "opacity-100" : "opacity-0"
-                }`}
-              />
-            </button>
-          );
+          const tones = ["navy", "teal", "amber", "rose"] as const;
+          return {
+            id: t.value,
+            label: t.label,
+            badge: n,
+            tone: tones[i % tones.length],
+          };
         })}
-      </div>
+      />
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_240px]">
-        <div>
+      <div className="grid gap-4 lg:grid-cols-[minmax(260px,340px)_minmax(0,1fr)]">
+        <MastersTableCard
+          title={`Fee groups · ${ay}`}
+          maxHeight="max-h-[min(70vh,640px)]"
+        >
+          {groupsForTab.length === 0 ? (
+            <MastersEmptyRow label="No groups for this tab" />
+          ) : (
+            <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+              {bandSections.map((section) => (
+                <li key={section.key}>
+                  <div className="sticky top-0 z-[1] border-b border-[rgba(32,48,80,0.08)] bg-[#eef2f8] px-4 py-2.5">
+                    <div className="text-xs font-bold uppercase tracking-wide text-[var(--brand-deep)]">
+                      {section.label}
+                      <span className="ml-1.5 font-semibold text-[var(--brand-mid)]">
+                        ({section.shortLabel})
+                      </span>
+                    </div>
+                  </div>
+                  {section.groups.length === 0 ? (
+                    <p className="px-4 py-2.5 text-[11px] text-[var(--muted)]">
+                      No group in this band
+                    </p>
+                  ) : (
+                    <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+                      {section.groups.map((g) => {
+                        const on = g.id === groupId;
+                        const classLabel =
+                          g.classIds.length === 0
+                            ? "All classes"
+                            : classesForFeeGroup(state, g)
+                                .map((c) => c.name)
+                                .join(", ");
+                        return (
+                          <li key={g.id}>
+                            <button
+                              type="button"
+                              onClick={() => setGroupId(g.id)}
+                              className={`w-full px-4 py-3 text-left transition ${
+                                on
+                                  ? "bg-[rgba(32,48,80,0.08)]"
+                                  : "hover:bg-[rgba(32,48,80,0.04)]"
+                              }`}
+                            >
+                              <div className="flex items-center gap-1.5">
+                                <span
+                                  className={`text-sm ${
+                                    on
+                                      ? "font-semibold text-[var(--brand-deep)]"
+                                      : "font-medium text-[var(--brand-deep)]"
+                                  }`}
+                                >
+                                  {g.name}
+                                </span>
+                                {g.structurePublishedAt ? (
+                                  <span
+                                    className="rounded bg-[rgba(21,128,61,0.12)] px-1 py-0.5 text-[9px] font-semibold text-[#15803d]"
+                                    title="Published"
+                                  >
+                                    Live
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="mt-0.5 text-[11px] text-[var(--muted)]">
+                                {g.code} · {classLabel}
+                              </div>
+                              <div className="mt-1 text-sm font-semibold text-[var(--brand-deep)]">
+                                {formatInr(annualTotalForGroup(state, g.id))}
+                                <span className="ml-1 text-xs font-normal text-[var(--muted)]">
+                                  / year
+                                </span>
+                              </div>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </MastersTableCard>
+
+        <div className="min-w-0">
           <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
             <div>
               <h3 className="text-sm font-semibold text-[var(--brand-deep)]">
                 {group?.name ?? "Select a fee group"}
               </h3>
               <p className="text-xs text-[var(--muted)]">
-                {DEFAULT_AY} ·{" "}
+                {ay} ·{" "}
                 {classScope
                   ? `Class override · ${classNameOf(classScope)}`
                   : "Default amounts (all classes in group)"}
@@ -385,7 +533,7 @@ export function FeeStructurePanel({
                   </span>
                 ) : null}
                 {group.structurePublishedAt ? (
-                  <span className="ml-1 block sm:inline text-[var(--muted)]">
+                  <span className="ml-1 block text-[var(--muted)] sm:inline">
                     Published{" "}
                     {group.structurePublishedAt.slice(0, 16).replace("T", " ")}
                     {group.structurePublishedBy
@@ -398,7 +546,7 @@ export function FeeStructurePanel({
                   </span>
                 )}
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {impact.unassignedMatching > 0 ? (
                   <button
                     type="button"
@@ -435,6 +583,11 @@ export function FeeStructurePanel({
                 >
                   Open Fee Take →
                 </Link>
+                <RemoveControl
+                  label="Clear all fees"
+                  check={clearCheck}
+                  onRemove={onClearAllFees}
+                />
               </div>
             </div>
           ) : null}
@@ -458,12 +611,20 @@ export function FeeStructurePanel({
                     isFirst={isFirst}
                     totalPaise={monthTotal(m.id)}
                     lines={monthLines}
-                    heads={usableHeads}
+                    heads={usableHeads.map((h) => ({
+                      id: h.id,
+                      nameEn: h.nameEn,
+                      code: h.code,
+                      frequency: h.frequency,
+                    }))}
                     classScopeLabel={
                       classScope ? classNameOf(classScope) : null
                     }
                     resolveHead={(id) =>
                       state.feeHeads.find((h) => h.id === id)?.nameEn ?? "—"
+                    }
+                    resolveFrequency={(id) =>
+                      state.feeHeads.find((h) => h.id === id)?.frequency
                     }
                     onAdd={(feeHeadId, amountPaise, copyToAll) =>
                       addHeadToMonth(m.id, feeHeadId, amountPaise, copyToAll)
@@ -480,62 +641,19 @@ export function FeeStructurePanel({
               })}
             </div>
           )}
+
+          {firstMonth && groupId ? (
+            <p className="mt-3 text-xs text-[var(--muted)]">
+              Tip: Set <strong>All classes</strong> defaults first, then pick a
+              class to override amounts. In <strong>April</strong>, use{" "}
+              <strong>Copy → schedule</strong> — monthly heads go to all 12
+              months, quarterly to Apr/Jul/Oct/Jan, half-yearly to Apr/Oct,
+              annual &amp; one-time to April only. Publish when ready for Fee
+              Take.
+            </p>
+          ) : null}
         </div>
-
-        <aside className="h-fit rounded-xl border border-[rgba(32,48,80,0.12)] bg-white lg:sticky lg:top-20">
-          <div className="border-b border-[rgba(32,48,80,0.08)] px-3 py-2.5 text-xs font-semibold tracking-wide text-[var(--muted)] uppercase">
-            Fee group
-          </div>
-          <ul className="max-h-[70vh] overflow-y-auto py-1">
-            {groupsForTab.map((g) => {
-              const on = g.id === groupId;
-              return (
-                <li key={g.id}>
-                  <button
-                    type="button"
-                    onClick={() => setGroupId(g.id)}
-                    className={`w-full px-3 py-2.5 text-left text-sm transition ${
-                      on
-                        ? "bg-[rgba(32,48,80,0.08)] font-semibold text-[var(--brand-deep)]"
-                        : "text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.04)]"
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <span>{g.name}</span>
-                      {g.structurePublishedAt ? (
-                        <span
-                          className="rounded bg-[rgba(21,128,61,0.12)] px-1 py-0.5 text-[9px] font-semibold text-[#15803d]"
-                          title="Published"
-                        >
-                          Live
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="text-[11px] font-normal text-[var(--muted)]">
-                      {g.code} · {formatInr(annualTotalForGroup(state, g.id))}
-                    </div>
-                  </button>
-                </li>
-              );
-            })}
-            {groupsForTab.length === 0 ? (
-              <li className="px-3 py-6 text-center text-xs text-[var(--muted)]">
-                No groups for this tab
-              </li>
-            ) : null}
-          </ul>
-        </aside>
       </div>
-
-      {firstMonth && groupId ? (
-        <p className="text-xs text-[var(--muted)]">
-          Tip: Set <strong>All classes</strong> defaults first, then pick a
-          class to override amounts (e.g. higher tuition for Class V). In{" "}
-          <strong>April</strong>, use <strong>Copy → all months</strong> for
-          recurring heads. Publish when ready — Fee Take bills from structure
-          immediately for students on this group.
-        </p>
-      ) : null}
     </div>
   );
 }
@@ -550,6 +668,7 @@ function MonthCard({
   heads,
   classScopeLabel,
   resolveHead,
+  resolveFrequency,
   onAdd,
   onUpdateAmount,
   onRemove,
@@ -561,9 +680,15 @@ function MonthCard({
   isFirst: boolean;
   totalPaise: number;
   lines: FeeStructureLine[];
-  heads: { id: string; nameEn: string; code: string }[];
+  heads: {
+    id: string;
+    nameEn: string;
+    code: string;
+    frequency?: string;
+  }[];
   classScopeLabel: string | null;
   resolveHead: (id: string) => string;
+  resolveFrequency: (id: string) => string | undefined;
   onAdd: (feeHeadId: string, amountPaise: number, copyToAll: boolean) => void;
   onUpdateAmount: (lineId: string, raw: string) => void;
   onRemove: (lineId: string) => void;
@@ -579,6 +704,10 @@ function MonthCard({
       setFeeHeadId(heads[0].id);
     }
   }, [heads, feeHeadId]);
+
+  const selectedFreq =
+    heads.find((h) => h.id === feeHeadId)?.frequency ?? "monthly";
+  const scheduleHint = feeFrequencyScheduleLabel(selectedFreq);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -621,44 +750,53 @@ function MonthCard({
       </div>
 
       <ul className="min-h-[72px] flex-1 divide-y divide-[rgba(32,48,80,0.06)]">
-        {lines.map((l) => (
-          <li key={l.id} className="px-3 py-2">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <div className="truncate text-xs font-medium text-[var(--brand-deep)]">
-                  {resolveHead(l.feeHeadId)}
+        {lines.map((l) => {
+          const freq = resolveFrequency(l.feeHeadId);
+          const copyLabel = feeFrequencyScheduleLabel(freq);
+          return (
+            <li key={l.id} className="px-3 py-2">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="truncate text-xs font-medium text-[var(--brand-deep)]">
+                    {resolveHead(l.feeHeadId)}
+                    {freq ? (
+                      <span className="ml-1 font-normal text-[var(--muted)]">
+                        · {freq.replace("_", "-")}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                    <input
+                      className="field max-w-[88px] !py-1 !text-xs"
+                      defaultValue={String(l.amountPaise / 100)}
+                      key={`${l.id}-${l.amountPaise}`}
+                      onBlur={(e) => onUpdateAmount(l.id, e.target.value)}
+                      aria-label="Amount"
+                    />
+                    {isFirst && onCopyToAll ? (
+                      <button
+                        type="button"
+                        className="text-[10px] font-semibold text-[var(--brand-mid)] underline-offset-2 hover:underline"
+                        onClick={() => onCopyToAll(l)}
+                        title={`Place on ${copyLabel} per fee-head frequency`}
+                      >
+                        Copy → {copyLabel}
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
-                <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                  <input
-                    className="field max-w-[88px] !py-1 !text-xs"
-                    defaultValue={String(l.amountPaise / 100)}
-                    key={`${l.id}-${l.amountPaise}`}
-                    onBlur={(e) => onUpdateAmount(l.id, e.target.value)}
-                    aria-label="Amount"
-                  />
-                  {isFirst && onCopyToAll ? (
-                    <button
-                      type="button"
-                      className="text-[10px] font-semibold text-[var(--brand-mid)] underline-offset-2 hover:underline"
-                      onClick={() => onCopyToAll(l)}
-                      title="Copy this head & amount to all 12 months"
-                    >
-                      Copy → all months
-                    </button>
-                  ) : null}
-                </div>
+                <RemoveControl
+                  compact
+                  check={checkStructureLineRemoval(
+                    resolveHead(l.feeHeadId),
+                    formatInr(l.amountPaise),
+                  )}
+                  onRemove={() => onRemove(l.id)}
+                />
               </div>
-              <RemoveControl
-                compact
-                check={checkStructureLineRemoval(
-                  resolveHead(l.feeHeadId),
-                  formatInr(l.amountPaise),
-                )}
-                onRemove={() => onRemove(l.id)}
-              />
-            </div>
-          </li>
-        ))}
+            </li>
+          );
+        })}
         {lines.length === 0 ? (
           <li className="px-3 py-4 text-center text-[11px] text-[var(--muted)]">
             {classScopeLabel
@@ -679,6 +817,7 @@ function MonthCard({
               {heads.map((h) => (
                 <option key={h.id} value={h.id}>
                   {h.nameEn}
+                  {h.frequency ? ` (${h.frequency.replace("_", "-")})` : ""}
                 </option>
               ))}
             </select>
@@ -698,8 +837,7 @@ function MonthCard({
                   onChange={(e) => setCopyAll(e.target.checked)}
                 />
                 <span>
-                  Required every month — create here and{" "}
-                  <strong>copy to all months</strong> (tuition, etc.)
+                  Spread by frequency → <strong>{scheduleHint}</strong>
                 </span>
               </label>
             ) : null}

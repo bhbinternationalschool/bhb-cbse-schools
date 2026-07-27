@@ -1,19 +1,26 @@
 "use client";
 
-import { useMemo, useState } from "react";
 import {
-  DEFAULT_AY,
+  CLASS_GROUPS,
   SESSION_MONTHS,
   STUDENT_TYPES,
   annualTotalForGroup,
   applyInstallmentPattern,
   checkFeeGroupRemoval,
+  classesInGroup,
+  cloneFeeSetupToAcademicYear,
+  currentAcademicYearCode,
   ensureAprToMarInstallments,
+  feeGroupClassBandLabel,
   formatInr,
+  groupFeeGroupsByClassBand,
   midYearFeePolicySummary,
   newId,
   parseInrToPaise,
   removeFeeGroup,
+  repairFeeGroupClassIds,
+  sortClassIdsByClassBand,
+  sortFeeGroupsByClassBand,
   type FeeGroup,
   type FeeStudentType,
   type InstallmentPattern,
@@ -24,13 +31,102 @@ import {
 import { EditControl } from "@/components/masters/EditControl";
 import { RemoveControl } from "@/components/masters/RemoveControl";
 import {
+  MastersEmptyRow,
   MastersTabStack,
   MastersTableCard,
   MastersTablesRow,
   MastersWorkCard,
 } from "@/components/masters/MastersLayout";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useDemoSessionOptional } from "@/components/shell/SessionContext";
 
 type Commit = (s: MastersState, msg?: string) => void;
+
+/** Header-selected session, falling back to the masters "current" year. */
+function useFeeSetupAy(state: MastersState): string {
+  const session = useDemoSessionOptional();
+  return session?.academicYearCode || currentAcademicYearCode(state);
+}
+
+/** Sessions that already have fee groups (copy sources), newest first. */
+function feeSetupSourceYears(state: MastersState, excludeAy: string): string[] {
+  return [
+    ...new Set(
+      state.feeGroups
+        .filter((g) => g.isActive && g.academicYearCode)
+        .map((g) => g.academicYearCode as string),
+    ),
+  ]
+    .filter((code) => code !== excludeAy)
+    .sort((a, b) => b.localeCompare(a));
+}
+
+/** Banner offering to copy a prior session's fee setup into an empty session. */
+export function CopyFeeSetupBanner({
+  state,
+  commit,
+  ay,
+}: {
+  state: MastersState;
+  commit: Commit;
+  ay: string;
+}) {
+  const sources = feeSetupSourceYears(state, ay);
+  const [fromAy, setFromAy] = useState(sources[0] ?? "");
+  const hasGroupsForAy = state.feeGroups.some(
+    (g) => g.isActive && g.academicYearCode === ay,
+  );
+  useEffect(() => {
+    if (!sources.includes(fromAy)) setFromAy(sources[0] ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sources.join("|")]);
+
+  if (hasGroupsForAy || sources.length === 0) return null;
+
+  function copyNow() {
+    if (!fromAy) return;
+    const next = cloneFeeSetupToAcademicYear(state, fromAy, ay);
+    if (next === state) {
+      commit(state, `Nothing to copy from ${fromAy}`);
+      return;
+    }
+    commit(
+      next,
+      `Fee setup copied ${fromAy} → ${ay} (groups + amounts, unpublished)`,
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[rgba(197,160,40,0.4)] bg-[rgba(197,160,40,0.08)] px-3 py-2.5 text-sm">
+      <span className="text-[var(--brand-deep)]">
+        <strong>No fee setup for {ay} yet.</strong> Copy groups &amp; amounts
+        from
+      </span>
+      <select
+        className="field !w-auto !py-1 !text-xs"
+        value={fromAy}
+        onChange={(e) => setFromAy(e.target.value)}
+        aria-label="Copy fee setup from session"
+      >
+        {sources.map((code) => (
+          <option key={code} value={code}>
+            {code}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        className="btn-accent rounded-lg px-3 py-1.5 text-xs font-semibold"
+        onClick={copyNow}
+      >
+        Copy to {ay}
+      </button>
+      <span className="text-xs text-[var(--muted)]">
+        Copies fee groups, month amounts &amp; calendar — review, then publish.
+      </span>
+    </div>
+  );
+}
 
 export function FeeGroupsPanel({
   state,
@@ -39,11 +135,43 @@ export function FeeGroupsPanel({
   state: MastersState;
   commit: Commit;
 }) {
+  const ay = useFeeSetupAy(state);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [studentType, setStudentType] = useState<FeeStudentType>("NEW");
   const [selectedClasses, setSelectedClasses] = useState<string[]>([]);
+
+  // Remap orphaned classIds (stale cls_* after roster rebuild) onto live classes — once
+  const repairedRef = useRef(false);
+  useEffect(() => {
+    if (repairedRef.current) return;
+    const repaired = repairFeeGroupClassIds(state);
+    const changed =
+      JSON.stringify(repaired.feeGroups.map((g) => [...g.classIds].sort())) !==
+      JSON.stringify(state.feeGroups.map((g) => [...g.classIds].sort()));
+    if (!changed) {
+      repairedRef.current = true;
+      return;
+    }
+    repairedRef.current = true;
+    commit(repaired, "Fee groups re-linked to class bands");
+  }, [state, commit]);
+
+  const groupsForAy = useMemo(
+    () =>
+      state.feeGroups.filter(
+        (g) => !g.academicYearCode || g.academicYearCode === ay,
+      ),
+    [state.feeGroups, ay],
+  );
+
+  const bandSections = useMemo(
+    () => groupFeeGroupsByClassBand(state, groupsForAy),
+    [state, groupsForAy],
+  );
+
+  const groupCount = groupsForAy.length;
 
   function resetForm() {
     setEditingId(null);
@@ -58,15 +186,30 @@ export function FeeGroupsPanel({
     setCode(g.code);
     setName(g.name);
     setStudentType(g.studentType);
-    setSelectedClasses([...g.classIds]);
+    setSelectedClasses(sortClassIdsByClassBand(state, g.classIds));
   }
 
   function toggleClass(classId: string) {
     setSelectedClasses((prev) =>
-      prev.includes(classId)
-        ? prev.filter((id) => id !== classId)
-        : [...prev, classId],
+      sortClassIdsByClassBand(
+        state,
+        prev.includes(classId)
+          ? prev.filter((id) => id !== classId)
+          : [...prev, classId],
+      ),
     );
+  }
+
+  function toggleClassBand(groupCode: (typeof CLASS_GROUPS)[number]["code"]) {
+    const ids = classesInGroup(state.classes, groupCode).map((c) => c.id);
+    if (!ids.length) return;
+    setSelectedClasses((prev) => {
+      const allOn = ids.every((id) => prev.includes(id));
+      const next = allOn
+        ? prev.filter((id) => !ids.includes(id))
+        : [...new Set([...prev, ...ids])];
+      return sortClassIdsByClassBand(state, next);
+    });
   }
 
   function saveGroup(e: React.FormEvent) {
@@ -82,20 +225,26 @@ export function FeeGroupsPanel({
       return;
     }
 
+    const classIds = sortClassIdsByClassBand(state, selectedClasses);
+
     if (editingId) {
       commit(
         {
           ...state,
-          feeGroups: state.feeGroups.map((g) =>
-            g.id === editingId
-              ? {
-                  ...g,
-                  code: nextCode,
-                  name: name.trim(),
-                  studentType,
-                  classIds: selectedClasses,
-                }
-              : g,
+          feeGroups: sortFeeGroupsByClassBand(
+            state,
+            state.feeGroups.map((g) =>
+              g.id === editingId
+                ? {
+                    ...g,
+                    code: nextCode,
+                    name: name.trim(),
+                    studentType,
+                    classIds,
+                    academicYearCode: g.academicYearCode || ay,
+                  }
+                : g,
+            ),
           ),
         },
         "Fee group updated",
@@ -108,24 +257,33 @@ export function FeeGroupsPanel({
       id: newId("fg"),
       code: nextCode,
       name: name.trim(),
-      academicYearCode: DEFAULT_AY,
+      academicYearCode: ay,
       studentType,
-      classIds: selectedClasses,
+      classIds,
       isActive: true,
       structurePublishedAt: null,
       structurePublishedBy: "",
     };
     commit(
-      { ...state, feeGroups: [...state.feeGroups, group] },
+      {
+        ...state,
+        feeGroups: sortFeeGroupsByClassBand(state, [
+          ...state.feeGroups,
+          group,
+        ]),
+      },
       "Fee group added — set amounts in Fee structure",
     );
     resetForm();
   }
 
   return (
+    <div className="space-y-3">
+    <CopyFeeSetupBanner state={state} commit={commit} ay={ay} />
     <MastersTabStack
       intro={
         <>
+          Session <strong className="text-[var(--brand-deep)]">{ay}</strong> ·{" "}
           <strong className="text-[var(--brand-deep)]">New</strong> = admission
           bundle ·{" "}
           <strong className="text-[var(--brand-deep)]">Promoted</strong> =
@@ -134,174 +292,276 @@ export function FeeGroupsPanel({
           group + mid-year rules (
           {midYearFeePolicySummary(state.midYearFeePolicy)}) ·{" "}
           <strong className="text-[var(--brand-deep)]">RTE</strong> = EWS.
+          Listed by class band: Pre-Primary → Primary → Middle → Secondary →
+          Senior.
         </>
       }
       tables={
-        <MastersTablesRow cols={1}>
-          <MastersTableCard title={`Fee groups · ${DEFAULT_AY}`}>
-            <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
-              {state.feeGroups.map((g) => {
-                const total = annualTotalForGroup(state, g.id);
-                const classLabel =
-                  g.classIds.length === 0
-                    ? "All classes"
-                    : state.classes
-                        .filter((c) => g.classIds.includes(c.id))
-                        .map((c) => c.name)
-                        .join(", ");
-                return (
-                  <li
-                    key={g.id}
-                    className="flex items-start justify-between gap-3 px-4 py-3"
-                  >
-                    <div>
-                      <div className="font-medium text-[var(--brand-deep)]">
-                        {g.name}{" "}
-                        <span className="text-xs font-normal text-[var(--muted)]">
-                          {g.code}
-                        </span>
-                      </div>
-                      <div className="mt-0.5 text-xs text-[var(--muted)]">
-                        {g.studentType} · {classLabel}
-                        {!g.isActive ? " · inactive" : ""}
-                      </div>
-                      <div className="mt-1 text-sm font-semibold text-[var(--brand-deep)]">
-                        {formatInr(total)}
-                        <span className="ml-1 text-xs font-normal text-[var(--muted)]">
-                          / year
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex shrink-0 flex-col items-end gap-1.5">
-                      <EditControl
-                        active={editingId === g.id}
-                        onEdit={() => startEdit(g)}
-                      />
-                      <button
-                        type="button"
-                        className="text-xs font-medium text-[var(--brand-mid)]"
-                        onClick={() =>
-                          commit(
-                            {
-                              ...state,
-                              feeGroups: state.feeGroups.map((x) =>
-                                x.id === g.id
-                                  ? { ...x, isActive: !x.isActive }
-                                  : x,
-                              ),
-                            },
-                            g.isActive
-                              ? "Group inactivated"
-                              : "Group activated",
-                          )
-                        }
-                      >
-                        {g.isActive ? "Inactivate" : "Activate"}
-                      </button>
-                      <RemoveControl
-                        check={checkFeeGroupRemoval(state, g.id)}
-                        onRemove={() => {
-                          const result = removeFeeGroup(state, g.id);
-                          if (!result.ok) {
-                            commit(state, result.reason);
-                            return;
-                          }
-                          if (editingId === g.id) resetForm();
-                          commit(result.state, "Fee group removed");
-                        }}
-                      />
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          </MastersTableCard>
-        </MastersTablesRow>
-      }
-      work={
-        <MastersWorkCard
-          title={editingId ? "Edit fee group" : "Add fee group"}
-          hint="Working form"
-        >
-          <form onSubmit={saveGroup} className="max-w-xl space-y-1">
-            <Field label="Code">
-              <input
-                className="field"
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                placeholder="NEW_NUR_V"
-                required
-              />
-            </Field>
-            <Field label="Name">
-              <input
-                className="field"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="New admission · Nursery–V"
-                required
-              />
-            </Field>
-            <Field label="Student type">
-              <select
-                className="field"
-                value={studentType}
-                onChange={(e) =>
-                  setStudentType(e.target.value as FeeStudentType)
-                }
-              >
-                {STUDENT_TYPES.map((t) => (
-                  <option key={t.value} value={t.value}>
-                    {t.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <div className="mt-3">
-              <div className="mb-1.5 text-sm text-[var(--muted)]">
-                Classes (leave empty = all)
-              </div>
-              <div className="flex max-h-40 flex-wrap gap-1.5 overflow-y-auto rounded-xl border border-[rgba(32,48,80,0.12)] p-2">
-                {state.classes.map((c) => {
-                  const on = selectedClasses.includes(c.id);
+        <MastersTablesRow cols={2}>
+          <MastersTableCard
+            title={`Fee groups · ${ay} · ${groupCount}`}
+            maxHeight="max-h-[min(70vh,560px)]"
+          >
+            {groupCount === 0 ? (
+              <MastersEmptyRow label="No fee groups yet" />
+            ) : (
+              <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+                {bandSections.map((section) => {
+                  const bandClasses =
+                    section.key === "ALL"
+                      ? []
+                      : classesInGroup(
+                          state.classes,
+                          section.key as (typeof CLASS_GROUPS)[number]["code"],
+                        );
                   return (
-                    <button
-                      key={c.id}
-                      type="button"
-                      onClick={() => toggleClass(c.id)}
-                      className={`rounded-lg px-2 py-1 text-xs font-medium ${
-                        on
-                          ? "bg-[var(--brand-deep)] text-white"
-                          : "bg-[var(--surface)] text-[var(--brand-deep)]"
-                      }`}
-                    >
-                      {c.name}
-                    </button>
+                    <li key={section.key}>
+                      <div className="sticky top-0 z-[1] border-b border-[rgba(32,48,80,0.08)] bg-[#eef2f8] px-4 py-2.5">
+                        <div className="text-xs font-bold uppercase tracking-wide text-[var(--brand-deep)]">
+                          {section.label}
+                          <span className="ml-1.5 font-semibold text-[var(--brand-mid)]">
+                            ({section.shortLabel})
+                          </span>
+                        </div>
+                        {bandClasses.length > 0 ? (
+                          <div className="mt-0.5 text-[11px] text-[var(--muted)]">
+                            {bandClasses.map((c) => c.name).join(" · ")}
+                          </div>
+                        ) : null}
+                      </div>
+                      {section.groups.length === 0 ? (
+                        <p className="px-4 py-3 text-[11px] text-[var(--muted)]">
+                          No fee group for this band yet
+                        </p>
+                      ) : (
+                        <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+                          {section.groups.map((g) => {
+                            const total = annualTotalForGroup(state, g.id);
+                            const orderedIds = sortClassIdsByClassBand(
+                              state,
+                              g.classIds,
+                            );
+                            const classLabel =
+                              orderedIds.length === 0
+                                ? "All classes"
+                                : orderedIds
+                                    .map(
+                                      (id) =>
+                                        state.classes.find((c) => c.id === id)
+                                          ?.name ?? id,
+                                    )
+                                    .join(", ");
+                            const bandSpan = feeGroupClassBandLabel(state, g);
+                            const typeLabel =
+                              STUDENT_TYPES.find(
+                                (t) => t.value === g.studentType,
+                              )?.label ?? g.studentType;
+                            return (
+                              <li
+                                key={g.id}
+                                className="flex items-start justify-between gap-3 px-4 py-3"
+                              >
+                                <div>
+                                  <div className="font-medium text-[var(--brand-deep)]">
+                                    {g.name}{" "}
+                                    <span className="text-xs font-normal text-[var(--muted)]">
+                                      {g.code}
+                                    </span>
+                                  </div>
+                                  <div className="mt-0.5 text-xs text-[var(--muted)]">
+                                    {typeLabel} · {bandSpan}
+                                    {!g.isActive ? " · inactive" : ""}
+                                  </div>
+                                  <div className="mt-0.5 text-[11px] text-[var(--muted)]">
+                                    {classLabel}
+                                  </div>
+                                  <div className="mt-1 text-sm font-semibold text-[var(--brand-deep)]">
+                                    {formatInr(total)}
+                                    <span className="ml-1 text-xs font-normal text-[var(--muted)]">
+                                      / year
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="flex shrink-0 flex-col items-end gap-1.5">
+                                  <EditControl
+                                    active={editingId === g.id}
+                                    onEdit={() => startEdit(g)}
+                                  />
+                                  <button
+                                    type="button"
+                                    className="text-xs font-medium text-[var(--brand-mid)]"
+                                    onClick={() =>
+                                      commit(
+                                        {
+                                          ...state,
+                                          feeGroups: state.feeGroups.map(
+                                            (x) =>
+                                              x.id === g.id
+                                                ? {
+                                                    ...x,
+                                                    isActive: !x.isActive,
+                                                  }
+                                                : x,
+                                          ),
+                                        },
+                                        g.isActive
+                                          ? "Group inactivated"
+                                          : "Group activated",
+                                      )
+                                    }
+                                  >
+                                    {g.isActive ? "Inactivate" : "Activate"}
+                                  </button>
+                                  <RemoveControl
+                                    check={checkFeeGroupRemoval(state, g.id)}
+                                    onRemove={() => {
+                                      const result = removeFeeGroup(
+                                        state,
+                                        g.id,
+                                      );
+                                      if (!result.ok) {
+                                        commit(state, result.reason);
+                                        return;
+                                      }
+                                      if (editingId === g.id) resetForm();
+                                      commit(result.state, "Fee group removed");
+                                    }}
+                                  />
+                                </div>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+                    </li>
                   );
                 })}
+              </ul>
+            )}
+          </MastersTableCard>
+
+          <MastersWorkCard
+            title={editingId ? "Edit fee group" : "Add fee group"}
+            hint="Pick classes by band — saved in Pre-Primary → Senior order"
+          >
+            <form onSubmit={saveGroup} className="space-y-1">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Code">
+                  <input
+                    className="field"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                    placeholder="NEW_NUR_V"
+                    required
+                  />
+                </Field>
+                <Field label="Name">
+                  <input
+                    className="field"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="New admission · Nursery–V"
+                    required
+                  />
+                </Field>
               </div>
-            </div>
-            <div className="mt-4 flex gap-2">
-              {editingId ? (
-                <button
-                  type="button"
-                  className="rounded-xl border border-[rgba(32,48,80,0.2)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)]"
-                  onClick={resetForm}
+              <Field label="Student type">
+                <select
+                  className="field"
+                  value={studentType}
+                  onChange={(e) =>
+                    setStudentType(e.target.value as FeeStudentType)
+                  }
                 >
-                  Cancel
+                  {STUDENT_TYPES.map((t) => (
+                    <option key={t.value} value={t.value}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <div className="mt-3">
+                <div className="mb-1.5 text-sm text-[var(--muted)]">
+                  Classes by band (leave empty = all)
+                </div>
+                <div className="max-h-[min(40vh,320px)] space-y-3 overflow-y-auto rounded-xl border border-[rgba(32,48,80,0.12)] p-2">
+                  {CLASS_GROUPS.map((band) => {
+                    const classes = classesInGroup(state.classes, band.code);
+                    if (!classes.length) return null;
+                    const ids = classes.map((c) => c.id);
+                    const allOn = ids.every((id) =>
+                      selectedClasses.includes(id),
+                    );
+                    const someOn =
+                      !allOn && ids.some((id) => selectedClasses.includes(id));
+                    return (
+                      <div key={band.code}>
+                        <div className="mb-1.5 flex items-center justify-between gap-2">
+                          <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--brand-deep)]">
+                            {band.label}
+                            <span className="ml-1 font-normal text-[var(--muted)]">
+                              ({band.shortLabel})
+                            </span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => toggleClassBand(band.code)}
+                            className="text-[11px] font-medium text-[var(--brand-mid)]"
+                          >
+                            {allOn
+                              ? "Clear"
+                              : someOn
+                                ? "Select all"
+                                : "Select band"}
+                          </button>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {classes.map((c) => {
+                            const on = selectedClasses.includes(c.id);
+                            return (
+                              <button
+                                key={c.id}
+                                type="button"
+                                onClick={() => toggleClass(c.id)}
+                                className={`rounded-lg px-2 py-1 text-xs font-medium ${
+                                  on
+                                    ? "bg-[var(--brand-deep)] text-white"
+                                    : "bg-[var(--surface)] text-[var(--brand-deep)]"
+                                }`}
+                              >
+                                {c.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="mt-4 flex gap-2">
+                {editingId ? (
+                  <button
+                    type="button"
+                    className="rounded-xl border border-[rgba(32,48,80,0.2)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)]"
+                    onClick={resetForm}
+                  >
+                    Cancel
+                  </button>
+                ) : null}
+                <button
+                  type="submit"
+                  className="btn-accent flex-1 rounded-xl px-4 py-2.5 text-sm font-semibold"
+                >
+                  {editingId ? "Update fee group" : "Save fee group"}
                 </button>
-              ) : null}
-              <button
-                type="submit"
-                className="btn-accent flex-1 rounded-xl px-4 py-2.5 text-sm font-semibold"
-              >
-                {editingId ? "Update fee group" : "Save fee group"}
-              </button>
-            </div>
-          </form>
-        </MastersWorkCard>
+              </div>
+            </form>
+          </MastersWorkCard>
+        </MastersTablesRow>
       }
     />
+    </div>
   );
 }
 
@@ -312,8 +572,9 @@ export function InstallmentsPanel({
   state: MastersState;
   commit: Commit;
 }) {
+  const ay = useFeeSetupAy(state);
   const list = state.installments
-    .filter((i) => i.academicYearCode === DEFAULT_AY)
+    .filter((i) => i.academicYearCode === ay)
     .slice()
     .sort((a, b) => a.sortOrder - b.sortOrder);
 
@@ -321,7 +582,7 @@ export function InstallmentsPanel({
 
   function ensureCalendar() {
     commit(
-      ensureAprToMarInstallments(state, DEFAULT_AY),
+      ensureAprToMarInstallments(state, ay),
       "Apr–Mar session calendar ready",
     );
   }
@@ -332,16 +593,16 @@ export function InstallmentsPanel({
       quarterly: "Quarterly (Apr, Jul, Oct, Jan)",
       half_yearly: "Half-yearly (Apr, Oct)",
     };
-    commit(applyInstallmentPattern(state, pattern, DEFAULT_AY), labels[pattern]);
+    commit(applyInstallmentPattern(state, pattern, ay), labels[pattern]);
   }
 
   function toggleMonth(code: string) {
-    const next = ensureAprToMarInstallments(state, DEFAULT_AY);
+    const next = ensureAprToMarInstallments(state, ay);
     commit(
       {
         ...next,
         installments: next.installments.map((i) =>
-          i.academicYearCode === DEFAULT_AY && i.code === code
+          i.academicYearCode === ay && i.code === code
             ? { ...i, isActive: !i.isActive }
             : i,
         ),
@@ -364,12 +625,12 @@ export function InstallmentsPanel({
 
   function updateDueDay(day: number) {
     const d = Math.min(28, Math.max(1, day));
-    const next = ensureAprToMarInstallments(state, DEFAULT_AY);
+    const next = ensureAprToMarInstallments(state, ay);
     commit(
       {
         ...next,
         installments: next.installments.map((i) => {
-          if (i.academicYearCode !== DEFAULT_AY) return i;
+          if (i.academicYearCode !== ay) return i;
           const meta = SESSION_MONTHS.find((m) => m.code === i.code);
           if (!meta) return i;
           return {
@@ -388,7 +649,7 @@ export function InstallmentsPanel({
       tables={
         <MastersTablesRow>
           <MastersTableCard
-            title={`Session months · ${DEFAULT_AY}`}
+            title={`Session months · ${ay}`}
             maxHeight="none"
           >
             <div className="p-4">
@@ -507,8 +768,22 @@ export function LateFeePanel({
   state: MastersState;
   commit: Commit;
 }) {
+  const ay = useFeeSetupAy(state);
+  // Key by session so the form re-initializes from that session's rule.
+  return <LateFeePanelInner key={ay} state={state} commit={commit} ay={ay} />;
+}
+
+function LateFeePanelInner({
+  state,
+  commit,
+  ay,
+}: {
+  state: MastersState;
+  commit: Commit;
+  ay: string;
+}) {
   const rule = state.lateFeeRules.find(
-    (r) => r.academicYearCode === DEFAULT_AY,
+    (r) => r.academicYearCode === ay,
   );
   const activeHeads = state.feeHeads.filter((h) => h.isActive);
   const defaultIds =
@@ -555,7 +830,7 @@ export function LateFeePanel({
     if (feeHeadIds.length === 0) return;
     const next: LateFeeRule = {
       id: rule?.id ?? newId("lfr"),
-      academicYearCode: DEFAULT_AY,
+      academicYearCode: ay,
       graceDays: Math.max(0, Number(graceDays) || 0),
       mode,
       value:
@@ -580,7 +855,7 @@ export function LateFeePanel({
   return (
     <div className="max-w-lg rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-5">
       <h3 className="text-sm font-semibold text-[var(--brand-deep)]">
-        Late-fee policy · {DEFAULT_AY}
+        Late-fee policy · {ay}
       </h3>
       <p className="mt-1 text-sm text-[var(--muted)]">
         Applied after grace days on unpaid installments. Select one or more fee

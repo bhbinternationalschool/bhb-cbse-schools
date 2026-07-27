@@ -1,24 +1,30 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
-  FEE_CATEGORIES,
   FEE_FREQUENCIES,
-  DEFAULT_AY,
+  currentAcademicYearCode,
   checkCampusRemoval,
   checkClassRemoval,
+  checkFeeHeadCategoryRemoval,
   checkFeeHeadRemoval,
   checkSectionRemoval,
+  feeHeadCategoryLabel,
   loadMasters,
+  listConcessionPolicies,
   newId,
   removeCampus,
   removeClass,
   removeFeeHead,
+  removeFeeHeadCategory,
   removeSection,
+  resolveFeeHeadCategories,
   saveMasters,
   type Campus,
   type FeeHead,
   type FeeHeadCategory,
+  type FeeHeadCategoryDef,
   type FeeFrequency,
   type MastersState,
   type SchoolClass,
@@ -40,13 +46,17 @@ import { SpecialFeesPanel } from "@/components/masters/SpecialFeesPanel";
 import { ConcessionsPanel } from "@/components/masters/ConcessionsPanel";
 import {
   AcademicPanel,
-  CompletenessDashboard,
   HolidaysPanel,
+  LeaveMastersPanel,
   NumberSeriesPanel,
   SchoolProfilePanel,
   StaffMastersPanel,
   SubjectsPanel,
 } from "@/components/masters/FoundationPanels";
+import { SalarySetupPanel } from "@/components/masters/SalarySetupPanel";
+import { RolesPermissionsPanel } from "@/components/masters/RolesPermissionsPanel";
+import { WaTemplatesPanel } from "@/components/masters/WaTemplatesPanel";
+import { AutomationPanel } from "@/components/masters/AutomationPanel";
 import {
   MastersEmptyRow,
   MastersTabStack,
@@ -54,6 +64,9 @@ import {
   MastersTablesRow,
   MastersWorkCard,
 } from "@/components/masters/MastersLayout";
+import { ModuleTabGroups, type ModuleTabGroup } from "@/components/ui/ModuleTabs";
+import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
+import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
 
 type Tab =
   | "overview"
@@ -65,6 +78,9 @@ type Tab =
   | "series"
   | "holidays"
   | "staff"
+  | "leave"
+  | "salary"
+  | "roles"
   | "fee-heads"
   | "fee-groups"
   | "fee-structure"
@@ -72,86 +88,90 @@ type Tab =
   | "concessions"
   | "installments"
   | "late-fee"
-  | "mid-year";
+  | "mid-year"
+  | "wa-templates"
+  | "automation";
 
-const TABS: { id: Tab; label: string; tone: string }[] = [
-  { id: "overview", label: "Overview", tone: "navy" },
-  { id: "school", label: "School", tone: "teal" },
-  { id: "academic", label: "Academic", tone: "teal" },
-  { id: "campuses", label: "Campuses", tone: "teal" },
-  { id: "classes", label: "Classes & sections", tone: "teal" },
-  { id: "subjects", label: "Subjects", tone: "teal" },
-  { id: "series", label: "Numbering", tone: "slate" },
-  { id: "holidays", label: "Holidays", tone: "amber" },
-  { id: "staff", label: "Staff", tone: "slate" },
-  { id: "fee-heads", label: "Fee heads", tone: "green" },
-  { id: "fee-groups", label: "Fee groups", tone: "green" },
-  { id: "fee-structure", label: "Fee structure", tone: "green" },
-  { id: "special-fees", label: "Special fees", tone: "green" },
-  { id: "concessions", label: "Concessions", tone: "green" },
-  { id: "installments", label: "Due dates", tone: "green" },
-  { id: "late-fee", label: "Late fee", tone: "rose" },
-  { id: "mid-year", label: "Mid-year", tone: "rose" },
+const TAB_GROUPS: ModuleTabGroup[] = [
+  {
+    id: "home",
+    label: "Overview",
+    tone: "navy",
+    tabs: [{ id: "overview", label: "Dashboard", tone: "navy" }],
+  },
+  {
+    id: "institution",
+    label: "Institution",
+    tone: "teal",
+    tabs: [
+      { id: "school", label: "School", tone: "teal" },
+      { id: "campuses", label: "Campuses", tone: "teal" },
+      { id: "staff", label: "Staff setup", tone: "slate" },
+      { id: "roles", label: "Roles & permissions", tone: "navy" },
+      { id: "leave", label: "Leave setup", tone: "coral" },
+      { id: "salary", label: "Salary setup", tone: "green" },
+      { id: "series", label: "Numbering", tone: "slate" },
+    ],
+  },
+  {
+    id: "academic",
+    label: "Academic",
+    tone: "sky",
+    tabs: [
+      { id: "academic", label: "Session", tone: "sky" },
+      { id: "classes", label: "Classes & sections", tone: "sky" },
+      { id: "subjects", label: "Subjects", tone: "violet" },
+      { id: "holidays", label: "Holidays", tone: "amber" },
+    ],
+  },
+  {
+    id: "fees",
+    label: "Fee setup",
+    tone: "green",
+    tabs: [
+      { id: "fee-heads", label: "Fee heads", tone: "green" },
+      { id: "fee-groups", label: "Fee groups", tone: "green" },
+      { id: "fee-structure", label: "Fee structure", tone: "green" },
+      { id: "special-fees", label: "Special fees", tone: "teal" },
+      { id: "concessions", label: "Concessions", tone: "teal" },
+      { id: "installments", label: "Due dates", tone: "amber" },
+      { id: "late-fee", label: "Late fee", tone: "rose" },
+      { id: "mid-year", label: "Mid-year", tone: "rose" },
+    ],
+  },
+  {
+    id: "comms-automation",
+    label: "Comms & automation",
+    tone: "violet",
+    tabs: [
+      { id: "wa-templates", label: "WhatsApp templates", tone: "violet" },
+      { id: "automation", label: "Automation", tone: "amber" },
+    ],
+  },
 ];
 
-const TAB_TONE: Record<
-  string,
-  { idle: string; hover: string; active: string; dot: string }
-> = {
-  navy: {
-    idle: "bg-[rgba(32,48,80,0.08)] text-[var(--brand-deep)]",
-    hover: "hover:bg-[rgba(32,48,80,0.14)]",
-    active:
-      "bg-[var(--brand-deep)] text-white shadow-[0_2px_10px_rgba(32,48,80,0.35)] ring-2 ring-[var(--brand-gold)] ring-offset-2",
-    dot: "bg-[var(--brand-gold)]",
-  },
-  teal: {
-    idle: "bg-[rgba(15,118,110,0.1)] text-[#0f766e]",
-    hover: "hover:bg-[rgba(15,118,110,0.18)]",
-    active:
-      "bg-[#0f766e] text-white shadow-[0_2px_10px_rgba(15,118,110,0.35)] ring-2 ring-[#5eead4] ring-offset-2",
-    dot: "bg-[#5eead4]",
-  },
-  slate: {
-    idle: "bg-[rgba(71,85,105,0.1)] text-[#334155]",
-    hover: "hover:bg-[rgba(71,85,105,0.18)]",
-    active:
-      "bg-[#334155] text-white shadow-[0_2px_10px_rgba(51,65,85,0.35)] ring-2 ring-[#94a3b8] ring-offset-2",
-    dot: "bg-[#94a3b8]",
-  },
-  amber: {
-    idle: "bg-[rgba(197,160,40,0.14)] text-[#8a6d12]",
-    hover: "hover:bg-[rgba(197,160,40,0.24)]",
-    active:
-      "bg-[#b8860b] text-white shadow-[0_2px_10px_rgba(184,134,11,0.4)] ring-2 ring-[var(--brand-gold)] ring-offset-2",
-    dot: "bg-[#fde68a]",
-  },
-  green: {
-    idle: "bg-[rgba(22,163,74,0.1)] text-[#15803d]",
-    hover: "hover:bg-[rgba(22,163,74,0.18)]",
-    active:
-      "bg-[#15803d] text-white shadow-[0_2px_10px_rgba(21,128,61,0.35)] ring-2 ring-[#86efac] ring-offset-2",
-    dot: "bg-[#86efac]",
-  },
-  rose: {
-    idle: "bg-[rgba(190,24,93,0.1)] text-[#9d174d]",
-    hover: "hover:bg-[rgba(190,24,93,0.18)]",
-    active:
-      "bg-[#9d174d] text-white shadow-[0_2px_10px_rgba(157,23,77,0.35)] ring-2 ring-[#f9a8d4] ring-offset-2",
-    dot: "bg-[#f9a8d4]",
-  },
-};
-
 export function MastersWorkspace() {
+  const session = useDemoSession();
+  const readOnly = useSessionReadOnly();
   const [tab, setTab] = useState<Tab>("overview");
   const [state, setState] = useState<MastersState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     setState(loadMasters());
+    void (async () => {
+      const { ensureStaffHydrated } = await import("@/lib/staffPersistence");
+      const did = await ensureStaffHydrated();
+      if (did) setState(loadMasters());
+    })();
   }, []);
 
   function commit(next: MastersState, msg?: string) {
+    if (readOnly) {
+      setNotice("Selected session is closed — masters are read-only");
+      window.setTimeout(() => setNotice(null), 2800);
+      return;
+    }
     setState(next);
     saveMasters(next);
     if (msg) {
@@ -174,9 +194,8 @@ export function MastersWorkspace() {
             Masters
           </h1>
           <p className="mt-1 text-sm text-[var(--muted)]">
-            Institution, academic, subjects, holidays, staff, and fee setup (
-            {DEFAULT_AY})
-
+            Institution, academic, subjects, holidays, staff setup, and fee setup ·
+            selected session {session.academicYearCode}
           </p>
         </div>
         {notice ? (
@@ -186,46 +205,18 @@ export function MastersWorkspace() {
         ) : null}
       </div>
 
-      <div
-        className="mt-6 flex flex-wrap gap-2 rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] p-2.5"
-        role="tablist"
-        aria-label="Masters sections"
-      >
-        {TABS.map((t) => {
-          const active = tab === t.id;
-          const tone = TAB_TONE[t.tone] ?? TAB_TONE.navy!;
-          return (
-            <button
-              key={t.id}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              onClick={() => setTab(t.id)}
-              className={`relative inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-2 text-[13px] transition ${
-                active
-                  ? `font-bold ${tone.active}`
-                  : `font-semibold ${tone.idle} ${tone.hover}`
-              }`}
-            >
-              {active ? (
-                <span
-                  className={`h-2 w-2 shrink-0 rounded-full ${tone.dot} ring-2 ring-white/40`}
-                  aria-hidden
-                />
-              ) : null}
-              <span>{t.label}</span>
-              {active ? (
-                <span className="ml-0.5 rounded bg-white/20 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide">
-                  Open
-                </span>
-              ) : null}
-            </button>
-          );
-        })}
-      </div>
+      <ModuleTabGroups
+        aria-label="Masters"
+        size="lg"
+        value={tab}
+        onChange={(id) => setTab(id as Tab)}
+        groups={TAB_GROUPS}
+      />
 
       <div className="mt-5">
-        {tab === "overview" ? <Overview state={state} onGo={setTab} /> : null}
+        {tab === "overview" ? (
+          <Overview state={state} onGo={setTab} commit={commit} />
+        ) : null}
         {tab === "school" ? (
           <SchoolProfilePanel state={state} commit={commit} />
         ) : null}
@@ -250,6 +241,9 @@ export function MastersWorkspace() {
         {tab === "staff" ? (
           <StaffMastersPanel state={state} commit={commit} />
         ) : null}
+        {tab === "leave" ? <LeaveMastersPanel /> : null}
+        {tab === "roles" ? <RolesPermissionsPanel /> : null}
+        {tab === "salary" ? <SalarySetupPanel /> : null}
         {tab === "fee-heads" ? (
           <FeeHeadsPanel state={state} commit={commit} />
         ) : null}
@@ -274,6 +268,8 @@ export function MastersWorkspace() {
         {tab === "mid-year" ? (
           <MidYearFeePolicyPanel state={state} commit={commit} />
         ) : null}
+        {tab === "wa-templates" ? <WaTemplatesPanel /> : null}
+        {tab === "automation" ? <AutomationPanel /> : null}
       </div>
     </div>
   );
@@ -282,33 +278,47 @@ export function MastersWorkspace() {
 function Overview({
   state,
   onGo,
+  commit,
 }: {
   state: MastersState;
   onGo: (t: Tab) => void;
+  commit: (s: MastersState, msg?: string) => void;
 }) {
+  const session = useDemoSession();
+  const ay = session.academicYearCode;
   const activeClasses = state.classes.filter((c) => c.isActive).length;
   const activeSections = state.sections.filter((s) => s.isActive).length;
   const activeHeads = state.feeHeads.filter((f) => f.isActive).length;
   const campuses = state.campuses.filter((c) => c.isActive).length;
-  const groups = state.feeGroups.filter((g) => g.isActive).length;
-  const installments = state.installments.filter((i) => i.isActive).length;
+  const groups = state.feeGroups.filter(
+    (g) => g.isActive && g.academicYearCode === ay,
+  ).length;
+  const installments = state.installments.filter(
+    (i) => i.isActive && i.academicYearCode === ay,
+  ).length;
 
-  const specialCount = state.specialFees?.filter((f) => f.isActive).length ?? 0;
+  const specialCount =
+    state.specialFees?.filter(
+      (f) => f.isActive && f.academicYearCode === ay,
+    ).length ?? 0;
   const concessionCount =
-    state.concessions?.filter((c) => c.isActive).length ?? 0;
+    listConcessionPolicies(state, { preferAy: ay }).filter((c) => c.isActive)
+      .length ?? 0;
 
   const subjectCount = state.subjects?.filter((s) => s.isActive).length ?? 0;
-  const staffCount =
-    state.staff?.filter((s) => s.status === "active").length ?? 0;
+  const deptCount =
+    state.departments?.filter((d) => d.isActive).length ?? 0;
   const holidayPub =
-    state.holidays?.filter((h) => h.isPublished).length ?? 0;
+    state.holidays?.filter(
+      (h) => h.isPublished && h.academicYearCode === ay,
+    ).length ?? 0;
 
   const cards = [
     { label: "Campuses", value: campuses, tab: "campuses" as Tab },
     { label: "Classes", value: activeClasses, tab: "classes" as Tab },
     { label: "Sections", value: activeSections, tab: "classes" as Tab },
     { label: "Subjects", value: subjectCount, tab: "subjects" as Tab },
-    { label: "Staff", value: staffCount, tab: "staff" as Tab },
+    { label: "Departments", value: deptCount, tab: "staff" as Tab },
     { label: "Holidays (pub)", value: holidayPub, tab: "holidays" as Tab },
     { label: "Fee heads", value: activeHeads, tab: "fee-heads" as Tab },
     { label: "Fee groups", value: groups, tab: "fee-groups" as Tab },
@@ -316,13 +326,15 @@ function Overview({
     { label: "Concessions", value: concessionCount, tab: "concessions" as Tab },
     { label: "Due dates", value: installments, tab: "installments" as Tab },
     { label: "Mid-year rules", value: "Edit", tab: "mid-year" as Tab },
+    { label: "WA templates", value: "EN+HI", tab: "wa-templates" as Tab },
+    { label: "Automation", value: "Rules", tab: "automation" as Tab },
   ];
 
   return (
     <div className="space-y-6">
-      <CompletenessDashboard
-        state={state}
-        onGo={(t) => onGo(t as Tab)}
+      <ModuleDashboardHost
+        moduleId="masters"
+        onNavigateTab={(t) => onGo(t as Tab)}
       />
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {cards.map((c) => (
@@ -354,6 +366,12 @@ function Overview({
         >
           Edit fee structure →
         </button>
+        <Link
+          href="/students"
+          className="rounded-lg border border-[rgba(197,160,40,0.45)] bg-[rgba(197,160,40,0.12)] px-3 py-2 text-sm font-medium text-[var(--brand-deep)]"
+        >
+          Import students (CSV) →
+        </Link>
         <button
           type="button"
           onClick={() => onGo("holidays")}
@@ -361,16 +379,36 @@ function Overview({
         >
           Holidays →
         </button>
+        <Link
+          href="/staff"
+          className="rounded-lg border border-[rgba(197,160,40,0.45)] bg-[rgba(197,160,40,0.12)] px-3 py-2 text-sm font-medium text-[var(--brand-deep)]"
+        >
+          Staff module →
+        </Link>
         <button
           type="button"
           onClick={() => onGo("staff")}
           className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm font-medium text-[var(--brand-deep)]"
         >
-          Staff masters →
+          Staff setup →
+        </button>
+        <button
+          type="button"
+          onClick={() => onGo("roles")}
+          className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm font-medium text-[var(--brand-deep)]"
+        >
+          Roles &amp; permissions →
+        </button>
+        <button
+          type="button"
+          onClick={() => onGo("leave")}
+          className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm font-medium text-[var(--brand-deep)]"
+        >
+          Leave setup →
         </button>
       </div>
       <p className="text-sm text-[var(--muted)]">
-        Fee setup for {DEFAULT_AY}: heads → groups →{" "}
+        Fee setup for {ay}: heads → groups →{" "}
         <strong>fee structure</strong> (class amounts + publish) → concessions
         → due dates → late fee. Published structure bills in Fee Take.
       </p>
@@ -983,24 +1021,38 @@ function FeeHeadsPanel({
   state: MastersState;
   commit: (s: MastersState, msg?: string) => void;
 }) {
+  const categories = resolveFeeHeadCategories(state);
+  const activeCategories = categories.filter((c) => c.isActive);
+  const defaultCat = activeCategories[0]?.code ?? categories[0]?.code ?? "misc";
+
   const [editingId, setEditingId] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [nameEn, setNameEn] = useState("");
-  const [category, setCategory] = useState<FeeHeadCategory>(
-    FEE_CATEGORIES[0]!.value,
-  );
+  const [category, setCategory] = useState<FeeHeadCategory>(defaultCat);
   const [frequency, setFrequency] = useState<FeeFrequency>(
     FEE_FREQUENCIES[1]!.value,
   );
   const [optional, setOptional] = useState(false);
+  const [refundable, setRefundable] = useState(false);
+
+  const [catEditingId, setCatEditingId] = useState<string | null>(null);
+  const [catCode, setCatCode] = useState("");
+  const [catLabel, setCatLabel] = useState("");
 
   function resetForm() {
     setEditingId(null);
     setCode("");
     setNameEn("");
-    setCategory(FEE_CATEGORIES[0]!.value);
+    setCategory(defaultCat);
     setFrequency(FEE_FREQUENCIES[1]!.value);
     setOptional(false);
+    setRefundable(false);
+  }
+
+  function resetCatForm() {
+    setCatEditingId(null);
+    setCatCode("");
+    setCatLabel("");
   }
 
   function startEdit(f: FeeHead) {
@@ -1010,6 +1062,69 @@ function FeeHeadsPanel({
     setCategory(f.category);
     setFrequency(f.frequency);
     setOptional(f.isOptional);
+    setRefundable(!!f.isRefundable);
+  }
+
+  function startEditCategory(c: FeeHeadCategoryDef) {
+    setCatEditingId(c.id);
+    setCatCode(c.code);
+    setCatLabel(c.label);
+  }
+
+  function saveCategory(e: React.FormEvent) {
+    e.preventDefault();
+    if (!catCode.trim() || !catLabel.trim()) return;
+    const nextCode = catCode
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "_")
+      .replace(/[^a-z0-9_]/g, "");
+    if (!nextCode) {
+      commit(state, "Category code is invalid");
+      return;
+    }
+    const list = resolveFeeHeadCategories(state);
+    if (list.some((c) => c.code === nextCode && c.id !== catEditingId)) {
+      commit(state, "Category code already exists");
+      return;
+    }
+
+    if (catEditingId) {
+      const prev = list.find((c) => c.id === catEditingId);
+      const oldCode = prev?.code ?? nextCode;
+      commit(
+        {
+          ...state,
+          feeHeadCategories: list.map((c) =>
+            c.id === catEditingId
+              ? { ...c, code: nextCode, label: catLabel.trim() }
+              : c,
+          ),
+          feeHeads:
+            oldCode === nextCode
+              ? state.feeHeads
+              : state.feeHeads.map((h) =>
+                  h.category === oldCode ? { ...h, category: nextCode } : h,
+                ),
+        },
+        "Fee category updated",
+      );
+      resetCatForm();
+      return;
+    }
+
+    const row: FeeHeadCategoryDef = {
+      id: newId("fhc"),
+      code: nextCode,
+      label: catLabel.trim(),
+      isActive: true,
+      sortOrder: (list.at(-1)?.sortOrder ?? 0) + 10,
+    };
+    commit(
+      { ...state, feeHeadCategories: [...list, row] },
+      "Fee category added",
+    );
+    resetCatForm();
   }
 
   function saveHead(e: React.FormEvent) {
@@ -1018,8 +1133,7 @@ function FeeHeadsPanel({
     const nextCode = code.trim().toUpperCase();
     if (
       state.feeHeads.some(
-        (f) =>
-          f.code.toUpperCase() === nextCode && f.id !== editingId,
+        (f) => f.code.toUpperCase() === nextCode && f.id !== editingId,
       )
     ) {
       commit(state, "Fee head code already exists");
@@ -1039,6 +1153,7 @@ function FeeHeadsPanel({
                   category,
                   frequency,
                   isOptional: optional,
+                  isRefundable: refundable,
                 }
               : f,
           ),
@@ -1056,6 +1171,7 @@ function FeeHeadsPanel({
       category,
       frequency,
       isOptional: optional,
+      isRefundable: refundable,
       isActive: true,
       sortOrder: (state.feeHeads.at(-1)?.sortOrder ?? 0) + 10,
     };
@@ -1069,7 +1185,76 @@ function FeeHeadsPanel({
   return (
     <MastersTabStack
       tables={
-        <MastersTablesRow cols={1}>
+        <MastersTablesRow cols={2}>
+          <MastersTableCard title="Fee head categories">
+            <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+              {categories.map((c) => {
+                const used = state.feeHeads.filter(
+                  (h) => h.category === c.code,
+                ).length;
+                return (
+                  <li
+                    key={c.id}
+                    className="flex items-center justify-between gap-3 px-4 py-3"
+                  >
+                    <div>
+                      <div className="font-medium text-[var(--brand-deep)]">
+                        {c.label}{" "}
+                        <span className="text-xs font-normal text-[var(--muted)]">
+                          {c.code}
+                        </span>
+                      </div>
+                      <div className="text-xs text-[var(--muted)]">
+                        {used} fee head{used === 1 ? "" : "s"}
+                        {!c.isActive ? " · inactive" : ""}
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 flex-col items-end gap-1.5 sm:flex-row sm:items-start">
+                      <EditControl
+                        active={catEditingId === c.id}
+                        onEdit={() => startEditCategory(c)}
+                      />
+                      <button
+                        type="button"
+                        className="text-xs font-medium text-[var(--brand-mid)]"
+                        onClick={() =>
+                          commit(
+                            {
+                              ...state,
+                              feeHeadCategories: resolveFeeHeadCategories(
+                                state,
+                              ).map((x) =>
+                                x.id === c.id
+                                  ? { ...x, isActive: !x.isActive }
+                                  : x,
+                              ),
+                            },
+                            c.isActive
+                              ? "Category inactivated"
+                              : "Category activated",
+                          )
+                        }
+                      >
+                        {c.isActive ? "Inactivate" : "Activate"}
+                      </button>
+                      <RemoveControl
+                        check={checkFeeHeadCategoryRemoval(state, c.id)}
+                        onRemove={() => {
+                          const result = removeFeeHeadCategory(state, c.id);
+                          if (!result.ok) {
+                            commit(state, result.reason);
+                            return;
+                          }
+                          if (catEditingId === c.id) resetCatForm();
+                          commit(result.state, "Category removed");
+                        }}
+                      />
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </MastersTableCard>
           <MastersTableCard title="Fee heads">
             <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
               {state.feeHeads
@@ -1088,7 +1273,10 @@ function FeeHeadsPanel({
                         </span>
                       </div>
                       <div className="text-xs text-[var(--muted)]">
-                        {f.category} · {f.frequency}
+                        {feeHeadCategoryLabel(state, f.category)} · {f.frequency}
+                        {f.isRefundable
+                          ? " · refundable"
+                          : " · non-refundable"}
                         {f.isOptional ? " · optional" : ""}
                         {!f.isActive ? " · inactive" : ""}
                       </div>
@@ -1139,86 +1327,154 @@ function FeeHeadsPanel({
         </MastersTablesRow>
       }
       work={
-        <MastersWorkCard
-          title={editingId ? "Edit fee head" : "Add fee head"}
-          hint="Working form"
-        >
-          <form onSubmit={saveHead} className="max-w-xl space-y-1">
-            <Field label="Code">
-              <input
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                className="field"
-                placeholder="SPORTS"
-                required
-              />
-            </Field>
-            <Field label="Name">
-              <input
-                value={nameEn}
-                onChange={(e) => setNameEn(e.target.value)}
-                className="field"
-                placeholder="Sports Fee"
-                required
-              />
-            </Field>
-            <Field label="Category">
-              <select
-                value={category}
-                onChange={(e) =>
-                  setCategory(e.target.value as FeeHeadCategory)
-                }
-                className="field"
-              >
-                {FEE_CATEGORIES.map((c) => (
-                  <option key={c.value} value={c.value}>
-                    {c.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Frequency">
-              <select
-                value={frequency}
-                onChange={(e) =>
-                  setFrequency(e.target.value as FeeFrequency)
-                }
-                className="field"
-              >
-                {FEE_FREQUENCIES.map((f) => (
-                  <option key={f.value} value={f.value}>
-                    {f.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <label className="mt-3 flex items-center gap-2 text-sm text-[var(--brand-deep)]">
-              <input
-                type="checkbox"
-                checked={optional}
-                onChange={(e) => setOptional(e.target.checked)}
-              />
-              Optional (e.g. transport)
-            </label>
-            <div className="mt-4 flex gap-2">
-              {editingId ? (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <MastersWorkCard
+            title={catEditingId ? "Edit category" : "Add category"}
+            hint="Manage fee head categories"
+          >
+            <form onSubmit={saveCategory} className="space-y-1">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Code">
+                  <input
+                    value={catCode}
+                    onChange={(e) => setCatCode(e.target.value)}
+                    className="field"
+                    placeholder="sports"
+                    required
+                  />
+                </Field>
+                <Field label="Label">
+                  <input
+                    value={catLabel}
+                    onChange={(e) => setCatLabel(e.target.value)}
+                    className="field"
+                    placeholder="Sports"
+                    required
+                  />
+                </Field>
+              </div>
+              <div className="mt-4 flex gap-2">
+                {catEditingId ? (
+                  <button
+                    type="button"
+                    className="rounded-xl border border-[rgba(32,48,80,0.2)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)]"
+                    onClick={resetCatForm}
+                  >
+                    Cancel
+                  </button>
+                ) : null}
                 <button
-                  type="button"
-                  className="rounded-xl border border-[rgba(32,48,80,0.2)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)]"
-                  onClick={resetForm}
+                  type="submit"
+                  className="btn-accent flex-1 rounded-xl px-4 py-2.5 text-sm font-semibold"
                 >
-                  Cancel
+                  {catEditingId ? "Update category" : "Save category"}
                 </button>
-              ) : null}
-              <button
-                type="submit"
-                className="btn-accent flex-1 rounded-xl px-4 py-2.5 text-sm font-semibold"
-              >
-                {editingId ? "Update fee head" : "Save fee head"}
-              </button>
-            </div>
-          </form>
-        </MastersWorkCard>
+              </div>
+            </form>
+          </MastersWorkCard>
+
+          <MastersWorkCard
+            title={editingId ? "Edit fee head" : "Add fee head"}
+            hint="Working form"
+          >
+            <form onSubmit={saveHead} className="space-y-1">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Code">
+                  <input
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                    className="field"
+                    placeholder="SPORTS"
+                    required
+                  />
+                </Field>
+                <Field label="Name">
+                  <input
+                    value={nameEn}
+                    onChange={(e) => setNameEn(e.target.value)}
+                    className="field"
+                    placeholder="Sports Fee"
+                    required
+                  />
+                </Field>
+                <Field label="Category">
+                  <select
+                    value={category}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setCategory(next);
+                      if (next === "deposit") setRefundable(true);
+                    }}
+                    className="field"
+                  >
+                    {(activeCategories.length
+                      ? activeCategories
+                      : categories
+                    ).map((c) => (
+                      <option key={c.id} value={c.code}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Frequency">
+                  <select
+                    value={frequency}
+                    onChange={(e) =>
+                      setFrequency(e.target.value as FeeFrequency)
+                    }
+                    className="field"
+                  >
+                    {FEE_FREQUENCIES.map((f) => (
+                      <option key={f.value} value={f.value}>
+                        {f.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Refund type">
+                  <select
+                    value={refundable ? "refundable" : "non_refundable"}
+                    onChange={(e) =>
+                      setRefundable(e.target.value === "refundable")
+                    }
+                    className="field"
+                  >
+                    <option value="non_refundable">Non-refundable</option>
+                    <option value="refundable">
+                      Refundable (security / caution deposit)
+                    </option>
+                  </select>
+                </Field>
+                <label className="mt-3 flex items-end gap-2 pb-2 text-sm text-[var(--brand-deep)]">
+                  <input
+                    type="checkbox"
+                    checked={optional}
+                    onChange={(e) => setOptional(e.target.checked)}
+                  />
+                  Optional (e.g. transport)
+                </label>
+              </div>
+              <div className="mt-4 flex gap-2">
+                {editingId ? (
+                  <button
+                    type="button"
+                    className="rounded-xl border border-[rgba(32,48,80,0.2)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)]"
+                    onClick={resetForm}
+                  >
+                    Cancel
+                  </button>
+                ) : null}
+                <button
+                  type="submit"
+                  className="btn-accent flex-1 rounded-xl px-4 py-2.5 text-sm font-semibold"
+                >
+                  {editingId ? "Update fee head" : "Save fee head"}
+                </button>
+              </div>
+            </form>
+          </MastersWorkCard>
+        </div>
       }
     />
   );

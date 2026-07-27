@@ -2,6 +2,7 @@
  * Certificates — TC (CBSE Annexure-I), bonafide, character, fee clearance.
  */
 
+import { assertModulePermission } from "@/lib/rbacGuard";
 import {
   amountInWordsPaise,
   computeStudentDues,
@@ -127,6 +128,8 @@ export type CertificateIssue = {
   overrideDues: boolean;
   issuedOn: string;
   issuedBy: string;
+  /** Resolved from Staff class-teacher mapping at issue time */
+  classTeacherName: string;
   createdAt: string;
   voidedAt: string | null;
   inactivatedStudent: boolean;
@@ -327,9 +330,25 @@ export function loadCertificates(): CertificatesState {
 }
 
 export function saveCertificates(state: CertificatesState) {
+  if (!assertModulePermission("certificates", "edit", "saveCertificates")) return;
+
+  if (typeof window === "undefined") return;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  void import("@/lib/certificatesPersistence").then(({ scheduleCertificatesSync }) => {
+    scheduleCertificatesSync(state);
+  });
+
+}
+
+export function writeCertificatesLocalRaw(state: CertificatesState) {
   if (typeof window === "undefined") return;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
+
+export function certificatesStateIsEmpty(state: CertificatesState): boolean {
+  return (state.issues?.length ?? 0) === 0;
+}
+
 
 function normalizeTc(raw: Partial<TcDetails> | null | undefined): TcDetails {
   const d = emptyTcDetails();
@@ -392,6 +411,7 @@ function normalizeIssue(c: CertificateIssue): CertificateIssue {
     overrideDues: !!c.overrideDues,
     issuedOn: c.issuedOn || todayIso(),
     issuedBy: c.issuedBy || "",
+    classTeacherName: c.classTeacherName || "",
     createdAt: c.createdAt || new Date().toISOString(),
     voidedAt: c.voidedAt ?? null,
     inactivatedStudent: !!c.inactivatedStudent,
@@ -564,6 +584,7 @@ export function studentOpenBalance(student: SisStudent): {
   const fees = loadFees();
   const dues = computeStudentDues(student, masters, fees, {
     includeFuture: true,
+    includeInactive: true,
   });
   const open = openFeeDues(dues);
   return {
@@ -594,6 +615,14 @@ export function certificateEligibility(
   if (student.status !== "active" && kind === "tc") {
     warnings.push(
       "Student is already inactive — TC may have been issued earlier",
+    );
+  }
+
+  if (kind === "tc" && openDueCount > 0) {
+    canIssue = false;
+    requiresOverride = true;
+    blockers.push(
+      `Open dues ${formatInr(openBalancePaise)} — settle via Fee Adjustments (leave write-off) or collect before TC`,
     );
   }
 
@@ -671,6 +700,7 @@ export type IssueCertificateInput = {
   kind: CertificateKind;
   studentId: string;
   issuedBy: string;
+  classTeacherName?: string;
   issuedOn?: string;
   admissionDate?: string;
   leavingDate?: string;
@@ -836,6 +866,7 @@ export function issueCertificate(
     overrideDues: !!input.overrideDues && eligibility.requiresOverride,
     issuedOn,
     issuedBy: input.issuedBy,
+    classTeacherName: (input.classTeacherName ?? "").trim(),
     createdAt: new Date().toISOString(),
     voidedAt: null,
     inactivatedStudent,

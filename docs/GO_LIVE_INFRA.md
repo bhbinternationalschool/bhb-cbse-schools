@@ -87,6 +87,7 @@ npx supabase db push
 Tables this app expects for remote sync:
 
 - `sis_households`, `sis_students`
+- `sis_departments`, `sis_designations`, `sis_staff`
 - `student_curriculum`, `curriculum_requests`, `class_curriculum_templates`
 - `tenants` row `slug = bhb-international`
 - `profiles` for RLS (`auth_user_id`)

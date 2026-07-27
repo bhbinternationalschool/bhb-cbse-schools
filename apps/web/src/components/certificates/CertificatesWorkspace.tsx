@@ -27,7 +27,13 @@ import {
 } from "@/lib/fees";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
 import { loadSis, type SisState } from "@/lib/sis";
-import { StudentTypeBadge } from "@/components/students/StudentAvatar";
+import {
+  designationName,
+  resolveClassTeacherName,
+  resolvePrincipal,
+} from "@/lib/staffResolve";
+import { StudentNameLabel } from "@/components/students/StudentAvatar";
+import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { StudentHitsFilterExport } from "@/components/reports/StudentHitsFilterExport";
 import {
   CertificateSheet,
@@ -102,6 +108,17 @@ export function CertificatesWorkspace() {
     refresh();
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    void (async () => {
+      const { ensureCertificatesHydrated } = await import(
+        "@/lib/certificatesPersistence"
+      );
+      await ensureCertificatesHydrated();
+      refresh();
+    })();
+  }, []);
+
   const classOptions = useMemo(() => {
     if (!masters) return [];
     return masters.classes.filter((c) => c.isActive);
@@ -168,8 +185,32 @@ export function CertificatesWorkspace() {
       subjectsStudied: defaultSubjectsForClass(label),
       applicationDate: leavingDate || todayIso(),
       checkedByName: prev.checkedByName || session.fullName,
+      checkedByDesignation:
+        prev.checkedByDesignation ||
+        (() => {
+          const m = loadMasters();
+          const me = m.staff.find(
+            (s) =>
+              s.fullName === session.fullName ||
+              s.loginUsername === session.email,
+          );
+          return me
+            ? designationName(m, me.designationId)
+            : prev.checkedByDesignation;
+        })(),
     }));
   }, [student?.id]);
+
+  // Show resolved class teacher hint when student selected
+  const resolvedClassTeacher = useMemo(() => {
+    if (!student || !masters) return "";
+    return resolveClassTeacherName(
+      masters,
+      student.classId,
+      student.sectionId,
+      student.academicYearCode || session.academicYearCode || DEFAULT_AY,
+    );
+  }, [student, masters, session.academicYearCode]);
 
   function patchTc(patch: Partial<TcDetails>) {
     setTcForm((prev) => ({ ...prev, ...patch }));
@@ -202,10 +243,21 @@ export function CertificatesWorkspace() {
       setError("Pick a student first");
       return;
     }
+    const mastersNow = masters ?? loadMasters();
+    const ay = session.academicYearCode || DEFAULT_AY;
+    const classTeacherName = resolveClassTeacherName(
+      mastersNow,
+      student.classId,
+      student.sectionId,
+      student.academicYearCode || ay,
+    );
+    const principal = resolvePrincipal(mastersNow);
+    const issuedBy = principal?.fullName || session.fullName;
     const result = issueCertificate({
       kind,
       studentId: student.id,
-      issuedBy: session.fullName,
+      issuedBy,
+      classTeacherName,
       issuedOn,
       admissionDate,
       leavingDate: kind === "tc" ? leavingDate : "",
@@ -286,6 +338,10 @@ export function CertificatesWorkspace() {
           {notice}
         </p>
       ) : null}
+
+      <div className="mt-4">
+        <ModuleDashboardHost moduleId="certificates" />
+      </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
         <div className="space-y-4">
@@ -387,8 +443,7 @@ export function CertificatesWorkspace() {
                       }}
                     >
                       <div className="text-sm font-semibold text-[var(--brand-deep)]">
-                        <StudentTypeBadge type={h.student.studentType} />
-                        {h.student.fullName}
+                        <StudentNameLabel student={h.student} />
                         {h.student.status !== "active" ? (
                           <span className="ml-1 text-[10px] font-normal text-[var(--muted)]">
                             (inactive)
@@ -412,6 +467,9 @@ export function CertificatesWorkspace() {
                   <span className="text-[var(--muted)]">
                     {" "}
                     · {student.admissionNo} · {selected.classLabel}
+                    {resolvedClassTeacher
+                      ? ` · Class teacher: ${resolvedClassTeacher}`
+                      : ""}
                   </span>
                   <div className="mt-0.5 text-[10px] text-[var(--muted)]">
                     PEN {student.pen || "not on file"} · APAAR{" "}

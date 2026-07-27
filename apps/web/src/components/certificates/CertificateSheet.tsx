@@ -102,6 +102,11 @@ export function CertificateSheet({ issue }: { issue: CertificateIssue }) {
               <div>
                 <div className="h-10 border-b border-[rgba(32,48,80,0.25)]" />
                 <p className="mt-1 text-[var(--muted)]">Class teacher</p>
+                {issue.classTeacherName ? (
+                  <p className="font-semibold text-[var(--brand-deep)]">
+                    {issue.classTeacherName}
+                  </p>
+                ) : null}
               </div>
               <div className="text-right">
                 <div className="ml-auto h-10 w-40 border-b border-[rgba(32,48,80,0.25)]" />
@@ -221,6 +226,9 @@ function TcSheet({
         <div>
           <div className="h-12 border-b border-[rgba(32,48,80,0.3)]" />
           <p className="mt-1 font-semibold">Signature of Class Teacher</p>
+          {issue.classTeacherName ? (
+            <p className="text-[var(--muted)]">{issue.classTeacherName}</p>
+          ) : null}
         </div>
         <div>
           <div className="h-12 border-b border-[rgba(32,48,80,0.3)]" />

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { DEFAULT_AY, type MastersState } from "@/lib/masters";
+import { type MastersState } from "@/lib/masters";
 import {
   pendingCurriculumRequests,
   type SisState,
@@ -25,6 +25,7 @@ import {
   type StudentCurriculum,
 } from "@/lib/studentCurriculum";
 import { StudentCurriculumEditor } from "@/components/students/StudentCurriculumEditor";
+import { useDemoSession } from "@/components/shell/SessionContext";
 
 export function CurriculumOfficePanel({
   masters,
@@ -41,9 +42,8 @@ export function CurriculumOfficePanel({
   students: SisStudent[];
   onApplied: (next: SisState, msg: string) => void;
 }) {
-  const ay =
-    masters.academicYears?.find((y) => y.status === "current")?.code ??
-    DEFAULT_AY;
+  const session = useDemoSession();
+  const ay = session.academicYearCode;
   const nextAyOptions = (masters.academicYears ?? [])
     .map((y) => y.code)
     .filter((c) => c !== ay);

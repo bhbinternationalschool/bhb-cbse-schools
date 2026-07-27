@@ -3,6 +3,7 @@
  * Parent page can mark paid on same origin; counter can confirm manually.
  */
 
+import { assertModulePermission } from "@/lib/rbacGuard";
 import {
   collectPayment,
   computeHouseholdDues,
@@ -14,7 +15,16 @@ import {
   type FeeDueLine,
   type VoucherLine,
 } from "@/lib/fees";
-import { DEFAULT_AY, loadMasters } from "@/lib/masters";
+import {
+  buildSchoolUpiPayUri,
+  resolveSchoolCollectionsUpi,
+} from "@/lib/admissions";
+import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
+import {
+  getSchoolMirrorSync,
+  scheduleClientSchoolMirrorSync,
+  setMirrorSlice,
+} from "@/lib/schoolDataMirror";
 import { loadSis } from "@/lib/sis";
 
 export type PaymentLinkStatus =
@@ -90,7 +100,16 @@ export function emptyPaymentsState(): PaymentsState {
 }
 
 export function loadPayments(): PaymentsState {
-  if (typeof window === "undefined") return emptyPaymentsState();
+  if (typeof window === "undefined") {
+    const mirrored = getSchoolMirrorSync().payments as PaymentsState | null;
+    if (mirrored && Array.isArray(mirrored.links)) {
+      return {
+        version: 1,
+        links: mirrored.links.map(normalizeLink),
+      };
+    }
+    return emptyPaymentsState();
+  }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return emptyPaymentsState();
@@ -108,8 +127,30 @@ export function loadPayments(): PaymentsState {
 }
 
 export function savePayments(state: PaymentsState) {
-  if (typeof window === "undefined") return;
+  if (!assertModulePermission("fees", "edit", "savePayments")) return;
+
+  if (typeof window === "undefined") {
+    setMirrorSlice("payments", state);
+    return;
+  }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  scheduleClientSchoolMirrorSync({ payments: state });
+  void import("@/lib/paymentsPersistence").then(({ schedulePaymentsSync }) => {
+    schedulePaymentsSync(state);
+  });
+}
+
+export function writePaymentsLocalRaw(state: PaymentsState) {
+  if (typeof window === "undefined") {
+    setMirrorSlice("payments", state);
+    return;
+  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  scheduleClientSchoolMirrorSync({ payments: state });
+}
+
+export function paymentsStateIsEmpty(state: PaymentsState): boolean {
+  return (state.links?.length ?? 0) === 0;
 }
 
 function normalizeLink(l: PaymentLink): PaymentLink {
@@ -418,6 +459,8 @@ export type PaymentSharePayload = {
   schoolName: string;
   lines: PaymentLinkLine[];
   upiVpa: string;
+  /** Optional upi:// deep link for QR / intent */
+  upiUri?: string;
   note: string;
 };
 
@@ -446,6 +489,7 @@ export function buildPaymentSharePayload(
   link: PaymentLink,
   schoolName: string,
   upiVpa = "bhbschool@upi",
+  upiUri?: string,
 ): PaymentSharePayload {
   return {
     v: 1,
@@ -458,8 +502,25 @@ export function buildPaymentSharePayload(
     schoolName,
     lines: link.lines,
     upiVpa,
+    upiUri: upiUri || undefined,
     note: link.note,
   };
+}
+
+/** Prefer school collections UPI + upi:// QR intent on share pages. */
+export function buildEnrichedPaymentSharePayload(
+  link: PaymentLink,
+  schoolName: string,
+  masters?: MastersState | null,
+): PaymentSharePayload {
+  const upi = resolveSchoolCollectionsUpi(masters ?? loadMasters());
+  const upiUri = buildSchoolUpiPayUri({
+    vpa: upi.vpa,
+    payeeName: upi.payeeName,
+    amountPaise: link.amountPaise,
+    note: `Fees ${link.code}`,
+  });
+  return buildPaymentSharePayload(link, schoolName, upi.vpa, upiUri);
 }
 
 export function encodePaymentSharePayload(payload: PaymentSharePayload): string {
@@ -480,7 +541,15 @@ export function decodePaymentSharePayload(
 
 export function buildPaymentShareUrl(payload: PaymentSharePayload): string {
   if (typeof window === "undefined") return "";
-  return `${window.location.origin}/pay/share#${encodePaymentSharePayload(payload)}`;
+  return buildPaymentShareUrlAbsolute(window.location.origin, payload);
+}
+
+export function buildPaymentShareUrlAbsolute(
+  origin: string,
+  payload: PaymentSharePayload,
+): string {
+  const base = (origin || "").replace(/\/$/, "");
+  return `${base}/pay/share#${encodePaymentSharePayload(payload)}`;
 }
 
 export function composeWhatsAppPaymentLinkMessage(

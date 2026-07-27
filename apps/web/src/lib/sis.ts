@@ -3,18 +3,24 @@
  * Source of truth for enrollments; syncs a slim view into Masters for fee demos.
  */
 
+import { activeSessionCode } from "@/lib/sessionWriteGuard";
+import { assertModulePermission } from "@/lib/rbacGuard";
 import {
   DEFAULT_AY,
-  DEMO_SIBLING_NAMES,
   DEMO_STUDENT_CLASS_BY_NAME,
+  currentAcademicYearCode,
   ensureStudentClassLinks,
   loadMasters,
-  resolveFeeGroupId,
   saveMasters,
   type DemoStudent,
   type FeeStudentType,
   type MastersState,
 } from "@/lib/masters";
+import {
+  getSchoolMirrorSync,
+  scheduleClientSchoolMirrorSync,
+  setMirrorSlice,
+} from "@/lib/schoolDataMirror";
 import {
   normalizeCurriculum,
   normalizeCurriculumRequest,
@@ -32,6 +38,13 @@ export type PenStatus =
   | "pending_portal"
   | "linked"
   | "";
+
+/** Student / parent Aadhaar status for UDISE+ compliance */
+export type AadhaarVerificationStatus =
+  | ""
+  | "missing"
+  | "received"
+  | "verified_udise";
 
 export type StudentCategory = "GEN" | "OBC" | "SC" | "ST" | "EWS" | "";
 
@@ -83,6 +96,8 @@ export type Household = {
   state: string;
   pincode: string;
   altMobile: string;
+  /** Guardian / parent photo (data URL or https) */
+  guardianPhotoUrl: string;
 };
 
 export type SisStudent = {
@@ -122,6 +137,13 @@ export type SisStudent = {
   motherTongue: string;
   placeOfBirth: string;
   aadhaarLast4: string;
+  /**
+   * Full 12-digit Aadhaar while not yet verified on UDISE+.
+   * After `aadhaarVerification === "verified_udise"`, UI shows last 4 only.
+   */
+  aadhaarNumber: string;
+  /** UDISE+ Aadhaar validation */
+  aadhaarVerification: AadhaarVerificationStatus;
   /** Compliance IDs */
   pen: string;
   penStatus: PenStatus;
@@ -130,12 +152,127 @@ export type SisStudent = {
   previousSchool: string;
   previousTcNo: string;
   previousUdise: string;
+  /** Father / mother full Aadhaar (needed for APAAR) — masked after verified */
+  fatherAadhaarNumber: string;
+  motherAadhaarNumber: string;
+  fatherAadhaarVerification: AadhaarVerificationStatus;
+  motherAadhaarVerification: AadhaarVerificationStatus;
+  /** Last UDISE compliance WhatsApp reminder (ISO date) */
+  udiseComplianceRemindedAt: string;
+  /** Last sync from UDISE+ Students_Details */
+  udiseAadhaarValidationStatus: string;
+  udiseMbuStatus: string;
+  /** Portal class label (informational — never overwrites SIS class) */
+  udisePortalClassHint: string;
+  /**
+   * MBU Pending (Age …) from portal — age below / biometric update pending
+   * for the class as per govt rules.
+   */
+  udiseAgeBelowClassAlert: boolean;
+  /**
+   * Office entered PEN at admission (transfer) — student not yet on our UDISE+
+   * list. Action: import from Drop Box or ask previous school to release.
+   * Cleared when Students_Details re-import matches this student.
+   */
+  udiseInboundTransferPending: boolean;
+  /**
+   * Hold this student back from next-session promotion (e.g. under-age for the
+   * class per UDISE MBU rule — repeat the same class next session). Blocks
+   * upward class moves until unlocked.
+   */
+  promotionLocked: boolean;
+  /** Why promotion is locked (shown as a clear suggestion in the UI). */
+  promotionLockReason: string;
+  /** Extended profile fields (legacy ERP / full-register parity) */
+  caste: string;
+  /** Class at first admission (may differ from current class) */
+  admissionClass: string;
+  admissionFormNo: string;
+  registrationNo: string;
+  /** TC number issued by this school when the student leaves */
+  tcNo: string;
+  previousSchoolClass: string;
+  previousSchoolYear: string;
+  /** Permanent / native address — correspondence address stays on Household */
+  permanentAddress: string;
+  permanentCity: string;
+  permanentState: string;
+  permanentPincode: string;
+  /** Transport route name (informational; Transport module owns routing) */
+  transportRoute: string;
+  /** Health record */
+  heightCm: string;
+  weightKg: string;
+  /** Children With Special Needs (a.k.a. divyang / handicapped) */
+  isCwsn: boolean;
+  disabilityDetails: string;
+  medicalNotes: string;
+  /** Parent socio-economic — needed for EWS / RTE and DBT */
+  fatherOccupation: string;
+  motherOccupation: string;
+  fatherQualification: string;
+  motherQualification: string;
+  /** Combined family income per year (₹) */
+  annualIncome: string;
+  /** Student bank account for scholarships / DBT */
+  bankName: string;
+  bankAccountNo: string;
+  bankIfsc: string;
+  /** Elective languages (CBSE) and interests */
+  secondLanguage: string;
+  thirdLanguage: string;
+  hobbies: string;
   docs: StudentDocs;
   notes: string;
   /** Optional photo (https URL or data:image for demo upload) */
   photoUrl: string;
+  /** Father / mother photos for ID cards & bulk parent image upload */
+  fatherPhotoUrl: string;
+  motherPhotoUrl: string;
+  /** Attendance / gate RFID card number */
+  rfidNo: string;
+  /** Biometric device enrolment id */
+  biometricId: string;
+  /** Portal login username (defaults to admission no when empty) */
+  loginUsername: string;
+  /** Portal login password (office-set; demo plain storage) */
+  loginPassword: string;
   /** Confirmed subjects/stream for the academic year */
   curriculum: StudentCurriculum | null;
+  /** Assigned student tag ids (shown before name across the ERP) */
+  tagIds: string[];
+};
+
+/** School-defined labels (RTE cohort, sports, staff ward, etc.) */
+export type StudentTag = {
+  id: string;
+  code: string;
+  name: string;
+  color: string;
+  isActive: boolean;
+  createdAt: string;
+};
+
+/** Post-admission move to another class / section / student type */
+export type ClassUpgradeRecord = {
+  id: string;
+  studentId: string;
+  studentName: string;
+  admissionNo: string;
+  fromClassId: string;
+  fromSectionId: string;
+  toClassId: string;
+  toSectionId: string;
+  fromFeeGroupId: string | null;
+  toFeeGroupId: string | null;
+  /** Fee student type before (NEW / PROMOTE / …) */
+  fromStudentType: string;
+  /** Fee student type after */
+  toStudentType: string;
+  reason: string;
+  effectiveOn: string;
+  createdAt: string;
+  createdBy: string;
 };
 
 export type SisState = {
@@ -143,6 +280,9 @@ export type SisState = {
   households: Household[];
   students: SisStudent[];
   curriculumRequests: CurriculumRequest[];
+  tags: StudentTag[];
+  /** Post-admission class upgrades (history) */
+  classUpgrades: ClassUpgradeRecord[];
 };
 
 export const DOC_LABELS: { key: StudentDocKey; label: string }[] = [
@@ -297,6 +437,80 @@ export function normalizePan(value: string): string {
     .slice(0, 10);
 }
 
+/** Keep 12-digit Aadhaar; if only last4 known, leave full empty. */
+export function normalizeAadhaarFull(value: string, last4Fallback = ""): string {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (digits.length === 12) return digits;
+  if (digits.length > 12) return digits.slice(0, 12);
+  return "";
+}
+
+export function normalizeAadhaarVerification(
+  raw: unknown,
+  hasAnyAadhaar?: string,
+): AadhaarVerificationStatus {
+  const v = String(raw || "");
+  if (
+    v === "missing" ||
+    v === "received" ||
+    v === "verified_udise"
+  ) {
+    return v;
+  }
+  if (hasAnyAadhaar && String(hasAnyAadhaar).replace(/\D/g, "").length >= 4) {
+    return "received";
+  }
+  return "missing";
+}
+
+/**
+ * Display Aadhaar: full 12 digits until UDISE+ verified; then ********XXXX only.
+ */
+export function displayAadhaar(input: {
+  number?: string;
+  last4?: string;
+  verification?: AadhaarVerificationStatus;
+}): string {
+  const last4 =
+    (input.last4 || "").replace(/\D/g, "").slice(-4) ||
+    (input.number || "").replace(/\D/g, "").slice(-4);
+  if (input.verification === "verified_udise") {
+    return last4 ? `********${last4}` : "—";
+  }
+  const full = (input.number || "").replace(/\D/g, "");
+  if (full.length === 12) return full.replace(/(\d{4})(?=\d)/g, "$1 ");
+  if (last4) return `********${last4}`;
+  return "—";
+}
+
+export function hasStoredAadhaar(input: {
+  number?: string;
+  last4?: string;
+}): boolean {
+  const full = (input.number || "").replace(/\D/g, "");
+  const last4 = (input.last4 || "").replace(/\D/g, "");
+  return full.length === 12 || last4.length === 4;
+}
+
+/** After UDISE verify: keep last4, clear full number from display store. */
+export function applyAadhaarUdiseVerified(input: {
+  number?: string;
+  last4?: string;
+}): {
+  aadhaarNumber: string;
+  aadhaarLast4: string;
+  aadhaarVerification: AadhaarVerificationStatus;
+} {
+  const last4 =
+    (input.last4 || "").replace(/\D/g, "").slice(-4) ||
+    (input.number || "").replace(/\D/g, "").slice(-4);
+  return {
+    aadhaarNumber: "",
+    aadhaarLast4: last4,
+    aadhaarVerification: "verified_udise",
+  };
+}
+
 export function isValidPan(value: string): boolean {
   if (!value) return true;
   return /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(value);
@@ -328,8 +542,38 @@ export function normalizeStudent(s: Partial<SisStudent> & { id: string }): SisSt
     motherName: s.motherName ?? "",
     fatherMobile: normalizeMobile(s.fatherMobile ?? ""),
     motherMobile: normalizeMobile(s.motherMobile ?? ""),
-    fatherAadhaarLast4: (s.fatherAadhaarLast4 ?? "").replace(/\D/g, "").slice(0, 4),
-    motherAadhaarLast4: (s.motherAadhaarLast4 ?? "").replace(/\D/g, "").slice(0, 4),
+    fatherAadhaarLast4: (() => {
+      const l4 = (s.fatherAadhaarLast4 ?? "").replace(/\D/g, "").slice(0, 4);
+      const full = normalizeAadhaarFull(s.fatherAadhaarNumber ?? "", l4);
+      return l4 || full.slice(-4);
+    })(),
+    motherAadhaarLast4: (() => {
+      const l4 = (s.motherAadhaarLast4 ?? "").replace(/\D/g, "").slice(0, 4);
+      const full = normalizeAadhaarFull(s.motherAadhaarNumber ?? "", l4);
+      return l4 || full.slice(-4);
+    })(),
+    fatherAadhaarNumber:
+      String(s.fatherAadhaarVerification) === "verified_udise"
+        ? ""
+        : normalizeAadhaarFull(
+            s.fatherAadhaarNumber ?? "",
+            (s.fatherAadhaarLast4 ?? "").replace(/\D/g, "").slice(0, 4),
+          ),
+    motherAadhaarNumber:
+      String(s.motherAadhaarVerification) === "verified_udise"
+        ? ""
+        : normalizeAadhaarFull(
+            s.motherAadhaarNumber ?? "",
+            (s.motherAadhaarLast4 ?? "").replace(/\D/g, "").slice(0, 4),
+          ),
+    fatherAadhaarVerification: normalizeAadhaarVerification(
+      s.fatherAadhaarVerification,
+      s.fatherAadhaarNumber || s.fatherAadhaarLast4,
+    ),
+    motherAadhaarVerification: normalizeAadhaarVerification(
+      s.motherAadhaarVerification,
+      s.motherAadhaarNumber || s.motherAadhaarLast4,
+    ),
     fatherPan: normalizePan(s.fatherPan ?? ""),
     motherPan: normalizePan(s.motherPan ?? ""),
     guardianRelation: s.guardianRelation ?? "Father",
@@ -342,7 +586,22 @@ export function normalizeStudent(s: Partial<SisStudent> & { id: string }): SisSt
     nationality: s.nationality ?? "Indian",
     motherTongue: s.motherTongue ?? "",
     placeOfBirth: s.placeOfBirth ?? "",
-    aadhaarLast4: (s.aadhaarLast4 ?? "").replace(/\D/g, "").slice(0, 4),
+    aadhaarLast4: (() => {
+      const l4 = (s.aadhaarLast4 ?? "").replace(/\D/g, "").slice(0, 4);
+      const full = normalizeAadhaarFull(s.aadhaarNumber ?? "", l4);
+      return l4 || full.slice(-4);
+    })(),
+    aadhaarNumber:
+      String(s.aadhaarVerification) === "verified_udise"
+        ? ""
+        : normalizeAadhaarFull(
+            s.aadhaarNumber ?? "",
+            (s.aadhaarLast4 ?? "").replace(/\D/g, "").slice(0, 4),
+          ),
+    aadhaarVerification: normalizeAadhaarVerification(
+      s.aadhaarVerification,
+      s.aadhaarNumber || s.aadhaarLast4,
+    ),
     pen: s.pen ?? "",
     penStatus: s.penStatus ?? (s.pen ? "has_pen" : ""),
     apaarId: s.apaarId ?? "",
@@ -350,13 +609,74 @@ export function normalizeStudent(s: Partial<SisStudent> & { id: string }): SisSt
     previousSchool: s.previousSchool ?? "",
     previousTcNo: s.previousTcNo ?? "",
     previousUdise: s.previousUdise ?? "",
+    udiseComplianceRemindedAt: s.udiseComplianceRemindedAt ?? "",
+    udiseAadhaarValidationStatus: s.udiseAadhaarValidationStatus ?? "",
+    udiseMbuStatus: s.udiseMbuStatus ?? "",
+    udisePortalClassHint: s.udisePortalClassHint ?? "",
+    udiseAgeBelowClassAlert: !!s.udiseAgeBelowClassAlert,
+    udiseInboundTransferPending: !!s.udiseInboundTransferPending,
+    promotionLocked: !!s.promotionLocked,
+    promotionLockReason: String(s.promotionLockReason ?? "").trim(),
+    caste: s.caste ?? "",
+    admissionClass: s.admissionClass ?? "",
+    admissionFormNo: s.admissionFormNo ?? "",
+    registrationNo: s.registrationNo ?? "",
+    tcNo: s.tcNo ?? "",
+    previousSchoolClass: s.previousSchoolClass ?? "",
+    previousSchoolYear: s.previousSchoolYear ?? "",
+    permanentAddress: s.permanentAddress ?? "",
+    permanentCity: s.permanentCity ?? "",
+    permanentState: s.permanentState ?? "",
+    permanentPincode: (s.permanentPincode ?? "").replace(/\D/g, "").slice(0, 6),
+    transportRoute: s.transportRoute ?? "",
+    heightCm: s.heightCm ?? "",
+    weightKg: s.weightKg ?? "",
+    isCwsn: !!s.isCwsn,
+    disabilityDetails: s.disabilityDetails ?? "",
+    medicalNotes: s.medicalNotes ?? "",
+    fatherOccupation: s.fatherOccupation ?? "",
+    motherOccupation: s.motherOccupation ?? "",
+    fatherQualification: s.fatherQualification ?? "",
+    motherQualification: s.motherQualification ?? "",
+    annualIncome: s.annualIncome ?? "",
+    bankName: s.bankName ?? "",
+    bankAccountNo: s.bankAccountNo ?? "",
+    bankIfsc: (s.bankIfsc ?? "").toUpperCase().trim(),
+    secondLanguage: s.secondLanguage ?? "",
+    thirdLanguage: s.thirdLanguage ?? "",
+    hobbies: s.hobbies ?? "",
     docs,
     notes: s.notes ?? "",
     photoUrl: photoUrl || docs.photo.fileUrl || "",
+    fatherPhotoUrl: typeof s.fatherPhotoUrl === "string" ? s.fatherPhotoUrl : "",
+    motherPhotoUrl: typeof s.motherPhotoUrl === "string" ? s.motherPhotoUrl : "",
+    rfidNo: (s.rfidNo ?? "").trim(),
+    biometricId: (s.biometricId ?? "").trim(),
+    loginUsername: (s.loginUsername ?? "").trim(),
+    loginPassword: typeof s.loginPassword === "string" ? s.loginPassword : "",
     curriculum: normalizeCurriculum(
       s.curriculum,
       s.academicYearCode ?? DEFAULT_AY,
     ),
+    tagIds: Array.isArray(s.tagIds)
+      ? [...new Set(s.tagIds.filter((id): id is string => typeof id === "string"))]
+      : [],
+  };
+}
+
+export function normalizeStudentTag(
+  t: Partial<StudentTag> & { id?: string },
+): StudentTag {
+  return {
+    id: t.id || `stag_${Math.random().toString(36).slice(2, 10)}`,
+    code: (t.code || t.name || "TAG")
+      .toUpperCase()
+      .replace(/[^A-Z0-9_]/g, "_")
+      .slice(0, 12) || "TAG",
+    name: t.name || t.code || "Tag",
+    color: t.color || "#1565c0",
+    isActive: t.isActive !== false,
+    createdAt: t.createdAt || new Date().toISOString(),
   };
 }
 
@@ -378,6 +698,8 @@ export function normalizeHousehold(h: Partial<Household> & { id: string }): Hous
     state: h.state ?? "Uttar Pradesh",
     pincode: (h.pincode ?? "").replace(/\D/g, "").slice(0, 6),
     altMobile: normalizeMobile(h.altMobile ?? ""),
+    guardianPhotoUrl:
+      typeof h.guardianPhotoUrl === "string" ? h.guardianPhotoUrl : "",
   };
 }
 
@@ -524,354 +846,71 @@ export function avatarTone(fullName: string): string {
 }
 
 
-function pickFeeGroup(
-  masters: MastersState,
-  studentType: FeeStudentType,
-  classId: string,
-): string | null {
-  return resolveFeeGroupId(masters, {
-    studentType,
-    classId,
-    academicYearCode: DEFAULT_AY,
-    preferPublished: true,
-  });
+export function emptySisState(): SisState {
+  return {
+    version: 1,
+    households: [],
+    students: [],
+    curriculumRequests: [],
+    tags: [],
+    classUpgrades: [],
+  };
 }
 
-function seedFromMasters(masters: MastersState): SisState {
-  const campusId = masters.campuses.find((c) => c.isPrimary)?.id ??
-    masters.campuses[0]?.id ??
-    "";
-  const households: Household[] = [];
-  const students: SisStudent[] = [];
-
-  /** Shared sibling household (Rahul + Ananya). */
-  const siblingHh = normalizeHousehold({
-    id: id("hh"),
-    code: "HH-SINGH",
-    guardianName: "Ramesh Singh",
-    mobile: "9876543210",
-    email: "ramesh.singh@example.com",
-    address: "12, Lanka Road",
-    locality: "Lanka",
-    landmark: "Near BHU gate",
-    city: "Varanasi",
-    state: "Uttar Pradesh",
-    pincode: "221005",
-    altMobile: "9123456780",
-  });
-  households.push(siblingHh);
-
-  const demo = masters.students ?? [];
-  demo.forEach((d, i) => {
-    const isSibling = (DEMO_SIBLING_NAMES as readonly string[]).includes(
-      d.fullName,
-    );
-    let householdId = siblingHh.id;
-    if (!isSibling) {
-      const hh = normalizeHousehold({
-        id: id("hh"),
-        code: `HH-${100 + i}`,
-        guardianName: `Guardian of ${d.fullName.split(" ")[0] ?? d.fullName}`,
-        mobile: `98${String(70000001 + i).slice(0, 8)}`,
-        email: "",
-        address: "Lanka, Varanasi",
-        ...emptyHouseholdFields(),
-      });
-      households.push(hh);
-      householdId = hh.id;
-    }
-    const studentType: FeeStudentType = i % 3 === 0 ? "NEW" : "PROMOTE";
-    students.push(
-      normalizeStudent({
-        id: d.id.startsWith("stu") ? d.id : id("stu"),
-        admissionNo: d.admissionNo,
-        fullName: d.fullName,
-        gender: d.fullName.startsWith("Ananya") || d.fullName.includes("Meera") || d.fullName.includes("Isha") || d.fullName.includes("Sara") || d.fullName.includes("Priya")
-          ? "F"
-          : i % 2 === 0
-            ? "M"
-            : "F",
-        dob: d.fullName === "Ananya Singh" ? "2017-08-20" : `201${i % 8}-0${(i % 9) + 1}-15`,
-        status: d.status === "inactive" ? "inactive" : "active",
-        campusId,
-        classId: d.classId,
-        sectionId: d.sectionId,
-        rollNo: String((i % 40) + 1),
-        academicYearCode: DEFAULT_AY,
-        studentType,
-        feeGroupId: pickFeeGroup(masters, studentType, d.classId),
-        fatherName: isSibling ? "Ramesh Singh" : `Mr ${(d.fullName.split(" ").pop() ?? "Parent")}`,
-        motherName: isSibling ? "Sunita Singh" : "",
-        fatherMobile: isSibling ? "9876543210" : "",
-        motherMobile: isSibling ? "9123456780" : "",
-        householdId,
-        nationality: "Indian",
-        guardianRelation: "Father",
-      }),
-    );
-  });
-
-  if (students.length === 0) {
-    const clsVi = masters.classes.find((c) => c.name === "VI") ?? masters.classes[0];
-    const secVi =
-      masters.sections.find((s) => s.classId === clsVi?.id) ??
-      masters.sections[0];
-    const clsIii = masters.classes.find((c) => c.name === "III") ?? clsVi;
-    const secIii =
-      masters.sections.find((s) => s.classId === clsIii?.id) ?? secVi;
-    if (clsVi && secVi && clsIii && secIii) {
-      students.push(
-        normalizeStudent({
-          id: id("stu"),
-          admissionNo: "BHB-2025-101",
-          fullName: "Rahul Singh",
-          gender: "M",
-          dob: "2014-05-12",
-          status: "active",
-          campusId,
-          classId: clsVi.id,
-          sectionId: secVi.id,
-          rollNo: "1",
-          academicYearCode: DEFAULT_AY,
-          studentType: "PROMOTE",
-          feeGroupId: pickFeeGroup(masters, "PROMOTE", clsVi.id),
-          fatherName: "Ramesh Singh",
-          motherName: "Sunita Singh",
-          fatherMobile: "9876543210",
-          motherMobile: "9123456780",
-          householdId: siblingHh.id,
-          nationality: "Indian",
-          guardianRelation: "Father",
-        }),
-        normalizeStudent({
-          id: id("stu"),
-          admissionNo: "BHB-2025-102",
-          fullName: "Ananya Singh",
-          gender: "F",
-          dob: "2017-08-20",
-          status: "active",
-          campusId,
-          classId: clsIii.id,
-          sectionId: secIii.id,
-          rollNo: "5",
-          academicYearCode: DEFAULT_AY,
-          studentType: "PROMOTE",
-          feeGroupId: pickFeeGroup(masters, "PROMOTE", clsIii.id),
-          fatherName: "Ramesh Singh",
-          motherName: "Sunita Singh",
-          fatherMobile: "9876543210",
-          motherMobile: "9123456780",
-          householdId: siblingHh.id,
-          nationality: "Indian",
-          guardianRelation: "Father",
-        }),
-      );
-    }
+/**
+ * True when roster looks like the old built-in demo (safe one-time wipe).
+ */
+export function isLikelyDemoRoster(sis: SisState): boolean {
+  if (sis.students.length === 0) return false;
+  const demoNames = new Set(Object.keys(DEMO_STUDENT_CLASS_BY_NAME));
+  const demoAdm = sis.students.filter((s) =>
+    /^BHB-2025-10[1-9]$|^BHB-2025-11[0]$/i.test(s.admissionNo.trim()),
+  );
+  const named = sis.students.filter((s) => demoNames.has(s.fullName));
+  if (sis.students.length <= 12 && named.length >= Math.min(2, sis.students.length)) {
+    return named.length === sis.students.length || demoAdm.length === sis.students.length;
   }
-
-  return ensureSiblingDemo(
-    { version: 1, households, students, curriculumRequests: [] },
-    masters,
+  return (
+    sis.students.length <= 12 &&
+    demoAdm.length === sis.students.length &&
+    named.length >= 1
   );
 }
 
 /**
  * Guarantee at least one household with 2 active siblings for Fee Take / SIS demos.
- * Safe to run on every load — no-op if siblings already exist.
+ * Disabled for live — kept as no-op so callers do not re-inject Rahul/Ananya.
  */
 export function ensureSiblingDemo(
   sis: SisState,
-  masters: MastersState,
+  _masters: MastersState,
 ): SisState {
-  const active = sis.students.filter((s) => s.status === "active");
-  const already = sis.households.some(
-    (h) => active.filter((s) => s.householdId === h.id).length >= 2,
-  );
-  if (already) {
-    // Rename legacy Ananya Gupta → Singh if linked as sibling of Rahul
-    const rahul = sis.students.find((s) => s.fullName === "Rahul Singh");
-    return {
-      ...sis,
-      students: sis.students.map((s) => {
-        if (
-          s.fullName === "Ananya Gupta" &&
-          rahul &&
-          s.householdId === rahul.householdId
-        ) {
-          return normalizeStudent({
-            ...s,
-            fullName: "Ananya Singh",
-            fatherName: "Ramesh Singh",
-            motherName: "Sunita Singh",
-          });
-        }
-        return s;
-      }),
-    };
-  }
-
-  const campusId =
-    masters.campuses.find((c) => c.isPrimary)?.id ??
-    masters.campuses[0]?.id ??
-    "";
-  let households = [...sis.households];
-  let students = [...sis.students];
-
-  let rahul = students.find((s) => s.fullName === "Rahul Singh");
-  let ananya = students.find(
-    (s) => s.fullName === "Ananya Singh" || s.fullName === "Ananya Gupta",
-  );
-
-  const clsVi = masters.classes.find((c) => c.name === "VI");
-  const secVi = clsVi
-    ? masters.sections.find((s) => s.classId === clsVi.id)
-    : undefined;
-  const clsIii = masters.classes.find((c) => c.name === "III");
-  const secIii = clsIii
-    ? masters.sections.find((s) => s.classId === clsIii.id)
-    : undefined;
-
-  const siblingHh = normalizeHousehold({
-    id: id("hh"),
-    code: "HH-SINGH",
-    guardianName: "Ramesh Singh",
-    mobile: "9876543210",
-    email: "ramesh.singh@example.com",
-    address: "12, Lanka Road",
-    locality: "Lanka",
-    landmark: "Near BHU gate",
-    city: "Varanasi",
-    state: "Uttar Pradesh",
-    pincode: "221005",
-    altMobile: "9123456780",
-  });
-  households.push(siblingHh);
-
-  if (!rahul && clsVi && secVi) {
-    rahul = normalizeStudent({
-      id: id("stu"),
-      admissionNo: "BHB-2025-101",
-      fullName: "Rahul Singh",
-      gender: "M",
-      dob: "2014-05-12",
-      status: "active",
-      campusId,
-      classId: clsVi.id,
-      sectionId: secVi.id,
-      rollNo: "1",
-      academicYearCode: DEFAULT_AY,
-      studentType: "PROMOTE",
-      feeGroupId: pickFeeGroup(masters, "PROMOTE", clsVi.id),
-      fatherName: "Ramesh Singh",
-      motherName: "Sunita Singh",
-      fatherMobile: "9876543210",
-      motherMobile: "9123456780",
-      householdId: siblingHh.id,
-      nationality: "Indian",
-      guardianRelation: "Father",
-    });
-    students.push(rahul);
-  }
-
-  if (!ananya && clsIii && secIii) {
-    ananya = normalizeStudent({
-      id: id("stu"),
-      admissionNo: "BHB-2025-102",
-      fullName: "Ananya Singh",
-      gender: "F",
-      dob: "2017-08-20",
-      status: "active",
-      campusId,
-      classId: clsIii.id,
-      sectionId: secIii.id,
-      rollNo: "5",
-      academicYearCode: DEFAULT_AY,
-      studentType: "PROMOTE",
-      feeGroupId: pickFeeGroup(masters, "PROMOTE", clsIii.id),
-      fatherName: "Ramesh Singh",
-      motherName: "Sunita Singh",
-      fatherMobile: "9876543210",
-      motherMobile: "9123456780",
-      householdId: siblingHh.id,
-      nationality: "Indian",
-      guardianRelation: "Father",
-    });
-    students.push(ananya);
-  }
-
-  if (!rahul || !ananya) return sis;
-
-  const oldRahulHh = rahul.householdId;
-  const oldAnanyaHh = ananya.householdId;
-
-  students = students.map((s) => {
-    if (s.id === rahul!.id || s.id === ananya!.id) {
-      return normalizeStudent({
-        ...s,
-        fullName: s.id === ananya!.id ? "Ananya Singh" : s.fullName,
-        householdId: siblingHh.id,
-        fatherName: "Ramesh Singh",
-        motherName: "Sunita Singh",
-        fatherMobile: "9876543210",
-        motherMobile: "9123456780",
-        guardianRelation: "Father",
-      });
-    }
-    return s;
-  });
-
-  // Drop empty former households
-  households = households.filter((h) => {
-    if (h.id === siblingHh.id) return true;
-    if (h.id === oldRahulHh || h.id === oldAnanyaHh) {
-      return students.some((s) => s.householdId === h.id);
-    }
-    return true;
-  });
-
-  return {
-    version: 1,
-    households,
-    students,
-    curriculumRequests: sis.curriculumRequests ?? [],
-  };
+  return sis;
 }
 
-/** Ensure at least one staff-ward tagged student for concession grant suggestions. */
+/** Staff-ward demo tagging — disabled for live (no-op). */
 export function ensureStaffWardDemo(sis: SisState): SisState {
-  const active = sis.students.filter((s) => s.status === "active");
-  const hasStaff = active.some((s) =>
-    /staff\s*ward|staff\s*child|\bstaff\b/i.test(
-      [s.notes, s.guardianRelation].join(" "),
-    ),
-  );
-  if (hasStaff) return sis;
-  const candidate =
-    active.find(
-      (s) =>
-        s.fullName !== "Rahul Singh" && s.fullName !== "Ananya Singh",
-    ) ?? active[0];
-  if (!candidate) return sis;
-  return {
-    ...sis,
-    students: sis.students.map((s) =>
-      s.id === candidate.id
-        ? {
-            ...s,
-            notes: s.notes
-              ? `${s.notes} · Staff ward`
-              : "Staff ward",
-            guardianRelation: s.guardianRelation || "Father (staff)",
-          }
-        : s,
-    ),
-  };
+  return sis;
 }
 
-/** Push slim roster into Masters so special fees / concessions demos stay in sync. */
-export function syncSisIntoMasters(sis: SisState, masters?: MastersState) {
+/** Push slim roster into Masters so special fees / concessions stay in sync. */
+export function syncSisIntoMasters(
+  sis: SisState,
+  masters?: MastersState,
+  academicYearCode?: string,
+) {
   const m = masters ?? loadMasters();
-  const demo: DemoStudent[] = sis.students.map((s) => ({
+  // Prefer explicit / header-selected session so pickers match the workspace.
+  const ay = normalizeAyCode(
+    academicYearCode ||
+      activeSessionCode() ||
+      currentAcademicYearCode(m),
+  );
+  const scoped = sis.students.filter(
+    (s) => normalizeAyCode(s.academicYearCode) === ay,
+  );
+  const source = scoped.length ? scoped : sis.students;
+  const demo: DemoStudent[] = source.map((s) => ({
     id: s.id,
     admissionNo: s.admissionNo,
     fullName: s.fullName,
@@ -899,6 +938,14 @@ export function alignSisToMasters(
     (masters.students ?? []).map((d) => [d.admissionNo.toUpperCase(), d]),
   );
 
+  function sectionForClass(classId: string, preferSectionId?: string) {
+    if (preferSectionId) {
+      const hit = sectionById.get(preferSectionId);
+      if (hit && hit.classId === classId) return hit;
+    }
+    return masters.sections.find((x) => x.classId === classId);
+  }
+
   let changed = false;
   const students = sis.students.map((s) => {
     const secOk = sectionById.get(s.sectionId);
@@ -913,14 +960,14 @@ export function alignSisToMasters(
 
     // Class valid → first section
     if (classOk) {
-      const firstSec = masters.sections.find((x) => x.classId === s.classId);
+      const firstSec = sectionForClass(s.classId, s.sectionId);
       if (firstSec) {
         changed = true;
         return { ...s, sectionId: firstSec.id };
       }
     }
 
-    // Match masters demo roster
+    // Match masters roster mirror (same admission / name) for id remaps after re-seed
     const demo =
       demoByAdm.get(s.admissionNo.toUpperCase()) ??
       demoByName.get(s.fullName.toLowerCase());
@@ -933,9 +980,7 @@ export function alignSisToMasters(
     const classLabel = DEMO_STUDENT_CLASS_BY_NAME[s.fullName];
     if (classLabel) {
       const cls = classByName.get(classLabel.toLowerCase());
-      const firstSec = cls
-        ? masters.sections.find((x) => x.classId === cls.id)
-        : undefined;
+      const firstSec = cls ? sectionForClass(cls.id) : undefined;
       if (cls && firstSec) {
         changed = true;
         return { ...s, classId: cls.id, sectionId: firstSec.id };
@@ -948,18 +993,24 @@ export function alignSisToMasters(
   const validClass = new Set(masters.classes.map((c) => c.id));
   const orphanN = students.filter((s) => !validClass.has(s.classId)).length;
   if (sis.students.length > 0 && orphanN === sis.students.length) {
-    // Total drift — re-seed from current masters roster
-    return seedFromMasters(masters);
+    // Total drift — keep rows but do not invent demo people
+    return { ...sis, students };
   }
 
   if (!changed) return sis;
   return { ...sis, students };
 }
 
+const DEMO_CLEARED_KEY = "bhb_demo_roster_cleared_v1";
+
 export function loadSis(): SisState {
   const masters = ensureStudentClassLinks(loadMasters());
   if (typeof window === "undefined") {
-    return seedFromMasters(masters);
+    const mirrored = getSchoolMirrorSync().sis as SisState | null;
+    if (mirrored && Array.isArray(mirrored.households)) {
+      return mirrored;
+    }
+    return emptySisState();
   }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -978,31 +1029,82 @@ export function loadSis(): SisState {
             studentId: r.studentId || "",
           }),
         ),
+        tags: (parsed.tags ?? []).map((t) => normalizeStudentTag(t)),
+        classUpgrades: Array.isArray(parsed.classUpgrades)
+          ? parsed.classUpgrades.map((u) => ({
+              ...u,
+              fromStudentType: u.fromStudentType ?? "",
+              toStudentType: u.toStudentType ?? u.fromStudentType ?? "",
+            }))
+          : [],
       };
-      if (next.students.length === 0) {
-        next = seedFromMasters(masters);
-      } else {
+      // One-time wipe of built-in demo people so live testing starts clean
+      if (
+        !localStorage.getItem(DEMO_CLEARED_KEY) &&
+        isLikelyDemoRoster(next)
+      ) {
+        next = emptySisState();
+        localStorage.setItem(DEMO_CLEARED_KEY, "1");
+      } else if (!localStorage.getItem(DEMO_CLEARED_KEY)) {
+        localStorage.setItem(DEMO_CLEARED_KEY, "1");
+      }
+      if (next.students.length > 0) {
         next = alignSisToMasters(next, masters);
-        next = ensureSiblingDemo(next, masters);
-        next = ensureStaffWardDemo(next);
       }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
       syncSisIntoMasters(next, masters);
+      if (next.students.length > 0) {
+        void import("@/lib/feeDiscountImportHydrate").then(
+          ({ mergeAndPersistFeeDiscountSeed }) => {
+            mergeAndPersistFeeDiscountSeed(masters, next);
+          },
+        );
+      }
       return next;
     }
-    const seed = seedFromMasters(masters);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(seed));
-    syncSisIntoMasters(seed, masters);
-    return seed;
+    const empty = emptySisState();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(empty));
+    localStorage.setItem(DEMO_CLEARED_KEY, "1");
+    syncSisIntoMasters(empty, masters);
+    return empty;
   } catch {
-    return seedFromMasters(masters);
+    return emptySisState();
   }
 }
 
+/**
+ * Clear all students + unused households (live start / wipe before import).
+ * Does not remove fee vouchers — clear those separately if needed.
+ */
+export function clearAllStudents(options?: {
+  keepHouseholds?: boolean;
+}): SisState {
+  const prev = loadSis();
+  const next: SisState = {
+    version: 1,
+    households: options?.keepHouseholds ? prev.households : [],
+    students: [],
+    curriculumRequests: [],
+    tags: prev.tags ?? [],
+    classUpgrades: prev.classUpgrades ?? [],
+  };
+  if (typeof window !== "undefined") {
+    localStorage.setItem(DEMO_CLEARED_KEY, "1");
+  }
+  saveSis(next);
+  return next;
+}
+
 export function saveSis(state: SisState) {
-  if (typeof window === "undefined") return;
+  if (!assertModulePermission("students", "edit", "saveSis")) return;
+
+  if (typeof window === "undefined") {
+    setMirrorSlice("sis", state);
+    return;
+  }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   syncSisIntoMasters(state);
+  scheduleClientSchoolMirrorSync({ sis: state });
   // Dual-mode: push full roster + curriculum when Supabase is configured
   void import("@/lib/sisPersistence").then(({ scheduleSisSync }) => {
     scheduleSisSync(state);
@@ -1075,6 +1177,16 @@ export function suggestAdmissionNo(students: SisStudent[]): string {
   return `BHB-${year}-${max + 1}`;
 }
 
+/** Next Scholar Register Number (SRN) for Students SIS */
+export function suggestSrn(students: SisStudent[]): string {
+  let max = 0;
+  for (const s of students) {
+    const m = (s.srn || "").match(/(\d+)$/);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return `SRN-${String(max + 1).padStart(5, "0")}`;
+}
+
 export function householdOf(
   state: SisState,
   householdId: string,
@@ -1082,12 +1194,28 @@ export function householdOf(
   return state.households.find((h) => h.id === householdId);
 }
 
+/** `2023-2024` / `2023–24` → `2023-24` for cross-record comparison. */
+function normalizeAyCode(code: string): string {
+  const t = (code || "").trim().replace(/\s+/g, "").replace(/–/g, "-");
+  const full = t.match(/^(20\d{2})-(20\d{2})$/);
+  if (full) return `${full[1]}-${full[2]!.slice(2)}`;
+  return t;
+}
+
 export function siblingsOf(
   state: SisState,
   student: SisStudent,
 ): SisStudent[] {
+  const ay = normalizeAyCode(student.academicYearCode);
+  const selfAdm = student.admissionNo.trim().toUpperCase();
   return state.students.filter(
-    (s) => s.householdId === student.householdId && s.id !== student.id,
+    (s) =>
+      s.householdId === student.householdId &&
+      s.id !== student.id &&
+      // Same academic year only — never show a prior/next-year record as a sibling
+      normalizeAyCode(s.academicYearCode) === ay &&
+      // Exclude the same child appearing across years
+      s.admissionNo.trim().toUpperCase() !== selfAdm,
   );
 }
 

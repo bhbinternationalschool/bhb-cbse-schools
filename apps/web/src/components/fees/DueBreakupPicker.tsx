@@ -14,18 +14,34 @@ import {
  * Month → fee-head break-up for Collect / Manual book.
  * Open heads are selectable; fully paid heads stay visible in green (not selectable).
  */
+function lineDiscountPaise(
+  due: FeeDueLine,
+  lineDiscountRupees: Record<string, string>,
+): number {
+  const raw = lineDiscountRupees[due.dueKey];
+  if (!raw?.trim()) return 0;
+  const n = Math.round((Number(raw) || 0) * 100);
+  if (n <= 0) return 0;
+  return Math.min(n, due.balancePaise);
+}
+
 export function DueBreakupPicker({
   dues,
   selectedKeys,
   today,
   onToggle,
   onToggleMonth,
+  lineDiscountRupees,
+  onLineDiscount,
 }: {
   dues: FeeDueLine[];
   selectedKeys: Set<string>;
   today: string;
   onToggle: (due: FeeDueLine) => void;
   onToggleMonth: (monthDues: FeeDueLine[], select: boolean) => void;
+  /** Per dueKey counter discount (₹) — only on selected heads */
+  lineDiscountRupees?: Record<string, string>;
+  onLineDiscount?: (dueKey: string, rupees: string) => void;
 }) {
   const groups = useMemo(() => groupDuesByMonth(dues), [dues]);
   const currentMonthKey = today.slice(0, 7);
@@ -35,14 +51,14 @@ export function DueBreakupPicker({
 
   if (dues.length === 0) {
     return (
-      <p className="mt-2 text-xs text-[var(--muted)]">
+      <p className="mt-2 text-sm text-[var(--muted)] sm:text-base">
         No fee lines for this student
       </p>
     );
   }
 
   return (
-    <div className="mt-2 min-h-0 flex-1 space-y-2 overflow-y-auto">
+    <div className="fee-collect-ui mt-2 min-h-0 flex-1 space-y-2 overflow-y-auto">
       {groups.map((g) => {
         const openInMonth = openFeeDues(g.dues);
         const paidInMonth = g.dues.filter(isFeeDuePaid);
@@ -55,7 +71,13 @@ export function DueBreakupPicker({
           selectedInMonth.length === openInMonth.length;
         const someOn = !allOn && selectedInMonth.length > 0;
         const selectedPaise = selectedInMonth.reduce(
-          (s, d) => s + d.balancePaise,
+          (s, d) =>
+            s +
+            Math.max(
+              0,
+              d.balancePaise -
+                lineDiscountPaise(d, lineDiscountRupees ?? {}),
+            ),
           0,
         );
         const isCollapsed = !expanded.has(g.monthKey);
@@ -112,14 +134,14 @@ export function DueBreakupPicker({
                 }
               >
                 <span
-                  className="text-[10px] text-[var(--muted)]"
+                  className="text-sm text-[var(--muted)]"
                   aria-hidden
                 >
                   {isCollapsed ? "▸" : "▾"}
                 </span>
                 <span className="min-w-0 flex-1">
                   <span
-                    className={`block text-xs font-bold sm:text-sm ${
+                    className={`block text-sm font-bold sm:text-base ${
                       monthAllPaid
                         ? "text-[#15803d]"
                         : "text-[var(--brand-deep)]"
@@ -127,13 +149,13 @@ export function DueBreakupPicker({
                   >
                     {g.monthLabel}
                     {monthAllPaid ? (
-                      <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wide">
+                      <span className="ml-1.5 text-sm font-bold uppercase tracking-wide">
                         Paid
                       </span>
                     ) : null}
                   </span>
                   <span
-                    className={`block text-[10px] sm:text-[11px] ${
+                    className={`block text-sm sm:text-sm ${
                       monthAllPaid
                         ? "font-semibold text-[#15803d]"
                         : monthOverdue
@@ -159,7 +181,7 @@ export function DueBreakupPicker({
                 </span>
                 <span className="shrink-0 text-right">
                   <span
-                    className={`block text-xs font-bold sm:text-sm ${
+                    className={`block text-sm font-bold sm:text-base ${
                       monthAllPaid
                         ? "text-[#15803d]"
                         : monthOverdue
@@ -174,7 +196,7 @@ export function DueBreakupPicker({
                       : formatInr(g.totalPaise)}
                   </span>
                   {selectedPaise > 0 ? (
-                    <span className="block text-[10px] font-semibold text-[#16a34a]">
+                    <span className="block text-sm font-semibold text-[#16a34a]">
                       {formatInr(selectedPaise)}
                     </span>
                   ) : null}
@@ -195,7 +217,9 @@ export function DueBreakupPicker({
                         ? `Transport · ${d.transport?.periodLabel ?? d.installmentLabel}`
                         : d.kind === "special"
                           ? d.label.replace(/\s·\sSpecial$/, "") || d.feeHeadName
-                          : d.kind === "plan"
+                          : d.kind === "voucher"
+                            ? d.label
+                            : d.kind === "plan"
                             ? d.label
                             : d.feeHeadName;
 
@@ -212,34 +236,39 @@ export function DueBreakupPicker({
                             aria-label={`${headTitle} paid`}
                           />
                           <div className="min-w-0 flex-1">
-                            <div className="text-xs font-medium text-[#15803d] sm:text-sm">
+                            <div className="text-sm font-medium text-[#15803d] sm:text-base">
                               {headTitle}
-                              <span className="ml-1.5 rounded bg-[#16a34a]/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#15803d]">
+                              <span className="ml-1.5 rounded bg-[#16a34a]/15 px-1.5 py-0.5 text-sm font-bold uppercase tracking-wide text-[#15803d]">
                                 Paid
                               </span>
                               {d.kind === "special" ? (
-                                <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-wide text-[#15803d]/80">
+                                <span className="ml-1.5 text-sm font-semibold uppercase tracking-wide text-[#15803d]/80">
                                   Special
                                 </span>
                               ) : null}
+                              {d.kind === "voucher" ? (
+                                <span className="ml-1.5 text-sm font-semibold uppercase tracking-wide text-[#15803d]/80">
+                                  Voucher
+                                </span>
+                              ) : null}
                               {d.kind === "plan" ? (
-                                <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-wide text-[#15803d]/80">
+                                <span className="ml-1.5 text-sm font-semibold uppercase tracking-wide text-[#15803d]/80">
                                   Plan
                                 </span>
                               ) : null}
                               {d.kind === "store" ? (
-                                <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-wide text-[#15803d]/80">
+                                <span className="ml-1.5 text-sm font-semibold uppercase tracking-wide text-[#15803d]/80">
                                   Store
                                 </span>
                               ) : null}
                               {d.kind === "transport" ? (
-                                <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-wide text-[#15803d]/80">
+                                <span className="ml-1.5 text-sm font-semibold uppercase tracking-wide text-[#15803d]/80">
                                   Bus
                                 </span>
                               ) : null}
                             </div>
                             {d.kind === "store" && d.storeItems.length > 0 ? (
-                              <ul className="mt-1 space-y-0.5 text-[10px] text-[#15803d]/90">
+                              <ul className="mt-1 space-y-0.5 text-sm text-[#15803d]/90">
                                 {d.storeItems.map((it, idx) => (
                                   <li key={`${d.dueKey}-p-${idx}`}>
                                     {it.name}
@@ -249,13 +278,13 @@ export function DueBreakupPicker({
                                 ))}
                               </ul>
                             ) : d.kind === "transport" && d.transport ? (
-                              <div className="text-[10px] font-semibold text-[#15803d] sm:text-[11px]">
+                              <div className="text-sm font-semibold text-[#15803d] sm:text-sm">
                                 {d.transport.routeCode} · {d.transport.busNo} ·{" "}
                                 {d.transport.stopName} · paid{" "}
                                 {formatInr(d.paidPaise)}
                               </div>
                             ) : (
-                              <div className="text-[10px] font-semibold text-[#15803d] sm:text-[11px]">
+                              <div className="text-sm font-semibold text-[#15803d] sm:text-sm">
                                 Paid {formatInr(d.paidPaise)}
                                 {d.concessionPaise
                                   ? ` · −${formatInr(d.concessionPaise)} concession`
@@ -264,7 +293,7 @@ export function DueBreakupPicker({
                               </div>
                             )}
                             {d.concessionDetails?.length ? (
-                              <ul className="mt-1 space-y-0.5 text-[10px] font-medium text-[#15803d]/85">
+                              <ul className="mt-1 space-y-0.5 text-sm font-medium text-[#15803d]/85">
                                 {d.concessionDetails.map((c) => (
                                   <li key={`${d.dueKey}-paid-${c.grantId}`}>
                                     Discount · {formatConcessionDetailLine(c)}
@@ -273,13 +302,18 @@ export function DueBreakupPicker({
                               </ul>
                             ) : null}
                           </div>
-                          <div className="shrink-0 text-xs font-bold text-[#15803d] sm:text-sm">
+                          <div className="shrink-0 text-sm font-bold text-[#15803d] sm:text-base">
                             {formatInr(0)}
                           </div>
                         </div>
                       </li>
                     );
                   }
+
+                  const discountPaise = lineDiscountRupees
+                    ? lineDiscountPaise(d, lineDiscountRupees)
+                    : 0;
+                  const netPaise = Math.max(0, d.balancePaise - discountPaise);
 
                   return (
                     <li key={d.dueKey}>
@@ -291,31 +325,31 @@ export function DueBreakupPicker({
                           onChange={() => onToggle(d)}
                         />
                         <div className="min-w-0 flex-1">
-                          <div className="text-xs font-medium text-[var(--brand-deep)] sm:text-sm">
+                          <div className="text-sm font-medium text-[var(--brand-deep)] sm:text-base">
                             {headTitle}
                             {d.kind === "special" ? (
-                              <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                              <span className="ml-1.5 text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
                                 Special
                               </span>
                             ) : null}
                             {d.kind === "plan" ? (
-                              <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--brand-mid)]">
+                              <span className="ml-1.5 text-sm font-semibold uppercase tracking-wide text-[var(--brand-mid)]">
                                 Plan EMI
                               </span>
                             ) : null}
                             {d.kind === "store" ? (
-                              <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--brand-mid)]">
+                              <span className="ml-1.5 text-sm font-semibold uppercase tracking-wide text-[var(--brand-mid)]">
                                 Books / store
                               </span>
                             ) : null}
                             {d.kind === "transport" ? (
-                              <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--brand-mid)]">
+                              <span className="ml-1.5 text-sm font-semibold uppercase tracking-wide text-[var(--brand-mid)]">
                                 Transport
                               </span>
                             ) : null}
                           </div>
                           {d.kind === "store" && d.storeItems.length > 0 ? (
-                            <ul className="mt-1 space-y-0.5 text-[10px] text-[var(--muted)] sm:text-[11px]">
+                            <ul className="mt-1 space-y-0.5 text-sm text-[var(--muted)] sm:text-sm">
                               {d.storeItems.map((it, idx) => (
                                 <li key={`${d.dueKey}-${idx}`}>
                                   {it.sku} · {it.name}
@@ -332,7 +366,7 @@ export function DueBreakupPicker({
                             </ul>
                           ) : d.kind === "transport" && d.transport ? (
                             <div
-                              className={`text-[10px] sm:text-[11px] ${
+                              className={`text-sm sm:text-sm ${
                                 overdue
                                   ? "font-semibold text-[#dc2626]"
                                   : "text-[var(--muted)]"
@@ -354,7 +388,7 @@ export function DueBreakupPicker({
                             </div>
                           ) : (
                             <div
-                              className={`text-[10px] sm:text-[11px] ${
+                              className={`text-sm sm:text-sm ${
                                 overdue
                                   ? "font-semibold text-[#dc2626]"
                                   : "text-[var(--muted)]"
@@ -371,7 +405,7 @@ export function DueBreakupPicker({
                             </div>
                           )}
                           {d.concessionDetails?.length ? (
-                            <ul className="mt-1 space-y-0.5 text-[10px] text-[var(--muted)]">
+                            <ul className="mt-1 space-y-0.5 text-sm text-[var(--muted)]">
                               {d.concessionDetails.map((c) => (
                                 <li key={`${d.dueKey}-${c.grantId}`}>
                                   Discount · {formatConcessionDetailLine(c)}
@@ -394,18 +428,74 @@ export function DueBreakupPicker({
                             </ul>
                           ) : null}
                         </div>
-                        <div
-                          className={`shrink-0 text-xs font-bold sm:text-sm ${
-                            checked
-                              ? "text-[#16a34a]"
-                              : overdue
-                                ? "text-[#dc2626]"
-                                : "text-[var(--brand-deep)]"
-                          }`}
-                        >
-                          {formatInr(d.balancePaise)}
+                        <div className="shrink-0 text-right">
+                          {discountPaise > 0 ? (
+                            <>
+                              <div className="text-sm font-medium text-[var(--muted)] line-through sm:text-base">
+                                {formatInr(d.balancePaise)}
+                              </div>
+                              <div
+                                className={`text-sm font-bold sm:text-base ${
+                                  checked ? "text-[#16a34a]" : "text-[var(--brand-deep)]"
+                                }`}
+                              >
+                                {formatInr(netPaise)}
+                              </div>
+                            </>
+                          ) : (
+                            <div
+                              className={`text-sm font-bold sm:text-base ${
+                                checked
+                                  ? "text-[#16a34a]"
+                                  : overdue
+                                    ? "text-[#dc2626]"
+                                    : "text-[var(--brand-deep)]"
+                              }`}
+                            >
+                              {formatInr(d.balancePaise)}
+                            </div>
+                          )}
                         </div>
                       </label>
+                      {checked && onLineDiscount ? (
+                        <div className="flex flex-wrap items-center gap-2 border-t border-[rgba(32,48,80,0.06)] bg-[rgba(197,160,40,0.06)] px-2.5 py-2 pl-12">
+                          <span className="text-sm font-semibold text-[var(--brand-deep)]">
+                            Discount on {headTitle}
+                          </span>
+                          <div className="flex items-center gap-1">
+                            <span className="text-sm font-bold text-[var(--muted)]">
+                              ₹
+                            </span>
+                            <input
+                              type="number"
+                              min={0}
+                              step="0.01"
+                              max={d.balancePaise / 100}
+                              className="field w-28 !py-1.5 !text-base !font-semibold"
+                              value={lineDiscountRupees?.[d.dueKey] ?? ""}
+                              onChange={(e) =>
+                                onLineDiscount(
+                                  d.dueKey,
+                                  e.target.value.replace(/[^\d.]/g, ""),
+                                )
+                              }
+                              placeholder="0"
+                              aria-label={`Discount on ${headTitle}`}
+                            />
+                          </div>
+                          {discountPaise > 0 ? (
+                            <span className="text-sm font-semibold text-[#16a34a]">
+                              −{formatInr(discountPaise)} · collect{" "}
+                              {formatInr(netPaise)}
+                            </span>
+                          ) : (
+                            <span className="text-sm text-[var(--muted)]">
+                              Recurring heads can be saved for future months at
+                              collect
+                            </span>
+                          )}
+                        </div>
+                      ) : null}
                     </li>
                   );
                 })}

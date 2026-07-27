@@ -1,0 +1,187 @@
+/**
+ * Server-only Meta WABA message template list / status helpers.
+ */
+
+import { mkdir, readFile, writeFile } from "fs/promises";
+import path from "path";
+import type { MetaTemplateSyncRow } from "@/lib/waTemplates";
+import {
+  metaWabaIdFromEnv,
+  resolveWhatsAppWabaId,
+} from "@/lib/waMeta.server";
+
+const STATUS_EVENTS_PATH = path.join(
+  process.cwd(),
+  ".data",
+  "wa_template_status_events.json",
+);
+
+export type MetaTemplateStatusEvent = {
+  message_template_name?: string;
+  message_template_language?: string;
+  event?: string;
+  reason?: string;
+};
+
+export async function readPendingTemplateStatusEvents(): Promise<
+  MetaTemplateStatusEvent[]
+> {
+  try {
+    const raw = await readFile(STATUS_EVENTS_PATH, "utf8");
+    const parsed = JSON.parse(raw) as { events?: MetaTemplateStatusEvent[] };
+    return Array.isArray(parsed.events) ? parsed.events : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function appendTemplateStatusEvents(
+  events: MetaTemplateStatusEvent[],
+): Promise<void> {
+  if (!events.length) return;
+  const existing = await readPendingTemplateStatusEvents();
+  await mkdir(path.dirname(STATUS_EVENTS_PATH), { recursive: true });
+  await writeFile(
+    STATUS_EVENTS_PATH,
+    JSON.stringify(
+      { events: [...existing, ...events].slice(-500) },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+}
+
+export async function clearPendingTemplateStatusEvents(): Promise<void> {
+  try {
+    await mkdir(path.dirname(STATUS_EVENTS_PATH), { recursive: true });
+    await writeFile(
+      STATUS_EVENTS_PATH,
+      JSON.stringify({ events: [] }, null, 2),
+      "utf8",
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+function metaAccessToken(): string {
+  return (
+    process.env.WA_META_ACCESS_TOKEN ||
+    process.env.WHATSAPP_TOKEN ||
+    ""
+  );
+}
+
+function metaWabaId(): string {
+  return (
+    process.env.WA_BUSINESS_ACCOUNT_ID ||
+    process.env.WHATSAPP_WABA_ID ||
+    ""
+  );
+}
+
+function metaGraphVersion(): string {
+  return (
+    process.env.WA_GRAPH_API_VERSION ||
+    process.env.WHATSAPP_GRAPH_VERSION ||
+    "v21.0"
+  );
+}
+
+export function waTemplatesMetaConfigured(): boolean {
+  return !!(metaAccessToken() && metaWabaId());
+}
+
+export async function fetchMetaMessageTemplates(): Promise<{
+  ok: boolean;
+  rows: MetaTemplateSyncRow[];
+  error?: string;
+  mode: string;
+}> {
+  const token = metaAccessToken();
+  const waba = metaWabaIdFromEnv() || (await resolveWhatsAppWabaId());
+  if (!token || !waba) {
+    return {
+      ok: false,
+      rows: [],
+      mode: "stub",
+      error:
+        "Set WHATSAPP_TOKEN + WHATSAPP_WABA_ID (or WA_BUSINESS_ACCOUNT_ID) to sync Meta templates",
+    };
+  }
+
+  const version = metaGraphVersion();
+  const url = `https://graph.facebook.com/${version}/${waba}/message_templates?limit=100&fields=name,language,status,id,rejected_reason,category`;
+  try {
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const json = (await res.json().catch(() => ({}))) as {
+      data?: MetaTemplateSyncRow[];
+      error?: { message?: string };
+    };
+    if (!res.ok) {
+      return {
+        ok: false,
+        rows: [],
+        mode: "meta",
+        error: json.error?.message || `Meta HTTP ${res.status}`,
+      };
+    }
+    return {
+      ok: true,
+      mode: "meta",
+      rows: Array.isArray(json.data) ? json.data : [],
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      rows: [],
+      mode: "meta",
+      error: e instanceof Error ? e.message : "Meta templates fetch failed",
+    };
+  }
+}
+
+/** Extract message_template_status_update events from a Meta webhook body. */
+export function parseMetaTemplateStatusUpdates(body: unknown): {
+  message_template_name?: string;
+  message_template_language?: string;
+  event?: string;
+  reason?: string;
+}[] {
+  const out: {
+    message_template_name?: string;
+    message_template_language?: string;
+    event?: string;
+    reason?: string;
+  }[] = [];
+  if (!body || typeof body !== "object") return out;
+  const root = body as {
+    entry?: {
+      changes?: {
+        field?: string;
+        value?: {
+          message_template_name?: string;
+          message_template_language?: string;
+          event?: string;
+          reason?: string;
+        };
+      }[];
+    }[];
+  };
+  for (const entry of root.entry || []) {
+    for (const change of entry.changes || []) {
+      if (change.field !== "message_template_status_update") continue;
+      const v = change.value || {};
+      out.push({
+        message_template_name: v.message_template_name,
+        message_template_language: v.message_template_language,
+        event: v.event,
+        reason: v.reason,
+      });
+    }
+  }
+  return out;
+}

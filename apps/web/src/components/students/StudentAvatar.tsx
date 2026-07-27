@@ -1,12 +1,15 @@
 "use client";
 
+import type { ReactNode } from "react";
 import type { FeeStudentType } from "@/lib/masters";
 import {
   avatarTone,
   studentInitials,
   studentTypeShort,
+  type SisState,
   type SisStudent,
 } from "@/lib/sis";
+import { tagsForStudent } from "@/lib/studentTags";
 
 /** Photo if set, otherwise initials avatar. */
 export function StudentAvatar({
@@ -70,6 +73,69 @@ export function StudentTypeBadge({
       title={label}
     >
       {code}
+    </span>
+  );
+}
+
+/** Custom tags (STAFF, SPORT, …) shown before the student name. */
+export function StudentTagsBadge({
+  student,
+  sis,
+}: {
+  student: Pick<SisStudent, "tagIds">;
+  sis?: SisState;
+}) {
+  const tags = tagsForStudent(student, sis);
+  if (!tags.length) return null;
+  return (
+    <>
+      {tags.map((t) => (
+        <span
+          key={t.id}
+          className="mr-1 inline-flex h-5 max-w-[4.5rem] items-center truncate rounded px-1 text-[9px] font-bold uppercase tracking-wide text-white"
+          style={{ background: t.color }}
+          title={t.name}
+        >
+          {t.code}
+        </span>
+      ))}
+    </>
+  );
+}
+
+/**
+ * Type badge + tags + name — use everywhere a student is listed.
+ */
+export function StudentNameLabel({
+  student,
+  sis,
+  className,
+  children,
+}: {
+  student: Pick<SisStudent, "fullName" | "studentType"> &
+    Partial<Pick<SisStudent, "tagIds" | "udiseInboundTransferPending" | "pen">>;
+  sis?: SisState;
+  className?: string;
+  /** Extra content after the name (status chips, etc.) */
+  children?: ReactNode;
+}) {
+  return (
+    <span className={className}>
+      <StudentTypeBadge type={student.studentType} />
+      <StudentTagsBadge
+        student={{ tagIds: student.tagIds ?? [] }}
+        sis={sis}
+      />
+      {student.udiseInboundTransferPending ? (
+        <span
+          className="mr-1.5 inline-flex items-center rounded px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide bg-[rgba(138,90,16,0.18)] text-[#8a5a10]"
+          title="Import from UDISE+ Drop Box or ask previous school to release on portal"
+        >
+          Drop Box
+        </span>
+      ) : null}
+      {student.fullName}
+      {children}
     </span>
   );
 }

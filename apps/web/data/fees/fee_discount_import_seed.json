@@ -1,0 +1,1034 @@
+{
+  "version": 1,
+  "importedAt": "2026-07-25T12:10:39.067Z",
+  "sourceFile": "fee_discount_report.xlsx",
+  "academicYearCode": "2025-26",
+  "rules": [
+    {
+      "code": "IMP_TUIT_FLAT_300",
+      "name": "Discount300",
+      "kind": "hardship",
+      "mode": "fixed",
+      "value": 30000,
+      "feeHeadCodes": [
+        "TUITION"
+      ],
+      "siblingTiers": [],
+      "notes": "Imported from fee discount report · Discount300"
+    },
+    {
+      "code": "IMP_TR_FLAT_200",
+      "name": "Transport 200",
+      "kind": "transport",
+      "mode": "fixed",
+      "value": 20000,
+      "feeHeadCodes": [
+        "TRANSPORT"
+      ],
+      "siblingTiers": [],
+      "notes": "Imported from fee discount report · Transport 200"
+    },
+    {
+      "code": "IMP_TUIT_10PCT",
+      "name": "Discount10%",
+      "kind": "hardship",
+      "mode": "percent",
+      "value": 10,
+      "feeHeadCodes": [
+        "TUITION"
+      ],
+      "siblingTiers": [],
+      "notes": "Imported from fee discount report · Discount10%"
+    },
+    {
+      "code": "IMP_SIB4_100PCT",
+      "name": "4 & more sibling100%",
+      "kind": "sibling",
+      "mode": "percent",
+      "value": 100,
+      "feeHeadCodes": [
+        "TUITION"
+      ],
+      "siblingTiers": [
+        {
+          "childNo": 4,
+          "mode": "percent",
+          "value": 100
+        }
+      ],
+      "notes": "Imported from fee discount report · 4 & more sibling100%"
+    },
+    {
+      "code": "IMP_TUIT_FLAT_150",
+      "name": "Discount150",
+      "kind": "hardship",
+      "mode": "fixed",
+      "value": 15000,
+      "feeHeadCodes": [
+        "TUITION"
+      ],
+      "siblingTiers": [],
+      "notes": "Imported from fee discount report · Discount150"
+    },
+    {
+      "code": "IMP_TUIT_FLAT_375",
+      "name": "Discount375",
+      "kind": "hardship",
+      "mode": "fixed",
+      "value": 37500,
+      "feeHeadCodes": [
+        "TUITION"
+      ],
+      "siblingTiers": [],
+      "notes": "Imported from fee discount report · Discount375"
+    },
+    {
+      "code": "IMP_TUIT_FLAT_450",
+      "name": "Discount450",
+      "kind": "hardship",
+      "mode": "fixed",
+      "value": 45000,
+      "feeHeadCodes": [
+        "TUITION"
+      ],
+      "siblingTiers": [],
+      "notes": "Imported from fee discount report · Discount450"
+    },
+    {
+      "code": "IMP_TUIT_FLAT_250",
+      "name": "Discount250",
+      "kind": "hardship",
+      "mode": "fixed",
+      "value": 25000,
+      "feeHeadCodes": [
+        "TUITION"
+      ],
+      "siblingTiers": [],
+      "notes": "Imported from fee discount report · Discount250"
+    },
+    {
+      "code": "IMP_TUIT_FLAT_100",
+      "name": "Discount100",
+      "kind": "hardship",
+      "mode": "fixed",
+      "value": 10000,
+      "feeHeadCodes": [
+        "TUITION"
+      ],
+      "siblingTiers": [],
+      "notes": "Imported from fee discount report · Discount100"
+    },
+    {
+      "code": "IMP_TUIT_FLAT_500",
+      "name": "Discount500",
+      "kind": "hardship",
+      "mode": "fixed",
+      "value": 50000,
+      "feeHeadCodes": [
+        "TUITION"
+      ],
+      "siblingTiers": [],
+      "notes": "Imported from fee discount report · Discount500"
+    },
+    {
+      "code": "IMP_TUIT_FLAT_125",
+      "name": "Discount125",
+      "kind": "hardship",
+      "mode": "fixed",
+      "value": 12500,
+      "feeHeadCodes": [
+        "TUITION"
+      ],
+      "siblingTiers": [],
+      "notes": "Imported from fee discount report · Discount125"
+    },
+    {
+      "code": "IMP_TR_FLAT_100",
+      "name": "Transport 100",
+      "kind": "transport",
+      "mode": "fixed",
+      "value": 10000,
+      "feeHeadCodes": [
+        "TRANSPORT"
+      ],
+      "siblingTiers": [],
+      "notes": "Imported from fee discount report · Transport 100"
+    },
+    {
+      "code": "IMP_TUIT_FLAT_200",
+      "name": "Discount200",
+      "kind": "hardship",
+      "mode": "fixed",
+      "value": 20000,
+      "feeHeadCodes": [
+        "TUITION"
+      ],
+      "siblingTiers": [],
+      "notes": "Imported from fee discount report · Discount200"
+    },
+    {
+      "code": "IMP_TUIT_FLAT_412",
+      "name": "Discount412",
+      "kind": "hardship",
+      "mode": "fixed",
+      "value": 41200,
+      "feeHeadCodes": [
+        "TUITION"
+      ],
+      "siblingTiers": [],
+      "notes": "Imported from fee discount report · Discount412"
+    },
+    {
+      "code": "IMP_TUIT_FLAT_275",
+      "name": "Discount275",
+      "kind": "hardship",
+      "mode": "fixed",
+      "value": 27500,
+      "feeHeadCodes": [
+        "TUITION"
+      ],
+      "siblingTiers": [],
+      "notes": "Imported from fee discount report · Discount275"
+    },
+    {
+      "code": "IMP_TUIT_FLAT_550",
+      "name": "Discount550",
+      "kind": "hardship",
+      "mode": "fixed",
+      "value": 55000,
+      "feeHeadCodes": [
+        "TUITION"
+      ],
+      "siblingTiers": [],
+      "notes": "Imported from fee discount report · Discount550"
+    },
+    {
+      "code": "IMP_TUIT_FLAT_400",
+      "name": "Discount400",
+      "kind": "hardship",
+      "mode": "fixed",
+      "value": 40000,
+      "feeHeadCodes": [
+        "TUITION"
+      ],
+      "siblingTiers": [],
+      "notes": "Imported from fee discount report · Discount400"
+    },
+    {
+      "code": "IMP_TUIT_FLAT_350",
+      "name": "Discount350",
+      "kind": "hardship",
+      "mode": "fixed",
+      "value": 35000,
+      "feeHeadCodes": [
+        "TUITION"
+      ],
+      "siblingTiers": [],
+      "notes": "Imported from fee discount report · Discount350"
+    },
+    {
+      "code": "IMP_TUIT_FLAT_1000",
+      "name": "Discount1000",
+      "kind": "hardship",
+      "mode": "fixed",
+      "value": 100000,
+      "feeHeadCodes": [
+        "TUITION"
+      ],
+      "siblingTiers": [],
+      "notes": "Imported from fee discount report · Discount1000"
+    },
+    {
+      "code": "IMP_TUIT_FLAT_262",
+      "name": "Discount262",
+      "kind": "hardship",
+      "mode": "fixed",
+      "value": 26200,
+      "feeHeadCodes": [
+        "TUITION"
+      ],
+      "siblingTiers": [],
+      "notes": "Imported from fee discount report · Discount262"
+    },
+    {
+      "code": "RTE",
+      "name": "RTE / EWS free-ship",
+      "kind": "rte_ews",
+      "mode": "percent",
+      "value": 100,
+      "feeHeadCodes": [],
+      "siblingTiers": [],
+      "notes": "Principal + documentation · UP RTE rules"
+    }
+  ],
+  "grants": [
+    {
+      "admissionNo": "BHB-46/2023",
+      "studentName": "ANUPRIYA DIXIT",
+      "concessionCode": "IMP_TUIT_FLAT_300",
+      "discountLabel": "Discount300",
+      "siblingChildNo": null,
+      "reason": "Discount300 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-88/2023",
+      "studentName": "UTKARSH MAURYA",
+      "concessionCode": "IMP_TR_FLAT_200",
+      "discountLabel": "Transport 200",
+      "siblingChildNo": null,
+      "reason": "Transport 200 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-93/2023",
+      "studentName": "NAITIK KESHARI",
+      "concessionCode": "IMP_TUIT_10PCT",
+      "discountLabel": "Discount10%",
+      "siblingChildNo": null,
+      "reason": "Discount10% · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-120/2024",
+      "studentName": "SANVI YADAV",
+      "concessionCode": "IMP_TR_FLAT_200",
+      "discountLabel": "Transport 200",
+      "siblingChildNo": null,
+      "reason": "Transport 200 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-128/2024",
+      "studentName": "SHREYANSH MISHRA",
+      "concessionCode": "IMP_TUIT_10PCT",
+      "discountLabel": "Discount10%",
+      "siblingChildNo": null,
+      "reason": "Discount10% · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-7/2023",
+      "studentName": "DIVYANSHU PATEL",
+      "concessionCode": "IMP_SIB4_100PCT",
+      "discountLabel": "4 & more sibling100%",
+      "siblingChildNo": 4,
+      "reason": "4 & more sibling100% · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-26/2023",
+      "studentName": "VARDHITA MISHRA",
+      "concessionCode": "IMP_TUIT_10PCT",
+      "discountLabel": "Discount10%",
+      "siblingChildNo": null,
+      "reason": "Discount10% · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-66/2023",
+      "studentName": "PRIYANSHI",
+      "concessionCode": "IMP_TUIT_FLAT_150",
+      "discountLabel": "Discount150",
+      "siblingChildNo": null,
+      "reason": "Discount150 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-6/2023",
+      "studentName": "PRANJAL PATEL",
+      "concessionCode": "IMP_TUIT_FLAT_150",
+      "discountLabel": "Discount150",
+      "siblingChildNo": null,
+      "reason": "Discount150 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-48/2023",
+      "studentName": "HARSHIT MAURYA",
+      "concessionCode": "IMP_TUIT_FLAT_375",
+      "discountLabel": "Discount375",
+      "siblingChildNo": null,
+      "reason": "Discount375 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-61/2023",
+      "studentName": "JAYASH GUPTA",
+      "concessionCode": "IMP_TUIT_FLAT_150",
+      "discountLabel": "Discount150",
+      "siblingChildNo": null,
+      "reason": "Discount150 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-97/2023",
+      "studentName": "ANGEL SINGH",
+      "concessionCode": "IMP_TUIT_FLAT_150",
+      "discountLabel": "Discount150",
+      "siblingChildNo": null,
+      "reason": "Discount150 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-208/2024",
+      "studentName": "AARAV PATEL",
+      "concessionCode": "IMP_TUIT_FLAT_450",
+      "discountLabel": "Discount450",
+      "siblingChildNo": null,
+      "reason": "Discount450 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-131/2024",
+      "studentName": "DIVYANSH KUMAR SINGH",
+      "concessionCode": "IMP_TUIT_FLAT_150",
+      "discountLabel": "Discount150",
+      "siblingChildNo": null,
+      "reason": "Discount150 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-133/2024",
+      "studentName": "DEVANSH UPADHYAY",
+      "concessionCode": "IMP_TUIT_FLAT_250",
+      "discountLabel": "Discount250",
+      "siblingChildNo": null,
+      "reason": "Discount250 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-125/2024",
+      "studentName": "ROUNAK DIXIT",
+      "concessionCode": "IMP_TUIT_FLAT_150",
+      "discountLabel": "Discount150",
+      "siblingChildNo": null,
+      "reason": "Discount150 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-124/2024",
+      "studentName": "REEDAM DIXIT",
+      "concessionCode": "IMP_TUIT_FLAT_150",
+      "discountLabel": "Discount150",
+      "siblingChildNo": null,
+      "reason": "Discount150 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-123/2024",
+      "studentName": "ARADHYA UPADHYAY",
+      "concessionCode": "IMP_TUIT_FLAT_150",
+      "discountLabel": "Discount150",
+      "siblingChildNo": null,
+      "reason": "Discount150 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-47/2023",
+      "studentName": "YATHARTH DIXIT",
+      "concessionCode": "IMP_TUIT_10PCT",
+      "discountLabel": "Discount10%",
+      "siblingChildNo": null,
+      "reason": "Discount10% · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-72/2023",
+      "studentName": "SHREYA PATEL",
+      "concessionCode": "IMP_TUIT_FLAT_300",
+      "discountLabel": "Discount300",
+      "siblingChildNo": null,
+      "reason": "Discount300 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-197/2024",
+      "studentName": "SHABHYA PRATAP SINGH",
+      "concessionCode": "IMP_TUIT_FLAT_150",
+      "discountLabel": "Discount150",
+      "siblingChildNo": null,
+      "reason": "Discount150 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-230/2024",
+      "studentName": "SIDDHANT DIXIT",
+      "concessionCode": "IMP_TUIT_FLAT_100",
+      "discountLabel": "Discount100",
+      "siblingChildNo": null,
+      "reason": "Discount100 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-12/2023",
+      "studentName": "SHASHANK MISHRA",
+      "concessionCode": "IMP_TUIT_10PCT",
+      "discountLabel": "Discount10%",
+      "siblingChildNo": null,
+      "reason": "Discount10% · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-27/2023",
+      "studentName": "APRAJITA MISHRA",
+      "concessionCode": "IMP_SIB4_100PCT",
+      "discountLabel": "4 & more sibling100%",
+      "siblingChildNo": 4,
+      "reason": "4 & more sibling100% · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-222/2024",
+      "studentName": "RUDRANSH SINGH",
+      "concessionCode": "IMP_TUIT_FLAT_500",
+      "discountLabel": "Discount500",
+      "siblingChildNo": null,
+      "reason": "Discount500 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-108/2024",
+      "studentName": "ADARSH KESARI",
+      "concessionCode": "IMP_TUIT_10PCT",
+      "discountLabel": "Discount10%",
+      "siblingChildNo": null,
+      "reason": "Discount10% · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-217/2024",
+      "studentName": "ANSH PATEL",
+      "concessionCode": "IMP_TUIT_FLAT_500",
+      "discountLabel": "Discount500",
+      "siblingChildNo": null,
+      "reason": "Discount500 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-241/2024",
+      "studentName": "VIDHI SINGH",
+      "concessionCode": "IMP_TUIT_FLAT_500",
+      "discountLabel": "Discount500",
+      "siblingChildNo": null,
+      "reason": "Discount500 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-90/2023",
+      "studentName": "NAINSI",
+      "concessionCode": "IMP_TUIT_FLAT_150",
+      "discountLabel": "Discount150",
+      "siblingChildNo": null,
+      "reason": "Discount150 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-233/2024",
+      "studentName": "AYANSHI SINGH",
+      "concessionCode": "IMP_TR_FLAT_200",
+      "discountLabel": "Transport 200",
+      "siblingChildNo": null,
+      "reason": "Transport 200 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-243/2024",
+      "studentName": "VINAYAK MISHRA",
+      "concessionCode": "IMP_TUIT_10PCT",
+      "discountLabel": "Discount10%",
+      "siblingChildNo": null,
+      "reason": "Discount10% · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-113/2024",
+      "studentName": "PRATYAKSH JAISWAL",
+      "concessionCode": "IMP_TUIT_FLAT_125",
+      "discountLabel": "Discount125",
+      "siblingChildNo": null,
+      "reason": "Discount125 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-141/2024",
+      "studentName": "SHIVANSH YADAV",
+      "concessionCode": "IMP_TUIT_FLAT_150",
+      "discountLabel": "Discount150",
+      "siblingChildNo": null,
+      "reason": "Discount150 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-127/2024",
+      "studentName": "SHANVI DIXIT",
+      "concessionCode": "IMP_TR_FLAT_100",
+      "discountLabel": "Transport 100",
+      "siblingChildNo": null,
+      "reason": "Transport 100 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-219/2024",
+      "studentName": "AARAV SINGH",
+      "concessionCode": "IMP_TUIT_FLAT_125",
+      "discountLabel": "Discount125",
+      "siblingChildNo": null,
+      "reason": "Discount125 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-3/2023",
+      "studentName": "ARPIT PATEL",
+      "concessionCode": "IMP_TUIT_10PCT",
+      "discountLabel": "Discount10%",
+      "siblingChildNo": null,
+      "reason": "Discount10% · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-5/2023",
+      "studentName": "AYUSH SINGH",
+      "concessionCode": "IMP_TUIT_FLAT_200",
+      "discountLabel": "Discount200",
+      "siblingChildNo": null,
+      "reason": "Discount200 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-18/2023",
+      "studentName": "VIVAAN GOSWAMI",
+      "concessionCode": "IMP_TUIT_FLAT_200",
+      "discountLabel": "Discount200",
+      "siblingChildNo": null,
+      "reason": "Discount200 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-25/2023",
+      "studentName": "MANVIK MISHRA",
+      "concessionCode": "IMP_TUIT_10PCT",
+      "discountLabel": "Discount10%",
+      "siblingChildNo": null,
+      "reason": "Discount10% · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-40/2023",
+      "studentName": "YATHARTH MISHRA",
+      "concessionCode": "IMP_TUIT_10PCT",
+      "discountLabel": "Discount10%",
+      "siblingChildNo": null,
+      "reason": "Discount10% · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-92/2023",
+      "studentName": "RISHU PATEL",
+      "concessionCode": "IMP_TUIT_FLAT_412",
+      "discountLabel": "Discount412",
+      "siblingChildNo": null,
+      "reason": "Discount412 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-96/2023",
+      "studentName": "AARAV SINGH",
+      "concessionCode": "IMP_TUIT_FLAT_150",
+      "discountLabel": "Discount150",
+      "siblingChildNo": null,
+      "reason": "Discount150 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-242/2024",
+      "studentName": "SHREYASH GUPTA",
+      "concessionCode": "IMP_TUIT_FLAT_150",
+      "discountLabel": "Discount150",
+      "siblingChildNo": null,
+      "reason": "Discount150 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-132/2024",
+      "studentName": "REYAN KUMAR SINGH",
+      "concessionCode": "IMP_TUIT_FLAT_150",
+      "discountLabel": "Discount150",
+      "siblingChildNo": null,
+      "reason": "Discount150 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-193/2024",
+      "studentName": "MANAS SINGH",
+      "concessionCode": "IMP_TUIT_FLAT_275",
+      "discountLabel": "Discount275",
+      "siblingChildNo": null,
+      "reason": "Discount275 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-221/2024",
+      "studentName": "AYAAN CHAUBEY",
+      "concessionCode": "IMP_TUIT_FLAT_250",
+      "discountLabel": "Discount250",
+      "siblingChildNo": null,
+      "reason": "Discount250 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-236/2025",
+      "studentName": "ATHARV  SINGH",
+      "concessionCode": "IMP_TUIT_FLAT_125",
+      "discountLabel": "Discount125",
+      "siblingChildNo": null,
+      "reason": "Discount125 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-229/2025",
+      "studentName": "SHIVANSH  SINGH",
+      "concessionCode": "IMP_TUIT_FLAT_150",
+      "discountLabel": "Discount150",
+      "siblingChildNo": null,
+      "reason": "Discount150 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-237/2025",
+      "studentName": "NAMAN  PRATAP SINGH",
+      "concessionCode": "IMP_TUIT_FLAT_550",
+      "discountLabel": "Discount550",
+      "siblingChildNo": null,
+      "reason": "Discount550 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-228/2025",
+      "studentName": "SWARA  SINGH",
+      "concessionCode": "IMP_TUIT_FLAT_550",
+      "discountLabel": "Discount550",
+      "siblingChildNo": null,
+      "reason": "Discount550 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-231/2025",
+      "studentName": "AMAY  SINGH",
+      "concessionCode": "IMP_SIB4_100PCT",
+      "discountLabel": "4 & more sibling100%",
+      "siblingChildNo": 4,
+      "reason": "4 & more sibling100% · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-227/2025",
+      "studentName": "ANSHU  SINGH",
+      "concessionCode": "IMP_TUIT_FLAT_400",
+      "discountLabel": "Discount400",
+      "siblingChildNo": null,
+      "reason": "Discount400 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-232/2025",
+      "studentName": "DIPTI  SINGH",
+      "concessionCode": "IMP_TUIT_FLAT_550",
+      "discountLabel": "Discount550",
+      "siblingChildNo": null,
+      "reason": "Discount550 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-160/2025",
+      "studentName": "RIDHI  GUPTA",
+      "concessionCode": "IMP_TUIT_10PCT",
+      "discountLabel": "Discount10%",
+      "siblingChildNo": null,
+      "reason": "Discount10% · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-143/2025",
+      "studentName": "ADARSH  YADAV",
+      "concessionCode": "IMP_TUIT_10PCT",
+      "discountLabel": "Discount10%",
+      "siblingChildNo": null,
+      "reason": "Discount10% · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-147/2025",
+      "studentName": "PAWAN  YADAV",
+      "concessionCode": "IMP_TUIT_FLAT_100",
+      "discountLabel": "Discount100",
+      "siblingChildNo": null,
+      "reason": "Discount100 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-144/2025",
+      "studentName": "ANSHIKA  YADAV",
+      "concessionCode": "IMP_TUIT_FLAT_150",
+      "discountLabel": "Discount150",
+      "siblingChildNo": null,
+      "reason": "Discount150 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-201/2025",
+      "studentName": "AMRIT  MISHRA",
+      "concessionCode": "IMP_TUIT_FLAT_300",
+      "discountLabel": "Discount300",
+      "siblingChildNo": null,
+      "reason": "Discount300 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-226/2025",
+      "studentName": "VAIBHAV  MISHRA",
+      "concessionCode": "IMP_TUIT_FLAT_200",
+      "discountLabel": "Discount200",
+      "siblingChildNo": null,
+      "reason": "Discount200 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-145/2025",
+      "studentName": "ARNAV KUMAR GUPTA",
+      "concessionCode": "IMP_TUIT_10PCT",
+      "discountLabel": "Discount10%",
+      "siblingChildNo": null,
+      "reason": "Discount10% · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-218/2025",
+      "studentName": "KUNAL KUMAR GUPTA",
+      "concessionCode": "IMP_TUIT_FLAT_200",
+      "discountLabel": "Discount200",
+      "siblingChildNo": null,
+      "reason": "Discount200 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-166/2025",
+      "studentName": "AYUSH  GUPTA",
+      "concessionCode": "IMP_TUIT_FLAT_150",
+      "discountLabel": "Discount150",
+      "siblingChildNo": null,
+      "reason": "Discount150 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-153/2025",
+      "studentName": "PRATIK  YADAV",
+      "concessionCode": "IMP_SIB4_100PCT",
+      "discountLabel": "4 & more sibling100%",
+      "siblingChildNo": 4,
+      "reason": "4 & more sibling100% · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-168/2025",
+      "studentName": "AROHI",
+      "concessionCode": "IMP_TUIT_FLAT_125",
+      "discountLabel": "Discount125",
+      "siblingChildNo": null,
+      "reason": "Discount125 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-172/2025",
+      "studentName": "JONI",
+      "concessionCode": "IMP_TUIT_FLAT_100",
+      "discountLabel": "Discount100",
+      "siblingChildNo": null,
+      "reason": "Discount100 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-209/2025",
+      "studentName": "DEVANSH KUMAR MAURYA",
+      "concessionCode": "IMP_TUIT_10PCT",
+      "discountLabel": "Discount10%",
+      "siblingChildNo": null,
+      "reason": "Discount10% · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-210/2025",
+      "studentName": "VIRAT KUMAR MAURYA",
+      "concessionCode": "IMP_TUIT_FLAT_350",
+      "discountLabel": "Discount350",
+      "siblingChildNo": null,
+      "reason": "Discount350 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-198/2025",
+      "studentName": "VAIBHAV  VERMA",
+      "concessionCode": "IMP_TUIT_FLAT_150",
+      "discountLabel": "Discount150",
+      "siblingChildNo": null,
+      "reason": "Discount150 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-173/2025",
+      "studentName": "ANANT",
+      "concessionCode": "IMP_TUIT_FLAT_1000",
+      "discountLabel": "Discount1000",
+      "siblingChildNo": null,
+      "reason": "Discount1000 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-155/2025",
+      "studentName": "ANSHUMAN  PAL",
+      "concessionCode": "IMP_TUIT_FLAT_250",
+      "discountLabel": "Discount250",
+      "siblingChildNo": null,
+      "reason": "Discount250 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-216/2025",
+      "studentName": "RIDDHI  SINGH",
+      "concessionCode": "IMP_TUIT_FLAT_125",
+      "discountLabel": "Discount125",
+      "siblingChildNo": null,
+      "reason": "Discount125 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-174/2025",
+      "studentName": "KRITIKA  MAURYA",
+      "concessionCode": "IMP_TUIT_FLAT_250",
+      "discountLabel": "Discount250",
+      "siblingChildNo": null,
+      "reason": "Discount250 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-181/2025",
+      "studentName": "KRIYANSH  YADAV",
+      "concessionCode": "IMP_TUIT_10PCT",
+      "discountLabel": "Discount10%",
+      "siblingChildNo": null,
+      "reason": "Discount10% · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-186/2025",
+      "studentName": "DIVYANK  DUBEY",
+      "concessionCode": "IMP_TUIT_FLAT_300",
+      "discountLabel": "Discount300",
+      "siblingChildNo": null,
+      "reason": "Discount300 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-183/2025",
+      "studentName": "JIGYASHA  DIXIT",
+      "concessionCode": "IMP_TUIT_FLAT_262",
+      "discountLabel": "Discount262",
+      "siblingChildNo": null,
+      "reason": "Discount262 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-182/2025",
+      "studentName": "AKSHITA  DIXIT",
+      "concessionCode": "IMP_TUIT_FLAT_150",
+      "discountLabel": "Discount150",
+      "siblingChildNo": null,
+      "reason": "Discount150 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-219/2025",
+      "studentName": "ATMIKA  MISHRA",
+      "concessionCode": "IMP_TUIT_10PCT",
+      "discountLabel": "Discount10%",
+      "siblingChildNo": null,
+      "reason": "Discount10% · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-001/2026",
+      "studentName": "ABHI PATEL",
+      "concessionCode": "IMP_TUIT_10PCT",
+      "discountLabel": "Discount10%",
+      "siblingChildNo": null,
+      "reason": "Discount10% · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-008/2026",
+      "studentName": "ANKIT  MISHTRI",
+      "concessionCode": "IMP_TUIT_10PCT",
+      "discountLabel": "Discount10%",
+      "siblingChildNo": null,
+      "reason": "Discount10% · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-010/2026",
+      "studentName": "ABHIMANYU  MISHTRI",
+      "concessionCode": "IMP_TUIT_FLAT_150",
+      "discountLabel": "Discount150",
+      "siblingChildNo": null,
+      "reason": "Discount150 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-012/2026",
+      "studentName": "NUTAN  MISHRA",
+      "concessionCode": "IMP_TUIT_FLAT_300",
+      "discountLabel": "Discount300",
+      "siblingChildNo": null,
+      "reason": "Discount300 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-015/2026",
+      "studentName": "DEV SINGH",
+      "concessionCode": "IMP_TUIT_FLAT_500",
+      "discountLabel": "Discount500",
+      "siblingChildNo": null,
+      "reason": "Discount500 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-014/2026",
+      "studentName": "ARYAN",
+      "concessionCode": "IMP_TUIT_FLAT_150",
+      "discountLabel": "Discount150",
+      "siblingChildNo": null,
+      "reason": "Discount150 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-018/2026",
+      "studentName": "AARVI SINGH",
+      "concessionCode": "IMP_TUIT_FLAT_125",
+      "discountLabel": "Discount125",
+      "siblingChildNo": null,
+      "reason": "Discount125 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-01/2026",
+      "studentName": "PRACHI SINGH",
+      "concessionCode": "RTE",
+      "discountLabel": "RTE",
+      "siblingChildNo": null,
+      "reason": "RTE · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-002/2026",
+      "studentName": "ARUSH YADAV",
+      "concessionCode": "RTE",
+      "discountLabel": "RTE",
+      "siblingChildNo": null,
+      "reason": "RTE · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-003/2026",
+      "studentName": "NIVANSHI MISHRA",
+      "concessionCode": "RTE",
+      "discountLabel": "RTE",
+      "siblingChildNo": null,
+      "reason": "RTE · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "111",
+      "studentName": "SURESH KUMAR",
+      "concessionCode": "IMP_TUIT_FLAT_200",
+      "discountLabel": "Discount200",
+      "siblingChildNo": null,
+      "reason": "Discount200 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-020/2026",
+      "studentName": "ANIL KUMAR",
+      "concessionCode": "IMP_TUIT_FLAT_250",
+      "discountLabel": "Discount250",
+      "siblingChildNo": null,
+      "reason": "Discount250 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-004/2026",
+      "studentName": "SUJIT KUMAR",
+      "concessionCode": "IMP_TUIT_FLAT_200",
+      "discountLabel": "Discount200",
+      "siblingChildNo": null,
+      "reason": "Discount200 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-005/2026",
+      "studentName": "AYANSH KUMAR",
+      "concessionCode": "IMP_SIB4_100PCT",
+      "discountLabel": "4 & more sibling100%",
+      "siblingChildNo": 4,
+      "reason": "4 & more sibling100% · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-248/2026",
+      "studentName": "SHAURYA SHRIVASTAVA",
+      "concessionCode": "IMP_TUIT_FLAT_150",
+      "discountLabel": "Discount150",
+      "siblingChildNo": null,
+      "reason": "Discount150 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-249/2026",
+      "studentName": "PRATIKSHA SHRIVASTAVA",
+      "concessionCode": "IMP_TUIT_FLAT_150",
+      "discountLabel": "Discount150",
+      "siblingChildNo": null,
+      "reason": "Discount150 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-251/2026",
+      "studentName": "KUSHAGRA MAURYA",
+      "concessionCode": "IMP_TUIT_FLAT_200",
+      "discountLabel": "Discount200",
+      "siblingChildNo": null,
+      "reason": "Discount200 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-256/2026",
+      "studentName": "NAVYA  SINGH",
+      "concessionCode": "IMP_TUIT_FLAT_125",
+      "discountLabel": "Discount125",
+      "siblingChildNo": null,
+      "reason": "Discount125 · CLI · fee_discount_report.xlsx"
+    },
+    {
+      "admissionNo": "BHB-257/2026",
+      "studentName": "TEJAS PANDEY",
+      "concessionCode": "IMP_TUIT_FLAT_125",
+      "discountLabel": "Discount125",
+      "siblingChildNo": null,
+      "reason": "Discount125 · CLI · fee_discount_report.xlsx"
+    }
+  ]
+}

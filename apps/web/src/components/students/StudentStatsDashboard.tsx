@@ -1,0 +1,682 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import Link from "next/link";
+import { useDemoSession } from "@/components/shell/SessionContext";
+import {
+  currentAcademicYearCode,
+  type MastersState,
+} from "@/lib/masters";
+import { type SisState, type SisStudent } from "@/lib/sis";
+import { loadTransport } from "@/lib/transport";
+import { FilterExportButtons } from "@/components/reports/FilterExportButtons";
+import { describeFilters } from "@/lib/reportExport";
+import { TENANT } from "@/lib/types";
+
+function StatIcon({
+  tone,
+  children,
+}: {
+  tone: "green" | "red" | "amber" | "sky" | "blue" | "indigo" | "slate";
+  children: React.ReactNode;
+}) {
+  const bg: Record<typeof tone, string> = {
+    green: "bg-[#e8f5e9] text-[#2e7d32]",
+    red: "bg-[#ffebee] text-[#c62828]",
+    amber: "bg-[#fff8e1] text-[#f9a825]",
+    sky: "bg-[#e1f5fe] text-[#0288d1]",
+    blue: "bg-[#e3f2fd] text-[#1565c0]",
+    indigo: "bg-[#e8eaf6] text-[#3949ab]",
+    slate: "bg-[#eceff1] text-[#455a64]",
+  };
+  return (
+    <span
+      className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${bg[tone]}`}
+    >
+      {children}
+    </span>
+  );
+}
+
+type StatTone = "green" | "red" | "amber" | "sky" | "blue" | "indigo" | "slate";
+
+type StatCell = {
+  label: string;
+  value: number;
+  tone: StatTone;
+  icon: React.ReactNode;
+  onClick?: () => void;
+};
+
+function StatRow({ cell, bordered }: { cell: StatCell; bordered?: boolean }) {
+  const clickable = !!cell.onClick && cell.value > 0;
+  return (
+    <button
+      type="button"
+      onClick={clickable ? cell.onClick : undefined}
+      disabled={!clickable}
+      className={`flex w-full items-center gap-3 px-3 py-3 text-left transition ${
+        bordered ? "border-b border-[#eceff1]" : ""
+      } ${clickable ? "cursor-pointer hover:bg-[#f5f8fb]" : "cursor-default"}`}
+      title={clickable ? `View ${cell.label}` : undefined}
+    >
+      <StatIcon tone={cell.tone}>{cell.icon}</StatIcon>
+      <div className="min-w-0 flex-1">
+        <div className="text-[12px] text-[#607d8b]">{cell.label}</div>
+        <div className="text-lg font-semibold tabular-nums text-[#263238]">
+          {cell.value}
+        </div>
+      </div>
+      {clickable ? (
+        <span className="text-[#b0bec5]" aria-hidden>
+          ›
+        </span>
+      ) : null}
+    </button>
+  );
+}
+
+function PairCard({ left, right }: { left: StatCell; right: StatCell }) {
+  return (
+    <div className="overflow-hidden rounded-md border border-[#cfd8dc] bg-white shadow-sm">
+      <StatRow cell={left} bordered />
+      <StatRow cell={right} />
+    </div>
+  );
+}
+
+function BreakdownTable({
+  title,
+  colA,
+  colB,
+  rows,
+  empty,
+  showTotal = true,
+  onRowClick,
+}: {
+  title: string;
+  colA: string;
+  colB: string;
+  rows: { key: string; label: string; count: number }[];
+  empty?: string;
+  showTotal?: boolean;
+  onRowClick?: (key: string, label: string) => void;
+}) {
+  const total = rows.reduce((s, r) => s + r.count, 0);
+  return (
+    <div className="overflow-hidden rounded-md border border-[#cfd8dc] bg-white shadow-sm">
+      <div className="border-b border-[#90caf9] bg-[#e3f2fd] px-3 py-2 text-sm font-semibold text-[#1565c0]">
+        {title}
+      </div>
+      <div className="max-h-72 overflow-auto">
+        <table className="w-full text-left text-[13px]">
+          <thead>
+            <tr className="border-b border-[#eceff1] text-[11px] uppercase tracking-wide text-[#78909c]">
+              <th className="px-3 py-2 font-semibold">{colA}</th>
+              <th className="px-3 py-2 text-right font-semibold">{colB}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={2} className="px-2 py-2">
+                  <div className="rounded bg-[#ffebee] px-3 py-2 text-center text-[12px] font-medium text-[#c62828]">
+                    {empty || "No record found."}
+                  </div>
+                </td>
+              </tr>
+            ) : (
+              rows.map((r) => {
+                const clickable = !!onRowClick && r.count > 0;
+                return (
+                  <tr
+                    key={r.key}
+                    onClick={
+                      clickable ? () => onRowClick!(r.key, r.label) : undefined
+                    }
+                    className={`border-b border-[#f5f5f5] text-[#37474f] ${
+                      clickable
+                        ? "cursor-pointer hover:bg-[#f5f8fb]"
+                        : ""
+                    }`}
+                    title={clickable ? `View ${r.label}` : undefined}
+                  >
+                    <td className="px-3 py-1.5">
+                      {clickable ? (
+                        <span className="text-[#1565c0]">{r.label}</span>
+                      ) : (
+                        r.label
+                      )}
+                    </td>
+                    <td className="px-3 py-1.5 text-right tabular-nums font-medium">
+                      {r.count}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+            {showTotal && rows.length > 0 ? (
+              <tr className="bg-[#fffde7] font-semibold text-[#37474f]">
+                <td className="px-3 py-2">Total</td>
+                <td className="px-3 py-2 text-right tabular-nums">{total}</td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function StudentListDrawer({
+  title,
+  students,
+  masters,
+  onClose,
+}: {
+  title: string;
+  students: SisStudent[];
+  masters: MastersState;
+  onClose: () => void;
+}) {
+  const classSec = (s: SisStudent) => {
+    const cls = masters.classes.find((c) => c.id === s.classId)?.name ?? "—";
+    const sec = masters.sections.find((x) => x.id === s.sectionId)?.name ?? "";
+    return sec ? `${cls}-${sec}` : cls;
+  };
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-[rgba(32,48,80,0.45)] p-3 sm:items-center"
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      onClick={onClose}
+    >
+      <div
+        className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-[#cfd8dc] bg-white shadow-lg"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-2 border-b border-[#eceff1] px-4 py-3">
+          <div className="text-sm font-semibold text-[var(--brand-deep)]">
+            {title}
+            <span className="ml-2 text-xs font-normal text-[#78909c]">
+              {students.length} student{students.length === 1 ? "" : "s"}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md px-2 py-1 text-xs font-semibold text-[#607d8b] hover:bg-[#eceff1]"
+          >
+            Close
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto">
+          <table className="w-full text-left text-[13px]">
+            <thead className="sticky top-0 bg-white text-[10px] uppercase tracking-wide text-[#78909c]">
+              <tr className="border-b border-[#eceff1]">
+                <th className="px-4 py-2 font-semibold">#</th>
+                <th className="px-4 py-2 font-semibold">Student</th>
+                <th className="px-4 py-2 font-semibold">Class</th>
+                <th className="px-4 py-2 font-semibold">Admission</th>
+              </tr>
+            </thead>
+            <tbody>
+              {students.map((s, i) => (
+                <tr
+                  key={s.id}
+                  className="border-b border-[#f5f5f5] text-[#37474f]"
+                >
+                  <td className="px-4 py-2 tabular-nums text-[#90a4ae]">
+                    {i + 1}
+                  </td>
+                  <td className="px-4 py-2">
+                    <Link
+                      href={`/students/${s.id}/edit`}
+                      className="font-medium text-[var(--brand-deep)] hover:underline"
+                    >
+                      {s.fullName}
+                    </Link>
+                    {s.status !== "active" ? (
+                      <span className="ml-2 text-[10px] text-[#c62828]">
+                        inactive
+                      </span>
+                    ) : null}
+                  </td>
+                  <td className="px-4 py-2 text-[#607d8b]">
+                    {classSec(s)}
+                    {s.rollNo ? ` · ${s.rollNo}` : ""}
+                  </td>
+                  <td className="px-4 py-2 text-[#607d8b]">{s.admissionNo}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function StudentStatsDashboard({
+  sis,
+  masters,
+}: {
+  sis: SisState;
+  masters: MastersState;
+}) {
+  const session = useDemoSession();
+  const ay =
+    session.academicYearCode || currentAcademicYearCode(masters);
+  const transport = useMemo(() => loadTransport(), [sis.students.length]);
+
+  const stats = useMemo(() => {
+    const normalizeAy = (code: string) => {
+      const t = (code || "").trim().replace(/\s+/g, "").replace(/–/g, "-");
+      const full = t.match(/^(20\d{2})-(20\d{2})$/);
+      if (full) return `${full[1]}-${full[2]!.slice(2)}`;
+      return t || ay;
+    };
+    const sessionAy = normalizeAy(ay);
+
+    const inSession = (s: (typeof sis.students)[number]) =>
+      normalizeAy(s.academicYearCode || ay) === sessionAy;
+
+    const sessionStudents = sis.students.filter(inSession);
+    const active = sessionStudents.filter((s) => s.status === "active");
+    const inactive = sessionStudents.filter((s) => s.status === "inactive");
+
+    /** New = not enrolled in any earlier session; Old = continuing from prior year. */
+    const earlierAdmissions = new Set(
+      sis.students
+        .filter(
+          (s) => normalizeAy(s.academicYearCode || "") < sessionAy,
+        )
+        .map((s) => s.admissionNo.trim().toUpperCase()),
+    );
+    const newCount = active.filter(
+      (s) => !earlierAdmissions.has(s.admissionNo.trim().toUpperCase()),
+    ).length;
+    const oldCount = active.filter((s) =>
+      earlierAdmissions.has(s.admissionNo.trim().toUpperCase()),
+    ).length;
+
+    const male = active.filter((s) => s.gender === "M").length;
+    const female = active.filter((s) => s.gender === "F").length;
+
+    const today = new Date().toISOString().slice(0, 10);
+    const transportStudentIds = new Set(
+      transport.assignments
+        .filter((a) => !a.effectiveTo || a.effectiveTo >= today)
+        .map((a) => a.studentId),
+    );
+    const transportCount = active.filter((s) =>
+      transportStudentIds.has(s.id),
+    ).length;
+
+    const boarding = 0;
+
+    const classRows = masters.classes
+      .filter((c) => c.isActive !== false)
+      .slice()
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map((c) => ({
+        key: c.id,
+        label: c.name,
+        count: active.filter((s) => s.classId === c.id).length,
+      }))
+      .filter((r) => r.count > 0);
+
+    /**
+     * Session-wise ADMISSION: count each student once in the year they were
+     * first admitted (earliest enrollment), so promoted students are not
+     * double-counted across every session.
+     */
+    const firstSessionByAdm = new Map<string, string>();
+    for (const s of sis.students) {
+      const adm = s.admissionNo.trim().toUpperCase();
+      if (!adm) continue;
+      const code = normalizeAy(s.academicYearCode || ay);
+      const prev = firstSessionByAdm.get(adm);
+      if (!prev || code < prev) firstSessionByAdm.set(adm, code);
+    }
+    const admissionMap = new Map<string, number>();
+    for (const code of firstSessionByAdm.values()) {
+      admissionMap.set(code, (admissionMap.get(code) ?? 0) + 1);
+    }
+    const admissionRows = [...admissionMap.entries()]
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([label, count]) => ({ key: label, label, count }));
+
+    const religionMap = new Map<string, number>();
+    for (const s of active) {
+      const rel = (s.religion || "").trim().toUpperCase() || "NOT SET";
+      religionMap.set(rel, (religionMap.get(rel) ?? 0) + 1);
+    }
+    const religionRows = [...religionMap.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([label, count]) => ({ key: label, label, count }));
+
+    const categoryMap = new Map<string, number>();
+    for (const s of active) {
+      const cat = (s.category || "").trim().toUpperCase() || "NOT SET";
+      categoryMap.set(cat, (categoryMap.get(cat) ?? 0) + 1);
+    }
+    const categoryRows = [...categoryMap.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([label, count]) => ({ key: label, label, count }));
+
+    return {
+      active: active.length,
+      inactive: inactive.length,
+      oldCount,
+      newCount,
+      male,
+      female,
+      boarding,
+      transportCount,
+      classRows,
+      admissionRows,
+      firstSessionByAdm,
+      categoryRows,
+      religionRows,
+      sessionAy,
+      // Base data for click-through lists
+      activeList: active,
+      inactiveList: inactive,
+      sessionStudents,
+      earlierAdmissions,
+      transportStudentIds,
+      normalizeAy,
+    };
+  }, [sis, masters, ay, transport]);
+
+  const [drawer, setDrawer] = useState<{
+    title: string;
+    students: SisStudent[];
+  } | null>(null);
+
+  const openDrawer = (title: string, students: SisStudent[]) => {
+    if (students.length === 0) return;
+    setDrawer({
+      title,
+      students: [...students].sort((a, b) => {
+        const roll = Number(a.rollNo) - Number(b.rollNo);
+        if (Number.isFinite(roll) && roll !== 0) return roll;
+        return a.fullName.localeCompare(b.fullName);
+      }),
+    });
+  };
+
+  const exportRows = useMemo(() => {
+    const rows: Record<string, string | number>[] = [];
+    for (const r of stats.classRows) {
+      rows.push({ kind: "Class", name: r.label, students: r.count });
+    }
+    for (const r of stats.admissionRows) {
+      rows.push({ kind: "Admission (session)", name: r.label, students: r.count });
+    }
+    for (const r of stats.categoryRows) {
+      rows.push({ kind: "Category", name: r.label, students: r.count });
+    }
+    for (const r of stats.religionRows) {
+      rows.push({ kind: "Religion", name: r.label, students: r.count });
+    }
+    return rows;
+  }, [stats]);
+
+  return (
+    <div className="mt-4 space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[#cfd8dc] bg-white px-3 py-2 text-sm">
+        <span className="font-medium text-[#546e7a]">
+          Student overview · {stats.sessionAy} only (not combined years)
+        </span>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href="/students/new"
+            className="inline-flex items-center gap-1 rounded px-2 py-1 text-[12px] font-semibold text-[#1565c0] hover:bg-[#e3f2fd]"
+          >
+            <span aria-hidden>+</span> Add
+          </Link>
+          <FilterExportButtons
+            title="Student statistics"
+            subtitle={`${TENANT.shortName} · ${ay}`}
+            filterNote={describeFilters([
+              `Active ${stats.active}`,
+              `Inactive ${stats.inactive}`,
+            ])}
+            fileBaseName="student_statistics"
+            columns={[
+              { key: "kind", header: "Breakup" },
+              { key: "name", header: "Name" },
+              { key: "students", header: "Students", align: "right" },
+            ]}
+            rows={exportRows}
+            className="!gap-1"
+          />
+        </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <PairCard
+          left={{
+            label: "Active Students",
+            value: stats.active,
+            tone: "green",
+            onClick: () =>
+              openDrawer(
+                `Active students · ${stats.sessionAy}`,
+                stats.activeList,
+              ),
+            icon: (
+              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm0 2c-4 0-8 2-8 4v2h16v-2c0-2-4-4-8-4z" />
+              </svg>
+            ),
+          }}
+          right={{
+            label: "InActive Students",
+            value: stats.inactive,
+            tone: "red",
+            onClick: () =>
+              openDrawer(
+                `Inactive students · ${stats.sessionAy}`,
+                stats.inactiveList,
+              ),
+            icon: (
+              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm0 2c-4 0-8 2-8 4v2h16v-2c0-2-4-4-8-4z" />
+              </svg>
+            ),
+          }}
+        />
+        <PairCard
+          left={{
+            label: "Continuing (in prior year)",
+            value: stats.oldCount,
+            tone: "amber",
+            onClick: () =>
+              openDrawer(
+                `Continuing students · ${stats.sessionAy}`,
+                stats.activeList.filter((s) =>
+                  stats.earlierAdmissions.has(
+                    s.admissionNo.trim().toUpperCase(),
+                  ),
+                ),
+              ),
+            icon: (
+              <span className="text-[9px] font-extrabold tracking-wide">OLD</span>
+            ),
+          }}
+          right={{
+            label: "New admissions (this year)",
+            value: stats.newCount,
+            tone: "sky",
+            onClick: () =>
+              openDrawer(
+                `New admissions · ${stats.sessionAy}`,
+                stats.activeList.filter(
+                  (s) =>
+                    !stats.earlierAdmissions.has(
+                      s.admissionNo.trim().toUpperCase(),
+                    ),
+                ),
+              ),
+            icon: (
+              <span className="text-[9px] font-extrabold tracking-wide">NEW</span>
+            ),
+          }}
+        />
+        <PairCard
+          left={{
+            label: "Male Student",
+            value: stats.male,
+            tone: "blue",
+            onClick: () =>
+              openDrawer(
+                `Boys · ${stats.sessionAy}`,
+                stats.activeList.filter((s) => s.gender === "M"),
+              ),
+            icon: (
+              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M9 9a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm0 2c-3.3 0-6 1.7-6 3.5V17h12v-2.5C15 12.7 12.3 11 9 11zm9-7v2h2.6l-3.8 3.8A5 5 0 0 1 9 16a5 5 0 1 1 4.2-7.7L17 4.4V7h2V2h-5z" />
+              </svg>
+            ),
+          }}
+          right={{
+            label: "Female Student",
+            value: stats.female,
+            tone: "sky",
+            onClick: () =>
+              openDrawer(
+                `Girls · ${stats.sessionAy}`,
+                stats.activeList.filter((s) => s.gender === "F"),
+              ),
+            icon: (
+              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm0 10c-3.3 0-6 1.8-6 4v2h4v4h4v-4h4v-2c0-2.2-2.7-4-6-4z" />
+              </svg>
+            ),
+          }}
+        />
+        <PairCard
+          left={{
+            label: "Boarding",
+            value: stats.boarding,
+            tone: "indigo",
+            icon: (
+              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M4 11V4h16v7H4zm0 2h16v7H4v-7zm2 2v3h3v-3H6zm5 0v3h3v-3h-3zm5 0v3h3v-3h-3z" />
+              </svg>
+            ),
+          }}
+          right={{
+            label: "Transport",
+            value: stats.transportCount,
+            tone: "blue",
+            onClick: () =>
+              openDrawer(
+                `Transport students · ${stats.sessionAy}`,
+                stats.activeList.filter((s) =>
+                  stats.transportStudentIds.has(s.id),
+                ),
+              ),
+            icon: (
+              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M5 11V6h14v5H5zm-1 2h16l1 4v3h-2v-1H5v1H3v-3l1-4zm3 1.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm10 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z" />
+              </svg>
+            ),
+          }}
+        />
+      </div>
+
+      <div className="grid gap-3 lg:grid-cols-2">
+        <BreakdownTable
+          title={`Class Wise Students · ${stats.sessionAy}`}
+          colA="Class"
+          colB="Students"
+          rows={stats.classRows}
+          onRowClick={(key, label) =>
+            openDrawer(
+              `Class ${label} · ${stats.sessionAy}`,
+              stats.activeList.filter(
+                (s) =>
+                  s.classId === key ||
+                  masters.sections.find((sec) => sec.id === s.sectionId)
+                    ?.classId === key,
+              ),
+            )
+          }
+        />
+        <BreakdownTable
+          title="Session Wise Admission"
+          colA="Session"
+          colB="Admissions"
+          rows={stats.admissionRows}
+          empty="No admissions recorded."
+          onRowClick={(key, label) => {
+            const admittedIn = new Set(
+              [...stats.firstSessionByAdm.entries()]
+                .filter(([, code]) => code === key)
+                .map(([adm]) => adm),
+            );
+            openDrawer(
+              `Admitted in ${label}`,
+              sis.students.filter(
+                (s) =>
+                  admittedIn.has(s.admissionNo.trim().toUpperCase()) &&
+                  stats.normalizeAy(s.academicYearCode || ay) === key,
+              ),
+            );
+          }}
+        />
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <BreakdownTable
+          title="Category Wise Students"
+          colA="Category"
+          colB="Students"
+          rows={stats.categoryRows}
+          empty="No record found."
+          onRowClick={(key, label) =>
+            openDrawer(
+              `Category ${label} · ${stats.sessionAy}`,
+              stats.activeList.filter(
+                (s) =>
+                  ((s.category || "").trim().toUpperCase() || "NOT SET") ===
+                  key,
+              ),
+            )
+          }
+        />
+        <BreakdownTable
+          title="Religion Wise Students"
+          colA="Religion"
+          colB="Students"
+          rows={stats.religionRows}
+          onRowClick={(key, label) =>
+            openDrawer(
+              `Religion ${label} · ${stats.sessionAy}`,
+              stats.activeList.filter(
+                (s) =>
+                  ((s.religion || "").trim().toUpperCase() || "NOT SET") ===
+                  key,
+              ),
+            )
+          }
+        />
+      </div>
+
+      {drawer ? (
+        <StudentListDrawer
+          title={drawer.title}
+          students={drawer.students}
+          masters={masters}
+          onClose={() => setDrawer(null)}
+        />
+      ) : null}
+    </div>
+  );
+}
+

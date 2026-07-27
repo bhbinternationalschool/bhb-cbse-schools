@@ -14,6 +14,8 @@ export const TENANT = {
   shortName: "BHB International",
   tagline: "Tradition of excellence",
   domain: "erp.bhbinternational.school",
+  /** Public school portal (enquiry / apply links & QR — not ERP subdomain) */
+  publicPortal: "bhbinternational.school",
   city: "Varanasi",
   state: "Uttar Pradesh",
   logoUrl: "/logo.png?v=2",
@@ -32,6 +34,7 @@ export const TENANT = {
   schoolStatus: "Senior Secondary",
 };
 
+/** Fallback shell list — prefer Masters academicYears via listSessionYearOptions(). */
 export const ACADEMIC_YEARS: AcademicYearOption[] = [
   { code: "2025-26", label: "2025-26", status: "current" },
   { code: "2024-25", label: "2024-25", status: "closed" },

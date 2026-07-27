@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>UDISE+ Bridge</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 12px;
+        width: 280px;
+        font-size: 12px;
+        color: #203050;
+      }
+      h1 {
+        font-size: 14px;
+        margin: 0 0 8px;
+      }
+      .muted {
+        color: #666;
+        font-size: 11px;
+      }
+      button {
+        margin-top: 8px;
+        width: 100%;
+        padding: 8px;
+        border-radius: 8px;
+        border: 1px solid #ccc;
+        background: #203050;
+        color: #fff;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button.secondary {
+        background: #fff;
+        color: #203050;
+      }
+      pre {
+        font-size: 10px;
+        max-height: 120px;
+        overflow: auto;
+        background: #f4f4f4;
+        padding: 6px;
+        border-radius: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>BHB UDISE+ Bridge</h1>
+    <p class="muted">v1.0 — autofill login · capture Students_Details export</p>
+    <p id="status" class="muted">Loading…</p>
+    <button type="button" id="openLogin">Open SDMS login</button>
+    <button type="button" id="probe" class="secondary">Toggle network probe</button>
+    <p class="muted">Recent probe URLs:</p>
+    <pre id="logs">—</pre>
+    <script src="popup.js" type="module"></script>
+  </body>
+</html>

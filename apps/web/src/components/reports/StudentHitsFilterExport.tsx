@@ -1,10 +1,10 @@
 "use client";
 
 import { formatInr, type StudentSearchHit } from "@/lib/fees";
-import { DEFAULT_AY } from "@/lib/masters";
 import { describeFilters } from "@/lib/reportExport";
 import { FilterExportButtons } from "@/components/reports/FilterExportButtons";
 import { TENANT } from "@/lib/types";
+import { useDemoSessionOptional } from "@/components/shell/SessionContext";
 
 /** PDF/Excel of the current student search hits (shared across Fee-like screens). */
 export function StudentHitsFilterExport({
@@ -13,6 +13,7 @@ export function StudentHitsFilterExport({
   query,
   classLabel,
   sectionLabel,
+  academicYearCode,
   onMessage,
 }: {
   title: string;
@@ -20,12 +21,19 @@ export function StudentHitsFilterExport({
   query: string;
   classLabel?: string;
   sectionLabel?: string;
+  academicYearCode?: string;
   onMessage?: (msg: string) => void;
 }) {
+  const session = useDemoSessionOptional();
+  const ay =
+    academicYearCode ||
+    session?.academicYearCode ||
+    hits[0]?.student.academicYearCode ||
+    "";
   return (
     <FilterExportButtons
       title={title}
-      subtitle={`${TENANT.shortName} · ${DEFAULT_AY}`}
+      subtitle={`${TENANT.shortName}${ay ? ` · ${ay}` : ""}`}
       filterNote={describeFilters([
         classLabel ? `Class ${classLabel}` : "",
         sectionLabel ? `Sec ${sectionLabel}` : "",

@@ -11,6 +11,11 @@ import {
   normalizeNcfTagId,
 } from "@/lib/cbseSubjectGroups";
 import { TENANT } from "@/lib/types";
+import {
+  defaultSchoolTimingConfig,
+  normalizeSchoolTimingConfig,
+  type SchoolTimingConfig,
+} from "@/lib/schoolTiming";
 
 const FOUNDATION_DEFAULT_AY = "2025-26";
 
@@ -41,6 +46,8 @@ export type SchoolProfile = {
   google: string;
   youtube: string;
   logoUrl: string;
+  /** School merchant UPI VPA for collections (registration / fees) */
+  collectionsUpiVpa: string;
 };
 
 export type AyStatus = "current" | "closed" | "upcoming";
@@ -184,20 +191,138 @@ export type NumberSeries = {
   resetOnAy: boolean;
 };
 
-export type HolidayKind = "national" | "school" | "exam" | "other";
+export type HolidayKind =
+  | "gazetted"
+  | "restricted"
+  | "national"
+  | "school"
+  | "exam"
+  | "emergency"
+  | "other";
+
+export type HolidayScope = "school" | "class_group" | "class";
+export type HolidayDayType = "full" | "half";
+export type HolidayMode = "one_off" | "weekly";
+
+/** Who the holiday day off applies to (students and/or staff streams). */
+export type HolidayAppliesTo =
+  | "everyone"
+  | "students"
+  | "staff_all"
+  | "staff_teaching"
+  | "staff_non_teaching"
+  | "students_and_teaching"
+  | "students_and_non_teaching";
 
 export type Holiday = {
   id: string;
   academicYearCode: string;
   title: string;
+  /** One-off range start, or weekly rule effective-from */
   startsOn: string;
+  /** One-off range end, or weekly rule effective-to */
   endsOn: string;
   kind: HolidayKind;
+  /** Academic scope: school / class group / class (for students) */
+  scope: HolidayScope;
+  /** When scope = class_group */
+  groupCode: string;
+  /** When scope = class */
+  classIds: string[];
+  /** Students / teaching / non-teaching / combinations */
+  appliesTo: HolidayAppliesTo;
+  mode: HolidayMode;
+  /** 0=Sun … 6=Sat when mode = weekly */
+  weekday: number | null;
+  dayType: HolidayDayType;
+  /** Paid holiday for staff payroll when staff are included */
+  paidForStaff: boolean;
+  /** Dates where a weekly rule is suspended */
+  exceptionDates: string[];
+  /** Force working day (overrides weekly / other holidays for audience) */
+  workingOverride: boolean;
   isPublished: boolean;
   publishedAt: string | null;
   publishedBy: string;
   note: string;
 };
+
+const APPLIES_TO_SET = new Set<HolidayAppliesTo>([
+  "everyone",
+  "students",
+  "staff_all",
+  "staff_teaching",
+  "staff_non_teaching",
+  "students_and_teaching",
+  "students_and_non_teaching",
+]);
+
+export function normalizeHoliday(
+  h: Partial<Holiday> &
+    Pick<Holiday, "id" | "title" | "startsOn" | "academicYearCode">,
+): Holiday {
+  const kindRaw = (h.kind || "school") as string;
+  const kind: HolidayKind =
+    kindRaw === "gazetted" ||
+    kindRaw === "restricted" ||
+    kindRaw === "national" ||
+    kindRaw === "school" ||
+    kindRaw === "exam" ||
+    kindRaw === "emergency" ||
+    kindRaw === "other"
+      ? kindRaw
+      : "other";
+  const scope: HolidayScope =
+    h.scope === "class_group" || h.scope === "class" ? h.scope : "school";
+  const mode: HolidayMode = h.mode === "weekly" ? "weekly" : "one_off";
+  const dayType: HolidayDayType = h.dayType === "half" ? "half" : "full";
+  const weekday =
+    mode === "weekly" && typeof h.weekday === "number" && h.weekday >= 0 && h.weekday <= 6
+      ? h.weekday
+      : mode === "weekly"
+        ? 6
+        : null;
+  const appliesRaw = (h.appliesTo || "everyone") as string;
+  const appliesTo: HolidayAppliesTo = APPLIES_TO_SET.has(
+    appliesRaw as HolidayAppliesTo,
+  )
+    ? (appliesRaw as HolidayAppliesTo)
+    : "everyone";
+  const includesStaff =
+    appliesTo === "everyone" ||
+    appliesTo === "staff_all" ||
+    appliesTo === "staff_teaching" ||
+    appliesTo === "staff_non_teaching" ||
+    appliesTo === "students_and_teaching" ||
+    appliesTo === "students_and_non_teaching";
+  return {
+    id: h.id,
+    academicYearCode: h.academicYearCode,
+    title: h.title.trim() || "Holiday",
+    startsOn: (h.startsOn || "").slice(0, 10),
+    endsOn: (h.endsOn || h.startsOn || "").slice(0, 10),
+    kind,
+    scope,
+    groupCode: scope === "class_group" ? String(h.groupCode || "") : "",
+    classIds:
+      scope === "class" && Array.isArray(h.classIds)
+        ? h.classIds.filter(Boolean)
+        : [],
+    appliesTo,
+    mode,
+    weekday,
+    dayType,
+    paidForStaff: includesStaff ? h.paidForStaff !== false : false,
+    exceptionDates: Array.isArray(h.exceptionDates)
+      ? h.exceptionDates.map((d) => String(d).slice(0, 10)).filter(Boolean)
+      : [],
+    workingOverride: !!h.workingOverride,
+    isPublished: !!h.isPublished,
+    publishedAt: h.publishedAt ?? null,
+    publishedBy: h.publishedBy ?? "",
+    note: h.note ?? "",
+  };
+}
 
 export type Department = {
   id: string;
@@ -216,6 +341,21 @@ export type Designation = {
 
 export type StaffStream = "teaching" | "non_teaching";
 export type StaffCategory = "permanent" | "contract" | "part_time";
+export type StaffJobType =
+  | ""
+  | "confirmed"
+  | "probation"
+  | "temporary"
+  | "contract";
+export type StaffGender = "M" | "F" | "O" | "";
+export type StaffCasteCategory =
+  | "GENERAL"
+  | "OBC"
+  | "SC"
+  | "ST"
+  | "OTHER"
+  | "";
+export type StaffMaritalStatus = "" | "single" | "married" | "widowed" | "other";
 
 export type StaffRecord = {
   id: string;
@@ -223,11 +363,588 @@ export type StaffRecord = {
   fullName: string;
   stream: StaffStream;
   category: StaffCategory;
+  /** Vendor job type: Confirmed / Probation / Temporary / Contract */
+  jobType: StaffJobType;
   departmentId: string | null;
   designationId: string | null;
+  campusId: string | null;
+  /** Branch / campus label from vendor exports when not linked to campusId */
+  branchName: string;
   mobile: string;
+  altMobile: string;
+  email: string;
   status: "active" | "inactive";
+  gender: StaffGender;
+  religion: string;
+  casteCategory: StaffCasteCategory;
+  dateOfBirth: string;
+  joiningDate: string;
+  leavingDate: string;
+  /** When the staff row was first added in the source system */
+  staffAddedOn: string;
+  bloodGroup: string;
+  maritalStatus: StaffMaritalStatus;
+  fatherName: string;
+  spouseName: string;
+  nationality: string;
+  aadhaarNo: string;
+  panNo: string;
+  voterId: string;
+  addressCurrent: string;
+  addressPermanent: string;
+  city: string;
+  state: string;
+  pincode: string;
+  emergencyContactName: string;
+  emergencyContactMobile: string;
+  emergencyRelation: string;
+  qualification: string;
+  experienceYears: string;
+  /** Free-text experience summary from vendor (e.g. "1year 3month") */
+  experienceDetail: string;
+  /** Longer experience / role description */
+  experienceDescription: string;
+  subjectsTaught: string;
+  biometricId: string;
+  rfidNo: string;
+  /** OASIS / UDISE staff portal ID */
+  oasisId: string;
+  /** Basic pay in INR (whole rupees as entered) */
+  basicPay: string;
+  photoUrl: string;
+  signatureUrl: string;
+  /** Payload encoded in staff ID QR (emp code + id). */
+  qrPayload: string;
+  loginUsername: string;
+  loginPassword: string;
+  loginEnabled: boolean;
+  bankName: string;
+  bankBranch: string;
+  bankAccountNo: string;
+  bankIfsc: string;
+  bankAccountName: string;
+  upiId: string;
+  pfNumber: string;
+  uanNumber: string;
+  pfJoiningDate: string;
+  esicNumber: string;
+  esicDispensary: string;
+  remarks: string;
+  docs: StaffDocs;
+  classTeacherLinks: StaffClassTeacherLink[];
+  subjectTeachingLinks: StaffSubjectTeachingLink[];
+  vehicleLinks: StaffVehicleLink[];
+  dutyLinks: StaffDutyLink[];
 };
+
+export type StaffDocKey =
+  | "photo"
+  | "aadhaar"
+  | "pan"
+  | "addressProof"
+  | "educationCert"
+  | "experienceCert"
+  | "medicalCert"
+  | "policeVerification"
+  | "joiningLetter"
+  | "contract"
+  | "drivingLicense"
+  | "other";
+
+export type StaffDocStatus = "missing" | "received" | "verified";
+
+export type StaffDocFile = {
+  status: StaffDocStatus;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  fileUrl: string;
+  uploadedAt: string;
+};
+
+export type StaffDocs = Record<StaffDocKey, StaffDocFile>;
+
+export const STAFF_DOC_LABELS: { key: StaffDocKey; label: string }[] = [
+  { key: "photo", label: "Passport photo" },
+  { key: "aadhaar", label: "Aadhaar" },
+  { key: "pan", label: "PAN card" },
+  { key: "addressProof", label: "Address proof" },
+  { key: "educationCert", label: "Education certificates" },
+  { key: "experienceCert", label: "Experience / relieving" },
+  { key: "medicalCert", label: "Medical fitness" },
+  { key: "policeVerification", label: "Police verification" },
+  { key: "joiningLetter", label: "Joining letter" },
+  { key: "contract", label: "Appointment / contract" },
+  { key: "drivingLicense", label: "Driving licence (drivers)" },
+  { key: "other", label: "Other document" },
+];
+
+export function emptyStaffDocFile(
+  status: StaffDocStatus = "missing",
+): StaffDocFile {
+  return {
+    status,
+    fileName: "",
+    mimeType: "",
+    size: 0,
+    fileUrl: "",
+    uploadedAt: "",
+  };
+}
+
+export function emptyStaffDocs(): StaffDocs {
+  return {
+    photo: emptyStaffDocFile(),
+    aadhaar: emptyStaffDocFile(),
+    pan: emptyStaffDocFile(),
+    addressProof: emptyStaffDocFile(),
+    educationCert: emptyStaffDocFile(),
+    experienceCert: emptyStaffDocFile(),
+    medicalCert: emptyStaffDocFile(),
+    policeVerification: emptyStaffDocFile(),
+    joiningLetter: emptyStaffDocFile(),
+    contract: emptyStaffDocFile(),
+    drivingLicense: emptyStaffDocFile(),
+    other: emptyStaffDocFile(),
+  };
+}
+
+function normalizeStaffDocFile(raw: unknown): StaffDocFile {
+  if (!raw || typeof raw !== "object") return emptyStaffDocFile();
+  const o = raw as Partial<StaffDocFile>;
+  const status: StaffDocStatus =
+    o.status === "received" || o.status === "verified" || o.status === "missing"
+      ? o.status
+      : "missing";
+  return {
+    status,
+    fileName: str(o.fileName),
+    mimeType: str(o.mimeType),
+    size: typeof o.size === "number" ? o.size : 0,
+    fileUrl: typeof o.fileUrl === "string" ? o.fileUrl : "",
+    uploadedAt: str(o.uploadedAt),
+  };
+}
+
+export function normalizeStaffDocs(raw: unknown): StaffDocs {
+  const base = emptyStaffDocs();
+  if (!raw || typeof raw !== "object") return base;
+  const o = raw as Partial<Record<StaffDocKey, unknown>>;
+  for (const { key } of STAFF_DOC_LABELS) {
+    base[key] = normalizeStaffDocFile(o[key]);
+  }
+  return base;
+}
+
+export type StaffClassTeacherLink = {
+  id: string;
+  classId: string;
+  sectionId: string;
+  academicYearCode: string;
+  isPrimary: boolean;
+};
+
+export type StaffSubjectTeachingLink = {
+  id: string;
+  classId: string;
+  sectionId: string | null;
+  subjectId: string;
+  academicYearCode: string;
+  periodsPerWeek: number;
+};
+
+export type StaffVehicleRole =
+  | "driver"
+  | "attendant"
+  | "conductor"
+  | "helper";
+
+export type StaffVehicleLink = {
+  id: string;
+  routeId: string;
+  role: StaffVehicleRole;
+  academicYearCode: string;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+};
+
+export type StaffDutyRole =
+  | "lab_incharge"
+  | "library_incharge"
+  | "hostel_warden"
+  | "exam_incharge"
+  | "sports_incharge"
+  | "discipline_incharge"
+  | "other";
+
+export type StaffDutyLink = {
+  id: string;
+  role: StaffDutyRole;
+  label: string;
+  academicYearCode: string;
+  notes: string;
+};
+
+export const STAFF_VEHICLE_ROLES: {
+  value: StaffVehicleRole;
+  label: string;
+}[] = [
+  { value: "driver", label: "Driver" },
+  { value: "attendant", label: "Attendant" },
+  { value: "conductor", label: "Conductor" },
+  { value: "helper", label: "Helper" },
+];
+
+export const STAFF_DUTY_ROLES: { value: StaffDutyRole; label: string }[] = [
+  { value: "lab_incharge", label: "Lab in-charge" },
+  { value: "library_incharge", label: "Library in-charge" },
+  { value: "hostel_warden", label: "Hostel warden" },
+  { value: "exam_incharge", label: "Exam in-charge" },
+  { value: "sports_incharge", label: "Sports in-charge" },
+  { value: "discipline_incharge", label: "Discipline in-charge" },
+  { value: "other", label: "Other duty" },
+];
+
+/** Which duty mapping UIs apply for this staff (by stream + designation). */
+export type StaffDutyCapabilities = {
+  classTeacher: boolean;
+  subjectTeaching: boolean;
+  vehicle: boolean;
+  otherDuties: boolean;
+  /** Suggested vehicle role when opening vehicle mapping */
+  preferredVehicleRole: StaffVehicleRole;
+  label: string;
+};
+
+function haystack(...parts: (string | null | undefined)[]) {
+  return parts
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+    .replace(/[_-]+/g, " ");
+}
+
+export function staffDutyCapabilities(
+  staff: Pick<
+    StaffRecord,
+    "stream" | "designationId" | "departmentId"
+  >,
+  masters: {
+    designations: Designation[];
+    departments: Department[];
+  },
+): StaffDutyCapabilities {
+  const des = masters.designations.find((d) => d.id === staff.designationId);
+  const dep = masters.departments.find((d) => d.id === staff.departmentId);
+  const text = haystack(des?.code, des?.name, dep?.code, dep?.name);
+
+  const isDriver =
+    /\b(drv|driver|bus driver)\b/.test(text) || /\bdriver\b/.test(text);
+  const isAttendant =
+    /\b(att|attendant|ayah|vehicle attendant|bus attendant)\b/.test(text) &&
+    !isDriver;
+  const isConductorOrHelper =
+    /\b(conductor|bus helper)\b/.test(text) && !isDriver && !isAttendant;
+  const isTransportDept = /\b(transport|trans)\b/.test(text);
+  const isTransportStaff =
+    isDriver ||
+    isAttendant ||
+    isConductorOrHelper ||
+    (isTransportDept && staff.stream === "non_teaching");
+
+  const isTeacherLike =
+    staff.stream === "teaching" ||
+    /\b(tgt|pgt|prt|pprt|teacher|lecturer|faculty|educator|hm|head.?master|principal|vice.?principal)\b/.test(
+      text,
+    );
+
+  const isOfficeOrSupport =
+    /\b(clerk|admin|accountant|accounts|office|computer operator|co|peon)\b/.test(
+      text,
+    );
+
+  let preferredVehicleRole: StaffVehicleRole = "driver";
+  if (isAttendant) preferredVehicleRole = "attendant";
+  else if (/\bconductor\b/.test(text)) preferredVehicleRole = "conductor";
+  else if (/\bhelper\b/.test(text)) preferredVehicleRole = "helper";
+  else if (isDriver) preferredVehicleRole = "driver";
+  else if (isTransportDept) preferredVehicleRole = "attendant";
+
+  // Transport crew: vehicle mapping only (plus other duties if office titles overlap)
+  if (isTransportStaff && !isTeacherLike) {
+    return {
+      classTeacher: false,
+      subjectTeaching: false,
+      vehicle: true,
+      otherDuties: isOfficeOrSupport,
+      preferredVehicleRole,
+      label: isDriver
+        ? "Driver — vehicle / route mapping"
+        : isAttendant
+          ? "Attendant — vehicle / route mapping"
+          : "Transport staff — vehicle / route mapping",
+    };
+  }
+
+  // Teachers / academic: class + subject
+  if (isTeacherLike) {
+    return {
+      classTeacher: true,
+      subjectTeaching: true,
+      vehicle: false,
+      otherDuties: true,
+      preferredVehicleRole: "driver",
+      label: "Teaching staff — class teacher & subject mapping",
+    };
+  }
+
+  // Everyone else: other school duties
+  return {
+    classTeacher: false,
+    subjectTeaching: false,
+    vehicle: false,
+    otherDuties: true,
+    preferredVehicleRole: "driver",
+    label: "Staff duties — lab, library, hostel, and other roles",
+  };
+}
+
+function nidStaff(prefix: string) {
+  return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function normalizeClassTeacherLink(
+  raw: Partial<StaffClassTeacherLink>,
+): StaffClassTeacherLink | null {
+  if (!raw.classId || !raw.sectionId) return null;
+  return {
+    id: str(raw.id) || nidStaff("sct"),
+    classId: str(raw.classId),
+    sectionId: str(raw.sectionId),
+    academicYearCode: str(raw.academicYearCode),
+    isPrimary: raw.isPrimary !== false,
+  };
+}
+
+function normalizeSubjectTeachingLink(
+  raw: Partial<StaffSubjectTeachingLink>,
+): StaffSubjectTeachingLink | null {
+  if (!raw.classId || !raw.subjectId) return null;
+  return {
+    id: str(raw.id) || nidStaff("sst"),
+    classId: str(raw.classId),
+    sectionId: raw.sectionId ? str(raw.sectionId) : null,
+    subjectId: str(raw.subjectId),
+    academicYearCode: str(raw.academicYearCode),
+    periodsPerWeek:
+      typeof raw.periodsPerWeek === "number" && raw.periodsPerWeek >= 0
+        ? raw.periodsPerWeek
+        : 0,
+  };
+}
+
+function normalizeVehicleLink(
+  raw: Partial<StaffVehicleLink>,
+): StaffVehicleLink | null {
+  if (!raw.routeId) return null;
+  const role: StaffVehicleRole =
+    raw.role === "attendant" ||
+    raw.role === "conductor" ||
+    raw.role === "helper"
+      ? raw.role
+      : "driver";
+  return {
+    id: str(raw.id) || nidStaff("svh"),
+    routeId: str(raw.routeId),
+    role,
+    academicYearCode: str(raw.academicYearCode),
+    effectiveFrom: str(raw.effectiveFrom),
+    effectiveTo: raw.effectiveTo ? str(raw.effectiveTo) : null,
+  };
+}
+
+function normalizeDutyLink(
+  raw: Partial<StaffDutyLink>,
+): StaffDutyLink | null {
+  const role: StaffDutyRole =
+    STAFF_DUTY_ROLES.some((r) => r.value === raw.role) && raw.role
+      ? (raw.role as StaffDutyRole)
+      : "other";
+  return {
+    id: str(raw.id) || nidStaff("sdy"),
+    role,
+    label: str(raw.label),
+    academicYearCode: str(raw.academicYearCode),
+    notes: str(raw.notes),
+  };
+}
+
+function str(v: unknown): string {
+  return typeof v === "string" ? v.trim() : v == null ? "" : String(v).trim();
+}
+
+export function staffQrPayload(empCode: string, id: string): string {
+  return JSON.stringify({
+    type: "bhb_staff",
+    empCode: empCode.trim().toUpperCase(),
+    id,
+  });
+}
+
+export function normalizeStaffRecord(
+  s: Partial<StaffRecord> &
+    Pick<StaffRecord, "id" | "empCode" | "fullName">,
+): StaffRecord {
+  const stream: StaffStream =
+    s.stream === "non_teaching" ? "non_teaching" : "teaching";
+  const category: StaffCategory =
+    s.category === "contract" || s.category === "part_time"
+      ? s.category
+      : "permanent";
+  const gender: StaffGender =
+    s.gender === "M" || s.gender === "F" || s.gender === "O" ? s.gender : "";
+  const casteRaw = str(s.casteCategory).toUpperCase();
+  const casteCategory: StaffCasteCategory =
+    casteRaw === "GENERAL" ||
+    casteRaw === "OBC" ||
+    casteRaw === "SC" ||
+    casteRaw === "ST" ||
+    casteRaw === "OTHER"
+      ? casteRaw
+      : "";
+  const maritalRaw = str(s.maritalStatus).toLowerCase();
+  const maritalStatus: StaffMaritalStatus =
+    maritalRaw === "single" ||
+    maritalRaw === "married" ||
+    maritalRaw === "widowed" ||
+    maritalRaw === "other"
+      ? maritalRaw
+      : "";
+  const jobRaw = str(s.jobType).toLowerCase().replace(/[\s-]+/g, "_");
+  const jobType: StaffJobType =
+    jobRaw === "confirmed" ||
+    jobRaw === "probation" ||
+    jobRaw === "temporary" ||
+    jobRaw === "contract"
+      ? jobRaw
+      : "";
+  const empCode = str(s.empCode).toUpperCase();
+  return {
+    id: s.id,
+    empCode,
+    fullName: str(s.fullName),
+    stream,
+    category,
+    jobType,
+    departmentId: s.departmentId ?? null,
+    designationId: s.designationId ?? null,
+    campusId: s.campusId ?? null,
+    branchName: str(s.branchName),
+    mobile: str(s.mobile),
+    altMobile: str(s.altMobile),
+    email: str(s.email),
+    status: s.status === "inactive" ? "inactive" : "active",
+    gender,
+    religion: str(s.religion),
+    casteCategory,
+    dateOfBirth: str(s.dateOfBirth),
+    joiningDate: str(s.joiningDate),
+    leavingDate: str(s.leavingDate),
+    staffAddedOn: str(s.staffAddedOn),
+    bloodGroup: str(s.bloodGroup),
+    maritalStatus,
+    fatherName: str(s.fatherName),
+    spouseName: str(s.spouseName),
+    nationality: str(s.nationality) || "Indian",
+    aadhaarNo: str(s.aadhaarNo),
+    panNo: str(s.panNo).toUpperCase(),
+    voterId: str(s.voterId).toUpperCase(),
+    addressCurrent: str(s.addressCurrent),
+    addressPermanent: str(s.addressPermanent),
+    city: str(s.city),
+    state: str(s.state),
+    pincode: str(s.pincode),
+    emergencyContactName: str(s.emergencyContactName),
+    emergencyContactMobile: str(s.emergencyContactMobile),
+    emergencyRelation: str(s.emergencyRelation),
+    qualification: str(s.qualification),
+    experienceYears: str(s.experienceYears),
+    experienceDetail: str(s.experienceDetail),
+    experienceDescription: str(s.experienceDescription),
+    subjectsTaught: str(s.subjectsTaught),
+    biometricId: str(s.biometricId),
+    rfidNo: str(s.rfidNo),
+    oasisId: str(s.oasisId),
+    basicPay: str(s.basicPay),
+    photoUrl: typeof s.photoUrl === "string" ? s.photoUrl : "",
+    signatureUrl: typeof s.signatureUrl === "string" ? s.signatureUrl : "",
+    qrPayload: str(s.qrPayload) || staffQrPayload(empCode, s.id),
+    loginUsername: str(s.loginUsername),
+    loginPassword: typeof s.loginPassword === "string" ? s.loginPassword : "",
+    loginEnabled: s.loginEnabled !== false,
+    bankName: str(s.bankName),
+    bankBranch: str(s.bankBranch),
+    bankAccountNo: str(s.bankAccountNo),
+    bankIfsc: str(s.bankIfsc).toUpperCase(),
+    bankAccountName: str(s.bankAccountName),
+    upiId: str(s.upiId),
+    pfNumber: str(s.pfNumber),
+    uanNumber: str(s.uanNumber),
+    pfJoiningDate: str(s.pfJoiningDate),
+    esicNumber: str(s.esicNumber),
+    esicDispensary: str(s.esicDispensary),
+    remarks: str(s.remarks),
+    docs: (() => {
+      const docs = normalizeStaffDocs(s.docs);
+      if (
+        typeof s.photoUrl === "string" &&
+        s.photoUrl &&
+        !docs.photo.fileUrl
+      ) {
+        docs.photo = {
+          ...emptyStaffDocFile("received"),
+          fileUrl: s.photoUrl,
+          mimeType: "image/jpeg",
+          fileName: "photo.jpg",
+          uploadedAt: new Date().toISOString(),
+        };
+      }
+      return docs;
+    })(),
+    classTeacherLinks: Array.isArray(s.classTeacherLinks)
+      ? s.classTeacherLinks
+          .map((x) => normalizeClassTeacherLink(x))
+          .filter((x): x is StaffClassTeacherLink => !!x)
+      : [],
+    subjectTeachingLinks: Array.isArray(s.subjectTeachingLinks)
+      ? s.subjectTeachingLinks
+          .map((x) => normalizeSubjectTeachingLink(x))
+          .filter((x): x is StaffSubjectTeachingLink => !!x)
+      : [],
+    vehicleLinks: Array.isArray(s.vehicleLinks)
+      ? s.vehicleLinks
+          .map((x) => normalizeVehicleLink(x))
+          .filter((x): x is StaffVehicleLink => !!x)
+      : [],
+    dutyLinks: Array.isArray(s.dutyLinks)
+      ? s.dutyLinks
+          .map((x) => normalizeDutyLink(x))
+          .filter((x): x is StaffDutyLink => !!x)
+      : [],
+  };
+}
+
+export function emptyStaffDraft(
+  partial?: Partial<StaffRecord> & { id?: string },
+): StaffRecord {
+  const id = partial?.id ?? newFoundationId("stf");
+  return normalizeStaffRecord({
+    id,
+    empCode: "",
+    fullName: "",
+    ...partial,
+  });
+}
 
 export type CompletenessItem = {
   id: string;
@@ -239,6 +956,8 @@ export type CompletenessItem = {
 
 export type FoundationSlice = {
   schoolProfile: SchoolProfile;
+  /** Shared school day hours — default + class-group / class overrides */
+  schoolTiming: SchoolTimingConfig;
   academicYears: AcademicYearMaster[];
   academicTerms: AcademicTerm[];
   subjects: Subject[];
@@ -403,6 +1122,7 @@ export function defaultSchoolProfile(): SchoolProfile {
     google: "",
     youtube: "",
     logoUrl: TENANT.logoUrl,
+    collectionsUpiVpa: "bhbschool@upi",
   };
 }
 
@@ -655,36 +1375,65 @@ export function defaultFoundationSlice(classes: SchoolClass[]): FoundationSlice 
   ];
 
   const holidays: Holiday[] = [
-    {
+    normalizeHoliday({
       id: nid("hol"),
       academicYearCode: FOUNDATION_DEFAULT_AY,
       title: "Independence Day",
       startsOn: "2025-08-15",
       endsOn: "2025-08-15",
-      kind: "national",
+      kind: "gazetted",
+      scope: "school",
+      mode: "one_off",
+      dayType: "full",
+      paidForStaff: true,
       isPublished: true,
       publishedAt: new Date().toISOString(),
       publishedBy: "System",
       note: "",
-    },
-    {
+    }),
+    normalizeHoliday({
       id: nid("hol"),
       academicYearCode: FOUNDATION_DEFAULT_AY,
       title: "Diwali break",
       startsOn: "2025-10-20",
       endsOn: "2025-10-24",
       kind: "school",
+      scope: "school",
+      mode: "one_off",
+      dayType: "full",
+      paidForStaff: true,
       isPublished: false,
       publishedAt: null,
       publishedBy: "",
       note: "Draft — publish when confirmed",
-    },
+    }),
+    normalizeHoliday({
+      id: nid("hol"),
+      academicYearCode: FOUNDATION_DEFAULT_AY,
+      title: "Primary Saturday off",
+      startsOn: "2025-04-01",
+      endsOn: "2026-03-31",
+      kind: "school",
+      scope: "class_group",
+      groupCode: "PRIMARY",
+      appliesTo: "students",
+      mode: "weekly",
+      weekday: 6,
+      dayType: "full",
+      paidForStaff: false,
+      isPublished: false,
+      publishedAt: null,
+      publishedBy: "",
+      note: "Draft weekly rule — publish when confirmed",
+    }),
   ];
 
   const departments: Department[] = [
     { id: nid("dep"), code: "TEACH", name: "Teaching", isActive: true },
-    { id: nid("dep"), code: "ADMIN", name: "Administration", isActive: true },
-    { id: nid("dep"), code: "ACCT", name: "Accounts", isActive: true },
+    { id: nid("dep"), code: "ACAD", name: "Academic", isActive: true },
+    { id: nid("dep"), code: "ADMIN", name: "Admin", isActive: true },
+    { id: nid("dep"), code: "MGMT", name: "Management", isActive: true },
+    { id: nid("dep"), code: "SPORT", name: "Sports", isActive: true },
     { id: nid("dep"), code: "TRANS", name: "Transport", isActive: true },
   ];
 
@@ -693,7 +1442,7 @@ export function defaultFoundationSlice(classes: SchoolClass[]): FoundationSlice 
       id: nid("des"),
       code: "PRIN",
       name: "Principal",
-      departmentId: departments[1]!.id,
+      departmentId: departments[3]!.id,
       isActive: true,
     },
     {
@@ -712,33 +1461,60 @@ export function defaultFoundationSlice(classes: SchoolClass[]): FoundationSlice 
     },
     {
       id: nid("des"),
+      code: "PRT",
+      name: "PRT",
+      departmentId: departments[1]!.id,
+      isActive: true,
+    },
+    {
+      id: nid("des"),
       code: "CLK",
       name: "Clerk",
-      departmentId: departments[1]!.id,
+      departmentId: departments[2]!.id,
+      isActive: true,
+    },
+    {
+      id: nid("des"),
+      code: "PEON",
+      name: "Peon",
+      departmentId: departments[2]!.id,
       isActive: true,
     },
     {
       id: nid("des"),
       code: "DRV",
       name: "Driver",
-      departmentId: departments[3]!.id,
+      departmentId: departments[5]!.id,
+      isActive: true,
+    },
+    {
+      id: nid("des"),
+      code: "CO",
+      name: "Computer Operator",
+      departmentId: departments[2]!.id,
       isActive: true,
     },
   ];
 
   const staff: StaffRecord[] = [
-    {
+    normalizeStaffRecord({
       id: nid("stf"),
       empCode: "EMP-001",
       fullName: "Priya Sharma",
       stream: "non_teaching",
       category: "permanent",
       departmentId: departments[2]!.id,
-      designationId: designations[3]!.id,
+      designationId: designations[4]!.id,
       mobile: "9800000001",
       status: "active",
-    },
-    {
+      gender: "F",
+      religion: "Hindu",
+      casteCategory: "GENERAL",
+      email: "priya.sharma@school.in",
+      joiningDate: "2019-04-01",
+      loginUsername: "priya.sharma",
+    }),
+    normalizeStaffRecord({
       id: nid("stf"),
       empCode: "EMP-002",
       fullName: "Anil Kumar",
@@ -748,11 +1524,133 @@ export function defaultFoundationSlice(classes: SchoolClass[]): FoundationSlice 
       designationId: designations[1]!.id,
       mobile: "9800000002",
       status: "active",
-    },
+      gender: "M",
+      religion: "Hindu",
+      casteCategory: "OBC",
+      email: "anil.kumar@school.in",
+      joiningDate: "2018-07-15",
+      subjectsTaught: "Mathematics, Science",
+      loginUsername: "anil.kumar",
+    }),
+    normalizeStaffRecord({
+      id: nid("stf"),
+      empCode: "EMP-003",
+      fullName: "Sunita Verma",
+      stream: "teaching",
+      category: "permanent",
+      departmentId: departments[0]!.id,
+      designationId: designations[2]!.id,
+      mobile: "9800000003",
+      status: "active",
+      gender: "F",
+      religion: "Hindu",
+      casteCategory: "GENERAL",
+      joiningDate: "2020-04-01",
+      subjectsTaught: "English, SST",
+    }),
+    normalizeStaffRecord({
+      id: nid("stf"),
+      empCode: "EMP-004",
+      fullName: "Rakesh Yadav",
+      stream: "non_teaching",
+      category: "permanent",
+      departmentId: departments[5]!.id,
+      designationId: designations[6]!.id,
+      mobile: "9800000004",
+      status: "active",
+      gender: "M",
+      religion: "Hindu",
+      casteCategory: "OBC",
+    }),
+    normalizeStaffRecord({
+      id: nid("stf"),
+      empCode: "EMP-005",
+      fullName: "Meena Gupta",
+      stream: "teaching",
+      category: "contract",
+      departmentId: departments[1]!.id,
+      designationId: designations[3]!.id,
+      mobile: "9800000005",
+      status: "active",
+      gender: "F",
+      religion: "Hindu",
+      casteCategory: "GENERAL",
+    }),
+    normalizeStaffRecord({
+      id: nid("stf"),
+      empCode: "EMP-006",
+      fullName: "Imran Ali",
+      stream: "teaching",
+      category: "permanent",
+      departmentId: departments[0]!.id,
+      designationId: designations[1]!.id,
+      mobile: "9800000006",
+      status: "inactive",
+      gender: "M",
+      religion: "Muslim",
+      casteCategory: "GENERAL",
+    }),
+    normalizeStaffRecord({
+      id: nid("stf"),
+      empCode: "EMP-007",
+      fullName: "Suresh Das",
+      stream: "non_teaching",
+      category: "permanent",
+      departmentId: departments[2]!.id,
+      designationId: designations[5]!.id,
+      mobile: "9800000007",
+      status: "active",
+      gender: "M",
+      religion: "Hindu",
+      casteCategory: "SC",
+    }),
+    normalizeStaffRecord({
+      id: nid("stf"),
+      empCode: "EMP-008",
+      fullName: "Neha Singh",
+      stream: "teaching",
+      category: "permanent",
+      departmentId: departments[4]!.id,
+      designationId: designations[1]!.id,
+      mobile: "9800000008",
+      status: "active",
+      gender: "F",
+      religion: "Sikh",
+      casteCategory: "GENERAL",
+    }),
+    normalizeStaffRecord({
+      id: nid("stf"),
+      empCode: "EMP-009",
+      fullName: "Vikram Joshi",
+      stream: "non_teaching",
+      category: "permanent",
+      departmentId: departments[3]!.id,
+      designationId: designations[0]!.id,
+      mobile: "9800000009",
+      status: "active",
+      gender: "M",
+      religion: "Hindu",
+      casteCategory: "GENERAL",
+    }),
+    normalizeStaffRecord({
+      id: nid("stf"),
+      empCode: "EMP-010",
+      fullName: "Kavita Devi",
+      stream: "non_teaching",
+      category: "part_time",
+      departmentId: departments[2]!.id,
+      designationId: designations[7]!.id,
+      mobile: "9800000010",
+      status: "inactive",
+      gender: "F",
+      religion: "Hindu",
+      casteCategory: "ST",
+    }),
   ];
 
   return {
     schoolProfile: defaultSchoolProfile(),
+    schoolTiming: defaultSchoolTimingConfig(),
     academicYears,
     academicTerms,
     subjects,
@@ -793,6 +1691,9 @@ export function normalizeSchoolProfile(
     google: p?.google ?? "",
     youtube: p?.youtube ?? "",
     logoUrl: p?.logoUrl ?? d.logoUrl,
+    collectionsUpiVpa: (p?.collectionsUpiVpa || d.collectionsUpiVpa || "bhbschool@upi")
+      .trim()
+      .toLowerCase(),
   };
 }
 
@@ -806,6 +1707,7 @@ export function ensureFoundationOnMasters(state: MastersState): MastersState {
   return {
     ...state,
     schoolProfile: normalizeSchoolProfile(partial.schoolProfile),
+    schoolTiming: normalizeSchoolTimingConfig(partial.schoolTiming),
     academicYears: partial.academicYears?.length
       ? partial.academicYears
       : seed.academicYears,
@@ -840,14 +1742,26 @@ export function ensureFoundationOnMasters(state: MastersState): MastersState {
     numberSeries: partial.numberSeries?.length
       ? partial.numberSeries
       : seed.numberSeries,
-    holidays: Array.isArray(partial.holidays) ? partial.holidays : seed.holidays,
+    holidays: (
+      Array.isArray(partial.holidays) ? partial.holidays : seed.holidays
+    ).map((h) =>
+      normalizeHoliday({
+        ...h,
+        academicYearCode: h.academicYearCode || FOUNDATION_DEFAULT_AY,
+        title: h.title || "Holiday",
+        startsOn: h.startsOn || "",
+        id: h.id,
+      }),
+    ),
     departments: partial.departments?.length
       ? partial.departments
       : seed.departments,
     designations: partial.designations?.length
       ? partial.designations
       : seed.designations,
-    staff: Array.isArray(partial.staff) ? partial.staff : seed.staff,
+    staff: (Array.isArray(partial.staff) ? partial.staff : seed.staff).map(
+      (s) => normalizeStaffRecord(s),
+    ),
   };
 }
 
@@ -870,6 +1784,8 @@ export function mastersCompleteness(
   ).length;
   const staffN = (state.staff ?? []).filter((s) => s.status === "active")
     .length;
+  const deptN = (state.departments ?? []).filter((d) => d.isActive).length;
+  const desN = (state.designations ?? []).filter((d) => d.isActive).length;
   const seriesN = (state.numberSeries ?? []).length;
   const ayOk = (state.academicYears ?? []).some((y) => y.status === "current");
 
@@ -954,11 +1870,20 @@ export function mastersCompleteness(
       tab: "holidays",
     },
     {
-      id: "staff",
-      label: "Staff roster",
-      ok: staffN >= 1,
-      detail: `${staffN} active staff`,
+      id: "staff-setup",
+      label: "Staff setup (depts / designations)",
+      ok: deptN >= 1 && desN >= 1,
+      detail: `${deptN} department(s) · ${desN} designation(s)`,
       tab: "staff",
+    },
+    {
+      id: "staff",
+      label: "Staff roster (Staff module)",
+      ok: staffN >= 1,
+      detail:
+        staffN >= 1
+          ? `${staffN} active — manage in Staff module`
+          : "Add employees in Staff module (/staff)",
     },
     {
       id: "mid-year",
@@ -975,7 +1900,10 @@ export function mastersCompleteness(
   return { percent, items, okCount, total };
 }
 
-/** True if date falls on a published holiday for the AY. */
+/**
+ * School-wide published holiday on date (legacy helper).
+ * Prefer classifyHolidayDay / classifyClassHolidayDay for scoped rules.
+ */
 export function isPublishedHoliday(
   state: MastersState & Partial<FoundationSlice>,
   isoDate: string,
@@ -985,6 +1913,25 @@ export function isPublishedHoliday(
   for (const h of state.holidays ?? []) {
     if (!h.isPublished) continue;
     if (h.academicYearCode !== academicYearCode) continue;
+    if ((h.scope || "school") !== "school") continue;
+    if (h.workingOverride) continue;
+    const applies = h.appliesTo || "everyone";
+    if (
+      applies === "staff_all" ||
+      applies === "staff_teaching" ||
+      applies === "staff_non_teaching"
+    ) {
+      continue; // staff-only — not a student holiday
+    }
+    const mode = h.mode || "one_off";
+    if (mode === "weekly") {
+      if (d < h.startsOn || d > h.endsOn) continue;
+      if ((h.exceptionDates ?? []).includes(d)) continue;
+      const wd = typeof h.weekday === "number" ? h.weekday : null;
+      if (wd == null) continue;
+      if (new Date(`${d}T12:00:00`).getDay() !== wd) continue;
+      return h;
+    }
     if (d >= h.startsOn && d <= h.endsOn) return h;
   }
   return null;
@@ -997,10 +1944,45 @@ export const BOARD_MODES: { value: BoardMode; label: string }[] = [
 ];
 
 export const HOLIDAY_KINDS: { value: HolidayKind; label: string }[] = [
-  { value: "national", label: "National" },
-  { value: "school", label: "School" },
+  { value: "gazetted", label: "Gazetted" },
+  { value: "national", label: "National (legacy)" },
+  { value: "restricted", label: "Restricted" },
+  { value: "school", label: "School-specific" },
   { value: "exam", label: "Exam / break" },
+  { value: "emergency", label: "Emergency closure" },
   { value: "other", label: "Other" },
+];
+
+export const HOLIDAY_SCOPES: { value: HolidayScope; label: string }[] = [
+  { value: "school", label: "School-wide" },
+  { value: "class_group", label: "Class group" },
+  { value: "class", label: "Specific class(es)" },
+];
+
+export const HOLIDAY_APPLIES_TO: {
+  value: HolidayAppliesTo;
+  label: string;
+}[] = [
+  { value: "everyone", label: "Students + all staff" },
+  { value: "students", label: "Students only" },
+  { value: "staff_all", label: "All staff only" },
+  { value: "staff_teaching", label: "Teachers only" },
+  { value: "staff_non_teaching", label: "Non-teaching only" },
+  { value: "students_and_teaching", label: "Students + teachers" },
+  {
+    value: "students_and_non_teaching",
+    label: "Students + non-teaching",
+  },
+];
+
+export const HOLIDAY_MODES: { value: HolidayMode; label: string }[] = [
+  { value: "one_off", label: "One-off date / range" },
+  { value: "weekly", label: "Recurring weekly" },
+];
+
+export const HOLIDAY_DAY_TYPES: { value: HolidayDayType; label: string }[] = [
+  { value: "full", label: "Full day" },
+  { value: "half", label: "Half day" },
 ];
 
 export const STAFF_STREAMS: { value: StaffStream; label: string }[] = [
@@ -1013,6 +1995,51 @@ export const STAFF_CATEGORIES: { value: StaffCategory; label: string }[] = [
   { value: "contract", label: "Contract" },
   { value: "part_time", label: "Part-time" },
 ];
+
+export const STAFF_JOB_TYPES: {
+  value: Exclude<StaffJobType, "">;
+  label: string;
+}[] = [
+  { value: "confirmed", label: "Confirmed" },
+  { value: "probation", label: "Probation" },
+  { value: "temporary", label: "Temporary" },
+  { value: "contract", label: "Contract" },
+];
+
+export const STAFF_GENDERS: { value: StaffGender; label: string }[] = [
+  { value: "M", label: "Male" },
+  { value: "F", label: "Female" },
+  { value: "O", label: "Other" },
+];
+
+export const STAFF_CASTE_CATEGORIES: {
+  value: Exclude<StaffCasteCategory, "">;
+  label: string;
+}[] = [
+  { value: "GENERAL", label: "General" },
+  { value: "OBC", label: "OBC" },
+  { value: "SC", label: "SC" },
+  { value: "ST", label: "ST" },
+  { value: "OTHER", label: "Other" },
+];
+
+export const STAFF_MARITAL: { value: StaffMaritalStatus; label: string }[] = [
+  { value: "single", label: "Single" },
+  { value: "married", label: "Married" },
+  { value: "widowed", label: "Widowed" },
+  { value: "other", label: "Other" },
+];
+
+export const STAFF_BLOOD_GROUPS = [
+  "A+",
+  "A-",
+  "B+",
+  "B-",
+  "AB+",
+  "AB-",
+  "O+",
+  "O-",
+] as const;
 
 export function ensureSubjectGroups(subjects: Subject[]): Subject[] {
   const list = subjects.map(normalizeSubject);

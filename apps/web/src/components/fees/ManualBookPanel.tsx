@@ -1,6 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { PaymentChannelSelect } from "@/components/accounts/PaymentChannelSelect";
+import {
+  decodeTenderChannel,
+  encodeTenderChannel,
+  tenderChannelLabel,
+} from "@/lib/paymentChannels";
 import {
   collectPayment,
   computeHouseholdDues,
@@ -21,9 +27,9 @@ import {
   type VoucherLine,
   type VoucherTender,
 } from "@/lib/fees";
-import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
+import { loadMasters, type MastersState } from "@/lib/masters";
 import { loadSis, type SisState, type SisStudent } from "@/lib/sis";
-import { StudentTypeBadge } from "@/components/students/StudentAvatar";
+import { StudentNameLabel } from "@/components/students/StudentAvatar";
 import { DueBreakupPicker } from "@/components/fees/DueBreakupPicker";
 
 function todayIso() {
@@ -33,6 +39,7 @@ function todayIso() {
 type TenderLine = {
   key: string;
   mode: TenderMode;
+  bankAccountId: string;
   amount: string;
   ref: string;
   instrumentDate: string;
@@ -40,16 +47,16 @@ type TenderLine = {
 };
 
 type TenderComposer = {
-  mode: TenderMode | "";
+  channel: string;
   ref: string;
   instrumentDate: string;
   bankName: string;
   amount: string;
 };
 
-function emptyComposer(mode: TenderMode | "" = ""): TenderComposer {
+function emptyComposer(channel = ""): TenderComposer {
   return {
-    mode,
+    channel,
     ref: "",
     instrumentDate: todayIso(),
     bankName: "",
@@ -64,11 +71,13 @@ function newTenderKey() {
 export function ManualBookPanel({
   tick,
   cashierName,
+  academicYearCode,
   onPosted,
   onOpenReceipt,
 }: {
   tick: number;
   cashierName: string;
+  academicYearCode: string;
   onPosted: (voucherId: string) => void;
   onOpenReceipt: (voucherId: string) => void;
 }) {
@@ -139,9 +148,10 @@ export function ManualBookPanel({
       searchFeeStudents(query, sis, masters, loadFees(), {
         classId,
         sectionId,
+        academicYearCode,
       }),
     );
-  }, [query, classId, sectionId, sis, masters, tick]);
+  }, [query, classId, sectionId, sis, masters, tick, academicYearCode]);
 
   const selectedStudent = useMemo(() => {
     if (!sis || !selectedId) return null;
@@ -177,7 +187,14 @@ export function ManualBookPanel({
   const matched =
     collectTotal > 0 && tenderSum === collectTotal && tenderSum > 0;
   const manualRef = formatManualBookRef(seriesCode, leaf);
-  const modeMeta = TENDER_MODES.find((m) => m.value === composer.mode);
+  const modeMeta = composer.channel
+    ? TENDER_MODES.find(
+        (m) => m.value === decodeTenderChannel(composer.channel).mode,
+      )
+    : undefined;
+  const composerMode = composer.channel
+    ? decodeTenderChannel(composer.channel).mode
+    : ("" as TenderMode | "");
   const hasUncleared = tenderLines.some((t) => t.mode === "cheque");
   const today = todayIso();
   const siblingCount = householdBundle.length;
@@ -195,11 +212,12 @@ export function ManualBookPanel({
       setError("Collection amount is already fully covered");
       return;
     }
-    if (!composer.mode) {
-      setError("Select a payment mode");
+    if (!composer.channel) {
+      setError("Select payment mode & account");
       return;
     }
-    const meta = TENDER_MODES.find((m) => m.value === composer.mode);
+    const { mode, bankId } = decodeTenderChannel(composer.channel);
+    const meta = TENDER_MODES.find((m) => m.value === mode);
     const amountPaise = Math.round((Number(composer.amount) || 0) * 100);
     if (amountPaise <= 0) {
       setError("Enter payment amount");
@@ -221,7 +239,8 @@ export function ManualBookPanel({
       ...prev,
       {
         key: newTenderKey(),
-        mode: composer.mode as TenderMode,
+        mode,
+        bankAccountId: bankId,
         amount: composer.amount,
         ref: composer.ref.trim(),
         instrumentDate: composer.instrumentDate || paperDate,
@@ -349,6 +368,7 @@ export function ManualBookPanel({
       ref: t.ref,
       instrumentDate: t.instrumentDate || paperDate,
       bankName: t.bankName,
+      bankAccountId: t.bankAccountId || undefined,
       realisation:
         t.mode === "cheque" ? "subject_to_clearance" : "cleared",
     }));
@@ -358,7 +378,7 @@ export function ManualBookPanel({
       lines,
       tenders,
       cashierName,
-      academicYearCode: DEFAULT_AY,
+      academicYearCode,
       collectionDate: paperDate,
       transactionDate: paperDate,
       source: "manual_book",
@@ -537,8 +557,7 @@ export function ManualBookPanel({
                       className="rounded-lg border border-[rgba(32,48,80,0.14)] bg-[rgba(32,48,80,0.03)] px-3 py-2 text-left hover:border-[rgba(197,160,40,0.45)] hover:bg-[rgba(197,160,40,0.1)]"
                     >
                       <div className="text-sm font-semibold text-[var(--brand-deep)]">
-                        <StudentTypeBadge type={h.student.studentType} />
-                        {h.student.fullName}
+                        <StudentNameLabel student={h.student} />
                       </div>
                       <div className="text-[11px] text-[var(--muted)]">
                         {h.classLabel} · {formatInr(h.balancePaise)}
@@ -710,8 +729,7 @@ export function ManualBookPanel({
                         />
                         <div className="min-w-0">
                           <div className="text-sm font-bold text-[var(--brand-deep)]">
-                            <StudentTypeBadge type={row.student.studentType} />
-                            {row.student.fullName}
+                            <StudentNameLabel student={row.student} />
                             {isSibling ? (
                               <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
                                 Sibling
@@ -840,7 +858,10 @@ export function ManualBookPanel({
                       <span className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-[var(--brand-gold)] text-[10px] font-bold text-[var(--brand-deep)]">
                         {i + 1}
                       </span>
-                      {tenderModeLabel(t.mode)} ·{" "}
+                      {tenderChannelLabel(
+                        encodeTenderChannel(t.mode, t.bankAccountId),
+                      )}{" "}
+                      ·{" "}
                       {formatInr(Math.round((Number(t.amount) || 0) * 100))}
                     </div>
                     <div className="mt-0.5 text-[11px] text-[var(--muted)]">
@@ -876,7 +897,7 @@ export function ManualBookPanel({
               <div className="text-xs font-extrabold uppercase tracking-[0.14em] text-[var(--brand-deep)]">
                 {tenderLines.length === 0 ? "Add payment" : "Add another"}
               </div>
-              {remainingPaise > 0 && composer.mode ? (
+              {remainingPaise > 0 && composer.channel ? (
                 <button
                   type="button"
                   className="rounded-full bg-[rgba(197,160,40,0.2)] px-2.5 py-0.5 text-[11px] font-bold text-[var(--brand-deep)]"
@@ -888,33 +909,27 @@ export function ManualBookPanel({
             </div>
 
             <div className="flex flex-col gap-2 lg:flex-row lg:items-end">
-              <label className="block min-w-0 flex-1 text-sm lg:max-w-[9rem]">
+              <label className="block min-w-0 flex-1 text-sm lg:max-w-[14rem]">
                 <span className="mb-1 block text-[11px] font-medium text-[var(--muted)]">
-                  Mode
+                  Mode & account
                 </span>
-                <select
+                <PaymentChannelSelect
                   className="field !py-1.5"
-                  value={composer.mode}
-                  onChange={(e) =>
+                  variant="tender"
+                  value={composer.channel}
+                  onChange={(channel) =>
                     patchComposer({
-                      mode: e.target.value as TenderMode | "",
+                      channel,
                       ref: "",
                       bankName: "",
                       amount: "",
                       instrumentDate: paperDate || todayIso(),
                     })
                   }
-                >
-                  <option value="">Select…</option>
-                  {TENDER_MODES.map((m) => (
-                    <option key={m.value} value={m.value}>
-                      {m.label}
-                    </option>
-                  ))}
-                </select>
+                />
               </label>
 
-              {composer.mode && modeMeta ? (
+              {composer.channel && modeMeta ? (
                 <>
                   {modeMeta.needsRef ? (
                     <label className="block min-w-0 flex-[1.2] text-sm">
@@ -934,7 +949,7 @@ export function ManualBookPanel({
                   {modeMeta.needsBank ? (
                     <label className="block min-w-0 flex-1 text-sm">
                       <span className="mb-1 block text-[11px] font-medium text-[var(--muted)]">
-                        Bank
+                        Instrument bank
                       </span>
                       <input
                         className="field !py-1.5"
@@ -992,7 +1007,7 @@ export function ManualBookPanel({
               ) : null}
             </div>
 
-            {composer.mode === "cheque" ? (
+            {composerMode === "cheque" ? (
               <p className="mt-2 rounded-lg bg-[rgba(197,160,40,0.2)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--brand-deep)]">
                 Cheque will be marked: realisation subject to clearance
               </p>

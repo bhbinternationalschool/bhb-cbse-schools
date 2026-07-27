@@ -18,7 +18,7 @@ import {
   createPaymentLink,
   whatsAppPaymentLinkUrl,
 } from "@/lib/payments";
-import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
+import { loadMasters, type MastersState } from "@/lib/masters";
 import {
   householdOf,
   householdWhatsApp,
@@ -28,7 +28,7 @@ import {
 } from "@/lib/sis";
 import { TENANT, type OverdueStage } from "@/lib/types";
 import { useDemoSession } from "@/components/shell/SessionContext";
-import { StudentTypeBadge } from "@/components/students/StudentAvatar";
+import { StudentNameLabel } from "@/components/students/StudentAvatar";
 import { FilterExportButtons } from "@/components/reports/FilterExportButtons";
 import { describeFilters } from "@/lib/reportExport";
 import { InstallmentPlanDialog } from "@/components/fees/InstallmentPlanDialog";
@@ -38,6 +38,14 @@ import {
   listPolicyHoldRows,
   type HoldCheck,
 } from "@/lib/holds";
+import {
+  composeParentMeetingInvite,
+  ensureFeeRecoveryTasksHydrated,
+  listOpenParentMeetings,
+  scheduleParentMeeting,
+  type FeeRecoveryMeeting,
+} from "@/lib/feeRecoveryTasks";
+import { openWaMe } from "@/lib/waMe";
 import type { HoldCode } from "@/lib/types";
 
 const STAGE_FILTERS: { value: "" | OverdueStage; label: string }[] = [
@@ -51,6 +59,7 @@ const STAGE_FILTERS: { value: "" | OverdueStage; label: string }[] = [
 
 export function DefaultersPlaybook() {
   const session = useDemoSession();
+  const ay = session.academicYearCode;
   const [sis, setSis] = useState<SisState | null>(null);
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [rows, setRows] = useState<LiveDefaulter[]>([]);
@@ -59,6 +68,10 @@ export function DefaultersPlaybook() {
   const [classId, setClassId] = useState("");
   const [stageFilter, setStageFilter] = useState<"" | OverdueStage>("");
   const [includeUpcoming, setIncludeUpcoming] = useState(false);
+  const [rosterMode, setRosterMode] = useState<"active" | "inactive">(
+    "active",
+  );
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
@@ -69,6 +82,7 @@ export function DefaultersPlaybook() {
     mode: "unhold" | "rehold";
     block: Extract<HoldCheck, { allowed: false }> | null;
   } | null>(null);
+  const [meetings, setMeetings] = useState<FeeRecoveryMeeting[]>([]);
 
   function refresh() {
     const s = loadSis();
@@ -76,11 +90,14 @@ export function DefaultersPlaybook() {
     const list = listLiveDefaulters({
       sis: s,
       masters: m,
+      academicYearCode: ay,
       includeUpcoming,
+      inactiveOnly: rosterMode === "inactive",
     });
     setSis(s);
     setMasters(m);
     setRows(list);
+    setMeetings(listOpenParentMeetings());
     setTick((t) => t + 1);
     setSelectedId((prev) => {
       if (prev && list.some((r) => r.studentId === prev)) return prev;
@@ -91,7 +108,15 @@ export function DefaultersPlaybook() {
   useEffect(() => {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [includeUpcoming]);
+  }, [includeUpcoming, rosterMode, ay]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    void (async () => {
+      await ensureFeeRecoveryTasksHydrated();
+      setMeetings(listOpenParentMeetings());
+    })();
+  }, []);
 
   const classOptions = useMemo(() => {
     if (!masters) return [];
@@ -167,7 +192,7 @@ export function DefaultersPlaybook() {
       classLabel: row.classLabel,
       dues,
       createdBy: session.fullName,
-      academicYearCode: row.academicYearCode || DEFAULT_AY,
+      academicYearCode: row.academicYearCode || ay,
       note: `Defaulter ${row.stageLabel}`,
     });
   }
@@ -238,6 +263,34 @@ export function DefaultersPlaybook() {
     if (withLink) refresh();
   }
 
+  function runReminderCampaign(withLink: boolean) {
+    const targets = filtered.filter((r) => selectedIds.has(r.studentId));
+    const list = targets.length > 0 ? targets : filtered.slice(0, 15);
+    if (list.length === 0) {
+      setError("No defaulters to remind");
+      return;
+    }
+    const ok = window.confirm(
+      `Open WhatsApp for ${list.length} student(s)${withLink ? " with pay links" : ""}? (browsers may block multiple tabs)`,
+    );
+    if (!ok) return;
+    let sent = 0;
+    for (const row of list) {
+      sendReminder(row, withLink);
+      sent += 1;
+    }
+    flash(`Reminder campaign · ${sent} message(s)`);
+  }
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   function onAction(actionId: string, row: LiveDefaulter) {
     setError(null);
     if (actionId === "paylink" || actionId === "remind") {
@@ -281,7 +334,39 @@ export function DefaultersPlaybook() {
       return;
     }
     if (actionId === "meeting") {
-      flash("Parent meeting task (coming soon)");
+      const mobile = guardianMobile(row);
+      const result = scheduleParentMeeting({
+        studentId: row.studentId,
+        householdId: row.householdId,
+        studentName: row.fullName,
+        classLabel: row.classLabel,
+        admissionNo: row.admissionNo,
+        amountPaise: row.overdueAmountPaise,
+        overdueDays: row.overdueDays,
+        mobile,
+        createdBy: session.fullName || "office",
+      });
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      const invite = composeParentMeetingInvite(result.meeting);
+      setMeetings(listOpenParentMeetings());
+      if (mobile && isValidMobile(mobile)) {
+        openWaMe(mobile, invite);
+        flash(
+          `Parent meeting ${result.meeting.scheduledOn} · WhatsApp opened`,
+        );
+      } else {
+        void navigator.clipboard.writeText(invite).then(
+          () =>
+            flash(
+              `Parent meeting ${result.meeting.scheduledOn} · invite copied (no mobile)`,
+            ),
+          () =>
+            flash(`Parent meeting scheduled for ${result.meeting.scheduledOn}`),
+        );
+      }
       return;
     }
   }
@@ -321,6 +406,18 @@ export function DefaultersPlaybook() {
         <p className="mt-3 rounded-lg bg-[#dc2626]/10 px-3 py-2 text-sm text-[#dc2626]">
           {error}
         </p>
+      ) : null}
+
+      {meetings.length > 0 ? (
+        <div className="mt-3 rounded-lg border border-[rgba(32,48,80,0.12)] bg-[rgba(248,248,240,0.9)] px-3 py-2 text-[12px] text-[var(--brand-deep)]">
+          <span className="font-semibold">
+            {meetings.length} parent meeting(s) scheduled
+          </span>
+          <span className="text-[var(--muted)]">
+            {" "}
+            · next {meetings[0]?.studentName} on {meetings[0]?.scheduledOn}
+          </span>
+        </div>
       ) : null}
       {notice ? (
         <p className="mt-3 rounded-lg bg-[rgba(32,48,80,0.06)] px-3 py-2 text-sm text-[var(--brand-deep)]">
@@ -408,11 +505,48 @@ export function DefaultersPlaybook() {
           />
           Include upcoming (not yet due)
         </label>
-        <div className="flex items-end pb-1 sm:col-span-4 lg:col-span-1">
+        <div className="flex flex-wrap items-end gap-2 pb-1 sm:col-span-4">
+          <div className="flex rounded-lg border border-[rgba(32,48,80,0.15)] p-0.5 text-xs font-semibold">
+            <button
+              type="button"
+              className={`rounded-md px-3 py-1.5 ${
+                rosterMode === "active"
+                  ? "bg-[var(--brand-deep)] text-white"
+                  : "text-[var(--muted)]"
+              }`}
+              onClick={() => setRosterMode("active")}
+            >
+              Active dues
+            </button>
+            <button
+              type="button"
+              className={`rounded-md px-3 py-1.5 ${
+                rosterMode === "inactive"
+                  ? "bg-[var(--brand-deep)] text-white"
+                  : "text-[var(--muted)]"
+              }`}
+              onClick={() => setRosterMode("inactive")}
+            >
+              Inactive / TC dues
+            </button>
+          </div>
+          <button
+            type="button"
+            className="rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-1.5 text-xs font-semibold"
+            onClick={() => runReminderCampaign(true)}
+          >
+            Campaign WhatsApp
+            {selectedIds.size > 0 ? ` (${selectedIds.size})` : " (filtered)"}
+          </button>
           <FilterExportButtons
-            title="Fee defaulters"
-            subtitle={`${TENANT.shortName} · ${DEFAULT_AY}`}
+            title={
+              rosterMode === "inactive"
+                ? "Inactive student dues"
+                : "Fee defaulters"
+            }
+            subtitle={`${TENANT.shortName} · ${ay}`}
             filterNote={describeFilters([
+              rosterMode === "inactive" ? "Inactive roster" : "Active roster",
               classOptions.find((c) => c.id === classId)?.name
                 ? `Class ${classOptions.find((c) => c.id === classId)?.name}`
                 : "",
@@ -420,7 +554,11 @@ export function DefaultersPlaybook() {
               includeUpcoming ? "Incl. upcoming" : "",
               query.trim() ? `Search “${query.trim()}”` : "",
             ])}
-            fileBaseName="fee_defaulters"
+            fileBaseName={
+              rosterMode === "inactive"
+                ? "inactive_fee_dues"
+                : "fee_defaulters"
+            }
             columns={[
               { key: "admissionNo", header: "Adm no", width: 1 },
               { key: "fullName", header: "Name", width: 1.5 },
@@ -454,12 +592,16 @@ export function DefaultersPlaybook() {
       <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_1.1fr]">
         <section>
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">
-            Live ledger
+            {rosterMode === "inactive"
+              ? "Inactive / left — open dues"
+              : "Live ledger"}
           </h2>
           {filtered.length === 0 ? (
             <p className="mt-3 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-4 py-10 text-center text-sm text-[var(--muted)]">
               {rows.length === 0
-                ? "No overdue open dues on the Fee Take ledger. Collect or wait for due dates."
+                ? rosterMode === "inactive"
+                  ? "No open dues on inactive students."
+                  : "No overdue open dues on the Fee Take ledger. Collect or wait for due dates."
                 : "No students match these filters."}
             </p>
           ) : (
@@ -467,11 +609,19 @@ export function DefaultersPlaybook() {
               {filtered.map((d) => {
                 const active = d.studentId === selected?.studentId;
                 return (
-                  <li key={d.studentId}>
+                  <li key={d.studentId} className="flex items-stretch">
+                    <label className="flex items-center px-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(d.studentId)}
+                        onChange={() => toggleSelect(d.studentId)}
+                        aria-label={`Select ${d.fullName}`}
+                      />
+                    </label>
                     <button
                       type="button"
                       onClick={() => setSelectedId(d.studentId)}
-                      className={`flex w-full items-center gap-3 px-4 py-3 text-left transition ${
+                      className={`flex min-w-0 flex-1 items-center gap-3 px-2 py-3 text-left transition ${
                         active
                           ? "bg-[rgba(32,48,80,0.06)]"
                           : "hover:bg-[rgba(32,48,80,0.03)]"
@@ -479,8 +629,7 @@ export function DefaultersPlaybook() {
                     >
                       <div className="min-w-0 flex-1">
                         <div className="truncate font-medium text-[var(--ink)]">
-                          <StudentTypeBadge type={d.student.studentType} />
-                          {d.fullName}{" "}
+                          <StudentNameLabel student={d.student} />{" "}
                           <span className="font-normal text-[var(--muted)]">
                             {d.classLabel}
                           </span>

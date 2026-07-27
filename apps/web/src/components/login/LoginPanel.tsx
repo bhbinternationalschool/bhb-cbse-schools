@@ -5,6 +5,12 @@ import { useState, useTransition } from "react";
 import Image from "next/image";
 import type { Persona } from "@/lib/types";
 import { TENANT } from "@/lib/types";
+import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import {
+  createBrowserSupabase,
+  isDemoAuth,
+  isSupabaseConfigured,
+} from "@/lib/supabase/client";
 
 const PERSONAS: {
   id: Persona;
@@ -18,7 +24,7 @@ const PERSONAS: {
     label: "Staff",
     headline: "Office & teaching portal",
     button: "Sign in to workspace",
-    hint: "Email or mobile + password / OTP",
+    hint: "Super-admin email, Staff login, or leave blank for demo",
   },
   {
     id: "parent",
@@ -50,6 +56,8 @@ export function LoginPanel() {
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const active = PERSONAS.find((p) => p.id === persona)!;
+  const demoAuth = isDemoAuth();
+  const supabaseReady = isSupabaseConfigured();
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -59,19 +67,163 @@ export function LoginPanel() {
       return;
     }
     startTransition(async () => {
+      const { currentAcademicYearCode, loadMasters } = await import(
+        "@/lib/masters"
+      );
+      const academicYearCode = currentAcademicYearCode();
+
+      // Production staff path: Supabase Auth → mint app cookie
+      if (!demoAuth && persona === "staff") {
+        if (!supabaseReady) {
+          setError("Supabase is not configured. Set URL and anon key in .env.");
+          return;
+        }
+        const email = identifier.trim();
+        const password = secret;
+        if (!email || !password) {
+          setError("Email and password are required.");
+          return;
+        }
+        const sb = createBrowserSupabase();
+        if (!sb) {
+          setError("Could not start auth client.");
+          return;
+        }
+        const { data, error: authErr } = await sb.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (authErr || !data.session?.access_token) {
+          setError(authErr?.message || "Sign-in failed. Check email and password.");
+          return;
+        }
+        const res = await fetch("/api/auth/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            accessToken: data.session.access_token,
+            academicYearCode,
+          }),
+        });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => null)) as {
+            error?: string;
+          } | null;
+          setError(body?.error || "Could not open school session.");
+          await sb.auth.signOut();
+          return;
+        }
+        router.push(routeForPersona(persona));
+        router.refresh();
+        return;
+      }
+
+      const payload: Record<string, string> = {
+        persona,
+        academicYearCode,
+      };
+
+      if (persona === "staff" && identifier.trim()) {
+        const { matchStaffLogin } = await import("@/lib/staffResolve");
+        const { superAdminRoleCode, superAdminDemoProfile } = await import(
+          "@/lib/superAdmin"
+        );
+        const masters = loadMasters();
+        const hit = matchStaffLogin(masters, identifier, secret);
+        if (hit) {
+          const des = masters.designations.find((d) => d.id === hit.designationId);
+          payload.fullName = hit.fullName;
+          payload.roleCode = des?.code || des?.name || "staff";
+          payload.email = hit.email || hit.loginUsername || hit.empCode;
+          payload.staffId = hit.id;
+          const owner = superAdminRoleCode(payload.email);
+          if (owner) payload.roleCode = owner;
+        } else if (demoAuth) {
+          const sa = superAdminDemoProfile(identifier);
+          if (!sa) {
+            setError(
+              "No matching staff login. Use emp code / username / email and password from Staff → Login, super-admin email, or leave blank for demo.",
+            );
+            return;
+          }
+          payload.fullName = sa.fullName;
+          payload.roleCode = sa.roleCode;
+          payload.email = sa.email;
+        } else {
+          setError("No matching staff login.");
+          return;
+        }
+      } else if (persona === "staff") {
+        if (!demoAuth) {
+          setError("Email and password are required.");
+          return;
+        }
+        const { superAdminRoleCode } = await import("@/lib/superAdmin");
+        const directorEmail = identifier.trim();
+        const owner = superAdminRoleCode(directorEmail);
+        if (owner && directorEmail) {
+          payload.fullName = "Director";
+          payload.roleCode = owner;
+          payload.email = directorEmail;
+        } else {
+        // Blank demo login → bind Principal from roster when present
+        const { resolvePrincipal } = await import("@/lib/staffResolve");
+        const masters = loadMasters();
+        const prin = resolvePrincipal(masters);
+        if (prin) {
+          const des = masters.designations.find(
+            (d) => d.id === prin.designationId,
+          );
+          payload.fullName = prin.fullName;
+          payload.roleCode = "principal";
+          payload.email =
+            prin.email ||
+            prin.loginUsername ||
+            prin.empCode ||
+            payload.email ||
+            "";
+          payload.staffId = prin.id;
+          if (des?.code) payload.roleCode = "principal";
+        }
+        }
+      } else if (persona === "parent") {
+        const { loadSis } = await import("@/lib/sis");
+        const { resolveParentHousehold } = await import("@/lib/parentPortal");
+        const sis = loadSis();
+        const hh = resolveParentHousehold(sis, {
+          mobile: identifier.trim(),
+          guardianName: identifier.trim().length >= 3 ? identifier.trim() : "",
+        });
+        if (hh) {
+          payload.householdId = hh.id;
+          payload.fullName = hh.guardianName || "Parent";
+          payload.roleCode = "parent";
+        } else if (!demoAuth) {
+          setError("No household found for this mobile.");
+          return;
+        }
+      }
+
       const res = await fetch("/api/auth/demo", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ persona }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
-        setError("Could not sign in. Try again.");
+        const body = (await res.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        setError(body?.error || "Could not sign in. Try again.");
         return;
       }
       router.push(routeForPersona(persona));
       router.refresh();
     });
   }
+
+  const staffHint = !demoAuth
+    ? "School email + password (Supabase Auth). Profile must be linked to your user."
+    : "Super-admin: director@bhbinternational.school (any password). Or Staff → Login credentials. Blank = demo principal.";
 
   return (
     <div className="glass panel-enter w-full max-w-md rounded-2xl p-7 sm:p-8">
@@ -95,47 +247,32 @@ export function LoginPanel() {
       <p className="font-tagline mt-1 text-sm">{TENANT.tagline}</p>
       <p className="mt-2 text-sm text-[var(--muted)]">{active.headline}</p>
 
-      <div
-        className="mt-6 flex gap-1 border-b border-[rgba(11,61,74,0.12)]"
-        role="tablist"
+      <ModuleTabs
         aria-label="Who are you"
-      >
-        {PERSONAS.map((p) => {
-          const selected = p.id === persona;
-          return (
-            <button
-              key={p.id}
-              type="button"
-              role="tab"
-              aria-selected={selected}
-              onClick={() => {
-                setPersona(p.id);
-                setError(null);
-                setSecret("");
-              }}
-              className={`relative flex-1 px-2 pb-3 text-sm font-medium transition ${
-                selected
-                  ? "text-[var(--brand-deep)]"
-                  : "text-[var(--muted)] hover:text-[var(--brand-deep)]"
-              }`}
-            >
-              {p.label}
-              <span
-                className={`absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-[var(--brand-gold)] transition ${
-                  selected ? "opacity-100" : "opacity-0"
-                }`}
-              />
-            </button>
-          );
-        })}
-      </div>
+        size="lg"
+        value={persona}
+        onChange={(id) => {
+          setPersona(id as Persona);
+          setError(null);
+          setSecret("");
+        }}
+        items={[
+          { id: "staff", label: "Staff", tone: "navy" },
+          { id: "parent", label: "Parent", tone: "teal" },
+          { id: "field", label: "Field", tone: "amber" },
+        ]}
+      />
 
       <form onSubmit={onSubmit} className="mt-5 space-y-3">
         {persona !== "field" ? (
           <>
             <label className="block text-sm">
               <span className="mb-1.5 block text-[var(--muted)]">
-                {persona === "parent" ? "Mobile" : "Mobile / Email"}
+                {persona === "parent"
+                  ? "Mobile"
+                  : !demoAuth
+                    ? "Email"
+                    : "Mobile / Email"}
               </span>
               <input
                 value={identifier}
@@ -143,15 +280,22 @@ export function LoginPanel() {
                 placeholder={
                   persona === "parent"
                     ? "98xxxxxxxx"
-                    : "you@bhbinternational.school"
+                    : !demoAuth
+                      ? "you@school.edu"
+                      : "emp code / username / email"
                 }
                 className="w-full rounded-xl border border-[rgba(11,61,74,0.18)] bg-white/80 px-3.5 py-2.5 outline-none ring-[var(--ring)] focus:ring-2"
                 autoComplete="username"
+                required={!demoAuth && persona === "staff"}
               />
             </label>
             <label className="block text-sm">
               <span className="mb-1.5 block text-[var(--muted)]">
-                {persona === "parent" ? "OTP" : "OTP / Password"}
+                {persona === "parent"
+                  ? "OTP"
+                  : !demoAuth
+                    ? "Password"
+                    : "OTP / Password"}
               </span>
               <input
                 type={persona === "staff" ? "password" : "text"}
@@ -162,6 +306,7 @@ export function LoginPanel() {
                 autoComplete={
                   persona === "staff" ? "current-password" : "one-time-code"
                 }
+                required={!demoAuth && persona === "staff"}
               />
             </label>
           </>
@@ -181,7 +326,14 @@ export function LoginPanel() {
           </label>
         )}
 
-        <p className="text-xs text-[var(--muted)]">{active.hint} · Demo mode accepts any value</p>
+        <p className="text-xs text-[var(--muted)]">
+          {persona === "staff" ? staffHint : active.hint}
+          {persona === "staff" && demoAuth
+            ? " · Leave blank for demo principal"
+            : persona !== "staff"
+              ? " · Demo mode accepts any value"
+              : null}
+        </p>
 
         {error ? (
           <p className="text-sm text-[var(--danger)]" role="alert">
@@ -200,6 +352,7 @@ export function LoginPanel() {
 
       <p className="mt-5 text-center text-xs text-[var(--muted)]">
         {TENANT.name} · Secure login · DPDP
+        {!demoAuth ? " · Auth live" : " · Demo auth"}
       </p>
     </div>
   );

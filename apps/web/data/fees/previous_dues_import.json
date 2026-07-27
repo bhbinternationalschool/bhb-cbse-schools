@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "importedAt": "2026-07-25T10:40:00.284Z",
+  "sourceFile": "Student Wise Fee Details (2).xlsx",
+  "summary": {
+    "totalRows": 236,
+    "withPending": 1,
+    "totalPendingRupees": 19950
+  },
+  "stats": {
+    "created": 0,
+    "updated": 0,
+    "cleared": 0,
+    "skipped": 235,
+    "errors": 1
+  },
+  "matched": [],
+  "errors": [
+    "No student for admission BHB-96/2023 (AARAV SINGH)"
+  ]
+}

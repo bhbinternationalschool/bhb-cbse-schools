@@ -1,10 +1,24 @@
+import { assertModulePermission } from "@/lib/rbacGuard";
 import type { FoundationSlice } from "@/lib/foundationMasters";
 import { ensureFoundationOnMasters } from "@/lib/foundationMasters";
 import { defaultFoundationSlice } from "@/lib/foundationMasters";
+import { ensureFoundationFeeStructure202627 } from "@/lib/feeStructureFoundation202627";
+import { ensurePrimaryFeeStructure202627 } from "@/lib/feeStructurePrimary202627";
+import { ensureMiddleFeeStructure202627 } from "@/lib/feeStructureMiddle202627";
+import { ensureSecondaryFeeStructure202627 } from "@/lib/feeStructureSecondary202627";
+import {
+  buildTeacherRosterOntoMasters,
+  migrateDemoStaffToTeacherRoster,
+} from "@/lib/teacherRosterSeed";
 import {
   ncfCartOfferingsReady,
   seedNcfCartOfferings,
 } from "@/lib/ncfCartSeed";
+import {
+  getSchoolMirrorSync,
+  scheduleClientSchoolMirrorSync,
+  setMirrorSlice,
+} from "@/lib/schoolDataMirror";
 
 export type Campus = {
   id: string;
@@ -130,24 +144,22 @@ export type Section = {
   isActive: boolean;
 };
 
-export type FeeHeadCategory =
-  | "tuition"
-  | "admission"
-  | "exam"
-  | "transport"
-  | "annual"
-  | "development"
-  | "lab"
-  | "computer"
-  | "library"
-  | "misc"
-  | "late_fee"
-  | "certificate";
+/** Fee head category code (masters-managed; not a fixed enum). */
+export type FeeHeadCategory = string;
+
+export type FeeHeadCategoryDef = {
+  id: string;
+  code: string;
+  label: string;
+  isActive: boolean;
+  sortOrder: number;
+};
 
 export type FeeFrequency =
   | "one_time"
   | "monthly"
   | "quarterly"
+  | "half_yearly"
   | "annual"
   | "as_needed";
 
@@ -156,9 +168,15 @@ export type FeeHead = {
   code: string;
   nameEn: string;
   nameHi?: string;
+  /** References FeeHeadCategoryDef.code */
   category: FeeHeadCategory;
   frequency: FeeFrequency;
   isOptional: boolean;
+  /**
+   * Refundable heads (e.g. security / caution deposit) can be returned on TC/exit.
+   * Default false = non-refundable fee.
+   */
+  isRefundable: boolean;
   isActive: boolean;
   sortOrder: number;
 };
@@ -324,6 +342,8 @@ export type MastersState = {
   classes: SchoolClass[];
   sections: Section[];
   feeHeads: FeeHead[];
+  /** Editable fee-head categories (tuition, deposit, custom…). */
+  feeHeadCategories: FeeHeadCategoryDef[];
   feeGroups: FeeGroup[];
   feeStructureLines: FeeStructureLine[];
   installments: FeeInstallment[];
@@ -368,6 +388,133 @@ export function normalizeMidYearFeePolicy(
   };
 }
 
+const FEE_STUDENT_TYPE_ORDER: Record<FeeStudentType, number> = {
+  NEW: 0,
+  PROMOTE: 1,
+  MID_YEAR: 2,
+  RTE: 3,
+};
+
+/**
+ * Rank a fee group by the earliest class band it covers
+ * (Pre-Primary → … → Senior). Empty classIds (“all”) ranks last.
+ */
+export function feeGroupClassBandRank(
+  state: MastersState,
+  group: FeeGroup,
+): number {
+  if (!group.classIds?.length) return CLASS_GROUPS.length;
+  let min = CLASS_GROUPS.length;
+  for (const id of group.classIds) {
+    const cls = state.classes.find((c) => c.id === id);
+    if (!cls) continue;
+    const code = cls.groupCode ?? classGroupCodeForName(cls.name);
+    const idx = CLASS_GROUPS.findIndex((g) => g.code === code);
+    if (idx >= 0 && idx < min) min = idx;
+  }
+  return min;
+}
+
+/** All class-band indexes a fee group covers (ascending). Empty = all classes. */
+export function feeGroupClassBandRanks(
+  state: MastersState,
+  group: FeeGroup,
+): number[] {
+  if (!group.classIds?.length) return [];
+  const found = new Set<number>();
+  for (const id of group.classIds) {
+    const cls = state.classes.find((c) => c.id === id);
+    if (!cls) continue;
+    const code = cls.groupCode ?? classGroupCodeForName(cls.name);
+    const idx = CLASS_GROUPS.findIndex((g) => g.code === code);
+    if (idx >= 0) found.add(idx);
+  }
+  return [...found].sort((a, b) => a - b);
+}
+
+/** Sort fee groups: class band → student type → name. */
+export function sortFeeGroupsByClassBand(
+  state: MastersState,
+  groups: FeeGroup[] = state.feeGroups,
+): FeeGroup[] {
+  return groups.slice().sort((a, b) => {
+    const ra = feeGroupClassBandRank(state, a);
+    const rb = feeGroupClassBandRank(state, b);
+    if (ra !== rb) return ra - rb;
+    const ta = FEE_STUDENT_TYPE_ORDER[a.studentType] ?? 99;
+    const tb = FEE_STUDENT_TYPE_ORDER[b.studentType] ?? 99;
+    if (ta !== tb) return ta - tb;
+    return a.name.localeCompare(b.name) || a.code.localeCompare(b.code);
+  });
+}
+
+/** Class ids ordered by CLASS_GROUPS then class sortOrder. */
+export function sortClassIdsByClassBand(
+  state: MastersState,
+  classIds: string[],
+): string[] {
+  const order = CLASS_GROUPS.flatMap((g) =>
+    classesInGroup(state.classes, g.code).map((c) => c.id),
+  );
+  const rank = new Map(order.map((id, i) => [id, i]));
+  return classIds.slice().sort((a, b) => {
+    const ia = rank.get(a) ?? 9999;
+    const ib = rank.get(b) ?? 9999;
+    return ia - ib;
+  });
+}
+
+/** Label for bands a fee group covers (e.g. "Nur–UKG · I–V"). */
+export function feeGroupClassBandLabel(
+  state: MastersState,
+  group: FeeGroup,
+): string {
+  const ranks = feeGroupClassBandRanks(state, group);
+  if (!ranks.length) return "All classes";
+  return ranks
+    .map((i) => CLASS_GROUPS[i]?.shortLabel ?? CLASS_GROUPS[i]?.label)
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/**
+ * Bucket fee groups into every CLASS_GROUPS section (Pre-Primary → Senior),
+ * then an “All classes” bucket. A group appears once under its earliest band.
+ * Empty bands are still returned so the UI shows full serial order.
+ */
+export function groupFeeGroupsByClassBand(
+  state: MastersState,
+  groups: FeeGroup[] = state.feeGroups,
+): { key: string; label: string; shortLabel: string; groups: FeeGroup[] }[] {
+  const sorted = sortFeeGroupsByClassBand(state, groups);
+  const sections = CLASS_GROUPS.map((g) => ({
+    key: g.code,
+    label: g.label,
+    shortLabel: g.shortLabel,
+    groups: [] as FeeGroup[],
+  }));
+  const allSection = {
+    key: "ALL",
+    label: "All classes",
+    shortLabel: "All",
+    groups: [] as FeeGroup[],
+  };
+
+  for (const group of sorted) {
+    const ranks = feeGroupClassBandRanks(state, group);
+    if (!ranks.length) {
+      allSection.groups.push(group);
+      continue;
+    }
+    const earliest = ranks[0]!;
+    sections[earliest]?.groups.push(group);
+  }
+
+  return allSection.groups.length
+    ? [...sections, allSection]
+    : sections;
+}
+
 const STORAGE_KEY = "bhb_masters_v5";
 const LEGACY_KEYS = [
   "bhb_masters_v4",
@@ -376,6 +523,63 @@ const LEGACY_KEYS = [
   "bhb_masters_v1",
 ];
 export const DEFAULT_AY = "2025-26";
+
+export type SessionYearOption = {
+  code: string;
+  label: string;
+  status: "current" | "closed" | "upcoming";
+};
+
+/**
+ * Active “current” academic year from Masters (Academics tab).
+ * Falls back to DEFAULT_AY when masters are unavailable (SSR / empty).
+ */
+export function currentAcademicYearCode(
+  state?: MastersState | null,
+): string {
+  const m =
+    state ??
+    (typeof window !== "undefined" ? loadMasters() : null);
+  if (!m?.academicYears?.length) return DEFAULT_AY;
+  const cur = m.academicYears.find(
+    (y) => y.status === "current" && y.isActive !== false,
+  );
+  return cur?.code ?? DEFAULT_AY;
+}
+
+/** Years for header Session selector and import pickers — from Masters. */
+export function listSessionYearOptions(
+  state?: MastersState | null,
+): SessionYearOption[] {
+  const m =
+    state ??
+    (typeof window !== "undefined" ? loadMasters() : null);
+  if (!m?.academicYears?.length) {
+    return [{ code: DEFAULT_AY, label: DEFAULT_AY, status: "current" }];
+  }
+  return m.academicYears
+    .filter((y) => y.isActive !== false)
+    .slice()
+    .sort((a, b) => b.code.localeCompare(a.code))
+    .map((y) => ({
+      code: y.code,
+      label: y.label || y.code,
+      status: y.status,
+    }));
+}
+
+/** Push workspace header/session cookie to match Masters current (or any code). */
+export async function syncWorkspaceAcademicYear(
+  academicYearCode: string,
+): Promise<boolean> {
+  if (typeof window === "undefined") return false;
+  const res = await fetch("/api/session/ay", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ academicYearCode }),
+  });
+  return res.ok;
+}
 
 /** Academic session months April → March (Indian school year). */
 export const SESSION_MONTHS: {
@@ -507,6 +711,23 @@ export function formatInr(paise: number): string {
   }).format(paise / 100);
 }
 
+/** Compact INR for dashboard KPIs (₹1.2L, ₹3.4Cr). */
+export function formatInrCompact(paise: number): string {
+  const rupees = paise / 100;
+  if (!Number.isFinite(rupees)) return "₹0";
+  const abs = Math.abs(rupees);
+  if (abs >= 1_00_00_000) {
+    return `₹${(rupees / 1_00_00_000).toFixed(2)} Cr`;
+  }
+  if (abs >= 1_00_000) {
+    return `₹${(rupees / 1_00_000).toFixed(2)} L`;
+  }
+  if (abs >= 10_000) {
+    return `₹${(rupees / 1_000).toFixed(1)}k`;
+  }
+  return formatInr(paise);
+}
+
 export function parseInrToPaise(raw: string): number {
   const n = Number(String(raw).replace(/[₹,\s]/g, ""));
   if (!Number.isFinite(n) || n < 0) return 0;
@@ -542,6 +763,7 @@ function buildFeeHeads(): FeeHead[] {
       category: "tuition",
       frequency: "monthly",
       isOptional: false,
+      isRefundable: false,
       isActive: true,
       sortOrder: 10,
     },
@@ -552,6 +774,7 @@ function buildFeeHeads(): FeeHead[] {
       category: "admission",
       frequency: "one_time",
       isOptional: false,
+      isRefundable: false,
       isActive: true,
       sortOrder: 20,
     },
@@ -562,6 +785,7 @@ function buildFeeHeads(): FeeHead[] {
       category: "annual",
       frequency: "annual",
       isOptional: false,
+      isRefundable: false,
       isActive: true,
       sortOrder: 30,
     },
@@ -572,6 +796,7 @@ function buildFeeHeads(): FeeHead[] {
       category: "exam",
       frequency: "as_needed",
       isOptional: false,
+      isRefundable: false,
       isActive: true,
       sortOrder: 40,
     },
@@ -582,6 +807,7 @@ function buildFeeHeads(): FeeHead[] {
       category: "transport",
       frequency: "monthly",
       isOptional: true,
+      isRefundable: false,
       isActive: true,
       sortOrder: 50,
     },
@@ -592,6 +818,7 @@ function buildFeeHeads(): FeeHead[] {
       category: "computer",
       frequency: "monthly",
       isOptional: true,
+      isRefundable: false,
       isActive: true,
       sortOrder: 60,
     },
@@ -602,6 +829,7 @@ function buildFeeHeads(): FeeHead[] {
       category: "lab",
       frequency: "annual",
       isOptional: true,
+      isRefundable: false,
       isActive: true,
       sortOrder: 70,
     },
@@ -612,6 +840,7 @@ function buildFeeHeads(): FeeHead[] {
       category: "library",
       frequency: "annual",
       isOptional: true,
+      isRefundable: false,
       isActive: true,
       sortOrder: 80,
     },
@@ -622,8 +851,20 @@ function buildFeeHeads(): FeeHead[] {
       category: "development",
       frequency: "annual",
       isOptional: false,
+      isRefundable: false,
       isActive: true,
       sortOrder: 90,
+    },
+    {
+      code: "SECURITY",
+      nameEn: "Security Deposit",
+      nameHi: "सुरक्षा जमा",
+      category: "deposit",
+      frequency: "one_time",
+      isOptional: false,
+      isRefundable: true,
+      isActive: true,
+      sortOrder: 95,
     },
     {
       code: "LATE",
@@ -632,6 +873,7 @@ function buildFeeHeads(): FeeHead[] {
       category: "late_fee",
       frequency: "as_needed",
       isOptional: false,
+      isRefundable: false,
       isActive: true,
       sortOrder: 100,
     },
@@ -642,6 +884,7 @@ function buildFeeHeads(): FeeHead[] {
       category: "certificate",
       frequency: "as_needed",
       isOptional: true,
+      isRefundable: false,
       isActive: true,
       sortOrder: 110,
     },
@@ -780,11 +1023,15 @@ export function defaultMasters(): MastersState {
       tuitionM: number;
       exam: number;
       development: number;
+      security?: number;
     },
   ) {
     const lines: [string, number, string][] = [];
     if (group.studentType === "NEW" && amounts.admission) {
       lines.push([byCode("ADMISSION").id, amounts.admission, byInst("APR").id]);
+    }
+    if (group.studentType === "NEW" && amounts.security) {
+      lines.push([byCode("SECURITY").id, amounts.security, byInst("APR").id]);
     }
     lines.push(
       [byCode("ANNUAL").id, amounts.annual, byInst("APR").id],
@@ -809,6 +1056,7 @@ export function defaultMasters(): MastersState {
   const byGroup = (code: string) => feeGroups.find((g) => g.code === code)!;
   addBundle(byGroup("NEW_PRIMARY"), {
     admission: 5000,
+    security: 2000,
     annual: 3500,
     tuitionM: 1500,
     exam: 800,
@@ -822,6 +1070,7 @@ export function defaultMasters(): MastersState {
   });
   addBundle(byGroup("NEW_MIDDLE"), {
     admission: 6000,
+    security: 2500,
     annual: 4000,
     tuitionM: 1850,
     exam: 1000,
@@ -835,6 +1084,7 @@ export function defaultMasters(): MastersState {
   });
   addBundle(byGroup("NEW_SEC"), {
     admission: 8000,
+    security: 3000,
     annual: 5000,
     tuitionM: 2350,
     exam: 1500,
@@ -848,6 +1098,7 @@ export function defaultMasters(): MastersState {
   });
   addBundle(byGroup("NEW_SR"), {
     admission: 10000,
+    security: 5000,
     annual: 6000,
     tuitionM: 3000,
     exam: 2000,
@@ -868,7 +1119,8 @@ export function defaultMasters(): MastersState {
       mode: "flat",
       value: R(100),
       feeHeadId: byCode("LATE").id,
-      feeHeadIds: [byCode("LATE").id],
+      /** Empty = apply to all overdue heads; LATE id is posting head only */
+      feeHeadIds: [],
       maxAmountPaise: R(500),
       isActive: true,
     },
@@ -1010,7 +1262,7 @@ export function defaultMasters(): MastersState {
     },
   ];
 
-  return {
+  const base: MastersState = {
     version: 2,
     campuses: [
       {
@@ -1025,6 +1277,7 @@ export function defaultMasters(): MastersState {
     classes,
     sections,
     feeHeads,
+    feeHeadCategories: defaultFeeHeadCategories(),
     feeGroups,
     feeStructureLines,
     installments,
@@ -1037,6 +1290,119 @@ export function defaultMasters(): MastersState {
     concessions,
     concessionGrants: [],
     ...defaultFoundationSlice(classes),
+  };
+  // Real Teacher.xlsx roster (not EMP-001 demo placeholders)
+  return buildTeacherRosterOntoMasters({ ...base, staff: [] });
+}
+
+export function defaultFeeHeadCategories(): FeeHeadCategoryDef[] {
+  const seed: { code: string; label: string }[] = [
+    { code: "tuition", label: "Tuition" },
+    { code: "admission", label: "Admission" },
+    { code: "exam", label: "Exam" },
+    { code: "transport", label: "Transport" },
+    { code: "annual", label: "Annual" },
+    { code: "development", label: "Development" },
+    { code: "lab", label: "Lab" },
+    { code: "computer", label: "Computer" },
+    { code: "library", label: "Library" },
+    { code: "deposit", label: "Deposit / security" },
+    { code: "late_fee", label: "Late fee" },
+    { code: "certificate", label: "Certificate" },
+    { code: "misc", label: "Misc" },
+  ];
+  return seed.map((s, i) => ({
+    id: `fhc_${s.code}`,
+    code: s.code,
+    label: s.label,
+    isActive: true,
+    sortOrder: (i + 1) * 10,
+  }));
+}
+
+/** Active categories for dropdowns; seeds defaults when empty. */
+export function resolveFeeHeadCategories(
+  state: MastersState | null | undefined,
+): FeeHeadCategoryDef[] {
+  const list =
+    state?.feeHeadCategories?.length
+      ? state.feeHeadCategories.map(normalizeFeeHeadCategory)
+      : defaultFeeHeadCategories();
+  return list
+    .slice()
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label));
+}
+
+export function normalizeFeeHeadCategory(
+  c: Partial<FeeHeadCategoryDef> & { id: string },
+): FeeHeadCategoryDef {
+  return {
+    id: c.id,
+    code: (c.code ?? "").trim().toLowerCase().replace(/\s+/g, "_") || "misc",
+    label: (c.label ?? "").trim() || c.code || "Category",
+    isActive: c.isActive !== false,
+    sortOrder: c.sortOrder ?? 0,
+  };
+}
+
+export function feeHeadCategoryLabel(
+  state: MastersState | null | undefined,
+  code: string,
+): string {
+  const hit = resolveFeeHeadCategories(state).find(
+    (c) => c.code === code || c.code === code?.toLowerCase(),
+  );
+  return hit?.label ?? code ?? "—";
+}
+
+/** @deprecated Use resolveFeeHeadCategories(state) — kept for older imports. */
+export const FEE_CATEGORIES: { value: string; label: string }[] =
+  defaultFeeHeadCategories().map((c) => ({
+    value: c.code,
+    label: c.label,
+  }));
+
+export function checkFeeHeadCategoryRemoval(
+  state: MastersState,
+  categoryId: string,
+): RemovalCheck {
+  const cat = resolveFeeHeadCategories(state).find((c) => c.id === categoryId);
+  const label = cat?.label ?? "this category";
+  const usedN = (state.feeHeads ?? []).filter(
+    (h) => h.category === cat?.code,
+  ).length;
+  if (usedN > 0) {
+    return {
+      canRemove: false,
+      blockers: [`${usedN} fee head(s)`],
+      suggestion: `Linked to ${usedN} fee head(s). Reassign those heads first, or use Inactivate.`,
+      confirmMessage: `Remove category “${label}”?`,
+    };
+  }
+  return {
+    canRemove: true,
+    blockers: [],
+    suggestion: "Unused categories can be removed.",
+    confirmMessage: `Remove category “${label}”?`,
+  };
+}
+
+export function removeFeeHeadCategory(
+  state: MastersState,
+  categoryId: string,
+): { ok: true; state: MastersState } | { ok: false; reason: string } {
+  const check = checkFeeHeadCategoryRemoval(state, categoryId);
+  if (!check.canRemove) {
+    return { ok: false, reason: check.suggestion };
+  }
+  return {
+    ok: true,
+    state: {
+      ...state,
+      feeHeadCategories: resolveFeeHeadCategories(state).filter(
+        (c) => c.id !== categoryId,
+      ),
+    },
   };
 }
 
@@ -1080,38 +1446,12 @@ export function resolveConcessionKinds(
   return kinds;
 }
 
+/** Slim roster mirror of SIS — starts empty for live schools (import or add students). */
 function buildDemoStudents(
-  classes: SchoolClass[],
-  sections: Section[],
+  _classes: SchoolClass[],
+  _sections: Section[],
 ): DemoStudent[] {
-  const pick = (name: string) => classes.find((c) => c.name === name);
-  const samples: { className: string; kids: string[] }[] = [
-    { className: "VI", kids: ["Rahul Singh", "Kabir Ali"] },
-    { className: "VIII", kids: ["Meera Joshi", "Arjun Verma"] },
-    { className: "III", kids: ["Ananya Singh", "Isha Patel", "Dev Sharma", "Sara Khan"] },
-    { className: "X", kids: ["Rohan Das", "Priya Nair"] },
-  ];
-  const out: DemoStudent[] = [];
-  let n = 100;
-  for (const s of samples) {
-    const cls = pick(s.className);
-    if (!cls) continue;
-    const secs = sections.filter((sec) => sec.classId === cls.id);
-    s.kids.forEach((fullName, i) => {
-      const sec = secs[i % Math.max(secs.length, 1)] ?? secs[0];
-      if (!sec) return;
-      n += 1;
-      out.push({
-        id: id("stu"),
-        admissionNo: `BHB-2025-${n}`,
-        fullName,
-        classId: cls.id,
-        sectionId: sec.id,
-        status: "active",
-      });
-    });
-  }
-  return out;
+  return [];
 }
 
 /** Demo name → class label (for SIS rematch when class ids drift). */
@@ -1132,7 +1472,7 @@ export const DEMO_STUDENT_CLASS_BY_NAME: Record<string, string> = {
 /** Names that share one demo household (siblings). */
 export const DEMO_SIBLING_NAMES = ["Rahul Singh", "Ananya Singh"] as const;
 
-/** Rebuild masters.students against current class/section ids. */
+/** Rebuild masters.students against current class/section ids (empty when no SIS sync yet). */
 export function rebuildDemoRoster(masters: MastersState): MastersState {
   return {
     ...masters,
@@ -1141,20 +1481,23 @@ export function rebuildDemoRoster(masters: MastersState): MastersState {
 }
 
 /**
- * Fix student class/section ids that no longer exist on masters
- * (e.g. after masters re-seed). Returns same reference if nothing changed.
+ * Fix student class/section ids that no longer exist on masters.
+ * Does not invent demo people — drops broken slim rows or leaves empty.
  */
 export function ensureStudentClassLinks(masters: MastersState): MastersState {
   const classIds = new Set(masters.classes.map((c) => c.id));
-  const broken = (masters.students ?? []).some(
+  const students = masters.students ?? [];
+  if (students.length === 0) return masters;
+
+  const valid = students.filter(
     (s) =>
-      !classIds.has(s.classId) ||
-      !masters.sections.some(
+      classIds.has(s.classId) &&
+      masters.sections.some(
         (sec) => sec.id === s.sectionId && sec.classId === s.classId,
       ),
   );
-  if (!broken && (masters.students?.length ?? 0) > 0) return masters;
-  const next = rebuildDemoRoster(masters);
+  if (valid.length === students.length) return masters;
+  const next = { ...masters, students: valid };
   if (typeof window !== "undefined") saveMasters(next);
   return next;
 }
@@ -1278,6 +1621,76 @@ function ensureClassRoster(state: MastersState): MastersState {
   return next;
 }
 
+/** Normalize legacy fee heads (isRefundable + deposit category). */
+export function normalizeFeeHead(
+  h: Partial<FeeHead> & { id: string },
+): FeeHead {
+  const code = (h.code ?? "").toUpperCase();
+  const looksLikeDeposit =
+    h.category === "deposit" ||
+    code === "SECURITY" ||
+    code === "CAUTION" ||
+    /SECURITY|CAUTION|DEPOSIT/.test(code);
+  const category: FeeHeadCategory = looksLikeDeposit
+    ? "deposit"
+    : ((h.category as FeeHeadCategory) ?? "misc");
+  const inferredRefundable = looksLikeDeposit;
+  return {
+    id: h.id,
+    code: h.code ?? "",
+    nameEn: h.nameEn ?? "",
+    nameHi: h.nameHi,
+    category,
+    frequency: (h.frequency as FeeFrequency) ?? "one_time",
+    isOptional: !!h.isOptional,
+    isRefundable: h.isRefundable == null ? inferredRefundable : !!h.isRefundable,
+    isActive: h.isActive !== false,
+    sortOrder: h.sortOrder ?? 0,
+  };
+}
+
+function ensureFeeHeads(state: MastersState): MastersState {
+  let heads = (state.feeHeads ?? []).map((h) => normalizeFeeHead(h));
+  if (!heads.some((h) => h.code.toUpperCase() === "SECURITY")) {
+    const seed = buildFeeHeads().find((h) => h.code === "SECURITY");
+    if (seed) {
+      heads = [
+        ...heads,
+        {
+          ...seed,
+          id: id("fh"),
+          sortOrder:
+            Math.max(0, ...heads.map((h) => h.sortOrder)) + 5,
+        },
+      ];
+    }
+  }
+  const categories = resolveFeeHeadCategories(state);
+  // Ensure every head category exists in the catalog
+  const codes = new Set(categories.map((c) => c.code));
+  let nextCats = [...categories];
+  for (const h of heads) {
+    const code = (h.category || "misc").toLowerCase();
+    if (!codes.has(code)) {
+      codes.add(code);
+      nextCats.push(
+        normalizeFeeHeadCategory({
+          id: id("fhc"),
+          code,
+          label: code.replace(/_/g, " "),
+          isActive: true,
+          sortOrder: (nextCats.length + 1) * 10,
+        }),
+      );
+    }
+  }
+  return {
+    ...state,
+    feeHeads: heads,
+    feeHeadCategories: nextCats,
+  };
+}
+
 function ensureFeeSetup(state: MastersState): MastersState {
   let next = { ...state, version: 2 as const };
   if (!next.feeGroups?.length || !next.feeStructureLines?.length) {
@@ -1291,6 +1704,7 @@ function ensureFeeSetup(state: MastersState): MastersState {
     };
   }
   next = ensureClassRoster(next);
+  next = ensureFeeHeads(next);
   if (!next.lateFeeRules?.length) {
     const full = defaultMasters();
     next = { ...next, lateFeeRules: full.lateFeeRules };
@@ -1316,12 +1730,7 @@ function ensureFeeSetup(state: MastersState): MastersState {
     }),
   };
   next = ensureAprToMarInstallments(next, DEFAULT_AY);
-  if (!next.students?.length) {
-    next = {
-      ...next,
-      students: buildDemoStudents(next.classes, next.sections),
-    };
-  }
+  if (!next.students) next = { ...next, students: [] };
   if (!next.specialFees) next = { ...next, specialFees: [] };
   if (!next.specialFeeAssignments) {
     next = { ...next, specialFeeAssignments: [] };
@@ -1347,11 +1756,13 @@ function ensureFeeSetup(state: MastersState): MastersState {
     ...next,
     feeGroups: (next.feeGroups ?? []).map(normalizeFeeGroup),
   };
+  next = repairFeeGroupClassIds(next);
   next = {
     ...next,
     concessionKinds: resolveConcessionKinds(next),
   };
   next = ensureFoundationOnMasters(next);
+  next = migrateDemoStaffToTeacherRoster(next);
   // Auto-seed IX–X / XI–XII NCF cart offerings when class maps are thin
   if (!ncfCartOfferingsReady(next)) {
     const seeded = seedNcfCartOfferings({
@@ -1365,17 +1776,28 @@ function ensureFeeSetup(state: MastersState): MastersState {
       classSubjects: seeded.classSubjects,
     };
   }
+  next = ensureFoundationFeeStructure202627(next);
+  next = ensurePrimaryFeeStructure202627(next);
+  next = ensureMiddleFeeStructure202627(next);
+  next = ensureSecondaryFeeStructure202627(next);
   return next;
 }
 
 export function loadMasters(): MastersState {
-  if (typeof window === "undefined") return defaultMasters();
+  if (typeof window === "undefined") {
+    const mirrored = getSchoolMirrorSync().masters as MastersState | null;
+    if (mirrored && Array.isArray(mirrored.classes)) {
+      return ensureFeeSetup(mirrored);
+    }
+    return defaultMasters();
+  }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = ensureFeeSetup(JSON.parse(raw) as MastersState);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
-      return parsed;
+      const migrated = migrateDemoStaffToTeacherRoster(parsed);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
+      return migrated;
     }
     for (const key of LEGACY_KEYS) {
       const legacy = localStorage.getItem(key);
@@ -1395,8 +1817,29 @@ export function loadMasters(): MastersState {
 }
 
 export function saveMasters(state: MastersState) {
-  if (typeof window === "undefined") return;
+  if (!assertModulePermission("masters", "edit", "saveMasters")) return;
+  persistMastersClient(state);
+}
+
+/** System imports (fee discounts seed) — bypass RBAC / closed-session guards. */
+export function persistMastersSystemImport(state: MastersState) {
+  if (typeof window === "undefined") {
+    setMirrorSlice("masters", state);
+    return;
+  }
+  persistMastersClient(state);
+}
+
+function persistMastersClient(state: MastersState) {
+  if (typeof window === "undefined") {
+    setMirrorSlice("masters", state);
+    return;
+  }
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, version: 2 }));
+  scheduleClientSchoolMirrorSync({ masters: state });
+  void import("@/lib/staffPersistence").then(({ scheduleStaffSync }) => {
+    scheduleStaffSync(state);
+  });
 }
 
 export function newId(prefix: string) {
@@ -1686,6 +2129,73 @@ export function checkStructureLineRemoval(
   };
 }
 
+/**
+ * Clear every structure line on a fee group (all months / class scopes).
+ * Allowed only when no active students are assigned to the group.
+ */
+export function checkClearFeeGroupStructure(
+  studentCount: number,
+  lineCount: number,
+): RemovalCheck {
+  if (lineCount <= 0) {
+    return {
+      canRemove: false,
+      blockers: ["No fee lines"],
+      suggestion: "This group has no fee amounts to clear.",
+      confirmMessage: "Nothing to clear.",
+    };
+  }
+  if (studentCount > 0) {
+    return {
+      canRemove: false,
+      blockers: [`${studentCount} student(s) on this group`],
+      suggestion: `Cannot clear — ${studentCount} student(s) are on this fee group. Move or unassign them first (or they will lose billed heads).`,
+      confirmMessage: "Clear blocked",
+    };
+  }
+  return {
+    canRemove: true,
+    blockers: [],
+    suggestion:
+      "No students are on this fee group, so clearing is safe. Publishes status will also reset.",
+    confirmMessage: `Remove all ${lineCount} fee amount line(s) from this group?`,
+  };
+}
+
+/** Remove all fee structure lines for a group; resets publish flag. */
+export function clearFeeGroupStructure(
+  state: MastersState,
+  feeGroupId: string,
+  studentCount: number,
+): { ok: true; state: MastersState; removed: number } | { ok: false; reason: string } {
+  const lineCount = state.feeStructureLines.filter(
+    (l) => l.feeGroupId === feeGroupId,
+  ).length;
+  const check = checkClearFeeGroupStructure(studentCount, lineCount);
+  if (!check.canRemove) {
+    return { ok: false, reason: check.suggestion };
+  }
+  return {
+    ok: true,
+    removed: lineCount,
+    state: {
+      ...state,
+      feeStructureLines: state.feeStructureLines.filter(
+        (l) => l.feeGroupId !== feeGroupId,
+      ),
+      feeGroups: state.feeGroups.map((g) =>
+        g.id === feeGroupId
+          ? {
+              ...g,
+              structurePublishedAt: null,
+              structurePublishedBy: "",
+            }
+          : g,
+      ),
+    },
+  };
+}
+
 export function checkAssignmentRemoval(studentCount: number): RemovalCheck {
   if (studentCount > 0) {
     return {
@@ -1920,7 +2430,7 @@ export function normalizeConcessionRule(
     code: c.code ?? "",
     name: c.name ?? "",
     kind,
-    academicYearCode: c.academicYearCode ?? DEFAULT_AY,
+    academicYearCode: CONCESSION_ALL_SESSIONS,
     mode,
     value:
       mode === "percent"
@@ -2006,6 +2516,135 @@ export function concessionApprovalHint(rule: ConcessionRule): string {
   return `Auto ≤ ${formatInr(rule.autoApproveMaxPaise)} · else Principal`;
 }
 
+/** Concession policies apply across every academic session. */
+export const CONCESSION_ALL_SESSIONS = "*";
+
+export function normalizeAcademicYearCode(code: string): string {
+  const t = (code || "").trim().replace(/\s+/g, "").replace(/–/g, "-");
+  const full = t.match(/^(20\d{2})-(20\d{2})$/);
+  if (full) return `${full[1]}-${full[2]!.slice(2)}`;
+  return t;
+}
+
+export function isAllSessionsConcession(rule: ConcessionRule): boolean {
+  const scope = (rule.academicYearCode || "").trim();
+  return !scope || scope === CONCESSION_ALL_SESSIONS;
+}
+
+/** One row per policy code — grants aggregate across duplicate session copies. */
+export function listConcessionPolicies(
+  masters: MastersState,
+  options?: { preferAy?: string },
+): ConcessionRule[] {
+  const all = masters.concessions ?? [];
+  const preferAy = options?.preferAy;
+  const byCode = new Map<string, ConcessionRule>();
+
+  const rank = (rule: ConcessionRule): number => {
+    let score = 0;
+    if (isAllSessionsConcession(rule)) score += 200;
+    if (
+      preferAy &&
+      normalizeAcademicYearCode(rule.academicYearCode) ===
+        normalizeAcademicYearCode(preferAy)
+    ) {
+      score += 100;
+    }
+    if (rule.isActive) score += 50;
+    return score;
+  };
+
+  for (const rule of all) {
+    const key = (rule.code || "").trim().toUpperCase();
+    if (!key) continue;
+    const prev = byCode.get(key);
+    if (!prev || rank(rule) > rank(prev)) byCode.set(key, rule);
+  }
+
+  return [...byCode.values()].sort((a, b) => {
+    if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+export function concessionIdsForCode(
+  masters: MastersState,
+  code: string,
+): string[] {
+  const key = code.trim().toUpperCase();
+  return (masters.concessions ?? [])
+    .filter((c) => c.code.trim().toUpperCase() === key)
+    .map((c) => c.id);
+}
+
+export function grantsForConcessionPolicy(
+  masters: MastersState,
+  rule: ConcessionRule,
+): ConcessionGrant[] {
+  const ids = new Set(concessionIdsForCode(masters, rule.code));
+  return (masters.concessionGrants ?? []).filter((g) => ids.has(g.concessionId));
+}
+
+export function resolveConcessionRule(
+  masters: MastersState,
+  concessionId: string,
+): ConcessionRule | undefined {
+  return masters.concessions.find((c) => c.id === concessionId);
+}
+
+/** Resolve grant → active policy (same code if an old session id was stored). */
+export function resolveConcessionRuleForGrant(
+  masters: MastersState,
+  grant: ConcessionGrant,
+  options?: { preferAy?: string },
+): ConcessionRule | undefined {
+  const direct = resolveConcessionRule(masters, grant.concessionId);
+  if (direct?.isActive) return direct;
+  const code = direct?.code ?? masters.concessions.find((c) => c.id === grant.concessionId)?.code;
+  if (!code) return direct;
+  return listConcessionPolicies(masters, options).find(
+    (c) => c.code.toUpperCase() === code.toUpperCase() && c.isActive,
+  );
+}
+
+/**
+ * Fee group for dues: current session structure wins over a stale group id
+ * from a previous academic year.
+ */
+export function resolveStudentFeeGroupId(
+  masters: MastersState,
+  student: {
+    feeGroupId?: string | null;
+    studentType: FeeStudentType;
+    classId: string;
+    academicYearCode?: string;
+  },
+): string | null {
+  const ay = student.academicYearCode || DEFAULT_AY;
+  const assigned = student.feeGroupId
+    ? masters.feeGroups.find((g) => g.id === student.feeGroupId)
+    : null;
+  if (
+    assigned?.isActive &&
+    assigned.academicYearCode === ay &&
+    (assigned.classIds.length === 0 ||
+      !student.classId ||
+      assigned.classIds.includes(student.classId))
+  ) {
+    return assigned.id;
+  }
+  return (
+    resolveFeeGroupId(masters, {
+      studentType: student.studentType,
+      classId: student.classId,
+      academicYearCode: ay,
+      preferPublished: true,
+    }) ??
+    student.feeGroupId ??
+    null
+  );
+}
+
 export function normalizeFeeGroup(
   g: Partial<FeeGroup> & { id: string },
 ): FeeGroup {
@@ -2020,6 +2659,130 @@ export function normalizeFeeGroup(
     structurePublishedAt: g.structurePublishedAt ?? null,
     structurePublishedBy: g.structurePublishedBy ?? "",
   };
+}
+
+/**
+ * Infer class names from fee-group code/name when stored classIds
+ * no longer match the live class roster (re-seed / ID churn).
+ */
+export function inferFeeGroupClassNames(group: FeeGroup): string[] | null {
+  const code = (group.code || "").toUpperCase();
+  const name = (group.name || "").toLowerCase();
+
+  if (
+    code.includes("SR") ||
+    /xi\s*[–-]\s*xii|senior/.test(name) ||
+    code.includes("SENIOR")
+  ) {
+    return ["XI", "XII"];
+  }
+  if (
+    code.includes("SEC") ||
+    /ix\s*[–-]\s*x\b|secondary/.test(name)
+  ) {
+    return ["IX", "X"];
+  }
+  if (code.includes("MIDDLE") || /vi\s*[–-]\s*viii/.test(name)) {
+    return ["VI", "VII", "VIII"];
+  }
+  if (
+    code.includes("PRE") ||
+    /nur\s*[–-]\s*ukg|pre-?primary/.test(name)
+  ) {
+    return ["Nursery", "LKG", "UKG"];
+  }
+  if (
+    code.includes("PRIMARY") ||
+    /nursery\s*[–-]\s*v\b|nur\s*[–-]\s*v\b|i\s*[–-]\s*v\b/.test(name)
+  ) {
+    return ["Nursery", "LKG", "UKG", "I", "II", "III", "IV", "V"];
+  }
+  return null;
+}
+
+/**
+ * Remap orphaned fee-group classIds onto the current class roster
+ * and keep them in CLASS_GROUPS serial order.
+ */
+export function repairFeeGroupClassIds(state: MastersState): MastersState {
+  const byId = new Map(state.classes.map((c) => [c.id, c]));
+  const byName = new Map(
+    state.classes.map((c) => [c.name.trim().toLowerCase(), c]),
+  );
+
+  let changed = false;
+  const feeGroups = state.feeGroups.map((g) => {
+    const resolved = g.classIds.filter((id) => byId.has(id));
+    if (resolved.length === g.classIds.length && g.classIds.length > 0) {
+      const sorted = sortClassIdsByClassBand(state, resolved);
+      if (sorted.join("\0") !== g.classIds.join("\0")) {
+        changed = true;
+        return { ...g, classIds: sorted };
+      }
+      return g;
+    }
+    if (g.classIds.length === 0) return g;
+
+    const names = inferFeeGroupClassNames(g);
+    if (names?.length) {
+      const nextIds = names
+        .map((n) => byName.get(n.toLowerCase())?.id)
+        .filter((id): id is string => !!id);
+      if (nextIds.length) {
+        changed = true;
+        return {
+          ...g,
+          classIds: sortClassIdsByClassBand(state, nextIds),
+        };
+      }
+    }
+
+    if (resolved.length !== g.classIds.length) {
+      changed = true;
+      return {
+        ...g,
+        classIds: sortClassIdsByClassBand(state, resolved),
+      };
+    }
+    return g;
+  });
+
+  if (!changed) return state;
+
+  // Remap structure-line class overrides when class ids were remapped
+  const idMap = new Map<string, string>();
+  for (let i = 0; i < state.feeGroups.length; i++) {
+    const prev = state.feeGroups[i]!;
+    const next = feeGroups[i]!;
+    if (prev.classIds.length !== next.classIds.length) continue;
+    // Best-effort: map by position after sort is unreliable; map via names
+    const names = inferFeeGroupClassNames(next);
+    if (!names) continue;
+    for (let j = 0; j < prev.classIds.length; j++) {
+      const oldId = prev.classIds[j]!;
+      if (byId.has(oldId)) continue;
+      // try match old orphan to a name in the inferred set by index in unsorted —
+      // instead map orphan → current class when counts match seed patterns
+    }
+    // Build orphan→current from inferred names if lengths equal
+    if (prev.classIds.length === names.length) {
+      for (let j = 0; j < prev.classIds.length; j++) {
+        const oldId = prev.classIds[j]!;
+        const newId = byName.get(names[j]!.toLowerCase())?.id;
+        if (newId && !byId.has(oldId)) idMap.set(oldId, newId);
+      }
+    }
+  }
+
+  const feeStructureLines =
+    idMap.size === 0
+      ? state.feeStructureLines
+      : state.feeStructureLines.map((l) => {
+          if (!l.classId || !idMap.has(l.classId)) return l;
+          return { ...l, classId: idMap.get(l.classId)! };
+        });
+
+  return { ...state, feeGroups, feeStructureLines };
 }
 
 /**
@@ -2105,35 +2868,75 @@ export function classesForFeeGroup(
   state: MastersState,
   group: FeeGroup,
 ): SchoolClass[] {
-  const active = state.classes
-    .filter((c) => c.isActive)
-    .sort((a, b) => a.sortOrder - b.sortOrder);
-  if (group.classIds.length === 0) return active;
-  return active.filter((c) => group.classIds.includes(c.id));
+  const active = state.classes.filter((c) => c.isActive);
+  const pool =
+    group.classIds.length === 0
+      ? active
+      : active.filter((c) => group.classIds.includes(c.id));
+  const orderedIds = sortClassIdsByClassBand(
+    state,
+    pool.map((c) => c.id),
+  );
+  const byId = new Map(pool.map((c) => [c.id, c]));
+  return orderedIds
+    .map((id) => byId.get(id))
+    .filter((c): c is SchoolClass => !!c);
 }
-
-export const FEE_CATEGORIES: { value: FeeHeadCategory; label: string }[] = [
-  { value: "tuition", label: "Tuition" },
-  { value: "admission", label: "Admission" },
-  { value: "exam", label: "Exam" },
-  { value: "transport", label: "Transport" },
-  { value: "annual", label: "Annual" },
-  { value: "development", label: "Development" },
-  { value: "lab", label: "Lab" },
-  { value: "computer", label: "Computer" },
-  { value: "library", label: "Library" },
-  { value: "late_fee", label: "Late fee" },
-  { value: "certificate", label: "Certificate" },
-  { value: "misc", label: "Misc" },
-];
 
 export const FEE_FREQUENCIES: { value: FeeFrequency; label: string }[] = [
   { value: "one_time", label: "One-time" },
   { value: "monthly", label: "Monthly" },
   { value: "quarterly", label: "Quarterly" },
+  { value: "half_yearly", label: "Half-yearly" },
   { value: "annual", label: "Annual" },
   { value: "as_needed", label: "As needed" },
 ];
+
+/**
+ * Which session month codes (APR…MAR) a fee head should bill on
+ * when spreading / “copy to months” by frequency.
+ * Empty = keep only the source month (as_needed).
+ */
+export function installmentCodesForFeeFrequency(
+  frequency: FeeFrequency | string | undefined | null,
+): string[] {
+  switch (frequency) {
+    case "monthly":
+      return SESSION_MONTHS.map((m) => m.code);
+    case "quarterly":
+      return ["APR", "JUL", "OCT", "JAN"];
+    case "half_yearly":
+      return ["APR", "OCT"];
+    case "annual":
+    case "one_time":
+      return ["APR"];
+    case "as_needed":
+      return [];
+    default:
+      return SESSION_MONTHS.map((m) => m.code);
+  }
+}
+
+export function feeFrequencyScheduleLabel(
+  frequency: FeeFrequency | string | undefined | null,
+): string {
+  switch (frequency) {
+    case "monthly":
+      return "all 12 months";
+    case "quarterly":
+      return "Apr · Jul · Oct · Jan";
+    case "half_yearly":
+      return "Apr · Oct";
+    case "annual":
+      return "April only (annual)";
+    case "one_time":
+      return "April only (one-time)";
+    case "as_needed":
+      return "this month only";
+    default:
+      return "scheduled months";
+  }
+}
 
 export const STUDENT_TYPES: { value: FeeStudentType; label: string }[] = [
   { value: "NEW", label: "New admission" },
@@ -2223,6 +3026,90 @@ export function resolveFeeGroupId(
   return null;
 }
 
+/**
+ * Copy fee groups + structure lines + Apr–Mar installments from one AY
+ * onto another when the target year has no groups yet (for arrears transfer).
+ */
+export function cloneFeeSetupToAcademicYear(
+  state: MastersState,
+  fromAy: string,
+  toAy: string,
+): MastersState {
+  if (fromAy === toAy) return state;
+  const hasTarget = state.feeGroups.some(
+    (g) => g.isActive && g.academicYearCode === toAy,
+  );
+  if (hasTarget) return state;
+
+  let next = ensureAprToMarInstallments(state, toAy);
+  const sourceInstallments = new Map(
+    next.installments
+      .filter((i) => i.academicYearCode === fromAy)
+      .map((i) => [i.code, i] as const),
+  );
+  next = {
+    ...next,
+    installments: next.installments.map((i) => {
+      if (i.academicYearCode !== toAy) return i;
+      const source = sourceInstallments.get(i.code);
+      if (!source) return i;
+      const sourceDay = source.dueOn.match(/-(\d{2})$/)?.[1];
+      return {
+        ...i,
+        isActive: source.isActive,
+        dueOn: sourceDay
+          ? i.dueOn.replace(/-\d{2}$/, `-${sourceDay}`)
+          : i.dueOn,
+      };
+    }),
+  };
+  const sourceGroups = next.feeGroups.filter(
+    (g) => g.isActive && g.academicYearCode === fromAy,
+  );
+  if (!sourceGroups.length) return next;
+
+  const idMap = new Map<string, string>();
+  const newGroups: FeeGroup[] = sourceGroups.map((g) => {
+    const nid = id("fg");
+    idMap.set(g.id, nid);
+    return {
+      ...g,
+      id: nid,
+      academicYearCode: toAy,
+      structurePublishedAt: null,
+      structurePublishedBy: "",
+    };
+  });
+
+  const newLines: FeeStructureLine[] = next.feeStructureLines
+    .filter((l) => idMap.has(l.feeGroupId))
+    .map((l) => {
+      const oldInst = l.installmentId
+        ? next.installments.find((i) => i.id === l.installmentId)
+        : null;
+      let newInstId = l.installmentId;
+      if (oldInst) {
+        const match = next.installments.find(
+          (i) =>
+            i.academicYearCode === toAy && i.code === oldInst.code,
+        );
+        newInstId = match?.id ?? null;
+      }
+      return {
+        ...l,
+        id: id("fsl"),
+        feeGroupId: idMap.get(l.feeGroupId)!,
+        installmentId: newInstId,
+      };
+    });
+
+  return {
+    ...next,
+    feeGroups: [...next.feeGroups, ...newGroups],
+    feeStructureLines: [...next.feeStructureLines, ...newLines],
+  };
+}
+
 export function isTransportFeeHead(head: {
   category?: string;
   code?: string;
@@ -2270,7 +3157,10 @@ export function shouldBillMidYearLine(input: {
   const freq = input.feeHead?.frequency;
   if (
     policy.includeOneTimeBeforeJoin &&
-    (freq === "one_time" || freq === "annual" || freq === "as_needed")
+    (freq === "one_time" ||
+      freq === "annual" ||
+      freq === "half_yearly" ||
+      freq === "as_needed")
   ) {
     return true;
   }

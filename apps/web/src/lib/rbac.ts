@@ -1,0 +1,1034 @@
+/**
+ * Advanced RBAC — module × action × scope.
+ * Demo store: localStorage `bhb_rbac_v1` (separate from MastersState).
+ */
+
+import type { MastersState } from "@/lib/masters";
+import type { StaffRecord } from "@/lib/foundationMasters";
+import { canAccessModuleHref } from "@/lib/moduleRegistry";
+import { getSessionActor } from "@/lib/sessionActor";
+import { assertSessionWritable } from "@/lib/sessionWriteGuard";
+import { isProtectedSuperAdminEmail } from "@/lib/superAdmin";
+
+export type RbacModule =
+  | "home"
+  | "masters"
+  | "students"
+  | "admissions"
+  | "staff"
+  | "store"
+  | "purchase"
+  | "transport"
+  | "accounts"
+  | "trust"
+  | "fees"
+  | "attendance"
+  | "homework"
+  | "timetable"
+  | "ptm"
+  | "student_leave"
+  | "vault"
+  | "rte"
+  | "payroll"
+  | "exams"
+  | "certificates"
+  | "compliance"
+  | "notices"
+  | "news"
+  | "gallery"
+  | "notifications"
+  | "settings"
+  | "policies";
+
+export type RbacAction =
+  | "view"
+  | "create"
+  | "edit"
+  | "delete"
+  | "void"
+  | "approve"
+  | "export"
+  | "unlock"
+  | "impersonate";
+
+export type PermissionGrant = {
+  module: RbacModule;
+  actions: RbacAction[];
+};
+
+export type RoleScope = {
+  campusIds: string[];
+  classIds: string[];
+  departmentIds: string[];
+};
+
+export type RbacRole = {
+  id: string;
+  code: string;
+  name: string;
+  isBuiltIn: boolean;
+  isActive: boolean;
+  /** Create/edit requests need another role to approve */
+  makerChecker: boolean;
+  permissions: PermissionGrant[];
+  note: string;
+};
+
+export type UserRoleAssignment = {
+  id: string;
+  staffId: string;
+  roleId: string;
+  isPrimary: boolean;
+  scope: RoleScope;
+  /** ISO date (YYYY-MM-DD); empty = no expiry */
+  expiresOn: string;
+  note: string;
+};
+
+export type RbacAuditEntry = {
+  id: string;
+  at: string;
+  by: string;
+  action: string;
+  detail: string;
+};
+
+export type RbacState = {
+  version: 1;
+  roles: RbacRole[];
+  assignments: UserRoleAssignment[];
+  audit: RbacAuditEntry[];
+};
+
+export type SessionLike = {
+  roleCode: string;
+  staffId?: string;
+  householdId?: string;
+  email?: string;
+  fullName: string;
+  persona?: string;
+};
+
+const STORAGE_KEY = "bhb_rbac_v1";
+
+export const RBAC_MODULES: {
+  id: RbacModule;
+  label: string;
+  href?: string;
+}[] = [
+  { id: "home", label: "Home", href: "/home" },
+  { id: "masters", label: "Masters", href: "/masters" },
+  { id: "students", label: "Students", href: "/students" },
+  { id: "admissions", label: "Admissions", href: "/admissions" },
+  { id: "staff", label: "Staff", href: "/staff" },
+  { id: "store", label: "Store / inventory", href: "/store" },
+  { id: "purchase", label: "Purchase · PO · GRN", href: "/store?tab=purchase" },
+  { id: "transport", label: "Transport", href: "/transport" },
+  { id: "accounts", label: "Accounts", href: "/accounts" },
+  { id: "trust", label: "Trust · Construction", href: "/trust" },
+  { id: "fees", label: "Fees", href: "/fees" },
+  { id: "attendance", label: "Attendance", href: "/attendance" },
+  { id: "homework", label: "Homework & Diary", href: "/homework" },
+  { id: "timetable", label: "Timetable", href: "/timetable" },
+  { id: "ptm", label: "PTM", href: "/ptm" },
+  { id: "student_leave", label: "Student leave", href: "/attendance?tab=leave" },
+  { id: "vault", label: "Document vault", href: "/vault" },
+  { id: "rte", label: "RTE / EWS", href: "/admissions?tab=rte" },
+  { id: "payroll", label: "Payroll", href: "/payroll" },
+  { id: "exams", label: "Exams", href: "/exams" },
+  { id: "certificates", label: "Certificates", href: "/certificates" },
+  { id: "compliance", label: "Compliance / UDISE" },
+  { id: "notices", label: "Notices / circulars", href: "/comms?tab=notices" },
+  { id: "news", label: "News", href: "/comms?tab=news" },
+  { id: "gallery", label: "Gallery", href: "/comms?tab=gallery" },
+  { id: "notifications", label: "Notifications", href: "/comms?tab=inbox" },
+  { id: "settings", label: "Settings / RBAC" },
+  { id: "policies", label: "Policies (leave / holiday)" },
+];
+
+export const RBAC_ACTIONS: { id: RbacAction; label: string }[] = [
+  { id: "view", label: "View" },
+  { id: "create", label: "Create" },
+  { id: "edit", label: "Edit" },
+  { id: "delete", label: "Delete" },
+  { id: "void", label: "Void" },
+  { id: "approve", label: "Approve" },
+  { id: "export", label: "Export" },
+  { id: "unlock", label: "Unlock" },
+  { id: "impersonate", label: "Impersonate" },
+];
+
+const ALL_ACTIONS: RbacAction[] = RBAC_ACTIONS.map((a) => a.id);
+
+function nid(prefix: string) {
+  return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/** Local staff resolve — avoids circular import with staffResolve.ts */
+function resolveStaffForRbac(
+  session: { staffId?: string; email?: string; fullName: string },
+  masters: MastersState,
+): StaffRecord | null {
+  const roster = masters.staff ?? [];
+  if (session.staffId) {
+    const byId = roster.find((s) => s.id === session.staffId);
+    if (byId) return byId;
+  }
+  const email = (session.email || "").trim().toLowerCase();
+  if (email) {
+    const byEmail = roster.find((s) => {
+      const e = (s.email || "").trim().toLowerCase();
+      const u = (s.loginUsername || "").trim().toLowerCase();
+      const c = (s.empCode || "").trim().toLowerCase();
+      return e === email || u === email || c === email;
+    });
+    if (byEmail) return byEmail;
+  }
+  const name = (session.fullName || "").trim().toLowerCase();
+  if (!name) return null;
+  return (
+    roster.find((s) => s.fullName.trim().toLowerCase() === name) ?? null
+  );
+}
+
+function emptyScope(): RoleScope {
+  return { campusIds: [], classIds: [], departmentIds: [] };
+}
+
+function grant(module: RbacModule, actions: RbacAction[]): PermissionGrant {
+  return { module, actions: [...actions] };
+}
+
+function allExcept(...deny: RbacAction[]): RbacAction[] {
+  return ALL_ACTIONS.filter((a) => !deny.includes(a));
+}
+
+/** Built-in role templates (Phase 1) — Accounts has no payroll. */
+export function defaultBuiltInRoles(): RbacRole[] {
+  const ops: RbacAction[] = ["view", "create", "edit", "delete", "export"];
+  const feesOps: RbacAction[] = [
+    "view",
+    "create",
+    "edit",
+    "void",
+    "export",
+  ];
+  const teachOps: RbacAction[] = ["view", "create", "edit"];
+
+  return [
+    {
+      id: "role_owner",
+      code: "owner",
+      name: "Owner",
+      isBuiltIn: true,
+      isActive: true,
+      makerChecker: false,
+      note: "All campuses, billing, policy override, audited impersonation",
+      permissions: RBAC_MODULES.map((m) => grant(m.id, ALL_ACTIONS)),
+    },
+    {
+      id: "role_principal",
+      code: "principal",
+      name: "Principal",
+      isBuiltIn: true,
+      isActive: true,
+      makerChecker: false,
+      note: "Campus approvals, policy approve, supervision",
+      permissions: RBAC_MODULES.map((m) =>
+        grant(
+          m.id,
+          m.id === "settings" || m.id === "policies"
+            ? allExcept("impersonate")
+            : allExcept("impersonate"),
+        ),
+      ),
+    },
+    {
+      id: "role_admin",
+      code: "admin",
+      name: "Admin",
+      isBuiltIn: true,
+      isActive: true,
+      makerChecker: false,
+      note: "Masters, admissions, records, compliance — no salary view",
+      permissions: [
+        grant("home", ["view"]),
+        grant("masters", ops),
+        grant("students", [...ops, "export"]),
+        grant("admissions", [...ops, "approve", "export"]),
+        grant("staff", ops),
+        grant("store", ops),
+        grant("purchase", ops),
+        grant("transport", ["view", "edit"]),
+        grant("accounts", ops),
+        grant("trust", ops),
+        grant("fees", feesOps),
+        grant("attendance", ops),
+        grant("homework", ops),
+        grant("timetable", ops),
+        grant("ptm", ops),
+        grant("student_leave", ops),
+        grant("vault", ops),
+        grant("rte", ops),
+        grant("exams", ops),
+        grant("certificates", ops),
+        grant("compliance", ["view", "edit", "export"]),
+        grant("notices", ops),
+        grant("news", ops),
+        grant("gallery", ops),
+        grant("notifications", ["view", "edit"]),
+        grant("settings", ["view", "edit"]),
+        grant("policies", ["view", "edit", "approve"]),
+        // no payroll
+      ],
+    },
+    {
+      id: "role_office",
+      code: "office",
+      name: "Office",
+      isBuiltIn: true,
+      isActive: true,
+      makerChecker: true,
+      note: "Prepare payroll & fee take — cannot approve",
+      permissions: [
+        grant("home", ["view"]),
+        grant("masters", ["view"]),
+        grant("students", ops),
+        grant("admissions", ["view", "create", "edit", "export"]),
+        grant("staff", ["view", "edit"]),
+        grant("fees", feesOps),
+        grant("attendance", ["view", "edit", "approve", "export"]),
+        grant("homework", ["view", "export"]),
+        grant("timetable", ["view", "create", "edit", "approve", "export"]),
+        grant("ptm", ["view", "create", "edit", "export"]),
+        grant("student_leave", ["view", "create", "edit", "approve", "export"]),
+        grant("vault", ["view", "export"]),
+        grant("rte", ["view", "create", "edit", "export"]),
+        grant("store", ["view", "edit", "export"]),
+        grant("purchase", ["view", "create", "edit", "approve", "export"]),
+        grant("transport", ["view", "edit", "export"]),
+        grant("accounts", ["view", "create", "edit", "export", "approve"]),
+        grant("trust", ["view", "export"]),
+        grant("payroll", ["view", "create", "edit", "export"]),
+        grant("certificates", ops),
+        grant("notices", ops),
+        grant("news", ops),
+        grant("gallery", ops),
+        grant("notifications", ["view"]),
+        grant("policies", ["view"]),
+        grant("settings", ["view"]),
+      ],
+    },
+    {
+      id: "role_accounts",
+      code: "accounts",
+      name: "Accounts",
+      isBuiltIn: true,
+      isActive: true,
+      makerChecker: true,
+      note: "Fees / expenses — no salary or payroll (§6i.4)",
+      permissions: [
+        grant("home", ["view"]),
+        grant("students", ["view"]),
+        grant("admissions", ["view"]),
+        grant("staff", ["view"]),
+        grant("fees", feesOps),
+        grant("certificates", ["view", "create", "export"]),
+        grant("notices", ["view"]),
+        grant("news", ["view"]),
+        grant("gallery", ["view"]),
+        grant("notifications", ["view"]),
+        grant("store", ["view", "export"]),
+        grant("purchase", ["view", "create", "edit", "approve", "export"]),
+        grant("transport", ["view", "edit", "export"]),
+        grant("accounts", ["view", "create", "edit", "export", "approve"]),
+        grant("trust", ["view", "create", "edit", "export", "approve"]),
+        // no payroll, masters edit, settings
+      ],
+    },
+    {
+      id: "role_transport",
+      code: "transport",
+      name: "Transport",
+      isBuiltIn: true,
+      isActive: true,
+      makerChecker: false,
+      note: "Routes & fleet — no fee policy edit",
+      permissions: [
+        grant("home", ["view"]),
+        grant("transport", ops),
+        grant("accounts", ["view"]),
+        grant("trust", ["view"]),
+        grant("students", ["view"]),
+        grant("staff", ["view"]),
+        grant("notices", ["view"]),
+        grant("notifications", ["view"]),
+      ],
+    },
+    {
+      id: "role_teacher",
+      code: "teacher",
+      name: "Teacher",
+      isBuiltIn: true,
+      isActive: true,
+      makerChecker: false,
+      note: "Own class(es) only — mark attendance & exams",
+      permissions: [
+        grant("home", ["view"]),
+        grant("students", ["view"]),
+        grant("staff", ["view"]),
+        grant("attendance", teachOps),
+        grant("homework", [...teachOps, "export"]),
+        grant("timetable", ["view"]),
+        grant("ptm", [...teachOps, "export"]),
+        grant("student_leave", [...teachOps, "approve", "export"]),
+        grant("vault", ["view"]),
+        grant("purchase", ["view", "create"]),
+        grant("exams", teachOps),
+        grant("certificates", ["view"]),
+        grant("notices", ["view"]),
+        grant("news", ["view"]),
+        grant("gallery", ["view"]),
+        grant("notifications", ["view"]),
+      ],
+    },
+    {
+      id: "role_parent",
+      code: "parent",
+      name: "Parent",
+      isBuiltIn: true,
+      isActive: true,
+      makerChecker: false,
+      note: "Self-service portal only",
+      permissions: [grant("home", ["view"])],
+    },
+    {
+      id: "role_driver",
+      code: "driver",
+      name: "Driver",
+      isBuiltIn: true,
+      isActive: true,
+      makerChecker: false,
+      note: "Field / transport self-service",
+      permissions: [
+        grant("home", ["view"]),
+        grant("transport", ["view"]),
+      ],
+    },
+  ];
+}
+
+export function defaultRbacState(): RbacState {
+  return {
+    version: 1,
+    roles: defaultBuiltInRoles(),
+    assignments: [],
+    audit: [],
+  };
+}
+
+function normalizeGrant(g: Partial<PermissionGrant> | null | undefined): PermissionGrant | null {
+  if (!g?.module) return null;
+  const mod = RBAC_MODULES.find((m) => m.id === g.module);
+  if (!mod) return null;
+  const actions = (Array.isArray(g.actions) ? g.actions : [])
+    .filter((a): a is RbacAction =>
+      ALL_ACTIONS.includes(a as RbacAction),
+    )
+    .filter((a, i, arr) => arr.indexOf(a) === i);
+  return { module: mod.id, actions };
+}
+
+function normalizeRole(r: Partial<RbacRole> | null | undefined): RbacRole | null {
+  if (!r?.id || !r.code) return null;
+  const permissions = (Array.isArray(r.permissions) ? r.permissions : [])
+    .map(normalizeGrant)
+    .filter((g): g is PermissionGrant => !!g);
+  return {
+    id: r.id,
+    code: String(r.code).trim().toLowerCase(),
+    name: String(r.name || r.code).trim() || r.code,
+    isBuiltIn: !!r.isBuiltIn,
+    isActive: r.isActive !== false,
+    makerChecker: !!r.makerChecker,
+    permissions,
+    note: String(r.note || ""),
+  };
+}
+
+function normalizeAssignment(
+  a: Partial<UserRoleAssignment> | null | undefined,
+): UserRoleAssignment | null {
+  if (!a?.id || !a.staffId || !a.roleId) return null;
+  const scope = a.scope || emptyScope();
+  return {
+    id: a.id,
+    staffId: a.staffId,
+    roleId: a.roleId,
+    isPrimary: !!a.isPrimary,
+    scope: {
+      campusIds: Array.isArray(scope.campusIds) ? scope.campusIds : [],
+      classIds: Array.isArray(scope.classIds) ? scope.classIds : [],
+      departmentIds: Array.isArray(scope.departmentIds)
+        ? scope.departmentIds
+        : [],
+    },
+    expiresOn: String(a.expiresOn || "").slice(0, 10),
+    note: String(a.note || ""),
+  };
+}
+
+export function normalizeRbacState(
+  raw?: Partial<RbacState> | null,
+): RbacState {
+  const base = defaultRbacState();
+  if (!raw) return base;
+  const rolesRaw = Array.isArray(raw.roles) ? raw.roles : [];
+  const roles = rolesRaw
+    .map(normalizeRole)
+    .filter((r): r is RbacRole => !!r);
+  // Ensure built-ins exist; merge newly added modules onto existing built-ins
+  for (const b of base.roles) {
+    const idx = roles.findIndex((r) => r.code === b.code && r.isBuiltIn);
+    if (idx < 0) {
+      roles.push(b);
+      continue;
+    }
+    const existing = roles[idx]!;
+    const mergedPerms = [...existing.permissions];
+    for (const g of b.permissions) {
+      if (!mergedPerms.some((p) => p.module === g.module)) {
+        mergedPerms.push({ module: g.module, actions: [...g.actions] });
+      }
+    }
+    roles[idx] = { ...existing, permissions: mergedPerms };
+  }
+  const assignments = (Array.isArray(raw.assignments) ? raw.assignments : [])
+    .map(normalizeAssignment)
+    .filter((a): a is UserRoleAssignment => !!a);
+  const audit = Array.isArray(raw.audit)
+    ? raw.audit.slice(0, 200).map((e) => ({
+        id: String(e?.id || nid("aud")),
+        at: String(e?.at || new Date().toISOString()),
+        by: String(e?.by || "system"),
+        action: String(e?.action || ""),
+        detail: String(e?.detail || ""),
+      }))
+    : [];
+  return { version: 1, roles, assignments, audit };
+}
+
+export function loadRbac(): RbacState {
+  if (typeof window === "undefined") return defaultRbacState();
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return defaultRbacState();
+    return normalizeRbacState(JSON.parse(raw) as Partial<RbacState>);
+  } catch {
+    return defaultRbacState();
+  }
+}
+
+export function saveRbac(state: RbacState): void {
+  if (!assertSessionWritable("saveRbac")) return;
+  const actor = getSessionActor();
+  if (actor && typeof window !== "undefined") {
+    // Lazy load to avoid masters ↔ rbac cycles at module init
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { loadMasters } = require("@/lib/masters") as typeof import("@/lib/masters");
+    if (!canConfigureRbac(actor, loadMasters())) {
+      window.dispatchEvent(
+        new CustomEvent("bhb-rbac-denied", {
+          detail: { module: "settings", action: "edit", label: "saveRbac" },
+        }),
+      );
+      return;
+    }
+  }
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify(normalizeRbacState(state)),
+  );
+  void import("@/lib/rbacPersistence").then(({ scheduleRbacSync }) => {
+    scheduleRbacSync(state);
+  });
+}
+
+export function writeRbacLocalRaw(state: RbacState): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify(normalizeRbacState(state)),
+  );
+}
+
+export function rbacStateIsEmpty(state: RbacState): boolean {
+  return (state.assignments?.length ?? 0) === 0 && (state.audit?.length ?? 0) === 0;
+}
+
+export function newRbacId(prefix: string) {
+  return nid(prefix);
+}
+
+export function appendRbacAudit(
+  state: RbacState,
+  by: string,
+  action: string,
+  detail: string,
+): RbacState {
+  const entry: RbacAuditEntry = {
+    id: nid("aud"),
+    at: new Date().toISOString(),
+    by: by || "system",
+    action,
+    detail,
+  };
+  return {
+    ...state,
+    audit: [entry, ...state.audit].slice(0, 200),
+  };
+}
+
+export function cloneRole(
+  state: RbacState,
+  roleId: string,
+  code: string,
+  name: string,
+  by: string,
+): { ok: true; state: RbacState; role: RbacRole } | { ok: false; reason: string } {
+  const src = state.roles.find((r) => r.id === roleId);
+  if (!src) return { ok: false, reason: "Role not found" };
+  const c = code.trim().toLowerCase().replace(/\s+/g, "_");
+  if (!c) return { ok: false, reason: "Code required" };
+  if (state.roles.some((r) => r.code === c)) {
+    return { ok: false, reason: "Code already exists" };
+  }
+  const role: RbacRole = {
+    id: nid("role"),
+    code: c,
+    name: name.trim() || c,
+    isBuiltIn: false,
+    isActive: true,
+    makerChecker: src.makerChecker,
+    permissions: src.permissions.map((p) => ({
+      module: p.module,
+      actions: [...p.actions],
+    })),
+    note: `Cloned from ${src.name}`,
+  };
+  let next: RbacState = { ...state, roles: [...state.roles, role] };
+  next = appendRbacAudit(next, by, "clone_role", `${src.code} → ${role.code}`);
+  return { ok: true, state: next, role };
+}
+
+export function setRolePermission(
+  state: RbacState,
+  roleId: string,
+  module: RbacModule,
+  action: RbacAction,
+  enabled: boolean,
+  by: string,
+): RbacState {
+  const roles = state.roles.map((r) => {
+    if (r.id !== roleId) return r;
+    const perms = [...r.permissions];
+    let g = perms.find((p) => p.module === module);
+    if (!g) {
+      g = { module, actions: [] };
+      perms.push(g);
+    }
+    const actions = new Set(g.actions);
+    if (enabled) actions.add(action);
+    else actions.delete(action);
+    g = { module, actions: [...actions] };
+    const nextPerms = perms
+      .filter((p) => p.module !== module)
+      .concat(g.actions.length ? [g] : []);
+    return { ...r, permissions: nextPerms };
+  });
+  return appendRbacAudit(
+    { ...state, roles },
+    by,
+    enabled ? "grant" : "revoke",
+    `${roleId} ${module}.${action}`,
+  );
+}
+
+/** Modules whose reports appear in Reports Center. */
+export const REPORTS_CENTER_RBAC_MODULES: RbacModule[] = [
+  "fees",
+  "students",
+  "admissions",
+  "staff",
+  "attendance",
+  "homework",
+  "timetable",
+  "ptm",
+  "student_leave",
+  "vault",
+  "rte",
+  "payroll",
+  "store",
+  "purchase",
+  "transport",
+  "accounts",
+  "trust",
+];
+
+export function canAccessReportsCenter(
+  session: SessionLike,
+  masters: MastersState | null | undefined,
+  rbac?: RbacState,
+): boolean {
+  return REPORTS_CENTER_RBAC_MODULES.some((m) =>
+    canAccessModule(session, masters, m, rbac),
+  );
+}
+
+export function moduleForHref(href: string): RbacModule | null {
+  const [pathPart, query = ""] = href.split("?");
+  const path = pathPart || "";
+  const params = new URLSearchParams(query);
+  if (path === "/home" || path === "/") return "home";
+  if (path.startsWith("/reports")) return null; // handled in canAccessHref
+  if (path.startsWith("/modules")) return "settings";
+  if (path.startsWith("/fees/defaulters")) return "fees";
+  if (path.startsWith("/fees")) return "fees";
+  if (path.startsWith("/masters")) return "masters";
+  if (path.startsWith("/students")) {
+    // Students → UDISE+ tab is compliance-scoped
+    if (params.get("tab") === "udise") return "compliance";
+    return "students";
+  }
+  if (path.startsWith("/admissions")) return "admissions";
+  if (path.startsWith("/staff")) return "staff";
+  if (path.startsWith("/store")) return "store";
+  if (path.startsWith("/purchase")) return "purchase";
+  if (path.startsWith("/transport")) return "transport";
+  if (path.startsWith("/accounts") || path.startsWith("/expenses")) return "accounts";
+  if (path.startsWith("/trust") || path.startsWith("/construction")) return "trust";
+  if (path.startsWith("/attendance")) return "attendance";
+  if (path.startsWith("/homework")) return "homework";
+  if (path.startsWith("/timetable")) return "timetable";
+  if (path.startsWith("/ptm")) return "ptm";
+  if (path.startsWith("/student-leave")) return "student_leave";
+  if (path.startsWith("/vault")) return "vault";
+  if (path.startsWith("/rte")) return "rte";
+  if (path.startsWith("/payroll")) return "payroll";
+  if (path.startsWith("/exams")) return "exams";
+  if (path.startsWith("/certificates")) return "certificates";
+  if (path.startsWith("/comms") || path.startsWith("/notices") || path.startsWith("/news") || path.startsWith("/gallery")) {
+    const tab = params.get("tab");
+    if (tab === "news" || path.startsWith("/news")) return "news";
+    if (tab === "gallery" || path.startsWith("/gallery")) return "gallery";
+    if (tab === "inbox") return "notifications";
+    return "notices";
+  }
+  return null;
+}
+
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function assignmentActive(a: UserRoleAssignment): boolean {
+  if (!a.expiresOn) return true;
+  return a.expiresOn >= todayIso();
+}
+
+/**
+ * Infer built-in role code from session.roleCode / designation when no assignment.
+ */
+export function inferRoleCodes(
+  session: SessionLike,
+  masters?: MastersState | null,
+): string[] {
+  if (isProtectedSuperAdminEmail(session.email)) {
+    return ["owner"];
+  }
+  const rc = (session.roleCode || "").toLowerCase();
+  const matched: string[] = [];
+
+  if (/owner|super.?admin|trustee|director/.test(rc)) matched.push("owner");
+  if (/principal|hm|head.?master|vice.?principal/.test(rc)) {
+    matched.push("principal");
+  }
+  if (/^admin$|administrator|registrar/.test(rc)) matched.push("admin");
+  if (/office|front.?office/.test(rc)) matched.push("office");
+  if (/accounts|accountant|cashier|finance/.test(rc)) {
+    matched.push("accounts");
+  }
+  if (/clerk/.test(rc)) matched.push("office");
+  if (/transport|fleet/.test(rc)) matched.push("transport");
+  if (/teacher|tgt|pgt|prt|faculty|lecturer/.test(rc)) matched.push("teacher");
+  if (/driver/.test(rc)) matched.push("driver");
+  if (/parent|guardian/.test(rc)) matched.push("parent");
+
+  if (masters) {
+    const self = resolveStaffForRbac(session, masters);
+    if (self) {
+      const des = masters.designations.find((d) => d.id === self.designationId);
+      const blob = `${des?.code || ""} ${des?.name || ""}`.toLowerCase();
+      if (/owner|trustee|director/.test(blob)) matched.push("owner");
+      if (/prin|principal|hm|head.?master|vice.?principal/.test(blob)) {
+        matched.push("principal");
+      }
+      if (/admin|registrar/.test(blob)) matched.push("admin");
+      if (/office|clerk/.test(blob)) matched.push("office");
+      if (/accounts|accountant|cashier/.test(blob)) matched.push("accounts");
+      if (/driver/.test(blob)) matched.push("driver");
+      if (/teacher|tgt|pgt|prt|faculty/.test(blob)) matched.push("teacher");
+      if (self.stream === "teaching" && matched.length === 0) {
+        matched.push("teacher");
+      }
+    }
+  }
+
+  if (matched.length === 0) {
+    // Demo blank staff login is principal
+    if ((session.persona || "staff") === "staff") matched.push("principal");
+    else if (session.persona === "parent") matched.push("parent");
+    else if (session.persona === "field") matched.push("driver");
+    else matched.push("teacher");
+  }
+
+  return [...new Set(matched)];
+}
+
+export function resolveSessionRoles(
+  rbac: RbacState,
+  session: SessionLike,
+  masters?: MastersState | null,
+): RbacRole[] {
+  const self = masters ? resolveStaffForRbac(session, masters) : null;
+  const fromAssign = self
+    ? rbac.assignments.filter(
+        (a) => a.staffId === self.id && assignmentActive(a),
+      )
+    : [];
+
+  if (fromAssign.length > 0) {
+    const roles = fromAssign
+      .map((a) => rbac.roles.find((r) => r.id === a.roleId))
+      .filter((r): r is RbacRole => !!r && r.isActive);
+    if (roles.length) return roles;
+  }
+
+  const codes = inferRoleCodes(session, masters);
+  return rbac.roles.filter((r) => r.isActive && codes.includes(r.code));
+}
+
+export function effectivePermissions(
+  roles: RbacRole[],
+): Map<RbacModule, Set<RbacAction>> {
+  const map = new Map<RbacModule, Set<RbacAction>>();
+  for (const role of roles) {
+    for (const g of role.permissions) {
+      let set = map.get(g.module);
+      if (!set) {
+        set = new Set();
+        map.set(g.module, set);
+      }
+      for (const a of g.actions) set.add(a);
+    }
+  }
+  return map;
+}
+
+export function hasPermission(
+  session: SessionLike,
+  masters: MastersState | null | undefined,
+  module: RbacModule,
+  action: RbacAction,
+  rbac?: RbacState,
+): boolean {
+  const state = rbac ?? (typeof window !== "undefined" ? loadRbac() : defaultRbacState());
+  const roles = resolveSessionRoles(state, session, masters);
+  const eff = effectivePermissions(roles);
+  return !!eff.get(module)?.has(action);
+}
+
+export function canAccessModule(
+  session: SessionLike,
+  masters: MastersState | null | undefined,
+  module: RbacModule,
+  rbac?: RbacState,
+): boolean {
+  return hasPermission(session, masters, module, "view", rbac);
+}
+
+export function canAccessHref(
+  session: SessionLike,
+  masters: MastersState | null | undefined,
+  href: string,
+  rbac?: RbacState,
+): boolean {
+  const path = href.split("?")[0] || "";
+  if (path.startsWith("/reports")) {
+    return (
+      canAccessReportsCenter(session, masters, rbac) &&
+      canAccessModuleHref(href)
+    );
+  }
+  if (path.startsWith("/student-leave")) {
+    return (
+      (canAccessModule(session, masters, "student_leave", rbac) ||
+        canAccessModule(session, masters, "attendance", rbac)) &&
+      canAccessModuleHref(href)
+    );
+  }
+  if (path.startsWith("/purchase")) {
+    return (
+      (canAccessModule(session, masters, "purchase", rbac) ||
+        canAccessModule(session, masters, "store", rbac)) &&
+      canAccessModuleHref(href)
+    );
+  }
+  if (path.startsWith("/rte")) {
+    return (
+      (canAccessModule(session, masters, "rte", rbac) ||
+        canAccessModule(session, masters, "admissions", rbac)) &&
+      canAccessModuleHref(href)
+    );
+  }
+  if (path.startsWith("/admissions")) {
+    const qs = href.includes("?") ? href.split("?")[1] : "";
+    const tab = new URLSearchParams(qs).get("tab");
+    if (tab === "rte") {
+      return (
+        (canAccessModule(session, masters, "rte", rbac) ||
+          canAccessModule(session, masters, "admissions", rbac)) &&
+        canAccessModuleHref(href)
+      );
+    }
+  }
+  if (path.startsWith("/attendance")) {
+    const qs = href.includes("?") ? href.split("?")[1] : "";
+    const tab = new URLSearchParams(qs).get("tab");
+    if (tab === "leave" || tab === "student-leave" || tab === "student_leave") {
+      return (
+        (canAccessModule(session, masters, "student_leave", rbac) ||
+          canAccessModule(session, masters, "attendance", rbac)) &&
+        canAccessModuleHref(href)
+      );
+    }
+  }
+  if (path.startsWith("/store")) {
+    const qs = href.includes("?") ? href.split("?")[1] : "";
+    const tab = new URLSearchParams(qs).get("tab");
+    if (tab === "purchase" || tab === "indent" || tab === "po" || tab === "grn") {
+      return (
+        (canAccessModule(session, masters, "purchase", rbac) ||
+          canAccessModule(session, masters, "store", rbac)) &&
+        canAccessModuleHref(href)
+      );
+    }
+  }
+  const mod = moduleForHref(href);
+  if (!mod) return canAccessModuleHref(href);
+  if (mod === "home") return canAccessModuleHref(href);
+  if (!canAccessModule(session, masters, mod, rbac)) return false;
+  return canAccessModuleHref(href);
+}
+
+/** Who may edit Roles & Permissions matrix */
+export function canConfigureRbac(
+  session: SessionLike,
+  masters?: MastersState | null,
+  rbac?: RbacState,
+): boolean {
+  if (isProtectedSuperAdminEmail(session.email)) return true;
+  if (hasPermission(session, masters ?? null, "settings", "edit", rbac)) {
+    return true;
+  }
+  const codes = inferRoleCodes(session, masters);
+  return codes.some((c) => c === "owner" || c === "principal" || c === "admin");
+}
+
+export type AccessSummaryRow = {
+  capability: string;
+  module: RbacModule;
+  action: RbacAction;
+  roleNames: string[];
+};
+
+/** Principal view: who can approve waivers / edit marks / export UDISE */
+export function principalAccessSummary(rbac: RbacState): AccessSummaryRow[] {
+  const checks: { capability: string; module: RbacModule; action: RbacAction }[] =
+    [
+      { capability: "Approve fee waivers / concessions", module: "fees", action: "approve" },
+      { capability: "Manage admissions (enroll)", module: "admissions", action: "edit" },
+      { capability: "Edit exam marks", module: "exams", action: "edit" },
+      { capability: "Export UDISE / compliance", module: "compliance", action: "export" },
+      { capability: "Approve payroll", module: "payroll", action: "approve" },
+      { capability: "Edit masters", module: "masters", action: "edit" },
+      { capability: "Configure policies", module: "policies", action: "edit" },
+      { capability: "Impersonate users", module: "settings", action: "impersonate" },
+    ];
+
+  return checks.map((c) => {
+    const roleNames = rbac.roles
+      .filter(
+        (r) =>
+          r.isActive &&
+          r.permissions.some(
+            (p) => p.module === c.module && p.actions.includes(c.action),
+          ),
+      )
+      .map((r) => r.name);
+    return { ...c, roleNames };
+  });
+}
+
+export type StaffAccessRow = {
+  staffId: string;
+  staffName: string;
+  empCode: string;
+  roles: string[];
+  expiresSoon: boolean;
+};
+
+export function staffAccessOverview(
+  rbac: RbacState,
+  masters: MastersState,
+): StaffAccessRow[] {
+  const byStaff = new Map<string, UserRoleAssignment[]>();
+  for (const a of rbac.assignments) {
+    if (!assignmentActive(a)) continue;
+    const list = byStaff.get(a.staffId) || [];
+    list.push(a);
+    byStaff.set(a.staffId, list);
+  }
+  const rows: StaffAccessRow[] = [];
+  for (const [staffId, assigns] of byStaff) {
+    const staff = masters.staff?.find((s) => s.id === staffId);
+    const roles = assigns
+      .map((a) => rbac.roles.find((r) => r.id === a.roleId)?.name)
+      .filter((n): n is string => !!n);
+    const expiresSoon = assigns.some((a) => {
+      if (!a.expiresOn) return false;
+      const in7 = new Date();
+      in7.setDate(in7.getDate() + 7);
+      return a.expiresOn <= in7.toISOString().slice(0, 10);
+    });
+    rows.push({
+      staffId,
+      staffName: staff?.fullName || staffId,
+      empCode: staff?.empCode || "",
+      roles,
+      expiresSoon,
+    });
+  }
+  return rows.sort((a, b) => a.staffName.localeCompare(b.staffName));
+}
+
+export function roleHasAction(
+  role: RbacRole,
+  module: RbacModule,
+  action: RbacAction,
+): boolean {
+  return !!role.permissions
+    .find((p) => p.module === module)
+    ?.actions.includes(action);
+}

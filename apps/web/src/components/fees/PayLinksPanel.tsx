@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { formatInr } from "@/lib/fees";
 import {
   applyPaymentLink,
-  buildPaymentSharePayload,
+  buildEnrichedPaymentSharePayload,
   buildPaymentShareUrl,
   cancelPaymentLink,
   composeWhatsAppPaymentLinkMessage,
@@ -16,6 +16,11 @@ import {
 } from "@/lib/payments";
 import { householdWhatsApp, loadSis, type SisState } from "@/lib/sis";
 import { TENANT } from "@/lib/types";
+import {
+  gatewayCheckoutHint,
+  getPaymentGatewayConfig,
+  paymentGatewayModeLabel,
+} from "@/lib/paymentGateway";
 
 export function PayLinksPanel({
   tick,
@@ -33,6 +38,7 @@ export function PayLinksPanel({
   const [filter, setFilter] = useState<"open" | "all">("open");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const pg = getPaymentGatewayConfig();
 
   function refresh() {
     setSis(loadSis());
@@ -57,7 +63,7 @@ export function PayLinksPanel({
   }
 
   function copyLink(link: PaymentLink) {
-    const payload = buildPaymentSharePayload(link, TENANT.nameDisplay);
+    const payload = buildEnrichedPaymentSharePayload(link, TENANT.nameDisplay);
     const url = buildPaymentShareUrl(payload);
     void navigator.clipboard.writeText(url).then(
       () => flash("Payment link copied"),
@@ -72,7 +78,7 @@ export function PayLinksPanel({
       setError("No WhatsApp number on this household — set it on Fee Take");
       return;
     }
-    const payload = buildPaymentSharePayload(link, TENANT.nameDisplay);
+    const payload = buildEnrichedPaymentSharePayload(link, TENANT.nameDisplay);
     const url = buildPaymentShareUrl(payload);
     const msg = composeWhatsAppPaymentLinkMessage(
       link,
@@ -121,7 +127,8 @@ export function PayLinksPanel({
           </h2>
           <p className="mt-0.5 text-xs text-[var(--muted)]">
             Create from Collect (select dues → Send UPI link). Parent pays on
-            phone; confirm here if needed. Demo uses same-browser storage.
+            phone; confirm here if needed. Gateway:{" "}
+            {paymentGatewayModeLabel(pg.mode)} — {gatewayCheckoutHint(pg.mode)}
           </p>
         </div>
         <div className="flex gap-2">

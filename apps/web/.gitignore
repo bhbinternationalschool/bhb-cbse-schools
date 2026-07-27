@@ -23,6 +23,10 @@
 # misc
 .DS_Store
 *.pem
+.data/
+data/leads/*.json
+!data/leads/.gitkeep
+
 
 # debug
 npm-debug.log*

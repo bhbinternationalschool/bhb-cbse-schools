@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  DEFAULT_AY,
   STUDENT_TYPES,
+  currentAcademicYearCode,
   loadMasters,
   type FeeStudentType,
   type MastersState,
@@ -32,7 +32,7 @@ import {
 import { RemoveControl } from "@/components/masters/RemoveControl";
 import {
   StudentAvatar,
-  StudentTypeBadge,
+  StudentNameLabel,
 } from "@/components/students/StudentAvatar";
 import { FilterExportButtons } from "@/components/reports/FilterExportButtons";
 import { describeFilters } from "@/lib/reportExport";
@@ -42,20 +42,49 @@ import {
 } from "@/lib/studentRegisterExport";
 import { TENANT } from "@/lib/types";
 import { CurriculumOfficePanel } from "@/components/students/CurriculumOfficePanel";
+import { StudentImportPanel } from "@/components/students/StudentImportPanel";
+import { StudentProfileModal } from "@/components/students/StudentProfileModal";
+import { UdiseComplianceWorkspace } from "@/components/students/UdiseComplianceWorkspace";
+import { StudentStatsDashboard } from "@/components/students/StudentStatsDashboard";
+import { SisReportsPanel } from "@/components/students/SisReportsPanel";
+import { StudentTagsPanel } from "@/components/students/StudentTagsPanel";
+import { StudentSiblingsPanel } from "@/components/students/StudentSiblingsPanel";
+import { StudentUpgradePanel } from "@/components/students/StudentUpgradePanel";
+import { StudentUpdatePanel } from "@/components/students/StudentUpdatePanel";
+import { StudentDuplicatesPanel } from "@/components/students/StudentDuplicatesPanel";
+import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
+import { useDemoSession } from "@/components/shell/SessionContext";
+import { listImportSessions, normalizeSessionCode } from "@/lib/studentImport";
 import {
   classNeedsCartEnrollment,
   enrollmentStatusOf,
 } from "@/lib/officeCurriculumWorkflow";
 
 type ViewMode = "list" | "card";
+type MainTab =
+  | "dashboard"
+  | "roster"
+  | "register"
+  | "reports"
+  | "tags"
+  | "siblings"
+  | "upgrade"
+  | "update"
+  | "duplicates"
+  | "udise";
 const VIEW_KEY = "bhb_sis_view";
+const TAB_KEY = "bhb_sis_main_tab";
 
 export function StudentsWorkspace() {
+  const session = useDemoSession();
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [state, setState] = useState<SisState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const [query, setQuery] = useState("");
+  /** "" = follow header session; "all" = every year */
+  const [sessionFilter, setSessionFilter] = useState("");
   const [classFilter, setClassFilter] = useState("");
   const [sectionFilter, setSectionFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | StudentStatus>(
@@ -77,8 +106,11 @@ export function StudentsWorkspace() {
   /** all = every set filter must match; any = at least one set filter */
   const [matchMode, setMatchMode] = useState<"all" | "any">("all");
   const [selectedId, setSelectedId] = useState("");
+  const [profileId, setProfileId] = useState("");
   const [view, setView] = useState<ViewMode>("list");
+  const [mainTab, setMainTab] = useState<MainTab>("dashboard");
   const [showCurriculumOffice, setShowCurriculumOffice] = useState(false);
+  const [panelTick, setPanelTick] = useState(0);
 
   useEffect(() => {
     const m = loadMasters();
@@ -89,6 +121,37 @@ export function StudentsWorkspace() {
     try {
       const saved = localStorage.getItem(VIEW_KEY);
       if (saved === "list" || saved === "card") setView(saved);
+      const params = new URLSearchParams(window.location.search);
+      const urlTab = params.get("tab");
+      const tab = urlTab || localStorage.getItem(TAB_KEY);
+      if (
+        tab === "dashboard" ||
+        tab === "roster" ||
+        tab === "register" ||
+        tab === "reports" ||
+        tab === "tags" ||
+        tab === "siblings" ||
+        tab === "upgrade" ||
+        tab === "update" ||
+        tab === "duplicates" ||
+        tab === "udise"
+      ) {
+        setMainTab(tab);
+        if (!urlTab && tab !== "dashboard") {
+          try {
+            const url = new URL(window.location.href);
+            url.searchParams.set("tab", tab);
+            window.history.replaceState({}, "", url.toString());
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+      const q = params.get("q");
+      if (q) {
+        setQuery(q);
+        if (!urlTab) setMainTab("register");
+      }
     } catch {
       /* ignore */
     }
@@ -104,6 +167,22 @@ export function StudentsWorkspace() {
     setView(next);
     try {
       localStorage.setItem(VIEW_KEY, next);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function setMainTabPersist(next: MainTab) {
+    setMainTab(next);
+    try {
+      localStorage.setItem(TAB_KEY, next);
+      const url = new URL(window.location.href);
+      if (next === "dashboard") {
+        url.searchParams.delete("tab");
+      } else {
+        url.searchParams.set("tab", next);
+      }
+      window.history.replaceState({}, "", url.toString());
     } catch {
       /* ignore */
     }
@@ -126,8 +205,34 @@ export function StudentsWorkspace() {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [masters, classFilter]);
 
+  const headerAy =
+    session.academicYearCode ||
+    (masters ? currentAcademicYearCode(masters) : "");
+  const effectiveSession =
+    sessionFilter === "all" ? "" : sessionFilter || headerAy;
+
+  useEffect(() => {
+    // The header selector is the system-wide source of truth.
+    setSessionFilter("");
+    setProfileId("");
+  }, [headerAy]);
+
+  const sessionOptions = useMemo(() => {
+    if (!masters) return [] as string[];
+    const codes = new Set<string>(listImportSessions(masters));
+    for (const s of state?.students ?? []) {
+      if (s.academicYearCode) codes.add(s.academicYearCode);
+    }
+    return [...codes].sort((a, b) => b.localeCompare(a));
+  }, [masters, state]);
+
   const filtered = useMemo(() => {
     if (!state || !masters) return [];
+
+    const inSession = (s: SisStudent) =>
+      !effectiveSession ||
+      normalizeSessionCode(s.academicYearCode || "") ===
+        normalizeSessionCode(effectiveSession);
 
     const matchesSearch = (s: SisStudent) => {
       if (!query.trim()) return true;
@@ -204,6 +309,7 @@ export function StudentsWorkspace() {
     if (query.trim()) predicates.push(matchesSearch);
 
     const list = state.students.filter((s) => {
+      if (!inSession(s)) return false;
       if (predicates.length === 0) return true;
       if (matchMode === "any") {
         return predicates.some((p) => p(s));
@@ -219,6 +325,7 @@ export function StudentsWorkspace() {
   }, [
     state,
     masters,
+    effectiveSession,
     statusFilter,
     classFilter,
     sectionFilter,
@@ -237,6 +344,7 @@ export function StudentsWorkspace() {
 
   function clearFilters() {
     setQuery("");
+    setSessionFilter("");
     setClassFilter("");
     setSectionFilter("");
     setStatusFilter("active");
@@ -252,6 +360,7 @@ export function StudentsWorkspace() {
   }
 
   const hasExtraFilters =
+    !!sessionFilter ||
     !!typeFilter ||
     !!genderFilter ||
     !!categoryFilter ||
@@ -302,6 +411,9 @@ export function StudentsWorkspace() {
     const fg = masters.feeGroups.find((g) => g.id === feeGroupFilter)?.code;
     const cam = masters.campuses.find((c) => c.id === campusFilter)?.name;
     return describeFilters([
+      effectiveSession
+        ? `Session ${effectiveSession}`
+        : "All sessions",
       cls ? `Class ${cls}` : "",
       sec ? `Sec ${sec}` : "",
       statusFilter !== "all" ? statusFilter : "",
@@ -330,6 +442,7 @@ export function StudentsWorkspace() {
     ]);
   }, [
     masters,
+    effectiveSession,
     classFilter,
     sectionFilter,
     statusFilter,
@@ -370,9 +483,15 @@ export function StudentsWorkspace() {
 
   const m = masters;
   const sis = state;
-  const activeCount = sis.students.filter((s) => s.status === "active").length;
+  const inSessionScope = (s: SisStudent) =>
+    !effectiveSession ||
+    normalizeSessionCode(s.academicYearCode || "") ===
+      normalizeSessionCode(effectiveSession);
+  const activeCount = sis.students.filter(
+    (s) => s.status === "active" && inSessionScope(s),
+  ).length;
   const inactiveCount = sis.students.filter(
-    (s) => s.status === "inactive",
+    (s) => s.status === "inactive" && inSessionScope(s),
   ).length;
 
   function classSectionOf(s: SisStudent) {
@@ -381,6 +500,11 @@ export function StudentsWorkspace() {
 
   function openHousehold(studentId: string) {
     setSelectedId(studentId);
+  }
+
+  function openProfile(studentId: string) {
+    setSelectedId(studentId);
+    setProfileId(studentId);
   }
 
   function classNameOf(id: string) {
@@ -445,7 +569,9 @@ export function StudentsWorkspace() {
             Students
           </h1>
           <p className="mt-1 text-sm text-[var(--muted)]">
-            SIS roster · {DEFAULT_AY} · {activeCount} active
+            SIS roster ·{" "}
+            {effectiveSession || "All sessions"} ·{" "}
+            {activeCount} active
             {inactiveCount ? ` · ${inactiveCount} inactive` : ""}
           </p>
         </div>
@@ -455,34 +581,36 @@ export function StudentsWorkspace() {
               {notice}
             </span>
           ) : null}
-          <div
-            className="flex rounded-lg border border-[rgba(32,48,80,0.15)] bg-white p-0.5"
-            role="group"
-            aria-label="View mode"
-          >
-            <button
-              type="button"
-              onClick={() => setViewMode("list")}
-              className={`rounded-md px-3 py-1.5 text-xs font-semibold ${
-                view === "list"
-                  ? "bg-[var(--brand-deep)] text-white"
-                  : "text-[var(--muted)] hover:text-[var(--brand-deep)]"
-              }`}
+          {mainTab === "register" ? (
+            <div
+              className="flex rounded-lg border border-[rgba(32,48,80,0.15)] bg-white p-0.5"
+              role="group"
+              aria-label="View mode"
             >
-              List
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode("card")}
-              className={`rounded-md px-3 py-1.5 text-xs font-semibold ${
-                view === "card"
-                  ? "bg-[var(--brand-deep)] text-white"
-                  : "text-[var(--muted)] hover:text-[var(--brand-deep)]"
-              }`}
-            >
-              Cards
-            </button>
-          </div>
+              <button
+                type="button"
+                onClick={() => setViewMode("list")}
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold ${
+                  view === "list"
+                    ? "bg-[var(--brand-deep)] text-white"
+                    : "text-[var(--muted)] hover:text-[var(--brand-deep)]"
+                }`}
+              >
+                List
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("card")}
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold ${
+                  view === "card"
+                    ? "bg-[var(--brand-deep)] text-white"
+                    : "text-[var(--muted)] hover:text-[var(--brand-deep)]"
+                }`}
+              >
+                Cards
+              </button>
+            </div>
+          ) : null}
           <Link
             href="/students/new"
             className="btn-accent rounded-xl px-4 py-2.5 text-sm font-semibold"
@@ -492,6 +620,126 @@ export function StudentsWorkspace() {
         </div>
       </div>
 
+      <ModuleTabs
+        aria-label="Students sections"
+        size="xl"
+        value={mainTab}
+        onChange={(id) => setMainTabPersist(id as MainTab)}
+        items={[
+          { id: "dashboard", label: "Dashboard", tone: "navy" },
+          { id: "roster", label: "Overview", tone: "navy" },
+          { id: "register", label: "Register", tone: "navy" },
+          { id: "update", label: "Update", tone: "sky" },
+          { id: "duplicates", label: "Duplicates", tone: "coral" },
+          { id: "udise", label: "UDISE+", tone: "coral" },
+          { id: "siblings", label: "Siblings", tone: "violet" },
+          { id: "upgrade", label: "Upgrade", tone: "amber" },
+          { id: "reports", label: "Reports", tone: "green" },
+          { id: "tags", label: "Tags", tone: "slate" },
+        ]}
+      />
+
+      {mainTab === "dashboard" ? (
+        <ModuleDashboardHost
+          moduleId="students"
+          onNavigateTab={(t) => setMainTabPersist(t as MainTab)}
+        />
+      ) : null}
+
+      {mainTab === "udise" ? (
+        <UdiseComplianceWorkspace
+          tick={panelTick}
+          onChanged={(next, message) => {
+            setState(next);
+            setPanelTick((t) => t + 1);
+            if (message) {
+              setNotice(message);
+              window.setTimeout(() => setNotice(null), 2800);
+            }
+          }}
+        />
+      ) : null}
+
+      {mainTab === "reports" ? (
+        <SisReportsPanel
+          tick={panelTick}
+          onNotice={(msg) => {
+            setNotice(msg);
+            window.setTimeout(() => setNotice(null), 2800);
+          }}
+        />
+      ) : null}
+
+      {mainTab === "tags" ? (
+        <StudentTagsPanel
+          tick={panelTick}
+          onChanged={() => {
+            setState(loadSis());
+            setPanelTick((t) => t + 1);
+          }}
+        />
+      ) : null}
+
+      {mainTab === "siblings" ? (
+        <StudentSiblingsPanel
+          tick={panelTick}
+          onChanged={(next) => {
+            setState(next);
+            setPanelTick((t) => t + 1);
+          }}
+        />
+      ) : null}
+
+      {mainTab === "upgrade" ? (
+        <StudentUpgradePanel
+          tick={panelTick}
+          onChanged={(next) => {
+            setState(next);
+            setPanelTick((t) => t + 1);
+          }}
+        />
+      ) : null}
+
+      {mainTab === "update" ? (
+        <StudentUpdatePanel
+          tick={panelTick}
+          onChanged={(next) => {
+            setState(next);
+            setPanelTick((t) => t + 1);
+          }}
+        />
+      ) : null}
+
+      {mainTab === "duplicates" ? (
+        <StudentDuplicatesPanel
+          tick={panelTick}
+          onChanged={(next, message) => {
+            setState(next);
+            setPanelTick((t) => t + 1);
+            if (message) {
+              setNotice(message);
+              window.setTimeout(() => setNotice(null), 2800);
+            }
+          }}
+        />
+      ) : null}
+
+      {mainTab === "roster" ? (
+        <>
+      <StudentStatsDashboard sis={sis} masters={m} />
+
+      <div className="mt-4 space-y-3">
+        <StudentImportPanel
+          masters={m}
+          sis={sis}
+          onApplied={(next, message) => commit(next, message)}
+        />
+      </div>
+        </>
+      ) : null}
+
+      {mainTab === "register" ? (
+        <>
       <div className="mt-5 space-y-2">
         <div className="flex flex-wrap items-center gap-2">
           <div
@@ -538,6 +786,25 @@ export function StudentsWorkspace() {
             aria-label="Search students"
           />
           <select
+            className="field max-w-[11rem]"
+            value={sessionFilter || ""}
+            onChange={(e) => setSessionFilter(e.target.value)}
+            aria-label="Filter by session"
+            title="Roster is per academic year — change header Session or pick here"
+          >
+            <option value="">
+              Session {headerAy || "—"} (header)
+            </option>
+            {sessionOptions
+              .filter((c) => c !== headerAy)
+              .map((c) => (
+                <option key={c} value={c}>
+                  {c} only
+                </option>
+              ))}
+            <option value="all">All sessions</option>
+          </select>
+          <select
             className="field max-w-[10rem]"
             value={classFilter}
             onChange={(e) => {
@@ -552,9 +819,12 @@ export function StudentsWorkspace() {
               .map((c) => {
                 const n = sis.students.filter(
                   (s) =>
-                    s.classId === c.id ||
-                    m.sections.find((sec) => sec.id === s.sectionId)
-                      ?.classId === c.id,
+                    (!effectiveSession ||
+                      normalizeSessionCode(s.academicYearCode || "") ===
+                        normalizeSessionCode(effectiveSession)) &&
+                    (s.classId === c.id ||
+                      m.sections.find((sec) => sec.id === s.sectionId)
+                        ?.classId === c.id),
                 ).length;
                 return (
                   <option key={c.id} value={c.id}>
@@ -583,6 +853,9 @@ export function StudentsWorkspace() {
               const n = sis.students.filter(
                 (stu) =>
                   stu.sectionId === s.id &&
+                  (!effectiveSession ||
+                    normalizeSessionCode(stu.academicYearCode || "") ===
+                      normalizeSessionCode(effectiveSession)) &&
                   (statusFilter === "all" || stu.status === statusFilter),
               ).length;
               return (
@@ -607,7 +880,7 @@ export function StudentsWorkspace() {
           </select>
           <FilterExportButtons
             title="Student register (full form)"
-            subtitle={`${TENANT.shortName} · ${DEFAULT_AY}`}
+            subtitle={`${TENANT.shortName} · ${headerAy}`}
             filterNote={exportFilterNote}
             fileBaseName="students_full_register"
             columns={STUDENT_REGISTER_EXPORT_COLUMNS}
@@ -820,19 +1093,19 @@ export function StudentsWorkspace() {
                       <div className="min-w-0 flex-1">
                         <button
                           type="button"
-                          onClick={() => openHousehold(s.id)}
+                          onClick={() => openProfile(s.id)}
                           className="flex w-full items-start gap-3 text-left"
                         >
                           <StudentAvatar student={s} size={42} />
                           <div className="min-w-0 flex-1">
                             <div className="font-medium text-[var(--brand-deep)]">
-                              <StudentTypeBadge type={s.studentType} />
-                              {s.fullName}
+                              <StudentNameLabel student={s} sis={sis}>
                               {s.status !== "active" ? (
                                 <span className="ml-2 text-xs font-normal text-[var(--muted)]">
                                   inactive
                                 </span>
                               ) : null}
+                              </StudentNameLabel>
                               {state &&
                               pendingCurriculumRequests(state, s.id).length >
                                 0 ? (
@@ -918,13 +1191,12 @@ export function StudentsWorkspace() {
                   >
                     <button
                       type="button"
-                      onClick={() => openHousehold(s.id)}
+                      onClick={() => openProfile(s.id)}
                       className="flex w-full flex-col items-center text-center"
                     >
                       <StudentAvatar student={s} size={72} />
                       <div className="mt-3 font-medium text-[var(--brand-deep)]">
-                        <StudentTypeBadge type={s.studentType} />
-                        {s.fullName}
+                        <StudentNameLabel student={s} sis={sis} />
                       </div>
                       <div className="mt-1 text-xs text-[var(--muted)]">
                         {s.admissionNo}
@@ -1013,6 +1285,26 @@ export function StudentsWorkspace() {
           )}
         </div>
       </div>
+        </>
+      ) : null}
+
+      {profileId
+        ? (() => {
+            const ps = sis.students.find((s) => s.id === profileId);
+            if (!ps) return null;
+            return (
+              <StudentProfileModal
+                student={ps}
+                sis={sis}
+                masters={m}
+                classLabel={classSectionOf(ps)}
+                feeGroupLabel={feeGroupName(ps.feeGroupId)}
+                onClose={() => setProfileId("")}
+                onOpenStudent={(id) => setProfileId(id)}
+              />
+            );
+          })()
+        : null}
     </div>
   );
 }
@@ -1126,14 +1418,22 @@ function StudentDetail({
           <StudentAvatar student={student} size={56} />
           <div className="min-w-0">
             <h3 className="text-sm font-semibold text-[var(--brand-deep)]">
-              <StudentTypeBadge type={student.studentType} />
-              {student.fullName}
+              <StudentNameLabel student={student} sis={state}>
               {highlight && sibs.length > 0 ? (
                 <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--brand-gold)]">
                   Focus
                 </span>
               ) : null}
+              </StudentNameLabel>
             </h3>
+            {student.udiseInboundTransferPending ? (
+              <p className="mt-1 text-[10px] font-semibold text-[#8a5a10]">
+                Import from UDISE+ Drop Box or ask previous school to release
+                {student.previousSchool
+                  ? ` (${student.previousSchool}${student.previousUdise ? ` · ${student.previousUdise}` : ""})`
+                  : ""}
+              </p>
+            ) : null}
             <p className="mt-0.5 text-xs text-[var(--muted)]">
               Profile {pct}% complete
             </p>

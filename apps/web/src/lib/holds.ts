@@ -2,6 +2,7 @@
  * Fee hold enforcement — playbook stages → hard blocks + Principal PIN overrides.
  */
 
+import { assertModulePermission } from "@/lib/rbacGuard";
 import type { HoldCode, OverdueStage } from "@/lib/types";
 import {
   calendarDaysPastDue,
@@ -159,6 +160,8 @@ export function loadHolds(): HoldsState {
 }
 
 export function saveHolds(state: HoldsState) {
+  if (!assertModulePermission("fees", "edit", "saveHolds")) return;
+
   if (typeof window === "undefined") return;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
@@ -242,6 +245,7 @@ export function studentHoldContext(
   const dues = computeStudentDues(student, masters, fees, {
     asOf,
     includeFuture: true,
+    includeInactive: student.status !== "active",
   });
   const open = openFeeDues(dues);
   const overdue = open.filter((d) => d.dueOn <= asOf);

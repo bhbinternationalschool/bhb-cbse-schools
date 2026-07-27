@@ -71,6 +71,16 @@ body {
   color: var(--brand-deep);
 }
 
+/* Shared colourful module tabs */
+.module-tabs {
+  scrollbar-width: thin;
+}
+
+.module-tabs button[role="tab"],
+.module-tabs button {
+  letter-spacing: 0.02em;
+}
+
 h1,
 h2,
 h3,
@@ -97,6 +107,105 @@ h3,
 :focus-visible {
   outline: 2px solid var(--brand-gold);
   outline-offset: 2px;
+}
+
+/* Home hub — entrance + reduced motion */
+@keyframes home-hub-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.home-hub-hero {
+  animation: home-hub-in 0.45s ease-out both;
+}
+
+.home-hub-tile {
+  animation: home-hub-in 0.4s ease-out both;
+}
+
+/* Module dashboards — navy/gold command centre */
+.module-dash-hero {
+  background:
+    radial-gradient(
+      ellipse 80% 60% at 10% 0%,
+      rgba(197, 160, 40, 0.35),
+      transparent 55%
+    ),
+    linear-gradient(135deg, #203050 0%, #2a3d66 48%, #384870 100%);
+  box-shadow: 0 16px 40px rgba(32, 48, 80, 0.22);
+}
+
+.module-dash-panel {
+  border-radius: 1rem;
+  border: 1px solid rgba(32, 48, 80, 0.1);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 10px 28px rgba(32, 48, 80, 0.06);
+}
+
+.module-dash-kpi {
+  animation: home-hub-in 0.35s ease-out both;
+}
+
+.module-dash-bar,
+.module-dash-slice,
+.module-dash-trend {
+  transition: opacity 0.2s ease;
+}
+
+.module-dash-drawer {
+  animation: home-hub-in 0.25s ease-out both;
+}
+
+.erp-sidebar-link,
+.erp-sidebar-group-btn {
+  transition:
+    background-color 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.erp-sidebar-shell {
+  animation: erp-sidebar-in 0.22s ease-out both;
+}
+
+@keyframes erp-sidebar-in {
+  from {
+    opacity: 0;
+    transform: translateX(-0.75rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-hub-hero,
+  .home-hub-tile,
+  .module-dash-kpi,
+  .module-dash-drawer {
+    animation: none;
+  }
+
+  .home-hub-tile:hover,
+  .module-dash-kpi:hover {
+    transform: none;
+  }
+
+  .erp-sidebar-link,
+  .erp-sidebar-group-btn {
+    transition: none;
+  }
+
+  .erp-sidebar-shell {
+    animation: none;
+  }
 }
 
 @keyframes kenburns {
@@ -136,6 +245,103 @@ h3,
   animation: panel-in 280ms ease-out both;
 }
 
+/* Live notices / news running strip */
+.comms-strip {
+  background:
+    linear-gradient(90deg, rgba(197, 160, 40, 0.22), transparent 28%),
+    linear-gradient(180deg, #1a2740 0%, #203050 55%, #182338 100%);
+  box-shadow: inset 0 -1px 0 rgba(197, 160, 40, 0.2);
+}
+
+.comms-strip-sheen {
+  background: linear-gradient(
+    105deg,
+    transparent 40%,
+    rgba(255, 255, 255, 0.06) 50%,
+    transparent 60%
+  );
+  background-size: 220% 100%;
+  animation: comms-strip-sheen 7s ease-in-out infinite;
+}
+
+.comms-strip-mask {
+  mask-image: linear-gradient(
+    90deg,
+    transparent,
+    #000 2.5rem,
+    #000 calc(100% - 1.5rem),
+    transparent
+  );
+}
+
+.comms-strip-track {
+  display: inline-flex;
+  width: max-content;
+  animation-name: comms-strip-marquee;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  will-change: transform;
+}
+
+.comms-strip-track.is-paused {
+  animation-play-state: paused;
+}
+
+.comms-strip-item {
+  transition: color 120ms ease, opacity 120ms ease;
+}
+
+.comms-strip-item:hover {
+  color: var(--brand-gold-soft);
+}
+
+.comms-strip-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-left: 0.35rem;
+  border-radius: 999px;
+  background: rgba(197, 160, 40, 0.75);
+  box-shadow: 0 0 8px rgba(197, 160, 40, 0.55);
+}
+
+@keyframes comms-strip-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes comms-strip-sheen {
+  0%,
+  100% {
+    background-position: 100% 0;
+  }
+  50% {
+    background-position: 0% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .comms-strip-track {
+    animation: none;
+    flex-wrap: wrap;
+    width: 100%;
+    max-width: 100%;
+    justify-content: flex-start;
+    gap: 0.25rem;
+    padding-right: 0.75rem;
+  }
+  .comms-strip-sheen {
+    animation: none;
+  }
+  .comms-strip-item {
+    white-space: normal;
+  }
+}
+
 .glass {
   background: var(--panel);
   backdrop-filter: blur(16px);
@@ -159,6 +365,63 @@ h3,
 
 .btn-accent:active {
   transform: scale(0.98);
+}
+
+@keyframes erp-ai-bounce {
+  0%,
+  80%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+.erp-ai-dot {
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  margin-left: 2px;
+  border-radius: 999px;
+  background: var(--brand-mid);
+  animation: erp-ai-bounce 1s infinite ease-in-out;
+}
+
+.fee-collect-ui {
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.fee-collect-ui .field {
+  font-size: 1.125rem !important;
+  line-height: 1.45;
+  padding: 0.7rem 1rem !important;
+  min-height: 2.875rem;
+}
+
+.fee-collect-ui :where(.text-\[9px\], .text-\[10px\], .text-\[11px\]) {
+  font-size: 0.875rem !important;
+  line-height: 1.4;
+}
+
+.fee-collect-ui :where(.text-xs) {
+  font-size: 0.9375rem !important;
+}
+
+.fee-collect-ui :where(.text-sm) {
+  font-size: 1.0625rem !important;
+}
+
+.fee-collect-ui :where(.text-base) {
+  font-size: 1.125rem !important;
+}
+
+.fee-collect-ui input[type="checkbox"] {
+  width: 1.125rem;
+  height: 1.125rem;
 }
 
 .field {
@@ -271,6 +534,48 @@ h3,
     display: none !important;
   }
 
+  /* Payslips — print selected payslip batch */
+  body.printing-payslips {
+    background: white !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body.printing-payslips * {
+    visibility: hidden !important;
+  }
+
+  body.printing-payslips #payslip-print-root.print-target,
+  body.printing-payslips #payslip-print-root.print-target * {
+    visibility: visible !important;
+  }
+
+  body.printing-payslips #payslip-print-root.print-target {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+  }
+
+  body.printing-payslips .payslip-sheet {
+    box-shadow: none !important;
+    break-after: page;
+    page-break-after: always;
+  }
+
+  body.printing-payslips .payslip-sheet:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+
+  body.printing-payslips .print\:hidden,
+  body.printing-payslips .print-hide {
+    display: none !important;
+  }
+
   /* Certificates — print only the selected sheet */
   body.printing-certificate {
     background: white !important;
@@ -323,6 +628,90 @@ h3,
     .certificate-watermark
     span {
     color: rgba(180, 35, 24, 0.18) !important;
+  }
+
+  /* Exam question papers */
+  body.printing-exam-paper {
+    background: white !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    counter-reset: exam-page;
+  }
+
+  @page {
+    margin: 12mm 12mm 16mm;
+  }
+
+  body.printing-exam-paper * {
+    visibility: hidden !important;
+  }
+
+  body.printing-exam-paper .exam-paper-sheet.print-target,
+  body.printing-exam-paper .exam-paper-sheet.print-target * {
+    visibility: visible !important;
+  }
+
+  body.printing-exam-paper .exam-paper-sheet.print-target {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: 190mm !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: white !important;
+    overflow: visible !important;
+  }
+
+  body.printing-exam-paper .exam-paper-sheet .print-hide,
+  body.printing-exam-paper .print-hide {
+    display: none !important;
+  }
+
+  body.printing-exam-paper .exam-paper-page-footer {
+    display: flex !important;
+    position: running(examFooter);
+  }
+
+  body.printing-exam-paper .exam-paper-page-num::after {
+    counter-increment: exam-page;
+    content: counter(exam-page);
+  }
+
+  body.printing-exam-paper .exam-paper-page-total::after {
+    content: "";
+  }
+
+  body.printing-staff-idcard {
+    background: white !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body.printing-staff-idcard * {
+    visibility: hidden !important;
+  }
+
+  body.printing-staff-idcard .staff-idcard-sheet.print-target,
+  body.printing-staff-idcard .staff-idcard-sheet.print-target * {
+    visibility: visible !important;
+  }
+
+  body.printing-staff-idcard .staff-idcard-sheet.print-target {
+    position: absolute !important;
+    left: 50% !important;
+    top: 12mm !important;
+    transform: translateX(-50%) !important;
+    width: 86mm !important;
+    min-height: 54mm !important;
+    margin: 0 !important;
+    border-radius: 8px !important;
+    box-shadow: none !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 }
 

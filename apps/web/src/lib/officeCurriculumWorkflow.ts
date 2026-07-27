@@ -20,6 +20,7 @@ import {
   type StudentCurriculum,
 } from "@/lib/studentCurriculum";
 
+import { assertModulePermission } from "@/lib/rbacGuard";
 export type CurriculumEnrollmentStatus = "confirmed" | "draft" | "empty";
 
 export type ClassCurriculumTemplate = {
@@ -109,6 +110,7 @@ export function loadClassCurriculumTemplates(): ClassCurriculumTemplate[] {
 export function saveClassCurriculumTemplates(
   list: ClassCurriculumTemplate[],
 ): void {
+  if (!assertModulePermission("students", "edit", "saveClassCurriculumTemplates")) return;
   if (typeof window === "undefined") return;
   localStorage.setItem(TEMPLATE_KEY, JSON.stringify(list));
   void import("@/lib/curriculumPersistence").then(({ scheduleTemplateSync }) => {

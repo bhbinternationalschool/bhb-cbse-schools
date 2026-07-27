@@ -8,7 +8,16 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test:playbook": "npx tsx src/lib/playbook.selftest.ts"
+    "test:playbook": "npx tsx src/lib/playbook.selftest.ts",
+    "test:erp-chat": "npx tsx src/lib/erpChat.selftest.ts",
+    "test:wa-templates-automation": "npx tsx src/lib/waTemplatesAutomation.selftest.ts",
+    "import:leads": "npx tsx scripts/import-lead-excels.ts",
+    "import:fee-discounts": "npx tsx scripts/import-fee-discounts-excel.ts",
+    "clear:collections": "npx tsx scripts/clear-fee-collections.ts",
+    "bootstrap:go-live": "npx tsx scripts/bootstrap-go-live.mts",
+    "wa:subscribe": "npx tsx scripts/wa-waba-subscribe.mts",
+    "smoke:supabase": "npx tsx scripts/smoke-sis-remote.mts",
+    "audit:supabase": "npx tsx scripts/audit-supabase-schema.mts"
   },
   "dependencies": {
     "@bhb/time": "*",
@@ -18,13 +27,16 @@
     "jspdf": "^4.2.1",
     "lucide-react": "^0.511.0",
     "next": "15.5.20",
+    "qrcode": "^1.5.4",
     "react": "19.1.0",
-    "react-dom": "19.1.0"
+    "react-dom": "19.1.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",

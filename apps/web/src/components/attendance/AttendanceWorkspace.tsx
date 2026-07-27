@@ -3,10 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ATTENDANCE_STATUSES,
+  attendanceLockReason,
+  canOverrideAttendanceLock,
   defaultMarksForRoster,
   findRegister,
+  getAttendancePolicy,
+  isTeacherAttendanceLocked,
+  listOpenAttendanceExceptions,
   listRecentRegisters,
-  loadAttendance,
   rosterForSection,
   statusTone,
   summarizeMarks,
@@ -16,19 +20,60 @@ import {
   type AttendanceStatus,
 } from "@/lib/attendance";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
-import { isPublishedHoliday } from "@/lib/foundationMasters";
+import { classifyClassHolidayDay } from "@/lib/holidayPolicy";
 import { loadSis, type SisState } from "@/lib/sis";
 import {
   StudentAvatar,
-  StudentTypeBadge,
+  StudentNameLabel,
 } from "@/components/students/StudentAvatar";
 import { FilterExportButtons } from "@/components/reports/FilterExportButtons";
 import { describeFilters } from "@/lib/reportExport";
 import { TENANT } from "@/lib/types";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
+import { StaffAttendancePanel } from "@/components/attendance/StaffAttendancePanel";
+import { AttendanceExceptionsPanel } from "@/components/attendance/AttendanceExceptionsPanel";
+import { StaffAttendanceReportsPanel } from "@/components/staff/StaffLeaveReportsPanel";
+import { StudentAttendanceReportsPanel } from "@/components/attendance/StudentAttendanceReportsPanel";
+import { StudentLeaveWorkspace } from "@/components/studentLeave/StudentLeaveWorkspace";
+import { resolveSessionStaff } from "@/lib/staffResolve";
+
+type AttTab =
+  | "dashboard"
+  | "students"
+  | "staff"
+  | "leave"
+  | "exceptions"
+  | "student-reports"
+  | "staff-reports";
 
 export function AttendanceWorkspace() {
   const session = useDemoSession();
+  const [tab, setTab] = useState<AttTab>("dashboard");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const raw = new URLSearchParams(window.location.search).get("tab");
+    const allowed: AttTab[] = [
+      "dashboard",
+      "students",
+      "staff",
+      "leave",
+      "exceptions",
+      "student-reports",
+      "staff-reports",
+    ];
+    if (raw === "reports") {
+      setTab("student-reports");
+      return;
+    }
+    if (raw === "student-leave" || raw === "student_leave") {
+      setTab("leave");
+      return;
+    }
+    if (raw && (allowed as string[]).includes(raw)) setTab(raw as AttTab);
+  }, []);
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [sis, setSis] = useState<SisState | null>(null);
   const [classId, setClassId] = useState("");
@@ -40,6 +85,14 @@ export function AttendanceWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
+  const [myClassAutoDone, setMyClassAutoDone] = useState(false);
+  const [overrideNote, setOverrideNote] = useState("");
+  const [clockTick, setClockTick] = useState(0);
+
+  useEffect(() => {
+    const t = window.setInterval(() => setClockTick((x) => x + 1), 30_000);
+    return () => window.clearInterval(t);
+  }, []);
 
   const ay = session.academicYearCode || DEFAULT_AY;
 
@@ -51,7 +104,46 @@ export function AttendanceWorkspace() {
 
   useEffect(() => {
     refresh();
+    void (async () => {
+      const { ensureAttendanceHydrated } = await import(
+        "@/lib/attendancePersistence"
+      );
+      const changed = await ensureAttendanceHydrated();
+      if (changed) refresh();
+    })();
   }, []);
+
+  /** Sections this staff is class teacher of (for phone/tablet quick mark). */
+  const myClassSections = useMemo(() => {
+    if (!masters) return [];
+    const staff = resolveSessionStaff(session, masters);
+    if (!staff) return [];
+    const out: { classId: string; sectionId: string; label: string }[] = [];
+    for (const link of staff.classTeacherLinks ?? []) {
+      if (link.academicYearCode && link.academicYearCode !== ay) continue;
+      const cls = masters.classes.find((c) => c.id === link.classId);
+      const sec = masters.sections.find((s) => s.id === link.sectionId);
+      if (!cls || !sec) continue;
+      out.push({
+        classId: link.classId,
+        sectionId: link.sectionId,
+        label: `${cls.name || "Class"} · ${sec.name || ""}`.trim(),
+      });
+    }
+    return out;
+  }, [masters, session, ay, tick]);
+
+  useEffect(() => {
+    if (myClassAutoDone || myClassSections.length === 0) return;
+    if (classId && sectionId) {
+      setMyClassAutoDone(true);
+      return;
+    }
+    const first = myClassSections[0]!;
+    setClassId(first.classId);
+    setSectionId(first.sectionId);
+    setMyClassAutoDone(true);
+  }, [myClassSections, myClassAutoDone, classId, sectionId]);
 
   const classOptions = useMemo(() => {
     if (!masters) return [];
@@ -101,9 +193,35 @@ export function AttendanceWorkspace() {
   const summary = useMemo(() => summarizeMarks(marks), [marks]);
 
   const holidayOnDate = useMemo(() => {
-    if (!masters) return null;
-    return isPublishedHoliday(masters, date, ay);
-  }, [masters, date, ay]);
+    if (!masters || !classId) return null;
+    const c = classifyClassHolidayDay(masters, date, ay, classId);
+    if (c.status === "working") return null;
+    return c;
+  }, [masters, date, ay, classId]);
+
+  const holidayBlocks = holidayOnDate?.status === "holiday";
+
+  const policy = useMemo(() => {
+    void tick;
+    return getAttendancePolicy();
+  }, [tick]);
+
+  const teacherLocked = useMemo(() => {
+    void clockTick;
+    return isTeacherAttendanceLocked(date, policy);
+  }, [date, policy, clockTick]);
+
+  const canOverrideLock = useMemo(() => canOverrideAttendanceLock(), [tick]);
+
+  const lockBlocksTeacher =
+    teacherLocked && !canOverrideLock;
+
+  const openExceptionCount = useMemo(() => {
+    void tick;
+    return listOpenAttendanceExceptions().filter(
+      (e) => !ay || e.academicYearCode === ay,
+    ).length;
+  }, [tick, ay]);
 
   const recent = useMemo(() => {
     void tick;
@@ -123,6 +241,7 @@ export function AttendanceWorkspace() {
   }
 
   function setStatus(studentId: string, status: AttendanceStatus) {
+    if (lockBlocksTeacher) return;
     setMarks((prev) =>
       prev.map((m) => (m.studentId === studentId ? { ...m, status } : m)),
     );
@@ -130,6 +249,7 @@ export function AttendanceWorkspace() {
   }
 
   function markAll(status: AttendanceStatus) {
+    if (lockBlocksTeacher) return;
     setMarks((prev) => prev.map((m) => ({ ...m, status })));
     setDirty(true);
   }
@@ -139,13 +259,22 @@ export function AttendanceWorkspace() {
       setError("Pick class and section first");
       return;
     }
-    if (masters) {
-      const hol = isPublishedHoliday(masters, date, ay);
-      if (hol) {
+    if (lockBlocksTeacher) {
+      setError(
+        attendanceLockReason(date, policy) ||
+          "Locked after teacher cut-off",
+      );
+      return;
+    }
+    if (teacherLocked && canOverrideLock && !overrideNote.trim()) {
+      setError("Office override note required after cut-off");
+      return;
+    }
+    if (masters && classId) {
+      const hol = classifyClassHolidayDay(masters, date, ay, classId);
+      if (hol.status === "holiday" && hol.holiday) {
         setError(
-          `Published holiday: ${hol.title} (${hol.startsOn}${
-            hol.endsOn !== hol.startsOn ? `–${hol.endsOn}` : ""
-          }). Attendance is not marked on holidays.`,
+          `Published holiday for this class: ${hol.label}. Attendance is not marked on full holidays.`,
         );
         return;
       }
@@ -165,16 +294,30 @@ export function AttendanceWorkspace() {
       marks,
       markedBy: session.fullName,
       remark,
+      officeOverrideNote: teacherLocked ? overrideNote : undefined,
+      classLabel: classLabel(classId, sectionId),
+      students: sis?.students,
     });
     if (!result.ok) {
       setError(result.error);
       return;
     }
     setDirty(false);
+    setOverrideNote("");
     refresh();
     const s = summarizeMarks(result.register.marks);
+    const nudgePart =
+      result.nudgesOpened > 0
+        ? ` · opened ${result.nudgesOpened} absent WhatsApp nudge${
+            result.nudgesOpened === 1 ? "" : "s"
+          }`
+        : result.nudges.length === 0 && s.absent > 0
+          ? " · no new absent nudges"
+          : "";
     flash(
-      `Saved ${classLabel(classId, sectionId)} · ${date} — P ${s.present} · A ${s.absent}`,
+      `Saved ${classLabel(classId, sectionId)} · ${date} — P ${s.present} · A ${s.absent}${
+        result.lockedOverride ? " · office override" : ""
+      }${nudgePart}`,
     );
   }
 
@@ -186,8 +329,8 @@ export function AttendanceWorkspace() {
             Attendance
           </h1>
           <p className="mt-1 text-sm text-[var(--muted)]">
-            Daily class register by section. Fee holds never block marking —
-            every enrolled student stays on the sheet.
+            Class teacher marks students on phone/tablet (bulk All present /
+            All absent). Staff uses punch / rules separately.
           </p>
         </div>
         <span className="rounded-lg bg-[rgba(15,122,76,0.1)] px-3 py-1.5 text-[11px] font-semibold text-[var(--ok)]">
@@ -195,6 +338,69 @@ export function AttendanceWorkspace() {
         </span>
       </div>
 
+      <ModuleTabs
+        aria-label="Attendance"
+        value={tab}
+        onChange={(id) => setTab(id as AttTab)}
+        items={[
+          { id: "dashboard", label: "Dashboard", tone: "navy" },
+          { id: "students", label: "Students", tone: "navy" },
+          { id: "staff", label: "Staff", tone: "teal" },
+          { id: "leave", label: "Student leave", tone: "sky" },
+          {
+            id: "exceptions",
+            label:
+              openExceptionCount > 0
+                ? `Exceptions (${openExceptionCount})`
+                : "Exceptions",
+            tone: "amber",
+          },
+          { id: "student-reports", label: "Student reports", tone: "amber" },
+          { id: "staff-reports", label: "Staff reports", tone: "violet" },
+        ]}
+      />
+
+      {tab === "dashboard" ? (
+        <div className="mt-5">
+          <ModuleDashboardHost
+            moduleId="attendance"
+            onNavigateTab={(t) => setTab(t as AttTab)}
+          />
+        </div>
+      ) : null}
+
+      {tab === "staff" ? (
+        <div className="mt-5">
+          <StaffAttendancePanel ay={ay} />
+        </div>
+      ) : null}
+
+      {tab === "leave" ? (
+        <div className="mt-5">
+          <StudentLeaveWorkspace embedded />
+        </div>
+      ) : null}
+
+      {tab === "exceptions" ? (
+        <div className="mt-5">
+          <AttendanceExceptionsPanel ay={ay} />
+        </div>
+      ) : null}
+
+      {tab === "student-reports" ? (
+        <div className="mt-5">
+          <StudentAttendanceReportsPanel ay={ay} />
+        </div>
+      ) : null}
+
+      {tab === "staff-reports" ? (
+        <div className="mt-5">
+          <StaffAttendanceReportsPanel ay={ay} />
+        </div>
+      ) : null}
+
+      {tab === "students" ? (
+      <>
       {error ? (
         <p className="mt-3 rounded-lg bg-[#dc2626]/10 px-3 py-2 text-sm text-[#dc2626]">
           {error}
@@ -208,7 +414,7 @@ export function AttendanceWorkspace() {
 
       <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,0.65fr)]">
         <div className="space-y-4">
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4 pb-24 sm:pb-4">
             <div className="flex flex-wrap items-end justify-between gap-3">
               <h2 className="text-sm font-bold text-[var(--brand-deep)]">
                 Mark register
@@ -217,6 +423,40 @@ export function AttendanceWorkspace() {
                 Teacher: {session.fullName} · Session {ay}
               </p>
             </div>
+
+            {myClassSections.length > 0 ? (
+              <div className="mt-3">
+                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                  My class (tap to open)
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {myClassSections.map((c) => {
+                    const active =
+                      c.classId === classId && c.sectionId === sectionId;
+                    return (
+                      <button
+                        key={`${c.classId}-${c.sectionId}`}
+                        type="button"
+                        onClick={() => {
+                          setClassId(c.classId);
+                          setSectionId(c.sectionId);
+                        }}
+                        className={`min-h-11 rounded-xl px-3.5 py-2 text-sm font-bold ${
+                          active
+                            ? "bg-[var(--brand-deep)] text-white shadow-sm"
+                            : "border border-[rgba(32,48,80,0.15)] bg-[rgba(32,48,80,0.04)] text-[var(--brand-deep)]"
+                        }`}
+                      >
+                        {c.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-1.5 text-[11px] text-[var(--muted)]">
+                  Phone/tablet: All present → correct absentees → Save.
+                </p>
+              </div>
+            ) : null}
 
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
               <label className="block text-sm">
@@ -274,10 +514,39 @@ export function AttendanceWorkspace() {
 
             {holidayOnDate ? (
               <div className="mt-3 rounded-lg border border-[rgba(197,160,40,0.45)] bg-[rgba(197,160,40,0.12)] px-3 py-2 text-sm text-[var(--brand-deep)]">
-                <strong>{holidayOnDate.title}</strong> — published holiday.
-                Class attendance cannot be saved for this date. Change the date
-                or unpublish in Masters → Holidays.
+                <strong>{holidayOnDate.label}</strong>
+                {holidayBlocks
+                  ? " — full holiday for this class. Attendance cannot be saved. Change the date or adjust Masters → Holidays."
+                  : " — half-day policy for this class. You may still mark attendance."}
               </div>
+            ) : null}
+
+            {teacherLocked ? (
+              <div
+                className={`mt-3 rounded-lg border px-3 py-2 text-sm ${
+                  lockBlocksTeacher
+                    ? "border-[#dc2626]/35 bg-[#dc2626]/10 text-[#991b1b]"
+                    : "border-[rgba(217,119,6,0.45)] bg-[rgba(217,119,6,0.12)] text-[var(--brand-deep)]"
+                }`}
+              >
+                <strong>
+                  {lockBlocksTeacher ? "Locked for teachers" : "Cut-off passed"}
+                </strong>
+                {" — "}
+                {attendanceLockReason(date, policy) ||
+                  `Teacher cut-off ${policy.teacherCutoffTime} IST.`}
+                {canOverrideLock
+                  ? " You can save with an office override note."
+                  : " Ask office/principal to correct."}
+              </div>
+            ) : policy.lockTeachersAfterCutoff ? (
+              <p className="mt-3 text-[11px] text-[var(--muted)]">
+                Teacher cut-off {policy.teacherCutoffTime} IST
+                {policy.absentNudgeEnabled
+                  ? " · Absent saves open parent WhatsApp nudges"
+                  : ""}
+                .
+              </p>
             ) : null}
 
             {sectionId ? (
@@ -285,24 +554,24 @@ export function AttendanceWorkspace() {
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    className="rounded-lg bg-[#16a34a] px-2.5 py-1.5 text-[11px] font-bold text-white disabled:opacity-40"
-                    disabled={!!holidayOnDate}
+                    className="min-h-11 min-w-[7.5rem] flex-1 rounded-xl bg-[#16a34a] px-3 py-2.5 text-sm font-bold text-white disabled:opacity-40 sm:flex-none"
+                    disabled={holidayBlocks || lockBlocksTeacher}
                     onClick={() => markAll("P")}
                   >
                     All present
                   </button>
                   <button
                     type="button"
-                    className="rounded-lg bg-[#dc2626] px-2.5 py-1.5 text-[11px] font-bold text-white disabled:opacity-40"
-                    disabled={!!holidayOnDate}
+                    className="min-h-11 min-w-[7.5rem] flex-1 rounded-xl bg-[#dc2626] px-3 py-2.5 text-sm font-bold text-white disabled:opacity-40 sm:flex-none"
+                    disabled={holidayBlocks || lockBlocksTeacher}
                     onClick={() => markAll("A")}
                   >
                     All absent
                   </button>
                   <button
                     type="button"
-                    className="rounded-lg border border-[rgba(32,48,80,0.18)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--brand-deep)] disabled:opacity-40"
-                    disabled={!!holidayOnDate}
+                    className="min-h-11 rounded-xl border border-[rgba(32,48,80,0.18)] px-3 py-2.5 text-sm font-semibold text-[var(--brand-deep)] disabled:opacity-40"
+                    disabled={holidayBlocks || lockBlocksTeacher}
                     onClick={() => {
                       setMarks(defaultMarksForRoster(roster, existing));
                       setRemark(existing?.remark ?? "");
@@ -400,15 +669,14 @@ export function AttendanceWorkspace() {
                             <StudentAvatar student={st} size={32} />
                             <div className="min-w-0">
                               <div className="truncate text-sm font-semibold text-[var(--brand-deep)]">
-                                <StudentTypeBadge type={st.studentType} />
-                                {st.fullName}
+                                <StudentNameLabel student={st} />
                               </div>
                               <div className="text-[10px] text-[var(--muted)]">
                                 {st.admissionNo}
                               </div>
                             </div>
                           </div>
-                          <div className="flex flex-wrap gap-1">
+                          <div className="flex flex-wrap gap-1.5">
                             {ATTENDANCE_STATUSES.map((s) => {
                               const active = mark.status === s.code;
                               const tone = statusTone(s.code);
@@ -418,7 +686,8 @@ export function AttendanceWorkspace() {
                                   type="button"
                                   title={s.label}
                                   aria-pressed={active}
-                                  className={`min-w-[2.25rem] rounded-md px-1.5 py-1 text-[11px] font-bold ${
+                                  disabled={lockBlocksTeacher}
+                                  className={`min-h-10 min-w-[2.75rem] rounded-lg px-2 py-2 text-xs font-bold disabled:opacity-40 ${
                                     active
                                       ? `${tone.bg} ${tone.text}`
                                       : "bg-[rgba(32,48,80,0.06)] text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.1)]"
@@ -443,6 +712,7 @@ export function AttendanceWorkspace() {
                   <input
                     className="field !py-1.5"
                     value={remark}
+                    disabled={lockBlocksTeacher}
                     onChange={(e) => {
                       setRemark(e.target.value);
                       setDirty(true);
@@ -451,18 +721,78 @@ export function AttendanceWorkspace() {
                   />
                 </label>
 
+                {teacherLocked && canOverrideLock ? (
+                  <label className="mt-3 block text-sm">
+                    <span className="mb-1 block text-[11px] font-semibold text-[#b45309]">
+                      Office override note (required)
+                    </span>
+                    <input
+                      className="field !py-1.5"
+                      value={overrideNote}
+                      onChange={(e) => setOverrideNote(e.target.value)}
+                      placeholder="Why are you correcting this register after cut-off?"
+                    />
+                  </label>
+                ) : null}
+
                 <button
                   type="button"
-                  className="btn-accent mt-4 rounded-lg px-4 py-2.5 text-sm font-bold disabled:opacity-50"
-                  disabled={!sectionId || roster.length === 0 || !!holidayOnDate}
+                  className="btn-accent mt-4 hidden rounded-lg px-4 py-2.5 text-sm font-bold disabled:opacity-50 sm:inline-flex"
+                  disabled={
+                    !sectionId ||
+                    roster.length === 0 ||
+                    holidayBlocks ||
+                    lockBlocksTeacher
+                  }
                   onClick={onSave}
                 >
                   {existing ? "Update register" : "Save register"}
                 </button>
+
+                {/* Sticky phone/tablet action bar */}
+                <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[rgba(32,48,80,0.12)] bg-[rgba(248,248,240,0.96)] p-3 backdrop-blur-md sm:hidden">
+                  <div className="mx-auto flex max-w-lg gap-2">
+                    <button
+                      type="button"
+                      className="min-h-12 flex-1 rounded-xl bg-[#16a34a] text-sm font-bold text-white disabled:opacity-40"
+                      disabled={
+                        !sectionId || holidayBlocks || lockBlocksTeacher
+                      }
+                      onClick={() => markAll("P")}
+                    >
+                      All P
+                    </button>
+                    <button
+                      type="button"
+                      className="min-h-12 flex-1 rounded-xl bg-[#dc2626] text-sm font-bold text-white disabled:opacity-40"
+                      disabled={
+                        !sectionId || holidayBlocks || lockBlocksTeacher
+                      }
+                      onClick={() => markAll("A")}
+                    >
+                      All A
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-accent min-h-12 flex-[1.4] rounded-xl text-sm font-bold disabled:opacity-50"
+                      disabled={
+                        !sectionId ||
+                        roster.length === 0 ||
+                        holidayBlocks ||
+                        lockBlocksTeacher
+                      }
+                      onClick={onSave}
+                    >
+                      {dirty ? "Save*" : existing ? "Update" : "Save"}
+                    </button>
+                  </div>
+                </div>
               </>
             ) : (
               <p className="mt-4 text-sm text-[var(--muted)]">
-                Select class and section to load the roster.
+                {myClassSections.length > 0
+                  ? "Tap your class above, or pick class and section."
+                  : "Select class and section to load the roster. Class teachers: link yourself in Staff → Duties to see My class shortcuts."}
               </p>
             )}
           </div>
@@ -529,6 +859,8 @@ export function AttendanceWorkspace() {
           </div>
         </div>
       </div>
+      </>
+      ) : null}
     </div>
   );
 }

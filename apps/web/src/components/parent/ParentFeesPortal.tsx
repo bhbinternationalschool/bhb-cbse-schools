@@ -21,13 +21,13 @@ import {
   resolveParentHousehold,
 } from "@/lib/parentPortal";
 import {
-  buildPaymentSharePayload,
+  buildEnrichedPaymentSharePayload,
   buildPaymentShareUrl,
   createPaymentLink,
-  payPaymentLinkDemo,
 } from "@/lib/payments";
 import { loadSis, type Household, type SisStudent } from "@/lib/sis";
-import { StudentTypeBadge } from "@/components/students/StudentAvatar";
+import { StudentNameLabel } from "@/components/students/StudentAvatar";
+import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import { FilterExportButtons } from "@/components/reports/FilterExportButtons";
 import { describeFilters } from "@/lib/reportExport";
 import { TENANT } from "@/lib/types";
@@ -140,7 +140,7 @@ export function ParentFeesPortal({
     setSelected(new Set());
   }
 
-  function paySelected() {
+  async function paySelected() {
     if (!household || paying) return;
     const dues = allOpen.filter((d) => selected.has(d.dueKey));
     if (dues.length === 0) {
@@ -148,48 +148,65 @@ export function ParentFeesPortal({
       return;
     }
     setPaying(true);
-    const masters = loadMasters();
-    const primary =
-      bundle.find((r) => r.student.id === activeStudentId)?.student ??
-      bundle[0]?.student;
-    if (!primary) {
-      setPaying(false);
-      flash("No student on this household");
-      return;
-    }
-    const created = createPaymentLink({
-      householdId: household.id,
-      studentId: primary.id,
-      studentName:
-        dues.length === 1
-          ? dues[0]!.studentId === primary.id
-            ? primary.fullName
-            : dues[0]!.label
-          : `${household.guardianName} · family`,
-      classLabel: classLabelForStudent(primary, masters),
-      dues,
-      createdBy: guardianDisplayName || "Parent",
-      note: "Parent portal",
-    });
-    if (!created.ok) {
-      setPaying(false);
-      flash(created.error);
-      return;
-    }
-    const paid = payPaymentLinkDemo(created.link.id);
-    setPaying(false);
-    if (!paid.ok) {
-      // Fallback: open share URL so parent can tap Pay there
+    try {
+      const masters = loadMasters();
+      const primary =
+        bundle.find((r) => r.student.id === activeStudentId)?.student ??
+        bundle[0]?.student;
+      if (!primary) {
+        flash("No student on this household");
+        return;
+      }
+      const created = createPaymentLink({
+        householdId: household.id,
+        studentId: primary.id,
+        studentName:
+          dues.length === 1
+            ? dues[0]!.studentId === primary.id
+              ? primary.fullName
+              : dues[0]!.label
+            : `${household.guardianName} · family`,
+        classLabel: classLabelForStudent(primary, masters),
+        dues,
+        createdBy: guardianDisplayName || "Parent",
+        note: "Parent portal",
+      });
+      if (!created.ok) {
+        flash(created.error);
+        return;
+      }
+      try {
+        const res = await fetch("/api/payments/parent-pay", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            linkId: created.link.id,
+            sendWhatsApp: true,
+          }),
+        });
+        const json = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          receiptNo?: string;
+        };
+        if (res.ok && json.receiptNo) {
+          flash(
+            `Paid ${formatInr(created.link.amountPaise)} · ${json.receiptNo}`,
+          );
+          setSelected(new Set());
+          setTick((x) => x + 1);
+          setTab("receipts");
+          return;
+        }
+      } catch {
+        /* fall through */
+      }
       const url = buildPaymentShareUrl(
-        buildPaymentSharePayload(created.link, TENANT.shortName),
+        buildEnrichedPaymentSharePayload(created.link, TENANT.shortName),
       );
       window.location.href = url;
-      return;
+    } finally {
+      setPaying(false);
     }
-    flash(`Paid ${formatInr(created.link.amountPaise)} · ${paid.receiptNo}`);
-    setSelected(new Set());
-    setTick((x) => x + 1);
-    setTab("receipts");
   }
 
   if (!household) {
@@ -264,27 +281,17 @@ export function ParentFeesPortal({
           </div>
         </div>
 
-        <div className="mt-3 flex gap-1 rounded-lg bg-[rgba(32,48,80,0.06)] p-1">
-          {(
-            [
-              ["dues", "Fees due"],
-              ["receipts", "Receipts"],
-            ] as const
-          ).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setTab(id)}
-              className={`flex-1 rounded-md py-1.5 text-xs font-semibold ${
-                tab === id
-                  ? "bg-white text-[var(--brand-deep)] shadow-sm"
-                  : "text-[var(--muted)]"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <ModuleTabs
+          aria-label="Parent fees"
+          size="lg"
+          className="!mt-3"
+          value={tab}
+          onChange={(id) => setTab(id as "dues" | "receipts")}
+          items={[
+            { id: "dues", label: "Fees due", tone: "coral" },
+            { id: "receipts", label: "Receipts", tone: "green" },
+          ]}
+        />
       </header>
 
       {notice ? (
@@ -379,9 +386,8 @@ export function ParentFeesPortal({
                   <div>
                     <div className="flex flex-wrap items-center gap-1.5">
                       <h2 className="text-base font-semibold text-[var(--brand-deep)]">
-                        {activeRow.student.fullName}
+                        <StudentNameLabel student={activeRow.student} />
                       </h2>
-                      <StudentTypeBadge type={activeRow.student.studentType} />
                     </div>
                     <p className="mt-0.5 text-[11px] text-[var(--muted)]">
                       {classLabelForStudent(activeRow.student)} · Adm{" "}
@@ -556,7 +562,7 @@ export function ParentFeesPortal({
             <button
               type="button"
               disabled={selectedTotal <= 0 || paying}
-              onClick={paySelected}
+              onClick={() => void paySelected()}
               className="btn-accent rounded-xl px-4 py-2.5 text-sm font-semibold disabled:opacity-40"
             >
               {paying ? "Paying…" : "Pay with UPI"}

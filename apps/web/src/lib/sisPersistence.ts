@@ -252,6 +252,41 @@ export async function fetchSisRemote(): Promise<SisRemoteBundle | null> {
   return { households, students, householdUpdatedAt, studentUpdatedAt };
 }
 
+/** Service-role pull for WhatsApp / server mirror (no browser session). */
+export async function fetchSisRemoteServer(): Promise<SisRemoteBundle | null> {
+  const { getServerTenantContext } = await import("@/lib/serverTenant");
+  const ctx = await getServerTenantContext();
+  if (!ctx) return null;
+  const { sb, tenantId } = ctx;
+
+  const [hhRes, stuRes] = await Promise.all([
+    sb.from("sis_households").select("*").eq("tenant_id", tenantId),
+    sb.from("sis_students").select("*").eq("tenant_id", tenantId),
+  ]);
+
+  if (hhRes.error) {
+    console.warn("[sis] server pull households failed", hhRes.error.message);
+    return null;
+  }
+  if (stuRes.error) {
+    console.warn("[sis] server pull students failed", stuRes.error.message);
+    return null;
+  }
+
+  const householdUpdatedAt: Record<string, string> = {};
+  const studentUpdatedAt: Record<string, string> = {};
+  const households = ((hhRes.data ?? []) as HouseholdRow[]).map((row) => {
+    householdUpdatedAt[row.id] = row.updated_at;
+    return rowToHousehold(row);
+  });
+  const students = ((stuRes.data ?? []) as StudentRow[]).map((row) => {
+    studentUpdatedAt[row.id] = row.updated_at;
+    return rowToStudent(row);
+  });
+
+  return { households, students, householdUpdatedAt, studentUpdatedAt };
+}
+
 /**
  * Merge remote roster into local SIS.
  * Remote wins on id collision; local-only rows kept.
@@ -403,6 +438,39 @@ export async function pushSisState(
   return { ok: true };
 }
 
+/**
+ * Delete all remote SIS households + students for this tenant (live wipe).
+ * Call after clearAllStudents so hydrate does not re-pull demo.
+ */
+export async function wipeRemoteSisRoster(): Promise<{
+  ok: boolean;
+  error?: string;
+}> {
+  if (!sisRemoteEnabled()) return { ok: true };
+  const ctx = await clientAndTenant();
+  if (!ctx) return { ok: false, error: "Tenant not resolved" };
+  const { sb, tenantId } = ctx;
+
+  const { error: stuErr } = await sb
+    .from("sis_students")
+    .delete()
+    .eq("tenant_id", tenantId);
+  if (stuErr) {
+    console.warn("[sis] wipe students failed", stuErr.message);
+    return { ok: false, error: stuErr.message };
+  }
+  const { error: hhErr } = await sb
+    .from("sis_households")
+    .delete()
+    .eq("tenant_id", tenantId);
+  if (hhErr) {
+    console.warn("[sis] wipe households failed", hhErr.message);
+    return { ok: false, error: hhErr.message };
+  }
+  resetSisPersistenceCache();
+  return { ok: true };
+}
+
 export function scheduleSisSync(state: SisState) {
   if (!sisRemoteEnabled()) return;
   if (typeof window === "undefined") return;
@@ -426,16 +494,29 @@ export async function ensureSisHydrated(): Promise<boolean> {
   hydratedOnce = true;
 
   const remote = await fetchSisRemote();
-  const { loadSis, saveSis } = await import("@/lib/sis");
+  const { loadSis, saveSis, isLikelyDemoRoster } = await import("@/lib/sis");
   let next = loadSis();
   let changed = false;
 
   if (remote && (remote.households.length > 0 || remote.students.length > 0)) {
-    next = mergeSisRemoteIntoState(next, remote);
-    changed = true;
+    const remoteAsSis = {
+      version: 1 as const,
+      households: remote.households,
+      students: remote.students,
+      curriculumRequests: [] as [],
+      tags: next.tags ?? [],
+      classUpgrades: next.classUpgrades ?? [],
+    };
+    // Do not re-import wiped demo people from Supabase into an empty local roster
+    if (next.students.length === 0 && isLikelyDemoRoster(remoteAsSis)) {
+      await wipeRemoteSisRoster();
+    } else {
+      next = mergeSisRemoteIntoState(next, remote);
+      changed = true;
+    }
   }
 
-  // Push local (or merged) so empty remote gets seeded from demo
+  // Push local (or merged) so empty remote stays in sync — does not invent demo people
   await pushSisState(next);
 
   if (changed) {
@@ -447,5 +528,11 @@ export async function ensureSisHydrated(): Promise<boolean> {
     "@/lib/curriculumPersistence"
   );
   await ensureCurriculumHydrated();
+
+  const { applyFeeDiscountSeedNow } = await import(
+    "@/lib/feeDiscountImportHydrate"
+  );
+  applyFeeDiscountSeedNow();
+
   return changed;
 }

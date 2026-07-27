@@ -5,6 +5,7 @@ import {
   amountInWordsPaise,
   formatConcessionDetailLine,
   formatInr,
+  receiptSeriesOf,
   tenderModeLabel,
   voucherHasUnclearedCheque,
   type CollectionVoucher,
@@ -82,6 +83,9 @@ export function FeeReceiptSheet({
   sis,
   masters,
   students: studentsProp,
+  remainingPayQrDataUrl,
+  remainingPayAmountPaise,
+  remainingPayUrl,
 }: {
   voucher: CollectionVoucher;
   householdHint?: string;
@@ -89,6 +93,10 @@ export function FeeReceiptSheet({
   masters?: MastersState | null;
   /** When set (e.g. shared digital receipt), skip SIS/masters lookup */
   students?: ReceiptStudentRow[];
+  /** Optional UPI QR for balance still due (current / future) */
+  remainingPayQrDataUrl?: string | null;
+  remainingPayAmountPaise?: number;
+  remainingPayUrl?: string | null;
 }) {
   const voided = !!voucher.voidedAt;
   const stc = voucherHasUnclearedCheque(voucher);
@@ -147,7 +155,9 @@ export function FeeReceiptSheet({
 
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-b border-[rgba(32,48,80,0.15)] pb-2">
             <div className="rounded bg-[var(--brand-deep)] px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-white">
-              Fee receipt
+              {receiptSeriesOf(voucher.receiptNo) === "R"
+                ? "Registration receipt"
+                : "Fee receipt"}
               {voided ? " · void" : ""}
               {voucher.source === "manual_book" ? " · manual book" : ""}
               {voucher.source === "payment_link" ? " · UPI link" : ""}
@@ -264,16 +274,36 @@ export function FeeReceiptSheet({
             <tbody>
               {(() => {
                 const order: Array<
-                  "academic" | "transport" | "special" | "store"
-                > = ["academic", "transport", "special", "store"];
+                  | "academic"
+                  | "transport"
+                  | "special"
+                  | "store"
+                  | "voucher"
+                  | "arrears"
+                  | "plan"
+                > = [
+                  "arrears",
+                  "academic",
+                  "transport",
+                  "special",
+                  "voucher",
+                  "store",
+                  "plan",
+                ];
                 const sectionTitle = (k: (typeof order)[number]) =>
-                  k === "academic"
-                    ? "A — Academic"
-                    : k === "transport"
-                      ? "B — Transport"
-                      : k === "special"
-                        ? "C — Special / misc"
-                        : "D — Store / books";
+                  k === "arrears"
+                    ? "Arrears"
+                    : k === "academic"
+                      ? "A — Academic"
+                      : k === "transport"
+                        ? "B — Transport"
+                        : k === "special"
+                          ? "C — Special / misc"
+                          : k === "voucher"
+                            ? "V — Charge vouchers"
+                            : k === "store"
+                              ? "D — Store / books"
+                              : "E — Installment plan";
                 const rows: ReactNode[] = [];
                 let n = 0;
                 for (const kind of order) {
@@ -554,6 +584,35 @@ export function FeeReceiptSheet({
             <p className="mt-3 text-[11px] text-[var(--muted)]">
               <span className="font-semibold">Note:</span> {voucher.note}
             </p>
+          ) : null}
+
+          {!voided &&
+          remainingPayQrDataUrl &&
+          (remainingPayAmountPaise || 0) > 0 ? (
+            <div className="mt-4 flex flex-wrap items-center gap-4 rounded border border-[rgba(15,118,110,0.25)] bg-[rgba(15,118,110,0.06)] px-3 py-3">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={remainingPayQrDataUrl}
+                alt="UPI QR for remaining dues"
+                className="h-24 w-24 rounded border border-white bg-white p-0.5"
+              />
+              <div className="min-w-0 flex-1 text-[11px] leading-snug text-[var(--brand-deep)]">
+                <p className="font-bold uppercase tracking-wide text-[#0f766e]">
+                  Pay remaining / next dues
+                </p>
+                <p className="mt-1 tabular-nums font-semibold">
+                  {formatInr(remainingPayAmountPaise || 0)}
+                </p>
+                <p className="mt-1 text-[var(--muted)]">
+                  Scan UPI QR after this payment, or open the school pay link.
+                </p>
+                {remainingPayUrl ? (
+                  <p className="mt-1 break-all text-[10px] text-[#0f766e]">
+                    {remainingPayUrl}
+                  </p>
+                ) : null}
+              </div>
+            </div>
           ) : null}
 
           <div className="mt-8 grid grid-cols-2 gap-6 text-[11px] text-[var(--brand-deep)]">

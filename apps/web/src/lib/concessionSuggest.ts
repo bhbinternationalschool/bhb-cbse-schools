@@ -3,10 +3,12 @@
  */
 
 import {
+  concessionIdsForCode,
   ordinalChildLabel,
   resolveSiblingTierValue,
   type ConcessionGrant,
   type ConcessionRule,
+  type MastersState,
 } from "@/lib/masters";
 import {
   siblingsOf,
@@ -22,17 +24,59 @@ export type ConcessionSuggest = {
   siblingChildNo?: number;
 };
 
+function concessionGrantIds(
+  masters: MastersState | undefined,
+  concession: ConcessionRule,
+): Set<string> {
+  if (!masters) return new Set([concession.id]);
+  return new Set(concessionIdsForCode(masters, concession.code));
+}
+
 function alreadyGranted(
   studentId: string,
-  concessionId: string,
+  concession: ConcessionRule,
   grants: ConcessionGrant[],
+  masters?: MastersState,
 ): boolean {
+  const ids = concessionGrantIds(masters, concession);
   return grants.some(
     (g) =>
       g.studentId === studentId &&
-      g.concessionId === concessionId &&
+      ids.has(g.concessionId) &&
       g.status !== "rejected",
   );
+}
+
+function ayNorm(code: string): string {
+  const t = (code || "").trim().replace(/\s+/g, "").replace(/–/g, "-");
+  const full = t.match(/^(20\d{2})-(20\d{2})$/);
+  if (full) return `${full[1]}-${full[2]!.slice(2)}`;
+  return t;
+}
+
+/**
+ * Active students scoped to one session so a child promoted across years is
+ * listed once. With an ay: only that session's records. Without: one record
+ * per admission no (latest session wins).
+ */
+function activeStudentsForSession(
+  sis: SisState,
+  academicYearCode?: string,
+): SisStudent[] {
+  const active = sis.students.filter((s) => s.status === "active");
+  const scope = ayNorm(academicYearCode || "");
+  if (scope) {
+    return active.filter((s) => ayNorm(s.academicYearCode) === scope);
+  }
+  const byAdm = new Map<string, SisStudent>();
+  for (const s of active) {
+    const key = s.admissionNo.trim().toUpperCase() || s.id;
+    const prev = byAdm.get(key);
+    if (!prev || ayNorm(s.academicYearCode) > ayNorm(prev.academicYearCode)) {
+      byAdm.set(key, s);
+    }
+  }
+  return [...byAdm.values()];
 }
 
 function looksLikeStaffWard(s: SisStudent): boolean {
@@ -50,14 +94,15 @@ function looksLikeStaffWard(s: SisStudent): boolean {
   );
 }
 
-/** Active household members oldest → youngest (1st child first). */
+/** Active household members oldest → youngest (1st child first), one per child. */
 export function rankHouseholdSiblings(
   sis: SisState,
   householdId: string,
+  academicYearCode?: string,
 ): SisStudent[] {
   if (!householdId) return [];
-  return sis.students
-    .filter((s) => s.status === "active" && s.householdId === householdId)
+  return activeStudentsForSession(sis, academicYearCode)
+    .filter((s) => s.householdId === householdId)
     .sort((a, b) => {
       if (a.dob && b.dob && a.dob !== b.dob) return a.dob.localeCompare(b.dob);
       return a.admissionNo.localeCompare(b.admissionNo);
@@ -69,9 +114,20 @@ export function siblingChildNumber(
   sis: SisState,
   student: SisStudent,
 ): number {
-  const ranked = rankHouseholdSiblings(sis, student.householdId);
+  // Rank within the student's own session so cross-session duplicates of the
+  // same child never shift the ordinal.
+  const ranked = rankHouseholdSiblings(
+    sis,
+    student.householdId,
+    student.academicYearCode,
+  );
   const idx = ranked.findIndex((s) => s.id === student.id);
-  return idx < 0 ? 1 : idx + 1;
+  if (idx >= 0) return idx + 1;
+  const adm = student.admissionNo.trim().toUpperCase();
+  const byAdm = ranked.findIndex(
+    (s) => s.admissionNo.trim().toUpperCase() === adm,
+  );
+  return byAdm < 0 ? 1 : byAdm + 1;
 }
 
 /** Active students who share a household with at least one other active sibling. */
@@ -79,8 +135,9 @@ export function listSiblingCandidates(
   sis: SisState,
   excludeIds?: Set<string>,
   rule?: ConcessionRule,
+  academicYearCode?: string,
 ): ConcessionSuggest[] {
-  const active = sis.students.filter((s) => s.status === "active");
+  const active = activeStudentsForSession(sis, academicYearCode);
   const byHh = new Map<string, SisStudent[]>();
   for (const s of active) {
     if (!s.householdId) continue;
@@ -92,7 +149,7 @@ export function listSiblingCandidates(
   const out: ConcessionSuggest[] = [];
   for (const [hhId, members] of byHh) {
     if (members.length < 2) continue;
-    const ranked = rankHouseholdSiblings(sis, hhId);
+    const ranked = rankHouseholdSiblings(sis, hhId, academicYearCode);
     for (const s of ranked) {
       if (excludeIds?.has(s.id)) continue;
       const childNo = siblingChildNumber(sis, s);
@@ -124,20 +181,20 @@ export function suggestStudentsForConcession(
   concession: ConcessionRule,
   sis: SisState,
   grants: ConcessionGrant[],
+  academicYearCode?: string,
+  masters?: MastersState,
 ): ConcessionSuggest[] {
+  const grantIds = concessionGrantIds(masters, concession);
   const exclude = new Set(
     grants
-      .filter(
-        (g) =>
-          g.concessionId === concession.id && g.status !== "rejected",
-      )
+      .filter((g) => grantIds.has(g.concessionId) && g.status !== "rejected")
       .map((g) => g.studentId),
   );
   const kind = concession.kind;
-  const active = sis.students.filter((s) => s.status === "active");
+  const active = activeStudentsForSession(sis, academicYearCode);
 
   if (kind === "sibling") {
-    return listSiblingCandidates(sis, exclude, concession);
+    return listSiblingCandidates(sis, exclude, concession, academicYearCode);
   }
 
   if (kind === "staff_ward") {
@@ -210,8 +267,9 @@ export function siblingGrantHint(
 
 export function isStudentAlreadyGranted(
   studentId: string,
-  concessionId: string,
+  concession: ConcessionRule,
   grants: ConcessionGrant[],
+  masters?: MastersState,
 ): boolean {
-  return alreadyGranted(studentId, concessionId, grants);
+  return alreadyGranted(studentId, concession, grants, masters);
 }

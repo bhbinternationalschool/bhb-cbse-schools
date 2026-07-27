@@ -1,26 +1,78 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { formatInr, searchFeeStudents, type StudentSearchHit } from "@/lib/fees";
-import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
-import { loadSis, type SisState } from "@/lib/sis";
-import {
-  assignStudentToRoute,
-  endTransportAssignment,
-  listActiveRoutes,
-  listAllAssignments,
-  loadTransport,
-  type TransportRoute,
-} from "@/lib/transport";
-import { StudentTypeBadge } from "@/components/students/StudentAvatar";
+import { useEffect, useMemo, useState } from "react";
+import { HoldStatusBanner, PrincipalHoldOverrideDialog } from "@/components/fees/PrincipalHoldOverrideDialog";
 import { StudentHitsFilterExport } from "@/components/reports/StudentHitsFilterExport";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { StudentNameLabel } from "@/components/students/StudentAvatar";
 import {
-  HoldStatusBanner,
-  PrincipalHoldOverrideDialog,
-} from "@/components/fees/PrincipalHoldOverrideDialog";
+  BoardingPanel,
+  CompliancePanel,
+  DealersPanel,
+  FinancePanel,
+  LiveMapPanel,
+  ServicePanel,
+} from "@/components/transport/TransportFleetPanels";
+import {
+  FleetPanel,
+  FuelPanel,
+  RoutesPanel,
+} from "@/components/transport/TransportOpsPanels";
+import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
+import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
+import { formatInr, searchFeeStudents, type StudentSearchHit } from "@/lib/fees";
 import { checkHold, type HoldCheck } from "@/lib/holds";
+import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
+import { loadSis, type SisState } from "@/lib/sis";
+import { formatRouteCrew, staffAssignedToRoute } from "@/lib/staffResolve";
+import {
+  assignStudentToRoute,
+  computeTransportPeriodDues,
+  endTransportAssignment,
+  expectedMonthlyFeePaise,
+  listActiveRiders,
+  listActiveRoutes,
+  loadTransport,
+  seedTransportIfEmpty,
+  upsertFleetVehicle,
+  type TransportState,
+} from "@/lib/transport";
+import {
+  TRANSPORT_REPORT_CATEGORIES,
+  TRANSPORT_REPORTS,
+  runTransportReport,
+  type TransportReportFormat,
+} from "@/lib/transportReportCatalog";
+
+type TransportTab =
+  | "dashboard"
+  | "riders"
+  | "routes"
+  | "fleet"
+  | "fuel"
+  | "dealers"
+  | "finance"
+  | "service"
+  | "board"
+  | "compliance"
+  | "live"
+  | "reports";
+
+const TABS: ModuleTabItem[] = [
+  { id: "dashboard", label: "Dashboard", tone: "navy" },
+  { id: "riders", label: "Riders", tone: "navy" },
+  { id: "routes", label: "Routes", tone: "teal" },
+  { id: "fleet", label: "Fleet", tone: "slate" },
+  { id: "fuel", label: "Fuel", tone: "amber" },
+  { id: "dealers", label: "Dealers", tone: "violet" },
+  { id: "finance", label: "Finance", tone: "green" },
+  { id: "service", label: "Service", tone: "coral" },
+  { id: "board", label: "Boarding", tone: "sky" },
+  { id: "compliance", label: "Compliance", tone: "rose" },
+  { id: "live", label: "Live", tone: "teal" },
+  { id: "reports", label: "Reports", tone: "navy" },
+];
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -28,9 +80,30 @@ function todayIso() {
 
 export function TransportWorkspace() {
   const session = useDemoSession();
+  const [tab, setTab] = useState<TransportTab>("dashboard");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const raw = new URLSearchParams(window.location.search).get("tab");
+    const allowed: TransportTab[] = [
+      "dashboard",
+      "riders",
+      "routes",
+      "fleet",
+      "fuel",
+      "dealers",
+      "finance",
+      "service",
+      "board",
+      "compliance",
+      "live",
+      "reports",
+    ];
+    if (raw && (allowed as string[]).includes(raw)) setTab(raw as TransportTab);
+  }, []);
+  const [state, setState] = useState<TransportState | null>(null);
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [sis, setSis] = useState<SisState | null>(null);
-  const [routes, setRoutes] = useState<TransportRoute[]>([]);
   const [query, setQuery] = useState("");
   const [classId, setClassId] = useState("");
   const [sectionId, setSectionId] = useState("");
@@ -40,50 +113,60 @@ export function TransportWorkspace() {
   const [stopId, setStopId] = useState("");
   const [effectiveFrom, setEffectiveFrom] = useState(todayIso);
   const [feeOverride, setFeeOverride] = useState("");
+  const [feeOverrideReason, setFeeOverrideReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [tick, setTick] = useState(0);
   const [holdCheck, setHoldCheck] = useState<HoldCheck | null>(null);
   const [holdDialog, setHoldDialog] = useState(false);
 
+  function flash(message: string) {
+    setNotice(message);
+    setError(null);
+    window.setTimeout(() => setNotice(null), 2800);
+  }
+
   function refreshHolds(studentId?: string) {
-    if (!studentId) {
-      setHoldCheck(null);
-      return;
-    }
-    setHoldCheck(checkHold(studentId, "HOLD_TRANSPORT"));
+    setHoldCheck(studentId ? checkHold(studentId, "HOLD_TRANSPORT") : null);
   }
 
   function refresh() {
-    const m = loadMasters();
-    const s = loadSis();
-    const t = loadTransport();
-    setMasters(m);
-    setSis(s);
-    setRoutes(listActiveRoutes(t));
-    setTick((x) => x + 1);
+    try {
+      const transport = seedTransportIfEmpty();
+      setState(transport);
+      setMasters(loadMasters());
+      setSis(loadSis());
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Failed to load transport";
+      setError(msg);
+      // Avoid infinite “Loading transport…” if seed/load throws
+      setState((prev) => prev ?? loadTransport());
+      try {
+        setMasters(loadMasters());
+      } catch {
+        /* ignore */
+      }
+      try {
+        setSis(loadSis());
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   useEffect(() => {
     refresh();
   }, []);
 
-  const classOptions = useMemo(() => {
-    if (!masters) return [];
-    return masters.classes.filter((c) => c.isActive);
-  }, [masters]);
-
-  const sectionOptions = useMemo(() => {
-    if (!masters || !classId) return [];
-    return masters.sections.filter((s) => s.classId === classId && s.isActive);
-  }, [masters, classId]);
-
   useEffect(() => {
-    if (!sectionId) return;
-    if (!sectionOptions.some((s) => s.id === sectionId)) {
-      setSectionId("");
-    }
-  }, [sectionId, sectionOptions]);
+    if (typeof window === "undefined") return;
+    void (async () => {
+      const { ensureTransportHydrated } = await import(
+        "@/lib/transportPersistence"
+      );
+      await ensureTransportHydrated();
+      refresh();
+    })();
+  }, []);
 
   useEffect(() => {
     if (!sis || !masters) return;
@@ -93,34 +176,65 @@ export function TransportWorkspace() {
         sectionId,
       }),
     );
-  }, [query, classId, sectionId, sis, masters, tick]);
+  }, [query, classId, sectionId, sis, masters]);
 
   useEffect(() => {
     refreshHolds(selected?.student.id);
-  }, [selected?.student.id, tick]);
+  }, [selected?.student.id, state]);
 
-  const selectedRoute = routes.find((r) => r.id === routeId) ?? null;
+  const classOptions = useMemo(
+    () => masters?.classes.filter((row) => row.isActive) ?? [],
+    [masters],
+  );
+  const sectionOptions = useMemo(
+    () =>
+      masters?.sections.filter(
+        (row) => row.isActive && row.classId === classId,
+      ) ?? [],
+    [masters, classId],
+  );
+
+  useEffect(() => {
+    if (sectionId && !sectionOptions.some((row) => row.id === sectionId)) {
+      setSectionId("");
+    }
+  }, [sectionId, sectionOptions]);
+
+  const routes = useMemo(() => (state ? listActiveRoutes(state) : []), [state]);
+  const riders = useMemo(() => (state ? listActiveRiders(state) : []), [state]);
+  const selectedRoute = routes.find((route) => route.id === routeId) ?? null;
+  const selectedStop =
+    selectedRoute?.stops.find((stop) => stop.id === stopId) ?? null;
 
   useEffect(() => {
     if (!selectedRoute) {
       setStopId("");
-      return;
-    }
-    if (!selectedRoute.stops.some((st) => st.id === stopId)) {
+    } else if (!selectedRoute.stops.some((stop) => stop.id === stopId)) {
       setStopId(selectedRoute.stops[0]?.id ?? "");
     }
   }, [selectedRoute, stopId]);
 
-  const riders = useMemo(() => {
-    void tick;
-    return listAllAssignments().filter((a) => a.effectiveTo == null);
-  }, [tick]);
-
-  function flash(msg: string) {
-    setNotice(msg);
-    setError(null);
-    window.setTimeout(() => setNotice(null), 2800);
-  }
+  const expectedFeePaise =
+    state && selectedRoute
+      ? expectedMonthlyFeePaise(
+          selectedRoute,
+          selectedStop ?? undefined,
+          state.feePolicy,
+        )
+      : 0;
+  const overridePaise = feeOverride.trim()
+    ? Math.round((Number(feeOverride) || 0) * 100)
+    : 0;
+  const proposedFeePaise = overridePaise > 0 ? overridePaise : expectedFeePaise;
+  const existingDues = useMemo(() => {
+    if (!state || !selected) return [];
+    return computeTransportPeriodDues(selected.student.id, {
+      academicYearCode: selected.student.academicYearCode || DEFAULT_AY,
+      asOf: todayIso(),
+      includeFuture: true,
+      state,
+    });
+  }, [selected, state]);
 
   function onAssign() {
     if (!selected) {
@@ -138,9 +252,14 @@ export function TransportWorkspace() {
       setError(hold.message);
       return;
     }
-    const overridePaise = feeOverride.trim()
-      ? Math.round((Number(feeOverride) || 0) * 100)
-      : 0;
+    if (
+      overridePaise > 0 &&
+      overridePaise !== expectedFeePaise &&
+      !feeOverrideReason.trim()
+    ) {
+      setError("Enter a reason when overriding the expected monthly fee");
+      return;
+    }
     const result = assignStudentToRoute({
       studentId: selected.student.id,
       householdId: selected.student.householdId,
@@ -149,20 +268,30 @@ export function TransportWorkspace() {
       effectiveFrom,
       academicYearCode: selected.student.academicYearCode || DEFAULT_AY,
       monthlyFeePaise: overridePaise > 0 ? overridePaise : undefined,
+      feeOverrideReason: feeOverrideReason.trim(),
     });
     if (!result.ok) {
       setError(result.error);
       return;
     }
-    const route = routes.find((r) => r.id === routeId);
     flash(
-      `Assigned ${selected.student.fullName} to ${route?.code ?? "route"} — monthly dues on Fee Take`,
+      `Assigned ${selected.student.fullName} to ${selectedRoute?.code ?? "route"} — monthly dues are available in Fee Take`,
     );
     setSelected(null);
     setQuery("");
     setFeeOverride("");
+    setFeeOverrideReason("");
     refresh();
   }
+
+  const commonPanelProps = {
+    onRefresh: refresh,
+    onFlash: flash,
+    onError: (message: string) => {
+      setError(message);
+      setNotice(null);
+    },
+  };
 
   return (
     <div>
@@ -172,8 +301,8 @@ export function TransportWorkspace() {
             Transport
           </h1>
           <p className="mt-1 text-sm text-[var(--muted)]">
-            Assign students to bus routes — monthly transport dues appear on Fee
-            Take and Manual book with route, bus, and stop.
+            Riders, routes, fleet operations, boarding, compliance, and
+            transport finance in one workspace.
           </p>
         </div>
         <Link
@@ -184,10 +313,21 @@ export function TransportWorkspace() {
         </Link>
       </div>
 
+      <ModuleTabs
+        items={TABS}
+        value={tab}
+        onChange={(id) => setTab(id as TransportTab)}
+        aria-label="Transport workspace"
+        size="md"
+      />
+
       {error ? (
-        <p className="mt-3 rounded-lg bg-[#dc2626]/10 px-3 py-2 text-sm text-[#dc2626]">
-          {error}
-        </p>
+        <div className="mt-3 flex items-start justify-between gap-3 rounded-lg bg-[#dc2626]/10 px-3 py-2 text-sm text-[#dc2626]">
+          <span>{error}</span>
+          <button type="button" className="font-bold" onClick={() => setError(null)}>
+            ×
+          </button>
+        </div>
       ) : null}
       {notice ? (
         <p className="mt-3 rounded-lg bg-[rgba(32,48,80,0.06)] px-3 py-2 text-sm text-[var(--brand-deep)]">
@@ -195,332 +335,120 @@ export function TransportWorkspace() {
         </p>
       ) : null}
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-        <div className="space-y-4">
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
-            <h2 className="text-sm font-bold text-[var(--brand-deep)]">
-              Assign rider
-            </h2>
-            <p className="mt-0.5 text-[11px] text-[var(--muted)]">
-              Operator: {session.fullName}
-            </p>
+      {!state ? (
+        <p className="mt-6 text-sm text-[var(--muted)]">Loading transport…</p>
+      ) : (
+        <>
+          {tab === "dashboard" ? (
+            <ModuleDashboardHost
+              moduleId="transport"
+              onNavigateTab={(t) => setTab(t as TransportTab)}
+            />
+          ) : null}
+          {tab === "riders" ? (
+            <RidersPanel
+              state={state}
+              masters={masters}
+              sis={sis}
+              sessionName={session.fullName}
+              query={query}
+              setQuery={setQuery}
+              classId={classId}
+              setClassId={setClassId}
+              sectionId={sectionId}
+              setSectionId={setSectionId}
+              classOptions={classOptions}
+              sectionOptions={sectionOptions}
+              hits={hits}
+              selected={selected}
+              setSelected={setSelected}
+              holdCheck={holdCheck}
+              setHoldDialog={setHoldDialog}
+              routes={routes}
+              routeId={routeId}
+              setRouteId={setRouteId}
+              selectedRoute={selectedRoute}
+              stopId={stopId}
+              setStopId={setStopId}
+              effectiveFrom={effectiveFrom}
+              setEffectiveFrom={setEffectiveFrom}
+              feeOverride={feeOverride}
+              setFeeOverride={setFeeOverride}
+              feeOverrideReason={feeOverrideReason}
+              setFeeOverrideReason={setFeeOverrideReason}
+              expectedFeePaise={expectedFeePaise}
+              proposedFeePaise={proposedFeePaise}
+              existingDues={existingDues}
+              riders={riders}
+              onAssign={onAssign}
+              onRefresh={refresh}
+              onFlash={flash}
+              onNotice={setNotice}
+            />
+          ) : null}
+          {tab === "routes" ? (
+            <RoutesPanel
+              state={state}
+              vehicles={state.vehicles}
+              {...commonPanelProps}
+            />
+          ) : null}
+          {tab === "fleet" ? (
+            <FleetPanel
+              state={state}
+              masters={masters}
+              upsertVehicle={upsertFleetVehicle}
+              {...commonPanelProps}
+            />
+          ) : null}
+          {tab === "fuel" ? (
+            <FuelPanel state={state} {...commonPanelProps} />
+          ) : null}
+          {tab === "dealers" ? (
+            <DealersPanel state={state} {...commonPanelProps} />
+          ) : null}
+          {tab === "finance" ? (
+            <FinancePanel state={state} {...commonPanelProps} />
+          ) : null}
+          {tab === "service" ? (
+            <ServicePanel
+              state={state}
+              sessionName={session.fullName}
+              {...commonPanelProps}
+            />
+          ) : null}
+          {tab === "board" ? (
+            <BoardingPanel
+              state={state}
+              sis={sis}
+              masters={masters}
+              {...commonPanelProps}
+            />
+          ) : null}
+          {tab === "compliance" ? (
+            <CompliancePanel
+              state={state}
+              sis={sis}
+              onRefresh={refresh}
+              onFlash={flash}
+            />
+          ) : null}
+          {tab === "live" ? (
+            <LiveMapPanel state={state} {...commonPanelProps} />
+          ) : null}
+          {tab === "reports" ? (
+            <ReportsPanel
+              state={state}
+              masters={masters}
+              sis={sis}
+              onFlash={flash}
+              onError={setError}
+            />
+          ) : null}
+        </>
+      )}
 
-            <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,0.7fr)_minmax(0,0.7fr)]">
-              <label className="block text-sm">
-                <span className="mb-1 block text-[11px] text-[var(--muted)]">
-                  Find student
-                </span>
-                <input
-                  className="field"
-                  value={query}
-                  onChange={(e) => {
-                    setQuery(e.target.value);
-                    setSelected(null);
-                  }}
-                  placeholder="Name, admission no, or mobile…"
-                />
-              </label>
-              <label className="block text-sm">
-                <span className="mb-1 block text-[11px] text-[var(--muted)]">
-                  Class
-                </span>
-                <select
-                  className="field !py-1.5"
-                  value={classId}
-                  onChange={(e) => {
-                    setClassId(e.target.value);
-                    setSectionId("");
-                    setSelected(null);
-                  }}
-                >
-                  <option value="">All classes</option>
-                  {classOptions.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block text-sm">
-                <span className="mb-1 block text-[11px] text-[var(--muted)]">
-                  Section
-                </span>
-                <select
-                  className="field !py-1.5"
-                  value={sectionId}
-                  disabled={!classId}
-                  onChange={(e) => {
-                    setSectionId(e.target.value);
-                    setSelected(null);
-                  }}
-                >
-                  <option value="">
-                    {classId ? "All sections" : "Pick class first"}
-                  </option>
-                  {sectionOptions.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            <div className="mt-2 flex justify-end">
-              <StudentHitsFilterExport
-                title="Transport · student search"
-                hits={hits}
-                query={query}
-                classLabel={classOptions.find((c) => c.id === classId)?.name}
-                sectionLabel={sectionOptions.find((s) => s.id === sectionId)?.name}
-                onMessage={(msg) => {
-                  setNotice(msg);
-                  window.setTimeout(() => setNotice(null), 2200);
-                }}
-              />
-            </div>
-
-            {!selected && (query.trim() || classId || sectionId) ? (
-              <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto">
-                {hits.length === 0 ? (
-                  <li className="rounded-lg bg-[rgba(32,48,80,0.04)] px-3 py-3 text-sm text-[var(--muted)]">
-                    No students match.
-                  </li>
-                ) : (
-                  hits.slice(0, 12).map((h) => (
-                  <li key={h.student.id}>
-                    <button
-                      type="button"
-                      className="w-full rounded-lg border border-[rgba(32,48,80,0.12)] px-3 py-2 text-left hover:border-[rgba(197,160,40,0.45)] hover:bg-[rgba(197,160,40,0.08)]"
-                      onClick={() => {
-                        setSelected(h);
-                        setQuery(h.student.fullName);
-                      }}
-                    >
-                      <div className="text-sm font-semibold text-[var(--brand-deep)]">
-                        <StudentTypeBadge type={h.student.studentType} />
-                        {h.student.fullName}
-                      </div>
-                      <div className="text-[11px] text-[var(--muted)]">
-                        {h.classLabel} · open dues {formatInr(h.balancePaise)}
-                      </div>
-                    </button>
-                  </li>
-                  ))
-                )}
-              </ul>
-            ) : null}
-
-            {selected ? (
-              <div className="mt-3 space-y-2">
-                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[rgba(32,48,80,0.04)] px-3 py-2">
-                  <div className="text-sm text-[var(--brand-deep)]">
-                    <span className="font-semibold">
-                      {selected.student.fullName}
-                    </span>
-                    <span className="text-[var(--muted)]">
-                      {" "}
-                      · {selected.student.admissionNo} · {selected.classLabel}
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    className="text-xs font-semibold text-[var(--brand-mid)]"
-                    onClick={() => {
-                      setSelected(null);
-                      setQuery("");
-                    }}
-                  >
-                    Change
-                  </button>
-                </div>
-                <HoldStatusBanner
-                  check={holdCheck}
-                  onOverride={() => setHoldDialog(true)}
-                />
-              </div>
-            ) : null}
-
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <label className="block text-sm sm:col-span-2">
-                <span className="mb-1 block text-[11px] text-[var(--muted)]">
-                  Route
-                </span>
-                <select
-                  className="field !py-1.5"
-                  value={routeId}
-                  onChange={(e) => setRouteId(e.target.value)}
-                >
-                  <option value="">Select route…</option>
-                  {routes.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.code} · {r.name} · {r.busNo} ·{" "}
-                      {formatInr(r.monthlyFeePaise)}/mo
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block text-sm">
-                <span className="mb-1 block text-[11px] text-[var(--muted)]">
-                  Stop
-                </span>
-                <select
-                  className="field !py-1.5"
-                  value={stopId}
-                  onChange={(e) => setStopId(e.target.value)}
-                  disabled={!selectedRoute}
-                >
-                  <option value="">
-                    {selectedRoute ? "Select stop…" : "Pick route first"}
-                  </option>
-                  {selectedRoute?.stops.map((st) => (
-                    <option key={st.id} value={st.id}>
-                      {st.sequence}. {st.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block text-sm">
-                <span className="mb-1 block text-[11px] text-[var(--muted)]">
-                  Effective from
-                </span>
-                <input
-                  className="field !py-1.5"
-                  type="date"
-                  value={effectiveFrom}
-                  onChange={(e) => setEffectiveFrom(e.target.value)}
-                />
-              </label>
-              <label className="block text-sm sm:col-span-2">
-                <span className="mb-1 block text-[11px] text-[var(--muted)]">
-                  Fee override ₹/month (optional)
-                </span>
-                <input
-                  className="field !py-1.5"
-                  inputMode="decimal"
-                  value={feeOverride}
-                  onChange={(e) => setFeeOverride(e.target.value)}
-                  placeholder={
-                    selectedRoute
-                      ? `Default ${formatInr(selectedRoute.monthlyFeePaise)}`
-                      : "Use route fee"
-                  }
-                />
-              </label>
-            </div>
-
-            <button
-              type="button"
-              className="mt-4 rounded-lg bg-[var(--brand-deep)] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"
-              disabled={!selected || !routeId || !stopId}
-              onClick={onAssign}
-            >
-              Assign to route
-            </button>
-          </div>
-
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
-            <h2 className="text-sm font-bold text-[var(--brand-deep)]">
-              Active riders
-            </h2>
-            {riders.length === 0 ? (
-              <p className="mt-2 text-sm text-[var(--muted)]">
-                No active assignments yet.
-              </p>
-            ) : (
-              <ul className="mt-2 max-h-80 divide-y divide-[rgba(32,48,80,0.08)] overflow-y-auto">
-                {riders.map((a) => {
-                  const st = sis?.students.find((s) => s.id === a.studentId);
-                  const fee =
-                    a.monthlyFeePaise > 0
-                      ? a.monthlyFeePaise
-                      : (a.route?.monthlyFeePaise ?? 0);
-                  return (
-                    <li
-                      key={a.id}
-                      className="flex flex-wrap items-start justify-between gap-2 py-2"
-                    >
-                      <div className="min-w-0">
-                        <div className="text-sm font-semibold text-[var(--brand-deep)]">
-                          {st?.fullName ?? a.studentId}
-                        </div>
-                        <div className="text-[11px] text-[var(--muted)]">
-                          {a.route?.code} · {a.route?.busNo} · Stop {a.stopName}{" "}
-                          · from {a.effectiveFrom}
-                        </div>
-                        <div className="text-[10px] text-[var(--muted)]">
-                          {formatInr(fee)}/month
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        className="text-[11px] font-semibold text-[#dc2626]"
-                        onClick={() => {
-                          const end = todayIso();
-                          if (
-                            !window.confirm(
-                              `End transport for ${st?.fullName ?? "student"} from ${end}?`,
-                            )
-                          ) {
-                            return;
-                          }
-                          endTransportAssignment(a.id, end);
-                          refresh();
-                          flash("Assignment ended");
-                        }}
-                      >
-                        End
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
-          <h2 className="text-sm font-bold text-[var(--brand-deep)]">
-            Routes
-          </h2>
-          <ul className="mt-2 space-y-3">
-            {routes.map((r) => (
-              <li
-                key={r.id}
-                className="rounded-lg border border-[rgba(32,48,80,0.1)] px-3 py-2"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <div className="text-sm font-bold text-[var(--brand-deep)]">
-                      {r.code} · {r.name}
-                    </div>
-                    <div className="text-[11px] text-[var(--muted)]">
-                      {r.busNo}
-                      {r.vehicleReg ? ` · ${r.vehicleReg}` : ""}
-                    </div>
-                  </div>
-                  <div className="text-sm font-bold text-[var(--brand-deep)]">
-                    {formatInr(r.monthlyFeePaise)}
-                    <span className="text-[10px] font-normal text-[var(--muted)]">
-                      /mo
-                    </span>
-                  </div>
-                </div>
-                <ol className="mt-1 list-decimal pl-4 text-[10px] text-[var(--muted)]">
-                  {r.stops.map((st) => (
-                    <li key={st.id}>{st.name}</li>
-                  ))}
-                </ol>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
-
-      {holdDialog &&
-      selected &&
-      holdCheck &&
-      !holdCheck.allowed ? (
+      {holdDialog && selected && holdCheck && !holdCheck.allowed ? (
         <PrincipalHoldOverrideDialog
           studentId={selected.student.id}
           studentName={selected.student.fullName}
@@ -535,6 +463,603 @@ export function TransportWorkspace() {
           }}
         />
       ) : null}
+    </div>
+  );
+}
+
+type RidersPanelProps = {
+  state: TransportState;
+  masters: MastersState | null;
+  sis: SisState | null;
+  sessionName: string;
+  query: string;
+  setQuery: (value: string) => void;
+  classId: string;
+  setClassId: (value: string) => void;
+  sectionId: string;
+  setSectionId: (value: string) => void;
+  classOptions: MastersState["classes"];
+  sectionOptions: MastersState["sections"];
+  hits: StudentSearchHit[];
+  selected: StudentSearchHit | null;
+  setSelected: (value: StudentSearchHit | null) => void;
+  holdCheck: HoldCheck | null;
+  setHoldDialog: (value: boolean) => void;
+  routes: ReturnType<typeof listActiveRoutes>;
+  routeId: string;
+  setRouteId: (value: string) => void;
+  selectedRoute: ReturnType<typeof listActiveRoutes>[number] | null;
+  stopId: string;
+  setStopId: (value: string) => void;
+  effectiveFrom: string;
+  setEffectiveFrom: (value: string) => void;
+  feeOverride: string;
+  setFeeOverride: (value: string) => void;
+  feeOverrideReason: string;
+  setFeeOverrideReason: (value: string) => void;
+  expectedFeePaise: number;
+  proposedFeePaise: number;
+  existingDues: ReturnType<typeof computeTransportPeriodDues>;
+  riders: ReturnType<typeof listActiveRiders>;
+  onAssign: () => void;
+  onRefresh: () => void;
+  onFlash: (message: string) => void;
+  onNotice: (message: string | null) => void;
+};
+
+function RidersPanel(props: RidersPanelProps) {
+  const {
+    masters,
+    sis,
+    sessionName,
+    query,
+    setQuery,
+    classId,
+    setClassId,
+    sectionId,
+    setSectionId,
+    classOptions,
+    sectionOptions,
+    hits,
+    selected,
+    setSelected,
+    holdCheck,
+    setHoldDialog,
+    routes,
+    routeId,
+    setRouteId,
+    selectedRoute,
+    stopId,
+    setStopId,
+    effectiveFrom,
+    setEffectiveFrom,
+    feeOverride,
+    setFeeOverride,
+    feeOverrideReason,
+    setFeeOverrideReason,
+    expectedFeePaise,
+    proposedFeePaise,
+    existingDues,
+    riders,
+    onAssign,
+    onRefresh,
+    onFlash,
+    onNotice,
+  } = props;
+
+  return (
+    <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(20rem,0.85fr)]">
+      <div className="space-y-4">
+        <section className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <h2 className="text-sm font-bold text-[var(--brand-deep)]">
+            Assign rider
+          </h2>
+          <p className="mt-0.5 text-[11px] text-[var(--muted)]">
+            Operator: {sessionName}
+          </p>
+
+          <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,0.7fr)_minmax(0,0.7fr)]">
+            <label className="text-sm">
+              <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                Find student
+              </span>
+              <input
+                className="field"
+                value={query}
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  setSelected(null);
+                }}
+                placeholder="Name, admission no, or mobile…"
+              />
+            </label>
+            <label className="text-sm">
+              <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                Class
+              </span>
+              <select
+                className="field !py-1.5"
+                value={classId}
+                onChange={(event) => {
+                  setClassId(event.target.value);
+                  setSectionId("");
+                  setSelected(null);
+                }}
+              >
+                <option value="">All classes</option>
+                {classOptions.map((row) => (
+                  <option key={row.id} value={row.id}>
+                    {row.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-sm">
+              <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                Section
+              </span>
+              <select
+                className="field !py-1.5"
+                value={sectionId}
+                disabled={!classId}
+                onChange={(event) => {
+                  setSectionId(event.target.value);
+                  setSelected(null);
+                }}
+              >
+                <option value="">
+                  {classId ? "All sections" : "Pick class first"}
+                </option>
+                {sectionOptions.map((row) => (
+                  <option key={row.id} value={row.id}>
+                    {row.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="mt-2 flex justify-end">
+            <StudentHitsFilterExport
+              title="Transport · student search"
+              hits={hits}
+              query={query}
+              classLabel={classOptions.find((row) => row.id === classId)?.name}
+              sectionLabel={
+                sectionOptions.find((row) => row.id === sectionId)?.name
+              }
+              onMessage={(message) => {
+                onNotice(message);
+                window.setTimeout(() => onNotice(null), 2200);
+              }}
+            />
+          </div>
+
+          {!selected && (query.trim() || classId || sectionId) ? (
+            <ul className="mt-2 max-h-44 space-y-1 overflow-y-auto">
+              {hits.length === 0 ? (
+                <li className="rounded-lg bg-[rgba(32,48,80,0.04)] px-3 py-3 text-sm text-[var(--muted)]">
+                  No students match.
+                </li>
+              ) : (
+                hits.slice(0, 12).map((hit) => (
+                  <li key={hit.student.id}>
+                    <button
+                      type="button"
+                      className="w-full rounded-lg border border-[rgba(32,48,80,0.12)] px-3 py-2 text-left hover:bg-[rgba(197,160,40,0.08)]"
+                      onClick={() => {
+                        setSelected(hit);
+                        setQuery(hit.student.fullName);
+                      }}
+                    >
+                      <div className="text-sm font-semibold text-[var(--brand-deep)]">
+                        <StudentNameLabel student={hit.student} />
+                      </div>
+                      <div className="text-[11px] text-[var(--muted)]">
+                        {hit.classLabel} · open dues {formatInr(hit.balancePaise)}
+                      </div>
+                    </button>
+                  </li>
+                ))
+              )}
+            </ul>
+          ) : null}
+
+          {selected ? (
+            <div className="mt-3 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[rgba(32,48,80,0.04)] px-3 py-2">
+                <div className="text-sm text-[var(--brand-deep)]">
+                  <strong>{selected.student.fullName}</strong>
+                  <span className="text-[var(--muted)]">
+                    {" "}
+                    · {selected.student.admissionNo} · {selected.classLabel}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="text-xs font-semibold text-[var(--brand-mid)]"
+                  onClick={() => {
+                    setSelected(null);
+                    setQuery("");
+                  }}
+                >
+                  Change
+                </button>
+              </div>
+              <HoldStatusBanner
+                check={holdCheck}
+                onOverride={() => setHoldDialog(true)}
+              />
+            </div>
+          ) : null}
+
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <label className="text-sm sm:col-span-2">
+              <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                Route
+              </span>
+              <select
+                className="field !py-1.5"
+                value={routeId}
+                onChange={(event) => setRouteId(event.target.value)}
+              >
+                <option value="">Select route…</option>
+                {routes.map((route) => (
+                  <option key={route.id} value={route.id}>
+                    {route.code} · {route.name} · {route.busNo}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-sm">
+              <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                Stop
+              </span>
+              <select
+                className="field !py-1.5"
+                value={stopId}
+                disabled={!selectedRoute}
+                onChange={(event) => setStopId(event.target.value)}
+              >
+                <option value="">
+                  {selectedRoute ? "Select stop…" : "Pick route first"}
+                </option>
+                {selectedRoute?.stops.map((stop) => (
+                  <option key={stop.id} value={stop.id}>
+                    {stop.sequence}. {stop.name}
+                    {stop.distanceKm ? ` · ${stop.distanceKm} km` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-sm">
+              <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                Effective from
+              </span>
+              <input
+                className="field !py-1.5"
+                type="date"
+                value={effectiveFrom}
+                onChange={(event) => setEffectiveFrom(event.target.value)}
+              />
+            </label>
+            <label className="text-sm">
+              <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                Fee override ₹/month
+              </span>
+              <input
+                className="field !py-1.5"
+                inputMode="decimal"
+                value={feeOverride}
+                onChange={(event) => setFeeOverride(event.target.value)}
+                placeholder={
+                  expectedFeePaise
+                    ? `Expected ${formatInr(expectedFeePaise)}`
+                    : "Use route policy"
+                }
+              />
+            </label>
+            <label className="text-sm">
+              <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                Override reason
+              </span>
+              <input
+                className="field !py-1.5"
+                value={feeOverrideReason}
+                onChange={(event) => setFeeOverrideReason(event.target.value)}
+                placeholder="Required when fee differs"
+              />
+            </label>
+          </div>
+
+          {selected && selectedRoute && stopId ? (
+            <div className="mt-3 rounded-lg border border-[rgba(15,118,110,0.2)] bg-[rgba(15,118,110,0.06)] px-3 py-2 text-xs">
+              <div className="font-bold text-[#0f766e]">Dues preview</div>
+              <div className="mt-1 text-[var(--brand-deep)]">
+                New monthly charge: {formatInr(proposedFeePaise)} · expected{" "}
+                {formatInr(expectedFeePaise)} · starts {effectiveFrom}
+              </div>
+              <div className="text-[11px] text-[var(--muted)]">
+                Existing assignment dues in this session: {existingDues.length}
+                {existingDues.length
+                  ? ` · ${formatInr(existingDues.reduce((sum, due) => sum + due.amountPaise, 0))}`
+                  : ""}
+              </div>
+            </div>
+          ) : null}
+
+          <button
+            type="button"
+            className="mt-4 rounded-lg bg-[var(--brand-deep)] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"
+            disabled={!selected || !routeId || !stopId}
+            onClick={onAssign}
+          >
+            Assign to route
+          </button>
+        </section>
+
+        <section className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <h2 className="text-sm font-bold text-[var(--brand-deep)]">
+            Active riders
+          </h2>
+          {riders.length === 0 ? (
+            <p className="mt-2 text-sm text-[var(--muted)]">
+              No active assignments yet.
+            </p>
+          ) : (
+            <ul className="mt-2 max-h-96 divide-y divide-[rgba(32,48,80,0.08)] overflow-y-auto">
+              {riders.map((assignment) => {
+                const student = sis?.students.find(
+                  (row) => row.id === assignment.studentId,
+                );
+                const fee =
+                  assignment.monthlyFeePaise > 0
+                    ? assignment.monthlyFeePaise
+                    : assignment.route
+                      ? expectedMonthlyFeePaise(
+                          assignment.route,
+                          assignment.route.stops.find(
+                            (stop) => stop.id === assignment.stopId,
+                          ),
+                          props.state.feePolicy,
+                        )
+                      : 0;
+                return (
+                  <li
+                    key={assignment.id}
+                    className="flex flex-wrap items-start justify-between gap-2 py-2"
+                  >
+                    <div>
+                      <div className="text-sm font-semibold text-[var(--brand-deep)]">
+                        {student?.fullName ?? assignment.studentId}
+                      </div>
+                      <div className="text-[11px] text-[var(--muted)]">
+                        {assignment.route?.code} · {assignment.route?.busNo} ·{" "}
+                        {assignment.stopName} · from {assignment.effectiveFrom}
+                      </div>
+                      <div className="text-[10px] text-[var(--muted)]">
+                        {formatInr(fee)}/month
+                        {assignment.feeOverrideReason
+                          ? ` · override: ${assignment.feeOverrideReason}`
+                          : ""}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="text-[11px] font-semibold text-[#dc2626]"
+                      onClick={() => {
+                        const end = todayIso();
+                        if (
+                          !window.confirm(
+                            `End transport for ${student?.fullName ?? "student"} from ${end}?`,
+                          )
+                        ) {
+                          return;
+                        }
+                        endTransportAssignment(assignment.id, end);
+                        onRefresh();
+                        onFlash("Assignment ended");
+                      }}
+                    >
+                      End
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+      </div>
+
+      <section className="h-fit rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+        <h2 className="text-sm font-bold text-[var(--brand-deep)]">
+          Routes snapshot
+        </h2>
+        <ul className="mt-2 space-y-3">
+          {routes.map((route) => {
+            const crew = masters
+              ? formatRouteCrew(staffAssignedToRoute(masters, route.id))
+              : "";
+            return (
+              <li
+                key={route.id}
+                className="rounded-lg border border-[rgba(32,48,80,0.1)] px-3 py-2"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="text-sm font-bold text-[var(--brand-deep)]">
+                      {route.code} · {route.name}
+                    </div>
+                    <div className="text-[11px] text-[var(--muted)]">
+                      {route.busNo}
+                      {route.vehicleReg ? ` · ${route.vehicleReg}` : ""}
+                    </div>
+                  </div>
+                  <div className="text-sm font-bold text-[var(--brand-deep)]">
+                    {formatInr(route.monthlyFeePaise)}
+                    <span className="text-[10px] font-normal text-[var(--muted)]">
+                      /mo
+                    </span>
+                  </div>
+                </div>
+                <div className="mt-1 text-[11px] font-medium text-[var(--brand-deep)]">
+                  {crew || "No driver / attendant mapped — set in Staff → Duties"}
+                </div>
+                <div className="mt-1 text-[10px] text-[var(--muted)]">
+                  {riders.filter((row) => row.routeId === route.id).length} riders
+                  · {route.stops.map((stop) => stop.name).join(" → ")}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+    </div>
+  );
+}
+
+function ReportsPanel({
+  state,
+  masters,
+  sis,
+  onFlash,
+  onError,
+}: {
+  state: TransportState;
+  masters: MastersState | null;
+  sis: SisState | null;
+  onFlash: (message: string) => void;
+  onError: (message: string) => void;
+}) {
+  const [date, setDate] = useState(todayIso);
+  const [routeId, setRouteId] = useState("");
+  const [vehicleId, setVehicleId] = useState("");
+  const [format, setFormat] = useState<TransportReportFormat>("excel");
+
+  function run(id: (typeof TRANSPORT_REPORTS)[number]["id"]) {
+    const result = runTransportReport(id, {
+      date,
+      routeId: routeId || undefined,
+      vehicleId: vehicleId || undefined,
+      format,
+      transport: state,
+      masters: masters ?? undefined,
+      sis: sis ?? undefined,
+    });
+    if (!result.ok) {
+      onError(result.error);
+      return;
+    }
+    onFlash(result.message);
+  }
+
+  return (
+    <div className="mt-4 space-y-4">
+      <div className="grid gap-3 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4 sm:grid-cols-4">
+        <label className="text-sm">
+          <span className="mb-1 block text-[11px] text-[var(--muted)]">
+            Report date
+          </span>
+          <input
+            className="field !py-1.5"
+            type="date"
+            value={date}
+            onChange={(event) => setDate(event.target.value)}
+          />
+        </label>
+        <label className="text-sm">
+          <span className="mb-1 block text-[11px] text-[var(--muted)]">
+            Route
+          </span>
+          <select
+            className="field !py-1.5"
+            value={routeId}
+            onChange={(event) => setRouteId(event.target.value)}
+          >
+            <option value="">All routes</option>
+            {listActiveRoutes(state).map((route) => (
+              <option key={route.id} value={route.id}>
+                {route.code} · {route.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-sm">
+          <span className="mb-1 block text-[11px] text-[var(--muted)]">
+            Vehicle
+          </span>
+          <select
+            className="field !py-1.5"
+            value={vehicleId}
+            onChange={(event) => setVehicleId(event.target.value)}
+          >
+            <option value="">All vehicles</option>
+            {state.vehicles.map((vehicle) => (
+              <option key={vehicle.id} value={vehicle.id}>
+                {vehicle.registrationNo} · {vehicle.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-sm">
+          <span className="mb-1 block text-[11px] text-[var(--muted)]">
+            Format
+          </span>
+          <select
+            className="field !py-1.5"
+            value={format}
+            onChange={(event) =>
+              setFormat(event.target.value as TransportReportFormat)
+            }
+          >
+            <option value="excel">Excel</option>
+            <option value="pdf">PDF</option>
+          </select>
+        </label>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        {TRANSPORT_REPORT_CATEGORIES.map((category) => (
+          <section
+            key={category.id}
+            className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white"
+          >
+            <h2
+              className={`${category.headerClass} px-4 py-3 text-sm font-bold text-white`}
+            >
+              {category.title}
+            </h2>
+            <ul className="divide-y divide-[rgba(32,48,80,0.08)] px-4">
+              {TRANSPORT_REPORTS.filter(
+                (report) => report.category === category.id,
+              ).map((report) => (
+                <li
+                  key={report.id}
+                  className="flex items-center justify-between gap-3 py-3"
+                >
+                  <div>
+                    <div className="text-sm font-semibold text-[var(--brand-deep)]">
+                      {report.label}
+                    </div>
+                    {report.hint ? (
+                      <div className="text-[10px] text-[var(--muted)]">
+                        {report.hint}
+                      </div>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    className="shrink-0 rounded-lg border border-[rgba(32,48,80,0.18)] px-3 py-1.5 text-xs font-bold text-[var(--brand-deep)]"
+                    onClick={() => run(report.id)}
+                  >
+                    Run
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+      </div>
     </div>
   );
 }

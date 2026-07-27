@@ -37,8 +37,10 @@ import { loadSis, type SisState } from "@/lib/sis";
 import { checkHold, setReportCardHoldFromStage, type HoldCheck } from "@/lib/holds";
 import {
   StudentAvatar,
-  StudentTypeBadge,
+  StudentNameLabel,
 } from "@/components/students/StudentAvatar";
+import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import {
   HoldStatusBanner,
@@ -52,14 +54,28 @@ import {
   ClassResultSheetView,
   printClassResultSheet,
 } from "@/components/exams/ClassResultSheet";
+import { ExamDateSheetPanel } from "@/components/exams/ExamDateSheetPanel";
+import { ExamPapersPanel } from "@/components/exams/ExamPapersPanel";
+import { hasPermission } from "@/lib/rbac";
 
-type Tab = "marks" | "reports" | "results" | "setup";
+type Tab =
+  | "dashboard"
+  | "marks"
+  | "datesheet"
+  | "papers"
+  | "reports"
+  | "results"
+  | "setup";
 
 export function ExamsWorkspace() {
   const session = useDemoSession();
-  const [tab, setTab] = useState<Tab>("marks");
-  const [masters, setMasters] = useState<MastersState | null>(null);
-  const [sis, setSis] = useState<SisState | null>(null);
+  const [tab, setTab] = useState<Tab>("dashboard");
+  const [masters, setMasters] = useState<MastersState | null>(() =>
+    typeof window !== "undefined" ? loadMasters() : null,
+  );
+  const [sis, setSis] = useState<SisState | null>(() =>
+    typeof window !== "undefined" ? loadSis() : null,
+  );
   const [classId, setClassId] = useState("");
   const [sectionId, setSectionId] = useState("");
   const [examTermId, setExamTermId] = useState("");
@@ -112,9 +128,13 @@ export function ExamsWorkspace() {
   }
 
   useEffect(() => {
+    // Paint immediately from localStorage, then refresh after remote hydrate
+    refresh();
     void (async () => {
       const { ensureSisHydrated } = await import("@/lib/sisPersistence");
+      const { ensureExamsHydrated } = await import("@/lib/examsPersistence");
       await ensureSisHydrated();
+      await ensureExamsHydrated();
       refresh();
     })();
   }, []);
@@ -138,12 +158,16 @@ export function ExamsWorkspace() {
 
   const classOptions = useMemo(() => {
     if (!masters) return [];
-    return masters.classes.filter((c) => c.isActive);
+    // Treat missing isActive as active (legacy rows)
+    const active = masters.classes.filter((c) => c.isActive !== false);
+    return active.length > 0 ? active : masters.classes;
   }, [masters]);
 
   const sectionOptions = useMemo(() => {
     if (!masters || !classId) return [];
-    return masters.sections.filter((s) => s.classId === classId && s.isActive);
+    const forClass = masters.sections.filter((s) => s.classId === classId);
+    const active = forClass.filter((s) => s.isActive !== false);
+    return active.length > 0 ? active : forClass;
   }, [masters, classId]);
 
   useEffect(() => {
@@ -581,30 +605,22 @@ export function ExamsWorkspace() {
             {policy.reportCardHoldFromStage})
           </p>
         </div>
-        <div className="flex rounded-lg border border-[rgba(32,48,80,0.12)] bg-white p-0.5 text-xs font-semibold">
-          {(
-            [
-              { id: "marks" as const, label: "Mark entry" },
-              { id: "reports" as const, label: "Report cards" },
-              { id: "results" as const, label: "Results" },
-              { id: "setup" as const, label: "Exams & policy" },
-            ] as const
-          ).map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              className={`rounded-md px-3 py-1.5 ${
-                tab === t.id
-                  ? "bg-[rgba(32,48,80,0.08)] text-[var(--brand-deep)]"
-                  : "text-[var(--muted)]"
-              }`}
-              onClick={() => setTab(t.id)}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
       </div>
+      <ModuleTabs
+        aria-label="Exams sections"
+        size="xl"
+        value={tab}
+        onChange={(id) => setTab(id as Tab)}
+        items={[
+          { id: "dashboard", label: "Dashboard", tone: "navy" },
+          { id: "marks", label: "Mark entry", tone: "sky" },
+          { id: "datesheet", label: "Date-sheet", tone: "violet" },
+          { id: "papers", label: "Question papers", tone: "rose" },
+          { id: "reports", label: "Report cards", tone: "amber" },
+          { id: "results", label: "Results", tone: "green" },
+          { id: "setup", label: "Exams & policy", tone: "navy" },
+        ]}
+      />
 
       {error ? (
         <p className="mt-3 rounded-lg bg-[#dc2626]/10 px-3 py-2 text-sm text-[#dc2626]">
@@ -617,7 +633,10 @@ export function ExamsWorkspace() {
         </p>
       ) : null}
 
-      {tab !== "setup" ? (
+      {tab !== "setup" &&
+      tab !== "dashboard" &&
+      tab !== "datesheet" &&
+      tab !== "papers" ? (
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
           <label className="block text-sm">
             <span className="mb-1 block text-[11px] text-[var(--muted)]">
@@ -647,7 +666,13 @@ export function ExamsWorkspace() {
                 setSectionId("");
               }}
             >
-              <option value="">Select class</option>
+              <option value="">
+                {!masters
+                  ? "Loading classes…"
+                  : classOptions.length === 0
+                    ? "No classes in Masters"
+                    : "Select class"}
+              </option>
               {classOptions.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -674,6 +699,31 @@ export function ExamsWorkspace() {
             </select>
           </label>
         </div>
+      ) : null}
+
+      {tab === "datesheet" && masters ? (
+        <ExamDateSheetPanel
+          academicYearCode={ay}
+          masters={masters}
+          terms={terms}
+          onChanged={refresh}
+        />
+      ) : null}
+
+      {tab === "papers" && masters ? (
+        <ExamPapersPanel
+          masters={masters}
+          academicYearCode={ay}
+          terms={terms}
+          canEdit={hasPermission(session, masters, "exams", "edit")}
+          actorName={session.fullName || "Staff"}
+          onError={setError}
+          onNotice={(msg) => {
+            setNotice(msg);
+            setError(null);
+            window.setTimeout(() => setNotice(null), 4000);
+          }}
+        />
       ) : null}
 
       {tab === "setup" ? (
@@ -1371,6 +1421,15 @@ export function ExamsWorkspace() {
         </div>
       ) : null}
 
+      {tab === "dashboard" ? (
+        <div className="mt-6">
+          <ModuleDashboardHost
+            moduleId="exams"
+            onNavigateTab={(t) => setTab(t as Tab)}
+          />
+        </div>
+      ) : null}
+
       {tab === "marks" ? (
         <div className="mt-6">
           {!classId || !sectionId || !term ? (
@@ -1446,8 +1505,7 @@ export function ExamsWorkspace() {
                             <StudentAvatar student={st} size={28} />
                             <div className="min-w-0">
                               <div className="truncate font-medium text-[var(--brand-deep)]">
-                                <StudentTypeBadge type={st.studentType} />
-                                {st.fullName}
+                                <StudentNameLabel student={st} />
                               </div>
                               <div className="text-[10px] text-[var(--muted)]">
                                 {st.admissionNo}
@@ -1532,8 +1590,7 @@ export function ExamsWorkspace() {
                         <StudentAvatar student={st} size={36} />
                         <div className="min-w-0 flex-1">
                           <div className="truncate font-medium text-[var(--ink)]">
-                            <StudentTypeBadge type={st.studentType} />
-                            {st.fullName}
+                            <StudentNameLabel student={st} />
                           </div>
                           <div className="text-xs text-[var(--muted)]">
                             {st.admissionNo}
@@ -1694,10 +1751,7 @@ export function ExamsWorkspace() {
                               <StudentAvatar student={row.student} size={28} />
                               <div className="min-w-0">
                                 <div className="truncate font-medium text-[var(--brand-deep)]">
-                                  <StudentTypeBadge
-                                    type={row.student.studentType}
-                                  />
-                                  {row.student.fullName}
+                                  <StudentNameLabel student={row.student} />
                                 </div>
                                 <div className="text-[10px] text-[var(--muted)]">
                                   {row.student.admissionNo}

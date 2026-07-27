@@ -1,11 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { formatInr } from "@/lib/fees";
+import QRCode from "qrcode";
+import {
+  buildSchoolUpiPayUri,
+  resolveSchoolCollectionsUpi,
+} from "@/lib/admissions";
+import { formatInr, loadMasters } from "@/lib/masters";
 import {
   decodePaymentSharePayload,
   getPaymentLink,
-  payPaymentLinkDemo,
   type PaymentSharePayload,
 } from "@/lib/payments";
 import { TENANT } from "@/lib/types";
@@ -14,6 +18,7 @@ export default function PaySharePage() {
   const [payload, setPayload] = useState<PaymentSharePayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [done, setDone] = useState<{
     receiptNo: string;
     upiRef: string;
@@ -38,28 +43,113 @@ export default function PaySharePage() {
         receiptNo: live.receiptNo,
         upiRef: live.upiRef || "—",
       });
+      return;
     }
+
+    // Fallback: check server mirror (WhatsApp-created links)
+    void fetch(`/api/payments/parent-pay?linkId=${encodeURIComponent(decoded.linkId)}`)
+      .then(async (res) => {
+        if (!res.ok) return;
+        const json = (await res.json()) as {
+          link?: { status?: string; receiptNo?: string | null; upiRef?: string };
+        };
+        if (json.link?.status === "paid" && json.link.receiptNo) {
+          setDone({
+            receiptNo: json.link.receiptNo,
+            upiRef: json.link.upiRef || "—",
+          });
+        }
+      })
+      .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!payload || done) {
+      setQrDataUrl(null);
+      return;
+    }
+    const masters = loadMasters();
+    const upi = resolveSchoolCollectionsUpi(masters);
+    const uri =
+      payload.upiUri ||
+      buildSchoolUpiPayUri({
+        vpa: payload.upiVpa || upi.vpa,
+        payeeName: upi.payeeName,
+        amountPaise: payload.amountPaise,
+        note: `Fees ${payload.code}`,
+      });
+    let cancelled = false;
+    void QRCode.toDataURL(uri, {
+      width: 220,
+      margin: 1,
+      errorCorrectionLevel: "M",
+    }).then((url) => {
+      if (!cancelled) setQrDataUrl(url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [payload, done]);
 
   const expired = useMemo(() => {
     if (!payload) return false;
     return payload.expiresOn < new Date().toISOString().slice(0, 10);
   }, [payload]);
 
-  function onPay() {
+  const upiDeepLink = useMemo(() => {
+    if (!payload) return "";
+    const masters = loadMasters();
+    const upi = resolveSchoolCollectionsUpi(masters);
+    return (
+      payload.upiUri ||
+      buildSchoolUpiPayUri({
+        vpa: payload.upiVpa || upi.vpa,
+        payeeName: upi.payeeName,
+        amountPaise: payload.amountPaise,
+        note: `Fees ${payload.code}`,
+      })
+    );
+  }, [payload]);
+
+  async function onPay() {
     if (!payload || paying) return;
     setPaying(true);
     setError(null);
-    const result = payPaymentLinkDemo(payload.linkId);
-    setPaying(false);
-    if (!result.ok) {
-      setError(result.error);
-      return;
+    try {
+      const res = await fetch("/api/payments/parent-pay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          linkId: payload.linkId,
+          sendWhatsApp: true,
+        }),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        receiptNo?: string;
+        link?: { upiRef?: string };
+      };
+      if (!res.ok) {
+        // Fall back to local demo pay if server mirror missing this link
+        const { payPaymentLinkDemo } = await import("@/lib/payments");
+        const local = payPaymentLinkDemo(payload.linkId);
+        if (!local.ok) {
+          setError(json.error || local.error);
+          return;
+        }
+        setDone({
+          receiptNo: local.receiptNo,
+          upiRef: local.link.upiRef,
+        });
+        return;
+      }
+      setDone({
+        receiptNo: json.receiptNo || "—",
+        upiRef: json.link?.upiRef || "—",
+      });
+    } finally {
+      setPaying(false);
     }
-    setDone({
-      receiptNo: result.receiptNo,
-      upiRef: result.link.upiRef,
-    });
   }
 
   if (error && !payload) {
@@ -140,23 +230,37 @@ export default function PaySharePage() {
               UTR {done.upiRef}
             </p>
             <p className="mt-3 text-[11px] text-[var(--muted)]">
-              Keep this confirmation. School ledger is updated when paid from
-              the same browser as Fee Take (demo).
+              Fee ledger updated. Receipt is also sent on WhatsApp when Business
+              API is configured.
             </p>
           </div>
         ) : (
           <>
             <div className="mt-5 rounded-xl bg-[rgba(32,48,80,0.04)] px-4 py-3 text-center">
-              <p className="text-[11px] text-[var(--muted)]">Pay to UPI ID</p>
+              <p className="text-[11px] text-[var(--muted)]">Scan UPI QR</p>
               <p className="mt-1 font-mono text-sm font-bold text-[var(--brand-deep)]">
                 {payload.upiVpa}
               </p>
-              <div
-                className="mx-auto mt-3 flex h-28 w-28 items-center justify-center rounded-lg border-2 border-dashed border-[rgba(32,48,80,0.2)] bg-white text-[10px] text-[var(--muted)]"
-                aria-hidden
-              >
-                Demo QR
-              </div>
+              {qrDataUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={qrDataUrl}
+                  alt="UPI payment QR"
+                  className="mx-auto mt-3 h-40 w-40 rounded-lg border border-[rgba(32,48,80,0.12)] bg-white p-1"
+                />
+              ) : (
+                <div className="mx-auto mt-3 flex h-40 w-40 items-center justify-center rounded-lg border border-dashed border-[rgba(32,48,80,0.2)] text-[10px] text-[var(--muted)]">
+                  Preparing QR…
+                </div>
+              )}
+              {upiDeepLink ? (
+                <a
+                  href={upiDeepLink}
+                  className="mt-3 inline-block text-[12px] font-semibold text-[#0f766e] underline"
+                >
+                  Open in UPI app
+                </a>
+              ) : null}
             </div>
 
             {error ? (
@@ -171,17 +275,17 @@ export default function PaySharePage() {
                 type="button"
                 className="btn-accent mt-5 w-full rounded-xl px-4 py-3.5 text-sm font-extrabold disabled:opacity-60"
                 disabled={paying}
-                onClick={onPay}
+                onClick={() => void onPay()}
               >
                 {paying
-                  ? "Processing…"
-                  : `Pay ${formatInr(payload.amountPaise)} (demo UPI)`}
+                  ? "Confirming payment…"
+                  : `Confirm paid ${formatInr(payload.amountPaise)}`}
               </button>
             )}
             <p className="mt-3 text-center text-[10px] leading-relaxed text-[var(--muted)]">
-              Demo only — no real money moves. Production will use Razorpay /
-              UPI intent. Counter can also confirm the UTR under Fee Take → Pay
-              links.
+              Scan QR or open UPI, then tap Confirm so the school ledger and
+              receipt update. Counter can also confirm the UTR under Fee Take →
+              Pay links.
             </p>
           </>
         )}

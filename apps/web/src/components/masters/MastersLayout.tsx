@@ -72,7 +72,7 @@ export function MastersTabStack({
 }: {
   intro?: ReactNode;
   tables: ReactNode;
-  work: ReactNode;
+  work?: ReactNode;
 }) {
   return (
     <div className="space-y-4">

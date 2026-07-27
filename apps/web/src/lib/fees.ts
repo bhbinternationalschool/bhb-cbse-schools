@@ -4,13 +4,28 @@
  */
 
 import {
+  mergeDiscountRulesFromSeed,
+  resolvedConcessionGrantsForStudent,
+} from "@/lib/feeDiscountRuntime";
+import { assertModulePermission } from "@/lib/rbacGuard";
+import {
+  getSchoolMirrorSync,
+  scheduleClientSchoolMirrorSync,
+  setMirrorSlice,
+} from "@/lib/schoolDataMirror";
+import {
   DEFAULT_AY,
+  currentAcademicYearCode,
+  dueOnForSessionMonth,
   formatInr,
+  listSessionYearOptions,
   loadMasters,
   normalizeMidYearFeePolicy,
   ordinalChildLabel,
   resolveFeeGroupId,
+  resolveConcessionRuleForGrant,
   resolveSpecialFeeAssignees,
+  resolveStudentFeeGroupId,
   resolveStructureLinesForClass,
   resolveSiblingTierValue,
   shouldBillMidYearLine,
@@ -29,6 +44,11 @@ import {
   type SisState,
   type SisStudent,
 } from "@/lib/sis";
+import {
+  listAdhocDuesForStudent,
+  postedWaiversByDueKey,
+  stopFutureBlocks,
+} from "@/lib/feeAdjustments";
 import {
   listStoreIssuesForStudent,
   loadStore,
@@ -61,7 +81,10 @@ export type DueKind =
   | "transport"
   | "special"
   | "store"
-  | "plan";
+  | "plan"
+  | "arrears"
+  /** Supplementary charge voucher (extra heads on a month) */
+  | "voucher";
 
 export type StoreDueItem = {
   sku: string;
@@ -235,6 +258,7 @@ export type VoucherLine = {
 export function voucherLineFromDue(
   d: FeeDueLine,
   studentName: string,
+  amountPaise?: number,
 ): VoucherLine {
   return {
     dueKey: d.dueKey,
@@ -242,7 +266,7 @@ export function voucherLineFromDue(
     studentName,
     label: d.label,
     kind: d.kind,
-    amountPaise: d.balancePaise,
+    amountPaise: amountPaise ?? d.balancePaise,
     billedPaise: d.billedPaise,
     concessionPaise: d.concessionPaise,
     concessionDetails:
@@ -259,6 +283,53 @@ export function voucherLineFromDue(
       ? { transport: { ...d.transport } }
       : {}),
   };
+}
+
+/**
+ * Spread a collection amount across open due lines (oldest due date first).
+ * Used for partial payments when multiple months/heads are selected.
+ */
+export function allocateCollectionToDues(
+  dues: FeeDueLine[],
+  amountPaise: number,
+  resolveStudentName: (studentId: string) => string,
+):
+  | { ok: true; lines: VoucherLine[] }
+  | { ok: false; error: string } {
+  if (amountPaise <= 0) {
+    return { ok: false, error: "Collection amount must be positive" };
+  }
+  const open = openFeeDues(dues);
+  if (open.length === 0) {
+    return { ok: false, error: "No open dues selected" };
+  }
+  const maxCollect = open.reduce((s, d) => s + d.balancePaise, 0);
+  if (amountPaise > maxCollect) {
+    return {
+      ok: false,
+      error: `Amount exceeds selected balance (${formatInr(maxCollect)})`,
+    };
+  }
+
+  const sorted = [...open].sort((a, b) => {
+    const byDue = a.dueOn.localeCompare(b.dueOn);
+    if (byDue !== 0) return byDue;
+    return a.dueKey.localeCompare(b.dueKey);
+  });
+
+  let remain = amountPaise;
+  const lines: VoucherLine[] = [];
+  for (const d of sorted) {
+    if (remain <= 0) break;
+    const take = Math.min(d.balancePaise, remain);
+    if (take <= 0) continue;
+    lines.push(voucherLineFromDue(d, resolveStudentName(d.studentId), take));
+    remain -= take;
+  }
+  if (remain > 0) {
+    return { ok: false, error: "Could not allocate amount across selected dues" };
+  }
+  return { ok: true, lines };
 }
 
 export type ChequeRealisation = "cleared" | "subject_to_clearance";
@@ -313,6 +384,8 @@ export type VoucherTender = {
   /** Cheque date or bank value date for this tender */
   instrumentDate: string;
   bankName: string;
+  /** School bank account that received / will receive this tender. */
+  bankAccountId?: string;
   /**
    * Cheque (and similar) — receipt issued but bank clearance pending.
    * Non-cheque modes are always "cleared".
@@ -388,6 +461,79 @@ export type FeesState = {
   installmentPlans: InstallmentPlan[];
   /** FIFO allocations from plan EMI payments onto original dues */
   planAllocations: PlanAllocation[];
+  /** Prior-session balances brought into the current session */
+  carriedForwardDues: CarriedForwardDue[];
+  /**
+   * Supplementary charge vouchers — extra heads for a month that was already
+   * (partially) paid; open lines appear on Fee Take for collection.
+   */
+  chargeVouchers: ChargeVoucher[];
+};
+
+/** One head line on a supplementary charge voucher. */
+export type ChargeVoucherLine = {
+  id: string;
+  feeHeadId: string;
+  feeHeadName: string;
+  amountPaise: number;
+  note: string;
+};
+
+/**
+ * Billing voucher (not a receipt) — creates collectable dues for heads
+ * left out of an already-paid month (or any ad-hoc month charge).
+ */
+export type ChargeVoucher = {
+  id: string;
+  /** Display code e.g. CV-7K2M */
+  code: string;
+  studentId: string;
+  householdId: string;
+  studentName: string;
+  academicYearCode: string;
+  /** Session month installment this voucher is for */
+  installmentId: string | null;
+  installmentLabel: string;
+  dueOn: string;
+  lines: ChargeVoucherLine[];
+  totalPaise: number;
+  reason: string;
+  createdAt: string;
+  createdBy: string;
+  voidedAt: string | null;
+  voidedBy: string;
+};
+
+/** Snapshot of last-session open dues moved into the current session. */
+export type CarriedForwardDue = {
+  id: string;
+  studentId: string;
+  fromAcademicYearCode: string;
+  toAcademicYearCode: string;
+  amountPaise: number;
+  dueOn: string;
+  label: string;
+  sourceDueKeys: string[];
+  sourceBreakdown: {
+    dueKey: string;
+    label: string;
+    amountPaise: number;
+  }[];
+  transferredAt: string;
+  transferredBy: string;
+  voidedAt: string | null;
+};
+
+export type LastSessionTransferPreview = {
+  studentId: string;
+  studentName: string;
+  fromAy: string;
+  toAy: string;
+  totalPaise: number;
+  lines: { dueKey: string; label: string; balancePaise: number }[];
+  alreadyTransferredPaise: number;
+  canTransfer: boolean;
+  reason?: string;
 };
 
 export type DayCloseStatus =
@@ -462,6 +608,12 @@ export function denomPhysicalTotal(lines: DayCloseDenomLine[]): number {
 const STORAGE_KEY = "bhb_fees_v1";
 const MANUAL_BACKDATE_DAYS = 3;
 const DEFAULT_COUNTER_ID = "front_office";
+
+/** In-tab working copy — survives when localStorage quota is exceeded (IDB backup). */
+let feesWorkingCopy: FeesState | null = null;
+let feesIdbHydrateStarted = false;
+
+export const FEES_UPDATED_EVENT = "bhb-fees-updated";
 
 function id(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
@@ -636,7 +788,7 @@ function ensureChequesFromVouchers(
   return [...extra, ...existing];
 }
 
-function emptyFeesState(): FeesState {
+export function emptyFeesState(): FeesState {
   return {
     version: 1,
     vouchers: [],
@@ -645,58 +797,613 @@ function emptyFeesState(): FeesState {
     dayCloses: [],
     installmentPlans: [],
     planAllocations: [],
+    carriedForwardDues: [],
+    chargeVouchers: [],
   };
+}
+
+/** Remove all receipts / collections; keep arrears, charge vouchers, manual books, EMI plans. */
+export function clearFeeCollections(state: FeesState): FeesState {
+  return {
+    ...state,
+    version: 1,
+    vouchers: [],
+    cheques: [],
+    dayCloses: [],
+    planAllocations: [],
+  };
+}
+
+export function countFeeCollections(state: FeesState): number {
+  return (state.vouchers ?? []).filter((v) => !v.voidedAt).length;
+}
+
+function isStorageQuotaError(err: unknown): boolean {
+  if (!(err instanceof DOMException)) return false;
+  return (
+    err.name === "QuotaExceededError" ||
+    err.code === 22 ||
+    err.code === 1014
+  );
+}
+
+/** Slim JSON before persistence — large legacy imports can exceed localStorage. */
+export function compactFeesForStorage(state: FeesState): FeesState {
+  return {
+    ...state,
+    vouchers: (state.vouchers ?? []).map((v) => ({
+      ...v,
+      note:
+        (v.note ?? "").length > 280
+          ? `${v.note.slice(0, 277)}…`
+          : (v.note ?? ""),
+      lines: (v.lines ?? []).map((l) => ({
+        ...l,
+        concessionDetails:
+          (l.concessionPaise ?? 0) > 0 ? (l.concessionDetails ?? []) : [],
+      })),
+    })),
+  };
+}
+
+function normalizeFeesState(parsed: FeesState): FeesState {
+  const vouchers = Array.isArray(parsed.vouchers)
+    ? parsed.vouchers.map(normalizeVoucher)
+    : [];
+  const cheques = ensureChequesFromVouchers(
+    vouchers,
+    Array.isArray(parsed.cheques)
+      ? parsed.cheques.map(normalizeCheque)
+      : [],
+  );
+  const manualBooks =
+    Array.isArray(parsed.manualBooks) && parsed.manualBooks.length > 0
+      ? parsed.manualBooks.map(normalizeManualBook)
+      : defaultManualBooks();
+  const dayCloses = Array.isArray(parsed.dayCloses)
+    ? parsed.dayCloses.map(normalizeDayClose)
+    : [];
+  const installmentPlans = Array.isArray(parsed.installmentPlans)
+    ? parsed.installmentPlans.map(normalizeInstallmentPlan)
+    : [];
+  const planAllocations = Array.isArray(parsed.planAllocations)
+    ? parsed.planAllocations.map(normalizePlanAllocation)
+    : [];
+  const carriedForwardDues = Array.isArray(parsed.carriedForwardDues)
+    ? parsed.carriedForwardDues.map(normalizeCarriedForwardDue)
+    : [];
+  const chargeVouchers = Array.isArray(parsed.chargeVouchers)
+    ? parsed.chargeVouchers.map(normalizeChargeVoucher)
+    : [];
+  return {
+    version: 1,
+    vouchers,
+    cheques,
+    manualBooks,
+    dayCloses,
+    installmentPlans,
+    planAllocations,
+    carriedForwardDues,
+    chargeVouchers,
+  };
+}
+
+function parseFeesJson(raw: string): FeesState {
+  return normalizeFeesState(JSON.parse(raw) as FeesState);
+}
+
+function notifyFeesUpdated() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(FEES_UPDATED_EVENT));
+}
+
+function kickFeesIdbHydrate() {
+  if (feesIdbHydrateStarted || typeof window === "undefined") return;
+  feesIdbHydrateStarted = true;
+  void import("@/lib/feesLocalStore").then(async (idb) => {
+    if (!idb.feesIdbAvailable()) return;
+    const remote = await idb.readFeesFromIdb();
+    if (!remote) return;
+    const next = normalizeFeesState(remote);
+    const localCount = feesWorkingCopy?.vouchers?.length ?? 0;
+    const remoteCount = next.vouchers?.length ?? 0;
+    if (remoteCount > localCount) {
+      feesWorkingCopy = next;
+      notifyFeesUpdated();
+    }
+  });
+}
+
+/**
+ * Pull fees from IndexedDB when localStorage is empty or flagged over quota.
+ * Call from Fee Take / import panels on mount.
+ */
+export async function hydrateFeesStore(): Promise<boolean> {
+  if (typeof window === "undefined") return false;
+  const { feesPreferIdb, readFeesFromIdb, feesIdbAvailable } = await import(
+    "@/lib/feesLocalStore"
+  );
+  if (!feesIdbAvailable()) return false;
+
+  const fromIdb = await readFeesFromIdb();
+  if (!fromIdb) return false;
+
+  const next = normalizeFeesState(fromIdb);
+  const localCount = feesWorkingCopy?.vouchers?.length ?? 0;
+  const remoteCount = next.vouchers?.length ?? 0;
+  const shouldUse =
+    feesPreferIdb() || remoteCount > localCount || localCount === 0;
+  if (!shouldUse) return false;
+
+  feesWorkingCopy = next;
+  notifyFeesUpdated();
+  return true;
+}
+
+function persistFeesClient(state: FeesState) {
+  feesWorkingCopy = state;
+  const compact = compactFeesForStorage(state);
+
+  void import("@/lib/feesLocalStore").then(async (idb) => {
+    if (idb.feesIdbAvailable()) {
+      try {
+        await idb.writeFeesToIdb(compact);
+      } catch (e) {
+        console.warn("[fees] IndexedDB write failed", e);
+      }
+    }
+  });
+
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(compact));
+  } catch (err) {
+    if (!isStorageQuotaError(err)) throw err;
+    console.warn(
+      "[fees] localStorage quota exceeded — using IndexedDB + server mirror",
+    );
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      /* ignore */
+    }
+    void import("@/lib/feesLocalStore").then((idb) => {
+      idb.markFeesPreferIdb();
+    });
+  }
+
+  scheduleClientSchoolMirrorSync({ fees: state });
+  void import("@/lib/feesPersistence").then(({ scheduleFeesSync }) => {
+    scheduleFeesSync(state);
+  });
+  notifyFeesUpdated();
 }
 
 export function loadFees(): FeesState {
   if (typeof window === "undefined") {
-    return emptyFeesState();
-  }
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return emptyFeesState();
+    const mirrored = getSchoolMirrorSync().fees as FeesState | null;
+    if (mirrored && Array.isArray(mirrored.vouchers)) {
+      return mirrored;
     }
-    const parsed = JSON.parse(raw) as FeesState;
-    const vouchers = Array.isArray(parsed.vouchers)
-      ? parsed.vouchers.map(normalizeVoucher)
-      : [];
-    const cheques = ensureChequesFromVouchers(
-      vouchers,
-      Array.isArray(parsed.cheques)
-        ? parsed.cheques.map(normalizeCheque)
-        : [],
-    );
-    const manualBooks =
-      Array.isArray(parsed.manualBooks) && parsed.manualBooks.length > 0
-        ? parsed.manualBooks.map(normalizeManualBook)
-        : defaultManualBooks();
-    const dayCloses = Array.isArray(parsed.dayCloses)
-      ? parsed.dayCloses.map(normalizeDayClose)
-      : [];
-    const installmentPlans = Array.isArray(parsed.installmentPlans)
-      ? parsed.installmentPlans.map(normalizeInstallmentPlan)
-      : [];
-    const planAllocations = Array.isArray(parsed.planAllocations)
-      ? parsed.planAllocations.map(normalizePlanAllocation)
-      : [];
-    return {
-      version: 1,
-      vouchers,
-      cheques,
-      manualBooks,
-      dayCloses,
-      installmentPlans,
-      planAllocations,
-    };
-  } catch {
     return emptyFeesState();
   }
+
+  if (feesWorkingCopy) return feesWorkingCopy;
+
+  try {
+    if (!feesIdbHydrateStarted) {
+      void import("@/lib/feesLocalStore").then(async (idb) => {
+        if (idb.feesPreferIdb()) {
+          const hydrated = await hydrateFeesStore();
+          if (hydrated) return;
+        }
+        kickFeesIdbHydrate();
+      });
+    }
+
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      feesWorkingCopy = parseFeesJson(raw);
+      return feesWorkingCopy;
+    }
+  } catch {
+    feesWorkingCopy = emptyFeesState();
+    kickFeesIdbHydrate();
+    return feesWorkingCopy;
+  }
+
+  feesWorkingCopy = emptyFeesState();
+  kickFeesIdbHydrate();
+  return feesWorkingCopy;
+}
+
+function normalizeCarriedForwardDue(
+  row: Partial<CarriedForwardDue>,
+): CarriedForwardDue {
+  return {
+    id: row.id || id("cf"),
+    studentId: row.studentId || "",
+    fromAcademicYearCode: row.fromAcademicYearCode || "",
+    toAcademicYearCode: row.toAcademicYearCode || DEFAULT_AY,
+    amountPaise: Math.max(0, Math.round(row.amountPaise || 0)),
+    dueOn: row.dueOn || `${DEFAULT_AY.slice(0, 4)}-04-01`,
+    label: row.label || "Previous session arrears",
+    sourceDueKeys: Array.isArray(row.sourceDueKeys) ? row.sourceDueKeys : [],
+    sourceBreakdown: Array.isArray(row.sourceBreakdown)
+      ? row.sourceBreakdown.map((b) => ({
+          dueKey: b.dueKey || "",
+          label: b.label || "",
+          amountPaise: Math.max(0, Math.round(b.amountPaise || 0)),
+        }))
+      : [],
+    transferredAt: row.transferredAt || new Date().toISOString(),
+    transferredBy: row.transferredBy || "",
+    voidedAt: row.voidedAt ?? null,
+  };
+}
+
+function chargeVoucherCode(): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let s = "";
+  for (let i = 0; i < 4; i++) {
+    s += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return `CV-${s}`;
+}
+
+function normalizeChargeVoucherLine(
+  l: Partial<ChargeVoucherLine>,
+): ChargeVoucherLine {
+  return {
+    id: l.id || id("cvl"),
+    feeHeadId: l.feeHeadId || "",
+    feeHeadName: l.feeHeadName || "Fee",
+    amountPaise: Math.max(0, Math.round(l.amountPaise || 0)),
+    note: l.note || "",
+  };
+}
+
+function normalizeChargeVoucher(
+  row: Partial<ChargeVoucher>,
+): ChargeVoucher {
+  const lines = Array.isArray(row.lines)
+    ? row.lines.map(normalizeChargeVoucherLine)
+    : [];
+  return {
+    id: row.id || id("cv"),
+    code: row.code || chargeVoucherCode(),
+    studentId: row.studentId || "",
+    householdId: row.householdId || "",
+    studentName: row.studentName || "",
+    academicYearCode: row.academicYearCode || DEFAULT_AY,
+    installmentId: row.installmentId ?? null,
+    installmentLabel: row.installmentLabel || "Session",
+    dueOn: row.dueOn || new Date().toISOString().slice(0, 10),
+    lines,
+    totalPaise:
+      row.totalPaise != null
+        ? Math.max(0, Math.round(row.totalPaise))
+        : lines.reduce((s, l) => s + l.amountPaise, 0),
+    reason: row.reason || "",
+    createdAt: row.createdAt || new Date().toISOString(),
+    createdBy: row.createdBy || "",
+    voidedAt: row.voidedAt ?? null,
+    voidedBy: row.voidedBy || "",
+  };
+}
+
+export function chargeVoucherDueKey(
+  voucherId: string,
+  lineId: string,
+): string {
+  return `cv:${voucherId}:${lineId}`;
+}
+
+export function listChargeVouchers(
+  fees?: FeesState,
+  filters?: { studentId?: string; includeVoided?: boolean },
+): ChargeVoucher[] {
+  const state = fees ?? loadFees();
+  let list = state.chargeVouchers ?? [];
+  if (!filters?.includeVoided) {
+    list = list.filter((v) => !v.voidedAt);
+  }
+  if (filters?.studentId) {
+    list = list.filter((v) => v.studentId === filters.studentId);
+  }
+  return list.slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+export function openChargeVoucherCount(fees?: FeesState): number {
+  const state = fees ?? loadFees();
+  const paid = paidByDueKey(state);
+  let n = 0;
+  for (const v of state.chargeVouchers ?? []) {
+    if (v.voidedAt) continue;
+    for (const line of v.lines) {
+      const dueKey = chargeVoucherDueKey(v.id, line.id);
+      const balance = Math.max(0, line.amountPaise - (paid.get(dueKey) ?? 0));
+      if (balance > 0) {
+        n += 1;
+        break;
+      }
+    }
+  }
+  return n;
+}
+
+export function createChargeVoucher(input: {
+  studentId: string;
+  installmentId?: string | null;
+  installmentLabel?: string;
+  dueOn?: string;
+  reason: string;
+  createdBy: string;
+  academicYearCode?: string;
+  lines: {
+    feeHeadId: string;
+    feeHeadName?: string;
+    amountPaise: number;
+    note?: string;
+  }[];
+}):
+  | { ok: true; voucher: ChargeVoucher }
+  | { ok: false; error: string } {
+  const reason = input.reason.trim();
+  if (!reason) return { ok: false, error: "Reason is required" };
+  const linesIn = (input.lines ?? []).filter((l) => l.amountPaise > 0);
+  if (linesIn.length === 0) {
+    return { ok: false, error: "Add at least one head with amount > 0" };
+  }
+
+  const sis = loadSis();
+  const student = sis.students.find((s) => s.id === input.studentId);
+  if (!student) return { ok: false, error: "Student not found" };
+
+  const masters = loadMasters();
+  const ay =
+    input.academicYearCode ||
+    student.academicYearCode ||
+    currentAcademicYearCode(masters);
+
+  let installmentLabel = input.installmentLabel || "Session";
+  let dueOn = input.dueOn || new Date().toISOString().slice(0, 10);
+  let installmentId = input.installmentId ?? null;
+  if (installmentId) {
+    const inst = masters.installments.find((i) => i.id === installmentId);
+    if (inst) {
+      installmentLabel = inst.label || inst.code;
+      dueOn = input.dueOn || inst.dueOn;
+    }
+  }
+
+  const lines: ChargeVoucherLine[] = linesIn.map((l) => {
+    const head =
+      masters.feeHeads.find((h) => h.id === l.feeHeadId)?.nameEn ||
+      l.feeHeadName ||
+      "Fee";
+    return {
+      id: id("cvl"),
+      feeHeadId: l.feeHeadId,
+      feeHeadName: head,
+      amountPaise: Math.round(l.amountPaise),
+      note: l.note?.trim() || "",
+    };
+  });
+
+  const voucher: ChargeVoucher = {
+    id: id("cv"),
+    code: chargeVoucherCode(),
+    studentId: student.id,
+    householdId: student.householdId,
+    studentName: student.fullName,
+    academicYearCode: ay,
+    installmentId,
+    installmentLabel,
+    dueOn,
+    lines,
+    totalPaise: lines.reduce((s, l) => s + l.amountPaise, 0),
+    reason,
+    createdAt: new Date().toISOString(),
+    createdBy: input.createdBy,
+    voidedAt: null,
+    voidedBy: "",
+  };
+
+  const state = loadFees();
+  saveFees({
+    ...state,
+    chargeVouchers: [voucher, ...(state.chargeVouchers ?? [])],
+  });
+  return { ok: true, voucher };
+}
+
+export function voidChargeVoucher(
+  voucherId: string,
+  by: string,
+): { ok: true } | { ok: false; error: string } {
+  const state = loadFees();
+  const idx = (state.chargeVouchers ?? []).findIndex((v) => v.id === voucherId);
+  if (idx < 0) return { ok: false, error: "Voucher not found" };
+  const row = state.chargeVouchers[idx]!;
+  if (row.voidedAt) return { ok: false, error: "Already voided" };
+  const next = [...state.chargeVouchers];
+  next[idx] = {
+    ...row,
+    voidedAt: new Date().toISOString(),
+    voidedBy: by,
+  };
+  saveFees({ ...state, chargeVouchers: next });
+  return { ok: true };
+}
+
+/**
+ * Heads in the student's fee structure for a month that have no open due
+ * (and optionally already fully paid) — candidates for a supplementary voucher.
+ */
+export function suggestChargeVoucherHeads(input: {
+  studentId: string;
+  installmentId: string;
+  masters?: MastersState;
+  fees?: FeesState;
+}): {
+  feeHeadId: string;
+  feeHeadName: string;
+  structureAmountPaise: number;
+  alreadyPaidPaise: number;
+  openBalancePaise: number;
+  suggestedPaise: number;
+  status: "missing" | "partial" | "unpaid" | "paid";
+}[] {
+  const masters = input.masters ?? loadMasters();
+  const fees = input.fees ?? loadFees();
+  const sis = loadSis();
+  const student = sis.students.find((s) => s.id === input.studentId);
+  if (!student?.feeGroupId) return [];
+
+  const structure = resolveStructureLinesForClass(
+    masters,
+    student.feeGroupId,
+    student.classId,
+  ).filter((l) => l.installmentId === input.installmentId);
+
+  const dues = computeStudentDues(student, masters, fees, {
+    includeFuture: true,
+    includePaid: true,
+    includeInactive: true,
+  });
+
+  const out: {
+    feeHeadId: string;
+    feeHeadName: string;
+    structureAmountPaise: number;
+    alreadyPaidPaise: number;
+    openBalancePaise: number;
+    suggestedPaise: number;
+    status: "missing" | "partial" | "unpaid" | "paid";
+  }[] = [];
+
+  for (const sl of structure) {
+    const headName =
+      masters.feeHeads.find((h) => h.id === sl.feeHeadId)?.nameEn ?? "Fee";
+    const matching = dues.filter(
+      (d) =>
+        d.kind === "academic" &&
+        d.feeHeadId === sl.feeHeadId &&
+        d.installmentId === input.installmentId,
+    );
+    const paid = matching.reduce((s, d) => s + d.paidPaise, 0);
+    const open = matching.reduce((s, d) => s + d.balancePaise, 0);
+    const billed = matching.reduce((s, d) => s + d.billedPaise, 0);
+
+    let status: "missing" | "partial" | "unpaid" | "paid" = "unpaid";
+    let suggested = sl.amountPaise;
+    if (matching.length === 0) {
+      status = "missing";
+      suggested = sl.amountPaise;
+    } else if (open <= 0 && paid > 0) {
+      status = "paid";
+      suggested = 0;
+    } else if (paid > 0 && open > 0) {
+      status = "partial";
+      suggested = open;
+    } else if (open > 0) {
+      status = "unpaid";
+      suggested = 0; // already on Fee Take as structure due
+    }
+
+    // Also check existing open charge vouchers for this head+month
+    const cvOpen = (fees.chargeVouchers ?? [])
+      .filter(
+        (v) =>
+          !v.voidedAt &&
+          v.studentId === student.id &&
+          v.installmentId === input.installmentId,
+      )
+      .flatMap((v) =>
+        v.lines
+          .filter((l) => l.feeHeadId === sl.feeHeadId)
+          .map((l) => {
+            const dueKey = chargeVoucherDueKey(v.id, l.id);
+            const p = paidByDueKey(fees).get(dueKey) ?? 0;
+            return Math.max(0, l.amountPaise - p);
+          }),
+      )
+      .reduce((s, n) => s + n, 0);
+
+    out.push({
+      feeHeadId: sl.feeHeadId,
+      feeHeadName: headName,
+      structureAmountPaise: sl.amountPaise,
+      alreadyPaidPaise: paid,
+      openBalancePaise: open + cvOpen,
+      suggestedPaise: status === "missing" ? suggested : 0,
+      status:
+        matching.length === 0 && billed === 0
+          ? "missing"
+          : status,
+    });
+  }
+
+  return out;
 }
 
 export function saveFees(state: FeesState) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  if (!assertModulePermission("fees", "edit", "saveFees")) return;
+
+  if (typeof window === "undefined") {
+    setMirrorSlice("fees", state);
+    return;
+  }
+  persistFeesClient(state);
+}
+
+/** Hydrate path — write localStorage + mirror without closed-session guard / cloud schedule. */
+export function writeFeesLocalRaw(state: FeesState) {
+  if (typeof window === "undefined") {
+    setMirrorSlice("fees", state);
+    return;
+  }
+  persistFeesClient(state);
+}
+
+/** Wipe all collection vouchers from desk + IndexedDB + mirror sync. */
+export async function wipeFeeCollections(): Promise<{
+  removedVouchers: number;
+  fees: FeesState;
+}> {
+  const current = loadFees();
+  const removedVouchers = (current.vouchers ?? []).length;
+  const next = clearFeeCollections(current);
+  if (typeof window !== "undefined") {
+    const compact = compactFeesForStorage(next);
+    feesWorkingCopy = next;
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(compact));
+    } catch {
+      localStorage.removeItem(STORAGE_KEY);
+    }
+    const idb = await import("@/lib/feesLocalStore");
+    if (idb.feesIdbAvailable()) {
+      await idb.writeFeesToIdb(compact);
+    }
+    scheduleClientSchoolMirrorSync({ fees: next });
+    notifyFeesUpdated();
+  } else {
+    setMirrorSlice("fees", next);
+  }
+  return { removedVouchers, fees: next };
+}
+
+export function feesStateIsEmpty(state: FeesState): boolean {
+  return (
+    (state.vouchers?.length ?? 0) === 0 &&
+    (state.cheques?.length ?? 0) === 0 &&
+    (state.dayCloses?.length ?? 0) === 0 &&
+    (state.installmentPlans?.length ?? 0) === 0 &&
+    (state.planAllocations?.length ?? 0) === 0 &&
+    (state.carriedForwardDues?.length ?? 0) === 0 &&
+    (state.chargeVouchers?.length ?? 0) === 0
+  );
 }
 
 function normalizeVoucherLine(l: Partial<VoucherLine>): VoucherLine {
@@ -705,6 +1412,8 @@ function normalizeVoucherLine(l: Partial<VoucherLine>): VoucherLine {
     l.kind === "store" ||
     l.kind === "transport" ||
     l.kind === "plan" ||
+    l.kind === "arrears" ||
+    l.kind === "voucher" ||
     l.kind === "academic"
       ? l.kind
       : l.dueKey?.startsWith("store:")
@@ -715,7 +1424,11 @@ function normalizeVoucherLine(l: Partial<VoucherLine>): VoucherLine {
             ? "special"
             : l.dueKey?.startsWith("plan:")
               ? "plan"
-              : "academic";
+              : l.dueKey?.startsWith("arrears:")
+                ? "arrears"
+                : l.dueKey?.startsWith("cv:")
+                  ? "voucher"
+                  : "academic";
   let storeItems = Array.isArray(l.storeItems) ? l.storeItems : [];
   let storeIssueNo = l.storeIssueNo ?? "";
   const transportDetail = l.transport ?? null;
@@ -803,6 +1516,7 @@ function normalizeVoucher(v: Partial<CollectionVoucher>): CollectionVoucher {
       ref: t.ref ?? "",
       instrumentDate: t.instrumentDate ?? "",
       bankName: t.bankName ?? "",
+      bankAccountId: t.bankAccountId ?? "",
       realisation:
         t.realisation ??
         (t.mode === "cheque" ? "subject_to_clearance" : "cleared"),
@@ -976,22 +1690,23 @@ export function syncAllStudentFeeGroups(options?: {
 
 function concessionForHead(
   masters: MastersState,
-  studentId: string,
+  student: { id: string; admissionNo: string; academicYearCode?: string },
   feeHeadId: string,
   billedPaise: number,
   asOf: string,
 ): { totalPaise: number; details: FeeConcessionDetail[] } {
-  const grants = (masters.concessionGrants ?? []).filter(
-    (g) =>
-      g.studentId === studentId &&
-      g.status === "approved" &&
-      g.effectiveFrom <= asOf &&
-      (g.effectiveTo == null || g.effectiveTo >= asOf),
+  const mastersWithRules = mergeDiscountRulesFromSeed(masters);
+  const grants = resolvedConcessionGrantsForStudent(
+    mastersWithRules,
+    student,
+    asOf,
   );
   const details: FeeConcessionDetail[] = [];
   let total = 0;
   for (const g of grants) {
-    const rule = masters.concessions.find((c) => c.id === g.concessionId);
+    const rule = resolveConcessionRuleForGrant(mastersWithRules, g, {
+      preferAy: student.academicYearCode,
+    });
     if (!rule || !rule.isActive) continue;
     if (
       rule.feeHeadIds.length > 0 &&
@@ -1098,23 +1813,32 @@ export function computeStudentDues(
     includeFuture?: boolean;
     /** Keep fully paid heads/months on the card (green, non-selectable). Default true. */
     includePaid?: boolean;
+    /** Include inactive students (inactive dues register). Default false. */
+    includeInactive?: boolean;
   },
 ): FeeDueLine[] {
-  if (student.status !== "active") return [];
+  if (student.status !== "active" && !options?.includeInactive) return [];
   const asOf = options?.asOf ?? new Date().toISOString().slice(0, 10);
   const includeFuture = options?.includeFuture ?? true;
   const includePaid = options?.includePaid ?? true;
   const paidMap = paidByDueKey(fees);
+  const waiverMap = postedWaiversByDueKey(student.id);
   const lines: FeeDueLine[] = [];
   const midYearPolicy = normalizeMidYearFeePolicy(masters.midYearFeePolicy);
 
   const headName = (hid: string) =>
     masters.feeHeads.find((h) => h.id === hid)?.nameEn ?? "Fee";
 
-  if (student.feeGroupId) {
+  function pushLine(line: FeeDueLine) {
+    if (stopFutureBlocks(student.id, line.dueOn)) return;
+    lines.push(line);
+  }
+
+  const feeGroupId = resolveStudentFeeGroupId(masters, student);
+  if (feeGroupId) {
     const structure = resolveStructureLinesForClass(
       masters,
-      student.feeGroupId,
+      feeGroupId,
       student.classId,
     );
 
@@ -1144,7 +1868,7 @@ export function computeStudentDues(
       const billed = sl.amountPaise;
       const concession = concessionForHead(
         masters,
-        student.id,
+        student,
         sl.feeHeadId,
         billed,
         asOf,
@@ -1156,7 +1880,7 @@ export function computeStudentDues(
       }
 
       const instLabel = inst?.label ?? inst?.code ?? "Session";
-      lines.push({
+      pushLine({
         dueKey,
         kind: "academic",
         studentId: student.id,
@@ -1201,7 +1925,15 @@ export function computeStudentDues(
       continue;
     }
     const paid = paidMap.get(td.dueKey) ?? 0;
-    const balance = Math.max(0, td.amountPaise - paid);
+    const transportHeadId =
+      masters.feeHeads.find((h) => h.code === "TRANSPORT")?.id ?? "";
+    const transportConcession = transportHeadId
+      ? concessionForHead(masters, student, transportHeadId, td.amountPaise, asOf)
+      : { totalPaise: 0, details: [] as FeeConcessionDetail[] };
+    const balance = Math.max(
+      0,
+      td.amountPaise - transportConcession.totalPaise - paid,
+    );
     if (balance <= 0) {
       if (!(includePaid && paid > 0)) continue;
     }
@@ -1211,7 +1943,7 @@ export function computeStudentDues(
       dueKey: td.dueKey,
       kind: "transport",
       studentId: student.id,
-      feeHeadId: "",
+      feeHeadId: transportHeadId,
       feeHeadName: "Transport",
       installmentId: null,
       installmentLabel: td.periodLabel,
@@ -1231,8 +1963,8 @@ export function computeStudentDues(
       },
       dueOn: td.dueOn,
       billedPaise: td.amountPaise,
-      concessionPaise: 0,
-      concessionDetails: [],
+      concessionPaise: transportConcession.totalPaise,
+      concessionDetails: transportConcession.details,
       paidPaise: paid,
       balancePaise: balance,
       label: `Transport · ${td.periodLabel} · ${td.routeCode}`,
@@ -1256,7 +1988,7 @@ export function computeStudentDues(
     const billed = sf.amountPaise;
     const concession = concessionForHead(
       masters,
-      student.id,
+      student,
       sf.feeHeadId,
       billed,
       asOf,
@@ -1296,11 +2028,21 @@ export function computeStudentDues(
     if (iss.academicYearCode !== (student.academicYearCode || DEFAULT_AY)) {
       continue;
     }
+    // Cash / already settled at counter — not a Fee Take due
+    if (
+      iss.paymentMode === "cash" ||
+      iss.paymentStatus === "paid" ||
+      iss.paymentStatus === "void" ||
+      iss.recipientKind === "staff" ||
+      !iss.studentId
+    ) {
+      continue;
+    }
     if (!includeFuture && isAfterRunningSessionMonth(iss.issuedOn, asOf)) {
       continue;
     }
     const dueKey = storeDueKey(student.id, iss.id);
-    const billed = iss.totalPaise;
+    const billed = Math.max(0, iss.totalPaise - (iss.returnedPaise || 0));
     const paid = paidMap.get(dueKey) ?? 0;
     const balance = Math.max(0, billed - paid);
     if (balance <= 0) {
@@ -1350,26 +2092,535 @@ export function computeStudentDues(
   }
 
   const plan = activePlanForStudent(fees.installmentPlans, student.id);
+  // Apply stop-future + waivers to lines collected via raw push (transport/special/store)
+  const adjusted = lines
+    .filter((l) => !stopFutureBlocks(student.id, l.dueOn))
+    .map((l) => {
+      const waived = waiverMap.get(l.dueKey) ?? 0;
+      if (waived <= 0) return l;
+      const balance = Math.max(0, l.balancePaise - waived);
+      return {
+        ...l,
+        concessionPaise: l.concessionPaise + waived,
+        balancePaise: balance,
+        label:
+          balance <= 0
+            ? `${l.label} · waived`
+            : `${l.label} · −${formatInr(waived)} waived`,
+      };
+    })
+    .filter(
+      (l) =>
+        l.balancePaise > 0 ||
+        (includePaid && (l.paidPaise > 0 || (waiverMap.get(l.dueKey) ?? 0) > 0)),
+    );
+
+  // Late fee on overdue academic/special balances
+  for (const late of computeLateFeeDues(
+    student,
+    masters,
+    adjusted,
+    paidMap,
+    asOf,
+  )) {
+    adjusted.push(late);
+  }
+
+  // Ad-hoc charges from adjustments
+  for (const ad of listAdhocDuesForStudent(student.id, paidMap)) {
+    if (stopFutureBlocks(student.id, ad.dueOn)) continue;
+    adjusted.push(ad);
+  }
+
+  // Supplementary charge vouchers (extra heads on a paid / partial month)
+  for (const cv of fees.chargeVouchers ?? []) {
+    if (cv.voidedAt || cv.studentId !== student.id) continue;
+    if (!includeFuture && isAfterRunningSessionMonth(cv.dueOn, asOf)) continue;
+    for (const line of cv.lines) {
+      if (stopFutureBlocks(student.id, cv.dueOn)) continue;
+      const dueKey = chargeVoucherDueKey(cv.id, line.id);
+      const paid = paidMap.get(dueKey) ?? 0;
+      const balance = Math.max(0, line.amountPaise - paid);
+      if (balance <= 0) {
+        if (!(includePaid && paid > 0)) continue;
+      }
+      adjusted.push({
+        dueKey,
+        kind: "voucher",
+        studentId: student.id,
+        feeHeadId: line.feeHeadId,
+        feeHeadName: line.feeHeadName,
+        installmentId: cv.installmentId,
+        installmentLabel: cv.installmentLabel,
+        specialFeeId: null,
+        structureLineId: null,
+        storeIssueId: null,
+        storeIssueNo: "",
+        storeItems: [],
+        transport: null,
+        dueOn: cv.dueOn,
+        billedPaise: line.amountPaise,
+        concessionPaise: 0,
+        concessionDetails: [],
+        paidPaise: paid,
+        balancePaise: balance,
+        label: `Voucher ${cv.code} · ${line.feeHeadName} · ${cv.installmentLabel}`,
+      });
+    }
+  }
+
   if (plan) {
     const covered = coveredDueKeySet(plan);
-    const filtered = lines.filter((l) => !covered.has(l.dueKey));
+    const filtered = adjusted.filter((l) => !covered.has(l.dueKey));
     const slices = planSliceDues(plan, paidMapRaw, {
       includePaid,
       asOf,
       includeFuture,
     });
-    return [...filtered, ...slices].sort((a, b) =>
+    return appendArrearsDues(
+      [...filtered, ...slices],
+      student,
+      fees,
+      paidMap,
+      includePaid,
+    ).sort((a, b) =>
       a.dueOn === b.dueOn
         ? a.label.localeCompare(b.label)
         : a.dueOn.localeCompare(b.dueOn),
     );
   }
 
-  return lines.sort((a, b) =>
+  return appendArrearsDues(
+    adjusted,
+    student,
+    fees,
+    paidMap,
+    includePaid,
+  ).sort((a, b) =>
     a.dueOn === b.dueOn
       ? a.label.localeCompare(b.label)
       : a.dueOn.localeCompare(b.dueOn),
   );
+}
+
+/** Apply active late-fee rules to overdue open dues. */
+export function computeLateFeeDues(
+  student: SisStudent,
+  masters: MastersState,
+  baseLines: FeeDueLine[],
+  paidMap: Map<string, number>,
+  asOf: string,
+): FeeDueLine[] {
+  const ay = student.academicYearCode || DEFAULT_AY;
+  const rules = (masters.lateFeeRules ?? []).filter(
+    (r) => r.isActive && r.academicYearCode === ay,
+  );
+  if (!rules.length) return [];
+
+  const out: FeeDueLine[] = [];
+  for (const line of baseLines) {
+    if (line.balancePaise <= 0) continue;
+    if (line.kind === "arrears" || line.kind === "plan") continue;
+    if (line.dueOn >= asOf) continue;
+
+    const daysLate = Math.floor(
+      (Date.parse(asOf) - Date.parse(line.dueOn)) / 86_400_000,
+    );
+    if (!Number.isFinite(daysLate) || daysLate < 0) continue;
+
+    for (const rule of rules) {
+      const lateHeadId = masters.feeHeads.find((h) => h.code === "LATE")?.id;
+      const heads =
+        rule.feeHeadIds?.length > 0
+          ? rule.feeHeadIds
+          : rule.feeHeadId
+            ? [rule.feeHeadId]
+            : [];
+      // Seed/legacy rules often list only the LATE posting head — treat that as “all dues”.
+      const appliesToAll =
+        heads.length === 0 ||
+        (lateHeadId != null && heads.every((id) => id === lateHeadId));
+      if (
+        !appliesToAll &&
+        line.feeHeadId &&
+        !heads.includes(line.feeHeadId)
+      ) {
+        continue;
+      }
+      if (daysLate <= (rule.graceDays || 0)) continue;
+
+      let charge =
+        rule.mode === "percent"
+          ? Math.round((line.balancePaise * rule.value) / 10_000)
+          : rule.value;
+      if (rule.maxAmountPaise != null) {
+        charge = Math.min(charge, rule.maxAmountPaise);
+      }
+      if (charge <= 0) continue;
+
+      const dueKey = `late:${student.id}:${line.dueKey}:${rule.id}`;
+      const paid = paidMap.get(dueKey) ?? 0;
+      const balance = Math.max(0, charge - paid);
+      if (balance <= 0) continue;
+
+      out.push({
+        dueKey,
+        kind: "special",
+        studentId: student.id,
+        feeHeadId: rule.feeHeadId || line.feeHeadId,
+        feeHeadName: "Late fee",
+        installmentId: null,
+        installmentLabel: "Late",
+        specialFeeId: null,
+        structureLineId: null,
+        storeIssueId: null,
+        storeIssueNo: "",
+        storeItems: [],
+        transport: null,
+        dueOn: asOf,
+        billedPaise: charge,
+        concessionPaise: 0,
+        concessionDetails: [],
+        paidPaise: paid,
+        balancePaise: balance,
+        label: `Late fee · ${line.label} (${daysLate}d)`,
+      });
+    }
+  }
+  return out;
+}
+
+function appendArrearsDues(
+  lines: FeeDueLine[],
+  student: SisStudent,
+  fees: FeesState,
+  paidMap: Map<string, number>,
+  includePaid: boolean,
+): FeeDueLine[] {
+  const studentAy = student.academicYearCode || DEFAULT_AY;
+  const sourceSettled = new Set<string>();
+  for (const cf of fees.carriedForwardDues ?? []) {
+    if (cf.voidedAt || cf.studentId !== student.id) continue;
+    for (const k of cf.sourceDueKeys) sourceSettled.add(k);
+  }
+
+  const withoutSettled = lines.filter((l) => !sourceSettled.has(l.dueKey));
+
+  for (const cf of fees.carriedForwardDues ?? []) {
+    if (cf.voidedAt || cf.studentId !== student.id) continue;
+    if (cf.toAcademicYearCode !== studentAy) continue;
+    const dueKey = `arrears:${cf.id}`;
+    const paid = paidMap.get(dueKey) ?? 0;
+    const balance = Math.max(0, cf.amountPaise - paid);
+    if (balance <= 0) {
+      if (!(includePaid && paid > 0)) continue;
+    }
+    withoutSettled.push({
+      dueKey,
+      kind: "arrears",
+      studentId: student.id,
+      feeHeadId: "",
+      feeHeadName: "Arrears",
+      installmentId: null,
+      installmentLabel: `From ${cf.fromAcademicYearCode}`,
+      specialFeeId: null,
+      structureLineId: null,
+      storeIssueId: null,
+      storeIssueNo: "",
+      storeItems: [],
+      transport: null,
+      dueOn: cf.dueOn,
+      billedPaise: cf.amountPaise,
+      concessionPaise: 0,
+      concessionDetails: [],
+      paidPaise: paid,
+      balancePaise: balance,
+      label: cf.label,
+    });
+  }
+  return withoutSettled;
+}
+
+/** Closed / previous session before the current academic year. */
+export function previousAcademicYearCode(
+  toAy?: string,
+  masters?: MastersState | null,
+): string | null {
+  const current = toAy || currentAcademicYearCode(masters);
+  const years = listSessionYearOptions(masters ?? undefined)
+    .map((y) => y.code)
+    .filter((c) => c && c !== current)
+    .sort((a, b) => b.localeCompare(a));
+  const older = years.filter((c) => c < current);
+  if (older[0]) return older[0];
+  const closed = listSessionYearOptions(masters ?? undefined).find(
+    (y) => y.status === "closed" && y.code !== current,
+  );
+  return closed?.code ?? null;
+}
+
+/**
+ * Open dues as billed for a prior academic session (fee groups for that AY,
+ * or the student’s own group while they are still on that session).
+ */
+export function computeLastSessionOpenDues(
+  student: SisStudent,
+  masters: MastersState,
+  fees: FeesState,
+  fromAy: string,
+): FeeDueLine[] {
+  if (student.status !== "active") return [];
+
+  const studentAy = student.academicYearCode || DEFAULT_AY;
+  // Prefer students still enrolled on the last session — their open ledger is authoritative.
+  // Also allow when they already have collection vouchers stamped with fromAy.
+  const hasPriorVouchers = fees.vouchers.some(
+    (v) =>
+      !v.voidedAt &&
+      v.academicYearCode === fromAy &&
+      v.lines.some((l) => l.studentId === student.id),
+  );
+  if (studentAy !== fromAy && !hasPriorVouchers) {
+    return [];
+  }
+
+  let groupId = resolveFeeGroupId(masters, {
+    studentType: student.studentType,
+    classId: student.classId,
+    academicYearCode: fromAy,
+    preferPublished: true,
+  });
+
+  if (!groupId && studentAy === fromAy && student.feeGroupId) {
+    groupId = student.feeGroupId;
+  }
+
+  if (!groupId) {
+    for (const t of ["PROMOTE", "NEW", "MID_YEAR", "RTE"] as const) {
+      groupId = resolveFeeGroupId(masters, {
+        studentType: t,
+        classId: student.classId,
+        academicYearCode: fromAy,
+        preferPublished: true,
+      });
+      if (groupId) break;
+    }
+  }
+
+  if (!groupId) return [];
+
+  const group = masters.feeGroups.find((g) => g.id === groupId);
+  if (
+    group &&
+    group.academicYearCode !== fromAy &&
+    studentAy !== fromAy
+  ) {
+    return [];
+  }
+
+  const clone: SisStudent = {
+    ...student,
+    academicYearCode: fromAy,
+    feeGroupId: groupId,
+  };
+
+  return computeStudentDues(clone, masters, fees, {
+    includeFuture: true,
+    includePaid: false,
+  }).filter((d) => d.kind !== "arrears" && d.balancePaise > 0);
+}
+
+export function previewLastSessionTransfer(
+  student: SisStudent,
+  masters?: MastersState,
+  fees?: FeesState,
+  options?: { fromAy?: string; toAy?: string },
+): LastSessionTransferPreview {
+  const m = masters ?? loadMasters();
+  const f = fees ?? loadFees();
+  const toAy = options?.toAy || currentAcademicYearCode(m);
+  const fromAy =
+    options?.fromAy || previousAcademicYearCode(toAy, m) || "";
+  const already = (f.carriedForwardDues ?? [])
+    .filter(
+      (c) =>
+        !c.voidedAt &&
+        c.studentId === student.id &&
+        c.fromAcademicYearCode === fromAy &&
+        c.toAcademicYearCode === toAy,
+    )
+    .reduce((s, c) => s + c.amountPaise, 0);
+
+  if (!fromAy) {
+    return {
+      studentId: student.id,
+      studentName: student.fullName,
+      fromAy: "",
+      toAy,
+      totalPaise: 0,
+      lines: [],
+      alreadyTransferredPaise: already,
+      canTransfer: false,
+      reason: "No previous academic session found in Masters",
+    };
+  }
+
+  if (already > 0) {
+    return {
+      studentId: student.id,
+      studentName: student.fullName,
+      fromAy,
+      toAy,
+      totalPaise: 0,
+      lines: [],
+      alreadyTransferredPaise: already,
+      canTransfer: false,
+      reason: `Already transferred ${formatInr(already)} from ${fromAy}`,
+    };
+  }
+
+  const open = computeLastSessionOpenDues(student, m, f, fromAy);
+  const lines = open.map((d) => ({
+    dueKey: d.dueKey,
+    label: d.label,
+    balancePaise: d.balancePaise,
+  }));
+  const totalPaise = lines.reduce((s, l) => s + l.balancePaise, 0);
+
+  if (totalPaise <= 0) {
+    const hasFromAyGroup = m.feeGroups.some(
+      (g) => g.isActive && g.academicYearCode === fromAy,
+    );
+    const onLastSession =
+      (student.academicYearCode || DEFAULT_AY) === fromAy;
+    return {
+      studentId: student.id,
+      studentName: student.fullName,
+      fromAy,
+      toAy,
+      totalPaise: 0,
+      lines: [],
+      alreadyTransferredPaise: already,
+      canTransfer: false,
+      reason: !onLastSession
+        ? `Student is on ${student.academicYearCode || toAy}. Set their session to ${fromAy} (with open dues) to transfer, or keep fee groups for ${fromAy}.`
+        : hasFromAyGroup
+          ? `No open dues in ${fromAy}`
+          : `No fee groups for ${fromAy}. Copy fee structure from ${toAy} in Masters, or assign a fee group while the student is on ${fromAy}.`,
+    };
+  }
+
+  return {
+    studentId: student.id,
+    studentName: student.fullName,
+    fromAy,
+    toAy,
+    totalPaise,
+    lines,
+    alreadyTransferredPaise: already,
+    canTransfer: true,
+  };
+}
+
+/**
+ * Move last-session open balances into current-session arrears lines.
+ * Also rolls the student onto toAy (and resolves fee group) when they were
+ * still on fromAy.
+ */
+export function transferLastSessionDues(options: {
+  studentIds: string[];
+  transferredBy: string;
+  fromAy?: string;
+  toAy?: string;
+}):
+  | {
+      ok: true;
+      transferred: number;
+      totalPaise: number;
+      fees: FeesState;
+    }
+  | { ok: false; error: string } {
+  const m = loadMasters();
+  const sis = loadSis();
+  let fees = loadFees();
+  const toAy = options.toAy || currentAcademicYearCode(m);
+  const fromAy =
+    options.fromAy || previousAcademicYearCode(toAy, m) || "";
+  if (!fromAy) {
+    return { ok: false, error: "No previous academic session found" };
+  }
+
+  const carried = [...(fees.carriedForwardDues ?? [])];
+  let transferred = 0;
+  let totalPaise = 0;
+  const dueOn = dueOnForSessionMonth(toAy, 4, 1);
+
+  const students = sis.students.map((st) => {
+    if (!options.studentIds.includes(st.id)) return st;
+    if (st.status !== "active") return st;
+
+    const preview = previewLastSessionTransfer(st, m, fees, { fromAy, toAy });
+    if (!preview.canTransfer || preview.totalPaise <= 0) return st;
+
+    const cf: CarriedForwardDue = {
+      id: id("cf"),
+      studentId: st.id,
+      fromAcademicYearCode: fromAy,
+      toAcademicYearCode: toAy,
+      amountPaise: preview.totalPaise,
+      dueOn,
+      label: `Arrears from ${fromAy}`,
+      sourceDueKeys: preview.lines.map((l) => l.dueKey),
+      sourceBreakdown: preview.lines.map((l) => ({
+        dueKey: l.dueKey,
+        label: l.label,
+        amountPaise: l.balancePaise,
+      })),
+      transferredAt: new Date().toISOString(),
+      transferredBy: options.transferredBy || "",
+      voidedAt: null,
+    };
+    carried.push(cf);
+    transferred += 1;
+    totalPaise += preview.totalPaise;
+
+    // Roll student onto current session if they were still on last session
+    const nextAy =
+      (st.academicYearCode || DEFAULT_AY) === fromAy ? toAy : st.academicYearCode;
+    const nextGroupId =
+      nextAy === toAy
+        ? resolveFeeGroupId(m, {
+            studentType:
+              st.studentType === "NEW" ? "PROMOTE" : st.studentType,
+            classId: st.classId,
+            academicYearCode: toAy,
+            preferPublished: true,
+          }) || st.feeGroupId
+        : st.feeGroupId;
+
+    return {
+      ...st,
+      academicYearCode: nextAy || toAy,
+      feeGroupId: nextGroupId,
+      studentType:
+        (st.academicYearCode || DEFAULT_AY) === fromAy && st.studentType === "NEW"
+          ? ("PROMOTE" as const)
+          : st.studentType,
+    };
+  });
+
+  if (transferred === 0) {
+    return {
+      ok: false,
+      error:
+        "No last-session dues to transfer for the selected student(s)",
+    };
+  }
+
+  fees = { ...fees, carriedForwardDues: carried };
+  saveFees(fees);
+  saveSis({ ...sis, students });
+  return { ok: true, transferred, totalPaise, fees };
 }
 
 export function computeHouseholdDues(
@@ -1441,13 +2692,15 @@ export function groupDuesByMonth(dues: FeeDueLine[]): DueMonthGroup[] {
         const bPaid = b.balancePaise <= 0 && b.paidPaise > 0 ? 1 : 0;
         if (aPaid !== bPaid) return aPaid - bPaid;
         const kindRank = (k: FeeDueLine["kind"]) =>
-          k === "academic"
+          k === "arrears"
             ? 0
-            : k === "transport"
+            : k === "academic"
               ? 1
-              : k === "special"
+              : k === "transport"
                 ? 2
-                : 3;
+                : k === "special"
+                  ? 3
+                  : 4;
         const kr = kindRank(a.kind) - kindRank(b.kind);
         if (kr !== 0) return kr;
         return a.feeHeadName.localeCompare(b.feeHeadName) ||
@@ -1485,18 +2738,37 @@ export function groupDuesByMonth(dues: FeeDueLine[]): DueMonthGroup[] {
   });
 }
 
+export type FeeReceiptSeries = "F" | "R";
+
+/**
+ * Fee Take assigned dues → F/{ay}/####
+ * Registration desk / field collect → R/{ay}/####
+ * Legacy REC/{ay}/ counts toward F sequence.
+ */
 export function nextReceiptNo(
   fees: FeesState,
   ayCode = DEFAULT_AY,
+  series: FeeReceiptSeries = "F",
 ): string {
-  const prefix = `REC/${ayCode}/`;
+  const prefixes =
+    series === "R"
+      ? [`R/${ayCode}/`]
+      : [`F/${ayCode}/`, `REC/${ayCode}/`];
   let max = 0;
   for (const v of fees.vouchers) {
-    if (!v.receiptNo.startsWith(prefix)) continue;
-    const n = Number(v.receiptNo.slice(prefix.length));
-    if (Number.isFinite(n) && n > max) max = n;
+    for (const prefix of prefixes) {
+      if (!v.receiptNo.startsWith(prefix)) continue;
+      const n = Number(v.receiptNo.slice(prefix.length));
+      if (Number.isFinite(n) && n > max) max = n;
+    }
   }
-  return `${prefix}${String(max + 1).padStart(4, "0")}`;
+  return `${series}/${ayCode}/${String(max + 1).padStart(4, "0")}`;
+}
+
+export function receiptSeriesOf(receiptNo: string): FeeReceiptSeries | "" {
+  if (receiptNo.startsWith("R/")) return "R";
+  if (receiptNo.startsWith("F/") || receiptNo.startsWith("REC/")) return "F";
+  return "";
 }
 
 export function collectPayment(input: {
@@ -1511,6 +2783,8 @@ export function collectPayment(input: {
   transactionId?: string;
   schoolReceiptNo?: string;
   source?: CollectionSource;
+  /** F = regular Fee Take · R = registration fee (daybook / cashbook) */
+  receiptSeries?: FeeReceiptSeries;
   manualBookSeries?: string;
   manualBookLeaf?: string;
   /** Skip backdate / duplicate soft checks when already confirmed by UI */
@@ -1521,8 +2795,15 @@ export function collectPayment(input: {
   | {
       ok: false;
       error: string;
-      code?: "backdate" | "duplicate" | "manual_no" | "day_closed";
+      code?: "backdate" | "duplicate" | "manual_no" | "day_closed" | "rbac";
     } {
+  if (!assertModulePermission("fees", "create", "collectPayment")) {
+    return {
+      ok: false,
+      error: "You do not have permission to collect fees.",
+      code: "rbac",
+    };
+  }
   const total = input.lines.reduce((s, l) => s + l.amountPaise, 0);
   const activeTenders = input.tenders.filter((t) => t.amountPaise > 0);
   const tenderSum = activeTenders.reduce((s, t) => s + t.amountPaise, 0);
@@ -1636,7 +2917,11 @@ export function collectPayment(input: {
 
   const voucher: CollectionVoucher = {
     id: id("rcv"),
-    receiptNo: nextReceiptNo(fees, input.academicYearCode ?? DEFAULT_AY),
+    receiptNo: nextReceiptNo(
+      fees,
+      input.academicYearCode ?? DEFAULT_AY,
+      input.receiptSeries ?? "F",
+    ),
     schoolReceiptNo: manualRef,
     source,
     manualBookSeries: source === "manual_book" ? series : "",
@@ -1697,6 +2982,29 @@ export function collectPayment(input: {
     installmentPlans: finalized.installmentPlans,
     planAllocations: finalized.planAllocations,
   });
+
+  void import("@/lib/accounts")
+    .then((m) => {
+      const storeAmountPaise = voucher.lines
+        .filter((l) => l.kind === "store")
+        .reduce((n, l) => n + l.amountPaise, 0);
+      m.postFeeCollectionToAccounts({
+        voucherId: voucher.id,
+        collectionDate: voucher.collectionDate,
+        receiptNo: voucher.receiptNo,
+        label: voucher.householdId,
+        tenders: voucher.tenders.map((t) => ({
+          mode: t.mode,
+          amountPaise: t.amountPaise,
+          bankAccountId: t.bankAccountId,
+        })),
+        storeAmountPaise,
+      });
+    })
+    .catch(() => {
+      /* accounts optional */
+    });
+
   return { ok: true, voucher };
 }
 
@@ -1989,9 +3297,10 @@ export async function deliverWhatsAppFeeReceipt(input: {
   | {
       ok: true;
       mobile: string;
-      mode: "share_file" | "wa_link";
+      mode: "share_file" | "wa_link" | "api";
       pdfDownloaded: boolean;
       receiptUrl: string;
+      apiFallbackReason?: string;
     }
   | { ok: false; error: string }
 > {
@@ -2065,6 +3374,56 @@ export async function deliverWhatsAppFeeReceipt(input: {
     navigator.clipboard?.writeText
   ) {
     void navigator.clipboard.writeText(receiptUrl).catch(() => undefined);
+  }
+
+  // Live WhatsApp Business API — message from school number (+91 94519 38805)
+  if (typeof window !== "undefined") {
+    try {
+      const health = (await fetch("/api/integrations/health").then((r) =>
+        r.json(),
+      )) as { whatsappOutbound?: boolean };
+      if (health?.whatsappOutbound) {
+        const res = await fetch("/api/wa/dispatch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: [{ mobile, body: message }],
+          }),
+        });
+        const dispatch = (await res.json()) as {
+          results?: { status: string; error?: string }[];
+          hint?: string;
+        };
+        const row = dispatch.results?.[0];
+        if (row?.status === "sent") {
+          if (input.markSent !== false) {
+            markWhatsAppReceiptSent(input.voucher.id);
+          }
+          return {
+            ok: true,
+            mobile,
+            mode: "api",
+            pdfDownloaded: false,
+            receiptUrl,
+          };
+        }
+        const apiErr = (row?.error || dispatch.hint || "").toLowerCase();
+        const sessionBlocked =
+          apiErr.includes("24 hour") ||
+          apiErr.includes("customer service") ||
+          apiErr.includes("re-engagement") ||
+          apiErr.includes("131047") ||
+          apiErr.includes("131026");
+        if (!sessionBlocked && row?.error) {
+          return {
+            ok: false,
+            error: `WhatsApp API: ${row.error}`,
+          };
+        }
+      }
+    } catch {
+      /* fall through to wa.me / share */
+    }
   }
 
   if (pdfFile) {
@@ -2360,12 +3719,29 @@ export type StudentSearchHit = {
   balancePaise: number;
 };
 
+function normAyCode(code: string): string {
+  const t = (code || "").trim().replace(/\s+/g, "").replace(/–/g, "-");
+  const full = t.match(/^(20\d{2})-(20\d{2})$/);
+  if (full) return `${full[1]}-${full[2]!.slice(2)}`;
+  return t;
+}
+
 export function searchFeeStudents(
   query: string,
   sis?: SisState,
   masters?: MastersState,
   fees?: FeesState,
-  filters?: { classId?: string; sectionId?: string; includeInactive?: boolean },
+  filters?: {
+    classId?: string;
+    sectionId?: string;
+    includeInactive?: boolean;
+    /** Session scope; defaults to the current academic year. */
+    academicYearCode?: string;
+    /** Include fee months after the running session month in balance. Default false. */
+    includeFuture?: boolean;
+    /** Search every session record (legacy behaviour, repeats promoted students). */
+    allSessions?: boolean;
+  },
 ): StudentSearchHit[] {
   const s = sis ?? loadSis();
   const m = masters ?? loadMasters();
@@ -2381,6 +3757,18 @@ export function searchFeeStudents(
   let list = filters?.includeInactive
     ? s.students.slice()
     : s.students.filter((st) => st.status === "active");
+  if (!filters?.allSessions) {
+    // One record per student: only the selected session (default = current AY),
+    // so a child promoted across years is not repeated in pickers.
+    const scope = normAyCode(
+      filters?.academicYearCode || currentAcademicYearCode(m),
+    );
+    const scoped = list.filter(
+      (st) => normAyCode(st.academicYearCode) === scope,
+    );
+    // Fall back to all records if the scope matches nothing (odd AY codes).
+    if (scoped.length || list.length === 0) list = scoped;
+  }
   if (classId) {
     list = list.filter((st) => st.classId === classId);
   }
@@ -2404,8 +3792,13 @@ export function searchFeeStudents(
   return list
     .slice(0, classId || sectionId ? 80 : 40)
     .map((student) => {
-      const dues = computeStudentDues(student, m, f, { includeFuture: true });
-      const balancePaise = dues.reduce((sum, d) => sum + d.balancePaise, 0);
+      const dues = computeStudentDues(student, m, f, {
+        includeFuture: filters?.includeFuture ?? false,
+      });
+      const balancePaise = openFeeDues(dues).reduce(
+        (sum, d) => sum + d.balancePaise,
+        0,
+      );
       const hh = householdOf(s, student.householdId) ?? null;
       return {
         student,
@@ -2557,6 +3950,7 @@ export function buildDayBook(
         line.kind === "special" ||
         line.kind === "transport" ||
         line.kind === "plan" ||
+        line.kind === "arrears" ||
         line.kind === "academic"
           ? line.kind
           : line.dueKey.startsWith("store:")
@@ -2567,7 +3961,9 @@ export function buildDayBook(
                 ? "special"
                 : line.dueKey.startsWith("plan:")
                   ? "plan"
-                  : "academic";
+                  : line.dueKey.startsWith("arrears:")
+                    ? "arrears"
+                    : "academic";
       const cur = byKind.get(kind) ?? { paise: 0, lineCount: 0 };
       cur.paise += line.amountPaise;
       cur.lineCount += 1;
@@ -2584,10 +3980,12 @@ export function buildDayBook(
     });
 
   const kindMeta: { kind: DueKind; label: string }[] = [
+    { kind: "arrears", label: "Previous session arrears" },
     { kind: "academic", label: "Academic fees" },
     { kind: "transport", label: "Transport" },
     { kind: "special", label: "Special / misc" },
     { kind: "store", label: "Store / books" },
+    { kind: "voucher", label: "Charge vouchers" },
     { kind: "plan", label: "Installment plan" },
   ];
   const kindTotals = kindMeta
@@ -2836,6 +4234,13 @@ export function approveDayClose(input: {
     resolvedAt: now,
   };
   saveFees(upsertDayClose(session, fees));
+  void import("@/lib/accounts")
+    .then((m) => {
+      m.applyDayCloseHandover(session);
+    })
+    .catch(() => {
+      /* accounts optional */
+    });
   return { ok: true, session };
 }
 

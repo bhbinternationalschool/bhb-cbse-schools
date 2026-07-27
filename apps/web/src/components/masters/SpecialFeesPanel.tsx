@@ -2,12 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
-  DEFAULT_AY,
   checkAssignmentRemoval,
   checkSpecialFeeRemoval,
   formatInr,
   newId,
   parseInrToPaise,
+  currentAcademicYearCode,
   removeSpecialFee,
   resolveSpecialFeeAssignees,
   type MastersState,
@@ -16,6 +16,8 @@ import {
 } from "@/lib/masters";
 import { EditControl } from "@/components/masters/EditControl";
 import { RemoveControl } from "@/components/masters/RemoveControl";
+import { useDemoSessionOptional } from "@/components/shell/SessionContext";
+import { loadSis } from "@/lib/sis";
 
 type Commit = (s: MastersState, msg?: string) => void;
 
@@ -26,7 +28,23 @@ export function SpecialFeesPanel({
   state: MastersState;
   commit: Commit;
 }) {
-  const specialFees = state.specialFees ?? [];
+  const session = useDemoSessionOptional();
+  // Header-selected session, falling back to the masters "current" year.
+  const ay = session?.academicYearCode || currentAcademicYearCode(state);
+  const sessionStudents = useMemo(
+    () =>
+      loadSis().students.filter(
+        (s) => s.academicYearCode === ay,
+      ),
+    [ay, state.students],
+  );
+  const sessionState = useMemo(
+    () => ({ ...state, students: sessionStudents }),
+    [state, sessionStudents],
+  );
+  const specialFees = (state.specialFees ?? []).filter(
+    (f) => f.academicYearCode === ay,
+  );
   const [selectedId, setSelectedId] = useState(specialFees[0]?.id ?? "");
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -43,6 +61,14 @@ export function SpecialFeesPanel({
   const [amount, setAmount] = useState("500");
   const [dueOn, setDueOn] = useState("2025-09-15");
   const [reason, setReason] = useState("");
+
+  useEffect(() => {
+    setSelectedId(specialFees[0]?.id ?? "");
+    setEditingId(null);
+    setDueOn(`${ay.slice(0, 4)}-09-15`);
+    // Session change intentionally resets the session-specific editor.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ay]);
 
   // Assign form
   const [classIds, setClassIds] = useState<string[]>([]);
@@ -68,7 +94,7 @@ export function SpecialFeesPanel({
   }, [pickerSectionId, pickerSectionOptions]);
 
   const studentsForPicker = useMemo(() => {
-    let list = state.students.filter((s) => s.status === "active");
+    let list = sessionStudents.filter((s) => s.status === "active");
     if (classIds.length > 0) {
       list = list.filter((s) => classIds.includes(s.classId));
     }
@@ -84,7 +110,7 @@ export function SpecialFeesPanel({
       );
     }
     return list;
-  }, [state.students, classIds, pickerSectionId, studentQuery]);
+  }, [sessionStudents, classIds, pickerSectionId, studentQuery]);
 
   const assignmentsForSelected = useMemo(
     () =>
@@ -104,7 +130,7 @@ export function SpecialFeesPanel({
         "",
     );
     setAmount("500");
-    setDueOn("2025-09-15");
+    setDueOn(`${ay.slice(0, 4)}-09-15`);
     setReason("");
   }
 
@@ -157,7 +183,7 @@ export function SpecialFeesPanel({
       commit(
         {
           ...state,
-          specialFees: specialFees.map((f) =>
+          specialFees: (state.specialFees ?? []).map((f) =>
             f.id === editingId
               ? {
                   ...f,
@@ -182,14 +208,14 @@ export function SpecialFeesPanel({
       code: nextCode,
       name: name.trim(),
       feeHeadId,
-      academicYearCode: DEFAULT_AY,
+      academicYearCode: ay,
       amountPaise: parseInrToPaise(amount),
       dueOn,
       reason: reason.trim(),
       isActive: true,
     };
     commit(
-      { ...state, specialFees: [...specialFees, fee] },
+      { ...state, specialFees: [...(state.specialFees ?? []), fee] },
       "Special fee created",
     );
     setSelectedId(fee.id);
@@ -224,7 +250,10 @@ export function SpecialFeesPanel({
         row,
       ],
     };
-    const count = resolveSpecialFeeAssignees(nextState, row).length;
+    const count = resolveSpecialFeeAssignees(
+      { ...nextState, students: sessionStudents },
+      row,
+    ).length;
     commit(nextState, `Assigned to ${count} student(s)`);
     setClassIds([]);
     setStudentIds([]);
@@ -246,7 +275,7 @@ export function SpecialFeesPanel({
     commit(
       {
         ...state,
-        specialFees: specialFees.map((f) =>
+        specialFees: (state.specialFees ?? []).map((f) =>
           f.id === fee.id ? { ...f, isActive: !f.isActive } : f,
         ),
       },
@@ -279,7 +308,7 @@ export function SpecialFeesPanel({
         <div className="space-y-4">
           <div className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
             <div className="border-b border-[rgba(32,48,80,0.08)] px-4 py-3 text-sm font-semibold text-[var(--brand-deep)]">
-              Special fees · {DEFAULT_AY}
+              Special fees · {ay}
             </div>
             <ul className="max-h-[320px] divide-y divide-[rgba(32,48,80,0.08)] overflow-y-auto">
               {specialFees.map((f) => {
@@ -613,7 +642,7 @@ export function SpecialFeesPanel({
             </div>
             <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
               {assignmentsForSelected.map((a) => {
-                const people = resolveSpecialFeeAssignees(state, a);
+                const people = resolveSpecialFeeAssignees(sessionState, a);
                 const classNames = a.classIds
                   .map((id) => classLabel(id))
                   .join(", ");

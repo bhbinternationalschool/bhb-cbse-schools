@@ -3,6 +3,7 @@
  * Report card print is gated by HOLD_REPORT_CARD.
  */
 
+import { assertModulePermission } from "@/lib/rbacGuard";
 import {
   DEFAULT_AY,
   loadMasters,
@@ -104,6 +105,20 @@ export type ExamSubject = {
   isActive: boolean;
 };
 
+/** One dated exam sitting for every section of a class. */
+export type ExamDateSheetEntry = {
+  id: string;
+  academicYearCode: string;
+  examTermId: string;
+  classId: string;
+  subjectId: string;
+  date: string;
+  startTime: string;
+  durationMinutes: number;
+  note: string;
+  updatedAt: string;
+};
+
 export type StudentSubjectMark = {
   studentId: string;
   subjectId: string;
@@ -155,6 +170,7 @@ export type ExamsState = {
   version: 1;
   terms: ExamTerm[];
   subjects: ExamSubject[];
+  dateSheet: ExamDateSheetEntry[];
   sheets: MarkSheet[];
   policy: ExamPolicy;
   promotions: PromotionRecord[];
@@ -416,6 +432,7 @@ function emptyState(): ExamsState {
     version: 1,
     terms: defaultTerms(),
     subjects: defaultSubjects(),
+    dateSheet: [],
     sheets: [],
     policy: defaultExamPolicy(),
     promotions: [],
@@ -517,6 +534,43 @@ function normalizeSubject(s: Partial<ExamSubject>): ExamSubject {
   };
 }
 
+function normalizeExamTime(value: string | undefined): string {
+  const raw = (value ?? "").trim();
+  if (!/^\d{1,2}:\d{2}$/.test(raw)) return "09:00";
+  const [hours, minutes] = raw.split(":").map(Number);
+  if (
+    !Number.isInteger(hours) ||
+    !Number.isInteger(minutes) ||
+    hours < 0 ||
+    hours > 23 ||
+    minutes < 0 ||
+    minutes > 59
+  ) {
+    return "09:00";
+  }
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function normalizeDateSheetEntry(
+  row: Partial<ExamDateSheetEntry>,
+): ExamDateSheetEntry {
+  return {
+    id: row.id ?? id("exam_slot"),
+    academicYearCode: row.academicYearCode ?? DEFAULT_AY,
+    examTermId: row.examTermId ?? "",
+    classId: row.classId ?? "",
+    subjectId: row.subjectId ?? "",
+    date: (row.date ?? "").slice(0, 10),
+    startTime: normalizeExamTime(row.startTime),
+    durationMinutes: Math.min(
+      480,
+      Math.max(1, Math.floor(Number(row.durationMinutes) || 60)),
+    ),
+    note: (row.note ?? "").trim(),
+    updatedAt: row.updatedAt ?? new Date().toISOString(),
+  };
+}
+
 function normalizeMark(m: Partial<StudentSubjectMark>): StudentSubjectMark {
   const obtained =
     m.marksObtained == null || Number.isNaN(Number(m.marksObtained))
@@ -590,6 +644,9 @@ export function loadExams(): ExamsState {
       version: 1,
       terms,
       subjects,
+      dateSheet: Array.isArray(parsed.dateSheet)
+        ? parsed.dateSheet.map(normalizeDateSheetEntry)
+        : [],
       sheets: Array.isArray(parsed.sheets)
         ? parsed.sheets.map(normalizeSheet)
         : [],
@@ -614,8 +671,26 @@ export function loadExams(): ExamsState {
 }
 
 export function saveExams(state: ExamsState) {
+  if (!assertModulePermission("exams", "edit", "saveExams")) return;
+
   if (typeof window === "undefined") return;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  void import("@/lib/examsPersistence").then(({ scheduleExamsSync }) => {
+    scheduleExamsSync(state);
+  });
+}
+
+export function writeExamsLocalRaw(state: ExamsState) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+export function examsStateIsEmpty(state: ExamsState): boolean {
+  return (
+    (state.dateSheet?.length ?? 0) === 0 &&
+    (state.sheets?.length ?? 0) === 0 &&
+    (state.promotions?.length ?? 0) === 0
+  );
 }
 
 export function getExamPolicy(state?: ExamsState): ExamPolicy {
@@ -883,7 +958,157 @@ export function deleteExamTerm(
   saveExams({
     ...state,
     terms: state.terms.filter((t) => t.id !== termId),
+    dateSheet: state.dateSheet.filter((row) => row.examTermId !== termId),
     sheets: state.sheets.filter((s) => s.examTermId !== termId),
+  });
+  return { ok: true };
+}
+
+function timeMinutes(value: string): number {
+  const [hours, minutes] = value.split(":").map(Number);
+  return (hours || 0) * 60 + (minutes || 0);
+}
+
+function examDateSheetOverlap(
+  a: Pick<ExamDateSheetEntry, "date" | "startTime" | "durationMinutes">,
+  b: Pick<ExamDateSheetEntry, "date" | "startTime" | "durationMinutes">,
+): boolean {
+  if (a.date !== b.date) return false;
+  const aStart = timeMinutes(a.startTime);
+  const bStart = timeMinutes(b.startTime);
+  return (
+    aStart < bStart + b.durationMinutes &&
+    bStart < aStart + a.durationMinutes
+  );
+}
+
+export function listExamDateSheet(
+  academicYearCode: string,
+  examTermId?: string,
+  state?: ExamsState,
+): ExamDateSheetEntry[] {
+  const current = state ?? loadExams();
+  return (current.dateSheet ?? [])
+    .filter(
+      (row) =>
+        row.academicYearCode === academicYearCode &&
+        (!examTermId || row.examTermId === examTermId),
+    )
+    .slice()
+    .sort(
+      (a, b) =>
+        a.date.localeCompare(b.date) ||
+        a.startTime.localeCompare(b.startTime) ||
+        a.classId.localeCompare(b.classId),
+    );
+}
+
+export function saveExamDateSheetEntry(input: {
+  id?: string;
+  academicYearCode: string;
+  examTermId: string;
+  classId: string;
+  subjectId: string;
+  date: string;
+  startTime: string;
+  durationMinutes: number;
+  note?: string;
+}):
+  | { ok: true; entry: ExamDateSheetEntry }
+  | { ok: false; error: string } {
+  const state = loadExams();
+  const term = state.terms.find(
+    (row) =>
+      row.id === input.examTermId &&
+      row.academicYearCode === input.academicYearCode,
+  );
+  if (!term) return { ok: false, error: "Select a valid exam" };
+  if (!input.classId) return { ok: false, error: "Select a class" };
+  const subject = state.subjects.find(
+    (row) =>
+      row.id === input.subjectId &&
+      row.isActive &&
+      (row.classIds.length === 0 || row.classIds.includes(input.classId)),
+  );
+  if (!subject) {
+    return { ok: false, error: "Select a subject applicable to this class" };
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) {
+    return { ok: false, error: "Select an exam date" };
+  }
+  const masters = loadMasters();
+  const ayRow = masters.academicYears.find(
+    (y) => y.code === input.academicYearCode,
+  );
+  if (ayRow?.startsOn && input.date < ayRow.startsOn.slice(0, 10)) {
+    return {
+      ok: false,
+      error: `Date is before session ${input.academicYearCode} starts`,
+    };
+  }
+  if (ayRow?.endsOn && input.date > ayRow.endsOn.slice(0, 10)) {
+    return {
+      ok: false,
+      error: `Date is after session ${input.academicYearCode} ends`,
+    };
+  }
+  if (term.startsOn && input.date < term.startsOn) {
+    return { ok: false, error: `Date is before ${term.code} starts` };
+  }
+  if (term.endsOn && input.date > term.endsOn) {
+    return { ok: false, error: `Date is after ${term.code} ends` };
+  }
+  if (!/^\d{2}:\d{2}$/.test(input.startTime)) {
+    return { ok: false, error: "Select a valid start time" };
+  }
+  const durationMinutes = Math.floor(Number(input.durationMinutes));
+  if (durationMinutes < 1 || durationMinutes > 480) {
+    return { ok: false, error: "Duration must be between 1 and 480 minutes" };
+  }
+
+  const entry = normalizeDateSheetEntry({
+    id: input.id,
+    academicYearCode: input.academicYearCode,
+    examTermId: input.examTermId,
+    classId: input.classId,
+    subjectId: input.subjectId,
+    date: input.date,
+    startTime: input.startTime,
+    durationMinutes,
+    note: input.note,
+    updatedAt: new Date().toISOString(),
+  });
+  const clash = (state.dateSheet ?? []).find(
+    (row) =>
+      row.id !== entry.id &&
+      row.classId === entry.classId &&
+      examDateSheetOverlap(row, entry),
+  );
+  if (clash) {
+    return {
+      ok: false,
+      error: "This class already has an overlapping exam sitting",
+    };
+  }
+  saveExams({
+    ...state,
+    dateSheet: state.dateSheet.some((row) => row.id === entry.id)
+      ? state.dateSheet.map((row) => (row.id === entry.id ? entry : row))
+      : [...state.dateSheet, entry],
+  });
+  return { ok: true, entry };
+}
+
+export function deleteExamDateSheetEntry(
+  entryId: string,
+): { ok: true } | { ok: false; error: string } {
+  const state = loadExams();
+  if (!state.dateSheet.some((row) => row.id === entryId)) {
+    return { ok: false, error: "Date-sheet entry not found" };
+  }
+  saveExams({
+    ...state,
+    dateSheet: state.dateSheet.filter((row) => row.id !== entryId),
   });
   return { ok: true };
 }
