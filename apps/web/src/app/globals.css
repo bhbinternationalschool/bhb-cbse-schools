@@ -390,6 +390,63 @@ h3,
   animation: erp-ai-bounce 1s infinite ease-in-out;
 }
 
+@keyframes erp-ai-pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgba(197, 160, 40, 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 12px rgba(197, 160, 40, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(197, 160, 40, 0);
+  }
+}
+
+.erp-ai-fab-pulse {
+  animation: erp-ai-pulse-ring 2s infinite;
+}
+
+.erp-ai-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #22c55e;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35);
+}
+
+.erp-ai-hint-bubble {
+  animation: erp-ai-hint-in 0.45s ease-out;
+}
+
+@keyframes erp-ai-hint-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.erp-ai-avatar {
+  animation: erp-ai-shimmer 4s ease-in-out infinite;
+}
+
+@keyframes erp-ai-shimmer {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.08);
+  }
+}
+
+.erp-ai-drag-handle {
+  user-select: none;
+}
+
 .fee-collect-ui {
   font-size: 1rem;
   line-height: 1.5;

@@ -153,6 +153,43 @@ export function paymentsStateIsEmpty(state: PaymentsState): boolean {
   return (state.links?.length ?? 0) === 0;
 }
 
+const PAYMENTS_MIRROR_META = "bhb_payments_mirror_meta_v1";
+
+function readPaymentsMirrorMeta(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    const raw = localStorage.getItem(PAYMENTS_MIRROR_META);
+    if (!raw) return "";
+    return String((JSON.parse(raw) as { updatedAt?: string }).updatedAt || "");
+  } catch {
+    return "";
+  }
+}
+
+function writePaymentsMirrorMeta(iso: string) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(PAYMENTS_MIRROR_META, JSON.stringify({ updatedAt: iso }));
+}
+
+export function hydratePaymentsFromMirror(
+  raw: unknown,
+  remoteAt: string,
+  remoteIsNewer: boolean,
+): boolean {
+  if (!raw || typeof raw !== "object") return false;
+  const local = loadPayments();
+  const localAt = readPaymentsMirrorMeta();
+  const takeRemote =
+    remoteIsNewer ||
+    paymentsStateIsEmpty(local) ||
+    !localAt ||
+    (remoteAt && remoteAt > localAt);
+  if (!takeRemote) return false;
+  writePaymentsLocalRaw(raw as PaymentsState);
+  writePaymentsMirrorMeta(remoteAt || new Date().toISOString());
+  return true;
+}
+
 function normalizeLink(l: PaymentLink): PaymentLink {
   return {
     id: l.id || id("pl"),

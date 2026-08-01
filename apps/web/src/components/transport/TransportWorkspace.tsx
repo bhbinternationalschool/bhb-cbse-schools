@@ -19,6 +19,7 @@ import {
   FuelPanel,
   RoutesPanel,
 } from "@/components/transport/TransportOpsPanels";
+import { TransportPlannerPanel } from "@/components/transport/TransportPlannerPanel";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { formatInr, searchFeeStudents, type StudentSearchHit } from "@/lib/fees";
@@ -47,6 +48,7 @@ import {
 
 type TransportTab =
   | "dashboard"
+  | "planner"
   | "riders"
   | "routes"
   | "fleet"
@@ -61,6 +63,7 @@ type TransportTab =
 
 const TABS: ModuleTabItem[] = [
   { id: "dashboard", label: "Dashboard", tone: "navy" },
+  { id: "planner", label: "Planner", tone: "teal" },
   { id: "riders", label: "Riders", tone: "navy" },
   { id: "routes", label: "Routes", tone: "teal" },
   { id: "fleet", label: "Fleet", tone: "slate" },
@@ -87,6 +90,7 @@ export function TransportWorkspace() {
     const raw = new URLSearchParams(window.location.search).get("tab");
     const allowed: TransportTab[] = [
       "dashboard",
+      "planner",
       "riders",
       "routes",
       "fleet",
@@ -345,6 +349,18 @@ export function TransportWorkspace() {
               onNavigateTab={(t) => setTab(t as TransportTab)}
             />
           ) : null}
+          {tab === "planner" ? (
+            <TransportPlannerPanel
+              state={state}
+              masters={masters}
+              sis={sis}
+              academicYearCode={session.academicYearCode}
+              onRefresh={refresh}
+              onSisRefresh={() => setSis(loadSis())}
+              onFlash={flash}
+              onError={setError}
+            />
+          ) : null}
           {tab === "riders" ? (
             <RidersPanel
               state={state}
@@ -434,7 +450,13 @@ export function TransportWorkspace() {
             />
           ) : null}
           {tab === "live" ? (
-            <LiveMapPanel state={state} {...commonPanelProps} />
+            <LiveMapPanel
+              state={state}
+              sis={sis}
+              masters={masters}
+              academicYearCode={session.academicYearCode}
+              {...commonPanelProps}
+            />
           ) : null}
           {tab === "reports" ? (
             <ReportsPanel
@@ -555,7 +577,15 @@ function RidersPanel(props: RidersPanelProps) {
             Assign rider
           </h2>
           <p className="mt-0.5 text-[11px] text-[var(--muted)]">
-            Operator: {sessionName}
+            Operator: {sessionName} · or use{" "}
+            <button
+              type="button"
+              className="font-semibold text-[var(--brand-mid)] underline"
+              onClick={() => onNotice("Open the Planner tab for SIS route suggestions")}
+            >
+              Planner
+            </button>{" "}
+            for auto-suggest
           </p>
 
           <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,0.7fr)_minmax(0,0.7fr)]">

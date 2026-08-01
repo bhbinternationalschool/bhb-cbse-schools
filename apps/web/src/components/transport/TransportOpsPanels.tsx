@@ -596,6 +596,7 @@ export function FleetPanel({
     "diesel",
   );
   const [odo, setOdo] = useState("0");
+  const [seats, setSeats] = useState("40");
   const [editId, setEditId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -608,6 +609,7 @@ export function FleetPanel({
       name: vname || reg,
       fuelType,
       odometerKm: Number(odo) || 0,
+      seatCapacity: Number(seats) || 40,
       type: "bus",
     });
     if (!r.ok) {
@@ -618,6 +620,7 @@ export function FleetPanel({
     setReg("");
     setVname("");
     setOdo("0");
+    setSeats("40");
     onRefresh();
     onFlash("Vehicle saved");
   }
@@ -675,6 +678,16 @@ export function FleetPanel({
               onChange={(e) => setOdo(e.target.value)}
             />
           </label>
+          <label className="text-sm">
+            <span className="mb-1 block text-[11px] text-[var(--muted)]">
+              Seat capacity
+            </span>
+            <input
+              className="field !py-1.5"
+              value={seats}
+              onChange={(e) => setSeats(e.target.value)}
+            />
+          </label>
         </div>
         <button
           type="button"
@@ -711,6 +724,7 @@ export function FleetPanel({
                       : "diesel",
                   );
                   setOdo(String(v.odometerKm));
+                  setSeats(String(v.seatCapacity || 40));
                 }}
               >
                 Edit

@@ -5,6 +5,14 @@
 
 import type { ModuleDashboardModel } from "@/components/dashboard/ModuleDashboard";
 import {
+  chartPt,
+  dualRing,
+  dualRingBlock,
+  dualRingLayers,
+  feePositionLayers,
+  topChartPoints,
+} from "@/lib/dashboardChartRings";
+import {
   ADMISSION_STAGES,
   followUpCounts,
   funnelCounts,
@@ -23,13 +31,14 @@ import {
 import { loadAttendance, summarizeMarks } from "@/lib/attendance";
 import { loadCertificates } from "@/lib/certificates";
 import { loadExams } from "@/lib/exams";
-import { buildFeesDashboardModel } from "@/lib/feeDashboard";
+import { buildFeesDashboardModel, feeCollectionModeBreakupRupees } from "@/lib/feeDashboard";
 import { computeFeeKpis } from "@/lib/feeFinance";
 import { buildDayBook, formatInr, loadFees } from "@/lib/fees";
 import { loadOfflineQueue } from "@/lib/fieldSurvey";
 import { loadHomework } from "@/lib/homework";
 import {
   currentAcademicYearCode,
+  formatInrCompact,
   loadMasters,
   type MastersState,
 } from "@/lib/masters";
@@ -195,6 +204,21 @@ function mastersDash(
     ],
     chartTitle: "Sections by class",
     chartSeries: chart.length ? chart : [{ label: "—", value: 0 }],
+    ...dualRing(
+      "Sections by class",
+      topChartPoints(
+        chart.map((c) => chartPt(c.label, c.value)),
+      ),
+      "Foundation",
+      [
+        chartPt("Classes", classes.length, "#203050"),
+        chartPt("Sections", sections.length, "#0f766e"),
+        chartPt("Staff", activeStaff, "#0284c7"),
+        chartPt("Fee heads", feeHeads, "#c5a028"),
+      ],
+      String(sections.length),
+      "sections",
+    ),
     tableTitle: "Class structure",
     tableColumns: [
       { key: "name", label: "Class" },
@@ -236,6 +260,8 @@ function admissionsDash(academicYearCode?: string): ModuleDashboardModel {
       name: sourceLabel(k as Parameters<typeof sourceLabel>[0]),
       count: n,
     }));
+  const sourceChart = sourceRows.map((r) => chartPt(r.name, r.count));
+  const funnelChart = chart.filter((p) => p.value > 0);
   return {
     title: "Admissions",
     subtitle: `Session ${academicYearCode || "all"} · enquiry funnel, follow-ups, and conversion.`,
@@ -289,6 +315,14 @@ function admissionsDash(academicYearCode?: string): ModuleDashboardModel {
       { key: "count", label: "Leads", align: "right" },
     ],
     tableRows: sourceRows,
+    ...dualRing(
+      "Funnel stage",
+      funnelChart.length ? funnelChart : chart,
+      "Lead sources",
+      topChartPoints(sourceChart),
+      String(total),
+      "leads",
+    ),
     quickLinks: [
       { label: "New enquiry", tab: "enquiry" },
       { label: "Field survey", tab: "survey" },
@@ -405,15 +439,34 @@ function studentsDash(academicYearCode?: string): ModuleDashboardModel {
       label: r.name,
       value: Number(r.count),
     })),
-    chartDefaultView: "bar",
+    ...dualRing(
+      "By class",
+      topChartPoints(
+        classRows.map((r) => chartPt(r.name, Number(r.count))),
+      ),
+      "Gender",
+      [
+        chartPt("Boys", male, "#0284c7"),
+        chartPt("Girls", female, "#9d174d"),
+      ],
+      String(active.length),
+      "active",
+    ),
     extraCharts: [
-      {
-        title: "Admission trend (session wise)",
-        series: admissionChartSeries.length
+      dualRingBlock(
+        "Admission trend (session wise)",
+        "By session",
+        admissionChartSeries.length
           ? admissionChartSeries
           : [{ label: "—", value: 0 }],
-        defaultView: "trend",
-      },
+        "This session",
+        [
+          chartPt("New", fresh, "#15803d"),
+          chartPt("Continuing", continuing, "#203050"),
+        ],
+        String(active.length),
+        "students",
+      ),
     ],
     tableTitle: "Students by class",
     tableColumns: [
@@ -506,6 +559,19 @@ function staffDash(academicYearCode?: string): ModuleDashboardModel {
       label: r.name,
       value: Number(r.count),
     })),
+    ...dualRing(
+      "By department",
+      topChartPoints(
+        deptRows.map((r) => chartPt(r.name, Number(r.count))),
+      ),
+      "Stream",
+      [
+        chartPt("Teaching", teaching, "#0f766e"),
+        chartPt("Non-teaching", nonTeaching, "#0284c7"),
+      ],
+      String(active.length),
+      "staff",
+    ),
     tableTitle: "Department roster",
     tableColumns: [
       { key: "name", label: "Department" },
@@ -545,6 +611,12 @@ function storeDash(academicYearCode?: string): ModuleDashboardModel {
   const catRows = [...byCat.entries()]
     .map(([name, count]) => ({ id: name, name, count }))
     .sort((a, b) => b.count - a.count);
+  const cashSalesPaise = issues
+    .filter((i) => i.paymentMode === "cash")
+    .reduce((n, i) => n + (i.totalPaise || 0), 0);
+  const creditSalesPaise = issues
+    .filter((i) => i.paymentMode === "credit")
+    .reduce((n, i) => n + (i.totalPaise || 0), 0);
   return {
     title: "Store",
     subtitle: "Stock health, issues, and sales pulse for the school store.",
@@ -597,6 +669,17 @@ function storeDash(academicYearCode?: string): ModuleDashboardModel {
     ],
     chartTitle: "Issues — last 7 days",
     chartSeries: trend,
+    ...dualRingLayers(
+      "Issues by day",
+      trend,
+      "Sales mode (₹)",
+      [
+        chartPt("Cash", Math.round(cashSalesPaise / 100), "#15803d"),
+        chartPt("Credit", Math.round(creditSalesPaise / 100), "#203050"),
+      ],
+      String(issues.length),
+      "issues",
+    ),
     tableTitle: "Low stock watchlist",
     tableColumns: [
       { key: "name", label: "Item" },
@@ -683,6 +766,19 @@ function transportDash(academicYearCode?: string): ModuleDashboardModel {
       label: r.name,
       value: r.riders,
     })),
+    ...dualRing(
+      "Riders by route",
+      topChartPoints(
+        byRoute.map((r) => chartPt(r.name, r.riders)),
+      ),
+      "Fleet",
+      [
+        chartPt("Vehicles", vehicles.length, "#0284c7"),
+        chartPt("Stops", stopCount, "#c5a028"),
+      ],
+      String(riders.length),
+      "riders",
+    ),
     tableTitle: "Route board",
     tableColumns: [
       { key: "name", label: "Route" },
@@ -759,6 +855,20 @@ function accountsDash(): ModuleDashboardModel {
     ],
     chartTitle: "Collections — last 7 days (₹)",
     chartSeries: trend,
+    ...dualRingLayers(
+      "Liquidity (₹)",
+      [
+        chartPt("Cash", Math.round(snap.cashInHandPaise / 100), "#203050"),
+        chartPt("Banks", Math.round(bankTotal / 100), "#0284c7"),
+      ],
+      "Flows (₹)",
+      [
+        chartPt("Open AP", Math.round(snap.openApPaise / 100), "#c2410c"),
+        chartPt("Today in", Math.round(todayBook.totalPaise / 100), "#15803d"),
+      ],
+      formatInr(todayBook.totalPaise),
+      "today",
+    ),
     tableTitle: "Bank accounts",
     tableColumns: [
       { key: "name", label: "Account" },
@@ -828,6 +938,17 @@ function trustDash(): ModuleDashboardModel {
     ],
     chartTitle: "Works by project",
     chartSeries: chart.length ? chart : [{ label: "—", value: 0 }],
+    ...dualRing(
+      "Works by project",
+      topChartPoints(chart),
+      "Resources",
+      [
+        chartPt("Materials", materials.length, "#c5a028"),
+        chartPt("Labour", labour.length, "#0f766e"),
+      ],
+      String(works.length),
+      "works",
+    ),
     tableTitle: "Projects",
     tableColumns: [
       { key: "name", label: "Project" },
@@ -1056,6 +1177,24 @@ function attendanceDash(academicYearCode?: string): ModuleDashboardModel {
         : trend.some((t) => t.value > 0)
           ? trend
           : [{ label: "—", value: 0 }],
+    ...dualRing(
+      "Students today",
+      [
+        chartPt("Present", stuPresent, "#15803d"),
+        chartPt("Absent", stuAbsent, "#c2410c"),
+        chartPt("Leave", stuLeave, "#c5a028"),
+        chartPt("Late", stuLate, "#0284c7"),
+      ],
+      "Staff today",
+      [
+        chartPt("Present", staffPresent, "#0f766e"),
+        chartPt("Absent", staffAbsent, "#9d174d"),
+        chartPt("Leave", staffLeave, "#c5a028"),
+        chartPt("Half day", staffHalf, "#203050"),
+      ],
+      String(stuPresent + staffPresent),
+      "present",
+    ),
     tableTitle: "Student registers today",
     tableColumns: [
       { key: "class", label: "Class / section" },
@@ -1136,6 +1275,18 @@ function homeworkDash(academicYearCode?: string): ModuleDashboardModel {
     ],
     chartTitle: "Assignments — last 7 days",
     chartSeries: trend,
+    ...dualRingLayers(
+      "Posts by day",
+      trend,
+      "Activity",
+      [
+        chartPt("Assignments", posts.length, "#203050"),
+        chartPt("Submissions", subs.length, "#0f766e"),
+        chartPt("Diary", diary.length, "#c5a028"),
+      ],
+      String(posts.length),
+      "posts",
+    ),
     tableTitle: "Recent assignments",
     tableColumns: [
       { key: "title", label: "Title" },
@@ -1181,6 +1332,10 @@ function ptmDash(academicYearCode?: string): ModuleDashboardModel {
     label: e.name || e.date || "Event",
     value: bookings.filter((b) => b.eventId === e.id).length,
   }));
+  const bookedSlots = slots.filter((s) =>
+    bookings.some((b) => b.slotId === s.id),
+  ).length;
+  const openSlots = Math.max(0, slots.length - bookedSlots);
   return {
     title: "PTM",
     subtitle: `Session ${academicYearCode || "all"} · meetings, slots, and feedback.`,
@@ -1216,6 +1371,17 @@ function ptmDash(academicYearCode?: string): ModuleDashboardModel {
     ],
     chartTitle: "Bookings by event",
     chartSeries: chart.length ? chart : [{ label: "—", value: 0 }],
+    ...dualRing(
+      "Bookings by event",
+      topChartPoints(chart),
+      "Slots",
+      [
+        chartPt("Booked", bookedSlots, "#15803d"),
+        chartPt("Open", openSlots, "#64748b"),
+      ],
+      String(bookings.length),
+      "bookings",
+    ),
     tableTitle: "Upcoming / recent events",
     tableColumns: [
       { key: "title", label: "Event" },
@@ -1296,6 +1462,23 @@ function vaultDash(): ModuleDashboardModel {
       label: r.name,
       value: Number(r.count),
     })),
+    ...dualRing(
+      "By type",
+      topChartPoints(
+        typeRows.map((r) => chartPt(r.name, Number(r.count))),
+      ),
+      "Expiry",
+      [
+        chartPt("Expiring soon", expiring.length, "#c2410c"),
+        chartPt(
+          "OK",
+          Math.max(0, docs.length - expiring.length),
+          "#15803d",
+        ),
+      ],
+      String(docs.length),
+      "documents",
+    ),
     tableTitle: "Expiry watchlist",
     tableColumns: [
       { key: "title", label: "Document" },
@@ -1327,6 +1510,12 @@ function modulesDash(): ModuleDashboardModel {
     blurb: m.blurb,
   }));
   const enabled = rows.filter((r) => r.status === "Enabled").length;
+  const optionalOn = REGISTRY_MODULES.filter(
+    (m) => !m.alwaysOn && isModuleEnabled(m.id),
+  ).length;
+  const optionalOff = REGISTRY_MODULES.filter(
+    (m) => !m.alwaysOn && !isModuleEnabled(m.id),
+  ).length;
   return {
     title: "Modules",
     subtitle: "Optional product modules for this tenant.",
@@ -1362,6 +1551,20 @@ function modulesDash(): ModuleDashboardModel {
       { label: "Enabled", value: enabled },
       { label: "Disabled", value: Math.max(0, rows.length - enabled) },
     ],
+    ...dualRing(
+      "Enablement",
+      [
+        chartPt("Enabled", enabled, "#15803d"),
+        chartPt("Disabled", Math.max(0, rows.length - enabled), "#64748b"),
+      ],
+      "Optional modules",
+      [
+        chartPt("Optional on", optionalOn, "#0f766e"),
+        chartPt("Optional off", optionalOff, "#c2410c"),
+      ],
+      String(enabled),
+      "enabled",
+    ),
     tableTitle: "Module registry",
     tableColumns: [
       { key: "name", label: "Module" },
@@ -1422,6 +1625,18 @@ function payrollDash(academicYearCode?: string): ModuleDashboardModel {
     ],
     chartTitle: "Net payout by run (₹)",
     chartSeries: chart.length ? chart : [{ label: "—", value: 0 }],
+    ...dualRing(
+      "Run status",
+      [
+        chartPt("Draft", draft, "#c5a028"),
+        chartPt("Approved", approved, "#0f766e"),
+        chartPt("Paid", paid, "#15803d"),
+      ],
+      "Recent payout (₹)",
+      topChartPoints(chart),
+      String(runs.length),
+      "runs",
+    ),
     tableTitle: "Recent runs",
     tableColumns: [
       { key: "period", label: "Period" },
@@ -1497,6 +1712,17 @@ function examsDash(academicYearCode?: string): ModuleDashboardModel {
     ],
     chartTitle: "Mark sheets by term",
     chartSeries: chart.length ? chart : [{ label: "—", value: 0 }],
+    ...dualRing(
+      "Mark sheets by term",
+      topChartPoints(chart),
+      "Pipeline",
+      [
+        chartPt("Mark sheets", sheets.length, "#0f766e"),
+        chartPt("Promotions", promotions.length, "#0284c7"),
+      ],
+      String(sheets.length),
+      "sheets",
+    ),
     tableTitle: "Exam terms",
     tableColumns: [
       { key: "label", label: "Term" },
@@ -1531,6 +1757,7 @@ function certificatesDash(academicYearCode?: string): ModuleDashboardModel {
   const typeRows = [...byType.entries()]
     .map(([name, count]) => ({ id: name, name, count }))
     .sort((a, b) => b.count - a.count);
+  const todayIssued = issues.filter((c) => c.issuedOn === todayIso()).length;
   return {
     title: "Certificates",
     subtitle: `Session ${academicYearCode || "all"} · issued certificates and template usage.`,
@@ -1566,6 +1793,23 @@ function certificatesDash(academicYearCode?: string): ModuleDashboardModel {
       label: r.name,
       value: Number(r.count),
     })),
+    ...dualRing(
+      "By type",
+      topChartPoints(
+        typeRows.map((r) => chartPt(r.name, Number(r.count))),
+      ),
+      "Recency",
+      [
+        chartPt("Today", todayIssued, "#15803d"),
+        chartPt(
+          "Earlier",
+          Math.max(0, issues.length - todayIssued),
+          "#203050",
+        ),
+      ],
+      String(issues.length),
+      "issued",
+    ),
     tableTitle: "Recent issues",
     tableColumns: [
       { key: "student", label: "Student" },
@@ -1594,6 +1838,7 @@ function reportsDash(): ModuleDashboardModel {
   const modRows = [...byModule.entries()]
     .map(([name, count]) => ({ id: name, name, count }))
     .sort((a, b) => b.count - a.count);
+  const withLink = recent.filter((r) => r.href).length;
   return {
     title: "Reports",
     subtitle: "Cross-module report centre — recent runs and hot modules.",
@@ -1633,6 +1878,23 @@ function reportsDash(): ModuleDashboardModel {
       label: r.name,
       value: Number(r.count),
     })),
+    ...dualRing(
+      "By module",
+      topChartPoints(
+        modRows.map((r) => chartPt(r.name, Number(r.count))),
+      ),
+      "Output",
+      [
+        chartPt("With link", withLink, "#15803d"),
+        chartPt(
+          "View only",
+          Math.max(0, recent.length - withLink),
+          "#64748b",
+        ),
+      ],
+      String(recent.length),
+      "runs",
+    ),
     tableTitle: "Recent report runs",
     tableColumns: [
       { key: "name", label: "Report" },
@@ -1661,6 +1923,10 @@ function fieldDash(academicYearCode?: string): ModuleDashboardModel {
   };
   const surveyLeads = adm.leads.filter((l) => l.source === "field_survey").length;
   const funnel = funnelCounts(adm);
+  const funnelChart = ADMISSION_STAGES.map((s) => ({
+    label: s.label,
+    value: funnel[s.value as AdmissionStage] || 0,
+  })).filter((p) => p.value > 0);
   return {
     title: "Field",
     subtitle: `Session ${academicYearCode || "all"} · survey, capture, and admissions calling.`,
@@ -1698,6 +1964,26 @@ function fieldDash(academicYearCode?: string): ModuleDashboardModel {
       label: s.label,
       value: funnel[s.value as AdmissionStage] || 0,
     })),
+    ...dualRing(
+      "Funnel",
+      funnelChart.length
+        ? funnelChart
+        : ADMISSION_STAGES.map((s) => ({
+            label: s.label,
+            value: funnel[s.value as AdmissionStage] || 0,
+          })),
+      "Field mix",
+      [
+        chartPt("Field survey", surveyLeads, "#203050"),
+        chartPt(
+          "Other sources",
+          Math.max(0, adm.leads.length - surveyLeads),
+          "#64748b",
+        ),
+      ],
+      String(surveyLeads),
+      "survey leads",
+    ),
     tableTitle: "Jump to field tools",
     tableColumns: [
       { key: "name", label: "Tool" },
@@ -1764,6 +2050,18 @@ function studentLeaveDash(academicYearCode?: string): ModuleDashboardModel {
     ],
     chartTitle: "Requests — last 7 days",
     chartSeries: trend,
+    ...dualRingLayers(
+      "Requests by day",
+      trend,
+      "Status",
+      [
+        chartPt("Pending", pending, "#c2410c"),
+        chartPt("Approved", approved, "#15803d"),
+        chartPt("Rejected", rejected, "#64748b"),
+      ],
+      String(reqs.length),
+      "requests",
+    ),
     tableTitle: "Recent requests",
     tableColumns: [
       { key: "student", label: "Student" },
@@ -1831,6 +2129,18 @@ function purchaseDash(academicYearCode?: string): ModuleDashboardModel {
     ],
     chartTitle: "GRNs — last 7 days",
     chartSeries: chart,
+    ...dualRingLayers(
+      "GRNs by day",
+      chart,
+      "Procurement",
+      [
+        chartPt("Indents", indents.length, "#203050"),
+        chartPt("POs", pos.length, "#0f766e"),
+        chartPt("GRNs", grns.length, "#0284c7"),
+      ],
+      String(grns.length),
+      "grns",
+    ),
     tableTitle: "Recent GRNs",
     tableColumns: [
       { key: "no", label: "GRN" },
@@ -1974,11 +2284,17 @@ export function buildSchoolDashboard(
       value: funnel[s.value as AdmissionStage] || 0,
     })).filter((p) => p.value > 0);
 
+    const feeVouchers = loadFees().vouchers.filter(
+      (v) => !v.voidedAt && (!ay || v.academicYearCode === ay),
+    );
+    const collectedModeBreakup = feeCollectionModeBreakupRupees(feeVouchers);
+
     const feeChart = [
       {
         label: "Collected",
         value: Math.round(feeKpi.collectedPaise / 100),
         color: "#15803d",
+        modeBreakup: collectedModeBreakup,
       },
       {
         label: "Open dues",
@@ -1992,10 +2308,26 @@ export function buildSchoolDashboard(
       },
     ].filter((p) => p.value > 0);
 
+    const admissionSources = sourceCounts(admissionsState);
+    const sourceChart = Object.entries(admissionSources)
+      .filter(([, n]) => n > 0)
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, n]) =>
+        chartPt(sourceLabel(k as Parameters<typeof sourceLabel>[0]), n),
+      );
+    const inactiveStudents = sessionStudents.length - activeStudents.length;
+    const feeLayers = feePositionLayers(
+      feeKpi.collectedPaise,
+      feeKpi.openPaise,
+      feeKpi.arrearsPaise,
+      collectedModeBreakup,
+      formatInrCompact(feeKpi.collectedPaise),
+    );
+
     return {
       heroEyebrow: "School overview",
       title: TENANT.nameDisplay,
-      subtitle: `Session ${sessionAy} · Tap a KPI to open the module. Charts default to rounded donuts.`,
+      subtitle: `Session ${sessionAy} · Tap a KPI to open the module. Charts use dual rings in pie view.`,
       kpis: [],
       kpiSections: [
         {
@@ -2143,26 +2475,37 @@ export function buildSchoolDashboard(
       chartSeries: feeChart.length
         ? feeChart
         : [{ label: "No dues data", value: 0 }],
+      ...feeLayers,
       chartDefaultView: "pie",
       extraCharts: [
-        {
-          title: "Students by gender",
-          series:
-            male + female > 0
-              ? [
-                  { label: "Boys", value: male, color: "#0284c7" },
-                  { label: "Girls", value: female, color: "#9d174d" },
-                ]
-              : [{ label: "—", value: 0 }],
-          defaultView: "pie",
-        },
-        {
-          title: "Admission funnel",
-          series: funnelChart.length
+        dualRingBlock(
+          "Students by gender",
+          "Gender",
+          male + female > 0
+            ? [
+                chartPt("Boys", male, "#0284c7"),
+                chartPt("Girls", female, "#9d174d"),
+              ]
+            : [{ label: "—", value: 0 }],
+          "Status",
+          [
+            chartPt("Active", activeStudents.length, "#15803d"),
+            chartPt("Inactive", inactiveStudents, "#64748b"),
+          ],
+          String(activeStudents.length),
+          "active",
+        ),
+        dualRingBlock(
+          "Admission funnel",
+          "Funnel stage",
+          funnelChart.length
             ? funnelChart
             : [{ label: "—", value: 0 }],
-          defaultView: "pie",
-        },
+          "Lead sources",
+          topChartPoints(sourceChart),
+          String(Math.max(0, pipeline)),
+          "pipeline",
+        ),
       ],
       tableTitle: "Today's class registers",
       tableColumns: [

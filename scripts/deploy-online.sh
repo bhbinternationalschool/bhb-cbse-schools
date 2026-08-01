@@ -41,6 +41,7 @@ WHATSAPP_VERIFY_TOKEN="$(get_env WHATSAPP_VERIFY_TOKEN)"
 WHATSAPP_WABA_ID="$(get_env WHATSAPP_WABA_ID)"
 WHATSAPP_DEFAULT_COUNTRY_CODE="$(get_env WHATSAPP_DEFAULT_COUNTRY_CODE)"
 WHATSAPP_GRAPH_VERSION="$(get_env WHATSAPP_GRAPH_VERSION)"
+GOOGLE_MAPS_API_KEY="$(get_env GOOGLE_MAPS_API_KEY)"
 
 WHATSAPP_DEFAULT_COUNTRY_CODE="${WHATSAPP_DEFAULT_COUNTRY_CODE:-91}"
 WHATSAPP_GRAPH_VERSION="${WHATSAPP_GRAPH_VERSION:-v21.0}"
@@ -59,6 +60,11 @@ if [[ -n "$WHATSAPP_TOKEN" && -n "$WHATSAPP_PHONE_ID" ]]; then
   echo "WhatsApp: token + phone id present (outbound enabled on deploy)"
 else
   echo "WhatsApp: not configured in .env.local — outbound will stay off"
+fi
+if [[ -n "$GOOGLE_MAPS_API_KEY" ]]; then
+  echo "Google Maps: API key present (road distance on deploy)"
+else
+  echo "Google Maps: not configured — transport planner will use estimates"
 fi
 echo ""
 echo "Submitting Cloud Build (this replaces school-erp-web)…"
@@ -100,6 +106,7 @@ SUBSTITUTIONS+="@_WHATSAPP_VERIFY_TOKEN=${WHATSAPP_VERIFY_TOKEN}"
 SUBSTITUTIONS+="@_WHATSAPP_WABA_ID=${WHATSAPP_WABA_ID}"
 SUBSTITUTIONS+="@_WHATSAPP_DEFAULT_COUNTRY_CODE=${WHATSAPP_DEFAULT_COUNTRY_CODE}"
 SUBSTITUTIONS+="@_WHATSAPP_GRAPH_VERSION=${WHATSAPP_GRAPH_VERSION}"
+SUBSTITUTIONS+="@_GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}"
 
 gcloud builds submit "$ROOT" \
   --project="$PROJECT_ID" \

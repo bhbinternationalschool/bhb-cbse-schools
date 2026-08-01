@@ -56,6 +56,7 @@ import {
 import { ChequesPanel } from "@/components/fees/ChequesPanel";
 import { ManualBookPanel } from "@/components/fees/ManualBookPanel";
 import { DayClosePanel } from "@/components/fees/DayClosePanel";
+import { TransportFeeSchedulePanel } from "@/components/fees/TransportFeeSchedulePanel";
 import { DueBreakupPicker } from "@/components/fees/DueBreakupPicker";
 import { PayLinksPanel } from "@/components/fees/PayLinksPanel";
 import { SisParentWaInbox } from "@/components/fees/SisParentWaInbox";
@@ -2016,7 +2017,13 @@ function CollectPanel({
                       No fee lines for this student
                     </p>
                   ) : (
-                    <DueBreakupPicker
+                    <>
+                      <TransportFeeSchedulePanel
+                        studentId={row.student.id}
+                        academicYearCode={row.student.academicYearCode}
+                        dues={row.dues}
+                      />
+                      <DueBreakupPicker
                       dues={row.dues}
                       selectedKeys={selectedKeys}
                       today={today}
@@ -2025,6 +2032,7 @@ function CollectPanel({
                       lineDiscountRupees={lineDiscountRupees}
                       onLineDiscount={onLineDiscount}
                     />
+                    </>
                   )}
                 </div>
               );

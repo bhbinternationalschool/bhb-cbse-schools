@@ -26,6 +26,7 @@ import {
   isValidPan,
   loadSis,
   newSisId,
+  normalizeHousehold,
   normalizeMobile,
   normalizePan,
   normalizeStudent,
@@ -59,7 +60,29 @@ import { StudentCurriculumEditor } from "@/components/students/StudentCurriculum
 import { StudentNameLabel } from "@/components/students/StudentAvatar";
 import { listStudentTags } from "@/lib/studentTags";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { AddressAutocompleteField } from "@/components/maps/AddressAutocompleteField";
+import {
+  householdGeoFromPlace,
+  type HouseholdPlaceGeo,
+} from "@/lib/mapsPlaces";
+import { householdHasGeo } from "@/lib/mapsGeocode";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
+
+function householdPlaceGeoFromRecord(
+  hh: Household,
+): HouseholdPlaceGeo | null {
+  if (!householdHasGeo(hh)) return null;
+  return {
+    geoLat: hh.geoLat!,
+    geoLng: hh.geoLng!,
+    geoPlaceId: hh.geoPlaceId || "",
+    geoFormattedAddress: hh.geoFormattedAddress || "",
+    geoGeocodedAt: hh.geoGeocodedAt || "",
+    geoSource: hh.geoSource || "geocode",
+    geoConfidence: hh.geoConfidence || "low",
+    geoAddressKey: hh.geoAddressKey || "",
+  };
+}
 
 type Tab = "basic" | "subjects" | "identity" | "family" | "ids" | "docs";
 
@@ -242,6 +265,7 @@ export function StudentForm({
   const [city, setCity] = useState("Varanasi");
   const [stateName, setStateName] = useState("Uttar Pradesh");
   const [pincode, setPincode] = useState("");
+  const [placeGeo, setPlaceGeo] = useState<HouseholdPlaceGeo | null>(null);
   const [linkHouseholdId, setLinkHouseholdId] = useState("");
 
   const [pen, setPen] = useState("");
@@ -352,6 +376,7 @@ export function StudentForm({
       setCity(hh?.city ?? "Varanasi");
       setStateName(hh?.state ?? "Uttar Pradesh");
       setPincode(hh?.pincode ?? "");
+      setPlaceGeo(hh ? householdPlaceGeoFromRecord(hh) : null);
       setLinkHouseholdId(s.householdId);
       setPen(s.pen);
       setPenStatus(s.penStatus);
@@ -681,15 +706,22 @@ export function StudentForm({
 
     if (householdId && households.some((h) => h.id === householdId)) {
       households = households.map((h) =>
-        h.id === householdId ? { ...h, ...hhPayload } : h,
+        h.id === householdId
+          ? normalizeHousehold({
+              ...h,
+              ...hhPayload,
+              ...(placeGeo ?? {}),
+            })
+          : h,
       );
     } else {
-      const hh: Household = {
+      const hh: Household = normalizeHousehold({
         id: newSisId("hh"),
         code: `HH-${100 + households.length + 1}`,
         ...hhPayload,
         guardianPhotoUrl: "",
-      };
+        ...(placeGeo ?? {}),
+      });
       households.push(hh);
       householdId = hh.id;
     }
@@ -1761,6 +1793,9 @@ export function StudentForm({
                       setCity(hh.city);
                       setStateName(hh.state);
                       setPincode(hh.pincode);
+                      setPlaceGeo(householdPlaceGeoFromRecord(hh));
+                    } else {
+                      setPlaceGeo(null);
                     }
                   }}
                 >
@@ -1835,11 +1870,22 @@ export function StudentForm({
                 </Field>
               </div>
               <Field label="Address line (house / street)">
-                <input
-                  className="field"
+                <AddressAutocompleteField
                   value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  placeholder="House no., street"
+                  onChange={(v) => {
+                    setAddress(v);
+                    setPlaceGeo(null);
+                  }}
+                  onResolved={(place) => {
+                    setAddress(place.address);
+                    if (place.locality) setLocality(place.locality);
+                    if (place.landmark) setLandmark(place.landmark);
+                    if (place.city) setCity(place.city);
+                    if (place.state) setStateName(place.state);
+                    if (place.pincode) setPincode(place.pincode);
+                    setPlaceGeo(householdGeoFromPlace(place));
+                  }}
+                  placeholder="Search Google Maps — house, colony, landmark…"
                 />
               </Field>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -1861,8 +1907,8 @@ export function StudentForm({
                 </Field>
               </div>
               <p className="mt-2 text-[11px] text-[var(--muted)]">
-                Locality + landmark help assign a bus stop later. Transport fees
-                use route/stop zones — not GPS from this address alone.
+                Pick a Google suggestion to pin the home on the map for transport
+                planner. Locality + landmark still help match bus stops.
               </p>
               <div className="mt-3 grid gap-3 sm:grid-cols-3">
                 <Field label="City">

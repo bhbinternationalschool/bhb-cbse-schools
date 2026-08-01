@@ -85,9 +85,22 @@ export type DashboardTableBlock = {
 
 export type ChartView = "bar" | "pie" | "trend";
 
+export type DashboardChartCenter = {
+  value: string;
+  label: string;
+};
+
+export type DashboardChartRing = {
+  id: string;
+  label: string;
+  series: DashboardChartPoint[];
+};
+
 export type DashboardChartBlock = {
   title: string;
   series: DashboardChartPoint[];
+  rings?: DashboardChartRing[];
+  center?: DashboardChartCenter;
   /** Preferred initial view (defaults to bar; use trend for time series). */
   defaultView?: ChartView;
 };
@@ -109,6 +122,8 @@ export type ModuleDashboardModel = {
   kpiSections?: DashboardKpiSection[];
   chartTitle: string;
   chartSeries: DashboardChartPoint[];
+  chartRings?: DashboardChartRing[];
+  chartCenter?: DashboardChartCenter;
   /** Preferred initial view for the primary chart. */
   chartDefaultView?: ChartView;
   /** Optional range toggle (e.g. 7 days / 30 days). */
@@ -354,19 +369,43 @@ function BarChartSvg({ series }: { series: DashboardChartPoint[] }) {
   );
 }
 
-function PieChartSvg({ series }: { series: DashboardChartPoint[] }) {
-  const data = withColors(series).filter((d) => d.value > 0).slice(0, 8);
+type RingGeom = { outerR: number; innerR: number };
+
+const MULTI_RING_LAYOUT: RingGeom[] = [
+  { outerR: 88, innerR: 58 },
+  { outerR: 52, innerR: 26 },
+];
+
+const SINGLE_RING_LAYOUT: RingGeom = { outerR: 88, innerR: 52 };
+
+type DonutSlice = DashboardChartPoint & {
+  path: string;
+  pct: number;
+  ringIndex: number;
+  sliceIndex: number;
+  strokeW: number;
+};
+
+function ringGeom(ringCount: number, ringIndex: number): RingGeom {
+  if (ringCount <= 1) return SINGLE_RING_LAYOUT;
+  return MULTI_RING_LAYOUT[ringIndex] ?? MULTI_RING_LAYOUT[MULTI_RING_LAYOUT.length - 1]!;
+}
+
+function buildDonutSlices(
+  series: DashboardChartPoint[],
+  geom: RingGeom,
+  ringIndex: number,
+  cx = 120,
+  cy = 110,
+): DonutSlice[] {
+  const data = withColors(series).filter((d) => d.value > 0).slice(0, 6);
   const total = data.reduce((s, d) => s + d.value, 0) || 1;
-  const cx = 120;
-  const cy = 110;
-  const outerR = 88;
-  const innerR = 52;
-  const midR = (outerR + innerR) / 2;
-  const strokeW = outerR - innerR;
+  const midR = (geom.outerR + geom.innerR) / 2;
+  const strokeW = geom.outerR - geom.innerR;
   const gap = data.length > 1 ? 0.06 : 0;
   let angle = -Math.PI / 2;
 
-  const slices = data.map((d) => {
+  return data.map((d, sliceIndex) => {
     const sweep = (d.value / total) * Math.PI * 2;
     const start = angle + gap / 2;
     const end = angle + sweep - gap / 2;
@@ -381,78 +420,185 @@ function PieChartSvg({ series }: { series: DashboardChartPoint[] }) {
       sweep >= Math.PI * 2 - 0.02
         ? `M ${cx} ${cy - midR} A ${midR} ${midR} 0 1 1 ${cx - 0.01} ${cy - midR}`
         : `M ${x1} ${y1} A ${midR} ${midR} 0 ${large} 1 ${x2} ${y2}`;
-    return { ...d, path, pct };
+    return { ...d, path, pct, ringIndex, sliceIndex, strokeW };
   });
+}
+
+function DonutChartSvg({
+  rings,
+  center,
+}: {
+  rings: DashboardChartRing[];
+  center?: DashboardChartCenter;
+}) {
+  const activeRings = rings.filter((r) => r.series.some((p) => p.value > 0));
+  const displayRings =
+    activeRings.length > 0
+      ? activeRings
+      : [{ id: "empty", label: "", series: [{ label: "—", value: 0 }] }];
+  const ringCount = displayRings.length;
+  const [hover, setHover] = useState<{
+    ring: number;
+    index: number;
+  } | null>(null);
+
+  const allSlices = displayRings.flatMap((ring, ringIndex) =>
+    buildDonutSlices(ring.series, ringGeom(ringCount, ringIndex), ringIndex),
+  );
+
+  const outerTotal =
+    displayRings[0]?.series.reduce((s, p) => s + (p.value > 0 ? p.value : 0), 0) ||
+    1;
+  const centerValue = center?.value ?? formatCompact(outerTotal);
+  const centerLabel = center?.label ?? "total";
+  const holeR =
+    ringCount > 1
+      ? (MULTI_RING_LAYOUT[MULTI_RING_LAYOUT.length - 1]?.innerR ?? 26) - 2
+      : SINGLE_RING_LAYOUT.innerR - 2;
+
+  function sliceOpacity(slice: DonutSlice): number {
+    if (!hover) return 1;
+    if (hover.ring === slice.ringIndex && hover.index === slice.sliceIndex) {
+      return 1;
+    }
+    if (hover.ring === 0 && slice.ringIndex === 1) {
+      const outerSlice = displayRings[0]?.series[hover.index];
+      const linked =
+        outerSlice?.modeBreakup
+          ?.filter((m) => m.value > 0)
+          .map((m) => m.label) ?? [];
+      if (linked.length > 0) {
+        return linked.includes(slice.label) ? 1 : 0.18;
+      }
+    }
+    if (hover.ring !== slice.ringIndex) return 0.32;
+    return 0.32;
+  }
+
+  const hoveredSlice =
+    hover != null
+      ? allSlices.find(
+          (s) => s.ringIndex === hover.ring && s.sliceIndex === hover.index,
+        ) ?? null
+      : null;
 
   return (
-    <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start">
-      <svg
-        viewBox="0 0 240 220"
-        className="h-auto w-full max-w-[260px] shrink-0"
-        role="img"
-        aria-label="Donut chart"
-      >
-        {slices.map((s, i) => (
-          <path
-            key={`${s.label}-${i}`}
-            d={s.path}
-            fill="none"
-            stroke={s.color}
-            strokeWidth={strokeW}
-            strokeLinecap="round"
-            className="module-dash-slice"
+    <div className="flex flex-col items-center gap-4 lg:flex-row lg:items-start">
+      <div className="relative shrink-0">
+        {hoveredSlice ? (
+          <div className="pointer-events-none absolute left-1/2 top-0 z-10 w-max max-w-[min(16rem,90vw)] -translate-x-1/2 -translate-y-1 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-3 py-2 text-center shadow-lg">
+            <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted)]">
+              {displayRings[hoveredSlice.ringIndex]?.label || hoveredSlice.label}
+            </p>
+            <p className="font-display text-base font-bold text-[var(--brand-deep)]">
+              {hoveredSlice.label}
+            </p>
+            <p className="tabular-nums text-sm font-semibold text-[var(--ink)]">
+              {formatCompact(hoveredSlice.value)} · {hoveredSlice.pct}%
+            </p>
+          </div>
+        ) : null}
+        <svg
+          viewBox="0 0 240 220"
+          className="h-auto w-full max-w-[280px]"
+          role="img"
+          aria-label="Multi-ring donut chart"
+        >
+          {allSlices.map((s, i) => (
+            <path
+              key={`${s.ringIndex}-${s.label}-${i}`}
+              d={s.path}
+              fill="none"
+              stroke={s.color}
+              strokeWidth={s.strokeW}
+              strokeLinecap="round"
+              opacity={sliceOpacity(s)}
+              className="module-dash-slice transition-opacity duration-150"
+              onMouseEnter={() =>
+                setHover({ ring: s.ringIndex, index: s.sliceIndex })
+              }
+              onMouseLeave={() => setHover(null)}
+            >
+              <title>{`${s.label}: ${s.value} (${s.pct}%)`}</title>
+            </path>
+          ))}
+          <circle
+            cx={120}
+            cy={110}
+            r={holeR}
+            fill="var(--brand-cream)"
+            className="drop-shadow-sm"
+          />
+          <text
+            x={120}
+            y={106}
+            textAnchor="middle"
+            className="fill-[var(--brand-deep)]"
+            fontSize={ringCount > 1 ? 15 : 18}
+            fontWeight={800}
           >
-            <title>{`${s.label}: ${s.value} (${s.pct}%)`}</title>
-          </path>
-        ))}
-        <circle
-          cx={cx}
-          cy={cy}
-          r={innerR - 2}
-          fill="var(--brand-cream)"
-          className="drop-shadow-sm"
-        />
-        <text
-          x={cx}
-          y={cy - 4}
-          textAnchor="middle"
-          className="fill-[var(--brand-deep)]"
-          fontSize={18}
-          fontWeight={800}
-        >
-          {formatCompact(total)}
-        </text>
-        <text
-          x={cx}
-          y={cy + 16}
-          textAnchor="middle"
-          className="fill-[var(--muted)]"
-          fontSize={11}
-        >
-          total
-        </text>
-      </svg>
-      <ul className="w-full space-y-2 text-sm">
-        {slices.map((s, i) => (
-          <li key={`${s.label}-leg-${i}`} className="flex items-center gap-2">
-            <span
-              className="h-3 w-3 shrink-0 rounded-full"
-              style={{ background: s.color }}
-              aria-hidden
-            />
-            <span className="min-w-0 flex-1 truncate font-medium text-[var(--ink)]">
-              {s.label}
-            </span>
-            <span className="tabular-nums text-[15px] font-bold text-[var(--brand-deep)]">
-              {s.value}
-            </span>
-            <span className="w-10 text-right tabular-nums text-[var(--muted)]">
-              {s.pct}%
-            </span>
-          </li>
-        ))}
-      </ul>
+            {centerValue}
+          </text>
+          <text
+            x={120}
+            y={124}
+            textAnchor="middle"
+            className="fill-[var(--muted)]"
+            fontSize={10}
+          >
+            {centerLabel}
+          </text>
+        </svg>
+      </div>
+      <div className="w-full space-y-4">
+        {displayRings.map((ring, ringIndex) => {
+          const ringSlices = allSlices.filter((s) => s.ringIndex === ringIndex);
+          if (!ringSlices.length) return null;
+          return (
+            <div key={ring.id}>
+              {ring.label ? (
+                <p className="mb-2 text-xs font-bold uppercase tracking-wide text-[var(--muted)]">
+                  {ring.label}
+                </p>
+              ) : null}
+              <ul className="space-y-2 text-sm">
+                {ringSlices.map((s, i) => (
+                  <li
+                    key={`${ring.id}-${s.label}-${i}`}
+                    className="flex cursor-default items-center gap-2"
+                    onMouseEnter={() =>
+                      setHover({ ring: ringIndex, index: s.sliceIndex })
+                    }
+                    onMouseLeave={() => setHover(null)}
+                  >
+                    <span
+                      className="h-3 w-3 shrink-0 rounded-full"
+                      style={{ background: s.color }}
+                      aria-hidden
+                    />
+                    <span className="min-w-0 flex-1 truncate font-medium text-[var(--ink)]">
+                      {s.label}
+                    </span>
+                    <span className="tabular-nums text-[15px] font-bold text-[var(--brand-deep)]">
+                      {formatCompact(s.value)}
+                    </span>
+                    <span className="w-10 text-right tabular-nums text-[var(--muted)]">
+                      {s.pct}%
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })}
+      </div>
     </div>
+  );
+}
+
+function PieChartSvg({ series }: { series: DashboardChartPoint[] }) {
+  return (
+    <DonutChartSvg rings={[{ id: "main", label: "", series }]} />
   );
 }
 
@@ -899,12 +1045,16 @@ function KpiDetailDrawer({
 function ChartPanel({
   title,
   series,
+  rings,
+  center,
   defaultView = "bar",
   ranges,
   defaultRangeId,
 }: {
   title: string;
   series: DashboardChartPoint[];
+  rings?: DashboardChartRing[];
+  center?: DashboardChartCenter;
   defaultView?: ChartView;
   ranges?: DashboardChartRange[];
   defaultRangeId?: string;
@@ -919,6 +1069,11 @@ function ChartPanel({
   const data = (activeRange?.series ?? series).length
     ? activeRange?.series ?? series
     : [{ label: "—", value: 0 }];
+  const pieRings =
+    rings && rings.length > 0
+      ? rings
+      : [{ id: "main", label: "", series: data }];
+  const hasMultiRing = Boolean(rings && rings.length > 1);
   return (
     <section className="module-dash-panel p-4 sm:p-5">
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -957,11 +1112,15 @@ function ChartPanel({
       </div>
       <div className="min-h-[220px] rounded-xl bg-[rgba(248,248,240,0.65)] p-2 sm:p-3">
         {chartView === "bar" ? <BarChartSvg series={data} /> : null}
-        {chartView === "pie" ? <PieChartSvg series={data} /> : null}
+        {chartView === "pie" ? (
+          <DonutChartSvg rings={pieRings} center={center} />
+        ) : null}
         {chartView === "trend" ? <TrendChartSvg series={data} /> : null}
       </div>
       <p className="mt-2 text-xs text-[var(--muted)]">
-        Hover a bar or point for payment mode break-up.
+        {hasMultiRing
+          ? "Hover an outer segment to highlight linked payment modes on the inner ring."
+          : "Hover a bar or point for payment mode break-up."}
       </p>
     </section>
   );
@@ -1104,6 +1263,8 @@ export function ModuleDashboardView({
         <ChartPanel
           title={model.chartTitle}
           series={primarySeries}
+          rings={model.chartRings}
+          center={model.chartCenter}
           defaultView={model.chartDefaultView || "bar"}
           ranges={model.chartRanges}
           defaultRangeId={model.chartRangeDefault}
@@ -1114,6 +1275,8 @@ export function ModuleDashboardView({
                 key={c.title}
                 title={c.title}
                 series={c.series.length ? c.series : [{ label: "—", value: 0 }]}
+                rings={c.rings}
+                center={c.center}
                 defaultView={c.defaultView || "trend"}
               />
             ))

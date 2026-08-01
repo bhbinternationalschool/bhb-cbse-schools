@@ -30,7 +30,11 @@ export const TENANT = {
   /** Demo CBSE identifiers — replace with real affiliation when live */
   affiliationNo: "213XXXX",
   schoolCode: "70XXX",
-  schoolAddress: "Varanasi, Uttar Pradesh",
+  /** Campus — Google Maps: Piyamilan chauraha, Baniyavapar, Ayar 221202 */
+  schoolAddress:
+    "Piyamilan Chauraha, Baniyavapar, Ayar, Varanasi, Uttar Pradesh 221202",
+  schoolLat: 25.4354328,
+  schoolLng: 82.9439863,
   schoolStatus: "Senior Secondary",
 };
 

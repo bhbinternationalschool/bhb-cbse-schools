@@ -39,23 +39,38 @@ export function AppShell({
   >([]);
   const [clock, setClock] = useState("");
 
-  // Hydration-safe: localStorage (masters / module registry) only after mount
+  // Hydration-safe: pull cloud mirror BEFORE pushing local seed; then hydrate blobs.
   useEffect(() => {
     markModuleRegistryClientReady();
     setYears(listSessionYearOptions());
     setClock(formatIst());
     const t = window.setInterval(() => setClock(formatIst()), 30_000);
-    applyFeeDiscountSeedNow();
-    void import("@/lib/admissionsPersistence").then(({ ensureAdmissionsHydrated }) => {
-      ensureAdmissionsHydrated().then((changed) => {
-        if (changed) {
-          window.dispatchEvent(new CustomEvent("bhb-admissions-hydrated"));
-        }
-      });
-    });
-    void import("@/lib/schoolDataMirror").then(({ pushFullSchoolMirrorToServer }) => {
+
+    void (async () => {
+      const { ensureClientSchoolMirrorHydrated, ensureAllDeskHydrated } =
+        await import("@/lib/schoolDataMirrorClientHydrate");
+      const { pushFullSchoolMirrorToServer } = await import(
+        "@/lib/schoolDataMirror"
+      );
+
+      const mirrorChanged = await ensureClientSchoolMirrorHydrated();
+      const results = await Promise.allSettled([
+        ensureAllDeskHydrated(),
+        import("@/lib/admissionsPersistence").then((m) =>
+          m.ensureAdmissionsHydrated(),
+        ),
+      ]);
+      const admResult = results[1];
+      if (admResult.status === "fulfilled" && admResult.value) {
+        window.dispatchEvent(new CustomEvent("bhb-admissions-hydrated"));
+      }
+      if (mirrorChanged) {
+        window.dispatchEvent(new CustomEvent("bhb-desk-hydrated"));
+      }
+      applyFeeDiscountSeedNow();
       pushFullSchoolMirrorToServer();
-    });
+    })();
+
     return () => window.clearInterval(t);
   }, []);
 

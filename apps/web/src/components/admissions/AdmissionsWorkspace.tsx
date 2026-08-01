@@ -65,6 +65,7 @@ import {
 import { canAccessModule, hasPermission, loadRbac } from "@/lib/rbac";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { AddressAutocompleteField } from "@/components/maps/AddressAutocompleteField";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import {
   MastersEmptyRow,
@@ -2754,12 +2755,33 @@ function LeadDetail({
               onChange={(e) => onPatch({ locality: e.target.value })}
             />
           </Field>
-          <Field label="Address">
+          <Field label="Home address">
+            <AddressAutocompleteField
+              disabled={locked || !canEdit}
+              value={lead.address}
+              onChange={(v) => onPatch({ address: v })}
+              onResolved={(place) =>
+                onPatch({
+                  address: place.address,
+                  locality: place.locality || lead.locality,
+                  pincode: place.pincode || lead.pincode,
+                })
+              }
+              inputClassName={inp}
+            />
+          </Field>
+          <Field label="PIN code">
             <input
               className={inp}
               disabled={locked || !canEdit}
-              value={lead.address}
-              onChange={(e) => onPatch({ address: e.target.value })}
+              inputMode="numeric"
+              maxLength={6}
+              value={lead.pincode}
+              onChange={(e) =>
+                onPatch({
+                  pincode: e.target.value.replace(/\D/g, "").slice(0, 6),
+                })
+              }
             />
           </Field>
         </div>

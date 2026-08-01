@@ -98,6 +98,16 @@ export type Household = {
   altMobile: string;
   /** Guardian / parent photo (data URL or https) */
   guardianPhotoUrl: string;
+  /** Google Maps geocode — shared by siblings on this household */
+  geoLat?: number;
+  geoLng?: number;
+  geoPlaceId?: string;
+  geoFormattedAddress?: string;
+  geoGeocodedAt?: string;
+  geoSource?: "geocode" | "places" | "gps" | "manual";
+  geoConfidence?: "high" | "low" | "failed";
+  /** Fingerprint of address fields when geo was set */
+  geoAddressKey?: string;
 };
 
 export type SisStudent = {
@@ -680,9 +690,36 @@ export function normalizeStudentTag(
   };
 }
 
+function householdAddressKey(
+  h: Pick<
+    Household,
+    "address" | "locality" | "landmark" | "pincode" | "city" | "state"
+  >,
+): string {
+  return [h.address, h.locality, h.landmark, h.pincode, h.city, h.state]
+    .map((s) => String(s || "").trim().toLowerCase())
+    .filter(Boolean)
+    .join("|");
+}
+
 export function normalizeHousehold(h: Partial<Household> & { id: string }): Household {
   const mobile = normalizeMobile(h.mobile ?? "");
   const whatsappRaw = normalizeMobile(h.whatsappMobile ?? "");
+  const addressKey = householdAddressKey({
+    address: h.address ?? "",
+    locality: h.locality ?? "",
+    landmark: h.landmark ?? "",
+    pincode: (h.pincode ?? "").replace(/\D/g, "").slice(0, 6),
+    city: h.city ?? "",
+    state: h.state ?? "Uttar Pradesh",
+  });
+  const geoStale = Boolean(h.geoAddressKey && h.geoAddressKey !== addressKey);
+  const keepGeo =
+    !geoStale &&
+    typeof h.geoLat === "number" &&
+    typeof h.geoLng === "number" &&
+    h.geoConfidence !== "failed";
+
   return {
     id: h.id,
     code: h.code ?? "",
@@ -700,6 +737,18 @@ export function normalizeHousehold(h: Partial<Household> & { id: string }): Hous
     altMobile: normalizeMobile(h.altMobile ?? ""),
     guardianPhotoUrl:
       typeof h.guardianPhotoUrl === "string" ? h.guardianPhotoUrl : "",
+    ...(keepGeo
+      ? {
+          geoLat: h.geoLat,
+          geoLng: h.geoLng,
+          geoPlaceId: h.geoPlaceId,
+          geoFormattedAddress: h.geoFormattedAddress,
+          geoGeocodedAt: h.geoGeocodedAt,
+          geoSource: h.geoSource,
+          geoConfidence: h.geoConfidence,
+          geoAddressKey: h.geoAddressKey,
+        }
+      : {}),
   };
 }
 
@@ -1112,6 +1161,71 @@ export function saveSis(state: SisState) {
   void import("@/lib/curriculumPersistence").then(({ scheduleCurriculumSync }) => {
     scheduleCurriculumSync(state);
   });
+}
+
+const SIS_MIRROR_META = "bhb_sis_mirror_meta_v1";
+
+function readSisMirrorMeta(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    const raw = localStorage.getItem(SIS_MIRROR_META);
+    if (!raw) return "";
+    return String((JSON.parse(raw) as { updatedAt?: string }).updatedAt || "");
+  } catch {
+    return "";
+  }
+}
+
+function writeSisMirrorMeta(iso: string) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(SIS_MIRROR_META, JSON.stringify({ updatedAt: iso }));
+}
+
+export function sisMirrorIsEmpty(state: SisState): boolean {
+  return (state.students?.length ?? 0) === 0 && (state.households?.length ?? 0) === 0;
+}
+
+export function writeSisLocalRaw(state: SisState) {
+  const next: SisState = {
+    version: 1,
+    households: (state.households ?? []).map((h) => normalizeHousehold(h)),
+    students: (state.students ?? []).map((s) => normalizeStudent(s)),
+    curriculumRequests: (state.curriculumRequests ?? []).map((r) =>
+      normalizeCurriculumRequest({
+        ...r,
+        id: r.id || `creq_${Math.random().toString(36).slice(2, 9)}`,
+        studentId: r.studentId || "",
+      }),
+    ),
+    tags: (state.tags ?? []).map((t) => normalizeStudentTag(t)),
+    classUpgrades: Array.isArray(state.classUpgrades) ? state.classUpgrades : [],
+  };
+  if (typeof window === "undefined") {
+    setMirrorSlice("sis", next);
+    return;
+  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  syncSisIntoMasters(next, loadMasters());
+}
+
+export function hydrateSisFromMirror(
+  raw: unknown,
+  remoteAt: string,
+  remoteIsNewer: boolean,
+): boolean {
+  if (!raw || typeof raw !== "object") return false;
+  const local = loadSis();
+  const localAt = readSisMirrorMeta();
+  const takeRemote =
+    remoteIsNewer ||
+    sisMirrorIsEmpty(local) ||
+    !localAt ||
+    (remoteAt && remoteAt > localAt);
+  if (!takeRemote) return false;
+  writeSisLocalRaw(raw as SisState);
+  writeSisMirrorMeta(remoteAt || new Date().toISOString());
+  scheduleClientSchoolMirrorSync({ sis: raw });
+  return true;
 }
 
 export type SisRemovalCheck = {

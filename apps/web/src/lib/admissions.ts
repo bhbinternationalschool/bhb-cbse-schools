@@ -1271,6 +1271,47 @@ export function admissionsStateIsEmpty(state: AdmissionsState): boolean {
   return (state.leads?.length ?? 0) === 0 && (state.households?.length ?? 0) === 0;
 }
 
+const ADMISSIONS_MIRROR_META = "bhb_admissions_mirror_meta_v1";
+
+function readAdmissionsMirrorMeta(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    const raw = localStorage.getItem(ADMISSIONS_MIRROR_META);
+    if (!raw) return "";
+    return String((JSON.parse(raw) as { updatedAt?: string }).updatedAt || "");
+  } catch {
+    return "";
+  }
+}
+
+function writeAdmissionsMirrorMeta(iso: string) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(ADMISSIONS_MIRROR_META, JSON.stringify({ updatedAt: iso }));
+}
+
+export function hydrateAdmissionsFromMirror(
+  raw: unknown,
+  remoteAt: string,
+  remoteIsNewer: boolean,
+): boolean {
+  if (!raw || typeof raw !== "object") return false;
+  const local = loadAdmissions();
+  const localAt = readAdmissionsMirrorMeta();
+  const remoteLeads = (raw as AdmissionsState).leads?.length ?? 0;
+  const localLeads = local.leads?.length ?? 0;
+  const takeRemote =
+    remoteIsNewer ||
+    admissionsStateIsEmpty(local) ||
+    (remoteLeads > localLeads && remoteLeads > 0) ||
+    !localAt ||
+    (remoteAt && remoteAt > localAt);
+  if (!takeRemote) return false;
+  writeAdmissionsLocalRaw(raw as AdmissionsState);
+  writeAdmissionsMirrorMeta(remoteAt || new Date().toISOString());
+  scheduleClientSchoolMirrorSync({ admissions: raw });
+  return true;
+}
+
 function padSeq(n: number) {
   return String(n).padStart(4, "0");
 }

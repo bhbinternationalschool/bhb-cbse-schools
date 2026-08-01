@@ -1111,7 +1111,7 @@ export function defaultSchoolProfile(): SchoolProfile {
     address: TENANT.schoolAddress,
     city: TENANT.city,
     state: TENANT.state,
-    pincode: "221001",
+    pincode: "221202",
     phone: "",
     mobile: "",
     whatsapp: "",

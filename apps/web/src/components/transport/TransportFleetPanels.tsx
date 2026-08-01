@@ -11,6 +11,16 @@ import {
 } from "@/lib/fees";
 import type { MastersState } from "@/lib/masters";
 import type { SisState } from "@/lib/sis";
+import { TENANT } from "@/lib/types";
+import {
+  DEFAULT_MAP_LAYERS,
+  TransportGoogleMap,
+  TransportMapLegend,
+} from "@/components/transport/TransportGoogleMap";
+import {
+  buildTransportMapMarkers,
+  type TransportMapLayers,
+} from "@/lib/transportMapMarkers";
 import {
   approveRepairRequest,
   completeServiceJob,
@@ -876,45 +886,94 @@ export function CompliancePanel({
 
 export function LiveMapPanel({
   state,
+  sis,
+  masters,
+  academicYearCode,
   onRefresh,
   onFlash,
   onError,
 }: {
   state: TransportState;
+  sis?: SisState | null;
+  masters?: MastersState | null;
+  academicYearCode?: string;
   onRefresh: () => void;
   onFlash: (m: string) => void;
   onError: (m: string) => void;
 }) {
   const [vehicleId, setVehicleId] = useState("");
-  const [lat, setLat] = useState("25.3176");
-  const [lng, setLng] = useState("82.9739");
+  const [lat, setLat] = useState(String(TENANT.schoolLat));
+  const [lng, setLng] = useState(String(TENANT.schoolLng));
+  const [layers, setLayers] = useState<TransportMapLayers>(DEFAULT_MAP_LAYERS);
   const last = lastGpsPingByVehicle(state);
   const onRoad = state.vehicles.filter(
     (v) => v.isActive && v.status === "active",
   );
 
-  const pins = onRoad
-    .map((v) => {
-      const p = last.get(v.id);
-      if (!p) return null;
-      const x = ((p.lng - 82.7) / 0.5) * 100;
-      const y = (1 - (p.lat - 25.1) / 0.4) * 100;
-      return {
-        v,
-        p,
-        x: Math.min(95, Math.max(5, x)),
-        y: Math.min(95, Math.max(5, y)),
-      };
-    })
-    .filter(Boolean) as {
-    v: (typeof onRoad)[0];
-    p: NonNullable<ReturnType<typeof last.get>>;
-    x: number;
-    y: number;
-  }[];
+  const layerCounts = useMemo(() => {
+    const only = (key: keyof TransportMapLayers): TransportMapLayers => ({
+      school: key === "school",
+      stops: key === "stops",
+      unassigned: key === "unassigned",
+      riders: key === "riders",
+      buses: key === "buses",
+    });
+    const countKind = (key: keyof TransportMapLayers) =>
+      buildTransportMapMarkers({
+        transport: state,
+        sis: sis ?? null,
+        masters: masters ?? null,
+        academicYearCode,
+        layers: only(key),
+      }).length;
+    return {
+      school: countKind("school"),
+      stops: countKind("stops"),
+      unassigned: countKind("unassigned"),
+      riders: countKind("riders"),
+      buses: countKind("buses"),
+    };
+  }, [state, sis, masters, academicYearCode]);
+
+  function toggleLayer(key: keyof TransportMapLayers) {
+    setLayers((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
 
   return (
-    <div className="mt-4 grid gap-4 lg:grid-cols-2">
+    <div className="mt-4 space-y-4">
+      <section className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-bold text-[var(--brand-deep)]">
+              Live route map
+            </h2>
+            <p className="mt-0.5 text-xs text-[var(--muted)]">
+              School · route stop zones · pinned homes · bus GPS
+            </p>
+          </div>
+          <TransportMapLegend
+            layers={layers}
+            onToggle={toggleLayer}
+            counts={layerCounts}
+          />
+        </div>
+        <div className="mt-3">
+          <TransportGoogleMap
+            transport={state}
+            sis={sis ?? null}
+            masters={masters ?? null}
+            academicYearCode={academicYearCode}
+            layers={layers}
+          />
+        </div>
+        <p className="mt-2 text-[10px] text-[var(--muted)]">
+          Orange = students without transport (need SIS address pin). Navy dots =
+          stop fee zones (~distance from school). Enable{" "}
+          <strong>Maps JavaScript API</strong> on your Google key.
+        </p>
+      </section>
+
+    <div className="grid gap-4 lg:grid-cols-2">
       <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
         <h2 className="text-sm font-bold text-[var(--brand-deep)]">
           Record GPS ping
@@ -1014,31 +1073,7 @@ export function LiveMapPanel({
           })}
         </ul>
       </div>
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
-        <h2 className="text-sm font-bold text-[var(--brand-deep)]">
-          Live map desk
-        </h2>
-        <div className="relative mt-3 h-80 overflow-hidden rounded-lg bg-[linear-gradient(135deg,#e8eef5,#d5e4f0)]">
-          <div className="absolute inset-2 rounded border border-dashed border-[rgba(32,48,80,0.2)]" />
-          {pins.map(({ v, p, x, y }) => (
-            <div
-              key={v.id}
-              className="absolute -translate-x-1/2 -translate-y-1/2"
-              style={{ left: `${x}%`, top: `${y}%` }}
-              title={`${v.registrationNo} @ ${p.recordedAt}`}
-            >
-              <div className="rounded bg-[var(--brand-deep)] px-1.5 py-0.5 text-[9px] font-bold text-white shadow">
-                {v.registrationNo.slice(-4)}
-              </div>
-            </div>
-          ))}
-          {pins.length === 0 ? (
-            <p className="absolute inset-0 flex items-center justify-center text-sm text-[var(--muted)]">
-              No pings yet — record a location
-            </p>
-          ) : null}
-        </div>
-      </div>
+    </div>
     </div>
   );
 }

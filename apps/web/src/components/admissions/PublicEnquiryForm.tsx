@@ -13,6 +13,7 @@ import {
 } from "@/lib/admissions";
 import { loadMasters } from "@/lib/masters";
 import { TENANT } from "@/lib/types";
+import { AddressAutocompleteField } from "@/components/maps/AddressAutocompleteField";
 
 const FALLBACK_CLASSES = [
   "Nursery",
@@ -63,6 +64,7 @@ export function PublicEnquiryForm({
   const [mobile, setMobile] = useState("");
   const [locality, setLocality] = useState("");
   const [address, setAddress] = useState("");
+  const [pincode, setPincode] = useState("");
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<{ enquiryNo: string } | null>(null);
@@ -87,6 +89,7 @@ export function PublicEnquiryForm({
         mobile,
         locality,
         address,
+        pincode,
         campaignNote: `Public · ${sourceLabel(source)}${classSoughtId ? "" : ` · Class ${classLabel}`}`,
         note,
         leadDate: new Date().toISOString().slice(0, 10),
@@ -214,19 +217,41 @@ export function PublicEnquiryForm({
           />
         </label>
         <label className="block text-[11px] font-semibold text-[var(--muted)]">
-          Locality
+          Home address
+          <div className="mt-1">
+            <AddressAutocompleteField
+              value={address}
+              onChange={(v) => {
+                setAddress(v);
+              }}
+              onResolved={(place) => {
+                setAddress(place.address);
+                if (place.locality) setLocality(place.locality);
+                if (place.pincode) setPincode(place.pincode);
+              }}
+              inputClassName={inp}
+            />
+          </div>
+        </label>
+        <label className="block text-[11px] font-semibold text-[var(--muted)]">
+          Locality / area
           <input
             className={`${inp} mt-1`}
             value={locality}
             onChange={(e) => setLocality(e.target.value)}
+            placeholder="Filled when you pick an address above"
           />
         </label>
         <label className="block text-[11px] font-semibold text-[var(--muted)]">
-          Address
+          PIN code
           <input
             className={`${inp} mt-1`}
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
+            inputMode="numeric"
+            maxLength={6}
+            value={pincode}
+            onChange={(e) =>
+              setPincode(e.target.value.replace(/\D/g, "").slice(0, 6))
+            }
           />
         </label>
         <label className="block text-[11px] font-semibold text-[var(--muted)]">

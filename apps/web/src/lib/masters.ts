@@ -1836,10 +1836,60 @@ function persistMastersClient(state: MastersState) {
     return;
   }
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, version: 2 }));
+  writeMastersMirrorMeta(new Date().toISOString());
   scheduleClientSchoolMirrorSync({ masters: state });
   void import("@/lib/staffPersistence").then(({ scheduleStaffSync }) => {
     scheduleStaffSync(state);
   });
+}
+
+const MASTERS_MIRROR_META = "bhb_masters_mirror_meta_v1";
+
+function readMastersMirrorMeta(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    const raw = localStorage.getItem(MASTERS_MIRROR_META);
+    if (!raw) return "";
+    return String((JSON.parse(raw) as { updatedAt?: string }).updatedAt || "");
+  } catch {
+    return "";
+  }
+}
+
+function writeMastersMirrorMeta(iso: string) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(MASTERS_MIRROR_META, JSON.stringify({ updatedAt: iso }));
+}
+
+export function mastersMirrorIsEmpty(state: MastersState): boolean {
+  return (state.classes?.length ?? 0) <= 3 && (state.campuses?.length ?? 0) <= 1;
+}
+
+/** Pull masters from server mirror — avoids seed overwriting cloud on new browser. */
+export function hydrateMastersFromMirror(
+  raw: unknown,
+  remoteAt: string,
+  remoteIsNewer: boolean,
+): boolean {
+  if (!raw || typeof raw !== "object") return false;
+  const local = loadMasters();
+  const localAt = readMastersMirrorMeta();
+  const takeRemote =
+    remoteIsNewer ||
+    mastersMirrorIsEmpty(local) ||
+    !localAt ||
+    (remoteAt && remoteAt > localAt);
+  if (!takeRemote) return false;
+  const normalized = ensureFeeSetup(
+    migrateDemoStaffToTeacherRoster(raw as MastersState),
+  );
+  localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({ ...normalized, version: 2 }),
+  );
+  writeMastersMirrorMeta(remoteAt || new Date().toISOString());
+  setMirrorSlice("masters", normalized);
+  return true;
 }
 
 export function newId(prefix: string) {

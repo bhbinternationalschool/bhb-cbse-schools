@@ -123,6 +123,10 @@ export type FleetVehicle = {
   odometerKm: number;
   avgMileage: number;
   primaryRouteId: string;
+  /** Bus photo URL for Fee Take / parent comms */
+  photoUrl?: string;
+  /** Passenger capacity for route planning */
+  seatCapacity?: number;
   status: VehicleStatus;
   compliance: VehicleComplianceDoc[];
   serviceSchedule: ServiceScheduleItem[];
@@ -359,6 +363,8 @@ export type TransportPeriodDue = {
   routeName: string;
   busNo: string;
   vehicleReg: string;
+  vehicleId: string;
+  vehiclePhotoUrl: string;
   stopName: string;
   periodKey: string;
   periodLabel: string;
@@ -499,6 +505,8 @@ function normalizeVehicle(v: Partial<FleetVehicle>): FleetVehicle {
     odometerKm: Math.max(0, Number(v.odometerKm) || 0),
     avgMileage: Math.max(0, Number(v.avgMileage) || 0),
     primaryRouteId: v.primaryRouteId ?? "",
+    photoUrl: v.photoUrl?.trim() || "",
+    seatCapacity: Math.max(1, Number(v.seatCapacity) || 40),
     status: (v.status as VehicleStatus) || "active",
     compliance: Array.isArray(v.compliance) ? v.compliance : [],
     serviceSchedule: Array.isArray(v.serviceSchedule) ? v.serviceSchedule : [],
@@ -784,6 +792,8 @@ export function computeTransportPeriodDues(
         routeName: route.name,
         busNo,
         vehicleReg,
+        vehicleId: veh?.id || route.vehicleId || "",
+        vehiclePhotoUrl: veh?.photoUrl || "",
         stopName: stop?.name ?? "Stop",
         periodKey,
         periodLabel: periodLabel(periodKey),
@@ -963,7 +973,39 @@ export function assignStudentToRoute(input: {
     ...state,
     assignments: [assignment, ...nextAssignments],
   });
+  saveTransport(alignVehiclesToRoutes(loadTransport()));
   return { ok: true, assignment };
+}
+
+/** Sync vehicle.primaryRouteId ↔ route.vehicleId from fleet records. */
+export function alignVehiclesToRoutes(state: TransportState): TransportState {
+  const vehicles = state.vehicles.map((v) => {
+    const linked = state.routes.find(
+      (r) => r.isActive !== false && r.vehicleId === v.id,
+    );
+    if (linked && v.primaryRouteId !== linked.id) {
+      return { ...v, primaryRouteId: linked.id };
+    }
+    return v;
+  });
+
+  const routes = state.routes.map((r) => {
+    if (!r.vehicleId && r.busNo) {
+      const veh = vehicles.find(
+        (v) =>
+          v.isActive &&
+          (v.registrationNo === r.vehicleReg ||
+            v.name === r.busNo ||
+            v.registrationNo === r.busNo),
+      );
+      if (veh) {
+        return { ...r, vehicleId: veh.id, vehicleReg: veh.registrationNo };
+      }
+    }
+    return r;
+  });
+
+  return { ...state, vehicles, routes };
 }
 
 export function endTransportAssignment(

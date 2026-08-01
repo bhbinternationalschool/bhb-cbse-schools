@@ -101,8 +101,13 @@ export type TransportDueDetail = {
   routeName: string;
   busNo: string;
   vehicleReg: string;
+  vehicleId: string;
+  vehiclePhotoUrl: string;
   stopName: string;
   periodLabel: string;
+  periodKey: string;
+  effectiveFrom: string;
+  monthlyFeePaise: number;
 };
 
 export type TenderMode =
@@ -1406,6 +1411,43 @@ export function feesStateIsEmpty(state: FeesState): boolean {
   );
 }
 
+const FEES_MIRROR_META = "bhb_fees_mirror_meta_v1";
+
+function readFeesMirrorMeta(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    const raw = localStorage.getItem(FEES_MIRROR_META);
+    if (!raw) return "";
+    return String((JSON.parse(raw) as { updatedAt?: string }).updatedAt || "");
+  } catch {
+    return "";
+  }
+}
+
+function writeFeesMirrorMeta(iso: string) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(FEES_MIRROR_META, JSON.stringify({ updatedAt: iso }));
+}
+
+export function hydrateFeesFromMirror(
+  raw: unknown,
+  remoteAt: string,
+  remoteIsNewer: boolean,
+): boolean {
+  if (!raw || typeof raw !== "object") return false;
+  const local = loadFees();
+  const localAt = readFeesMirrorMeta();
+  const takeRemote =
+    remoteIsNewer ||
+    feesStateIsEmpty(local) ||
+    !localAt ||
+    (remoteAt && remoteAt > localAt);
+  if (!takeRemote) return false;
+  writeFeesLocalRaw(raw as FeesState);
+  writeFeesMirrorMeta(remoteAt || new Date().toISOString());
+  return true;
+}
+
 function normalizeVoucherLine(l: Partial<VoucherLine>): VoucherLine {
   const kind: DueKind =
     l.kind === "special" ||
@@ -1958,8 +2000,15 @@ export function computeStudentDues(
         routeName: td.routeName,
         busNo: td.busNo,
         vehicleReg: td.vehicleReg,
+        vehicleId: td.vehicleId,
+        vehiclePhotoUrl: td.vehiclePhotoUrl,
         stopName: td.stopName,
         periodLabel: td.periodLabel,
+        periodKey: td.periodKey,
+        effectiveFrom:
+          transport.assignments.find((a) => a.id === td.assignmentId)
+            ?.effectiveFrom ?? "",
+        monthlyFeePaise: td.amountPaise,
       },
       dueOn: td.dueOn,
       billedPaise: td.amountPaise,

@@ -7,6 +7,7 @@ import type {
   DashboardKpi,
   ModuleDashboardModel,
 } from "@/components/dashboard/ModuleDashboard";
+import { feePositionLayers } from "@/lib/dashboardChartRings";
 import { computeFeeKpis } from "@/lib/feeFinance";
 import {
   computeStudentDues,
@@ -56,7 +57,8 @@ function voucherModeSummary(v: CollectionVoucher): string {
   return modes.length ? modes.join(", ") : "—";
 }
 
-function aggregateModeBreakupRupees(
+/** Session-wide collection totals by payment mode (rupees). */
+export function feeCollectionModeBreakupRupees(
   vouchers: CollectionVoucher[],
 ): { label: string; value: number }[] {
   const map = new Map<string, number>();
@@ -94,7 +96,7 @@ function collectionTrendSeries(
       label: dayLabel(d),
       date: d,
       value: Math.round(sum / 100),
-      modeBreakup: aggregateModeBreakupRupees(dayVouchers),
+      modeBreakup: feeCollectionModeBreakupRupees(dayVouchers),
     };
   });
 }
@@ -113,7 +115,7 @@ export function buildFeesDashboardModel(
     (v) => !v.voidedAt && inAcademicYear(v, ay),
   );
   const todayVouchers = vouchers.filter((v) => v.collectionDate === today);
-  const todayModeBreakup = aggregateModeBreakupRupees(todayVouchers);
+  const todayModeBreakup = feeCollectionModeBreakupRupees(todayVouchers);
 
   const days7 = lastNDays(7);
   const days30 = lastNDays(30);
@@ -299,12 +301,21 @@ export function buildFeesDashboardModel(
     },
   ];
 
+  const sessionModeBreakup = feeCollectionModeBreakupRupees(vouchers);
+
   return {
     title: "Fees",
-    subtitle: `Session ${kpi.academicYearCode} · collection, dues, and arrears.`,
+    subtitle: `Session ${kpi.academicYearCode} · collection, dues, and arrears. Switch to pie for dual-ring fee position.`,
     kpis,
     chartTitle: "Collections — last 7 days",
     chartSeries: trend7,
+    ...feePositionLayers(
+      kpi.collectedPaise,
+      kpi.openPaise,
+      kpi.arrearsPaise,
+      sessionModeBreakup,
+      formatInrCompact(kpi.collectedPaise),
+    ),
     chartDefaultView: "bar",
     chartRanges: [
       {

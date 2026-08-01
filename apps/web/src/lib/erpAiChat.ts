@@ -31,6 +31,10 @@ export type ErpAiMessage = {
   text: string;
   at: string;
   links?: ErpAiLink[];
+  /** Contextual first-visit page tour */
+  guideId?: string;
+  pageLabel?: string;
+  steps?: string[];
 };
 
 export type ErpAiQuickPrompt = {
