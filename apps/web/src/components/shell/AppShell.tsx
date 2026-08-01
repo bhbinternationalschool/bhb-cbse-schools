@@ -12,6 +12,8 @@ import { StaffInternalChatButton } from "./StaffInternalChatButton";
 import { CommsRunningStrip } from "./CommsRunningStrip";
 import { ErpAiChatbot } from "./ErpAiChatbot";
 import { ErpSidebar, ErpSidebarMenuButton } from "./ErpSidebar";
+import { PwaInstallBanner } from "@/components/pwa/PwaInstallBanner";
+import { staffPwaInstallCopy } from "@/lib/pwaApps";
 import { TENANT } from "@/lib/types";
 import type { DemoSession } from "@/lib/auth";
 import { SessionProvider } from "./SessionContext";
@@ -93,6 +95,7 @@ export function AppShell({
     years.find((y) => y.code === session.academicYearCode) ??
     years.find((y) => y.status === "current");
   const readOnly = ay?.status === "closed";
+  const staffPwa = staffPwaInstallCopy(session.roleCode);
 
   useEffect(() => {
     setSessionWriteLock({
@@ -215,6 +218,13 @@ export function AppShell({
           </div>
           <CommsRunningStrip audience="staff" />
         </header>
+        <PwaInstallBanner
+          appId="staff"
+          title={staffPwa.title}
+          subtitle={staffPwa.subtitle}
+          iosHint={staffPwa.iosHint}
+          className="px-4 pt-2 sm:px-6"
+        />
         {readOnly ? (
           <div className="border-b border-[rgba(197,160,40,0.35)] bg-[rgba(197,160,40,0.12)] px-4 py-2 text-center text-xs font-medium text-[var(--brand-deep)] sm:px-6">
             Session {session.academicYearCode} is closed — viewing only. Switch

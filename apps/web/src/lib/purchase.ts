@@ -18,6 +18,7 @@ import {
   type ReportColumn,
 } from "@/lib/reportExport";
 import { adjustStock, loadStore } from "@/lib/store";
+import { parseBillOcrFromText } from "@/lib/ocrParse";
 import { TENANT } from "@/lib/types";
 
 const STORAGE_KEY = "bhb_purchase_v1";
@@ -1340,13 +1341,20 @@ export type BillOcrSuggestion = {
   dueOn: string;
   amountPaise: number;
   note: string;
-  /** Demo confidence label */
-  confidence: "demo_high" | "demo_medium" | "demo_low";
+  /** Demo or Vision confidence label */
+  confidence:
+    | "vision_high"
+    | "vision_medium"
+    | "vision_low"
+    | "demo_high"
+    | "demo_medium"
+    | "demo_low";
+  rawTextPreview?: string;
 };
 
 /**
- * Demo bill OCR: parses invoice # / ₹ amount from file name + note.
- * Swap for real vision/OCR API later (§6f.1).
+ * Demo / offline bill OCR: parses invoice # / ₹ amount from file name + note.
+ * Prefer POST /api/ocr/bill with image for Google Vision.
  */
 export function suggestBillOcr(input: {
   fileName?: string;
@@ -1354,44 +1362,11 @@ export function suggestBillOcr(input: {
   fallbackAmountPaise: number;
   billDate?: string;
 }): BillOcrSuggestion {
-  const billDate = input.billDate || todayIso();
-  const blob = `${input.fileName || ""} ${input.photoNote || ""}`;
-  const invMatch =
-    blob.match(/(?:inv|invoice|bill)[\s\-_:#]*([A-Z0-9\-\/]{3,20})/i) ||
-    blob.match(/\b([A-Z]{2,4}[\-\/]?\d{3,8})\b/);
-  const amtMatch =
-    blob.match(/₹\s*([\d,]+(?:\.\d{1,2})?)/) ||
-    blob.match(/(?:rs\.?|inr)\s*([\d,]+(?:\.\d{1,2})?)/i) ||
-    blob.match(/\b([\d,]{3,})\s*(?:rs|inr)?\b/i);
-
-  let amountPaise = input.fallbackAmountPaise;
-  let confidence: BillOcrSuggestion["confidence"] = "demo_low";
-  if (amtMatch) {
-    const n = Number(String(amtMatch[1]).replace(/,/g, ""));
-    if (Number.isFinite(n) && n > 0) {
-      amountPaise = Math.round(n * 100);
-      confidence = "demo_high";
-    }
-  } else if (input.fallbackAmountPaise > 0) {
-    confidence = "demo_medium";
-  }
-
-  const billNo = invMatch?.[1]
-    ? invMatch[1].toUpperCase()
-    : `INV-${billDate.replace(/-/g, "").slice(2)}`;
-
-  const due = new Date(billDate + "T00:00:00");
-  due.setDate(due.getDate() + 15);
-  const dueOn = due.toISOString().slice(0, 10);
-
-  return {
-    billNo,
-    billDate,
-    dueOn,
-    amountPaise,
-    note: invMatch || amtMatch
-      ? "Parsed from scan / note (demo OCR)"
-      : "No invoice # or amount found — using PO line totals",
-    confidence,
-  };
+  return parseBillOcrFromText(`${input.fileName || ""} ${input.photoNote || ""}`, {
+    fallbackAmountPaise: input.fallbackAmountPaise,
+    billDate: input.billDate,
+    fileName: input.fileName,
+    photoNote: input.photoNote,
+    engine: "demo",
+  });
 }

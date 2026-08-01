@@ -137,6 +137,23 @@ export async function listWaCrmBotThreads(): Promise<WaCrmBotThread[]> {
   );
 }
 
+export async function markWaCrmBotThreadRead(
+  threadId: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  let store = await readStore();
+  const thread = store.threads.find((t) => t.id === threadId);
+  if (!thread) return { ok: false, reason: "Thread not found" };
+  if (!thread.unreadStaff) return { ok: true };
+
+  const next: WaCrmBotThread = { ...thread, unreadStaff: 0, updatedAt: nowIso() };
+  store = {
+    ...store,
+    threads: store.threads.map((t) => (t.id === threadId ? next : t)),
+  };
+  await writeStore(store);
+  return { ok: true };
+}
+
 export async function staffReplyWaCrmBot(opts: {
   threadId: string;
   text: string;
@@ -198,6 +215,10 @@ export async function handleWaCrmBotInbound(opts: {
   text: string;
   waMessageId?: string;
   profileName?: string;
+  /** Routed via unified school bot — skip generic admissions welcome on Hi. */
+  fromUnified?: boolean;
+  visitorName?: string;
+  forceEscalate?: boolean;
 }): Promise<{
   replied: boolean;
   escalate: boolean;
@@ -218,7 +239,9 @@ export async function handleWaCrmBotInbound(opts: {
   }
 
   let store = await readStore();
-  const opened = findOrCreateThread(store, mobile10, opts.profileName);
+  const profile =
+    opts.visitorName?.trim() || opts.profileName?.trim() || "";
+  const opened = findOrCreateThread(store, mobile10, profile);
   store = opened.store;
   let thread = opened.thread;
 
@@ -227,13 +250,18 @@ export async function handleWaCrmBotInbound(opts: {
     role: "parent",
     text: text || "(open)",
     at: nowIso(),
-    by: thread.parentName || "Parent",
+    by: thread.parentName || profile || "Parent",
     waMessageId: opts.waMessageId,
   };
 
   const isGreeting =
-    !text || /^(hi|hello|namaste|hey|start|menu)$/i.test(text);
-  const intent = isGreeting ? ("unknown" as const) : detectCrmBotIntent(text);
+    !opts.fromUnified &&
+    (!text || /^(hi|hello|namaste|hey|start|menu)$/i.test(text));
+  const intent = opts.forceEscalate
+    ? ("human" as const)
+    : isGreeting
+      ? ("unknown" as const)
+      : detectCrmBotIntent(text);
   const { findAdmissionLeadByMobile, loadAdmissions, stageLabel } =
     await import("@/lib/admissions");
   const leadRow = findAdmissionLeadByMobile(loadAdmissions(), mobile10);
@@ -250,7 +278,11 @@ export async function handleWaCrmBotInbound(opts: {
     lead: leadCtx,
   });
   let replyText = bot.text;
-  if (isGreeting && leadRow) {
+  if (opts.fromUnified && intent === "unknown" && !opts.forceEscalate) {
+    replyText =
+      "Reply *FEE* · *REGISTER* · *DOCS* · *STATUS* · *VISIT* · *HUMAN* — or *MENU* for the main school menu.";
+  }
+  if (isGreeting && leadRow && !opts.fromUnified) {
     replyText = [
       `Namaste${opts.profileName ? ` ${opts.profileName}` : ""} — *${TENANT.nameDisplay} Admissions*.`,
       leadRow.childName
@@ -279,7 +311,8 @@ export async function handleWaCrmBotInbound(opts: {
       : thread.status === "closed"
         ? "bot"
         : thread.status || "bot",
-    unreadStaff: bot.escalate ? thread.unreadStaff + 1 : thread.unreadStaff,
+    // Every parent message should surface in Admissions → WhatsApp bot inbox.
+    unreadStaff: thread.unreadStaff + 1,
     messages: [...thread.messages, parentMsg, botMsg],
     updatedAt: nowIso(),
   };

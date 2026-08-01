@@ -6,6 +6,7 @@ import { Megaphone, Newspaper, Images, Bell, MessagesSquare } from "lucide-react
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ClassChannelsPanel } from "@/components/comms/ClassChannelsPanel";
+import { WaChatHubPanel } from "@/components/comms/WaChatHubPanel";
 import {
   addGalleryPhoto,
   audienceLabel,
@@ -40,13 +41,14 @@ import {
 import { uploadSchoolObject } from "@/lib/objectStorage";
 import { TENANT } from "@/lib/types";
 
-type CommsTab = "notices" | "news" | "gallery" | "inbox" | "channels";
+type CommsTab = "notices" | "news" | "gallery" | "inbox" | "channels" | "wa_hub";
 
 const TABS: ModuleTabItem[] = [
   { id: "notices", label: "Notices", tone: "navy" },
   { id: "news", label: "News", tone: "teal" },
   { id: "gallery", label: "Gallery", tone: "amber" },
   { id: "channels", label: "Class WA", tone: "violet" },
+  { id: "wa_hub", label: "WhatsApp hub", tone: "teal" },
   { id: "inbox", label: "Inbox", tone: "slate" },
 ];
 
@@ -66,7 +68,8 @@ function tabFromSearch(raw: string | null, path: string): CommsTab {
     raw === "gallery" ||
     raw === "inbox" ||
     raw === "notices" ||
-    raw === "channels"
+    raw === "channels" ||
+    raw === "wa_hub"
   ) {
     return raw;
   }
@@ -692,6 +695,10 @@ export function CommsWorkspace() {
       ) : null}
 
       {tab === "channels" ? <ClassChannelsPanel /> : null}
+
+      {tab === "wa_hub" ? (
+        <WaChatHubPanel by={session.fullName} canEdit />
+      ) : null}
 
       {tab === "inbox" ? (
         <section className="space-y-3">

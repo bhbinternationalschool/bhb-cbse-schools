@@ -1,8 +1,30 @@
+import type { Metadata, Viewport } from "next";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { AppShell } from "@/components/shell/AppShell";
 import { ErpModuleGate } from "@/components/shell/ErpModuleGate";
 import { getDemoSession } from "@/lib/auth";
+import { pwaManifestHref } from "@/lib/pwaApps";
+import { TENANT } from "@/lib/types";
+
+export const metadata: Metadata = {
+  title: "Staff ERP",
+  description: "BHB International School ERP — teachers, principal, admin.",
+  applicationName: "BHB Staff",
+  manifest: pwaManifestHref("staff"),
+  appleWebApp: {
+    capable: true,
+    title: "BHB Staff",
+    statusBarStyle: "black-translucent",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: TENANT.primaryColor,
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+};
 
 export default async function AuthenticatedLayout({
   children,
@@ -14,14 +36,16 @@ export default async function AuthenticatedLayout({
   if (session.persona === "parent") redirect("/parent");
   if (session.persona === "field") redirect("/field");
   return (
-    <AppShell session={session}>
-      <Suspense
-        fallback={
-          <div className="p-6 text-sm text-[var(--muted)]">Loading…</div>
-        }
-      >
-        <ErpModuleGate>{children}</ErpModuleGate>
-      </Suspense>
-    </AppShell>
+    <div className="bhb-pwa-staff min-h-dvh">
+      <AppShell session={session}>
+        <Suspense
+          fallback={
+            <div className="p-6 text-sm text-[var(--muted)]">Loading…</div>
+          }
+        >
+          <ErpModuleGate>{children}</ErpModuleGate>
+        </Suspense>
+      </AppShell>
+    </div>
   );
 }

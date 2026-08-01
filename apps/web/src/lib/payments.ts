@@ -63,6 +63,10 @@ export type PaymentLink = {
   voucherId: string | null;
   receiptNo: string | null;
   note: string;
+  /** Live PG checkout (Razorpay payment link short_url). */
+  gatewayMode?: "demo" | "razorpay" | "cashfree";
+  gatewayCheckoutUrl?: string;
+  gatewayExternalId?: string;
 };
 
 export type PaymentsState = {
@@ -219,6 +223,9 @@ function normalizeLink(l: PaymentLink): PaymentLink {
     voucherId: l.voucherId ?? null,
     receiptNo: l.receiptNo ?? null,
     note: l.note || "",
+    gatewayMode: l.gatewayMode,
+    gatewayCheckoutUrl: l.gatewayCheckoutUrl,
+    gatewayExternalId: l.gatewayExternalId,
   };
 }
 
@@ -330,6 +337,26 @@ export function createPaymentLink(input: {
   return { ok: true, link };
 }
 
+export function patchPaymentLink(
+  linkId: string,
+  patch: Partial<
+    Pick<
+      PaymentLink,
+      "gatewayMode" | "gatewayCheckoutUrl" | "gatewayExternalId"
+    >
+  >,
+): PaymentLink | null {
+  const state = loadPayments();
+  const link = state.links.find((l) => l.id === linkId);
+  if (!link) return null;
+  const updated: PaymentLink = { ...link, ...patch };
+  savePayments({
+    version: 1,
+    links: state.links.map((l) => (l.id === linkId ? updated : l)),
+  });
+  return updated;
+}
+
 export function cancelPaymentLink(linkId: string): boolean {
   const state = loadPayments();
   const link = state.links.find((l) => l.id === linkId);
@@ -358,7 +385,7 @@ export function resolveOpenLinesForLink(
     sis,
     masters,
     fees,
-    { includeFuture: true },
+    { includeFuture: false },
   );
   const dues = bundle.flatMap((row) => row.dues);
   const byKey = new Map(dues.map((d) => [d.dueKey, d]));
@@ -602,10 +629,13 @@ export function composeWhatsAppPaymentLinkMessage(
     `Amount: *${formatInr(link.amountPaise)}*`,
     `Valid till: ${link.expiresOn}`,
     "",
-    "Pay online:",
+    "Pay with GPay / UPI:",
     payUrl,
     "",
-    "Or pay via UPI at the school counter and share the UTR.",
+    "1️⃣ Open link → pay in Google Pay / UPI",
+    "2️⃣ Tap *Confirm paid* on the page for receipt",
+    "",
+    "Or pay at school counter and share UTR.",
   ];
   return lines.join("\n");
 }

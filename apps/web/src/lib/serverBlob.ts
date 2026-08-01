@@ -10,7 +10,8 @@ export type ServerBlobTable =
   | "wa_bot_threads_state"
   | "fees_state"
   | "payments_state"
-  | "admissions_state";
+  | "admissions_state"
+  | "staff_attendance_state";
 
 export async function fetchServerBlob<T>(
   table: ServerBlobTable,

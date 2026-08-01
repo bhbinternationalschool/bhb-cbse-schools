@@ -290,7 +290,7 @@ export async function getWhatsAppSetupReport(): Promise<WhatsAppSetupReport> {
       "POST /api/wa/setup with { \"action\": \"subscribe\" } or re-run deploy (bootstrap subscribes automatically).",
     );
   }
-  if (phoneHealth.codeVerificationStatus === "EXPIRED") {
+  if (phoneHealth.codeVerificationStatus === "EXPIRED" && !phoneHealth.canSendMessage) {
     issues.push(
       "Phone number OTP verification is EXPIRED in Meta (may affect registration).",
     );

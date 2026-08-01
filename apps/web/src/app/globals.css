@@ -772,3 +772,13 @@ h3,
   }
 }
 
+/* Parent PWA — standalone / home-screen install */
+.parent-pwa-shell {
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+@media (display-mode: standalone) {
+  .parent-pwa-shell {
+    padding-top: env(safe-area-inset-top, 0);
+  }
+}

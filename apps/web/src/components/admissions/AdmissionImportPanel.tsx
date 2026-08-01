@@ -21,6 +21,7 @@ import {
   mapEnquirySurveyRows,
   mapFieldLeadsRows,
 } from "@/lib/admissionsExcelImport";
+import { GoogleLeadWebhookPanel } from "@/components/admissions/GoogleLeadWebhookPanel";
 
 export function AdmissionImportPanel({
   state,
@@ -186,6 +187,7 @@ export function AdmissionImportPanel({
 
   return (
     <div className="space-y-3">
+      <GoogleLeadWebhookPanel />
       <p className="text-[12px] text-[var(--muted)]">
         Upload older / offline leads (CSV or Excel). Field_Leads.xlsx and
         BHB_School_Enquiry_Survey.xlsx are mapped automatically. Choose default

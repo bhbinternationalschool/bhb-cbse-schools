@@ -8,11 +8,11 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { NextResponse } from "next/server";
 import {
-  applyPaymentLink,
   getPaymentLink,
   getPaymentLinkByCode,
   loadPayments,
 } from "@/lib/payments";
+import { settlePaymentLinkWithWhatsApp } from "@/lib/paymentSettlement.server";
 import { ensureSchoolMirrorLoaded } from "@/lib/schoolDataMirror.server";
 
 export const runtime = "nodejs";
@@ -38,11 +38,29 @@ function extractLinkRef(payload: Record<string, unknown>): {
   code?: string;
   paymentId?: string;
 } {
+  const inner = (payload.payload || {}) as Record<string, unknown>;
+
+  const paymentLink = (
+    inner.payment_link as { entity?: Record<string, unknown> } | undefined
+  )?.entity;
+  if (paymentLink) {
+    const notes = (paymentLink.notes || {}) as Record<string, string>;
+    const payment = (
+      inner.payment as { entity?: Record<string, unknown> } | undefined
+    )?.entity;
+    return {
+      linkId: notes.linkId || notes.link_id,
+      code: notes.code || notes.pay_link_code || notes.payment_link_code,
+      paymentId: String(
+        payment?.id || paymentLink.id || paymentLink.order_id || "",
+      ),
+    };
+  }
+
   const payment =
-    (payload.payload as { payment?: { entity?: Record<string, unknown> } })
-      ?.payment?.entity ||
-    (payload.payload as { order?: { entity?: Record<string, unknown> } })?.order
+    (inner.payment as { entity?: Record<string, unknown> } | undefined)
       ?.entity ||
+    (inner.order as { entity?: Record<string, unknown> } | undefined)?.entity ||
     {};
   const notes = (payment.notes || {}) as Record<string, string>;
   const linkId = notes.linkId || notes.link_id || notes.payment_link_id;
@@ -61,7 +79,7 @@ export async function GET() {
     service: "razorpay-webhook",
     configured,
     note: configured
-      ? "POST payment.captured / order.paid events here"
+      ? "POST payment.captured / payment_link.paid events here"
       : "Set RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET",
   });
 }
@@ -126,10 +144,11 @@ export async function POST(req: Request) {
     });
   }
 
-  const result = applyPaymentLink({
+  const result = await settlePaymentLinkWithWhatsApp({
     linkId: link.id,
     cashierName: "Razorpay webhook",
     upiRef: paymentId || `RZ_${Date.now().toString(36).toUpperCase()}`,
+    sendWhatsApp: true,
   });
 
   if (!result.ok) {
@@ -141,5 +160,6 @@ export async function POST(req: Request) {
     receiptNo: result.receiptNo,
     voucherId: result.voucherId,
     linkId: result.link.id,
+    whatsappReceipt: result.whatsappReceipt,
   });
 }

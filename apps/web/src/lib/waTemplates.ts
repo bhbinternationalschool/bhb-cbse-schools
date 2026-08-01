@@ -709,6 +709,8 @@ export function updateTemplateLocal(
       | "status"
       | "metaName"
       | "rejectionReason"
+      | "footer"
+      | "buttons"
     >
   >,
   by: string,
@@ -730,6 +732,219 @@ export function updateTemplateLocal(
     by,
     "update",
     `Updated ${id}`,
+  );
+}
+
+/** Sample values for Meta template review examples. */
+export function sampleValueForWaVar(name: string): string {
+  const samples: Record<string, string> = {
+    guardianName: "Priya Sharma",
+    childName: "Aarav",
+    studentName: "Aarav",
+    schoolName: "BHB International School",
+    registerLink: "https://bhbinternational.school/register",
+    payLink: "https://bhbinternational.school/pay",
+    feeDue: "₹5,000",
+    amount: "₹5,000",
+    dueDate: "15 Aug 2026",
+    className: "Class 5A",
+    date: "22 Jul 2026",
+    time: "10:00 AM",
+    otp: "123456",
+  };
+  return samples[name] || name.slice(0, 20) || "Sample";
+}
+
+function positionalizeTemplateText(
+  text: string,
+  variables: string[],
+): { text: string; examples: string[] } {
+  let out = text;
+  const examples: string[] = [];
+  variables.forEach((v, i) => {
+    const re = new RegExp(`\\{\\{\\s*${escapeRegExp(v)}\\s*\\}\\}`, "g");
+    out = out.replace(re, `{{${i + 1}}}`);
+    examples.push(sampleValueForWaVar(v));
+  });
+  return { text: out, examples };
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Build Meta Graph API payload to create + submit a message template. */
+export function buildMetaTemplateCreatePayload(template: WaTemplate): {
+  name: string;
+  language: string;
+  category: WaTemplateCategory;
+  components: Record<string, unknown>[];
+  warnings: string[];
+} {
+  const warnings: string[] = [];
+  const components: Record<string, unknown>[] = [];
+
+  if (template.headerFormat === "TEXT" && template.headerText.trim()) {
+    const vars = extractVariables(template.headerText);
+    const pos = positionalizeTemplateText(template.headerText, vars);
+    components.push({
+      type: "HEADER",
+      format: "TEXT",
+      text: pos.text.slice(0, 60),
+      ...(vars.length ? { example: { header_text: pos.examples } } : {}),
+    });
+  } else if (
+    template.headerFormat !== "NONE" &&
+    template.headerFormat !== "TEXT"
+  ) {
+    warnings.push(
+      `Media header (${template.headerFormat}) — create in ERP as draft, then add image/video in Meta once approved, or use a TEXT header for auto-submit.`,
+    );
+  }
+
+  const bodyVars = extractVariables(template.body);
+  const bodyPos = positionalizeTemplateText(template.body, bodyVars);
+  components.push({
+    type: "BODY",
+    text: bodyPos.text.slice(0, 1024),
+    example: {
+      body_text: [
+        bodyVars.length ? bodyPos.examples : ["Sample"],
+      ],
+    },
+  });
+
+  if (template.footer.trim()) {
+    components.push({
+      type: "FOOTER",
+      text: template.footer.slice(0, 60),
+    });
+  }
+
+  if (template.buttons.length) {
+    const buttons = template.buttons.slice(0, 3).map((b) => {
+      if (b.type === "QUICK_REPLY") {
+        return { type: "QUICK_REPLY", text: b.text.slice(0, 25) };
+      }
+      if (b.type === "URL") {
+        const url = (b.url || "https://bhbinternational.school").slice(0, 2000);
+        const hasVar = /\{\{/.test(url);
+        return {
+          type: "URL",
+          text: b.text.slice(0, 25),
+          url,
+          ...(hasVar
+            ? {
+                example: [
+                  url.replace(/\{\{[^}]+\}\}/g, "sample"),
+                ],
+              }
+            : {}),
+        };
+      }
+      return {
+        type: "PHONE_NUMBER",
+        text: b.text.slice(0, 25),
+        phone_number: (b.phoneNumber || "+919451938805").replace(/\s/g, ""),
+      };
+    });
+    components.push({ type: "BUTTONS", buttons });
+  }
+
+  const metaName = (template.metaName || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "_")
+    .slice(0, 512);
+  if (!metaName) {
+    warnings.push("Meta template name is required (snake_case, e.g. bhb_fee_reminder).");
+  }
+
+  return {
+    name: metaName,
+    language: template.metaLanguage || template.language,
+    category: template.category,
+    components,
+    warnings,
+  };
+}
+
+export function createDraftWaTemplate(
+  state: WaTemplatesState,
+  opts: {
+    name: string;
+    metaName: string;
+    module: WaTemplateModule;
+    category?: WaTemplateCategory;
+    language: WaTemplateLanguage;
+    body: string;
+    footer?: string;
+    buttons?: WaTemplateButton[];
+    by: string;
+  },
+): WaTemplatesState {
+  const body = opts.body.trim();
+  const metaName = opts.metaName
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "_");
+  const tpl: WaTemplate = {
+    id: nid("wtp"),
+    familyKey: `custom_${metaName}`,
+    name: opts.name.trim() || metaName,
+    module: opts.module,
+    category: opts.category || "UTILITY",
+    language: opts.language,
+    status: "draft",
+    metaName,
+    metaLanguage: opts.language,
+    metaTemplateId: "",
+    rejectionReason: "",
+    syncedAt: "",
+    headerFormat: "NONE",
+    headerText: "",
+    body,
+    footer: opts.footer || "",
+    buttons: opts.buttons || [],
+    variables: extractVariables(body),
+    mediaUrl: "",
+    carousel: [],
+    localFallbackBody: body,
+    paused: false,
+    updatedAt: nowIso(),
+    createdAt: nowIso(),
+  };
+  return appendWaTemplatesAudit(
+    { ...state, templates: [...state.templates, tpl] },
+    opts.by,
+    "create_draft",
+    tpl.metaName,
+  );
+}
+
+export function markTemplateSubmittedToMeta(
+  state: WaTemplatesState,
+  id: string,
+  metaTemplateId: string,
+  by: string,
+): WaTemplatesState {
+  const templates = state.templates.map((t) =>
+    t.id === id
+      ? {
+          ...t,
+          status: "pending" as const,
+          metaTemplateId,
+          rejectionReason: "",
+          syncedAt: nowIso(),
+          updatedAt: nowIso(),
+        }
+      : t,
+  );
+  return appendWaTemplatesAudit(
+    { ...state, templates, lastMetaSyncAt: nowIso() },
+    by,
+    "submit_meta",
+    metaTemplateId,
   );
 }
 

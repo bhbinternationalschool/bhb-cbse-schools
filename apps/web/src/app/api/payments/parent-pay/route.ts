@@ -3,14 +3,9 @@
  */
 
 import { NextResponse } from "next/server";
-import {
-  applyPaymentLink,
-  getPaymentLink,
-  loadPayments,
-} from "@/lib/payments";
+import { getPaymentLink, loadPayments } from "@/lib/payments";
+import { settlePaymentLinkWithWhatsApp } from "@/lib/paymentSettlement.server";
 import { ensureSchoolMirrorLoaded } from "@/lib/schoolDataMirror.server";
-import { sendSisFeeReceiptOnWhatsApp } from "@/lib/waSisBotServer";
-import { loadSis, householdWhatsApp } from "@/lib/sis";
 
 export const runtime = "nodejs";
 
@@ -40,26 +35,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "linkId required" }, { status: 400 });
   }
 
-  const result = applyPaymentLink({
+  const result = await settlePaymentLinkWithWhatsApp({
     linkId: body.linkId,
     cashierName: "Parent UPI (WhatsApp / pay link)",
     upiRef: body.upiRef,
+    sendWhatsApp: body.sendWhatsApp,
   });
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: 400 });
-  }
-
-  let wa: { ok: boolean; error?: string } | null = null;
-  if (body.sendWhatsApp !== false) {
-    const sis = loadSis();
-    const hh = sis.households.find((h) => h.id === result.link.householdId);
-    const mobile = hh ? householdWhatsApp(hh) || hh.mobile || "" : "";
-    if (mobile) {
-      wa = await sendSisFeeReceiptOnWhatsApp({
-        mobile,
-        voucherId: result.voucherId,
-      });
-    }
   }
 
   return NextResponse.json({
@@ -67,6 +50,6 @@ export async function POST(req: Request) {
     receiptNo: result.receiptNo,
     voucherId: result.voucherId,
     link: result.link,
-    whatsappReceipt: wa,
+    whatsappReceipt: result.whatsappReceipt,
   });
 }

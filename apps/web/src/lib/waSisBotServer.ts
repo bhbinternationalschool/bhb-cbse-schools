@@ -21,7 +21,6 @@ import { loadMasters } from "@/lib/masters";
 import {
   buildPaymentSharePayload,
   buildPaymentShareUrlAbsolute,
-  composeWhatsAppPaymentLinkMessage,
   createPaymentLink,
 } from "@/lib/payments";
 import {
@@ -37,11 +36,13 @@ import {
   composeSisPayReply,
   composeSisReceiptsReply,
   detectSisBotIntent,
+  parseSisPaySelection,
   sisBotWelcomeText,
   type SisBotChildLine,
   type SisBotDueLine,
 } from "@/lib/sisParentBotEngine";
-import { loadSis, type Household, type SisStudent } from "@/lib/sis";
+import { attachRazorpayToPaymentLink } from "@/lib/razorpay.server";
+import { loadSis, householdWhatsApp, type Household, type SisStudent } from "@/lib/sis";
 import { TENANT } from "@/lib/types";
 import { sendWhatsAppText, waNormalizeLocal10 } from "@/lib/waSend";
 
@@ -146,17 +147,24 @@ function childrenOf(hh: Household): SisStudent[] {
   );
 }
 
-function flattenOpenDues(hhId: string): FeeDueLine[] {
+function flattenOpenDues(
+  hhId: string,
+  studentId?: string,
+): FeeDueLine[] {
   const rows = computeHouseholdDues(
     hhId,
     loadSis(),
     loadMasters(),
     loadFees(),
-    { includeFuture: true },
+    { includeFuture: false },
   );
-  return openFeeDues(rows.flatMap((r) => r.dues)).filter(
+  let dues = openFeeDues(rows.flatMap((r) => r.dues)).filter(
     (d) => d.balancePaise > 0,
   );
+  if (studentId) {
+    dues = dues.filter((d) => d.studentId === studentId);
+  }
+  return dues;
 }
 
 function dueStudentName(due: FeeDueLine): string {
@@ -252,9 +260,92 @@ function findOrCreate(
   };
 }
 
+async function buildPayLinkReply(
+  hh: Household,
+  kids: SisStudent[],
+  dues: FeeDueLine[],
+  payLabel: { studentName: string; classLabel: string; studentId: string },
+): Promise<{ text: string; escalate: boolean }> {
+  if (dues.length === 0) {
+    return {
+      escalate: false,
+      text: "No open dues till the current running month. Reply *DUES* to refresh.",
+    };
+  }
+
+  const masters = loadMasters();
+  const created = createPaymentLink({
+    householdId: hh.id,
+    studentId: payLabel.studentId,
+    studentName: payLabel.studentName,
+    classLabel: payLabel.classLabel,
+    dues,
+    createdBy: "SIS WhatsApp bot",
+    note: "Created via parent WhatsApp PAY",
+    expiresInDays: 7,
+  });
+  if (!created.ok) {
+    return { escalate: false, text: created.error };
+  }
+
+  let link = created.link;
+  let payUrl: string;
+  let autoSettle = false;
+  const mobile10 =
+    householdWhatsApp(hh) || hh.mobile || hh.whatsappMobile || "";
+
+  const rz = await attachRazorpayToPaymentLink({
+    link,
+    customerName: hh.guardianName || payLabel.studentName,
+    customerMobile: mobile10,
+    appOrigin: publicAppOrigin(),
+  });
+  if (rz.ok) {
+    link = rz.link;
+    payUrl = rz.checkoutUrl;
+    autoSettle = true;
+  } else {
+    const upi = resolveSchoolCollectionsUpi(masters);
+    const upiUri = buildSchoolUpiPayUri({
+      vpa: upi.vpa,
+      payeeName: upi.payeeName,
+      amountPaise: link.amountPaise,
+      note: `Fees ${link.code}`,
+    });
+    const payload = buildPaymentSharePayload(
+      link,
+      TENANT.nameDisplay,
+      upi.vpa,
+      upiUri,
+    );
+    payUrl = buildPaymentShareUrlAbsolute(publicAppOrigin(), payload);
+  }
+
+  const upi = resolveSchoolCollectionsUpi(masters);
+  const upiUri = buildSchoolUpiPayUri({
+    vpa: upi.vpa,
+    payeeName: upi.payeeName,
+    amountPaise: link.amountPaise,
+    note: `Fees ${link.code}`,
+  });
+
+  return {
+    escalate: false,
+    text: composeSisPayReply({
+      amountPaise: link.amountPaise,
+      payUrl,
+      upiUri: autoSettle ? undefined : upiUri,
+      code: link.code,
+      studentHint: `${payLabel.studentName}${payLabel.classLabel ? ` (${payLabel.classLabel})` : ""}`,
+      autoSettle,
+    }),
+  };
+}
+
 async function buildBotReply(
   hh: Household,
   intent: ReturnType<typeof detectSisBotIntent>,
+  rawText: string,
 ): Promise<{ text: string; escalate: boolean }> {
   const masters = loadMasters();
   const kids = childrenOf(hh);
@@ -283,67 +374,62 @@ async function buildBotReply(
           guardianName: hh.guardianName,
           dueLines,
           totalPaise: total,
-          includeFutureNote: true,
+          runningMonthOnly: true,
         }),
       };
     }
     case "pay": {
-      const dues = flattenOpenDues(hh.id);
+      const payRefs = kids.map((s) => ({ id: s.id, name: s.fullName }));
+      const selection =
+        kids.length <= 1
+          ? ({ scope: "all" } as const)
+          : parseSisPaySelection(rawText, payRefs);
+      if (selection.scope === "invalid") {
+        return { escalate: false, text: selection.message };
+      }
+
+      const studentId =
+        selection.scope === "child" ? selection.studentId : undefined;
+      const dues = flattenOpenDues(hh.id, studentId);
       if (dues.length === 0) {
+        const who =
+          selection.scope === "child"
+            ? ` for *${selection.studentName}*`
+            : "";
         return {
           escalate: false,
-          text: "No open dues to pay. Reply *DUES* to refresh.",
+          text: `No open dues${who} till the current running month. Reply *DUES* to refresh.`,
         };
       }
-      const primary = kids[0];
-      const created = createPaymentLink({
-        householdId: hh.id,
-        studentId: primary?.id || dues[0]!.studentId,
-        studentName:
-          kids.length > 1
-            ? `${hh.guardianName || "Family"} (${kids.length} children)`
-            : primary?.fullName || dueStudentName(dues[0]!),
-        classLabel:
-          kids.length === 1 && primary
-            ? classLabelForStudent(primary, masters)
-            : "Household",
-        dues,
-        createdBy: "SIS WhatsApp bot",
-        note: "Created via parent WhatsApp PAY",
-        expiresInDays: 7,
-      });
-      if (!created.ok) {
-        return { escalate: false, text: created.error };
-      }
-      const upi = resolveSchoolCollectionsUpi(masters);
-      const upiUri = buildSchoolUpiPayUri({
-        vpa: upi.vpa,
-        payeeName: upi.payeeName,
-        amountPaise: created.link.amountPaise,
-        note: `Fees ${created.link.code}`,
-      });
-      const payload = buildPaymentSharePayload(
-        created.link,
-        TENANT.nameDisplay,
-        upi.vpa,
-        upiUri,
-      );
-      const payUrl = buildPaymentShareUrlAbsolute(publicAppOrigin(), payload);
-      const hint = composeWhatsAppPaymentLinkMessage(
-        created.link,
-        payUrl,
-        TENANT.nameDisplay,
-      );
-      return {
-        escalate: false,
-        text: composeSisPayReply({
-          amountPaise: created.link.amountPaise,
-          payUrl,
-          upiUri,
-          code: created.link.code,
-          studentHint: hint.split("\n").slice(3, 5).join("\n"),
-        }),
+
+      let payLabel: {
+        studentName: string;
+        classLabel: string;
+        studentId: string;
       };
+      if (selection.scope === "child") {
+        const st = kids.find((k) => k.id === selection.studentId)!;
+        payLabel = {
+          studentId: st.id,
+          studentName: st.fullName,
+          classLabel: classLabelForStudent(st, masters),
+        };
+      } else if (kids.length > 1) {
+        payLabel = {
+          studentId: kids[0]!.id,
+          studentName: `${hh.guardianName || "Family"} (${kids.length} children)`,
+          classLabel: "Household",
+        };
+      } else {
+        const primary = kids[0]!;
+        payLabel = {
+          studentId: primary.id,
+          studentName: primary.fullName,
+          classLabel: classLabelForStudent(primary, masters),
+        };
+      }
+
+      return buildPayLinkReply(hh, kids, dues, payLabel);
     }
     case "receipts": {
       const rows = householdReceipts(hh.id).map((v) => ({
@@ -358,7 +444,10 @@ async function buildBotReply(
     case "human":
       return { escalate: true, text: composeSisHumanReply() };
     default:
-      return { escalate: false, text: sisBotWelcomeText() };
+      return {
+        escalate: false,
+        text: sisBotWelcomeText(kids.length > 1),
+      };
   }
 }
 
@@ -367,6 +456,7 @@ export async function handleWaSisBotInbound(opts: {
   text: string;
   waMessageId?: string;
   profileName?: string;
+  fromUnified?: boolean;
 }): Promise<{
   matched: boolean;
   replied: boolean;
@@ -404,14 +494,20 @@ export async function handleWaSisBotInbound(opts: {
   };
 
   const isGreeting =
-    !text || /^(hi|hello|namaste|hey|start|menu)$/i.test(text);
+    !opts.fromUnified &&
+    (!text || /^(hi|hello|namaste|hey|start|menu)$/i.test(text));
   const intent = isGreeting ? ("unknown" as const) : detectSisBotIntent(text);
-  const bot = await buildBotReply(hh, intent);
+  const bot = await buildBotReply(hh, intent, text);
+  let replyText = bot.text;
+  if (opts.fromUnified && intent === "unknown") {
+    replyText =
+      "Reply *KIDS* · *DUES* · *PAY* (GPay/UPI) · *PAY 1* · *RECEIPTS* · *HUMAN* — or *MENU* for the main school menu.";
+  }
 
   const botMsg: WaSisBotMsg = {
     id: nid("wsm"),
     role: "bot",
-    text: bot.text,
+    text: replyText,
     at: nowIso(),
     by: "SIS parent WA bot",
   };
@@ -435,7 +531,7 @@ export async function handleWaSisBotInbound(opts: {
 
   const send = await sendWhatsAppText({
     toMobile: mobile10,
-    body: bot.text,
+    body: replyText,
     clientMessageId: botMsg.id,
   });
 
@@ -443,7 +539,7 @@ export async function handleWaSisBotInbound(opts: {
     matched: true,
     replied: send.ok || send.mode === "stub",
     escalate: bot.escalate,
-    replyText: bot.text,
+    replyText,
     stub: !send.ok,
     error: send.ok ? undefined : send.error,
   };

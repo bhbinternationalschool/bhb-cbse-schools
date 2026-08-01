@@ -127,6 +127,9 @@ export type FleetVehicle = {
   photoUrl?: string;
   /** Passenger capacity for route planning */
   seatCapacity?: number;
+  /** Assigned driver (WhatsApp hub / fleet comms) */
+  driverName?: string;
+  driverMobile?: string;
   status: VehicleStatus;
   compliance: VehicleComplianceDoc[];
   serviceSchedule: ServiceScheduleItem[];
@@ -507,6 +510,8 @@ function normalizeVehicle(v: Partial<FleetVehicle>): FleetVehicle {
     primaryRouteId: v.primaryRouteId ?? "",
     photoUrl: v.photoUrl?.trim() || "",
     seatCapacity: Math.max(1, Number(v.seatCapacity) || 40),
+    driverName: (v.driverName ?? "").trim(),
+    driverMobile: (v.driverMobile ?? "").replace(/\D/g, "").slice(-10),
     status: (v.status as VehicleStatus) || "active",
     compliance: Array.isArray(v.compliance) ? v.compliance : [],
     serviceSchedule: Array.isArray(v.serviceSchedule) ? v.serviceSchedule : [],

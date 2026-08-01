@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import { LoginPanel } from "@/components/login/LoginPanel";
+import { LoginPwaInstall } from "@/components/pwa/LoginPwaInstall";
 import { TENANT } from "@/lib/types";
 
 export const metadata: Metadata = {
@@ -81,6 +82,7 @@ export default function LoginPage() {
           <LoginPanel />
         </div>
       </div>
+      <LoginPwaInstall />
     </div>
   );
 }

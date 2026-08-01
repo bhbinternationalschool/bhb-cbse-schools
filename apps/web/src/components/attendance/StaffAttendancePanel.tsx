@@ -680,6 +680,11 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
               {myMark?.note ? (
                 <p className="text-[11px] text-[var(--muted)]">{myMark.note}</p>
               ) : null}
+              {myMark?.punchGeo?.distanceM != null ? (
+                <p className="text-[11px] text-[var(--muted)]">
+                  WA GPS · ~{Math.round(myMark.punchGeo.distanceM)} m from campus
+                </p>
+              ) : null}
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"

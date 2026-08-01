@@ -18,7 +18,8 @@ export type AttendancePunchWay =
   | "adjusted"
   | "leave_sync"
   | "rule"
-  | "survey";
+  | "survey"
+  | "whatsapp";
 
 export const ATTENDANCE_PUNCH_WAYS: {
   code: AttendancePunchWay;
@@ -34,6 +35,7 @@ export const ATTENDANCE_PUNCH_WAYS: {
   { code: "leave_sync", label: "Leave sync", short: "Leave" },
   { code: "rule", label: "Punch rules", short: "Rule" },
   { code: "survey", label: "Field survey", short: "Survey" },
+  { code: "whatsapp", label: "WhatsApp GPS", short: "WA" },
 ];
 
 export function punchWayLabel(way: string | undefined): string {
@@ -46,6 +48,15 @@ export function punchWayShort(way: string | undefined): string {
   return ATTENDANCE_PUNCH_WAYS.find((w) => w.code === way)?.short ?? way;
 }
 
+export type StaffPunchGeo = {
+  lat: number;
+  lng: number;
+  accuracyM?: number;
+  distanceM?: number;
+  at: string;
+  source: "wa_location";
+};
+
 export type StaffAttendanceMark = {
   staffId: string;
   status: AttendanceStatus;
@@ -56,6 +67,8 @@ export type StaffAttendanceMark = {
   outTime: string;
   /** Channel / way attendance was marked */
   punchWay: AttendancePunchWay | "";
+  /** Last WhatsApp / geofenced punch audit */
+  punchGeo?: StaffPunchGeo;
 };
 
 export type StaffAttendanceRegister = {
@@ -75,6 +88,12 @@ export type StaffAttendanceSettings = {
   autoApplyRulesOnSave: boolean;
   /** Overlay approved leave as LE / HD when loading or syncing a date */
   syncLeaveToAttendance: boolean;
+  /** Teachers / staff punch via WhatsApp + location pin */
+  allowWhatsAppPunch: boolean;
+  /** Campus geofence radius (metres) for WA punch */
+  geofenceRadiusM: number;
+  /** Reject WA pins when accuracy worse than this (0 = ignore) */
+  maxLocationAccuracyM: number;
 };
 
 export type StaffAttendanceState = {
@@ -94,6 +113,9 @@ export function defaultAttendanceSettings(): StaffAttendanceSettings {
     allowSelfPunch: true,
     autoApplyRulesOnSave: false,
     syncLeaveToAttendance: true,
+    allowWhatsAppPunch: true,
+    geofenceRadiusM: 150,
+    maxLocationAccuracyM: 120,
   };
 }
 
@@ -114,6 +136,18 @@ export function normalizeAttendanceSettings(
       typeof s?.syncLeaveToAttendance === "boolean"
         ? s.syncLeaveToAttendance
         : d.syncLeaveToAttendance,
+    allowWhatsAppPunch:
+      typeof s?.allowWhatsAppPunch === "boolean"
+        ? s.allowWhatsAppPunch
+        : d.allowWhatsAppPunch,
+    geofenceRadiusM:
+      typeof s?.geofenceRadiusM === "number" && s.geofenceRadiusM > 0
+        ? s.geofenceRadiusM
+        : d.geofenceRadiusM,
+    maxLocationAccuracyM:
+      typeof s?.maxLocationAccuracyM === "number" && s.maxLocationAccuracyM >= 0
+        ? s.maxLocationAccuracyM
+        : d.maxLocationAccuracyM,
   };
 }
 
@@ -122,6 +156,26 @@ export function emptyStaffAttendanceState(): StaffAttendanceState {
     version: 1,
     settings: defaultAttendanceSettings(),
     registers: [],
+  };
+}
+
+function normalizePunchGeo(
+  g?: StaffPunchGeo | null,
+): StaffPunchGeo | undefined {
+  if (!g || !Number.isFinite(g.lat) || !Number.isFinite(g.lng)) return undefined;
+  return {
+    lat: g.lat,
+    lng: g.lng,
+    accuracyM:
+      typeof g.accuracyM === "number" && g.accuracyM >= 0
+        ? g.accuracyM
+        : undefined,
+    distanceM:
+      typeof g.distanceM === "number" && g.distanceM >= 0
+        ? g.distanceM
+        : undefined,
+    at: g.at || new Date().toISOString(),
+    source: "wa_location",
   };
 }
 
@@ -146,6 +200,7 @@ function normalizeRegister(
             punchWay: (ATTENDANCE_PUNCH_WAYS.some((w) => w.code === way)
               ? way
               : "") as AttendancePunchWay | "",
+            punchGeo: normalizePunchGeo((m as StaffAttendanceMark).punchGeo),
           };
         })
       : [],
@@ -155,7 +210,7 @@ function normalizeRegister(
   };
 }
 
-function normalizeState(
+export function normalizeStaffAttendanceState(
   raw: Partial<StaffAttendanceState>,
 ): StaffAttendanceState {
   return {
@@ -178,7 +233,7 @@ export function loadStaffAttendance(): StaffAttendanceState {
     if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.registers)) {
       return emptyStaffAttendanceState();
     }
-    return normalizeState(parsed);
+    return normalizeStaffAttendanceState(parsed);
   } catch {
     return emptyStaffAttendanceState();
   }
@@ -188,7 +243,7 @@ export function saveStaffAttendance(state: StaffAttendanceState) {
   if (!assertModulePermission("staff", "edit", "saveStaffAttendance")) return;
 
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeState(state)));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeStaffAttendanceState(state)));
   void import("@/lib/staffAttendancePersistence").then(
     ({ scheduleStaffAttendanceSync }) => {
       scheduleStaffAttendanceSync(state);
@@ -198,7 +253,7 @@ export function saveStaffAttendance(state: StaffAttendanceState) {
 
 export function writeStaffAttendanceLocalRaw(state: StaffAttendanceState) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeState(state)));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeStaffAttendanceState(state)));
 }
 
 export function staffAttendanceStateIsEmpty(
@@ -247,6 +302,75 @@ export function defaultStaffMarks(
       outTime: "",
       punchWay: "" as const,
     }));
+}
+
+/** Pure upsert — for server WhatsApp punch (no localStorage). */
+export function upsertStaffMarkInState(
+  state: StaffAttendanceState,
+  input: {
+    academicYearCode: string;
+    date: string;
+    staffId: string;
+    status: AttendanceStatus;
+    inTime?: string;
+    outTime?: string;
+    note?: string;
+    punchWay?: AttendancePunchWay | "";
+    punchGeo?: StaffPunchGeo;
+    markedBy: string;
+    roster: StaffRecord[];
+  },
+): { state: StaffAttendanceState; register: StaffAttendanceRegister } {
+  const existing = findStaffRegister(
+    state,
+    input.date,
+    input.academicYearCode,
+  );
+  let marks = existing
+    ? [...existing.marks]
+    : defaultStaffMarks(input.roster);
+
+  const idx = marks.findIndex((m) => m.staffId === input.staffId);
+  const base: StaffAttendanceMark =
+    idx >= 0
+      ? marks[idx]!
+      : {
+          staffId: input.staffId,
+          status: "P",
+          note: "",
+          inTime: "",
+          outTime: "",
+          punchWay: "",
+        };
+  const nextMark: StaffAttendanceMark = {
+    staffId: input.staffId,
+    status: input.status,
+    note: input.note !== undefined ? input.note : base.note,
+    inTime: input.inTime !== undefined ? input.inTime : base.inTime,
+    outTime: input.outTime !== undefined ? input.outTime : base.outTime,
+    punchWay:
+      input.punchWay !== undefined ? input.punchWay : base.punchWay || "manual",
+    punchGeo: input.punchGeo !== undefined ? input.punchGeo : base.punchGeo,
+  };
+  if (idx >= 0) marks[idx] = nextMark;
+  else marks.push(nextMark);
+
+  const row: StaffAttendanceRegister = {
+    id: existing?.id ?? nid("sar"),
+    academicYearCode: input.academicYearCode,
+    date: input.date,
+    marks,
+    markedBy: input.markedBy,
+    markedAt: new Date().toISOString(),
+    remark: existing?.remark ?? "",
+  };
+  const registers = existing
+    ? state.registers.map((r) => (r.id === existing.id ? row : r))
+    : [row, ...state.registers];
+  return {
+    state: { ...state, version: 1, registers },
+    register: row,
+  };
 }
 
 /** Overlay approved leave onto marks for a date (LE or HD). */

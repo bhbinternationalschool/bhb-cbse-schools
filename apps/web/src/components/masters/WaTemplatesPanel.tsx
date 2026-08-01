@@ -8,7 +8,9 @@ import {
   saveWaTemplates,
   statusTone,
   updateTemplateLocal,
+  createDraftWaTemplate,
   type WaTemplate,
+  type WaTemplateButton,
   type WaTemplateLanguage,
   type WaTemplateModule,
   type WaTemplateStatus,
@@ -44,6 +46,15 @@ export function WaTemplatesPanel() {
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [showNew, setShowNew] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newMetaName, setNewMetaName] = useState("");
+  const [newBody, setNewBody] = useState(
+    "Namaste {{guardianName}}, message from {{schoolName}}.",
+  );
+  const [newModule, setNewModule] = useState<WaTemplateModule>("comms");
+  const [newLang, setNewLang] = useState<WaTemplateLanguage>("en");
 
   useEffect(() => {
     setState(loadWaTemplates());
@@ -130,6 +141,66 @@ export function WaTemplatesPanel() {
     }
   }
 
+  async function onSubmitMeta(templateId: string) {
+    if (!state) return;
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/wa/templates/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ templateId, state }),
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        state?: WaTemplatesState;
+        status?: string;
+        warnings?: string[];
+        hint?: string;
+      };
+      if (json.state) {
+        commit(
+          json.state,
+          json.ok
+            ? `Submitted to Meta (${json.status || "PENDING"})`
+            : json.error || "Submit failed",
+        );
+      }
+      if (json.warnings?.length) {
+        setNotice(`${json.warnings.join(" ")}`);
+        window.setTimeout(() => setNotice(null), 5000);
+      }
+      if (!res.ok && !json.state) {
+        setNotice(json.error || "Submit failed");
+        window.setTimeout(() => setNotice(null), 4000);
+      }
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : "Submit failed");
+      window.setTimeout(() => setNotice(null), 3200);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function onCreateDraft() {
+    if (!state) return;
+    const metaName =
+      newMetaName.trim() ||
+      newName.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_");
+    const next = createDraftWaTemplate(state, {
+      name: newName.trim() || metaName,
+      metaName,
+      module: newModule,
+      language: newLang,
+      body: newBody,
+      by: session.fullName || "masters",
+    });
+    const created = next.templates[next.templates.length - 1];
+    commit(next, "Draft template created");
+    if (created) setSelectedId(created.id);
+    setShowNew(false);
+  }
+
   if (!state) {
     return (
       <p className="text-sm text-[var(--muted)]">Loading WhatsApp templates…</p>
@@ -146,8 +217,10 @@ export function WaTemplatesPanel() {
                 WhatsApp templates
               </h2>
               <p className="text-[12px] text-[var(--muted)]">
-                School-wide Meta catalog (English + Hindi). Seed rows stay{" "}
-                <em>pending</em> until Meta sync marks them approved / rejected.
+                Create templates here → <strong>Submit to Meta</strong> for
+                approval (no Business Manager).{" "}
+                <em>Session buttons</em> in the school bot work without templates
+                (24h window). <em>Template buttons</em> need Meta approval below.
                 Last sync: {state.lastMetaSyncAt || "never"}
               </p>
             </div>
@@ -159,6 +232,14 @@ export function WaTemplatesPanel() {
               ) : null}
               <button
                 type="button"
+                disabled={readOnly}
+                className="rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-2 text-[11px] font-semibold"
+                onClick={() => setShowNew((v) => !v)}
+              >
+                {showNew ? "Cancel" : "New template"}
+              </button>
+              <button
+                type="button"
                 disabled={syncing || readOnly}
                 className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-[11px] font-semibold text-white disabled:opacity-50"
                 onClick={() => void onSyncMeta()}
@@ -167,6 +248,77 @@ export function WaTemplatesPanel() {
               </button>
             </div>
           </div>
+          {showNew ? (
+            <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-3 text-[12px]">
+              <p className="mb-2 font-semibold text-[var(--brand-deep)]">
+                New draft template
+              </p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className="block text-[11px] font-semibold text-[var(--muted)]">
+                  Display name
+                  <input
+                    className={`${inp} mt-1`}
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    placeholder="Fee reminder"
+                  />
+                </label>
+                <label className="block text-[11px] font-semibold text-[var(--muted)]">
+                  Meta name (snake_case)
+                  <input
+                    className={`${inp} mt-1 font-mono`}
+                    value={newMetaName}
+                    onChange={(e) => setNewMetaName(e.target.value)}
+                    placeholder="bhb_fee_reminder"
+                  />
+                </label>
+                <label className="block text-[11px] font-semibold text-[var(--muted)]">
+                  Module
+                  <select
+                    className={`${inp} mt-1`}
+                    value={newModule}
+                    onChange={(e) =>
+                      setNewModule(e.target.value as WaTemplateModule)
+                    }
+                  >
+                    <option value="comms">Comms</option>
+                    <option value="admissions">Admissions</option>
+                    <option value="fees">Fees</option>
+                    <option value="transport">Transport</option>
+                    <option value="general">General</option>
+                  </select>
+                </label>
+                <label className="block text-[11px] font-semibold text-[var(--muted)]">
+                  Language
+                  <select
+                    className={`${inp} mt-1`}
+                    value={newLang}
+                    onChange={(e) =>
+                      setNewLang(e.target.value as WaTemplateLanguage)
+                    }
+                  >
+                    <option value="en">English</option>
+                    <option value="hi">Hindi</option>
+                  </select>
+                </label>
+                <label className="block text-[11px] font-semibold text-[var(--muted)] sm:col-span-2">
+                  Body (use {"{{guardianName}}"}, {"{{schoolName}}"}, etc.)
+                  <textarea
+                    className={`${inp} mt-1 min-h-[80px] font-mono text-[11px]`}
+                    value={newBody}
+                    onChange={(e) => setNewBody(e.target.value)}
+                  />
+                </label>
+              </div>
+              <button
+                type="button"
+                className="mt-2 rounded-lg bg-[#0f766e] px-3 py-2 text-[11px] font-semibold text-white"
+                onClick={onCreateDraft}
+              >
+                Save draft
+              </button>
+            </div>
+          ) : null}
           <div className="flex flex-wrap gap-2 text-[11px]">
             {(
               ["approved", "pending", "rejected", "paused", "draft"] as const
@@ -305,6 +457,8 @@ export function WaTemplatesPanel() {
             <TemplateEditor
               template={selected}
               readOnly={readOnly}
+              submitting={submitting}
+              onSubmitMeta={() => void onSubmitMeta(selected.id)}
               onSave={(patch, msg) => {
                 commit(
                   updateTemplateLocal(
@@ -324,8 +478,10 @@ export function WaTemplatesPanel() {
             hint="Select a template from the catalog"
           >
             <p className="text-[12px] text-[var(--muted)]">
-              Marketing templates may include media headers or carousels.
-              Approve status comes from Meta sync / webhook.
+              <strong>Session buttons</strong> (school bot menus) work when parents
+              message you — no template needed.{" "}
+              <strong>Template buttons</strong> (quick-reply on campaigns / cold
+              outbound) are created here and submitted to Meta for approval.
             </p>
           </MastersWorkCard>
         )
@@ -337,10 +493,14 @@ export function WaTemplatesPanel() {
 function TemplateEditor({
   template,
   readOnly,
+  submitting,
+  onSubmitMeta,
   onSave,
 }: {
   template: WaTemplate;
   readOnly: boolean;
+  submitting: boolean;
+  onSubmitMeta: () => void;
   onSave: (
     patch: Parameters<typeof updateTemplateLocal>[2],
     msg?: string,
@@ -349,17 +509,40 @@ function TemplateEditor({
   const [body, setBody] = useState(template.body);
   const [fallback, setFallback] = useState(template.localFallbackBody);
   const [metaName, setMetaName] = useState(template.metaName);
+  const [footer, setFooter] = useState(template.footer);
+  const [btn1, setBtn1] = useState(template.buttons[0]?.text || "");
+  const [btn2, setBtn2] = useState(template.buttons[1]?.text || "");
+  const [btn3, setBtn3] = useState(template.buttons[2]?.text || "");
 
   useEffect(() => {
     setBody(template.body);
     setFallback(template.localFallbackBody);
     setMetaName(template.metaName);
+    setFooter(template.footer);
+    setBtn1(template.buttons[0]?.text || "");
+    setBtn2(template.buttons[1]?.text || "");
+    setBtn3(template.buttons[2]?.text || "");
   }, [
     template.id,
     template.body,
     template.localFallbackBody,
     template.metaName,
+    template.footer,
+    template.buttons,
   ]);
+
+  function buildButtons(): WaTemplateButton[] {
+    return [btn1, btn2, btn3]
+      .map((t) => t.trim())
+      .filter(Boolean)
+      .map((text) => ({ type: "QUICK_REPLY" as const, text }));
+  }
+
+  const canSubmit =
+    !readOnly &&
+    template.status !== "approved" &&
+    body.trim().length > 0 &&
+    metaName.trim().length > 0;
 
   return (
     <div className="space-y-3 text-[12px]">
@@ -390,6 +573,40 @@ function TemplateEditor({
           onChange={(e) => setMetaName(e.target.value)}
         />
       </label>
+      <label className="block text-[11px] font-semibold text-[var(--muted)]">
+        Footer (optional, max 60 chars)
+        <input
+          className={`${inp} mt-1 text-[11px]`}
+          value={footer}
+          disabled={readOnly}
+          onChange={(e) => setFooter(e.target.value)}
+        />
+      </label>
+      <div className="rounded-lg border border-[rgba(32,48,80,0.1)] p-2">
+        <p className="mb-1 text-[11px] font-semibold text-[var(--brand-deep)]">
+          Template quick-reply buttons (max 3, Meta-approved templates only)
+        </p>
+        <div className="grid gap-2 sm:grid-cols-3">
+          {[btn1, btn2, btn3].map((val, i) => (
+            <input
+              key={i}
+              className={`${inp} text-[11px]`}
+              value={i === 0 ? btn1 : i === 1 ? btn2 : btn3}
+              disabled={readOnly}
+              placeholder={`Button ${i + 1}`}
+              onChange={(e) => {
+                if (i === 0) setBtn1(e.target.value);
+                else if (i === 1) setBtn2(e.target.value);
+                else setBtn3(e.target.value);
+              }}
+            />
+          ))}
+        </div>
+        <p className="mt-1 text-[10px] text-[var(--muted)]">
+          For bot menus (MENU, PARENT, REPORTS), session buttons are sent
+          automatically — no template needed.
+        </p>
+      </div>
       <label className="block text-[11px] font-semibold text-[var(--muted)]">
         Body preview
         <textarea
@@ -430,12 +647,42 @@ function TemplateEditor({
             className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-[11px] font-semibold text-white"
             onClick={() =>
               onSave(
-                { body, localFallbackBody: fallback, metaName },
+                {
+                  body,
+                  localFallbackBody: fallback,
+                  metaName,
+                  footer,
+                  buttons: buildButtons(),
+                },
                 "Template saved",
               )
             }
           >
             Save local edits
+          </button>
+          <button
+            type="button"
+            disabled={!canSubmit || submitting}
+            className="rounded-lg bg-[#0f766e] px-3 py-2 text-[11px] font-semibold text-white disabled:opacity-50"
+            onClick={() => {
+              onSave(
+                {
+                  body,
+                  localFallbackBody: fallback,
+                  metaName,
+                  footer,
+                  buttons: buildButtons(),
+                },
+                undefined,
+              );
+              onSubmitMeta();
+            }}
+          >
+            {submitting
+              ? "Submitting…"
+              : template.status === "pending"
+                ? "Re-submit to Meta"
+                : "Submit to Meta for approval"}
           </button>
           <button
             type="button"
@@ -450,6 +697,12 @@ function TemplateEditor({
             {template.paused ? "Resume" : "Pause"}
           </button>
         </div>
+      ) : null}
+      {template.status === "pending" ? (
+        <p className="text-[10px] text-amber-800">
+          Pending Meta review — click Sync from Meta or wait for webhook. Usually
+          minutes to 24 hours.
+        </p>
       ) : null}
     </div>
   );

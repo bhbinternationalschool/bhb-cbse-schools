@@ -29,6 +29,12 @@ export function StaffAttendanceSettingsPanel() {
     flash("Attendance settings saved");
   }
 
+  function setNumber(key: "geofenceRadiusM" | "maxLocationAccuracyM", value: number) {
+    const next = saveAttendanceSettings({ [key]: value });
+    setState(next);
+    flash("Geofence settings saved");
+  }
+
   if (!state) {
     return (
       <p className="text-sm text-[var(--muted)]">Loading attendance settings…</p>
@@ -40,7 +46,7 @@ export function StaffAttendanceSettingsPanel() {
   return (
     <MastersWorkCard
       title="Attendance settings"
-      hint="Self-punch, auto rules, and syncing approved leave onto the day register."
+      hint="Self-punch, WhatsApp GPS punch, geofence, auto rules, and leave sync."
     >
       {notice ? (
         <p className="mb-3 rounded-lg bg-[rgba(197,160,40,0.18)] px-3 py-2 text-sm font-medium text-[var(--brand-deep)]">
@@ -69,6 +75,59 @@ export function StaffAttendanceSettingsPanel() {
           onEnable={() => setFlag("syncLeaveToAttendance", true)}
           onDisable={() => setFlag("syncLeaveToAttendance", false)}
         />
+        <FlagRow
+          rule="Rule 4"
+          label="Allow WhatsApp attendance (IN/OUT + location)"
+          enabled={settings.allowWhatsAppPunch}
+          onEnable={() => setFlag("allowWhatsAppPunch", true)}
+          onDisable={() => setFlag("allowWhatsAppPunch", false)}
+        />
+        <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] p-4">
+          <p className="text-sm font-semibold text-[var(--brand-deep)]">
+            Campus geofence (WhatsApp)
+          </p>
+          <p className="mt-1 text-[11px] text-[var(--muted)]">
+            Teachers must share live location within radius of school coordinates.
+          </p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <label className="block text-xs">
+              <span className="font-semibold text-[var(--brand-deep)]">
+                Radius (metres)
+              </span>
+              <input
+                type="number"
+                min={50}
+                max={500}
+                className="mt-1 w-full rounded-lg border border-[rgba(32,48,80,0.15)] px-2 py-1.5"
+                value={settings.geofenceRadiusM}
+                onChange={(e) =>
+                  setNumber(
+                    "geofenceRadiusM",
+                    Math.max(50, Number(e.target.value) || 150),
+                  )
+                }
+              />
+            </label>
+            <label className="block text-xs">
+              <span className="font-semibold text-[var(--brand-deep)]">
+                Max GPS accuracy (m, 0=off)
+              </span>
+              <input
+                type="number"
+                min={0}
+                max={500}
+                className="mt-1 w-full rounded-lg border border-[rgba(32,48,80,0.15)] px-2 py-1.5"
+                value={settings.maxLocationAccuracyM}
+                onChange={(e) =>
+                  setNumber(
+                    "maxLocationAccuracyM",
+                    Math.max(0, Number(e.target.value) || 0),
+                  )
+                }
+              />
+            </label>
+          </div>
+        </div>
       </div>
     </MastersWorkCard>
   );

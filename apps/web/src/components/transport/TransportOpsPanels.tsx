@@ -597,6 +597,8 @@ export function FleetPanel({
   );
   const [odo, setOdo] = useState("0");
   const [seats, setSeats] = useState("40");
+  const [driverName, setDriverName] = useState("");
+  const [driverMobile, setDriverMobile] = useState("");
   const [editId, setEditId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -610,6 +612,8 @@ export function FleetPanel({
       fuelType,
       odometerKm: Number(odo) || 0,
       seatCapacity: Number(seats) || 40,
+      driverName: driverName.trim(),
+      driverMobile: driverMobile.replace(/\D/g, "").slice(-10),
       type: "bus",
     });
     if (!r.ok) {
@@ -621,6 +625,8 @@ export function FleetPanel({
     setVname("");
     setOdo("0");
     setSeats("40");
+    setDriverName("");
+    setDriverMobile("");
     onRefresh();
     onFlash("Vehicle saved");
   }
@@ -688,6 +694,28 @@ export function FleetPanel({
               onChange={(e) => setSeats(e.target.value)}
             />
           </label>
+          <label className="text-sm sm:col-span-2">
+            <span className="mb-1 block text-[11px] text-[var(--muted)]">
+              Driver name
+            </span>
+            <input
+              className="field !py-1.5"
+              value={driverName}
+              onChange={(e) => setDriverName(e.target.value)}
+              placeholder="For WhatsApp hub"
+            />
+          </label>
+          <label className="text-sm sm:col-span-2">
+            <span className="mb-1 block text-[11px] text-[var(--muted)]">
+              Driver mobile (10-digit)
+            </span>
+            <input
+              className="field !py-1.5"
+              value={driverMobile}
+              onChange={(e) => setDriverMobile(e.target.value)}
+              placeholder="WhatsApp identity"
+            />
+          </label>
         </div>
         <button
           type="button"
@@ -709,6 +737,7 @@ export function FleetPanel({
                 </div>
                 <div className="text-[10px] text-[var(--muted)]">
                   {v.name} · {v.fuelType} · {v.status} · {v.odometerKm} km
+                  {v.driverName ? ` · ${v.driverName}` : ""}
                 </div>
               </button>
               <button
@@ -725,6 +754,8 @@ export function FleetPanel({
                   );
                   setOdo(String(v.odometerKm));
                   setSeats(String(v.seatCapacity || 40));
+                  setDriverName(v.driverName || "");
+                  setDriverMobile(v.driverMobile || "");
                 }}
               >
                 Edit
@@ -779,6 +810,12 @@ function Vehicle360({
           TCO {formatInr(tco.total)} (fuel {formatInr(tco.fuel)} · EMI{" "}
           {formatInr(tco.emi)} · jobs {formatInr(tco.jobs)})
         </div>
+        {vehicle.driverName || vehicle.driverMobile ? (
+          <div className="mt-1 text-[11px] text-[var(--muted)]">
+            Driver: {vehicle.driverName || "—"}
+            {vehicle.driverMobile ? ` · ${vehicle.driverMobile}` : ""}
+          </div>
+        ) : null}
       </div>
       <div>
         <div className="text-[11px] font-bold uppercase text-[var(--muted)]">

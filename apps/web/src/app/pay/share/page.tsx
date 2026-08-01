@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
 import {
   buildSchoolUpiPayUri,
@@ -10,12 +10,52 @@ import { formatInr, loadMasters } from "@/lib/masters";
 import {
   decodePaymentSharePayload,
   getPaymentLink,
+  type PaymentLink,
   type PaymentSharePayload,
 } from "@/lib/payments";
 import { TENANT } from "@/lib/types";
 
+type ServerLink = Pick<
+  PaymentLink,
+  | "id"
+  | "code"
+  | "status"
+  | "amountPaise"
+  | "studentName"
+  | "classLabel"
+  | "expiresOn"
+  | "receiptNo"
+  | "upiRef"
+  | "lines"
+  | "gatewayCheckoutUrl"
+  | "gatewayMode"
+>;
+
+function payloadFromServerLink(
+  link: ServerLink,
+  schoolName: string,
+  upiVpa: string,
+  upiUri?: string,
+): PaymentSharePayload {
+  return {
+    v: 1,
+    linkId: link.id,
+    code: link.code,
+    studentName: link.studentName,
+    classLabel: link.classLabel,
+    amountPaise: link.amountPaise,
+    expiresOn: link.expiresOn,
+    schoolName,
+    lines: link.lines,
+    upiVpa,
+    upiUri,
+    note: "",
+  };
+}
+
 export default function PaySharePage() {
   const [payload, setPayload] = useState<PaymentSharePayload | null>(null);
+  const [serverLink, setServerLink] = useState<ServerLink | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
@@ -24,47 +64,100 @@ export default function PaySharePage() {
     upiRef: string;
   } | null>(null);
 
-  useEffect(() => {
-    const raw = window.location.hash.replace(/^#/, "");
-    if (!raw) {
-      setError("This payment link is incomplete.");
-      return;
-    }
-    const decoded = decodePaymentSharePayload(decodeURIComponent(raw));
-    if (!decoded) {
-      setError("Could not open this payment link. Ask the school to resend.");
-      return;
-    }
-    setPayload(decoded);
+  const razorpayMode = !!serverLink?.gatewayCheckoutUrl;
 
-    const live = getPaymentLink(decoded.linkId);
-    if (live?.status === "paid" && live.receiptNo) {
+  const refreshPaidStatus = useCallback(async (linkId: string) => {
+    const res = await fetch(
+      `/api/payments/parent-pay?linkId=${encodeURIComponent(linkId)}`,
+    );
+    if (!res.ok) return false;
+    const json = (await res.json()) as { link?: ServerLink };
+    const link = json.link;
+    if (!link) return false;
+    setServerLink(link);
+    if (link.status === "paid" && link.receiptNo) {
       setDone({
-        receiptNo: live.receiptNo,
-        upiRef: live.upiRef || "—",
+        receiptNo: link.receiptNo,
+        upiRef: link.upiRef || "—",
       });
-      return;
+      return true;
     }
-
-    // Fallback: check server mirror (WhatsApp-created links)
-    void fetch(`/api/payments/parent-pay?linkId=${encodeURIComponent(decoded.linkId)}`)
-      .then(async (res) => {
-        if (!res.ok) return;
-        const json = (await res.json()) as {
-          link?: { status?: string; receiptNo?: string | null; upiRef?: string };
-        };
-        if (json.link?.status === "paid" && json.link.receiptNo) {
-          setDone({
-            receiptNo: json.link.receiptNo,
-            upiRef: json.link.upiRef || "—",
-          });
-        }
-      })
-      .catch(() => {});
+    return false;
   }, []);
 
   useEffect(() => {
-    if (!payload || done) {
+    const params = new URLSearchParams(window.location.search);
+    const queryLinkId = params.get("linkId") || "";
+    const raw = window.location.hash.replace(/^#/, "");
+
+    async function bootstrap() {
+      if (queryLinkId) {
+        const ok = await refreshPaidStatus(queryLinkId);
+        if (ok) return;
+        const res = await fetch(
+          `/api/payments/parent-pay?linkId=${encodeURIComponent(queryLinkId)}`,
+        );
+        if (!res.ok) {
+          setError("Could not open this payment link. Ask the school to resend.");
+          return;
+        }
+        const json = (await res.json()) as { link?: ServerLink };
+        const link = json.link;
+        if (!link) {
+          setError("Payment link not found.");
+          return;
+        }
+        setServerLink(link);
+        const masters = loadMasters();
+        const upi = resolveSchoolCollectionsUpi(masters);
+        const upiUri = buildSchoolUpiPayUri({
+          vpa: upi.vpa,
+          payeeName: upi.payeeName,
+          amountPaise: link.amountPaise,
+          note: `Fees ${link.code}`,
+        });
+        setPayload(
+          payloadFromServerLink(link, TENANT.nameDisplay, upi.vpa, upiUri),
+        );
+        return;
+      }
+
+      if (!raw) {
+        setError("This payment link is incomplete.");
+        return;
+      }
+      const decoded = decodePaymentSharePayload(decodeURIComponent(raw));
+      if (!decoded) {
+        setError("Could not open this payment link. Ask the school to resend.");
+        return;
+      }
+      setPayload(decoded);
+
+      const live = getPaymentLink(decoded.linkId);
+      if (live?.status === "paid" && live.receiptNo) {
+        setDone({
+          receiptNo: live.receiptNo,
+          upiRef: live.upiRef || "—",
+        });
+        return;
+      }
+
+      void refreshPaidStatus(decoded.linkId).then(async (paid) => {
+        if (paid) return;
+        const res = await fetch(
+          `/api/payments/parent-pay?linkId=${encodeURIComponent(decoded.linkId)}`,
+        );
+        if (!res.ok) return;
+        const json = (await res.json()) as { link?: ServerLink };
+        if (json.link) setServerLink(json.link);
+      });
+    }
+
+    void bootstrap();
+  }, [refreshPaidStatus]);
+
+  useEffect(() => {
+    if (!payload || done || razorpayMode) {
       setQrDataUrl(null);
       return;
     }
@@ -89,7 +182,15 @@ export default function PaySharePage() {
     return () => {
       cancelled = true;
     };
-  }, [payload, done]);
+  }, [payload, done, razorpayMode]);
+
+  useEffect(() => {
+    if (!payload || done || !razorpayMode) return;
+    const id = window.setInterval(() => {
+      void refreshPaidStatus(payload.linkId);
+    }, 4000);
+    return () => window.clearInterval(id);
+  }, [payload, done, razorpayMode, refreshPaidStatus]);
 
   const expired = useMemo(() => {
     if (!payload) return false;
@@ -130,7 +231,6 @@ export default function PaySharePage() {
         link?: { upiRef?: string };
       };
       if (!res.ok) {
-        // Fall back to local demo pay if server mirror missing this link
         const { payPaymentLinkDemo } = await import("@/lib/payments");
         const local = payPaymentLinkDemo(payload.linkId);
         if (!local.ok) {
@@ -196,6 +296,7 @@ export default function PaySharePage() {
           </p>
           <p className="mt-1 text-[11px] text-[var(--muted)]">
             Valid till {payload.expiresOn}
+            {razorpayMode ? " · Razorpay auto-receipt" : ""}
           </p>
         </div>
 
@@ -236,57 +337,82 @@ export default function PaySharePage() {
           </div>
         ) : (
           <>
-            <div className="mt-5 rounded-xl bg-[rgba(32,48,80,0.04)] px-4 py-3 text-center">
-              <p className="text-[11px] text-[var(--muted)]">Scan UPI QR</p>
-              <p className="mt-1 font-mono text-sm font-bold text-[var(--brand-deep)]">
-                {payload.upiVpa}
-              </p>
-              {qrDataUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={qrDataUrl}
-                  alt="UPI payment QR"
-                  className="mx-auto mt-3 h-40 w-40 rounded-lg border border-[rgba(32,48,80,0.12)] bg-white p-1"
-                />
-              ) : (
-                <div className="mx-auto mt-3 flex h-40 w-40 items-center justify-center rounded-lg border border-dashed border-[rgba(32,48,80,0.2)] text-[10px] text-[var(--muted)]">
-                  Preparing QR…
-                </div>
-              )}
-              {upiDeepLink ? (
+            {razorpayMode && serverLink?.gatewayCheckoutUrl ? (
+              <div className="mt-5 space-y-3">
                 <a
-                  href={upiDeepLink}
-                  className="mt-3 inline-block text-[12px] font-semibold text-[#0f766e] underline"
+                  href={serverLink.gatewayCheckoutUrl}
+                  className="btn-accent flex w-full items-center justify-center rounded-xl px-4 py-3.5 text-sm font-extrabold"
                 >
-                  Open in UPI app
+                  Pay {formatInr(payload.amountPaise)} via Razorpay
                 </a>
-              ) : null}
-            </div>
-
-            {error ? (
-              <p className="mt-3 text-center text-sm text-[#dc2626]">{error}</p>
-            ) : null}
-            {expired ? (
-              <p className="mt-3 text-center text-sm text-[#b45309]">
-                This link has expired. Ask the school for a new one.
-              </p>
+                <p className="text-center text-[10px] leading-relaxed text-[var(--muted)]">
+                  UPI / card / netbanking. Ledger &amp; WhatsApp receipt update
+                  automatically — no confirm button needed.
+                </p>
+              </div>
             ) : (
-              <button
-                type="button"
-                className="btn-accent mt-5 w-full rounded-xl px-4 py-3.5 text-sm font-extrabold disabled:opacity-60"
-                disabled={paying}
-                onClick={() => void onPay()}
-              >
-                {paying
-                  ? "Confirming payment…"
-                  : `Confirm paid ${formatInr(payload.amountPaise)}`}
-              </button>
+              <>
+                <div className="mt-5 rounded-xl bg-[rgba(32,48,80,0.04)] px-4 py-3 text-center">
+                  <p className="text-[11px] font-semibold text-[var(--brand-deep)]">
+                    Pay with Google Pay / UPI
+                  </p>
+                  <p className="mt-0.5 text-[10px] text-[var(--muted)]">
+                    GPay · PhonePe · Paytm — amount prefilled
+                  </p>
+                  <p className="mt-2 font-mono text-sm font-bold text-[var(--brand-deep)]">
+                    {payload.upiVpa}
+                  </p>
+                  {qrDataUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={qrDataUrl}
+                      alt="GPay / UPI payment QR"
+                      className="mx-auto mt-3 h-40 w-40 rounded-lg border border-[rgba(32,48,80,0.12)] bg-white p-1"
+                    />
+                  ) : (
+                    <div className="mx-auto mt-3 flex h-40 w-40 items-center justify-center rounded-lg border border-dashed border-[rgba(32,48,80,0.2)] text-[10px] text-[var(--muted)]">
+                      Preparing QR…
+                    </div>
+                  )}
+                  {upiDeepLink ? (
+                    <a
+                      href={upiDeepLink}
+                      className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#1a73e8] px-4 py-2.5 text-[12px] font-bold text-white"
+                    >
+                      Open Google Pay / UPI
+                    </a>
+                  ) : null}
+                </div>
+
+                {error ? (
+                  <p className="mt-3 text-center text-sm text-[#dc2626]">
+                    {error}
+                  </p>
+                ) : null}
+                {expired ? (
+                  <p className="mt-3 text-center text-sm text-[#b45309]">
+                    This link has expired. Ask the school for a new one.
+                  </p>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn-accent mt-5 w-full rounded-xl px-4 py-3.5 text-sm font-extrabold disabled:opacity-60"
+                    disabled={paying}
+                    onClick={() => void onPay()}
+                  >
+                    {paying
+                      ? "Confirming…"
+                      : `I paid in GPay / UPI — confirm ${formatInr(payload.amountPaise)}`}
+                  </button>
+                )}
+                <p className="mt-3 text-center text-[10px] leading-relaxed text-[var(--muted)]">
+                  Step 1: Scan QR or tap &quot;Open Google Pay / UPI&quot; and
+                  complete payment. Step 2: Tap confirm above — receipt is sent
+                  on WhatsApp and the fee ledger updates. Office can also verify
+                  UTR under Fee Take → Pay links.
+                </p>
+              </>
             )}
-            <p className="mt-3 text-center text-[10px] leading-relaxed text-[var(--muted)]">
-              Scan QR or open UPI, then tap Confirm so the school ledger and
-              receipt update. Counter can also confirm the UTR under Fee Take →
-              Pay links.
-            </p>
           </>
         )}
       </div>

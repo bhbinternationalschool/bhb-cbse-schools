@@ -50,6 +50,10 @@ export type HomeworkPost = {
   /** When parents were last WhatsApp-notified for this post */
   whatsappNotifiedAt: string;
   whatsappNotifiedCount: number;
+  /** Set when imported from Google Classroom */
+  source?: "erp" | "google_classroom";
+  googleCourseWorkId?: string;
+  googleCourseId?: string;
 };
 
 export type DiaryEntry = {
@@ -168,6 +172,9 @@ function normalizePost(p: Partial<HomeworkPost>): HomeworkPost {
     whatsappNotifiedAt: p.whatsappNotifiedAt || "",
     whatsappNotifiedCount:
       typeof p.whatsappNotifiedCount === "number" ? p.whatsappNotifiedCount : 0,
+    source: p.source === "google_classroom" ? "google_classroom" : "erp",
+    googleCourseWorkId: p.googleCourseWorkId || "",
+    googleCourseId: p.googleCourseId || "",
   };
 }
 
@@ -347,6 +354,81 @@ export function createHomeworkPost(
   const next = { ...state, posts: [post, ...state.posts] };
   saveHomework(next);
   return { ok: true, post };
+}
+
+export type ClassroomImportInput = {
+  academicYearCode: string;
+  teacherStaffId: string;
+  teacherName: string;
+  googleCourseWorkId: string;
+  googleCourseId: string;
+  classId: string;
+  sectionId: string;
+  subjectId: string;
+  title: string;
+  bodyEn: string;
+  date: string;
+  dueAt?: string;
+  requiresSubmit?: boolean;
+  attachments?: HomeworkAttachment[];
+};
+
+/** Import Google Classroom coursework into ERP homework (skips duplicates). */
+export function importClassroomHomeworkPosts(
+  items: ClassroomImportInput[],
+): {
+  ok: true;
+  imported: HomeworkPost[];
+  skipped: number;
+} {
+  const state = loadHomework();
+  if (state.settings.examModeFreeze) {
+    return { ok: true, imported: [], skipped: items.length };
+  }
+
+  const existing = new Set(
+    state.posts
+      .map((p) => p.googleCourseWorkId)
+      .filter((id) => !!id),
+  );
+
+  const imported: HomeworkPost[] = [];
+  let skipped = 0;
+
+  for (const item of items) {
+    if (!item.googleCourseWorkId || existing.has(item.googleCourseWorkId)) {
+      skipped += 1;
+      continue;
+    }
+    if (!item.classId || !item.sectionId || !item.subjectId) {
+      skipped += 1;
+      continue;
+    }
+    const post = normalizePost({
+      ...item,
+      id: nid("hw"),
+      bodyHi: "",
+      status: "published",
+      source: "google_classroom",
+      createdAt: nowIso(),
+      attachments: item.attachments || [],
+      aiTutorHint: "",
+    });
+    imported.push(post);
+    existing.add(item.googleCourseWorkId);
+  }
+
+  if (imported.length) {
+    saveHomework({ ...state, posts: [...imported, ...state.posts] });
+  }
+
+  return { ok: true, imported, skipped };
+}
+
+export function listImportedClassroomCourseWorkIds(): string[] {
+  return loadHomework()
+    .posts.map((p) => p.googleCourseWorkId)
+    .filter((id): id is string => !!id);
 }
 
 export function withdrawHomeworkPost(

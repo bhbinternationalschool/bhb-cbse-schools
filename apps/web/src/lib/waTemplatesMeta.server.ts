@@ -93,6 +93,82 @@ export function waTemplatesMetaConfigured(): boolean {
   return !!(metaAccessToken() && metaWabaId());
 }
 
+/** Create a message template on Meta WABA and submit for approval (no Meta UI). */
+export async function submitWaTemplateToMeta(
+  template: import("@/lib/waTemplates").WaTemplate,
+): Promise<{
+  ok: boolean;
+  metaTemplateId?: string;
+  status?: string;
+  error?: string;
+  warnings?: string[];
+}> {
+  const { buildMetaTemplateCreatePayload } = await import("@/lib/waTemplates");
+  const payload = buildMetaTemplateCreatePayload(template);
+  if (!payload.name) {
+    return { ok: false, error: "Missing meta template name", warnings: payload.warnings };
+  }
+  if (!payload.components.some((c) => c.type === "BODY")) {
+    return { ok: false, error: "Template body is required", warnings: payload.warnings };
+  }
+
+  const token = metaAccessToken();
+  const waba = metaWabaIdFromEnv() || (await resolveWhatsAppWabaId());
+  if (!token || !waba) {
+    return {
+      ok: false,
+      error:
+        "Set WHATSAPP_TOKEN + WHATSAPP_WABA_ID. Token needs whatsapp_business_management permission.",
+      warnings: payload.warnings,
+    };
+  }
+
+  const version = metaGraphVersion();
+  const url = `https://graph.facebook.com/${version}/${waba}/message_templates`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        name: payload.name,
+        language: payload.language,
+        category: payload.category,
+        components: payload.components,
+      }),
+    });
+    const json = (await res.json().catch(() => ({}))) as {
+      id?: string;
+      status?: string;
+      error?: { message?: string; error_user_msg?: string };
+    };
+    if (!res.ok) {
+      return {
+        ok: false,
+        error:
+          json.error?.error_user_msg ||
+          json.error?.message ||
+          `Meta HTTP ${res.status}`,
+        warnings: payload.warnings,
+      };
+    }
+    return {
+      ok: true,
+      metaTemplateId: json.id,
+      status: json.status || "PENDING",
+      warnings: payload.warnings,
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Meta template submit failed",
+      warnings: payload.warnings,
+    };
+  }
+}
+
 export async function fetchMetaMessageTemplates(): Promise<{
   ok: boolean;
   rows: MetaTemplateSyncRow[];

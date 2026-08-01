@@ -100,6 +100,69 @@ function pickComponent(
   return "";
 }
 
+/** Varanasi district PIN range — used when Google omits admin_level_2. */
+const VARANASI_PIN_PREFIX = "221";
+
+function normalizeIndianCityName(name: string): string {
+  const n = name.trim();
+  if (!n) return "";
+  if (/varanasi|banaras|kashi/i.test(n)) return TENANT.city;
+  return n;
+}
+
+/**
+ * India-specific city vs area split.
+ * Google often puts colony/sector in `locality`; city is usually admin_area_level_2 (district).
+ */
+function resolveIndianCityAndArea(components: AddressComponent[]): {
+  city: string;
+  area: string;
+  state: string;
+  pincode: string;
+} {
+  const sublocality =
+    pickComponent(
+      components,
+      "sublocality_level_1",
+      "sublocality",
+      "neighborhood",
+    ) || pickComponent(components, "sublocality_level_2");
+  const googleLocality = pickComponent(components, "locality");
+  const admin2 = pickComponent(components, "administrative_area_level_2");
+  const admin3 = pickComponent(components, "administrative_area_level_3");
+  const state =
+    pickComponent(components, "administrative_area_level_1") || TENANT.state;
+  const pincode = pickComponent(components, "postal_code");
+
+  let city = "";
+  if (admin2) {
+    city = normalizeIndianCityName(admin2);
+  } else if (
+    isVaranasiPin(pincode) ||
+    normalizeIndianCityName(googleLocality) === TENANT.city
+  ) {
+    city = TENANT.city;
+  } else if (googleLocality && !sublocality) {
+    // Small town — locality may be the city when there is no sublocality layer.
+    city = normalizeIndianCityName(googleLocality);
+  } else {
+    city = TENANT.city;
+  }
+
+  let area =
+    sublocality ||
+    (googleLocality && googleLocality !== city ? googleLocality : "") ||
+    admin3 ||
+    "";
+  if (area === city) area = sublocality || "";
+
+  return { city, area, state, pincode };
+}
+
+function isVaranasiPin(pincode: string): boolean {
+  return pincode.startsWith(VARANASI_PIN_PREFIX);
+}
+
 export function parsePlaceDetails(data: {
   place_id?: string;
   formatted_address?: string;
@@ -113,6 +176,7 @@ export function parsePlaceDetails(data: {
   if (typeof lat !== "number" || typeof lng !== "number") return null;
 
   const components = data.address_components ?? [];
+  const { city, area, state, pincode } = resolveIndianCityAndArea(components);
   const streetNumber = pickComponent(components, "street_number");
   const route = pickComponent(components, "route");
   const premise = pickComponent(components, "premise", "subpremise");
@@ -123,23 +187,12 @@ export function parsePlaceDetails(data: {
       "sublocality",
       "neighborhood",
     ) || pickComponent(components, "sublocality_level_2");
-  const locality =
-    pickComponent(components, "locality") ||
-    sublocality ||
-    pickComponent(components, "administrative_area_level_3");
-  const city =
-    pickComponent(components, "locality") ||
-    pickComponent(components, "administrative_area_level_2") ||
-    TENANT.city;
-  const state =
-    pickComponent(components, "administrative_area_level_1") ||
-    TENANT.state;
-  const pincode = pickComponent(components, "postal_code");
 
   const streetLine = [streetNumber, route, premise].filter(Boolean).join(" ");
   const address =
     streetLine ||
     data.name ||
+    area ||
     sublocality ||
     data.formatted_address?.split(",")[0]?.trim() ||
     "";
@@ -152,13 +205,13 @@ export function parsePlaceDetails(data: {
   const confidence: GeoConfidence =
     streetLine && pincode
       ? "high"
-      : pincode || sublocality
+      : pincode || area
         ? "low"
         : "low";
 
   return {
     address,
-    locality: sublocality || locality,
+    locality: area,
     landmark,
     city,
     state,

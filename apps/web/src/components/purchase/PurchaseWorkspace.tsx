@@ -27,7 +27,6 @@ import {
   runPurchaseReport,
   seedPurchaseIfEmpty,
   submitIndent,
-  suggestBillOcr,
   type BillOcrSuggestion,
   type GrnDestination,
   type IndentLine,
@@ -39,6 +38,7 @@ import {
   type PurchaseState,
 } from "@/lib/purchase";
 import { readImageAsDataUrl } from "@/lib/homework";
+import { runBillOcrApi } from "@/lib/ocrClient";
 import { openWaMe } from "@/lib/waMe";
 import { loadAccounts, seedAccountsIfEmpty } from "@/lib/accounts";
 import { PurchaseReturnPanel } from "@/components/purchase/PurchaseReturnPanel";
@@ -383,7 +383,9 @@ export function PurchaseWorkspace({
   const [grnPhotoNote, setGrnPhotoNote] = useState("");
   const [grnBillImageUrl, setGrnBillImageUrl] = useState("");
   const [grnBillFileName, setGrnBillFileName] = useState("");
+  const [grnBillMimeType, setGrnBillMimeType] = useState("image/jpeg");
   const [grnOcr, setGrnOcr] = useState<BillOcrSuggestion | null>(null);
+  const [grnOcrBusy, setGrnOcrBusy] = useState(false);
   const [grnQty, setGrnQty] = useState<Record<string, string>>({});
 
   // Per-item VendorBill editor (created during GRN posting)
@@ -1030,6 +1032,7 @@ export function PurchaseWorkspace({
                     }
                     setGrnBillImageUrl(r.url);
                     setGrnBillFileName(file.name);
+                    setGrnBillMimeType(file.type || "image/jpeg");
                     flash(`Attached ${file.name}`);
                   }}
                 />
@@ -1055,24 +1058,45 @@ export function PurchaseWorkspace({
                   <button
                     type="button"
                     className={btnOutline}
+                    disabled={grnOcrBusy}
                     onClick={() => {
-                      const fallback = computedGrnTotals.grossPaise;
-                      const sug = suggestBillOcr({
-                        fileName: grnBillFileName,
-                        photoNote: grnPhotoNote,
-                        fallbackAmountPaise:
-                          fallback || selectedPo.amountPaise,
-                        billDate: grnDate,
-                      });
-                      setGrnOcr(sug);
-                      flash(sug.note);
+                      void (async () => {
+                        setGrnOcrBusy(true);
+                        try {
+                          const fallback = computedGrnTotals.grossPaise;
+                          const r = await runBillOcrApi({
+                            dataUrl: grnBillImageUrl || undefined,
+                            mimeType: grnBillMimeType,
+                            fileName: grnBillFileName,
+                            photoNote: grnPhotoNote,
+                            fallbackAmountPaise:
+                              fallback || selectedPo.amountPaise,
+                            billDate: grnDate,
+                          });
+                          if (r.suggestion) {
+                            setGrnOcr(r.suggestion);
+                            flash(
+                              r.warning
+                                ? `${r.suggestion.note} (${r.warning})`
+                                : r.suggestion.note,
+                            );
+                          } else {
+                            setError(r.error || "OCR failed");
+                          }
+                        } finally {
+                          setGrnOcrBusy(false);
+                        }
+                      })();
                     }}
                   >
-                    Run bill OCR (demo)
+                    {grnOcrBusy ? "Reading bill…" : "Run bill OCR (Vision)"}
                   </button>
                   {grnOcr ? (
                     <span className="text-[11px] text-[var(--muted)]">
-                      Confidence: {grnOcr.confidence.replace("demo_", "")}
+                      Confidence:{" "}
+                      {grnOcr.confidence
+                        .replace("demo_", "")
+                        .replace("vision_", "")}
                     </span>
                   ) : null}
                 </div>

@@ -779,6 +779,7 @@ export async function handleWaSurveyBotInbound(opts: {
   waMessageId?: string;
   profileName?: string;
   location?: { lat: number; lng: number; name?: string; address?: string };
+  fromUnified?: boolean;
 }): Promise<{
   matched: boolean;
   replied: boolean;

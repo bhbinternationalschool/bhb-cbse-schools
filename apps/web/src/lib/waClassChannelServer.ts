@@ -564,6 +564,7 @@ export async function handleWaClassChannelInbound(msg: {
   waMessageId?: string;
   profileName?: string;
   mediaNote?: string;
+  fromUnified?: boolean;
 }): Promise<{
   escalate: boolean;
   replied: boolean;

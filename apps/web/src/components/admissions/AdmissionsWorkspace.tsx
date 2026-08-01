@@ -78,6 +78,7 @@ import { AdmissionImportPanel } from "@/components/admissions/AdmissionImportPan
 import { AdmissionRegistrationPanel } from "@/components/admissions/AdmissionRegistrationPanel";
 import { RteWorkspace } from "@/components/rte/RteWorkspace";
 import { AdmissionCampaignsPanel } from "@/components/admissions/AdmissionCampaignsPanel";
+import { AdmissionDocOcrPanel } from "@/components/admissions/AdmissionDocOcrPanel";
 import { AdmissionCrmChatInbox } from "@/components/admissions/AdmissionCrmChatInbox";
 import { AdmissionReportsPanel } from "@/components/admissions/AdmissionReportsPanel";
 import { SisParentMatchBanner } from "@/components/admissions/SisParentMatchBanner";
@@ -2596,6 +2597,14 @@ function LeadDetail({
       ) : null}
 
       <MastersWorkCard title="Child & class">
+        {!locked && canEdit ? (
+          <div className="mb-3">
+            <AdmissionDocOcrPanel
+              disabled={locked || !canEdit}
+              onApply={(patch) => onPatch(patch)}
+            />
+          </div>
+        ) : null}
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Child name">
             <input
@@ -2764,6 +2773,7 @@ function LeadDetail({
                 onPatch({
                   address: place.address,
                   locality: place.locality || lead.locality,
+                  city: place.city || lead.city || "Varanasi",
                   pincode: place.pincode || lead.pincode,
                 })
               }

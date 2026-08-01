@@ -42,6 +42,7 @@ import {
   type HomeworkReportId,
   type HomeworkState,
 } from "@/lib/homework";
+import { ClassroomSyncPanel } from "@/components/homework/ClassroomSyncPanel";
 import { TENANT } from "@/lib/types";
 
 type HwTab =
@@ -50,12 +51,14 @@ type HwTab =
   | "compose"
   | "diary"
   | "submissions"
-  | "reports";
+  | "reports"
+  | "classroom";
 
 const TABS: ModuleTabItem[] = [
   { id: "dashboard", label: "Dashboard", tone: "navy" },
   { id: "today", label: "Today", tone: "navy" },
   { id: "compose", label: "Compose HW", tone: "teal" },
+  { id: "classroom", label: "Classroom", tone: "teal" },
   { id: "diary", label: "Class diary", tone: "amber" },
   { id: "submissions", label: "Submissions", tone: "green" },
   { id: "reports", label: "Reports", tone: "slate" },
@@ -169,6 +172,7 @@ export function HomeworkWorkspace() {
       "dashboard",
       "today",
       "compose",
+      "classroom",
       "diary",
       "submissions",
       "reports",
@@ -635,6 +639,9 @@ export function HomeworkWorkspace() {
                           {p.teacherName}
                           {p.dueAt ? ` · due ${p.dueAt}` : ""}
                           {p.requiresSubmit ? " · submit required" : ""}
+                          {p.source === "google_classroom"
+                            ? " · Classroom"
+                            : ""}
                         </p>
                       </div>
                       <p className="text-xs font-medium text-[var(--brand-deep)]">
@@ -734,6 +741,21 @@ export function HomeworkWorkspace() {
             </ul>
           )}
         </section>
+      ) : null}
+
+      {tab === "classroom" && masters ? (
+        <ClassroomSyncPanel
+          masters={masters}
+          academicYearCode={ay}
+          teacherStaffId={teacherStaffId}
+          teacherName={teacherName}
+          onImported={(posts) => {
+            refresh();
+            if (posts.length) {
+              flash(`Imported ${posts.length} from Google Classroom`);
+            }
+          }}
+        />
       ) : null}
 
       {tab === "compose" ? (

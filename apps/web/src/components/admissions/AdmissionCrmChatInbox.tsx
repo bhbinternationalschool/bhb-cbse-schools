@@ -48,7 +48,7 @@ export function AdmissionCrmChatInbox({
   by: string;
   canEdit: boolean;
 }) {
-  const [channel, setChannel] = useState<Channel>("web");
+  const [channel, setChannel] = useState<Channel>("whatsapp");
   const [state, setState] = useState<CrmParentChatState>(() =>
     loadCrmParentChat(),
   );
@@ -72,17 +72,21 @@ export function AdmissionCrmChatInbox({
         threads?: WaThread[];
       };
       setWaConfigured(!!json.outboundConfigured);
-      setWaThreads(Array.isArray(json.threads) ? json.threads : []);
+      const list = Array.isArray(json.threads) ? json.threads : [];
+      setWaThreads(list);
+      return list;
     } catch {
       /* offline */
     }
+    return [];
   }, []);
 
   useEffect(() => {
     refreshWeb();
+    void refreshWa();
     const onFocus = () => {
       refreshWeb();
-      if (channel === "whatsapp") void refreshWa();
+      void refreshWa();
     };
     window.addEventListener("focus", onFocus);
     window.addEventListener("storage", onFocus);
@@ -90,7 +94,7 @@ export function AdmissionCrmChatInbox({
       window.removeEventListener("focus", onFocus);
       window.removeEventListener("storage", onFocus);
     };
-  }, [channel, refreshWa]);
+  }, [refreshWa]);
 
   useEffect(() => {
     if (channel !== "whatsapp") return;
@@ -123,6 +127,18 @@ export function AdmissionCrmChatInbox({
 
   function openWaThread(t: WaThread) {
     setSelectedId(t.id);
+    setWaThreads((prev) =>
+      prev.map((row) =>
+        row.id === t.id ? { ...row, unreadStaff: 0 } : row,
+      ),
+    );
+    void fetch("/api/wa/bot/threads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "markRead", threadId: t.id }),
+    }).catch(() => {
+      /* offline */
+    });
   }
 
   function onWebReply() {
@@ -176,9 +192,29 @@ export function AdmissionCrmChatInbox({
         Inbox for <strong>CRM / admission parents</strong> (
         {CRM_CHAT_AUDIENCE}).{" "}
         <span className="text-[#9a3412]">
-          Not linked to SIS Parent login (/parent) used by enrolled families.
+          WhatsApp messages appear under <strong>WhatsApp bot</strong> — not Web
+          chat. Enrolled families use Parent login (/parent), not this inbox.
         </span>
       </p>
+
+      {channel === "web" && waThreads.length > 0 ? (
+        <p className="rounded-lg border border-[rgba(180,83,9,0.35)] bg-[rgba(251,191,36,0.12)] px-3 py-2 text-[12px] text-[#92400e]">
+          You have {waThreads.length} WhatsApp conversation
+          {waThreads.length === 1 ? "" : "s"}
+          {unreadWa > 0 ? ` (${unreadWa} unread)` : ""}. Switch to{" "}
+          <button
+            type="button"
+            className="font-semibold underline"
+            onClick={() => {
+              setChannel("whatsapp");
+              setSelectedId(null);
+            }}
+          >
+            WhatsApp bot
+          </button>{" "}
+          to see messages from your school number.
+        </p>
+      ) : null}
 
       <div className="flex flex-wrap gap-2">
         <button

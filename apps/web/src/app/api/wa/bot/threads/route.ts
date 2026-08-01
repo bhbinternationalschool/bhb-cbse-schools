@@ -7,6 +7,7 @@
 import { NextResponse } from "next/server";
 import {
   listWaCrmBotThreads,
+  markWaCrmBotThreadRead,
   staffReplyWaCrmBot,
 } from "@/lib/waCrmBotServer";
 import { waOutboundConfigured } from "@/lib/waSend";
@@ -26,15 +27,32 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  let body: { threadId?: string; text?: string; by?: string };
+  let body: {
+    action?: string;
+    threadId?: string;
+    text?: string;
+    by?: string;
+  };
   try {
     body = (await req.json()) as typeof body;
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
-  if (!body.threadId || !body.text) {
+  if (!body.threadId) {
+    return NextResponse.json({ error: "threadId required" }, { status: 400 });
+  }
+
+  if (body.action === "markRead") {
+    const r = await markWaCrmBotThreadRead(body.threadId);
+    if (!r.ok) {
+      return NextResponse.json({ error: r.reason }, { status: 400 });
+    }
+    return NextResponse.json({ ok: true });
+  }
+
+  if (!body.text) {
     return NextResponse.json(
-      { error: "threadId and text required" },
+      { error: "text required (or action: markRead)" },
       { status: 400 },
     );
   }

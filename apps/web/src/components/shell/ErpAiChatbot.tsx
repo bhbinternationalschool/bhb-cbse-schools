@@ -33,6 +33,9 @@ import {
   resolveSessionRoles,
 } from "@/lib/rbac";
 import { TENANT } from "@/lib/types";
+import { VoiceMicButton } from "@/components/voice/VoiceMicButton";
+import { speakText } from "@/lib/voiceClient";
+import type { VoiceLang } from "@/lib/voiceLanguages";
 
 const PANEL_W = 380;
 const PANEL_H = 520;
@@ -43,16 +46,21 @@ const DRAG_THRESHOLD = 6;
 function loadHistory(
   key: string,
   ctx: ErpAiChatContext,
+  gemini?: boolean,
 ): ErpAiMessage[] {
-  if (typeof window === "undefined") return [erpAiWelcome(ctx)];
+  if (typeof window === "undefined") {
+    return [erpAiWelcome(ctx, { gemini })];
+  }
   try {
     const raw = sessionStorage.getItem(key);
-    if (!raw) return [erpAiWelcome(ctx)];
+    if (!raw) return [erpAiWelcome(ctx, { gemini })];
     const parsed = JSON.parse(raw) as ErpAiMessage[];
-    if (!Array.isArray(parsed) || !parsed.length) return [erpAiWelcome(ctx)];
+    if (!Array.isArray(parsed) || !parsed.length) {
+      return [erpAiWelcome(ctx, { gemini })];
+    }
     return parsed;
   } catch {
-    return [erpAiWelcome(ctx)];
+    return [erpAiWelcome(ctx, { gemini })];
   }
 }
 
@@ -111,6 +119,9 @@ export function ErpAiChatbot() {
   );
   const [showHint, setShowHint] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const [geminiOn, setGeminiOn] = useState(false);
+  const [voiceLang, setVoiceLang] = useState<VoiceLang>("auto");
+  const [voiceReply, setVoiceReply] = useState(true);
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -154,12 +165,20 @@ export function ErpAiChatbot() {
 
   useEffect(() => {
     setMasters(loadMasters());
+    void fetch("/api/erp-ai")
+      .then((r) => r.json())
+      .then((d: { geminiConfigured?: boolean }) => {
+        setGeminiOn(!!d.geminiConfigured);
+      })
+      .catch(() => null);
   }, []);
 
   useEffect(() => {
     if (!masters) return;
-    setMessages(loadHistory(storageKey, { session, masters }));
-  }, [session, masters, storageKey]);
+    setMessages(
+      loadHistory(storageKey, { session, masters }, geminiOn),
+    );
+  }, [session, masters, storageKey, geminiOn]);
 
   useEffect(() => {
     const saved = loadErpAiPosition(userKey);
@@ -260,22 +279,60 @@ export function ErpAiChatbot() {
     setDraft("");
     setTyping(true);
 
-    window.setTimeout(() => {
-      const reply = replyErpAiChat(trimmed, { session, masters });
+    const history = withUser
+      .slice(-12)
+      .map((m) => ({
+        role: m.role === "user" ? ("user" as const) : ("assistant" as const),
+        text: m.text,
+      }));
+
+    void (async () => {
+      let reply: ErpAiMessage;
+      try {
+        const res = await fetch("/api/erp-ai", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: trimmed,
+            history: history.slice(0, -1),
+            pathname,
+            tab: tab || undefined,
+          }),
+        });
+        const json = (await res.json().catch(() => ({}))) as {
+          message?: ErpAiMessage;
+          geminiConfigured?: boolean;
+          error?: string;
+        };
+        if (res.ok && json.message) {
+          reply = json.message;
+          if (json.geminiConfigured) setGeminiOn(true);
+        } else {
+          reply = replyErpAiChat(trimmed, { session, masters });
+        }
+      } catch {
+        reply = replyErpAiChat(trimmed, { session, masters });
+      }
+
       const withReply = [...withUser, reply];
       push(withReply);
       setTyping(false);
+
+      if (voiceReply && reply.role === "assistant") {
+        const plain = reply.text.replace(/\*\*([^*]+)\*\*/g, "$1");
+        void speakText(plain, { lang: voiceLang, preferGoogle: true });
+      }
 
       const openIntent = /^(open|go to|take me to|show)\b/i.test(trimmed);
       if (openIntent && reply.links?.length === 1) {
         router.push(reply.links[0]!.href);
       }
-    }, 280 + Math.min(600, trimmed.length * 8));
+    })();
   }
 
   function clearChat() {
     if (!masters) return;
-    push([erpAiWelcome({ session, masters })]);
+    push([erpAiWelcome({ session, masters }, { gemini: geminiOn })]);
   }
 
   function onPointerDown(e: React.PointerEvent) {
@@ -435,7 +492,7 @@ export function ErpAiChatbot() {
             <p className="truncate text-[10px] text-white/75">
               {analyzing
                 ? "Reading this page…"
-                : `${pageGuide?.pageLabel ?? "ERP"} · ${roleBadge}`}
+                : `${pageGuide?.pageLabel ?? "ERP"} · ${roleBadge}${geminiOn ? " · Gemini" : ""}${voiceReply ? " · 🔊" : ""}`}
             </p>
           </div>
         </div>
@@ -602,18 +659,35 @@ export function ErpAiChatbot() {
                 ask(draft);
               }}
             >
+              <VoiceMicButton
+                lang={voiceLang}
+                disabled={typing || !masters}
+                onTranscript={(t) => ask(t)}
+              />
               <input
                 ref={inputRef}
                 className="field !py-2 text-sm"
                 placeholder={
                   pageGuide
-                    ? `Ask about ${pageGuide.pageLabel}…`
-                    : "Ask or type “open fees”…"
+                    ? `Ask or speak — ${pageGuide.pageLabel}…`
+                    : "Ask, speak, or type “open fees”…"
                 }
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 disabled={typing || !masters}
               />
+              <button
+                type="button"
+                title={voiceReply ? "Voice replies on" : "Voice replies off"}
+                className={`shrink-0 rounded-xl border px-2 py-2 text-[11px] ${
+                  voiceReply
+                    ? "border-[rgba(15,118,110,0.35)] bg-[rgba(15,118,110,0.1)]"
+                    : "border-[rgba(32,48,80,0.15)] bg-white opacity-60"
+                }`}
+                onClick={() => setVoiceReply((v) => !v)}
+              >
+                🔊
+              </button>
               <button
                 type="submit"
                 disabled={typing || !draft.trim() || !masters}

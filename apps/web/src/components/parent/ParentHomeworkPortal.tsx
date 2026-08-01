@@ -16,6 +16,7 @@ import {
   submissionForStudent,
   type HomeworkState,
 } from "@/lib/homework";
+import { speakText } from "@/lib/voiceClient";
 import { StudentNameLabel } from "@/components/students/StudentAvatar";
 
 const field =
@@ -87,16 +88,10 @@ export function ParentHomeworkPortal({
   }, [hw, child]);
 
   function speak(text: string, id: string) {
-    if (typeof window === "undefined" || !window.speechSynthesis) {
-      flash("Voice not available on this device");
-      return;
-    }
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = /[\u0900-\u097F]/.test(text) ? "hi-IN" : "en-IN";
     setListeningId(id);
-    u.onend = () => setListeningId(null);
-    window.speechSynthesis.speak(u);
+    void speakText(text, { lang: "auto", preferGoogle: true }).finally(() =>
+      setListeningId(null),
+    );
   }
 
   if (!household) {

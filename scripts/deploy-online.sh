@@ -42,6 +42,9 @@ WHATSAPP_WABA_ID="$(get_env WHATSAPP_WABA_ID)"
 WHATSAPP_DEFAULT_COUNTRY_CODE="$(get_env WHATSAPP_DEFAULT_COUNTRY_CODE)"
 WHATSAPP_GRAPH_VERSION="$(get_env WHATSAPP_GRAPH_VERSION)"
 GOOGLE_MAPS_API_KEY="$(get_env GOOGLE_MAPS_API_KEY)"
+GEMINI_API_KEY="$(get_env GEMINI_API_KEY)"
+GOOGLE_OAUTH_CLIENT_ID="$(get_env GOOGLE_OAUTH_CLIENT_ID)"
+GOOGLE_OAUTH_CLIENT_SECRET="$(get_env GOOGLE_OAUTH_CLIENT_SECRET)"
 
 WHATSAPP_DEFAULT_COUNTRY_CODE="${WHATSAPP_DEFAULT_COUNTRY_CODE:-91}"
 WHATSAPP_GRAPH_VERSION="${WHATSAPP_GRAPH_VERSION:-v21.0}"
@@ -65,6 +68,16 @@ if [[ -n "$GOOGLE_MAPS_API_KEY" ]]; then
   echo "Google Maps: API key present (road distance on deploy)"
 else
   echo "Google Maps: not configured — transport planner will use estimates"
+fi
+if [[ -n "$GEMINI_API_KEY" ]]; then
+  echo "Gemini: API key present (ERP AI assistant on deploy)"
+else
+  echo "Gemini: not configured — ERP assistant uses offline guides only"
+fi
+if [[ -n "$GOOGLE_OAUTH_CLIENT_ID" && -n "$GOOGLE_OAUTH_CLIENT_SECRET" ]]; then
+  echo "Google OAuth: configured (Classroom homework sync on deploy)"
+else
+  echo "Google OAuth: not configured — Classroom tab will show setup instructions"
 fi
 echo ""
 echo "Submitting Cloud Build (this replaces school-erp-web)…"
@@ -107,6 +120,9 @@ SUBSTITUTIONS+="@_WHATSAPP_WABA_ID=${WHATSAPP_WABA_ID}"
 SUBSTITUTIONS+="@_WHATSAPP_DEFAULT_COUNTRY_CODE=${WHATSAPP_DEFAULT_COUNTRY_CODE}"
 SUBSTITUTIONS+="@_WHATSAPP_GRAPH_VERSION=${WHATSAPP_GRAPH_VERSION}"
 SUBSTITUTIONS+="@_GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}"
+SUBSTITUTIONS+="@_GEMINI_API_KEY=${GEMINI_API_KEY}"
+SUBSTITUTIONS+="@_GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}"
+SUBSTITUTIONS+="@_GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET}"
 
 gcloud builds submit "$ROOT" \
   --project="$PROJECT_ID" \

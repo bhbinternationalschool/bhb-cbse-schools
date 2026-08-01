@@ -565,7 +565,7 @@ export function ParentFeesPortal({
               onClick={() => void paySelected()}
               className="btn-accent rounded-xl px-4 py-2.5 text-sm font-semibold disabled:opacity-40"
             >
-              {paying ? "Paying…" : "Pay with UPI"}
+              {paying ? "Opening GPay / UPI…" : "Pay with GPay / UPI"}
             </button>
           </div>
         </div>

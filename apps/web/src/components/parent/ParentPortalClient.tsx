@@ -10,6 +10,9 @@ import { ParentSubjectsPortal } from "@/components/parent/ParentSubjectsPortal";
 import { ParentCommsPortal } from "@/components/parent/ParentCommsPortal";
 import { NotificationBell } from "@/components/shell/NotificationBell";
 import { CommsRunningStrip } from "@/components/shell/CommsRunningStrip";
+import { ParentVoiceBar } from "@/components/parent/ParentVoiceBar";
+import { PwaInstallBanner } from "@/components/pwa/PwaInstallBanner";
+import { parentPwaInstallCopy } from "@/lib/pwaApps";
 import { ErpChatButton } from "@/components/shell/StaffInternalChatButton";
 
 type PortalTab =
@@ -46,6 +49,9 @@ export function ParentPortalClient({
       ) {
         setPortalTab(raw);
       }
+    }
+    if (typeof window !== "undefined") {
+      applyTab(new URLSearchParams(window.location.search).get("tab"));
     }
     try {
       const stored = sessionStorage.getItem("bhb_parent_portal_tab");
@@ -130,6 +136,8 @@ export function ParentPortalClient({
               </button>
             ))}
           </div>
+          <PwaInstallBanner appId="parent" {...parentPwaInstallCopy()} />
+          <ParentVoiceBar onNavigate={(t) => setPortalTab(t)} />
         </div>
       </div>
 

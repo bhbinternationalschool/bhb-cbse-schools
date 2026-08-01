@@ -13,6 +13,9 @@ export type WaBotPersistBundle = {
   sis: unknown | null;
   survey: unknown | null;
   classChannel: unknown | null;
+  unified: unknown | null;
+  hub: unknown | null;
+  staffAtt: unknown | null;
 };
 
 const LOCAL_FILE = path.join(process.cwd(), ".data", "wa_bot_threads_bundle.json");
@@ -28,6 +31,9 @@ function emptyBundle(): WaBotPersistBundle {
     sis: null,
     survey: null,
     classChannel: null,
+    unified: null,
+    hub: null,
+    staffAtt: null,
   };
 }
 
@@ -42,6 +48,9 @@ async function loadBundle(): Promise<WaBotPersistBundle> {
       sis: remote.state.sis ?? null,
       survey: remote.state.survey ?? null,
       classChannel: remote.state.classChannel ?? null,
+      unified: remote.state.unified ?? null,
+      hub: remote.state.hub ?? null,
+      staffAtt: remote.state.staffAtt ?? null,
     };
     loaded = true;
     return cache;
@@ -75,7 +84,10 @@ async function saveBundle(bundle: WaBotPersistBundle): Promise<void> {
 }
 
 export async function loadWaBotSlice<T>(
-  key: keyof Pick<WaBotPersistBundle, "crm" | "sis" | "survey" | "classChannel">,
+  key: keyof Pick<
+    WaBotPersistBundle,
+    "crm" | "sis" | "survey" | "classChannel" | "unified" | "hub" | "staffAtt"
+  >,
   fallback: T,
 ): Promise<T> {
   const bundle = await loadBundle();
@@ -85,7 +97,10 @@ export async function loadWaBotSlice<T>(
 }
 
 export async function saveWaBotSlice<T>(
-  key: keyof Pick<WaBotPersistBundle, "crm" | "sis" | "survey" | "classChannel">,
+  key: keyof Pick<
+    WaBotPersistBundle,
+    "crm" | "sis" | "survey" | "classChannel" | "unified" | "hub" | "staffAtt"
+  >,
   value: T,
 ): Promise<void> {
   const bundle = await loadBundle();

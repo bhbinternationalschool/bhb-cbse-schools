@@ -557,7 +557,10 @@ function welcomeLinks(ctx: ErpAiChatContext): ErpAiLink[] {
   ];
 }
 
-export function erpAiWelcome(ctx: ErpAiChatContext): ErpAiMessage {
+export function erpAiWelcome(
+  ctx: ErpAiChatContext,
+  opts?: { gemini?: boolean },
+): ErpAiMessage {
   const who = ctx.session.fullName?.split(" ")[0] || "there";
   const role = roleLabel(ctx);
   const chips = quickPromptsForUser(ctx);
@@ -565,6 +568,10 @@ export function erpAiWelcome(ctx: ErpAiChatContext): ErpAiMessage {
     .slice(0, 3)
     .map((c) => c.label)
     .join(", ");
+
+  const aiNote = opts?.gemini
+    ? "Powered by **Gemini** — I can answer open questions and summarize live desk stats."
+    : "Built-in guides — set **GEMINI_API_KEY** on the server for AI answers.";
 
   return {
     id: nid(),
@@ -574,7 +581,7 @@ export function erpAiWelcome(ctx: ErpAiChatContext): ErpAiMessage {
       chipHint
         ? `Try: ${chipHint}.`
         : "Ask a question, or say “open home”."
-    } Offline guides — not ChatGPT.`,
+    }\n\n${aiNote}`,
     links: welcomeLinks(ctx),
   };
 }
