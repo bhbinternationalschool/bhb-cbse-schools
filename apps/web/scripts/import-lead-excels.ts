@@ -1,6 +1,6 @@
 /**
  * One-shot: import Field_Leads.xlsx + BHB_School_Enquiry_Survey.xlsx into
- * school_mirror admissions (CRM).
+ * admissions desk (CRM).
  *
  * Run from apps/web:
  *   npx tsx scripts/import-lead-excels.ts
@@ -9,11 +9,11 @@
 import { promises as fs } from "fs";
 import path from "path";
 import * as XLSX from "xlsx";
+import { loadEnvLocal } from "./lib/loadEnvLocal";
+
+loadEnvLocal();
 import {
-  defaultAdmissionsState,
   importLeads,
-  normalizeAdmissionsState,
-  type AdmissionsState,
   type ImportLeadRow,
 } from "../src/lib/admissions";
 import {
@@ -22,21 +22,9 @@ import {
 } from "../src/lib/admissionsExcelImport";
 import { reconcileLeadsWithSis } from "../src/lib/admissionsSisReconcile";
 import { DEFAULT_AY } from "../src/lib/masters";
-import type { SisState } from "../src/lib/sis";
 
 const ROOT = path.join(process.cwd());
 const DATA_LEADS = path.join(ROOT, "data", "leads");
-const MIRROR_PATH = path.join(ROOT, ".data", "school_mirror.json");
-
-type MirrorBundle = {
-  version: 1;
-  updatedAt: string;
-  sis: unknown | null;
-  fees: unknown | null;
-  payments: unknown | null;
-  masters: unknown | null;
-  admissions: unknown | null;
-};
 
 function sheetRows(filePath: string): Record<string, unknown>[] {
   const wb = XLSX.readFile(filePath);
@@ -73,29 +61,17 @@ async function main() {
     `Mapped Enquiry Survey: ${surveyRaw.length} sheet rows → ${surveyRows.length} lead rows`,
   );
 
-  let mirror: MirrorBundle = {
-    version: 1,
-    updatedAt: new Date(0).toISOString(),
-    sis: null,
-    fees: null,
-    payments: null,
-    masters: null,
-    admissions: null,
-  };
-  try {
-    mirror = JSON.parse(await fs.readFile(MIRROR_PATH, "utf8")) as MirrorBundle;
-  } catch {
-    /* first run */
-  }
+  const {
+    loadOpsAdmissions,
+    saveOpsAdmissions,
+    loadOpsMasters,
+    loadOpsSis,
+  } = await import("../src/lib/deskOpsLoad.server");
 
-  const masters = (mirror.masters || {}) as {
-    classes?: { id: string; name: string }[];
-  };
+  const masters = await loadOpsMasters();
   const resolveClassId = resolveClassIdFactory(masters);
 
-  const existing = mirror.admissions
-    ? normalizeAdmissionsState(mirror.admissions as Partial<AdmissionsState>)
-    : defaultAdmissionsState();
+  const existing = await loadOpsAdmissions();
 
   // Deduplicate against already-imported campaign notes from these files
   const alreadyFromFiles = new Set(
@@ -151,15 +127,11 @@ async function main() {
   // Check imported leads against the student register (all sessions, incl.
   // inactive). Runs even without SIS data so admission years get normalized
   // from the enquiry dates.
-  const sis = mirror.sis as SisState | null;
-  const sisSafe: SisState =
-    sis && Array.isArray(sis.students) && Array.isArray(sis.households)
-      ? sis
-      : ({ students: [], households: [] } as unknown as SisState);
-  if (!sisSafe.students.length) {
-    console.log("No SIS students in mirror — only fixing admission years.");
+  const sis = await loadOpsSis();
+  if (!sis.students.length) {
+    console.log("No SIS students in desk — only fixing admission years.");
   }
-  const rec = reconcileLeadsWithSis(state, sisSafe);
+  const rec = reconcileLeadsWithSis(state, sis);
   state = rec.state;
   const sisAdmitted = rec.admitted.length;
   const sisSuspected = rec.suspected.length;
@@ -172,19 +144,15 @@ async function main() {
     console.log(`  admission year corrected on ${rec.yearFixed} lead(s)`);
   }
 
-  mirror.admissions = state;
-  mirror.updatedAt = new Date().toISOString();
-  await fs.mkdir(path.dirname(MIRROR_PATH), { recursive: true });
-  await fs.writeFile(MIRROR_PATH, JSON.stringify(mirror), "utf8");
-
-  // Also write a client seed for localStorage hydrate
+  await saveOpsAdmissions(state);
+  const updatedAt = new Date().toISOString();
   const seedPath = path.join(DATA_LEADS, "admissions_leads_seed.json");
   await fs.writeFile(
     seedPath,
     JSON.stringify(
       {
         version: 1,
-        importedAt: mirror.updatedAt,
+        importedAt: updatedAt,
         sources: ["Field_Leads.xlsx", "BHB_School_Enquiry_Survey.xlsx"],
         state,
         stats: {
@@ -213,7 +181,7 @@ async function main() {
         sisSuspectedMatches: sisSuspected,
         totalLeads: state.leads.length,
         totalHouseholds: state.households.length,
-        mirror: MIRROR_PATH,
+        desk: "admission_desk_*",
         seed: seedPath,
         fieldErrors: fieldResult.errors.slice(0, 5),
         surveyErrors: surveyResult.errors.slice(0, 5),

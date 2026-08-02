@@ -7,28 +7,7 @@
  *   cd apps/web && npx tsx scripts/validate-desk-cutover.ts --json
  */
 
-import { existsSync, readFileSync } from "fs";
-import path from "path";
-
-function loadEnvLocal() {
-  const envPath = path.join(process.cwd(), ".env.local");
-  if (!existsSync(envPath)) return;
-  for (const line of readFileSync(envPath, "utf8").split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const eq = trimmed.indexOf("=");
-    if (eq < 1) continue;
-    const key = trimmed.slice(0, eq).trim();
-    let val = trimmed.slice(eq + 1).trim();
-    if (
-      (val.startsWith('"') && val.endsWith('"')) ||
-      (val.startsWith("'") && val.endsWith("'"))
-    ) {
-      val = val.slice(1, -1);
-    }
-    if (!(key in process.env)) process.env[key] = val;
-  }
-}
+import { loadEnvLocal } from "./lib/loadEnvLocal";
 
 loadEnvLocal();
 
@@ -1127,8 +1106,15 @@ async function countBlob(id: DeskModuleId): Promise<number> {
   }
 }
 
-function readinessNote(desk: number, blob: number): { ready: boolean; note: string } {
+function readinessNote(
+  desk: number,
+  blob: number,
+  readFromDb: boolean,
+): { ready: boolean; note: string } {
   if (desk === 0 && blob === 0) {
+    if (readFromDb) {
+      return { ready: true, note: "OK — empty (desk SoR)" };
+    }
     return { ready: false, note: "No data in desk or blob — use ERP first" };
   }
   if (desk === 0 && blob > 0) {
@@ -1162,7 +1148,11 @@ async function buildReport(): Promise<DeskReadinessRow[]> {
     const counts = await countDesk(mod.id);
     const blobCount = await countBlob(mod.id);
     counts.blob = blobCount;
-    const { ready, note } = readinessNote(counts.desk, counts.blob);
+    const { ready, note } = readinessNote(
+      counts.desk,
+      counts.blob,
+      mod.readFromDb(),
+    );
 
     rows.push({
       id: mod.id,

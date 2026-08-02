@@ -7,15 +7,16 @@
 
 import { promises as fs } from "fs";
 import path from "path";
+import { loadEnvLocal } from "./lib/loadEnvLocal";
+
+loadEnvLocal();
+
 import {
   clearFeeCollections,
   compactFeesForStorage,
-  loadFees,
 } from "../src/lib/fees";
-import { replaceSchoolMirror } from "../src/lib/schoolDataMirror";
 
 const ROOT = path.join(process.cwd());
-const MIRROR_PATH = path.join(ROOT, ".data", "school_mirror.json");
 const WIPE_SIGNAL_PATH = path.join(
   ROOT,
   "public",
@@ -23,49 +24,21 @@ const WIPE_SIGNAL_PATH = path.join(
   "collections_wiped.json",
 );
 
-type MirrorBundle = {
-  version: 1;
-  updatedAt: string;
-  sis: unknown | null;
-  fees: unknown | null;
-  payments: unknown | null;
-  masters: unknown | null;
-  admissions: unknown | null;
-};
-
 async function main() {
-  let mirror: MirrorBundle = {
-    version: 1,
-    updatedAt: new Date(0).toISOString(),
-    sis: null,
-    fees: null,
-    payments: null,
-    masters: null,
-    admissions: null,
-  };
+  const { loadOpsFees, saveOpsFees } = await import(
+    "../src/lib/deskOpsLoad.server"
+  );
 
-  try {
-    mirror = JSON.parse(await fs.readFile(MIRROR_PATH, "utf8")) as MirrorBundle;
-  } catch {
-    /* first run */
-  }
-
-  replaceSchoolMirror(mirror);
-
-  const prev = loadFees();
+  const prev = await loadOpsFees();
   const removedVouchers = (prev.vouchers ?? []).length;
   const removedCheques = (prev.cheques ?? []).length;
   const removedDayCloses = (prev.dayCloses ?? []).length;
   const removedAllocations = (prev.planAllocations ?? []).length;
 
   const next = compactFeesForStorage(clearFeeCollections(prev));
-  mirror.fees = next;
-  mirror.updatedAt = new Date().toISOString();
+  await saveOpsFees(next);
 
-  await fs.mkdir(path.dirname(MIRROR_PATH), { recursive: true });
-  await fs.writeFile(MIRROR_PATH, JSON.stringify(mirror), "utf8");
-
-  const wipedAt = mirror.updatedAt;
+  const wipedAt = new Date().toISOString();
   const signal = {
     wipedAt,
     removedVouchers,
@@ -83,7 +56,7 @@ async function main() {
         removedPlanAllocations: removedAllocations,
         keptCarriedForwardDues: next.carriedForwardDues?.length ?? 0,
         keptChargeVouchers: next.chargeVouchers?.length ?? 0,
-        mirror: MIRROR_PATH,
+        desk: "fee_desk_*",
         wipeSignal: WIPE_SIGNAL_PATH,
       },
       null,

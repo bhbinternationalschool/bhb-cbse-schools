@@ -126,4 +126,8 @@ export async function ensureAllDeskHydrated(): Promise<void> {
     ),
   ];
   await Promise.allSettled(tasks);
+  const { ensureDeskCutoverClient } = await import(
+    "@/lib/ensureDeskCutoverClient"
+  );
+  await ensureDeskCutoverClient();
 }

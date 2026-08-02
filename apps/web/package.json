@@ -18,7 +18,8 @@
     "wa:subscribe": "npx tsx scripts/wa-waba-subscribe.mts",
     "smoke:supabase": "npx tsx scripts/smoke-sis-remote.mts",
     "audit:supabase": "npx tsx scripts/audit-supabase-schema.mts",
-    "validate:desk-cutover": "npx tsx scripts/validate-desk-cutover.ts"
+    "validate:desk-cutover": "npx tsx scripts/validate-desk-cutover.ts",
+    "ensure:desk": "npx tsx scripts/ensure-desk-cutover.ts"
   },
   "dependencies": {
     "@bhb/time": "*",

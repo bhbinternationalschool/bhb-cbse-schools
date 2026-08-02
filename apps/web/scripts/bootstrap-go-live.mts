@@ -185,10 +185,25 @@ async function main() {
     }
   }
 
+  console.log("\nEnsuring desk cutover (backfill + seed)…");
+  const { ensureDeskCutoverServer } = await import(
+    "../src/lib/ensureDeskCutover.server"
+  );
+  const desk = await ensureDeskCutoverServer();
+  const changed = desk.actions.filter((a) => a.action !== "skip");
+  if (changed.length) {
+    for (const a of changed) {
+      console.log(`  ${a.module}: ${a.action} — ${a.detail}`);
+    }
+  } else {
+    console.log("  desk already up to date");
+  }
+
   console.log("\nDone. Next:");
   console.log("  1) Sign in as director (demo or Supabase Auth)");
   console.log("  2) Masters → Roles & permissions → Assignments");
-  console.log("  3) ./scripts/deploy-online.sh");
+  console.log("  3) npm run ensure:desk  (backfill desk + validate)");
+  console.log("  4) ./scripts/deploy-online.sh");
 }
 
 main().catch((e) => {

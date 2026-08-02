@@ -9,19 +9,19 @@ import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
+import { loadEnvLocal } from "./lib/loadEnvLocal";
+
+loadEnvLocal();
+
 import { DEFAULT_AY } from "../src/lib/masters";
 import {
   applyPaymentReportImport,
   formatPaymentImportSummary,
   parsePaymentReportText,
 } from "../src/lib/inventoryPaymentReportImport";
-import type { FeesState } from "../src/lib/fees";
-import type { MastersState } from "../src/lib/masters";
-import type { SisState } from "../src/lib/sis";
 
 const execFileAsync = promisify(execFile);
 const ROOT = path.join(process.cwd());
-const MIRROR_PATH = path.join(ROOT, ".data", "school_mirror.json");
 const DEFAULT_PDF = path.join(
   ROOT,
   "data",
@@ -36,36 +36,6 @@ reader = PdfReader(sys.argv[1])
 for page in reader.pages:
     print(page.extract_text() or "")
 `;
-
-type MirrorBundle = {
-  version: 1;
-  updatedAt: string;
-  sis: SisState | null;
-  fees: FeesState | null;
-  masters: MastersState | null;
-};
-
-function emptyFees(): FeesState {
-  return {
-    version: 1,
-    vouchers: [],
-    cheques: [],
-    manualBooks: [],
-    dayCloses: [],
-    installmentPlans: [],
-    planAllocations: [],
-    carriedForwardDues: [],
-    chargeVouchers: [],
-  };
-}
-
-function emptySis(): SisState {
-  return { households: [], students: [] } as unknown as SisState;
-}
-
-function emptyMasters(): MastersState {
-  return { feeHeads: [], feeGroups: [], feeStructureLines: [], installments: [] } as unknown as MastersState;
-}
 
 async function extractPdfText(pdfPath: string): Promise<string> {
   const pyPath = path.join(path.dirname(pdfPath), ".extract_pdf.py");
@@ -87,17 +57,11 @@ async function main() {
   const receipts = parsePaymentReportText(text);
   console.log(`Parsed ${receipts.length} receipt rows`);
 
-  let mirror: MirrorBundle | null = null;
-  try {
-    const raw = await fs.readFile(MIRROR_PATH, "utf8");
-    mirror = JSON.parse(raw) as MirrorBundle;
-  } catch {
-    mirror = null;
-  }
-
-  const sis = mirror?.sis ?? emptySis();
-  const fees = mirror?.fees ?? emptyFees();
-  const masters = mirror?.masters ?? emptyMasters();
+  const { loadOpsFees, saveOpsFees, loadOpsMasters, loadOpsSis } =
+    await import("../src/lib/deskOpsLoad.server");
+  const sis = await loadOpsSis();
+  const fees = await loadOpsFees();
+  const masters = await loadOpsMasters();
 
   const result = applyPaymentReportImport({
     fees,
@@ -115,16 +79,10 @@ async function main() {
     for (const u of result.unmatched.slice(0, 20)) console.log(`  ${u}`);
   }
 
-  const next: MirrorBundle = {
-    version: 1,
-    updatedAt: new Date().toISOString(),
-    sis,
-    fees: result.fees,
-    masters,
-  };
-  await fs.mkdir(path.dirname(MIRROR_PATH), { recursive: true });
-  await fs.writeFile(MIRROR_PATH, JSON.stringify(next, null, 2));
-  console.log(`Wrote fees (${result.fees.vouchers.length} vouchers) → ${MIRROR_PATH}`);
+  await saveOpsFees(result.fees);
+  console.log(
+    `Wrote fees desk (${result.fees.vouchers.length} vouchers) — fee_desk_*`,
+  );
 }
 
 main().catch((e) => {

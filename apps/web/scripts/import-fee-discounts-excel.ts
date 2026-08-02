@@ -8,16 +8,16 @@
 import { promises as fs } from "fs";
 import path from "path";
 import * as XLSX from "xlsx";
+import { loadEnvLocal } from "./lib/loadEnvLocal";
+
+loadEnvLocal();
+
 import {
   applyFeeDiscountImport,
   parseFeeDiscountExcelRows,
 } from "../src/lib/feeDiscountExcelImport";
-import { loadMasters, type MastersState } from "../src/lib/masters";
-import { replaceSchoolMirror } from "../src/lib/schoolDataMirror";
-import type { SisState } from "../src/lib/sis";
 
 const ROOT = path.join(process.cwd());
-const MIRROR_PATH = path.join(ROOT, ".data", "school_mirror.json");
 const DEFAULT_XLSX = path.join(ROOT, "data", "fees", "fee_discount_report.xlsx");
 const SEED_PATH = path.join(ROOT, "data", "fees", "fee_discount_import_seed.json");
 const BUNDLED_SEED_PATH = path.join(
@@ -33,20 +33,6 @@ const PUBLIC_SEED_PATH = path.join(
   "fees",
   "fee_discount_import_seed.json",
 );
-
-type MirrorBundle = {
-  version: 1;
-  updatedAt: string;
-  sis: SisState | null;
-  fees: unknown | null;
-  payments: unknown | null;
-  masters: MastersState | null;
-  admissions: unknown | null;
-};
-
-function emptySis(): SisState {
-  return { households: [], students: [] } as unknown as SisState;
-}
 
 function readSheetRows(filePath: string): Record<string, unknown>[] {
   const wb = XLSX.readFile(filePath);
@@ -67,35 +53,15 @@ async function main() {
 
   console.log(`Parsed ${rows.length} discount rows from ${xlsxPath}`);
 
-  let mirror: MirrorBundle = {
-    version: 1,
-    updatedAt: new Date(0).toISOString(),
-    sis: null,
-    fees: null,
-    payments: null,
-    masters: null,
-    admissions: null,
-  };
-  try {
-    mirror = JSON.parse(await fs.readFile(MIRROR_PATH, "utf8")) as MirrorBundle;
-  } catch {
-    /* first run */
-  }
-
-  replaceSchoolMirror(mirror);
-
-  const sis =
-    mirror.sis &&
-    Array.isArray(mirror.sis.students) &&
-    Array.isArray(mirror.sis.households)
-      ? mirror.sis
-      : emptySis();
-
-  const masters = loadMasters();
+  const { loadOpsMasters, saveOpsMasters, loadOpsSis } = await import(
+    "../src/lib/deskOpsLoad.server"
+  );
+  const sis = await loadOpsSis();
+  const masters = await loadOpsMasters();
 
   if (!sis.students.length) {
     console.warn(
-      "WARNING: No students in school mirror — rules will be created; grants apply when SIS syncs.",
+      "WARNING: No students in SIS desk — rules will be created; grants apply when SIS syncs.",
     );
   }
 
@@ -107,10 +73,7 @@ async function main() {
     importedBy: `CLI · ${path.basename(xlsxPath)}`,
   });
 
-  mirror.masters = result.masters;
-  mirror.updatedAt = new Date().toISOString();
-  await fs.mkdir(path.dirname(MIRROR_PATH), { recursive: true });
-  await fs.writeFile(MIRROR_PATH, JSON.stringify(mirror), "utf8");
+  await saveOpsMasters(result.masters);
 
   const seedJson = JSON.stringify(result.seed, null, 2);
   await fs.mkdir(path.dirname(SEED_PATH), { recursive: true });
@@ -126,7 +89,7 @@ async function main() {
         ...result.stats,
         rulesInMasters: result.masters.concessions.length,
         grantsInMasters: result.masters.concessionGrants?.length ?? 0,
-        mirror: MIRROR_PATH,
+        desk: "masters_desk_*",
         seed: SEED_PATH,
         bundledSeed: BUNDLED_SEED_PATH,
         publicSeed: PUBLIC_SEED_PATH,
