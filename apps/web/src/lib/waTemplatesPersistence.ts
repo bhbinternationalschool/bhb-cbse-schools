@@ -1,4 +1,4 @@
-import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
+import { createDeskSlicePersistence } from "@/lib/createDeskSlicePersistence";
 import {
   loadWaTemplates,
   waTemplatesIsEmpty,
@@ -6,15 +6,17 @@ import {
   type WaTemplatesState,
 } from "@/lib/waTemplates";
 
-const blob = createDomainBlobPersistence<WaTemplatesState>({
-  table: "wa_templates_state",
-  metaKey: "bhb_wa_templates_v1_remote_meta",
+const desk = createDeskSlicePersistence<WaTemplatesState>({
+  moduleId: "wa_templates",
+  blobMetaKey: "bhb_wa_templates_v1_remote_meta",
   label: "waTemplates",
   isEmpty: waTemplatesIsEmpty,
   loadLocal: loadWaTemplates,
   writeLocalRaw: writeWaTemplatesLocalRaw,
+  hasRemoteData: (b) =>
+    (Array.isArray(b.templates) ? b.templates.length : 0) > 0,
 });
 
-export const scheduleWaTemplatesSync = blob.scheduleSync;
-export const ensureWaTemplatesHydrated = blob.ensureHydrated;
-export const resetWaTemplatesPersistenceCache = blob.resetCache;
+export const scheduleWaTemplatesSync = desk.scheduleSync;
+export const ensureWaTemplatesHydrated = desk.ensureHydrated;
+export const resetWaTemplatesPersistenceCache = desk.resetCache;

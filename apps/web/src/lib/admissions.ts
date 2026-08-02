@@ -385,6 +385,8 @@ export type AdmissionsState = {
 
 const STORAGE_KEY = "bhb_admissions_v1";
 
+let serverAdmissionsCache: AdmissionsState | null = null;
+
 export const ADMISSION_STAGES: {
   value: AdmissionStage;
   label: string;
@@ -1097,7 +1099,7 @@ function normalizeRegistrationTender(
   };
 }
 
-function normalizeRegistrationPayment(
+export function normalizeRegistrationPayment(
   raw: Partial<RegistrationFeePayment> | null | undefined,
 ): RegistrationFeePayment {
   const now = new Date().toISOString();
@@ -1222,6 +1224,7 @@ function refreshLeadRegistrationPaymentStatus(
 
 export function loadAdmissions(): AdmissionsState {
   if (typeof window === "undefined") {
+    if (serverAdmissionsCache) return serverAdmissionsCache;
     const mirrored = getSchoolMirrorSync().admissions as
       | Partial<AdmissionsState>
       | null;
@@ -1242,12 +1245,17 @@ export function loadAdmissions(): AdmissionsState {
 }
 
 export function saveAdmissions(state: AdmissionsState): void {
-  // Public enquiry/register forms have no session actor → permission skipped
-  if (!assertModulePermission("admissions", "edit", "saveAdmissions")) return;
-
   const normalized = normalizeAdmissionsState(state);
+
+  if (typeof window !== "undefined") {
+    if (!assertModulePermission("admissions", "edit", "saveAdmissions")) return;
+  }
+
   if (typeof window === "undefined") {
-    setMirrorSlice("admissions", normalized);
+    writeAdmissionsLocalRaw(normalized);
+    void import("@/lib/admissionsPersistence").then(({ scheduleAdmissionsSync }) => {
+      scheduleAdmissionsSync(normalized);
+    });
     return;
   }
   writeAdmissionsLocalRaw(normalized);
@@ -1261,6 +1269,7 @@ export function saveAdmissions(state: AdmissionsState): void {
 export function writeAdmissionsLocalRaw(state: AdmissionsState): void {
   const normalized = normalizeAdmissionsState(state);
   if (typeof window === "undefined") {
+    serverAdmissionsCache = normalized;
     setMirrorSlice("admissions", normalized);
     return;
   }

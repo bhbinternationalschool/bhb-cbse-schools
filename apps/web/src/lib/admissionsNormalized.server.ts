@@ -1,0 +1,485 @@
+/**
+ * Admissions desk — Supabase normalized tables (admission_desk_*).
+ */
+
+import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  defaultAdmissionsState,
+  normalizeAdmissionHousehold,
+  normalizeAdmissionLead,
+  normalizeRegistrationPayment,
+  normalizeAdmissionsState,
+  type AdmissionHousehold,
+  type AdmissionLead,
+  type AdmissionsState,
+  type RegistrationFeePayment,
+} from "@/lib/admissions";
+import { admissionsDualWriteDbEnabled } from "@/lib/admissionsDbConfig";
+import { getServerTenantContext } from "@/lib/serverTenant";
+
+export type AdmissionDeskSyncMeta = {
+  householdCount: number;
+  leadCount: number;
+  openLeadCount: number;
+  enrolledLeadCount: number;
+  registrationPaymentCount: number;
+  lastLeadAt: string | null;
+  updatedAt: string;
+};
+
+export type AdmissionDeskFieldOps = Pick<
+  AdmissionsState,
+  | "surveyBeats"
+  | "surveyAttendance"
+  | "surveyExternals"
+  | "surveyTeam"
+  | "surveySessions"
+  | "leadCallerStaffIds"
+  | "nextEnquirySeq"
+  | "nextApplicationSeq"
+  | "nextHouseholdSeq"
+  | "nextRegPaySeq"
+  | "nextBeatSeq"
+>;
+
+const META_SELECT =
+  "household_count, lead_count, open_lead_count, enrolled_lead_count, registration_payment_count, last_lead_at, updated_at";
+
+async function resolveCtx(): Promise<{
+  sb: SupabaseClient;
+  tenantId: string;
+} | null> {
+  return getServerTenantContext();
+}
+
+async function deleteStale(
+  sb: SupabaseClient,
+  tenantId: string,
+  table: string,
+  keepIds: Set<string>,
+) {
+  const { data } = await sb.from(table).select("id").eq("tenant_id", tenantId);
+  const stale = (data ?? [])
+    .map((r) => String((r as { id: string }).id))
+    .filter((id) => !keepIds.has(id));
+  if (stale.length > 0) {
+    await sb.from(table).delete().in("id", stale);
+  }
+}
+
+async function upsertChunks(
+  sb: SupabaseClient,
+  table: string,
+  rows: Record<string, unknown>[],
+  chunk = 200,
+): Promise<{ ok: boolean; error?: string }> {
+  for (let i = 0; i < rows.length; i += chunk) {
+    const { error } = await sb.from(table).upsert(rows.slice(i, i + chunk));
+    if (error) return { ok: false, error: error.message };
+  }
+  return { ok: true };
+}
+
+function householdToRow(
+  tenantId: string,
+  h: AdmissionHousehold,
+): Record<string, unknown> {
+  return {
+    id: h.id,
+    tenant_id: tenantId,
+    code: h.code || "",
+    primary_mobile: h.primaryMobile || "",
+    whatsapp: h.whatsapp || "",
+    email: h.email || "",
+    locality: h.locality || "",
+    address: h.address || "",
+    city: h.city || "",
+    state: h.state || "",
+    pincode: h.pincode || "",
+    sis_household_id: h.sisHouseholdId || "",
+    note: h.note || "",
+    guardians_json: h.guardians ?? [],
+    household_json: h,
+    created_at: h.createdAt || new Date().toISOString(),
+    updated_at: h.updatedAt || new Date().toISOString(),
+  };
+}
+
+function rowToHousehold(r: Record<string, unknown>): AdmissionHousehold {
+  const fromJson = r.household_json as Partial<AdmissionHousehold> | undefined;
+  if (fromJson?.id) return normalizeAdmissionHousehold(fromJson);
+  return normalizeAdmissionHousehold({
+    id: String(r.id),
+    code: String(r.code || ""),
+    primaryMobile: String(r.primary_mobile || ""),
+    whatsapp: String(r.whatsapp || ""),
+    email: String(r.email || ""),
+    locality: String(r.locality || ""),
+    address: String(r.address || ""),
+    city: String(r.city || ""),
+    state: String(r.state || ""),
+    pincode: String(r.pincode || ""),
+    guardians: Array.isArray(r.guardians_json)
+      ? (r.guardians_json as AdmissionHousehold["guardians"])
+      : [],
+    sisHouseholdId: String(r.sis_household_id || ""),
+    note: String(r.note || ""),
+    createdAt: String(r.created_at),
+    updatedAt: String(r.updated_at),
+  });
+}
+
+function leadToRow(tenantId: string, l: AdmissionLead): Record<string, unknown> {
+  return {
+    id: l.id,
+    tenant_id: tenantId,
+    household_id: l.householdId || "",
+    enquiry_no: l.enquiryNo || "",
+    application_no: l.applicationNo || "",
+    stage: l.stage,
+    academic_year_code: l.academicYearCode,
+    source: l.source || "other",
+    child_name: l.childName || "",
+    mobile: l.mobile || "",
+    guardian_name: l.guardianName || "",
+    class_sought_id: l.classSoughtId || "",
+    assigned_to: l.assignedTo || "",
+    next_follow_up_at: l.nextFollowUpAt || null,
+    lead_date: l.leadDate || null,
+    student_id: l.studentId || "",
+    admission_no: l.admissionNo || "",
+    sis_match: l.sisMatch || "",
+    sis_student_id: l.sisStudentId || "",
+    lead_json: l,
+    created_at: l.createdAt || new Date().toISOString(),
+    updated_at: l.updatedAt || new Date().toISOString(),
+  };
+}
+
+function rowToLead(r: Record<string, unknown>): AdmissionLead {
+  const fromJson = r.lead_json as Partial<AdmissionLead> | undefined;
+  if (fromJson?.id) return normalizeAdmissionLead(fromJson);
+  return normalizeAdmissionLead({
+    id: String(r.id),
+    householdId: String(r.household_id || ""),
+    enquiryNo: String(r.enquiry_no || ""),
+    applicationNo: String(r.application_no || ""),
+    stage: r.stage as AdmissionLead["stage"],
+    academicYearCode: String(r.academic_year_code),
+    source: r.source as AdmissionLead["source"],
+    childName: String(r.child_name || ""),
+    mobile: String(r.mobile || ""),
+    guardianName: String(r.guardian_name || ""),
+    classSoughtId: String(r.class_sought_id || ""),
+    assignedTo: String(r.assigned_to || ""),
+    nextFollowUpAt: r.next_follow_up_at
+      ? String(r.next_follow_up_at).slice(0, 10)
+      : "",
+    leadDate: r.lead_date ? String(r.lead_date).slice(0, 10) : "",
+    studentId: String(r.student_id || ""),
+    admissionNo: String(r.admission_no || ""),
+    sisMatch: r.sis_match as AdmissionLead["sisMatch"],
+    sisStudentId: String(r.sis_student_id || ""),
+    createdAt: String(r.created_at),
+    updatedAt: String(r.updated_at),
+  });
+}
+
+function paymentToRow(
+  tenantId: string,
+  p: RegistrationFeePayment,
+): Record<string, unknown> {
+  return {
+    id: p.id,
+    tenant_id: tenantId,
+    code: p.code || "",
+    lead_id: p.leadId || "",
+    fee_head_id: p.feeHeadId || "",
+    amount_paise: p.amountPaise,
+    status: p.status,
+    mode: p.mode || "counter",
+    mobile: p.mobile || "",
+    child_name: p.childName || "",
+    paid_at: p.paidAt || null,
+    payment_json: p,
+    created_at: p.createdAt || new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function rowToPayment(r: Record<string, unknown>): RegistrationFeePayment {
+  const fromJson = r.payment_json as Partial<RegistrationFeePayment> | undefined;
+  if (fromJson?.id) {
+    return normalizeRegistrationPayment(fromJson);
+  }
+  return normalizeRegistrationPayment({
+    id: String(r.id),
+    code: String(r.code || ""),
+    leadId: String(r.lead_id || ""),
+    feeHeadId: String(r.fee_head_id || ""),
+    amountPaise: Number(r.amount_paise || 0),
+    status: r.status as RegistrationFeePayment["status"],
+    mode: r.mode as RegistrationFeePayment["mode"],
+    mobile: String(r.mobile || ""),
+    childName: String(r.child_name || ""),
+    paidAt: String(r.paid_at || ""),
+    createdAt: String(r.created_at),
+  });
+}
+
+function fieldOpsFromState(state: AdmissionsState): AdmissionDeskFieldOps {
+  return {
+    surveyBeats: state.surveyBeats,
+    surveyAttendance: state.surveyAttendance,
+    surveyExternals: state.surveyExternals,
+    surveyTeam: state.surveyTeam,
+    surveySessions: state.surveySessions,
+    leadCallerStaffIds: state.leadCallerStaffIds,
+    nextEnquirySeq: state.nextEnquirySeq,
+    nextApplicationSeq: state.nextApplicationSeq,
+    nextHouseholdSeq: state.nextHouseholdSeq,
+    nextRegPaySeq: state.nextRegPaySeq,
+    nextBeatSeq: state.nextBeatSeq,
+  };
+}
+
+function fieldOpsToState(
+  ops: AdmissionDeskFieldOps | null,
+  base: AdmissionsState,
+): AdmissionsState {
+  if (!ops) return base;
+  return normalizeAdmissionsState({
+    ...base,
+    surveyBeats: ops.surveyBeats,
+    surveyAttendance: ops.surveyAttendance,
+    surveyExternals: ops.surveyExternals,
+    surveyTeam: ops.surveyTeam,
+    surveySessions: ops.surveySessions,
+    leadCallerStaffIds: ops.leadCallerStaffIds,
+    nextEnquirySeq: ops.nextEnquirySeq,
+    nextApplicationSeq: ops.nextApplicationSeq,
+    nextHouseholdSeq: ops.nextHouseholdSeq,
+    nextRegPaySeq: ops.nextRegPaySeq,
+    nextBeatSeq: ops.nextBeatSeq,
+  });
+}
+
+function mapMetaRow(
+  metaRow: Record<string, unknown> | null,
+): AdmissionDeskSyncMeta | null {
+  if (!metaRow) return null;
+  return {
+    householdCount: metaRow.household_count as number,
+    leadCount: metaRow.lead_count as number,
+    openLeadCount: metaRow.open_lead_count as number,
+    enrolledLeadCount: metaRow.enrolled_lead_count as number,
+    registrationPaymentCount: metaRow.registration_payment_count as number,
+    lastLeadAt: metaRow.last_lead_at as string | null,
+    updatedAt: String(metaRow.updated_at),
+  };
+}
+
+export async function pushAdmissionDeskToDb(
+  state: AdmissionsState,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!admissionsDualWriteDbEnabled()) return { ok: true };
+  const ctx = await resolveCtx();
+  if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
+  const { sb, tenantId } = ctx;
+  const now = new Date().toISOString();
+  const normalized = normalizeAdmissionsState(state);
+
+  const households = normalized.households ?? [];
+  const leads = normalized.leads ?? [];
+  const payments = normalized.registrationPayments ?? [];
+
+  await Promise.all([
+    deleteStale(
+      sb,
+      tenantId,
+      "admission_desk_households",
+      new Set(households.map((h) => h.id)),
+    ),
+    deleteStale(
+      sb,
+      tenantId,
+      "admission_desk_leads",
+      new Set(leads.map((l) => l.id)),
+    ),
+    deleteStale(
+      sb,
+      tenantId,
+      "admission_desk_registration_payments",
+      new Set(payments.map((p) => p.id)),
+    ),
+  ]);
+
+  let r = await upsertChunks(
+    sb,
+    "admission_desk_households",
+    households.map((h) => householdToRow(tenantId, h)),
+  );
+  if (!r.ok) return r;
+
+  r = await upsertChunks(
+    sb,
+    "admission_desk_leads",
+    leads.map((l) => leadToRow(tenantId, l)),
+  );
+  if (!r.ok) return r;
+
+  r = await upsertChunks(
+    sb,
+    "admission_desk_registration_payments",
+    payments.map((p) => paymentToRow(tenantId, p)),
+  );
+  if (!r.ok) return r;
+
+  const ops = fieldOpsFromState(normalized);
+  await sb.from("admission_desk_field_ops").upsert({
+    tenant_id: tenantId,
+    ops_json: {
+      surveyBeats: ops.surveyBeats,
+      surveyAttendance: ops.surveyAttendance,
+      surveyExternals: ops.surveyExternals,
+      surveyTeam: ops.surveyTeam,
+      surveySessions: ops.surveySessions,
+      leadCallerStaffIds: ops.leadCallerStaffIds,
+    },
+    sequences_json: {
+      nextEnquirySeq: ops.nextEnquirySeq,
+      nextApplicationSeq: ops.nextApplicationSeq,
+      nextHouseholdSeq: ops.nextHouseholdSeq,
+      nextRegPaySeq: ops.nextRegPaySeq,
+      nextBeatSeq: ops.nextBeatSeq,
+    },
+    updated_at: now,
+  });
+
+  let lastLeadAt: string | null = null;
+  for (const l of leads) {
+    if (!lastLeadAt || l.updatedAt > lastLeadAt) lastLeadAt = l.updatedAt;
+  }
+
+  const openCount = leads.filter(
+    (l) => l.stage !== "enrolled" && l.stage !== "lost",
+  ).length;
+  const enrolledCount = leads.filter((l) => l.stage === "enrolled").length;
+
+  await sb.from("admission_desk_sync_meta").upsert(
+    {
+      tenant_id: tenantId,
+      household_count: households.length,
+      lead_count: leads.length,
+      open_lead_count: openCount,
+      enrolled_lead_count: enrolledCount,
+      registration_payment_count: payments.length,
+      last_lead_at: lastLeadAt,
+      updated_at: now,
+    },
+    { onConflict: "tenant_id" },
+  );
+
+  return { ok: true };
+}
+
+export async function fetchAdmissionDeskFromDb(): Promise<{
+  state: AdmissionsState;
+  meta: AdmissionDeskSyncMeta | null;
+}> {
+  const ctx = await resolveCtx();
+  if (!ctx) {
+    return { state: defaultAdmissionsState(), meta: null };
+  }
+  const { sb, tenantId } = ctx;
+
+  const [
+    { data: hhRows },
+    { data: leadRows },
+    { data: payRows },
+    { data: opsRow },
+    { data: metaRow },
+  ] = await Promise.all([
+    sb.from("admission_desk_households").select("*").eq("tenant_id", tenantId),
+    sb
+      .from("admission_desk_leads")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .order("updated_at", { ascending: false }),
+    sb
+      .from("admission_desk_registration_payments")
+      .select("*")
+      .eq("tenant_id", tenantId),
+    sb
+      .from("admission_desk_field_ops")
+      .select("ops_json, sequences_json")
+      .eq("tenant_id", tenantId)
+      .maybeSingle(),
+    sb
+      .from("admission_desk_sync_meta")
+      .select(META_SELECT)
+      .eq("tenant_id", tenantId)
+      .maybeSingle(),
+  ]);
+
+  const households = (hhRows ?? []).map((r) =>
+    rowToHousehold(r as Record<string, unknown>),
+  );
+  const leads = (leadRows ?? []).map((r) =>
+    rowToLead(r as Record<string, unknown>),
+  );
+  const registrationPayments = (payRows ?? []).map((r) =>
+    rowToPayment(r as Record<string, unknown>),
+  );
+
+  const opsJson = (opsRow?.ops_json ?? {}) as Record<string, unknown>;
+  const seqJson = (opsRow?.sequences_json ?? {}) as Record<string, unknown>;
+
+  const base = normalizeAdmissionsState({
+    version: 1,
+    households,
+    leads,
+    registrationPayments,
+    surveyBeats: opsJson.surveyBeats as AdmissionsState["surveyBeats"],
+    surveyAttendance: opsJson.surveyAttendance as AdmissionsState["surveyAttendance"],
+    surveyExternals: opsJson.surveyExternals as AdmissionsState["surveyExternals"],
+    surveyTeam: opsJson.surveyTeam as AdmissionsState["surveyTeam"],
+    surveySessions: opsJson.surveySessions as AdmissionsState["surveySessions"],
+    leadCallerStaffIds: opsJson.leadCallerStaffIds as string[],
+    nextEnquirySeq: seqJson.nextEnquirySeq as number,
+    nextApplicationSeq: seqJson.nextApplicationSeq as number,
+    nextHouseholdSeq: seqJson.nextHouseholdSeq as number,
+    nextRegPaySeq: seqJson.nextRegPaySeq as number,
+    nextBeatSeq: seqJson.nextBeatSeq as number,
+  });
+
+  return {
+    state: fieldOpsToState(null, base),
+    meta: mapMetaRow(metaRow as Record<string, unknown> | null),
+  };
+}
+
+export async function pushAdmissionLeadToDb(
+  lead: AdmissionLead,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!admissionsDualWriteDbEnabled()) return { ok: true };
+  const ctx = await resolveCtx();
+  if (!ctx) return { ok: false, error: "No tenant" };
+  const { sb, tenantId } = ctx;
+
+  const { error } = await sb
+    .from("admission_desk_leads")
+    .upsert(leadToRow(tenantId, normalizeAdmissionLead(lead)));
+  if (error) return { ok: false, error: error.message };
+
+  await sb.from("admission_desk_sync_meta").upsert(
+    {
+      tenant_id: tenantId,
+      last_lead_at: lead.updatedAt || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "tenant_id" },
+  );
+
+  return { ok: true };
+}

@@ -13,6 +13,8 @@ import {
 
 const STORAGE_KEY = "bhb_vault_v1";
 
+let serverVaultCache: VaultState | null = null;
+
 export type VaultDocType =
   | "fire_noc"
   | "building_safety"
@@ -94,7 +96,10 @@ export function emptyVaultState(): VaultState {
 }
 
 export function loadVault(): VaultState {
-  if (typeof window === "undefined") return emptyVaultState();
+  if (typeof window === "undefined") {
+    if (serverVaultCache) return serverVaultCache;
+    return emptyVaultState();
+  }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return emptyVaultState();
@@ -126,7 +131,10 @@ export function saveVault(state: VaultState): void {
 }
 
 export function writeVaultLocalRaw(state: VaultState) {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined") {
+    serverVaultCache = state;
+    return;
+  }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 

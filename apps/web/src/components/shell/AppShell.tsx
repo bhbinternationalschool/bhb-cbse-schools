@@ -13,7 +13,9 @@ import { CommsRunningStrip } from "./CommsRunningStrip";
 import { ErpAiChatbot } from "./ErpAiChatbot";
 import { ErpSidebar, ErpSidebarMenuButton } from "./ErpSidebar";
 import { PwaInstallBanner } from "@/components/pwa/PwaInstallBanner";
+import { StaffBottomNav } from "@/components/pwa/StaffBottomNav";
 import { staffPwaInstallCopy } from "@/lib/pwaApps";
+import { useMobileAppShell, usePwaStandalone } from "@/lib/pwaStandalone";
 import { TENANT } from "@/lib/types";
 import type { DemoSession } from "@/lib/auth";
 import { SessionProvider } from "./SessionContext";
@@ -35,6 +37,8 @@ export function AppShell({
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  const mobileApp = useMobileAppShell();
+  const standalone = usePwaStandalone();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [years, setYears] = useState<
     ReturnType<typeof listSessionYearOptions>
@@ -153,10 +157,16 @@ export function AppShell({
         </Suspense>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
-          <header className="sticky top-0 z-20 border-b border-[rgba(32,48,80,0.1)] bg-[rgba(248,248,240,0.92)] backdrop-blur-md">
+          <header
+            className={`sticky top-0 z-20 border-b border-[rgba(32,48,80,0.1)] bg-[rgba(248,248,240,0.92)] backdrop-blur-md ${
+              mobileApp ? "bhb-staff-app-header" : ""
+            }`}
+          >
             <div className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 sm:gap-4 sm:px-6">
-              <ErpSidebarMenuButton onClick={() => setMobileNavOpen(true)} />
-              <Link href="/home" className="flex shrink-0 items-center gap-2.5">
+              {!mobileApp ? (
+                <ErpSidebarMenuButton onClick={() => setMobileNavOpen(true)} />
+              ) : null}
+              <Link href="/home" className="flex min-w-0 shrink-0 items-center gap-2.5">
               <Image
                 src={TENANT.logoCrestUrl}
                 alt=""
@@ -166,20 +176,24 @@ export function AppShell({
                 priority
                 aria-hidden
               />
-              <div className="hidden min-w-0 leading-tight sm:block">
+              <div
+                className={`min-w-0 leading-tight ${mobileApp ? "block" : "hidden sm:block"}`}
+              >
                 <div className="font-display truncate text-sm font-bold tracking-wide text-[var(--brand-deep)] uppercase">
-                  {TENANT.nameDisplay}
+                  {mobileApp ? TENANT.shortName : TENANT.nameDisplay}
                 </div>
                 <div className="font-tagline truncate text-[11px]">
-                  {TENANT.tagline}
+                  {mobileApp ? session.fullName : TENANT.tagline}
                 </div>
               </div>
             </Link>
 
-            <UniversalSearchBar />
+            {!mobileApp ? <UniversalSearchBar /> : null}
 
-            <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-              <SessionSelector currentCode={session.academicYearCode} />
+            <div className={`flex shrink-0 items-center gap-2 sm:gap-3 ${mobileApp ? "bhb-staff-header-actions" : ""}`}>
+              {!mobileApp ? (
+                <SessionSelector currentCode={session.academicYearCode} />
+              ) : null}
               <StaffInternalChatButton />
               <NotificationBell persona="staff" />
               {readOnly ? (
@@ -218,22 +232,31 @@ export function AppShell({
           </div>
           <CommsRunningStrip audience="staff" />
         </header>
-        <PwaInstallBanner
-          appId="staff"
-          title={staffPwa.title}
-          subtitle={staffPwa.subtitle}
-          iosHint={staffPwa.iosHint}
-          className="px-4 pt-2 sm:px-6"
-        />
+        {!standalone ? (
+          <PwaInstallBanner
+            appId="staff"
+            title={staffPwa.title}
+            subtitle={staffPwa.subtitle}
+            iosHint={staffPwa.iosHint}
+            className="px-4 pt-2 sm:px-6"
+          />
+        ) : null}
         {readOnly ? (
           <div className="border-b border-[rgba(197,160,40,0.35)] bg-[rgba(197,160,40,0.12)] px-4 py-2 text-center text-xs font-medium text-[var(--brand-deep)] sm:px-6">
             Session {session.academicYearCode} is closed — viewing only. Switch
             to the current session to save changes.
           </div>
         ) : null}
-        <main className="mx-auto w-full max-w-[90rem] flex-1 px-4 py-6 sm:px-6">
+        <main
+          className={`bhb-staff-main mx-auto w-full max-w-[90rem] flex-1 px-4 py-6 sm:px-6 ${
+            mobileApp ? "max-sm:px-3 max-sm:py-4" : ""
+          }`}
+        >
           {children}
         </main>
+        {mobileApp ? (
+          <StaffBottomNav onOpenMenu={() => setMobileNavOpen(true)} />
+        ) : null}
         <ErpAiChatbot />
         </div>
       </div>

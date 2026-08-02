@@ -158,11 +158,12 @@ export function MastersWorkspace() {
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    setState(loadMasters());
     void (async () => {
+      const { ensureMastersHydrated } = await import("@/lib/mastersPersistence");
+      await ensureMastersHydrated();
       const { ensureStaffHydrated } = await import("@/lib/staffPersistence");
-      const did = await ensureStaffHydrated();
-      if (did) setState(loadMasters());
+      await ensureStaffHydrated();
+      setState(loadMasters());
     })();
   }, []);
 

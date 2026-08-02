@@ -704,6 +704,7 @@ export function moduleForHref(href: string): RbacModule | null {
   if (path.startsWith("/admissions")) return "admissions";
   if (path.startsWith("/staff")) return "staff";
   if (path.startsWith("/store")) return "store";
+  if (path.startsWith("/library")) return "store";
   if (path.startsWith("/purchase")) return "purchase";
   if (path.startsWith("/transport")) return "transport";
   if (path.startsWith("/accounts") || path.startsWith("/expenses")) return "accounts";

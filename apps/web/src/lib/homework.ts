@@ -20,6 +20,8 @@ import {
 
 const STORAGE_KEY = "bhb_homework_v1";
 
+let serverHomeworkCache: HomeworkState | null = null;
+
 export type HomeworkPostStatus = "published" | "withdrawn";
 
 export type HomeworkAttachment = {
@@ -219,7 +221,10 @@ function normalizeSeen(s: Partial<HomeworkSeen>): HomeworkSeen {
 }
 
 export function loadHomework(): HomeworkState {
-  if (typeof window === "undefined") return emptyHomeworkState();
+  if (typeof window === "undefined") {
+    if (serverHomeworkCache) return serverHomeworkCache;
+    return emptyHomeworkState();
+  }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return emptyHomeworkState();
@@ -241,7 +246,10 @@ export function saveHomework(state: HomeworkState): void {
 }
 
 export function writeHomeworkLocalRaw(state: HomeworkState) {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined") {
+    serverHomeworkCache = state;
+    return;
+  }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 

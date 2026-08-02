@@ -14,7 +14,9 @@ import {
   findStaffRegister,
   normalizeAttendanceSettings,
   normalizeStaffAttendanceState,
+  staffAttendanceStateIsEmpty,
   upsertStaffMarkInState,
+  writeStaffAttendanceLocalRaw,
   type StaffAttendanceState,
   type StaffPunchGeo,
 } from "@/lib/staffAttendance";
@@ -42,12 +44,26 @@ function todayIst(): string {
 
 export async function loadStaffAttendanceServer(): Promise<StaffAttendanceState> {
   if (loaded && cache) return cache;
+
+  const { ensureStaffAttendanceHydratedServer } = await import(
+    "@/lib/staffAttendancePersistence"
+  );
+  await ensureStaffAttendanceHydratedServer();
+
+  const fromCache = (await import("@/lib/staffAttendance")).loadStaffAttendance();
+  if (!staffAttendanceStateIsEmpty(fromCache)) {
+    cache = fromCache;
+    loaded = true;
+    return cache;
+  }
+
   const remote = await fetchServerBlob<StaffAttendanceState>(
     "staff_attendance_state",
   );
   if (remote.state?.version === 1 && Array.isArray(remote.state.registers)) {
     cache = normalizeStaffAttendanceState(remote.state);
     loaded = true;
+    writeStaffAttendanceLocalRaw(cache);
     return cache;
   }
   try {
@@ -56,6 +72,7 @@ export async function loadStaffAttendanceServer(): Promise<StaffAttendanceState>
     if (parsed?.version === 1) {
       cache = normalizeStaffAttendanceState(parsed);
       loaded = true;
+      writeStaffAttendanceLocalRaw(cache);
       return cache;
     }
   } catch {
@@ -71,7 +88,12 @@ export async function saveStaffAttendanceServer(
 ): Promise<void> {
   cache = normalizeStaffAttendanceState(state);
   loaded = true;
+  writeStaffAttendanceLocalRaw(cache);
   void pushServerBlob("staff_attendance_state", cache);
+  const { pushStaffAttendanceDeskToDb } = await import(
+    "@/lib/staffAttendanceNormalized.server"
+  );
+  void pushStaffAttendanceDeskToDb(cache);
   try {
     await fs.mkdir(path.dirname(LOCAL_FILE), { recursive: true });
     await fs.writeFile(LOCAL_FILE, JSON.stringify(cache, null, 2), "utf8");

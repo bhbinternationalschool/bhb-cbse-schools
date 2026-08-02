@@ -198,12 +198,15 @@ export type PayrollState = {
 const STORAGE_KEY = "bhb_payroll_v1";
 const AUDIT_MAX = 500;
 
+let serverPayrollCache: PayrollState | null = null;
+
 function nid(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
 export function loadPayroll(): PayrollState {
   if (typeof window === "undefined") {
+    if (serverPayrollCache) return serverPayrollCache;
     return { version: 2, runs: [], audit: [] };
   }
   try {
@@ -248,7 +251,10 @@ export function savePayroll(state: PayrollState) {
 }
 
 export function writePayrollLocalRaw(state: PayrollState) {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined") {
+    serverPayrollCache = state;
+    return;
+  }
   localStorage.setItem(
     STORAGE_KEY,
     JSON.stringify({ ...state, version: 2 }),

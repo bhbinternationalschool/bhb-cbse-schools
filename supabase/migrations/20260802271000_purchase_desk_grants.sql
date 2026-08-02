@@ -1,0 +1,10 @@
+grant all on public.purchase_desk_indents to service_role;
+grant all on public.purchase_desk_indent_lines to service_role;
+grant all on public.purchase_desk_orders to service_role;
+grant all on public.purchase_desk_order_lines to service_role;
+grant all on public.purchase_desk_grns to service_role;
+grant all on public.purchase_desk_grn_lines to service_role;
+grant all on public.purchase_desk_returns to service_role;
+grant all on public.purchase_desk_return_lines to service_role;
+grant all on public.purchase_desk_settings to service_role;
+grant all on public.purchase_desk_sync_meta to service_role;

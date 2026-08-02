@@ -41,35 +41,37 @@ export async function ensureClientSchoolMirrorHydrated(): Promise<boolean> {
 
   let changed = false;
 
-  if (remote.masters) {
+  const { deskSkipMirrorBlobSliceClient } = await import("@/lib/deskCutover");
+
+  if (remote.masters && !deskSkipMirrorBlobSliceClient("masters")) {
     const { hydrateMastersFromMirror } = await import("@/lib/masters");
     if (hydrateMastersFromMirror(remote.masters, remoteAt, remoteIsNewer)) {
       changed = true;
     }
   }
 
-  if (remote.sis) {
+  if (remote.sis && !deskSkipMirrorBlobSliceClient("sis")) {
     const { hydrateSisFromMirror } = await import("@/lib/sis");
     if (hydrateSisFromMirror(remote.sis, remoteAt, remoteIsNewer)) {
       changed = true;
     }
   }
 
-  if (remote.fees) {
+  if (remote.fees && !deskSkipMirrorBlobSliceClient("fees")) {
     const { hydrateFeesFromMirror } = await import("@/lib/fees");
     if (hydrateFeesFromMirror(remote.fees, remoteAt, remoteIsNewer)) {
       changed = true;
     }
   }
 
-  if (remote.payments) {
+  if (remote.payments && !deskSkipMirrorBlobSliceClient("payments")) {
     const { hydratePaymentsFromMirror } = await import("@/lib/payments");
     if (hydratePaymentsFromMirror(remote.payments, remoteAt, remoteIsNewer)) {
       changed = true;
     }
   }
 
-  if (remote.admissions) {
+  if (remote.admissions && !deskSkipMirrorBlobSliceClient("admissions")) {
     const { hydrateAdmissionsFromMirror } = await import("@/lib/admissions");
     if (hydrateAdmissionsFromMirror(remote.admissions, remoteAt, remoteIsNewer)) {
       changed = true;
@@ -80,18 +82,48 @@ export async function ensureClientSchoolMirrorHydrated(): Promise<boolean> {
   return changed;
 }
 
-/** Bootstrap all Supabase hydrators after mirror pull. */
+/** Bootstrap all Supabase desk hydrators after mirror pull. */
 export async function ensureAllDeskHydrated(): Promise<void> {
   const tasks = [
+    import("@/lib/mastersPersistence").then((m) => m.ensureMastersHydrated()),
+    import("@/lib/admissionsPersistence").then((m) => m.ensureAdmissionsHydrated()),
     import("@/lib/sisPersistence").then((m) => m.ensureSisHydrated()),
     import("@/lib/feesPersistence").then((m) => m.ensureFeesHydrated()),
     import("@/lib/paymentsPersistence").then((m) => m.ensurePaymentsHydrated()),
-    import("@/lib/admissionsPersistence").then((m) => m.ensureAdmissionsHydrated()),
+    import("@/lib/attendancePersistence").then((m) => m.ensureAttendanceHydrated()),
+    import("@/lib/staffAttendancePersistence").then((m) =>
+      m.ensureStaffAttendanceHydrated(),
+    ),
+    import("@/lib/examsPersistence").then((m) => m.ensureExamsHydrated()),
     import("@/lib/staffPersistence").then((m) => m.ensureStaffHydrated()),
     import("@/lib/transportPersistence").then((m) => m.ensureTransportHydrated()),
-    import("@/lib/attendancePersistence").then((m) => m.ensureAttendanceHydrated()),
-    import("@/lib/examsPersistence").then((m) => m.ensureExamsHydrated()),
     import("@/lib/rbacPersistence").then((m) => m.ensureRbacHydrated()),
+    import("@/lib/certificatesPersistence").then((m) =>
+      m.ensureCertificatesHydrated(),
+    ),
+    import("@/lib/examPapersPersistence").then((m) =>
+      m.ensureExamPapersHydrated(),
+    ),
+    import("@/lib/waTemplatesPersistence").then((m) =>
+      m.ensureWaTemplatesHydrated(),
+    ),
+    import("@/lib/staffHrPersistence").then((m) => m.ensureStaffHrHydrated()),
+    import("@/lib/staffAdvancesPersistence").then((m) =>
+      m.ensureStaffAdvancesHydrated(),
+    ),
+    import("@/lib/moduleRegistryPersistence").then((m) =>
+      m.ensureModuleRegistryHydrated(),
+    ),
+    import("@/lib/feeRecoveryTasksPersistence").then((m) =>
+      m.ensureFeeRecoveryTasksHydrated(),
+    ),
+    import("@/lib/automationPersistence").then((m) =>
+      m.ensureAutomationHydrated(),
+    ),
+    import("@/lib/erpChatPersistence").then((m) => m.ensureErpChatHydrated()),
+    import("@/lib/staffChatPersistence").then((m) =>
+      m.ensureStaffChatHydrated(),
+    ),
   ];
   await Promise.allSettled(tasks);
 }

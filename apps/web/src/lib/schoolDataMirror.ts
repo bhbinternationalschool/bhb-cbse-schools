@@ -4,6 +4,11 @@
  * mirror in sync. Disk persistence lives in schoolDataMirror.server.ts.
  */
 
+import {
+  deskSkipMirrorBlobSliceClient,
+  type MirrorBlobSlice,
+} from "@/lib/deskCutover";
+
 export type SchoolMirrorBundle = {
   version: 1;
   updatedAt: string;
@@ -74,11 +79,15 @@ export function scheduleClientSchoolMirrorSync(partial: {
 }): void {
   if (typeof window === "undefined") return;
   const body: Record<string, unknown> = {};
-  if (partial.sis !== undefined) body.sis = partial.sis;
-  if (partial.fees !== undefined) body.fees = partial.fees;
-  if (partial.payments !== undefined) body.payments = partial.payments;
-  if (partial.masters !== undefined) body.masters = partial.masters;
-  if (partial.admissions !== undefined) body.admissions = partial.admissions;
+  const maybeAdd = (key: MirrorBlobSlice, value: unknown) => {
+    if (value === undefined || deskSkipMirrorBlobSliceClient(key)) return;
+    body[key] = value;
+  };
+  maybeAdd("sis", partial.sis);
+  maybeAdd("fees", partial.fees);
+  maybeAdd("payments", partial.payments);
+  maybeAdd("masters", partial.masters);
+  maybeAdd("admissions", partial.admissions);
   if (Object.keys(body).length === 0) return;
   void fetch("/api/school-data/mirror", {
     method: "POST",
@@ -126,13 +135,18 @@ export function pushFullSchoolMirrorToServer(): void {
       masters?: unknown;
       admissions?: unknown;
     } = {
-      sis: loadSis(),
       fees: loadFees(),
       payments: loadPayments(),
       masters: loadMasters(),
     };
+    if (!deskSkipMirrorBlobSliceClient("sis")) {
+      partial.sis = loadSis();
+    }
     // Never push an empty CRM desk over a populated server mirror.
-    if ((admissions.leads?.length ?? 0) > 0) {
+    if (
+      !deskSkipMirrorBlobSliceClient("admissions") &&
+      (admissions.leads?.length ?? 0) > 0
+    ) {
       partial.admissions = admissions;
     }
     scheduleClientSchoolMirrorSync(partial);

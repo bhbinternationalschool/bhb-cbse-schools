@@ -16,6 +16,7 @@ export type RegistryModuleId =
   | "students"
   | "staff"
   | "store"
+  | "library"
   | "purchase"
   | "transport"
   | "accounts"
@@ -201,6 +202,14 @@ export const REGISTRY_MODULES: RegistryModuleDef[] = [
     blurb: "TC, bonafide, fee and character certificates",
     href: "/certificates",
     group: "academics",
+    defaultEnabled: true,
+  },
+  {
+    id: "library",
+    label: "Library",
+    blurb: "Book lending, issue/return and overdue fines",
+    href: "/library",
+    group: "finance",
     defaultEnabled: true,
   },
   {
@@ -468,6 +477,7 @@ export function registryModuleForHref(href: string): RegistryModuleId | null {
   if (path === "/payroll" || path.startsWith("/payroll/")) return "payroll";
   if (path === "/reports" || path.startsWith("/reports/")) return "reports";
   if (path === "/purchase" || path.startsWith("/purchase/")) return "purchase";
+  if (path === "/library" || path.startsWith("/library/")) return "library";
   if (path === "/store" || path.startsWith("/store/")) {
     if (tab === "purchase" || tab === "indent" || tab === "po" || tab === "grn") {
       return "purchase";

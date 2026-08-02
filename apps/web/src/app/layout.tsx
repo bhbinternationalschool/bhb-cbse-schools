@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Fraunces, Plus_Jakarta_Sans } from "next/font/google";
+import { PwaStandaloneProvider } from "@/components/pwa/PwaStandaloneProvider";
 import "./globals.css";
 
 const plusJakarta = Plus_Jakarta_Sans({
@@ -41,6 +42,7 @@ export default function RootLayout({
         className={`${plusJakarta.variable} ${fraunces.variable} antialiased`}
         suppressHydrationWarning
       >
+        <PwaStandaloneProvider />
         {children}
       </body>
     </html>

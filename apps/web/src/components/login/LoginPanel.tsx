@@ -187,6 +187,49 @@ export function LoginPanel() {
         }
         }
       } else if (persona === "parent") {
+        if (!demoAuth) {
+          const mobile = identifier.trim();
+          if (!mobile) {
+            setError("Enter your registered mobile number.");
+            return;
+          }
+          if (!secret || secret.replace(/\D/g, "").length < 6) {
+            const req = await fetch("/api/auth/otp/request", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ mobile }),
+            });
+            const body = (await req.json().catch(() => null)) as {
+              error?: string;
+              ok?: boolean;
+            } | null;
+            if (!req.ok) {
+              setError(body?.error || "Could not send OTP on WhatsApp.");
+              return;
+            }
+            setError("OTP sent on WhatsApp. Enter the 6-digit code and tap Sign in again.");
+            return;
+          }
+          const verify = await fetch("/api/auth/otp/verify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              mobile,
+              code: secret,
+              academicYearCode,
+            }),
+          });
+          if (!verify.ok) {
+            const body = (await verify.json().catch(() => null)) as {
+              error?: string;
+            } | null;
+            setError(body?.error || "Invalid OTP.");
+            return;
+          }
+          router.push(routeForPersona(persona));
+          router.refresh();
+          return;
+        }
         const { loadSis } = await import("@/lib/sis");
         const { resolveParentHousehold } = await import("@/lib/parentPortal");
         const sis = loadSis();

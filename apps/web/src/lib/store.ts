@@ -243,6 +243,8 @@ export type StoreState = {
 
 const STORAGE_KEY = "bhb_store_v1";
 
+let serverStoreCache: StoreState | null = null;
+
 const DEFAULT_CATEGORY_SEEDS: { code: StoreCategoryCode; name: string }[] = [
   { code: "book", name: "Books" },
   { code: "uniform", name: "Uniform" },
@@ -723,7 +725,10 @@ function emptyStore(): StoreState {
 }
 
 export function loadStore(): StoreState {
-  if (typeof window === "undefined") return emptyStore();
+  if (typeof window === "undefined") {
+    if (serverStoreCache) return serverStoreCache;
+    return emptyStore();
+  }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return emptyStore();
@@ -799,7 +804,10 @@ export function saveStore(state: StoreState) {
 }
 
 export function writeStoreLocalRaw(state: StoreState) {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined") {
+    serverStoreCache = state;
+    return;
+  }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 

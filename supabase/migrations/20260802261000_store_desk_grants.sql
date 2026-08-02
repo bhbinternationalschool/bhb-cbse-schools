@@ -1,0 +1,14 @@
+grant all on public.store_desk_categories to service_role;
+grant all on public.store_desk_sale_groups to service_role;
+grant all on public.store_desk_uoms to service_role;
+grant all on public.store_desk_infra_levels to service_role;
+grant all on public.store_desk_sources to service_role;
+grant all on public.store_desk_items to service_role;
+grant all on public.store_desk_issues to service_role;
+grant all on public.store_desk_issue_lines to service_role;
+grant all on public.store_desk_movements to service_role;
+grant all on public.store_desk_inventory_allocations to service_role;
+grant all on public.store_desk_asset_allocations to service_role;
+grant all on public.store_desk_sell_returns to service_role;
+grant all on public.store_desk_sell_return_lines to service_role;
+grant all on public.store_desk_sync_meta to service_role;

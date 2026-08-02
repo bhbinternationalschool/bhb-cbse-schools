@@ -39,22 +39,41 @@ function emptyBundle(): WaBotPersistBundle {
 
 async function loadBundle(): Promise<WaBotPersistBundle> {
   if (loaded && cache) return cache;
-  const remote = await fetchServerBlob<WaBotPersistBundle>("wa_bot_threads_state");
-  if (remote.state?.version === 1) {
-    cache = {
-      version: 1,
-      updatedAt: remote.updatedAt || remote.state.updatedAt || new Date().toISOString(),
-      crm: remote.state.crm ?? null,
-      sis: remote.state.sis ?? null,
-      survey: remote.state.survey ?? null,
-      classChannel: remote.state.classChannel ?? null,
-      unified: remote.state.unified ?? null,
-      hub: remote.state.hub ?? null,
-      staffAtt: remote.state.staffAtt ?? null,
-    };
-    loaded = true;
-    return cache;
+
+  const { waThreadsReadFromDbEnabled } = await import("@/lib/waThreadsDbConfig");
+  const { fetchWaThreadsDeskFromDb } = await import(
+    "@/lib/waThreadsNormalized.server"
+  );
+  const { deskSkipBlobPush } = await import("@/lib/deskCutover");
+
+  if (waThreadsReadFromDbEnabled()) {
+    const desk = await fetchWaThreadsDeskFromDb();
+    if ((desk.meta?.sliceCount ?? 0) > 0) {
+      cache = desk.bundle;
+      loaded = true;
+      return cache;
+    }
   }
+
+  if (!deskSkipBlobPush("wa_threads")) {
+    const remote = await fetchServerBlob<WaBotPersistBundle>("wa_bot_threads_state");
+    if (remote.state?.version === 1) {
+      cache = {
+        version: 1,
+        updatedAt: remote.updatedAt || remote.state.updatedAt || new Date().toISOString(),
+        crm: remote.state.crm ?? null,
+        sis: remote.state.sis ?? null,
+        survey: remote.state.survey ?? null,
+        classChannel: remote.state.classChannel ?? null,
+        unified: remote.state.unified ?? null,
+        hub: remote.state.hub ?? null,
+        staffAtt: remote.state.staffAtt ?? null,
+      };
+      loaded = true;
+      return cache;
+    }
+  }
+
   try {
     const raw = await fs.readFile(LOCAL_FILE, "utf8");
     const parsed = JSON.parse(raw) as WaBotPersistBundle;
@@ -66,6 +85,14 @@ async function loadBundle(): Promise<WaBotPersistBundle> {
   } catch {
     /* first run */
   }
+
+  const desk = await fetchWaThreadsDeskFromDb();
+  if ((desk.meta?.sliceCount ?? 0) > 0) {
+    cache = desk.bundle;
+    loaded = true;
+    return cache;
+  }
+
   cache = emptyBundle();
   loaded = true;
   return cache;
@@ -74,7 +101,20 @@ async function loadBundle(): Promise<WaBotPersistBundle> {
 async function saveBundle(bundle: WaBotPersistBundle): Promise<void> {
   cache = { ...bundle, version: 1, updatedAt: new Date().toISOString() };
   loaded = true;
-  void pushServerBlob("wa_bot_threads_state", cache);
+
+  const { pushWaThreadsDeskToDb } = await import(
+    "@/lib/waThreadsNormalized.server"
+  );
+  const desk = await pushWaThreadsDeskToDb(cache);
+  if (!desk.ok) {
+    console.warn("[wa-bot-store] desk push failed", desk.error);
+  }
+
+  const { deskSkipBlobPush } = await import("@/lib/deskCutover");
+  if (!deskSkipBlobPush("wa_threads")) {
+    void pushServerBlob("wa_bot_threads_state", cache);
+  }
+
   try {
     await fs.mkdir(path.dirname(LOCAL_FILE), { recursive: true });
     await fs.writeFile(LOCAL_FILE, JSON.stringify(cache, null, 2), "utf8");

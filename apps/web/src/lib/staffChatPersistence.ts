@@ -1,8 +1,8 @@
 /**
- * Internal staff chat remote sync — jsonb blob on staff_chat_state.
+ * Internal staff chat remote sync — desk slices + jsonb blob.
  */
 
-import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
+import { createDeskSlicePersistence } from "@/lib/createDeskSlicePersistence";
 import {
   loadStaffChat,
   staffChatStateIsEmpty,
@@ -10,15 +10,17 @@ import {
   type StaffChatState,
 } from "@/lib/staffInternalChat";
 
-const blob = createDomainBlobPersistence<StaffChatState>({
-  table: "staff_chat_state",
-  metaKey: "bhb_staff_chat_v1_remote_meta",
+const desk = createDeskSlicePersistence<StaffChatState>({
+  moduleId: "staff_chat",
+  blobMetaKey: "bhb_staff_chat_v1_remote_meta",
   label: "staff chat",
   isEmpty: staffChatStateIsEmpty,
   loadLocal: loadStaffChat,
   writeLocalRaw: writeStaffChatLocalRaw,
+  hasRemoteData: (b) =>
+    (Array.isArray(b.threads) ? b.threads.length : 0) > 0,
 });
 
-export const scheduleStaffChatSync = blob.scheduleSync;
-export const ensureStaffChatHydrated = blob.ensureHydrated;
-export const resetStaffChatPersistenceCache = blob.resetCache;
+export const scheduleStaffChatSync = desk.scheduleSync;
+export const ensureStaffChatHydrated = desk.ensureHydrated;
+export const resetStaffChatPersistenceCache = desk.resetCache;

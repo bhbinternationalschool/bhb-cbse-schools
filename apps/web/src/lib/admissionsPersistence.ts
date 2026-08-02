@@ -1,6 +1,5 @@
 /**
- * Admissions CRM remote sync — Supabase admissions_state via server API
- * (demo-auth sessions use service role on the server; direct client RLS would fail).
+ * Admissions CRM remote sync — jsonb blob on admissions_state + normalized admission_desk_*.
  */
 
 import {
@@ -11,6 +10,17 @@ import {
   type AdmissionsState,
 } from "@/lib/admissions";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
+import {
+  hydrateAdmissionsDeskFromDb,
+  scheduleAdmissionsDeskSync,
+} from "@/lib/admissionsNormalizedClient";
+import { mergeDbDeskIntoAdmissionsState } from "@/lib/admissionsNormalizedMerge";
+import { admissionsReadFromDbEnabled } from "@/lib/admissionsDbConfig";
+import {
+  deskSkipBlobHydrateClient,
+  deskSkipBlobPush,
+  deskSkipBlobPushClient,
+} from "@/lib/deskCutover";
 
 let hydratedOnce = false;
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -47,7 +57,7 @@ function writeMetaUpdatedAt(iso: string) {
   localStorage.setItem(META_KEY, JSON.stringify({ updatedAt: iso }));
 }
 
-async function fetchRemote(): Promise<{
+async function fetchRemoteBlob(): Promise<{
   state: AdmissionsState | null;
   updatedAt: string;
 }> {
@@ -69,7 +79,9 @@ async function fetchRemote(): Promise<{
   };
 }
 
-async function pushState(state: AdmissionsState): Promise<{ ok: boolean; error?: string }> {
+async function pushBlobState(
+  state: AdmissionsState,
+): Promise<{ ok: boolean; error?: string }> {
   const res = await fetch("/api/school-data/admissions", {
     method: "POST",
     credentials: "same-origin",
@@ -82,7 +94,7 @@ async function pushState(state: AdmissionsState): Promise<{ ok: boolean; error?:
   } | null;
   if (!res.ok || !body?.ok) {
     const message = body?.error || `HTTP ${res.status}`;
-    console.warn("[admissions] push failed", message);
+    console.warn("[admissions] blob push failed", message);
     return { ok: false, error: message };
   }
   writeMetaUpdatedAt(new Date().toISOString());
@@ -91,55 +103,93 @@ async function pushState(state: AdmissionsState): Promise<{ ok: boolean; error?:
 
 export function scheduleAdmissionsSync(state: AdmissionsState) {
   if (!admissionsRemoteEnabled()) return;
-  if (typeof window === "undefined") return;
-  pendingPush = normalizeAdmissionsState(state);
+  const normalized = normalizeAdmissionsState(state);
+
+  if (typeof window === "undefined") {
+    void pushAdmissionsRemoteServer(normalized);
+    return;
+  }
+
+  pendingPush = normalized;
   if (pushTimer) clearTimeout(pushTimer);
   pushTimer = setTimeout(() => {
     const payload = pendingPush;
     pendingPush = null;
     pushTimer = null;
     if (!payload) return;
-    void pushState(payload);
+    if (!deskSkipBlobPushClient("admissions")) {
+      void pushBlobState(payload);
+    }
+    scheduleAdmissionsDeskSync(payload);
   }, 500);
 }
 
-/** Pull once per tab; remote wins when newer or local empty. */
+/** Pull blob + normalized desk; remote wins when newer or local empty. */
 export async function ensureAdmissionsHydrated(): Promise<boolean> {
   if (!admissionsRemoteEnabled()) return false;
   if (hydratedOnce) return false;
   hydratedOnce = true;
 
-  const remote = await fetchRemote();
-  const local = loadAdmissions();
-  const localAt = readMetaUpdatedAt();
   let changed = false;
+  const skipBlob = deskSkipBlobHydrateClient("admissions");
 
-  if (remote.state) {
-    const remoteAt = remote.updatedAt || "";
-    const takeRemote =
-      admissionsStateIsEmpty(local) ||
-      !localAt ||
-      (remoteAt && remoteAt >= localAt);
-    if (takeRemote && !admissionsStateIsEmpty(remote.state)) {
-      writeAdmissionsLocalRaw(remote.state);
-      writeMetaUpdatedAt(remoteAt || new Date().toISOString());
-      changed = true;
+  if (!skipBlob) {
+    const remote = await fetchRemoteBlob();
+    const local = loadAdmissions();
+    const localAt = readMetaUpdatedAt();
+
+    if (remote.state) {
+      const remoteAt = remote.updatedAt || "";
+      const takeRemote =
+        admissionsStateIsEmpty(local) ||
+        !localAt ||
+        (remoteAt && remoteAt >= localAt);
+      if (takeRemote && !admissionsStateIsEmpty(remote.state)) {
+        writeAdmissionsLocalRaw(remote.state);
+        writeMetaUpdatedAt(remoteAt || new Date().toISOString());
+        changed = true;
+      }
     }
+  }
+
+  const { state: deskState, changed: deskChanged } =
+    await hydrateAdmissionsDeskFromDb(admissionsReadFromDbEnabled());
+  if (deskChanged && deskState) {
+    const merged = mergeDbDeskIntoAdmissionsState(loadAdmissions(), deskState, {
+      preferDb: admissionsReadFromDbEnabled(),
+    });
+    writeAdmissionsLocalRaw(merged);
+    changed = true;
   }
 
   const next = loadAdmissions();
   if (!admissionsStateIsEmpty(next)) {
-    await pushState(next);
-  } else if (remote.state && !admissionsStateIsEmpty(remote.state)) {
-    writeAdmissionsLocalRaw(remote.state);
-    changed = true;
+    scheduleAdmissionsSync(next);
+  } else if (!skipBlob) {
+    const remote = await fetchRemoteBlob();
+    if (remote.state && !admissionsStateIsEmpty(remote.state)) {
+      writeAdmissionsLocalRaw(remote.state);
+      changed = true;
+    }
   }
 
   return changed;
 }
 
-/** Service-role pull for WhatsApp / server mirror (no browser session). */
+/** Service-role pull for WhatsApp / server mirror (blob fallback). */
 export async function fetchAdmissionsRemoteServer(): Promise<AdmissionsState | null> {
+  const { admissionsReadFromDbEnabled } = await import("@/lib/admissionsDbConfig");
+  const { fetchAdmissionDeskFromDb } = await import(
+    "@/lib/admissionsNormalized.server"
+  );
+
+  if (admissionsReadFromDbEnabled()) {
+    const desk = await fetchAdmissionDeskFromDb();
+    if (!admissionsStateIsEmpty(desk.state)) {
+      return desk.state;
+    }
+  }
+
   const { fetchServerBlob } = await import("@/lib/serverBlob");
   const remote = await fetchServerBlob<AdmissionsState>("admissions_state");
   if (!remote.state) return null;
@@ -149,13 +199,63 @@ export async function fetchAdmissionsRemoteServer(): Promise<AdmissionsState | n
 export async function pushAdmissionsRemoteServer(
   state: AdmissionsState,
 ): Promise<{ ok: boolean; error?: string }> {
-  const { fetchServerBlob, pushServerBlob } = await import("@/lib/serverBlob");
   const normalized = normalizeAdmissionsState(state);
+  const skipBlob = deskSkipBlobPush("admissions");
+
+  const { pushAdmissionDeskToDb } = await import(
+    "@/lib/admissionsNormalized.server"
+  );
+  const desk = await pushAdmissionDeskToDb(normalized);
+  if (!desk.ok) return desk;
+
+  if (skipBlob) return { ok: true };
+
+  const { fetchServerBlob, pushServerBlob } = await import("@/lib/serverBlob");
   const remote = await fetchServerBlob<AdmissionsState>("admissions_state");
   const remoteLeads = (remote.state as AdmissionsState | null)?.leads?.length ?? 0;
   const nextLeads = normalized.leads?.length ?? 0;
   if (nextLeads < remoteLeads && remote.state) {
     return { ok: true };
   }
+
   return pushServerBlob("admissions_state", normalized);
+}
+
+/** Server-side hydrate from blob + normalized DB into admissions cache. */
+export async function ensureAdmissionsHydratedServer(): Promise<boolean> {
+  if (typeof window !== "undefined") return false;
+
+  const { fetchServerBlob } = await import("@/lib/serverBlob");
+  const { fetchAdmissionDeskFromDb } = await import(
+    "@/lib/admissionsNormalized.server"
+  );
+  const { admissionsReadFromDbEnabled } = await import("@/lib/admissionsDbConfig");
+  const { setMirrorSlice } = await import("@/lib/schoolDataMirror");
+
+  let state = loadAdmissions();
+  let changed = false;
+
+  if (!deskSkipBlobPush("admissions")) {
+    const remoteBlob = await fetchServerBlob<AdmissionsState>("admissions_state");
+    if (remoteBlob.state && !admissionsStateIsEmpty(remoteBlob.state)) {
+      state = normalizeAdmissionsState(remoteBlob.state);
+      changed = true;
+    }
+  }
+
+  const dbDesk = await fetchAdmissionDeskFromDb();
+  if (!admissionsStateIsEmpty(dbDesk.state)) {
+    state = mergeDbDeskIntoAdmissionsState(state, dbDesk.state, {
+      preferDb:
+        admissionsReadFromDbEnabled() || admissionsStateIsEmpty(state),
+    });
+    changed = true;
+  }
+
+  if (changed) {
+    writeAdmissionsLocalRaw(state);
+    setMirrorSlice("admissions", state);
+  }
+
+  return changed;
 }

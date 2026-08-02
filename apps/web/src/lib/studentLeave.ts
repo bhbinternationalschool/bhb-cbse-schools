@@ -21,6 +21,8 @@ import {
 
 const STORAGE_KEY = "bhb_student_leave_v1";
 
+let serverStudentLeaveCache: StudentLeaveState | null = null;
+
 export type StudentLeaveType = "SL" | "HD_AM" | "HD_PM" | "ML" | "OD" | "LL";
 
 export type StudentLeaveStatus =
@@ -98,7 +100,10 @@ export function emptyStudentLeaveState(): StudentLeaveState {
 }
 
 export function loadStudentLeave(): StudentLeaveState {
-  if (typeof window === "undefined") return emptyStudentLeaveState();
+  if (typeof window === "undefined") {
+    if (serverStudentLeaveCache) return serverStudentLeaveCache;
+    return emptyStudentLeaveState();
+  }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return emptyStudentLeaveState();
@@ -114,11 +119,26 @@ export function loadStudentLeave(): StudentLeaveState {
   }
 }
 
+export function writeStudentLeaveLocalRaw(state: StudentLeaveState) {
+  if (typeof window === "undefined") {
+    serverStudentLeaveCache = state;
+    return;
+  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+export function studentLeaveStateIsEmpty(state: StudentLeaveState): boolean {
+  return (state.requests?.length ?? 0) === 0;
+}
+
 export function saveStudentLeave(state: StudentLeaveState): void {
   if (!assertModulePermission("student_leave", "edit", "saveStudentLeave")) return;
 
   if (typeof window === "undefined") return;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  void import("@/lib/studentLeavePersistence").then(({ scheduleStudentLeaveSync }) => {
+    scheduleStudentLeaveSync(state);
+  });
 }
 
 export function createStudentLeaveRequest(input: {

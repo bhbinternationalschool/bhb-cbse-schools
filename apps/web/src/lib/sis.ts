@@ -21,6 +21,7 @@ import {
   scheduleClientSchoolMirrorSync,
   setMirrorSlice,
 } from "@/lib/schoolDataMirror";
+import { deskSkipBlobPushClient } from "@/lib/deskCutover";
 import {
   normalizeCurriculum,
   normalizeCurriculumRequest,
@@ -1149,11 +1150,16 @@ export function saveSis(state: SisState) {
 
   if (typeof window === "undefined") {
     setMirrorSlice("sis", state);
+    void import("@/lib/sisPersistence").then(({ scheduleSisSync }) => {
+      scheduleSisSync(state);
+    });
     return;
   }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   syncSisIntoMasters(state);
-  scheduleClientSchoolMirrorSync({ sis: state });
+  if (!deskSkipBlobPushClient("sis")) {
+    scheduleClientSchoolMirrorSync({ sis: state });
+  }
   // Dual-mode: push full roster + curriculum when Supabase is configured
   void import("@/lib/sisPersistence").then(({ scheduleSisSync }) => {
     scheduleSisSync(state);
@@ -1224,7 +1230,9 @@ export function hydrateSisFromMirror(
   if (!takeRemote) return false;
   writeSisLocalRaw(raw as SisState);
   writeSisMirrorMeta(remoteAt || new Date().toISOString());
-  scheduleClientSchoolMirrorSync({ sis: raw });
+  if (!deskSkipBlobPushClient("sis")) {
+    scheduleClientSchoolMirrorSync({ sis: raw });
+  }
   return true;
 }
 

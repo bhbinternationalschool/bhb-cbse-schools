@@ -111,6 +111,8 @@ export type AttendanceState = {
 
 const STORAGE_KEY = "bhb_attendance_v1";
 
+let serverAttendanceCache: AttendanceState | null = null;
+
 export const DEFAULT_ATTENDANCE_POLICY: AttendancePolicy = {
   teacherCutoffTime: "10:30",
   lockTeachersAfterCutoff: true,
@@ -264,7 +266,10 @@ export function normalizeAttendanceState(raw: unknown): AttendanceState {
 }
 
 export function loadAttendance(): AttendanceState {
-  if (typeof window === "undefined") return emptyAttendanceState();
+  if (typeof window === "undefined") {
+    if (serverAttendanceCache) return serverAttendanceCache;
+    return emptyAttendanceState();
+  }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return emptyAttendanceState();
@@ -275,10 +280,20 @@ export function loadAttendance(): AttendanceState {
 }
 
 export function saveAttendance(state: AttendanceState) {
-  if (!assertModulePermission("attendance", "edit", "saveAttendance")) return;
+  if (typeof window !== "undefined") {
+    if (!assertModulePermission("attendance", "edit", "saveAttendance")) return;
+  }
 
-  if (typeof window === "undefined") return;
   const next = normalizeAttendanceState(state);
+  if (typeof window === "undefined") {
+    writeAttendanceLocalRaw(next);
+    void import("@/lib/attendancePersistence").then(
+      ({ scheduleAttendanceSync }) => {
+        scheduleAttendanceSync(next);
+      },
+    );
+    return;
+  }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   void import("@/lib/attendancePersistence").then(
     ({ scheduleAttendanceSync }) => {
@@ -288,11 +303,12 @@ export function saveAttendance(state: AttendanceState) {
 }
 
 export function writeAttendanceLocalRaw(state: AttendanceState) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(
-    STORAGE_KEY,
-    JSON.stringify(normalizeAttendanceState(state)),
-  );
+  const next = normalizeAttendanceState(state);
+  if (typeof window === "undefined") {
+    serverAttendanceCache = next;
+    return;
+  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
 }
 
 export function attendanceStateIsEmpty(state: AttendanceState): boolean {

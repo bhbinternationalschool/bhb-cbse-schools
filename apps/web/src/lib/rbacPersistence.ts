@@ -1,4 +1,4 @@
-import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
+import { createDeskSlicePersistence } from "@/lib/createDeskSlicePersistence";
 import {
   loadRbac,
   rbacStateIsEmpty,
@@ -6,15 +6,16 @@ import {
   type RbacState,
 } from "@/lib/rbac";
 
-const blob = createDomainBlobPersistence<RbacState>({
-  table: "rbac_state",
-  metaKey: "bhb_rbac_v1_remote_meta",
+const desk = createDeskSlicePersistence<RbacState>({
+  moduleId: "rbac",
+  blobMetaKey: "bhb_rbac_v1_remote_meta",
   label: "rbac",
   isEmpty: rbacStateIsEmpty,
   loadLocal: loadRbac,
   writeLocalRaw: writeRbacLocalRaw,
+  hasRemoteData: (b) => (Array.isArray(b.roles) ? b.roles.length : 0) > 0,
 });
 
-export const scheduleRbacSync = blob.scheduleSync;
-export const ensureRbacHydrated = blob.ensureHydrated;
-export const resetRbacPersistenceCache = blob.resetCache;
+export const scheduleRbacSync = desk.scheduleSync;
+export const ensureRbacHydrated = desk.ensureHydrated;
+export const resetRbacPersistenceCache = desk.resetCache;

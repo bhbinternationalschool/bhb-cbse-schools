@@ -1,4 +1,4 @@
-import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
+import { createDeskSlicePersistence } from "@/lib/createDeskSlicePersistence";
 import {
   advancesStateIsEmpty,
   loadAdvances,
@@ -6,16 +6,18 @@ import {
   type AdvanceState,
 } from "@/lib/staffAdvance";
 
-const blob = createDomainBlobPersistence<AdvanceState>({
-  table: "staff_advances_state",
-  metaKey: "bhb_staff_advances_v1_remote_meta",
+const desk = createDeskSlicePersistence<AdvanceState>({
+  moduleId: "staff_advances",
+  blobMetaKey: "bhb_staff_advances_v1_remote_meta",
   label: "staffAdvances",
   isEmpty: advancesStateIsEmpty,
   loadLocal: loadAdvances,
   writeLocalRaw: writeAdvancesLocalRaw,
+  hasRemoteData: (b) =>
+    (Array.isArray(b.advances) ? b.advances.length : 0) > 0,
 });
 
-export const staffAdvancesRemoteEnabled = blob.remoteEnabled;
-export const scheduleStaffAdvancesSync = blob.scheduleSync;
-export const ensureStaffAdvancesHydrated = blob.ensureHydrated;
-export const resetStaffAdvancesPersistenceCache = blob.resetCache;
+export const staffAdvancesRemoteEnabled = desk.remoteEnabled;
+export const scheduleStaffAdvancesSync = desk.scheduleSync;
+export const ensureStaffAdvancesHydrated = desk.ensureHydrated;
+export const resetStaffAdvancesPersistenceCache = desk.resetCache;

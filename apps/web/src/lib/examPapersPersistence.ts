@@ -1,8 +1,8 @@
 /**
- * Exam papers remote sync — jsonb blob on exam_papers_state.
+ * Exam papers remote sync — desk slices + jsonb blob.
  */
 
-import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
+import { createDeskSlicePersistence } from "@/lib/createDeskSlicePersistence";
 import {
   examPapersStateIsEmpty,
   loadExamPapers,
@@ -10,15 +10,16 @@ import {
   type ExamPapersState,
 } from "@/lib/examPapers";
 
-const blob = createDomainBlobPersistence<ExamPapersState>({
-  table: "exam_papers_state",
-  metaKey: "bhb_exam_papers_v1_remote_meta",
+const desk = createDeskSlicePersistence<ExamPapersState>({
+  moduleId: "exam_papers",
+  blobMetaKey: "bhb_exam_papers_v1_remote_meta",
   label: "exam papers",
   isEmpty: examPapersStateIsEmpty,
   loadLocal: loadExamPapers,
   writeLocalRaw: writeExamPapersLocalRaw,
+  hasRemoteData: (b) => (Array.isArray(b.papers) ? b.papers.length : 0) > 0,
 });
 
-export const scheduleExamPapersSync = blob.scheduleSync;
-export const ensureExamPapersHydrated = blob.ensureHydrated;
-export const resetExamPapersPersistenceCache = blob.resetCache;
+export const scheduleExamPapersSync = desk.scheduleSync;
+export const ensureExamPapersHydrated = desk.ensureHydrated;
+export const resetExamPapersPersistenceCache = desk.resetCache;

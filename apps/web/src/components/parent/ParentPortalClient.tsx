@@ -12,7 +12,9 @@ import { NotificationBell } from "@/components/shell/NotificationBell";
 import { CommsRunningStrip } from "@/components/shell/CommsRunningStrip";
 import { ParentVoiceBar } from "@/components/parent/ParentVoiceBar";
 import { PwaInstallBanner } from "@/components/pwa/PwaInstallBanner";
+import { ParentBottomNav } from "@/components/pwa/ParentBottomNav";
 import { parentPwaInstallCopy } from "@/lib/pwaApps";
+import { useMobileAppShell, usePwaStandalone } from "@/lib/pwaStandalone";
 import { ErpChatButton } from "@/components/shell/StaffInternalChatButton";
 
 type PortalTab =
@@ -33,6 +35,8 @@ export function ParentPortalClient({
   householdId?: string;
 }) {
   const router = useRouter();
+  const mobileApp = useMobileAppShell();
+  const standalone = usePwaStandalone();
   const [portalTab, setPortalTab] = useState<PortalTab>("fees");
 
   useEffect(() => {
@@ -108,7 +112,7 @@ export function ParentPortalClient({
                 : "Subjects";
 
   return (
-    <div>
+    <div className={mobileApp ? "bhb-parent-mobile-app" : ""}>
       <div className="sticky top-0 z-30 border-b border-[rgba(32,48,80,0.1)] bg-[rgba(246,245,239,0.96)] backdrop-blur-md">
         <CommsRunningStrip
           audience="parents"
@@ -116,52 +120,81 @@ export function ParentPortalClient({
           onParentNavigate={(tab) => setPortalTab(tab)}
         />
         <div className="px-4 pt-2">
-          <div className="mx-auto flex max-w-lg items-center justify-end gap-2 pb-1">
-            <ErpChatButton />
-            <NotificationBell persona="parent" parentName={guardianName} />
-          </div>
-          <div className="mx-auto flex max-w-lg gap-1 overflow-x-auto rounded-lg bg-[rgba(32,48,80,0.06)] p-1">
-            {tabs.map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setPortalTab(id)}
-                className={`shrink-0 flex-1 rounded-md px-2 py-2 text-[11px] font-bold sm:text-xs ${
-                  portalTab === id
-                    ? "bg-white text-[var(--brand-deep)] shadow-sm"
-                    : "text-[var(--muted)]"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <PwaInstallBanner appId="parent" {...parentPwaInstallCopy()} />
+          {mobileApp ? (
+            <div className="mx-auto flex max-w-lg items-center justify-between gap-3 pb-2">
+              <div className="min-w-0">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-[var(--muted)]">
+                  BHB Parent
+                </p>
+                <p className="truncate text-sm font-semibold text-[var(--brand-deep)]">
+                  {guardianName}
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <ErpChatButton />
+                <NotificationBell persona="parent" parentName={guardianName} />
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="mx-auto flex max-w-lg items-center justify-end gap-2 pb-1">
+                <ErpChatButton />
+                <NotificationBell persona="parent" parentName={guardianName} />
+              </div>
+              <div className="mx-auto flex max-w-lg gap-1 overflow-x-auto rounded-lg bg-[rgba(32,48,80,0.06)] p-1">
+                {tabs.map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setPortalTab(id)}
+                    className={`shrink-0 flex-1 rounded-md px-2 py-2 text-[11px] font-bold sm:text-xs ${
+                      portalTab === id
+                        ? "bg-white text-[var(--brand-deep)] shadow-sm"
+                        : "text-[var(--muted)]"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+          {!standalone ? (
+            <PwaInstallBanner appId="parent" {...parentPwaInstallCopy()} />
+          ) : null}
           <ParentVoiceBar onNavigate={(t) => setPortalTab(t)} />
         </div>
       </div>
 
       {portalTab === "fees" ? (
-        <ParentFeesPortal
-          guardianDisplayName={guardianName}
-          onSignOut={() => {
-            void signOut();
-          }}
-        />
+        <div className={mobileApp ? "bhb-parent-app-content" : ""}>
+          <ParentFeesPortal
+            guardianDisplayName={guardianName}
+            onSignOut={() => {
+              void signOut();
+            }}
+          />
+        </div>
       ) : (
-        <div className="mx-auto min-h-screen max-w-lg pb-16">
-          <div className="flex items-center justify-between px-4 pt-3">
-            <p className="text-sm font-semibold text-[var(--brand-deep)]">
-              {title} · {guardianName}
-            </p>
-            <button
-              type="button"
-              onClick={() => void signOut()}
-              className="rounded-lg border border-[rgba(32,48,80,0.15)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)]"
-            >
-              Sign out
-            </button>
-          </div>
+        <div
+          className={`mx-auto min-h-screen max-w-lg ${
+            mobileApp ? "bhb-parent-app-content pb-4" : "pb-16"
+          }`}
+        >
+          {!mobileApp ? (
+            <div className="flex items-center justify-between px-4 pt-3">
+              <p className="text-sm font-semibold text-[var(--brand-deep)]">
+                {title} · {guardianName}
+              </p>
+              <button
+                type="button"
+                onClick={() => void signOut()}
+                className="rounded-lg border border-[rgba(32,48,80,0.15)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)]"
+              >
+                Sign out
+              </button>
+            </div>
+          ) : null}
           {portalTab === "homework" ? (
             <ParentHomeworkPortal guardianDisplayName={guardianName} />
           ) : null}
@@ -190,6 +223,13 @@ export function ParentPortalClient({
           ) : null}
         </div>
       )}
+      {mobileApp ? (
+        <ParentBottomNav
+          active={portalTab}
+          onSelect={setPortalTab}
+          onSignOut={() => void signOut()}
+        />
+      ) : null}
     </div>
   );
 }

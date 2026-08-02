@@ -381,6 +381,8 @@ export type AccountsState = {
 
 const STORAGE_KEY = "bhb_accounts_v1";
 
+let serverAccountsCache: AccountsState | null = null;
+
 /* ─── Helpers ──────────────────────────────────────────────── */
 
 function id(prefix: string): string {
@@ -963,7 +965,10 @@ function repairOrphanedCancelledVoucherLedger(
 }
 
 export function loadAccounts(): AccountsState {
-  if (typeof window === "undefined") return emptyAccounts();
+  if (typeof window === "undefined") {
+    if (serverAccountsCache) return serverAccountsCache;
+    return emptyAccounts();
+  }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return emptyAccounts();
@@ -1050,7 +1055,10 @@ export function saveAccounts(state: AccountsState): void {
 }
 
 export function writeAccountsLocalRaw(state: AccountsState): void {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined") {
+    serverAccountsCache = state;
+    return;
+  }
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, version: 1 }));
 }
 

@@ -1357,6 +1357,9 @@ export function saveFees(state: FeesState) {
 
   if (typeof window === "undefined") {
     setMirrorSlice("fees", state);
+    void import("@/lib/feesPersistence").then(({ scheduleFeesSync }) => {
+      scheduleFeesSync(state);
+    });
     return;
   }
   persistFeesClient(state);

@@ -23,6 +23,8 @@ import { TENANT } from "@/lib/types";
 
 const STORAGE_KEY = "bhb_purchase_v1";
 
+let serverPurchaseCache: PurchaseState | null = null;
+
 /* ─── Types ─────────────────────────────────────────────────── */
 
 export type IndentStatus =
@@ -391,7 +393,10 @@ function normalizeState(raw: Partial<PurchaseState> | null): PurchaseState {
 /* ─── Persistence ───────────────────────────────────────────── */
 
 export function loadPurchase(): PurchaseState {
-  if (typeof window === "undefined") return emptyPurchaseState();
+  if (typeof window === "undefined") {
+    if (serverPurchaseCache) return serverPurchaseCache;
+    return emptyPurchaseState();
+  }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return emptyPurchaseState();
@@ -412,7 +417,10 @@ export function savePurchase(state: PurchaseState): void {
 }
 
 export function writePurchaseLocalRaw(state: PurchaseState): void {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined") {
+    serverPurchaseCache = state;
+    return;
+  }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 

@@ -14,6 +14,7 @@ import {
 } from "@/lib/payments";
 import { settlePaymentLinkWithWhatsApp } from "@/lib/paymentSettlement.server";
 import { ensureSchoolMirrorLoaded } from "@/lib/schoolDataMirror.server";
+import { recordPaymentGatewayEvent } from "@/lib/paymentsNormalized.server";
 
 export const runtime = "nodejs";
 
@@ -113,6 +114,12 @@ export async function POST(req: Request) {
       eventName,
     )
   ) {
+    await recordPaymentGatewayEvent({
+      provider: "razorpay",
+      eventType: eventName,
+      settlementStatus: "ignored",
+      eventJson: event as Record<string, unknown>,
+    });
     return NextResponse.json({ ok: true, ignored: eventName });
   }
 
@@ -125,6 +132,13 @@ export async function POST(req: Request) {
     null;
 
   if (!link) {
+    await recordPaymentGatewayEvent({
+      provider: "razorpay",
+      eventType: eventName || "unknown",
+      externalPaymentId: paymentId || "",
+      settlementStatus: "failed",
+      eventJson: event as Record<string, unknown>,
+    });
     return NextResponse.json(
       {
         ok: false,
@@ -136,7 +150,28 @@ export async function POST(req: Request) {
     );
   }
 
+  await recordPaymentGatewayEvent({
+    paymentLinkId: link.id,
+    provider: "razorpay",
+    eventType: eventName || "payment.received",
+    externalPaymentId: paymentId || "",
+    amountPaise: link.amountPaise,
+    settlementStatus: "received",
+    eventJson: event as Record<string, unknown>,
+  });
+
   if (link.status === "paid") {
+    await recordPaymentGatewayEvent({
+      paymentLinkId: link.id,
+      provider: "razorpay",
+      eventType: eventName || "payment.already_paid",
+      externalPaymentId: paymentId || "",
+      amountPaise: link.amountPaise,
+      settlementStatus: "ignored",
+      voucherId: link.voucherId,
+      receiptNo: link.receiptNo,
+      eventJson: event as Record<string, unknown>,
+    });
     return NextResponse.json({
       ok: true,
       alreadyPaid: true,
@@ -152,8 +187,29 @@ export async function POST(req: Request) {
   });
 
   if (!result.ok) {
+    await recordPaymentGatewayEvent({
+      paymentLinkId: link.id,
+      provider: "razorpay",
+      eventType: eventName || "settlement.failed",
+      externalPaymentId: paymentId || "",
+      amountPaise: link.amountPaise,
+      settlementStatus: "failed",
+      eventJson: { error: result.error, raw: event },
+    });
     return NextResponse.json({ error: result.error }, { status: 400 });
   }
+
+  await recordPaymentGatewayEvent({
+    paymentLinkId: result.link.id,
+    provider: "razorpay",
+    eventType: eventName || "payment.settled",
+    externalPaymentId: paymentId || "",
+    amountPaise: result.link.amountPaise,
+    settlementStatus: "settled",
+    voucherId: result.voucherId,
+    receiptNo: result.receiptNo,
+    eventJson: event as Record<string, unknown>,
+  });
 
   return NextResponse.json({
     ok: true,

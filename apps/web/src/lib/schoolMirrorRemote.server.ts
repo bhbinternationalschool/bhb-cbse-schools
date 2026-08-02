@@ -10,16 +10,12 @@ import {
   type SchoolMirrorBundle,
 } from "@/lib/schoolDataMirror";
 import { fetchServerBlob } from "@/lib/serverBlob";
-import { defaultAdmissionsState, type AdmissionsState } from "@/lib/admissions";
+import { defaultAdmissionsState, type AdmissionsState, admissionsStateIsEmpty } from "@/lib/admissions";
 import { fetchAdmissionsRemoteServer } from "@/lib/admissionsPersistence";
 import { defaultMasters, type MastersState } from "@/lib/masters";
 import { emptyFeesState, type FeesState } from "@/lib/fees";
 import { emptyPaymentsState, type PaymentsState } from "@/lib/payments";
 import { emptySisState, type SisState } from "@/lib/sis";
-import {
-  fetchSisRemoteServer,
-  mergeSisRemoteIntoState,
-} from "@/lib/sisPersistence";
 import {
   fetchStaffRemoteServer,
   mergeStaffRemoteIntoMasters,
@@ -64,27 +60,49 @@ export async function hydrateSchoolMirrorFromRemote(
   const remoteBlob = await fetchServerBlob<SchoolMirrorBundle>(
     "school_mirror_state",
   );
+  const { sisReadFromDbEnabled } = await import("@/lib/sisDbConfig");
+  const { feesReadFromDbEnabled } = await import("@/lib/feesDbConfig");
+  const { paymentsReadFromDbEnabled } = await import("@/lib/paymentsDbConfig");
   let next: SchoolMirrorBundle = {
     version: 1,
     updatedAt: remoteBlob.updatedAt || cur.updatedAt || nowIso(),
-    sis: remoteBlob.state?.sis ?? cur.sis,
-    fees: remoteBlob.state?.fees ?? cur.fees,
-    payments: remoteBlob.state?.payments ?? cur.payments,
+    sis: sisReadFromDbEnabled()
+      ? cur.sis
+      : (remoteBlob.state?.sis ?? cur.sis),
+    fees: feesReadFromDbEnabled()
+      ? cur.fees
+      : (remoteBlob.state?.fees ?? cur.fees),
+    payments: paymentsReadFromDbEnabled()
+      ? cur.payments
+      : (remoteBlob.state?.payments ?? cur.payments),
     masters: remoteBlob.state?.masters ?? cur.masters,
     admissions: remoteBlob.state?.admissions ?? cur.admissions,
   };
 
-  const sisRemote = await fetchSisRemoteServer();
-  if (sisRemote && (sisRemote.households.length > 0 || sisRemote.students.length > 0)) {
-    const base =
-      (next.sis as SisState | null) && Array.isArray((next.sis as SisState).households)
-        ? (next.sis as SisState)
-        : emptySisState();
-    next = {
-      ...next,
-      sis: mergeSisRemoteIntoState(base, sisRemote),
-      updatedAt: nowIso(),
-    };
+  const { ensureSisHydratedServer } = await import("@/lib/sisPersistence");
+  if (await ensureSisHydratedServer()) {
+    const hydrated = getSchoolMirrorSync().sis as SisState | null;
+    if (hydrated) {
+      next = { ...next, sis: hydrated, updatedAt: nowIso() };
+    }
+  }
+
+  const { ensureFeesHydratedServer } = await import("@/lib/feesPersistence");
+  if (await ensureFeesHydratedServer()) {
+    const hydrated = getSchoolMirrorSync().fees as FeesState | null;
+    if (hydrated) {
+      next = { ...next, fees: hydrated, updatedAt: nowIso() };
+    }
+  }
+
+  const { ensurePaymentsHydratedServer } = await import(
+    "@/lib/paymentsPersistence"
+  );
+  if (await ensurePaymentsHydratedServer()) {
+    const hydrated = getSchoolMirrorSync().payments as PaymentsState | null;
+    if (hydrated) {
+      next = { ...next, payments: hydrated, updatedAt: nowIso() };
+    }
   }
 
   const mastersBase =
@@ -106,22 +124,21 @@ export async function hydrateSchoolMirrorFromRemote(
     };
   }
 
-  const [feesBlob, payBlob, admissionsRemote] = await Promise.all([
-    fetchServerBlob<FeesState>("fees_state"),
-    fetchServerBlob<PaymentsState>("payments_state"),
+  const [admissionsRemote] = await Promise.all([
     fetchAdmissionsRemoteServer(),
   ]);
-  if (feesBlob.state) {
-    next = { ...next, fees: feesBlob.state, updatedAt: nowIso() };
-  }
-  if (payBlob.state) {
-    next = { ...next, payments: payBlob.state, updatedAt: nowIso() };
-  }
 
+  const { admissionsReadFromDbEnabled } = await import("@/lib/admissionsDbConfig");
   const mirrorAdmissions = next.admissions as AdmissionsState | null;
   const mirrorLeads = admissionsLeadCount(mirrorAdmissions);
   const blobLeads = admissionsLeadCount(admissionsRemote);
-  if (blobLeads > 0 && admissionsRemote) {
+  if (
+    !admissionsReadFromDbEnabled() &&
+    blobLeads > 0 &&
+    admissionsRemote
+  ) {
+    next = { ...next, admissions: admissionsRemote, updatedAt: nowIso() };
+  } else if (admissionsReadFromDbEnabled() && admissionsRemote) {
     next = { ...next, admissions: admissionsRemote, updatedAt: nowIso() };
   } else if (mirrorLeads === 0 && !next.admissions) {
     next = { ...next, admissions: defaultAdmissionsState() };
@@ -132,6 +149,25 @@ export async function hydrateSchoolMirrorFromRemote(
   if (!next.masters) next = { ...next, masters: defaultMasters() };
   if (!next.sis) next = { ...next, sis: emptySisState() };
   if (!next.admissions) next = { ...next, admissions: defaultAdmissionsState() };
+
+  const { ensureAttendanceHydratedServer } = await import(
+    "@/lib/attendancePersistence"
+  );
+  await ensureAttendanceHydratedServer();
+
+  const { ensureExamsHydratedServer } = await import("@/lib/examsPersistence");
+  await ensureExamsHydratedServer();
+
+  const { ensureAdmissionsHydratedServer } = await import(
+    "@/lib/admissionsPersistence"
+  );
+  await ensureAdmissionsHydratedServer();
+
+  const { loadAdmissions } = await import("@/lib/admissions");
+  const hydratedAdmissions = loadAdmissions();
+  if (!admissionsStateIsEmpty(hydratedAdmissions)) {
+    next = { ...next, admissions: hydratedAdmissions, updatedAt: nowIso() };
+  }
 
   replaceSchoolMirror(next);
   lastHydrateMs = now;

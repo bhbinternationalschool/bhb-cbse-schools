@@ -30,6 +30,7 @@ export type DomainBlobTable =
   | "timetable_state"
   | "exam_papers_state"
   | "ptm_state"
+  | "student_leave_state"
   | "certificates_state"
   | "vault_state"
   | "rte_state"
@@ -40,7 +41,8 @@ export type DomainBlobTable =
   | "erp_chat_state"
   | "wa_templates_state"
   | "automation_state"
-  | "admissions_state";
+  | "admissions_state"
+  | "library_state";
 
 type BlobRow = {
   tenant_id: string;

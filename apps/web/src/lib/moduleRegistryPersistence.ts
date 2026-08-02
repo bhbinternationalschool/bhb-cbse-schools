@@ -1,4 +1,4 @@
-import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
+import { createDeskSlicePersistence } from "@/lib/createDeskSlicePersistence";
 import {
   moduleRegistryStateIsEmpty,
   readModuleRegistryStorage,
@@ -6,15 +6,17 @@ import {
   type ModuleRegistryState,
 } from "@/lib/moduleRegistry";
 
-const blob = createDomainBlobPersistence<ModuleRegistryState>({
-  table: "module_registry_state",
-  metaKey: "bhb_module_registry_v1_remote_meta",
+const desk = createDeskSlicePersistence<ModuleRegistryState>({
+  moduleId: "module_registry",
+  blobMetaKey: "bhb_module_registry_v1_remote_meta",
   label: "moduleRegistry",
   isEmpty: moduleRegistryStateIsEmpty,
   loadLocal: readModuleRegistryStorage,
   writeLocalRaw: writeModuleRegistryLocalRaw,
+  hasRemoteData: (b) =>
+    b.enabled != null && Object.keys(b.enabled as object).length > 0,
 });
 
-export const scheduleModuleRegistrySync = blob.scheduleSync;
-export const ensureModuleRegistryHydrated = blob.ensureHydrated;
-export const resetModuleRegistryPersistenceCache = blob.resetCache;
+export const scheduleModuleRegistrySync = desk.scheduleSync;
+export const ensureModuleRegistryHydrated = desk.ensureHydrated;
+export const resetModuleRegistryPersistenceCache = desk.resetCache;

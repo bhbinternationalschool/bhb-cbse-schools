@@ -15,6 +15,8 @@ import {
 
 const STORAGE_KEY = "bhb_ptm_v1";
 
+let serverPtmCache: PtmState | null = null;
+
 export type PtmMode = "in_person" | "video" | "phone";
 export type PtmBookingStatus =
   | "booked"
@@ -111,7 +113,10 @@ function normalizeState(raw: Partial<PtmState> | null): PtmState {
 }
 
 export function loadPtm(): PtmState {
-  if (typeof window === "undefined") return emptyPtmState();
+  if (typeof window === "undefined") {
+    if (serverPtmCache) return serverPtmCache;
+    return emptyPtmState();
+  }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return emptyPtmState();
@@ -133,7 +138,10 @@ export function savePtm(state: PtmState): void {
 }
 
 export function writePtmLocalRaw(state: PtmState) {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined") {
+    serverPtmCache = state;
+    return;
+  }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 

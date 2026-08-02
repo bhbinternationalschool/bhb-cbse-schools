@@ -104,6 +104,8 @@ export type StaffAttendanceState = {
 
 const STORAGE_KEY = "bhb_staff_attendance_v1";
 
+let serverStaffAttendanceCache: StaffAttendanceState | null = null;
+
 function nid(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -225,7 +227,10 @@ export function normalizeStaffAttendanceState(
 }
 
 export function loadStaffAttendance(): StaffAttendanceState {
-  if (typeof window === "undefined") return emptyStaffAttendanceState();
+  if (typeof window === "undefined") {
+    if (serverStaffAttendanceCache) return serverStaffAttendanceCache;
+    return emptyStaffAttendanceState();
+  }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return emptyStaffAttendanceState();
@@ -240,20 +245,35 @@ export function loadStaffAttendance(): StaffAttendanceState {
 }
 
 export function saveStaffAttendance(state: StaffAttendanceState) {
-  if (!assertModulePermission("staff", "edit", "saveStaffAttendance")) return;
+  if (typeof window !== "undefined") {
+    if (!assertModulePermission("staff", "edit", "saveStaffAttendance")) return;
+  }
 
-  if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeStaffAttendanceState(state)));
+  const next = normalizeStaffAttendanceState(state);
+  if (typeof window === "undefined") {
+    writeStaffAttendanceLocalRaw(next);
+    void import("@/lib/staffAttendancePersistence").then(
+      ({ scheduleStaffAttendanceSync }) => {
+        scheduleStaffAttendanceSync(next);
+      },
+    );
+    return;
+  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   void import("@/lib/staffAttendancePersistence").then(
     ({ scheduleStaffAttendanceSync }) => {
-      scheduleStaffAttendanceSync(state);
+      scheduleStaffAttendanceSync(next);
     },
   );
 }
 
 export function writeStaffAttendanceLocalRaw(state: StaffAttendanceState) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeStaffAttendanceState(state)));
+  const next = normalizeStaffAttendanceState(state);
+  if (typeof window === "undefined") {
+    serverStaffAttendanceCache = next;
+    return;
+  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
 }
 
 export function staffAttendanceStateIsEmpty(

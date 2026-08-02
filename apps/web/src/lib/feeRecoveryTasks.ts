@@ -5,7 +5,6 @@
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { formatInr } from "@/lib/masters";
 import { TENANT } from "@/lib/types";
-import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
 
 const STORAGE_KEY = "bhb_fee_recovery_tasks_v1";
 
@@ -81,20 +80,15 @@ export function saveFeeRecoveryTasks(state: FeeRecoveryTasksState): void {
   if (!assertModulePermission("fees", "edit", "saveFeeRecoveryTasks")) return;
   if (typeof window === "undefined") return;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  scheduleFeeRecoveryTasksSync(state);
+  void import("@/lib/feeRecoveryTasksPersistence").then((m) => {
+    m.scheduleFeeRecoveryTasksSync(state);
+  });
 }
 
-const blob = createDomainBlobPersistence<FeeRecoveryTasksState>({
-  table: "fee_recovery_tasks_state",
-  metaKey: "bhb_fee_recovery_tasks_v1_remote_meta",
-  label: "feeRecoveryTasks",
-  isEmpty: feeRecoveryTasksIsEmpty,
-  loadLocal: loadFeeRecoveryTasks,
-  writeLocalRaw: writeFeeRecoveryTasksLocalRaw,
-});
-
-export const scheduleFeeRecoveryTasksSync = blob.scheduleSync;
-export const ensureFeeRecoveryTasksHydrated = blob.ensureHydrated;
+export {
+  scheduleFeeRecoveryTasksSync,
+  ensureFeeRecoveryTasksHydrated,
+} from "@/lib/feeRecoveryTasksPersistence";
 
 export function scheduleParentMeeting(input: {
   studentId: string;

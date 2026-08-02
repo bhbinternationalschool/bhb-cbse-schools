@@ -20,6 +20,7 @@ import {
   STAFF_DOC_LABELS,
 } from "@/lib/foundationMasters";
 import type { MastersState } from "@/lib/masters";
+import { staffDualWriteDbEnabled, staffReadFromDbEnabled } from "@/lib/staffDbConfig";
 
 export type StaffRemoteBundle = {
   departments: Department[];
@@ -245,17 +246,26 @@ export async function fetchStaffRemoteServer(): Promise<StaffRemoteBundle | null
 export function mergeStaffRemoteIntoMasters(
   local: MastersState,
   remote: StaffRemoteBundle,
+  opts?: { preferDb?: boolean },
 ): MastersState {
+  const prefer = opts?.preferDb ?? staffReadFromDbEnabled() ?? false;
+
   const depMap = new Map<string, Department>();
-  for (const d of local.departments ?? []) depMap.set(d.id, d);
+  if (!prefer) {
+    for (const d of local.departments ?? []) depMap.set(d.id, d);
+  }
   for (const d of remote.departments) depMap.set(d.id, d);
 
   const desMap = new Map<string, Designation>();
-  for (const d of local.designations ?? []) desMap.set(d.id, d);
+  if (!prefer) {
+    for (const d of local.designations ?? []) desMap.set(d.id, d);
+  }
   for (const d of remote.designations) desMap.set(d.id, d);
 
   const staffMap = new Map<string, StaffRecord>();
-  for (const s of local.staff ?? []) staffMap.set(s.id, s);
+  if (!prefer) {
+    for (const s of local.staff ?? []) staffMap.set(s.id, s);
+  }
   for (const s of remote.staff) staffMap.set(s.id, s);
 
   return {
@@ -309,13 +319,12 @@ function staffToRow(s: StaffRecord, tenantId: string, now: string) {
   };
 }
 
-export async function pushStaffSlice(
+async function upsertStaffBundle(
+  sb: SupabaseClient,
+  tenantId: string,
   state: MastersState,
 ): Promise<{ ok: boolean; error?: string }> {
-  if (!staffRemoteEnabled()) return { ok: true };
-  const ctx = await clientAndTenant();
-  if (!ctx) return { ok: false, error: "Tenant not resolved" };
-  const { sb, tenantId } = ctx;
+  if (!staffDualWriteDbEnabled()) return { ok: true };
   const now = new Date().toISOString();
 
   const depRows = (state.departments ?? []).map((d) =>
@@ -362,6 +371,27 @@ export async function pushStaffSlice(
   return { ok: true };
 }
 
+export async function pushStaffRemoteServer(
+  state: MastersState,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!staffDualWriteDbEnabled()) return { ok: true };
+  const { getServerTenantContext } = await import("@/lib/serverTenant");
+  const ctx = await getServerTenantContext();
+  if (!ctx) {
+    return { ok: false, error: "Supabase tenant not configured" };
+  }
+  return upsertStaffBundle(ctx.sb, ctx.tenantId, state);
+}
+
+export async function pushStaffSlice(
+  state: MastersState,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!staffRemoteEnabled()) return { ok: true };
+  const ctx = await clientAndTenant();
+  if (!ctx) return { ok: false, error: "Tenant not resolved" };
+  return upsertStaffBundle(ctx.sb, ctx.tenantId, state);
+}
+
 export async function wipeRemoteStaffRoster(): Promise<{
   ok: boolean;
   error?: string;
@@ -399,9 +429,29 @@ export async function wipeRemoteStaffRoster(): Promise<{
   return { ok: true };
 }
 
+export function staffReadFromDbClientEnabled(): boolean {
+  return process.env.NEXT_PUBLIC_STAFF_READ_FROM_DB === "true";
+}
+
+/** Strip staff roster from masters before school_mirror blob upsert. */
+export function stripStaffFromMastersForBlob(
+  state: MastersState,
+): MastersState {
+  if (!staffReadFromDbEnabled()) return state;
+  return {
+    ...state,
+    departments: [],
+    designations: [],
+    staff: [],
+  };
+}
+
 export function scheduleStaffSync(state: MastersState) {
   if (!staffRemoteEnabled()) return;
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined") {
+    void pushStaffRemoteServer(state);
+    return;
+  }
   pendingPush = state;
   if (pushTimer) clearTimeout(pushTimer);
   pushTimer = setTimeout(() => {
@@ -414,13 +464,14 @@ export function scheduleStaffSync(state: MastersState) {
 }
 
 /**
- * Pull staff slice once, merge into Masters localStorage, then push.
+ * Pull staff slice once, merge into Masters localStorage, then push desk.
  */
 export async function ensureStaffHydrated(): Promise<boolean> {
   if (!staffRemoteEnabled()) return false;
   if (hydratedOnce) return false;
   hydratedOnce = true;
 
+  const readFromDb = staffReadFromDbEnabled();
   const remote = await fetchStaffRemote();
   const { loadMasters, saveMasters } = await import("@/lib/masters");
   let next = loadMasters();
@@ -432,11 +483,17 @@ export async function ensureStaffHydrated(): Promise<boolean> {
       remote.designations.length > 0 ||
       remote.staff.length > 0)
   ) {
-    next = mergeStaffRemoteIntoMasters(next, remote);
+    next = mergeStaffRemoteIntoMasters(next, remote, {
+      preferDb: readFromDb || (next.staff?.length ?? 0) === 0,
+    });
     changed = true;
   }
 
-  await pushStaffSlice(next);
+  const localStaffCount = next.staff?.length ?? 0;
+  const remoteStaffCount = remote?.staff.length ?? 0;
+  if (!readFromDb || localStaffCount > remoteStaffCount) {
+    await pushStaffSlice(next);
+  }
 
   if (changed) {
     saveMasters(next);

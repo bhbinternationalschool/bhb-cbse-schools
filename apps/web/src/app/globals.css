@@ -777,6 +777,54 @@ h3,
   padding-bottom: env(safe-area-inset-bottom, 0);
 }
 
+/* Mobile app shell — native-like chrome (PWA standalone + phone viewport) */
+.bhb-mobile-app {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.bhb-pwa-standalone {
+  overscroll-behavior-y: none;
+}
+
+.bhb-pwa-standalone .parent-pwa-shell,
+.bhb-pwa-standalone .bhb-pwa-staff,
+.bhb-pwa-standalone .bhb-pwa-field {
+  padding-top: env(safe-area-inset-top, 0);
+}
+
+.bhb-app-bottom-nav {
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+.bhb-parent-app-content,
+.bhb-staff-main {
+  padding-bottom: calc(4.75rem + env(safe-area-inset-bottom, 0px));
+}
+
+.bhb-mobile-app .bhb-staff-app-header {
+  padding-top: max(0.5rem, env(safe-area-inset-top, 0px));
+}
+
+.bhb-mobile-app .erp-ai-shell {
+  /* Keep AI FAB above bottom tab bar */
+  margin-bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px)) !important;
+}
+
+.bhb-mobile-app table {
+  display: block;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.bhb-mobile-app .bhb-parent-mobile-app input,
+.bhb-mobile-app .bhb-parent-mobile-app select,
+.bhb-mobile-app .bhb-parent-mobile-app textarea,
+.bhb-mobile-app .bhb-staff-main input,
+.bhb-mobile-app .bhb-staff-main select,
+.bhb-mobile-app .bhb-staff-main textarea {
+  font-size: 16px;
+}
+
 @media (display-mode: standalone) {
   .parent-pwa-shell {
     padding-top: env(safe-area-inset-top, 0);

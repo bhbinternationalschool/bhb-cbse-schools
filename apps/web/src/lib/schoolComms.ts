@@ -9,6 +9,8 @@ import { TENANT } from "@/lib/types";
 
 const STORAGE_KEY = "bhb_school_comms_v1";
 
+let serverSchoolCommsCache: SchoolCommsState | null = null;
+
 export type CommsAudience = "all" | "staff" | "parents" | "students";
 export type NoticeStatus = "draft" | "published" | "archived";
 
@@ -94,7 +96,10 @@ function normalize(raw: Partial<SchoolCommsState> | null): SchoolCommsState {
 }
 
 export function loadSchoolComms(): SchoolCommsState {
-  if (typeof window === "undefined") return emptySchoolComms();
+  if (typeof window === "undefined") {
+    if (serverSchoolCommsCache) return serverSchoolCommsCache;
+    return emptySchoolComms();
+  }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return emptySchoolComms();
@@ -105,7 +110,10 @@ export function loadSchoolComms(): SchoolCommsState {
 }
 
 export function writeSchoolCommsLocalRaw(state: SchoolCommsState): void {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined") {
+    serverSchoolCommsCache = normalize(state);
+    return;
+  }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(normalize(state)));
   window.dispatchEvent(new CustomEvent("bhb-school-comms"));
 }

@@ -83,7 +83,11 @@ export function TrustWorkspace() {
   }
 
   useEffect(() => {
-    refresh();
+    void (async () => {
+      const { ensureTrustHydrated } = await import("@/lib/trustPersistence");
+      await ensureTrustHydrated();
+      refresh();
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

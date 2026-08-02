@@ -178,6 +178,8 @@ export type ExamsState = {
 
 const STORAGE_KEY = "bhb_exams_v1";
 
+let serverExamsCache: ExamsState | null = null;
+
 function id(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -627,7 +629,10 @@ function normalizePromotion(p: Partial<PromotionRecord>): PromotionRecord {
 }
 
 export function loadExams(): ExamsState {
-  if (typeof window === "undefined") return emptyState();
+  if (typeof window === "undefined") {
+    if (serverExamsCache) return serverExamsCache;
+    return emptyState();
+  }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return emptyState();
@@ -671,9 +676,17 @@ export function loadExams(): ExamsState {
 }
 
 export function saveExams(state: ExamsState) {
-  if (!assertModulePermission("exams", "edit", "saveExams")) return;
+  if (typeof window !== "undefined") {
+    if (!assertModulePermission("exams", "edit", "saveExams")) return;
+  }
 
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined") {
+    writeExamsLocalRaw(state);
+    void import("@/lib/examsPersistence").then(({ scheduleExamsSync }) => {
+      scheduleExamsSync(state);
+    });
+    return;
+  }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   void import("@/lib/examsPersistence").then(({ scheduleExamsSync }) => {
     scheduleExamsSync(state);
@@ -681,7 +694,10 @@ export function saveExams(state: ExamsState) {
 }
 
 export function writeExamsLocalRaw(state: ExamsState) {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined") {
+    serverExamsCache = state;
+    return;
+  }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 

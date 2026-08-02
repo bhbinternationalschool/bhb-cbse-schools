@@ -135,6 +135,9 @@ export function savePayments(state: PaymentsState) {
 
   if (typeof window === "undefined") {
     setMirrorSlice("payments", state);
+    void import("@/lib/paymentsPersistence").then(({ schedulePaymentsSync }) => {
+      schedulePaymentsSync(state);
+    });
     return;
   }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));

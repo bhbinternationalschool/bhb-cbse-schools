@@ -1833,13 +1833,23 @@ export function persistMastersSystemImport(state: MastersState) {
 function persistMastersClient(state: MastersState) {
   if (typeof window === "undefined") {
     setMirrorSlice("masters", state);
+    void import("@/lib/staffPersistence").then(({ scheduleStaffSync }) => {
+      scheduleStaffSync(state);
+    });
     return;
   }
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, version: 2 }));
   writeMastersMirrorMeta(new Date().toISOString());
-  scheduleClientSchoolMirrorSync({ masters: state });
-  void import("@/lib/staffPersistence").then(({ scheduleStaffSync }) => {
-    scheduleStaffSync(state);
+  void import("@/lib/staffPersistence").then(
+    ({ scheduleStaffSync, stripStaffFromMastersForBlob }) => {
+      scheduleClientSchoolMirrorSync({
+        masters: stripStaffFromMastersForBlob(state),
+      });
+      scheduleStaffSync(state);
+    },
+  );
+  void import("@/lib/mastersPersistence").then(({ scheduleMastersSync }) => {
+    scheduleMastersSync(state);
   });
 }
 

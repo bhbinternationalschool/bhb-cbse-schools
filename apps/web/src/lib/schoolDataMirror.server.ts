@@ -14,7 +14,13 @@ import {
 import { hydrateSchoolMirrorFromRemote } from "@/lib/schoolMirrorRemote.server";
 import { fetchServerBlob, pushServerBlob } from "@/lib/serverBlob";
 import type { AdmissionsState } from "@/lib/admissions";
+import type { MastersState } from "@/lib/masters";
 import { pushAdmissionsRemoteServer } from "@/lib/admissionsPersistence";
+import { stripStaffFromMastersForBlob } from "@/lib/staffPersistence";
+import {
+  deskSkipMirrorBlobSlice,
+  type MirrorBlobSlice,
+} from "@/lib/deskCutover";
 
 const DATA_FILE = path.join(process.cwd(), ".data", "school_mirror.json");
 
@@ -99,6 +105,45 @@ function admissionsLeadCount(bundle: SchoolMirrorBundle): number {
   return Array.isArray(adm?.leads) ? adm.leads.length : 0;
 }
 
+function buildMirrorBlobPayload(
+  memory: SchoolMirrorBundle,
+  remoteBase: SchoolMirrorBundle,
+): SchoolMirrorBundle {
+  const pick = <K extends MirrorBlobSlice>(key: K): SchoolMirrorBundle[K] =>
+    deskSkipMirrorBlobSlice(key) ? remoteBase[key] : memory[key];
+
+  return {
+    version: 1,
+    updatedAt: memory.updatedAt,
+    sis: pick("sis"),
+    fees: pick("fees"),
+    payments: pick("payments"),
+    masters: deskSkipMirrorBlobSlice("masters")
+      ? remoteBase.masters
+      : memory.masters
+        ? stripStaffFromMastersForBlob(memory.masters as MastersState)
+        : memory.masters,
+    admissions: pick("admissions"),
+  };
+}
+
+function patchOnlyExcludedBlobSlices(
+  patch: Partial<
+    Pick<SchoolMirrorBundle, "sis" | "fees" | "payments" | "masters" | "admissions">
+  >,
+): boolean {
+  const blobKeys = (Object.keys(patch) as MirrorBlobSlice[]).filter(
+    (key) =>
+      key === "sis" ||
+      key === "fees" ||
+      key === "payments" ||
+      key === "admissions" ||
+      key === "masters",
+  );
+  if (blobKeys.length === 0) return false;
+  return blobKeys.every((key) => deskSkipMirrorBlobSlice(key));
+}
+
 export async function writeSchoolMirror(
   patch: Partial<
     Pick<
@@ -137,7 +182,31 @@ export async function writeSchoolMirror(
       getSchoolMirrorSync().admissions as AdmissionsState,
     );
   }
-  const pushed = await pushServerBlob("school_mirror_state", getSchoolMirrorSync());
+
+  const onlyExcludedSlices =
+    Object.keys(patchToApply).length > 0 &&
+    patchOnlyExcludedBlobSlices(patchToApply);
+  if (onlyExcludedSlices) {
+    return {
+      mirror: getSchoolMirrorSync(),
+      supabaseSynced: true,
+      leadCount: admissionsLeadCount(getSchoolMirrorSync()),
+    };
+  }
+
+  const allMirrorSlicesDrp = (
+    ["sis", "fees", "payments", "masters", "admissions"] as MirrorBlobSlice[]
+  ).every((slice) => deskSkipMirrorBlobSlice(slice));
+
+  const blobPayload = buildMirrorBlobPayload(getSchoolMirrorSync(), base);
+  if (allMirrorSlicesDrp) {
+    return {
+      mirror: getSchoolMirrorSync(),
+      supabaseSynced: true,
+      leadCount: admissionsLeadCount(getSchoolMirrorSync()),
+    };
+  }
+  const pushed = await pushServerBlob("school_mirror_state", blobPayload);
   return {
     mirror: getSchoolMirrorSync(),
     supabaseSynced: pushed.ok,

@@ -338,6 +338,35 @@ export function resolveSessionStaff(
   );
 }
 
+/** Class–section rows where this session's staff is class teacher (current AY). */
+export function listSessionClassTeacherSections(
+  session: {
+    staffId?: string;
+    email?: string;
+    fullName: string;
+  },
+  masters: MastersState,
+  academicYearCode: string,
+): { classId: string; sectionId: string; label: string }[] {
+  const staff = resolveSessionStaff(session, masters);
+  if (!staff) return [];
+  const out: { classId: string; sectionId: string; label: string }[] = [];
+  for (const link of staff.classTeacherLinks ?? []) {
+    if (link.academicYearCode && link.academicYearCode !== academicYearCode) {
+      continue;
+    }
+    const cls = masters.classes.find((c) => c.id === link.classId);
+    const sec = masters.sections.find((s) => s.id === link.sectionId);
+    if (!cls || !sec) continue;
+    out.push({
+      classId: link.classId,
+      sectionId: link.sectionId,
+      label: `${cls.name || "Class"} · ${sec.name || ""}`.trim(),
+    });
+  }
+  return out;
+}
+
 /**
  * Principal / admin / office can manage, direct, and adjust leave.
  * Regular staff may only request their own leave.

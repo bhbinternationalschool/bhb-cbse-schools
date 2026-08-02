@@ -311,6 +311,14 @@ export const HUB_GROUPS: HubGroup[] = [
         tone: "rose",
       },
       {
+        href: "/library",
+        title: "Library",
+        blurb: "Issue · return",
+        detail: "Book lending, overdue fines and parent reminders.",
+        icon: BookOpen,
+        tone: "violet",
+      },
+      {
         href: "/store",
         title: "Store",
         blurb: "Books · issue",
