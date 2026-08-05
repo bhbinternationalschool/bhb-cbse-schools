@@ -87,12 +87,18 @@ export async function ensureMastersHydrated(): Promise<boolean> {
   if (!deskSkipMirrorBlobSliceClient("masters")) {
     const { fetchSchoolMirror } = await import("@/lib/schoolDataMirror");
     const { hydrateMastersFromMirror } = await import("@/lib/masters");
+    const { readLocalMastersEditAt } = await import(
+      "@/lib/mastersNormalizedClient"
+    );
     const remote = await fetchSchoolMirror();
     if (remote?.masters) {
+      const localAt = readLocalMastersEditAt();
+      const remoteAt = remote.updatedAt || "";
+      const remoteIsNewer = !localAt || (!!remoteAt && remoteAt > localAt);
       mirrorChanged = hydrateMastersFromMirror(
         remote.masters,
-        remote.updatedAt,
-        true,
+        remoteAt,
+        remoteIsNewer,
       );
     }
   }

@@ -8,6 +8,7 @@ import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { stripStaffFromMastersForBlob } from "@/lib/staffPersistence";
 
 const META_KEY = "bhb_masters_desk_db_meta_v1";
+const LOCAL_EDIT_META_KEY = "bhb_masters_mirror_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
 let pending: MastersState | null = null;
 
@@ -38,6 +39,40 @@ function readMeta(): DeskMeta {
 function writeMeta(patch: DeskMeta) {
   if (typeof window === "undefined") return;
   localStorage.setItem(META_KEY, JSON.stringify(patch));
+}
+
+/** Last local edit time (saveMasters / tenant wipe). */
+export function readLocalMastersEditAt(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    const raw = localStorage.getItem(LOCAL_EDIT_META_KEY);
+    if (!raw) return "";
+    return String((JSON.parse(raw) as { updatedAt?: string }).updatedAt || "");
+  } catch {
+    return "";
+  }
+}
+
+/** Optimistic desk meta after local save — prevents stale DB overwriting edits on refresh. */
+export function touchMastersDeskLocalMeta(state: MastersState, at?: string) {
+  if (typeof window === "undefined") return;
+  const updatedAt = at || new Date().toISOString();
+  writeMeta({
+    updatedAt,
+    classCount: state.classes?.length ?? 0,
+    feeHeadCount: state.feeHeads?.length ?? 0,
+  });
+}
+
+function remoteDeskHasData(
+  bundle: Omit<MastersState, "version">,
+  body: { classCount?: number; feeHeadCount?: number },
+): boolean {
+  return (
+    (body.classCount ?? bundle.classes?.length ?? 0) > 0 ||
+    (body.feeHeadCount ?? bundle.feeHeads?.length ?? 0) > 0 ||
+    (bundle.subjects?.length ?? 0) > 0
+  );
 }
 
 export function scheduleMastersDeskSync(state: MastersState) {
@@ -103,17 +138,29 @@ export async function hydrateMastersDeskFromDb(
     };
     const bundle = body as Omit<MastersState, "version">;
     const meta = readMeta();
+    const localEditAt = readLocalMastersEditAt();
+    const remoteAt = body.updatedAt || "";
     const remoteClasses = body.classCount ?? bundle.classes?.length ?? 0;
+    const hasRemote = remoteDeskHasData(bundle, body);
+
+    const readFromDb =
+      preferDb || process.env.NEXT_PUBLIC_MASTERS_READ_FROM_DB === "true";
+
+    const remoteIsNewer =
+      !!remoteAt &&
+      (!meta.updatedAt || remoteAt > meta.updatedAt) &&
+      (!localEditAt || remoteAt > localEditAt);
+
+    const bootstrapNewDevice =
+      hasRemote && !meta.updatedAt && !localEditAt;
+
     const shouldTake =
-      preferDb ||
-      process.env.NEXT_PUBLIC_MASTERS_READ_FROM_DB === "true" ||
-      meta.classCount === 0 ||
-      (body.updatedAt && body.updatedAt >= meta.updatedAt) ||
-      remoteClasses > meta.classCount ||
-      (bundle.classes?.length ?? 0) > 3;
+      (readFromDb && hasRemote) ||
+      (hasRemote && (bootstrapNewDevice || remoteIsNewer));
+
     if (!shouldTake) return { bundle: empty, changed: false };
     writeMeta({
-      updatedAt: body.updatedAt || new Date().toISOString(),
+      updatedAt: remoteAt || new Date().toISOString(),
       classCount: remoteClasses,
       feeHeadCount: body.feeHeadCount ?? bundle.feeHeads?.length ?? 0,
     });

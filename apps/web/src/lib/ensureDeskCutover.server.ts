@@ -227,27 +227,27 @@ async function ensurePrimaryModule(id: DeskModuleId): Promise<EnsureDeskAction> 
       break;
     }
     case "masters": {
-      const { bundle, meta } = await fetchMastersDeskFromDb();
+      const { meta } = await fetchMastersDeskFromDb();
       const deskRows = meta?.sliceCount ?? 0;
-      const blob = await fetchServerBlob<{ masters?: MastersState }>(
-        "school_mirror_state",
-      );
-      const blobRows = blob.state?.masters?.classes?.length ?? 0;
-      if (blobRows > 0 && deskRows < 5) {
-        const state = blob.state?.masters ?? emptyMastersShell();
-        const ok = (await pushMastersDeskToDb(state)).ok;
-        return {
-          module: id,
-          action: ok ? "backfill" : "skip",
-          detail: `masters mirror → desk`,
-        };
-      }
       if (deskRows === 0) {
         const ok = (await pushMastersDeskToDb(emptyMastersShell())).ok;
         return {
           module: id,
           action: ok ? "seed" : "skip",
           detail: "empty masters shell",
+        };
+      }
+      const blob = await fetchServerBlob<{ masters?: MastersState }>(
+        "school_mirror_state",
+      );
+      const blobRows = blob.state?.masters?.classes?.length ?? 0;
+      if (blobRows > deskRows && deskRows > 0) {
+        const state = blob.state?.masters ?? emptyMastersShell();
+        const ok = (await pushMastersDeskToDb(state)).ok;
+        return {
+          module: id,
+          action: ok ? "backfill" : "skip",
+          detail: `masters mirror → desk`,
         };
       }
       break;

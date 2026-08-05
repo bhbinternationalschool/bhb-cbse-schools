@@ -1900,6 +1900,11 @@ function persistMastersClient(state: MastersState) {
       scheduleStaffSync(state);
     },
   );
+  void import("@/lib/mastersNormalizedClient").then(
+    ({ touchMastersDeskLocalMeta }) => {
+      touchMastersDeskLocalMeta(state);
+    },
+  );
   void import("@/lib/mastersPersistence").then(({ scheduleMastersSync }) => {
     scheduleMastersSync(state);
   });
@@ -1935,13 +1940,9 @@ export function hydrateMastersFromMirror(
   remoteIsNewer: boolean,
 ): boolean {
   if (!raw || typeof raw !== "object") return false;
-  const local = loadMasters();
   const localAt = readMastersMirrorMeta();
   const takeRemote =
-    remoteIsNewer ||
-    mastersMirrorIsEmpty(local) ||
-    !localAt ||
-    (remoteAt && remoteAt > localAt);
+    remoteIsNewer && (!localAt || (!!remoteAt && remoteAt > localAt));
   if (!takeRemote) return false;
   const normalized = ensureFeeSetup(
     migrateDemoStaffToTeacherRoster(raw as MastersState),
