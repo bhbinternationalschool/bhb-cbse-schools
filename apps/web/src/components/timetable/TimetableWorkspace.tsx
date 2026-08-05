@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { CalendarClock } from "lucide-react";
 import {
   WEEKDAY_SHORT,
   classSectionLabel,
@@ -46,6 +47,7 @@ import { listSubstitutionsForDate } from "@/lib/timetableSubstitution";
 import { SubstitutionPanel } from "@/components/timetable/SubstitutionPanel";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { resolveSessionStaff } from "@/lib/staffResolve";
 import { hasPermission } from "@/lib/rbac";
 
@@ -534,17 +536,11 @@ export function TimetableWorkspace() {
   );
 
   return (
-    <div>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-[var(--brand-deep)]">
-            Timetable
-          </h1>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            Weekly grids + Auto-assign (AI) for session {ay}. Holidays and exam
-            date-sheet also follow this session. No double-book teachers.
-          </p>
-        </div>
+    <ErpWorkspaceShell
+      title="Timetable"
+      subtitle={`Weekly grids + Auto-assign (AI) for session ${ay}. Holidays and exam date-sheet also follow this session. No double-book teachers.`}
+      icon={<CalendarClock className="size-6" aria-hidden />}
+      actions={
         <span
           className={`rounded-lg px-3 py-1.5 text-[11px] font-semibold ${
             sessionPublishedGrids.length
@@ -556,8 +552,8 @@ export function TimetableWorkspace() {
           {` · ${ay}`}
           {conflicts.length ? ` · ${conflicts.length} clash(es)` : ""}
         </span>
-      </div>
-
+      }
+    >
       <ModuleTabs
         aria-label="Timetable"
         value={tab}
@@ -1510,6 +1506,6 @@ export function TimetableWorkspace() {
           ) : null}
         </div>
       ) : null}
-    </div>
+    </ErpWorkspaceShell>
   );
 }

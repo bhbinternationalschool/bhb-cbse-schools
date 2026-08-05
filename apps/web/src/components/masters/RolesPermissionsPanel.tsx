@@ -6,6 +6,7 @@ import {
   appendRbacAudit,
   canConfigureRbac,
   cloneRole,
+  copyStaffRoleAssignments,
   defaultBuiltInRoles,
   loadRbac,
   newRbacId,
@@ -16,6 +17,7 @@ import {
   staffAccessOverview,
   RBAC_ACTIONS,
   RBAC_MODULES,
+  RBAC_MODULE_GROUPS,
   type RbacAction,
   type RbacModule,
   type RbacRole,
@@ -56,6 +58,10 @@ export function RolesPermissionsPanel() {
   const [assignRoleId, setAssignRoleId] = useState("");
   const [assignExpires, setAssignExpires] = useState("");
   const [assignNote, setAssignNote] = useState("");
+
+  const [copyFromStaffId, setCopyFromStaffId] = useState("");
+  const [copyToStaffId, setCopyToStaffId] = useState("");
+  const [copyReplace, setCopyReplace] = useState(true);
 
   useEffect(() => {
     const m = loadMasters();
@@ -203,6 +209,38 @@ export function RolesPermissionsPanel() {
     setAssignExpires("");
   }
 
+  function staffLabel(staffId: string): string {
+    const s = masters?.staff?.find((x) => x.id === staffId);
+    return s ? `${s.fullName} (${s.empCode})` : staffId;
+  }
+
+  function runCopyStaffAccess() {
+    if (!state || !copyFromStaffId || !copyToStaffId) {
+      setNotice("Pick source and target staff");
+      return;
+    }
+    const r = copyStaffRoleAssignments(
+      state,
+      copyFromStaffId,
+      copyToStaffId,
+      session.fullName,
+      {
+        replace: copyReplace,
+        fromLabel: staffLabel(copyFromStaffId),
+        toLabel: staffLabel(copyToStaffId),
+      },
+    );
+    if (!r.ok) {
+      setNotice(r.reason);
+      return;
+    }
+    commit(
+      r.state,
+      `Copied ${r.copied} role${r.copied === 1 ? "" : "s"} to ${staffLabel(copyToStaffId)}${r.skipped ? ` (${r.skipped} already had)` : ""}`,
+    );
+    setCopyToStaffId("");
+  }
+
   function removeAssignment(id: string) {
     if (!state) return;
     const a = state.assignments.find((x) => x.id === id);
@@ -321,49 +359,62 @@ export function RolesPermissionsPanel() {
           </div>
           {selected ? (
             <div className="overflow-x-auto rounded-lg border border-[rgba(32,48,80,0.1)]">
-              <table className="min-w-full text-left text-[11px]">
-                <thead className="bg-[rgba(32,48,80,0.04)] text-[var(--muted)]">
-                  <tr>
-                    <th className="px-2 py-2 font-semibold">Module</th>
-                    {RBAC_ACTIONS.map((a) => (
-                      <th
-                        key={a.id}
-                        className="px-1 py-2 text-center font-semibold"
-                        title={a.label}
-                      >
-                        {a.label.slice(0, 3)}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {RBAC_MODULES.map((m) => (
-                    <tr
-                      key={m.id}
-                      className="border-t border-[rgba(32,48,80,0.06)]"
-                    >
-                      <td className="px-2 py-1.5 font-medium text-[var(--brand-deep)]">
-                        {m.label}
-                      </td>
-                      {RBAC_ACTIONS.map((a) => {
-                        const on = roleHasAction(selected, m.id, a.id);
-                        return (
-                          <td key={a.id} className="px-1 py-1 text-center">
-                            <input
-                              type="checkbox"
-                              checked={on}
-                              onChange={(e) =>
-                                toggle(m.id, a.id, e.target.checked)
-                              }
-                              aria-label={`${m.label} ${a.label}`}
-                            />
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              {RBAC_MODULE_GROUPS.map((grp) => {
+                const modules = RBAC_MODULES.filter(
+                  (m) => (m.group || "core") === grp.id,
+                );
+                if (modules.length === 0) return null;
+                return (
+                  <div key={grp.id} className="border-b border-[rgba(32,48,80,0.06)] last:border-0">
+                    <p className="bg-[rgba(32,48,80,0.04)] px-2 py-1.5 text-[10px] font-bold uppercase tracking-wide text-[var(--muted)]">
+                      {grp.label}
+                    </p>
+                    <table className="min-w-full text-left text-[11px]">
+                      <thead className="text-[var(--muted)]">
+                        <tr>
+                          <th className="px-2 py-2 font-semibold">Module</th>
+                          {RBAC_ACTIONS.map((a) => (
+                            <th
+                              key={a.id}
+                              className="px-1 py-2 text-center font-semibold"
+                              title={a.label}
+                            >
+                              {a.label.slice(0, 3)}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {modules.map((m) => (
+                          <tr
+                            key={m.id}
+                            className="border-t border-[rgba(32,48,80,0.06)]"
+                          >
+                            <td className="px-2 py-1.5 font-medium text-[var(--brand-deep)]">
+                              {m.label}
+                            </td>
+                            {RBAC_ACTIONS.map((a) => {
+                              const on = roleHasAction(selected, m.id, a.id);
+                              return (
+                                <td key={a.id} className="px-1 py-1 text-center">
+                                  <input
+                                    type="checkbox"
+                                    checked={on}
+                                    onChange={(e) =>
+                                      toggle(m.id, a.id, e.target.checked)
+                                    }
+                                    aria-label={`${m.label} ${a.label}`}
+                                  />
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })}
             </div>
           ) : null}
         </MastersWorkCard>
@@ -516,6 +567,63 @@ export function RolesPermissionsPanel() {
                 onClick={addAssignment}
               >
                 Assign
+              </button>
+            </div>
+          </MastersWorkCard>
+          <MastersWorkCard
+            title="Copy access from staff"
+            hint="Duplicate explicit role assignments to another staff member (ERP module access). Source must already have assignments below — designation-only access is not copied."
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="text-sm">
+                <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                  Copy from
+                </span>
+                <select
+                  className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm"
+                  value={copyFromStaffId}
+                  onChange={(e) => setCopyFromStaffId(e.target.value)}
+                >
+                  <option value="">Source staff…</option>
+                  {activeStaff.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.empCode} — {s.fullName}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-sm">
+                <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                  Copy to
+                </span>
+                <select
+                  className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm"
+                  value={copyToStaffId}
+                  onChange={(e) => setCopyToStaffId(e.target.value)}
+                >
+                  <option value="">Target staff…</option>
+                  {activeStaff.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.empCode} — {s.fullName}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex items-center gap-2 self-end pb-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={copyReplace}
+                  onChange={(e) => setCopyReplace(e.target.checked)}
+                />
+                Replace target&apos;s existing assignments
+              </label>
+              <button
+                type="button"
+                className="self-end rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-sm font-semibold text-white"
+                onClick={runCopyStaffAccess}
+                disabled={!copyFromStaffId || !copyToStaffId}
+              >
+                Copy access
               </button>
             </div>
           </MastersWorkCard>

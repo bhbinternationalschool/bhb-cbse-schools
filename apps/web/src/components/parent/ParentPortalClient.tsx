@@ -8,6 +8,7 @@ import { ParentPtmPortal } from "@/components/parent/ParentPtmPortal";
 import { ParentStudentLeavePortal } from "@/components/parent/ParentStudentLeavePortal";
 import { ParentSubjectsPortal } from "@/components/parent/ParentSubjectsPortal";
 import { ParentCommsPortal } from "@/components/parent/ParentCommsPortal";
+import { ParentProfileDocsPortal } from "@/components/parent/ParentProfileDocsPortal";
 import { NotificationBell } from "@/components/shell/NotificationBell";
 import { CommsRunningStrip } from "@/components/shell/CommsRunningStrip";
 import { ParentVoiceBar } from "@/components/parent/ParentVoiceBar";
@@ -25,10 +26,12 @@ type PortalTab =
   | "subjects"
   | "notices"
   | "news"
-  | "gallery";
+  | "gallery"
+  | "profile";
 
 export function ParentPortalClient({
   guardianName,
+  householdId,
 }: {
   guardianName: string;
   /** Bound on login; chat resolves via session context */
@@ -49,7 +52,8 @@ export function ParentPortalClient({
         raw === "ptm" ||
         raw === "leave" ||
         raw === "subjects" ||
-        raw === "fees"
+        raw === "fees" ||
+        raw === "profile"
       ) {
         setPortalTab(raw);
       }
@@ -88,6 +92,7 @@ export function ParentPortalClient({
   const tabs = [
     ["fees", "Fees"],
     ["homework", "HW"],
+    ["profile", "Profile"],
     ["notices", "Notices"],
     ["news", "News"],
     ["gallery", "Gallery"],
@@ -109,7 +114,9 @@ export function ParentPortalClient({
               ? "News"
               : portalTab === "gallery"
                 ? "Gallery"
-                : "Subjects";
+                : portalTab === "profile"
+                  ? "Profile & docs"
+                  : "Subjects";
 
   return (
     <div className={mobileApp ? "bhb-parent-mobile-app" : ""}>
@@ -204,6 +211,12 @@ export function ParentPortalClient({
           {portalTab === "leave" ? (
             <ParentStudentLeavePortal guardianDisplayName={guardianName} />
           ) : null}
+          {portalTab === "profile" ? (
+            <ParentProfileDocsPortal
+              guardianDisplayName={guardianName}
+              householdId={householdId}
+            />
+          ) : null}
           {portalTab === "notices" ||
           portalTab === "news" ||
           portalTab === "gallery" ? (
@@ -216,8 +229,8 @@ export function ParentPortalClient({
             <>
               <ParentSubjectsPortal guardianDisplayName={guardianName} />
               <p className="mt-6 px-4 text-[11px] text-[var(--muted)]">
-                Parent portal: fees, homework, notices, news, gallery, PTM,
-                leave &amp; subjects.
+                Parent portal: fees, homework, profile &amp; docs, notices,
+                news, gallery, PTM, leave &amp; subjects.
               </p>
             </>
           ) : null}

@@ -1,10 +1,17 @@
 import { NextResponse } from "next/server";
 import { getDemoSession } from "@/lib/auth";
 import { parseParentVoiceCommand } from "@/lib/parentVoiceIntents";
-import { generateGeminiText, geminiConfigured } from "@/lib/erpAiGemini.server";
+import { generateTutorText, llmConfigured } from "@/lib/aiLlm.server";
 import { TENANT } from "@/lib/types";
 
 export const runtime = "nodejs";
+
+const PARENT_VOICE_SYSTEM = [
+  `You are the parent voice assistant for ${TENANT.nameDisplay}.`,
+  "Answer in the same language as the parent (Hindi or English).",
+  "Keep answers under 3 sentences. Only help with: fees, homework, notices, PTM, leave, transport.",
+  "Do not invent amounts or student data — tell them to open the relevant tab in the parent portal.",
+].join("\n");
 
 export async function POST(req: Request) {
   const session = await getDemoSession();
@@ -36,23 +43,17 @@ export async function POST(req: Request) {
     });
   }
 
-  if (geminiConfigured()) {
-    const gemini = await generateGeminiText({
-      system: [
-        `You are the parent voice assistant for ${TENANT.nameDisplay}.`,
-        "Answer in the same language as the parent (Hindi or English).",
-        "Keep answers under 3 sentences. Only help with: fees, homework, notices, PTM, leave, transport.",
-        "Do not invent amounts or student data — tell them to open the relevant tab in the parent portal.",
-        `Parent name: ${session.fullName || "Parent"}.`,
-      ].join("\n"),
+  if (llmConfigured()) {
+    const llm = await generateTutorText({
+      system: `${PARENT_VOICE_SYSTEM}\nParent name: ${session.fullName || "Parent"}.`,
       userMessage: message,
     });
-    if (gemini.ok) {
-      const hi = /[\u0900-\u097F]/.test(gemini.text);
+    if (llm.ok) {
+      const hi = /[\u0900-\u097F]/.test(llm.text);
       return NextResponse.json({
         ok: true,
-        engine: "gemini",
-        reply: gemini.text,
+        engine: llm.engine,
+        reply: llm.text,
         speakLang: hi ? "hi-IN" : "en-IN",
       });
     }

@@ -21,8 +21,14 @@ import {
   deskSkipBlobPush,
   deskSkipBlobPushClient,
 } from "@/lib/deskCutover";
+import {
+  isDeskHydrated,
+  markDeskHydrated,
+  resetDeskHydrated,
+} from "@/lib/deskHydrateGuard";
 
-let hydratedOnce = false;
+const MODULE = "admissions";
+
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingPush: AdmissionsState | null = null;
 
@@ -33,7 +39,7 @@ export function admissionsRemoteEnabled() {
 }
 
 export function resetAdmissionsPersistenceCache() {
-  hydratedOnce = false;
+  resetDeskHydrated(MODULE);
   pendingPush = null;
   if (pushTimer) {
     clearTimeout(pushTimer);
@@ -127,8 +133,8 @@ export function scheduleAdmissionsSync(state: AdmissionsState) {
 /** Pull blob + normalized desk; remote wins when newer or local empty. */
 export async function ensureAdmissionsHydrated(): Promise<boolean> {
   if (!admissionsRemoteEnabled()) return false;
-  if (hydratedOnce) return false;
-  hydratedOnce = true;
+  if (isDeskHydrated(MODULE)) return false;
+  markDeskHydrated(MODULE);
 
   let changed = false;
   const skipBlob = deskSkipBlobHydrateClient("admissions");

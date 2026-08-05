@@ -10,7 +10,8 @@ export type ParentPortalTab =
   | "subjects"
   | "notices"
   | "news"
-  | "gallery";
+  | "gallery"
+  | "profile";
 
 export type ParentVoiceResult = {
   tab?: ParentPortalTab;
@@ -27,6 +28,10 @@ const TAB_PATTERNS: { tab: ParentPortalTab; re: RegExp }[] = [
   { tab: "ptm", re: /\b(ptm|parent.?teacher|meeting|मीटिंग|अभिभावक)\b/i },
   { tab: "leave", re: /\b(leave|absent|छुट्टी|अवकाश)\b/i },
   { tab: "subjects", re: /\b(subject|subjects|पाठ|विषय)\b/i },
+  {
+    tab: "profile",
+    re: /\b(profile|document|documents|aadhaar|photo|upload|प्रोफाइल|दस्तावेज|आधार)\b/i,
+  },
 ];
 
 const TAB_LABEL: Record<ParentPortalTab, { en: string; hi: string }> = {
@@ -38,6 +43,7 @@ const TAB_LABEL: Record<ParentPortalTab, { en: string; hi: string }> = {
   notices: { en: "Notices", hi: "सूचनाएँ" },
   news: { en: "News", hi: "समाचार" },
   gallery: { en: "Gallery", hi: "गैलरी" },
+  profile: { en: "Profile & docs", hi: "प्रोफाइल" },
 };
 
 export function parseParentVoiceCommand(text: string): ParentVoiceResult {

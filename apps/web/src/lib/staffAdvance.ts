@@ -5,7 +5,7 @@
 
 import type { MastersState } from "@/lib/masters";
 import type { PayrollPaymentMode, PayrollRun } from "@/lib/payroll";
-import { assertModulePermission } from "@/lib/rbacGuard";
+import { assertStaffAdvancesPermission } from "@/lib/rbacGuard";
 export type AdvanceStatus = "open" | "closed";
 
 export type AdvanceSource = "cash" | "with_salary" | "other";
@@ -76,7 +76,7 @@ export function loadAdvances(): AdvanceState {
 }
 
 export function saveAdvances(state: AdvanceState) {
-  if (!assertModulePermission("payroll", "edit", "saveAdvances")) return;
+  if (!assertStaffAdvancesPermission("edit", "saveAdvances")) return;
   if (typeof window === "undefined") return;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   void import("@/lib/staffAdvancesPersistence").then(

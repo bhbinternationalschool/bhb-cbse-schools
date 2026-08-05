@@ -40,10 +40,12 @@ export default async function AuthenticatedLayout({
       <AppShell session={session}>
         <Suspense
           fallback={
-            <div className="p-6 text-sm text-[var(--muted)]">Loading…</div>
+            <div className="p-6 text-sm text-muted-foreground">Loading…</div>
           }
         >
-          <ErpModuleGate>{children}</ErpModuleGate>
+          <ErpModuleGate>
+            <div className="erp-module-root">{children}</div>
+          </ErpModuleGate>
         </Suspense>
       </AppShell>
     </div>

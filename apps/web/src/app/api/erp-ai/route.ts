@@ -1,20 +1,36 @@
 import { NextResponse } from "next/server";
 import { getDemoSession } from "@/lib/auth";
 import { replyErpAiChatServer } from "@/lib/erpAiChat.server";
-import { geminiConfigured, geminiModel } from "@/lib/erpAiGemini.server";
+import { llmStatus } from "@/lib/aiLlm.server";
+import { openAiModel } from "@/lib/openAi.server";
+import { geminiModel } from "@/lib/erpAiGemini.server";
 import { loadMasters } from "@/lib/masters";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 
 export const runtime = "nodejs";
 
 export async function GET() {
+  const status = llmStatus();
+  const anyLlm = status.primaryEngine !== "none";
+
   return NextResponse.json({
     service: "erp-ai",
-    geminiConfigured: geminiConfigured(),
-    model: geminiConfigured() ? geminiModel() : null,
-    note: geminiConfigured()
-      ? "POST { message, history?, pathname?, tab? } — local guides first, Gemini for open questions"
-      : "Set GEMINI_API_KEY in server env for live AI answers",
+    geminiConfigured: status.geminiConfigured,
+    llmConfigured: anyLlm,
+    preferredEngine: status.preferredEngine,
+    primaryEngine: status.primaryEngine,
+    fallbackEngine: status.fallbackEngine,
+    openAiModel: status.openaiConfigured ? openAiModel() : null,
+    geminiModel: status.geminiConfigured ? geminiModel() : null,
+    model:
+      status.primaryEngine === "openai"
+        ? openAiModel()
+        : status.primaryEngine === "gemini"
+          ? geminiModel()
+          : null,
+    note: anyLlm
+      ? `POST { message, history?, pathname?, tab? } — local guides first, ${status.primaryEngine}${status.fallbackEngine ? ` (fallback: ${status.fallbackEngine})` : ""} for open questions`
+      : "Set OPENAI_API_KEY or GEMINI_API_KEY in server env for live AI answers",
   });
 }
 
@@ -66,6 +82,7 @@ export async function POST(req: Request) {
     ok: true,
     engine: result.engine,
     geminiConfigured: result.geminiConfigured,
+    llmConfigured: result.llmConfigured,
     message: result.message,
   });
 }

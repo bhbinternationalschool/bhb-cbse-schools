@@ -22,17 +22,22 @@ import {
   scheduleSisDeskSync,
   sisNormalizedSyncEnabled,
 } from "@/lib/sisNormalizedClient";
+import {
+  isDeskHydrated,
+  markDeskHydrated,
+  resetDeskHydrated,
+} from "@/lib/deskHydrateGuard";
+
+const MODULE = "sis";
 
 export type { SisRemoteBundle };
-
-let hydratedOnce = false;
 
 export function sisRemoteEnabled() {
   return sisNormalizedSyncEnabled();
 }
 
 export function resetSisPersistenceCache() {
-  hydratedOnce = false;
+  resetDeskHydrated(MODULE);
 }
 
 /**
@@ -133,18 +138,33 @@ export function scheduleSisSync(state: SisState) {
  */
 export async function ensureSisHydrated(): Promise<boolean> {
   if (!sisRemoteEnabled()) return false;
-  if (hydratedOnce) return false;
-  hydratedOnce = true;
+  if (isDeskHydrated(MODULE)) return false;
+  markDeskHydrated(MODULE);
 
   const { loadSis, saveSis, writeSisLocalRaw, isLikelyDemoRoster } =
     await import("@/lib/sis");
   let next = loadSis();
   let changed = false;
 
+  const readFromDb = sisReadFromDbEnabled();
   const { bundle, changed: remoteChanged } = await hydrateSisDeskFromDb(
-    sisReadFromDbEnabled(),
+    readFromDb,
   );
-  if (
+  const remoteEmpty =
+    bundle.households.length === 0 && bundle.students.length === 0;
+
+  if (readFromDb && remoteEmpty) {
+    if (next.students.length > 0 || next.households.length > 0) {
+      const { emptySisState, writeSisLocalRaw } = await import("@/lib/sis");
+      next = {
+        ...emptySisState(),
+        tags: next.tags ?? [],
+        classUpgrades: next.classUpgrades ?? [],
+      };
+      writeSisLocalRaw(next);
+      changed = true;
+    }
+  } else if (
     remoteChanged &&
     (bundle.households.length > 0 || bundle.students.length > 0)
   ) {
@@ -160,13 +180,16 @@ export async function ensureSisHydrated(): Promise<boolean> {
       await wipeRemoteSisRoster();
     } else {
       next = mergeSisRemoteIntoState(next, bundle, {
-        preferDb: sisReadFromDbEnabled() || next.students.length === 0,
+        preferDb: readFromDb || next.students.length === 0,
       });
       changed = true;
     }
   }
 
-  await pushSisState(next);
+  // DB-read mode: hydrate is pull-only — never push stale browser roster back.
+  if (!readFromDb) {
+    await pushSisState(next);
+  }
 
   if (changed) {
     writeSisLocalRaw(next);

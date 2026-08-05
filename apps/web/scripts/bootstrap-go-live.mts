@@ -4,6 +4,7 @@
  * Run from apps/web:
  *   npx tsx scripts/bootstrap-go-live.mts
  *   npx tsx scripts/bootstrap-go-live.mts --email director@bhbinternational.school
+ *   npx tsx scripts/bootstrap-go-live.mts --skip-desk
  */
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync } from "node:fs";
@@ -49,6 +50,7 @@ async function findAuthUserId(
 
 async function main() {
   const flagEmail = process.argv.find((a) => a.includes("@"));
+  const skipDesk = process.argv.includes("--skip-desk");
   const env = loadEnv();
   const url = env.NEXT_PUBLIC_SUPABASE_URL;
   const key = env.SUPABASE_SERVICE_ROLE_KEY;
@@ -186,17 +188,21 @@ async function main() {
   }
 
   console.log("\nEnsuring desk cutover (backfill + seed)…");
-  const { ensureDeskCutoverServer } = await import(
-    "../src/lib/ensureDeskCutover.server"
-  );
-  const desk = await ensureDeskCutoverServer();
-  const changed = desk.actions.filter((a) => a.action !== "skip");
-  if (changed.length) {
-    for (const a of changed) {
-      console.log(`  ${a.module}: ${a.action} — ${a.detail}`);
-    }
+  if (skipDesk) {
+    console.log("  skipped (--skip-desk)");
   } else {
-    console.log("  desk already up to date");
+    const { ensureDeskCutoverServer } = await import(
+      "../src/lib/ensureDeskCutover.server"
+    );
+    const desk = await ensureDeskCutoverServer();
+    const changed = desk.actions.filter((a) => a.action !== "skip");
+    if (changed.length) {
+      for (const a of changed) {
+        console.log(`  ${a.module}: ${a.action} — ${a.detail}`);
+      }
+    } else {
+      console.log("  desk already up to date");
+    }
   }
 
   console.log("\nDone. Next:");

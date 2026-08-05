@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { getDemoSession } from "@/lib/auth";
+import {
+  DESK_SLICE_RBAC,
+  requireStaffPermission,
+} from "@/lib/apiRouteAuth.server";
 import type { DeskModuleId } from "@/lib/deskCutover";
 import { deskSliceDef, deskSliceEnvDualWrite } from "@/lib/deskSliceRegistry";
 import {
@@ -9,14 +12,6 @@ import {
 
 export const runtime = "nodejs";
 
-async function authorize(req: Request): Promise<boolean> {
-  const secret = process.env.MIRROR_SYNC_SECRET?.trim();
-  const header = req.headers.get("x-mirror-secret")?.trim();
-  if (secret && header && header === secret) return true;
-  const session = await getDemoSession();
-  return !!session;
-}
-
 type RouteCtx = { params: Promise<{ module: string }> };
 
 function parseModuleId(raw: string): DeskModuleId | null {
@@ -25,14 +20,15 @@ function parseModuleId(raw: string): DeskModuleId | null {
 }
 
 export async function GET(req: Request, ctx: RouteCtx) {
-  if (!(await authorize(req))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
   const { module } = await ctx.params;
   const id = parseModuleId(module);
   if (!id) {
     return NextResponse.json({ error: "Unknown module" }, { status: 404 });
   }
+  const rbacModule = DESK_SLICE_RBAC[id] ?? "settings";
+  const auth = await requireStaffPermission(req, rbacModule, "view");
+  if (!auth.ok) return auth.response;
+
   const { bundle, meta } = await fetchDeskSliceFromDb(id);
   return NextResponse.json({
     ok: true,
@@ -44,14 +40,15 @@ export async function GET(req: Request, ctx: RouteCtx) {
 }
 
 export async function POST(req: Request, ctx: RouteCtx) {
-  if (!(await authorize(req))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
   const { module } = await ctx.params;
   const id = parseModuleId(module);
   if (!id) {
     return NextResponse.json({ error: "Unknown module" }, { status: 404 });
   }
+  const rbacModule = DESK_SLICE_RBAC[id] ?? "settings";
+  const auth = await requireStaffPermission(req, rbacModule, "edit");
+  if (!auth.ok) return auth.response;
+
   const def = deskSliceDef(id)!;
   if (!deskSliceEnvDualWrite(def.envPrefix)) {
     return NextResponse.json({

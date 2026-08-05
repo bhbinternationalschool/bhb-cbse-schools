@@ -87,7 +87,7 @@ export async function hydrateSchoolMirrorFromRemote(
     }
   }
 
-  const { ensureFeesHydratedServer } = await import("@/lib/feesPersistence");
+  const { ensureFeesHydratedServer } = await import("@/lib/feesPersistence.server");
   if (await ensureFeesHydratedServer()) {
     const hydrated = getSchoolMirrorSync().fees as FeesState | null;
     if (hydrated) {

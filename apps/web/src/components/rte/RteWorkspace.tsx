@@ -5,10 +5,12 @@ import Link from "next/link";
 import { Accessibility } from "lucide-react";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
+import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
 import { isModuleEnabled, setModuleEnabled } from "@/lib/moduleRegistry";
 import { loadSis, type SisState } from "@/lib/sis";
 import { useModuleTabQuery } from "@/lib/useModuleTabQuery";
+import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import {
   applicationStatusLabel,
   assignLotteryNumbers,
@@ -56,13 +58,6 @@ const TABS: ModuleTabItem[] = [
   { id: "settings", label: "Settings", tone: "amber" },
   { id: "reports", label: "Reports", tone: "slate" },
 ];
-
-const field =
-  "rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2.5 py-1.5 text-sm text-[var(--brand-deep)]";
-const btn =
-  "rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50";
-const btnOutline =
-  "rounded-lg border border-[rgba(32,48,80,0.2)] bg-white px-3 py-1.5 text-sm text-[var(--brand-deep)]";
 
 export function RteWorkspace({
   embedded = false,
@@ -188,81 +183,64 @@ export function RteWorkspace({
   }
 
   return (
-    <div
-      className={
-        embedded ? "pb-6 pt-1" : "mx-auto max-w-6xl px-4 pb-10 pt-4"
+    <ErpWorkspaceShell
+      embedded={embedded}
+      title="RTE / EWS"
+      subtitle={
+        embedded
+          ? `Govt list · seats · lottery · allot → SIS with RTE/EWS tags · ${ay}`
+          : `Quota seats · applications · lottery · enrolled (§21c) · ${ay}`
       }
-    >
-      {embedded ? (
-        <p className="mb-3 text-sm text-[var(--muted)]">
-          Govt list · seats · lottery · allot → SIS with RTE/EWS tags · {ay}
-        </p>
-      ) : (
-        <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="flex items-center gap-2 text-2xl font-bold text-[var(--brand-deep)]">
-              <Accessibility className="h-7 w-7" aria-hidden />
-              RTE / EWS
-            </h1>
-            <p className="mt-1 text-sm text-[var(--muted)]">
-              Quota seats · applications · lottery · enrolled (§21c) · {ay}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
+      icon={<Accessibility className="size-6" aria-hidden />}
+      error={error}
+      notice={notice}
+      actions={
+        embedded ? undefined : (
+          <>
             <Link href="/modules" className={btnOutline}>
               Modules
             </Link>
             <Link href="/admissions?tab=rte" className={btnOutline}>
               ← Admissions
             </Link>
+          </>
+        )
+      }
+      toolbar={
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3">
+            <p className="text-[11px] text-[var(--muted)]">Mandated seats</p>
+            <p className="text-xl font-semibold text-[var(--brand-deep)]">
+              {fillSummary.total}
+            </p>
           </div>
-        </header>
-      )}
-
-      <div className="mb-4 grid gap-3 sm:grid-cols-3">
-        <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3">
-          <p className="text-[11px] text-[var(--muted)]">Mandated seats</p>
-          <p className="text-xl font-semibold text-[var(--brand-deep)]">
-            {fillSummary.total}
-          </p>
+          <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3">
+            <p className="text-[11px] text-[var(--muted)]">Filled</p>
+            <p className="text-xl font-semibold text-[var(--brand-deep)]">
+              {fillSummary.filled}{" "}
+              <span className="text-sm font-normal text-[var(--muted)]">
+                ({fillSummary.pct}%)
+              </span>
+            </p>
+          </div>
+          <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3">
+            <p className="text-[11px] text-[var(--muted)]">
+              Assigned · not admitted
+            </p>
+            <p className="text-xl font-semibold text-[var(--brand-deep)]">
+              {
+                apps.filter(
+                  (a) =>
+                    a.status === "govt_assigned" ||
+                    a.status === "submitted" ||
+                    a.status === "waitlist",
+                ).length
+              }
+            </p>
+          </div>
         </div>
-        <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3">
-          <p className="text-[11px] text-[var(--muted)]">Filled</p>
-          <p className="text-xl font-semibold text-[var(--brand-deep)]">
-            {fillSummary.filled}{" "}
-            <span className="text-sm font-normal text-[var(--muted)]">
-              ({fillSummary.pct}%)
-            </span>
-          </p>
-        </div>
-        <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3">
-          <p className="text-[11px] text-[var(--muted)]">
-            Assigned · not admitted
-          </p>
-          <p className="text-xl font-semibold text-[var(--brand-deep)]">
-            {
-              apps.filter(
-                (a) =>
-                  a.status === "govt_assigned" ||
-                  a.status === "submitted" ||
-                  a.status === "waitlist",
-              ).length
-            }
-          </p>
-        </div>
-      </div>
-
-      {notice ? (
-        <p className="mb-3 rounded-lg bg-[rgba(15,122,76,0.1)] px-3 py-2 text-sm text-[#0f7a4c]">
-          {notice}
-        </p>
-      ) : null}
-      {error ? (
-        <p className="mb-3 rounded-lg bg-[rgba(180,35,24,0.08)] px-3 py-2 text-sm text-[#b42318]">
-          {error}
-        </p>
-      ) : null}
-
+      }
+    >
       <ModuleTabs
         items={TABS}
         value={tab}
@@ -887,7 +865,7 @@ export function RteWorkspace({
           </ul>
         </section>
       ) : null}
-    </div>
+    </ErpWorkspaceShell>
   );
 }
 

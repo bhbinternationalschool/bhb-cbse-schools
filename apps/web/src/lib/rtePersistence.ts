@@ -16,6 +16,13 @@ import {
 import { mergeDbDeskIntoRteState } from "@/lib/rteNormalizedMerge";
 import { rteReadFromDbEnabled } from "@/lib/rteDbConfig";
 import { deskSkipBlobHydrateClient, deskSkipBlobPushClient } from "@/lib/deskCutover";
+import {
+  isDeskHydrated,
+  markDeskHydrated,
+  resetDeskHydrated,
+} from "@/lib/deskHydrateGuard";
+
+const MODULE = "rte";
 
 const blob = createDomainBlobPersistence<RteState>({
   table: "rte_state",
@@ -27,7 +34,10 @@ const blob = createDomainBlobPersistence<RteState>({
 });
 
 export const rteRemoteEnabled = blob.remoteEnabled;
-export const resetRtePersistenceCache = blob.resetCache;
+export function resetRtePersistenceCache() {
+  resetDeskHydrated(MODULE);
+  blob.resetCache();
+}
 
 export function scheduleRteSync(state: RteState) {
   if (typeof window === "undefined") {
@@ -58,6 +68,9 @@ export async function pushRteRemoteServer(
 }
 
 export async function ensureRteHydrated(): Promise<boolean> {
+  if (isDeskHydrated(MODULE)) return false;
+  markDeskHydrated(MODULE);
+
   const readFromDb = rteReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("rte")
     ? false

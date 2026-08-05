@@ -3,6 +3,13 @@
 import { useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
+  ErpMetricCard,
+  ErpMetricGrid,
+  ErpToolbar,
+  ErpToolbarBtn,
+  type ErpMetricTone,
+} from "@/components/ui/erp-roster";
+import {
   BarChart3,
   ArrowDown,
   ArrowUp,
@@ -13,6 +20,10 @@ import {
   Table2,
   X,
   ChevronRight,
+  IndianRupee,
+  Users,
+  TrendingUp,
+  AlertTriangle,
 } from "lucide-react";
 
 export type DashboardTone =
@@ -138,6 +149,37 @@ export type ModuleDashboardModel = {
   extraTables?: DashboardTableBlock[];
   quickLinks?: DashboardQuickLink[];
 };
+
+function dashboardToneToMetric(tone: DashboardTone): ErpMetricTone {
+  const map: Record<DashboardTone, ErpMetricTone> = {
+    navy: "navy",
+    gold: "amber",
+    teal: "sky",
+    rose: "rose",
+    green: "green",
+    sky: "sky",
+    coral: "amber",
+    slate: "navy",
+  };
+  return map[tone] ?? "sky";
+}
+
+function kpiIconForTone(tone: DashboardTone) {
+  switch (tone) {
+    case "green":
+      return <TrendingUp className="h-7 w-7" />;
+    case "rose":
+      return <AlertTriangle className="h-7 w-7" />;
+    case "gold":
+    case "coral":
+      return <IndianRupee className="h-7 w-7" />;
+    case "teal":
+    case "sky":
+      return <BarChart3 className="h-7 w-7" />;
+    default:
+      return <Users className="h-7 w-7" />;
+  }
+}
 
 const TONE_STYLES: Record<
   DashboardTone,
@@ -805,9 +847,9 @@ function DashboardTable({
 
   return (
     <section className="module-dash-panel overflow-hidden">
-      <div className="flex items-center gap-2 border-b border-[rgba(32,48,80,0.1)] bg-[linear-gradient(90deg,rgba(32,48,80,0.08),rgba(197,160,40,0.12))] px-4 py-3 sm:px-5">
-        <Table2 className="h-5 w-5 text-[var(--brand-deep)]" aria-hidden />
-        <h3 className="font-display text-xl font-bold text-[var(--brand-deep)] sm:text-2xl">
+      <div className="flex items-center gap-2 border-b border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] px-4 py-3 sm:px-5">
+        <Table2 className="h-5 w-5 text-[#2563eb]" aria-hidden />
+        <h3 className="text-base font-semibold text-[#2563eb]">
           {title}
         </h3>
         <span className="ml-auto rounded-full bg-white/80 px-3 py-1 text-sm font-bold tabular-nums text-[var(--brand-deep)]">
@@ -1077,7 +1119,7 @@ function ChartPanel({
   return (
     <section className="module-dash-panel p-4 sm:p-5">
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h3 className="font-display text-xl font-bold text-[var(--brand-deep)] sm:text-2xl">
+        <h3 className="text-base font-semibold text-[#2563eb] sm:text-base">
           {panelTitle}
         </h3>
         <div className="flex flex-wrap items-center gap-2">
@@ -1204,29 +1246,11 @@ export function ModuleDashboardView({
                 ) : null}
               </div>
             ) : null}
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <ErpMetricGrid>
               {section.kpis.map((kpi) => {
-                const tone = TONE_STYLES[kpi.tone || "navy"];
-                return (
-                  <button
-                    key={kpi.id}
-                    type="button"
-                    onClick={() => onKpiClick(kpi)}
-                    className={`module-dash-kpi group rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white p-4 text-left shadow-[0_8px_24px_rgba(32,48,80,0.06)] transition hover:-translate-y-0.5 hover:shadow-[0_12px_28px_rgba(32,48,80,0.12)] focus-visible:outline-none focus-visible:ring-2 ${tone.ring}`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <span
-                        className={`inline-flex rounded-lg px-2.5 py-1 text-[12px] font-bold uppercase tracking-[0.06em] ${tone.chip}`}
-                      >
-                        {kpi.label}
-                      </span>
-                      <ChevronRight className="h-5 w-5 shrink-0 text-[var(--muted)] opacity-60 transition group-hover:translate-x-0.5 group-hover:opacity-100" />
-                    </div>
-                    <div
-                      className={`mt-3 font-display text-2xl font-bold tabular-nums leading-none sm:text-3xl ${tone.value}`}
-                    >
-                      {kpi.value}
-                    </div>
+                const tone = kpi.tone || "navy";
+                const footer = (
+                  <>
                     {kpi.breakdown && kpi.breakdown.length > 0 ? (
                       <ul className="mt-2 space-y-0.5 border-t border-[rgba(32,48,80,0.08)] pt-2">
                         {kpi.breakdown.map((b) => (
@@ -1234,7 +1258,7 @@ export function ModuleDashboardView({
                             key={b.label}
                             className="flex items-center justify-between gap-2 text-xs text-[var(--ink)]"
                           >
-                            <span className="text-[var(--muted)]">{b.label}</span>
+                            <span className="text-muted-foreground">{b.label}</span>
                             <span className="font-semibold tabular-nums">
                               {b.value}
                             </span>
@@ -1243,14 +1267,26 @@ export function ModuleDashboardView({
                       </ul>
                     ) : null}
                     {kpi.hint ? (
-                      <p className="mt-2 text-[15px] leading-snug text-[var(--muted)]">
+                      <p className="mt-2 text-xs leading-snug text-muted-foreground">
                         {kpi.hint}
                       </p>
                     ) : null}
-                  </button>
+                  </>
+                );
+                return (
+                  <ErpMetricCard
+                    key={kpi.id}
+                    title={kpi.label}
+                    value={kpi.value}
+                    tone={dashboardToneToMetric(tone)}
+                    icon={kpiIconForTone(tone)}
+                    onClick={() => onKpiClick(kpi)}
+                    footer={footer}
+                    className="module-dash-kpi"
+                  />
                 );
               })}
-            </div>
+            </ErpMetricGrid>
           </div>
         ))}
       </section>
@@ -1312,33 +1348,28 @@ export function ModuleDashboardView({
 
       {model.quickLinks && model.quickLinks.length > 0 ? (
         <section className="module-dash-panel p-4 sm:p-5">
-          <h3 className="font-display text-xl font-bold text-[var(--brand-deep)]">
-            Jump in
-          </h3>
-          <div className="mt-3 flex flex-wrap gap-2">
+          <h3 className="text-base font-semibold text-[#2563eb]">Jump in</h3>
+          <ErpToolbar className="mt-3 justify-start">
             {model.quickLinks.map((link) =>
               link.href ? (
-                <a
+                <ErpToolbarBtn
                   key={link.label}
+                  icon={<ChevronRight className="h-4 w-4" />}
+                  label={link.label}
                   href={link.href}
-                  className="inline-flex items-center rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-3.5 py-2 text-sm font-semibold text-[var(--brand-deep)] transition hover:border-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.04)]"
-                >
-                  {link.label}
-                </a>
+                />
               ) : (
-                <button
+                <ErpToolbarBtn
                   key={link.label}
-                  type="button"
+                  icon={<ChevronRight className="h-4 w-4" />}
+                  label={link.label}
                   onClick={() =>
                     link.tab && onNavigateTab ? onNavigateTab(link.tab) : undefined
                   }
-                  className="inline-flex items-center rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-3.5 py-2 text-sm font-semibold text-[var(--brand-deep)] transition hover:border-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.04)]"
-                >
-                  {link.label}
-                </button>
+                />
               ),
             )}
-          </div>
+          </ErpToolbar>
         </section>
       ) : null}
 

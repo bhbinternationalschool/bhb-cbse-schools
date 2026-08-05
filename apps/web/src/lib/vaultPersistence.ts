@@ -16,6 +16,13 @@ import {
 import { mergeDbDeskIntoVaultState } from "@/lib/vaultNormalizedMerge";
 import { vaultReadFromDbEnabled } from "@/lib/vaultDbConfig";
 import { deskSkipBlobHydrateClient, deskSkipBlobPushClient } from "@/lib/deskCutover";
+import {
+  isDeskHydrated,
+  markDeskHydrated,
+  resetDeskHydrated,
+} from "@/lib/deskHydrateGuard";
+
+const MODULE = "vault";
 
 const blob = createDomainBlobPersistence<VaultState>({
   table: "vault_state",
@@ -27,7 +34,10 @@ const blob = createDomainBlobPersistence<VaultState>({
 });
 
 export const vaultRemoteEnabled = blob.remoteEnabled;
-export const resetVaultPersistenceCache = blob.resetCache;
+export function resetVaultPersistenceCache() {
+  resetDeskHydrated(MODULE);
+  blob.resetCache();
+}
 
 export function scheduleVaultSync(state: VaultState) {
   if (typeof window === "undefined") {
@@ -62,6 +72,9 @@ export async function pushVaultRemoteServer(
 }
 
 export async function ensureVaultHydrated(): Promise<boolean> {
+  if (isDeskHydrated(MODULE)) return false;
+  markDeskHydrated(MODULE);
+
   const readFromDb = vaultReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("vault")
     ? false

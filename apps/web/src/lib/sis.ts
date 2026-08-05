@@ -17,6 +17,9 @@ import {
   type MastersState,
 } from "@/lib/masters";
 import {
+  suggestFromSeriesCode,
+} from "@/lib/numberSeries";
+import {
   getSchoolMirrorSync,
   scheduleClientSchoolMirrorSync,
   setMirrorSlice,
@@ -49,7 +52,12 @@ export type AadhaarVerificationStatus =
 
 export type StudentCategory = "GEN" | "OBC" | "SC" | "ST" | "EWS" | "";
 
-export type DocStatus = "missing" | "received" | "verified";
+export type DocStatus =
+  | "missing"
+  | "received"
+  | "pending"
+  | "verified"
+  | "rejected";
 
 export type StudentDocKey =
   | "birthCert"
@@ -68,6 +76,13 @@ export type StudentDocFile = {
   size: number;
   fileUrl: string;
   uploadedAt: string;
+  /** Parent/guardian who submitted for verification */
+  submittedBy?: string;
+  submittedAt?: string;
+  /** Class teacher / office / principal decision */
+  reviewedBy?: string;
+  reviewedAt?: string;
+  reviewNote?: string;
 };
 
 export type StudentDocs = Record<StudentDocKey, StudentDocFile>;
@@ -114,6 +129,15 @@ export type Household = {
 export type SisStudent = {
   id: string;
   admissionNo: string;
+  /**
+   * Old ERP admission number — set only when imported from a legacy list.
+   * Manual entry students leave this blank; use `admissionNo` as the system id.
+   */
+  legacyErpAdmissionNo: string;
+  /** Import mapped legacy ERP no → system no still awaiting office verification. */
+  systemAdmissionPending: boolean;
+  /** True when row came from legacy ERP CSV import (not manual add). */
+  importedViaLegacyList: boolean;
   fullName: string;
   gender: "M" | "F" | "O" | "";
   dob: string;
@@ -343,7 +367,27 @@ export function emptyDocFile(status: DocStatus = "missing"): StudentDocFile {
     size: 0,
     fileUrl: "",
     uploadedAt: "",
+    submittedBy: "",
+    submittedAt: "",
+    reviewedBy: "",
+    reviewedAt: "",
+    reviewNote: "",
   };
+}
+
+export function docStatusLabel(status: DocStatus): string {
+  switch (status) {
+    case "pending":
+      return "Pending verification";
+    case "verified":
+      return "Verified";
+    case "rejected":
+      return "Rejected — re-upload";
+    case "received":
+      return "Received (office)";
+    default:
+      return "Missing";
+  }
 }
 
 export function emptyStudentDocs(): StudentDocs {
@@ -358,20 +402,26 @@ export function emptyStudentDocs(): StudentDocs {
   };
 }
 
+function parseDocStatus(raw: unknown): DocStatus {
+  if (
+    raw === "received" ||
+    raw === "verified" ||
+    raw === "missing" ||
+    raw === "pending" ||
+    raw === "rejected"
+  ) {
+    return raw;
+  }
+  return "missing";
+}
+
 export function normalizeDocFile(raw: unknown): StudentDocFile {
   if (typeof raw === "string") {
-    const status: DocStatus =
-      raw === "received" || raw === "verified" || raw === "missing"
-        ? raw
-        : "missing";
-    return emptyDocFile(status);
+    return emptyDocFile(parseDocStatus(raw));
   }
   if (!raw || typeof raw !== "object") return emptyDocFile();
   const o = raw as Partial<StudentDocFile> & { status?: string };
-  const status: DocStatus =
-    o.status === "received" || o.status === "verified" || o.status === "missing"
-      ? o.status
-      : "missing";
+  const status = parseDocStatus(o.status);
   const fileUrl = typeof o.fileUrl === "string" ? o.fileUrl : "";
   return {
     status: fileUrl && status === "missing" ? "received" : status,
@@ -380,6 +430,11 @@ export function normalizeDocFile(raw: unknown): StudentDocFile {
     size: typeof o.size === "number" ? o.size : 0,
     fileUrl,
     uploadedAt: typeof o.uploadedAt === "string" ? o.uploadedAt : "",
+    submittedBy: typeof o.submittedBy === "string" ? o.submittedBy : "",
+    submittedAt: typeof o.submittedAt === "string" ? o.submittedAt : "",
+    reviewedBy: typeof o.reviewedBy === "string" ? o.reviewedBy : "",
+    reviewedAt: typeof o.reviewedAt === "string" ? o.reviewedAt : "",
+    reviewNote: typeof o.reviewNote === "string" ? o.reviewNote : "",
   };
 }
 
@@ -537,6 +592,9 @@ export function normalizeStudent(s: Partial<SisStudent> & { id: string }): SisSt
   return {
     id: s.id,
     admissionNo: s.admissionNo ?? "",
+    legacyErpAdmissionNo: s.legacyErpAdmissionNo ?? "",
+    systemAdmissionPending: !!s.systemAdmissionPending,
+    importedViaLegacyList: !!s.importedViaLegacyList,
     fullName: s.fullName ?? "",
     gender: s.gender ?? "",
     dob: s.dob ?? "",
@@ -1289,8 +1347,24 @@ export function removeStudent(
   };
 }
 
-export function suggestAdmissionNo(students: SisStudent[]): string {
-  const year = DEFAULT_AY.split("-")[0] ?? "2025";
+export function suggestAdmissionNo(
+  students: SisStudent[],
+  masters?: Pick<MastersState, "numberSeries"> | null,
+  ayCode?: string,
+): string {
+  const m =
+    masters ??
+    (typeof window !== "undefined" ? loadMasters() : null);
+  const ay = ayCode ?? activeSessionCode() ?? DEFAULT_AY;
+  const fromSeries = suggestFromSeriesCode(
+    m?.numberSeries,
+    "ADMISSION",
+    ay,
+    students.map((s) => s.admissionNo),
+  );
+  if (fromSeries) return fromSeries;
+
+  const year = ay.split("-")[0] ?? "2025";
   let max = 100;
   for (const s of students) {
     const m = s.admissionNo.match(/(\d+)$/);
@@ -1300,13 +1374,49 @@ export function suggestAdmissionNo(students: SisStudent[]): string {
 }
 
 /** Next Scholar Register Number (SRN) for Students SIS */
-export function suggestSrn(students: SisStudent[]): string {
+export function suggestSrn(
+  students: SisStudent[],
+  masters?: Pick<MastersState, "numberSeries"> | null,
+  ayCode?: string,
+): string {
+  const m =
+    masters ??
+    (typeof window !== "undefined" ? loadMasters() : null);
+  const ay = ayCode ?? activeSessionCode() ?? DEFAULT_AY;
+  const fromSeries = suggestFromSeriesCode(
+    m?.numberSeries,
+    "SRN",
+    ay,
+    students.map((s) => s.srn || ""),
+  );
+  if (fromSeries) return fromSeries;
+
   let max = 0;
   for (const s of students) {
-    const m = (s.srn || "").match(/(\d+)$/);
-    if (m) max = Math.max(max, Number(m[1]));
+    const match = (s.srn || "").match(/(\d+)$/);
+    if (match) max = Math.max(max, Number(match[1]));
   }
   return `SRN-${String(max + 1).padStart(5, "0")}`;
+}
+
+/** Registration number for admissions / SIS */
+export function suggestRegistrationNo(
+  students: SisStudent[],
+  masters?: Pick<MastersState, "numberSeries"> | null,
+  ayCode?: string,
+): string {
+  const m =
+    masters ??
+    (typeof window !== "undefined" ? loadMasters() : null);
+  const ay = ayCode ?? activeSessionCode() ?? DEFAULT_AY;
+  return (
+    suggestFromSeriesCode(
+      m?.numberSeries,
+      "REGISTRATION",
+      ay,
+      students.map((s) => s.registrationNo || ""),
+    ) ?? ""
+  );
 }
 
 export function householdOf(

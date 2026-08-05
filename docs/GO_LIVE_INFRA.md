@@ -54,6 +54,10 @@ Local flags:
 - Set `false` when you want real Supabase Auth only  
 - Production app URL: `NEXT_PUBLIC_APP_URL=https://bhbinternational.school`
 
+**Track C desk cutover (cross-browser DB):** see [deploy/README.md](../deploy/README.md).  
+Templates: `deploy/env.production.example` + `deploy/desk-cutover.env.example`.  
+`./scripts/deploy-online.sh` merges desk flags into Cloud Run automatically.
+
 ---
 
 ## Supabase Auth dashboard (must match domain)

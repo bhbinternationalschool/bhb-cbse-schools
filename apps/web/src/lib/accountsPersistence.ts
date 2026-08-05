@@ -16,6 +16,13 @@ import {
 import { mergeDbDeskIntoAccountsState } from "@/lib/accountsNormalizedMerge";
 import { accountsReadFromDbEnabled } from "@/lib/accountsDbConfig";
 import { deskSkipBlobHydrateClient, deskSkipBlobPushClient } from "@/lib/deskCutover";
+import {
+  isDeskHydrated,
+  markDeskHydrated,
+  resetDeskHydrated,
+} from "@/lib/deskHydrateGuard";
+
+const MODULE = "accounts";
 
 const blob = createDomainBlobPersistence<AccountsState>({
   table: "accounts_state",
@@ -36,6 +43,9 @@ export const scheduleAccountsSync = (state: AccountsState) => {
   scheduleAccountsDeskSync(state);
 };
 export const ensureAccountsHydrated = async () => {
+  if (isDeskHydrated(MODULE)) return false;
+  markDeskHydrated(MODULE);
+
   const readFromDb = accountsReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("accounts")
     ? false
@@ -108,4 +118,7 @@ export async function ensureAccountsHydratedServer(): Promise<boolean> {
   return changed;
 }
 
-export const resetAccountsPersistenceCache = blob.resetCache;
+export function resetAccountsPersistenceCache() {
+  resetDeskHydrated(MODULE);
+  blob.resetCache();
+}

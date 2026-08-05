@@ -6,6 +6,7 @@
 import {
   defaultFoundationSlice,
   ensureFoundationOnMasters,
+  mergeNumberSeries,
   normalizeSchoolProfile,
 } from "@/lib/foundationMasters";
 import {
@@ -81,11 +82,19 @@ export function completeMastersSetup(
     actions.push("Set current academic year 2025-26");
   }
 
-  // Number series
-  if ((next.numberSeries ?? []).length < 3) {
+  // Number series — backfill any missing seed codes
+  {
     const seed = defaultFoundationSlice(next.classes ?? []);
-    next = { ...next, numberSeries: seed.numberSeries };
-    actions.push("Restored numbering series");
+    const merged = mergeNumberSeries(next.numberSeries, seed.numberSeries);
+    const hadMissing = seed.numberSeries.some(
+      (s) => !(next.numberSeries ?? []).some((n) => n.code === s.code),
+    );
+    if (hadMissing || (next.numberSeries ?? []).length === 0) {
+      next = { ...next, numberSeries: merged };
+      actions.push(
+        hadMissing ? "Added missing numbering series" : "Restored numbering series",
+      );
+    }
   }
 
   // Departments / designations

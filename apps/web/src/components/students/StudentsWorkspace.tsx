@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { GraduationCap } from "lucide-react";
 import {
   STUDENT_TYPES,
   currentAcademicYearCode,
@@ -42,6 +43,7 @@ import {
 } from "@/lib/studentRegisterExport";
 import { TENANT } from "@/lib/types";
 import { CurriculumOfficePanel } from "@/components/students/CurriculumOfficePanel";
+import { LegacyAdmissionVerifyPanel } from "@/components/students/LegacyAdmissionVerifyPanel";
 import { StudentImportPanel } from "@/components/students/StudentImportPanel";
 import { StudentProfileModal } from "@/components/students/StudentProfileModal";
 import { UdiseComplianceWorkspace } from "@/components/students/UdiseComplianceWorkspace";
@@ -52,7 +54,10 @@ import { StudentSiblingsPanel } from "@/components/students/StudentSiblingsPanel
 import { StudentUpgradePanel } from "@/components/students/StudentUpgradePanel";
 import { StudentUpdatePanel } from "@/components/students/StudentUpdatePanel";
 import { StudentDuplicatesPanel } from "@/components/students/StudentDuplicatesPanel";
+import { DocVerificationQueuePanel } from "@/components/students/DocVerificationQueuePanel";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
+import { ErpTableShell } from "@/components/ui/erp-roster";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { listImportSessions, normalizeSessionCode } from "@/lib/studentImport";
@@ -72,7 +77,8 @@ type MainTab =
   | "upgrade"
   | "update"
   | "duplicates"
-  | "udise";
+  | "udise"
+  | "doc_verify";
 const VIEW_KEY = "bhb_sis_view";
 const TAB_KEY = "bhb_sis_main_tab";
 
@@ -134,7 +140,8 @@ export function StudentsWorkspace() {
         tab === "upgrade" ||
         tab === "update" ||
         tab === "duplicates" ||
-        tab === "udise"
+        tab === "udise" ||
+        tab === "doc_verify"
       ) {
         setMainTab(tab);
         if (!urlTab && tab !== "dashboard") {
@@ -562,25 +569,19 @@ export function StudentsWorkspace() {
       : "No students match filters";
 
   return (
-    <div>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-[var(--brand-deep)]">
-            Students
-          </h1>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            SIS roster ·{" "}
-            {effectiveSession || "All sessions"} ·{" "}
-            {activeCount} active
-            {inactiveCount ? ` · ${inactiveCount} inactive` : ""}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {notice ? (
-            <span className="rounded-lg bg-[rgba(197,160,40,0.18)] px-3 py-1.5 text-xs font-medium text-[var(--brand-deep)]">
-              {notice}
-            </span>
-          ) : null}
+    <ErpWorkspaceShell
+      title="Students"
+      subtitle={
+        <>
+          SIS roster · {effectiveSession || "All sessions"} · {activeCount}{" "}
+          active
+          {inactiveCount ? ` · ${inactiveCount} inactive` : ""}
+        </>
+      }
+      icon={<GraduationCap className="size-6" aria-hidden />}
+      notice={notice}
+      actions={
+        <>
           {mainTab === "register" ? (
             <div
               className="flex rounded-lg border border-[rgba(32,48,80,0.15)] bg-white p-0.5"
@@ -617,12 +618,11 @@ export function StudentsWorkspace() {
           >
             + Add student
           </Link>
-        </div>
-      </div>
-
+        </>
+      }
+    >
       <ModuleTabs
         aria-label="Students sections"
-        size="xl"
         value={mainTab}
         onChange={(id) => setMainTabPersist(id as MainTab)}
         items={[
@@ -632,6 +632,7 @@ export function StudentsWorkspace() {
           { id: "update", label: "Update", tone: "sky" },
           { id: "duplicates", label: "Duplicates", tone: "coral" },
           { id: "udise", label: "UDISE+", tone: "coral" },
+          { id: "doc_verify", label: "Doc verify", tone: "amber" },
           { id: "siblings", label: "Siblings", tone: "violet" },
           { id: "upgrade", label: "Upgrade", tone: "amber" },
           { id: "reports", label: "Reports", tone: "green" },
@@ -644,6 +645,18 @@ export function StudentsWorkspace() {
           moduleId="students"
           onNavigateTab={(t) => setMainTabPersist(t as MainTab)}
         />
+      ) : null}
+
+      {mainTab === "doc_verify" ? (
+        <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(246,245,239,0.6)] p-4">
+          <DocVerificationQueuePanel
+            mode="student"
+            onChanged={() => {
+              setState(loadSis());
+              setPanelTick((t) => t + 1);
+            }}
+          />
+        </div>
       ) : null}
 
       {mainTab === "udise" ? (
@@ -729,6 +742,10 @@ export function StudentsWorkspace() {
       <StudentStatsDashboard sis={sis} masters={m} />
 
       <div className="mt-4 space-y-3">
+        <LegacyAdmissionVerifyPanel
+          tick={panelTick}
+          onChanged={(next, message) => commit(next, message)}
+        />
         <StudentImportPanel
           masters={m}
           sis={sis}
@@ -1072,7 +1089,7 @@ export function StudentsWorkspace() {
           </div>
 
           {view === "list" ? (
-            <div className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
+            <ErpTableShell>
               <ul className="max-h-[620px] divide-y divide-[rgba(32,48,80,0.08)] overflow-y-auto">
                 {filtered.map((s) => {
                   const on = householdIdSet.has(s.id);
@@ -1170,7 +1187,7 @@ export function StudentsWorkspace() {
                   </li>
                 ) : null}
               </ul>
-            </div>
+            </ErpTableShell>
           ) : (
             <div className="grid max-h-[620px] gap-3 overflow-y-auto sm:grid-cols-2">
               {filtered.map((s) => {
@@ -1305,7 +1322,7 @@ export function StudentsWorkspace() {
             );
           })()
         : null}
-    </div>
+    </ErpWorkspaceShell>
   );
 }
 

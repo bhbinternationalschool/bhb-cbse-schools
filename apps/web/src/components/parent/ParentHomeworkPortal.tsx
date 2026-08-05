@@ -17,10 +17,9 @@ import {
   type HomeworkState,
 } from "@/lib/homework";
 import { speakText } from "@/lib/voiceClient";
+import { HomeworkTutorChat } from "@/components/parent/HomeworkTutorChat";
 import { StudentNameLabel } from "@/components/students/StudentAvatar";
-
-const field =
-  "rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2.5 py-1.5 text-sm text-[var(--brand-deep)]";
+import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 
 export function ParentHomeworkPortal({
   guardianDisplayName,
@@ -249,6 +248,18 @@ export function ParentHomeworkPortal({
                     <span className="text-xs text-[var(--muted)]">Seen</span>
                   )}
                 </div>
+                <HomeworkTutorChat
+                  context={{
+                    childName: child.fullName,
+                    className:
+                      masters?.classes.find((c) => c.id === child.classId)
+                        ?.name || "",
+                    subjectLabel: subj,
+                    homeworkTitle: p.title,
+                    homeworkBody: text,
+                  }}
+                  onError={flash}
+                />
                 {p.requiresSubmit ? (
                   <div className="mt-3 space-y-2 rounded-lg bg-[rgba(32,48,80,0.04)] p-2">
                     {sub ? (

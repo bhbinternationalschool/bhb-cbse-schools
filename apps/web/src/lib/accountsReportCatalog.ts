@@ -4,6 +4,7 @@
 
 import {
   balanceSheet,
+  BANK_PAYMENT_MODE_LABELS,
   cashInHandPaise,
   coaLedgerRows,
   getBank,
@@ -18,6 +19,7 @@ import {
   loadAccounts,
   trialBalance,
   type AccountsState,
+  type ExpensePaymentSplit,
 } from "@/lib/accounts";
 import { buildDayBook, loadFees, tenderModeLabel } from "@/lib/fees";
 import { formatInr } from "@/lib/masters";
@@ -26,6 +28,19 @@ import {
   exportFilterReport,
 } from "@/lib/reportExport";
 import { TENANT } from "@/lib/types";
+
+function formatExpensePaymentSplitLine(
+  split: ExpensePaymentSplit,
+  accounts: AccountsState,
+): string {
+  const modeLabel = BANK_PAYMENT_MODE_LABELS[split.mode] ?? split.mode;
+  if (split.mode === "cash") {
+    const pool = accounts.cashPools.find((p) => p.id === split.poolId);
+    return `${modeLabel}${pool ? ` · ${pool.name}` : ""}${split.transactionRef ? ` · ${split.transactionRef}` : ""}`;
+  }
+  const bank = accounts.bankAccounts.find((b) => b.id === split.bankId);
+  return `${modeLabel}${bank ? ` · ${bank.name}` : ""}${split.transactionRef ? ` · ${split.transactionRef}` : ""}`;
+}
 
 export type AccountsReportFormat = "excel" | "pdf";
 
@@ -39,6 +54,8 @@ export type AccountsReportId =
   | "journal_register"
   | "cancelled_receipts_payments"
   | "expenses_by_category"
+  | "expenses_by_subcategory"
+  | "transaction_id_register"
   | "ap_ageing"
   | "owner_loan_register"
   | "trial_balance"
@@ -125,6 +142,18 @@ export const ACCOUNTS_REPORTS: AccountsReportDef[] = [
     category: "expenses",
     label: "Expenses by category",
     hint: "Paid vouchers in period",
+  },
+  {
+    id: "expenses_by_subcategory",
+    category: "expenses",
+    label: "Expenses by sub-category",
+    hint: "Category + sub-category totals for date range",
+  },
+  {
+    id: "transaction_id_register",
+    category: "cashflow",
+    label: "Transaction ID register",
+    hint: "Payments & receipts with txn / UPI / cheque refs",
   },
   {
     id: "ap_ageing",
@@ -215,6 +244,7 @@ export function runAccountsReport(
           account: pool?.name || e.poolId,
           direction: e.direction === "in" ? "Receipt" : "Payment",
           amount: formatInr(e.amountPaise),
+          transactionId: e.transactionRef || "—",
           source: e.sourceType,
           narration: e.narration,
         });
@@ -229,6 +259,7 @@ export function runAccountsReport(
           account: bank?.name || e.bankId,
           direction: e.direction === "dr" ? "Receipt" : "Payment",
           amount: formatInr(e.amountPaise),
+          transactionId: e.transactionRef || "—",
           source: e.sourceType,
           narration: e.narration,
         });
@@ -245,6 +276,7 @@ export function runAccountsReport(
             { key: "account", header: "Account", width: 1.1 },
             { key: "direction", header: "Type", width: 0.8 },
             { key: "amount", header: "Amount", width: 0.9 },
+            { key: "transactionId", header: "Txn ID", width: 1 },
             { key: "source", header: "Source", width: 1 },
             { key: "narration", header: "Narration", width: 1.4 },
           ],
@@ -285,6 +317,30 @@ export function runAccountsReport(
           inOut: "Out",
           amount: formatInr(v.grandTotalPaise || v.amountPaise),
         });
+      }
+      for (const v of accounts.expenseVouchers) {
+        if (isExpenseVoucherCancelled(v) || v.paidPaise <= 0) continue;
+        const payDate = v.paidOn || v.date;
+        if (payDate !== date) continue;
+        if (v.paymentSplits.length > 0) {
+          for (const split of v.paymentSplits) {
+            rows.push({
+              section: "Expense payment",
+              detail: `${v.voucherNo} · ${formatExpensePaymentSplitLine(split, accounts)}`,
+              count: v.narration || "paid",
+              inOut: "Out",
+              amount: formatInr(split.amountPaise),
+            });
+          }
+        } else {
+          rows.push({
+            section: "Expense payment",
+            detail: `${v.voucherNo} · ${v.narration || "paid"}`,
+            count: v.paymentStatus,
+            inOut: "Out",
+            amount: formatInr(v.paidPaise),
+          });
+        }
       }
       for (const e of accounts.cashLedger.filter((x) => x.date === date && !x.voidedAt)) {
         const pool = accounts.cashPools.find((p) => p.id === e.poolId);
@@ -750,6 +806,159 @@ export function runAccountsReport(
       );
       return r.ok
         ? { ok: true, message: `Expenses: ${rows.length} category(ies)` }
+        : r;
+    }
+    case "expenses_by_subcategory": {
+      const totals = new Map<
+        string,
+        {
+          category: string;
+          subcategory: string;
+          count: number;
+          paise: number;
+        }
+      >();
+      for (const v of accounts.expenseVouchers) {
+        if (v.paymentStatus !== "paid" || isExpenseVoucherCancelled(v)) continue;
+        if (!inRange(v.paidOn || v.date, from, to)) continue;
+        for (const line of v.lines) {
+          const cat = getExpenseCategory(line.categoryId, accounts);
+          const sub = line.subcategoryId
+            ? getExpenseCategory(line.subcategoryId, accounts)
+            : undefined;
+          const key = `${line.categoryId}:${line.subcategoryId || ""}`;
+          const share =
+            v.grandTotalPaise > 0
+              ? Math.round((line.totalPaise / v.grandTotalPaise) * v.amountPaise)
+              : line.totalPaise;
+          const cur = totals.get(key) ?? {
+            category: cat?.name || "Uncategorized",
+            subcategory: sub?.name || "—",
+            count: 0,
+            paise: 0,
+          };
+          cur.count += 1;
+          cur.paise += share;
+          totals.set(key, cur);
+        }
+      }
+      const rows = [...totals.values()]
+        .sort(
+          (a, b) =>
+            a.category.localeCompare(b.category) ||
+            a.subcategory.localeCompare(b.subcategory),
+        )
+        .map((t) => ({
+          category: t.category,
+          subcategory: t.subcategory,
+          lines: String(t.count),
+          total: formatInr(t.paise),
+        }));
+      const r = exportFilterReport(
+        {
+          title: "Expenses by sub-category",
+          subtitle: `${TENANT.shortName} · Accounts`,
+          filterNote: note,
+          columns: [
+            { key: "category", header: "Category", width: 1.2 },
+            { key: "subcategory", header: "Sub-category", width: 1.2 },
+            { key: "lines", header: "Lines", width: 0.7, align: "right" },
+            { key: "total", header: "Total", width: 1 },
+          ],
+          rows,
+          fileBaseName: "accounts_expenses_by_subcategory",
+        },
+        filters.format,
+      );
+      return r.ok
+        ? { ok: true, message: `Sub-categories: ${rows.length} row(s)` }
+        : r;
+    }
+    case "transaction_id_register": {
+      const rows: Record<string, string>[] = [];
+      for (const e of accounts.cashLedger) {
+        if (e.voidedAt) continue;
+        if (!inRange(e.date, from, to)) continue;
+        const pool = accounts.cashPools.find((p) => p.id === e.poolId);
+        rows.push({
+          date: e.date,
+          book: "Cash",
+          account: pool?.name || e.poolId,
+          direction: e.direction === "in" ? "Receipt" : "Payment",
+          amount: formatInr(e.amountPaise),
+          transactionId: e.transactionRef || "—",
+          source: e.sourceType,
+          ref: e.sourceId,
+          narration: e.narration,
+        });
+      }
+      for (const e of accounts.bankLedger) {
+        if (e.voidedAt) continue;
+        if (!inRange(e.date, from, to)) continue;
+        const bank = getBank(e.bankId, accounts);
+        rows.push({
+          date: e.date,
+          book: "Bank",
+          account: bank?.name || e.bankId,
+          direction: e.direction === "dr" ? "Receipt" : "Payment",
+          amount: formatInr(e.amountPaise),
+          transactionId: e.transactionRef || "—",
+          source: e.sourceType,
+          ref: e.sourceId,
+          narration: e.narration,
+        });
+      }
+      try {
+        const fees = loadFees();
+        for (const v of fees.vouchers) {
+          if (v.voidedAt) continue;
+          if (!inRange(v.collectionDate, from, to)) continue;
+          for (const t of v.tenders) {
+            if (t.amountPaise <= 0) continue;
+            rows.push({
+              date: v.collectionDate,
+              book: "Fees",
+              account: tenderModeLabel(t.mode),
+              direction: "Receipt",
+              amount: formatInr(t.amountPaise),
+              transactionId: t.ref.trim() || v.transactionId || "—",
+              source: "fee_collection",
+              ref: v.receiptNo,
+              narration: v.note || v.receiptNo,
+            });
+          }
+        }
+      } catch {
+        /* fees unavailable */
+      }
+      rows.sort(
+        (a, b) =>
+          a.date.localeCompare(b.date) ||
+          a.transactionId.localeCompare(b.transactionId),
+      );
+      const r = exportFilterReport(
+        {
+          title: "Transaction ID register",
+          subtitle: `${TENANT.shortName} · Accounts`,
+          filterNote: note,
+          columns: [
+            { key: "date", header: "Date", width: 0.9 },
+            { key: "book", header: "Book", width: 0.7 },
+            { key: "account", header: "Account / mode", width: 1 },
+            { key: "direction", header: "Type", width: 0.75 },
+            { key: "amount", header: "Amount", width: 0.9 },
+            { key: "transactionId", header: "Transaction ID", width: 1.1 },
+            { key: "source", header: "Source", width: 0.85 },
+            { key: "ref", header: "Voucher ref", width: 0.9 },
+            { key: "narration", header: "Narration", width: 1.2 },
+          ],
+          rows,
+          fileBaseName: "accounts_transaction_id_register",
+        },
+        filters.format,
+      );
+      return r.ok
+        ? { ok: true, message: `Transaction IDs: ${rows.length} row(s)` }
         : r;
     }
     case "ap_ageing": {

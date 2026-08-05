@@ -1,8 +1,12 @@
 "use client";
 
 import type { ReactNode } from "react";
+import {
+  ErpPanel,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
 
-/** Data table card — use in a side-by-side row above the work panel. */
+/** Data table card — roster style */
 export function MastersTableCard({
   title,
   children,
@@ -15,14 +19,12 @@ export function MastersTableCard({
   maxHeight?: string;
 }) {
   return (
-    <div
-      className={`overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white ${className}`}
-    >
-      <div className="border-b border-[rgba(32,48,80,0.08)] px-4 py-3 text-sm font-semibold text-[var(--brand-deep)]">
+    <ErpTableShell className={className}>
+      <div className="border-b border-[rgba(32,48,80,0.08)] px-4 py-3 text-sm font-semibold text-[#2563eb]">
         {title}
       </div>
       <div className={`${maxHeight} overflow-auto`}>{children}</div>
-    </div>
+    </ErpTableShell>
   );
 }
 
@@ -43,7 +45,7 @@ export function MastersTablesRow({
   return <div className={`grid gap-4 ${colClass}`}>{children}</div>;
 }
 
-/** Working form / actions — always below the tables. */
+/** Working form / actions — roster panel */
 export function MastersWorkCard({
   title,
   children,
@@ -54,13 +56,9 @@ export function MastersWorkCard({
   hint?: string;
 }) {
   return (
-    <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
-      <h3 className="text-sm font-semibold text-[var(--brand-deep)]">{title}</h3>
-      {hint ? (
-        <p className="mt-0.5 text-[11px] text-[var(--muted)]">{hint}</p>
-      ) : null}
-      <div className="mt-3">{children}</div>
-    </div>
+    <ErpPanel title={title} description={hint}>
+      {children}
+    </ErpPanel>
   );
 }
 
@@ -76,15 +74,32 @@ export function MastersTabStack({
 }) {
   return (
     <div className="space-y-4">
-      {intro ? <div className="text-sm text-[var(--muted)]">{intro}</div> : null}
+      {intro ? <div className="text-sm text-muted-foreground">{intro}</div> : null}
       {tables}
       {work}
     </div>
   );
 }
 
-export function MastersEmptyRow({ label = "No rows yet" }: { label?: string }) {
+export function MastersEmptyRow({
+  children,
+  label,
+  colSpan = 99,
+}: {
+  children?: ReactNode;
+  /** @deprecated use children */
+  label?: string;
+  colSpan?: number;
+}) {
+  const content = children ?? label ?? "No records yet.";
   return (
-    <p className="px-4 py-6 text-center text-sm text-[var(--muted)]">{label}</p>
+    <tr>
+      <td
+        colSpan={colSpan}
+        className="px-4 py-10 text-center text-sm text-muted-foreground"
+      >
+        {content}
+      </td>
+    </tr>
   );
 }

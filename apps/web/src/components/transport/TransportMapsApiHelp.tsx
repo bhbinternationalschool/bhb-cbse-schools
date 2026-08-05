@@ -54,16 +54,12 @@ export function TransportMapsApiHelp() {
             API restriction → Distance Matrix, Geocoding, Places, Maps JavaScript.
           </li>
           <li>
-            Add to <code className="rounded bg-white px-1">apps/web/.env.local</code>:
-            <pre className="mt-1 overflow-x-auto rounded-lg bg-white p-2 text-[11px]">
-              GOOGLE_MAPS_API_KEY=AIza…your_key
-            </pre>
-            For production Cloud Run, add the same variable in your deploy
-            secrets / Cloud Run env (see <code>scripts/deploy-online.sh</code>).
+            Give the API key to your school&apos;s IT team so they can add it to
+            the server configuration for this ERP (development and production).
           </li>
           <li>
-            Restart the dev server or redeploy. In Planner use{" "}
-            <strong>Pin homes on map</strong>, then road km shows “(Google Maps)”.
+            After setup, use <strong>Pin homes on map</strong> in Transport
+            Planner — road distances will show as &quot;(Google Maps)&quot;.
           </li>
         </ol>
       ) : null}

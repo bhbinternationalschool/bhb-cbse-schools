@@ -21,6 +21,13 @@ import {
 } from "@/lib/foundationMasters";
 import type { MastersState } from "@/lib/masters";
 import { staffDualWriteDbEnabled, staffReadFromDbEnabled } from "@/lib/staffDbConfig";
+import {
+  isDeskHydrated,
+  markDeskHydrated,
+  resetDeskHydrated,
+} from "@/lib/deskHydrateGuard";
+
+const MODULE = "staff";
 
 export type StaffRemoteBundle = {
   departments: Department[];
@@ -64,7 +71,6 @@ type StaffRow = {
 let tenantIdCache: string | null = null;
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingPush: MastersState | null = null;
-let hydratedOnce = false;
 
 const DATA_URL_MAX = 8_000;
 
@@ -73,8 +79,8 @@ export function staffRemoteEnabled() {
 }
 
 export function resetStaffPersistenceCache() {
+  resetDeskHydrated(MODULE);
   tenantIdCache = null;
-  hydratedOnce = false;
   pendingPush = null;
   if (pushTimer) {
     clearTimeout(pushTimer);
@@ -468,8 +474,8 @@ export function scheduleStaffSync(state: MastersState) {
  */
 export async function ensureStaffHydrated(): Promise<boolean> {
   if (!staffRemoteEnabled()) return false;
-  if (hydratedOnce) return false;
-  hydratedOnce = true;
+  if (isDeskHydrated(MODULE)) return false;
+  markDeskHydrated(MODULE);
 
   const readFromDb = staffReadFromDbEnabled();
   const remote = await fetchStaffRemote();
@@ -491,7 +497,8 @@ export async function ensureStaffHydrated(): Promise<boolean> {
 
   const localStaffCount = next.staff?.length ?? 0;
   const remoteStaffCount = remote?.staff.length ?? 0;
-  if (!readFromDb || localStaffCount > remoteStaffCount) {
+  // DB-read mode: hydrate is pull-only; don't push stale browser demo roster back to server.
+  if (!readFromDb && localStaffCount > 0) {
     await pushStaffSlice(next);
   }
 

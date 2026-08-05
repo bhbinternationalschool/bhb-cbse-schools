@@ -138,7 +138,9 @@ export function StudentDocUpload({
           >
             <option value="missing">Missing</option>
             <option value="received">Received</option>
+            <option value="pending">Pending verification</option>
             <option value="verified">Verified</option>
+            <option value="rejected">Rejected</option>
           </select>
           <div className="flex flex-wrap justify-end gap-1.5">
             <button

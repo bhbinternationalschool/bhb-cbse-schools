@@ -16,6 +16,13 @@ import {
 import { mergeDbDeskIntoTimetableState } from "@/lib/timetableNormalizedMerge";
 import { timetableReadFromDbEnabled } from "@/lib/timetableDbConfig";
 import { deskSkipBlobHydrateClient, deskSkipBlobPushClient } from "@/lib/deskCutover";
+import {
+  isDeskHydrated,
+  markDeskHydrated,
+  resetDeskHydrated,
+} from "@/lib/deskHydrateGuard";
+
+const MODULE = "timetable";
 
 const blob = createDomainBlobPersistence<TimetableState>({
   table: "timetable_state",
@@ -27,7 +34,10 @@ const blob = createDomainBlobPersistence<TimetableState>({
 });
 
 export const timetableRemoteEnabled = blob.remoteEnabled;
-export const resetTimetablePersistenceCache = blob.resetCache;
+export function resetTimetablePersistenceCache() {
+  resetDeskHydrated(MODULE);
+  blob.resetCache();
+}
 
 export function scheduleTimetableSync(state: TimetableState) {
   if (typeof window === "undefined") {
@@ -60,6 +70,9 @@ export async function pushTimetableRemoteServer(
 }
 
 export async function ensureTimetableHydrated(): Promise<boolean> {
+  if (isDeskHydrated(MODULE)) return false;
+  markDeskHydrated(MODULE);
+
   const readFromDb = timetableReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("timetable")
     ? false

@@ -17,28 +17,32 @@ const PERSONAS: {
   label: string;
   headline: string;
   button: string;
-  hint: string;
+  productionHint: string;
+  demoHint?: string;
 }[] = [
   {
     id: "staff",
     label: "Staff",
     headline: "Office & teaching portal",
     button: "Sign in to workspace",
-    hint: "Super-admin email, Staff login, or leave blank for demo",
+    productionHint: "School email and password",
+    demoHint: "Super-admin email, Staff login, or leave blank for demo principal",
   },
   {
     id: "parent",
     label: "Parent",
     headline: "Fees, attendance, bus & notices",
     button: "Continue with OTP",
-    hint: "Mobile OTP (primary)",
+    productionHint: "Registered mobile number — OTP sent on WhatsApp",
+    demoHint: "Any mobile works in demo mode",
   },
   {
     id: "field",
     label: "Field",
     headline: "Tap your role — big icons next",
     button: "Unlock",
-    hint: "4-digit PIN",
+    productionHint: "4-digit PIN from your school",
+    demoHint: "4-digit PIN",
   },
 ];
 
@@ -75,7 +79,7 @@ export function LoginPanel() {
       // Production staff path: Supabase Auth → mint app cookie
       if (!demoAuth && persona === "staff") {
         if (!supabaseReady) {
-          setError("Supabase is not configured. Set URL and anon key in .env.");
+          setError("Sign-in is not available. Contact your school administrator.");
           return;
         }
         const email = identifier.trim();
@@ -264,9 +268,16 @@ export function LoginPanel() {
     });
   }
 
-  const staffHint = !demoAuth
-    ? "School email + password (Supabase Auth). Profile must be linked to your user."
-    : "Super-admin: director@bhbinternational.school (any password). Or Staff → Login credentials. Blank = demo principal.";
+  const staffHint = demoAuth
+    ? "Super-admin: director@bhbinternational.school (any password). Or Staff → Login credentials. Blank = demo principal."
+    : "Use the email and password issued by your school.";
+
+  const personaHint =
+    persona === "staff"
+      ? staffHint
+      : demoAuth && active.demoHint
+        ? active.demoHint
+        : active.productionHint;
 
   return (
     <div className="glass panel-enter w-full max-w-md rounded-2xl p-7 sm:p-8">
@@ -292,7 +303,6 @@ export function LoginPanel() {
 
       <ModuleTabs
         aria-label="Who are you"
-        size="lg"
         value={persona}
         onChange={(id) => {
           setPersona(id as Persona);
@@ -369,14 +379,7 @@ export function LoginPanel() {
           </label>
         )}
 
-        <p className="text-xs text-[var(--muted)]">
-          {persona === "staff" ? staffHint : active.hint}
-          {persona === "staff" && demoAuth
-            ? " · Leave blank for demo principal"
-            : persona !== "staff"
-              ? " · Demo mode accepts any value"
-              : null}
-        </p>
+        <p className="text-xs text-[var(--muted)]">{personaHint}</p>
 
         {error ? (
           <p className="text-sm text-[var(--danger)]" role="alert">
@@ -395,7 +398,7 @@ export function LoginPanel() {
 
       <p className="mt-5 text-center text-xs text-[var(--muted)]">
         {TENANT.name} · Secure login · DPDP
-        {!demoAuth ? " · Auth live" : " · Demo auth"}
+        {demoAuth ? " · Demo mode" : ""}
       </p>
     </div>
   );

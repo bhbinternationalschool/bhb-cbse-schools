@@ -5,6 +5,7 @@
  */
 
 import { NextResponse } from "next/server";
+import { requireJobSecret } from "@/lib/apiRouteAuth.server";
 import {
   emptyAutomation,
   evaluateAutomationTick,
@@ -15,23 +16,6 @@ import {
 
 export const runtime = "nodejs";
 
-function authorized(req: Request): boolean {
-  const dispatch = process.env.WA_DISPATCH_SECRET || "";
-  const cron = process.env.CRON_SECRET || "";
-  if (!dispatch && !cron) return true; // open in local/demo
-  const hdr =
-    req.headers.get("x-wa-dispatch-secret") ||
-    req.headers.get("x-cron-secret") ||
-    "";
-  const bearer = (req.headers.get("authorization") || "").replace(
-    /^Bearer\s+/i,
-    "",
-  );
-  if (dispatch && (hdr === dispatch || bearer === dispatch)) return true;
-  if (cron && (hdr === cron || bearer === cron)) return true;
-  return false;
-}
-
 export async function GET() {
   return NextResponse.json({
     service: "wa-automation-tick",
@@ -40,7 +24,12 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  if (!authorized(req)) {
+  if (
+    !requireJobSecret(req, ["WA_DISPATCH_SECRET", "CRON_SECRET"], [
+      "x-wa-dispatch-secret",
+      "x-cron-secret",
+    ])
+  ) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

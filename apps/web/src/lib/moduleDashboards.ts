@@ -36,6 +36,7 @@ import { computeFeeKpis } from "@/lib/feeFinance";
 import { buildDayBook, formatInr, loadFees } from "@/lib/fees";
 import { loadOfflineQueue } from "@/lib/fieldSurvey";
 import { loadHomework } from "@/lib/homework";
+import { isStaffActive } from "@/lib/foundationMasters";
 import {
   currentAcademicYearCode,
   formatInrCompact,
@@ -151,7 +152,7 @@ function mastersDash(
   const classes = masters.classes.filter((c) => c.isActive !== false);
   const sections = masters.sections.filter((s) => s.isActive !== false);
   const staff = masters.staff ?? [];
-  const activeStaff = staff.filter((s) => s.status === "active").length;
+  const activeStaff = staff.filter(isStaffActive).length;
   const feeHeads = masters.feeHeads?.filter((f) => f.isActive).length ?? 0;
   const chart = classes.slice(0, 10).map((c) => ({
     label: c.name,
@@ -497,7 +498,7 @@ function staffDash(academicYearCode?: string): ModuleDashboardModel {
   const masters = loadMasters();
   const hr = loadStaffHr();
   const staff = masters.staff ?? [];
-  const active = staff.filter((s) => s.status === "active");
+  const active = staff.filter(isStaffActive);
   const teaching = active.filter((s) => s.stream === "teaching").length;
   const nonTeaching = active.filter((s) => s.stream === "non_teaching").length;
   const leaveOpen = (hr.leaveRequests ?? []).filter(
@@ -2274,7 +2275,7 @@ export function buildSchoolDashboard(
       : 0;
 
     const staffList = masters.staff ?? [];
-    const activeStaff = staffList.filter((s) => s.status === "active").length;
+    const activeStaff = staffList.filter(isStaffActive).length;
 
     const bankBal = totalBankBalancePaise(loadAccounts());
     const lowStock = listLowStockItems(loadStore()).length;

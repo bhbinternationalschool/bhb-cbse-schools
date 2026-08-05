@@ -19,12 +19,15 @@ import {
   type StaffRecord,
 } from "@/lib/foundationMasters";
 import { loadMasters, saveMasters, type MastersState } from "@/lib/masters";
+import { persistSeriesUse, suggestFromSeriesCode } from "@/lib/numberSeries";
 import { TENANT } from "@/lib/types";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import { StaffImageField } from "@/components/staff/StaffImageField";
 import { StaffDocUpload } from "@/components/staff/StaffDocUpload";
 import { StaffDutiesPanel } from "@/components/staff/StaffDutiesPanel";
+import { StaffAgreementPanel } from "@/components/staff/StaffAgreementPanel";
 import { RemoveControl } from "@/components/masters/RemoveControl";
+import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import {
   checkStaffRemoval,
   removeStaff,
@@ -106,12 +109,20 @@ export function StaffProfileForm(props: Props) {
     setMasters(m);
     if (props.mode === "create") {
       const id = emptyStaffDraft().id;
+      const empCode =
+        suggestFromSeriesCode(
+          m.numberSeries,
+          "STAFF_ID",
+          undefined,
+          m.staff.map((s) => s.empCode),
+        ) ?? "";
       setDraft(
         emptyStaffDraft({
           id,
+          empCode,
           nationality: "Indian",
           loginEnabled: true,
-          qrPayload: staffQrPayload("", id),
+          qrPayload: staffQrPayload(empCode || "", id),
         }),
       );
     } else {
@@ -206,7 +217,12 @@ export function StaffProfileForm(props: Props) {
         : masters.staff.map((s) => (s.id === row.id ? row : s));
     const next = { ...masters, staff };
     saveMasters(next);
-    setMasters(next);
+    if (props.mode === "create" && row.empCode) {
+      persistSeriesUse("STAFF_ID", undefined, row.empCode);
+      setMasters(loadMasters());
+    } else {
+      setMasters(next);
+    }
     setDraft(row);
     setError(null);
     setNotice(props.mode === "create" ? "Staff created" : "Staff updated");
@@ -263,7 +279,6 @@ export function StaffProfileForm(props: Props) {
     );
   }
 
-  const field = "field mt-1 w-full !py-2";
   const labelCls = "text-xs font-semibold text-[var(--muted)]";
 
   return (
@@ -335,7 +350,6 @@ export function StaffProfileForm(props: Props) {
 
       <ModuleTabs
         aria-label="Staff profile sections"
-        size="lg"
         value={tab}
         onChange={(id) => setTab(id as Tab)}
         items={TABS}
@@ -657,6 +671,7 @@ export function StaffProfileForm(props: Props) {
         ) : null}
 
         {tab === "employment" ? (
+          <>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <label className={labelCls}>
               Stream
@@ -905,6 +920,15 @@ export function StaffProfileForm(props: Props) {
               />
             </label>
           </div>
+          {props.mode === "edit" ? (
+            <div className="mt-6 border-t border-[rgba(32,48,80,0.08)] pt-6">
+              <h3 className="mb-3 text-sm font-bold text-[var(--brand-deep)]">
+                Employment agreements
+              </h3>
+              <StaffAgreementPanel mode="hr" staffId={draft.id} />
+            </div>
+          ) : null}
+          </>
         ) : null}
 
         {tab === "identity" ? (

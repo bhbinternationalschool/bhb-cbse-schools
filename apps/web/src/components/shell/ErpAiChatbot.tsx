@@ -43,24 +43,30 @@ const FAB_W = 220;
 const FAB_H = 72;
 const DRAG_THRESHOLD = 6;
 
+function engineDisplayLabel(engine: string | null | undefined): string {
+  if (engine === "openai") return "OpenAI";
+  if (engine === "gemini") return "Gemini";
+  return "AI";
+}
+
 function loadHistory(
   key: string,
   ctx: ErpAiChatContext,
-  gemini?: boolean,
+  llm?: { enabled: boolean; label: string },
 ): ErpAiMessage[] {
   if (typeof window === "undefined") {
-    return [erpAiWelcome(ctx, { gemini })];
+    return [erpAiWelcome(ctx, { llm: llm?.enabled, engineLabel: llm?.label })];
   }
   try {
     const raw = sessionStorage.getItem(key);
-    if (!raw) return [erpAiWelcome(ctx, { gemini })];
+    if (!raw) return [erpAiWelcome(ctx, { llm: llm?.enabled, engineLabel: llm?.label })];
     const parsed = JSON.parse(raw) as ErpAiMessage[];
     if (!Array.isArray(parsed) || !parsed.length) {
-      return [erpAiWelcome(ctx, { gemini })];
+      return [erpAiWelcome(ctx, { llm: llm?.enabled, engineLabel: llm?.label })];
     }
     return parsed;
   } catch {
-    return [erpAiWelcome(ctx, { gemini })];
+    return [erpAiWelcome(ctx, { llm: llm?.enabled, engineLabel: llm?.label })];
   }
 }
 
@@ -119,7 +125,8 @@ export function ErpAiChatbot() {
   );
   const [showHint, setShowHint] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
-  const [geminiOn, setGeminiOn] = useState(false);
+  const [llmOn, setLlmOn] = useState(false);
+  const [engineLabel, setEngineLabel] = useState("AI");
   const [voiceLang, setVoiceLang] = useState<VoiceLang>("auto");
   const [voiceReply, setVoiceReply] = useState(true);
 
@@ -167,18 +174,29 @@ export function ErpAiChatbot() {
     setMasters(loadMasters());
     void fetch("/api/erp-ai")
       .then((r) => r.json())
-      .then((d: { geminiConfigured?: boolean }) => {
-        setGeminiOn(!!d.geminiConfigured);
-      })
+      .then(
+        (d: {
+          llmConfigured?: boolean;
+          geminiConfigured?: boolean;
+          primaryEngine?: string;
+        }) => {
+          const enabled = !!(d.llmConfigured ?? d.geminiConfigured);
+          setLlmOn(enabled);
+          setEngineLabel(engineDisplayLabel(d.primaryEngine));
+        },
+      )
       .catch(() => null);
   }, []);
 
   useEffect(() => {
     if (!masters) return;
     setMessages(
-      loadHistory(storageKey, { session, masters }, geminiOn),
+      loadHistory(storageKey, { session, masters }, {
+        enabled: llmOn,
+        label: engineLabel,
+      }),
     );
-  }, [session, masters, storageKey, geminiOn]);
+  }, [session, masters, storageKey, llmOn, engineLabel]);
 
   useEffect(() => {
     const saved = loadErpAiPosition(userKey);
@@ -302,11 +320,18 @@ export function ErpAiChatbot() {
         const json = (await res.json().catch(() => ({}))) as {
           message?: ErpAiMessage;
           geminiConfigured?: boolean;
+          llmConfigured?: boolean;
+          engine?: string;
           error?: string;
         };
         if (res.ok && json.message) {
           reply = json.message;
-          if (json.geminiConfigured) setGeminiOn(true);
+          if (json.llmConfigured ?? json.geminiConfigured) {
+            setLlmOn(true);
+            if (json.engine && json.engine !== "local") {
+              setEngineLabel(engineDisplayLabel(json.engine));
+            }
+          }
         } else {
           reply = replyErpAiChat(trimmed, { session, masters });
         }
@@ -332,7 +357,12 @@ export function ErpAiChatbot() {
 
   function clearChat() {
     if (!masters) return;
-    push([erpAiWelcome({ session, masters }, { gemini: geminiOn })]);
+    push([
+      erpAiWelcome({ session, masters }, {
+        llm: llmOn,
+        engineLabel,
+      }),
+    ]);
   }
 
   function onPointerDown(e: React.PointerEvent) {
@@ -492,7 +522,7 @@ export function ErpAiChatbot() {
             <p className="truncate text-[10px] text-white/75">
               {analyzing
                 ? "Reading this page…"
-                : `${pageGuide?.pageLabel ?? "ERP"} · ${roleBadge}${geminiOn ? " · Gemini" : ""}${voiceReply ? " · 🔊" : ""}`}
+                : `${pageGuide?.pageLabel ?? "ERP"} · ${roleBadge}${llmOn ? ` · ${engineLabel}` : ""}${voiceReply ? " · 🔊" : ""}`}
             </p>
           </div>
         </div>

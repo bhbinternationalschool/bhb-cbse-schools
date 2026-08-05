@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ShoppingCart } from "lucide-react";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
+import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { DEFAULT_AY, formatInr, parseInrToPaise } from "@/lib/masters";
 import { useModuleTabQuery } from "@/lib/useModuleTabQuery";
@@ -42,6 +43,7 @@ import { runBillOcrApi } from "@/lib/ocrClient";
 import { openWaMe } from "@/lib/waMe";
 import { loadAccounts, seedAccountsIfEmpty } from "@/lib/accounts";
 import { PurchaseReturnPanel } from "@/components/purchase/PurchaseReturnPanel";
+import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 
 type PurchaseTab =
   | "dashboard"
@@ -59,13 +61,6 @@ const TABS: ModuleTabItem[] = [
   { id: "returns", label: "Returns", tone: "coral" },
   { id: "reports", label: "Reports", tone: "slate" },
 ];
-
-const field =
-  "rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2.5 py-1.5 text-sm text-[var(--brand-deep)]";
-const btn =
-  "rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50";
-const btnOutline =
-  "rounded-lg border border-[rgba(32,48,80,0.2)] bg-white px-3 py-1.5 text-sm text-[var(--brand-deep)]";
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -676,43 +671,25 @@ export function PurchaseWorkspace({
   }
 
   return (
-    <div
-      className={
-        embedded ? "pb-6" : "mx-auto max-w-6xl px-4 pb-10 pt-4"
+    <ErpWorkspaceShell
+      embedded={embedded}
+      title="Purchase"
+      subtitle={
+        embedded
+          ? "Indent → PO → GRN · stock & vendor bills"
+          : "Indent → PO → GRN · store stock & vendor bills (§20c)"
       }
-    >
-      {embedded ? (
-        <p className="mb-3 text-sm text-[var(--muted)]">
-          Indent → PO → GRN · stock & vendor bills
-        </p>
-      ) : (
-        <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="flex items-center gap-2 text-2xl font-bold text-[var(--brand-deep)]">
-              <ShoppingCart className="h-6 w-6" aria-hidden />
-              Purchase
-            </h1>
-            <p className="mt-1 text-sm text-[var(--muted)]">
-              Indent → PO → GRN · store stock & vendor bills (§20c)
-            </p>
-          </div>
+      icon={<ShoppingCart className="size-6" aria-hidden />}
+      error={error}
+      notice={notice}
+      actions={
+        embedded ? undefined : (
           <Link href="/store" className="text-sm text-[var(--brand-deep)] underline">
             ← Store
           </Link>
-        </header>
-      )}
-
-      {notice ? (
-        <div className="mb-3 rounded-xl bg-[#16a34a]/12 px-4 py-2 text-sm text-[#15803d]">
-          {notice}
-        </div>
-      ) : null}
-      {error ? (
-        <div className="mb-3 rounded-xl bg-[#b42318]/10 px-4 py-2 text-sm text-[#b42318]">
-          {error}
-        </div>
-      ) : null}
-
+        )
+      }
+    >
       <ModuleTabs
         items={TABS}
         value={tab}
@@ -1445,6 +1422,6 @@ export function PurchaseWorkspace({
           </ul>
         </div>
       ) : null}
-    </div>
+    </ErpWorkspaceShell>
   );
 }

@@ -2,10 +2,39 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { CalendarOff } from "lucide-react";
+import {
+  BarChart3,
+  CalendarOff,
+  ClipboardList,
+  Clock3,
+  LayoutDashboard,
+  List,
+} from "lucide-react";
 import { useDemoSession } from "@/components/shell/SessionContext";
-import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
+import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
+import { Badge } from "@/components/ui/badge";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { TabsContent, WorkspaceTabs, type WorkspaceTabItem } from "@/components/ui/workspace-tabs";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
 import { loadSis, type SisState } from "@/lib/sis";
 import { useModuleTabQuery } from "@/lib/useModuleTabQuery";
@@ -28,21 +57,6 @@ import {
 
 type LeaveTab = "dashboard" | "pending" | "all" | "apply" | "reports";
 
-const TABS: ModuleTabItem[] = [
-  { id: "dashboard", label: "Dashboard", tone: "navy" },
-  { id: "pending", label: "Pending", tone: "amber" },
-  { id: "all", label: "All", tone: "navy" },
-  { id: "apply", label: "Apply (staff)", tone: "teal" },
-  { id: "reports", label: "Reports", tone: "slate" },
-];
-
-const field =
-  "rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2.5 py-1.5 text-sm text-[var(--brand-deep)]";
-const btn =
-  "rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50";
-const btnOutline =
-  "rounded-lg border border-[rgba(32,48,80,0.2)] bg-white px-3 py-1.5 text-sm text-[var(--brand-deep)]";
-
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -59,6 +73,25 @@ function classLabel(
   const c = masters.classes.find((x) => x.id === classId);
   const s = masters.sections.find((x) => x.id === sectionId);
   return [c?.name, s?.name].filter(Boolean).join(" · ") || "—";
+}
+
+function leaveStatusBadge(status: StudentLeaveRequest["status"]) {
+  switch (status) {
+    case "pending":
+      return <Badge variant="secondary">Pending</Badge>;
+    case "approved":
+      return (
+        <Badge variant="secondary" className="bg-[var(--ok)]/15 text-[var(--ok)]">
+          Approved
+        </Badge>
+      );
+    case "rejected":
+      return <Badge variant="destructive">Rejected</Badge>;
+    case "cancelled":
+      return <Badge variant="outline">Cancelled</Badge>;
+    default:
+      return <Badge variant="outline">{status}</Badge>;
+  }
 }
 
 function RequestRow({
@@ -81,75 +114,97 @@ function RequestRow({
   showActions: boolean;
 }) {
   const student = sis.students.find((s) => s.id === req.studentId);
+
   return (
-    <li className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <p className="text-sm font-semibold text-[var(--brand-deep)]">
+    <Card>
+      <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0">
+        <div className="space-y-1">
+          <CardTitle className="text-base">
             {student?.fullName || req.studentId}
-          </p>
-          <p className="text-xs text-[var(--muted)]">
+          </CardTitle>
+          <CardDescription>
             {student
               ? classLabel(masters, student.classId, student.sectionId)
               : ""}{" "}
             · {leaveTypeLabel(req.leaveType)} · {req.fromDate}
             {req.toDate !== req.fromDate ? ` → ${req.toDate}` : ""} ·{" "}
             {leaveDayCount(req)} day(s)
-          </p>
-          <p className="mt-1 text-sm text-[var(--brand-deep)]">{req.reason}</p>
-          <p className="mt-1 text-xs text-[var(--muted)]">
-            {req.status}
-            {req.status === "pending"
-              ? ` · ${pendingApproverHint(req)}`
-              : ""}
-            {req.decidedBy ? ` · ${req.decidedBy}` : ""}
-            {req.attendanceApplied ? " · attendance applied" : ""}
-          </p>
+          </CardDescription>
         </div>
-        {showActions && req.status === "pending" ? (
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              className={btn}
-              onClick={() => {
-                const r = decideStudentLeave({
-                  id: req.id,
-                  approve: true,
-                  by: actorName,
-                });
-                if (!r.ok) onError(r.error);
-                else {
-                  onRefresh();
-                  onFlash("Approved");
-                }
-              }}
-            >
-              Approve
-            </button>
-            <button
-              type="button"
-              className={btnOutline}
-              onClick={() => {
-                const r = decideStudentLeave({
-                  id: req.id,
-                  approve: false,
-                  by: actorName,
-                });
-                if (!r.ok) onError(r.error);
-                else {
-                  onRefresh();
-                  onFlash("Rejected");
-                }
-              }}
-            >
-              Reject
-            </button>
-          </div>
-        ) : null}
-        {req.status === "pending" && req.requestedBy === actorName ? (
-          <button
+        {leaveStatusBadge(req.status)}
+      </CardHeader>
+      <CardContent className="space-y-2 pt-0">
+        <p className="text-sm">{req.reason}</p>
+        <p className="text-xs text-muted-foreground">
+          {req.status === "pending" ? `${pendingApproverHint(req)} · ` : ""}
+          {req.decidedBy ? `Decided by ${req.decidedBy}` : ""}
+          {req.attendanceApplied ? " · Attendance applied" : ""}
+        </p>
+      </CardContent>
+      {showActions && req.status === "pending" ? (
+        <CardFooter className="flex flex-wrap gap-2 border-t-0 pt-0">
+          <Button
             type="button"
-            className="text-xs text-[#b42318] underline"
+            size="sm"
+            onClick={() => {
+              const r = decideStudentLeave({
+                id: req.id,
+                approve: true,
+                by: actorName,
+              });
+              if (!r.ok) onError(r.error);
+              else {
+                onRefresh();
+                onFlash("Approved");
+              }
+            }}
+          >
+            Approve
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const r = decideStudentLeave({
+                id: req.id,
+                approve: false,
+                by: actorName,
+              });
+              if (!r.ok) onError(r.error);
+              else {
+                onRefresh();
+                onFlash("Rejected");
+              }
+            }}
+          >
+            Reject
+          </Button>
+          {req.requestedBy === actorName ? (
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              onClick={() => {
+                const r = cancelStudentLeaveRequest(req.id);
+                if (!r.ok) onError(r.error);
+                else {
+                  onRefresh();
+                  onFlash("Cancelled");
+                }
+              }}
+            >
+              Cancel
+            </Button>
+          ) : null}
+        </CardFooter>
+      ) : null}
+      {!showActions && req.status === "pending" && req.requestedBy === actorName ? (
+        <CardFooter className="border-t-0 pt-0">
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
             onClick={() => {
               const r = cancelStudentLeaveRequest(req.id);
               if (!r.ok) onError(r.error);
@@ -160,10 +215,10 @@ function RequestRow({
             }}
           >
             Cancel
-          </button>
-        ) : null}
-      </div>
-    </li>
+          </Button>
+        </CardFooter>
+      ) : null}
+    </Card>
   );
 }
 
@@ -238,6 +293,38 @@ export function StudentLeaveWorkspace({
     );
   }, [state, ay]);
 
+  const tabItems = useMemo<WorkspaceTabItem[]>(
+    () => [
+      {
+        id: "dashboard",
+        label: "Dashboard",
+        tone: "navy",
+        icon: <LayoutDashboard />,
+      },
+      {
+        id: "pending",
+        label: "Pending",
+        tone: "amber",
+        icon: <Clock3 />,
+        badge: pending.length > 0 ? pending.length : undefined,
+      },
+      { id: "all", label: "All", tone: "sky", icon: <List /> },
+      {
+        id: "apply",
+        label: "Apply (staff)",
+        tone: "teal",
+        icon: <ClipboardList />,
+      },
+      {
+        id: "reports",
+        label: "Reports",
+        tone: "slate",
+        icon: <BarChart3 />,
+      },
+    ],
+    [pending.length],
+  );
+
   const allRequests = useMemo(() => {
     if (!state) return [];
     return state.requests
@@ -269,7 +356,7 @@ export function StudentLeaveWorkspace({
 
   if (!state || !masters || !sis) {
     return (
-      <div className="px-4 py-8 text-sm text-[var(--muted)]">
+      <div className="flex items-center justify-center px-4 py-8 text-sm text-muted-foreground">
         Loading student leave…
       </div>
     );
@@ -288,246 +375,230 @@ export function StudentLeaveWorkspace({
   };
 
   return (
-    <div
-      className={
+    <ErpWorkspaceShell
+      embedded={embedded}
+      title="Student leave"
+      subtitle={
         embedded
-          ? "pb-6"
-          : "mx-auto max-w-6xl px-4 pb-10 pt-4"
+          ? "Parent requests · approve · auto attendance codes (LE / HD)"
+          : "Parent requests · staff approval · attendance codes"
       }
-    >
-      {embedded ? (
-        <p className="mb-3 text-sm text-[var(--muted)]">
-          Parent requests · approve · auto attendance codes (LE / HD)
-        </p>
-      ) : (
-        <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="flex items-center gap-2 text-2xl font-bold text-[var(--brand-deep)]">
-              <CalendarOff className="h-7 w-7" aria-hidden />
-              Student leave
-            </h1>
-            <p className="mt-1 text-sm text-[var(--muted)]">
-              Parent requests · staff approval · attendance codes (§19c)
-            </p>
-          </div>
-          <Link href="/reports?module=student_leave" className={btnOutline}>
+      icon={<CalendarOff className="size-6" aria-hidden />}
+      actions={
+        embedded ? undefined : (
+          <Link
+            href="/reports?module=student_leave"
+            className={cn(buttonVariants({ variant: "outline" }))}
+          >
+            <BarChart3 className="size-4" />
             Reports Center
           </Link>
-        </header>
-      )}
-
-      {error ? (
-        <p className="mb-3 rounded-lg bg-[rgba(180,35,24,0.08)] px-3 py-2 text-sm text-[#b42318]">
-          {error}
-        </p>
-      ) : null}
-      {notice ? (
-        <p className="mb-3 rounded-lg bg-[rgba(15,122,76,0.1)] px-3 py-2 text-sm text-[#0f7a4c]">
-          {notice}
-        </p>
-      ) : null}
-
-      <ModuleTabs
-        items={TABS.map((t) =>
-          t.id === "pending"
-            ? { ...t, badge: pending.length || undefined }
-            : t,
-        )}
+        )
+      }
+      error={error}
+      notice={notice}
+    >
+      <WorkspaceTabs
         value={tab}
-        onChange={(id) => setTab(id as LeaveTab)}
-      />
+        onValueChange={(value) => setTab(value as LeaveTab)}
+        items={tabItems}
+        aria-label="Student leave sections"
+      >
 
-      {tab === "dashboard" ? (
-        <ModuleDashboardHost
-          moduleId="student_leave"
-          onNavigateTab={(t) => setTab(t as LeaveTab)}
-        />
-      ) : null}
+        <TabsContent value="dashboard">
+          <ModuleDashboardHost
+            moduleId="student_leave"
+            onNavigateTab={(t) => setTab(t as LeaveTab)}
+          />
+        </TabsContent>
 
-      {tab === "pending" ? (
-        <section className="mt-4">
+        <TabsContent value="pending" className="grid gap-3">
           {pending.length === 0 ? (
-            <p className="text-sm text-[var(--muted)]">No pending requests.</p>
+            <p className="text-sm text-muted-foreground">No pending requests.</p>
           ) : (
-            <ul className="space-y-2">
-              {pending.map((req) => (
-                <RequestRow
-                  key={req.id}
-                  req={req}
-                  showActions
-                  {...rowProps}
-                />
-              ))}
-            </ul>
+            pending.map((req) => (
+              <RequestRow
+                key={req.id}
+                req={req}
+                showActions
+                {...rowProps}
+              />
+            ))
           )}
-        </section>
-      ) : null}
+        </TabsContent>
 
-      {tab === "all" ? (
-        <section className="mt-4">
+        <TabsContent value="all" className="grid gap-3">
           {allRequests.length === 0 ? (
-            <p className="text-sm text-[var(--muted)]">No requests yet.</p>
+            <p className="text-sm text-muted-foreground">No requests yet.</p>
           ) : (
-            <ul className="space-y-2">
-              {allRequests.map((req) => (
-                <RequestRow
-                  key={req.id}
-                  req={req}
-                  showActions={false}
-                  {...rowProps}
-                />
-              ))}
-            </ul>
+            allRequests.map((req) => (
+              <RequestRow
+                key={req.id}
+                req={req}
+                showActions={false}
+                {...rowProps}
+              />
+            ))
           )}
-        </section>
-      ) : null}
+        </TabsContent>
 
-      {tab === "apply" ? (
-        <section className="mt-4 max-w-xl space-y-3">
-          <p className="text-sm text-[var(--muted)]">
-            Staff can apply leave on behalf of a student (e.g. office walk-in).
-          </p>
-          <label className="block text-xs text-[var(--muted)]">
-            Student
-            <select
-              className={`${field} mt-1 w-full`}
-              value={studentId}
-              onChange={(e) => setStudentId(e.target.value)}
-            >
-              {activeStudents.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.fullName} ·{" "}
-                  {classLabel(masters, s.classId, s.sectionId)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="block text-xs text-[var(--muted)]">
-            Leave type
-            <select
-              className={`${field} mt-1 w-full`}
-              value={leaveType}
-              onChange={(e) =>
-                setLeaveType(e.target.value as StudentLeaveType)
-              }
-            >
-              {STUDENT_LEAVE_TYPES.map((t) => (
-                <option key={t.code} value={t.code}>
-                  {t.label} — {t.note}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="flex flex-wrap gap-3">
-            <label className="text-xs text-[var(--muted)]">
-              From
-              <input
-                type="date"
-                className={`${field} mt-1 block`}
-                value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
-              />
-            </label>
-            <label className="text-xs text-[var(--muted)]">
-              To
-              <input
-                type="date"
-                className={`${field} mt-1 block`}
-                value={toDate}
-                onChange={(e) => setToDate(e.target.value)}
-              />
-            </label>
-          </div>
-          <label className="block text-xs text-[var(--muted)]">
-            Reason
-            <textarea
-              className={`${field} mt-1 w-full`}
-              rows={3}
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-            />
-          </label>
-          <button type="button" className={btn} onClick={submitApply}>
-            Submit request
-          </button>
-        </section>
-      ) : null}
+        <TabsContent value="apply">
+          <Card className="max-w-xl">
+            <CardHeader>
+              <CardTitle>Apply on behalf of student</CardTitle>
+              <CardDescription>
+                Staff can submit leave for a student (e.g. office walk-in).
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-4">
+              <div className="grid gap-1.5">
+                <Label htmlFor="leave-student">Student</Label>
+                <Select
+                  value={studentId}
+                  onValueChange={(v) => setStudentId(v ?? "")}
+                >
+                  <SelectTrigger id="leave-student" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {activeStudents.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.fullName} · {classLabel(masters, s.classId, s.sectionId)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="leave-type">Leave type</Label>
+                <Select
+                  value={leaveType}
+                  onValueChange={(v) => setLeaveType(v as StudentLeaveType)}
+                >
+                  <SelectTrigger id="leave-type" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {STUDENT_LEAVE_TYPES.map((t) => (
+                      <SelectItem key={t.code} value={t.code}>
+                        {t.label} — {t.note}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="leave-from">From</Label>
+                  <Input
+                    id="leave-from"
+                    type="date"
+                    value={fromDate}
+                    onChange={(e) => setFromDate(e.target.value)}
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="leave-to">To</Label>
+                  <Input
+                    id="leave-to"
+                    type="date"
+                    value={toDate}
+                    onChange={(e) => setToDate(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="leave-reason">Reason</Label>
+                <Textarea
+                  id="leave-reason"
+                  rows={3}
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                />
+              </div>
+            </CardContent>
+            <CardFooter>
+              <Button type="button" onClick={submitApply}>
+                Submit request
+              </Button>
+            </CardFooter>
+          </Card>
+        </TabsContent>
 
-      {tab === "reports" ? (
-        <section className="mt-4 space-y-3">
-          <div className="flex flex-wrap items-end gap-2">
-            <label className="text-xs text-[var(--muted)]">
-              From
-              <input
+        <TabsContent value="reports" className="space-y-4">
+          <div className="flex flex-wrap items-end gap-4">
+            <div className="grid gap-1.5">
+              <Label htmlFor="report-from">From</Label>
+              <Input
+                id="report-from"
                 type="date"
-                className={`${field} mt-1 block`}
                 value={reportFrom}
                 onChange={(e) => setReportFrom(e.target.value)}
               />
-            </label>
-            <label className="text-xs text-[var(--muted)]">
-              To
-              <input
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="report-to">To</Label>
+              <Input
+                id="report-to"
                 type="date"
-                className={`${field} mt-1 block`}
                 value={reportTo}
                 onChange={(e) => setReportTo(e.target.value)}
               />
-            </label>
-            <label className="text-xs text-[var(--muted)]">
-              Format
-              <select
-                className={`${field} mt-1 block`}
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="report-format">Format</Label>
+              <Select
                 value={reportFormat}
-                onChange={(e) =>
-                  setReportFormat(e.target.value as "excel" | "pdf")
-                }
+                onValueChange={(v) => setReportFormat(v as "excel" | "pdf")}
               >
-                <option value="excel">Excel</option>
-                <option value="pdf">PDF</option>
-              </select>
-            </label>
+                <SelectTrigger id="report-format" className="w-32">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="excel">Excel</SelectItem>
+                  <SelectItem value="pdf">PDF</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
-          <ul className="space-y-1.5">
+
+          <div className="grid gap-2">
             {STUDENT_LEAVE_REPORTS.map((r) => (
-              <li
-                key={r.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.08)] bg-white px-3 py-2"
-              >
-                <div>
-                  <p className="text-sm font-medium text-[var(--brand-deep)]">
-                    {r.label}
-                  </p>
-                  {r.hint ? (
-                    <p className="text-xs text-[var(--muted)]">{r.hint}</p>
-                  ) : null}
-                </div>
-                <button
-                  type="button"
-                  className={btn}
-                  onClick={() => {
-                    const res = runStudentLeaveReport(
-                      r.id as StudentLeaveReportId,
-                      {
-                        academicYearCode: ay,
-                        fromDate: reportFrom,
-                        toDate: reportTo,
-                        format: reportFormat,
-                        leave: state,
-                        masters,
-                      },
-                    );
-                    if (!res.ok) setError(res.error);
-                    else flash(res.message);
-                  }}
-                >
-                  Export
-                </button>
-              </li>
+              <Card key={r.id} size="sm">
+                <CardContent className="flex flex-wrap items-center justify-between gap-3 py-3">
+                  <div>
+                    <p className="text-sm font-medium">{r.label}</p>
+                    {r.hint ? (
+                      <p className="text-xs text-muted-foreground">{r.hint}</p>
+                    ) : null}
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => {
+                      const res = runStudentLeaveReport(
+                        r.id as StudentLeaveReportId,
+                        {
+                          academicYearCode: ay,
+                          fromDate: reportFrom,
+                          toDate: reportTo,
+                          format: reportFormat,
+                          leave: state,
+                          masters,
+                        },
+                      );
+                      if (!res.ok) setError(res.error);
+                      else flash(res.message);
+                    }}
+                  >
+                    Export
+                  </Button>
+                </CardContent>
+              </Card>
             ))}
-          </ul>
-        </section>
-      ) : null}
-    </div>
+          </div>
+        </TabsContent>
+      </WorkspaceTabs>
+    </ErpWorkspaceShell>
   );
 }

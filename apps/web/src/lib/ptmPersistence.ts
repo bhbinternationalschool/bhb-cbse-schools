@@ -16,6 +16,13 @@ import {
 import { mergeDbDeskIntoPtmState } from "@/lib/ptmNormalizedMerge";
 import { ptmReadFromDbEnabled } from "@/lib/ptmDbConfig";
 import { deskSkipBlobHydrateClient, deskSkipBlobPushClient } from "@/lib/deskCutover";
+import {
+  isDeskHydrated,
+  markDeskHydrated,
+  resetDeskHydrated,
+} from "@/lib/deskHydrateGuard";
+
+const MODULE = "ptm";
 
 const blob = createDomainBlobPersistence<PtmState>({
   table: "ptm_state",
@@ -27,7 +34,10 @@ const blob = createDomainBlobPersistence<PtmState>({
 });
 
 export const ptmRemoteEnabled = blob.remoteEnabled;
-export const resetPtmPersistenceCache = blob.resetCache;
+export function resetPtmPersistenceCache() {
+  resetDeskHydrated(MODULE);
+  blob.resetCache();
+}
 
 export function schedulePtmSync(state: PtmState) {
   if (typeof window === "undefined") {
@@ -66,6 +76,9 @@ export async function pushPtmRemoteServer(
  * DB wins when NEXT_PUBLIC_PTM_READ_FROM_DB=true or local is empty.
  */
 export async function ensurePtmHydrated(): Promise<boolean> {
+  if (isDeskHydrated(MODULE)) return false;
+  markDeskHydrated(MODULE);
+
   const readFromDb = ptmReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("ptm")
     ? false

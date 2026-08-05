@@ -538,10 +538,100 @@ export function updateRuleSchedule(
       | "cronExpr"
       | "intervalMinutes"
       | "nextRunAt"
+      | "triggerType"
+      | "eventKey"
       | "templateFamilyKey"
       | "templateLanguage"
       | "quietHours"
       | "audienceSummary"
+      | "enabled"
+    >
+  >,
+): AutomationState {
+  return {
+    ...state,
+    rules: state.rules.map((r) =>
+      r.id === ruleId
+        ? {
+            ...r,
+            ...patch,
+            quietHours: patch.quietHours
+              ? normalizeQuiet(patch.quietHours)
+              : r.quietHours,
+            updatedAt: nowIso(),
+          }
+        : r,
+    ),
+  };
+}
+
+export type CreateAutomationRuleOpts = {
+  name: string;
+  description?: string;
+  module: AutomationModule;
+  triggerType: AutomationTriggerType;
+  cronExpr?: string;
+  intervalMinutes?: number;
+  eventKey?: string;
+  actionType: AutomationActionType;
+  templateFamilyKey?: string;
+  templateLanguage?: WaTemplateLanguage;
+  audienceSummary?: string;
+  enabled?: boolean;
+};
+
+export function createAutomationRule(
+  state: AutomationState,
+  opts: CreateAutomationRuleOpts,
+): { state: AutomationState; rule: AutomationRule } {
+  const now = nowIso();
+  const id = nid("auto");
+  const rule = normalizeRule({
+    id,
+    name: opts.name.trim() || "New rule",
+    description: opts.description?.trim() || "",
+    module: opts.module,
+    enabled: !!opts.enabled,
+    triggerType: opts.triggerType,
+    cronExpr: opts.cronExpr || "",
+    intervalMinutes: Math.max(0, opts.intervalMinutes || 0),
+    eventKey: opts.eventKey || "",
+    actionType: opts.actionType,
+    templateFamilyKey: opts.templateFamilyKey || "",
+    templateLanguage: opts.templateLanguage || "en",
+    audienceSummary: opts.audienceSummary || "",
+    quietHours: defaultQuietHours(),
+    executionMode: "approval_first",
+    nextRunAt: "",
+    lastRunAt: "",
+    testedAt: "",
+    createdAt: now,
+    updatedAt: now,
+  })!;
+  return {
+    state: { ...state, rules: [...state.rules, rule] },
+    rule,
+  };
+}
+
+export function updateAutomationRule(
+  state: AutomationState,
+  ruleId: string,
+  patch: Partial<
+    Pick<
+      AutomationRule,
+      | "name"
+      | "description"
+      | "module"
+      | "triggerType"
+      | "cronExpr"
+      | "intervalMinutes"
+      | "eventKey"
+      | "actionType"
+      | "templateFamilyKey"
+      | "templateLanguage"
+      | "audienceSummary"
+      | "quietHours"
       | "enabled"
     >
   >,

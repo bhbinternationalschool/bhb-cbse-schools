@@ -24,9 +24,7 @@ import {
   type AdmissionReportId,
 } from "@/lib/admissionReportCatalog";
 import { loadMasters, type MastersState } from "@/lib/masters";
-
-const field =
-  "rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2.5 py-1.5 text-sm text-[var(--brand-deep)]";
+import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 
 export function AdmissionReportsPanel({
   tick = 0,

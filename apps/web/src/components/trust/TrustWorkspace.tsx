@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Building2 } from "lucide-react";
 import {
   AllotmentsPanel,
   BillsPanel,
@@ -12,6 +13,7 @@ import {
 } from "@/components/trust/TrustPanels";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
+import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { loadTrust, seedTrustIfEmpty, type TrustState } from "@/lib/trust";
 
@@ -55,7 +57,14 @@ export function TrustWorkspace() {
     ];
     if (raw && (allowed as string[]).includes(raw)) setTab(raw as TrustTab);
   }, []);
-  const [state, setState] = useState<TrustState | null>(null);
+  const [state, setState] = useState<TrustState | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      return seedTrustIfEmpty();
+    } catch {
+      return null;
+    }
+  });
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState("");
@@ -83,16 +92,7 @@ export function TrustWorkspace() {
   }
 
   useEffect(() => {
-    void (async () => {
-      const { ensureTrustHydrated } = await import("@/lib/trustPersistence");
-      await ensureTrustHydrated();
-      refresh();
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
+    refresh();
     void (async () => {
       const { ensureTrustHydrated } = await import("@/lib/trustPersistence");
       await ensureTrustHydrated();
@@ -123,27 +123,13 @@ export function TrustWorkspace() {
   };
 
   return (
-    <div className="mx-auto max-w-6xl px-4 pb-10 pt-4">
-      <header className="mb-4">
-        <h1 className="text-2xl font-bold text-[var(--brand-deep)]">
-          Infrastructure & Construction
-        </h1>
-        <p className="mt-1 text-sm text-[var(--muted)]">
-          Trust projects · BOQ · site materials · CWIP (§6j)
-        </p>
-      </header>
-
-      {notice ? (
-        <div className="mb-3 rounded-xl bg-[#16a34a]/12 px-4 py-2 text-sm text-[#15803d]">
-          {notice}
-        </div>
-      ) : null}
-      {error ? (
-        <div className="mb-3 rounded-xl bg-[#dc2626]/12 px-4 py-2 text-sm text-[#dc2626]">
-          {error}
-        </div>
-      ) : null}
-
+    <ErpWorkspaceShell
+      title="Infrastructure & Construction"
+      subtitle="Trust projects · BOQ · site materials · CWIP (§6j)"
+      icon={<Building2 className="size-6" aria-hidden />}
+      error={error}
+      notice={notice}
+    >
       <ModuleTabs items={TABS} value={tab} onChange={(id) => setTab(id as TrustTab)} />
 
       {tab === "dashboard" ? (
@@ -159,6 +145,6 @@ export function TrustWorkspace() {
       {tab === "allotments" ? <AllotmentsPanel {...panelProps} /> : null}
       {tab === "bills" ? <BillsPanel {...panelProps} /> : null}
       {tab === "reports" ? <ReportsPanel {...panelProps} /> : null}
-    </div>
+    </ErpWorkspaceShell>
   );
 }

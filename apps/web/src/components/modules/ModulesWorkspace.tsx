@@ -13,11 +13,8 @@ import {
   type RegistryModuleId,
 } from "@/lib/moduleRegistry";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
-
-const btn =
-  "rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50";
-const btnOutline =
-  "rounded-lg border border-[rgba(32,48,80,0.2)] bg-white px-3 py-1.5 text-sm text-[var(--brand-deep)]";
+import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
+import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 
 export function ModulesWorkspace() {
   const [tick, setTick] = useState(0);
@@ -70,43 +67,35 @@ export function ModulesWorkspace() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-4 pb-10 pt-4">
-      <header className="mb-4">
-        <h1 className="flex items-center gap-2 text-2xl font-bold text-[var(--brand-deep)]">
-          <ToggleLeft className="h-7 w-7" aria-hidden />
-          Modules
-        </h1>
-        <p className="mt-1 text-sm text-[var(--muted)]">
-          Enable or disable every school module. Disabled modules hide from
-          Home and universal search. Home and Modules stay on so you can always
-          come back here.
-        </p>
-        <p className="mt-2 text-sm font-semibold text-[var(--brand-deep)]">
-          {counts.on} of {counts.total} toggleable modules on
-        </p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button type="button" className={btn} onClick={() => bulk(true)}>
-            Enable all
-          </button>
-          <button
-            type="button"
-            className={btnOutline}
-            onClick={() => bulk(false)}
-          >
-            Disable all
-          </button>
-        </div>
-      </header>
-
-      {notice ? (
-        <p className="mb-3 rounded-lg bg-[rgba(15,122,76,0.1)] px-3 py-2 text-sm text-[#0f7a4c]">
-          {notice}
-        </p>
-      ) : null}
-
+    <ErpWorkspaceShell
+      className="mx-auto max-w-3xl"
+      title="Modules"
+      subtitle="Enable or disable every school module. Disabled modules hide from Home and universal search. Home and Modules stay on so you can always come back here."
+      icon={<ToggleLeft className="size-6" aria-hidden />}
+      notice={notice}
+      toolbar={
+        <>
+          <p className="text-sm font-semibold text-[var(--brand-deep)]">
+            {counts.on} of {counts.total} toggleable modules on
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className={btn} onClick={() => bulk(true)}>
+              Enable all
+            </button>
+            <button
+              type="button"
+              className={btnOutline}
+              onClick={() => bulk(false)}
+            >
+              Disable all
+            </button>
+          </div>
+        </>
+      }
+    >
       <ModuleDashboardHost moduleId="modules" refreshKey={tick} />
 
-      <div className="mt-6 space-y-8" key={tick}>
+      <div className="space-y-8" key={tick}>
         {grouped.map((g) => (
           <section key={g.id}>
             <h2 className="font-display text-lg font-bold text-[var(--brand-deep)]">
@@ -179,6 +168,6 @@ export function ModulesWorkspace() {
           </section>
         ))}
       </div>
-    </div>
+    </ErpWorkspaceShell>
   );
 }

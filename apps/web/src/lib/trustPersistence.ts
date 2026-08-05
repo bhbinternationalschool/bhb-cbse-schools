@@ -16,6 +16,13 @@ import {
 import { mergeDbDeskIntoTrustState } from "@/lib/trustNormalizedMerge";
 import { trustReadFromDbEnabled } from "@/lib/trustDbConfig";
 import { deskSkipBlobHydrateClient, deskSkipBlobPushClient } from "@/lib/deskCutover";
+import {
+  isDeskHydrated,
+  markDeskHydrated,
+  resetDeskHydrated,
+} from "@/lib/deskHydrateGuard";
+
+const MODULE = "trust";
 
 const blob = createDomainBlobPersistence<TrustState>({
   table: "trust_state",
@@ -27,7 +34,10 @@ const blob = createDomainBlobPersistence<TrustState>({
 });
 
 export const trustRemoteEnabled = blob.remoteEnabled;
-export const resetTrustPersistenceCache = blob.resetCache;
+export function resetTrustPersistenceCache() {
+  resetDeskHydrated(MODULE);
+  blob.resetCache();
+}
 
 export function scheduleTrustSync(state: TrustState) {
   if (typeof window === "undefined") {
@@ -58,6 +68,9 @@ export async function pushTrustRemoteServer(
 }
 
 export async function ensureTrustHydrated(): Promise<boolean> {
+  if (isDeskHydrated(MODULE)) return false;
+  markDeskHydrated(MODULE);
+
   const readFromDb = trustReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("trust")
     ? false

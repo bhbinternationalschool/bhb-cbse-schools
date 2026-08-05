@@ -1,5 +1,5 @@
 import type { CollectionVoucher, FeesState } from "@/lib/fees";
-import type { FeeDeskAncillary } from "@/lib/feesDeskAncillary.server";
+import type { FeeDeskAncillary } from "@/lib/feesDeskAncillary.types";
 
 export function feesReadFromDbFlag(): boolean {
   if (typeof window !== "undefined") {

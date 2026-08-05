@@ -6,6 +6,8 @@
  */
 
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { loadMasters } from "@/lib/masters";
+import { suggestFromSeriesCode, persistSeriesUse } from "@/lib/numberSeries";
 import {
   listOpenPayables as listOpenTransportPayables,
   markPayablePaid as markTransportPayablePaid,
@@ -34,6 +36,8 @@ export type CashLedgerEntry = {
   sourceType: string;
   sourceId: string;
   narration: string;
+  /** UTR / receipt no. / txn id — required for audit trail */
+  transactionRef: string;
   runningBalancePaise: number;
   createdAt: string;
   /** Set when payment/receipt is cancelled. */
@@ -93,9 +97,28 @@ export type BankLedgerEntry = {
   sourceType: string;
   sourceId: string;
   narration: string;
+  /** UTR / cheque no. / txn id */
+  transactionRef: string;
   createdAt: string;
   voidedAt: string | null;
   cancelReason: string;
+};
+
+export type ExpensePaymentSplit = {
+  id: string;
+  mode: PaymentMode;
+  amountPaise: number;
+  poolId: string;
+  bankId: string;
+  transactionRef: string;
+};
+
+export type SessionExpenseCategoryRow = {
+  categoryId: string;
+  subcategoryId: string;
+  categoryName: string;
+  subcategoryName: string;
+  amountPaise: number;
 };
 
 export type ModeBankMapEntry = {
@@ -131,6 +154,8 @@ export type ExpenseCategory = {
   name: string;
   coaCode: string;
   isActive: boolean;
+  /** Vendors linked for optional selection on expense entry. */
+  vendorIds: string[];
 };
 
 export type ExpensePaymentStatus =
@@ -145,6 +170,8 @@ export type ExpenseVoucherLine = {
   id: string;
   categoryId: string;
   subcategoryId: string;
+  /** Optional vendor chosen on expense entry when category links vendors. */
+  vendorId: string;
   description: string;
   amountPaise: number;
   taxPaise: number;
@@ -172,6 +199,8 @@ export type ExpenseVoucher = {
   bankId: string;
   poolId: string;
   narration: string;
+  /** Payment splits when multiple modes used (cash + UPI, etc.) */
+  paymentSplits: ExpensePaymentSplit[];
   approvedBy: string;
   createdAt: string;
   cancelledAt: string | null;
@@ -204,16 +233,57 @@ export type AccountsVendor = {
 
 export type VendorBillStatus = "open" | "partial" | "paid";
 
+export const VENDOR_BILL_UNITS = [
+  "pcs",
+  "lt",
+  "kg",
+  "feet",
+  "mtr",
+  "box",
+  "bag",
+  "set",
+  "other",
+] as const;
+
+export type VendorBillUnit = (typeof VENDOR_BILL_UNITS)[number];
+
 export type VendorBillLine = {
   id: string;
+  /** Line date (defaults to bill date when empty). */
+  lineDate: string;
+  /** Item / service name. */
+  itemName: string;
+  /** Legacy alias for itemName. */
   description: string;
   qty: number;
+  unit: VendorBillUnit | string;
   ratePaise: number;
-  /** Gross line amount (qty * rate). */
+  /** Line discount in paise. */
+  discountPaise: number;
+  /** Line tax in paise. */
+  taxPaise: number;
+  /** Net line total: (qty × rate) − discount + tax. */
   amountPaise: number;
   /** Purchase ledger selection (mapped to an expense category / COA bucket). */
   categoryId: string;
 };
+
+/** Compute net line total from qty, rate, discount, and tax. */
+export function vendorBillLineTotalPaise(line: {
+  qty?: number;
+  ratePaise?: number;
+  discountPaise?: number;
+  taxPaise?: number;
+  amountPaise?: number;
+}): number {
+  if (line.amountPaise !== undefined && line.amountPaise > 0) {
+    return Math.max(0, Math.round(line.amountPaise));
+  }
+  const gross = Math.max(0, Number(line.qty) || 0) * Math.max(0, Math.round(Number(line.ratePaise) || 0));
+  const discount = Math.max(0, Math.round(Number(line.discountPaise) || 0));
+  const tax = Math.max(0, Math.round(Number(line.taxPaise) || 0));
+  return Math.max(0, gross - Math.min(discount, gross) + tax);
+}
 
 export type VendorBill = {
   id: string;
@@ -542,12 +612,16 @@ function syncModeBankMapFromBanks(
 }
 
 function normalizeExpenseCategory(c: Partial<ExpenseCategory>): ExpenseCategory {
+  const vendorIds = Array.isArray(c.vendorIds)
+    ? c.vendorIds.filter((vid) => typeof vid === "string" && vid.trim())
+    : [];
   return {
     id: c.id ?? id("ecat"),
     parentId: c.parentId ?? "",
     name: c.name ?? "Category",
     coaCode: c.coaCode ?? COA_EXP_OTHER,
     isActive: c.isActive !== false,
+    vendorIds,
   };
 }
 
@@ -569,6 +643,7 @@ function normalizeExpenseVoucherLine(
     id: l.id ?? id("exln"),
     categoryId: l.categoryId ?? "",
     subcategoryId: l.subcategoryId ?? "",
+    vendorId: l.vendorId ?? "",
     description: l.description ?? "",
     amountPaise,
     taxPaise,
@@ -654,6 +729,9 @@ function normalizeVoucher(v: Partial<ExpenseVoucher>): ExpenseVoucher {
     bankId: v.bankId ?? "",
     poolId: v.poolId ?? "",
     narration: v.narration ?? "",
+    paymentSplits: Array.isArray(v.paymentSplits)
+      ? v.paymentSplits.map((s) => normalizePaymentSplit(s))
+      : [],
     approvedBy: v.approvedBy ?? "",
     createdAt: v.createdAt ?? new Date().toISOString(),
     cancelledAt: v.cancelledAt ?? null,
@@ -688,14 +766,37 @@ function normalizeVendor(v: Partial<AccountsVendor>): AccountsVendor {
 }
 
 function normalizeBill(b: Partial<VendorBill>): VendorBill {
-  const normalizeLine = (l: Partial<VendorBillLine>): VendorBillLine => ({
-    id: l.id ?? id("vbln"),
-    description: l.description ?? "",
-    qty: Math.max(0, Number(l.qty) || 0),
-    ratePaise: Math.max(0, Math.round(Number(l.ratePaise) || 0)),
-    amountPaise: Math.max(0, Math.round(Number(l.amountPaise) || 0)),
-    categoryId: l.categoryId ?? "",
-  });
+  const normalizeLine = (l: Partial<VendorBillLine>): VendorBillLine => {
+    const itemName = (l.itemName ?? l.description ?? "").trim();
+    const qty = Math.max(0, Number(l.qty) || 0);
+    const ratePaise = Math.max(0, Math.round(Number(l.ratePaise) || 0));
+    const discountPaise = Math.max(0, Math.round(Number(l.discountPaise) || 0));
+    const taxPaise = Math.max(0, Math.round(Number(l.taxPaise) || 0));
+    const amountPaise = vendorBillLineTotalPaise({
+      qty,
+      ratePaise,
+      discountPaise,
+      taxPaise,
+      amountPaise: l.amountPaise,
+    });
+    const unitRaw = (l.unit ?? "pcs").trim() || "pcs";
+    const unit = (VENDOR_BILL_UNITS as readonly string[]).includes(unitRaw)
+      ? (unitRaw as VendorBillUnit)
+      : unitRaw;
+    return {
+      id: l.id ?? id("vbln"),
+      lineDate: l.lineDate ?? "",
+      itemName,
+      description: itemName,
+      qty,
+      unit,
+      ratePaise,
+      discountPaise,
+      taxPaise,
+      amountPaise,
+      categoryId: l.categoryId ?? "",
+    };
+  };
 
   const lines: VendorBillLine[] = Array.isArray(b.lines)
     ? b.lines.map(normalizeLine)
@@ -806,6 +907,19 @@ function normalizeCoa(c: Partial<CoaAccount>): CoaAccount {
   };
 }
 
+function normalizePaymentSplit(
+  s: Partial<ExpensePaymentSplit>,
+): ExpensePaymentSplit {
+  return {
+    id: s.id ?? id("exps"),
+    mode: (s.mode as PaymentMode) ?? "cash",
+    amountPaise: Math.max(0, Math.round(Number(s.amountPaise) || 0)),
+    poolId: s.poolId ?? "",
+    bankId: s.bankId ?? "",
+    transactionRef: s.transactionRef?.trim() ?? "",
+  };
+}
+
 function normalizeCashLedger(e: Partial<CashLedgerEntry>): CashLedgerEntry {
   return {
     id: e.id ?? id("cle"),
@@ -816,6 +930,7 @@ function normalizeCashLedger(e: Partial<CashLedgerEntry>): CashLedgerEntry {
     sourceType: e.sourceType ?? "",
     sourceId: e.sourceId ?? "",
     narration: e.narration ?? "",
+    transactionRef: e.transactionRef ?? "",
     runningBalancePaise: Math.round(Number(e.runningBalancePaise) || 0),
     createdAt: e.createdAt ?? new Date().toISOString(),
     voidedAt: e.voidedAt ?? null,
@@ -834,6 +949,7 @@ function normalizeBankLedger(e: Partial<BankLedgerEntry>): BankLedgerEntry {
     sourceType: e.sourceType ?? "",
     sourceId: e.sourceId ?? "",
     narration: e.narration ?? "",
+    transactionRef: e.transactionRef ?? "",
     createdAt: e.createdAt ?? new Date().toISOString(),
     voidedAt: e.voidedAt ?? null,
     cancelReason: e.cancelReason ?? "",
@@ -1221,6 +1337,34 @@ export function listExpenseSubcategories(
   );
 }
 
+/** Vendor IDs linked to category or sub-category (sub-category overrides when set). */
+export function linkedVendorIdsForExpense(
+  categoryId: string,
+  subcategoryId: string,
+  state?: AccountsState,
+): string[] {
+  const s = state ?? loadAccounts();
+  if (subcategoryId) {
+    const sub = s.expenseCategories.find((c) => c.id === subcategoryId);
+    if (sub?.vendorIds?.length) return sub.vendorIds;
+  }
+  const cat = s.expenseCategories.find((c) => c.id === categoryId);
+  return cat?.vendorIds ?? [];
+}
+
+export function listLinkedVendorsForExpense(
+  categoryId: string,
+  subcategoryId: string,
+  state?: AccountsState,
+): AccountsVendor[] {
+  const ids = linkedVendorIdsForExpense(categoryId, subcategoryId, state);
+  if (!ids.length) return [];
+  const s = state ?? loadAccounts();
+  return ids
+    .map((vid) => s.vendors.find((v) => v.id === vid && v.isActive !== false))
+    .filter((v): v is AccountsVendor => !!v);
+}
+
 export function accountKindFromCoaGroup(
   group: CoaGroup,
 ): "expense" | "collection" | "other" {
@@ -1231,6 +1375,17 @@ export function accountKindFromCoaGroup(
 
 export function nextExpenseVoucherNo(state?: AccountsState): string {
   const s = state ?? loadAccounts();
+  if (typeof window !== "undefined") {
+    const masters = loadMasters();
+    const fromSeries = suggestFromSeriesCode(
+      masters.numberSeries,
+      "EXPENSE_VOUCHER",
+      undefined,
+      s.expenseVouchers.map((v) => v.voucherNo),
+    );
+    if (fromSeries) return fromSeries;
+  }
+
   const year = new Date().getFullYear();
   const prefix = `EXP-${year}-`;
   const nums = s.expenseVouchers
@@ -1295,6 +1450,77 @@ export function upsertCoaAccount(
   return { ok: true, account };
 }
 
+export type AccountsRemovalCheck = {
+  canRemove: boolean;
+  blockers: string[];
+  suggestion: string;
+  confirmMessage: string;
+};
+
+/** Non-void journal lines posted against a COA account. */
+export function coaAccountHasJournalActivity(
+  coaId: string,
+  state?: AccountsState,
+): boolean {
+  const s = state ?? loadAccounts();
+  return s.journalEntries.some(
+    (j) =>
+      !j.voidedAt &&
+      j.lines.some(
+        (l) =>
+          l.coaId === coaId && (l.debitPaise > 0 || l.creditPaise > 0),
+      ),
+  );
+}
+
+export function checkCoaAccountRemoval(
+  coaId: string,
+  state?: AccountsState,
+): AccountsRemovalCheck {
+  const s = state ?? loadAccounts();
+  const account = s.coaAccounts.find((c) => c.id === coaId);
+  const label = account ? `${account.code} · ${account.name}` : "this account";
+  const blockers: string[] = [];
+  if (coaAccountHasJournalActivity(coaId, s)) {
+    blockers.push("journal entries");
+  }
+  const categoryN = account
+    ? s.expenseCategories.filter((c) => c.coaCode === account.code).length
+    : 0;
+  if (categoryN > 0) {
+    blockers.push(`${categoryN} expense categor${categoryN === 1 ? "y" : "ies"}`);
+  }
+  if (blockers.length > 0) {
+    return {
+      canRemove: false,
+      blockers,
+      suggestion: `Cannot delete — linked to ${blockers.join(" and ")}. Mark inactive instead.`,
+      confirmMessage: `Delete account “${label}”?`,
+    };
+  }
+  return {
+    canRemove: true,
+    blockers: [],
+    suggestion: "This cannot be undone.",
+    confirmMessage: `Delete account “${label}”?`,
+  };
+}
+
+export function deleteCoaAccount(
+  coaId: string,
+): { ok: true } | { ok: false; error: string } {
+  const state = loadAccounts();
+  const account = state.coaAccounts.find((c) => c.id === coaId);
+  if (!account) return fail("Account not found");
+  const check = checkCoaAccountRemoval(coaId, state);
+  if (!check.canRemove) return fail(check.suggestion);
+  saveAccounts({
+    ...state,
+    coaAccounts: state.coaAccounts.filter((c) => c.id !== coaId),
+  });
+  return { ok: true };
+}
+
 /* ─── Cash book ────────────────────────────────────────────── */
 
 export function cashInHandPaise(state?: AccountsState): number {
@@ -1310,6 +1536,7 @@ export function postCashMovement(input: {
   sourceType: string;
   sourceId?: string;
   narration?: string;
+  transactionRef?: string;
 }):
   | { ok: true; entry: CashLedgerEntry; pool: CashPool }
   | { ok: false; error: string } {
@@ -1331,6 +1558,7 @@ export function postCashMovement(input: {
     sourceType: input.sourceType,
     sourceId: input.sourceId ?? "",
     narration: input.narration ?? "",
+    transactionRef: input.transactionRef?.trim() ?? "",
     runningBalancePaise: nextBalance,
     createdAt: new Date().toISOString(),
     voidedAt: null,
@@ -1373,6 +1601,35 @@ export function upsertBankAccount(
   return { ok: true, bank };
 }
 
+export function checkBankAccountRemoval(
+  bankId: string,
+  state?: AccountsState,
+): AccountsRemovalCheck {
+  const s = state ?? loadAccounts();
+  const bank = s.bankAccounts.find((b) => b.id === bankId);
+  const label = bank?.name ?? "this bank account";
+  const blockers: string[] = [];
+  if (
+    s.bankLedger.some((e) => e.bankId === bankId && !e.voidedAt)
+  ) {
+    blockers.push("bank ledger entries");
+  }
+  if (blockers.length > 0) {
+    return {
+      canRemove: false,
+      blockers,
+      suggestion: `Cannot delete — linked to ${blockers.join(", ")}. Mark inactive instead.`,
+      confirmMessage: `Delete “${label}”?`,
+    };
+  }
+  return {
+    canRemove: true,
+    blockers: [],
+    suggestion: "This cannot be undone.",
+    confirmMessage: `Delete “${label}”?`,
+  };
+}
+
 export function deleteBankAccount(
   bankId: string,
 ): { ok: true } | { ok: false; error: string } {
@@ -1380,14 +1637,8 @@ export function deleteBankAccount(
   const bank = state.bankAccounts.find((b) => b.id === bankId);
   if (!bank) return fail("Bank account not found");
 
-  const hasActiveLedger = state.bankLedger.some(
-    (e) => e.bankId === bankId && !e.voidedAt,
-  );
-  if (hasActiveLedger) {
-    return fail(
-      "Cannot delete — this account has ledger entries. Mark it inactive instead.",
-    );
-  }
+  const check = checkBankAccountRemoval(bankId, state);
+  if (!check.canRemove) return fail(check.suggestion);
 
   const bankAccounts = state.bankAccounts.filter((b) => b.id !== bankId);
   saveAccounts({
@@ -1407,6 +1658,7 @@ export function postBankMovement(input: {
   sourceType: string;
   sourceId?: string;
   narration?: string;
+  transactionRef?: string;
 }): { ok: true; entry: BankLedgerEntry } | { ok: false; error: string } {
   const amount = Math.round(input.amountPaise);
   if (amount <= 0) return fail("Amount must be greater than zero");
@@ -1423,6 +1675,7 @@ export function postBankMovement(input: {
     sourceType: input.sourceType,
     sourceId: input.sourceId ?? "",
     narration: input.narration ?? "",
+    transactionRef: input.transactionRef?.trim() ?? "",
     createdAt: new Date().toISOString(),
     voidedAt: null,
     cancelReason: "",
@@ -1560,6 +1813,8 @@ export function upsertExpenseCategory(
     ...patch,
     name,
     parentId,
+    vendorIds:
+      patch.vendorIds !== undefined ? patch.vendorIds : existing?.vendorIds,
     id: existing?.id ?? patch.id ?? id("ecat"),
   });
   const expenseCategories = existing
@@ -1567,6 +1822,122 @@ export function upsertExpenseCategory(
     : [...state.expenseCategories, category];
   saveAccounts({ ...state, expenseCategories });
   return { ok: true, category };
+}
+
+/** Expense voucher (non-cancelled) referencing a category or sub-category. */
+export function expenseCategoryHasVouchers(
+  categoryId: string,
+  state?: AccountsState,
+): boolean {
+  const s = state ?? loadAccounts();
+  for (const v of s.expenseVouchers) {
+    if (isExpenseVoucherCancelled(v)) continue;
+    if (v.categoryId === categoryId) return true;
+    for (const line of v.lines) {
+      if (line.categoryId === categoryId || line.subcategoryId === categoryId) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+export function checkExpenseCategoryRemoval(
+  categoryId: string,
+  state?: AccountsState,
+): AccountsRemovalCheck {
+  const s = state ?? loadAccounts();
+  const cat = s.expenseCategories.find((c) => c.id === categoryId);
+  const label = cat?.name ?? "this category";
+  const blockers: string[] = [];
+  if (expenseCategoryHasVouchers(categoryId, s)) {
+    blockers.push("expense voucher(s)");
+  }
+  if (cat && !cat.parentId) {
+    const subN = s.expenseCategories.filter((c) => c.parentId === categoryId).length;
+    if (subN > 0) {
+      blockers.push(`${subN} sub-categor${subN === 1 ? "y" : "ies"}`);
+    }
+  }
+  const ruleN = s.recurringRules.filter((r) => r.categoryId === categoryId).length;
+  if (ruleN > 0) {
+    blockers.push(`${ruleN} recurring rule(s)`);
+  }
+  const billN = s.vendorBills.filter((b) => {
+    if (b.categoryId === categoryId) return true;
+    return b.lines.some((l) => l.categoryId === categoryId);
+  }).length;
+  if (billN > 0) {
+    blockers.push(`${billN} vendor bill(s)`);
+  }
+  if (blockers.length > 0) {
+    return {
+      canRemove: false,
+      blockers,
+      suggestion: `Cannot delete — linked to ${blockers.join(", ")}.`,
+      confirmMessage: `Delete “${label}”?`,
+    };
+  }
+  return {
+    canRemove: true,
+    blockers: [],
+    suggestion: "This cannot be undone.",
+    confirmMessage: `Delete “${label}”?`,
+  };
+}
+
+export function deleteExpenseCategory(
+  categoryId: string,
+): { ok: true } | { ok: false; error: string } {
+  const state = loadAccounts();
+  const cat = state.expenseCategories.find((c) => c.id === categoryId);
+  if (!cat) return fail("Category not found");
+  const check = checkExpenseCategoryRemoval(categoryId, state);
+  if (!check.canRemove) return fail(check.suggestion);
+  saveAccounts({
+    ...state,
+    expenseCategories: state.expenseCategories.filter((c) => c.id !== categoryId),
+  });
+  return { ok: true };
+}
+
+export function sessionExpenseCategoryTotals(
+  state: AccountsState,
+  sessionDate: string,
+): SessionExpenseCategoryRow[] {
+  const map = new Map<string, SessionExpenseCategoryRow>();
+  for (const v of state.expenseVouchers) {
+    if (isExpenseVoucherCancelled(v)) continue;
+    if (v.paidPaise <= 0) continue;
+    const payDate = v.paidOn || v.date;
+    if (payDate !== sessionDate) continue;
+    for (const line of v.lines) {
+      const share =
+        v.grandTotalPaise > 0
+          ? Math.round((line.totalPaise / v.grandTotalPaise) * v.paidPaise)
+          : 0;
+      if (share <= 0) continue;
+      const cat = getExpenseCategory(line.categoryId, state);
+      const sub = line.subcategoryId
+        ? getExpenseCategory(line.subcategoryId, state)
+        : undefined;
+      const key = `${line.categoryId}:${line.subcategoryId || ""}`;
+      const cur = map.get(key) ?? {
+        categoryId: line.categoryId,
+        subcategoryId: line.subcategoryId || "",
+        categoryName: cat?.name || "Uncategorized",
+        subcategoryName: sub?.name || "—",
+        amountPaise: 0,
+      };
+      cur.amountPaise += share;
+      map.set(key, cur);
+    }
+  }
+  return [...map.values()].sort(
+    (a, b) =>
+      a.categoryName.localeCompare(b.categoryName) ||
+      a.subcategoryName.localeCompare(b.subcategoryName),
+  );
 }
 
 export function createExpenseVoucher(input: {
@@ -1582,6 +1953,7 @@ export function createExpenseVoucher(input: {
   narration?: string;
   poolId?: string;
   bankId?: string;
+  paymentSplits?: Partial<ExpensePaymentSplit>[];
 }): { ok: true; voucher: ExpenseVoucher } | { ok: false; error: string } {
   const state = loadAccounts();
   const lines =
@@ -1612,6 +1984,9 @@ export function createExpenseVoucher(input: {
     if (line.totalPaise <= 0) return fail("Line total must be greater than zero");
   }
 
+  const vendorPayErr = validateVendorPaymentAmounts(lines, state);
+  if (vendorPayErr) return fail(vendorPayErr);
+
   const grandTotalPaise = lines.reduce((s, l) => s + l.totalPaise, 0);
   const taxPaise =
     input.taxPaise !== undefined
@@ -1628,12 +2003,52 @@ export function createExpenseVoucher(input: {
   );
   const needsApproval = grandTotalPaise > state.settings.expenseApprovalPaise;
 
+  const splits =
+    input.paymentSplits && input.paymentSplits.length > 0
+      ? input.paymentSplits.map((s) => normalizePaymentSplit(s))
+      : intendedPaidPaise > 0
+        ? [
+            normalizePaymentSplit({
+              mode: input.mode,
+              amountPaise: intendedPaidPaise,
+              poolId: input.poolId ?? "",
+              bankId: input.bankId ?? "",
+              transactionRef: "",
+            }),
+          ]
+        : [];
+
+  if (intendedPaidPaise > 0) {
+    const splitSum = splits.reduce((s, x) => s + x.amountPaise, 0);
+    if (splitSum !== intendedPaidPaise) {
+      return fail(
+        `Payment splits (${splitSum}) must equal paid amount (${intendedPaidPaise})`,
+      );
+    }
+    for (const split of splits) {
+      if (split.mode !== "cash" && !split.transactionRef.trim()) {
+        return fail("Transaction ID is required for non-cash payments");
+      }
+      if (split.mode === "cash" && !split.poolId) {
+        return fail("Select cash pool for cash payment");
+      }
+      if (split.mode !== "cash" && !split.bankId) {
+        return fail("Select bank account for non-cash payment");
+      }
+    }
+  }
+
+  const headerVendorId =
+    input.vendorId ??
+    lines.find((l) => l.vendorId)?.vendorId ??
+    "";
+
   const voucher = normalizeVoucher({
     id: id("exv"),
     voucherNo: input.voucherNo?.trim() || nextExpenseVoucherNo(state),
     date: input.date || todayIso(),
     categoryId: lines[0]!.categoryId,
-    vendorId: input.vendorId ?? "",
+    vendorId: headerVendorId,
     amountPaise: grandTotalPaise,
     taxPaise,
     grandTotalPaise,
@@ -1641,10 +2056,11 @@ export function createExpenseVoucher(input: {
     duePaise: grandTotalPaise,
     lines: lines.map((l) => ({
       ...l,
-      paidPaise: 0,
-      duePaise: l.totalPaise,
+      paidPaise: Math.min(l.totalPaise, l.paidPaise),
+      duePaise: Math.max(0, l.totalPaise - Math.min(l.totalPaise, l.paidPaise)),
     })),
-    mode: input.mode,
+    mode: splits[0]?.mode ?? input.mode,
+    paymentSplits: splits,
     paymentStatus: needsApproval ? "pending_approval" : "draft",
     narration: input.narration ?? "",
     createdAt: new Date().toISOString(),
@@ -1655,15 +2071,23 @@ export function createExpenseVoucher(input: {
     expenseVouchers: [voucher, ...state.expenseVouchers],
   });
 
+  persistSeriesUse("EXPENSE_VOUCHER", undefined, voucher.voucherNo);
+
   if (!needsApproval && intendedPaidPaise > 0) {
-    const payRes = payExpenseVoucher(voucher.id, {
-      date: input.date,
-      poolId: input.mode === "cash" ? input.poolId : undefined,
-      bankId: input.mode !== "cash" ? input.bankId : undefined,
-      amountPaise: intendedPaidPaise,
-    });
-    if (!payRes.ok) return payRes;
-    return { ok: true, voucher: payRes.voucher };
+    const payDate = input.date || todayIso();
+    for (const split of splits) {
+      const payRes = payExpenseVoucher(voucher.id, {
+        date: payDate,
+        mode: split.mode,
+        poolId: split.mode === "cash" ? split.poolId : undefined,
+        bankId: split.mode !== "cash" ? split.bankId : undefined,
+        amountPaise: split.amountPaise,
+        transactionRef: split.transactionRef,
+      });
+      if (!payRes.ok) return payRes;
+    }
+    const final = loadAccounts().expenseVouchers.find((v) => v.id === voucher.id);
+    return { ok: true, voucher: final ?? voucher };
   }
 
   return { ok: true, voucher };
@@ -1800,9 +2224,11 @@ export function payExpenseVoucher(
     date?: string;
     poolId?: string;
     bankId?: string;
+    mode?: PaymentMode;
     postJv?: boolean;
     /** Pay this amount now (defaults to full due). */
     amountPaise?: number;
+    transactionRef?: string;
   } = {},
 ): { ok: true; voucher: ExpenseVoucher } | { ok: false; error: string } {
   const state = loadAccounts();
@@ -1830,6 +2256,11 @@ export function payExpenseVoucher(
   );
   if (payNow <= 0) return fail("Nothing due on this voucher");
 
+  const payMode = input.mode ?? voucher.mode;
+  if (payMode !== "cash" && !input.transactionRef?.trim()) {
+    return fail("Transaction ID is required for non-cash payments");
+  }
+
   const date = input.date || todayIso();
   const expenseLines =
     voucher.lines.length > 0
@@ -1842,30 +2273,62 @@ export function payExpenseVoucher(
           }),
         ];
 
+  const vendorPayIntent = Math.min(
+    payNow,
+    vendorPaymentPaiseFromVoucherLines(expenseLines),
+  );
+  if (vendorPayIntent > 0) {
+    const vendorErr = validateVendorPaymentAmounts(
+      expenseLines.map((l) =>
+        l.vendorId && l.paidPaise > 0
+          ? l
+          : { ...l, paidPaise: 0 },
+      ),
+      state,
+    );
+    if (vendorErr) return fail(vendorErr);
+  }
+
+  const expensePayPortion = Math.max(0, payNow - vendorPayIntent);
+
   const jvLines: JournalLine[] = [];
-  for (const line of expenseLines) {
-    const catId = line.subcategoryId || line.categoryId;
-    const category = state.expenseCategories.find((c) => c.id === catId);
-    const expenseCoa = category
-      ? getCoaByCode(category.coaCode, state)
-      : undefined;
-    if (expenseCoa) {
-      const lineShare =
-        voucher.grandTotalPaise > 0
-          ? Math.round((line.totalPaise / voucher.grandTotalPaise) * payNow)
-          : payNow;
-      if (lineShare > 0) {
-        jvLines.push({
-          coaId: expenseCoa.id,
-          debitPaise: lineShare,
-          creditPaise: 0,
-          narration: line.description,
-        });
+  if (vendorPayIntent > 0) {
+    const apCoa = getCoaByCode(COA_ACCOUNTS_PAYABLE, state);
+    if (apCoa) {
+      jvLines.push({
+        coaId: apCoa.id,
+        debitPaise: vendorPayIntent,
+        creditPaise: 0,
+        narration: "Vendor payment",
+      });
+    }
+  }
+  if (expensePayPortion > 0) {
+    for (const line of expenseLines) {
+      if (line.vendorId && line.paidPaise > 0) continue;
+      const catId = line.subcategoryId || line.categoryId;
+      const category = state.expenseCategories.find((c) => c.id === catId);
+      const expenseCoa = category
+        ? getCoaByCode(category.coaCode, state)
+        : undefined;
+      if (expenseCoa) {
+        const lineShare =
+          voucher.grandTotalPaise > 0
+            ? Math.round((line.totalPaise / voucher.grandTotalPaise) * expensePayPortion)
+            : expensePayPortion;
+        if (lineShare > 0) {
+          jvLines.push({
+            coaId: expenseCoa.id,
+            debitPaise: lineShare,
+            creditPaise: 0,
+            narration: line.description,
+          });
+        }
       }
     }
   }
 
-  if (voucher.mode === "cash") {
+  if (payMode === "cash") {
     const poolId = input.poolId || voucher.poolId;
     if (!poolId) return fail("Select a cash pool");
     const res = postCashMovement({
@@ -1876,6 +2339,7 @@ export function payExpenseVoucher(
       sourceType: "expense_voucher",
       sourceId: voucher.id,
       narration: voucher.narration || voucher.voucherNo,
+      transactionRef: input.transactionRef,
     });
     if (!res.ok) return res;
     if (input.postJv !== false && jvLines.length) {
@@ -1903,10 +2367,21 @@ export function payExpenseVoucher(
     const newPaid = voucher.paidPaise + payNow;
     const updated = normalizeVoucher({
       ...voucher,
+      mode: payMode,
       paidPaise: newPaid,
       duePaise: Math.max(0, voucher.grandTotalPaise - newPaid),
       paidOn: date,
       poolId,
+      paymentSplits: [
+        ...voucher.paymentSplits,
+        normalizePaymentSplit({
+          mode: payMode,
+          amountPaise: payNow,
+          poolId,
+          bankId: "",
+          transactionRef: input.transactionRef ?? "",
+        }),
+      ],
     });
     const s2 = loadAccounts();
     saveAccounts({
@@ -1915,6 +2390,7 @@ export function payExpenseVoucher(
         v.id === voucherId ? updated : v,
       ),
     });
+    settleVendorPaymentForExpensePay(expenseLines, vendorPayIntent, date);
     return { ok: true, voucher: updated };
   }
 
@@ -1925,10 +2401,11 @@ export function payExpenseVoucher(
     date,
     direction: "cr",
     amountPaise: payNow,
-    mode: voucher.mode,
+    mode: payMode,
     sourceType: "expense_voucher",
     sourceId: voucher.id,
     narration: voucher.narration || voucher.voucherNo,
+    transactionRef: input.transactionRef,
   });
   if (!res.ok) return res;
   if (input.postJv !== false && jvLines.length) {
@@ -1956,10 +2433,21 @@ export function payExpenseVoucher(
   const newPaid = voucher.paidPaise + payNow;
   const updated = normalizeVoucher({
     ...voucher,
+    mode: payMode,
     paidPaise: newPaid,
     duePaise: Math.max(0, voucher.grandTotalPaise - newPaid),
     paidOn: date,
     bankId,
+    paymentSplits: [
+      ...voucher.paymentSplits,
+      normalizePaymentSplit({
+        mode: payMode,
+        amountPaise: payNow,
+        poolId: "",
+        bankId,
+        transactionRef: input.transactionRef ?? "",
+      }),
+    ],
   });
   const s2 = loadAccounts();
   saveAccounts({
@@ -1968,6 +2456,7 @@ export function payExpenseVoucher(
       v.id === voucherId ? updated : v,
     ),
   });
+  settleVendorPaymentForExpensePay(expenseLines, vendorPayIntent, date);
   return { ok: true, voucher: updated };
 }
 
@@ -2053,6 +2542,63 @@ export function upsertVendor(
   return { ok: true, vendor };
 }
 
+export function checkVendorRemoval(
+  vendorId: string,
+  state?: AccountsState,
+): AccountsRemovalCheck {
+  const s = state ?? loadAccounts();
+  const vendor = s.vendors.find((v) => v.id === vendorId);
+  const label = vendor?.name ?? "this vendor";
+  const blockers: string[] = [];
+  const billN = s.vendorBills.filter((b) => b.vendorId === vendorId).length;
+  if (billN > 0) blockers.push(`${billN} vendor bill(s)`);
+  const payableN = s.payables.filter((p) => p.vendorId === vendorId).length;
+  if (payableN > 0) blockers.push(`${payableN} payable(s)`);
+  const voucherN = s.expenseVouchers.filter(
+    (v) =>
+      !isExpenseVoucherCancelled(v) &&
+      (v.vendorId === vendorId ||
+        v.lines.some((l) => l.vendorId === vendorId)),
+  ).length;
+  if (voucherN > 0) blockers.push(`${voucherN} expense voucher(s)`);
+  const ruleN = s.recurringRules.filter((r) => r.vendorId === vendorId).length;
+  if (ruleN > 0) blockers.push(`${ruleN} recurring rule(s)`);
+  if (blockers.length > 0) {
+    return {
+      canRemove: false,
+      blockers,
+      suggestion: `Cannot delete — linked to ${blockers.join(", ")}.`,
+      confirmMessage: `Delete “${label}”?`,
+    };
+  }
+  return {
+    canRemove: true,
+    blockers: [],
+    suggestion: "This cannot be undone.",
+    confirmMessage: `Delete “${label}”?`,
+  };
+}
+
+export function deleteVendor(
+  vendorId: string,
+): { ok: true } | { ok: false; error: string } {
+  const state = loadAccounts();
+  const vendor = state.vendors.find((v) => v.id === vendorId);
+  if (!vendor) return fail("Vendor not found");
+  const check = checkVendorRemoval(vendorId, state);
+  if (!check.canRemove) return fail(check.suggestion);
+  saveAccounts({
+    ...state,
+    vendors: state.vendors.filter((v) => v.id !== vendorId),
+    expenseCategories: state.expenseCategories.map((c) =>
+      c.vendorIds?.length
+        ? { ...c, vendorIds: c.vendorIds.filter((vid) => vid !== vendorId) }
+        : c,
+    ),
+  });
+  return { ok: true };
+}
+
 export function createVendorBill(input: {
   vendorId: string;
   billNo?: string;
@@ -2083,7 +2629,7 @@ export function createVendorBill(input: {
   const taxPaise = Math.max(0, Math.round(Number(input.taxPaise) || 0));
 
   const grossPaise = lines.length
-    ? lines.reduce((s, l) => s + Math.max(0, Math.round(Number(l.amountPaise) || 0)), 0)
+    ? lines.reduce((s, l) => s + vendorBillLineTotalPaise(l), 0)
     : Math.max(0, Math.round(Number(input.amountPaise) || 0));
 
   const grandTotalPaise = Math.max(
@@ -2300,6 +2846,125 @@ export function listVendorBillsForVendor(
 
 export function vendorBillBalancePaise(bill: VendorBill): number {
   return Math.max(0, bill.amountPaise - bill.paidPaise);
+}
+
+/** Open AP balance for a vendor (sum of unpaid payables). */
+export function vendorOutstandingBalancePaise(
+  vendorId: string,
+  state?: AccountsState,
+): number {
+  const s = state ?? loadAccounts();
+  return s.payables
+    .filter((p) => p.vendorId === vendorId && p.status !== "paid")
+    .reduce((sum, p) => sum + Math.max(0, p.amountPaise - p.paidPaise), 0);
+}
+
+function vendorPaymentTotalsByVendor(
+  lines: ExpenseVoucherLine[],
+): Map<string, number> {
+  const byVendor = new Map<string, number>();
+  for (const line of lines) {
+    if (!line.vendorId || line.paidPaise <= 0) continue;
+    byVendor.set(
+      line.vendorId,
+      (byVendor.get(line.vendorId) ?? 0) + line.paidPaise,
+    );
+  }
+  return byVendor;
+}
+
+function validateVendorPaymentAmounts(
+  lines: ExpenseVoucherLine[],
+  state: AccountsState,
+): string | null {
+  for (const [vendorId, amount] of vendorPaymentTotalsByVendor(lines)) {
+    const balance = vendorOutstandingBalancePaise(vendorId, state);
+    if (amount > balance) {
+      const vendor = state.vendors.find((v) => v.id === vendorId);
+      const name = vendor?.name ?? "vendor";
+      const amt = (amount / 100).toFixed(2);
+      const bal = (balance / 100).toFixed(2);
+      return `Payment to ${name} (₹${amt}) exceeds outstanding balance (₹${bal})`;
+    }
+  }
+  return null;
+}
+
+function applyVendorPaymentAllocation(
+  state: AccountsState,
+  vendorId: string,
+  amountPaise: number,
+  paidOn: string,
+): AccountsState {
+  let remaining = Math.max(0, Math.round(amountPaise));
+  if (remaining <= 0) return state;
+
+  const openPayables = state.payables
+    .filter((p) => p.vendorId === vendorId && p.status !== "paid")
+    .sort((a, b) => a.dueOn.localeCompare(b.dueOn));
+
+  let payables = [...state.payables];
+  let vendorBills = [...state.vendorBills];
+
+  for (const payable of openPayables) {
+    if (remaining <= 0) break;
+    const due = Math.max(0, payable.amountPaise - payable.paidPaise);
+    if (due <= 0) continue;
+    const apply = Math.min(remaining, due);
+    remaining -= apply;
+    const newPaid = payable.paidPaise + apply;
+    const status: PayableStatus =
+      newPaid >= payable.amountPaise ? "paid" : "partial";
+    payables = payables.map((p) =>
+      p.id === payable.id ? { ...p, paidPaise: newPaid, status, paidOn } : p,
+    );
+    if (payable.sourceType === "expense_bill") {
+      vendorBills = vendorBills.map((b) => {
+        if (b.id !== payable.sourceId) return b;
+        const bPaid = Math.min(b.amountPaise, b.paidPaise + apply);
+        const bStatus: VendorBillStatus =
+          bPaid >= b.amountPaise ? "paid" : bPaid > 0 ? "partial" : "open";
+        return { ...b, paidPaise: bPaid, status: bStatus };
+      });
+    }
+  }
+
+  return { ...state, payables, vendorBills };
+}
+
+function settleVendorPaymentForExpensePay(
+  lines: ExpenseVoucherLine[],
+  vendorPayAmount: number,
+  paidOn: string,
+): void {
+  if (vendorPayAmount <= 0) return;
+  const totalIntent = vendorPaymentPaiseFromVoucherLines(lines);
+  if (totalIntent <= 0) return;
+
+  const byVendor = new Map<string, number>();
+  for (const line of lines) {
+    if (!line.vendorId || line.paidPaise <= 0) continue;
+    const share = Math.round((line.paidPaise / totalIntent) * vendorPayAmount);
+    if (share > 0) {
+      byVendor.set(line.vendorId, (byVendor.get(line.vendorId) ?? 0) + share);
+    }
+  }
+
+  let state = loadAccounts();
+  for (const [vendorId, amount] of byVendor) {
+    state = applyVendorPaymentAllocation(state, vendorId, amount, paidOn);
+  }
+  saveAccounts(state);
+}
+
+function vendorPaymentPaiseFromVoucherLines(
+  lines: ExpenseVoucherLine[],
+): number {
+  let total = 0;
+  for (const line of lines) {
+    if (line.vendorId && line.paidPaise > 0) total += line.paidPaise;
+  }
+  return total;
 }
 
 /* ─── Unified payables (incl. transport fleet) ────────────── */
@@ -3224,7 +3889,7 @@ export function postFeeCollectionToAccounts(input: {
   collectionDate: string;
   receiptNo?: string;
   label?: string;
-  tenders: { mode: string; amountPaise: number; bankAccountId?: string }[];
+  tenders: { mode: string; amountPaise: number; bankAccountId?: string; ref?: string }[];
   /** Portion of collection that settles store credit dues. */
   storeAmountPaise?: number;
 }): { ok: true; posted: boolean } | { ok: false; error: string } {
@@ -3256,6 +3921,10 @@ export function postFeeCollectionToAccounts(input: {
       : input.label || "Fee collection";
 
   if (cashPaise > 0) {
+    const cashRef =
+      input.tenders.find((t) => t.mode === "cash" && t.amountPaise > 0)?.ref?.trim() ||
+      input.receiptNo ||
+      "";
     const res = postCashMovement({
       poolId: drawer.id,
       date: input.collectionDate,
@@ -3264,6 +3933,7 @@ export function postFeeCollectionToAccounts(input: {
       sourceType: "fee_voucher",
       sourceId,
       narration: narrationBase,
+      transactionRef: cashRef,
     });
     if (!res.ok) return res;
   }
@@ -3287,6 +3957,7 @@ export function postFeeCollectionToAccounts(input: {
       sourceType: "fee_voucher",
       sourceId: `${sourceId}_${mode}`,
       narration: `${narrationBase} · ${mode}`,
+      transactionRef: t.ref?.trim() || input.receiptNo || "",
     });
     if (!res.ok) return res;
   }
@@ -3371,6 +4042,9 @@ export function postStoreSaleToAccounts(input: {
   issuedOn: string;
   amountPaise: number;
   paymentMode: "cash" | "credit";
+  tenderMode?: string;
+  paymentChannel?: string;
+  transactionRef?: string;
   narration?: string;
 }): { ok: true; posted: boolean } | { ok: false; error: string } {
   seedAccountsIfEmpty();
@@ -3407,6 +4081,7 @@ export function postStoreSaleToAccounts(input: {
       sourceType: "store_sale",
       sourceId,
       narration,
+      transactionRef: input.transactionRef,
     });
     if (!cashRes.ok) return cashRes;
     postJournal({

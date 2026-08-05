@@ -80,6 +80,7 @@ function noticeToRow(tenantId: string, n: SchoolNotice): Record<string, unknown>
     pinned: !!n.pinned,
     academic_year_code: n.academicYearCode || "",
     published_at: n.publishedAt || null,
+    scheduled_publish_at: n.scheduledPublishAt || null,
     created_at: n.createdAt || nowIso(),
     created_by: n.createdBy || "",
     updated_at: n.updatedAt || nowIso(),
@@ -98,10 +99,17 @@ function rowToNotice(r: Record<string, unknown>): SchoolNotice {
         ? r.audience
         : "all",
     status:
-      r.status === "published" || r.status === "archived" ? r.status : "draft",
+      r.status === "published" ||
+      r.status === "archived" ||
+      r.status === "scheduled"
+        ? r.status
+        : "draft",
     pinned: r.pinned === true,
     academicYearCode: String(r.academic_year_code || ""),
     publishedAt: r.published_at ? String(r.published_at) : "",
+    scheduledPublishAt: r.scheduled_publish_at
+      ? String(r.scheduled_publish_at)
+      : "",
     createdAt: String(r.created_at || nowIso()),
     createdBy: String(r.created_by || ""),
     updatedAt: String(r.updated_at || nowIso()),
@@ -119,6 +127,7 @@ function newsToRow(tenantId: string, n: SchoolNewsItem): Record<string, unknown>
     status: n.status || "draft",
     academic_year_code: n.academicYearCode || "",
     published_at: n.publishedAt || null,
+    scheduled_publish_at: n.scheduledPublishAt || null,
     created_at: n.createdAt || nowIso(),
     created_by: n.createdBy || "",
     updated_at: n.updatedAt || nowIso(),
@@ -133,9 +142,16 @@ function rowToNews(r: Record<string, unknown>): SchoolNewsItem {
     body: String(r.body || ""),
     coverUrl: String(r.cover_url || ""),
     status:
-      r.status === "published" || r.status === "archived" ? r.status : "draft",
+      r.status === "published" ||
+      r.status === "archived" ||
+      r.status === "scheduled"
+        ? r.status
+        : "draft",
     academicYearCode: String(r.academic_year_code || ""),
     publishedAt: r.published_at ? String(r.published_at) : "",
+    scheduledPublishAt: r.scheduled_publish_at
+      ? String(r.scheduled_publish_at)
+      : "",
     createdAt: String(r.created_at || nowIso()),
     createdBy: String(r.created_by || ""),
     updatedAt: String(r.updated_at || nowIso()),
@@ -152,6 +168,7 @@ function albumToRow(tenantId: string, a: GalleryAlbum): Record<string, unknown> 
     status: a.status || "draft",
     academic_year_code: a.academicYearCode || "",
     published_at: a.publishedAt || null,
+    scheduled_publish_at: a.scheduledPublishAt || null,
     created_at: a.createdAt || nowIso(),
     created_by: a.createdBy || "",
     updated_at: a.updatedAt || nowIso(),
@@ -165,9 +182,16 @@ function rowToAlbum(r: Record<string, unknown>): GalleryAlbum {
     description: String(r.description || ""),
     coverUrl: String(r.cover_url || ""),
     status:
-      r.status === "published" || r.status === "archived" ? r.status : "draft",
+      r.status === "published" ||
+      r.status === "archived" ||
+      r.status === "scheduled"
+        ? r.status
+        : "draft",
     academicYearCode: String(r.academic_year_code || ""),
     publishedAt: r.published_at ? String(r.published_at) : "",
+    scheduledPublishAt: r.scheduled_publish_at
+      ? String(r.scheduled_publish_at)
+      : "",
     createdAt: String(r.created_at || nowIso()),
     createdBy: String(r.created_by || ""),
     updatedAt: String(r.updated_at || nowIso()),

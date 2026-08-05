@@ -559,7 +559,7 @@ function welcomeLinks(ctx: ErpAiChatContext): ErpAiLink[] {
 
 export function erpAiWelcome(
   ctx: ErpAiChatContext,
-  opts?: { gemini?: boolean },
+  opts?: { gemini?: boolean; llm?: boolean; engineLabel?: string },
 ): ErpAiMessage {
   const who = ctx.session.fullName?.split(" ")[0] || "there";
   const role = roleLabel(ctx);
@@ -569,9 +569,11 @@ export function erpAiWelcome(
     .map((c) => c.label)
     .join(", ");
 
-  const aiNote = opts?.gemini
-    ? "Powered by **Gemini** — I can answer open questions and summarize live desk stats."
-    : "Built-in guides — set **GEMINI_API_KEY** on the server for AI answers.";
+  const aiEnabled = opts?.llm ?? opts?.gemini;
+  const label = opts?.engineLabel || "AI";
+  const aiNote = aiEnabled
+    ? `Powered by **${label}** — I can answer open questions and summarize live desk stats.`
+    : "Built-in guides — set **OPENAI_API_KEY** or **GEMINI_API_KEY** on the server for AI answers.";
 
   return {
     id: nid(),
@@ -745,6 +747,3 @@ export function erpAiStorageKey(session: SessionLike): string {
   const id = session.staffId || session.email || session.roleCode || "anon";
   return `bhb_erp_ai_chat_v1_${id}`;
 }
-
-/** @deprecated use quickPromptsForUser — kept for any stray imports */
-export const ERP_AI_QUICK_PROMPTS = ERP_AI_QUICK_PROMPT_CATALOG;

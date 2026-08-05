@@ -123,3 +123,46 @@ export async function runAdmissionDocOcrApi(opts: {
   }
   return { ok: json.ok !== false, suggestion: json.suggestion };
 }
+
+export async function runProfileDocOcrApi(opts: {
+  subject: "student" | "staff";
+  subjectId: string;
+  docKey: string;
+  dataUrl: string;
+  mimeType?: string;
+}): Promise<{
+  ok: boolean;
+  result?: import("@/lib/docVerificationOcr").DocVerificationOcrResult;
+  error?: string;
+  visionConfigured?: boolean;
+}> {
+  const res = await fetch("/api/ocr/profile-doc", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      subject: opts.subject,
+      subjectId: opts.subjectId,
+      docKey: opts.docKey,
+      imageBase64: base64FromDataUrl(opts.dataUrl),
+      mimeType: opts.mimeType,
+    }),
+  });
+  const json = (await res.json().catch(() => ({}))) as {
+    ok?: boolean;
+    result?: import("@/lib/docVerificationOcr").DocVerificationOcrResult;
+    error?: string;
+    visionConfigured?: boolean;
+  };
+  if (!res.ok) {
+    return {
+      ok: false,
+      error: json.error || "OCR failed",
+      visionConfigured: json.visionConfigured,
+    };
+  }
+  return {
+    ok: json.ok !== false,
+    result: json.result,
+    visionConfigured: json.visionConfigured,
+  };
+}

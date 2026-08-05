@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { SlidersHorizontal } from "lucide-react";
 import {
   FEE_FREQUENCIES,
   currentAcademicYearCode,
@@ -57,6 +58,8 @@ import { SalarySetupPanel } from "@/components/masters/SalarySetupPanel";
 import { RolesPermissionsPanel } from "@/components/masters/RolesPermissionsPanel";
 import { WaTemplatesPanel } from "@/components/masters/WaTemplatesPanel";
 import { AutomationPanel } from "@/components/masters/AutomationPanel";
+import { WaChatbotPanel } from "@/components/masters/WaChatbotPanel";
+import { SchoolBrandAssetsPanel } from "@/components/masters/SchoolBrandAssetsPanel";
 import {
   MastersEmptyRow,
   MastersTabStack,
@@ -65,8 +68,14 @@ import {
   MastersWorkCard,
 } from "@/components/masters/MastersLayout";
 import { ModuleTabGroups, type ModuleTabGroup } from "@/components/ui/ModuleTabs";
+import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
+import {
+  canAccessMastersTab,
+  canConfigureRbac,
+  loadRbac,
+} from "@/lib/rbac";
 
 type Tab =
   | "overview"
@@ -90,7 +99,9 @@ type Tab =
   | "late-fee"
   | "mid-year"
   | "wa-templates"
-  | "automation";
+  | "automation"
+  | "wa-chatbot"
+  | "brand";
 
 const TAB_GROUPS: ModuleTabGroup[] = [
   {
@@ -105,6 +116,7 @@ const TAB_GROUPS: ModuleTabGroup[] = [
     tone: "teal",
     tabs: [
       { id: "school", label: "School", tone: "teal" },
+      { id: "brand", label: "Brand & stamps", tone: "teal" },
       { id: "campuses", label: "Campuses", tone: "teal" },
       { id: "staff", label: "Staff setup", tone: "slate" },
       { id: "roles", label: "Roles & permissions", tone: "navy" },
@@ -146,6 +158,7 @@ const TAB_GROUPS: ModuleTabGroup[] = [
     tabs: [
       { id: "wa-templates", label: "WhatsApp templates", tone: "violet" },
       { id: "automation", label: "Automation", tone: "amber" },
+      { id: "wa-chatbot", label: "WhatsApp chatbot", tone: "teal" },
     ],
   },
 ];
@@ -154,18 +167,91 @@ export function MastersWorkspace() {
   const session = useDemoSession();
   const readOnly = useSessionReadOnly();
   const [tab, setTab] = useState<Tab>("overview");
-  const [state, setState] = useState<MastersState | null>(null);
+  const [rbac, setRbac] = useState(() =>
+    typeof window === "undefined" ? null : loadRbac(),
+  );
+  const [state, setState] = useState<MastersState | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      return loadMasters();
+    } catch {
+      return null;
+    }
+  });
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const raw = new URLSearchParams(window.location.search).get("tab");
+    const allowed: Tab[] = [
+      "overview",
+      "school",
+      "academic",
+      "campuses",
+      "classes",
+      "subjects",
+      "series",
+      "holidays",
+      "staff",
+      "leave",
+      "salary",
+      "roles",
+      "fee-heads",
+      "fee-groups",
+      "fee-structure",
+      "special-fees",
+      "concessions",
+      "installments",
+      "late-fee",
+      "mid-year",
+      "wa-templates",
+      "automation",
+      "wa-chatbot",
+      "brand",
+    ];
+    if (raw && (allowed as string[]).includes(raw)) setTab(raw as Tab);
+  }, []);
+
+  useEffect(() => {
+    setState(loadMasters());
     void (async () => {
       const { ensureMastersHydrated } = await import("@/lib/mastersPersistence");
-      await ensureMastersHydrated();
       const { ensureStaffHydrated } = await import("@/lib/staffPersistence");
-      await ensureStaffHydrated();
+      const { ensureRbacHydrated } = await import("@/lib/rbacPersistence");
+      await Promise.all([
+        ensureMastersHydrated(),
+        ensureStaffHydrated(),
+        ensureRbacHydrated(),
+      ]);
       setState(loadMasters());
+      setRbac(loadRbac());
     })();
   }, []);
+
+  const visibleTabGroups = useMemo(() => {
+    const r = rbac ?? loadRbac();
+    const masters = state;
+    return TAB_GROUPS.map((g) => ({
+      ...g,
+      tabs: g.tabs.filter((t) => {
+        if (t.id === "overview") return true;
+        if (!masters) return false;
+        if (t.id === "roles") {
+          return canConfigureRbac(session, masters, r);
+        }
+        return canAccessMastersTab(session, masters, t.id, r);
+      }),
+    })).filter((g) => g.tabs.length > 0);
+  }, [session, state, rbac]);
+
+  useEffect(() => {
+    if (!state) return;
+    const r = rbac ?? loadRbac();
+    if (tab !== "overview" && !canAccessMastersTab(session, state, tab, r)) {
+      if (tab === "roles" && canConfigureRbac(session, state, r)) return;
+      setTab("overview");
+    }
+  }, [tab, session, state, rbac]);
 
   function commit(next: MastersState, msg?: string) {
     if (readOnly) {
@@ -188,30 +274,17 @@ export function MastersWorkspace() {
   }
 
   return (
-    <div>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-[var(--brand-deep)]">
-            Masters
-          </h1>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            Institution, academic, subjects, holidays, staff setup, and fee setup ·
-            selected session {session.academicYearCode}
-          </p>
-        </div>
-        {notice ? (
-          <span className="rounded-lg bg-[rgba(197,160,40,0.18)] px-3 py-1.5 text-xs font-medium text-[var(--brand-deep)]">
-            {notice}
-          </span>
-        ) : null}
-      </div>
-
+    <ErpWorkspaceShell
+      title="Masters"
+      subtitle={`Institution, academic, subjects, holidays, staff setup, and fee setup · selected session ${session.academicYearCode}`}
+      icon={<SlidersHorizontal className="size-6" aria-hidden />}
+      notice={notice}
+    >
       <ModuleTabGroups
         aria-label="Masters"
-        size="lg"
         value={tab}
         onChange={(id) => setTab(id as Tab)}
-        groups={TAB_GROUPS}
+        groups={visibleTabGroups}
       />
 
       <div className="mt-5">
@@ -220,6 +293,9 @@ export function MastersWorkspace() {
         ) : null}
         {tab === "school" ? (
           <SchoolProfilePanel state={state} commit={commit} />
+        ) : null}
+        {tab === "brand" ? (
+          <SchoolBrandAssetsPanel state={state} commit={commit} />
         ) : null}
         {tab === "academic" ? (
           <AcademicPanel state={state} commit={commit} />
@@ -269,10 +345,39 @@ export function MastersWorkspace() {
         {tab === "mid-year" ? (
           <MidYearFeePolicyPanel state={state} commit={commit} />
         ) : null}
-        {tab === "wa-templates" ? <WaTemplatesPanel /> : null}
-        {tab === "automation" ? <AutomationPanel /> : null}
+        {tab === "wa-templates" ? (
+          canAccessMastersTab(session, state, "wa-templates", rbac ?? undefined) ? (
+            <WaTemplatesPanel />
+          ) : (
+            <MastersAccessDenied label="WhatsApp templates" />
+          )
+        ) : null}
+        {tab === "automation" ? (
+          canAccessMastersTab(session, state, "automation", rbac ?? undefined) ? (
+            <AutomationPanel />
+          ) : (
+            <MastersAccessDenied label="Automation" />
+          )
+        ) : null}
+        {tab === "wa-chatbot" ? (
+          canAccessMastersTab(session, state, "wa-chatbot", rbac ?? undefined) ? (
+            <WaChatbotPanel />
+          ) : (
+            <MastersAccessDenied label="WhatsApp chatbot" />
+          )
+        ) : null}
       </div>
-    </div>
+    </ErpWorkspaceShell>
+  );
+}
+
+function MastersAccessDenied({ label }: { label: string }) {
+  return (
+    <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+      You do not have permission to open <strong>{label}</strong>. Ask your
+      principal to grant access under Masters → Roles & permissions →{" "}
+      <em>WhatsApp & automation</em>.
+    </p>
   );
 }
 
@@ -314,6 +419,7 @@ function Overview({
       (h) => h.isPublished && h.academicYearCode === ay,
     ).length ?? 0;
 
+  const rbacState = loadRbac();
   const cards = [
     { label: "Campuses", value: campuses, tab: "campuses" as Tab },
     { label: "Classes", value: activeClasses, tab: "classes" as Tab },
@@ -329,7 +435,8 @@ function Overview({
     { label: "Mid-year rules", value: "Edit", tab: "mid-year" as Tab },
     { label: "WA templates", value: "EN+HI", tab: "wa-templates" as Tab },
     { label: "Automation", value: "Rules", tab: "automation" as Tab },
-  ];
+    { label: "WA chatbot", value: "Flows", tab: "wa-chatbot" as Tab },
+  ].filter((c) => canAccessMastersTab(session, state, c.tab, rbacState));
 
   return (
     <div className="space-y-6">

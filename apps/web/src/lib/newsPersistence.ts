@@ -12,10 +12,19 @@ import {
 } from "@/lib/newsNormalizedClient";
 import { mergeDbDeskIntoNewsState } from "@/lib/newsNormalizedMerge";
 import { newsReadFromDbEnabled } from "@/lib/newsDbConfig";
+import {
+  isDeskHydrated,
+  markDeskHydrated,
+} from "@/lib/deskHydrateGuard";
+
+const MODULE = "news";
 
 export { scheduleNewsDeskSync };
 
 export async function ensureNewsHydrated(): Promise<boolean> {
+  if (isDeskHydrated(MODULE)) return false;
+  markDeskHydrated(MODULE);
+
   const readFromDb = newsReadFromDbEnabled();
   const { bundle, changed } = await hydrateNewsDeskFromDb(readFromDb);
   if (!changed || (bundle.news.length === 0 && !readFromDb)) return false;

@@ -16,6 +16,13 @@ import {
 import { mergeDbDeskIntoAttendanceState } from "@/lib/attendanceNormalizedMerge";
 import { attendanceReadFromDbEnabled } from "@/lib/attendanceDbConfig";
 import { deskSkipBlobHydrateClient, deskSkipBlobPushClient } from "@/lib/deskCutover";
+import {
+  isDeskHydrated,
+  markDeskHydrated,
+  resetDeskHydrated,
+} from "@/lib/deskHydrateGuard";
+
+const MODULE = "attendance";
 
 const blob = createDomainBlobPersistence<AttendanceState>({
   table: "attendance_state",
@@ -27,7 +34,10 @@ const blob = createDomainBlobPersistence<AttendanceState>({
 });
 
 export const attendanceRemoteEnabled = blob.remoteEnabled;
-export const resetAttendancePersistenceCache = blob.resetCache;
+export function resetAttendancePersistenceCache() {
+  resetDeskHydrated(MODULE);
+  blob.resetCache();
+}
 
 export function scheduleAttendanceSync(state: AttendanceState) {
   if (typeof window === "undefined") {
@@ -68,6 +78,9 @@ export async function pushAttendanceRemoteServer(
  * DB wins when NEXT_PUBLIC_ATTENDANCE_READ_FROM_DB=true or local is empty.
  */
 export async function ensureAttendanceHydrated(): Promise<boolean> {
+  if (isDeskHydrated(MODULE)) return false;
+  markDeskHydrated(MODULE);
+
   const readFromDb = attendanceReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("attendance")
     ? false

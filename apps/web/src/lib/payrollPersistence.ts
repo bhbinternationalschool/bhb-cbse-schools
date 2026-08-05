@@ -16,6 +16,13 @@ import {
 import { mergeDbDeskIntoPayrollState } from "@/lib/payrollNormalizedMerge";
 import { payrollReadFromDbEnabled } from "@/lib/payrollDbConfig";
 import { deskSkipBlobHydrateClient, deskSkipBlobPushClient } from "@/lib/deskCutover";
+import {
+  isDeskHydrated,
+  markDeskHydrated,
+  resetDeskHydrated,
+} from "@/lib/deskHydrateGuard";
+
+const MODULE = "payroll";
 
 const blob = createDomainBlobPersistence<PayrollState>({
   table: "payroll_state",
@@ -36,6 +43,9 @@ export const schedulePayrollSync = (state: PayrollState) => {
   schedulePayrollDeskSync(state);
 };
 export const ensurePayrollHydrated = async () => {
+  if (isDeskHydrated(MODULE)) return false;
+  markDeskHydrated(MODULE);
+
   const readFromDb = payrollReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("payroll")
     ? false
@@ -107,4 +117,7 @@ export async function ensurePayrollHydratedServer(): Promise<boolean> {
   return changed;
 }
 
-export const resetPayrollPersistenceCache = blob.resetCache;
+export function resetPayrollPersistenceCache() {
+  resetDeskHydrated(MODULE);
+  blob.resetCache();
+}

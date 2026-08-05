@@ -2,10 +2,42 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { UsersRound } from "lucide-react";
+import {
+  BarChart3,
+  CalendarDays,
+  ClipboardList,
+  LayoutDashboard,
+  MessageSquare,
+  Star,
+  UsersRound,
+} from "lucide-react";
 import { useDemoSession } from "@/components/shell/SessionContext";
-import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
+import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
+import { Badge } from "@/components/ui/badge";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
+import { TabsContent, WorkspaceTabs, type WorkspaceTabItem } from "@/components/ui/workspace-tabs";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
 import { loadSis, type SisState } from "@/lib/sis";
 import { useModuleTabQuery } from "@/lib/useModuleTabQuery";
@@ -38,21 +70,14 @@ type PtmTab =
   | "feedback"
   | "reports";
 
-const TABS: ModuleTabItem[] = [
-  { id: "dashboard", label: "Dashboard", tone: "navy" },
-  { id: "events", label: "Events", tone: "navy" },
-  { id: "slots", label: "Slots", tone: "teal" },
-  { id: "bookings", label: "Bookings", tone: "amber" },
-  { id: "feedback", label: "Feedback", tone: "green" },
-  { id: "reports", label: "Reports", tone: "slate" },
+const TAB_ITEMS: WorkspaceTabItem[] = [
+  { id: "dashboard", label: "Dashboard", tone: "navy", icon: <LayoutDashboard /> },
+  { id: "events", label: "Events", tone: "navy", icon: <CalendarDays /> },
+  { id: "slots", label: "Slots", tone: "teal", icon: <ClipboardList /> },
+  { id: "bookings", label: "Bookings", tone: "amber", icon: <UsersRound /> },
+  { id: "feedback", label: "Feedback", tone: "green", icon: <Star /> },
+  { id: "reports", label: "Reports", tone: "slate", icon: <BarChart3 /> },
 ];
-
-const field =
-  "rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2.5 py-1.5 text-sm text-[var(--brand-deep)]";
-const btn =
-  "rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50";
-const btnOutline =
-  "rounded-lg border border-[rgba(32,48,80,0.2)] bg-white px-3 py-1.5 text-sm text-[var(--brand-deep)]";
 
 function classLabel(
   masters: MastersState,
@@ -76,6 +101,25 @@ function studentLabel(
   return `${st.fullName} · ${classLabel(masters, st.classId, st.sectionId)}`;
 }
 
+function bookingStatusBadge(status: string) {
+  switch (status) {
+    case "booked":
+      return <Badge>Booked</Badge>;
+    case "completed":
+      return (
+        <Badge variant="secondary" className="bg-[var(--ok)]/15 text-[var(--ok)]">
+          Completed
+        </Badge>
+      );
+    case "no_show":
+      return <Badge variant="outline">No-show</Badge>;
+    case "cancelled":
+      return <Badge variant="destructive">Cancelled</Badge>;
+    default:
+      return <Badge variant="outline">{status}</Badge>;
+  }
+}
+
 export function PtmWorkspace() {
   const session = useDemoSession();
   const ay = session.academicYearCode || DEFAULT_AY;
@@ -95,7 +139,6 @@ export function PtmWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [reportFormat, setReportFormat] = useState<"excel" | "pdf">("excel");
 
-  // Create event
   const [evName, setEvName] = useState("");
   const [evDate, setEvDate] = useState(() =>
     new Date().toISOString().slice(0, 10),
@@ -105,12 +148,10 @@ export function PtmWorkspace() {
   const [evNote, setEvNote] = useState("");
   const [evClassIds, setEvClassIds] = useState<string[]>([]);
 
-  // Slots
   const [slotTeacherId, setSlotTeacherId] = useState("");
   const [slotStarts, setSlotStarts] = useState("10:00,10:15,10:30");
   const [slotRoom, setSlotRoom] = useState("Room 12");
 
-  // Feedback
   const [fbBookingId, setFbBookingId] = useState("");
   const [fbStrengths, setFbStrengths] = useState("");
   const [fbAreas, setFbAreas] = useState("");
@@ -264,259 +305,290 @@ export function PtmWorkspace() {
 
   if (!state || !masters || !sis) {
     return (
-      <div className="px-4 py-8 text-sm text-[var(--muted)]">Loading PTM…</div>
+      <div className="flex items-center justify-center px-4 py-12 text-sm text-muted-foreground">
+        Loading PTM…
+      </div>
     );
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-4 pb-10 pt-4">
-      <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold text-[var(--brand-deep)]">
-            <UsersRound className="h-7 w-7" aria-hidden />
-            PTM scheduler
-          </h1>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            Parent–teacher meetings · slots · bookings · feedback (§19b)
-          </p>
-        </div>
-        <Link href="/reports?module=ptm" className={btnOutline}>
+    <ErpWorkspaceShell
+      title="PTM scheduler"
+      subtitle="Parent–teacher meetings · slots · bookings · feedback"
+      icon={<UsersRound className="size-6" aria-hidden />}
+      actions={
+        <Link
+          href="/reports?module=ptm"
+          className={cn(buttonVariants({ variant: "outline" }))}
+        >
+          <BarChart3 className="size-4" />
           Reports Center
         </Link>
-      </header>
-
-      {error ? (
-        <p className="mb-3 rounded-lg bg-[rgba(180,35,24,0.08)] px-3 py-2 text-sm text-[#b42318]">
-          {error}
-        </p>
-      ) : null}
-      {notice ? (
-        <p className="mb-3 rounded-lg bg-[rgba(15,122,76,0.1)] px-3 py-2 text-sm text-[#0f7a4c]">
-          {notice}
-        </p>
-      ) : null}
-
-      {activeEvents.length > 0 ? (
-        <label className="mb-3 block text-xs text-[var(--muted)]">
-          Active event
-          <select
-            className={`${field} mt-1 block min-w-[14rem]`}
-            value={eventId}
-            onChange={(e) => setEventId(e.target.value)}
-          >
-            {activeEvents.map((e) => (
-              <option key={e.id} value={e.id}>
-                {e.name} · {e.date}
-              </option>
-            ))}
-          </select>
-        </label>
-      ) : null}
-
-      <ModuleTabs items={TABS} value={tab} onChange={(id) => setTab(id as PtmTab)} />
-
-      {tab === "dashboard" ? (
-        <ModuleDashboardHost
-          moduleId="ptm"
-          onNavigateTab={(t) => setTab(t as PtmTab)}
-        />
-      ) : null}
-
-      {tab === "events" ? (
-        <section className="mt-4 space-y-4">
-          <ul className="space-y-2">
-            {state.events.map((e) => (
-              <li
-                key={e.id}
-                className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3"
+      }
+      error={error}
+      notice={notice}
+      toolbar={
+        activeEvents.length > 0 ? (
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="grid gap-1.5">
+              <Label htmlFor="ptm-active-event">Active event</Label>
+              <Select
+                value={eventId}
+                onValueChange={(v) => setEventId(v ?? "")}
               >
-                <p className="text-sm font-semibold text-[var(--brand-deep)]">
-                  {e.name}
-                  {!e.isActive ? (
-                    <span className="ml-2 text-xs font-normal text-[var(--muted)]">
-                      (inactive)
-                    </span>
-                  ) : null}
-                </p>
-                <p className="text-xs text-[var(--muted)]">
-                  {e.date}
-                  {e.endDate !== e.date ? ` → ${e.endDate}` : ""} ·{" "}
-                  {modeLabel(e.mode)} ·{" "}
-                  {e.classIds.length
-                    ? e.classIds
-                        .map((id) => classOptions.find((c) => c.id === id)?.name)
-                        .filter(Boolean)
-                        .join(", ")
-                    : "All classes"}
-                </p>
-                {e.note ? (
-                  <p className="mt-1 text-sm text-[var(--brand-deep)]">{e.note}</p>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-
-          <div className="max-w-xl space-y-3 border-t border-[rgba(32,48,80,0.08)] pt-4">
-            <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
-              New PTM event
-            </h2>
-            <label className="block text-xs text-[var(--muted)]">
-              Name
-              <input
-                className={`${field} mt-1 w-full`}
-                value={evName}
-                onChange={(e) => setEvName(e.target.value)}
-                placeholder="Term PTM"
-              />
-            </label>
-            <div className="flex flex-wrap gap-3">
-              <label className="text-xs text-[var(--muted)]">
-                Date
-                <input
-                  type="date"
-                  className={`${field} mt-1 block`}
-                  value={evDate}
-                  onChange={(e) => setEvDate(e.target.value)}
-                />
-              </label>
-              <label className="text-xs text-[var(--muted)]">
-                End date
-                <input
-                  type="date"
-                  className={`${field} mt-1 block`}
-                  value={evEndDate}
-                  onChange={(e) => setEvEndDate(e.target.value)}
-                />
-              </label>
-              <label className="text-xs text-[var(--muted)]">
-                Mode
-                <select
-                  className={`${field} mt-1 block`}
-                  value={evMode}
-                  onChange={(e) => setEvMode(e.target.value as PtmMode)}
-                >
-                  <option value="in_person">In person</option>
-                  <option value="video">Video</option>
-                  <option value="phone">Phone</option>
-                </select>
-              </label>
+                <SelectTrigger id="ptm-active-event" className="min-w-56">
+                  <SelectValue placeholder="Select event" />
+                </SelectTrigger>
+                <SelectContent>
+                  {activeEvents.map((e) => (
+                    <SelectItem key={e.id} value={e.id}>
+                      {e.name} · {e.date}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-            <div>
-              <p className="text-xs text-[var(--muted)]">Classes</p>
-              <div className="mt-1 flex flex-wrap gap-2">
-                {classOptions.map((c) => (
-                  <label
-                    key={c.id}
-                    className="flex items-center gap-1.5 text-xs text-[var(--brand-deep)]"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={evClassIds.includes(c.id)}
-                      onChange={() => toggleClass(c.id)}
-                    />
-                    {c.name}
-                  </label>
-                ))}
-              </div>
-            </div>
-            <label className="block text-xs text-[var(--muted)]">
-              Note
-              <textarea
-                className={`${field} mt-1 w-full`}
-                rows={2}
-                value={evNote}
-                onChange={(e) => setEvNote(e.target.value)}
-              />
-            </label>
-            <button type="button" className={btn} onClick={createEvent}>
-              Create event
-            </button>
+            {selectedEvent ? (
+              <Badge variant="secondary" className="mb-1">
+                {modeLabel(selectedEvent.mode)}
+              </Badge>
+            ) : null}
           </div>
-        </section>
-      ) : null}
+        ) : null
+      }
+    >
+      <WorkspaceTabs
+        value={tab}
+        onValueChange={(value) => setTab(value as PtmTab)}
+        items={TAB_ITEMS}
+        aria-label="PTM sections"
+      >
 
-      {tab === "slots" ? (
-        <section className="mt-4 space-y-4">
+        <TabsContent value="dashboard">
+          <ModuleDashboardHost
+            moduleId="ptm"
+            onNavigateTab={(t) => setTab(t as PtmTab)}
+          />
+        </TabsContent>
+
+        <TabsContent value="events" className="space-y-6">
+          <div className="grid gap-3">
+            {state.events.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No events yet.</p>
+            ) : (
+              state.events.map((e) => (
+                <Card key={e.id} size="sm">
+                  <CardHeader>
+                    <CardTitle className="flex flex-wrap items-center gap-2">
+                      {e.name}
+                      {!e.isActive ? (
+                        <Badge variant="outline">Inactive</Badge>
+                      ) : (
+                        <Badge variant="secondary">{modeLabel(e.mode)}</Badge>
+                      )}
+                    </CardTitle>
+                    <CardDescription>
+                      <CalendarDays className="mr-1 inline size-3.5" />
+                      {e.date}
+                      {e.endDate !== e.date ? ` → ${e.endDate}` : ""}
+                      {" · "}
+                      {e.classIds.length
+                        ? e.classIds
+                            .map(
+                              (id) =>
+                                classOptions.find((c) => c.id === id)?.name,
+                            )
+                            .filter(Boolean)
+                            .join(", ")
+                        : "All classes"}
+                    </CardDescription>
+                  </CardHeader>
+                  {e.note ? (
+                    <CardContent className="pt-0 text-sm">{e.note}</CardContent>
+                  ) : null}
+                </Card>
+              ))
+            )}
+          </div>
+
+          <Separator />
+
+          <Card>
+            <CardHeader>
+              <CardTitle>New PTM event</CardTitle>
+              <CardDescription>
+                Schedule a parent–teacher meeting for selected classes.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid max-w-xl gap-4">
+              <div className="grid gap-1.5">
+                <Label htmlFor="ev-name">Name</Label>
+                <Input
+                  id="ev-name"
+                  value={evName}
+                  onChange={(e) => setEvName(e.target.value)}
+                  placeholder="Term PTM"
+                />
+              </div>
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="ev-date">Date</Label>
+                  <Input
+                    id="ev-date"
+                    type="date"
+                    value={evDate}
+                    onChange={(e) => setEvDate(e.target.value)}
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="ev-end">End date</Label>
+                  <Input
+                    id="ev-end"
+                    type="date"
+                    value={evEndDate}
+                    onChange={(e) => setEvEndDate(e.target.value)}
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="ev-mode">Mode</Label>
+                  <Select
+                    value={evMode}
+                    onValueChange={(v) => setEvMode(v as PtmMode)}
+                  >
+                    <SelectTrigger id="ev-mode" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="in_person">In person</SelectItem>
+                      <SelectItem value="video">Video</SelectItem>
+                      <SelectItem value="phone">Phone</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid gap-2">
+                <Label>Classes</Label>
+                <div className="flex flex-wrap gap-3">
+                  {classOptions.map((c) => (
+                    <label
+                      key={c.id}
+                      className="flex cursor-pointer items-center gap-2 text-sm"
+                    >
+                      <Checkbox
+                        checked={evClassIds.includes(c.id)}
+                        onCheckedChange={() => toggleClass(c.id)}
+                      />
+                      {c.name}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="ev-note">Note</Label>
+                <Textarea
+                  id="ev-note"
+                  rows={2}
+                  value={evNote}
+                  onChange={(e) => setEvNote(e.target.value)}
+                />
+              </div>
+            </CardContent>
+            <CardFooter>
+              <Button type="button" onClick={createEvent}>
+                Create event
+              </Button>
+            </CardFooter>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="slots" className="space-y-6">
           {!eventId ? (
-            <p className="text-sm text-[var(--muted)]">
-              Create an event first.
-            </p>
+            <p className="text-sm text-muted-foreground">Create an event first.</p>
           ) : (
             <>
-              <ul className="space-y-1.5">
+              <div className="grid gap-2">
                 {eventSlots.length === 0 ? (
-                  <p className="text-sm text-[var(--muted)]">No slots yet.</p>
+                  <p className="text-sm text-muted-foreground">No slots yet.</p>
                 ) : (
                   eventSlots.map((s) => {
                     const booked = slotBookedCount(state, s.id);
                     return (
-                      <li
-                        key={s.id}
-                        className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.08)] bg-white px-3 py-2"
-                      >
-                        <span className="text-sm text-[var(--brand-deep)]">
-                          {s.teacherName} · {s.startAt}–{s.endAt}
-                          {s.roomOrLink ? ` · ${s.roomOrLink}` : ""}
-                        </span>
-                        <span className="text-xs text-[var(--muted)]">
-                          {booked}/{s.capacity} booked
-                        </span>
-                      </li>
+                      <Card key={s.id} size="sm">
+                        <CardContent className="flex flex-wrap items-center justify-between gap-2 py-3">
+                          <span className="text-sm font-medium">
+                            {s.teacherName} · {s.startAt}–{s.endAt}
+                            {s.roomOrLink ? ` · ${s.roomOrLink}` : ""}
+                          </span>
+                          <Badge variant="outline">
+                            {booked}/{s.capacity} booked
+                          </Badge>
+                        </CardContent>
+                      </Card>
                     );
                   })
                 )}
-              </ul>
-
-              <div className="max-w-xl space-y-3 border-t border-[rgba(32,48,80,0.08)] pt-4">
-                <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
-                  Add slots
-                </h2>
-                <label className="block text-xs text-[var(--muted)]">
-                  Teacher
-                  <select
-                    className={`${field} mt-1 w-full`}
-                    value={slotTeacherId}
-                    onChange={(e) => setSlotTeacherId(e.target.value)}
-                  >
-                    {staffOptions.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.fullName}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="block text-xs text-[var(--muted)]">
-                  Start times (comma-separated)
-                  <input
-                    className={`${field} mt-1 w-full`}
-                    value={slotStarts}
-                    onChange={(e) => setSlotStarts(e.target.value)}
-                    placeholder="10:00,10:15,10:30"
-                  />
-                </label>
-                <label className="block text-xs text-[var(--muted)]">
-                  Room / link
-                  <input
-                    className={`${field} mt-1 w-full`}
-                    value={slotRoom}
-                    onChange={(e) => setSlotRoom(e.target.value)}
-                  />
-                </label>
-                <button type="button" className={btn} onClick={addSlots}>
-                  Add slots
-                </button>
               </div>
+
+              <Separator />
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Add slots</CardTitle>
+                  <CardDescription>
+                    Comma-separated start times for the selected teacher.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="grid max-w-xl gap-4">
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="slot-teacher">Teacher</Label>
+                    <Select
+                      value={slotTeacherId}
+                      onValueChange={(v) => setSlotTeacherId(v ?? "")}
+                    >
+                      <SelectTrigger id="slot-teacher" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {staffOptions.map((s) => (
+                          <SelectItem key={s.id} value={s.id}>
+                            {s.fullName}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="slot-starts">Start times</Label>
+                    <Input
+                      id="slot-starts"
+                      value={slotStarts}
+                      onChange={(e) => setSlotStarts(e.target.value)}
+                      placeholder="10:00,10:15,10:30"
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="slot-room">Room / link</Label>
+                    <Input
+                      id="slot-room"
+                      value={slotRoom}
+                      onChange={(e) => setSlotRoom(e.target.value)}
+                    />
+                  </div>
+                </CardContent>
+                <CardFooter>
+                  <Button type="button" onClick={addSlots}>
+                    Add slots
+                  </Button>
+                </CardFooter>
+              </Card>
             </>
           )}
-        </section>
-      ) : null}
+        </TabsContent>
 
-      {tab === "bookings" ? (
-        <section className="mt-4 space-y-3">
+        <TabsContent value="bookings" className="space-y-4">
           <div className="flex flex-wrap gap-2">
-            <button
+            <Button
               type="button"
-              className={btn}
               disabled={!eventBookings.some((b) => b.status === "booked")}
               onClick={() => {
                 if (!state || !selectedEvent || !sis) return;
@@ -544,263 +616,284 @@ export function PtmWorkspace() {
                 else flash(`Opened WhatsApp reminder for ${n} booking(s)`);
               }}
             >
+              <MessageSquare className="size-4" />
               Remind all booked
-            </button>
+            </Button>
           </div>
+
           {eventBookings.length === 0 ? (
-            <p className="text-sm text-[var(--muted)]">No bookings yet.</p>
+            <p className="text-sm text-muted-foreground">No bookings yet.</p>
           ) : (
             eventBookings.map((b) => {
               const slot = state.slots.find((s) => s.id === b.slotId);
               return (
-                <div
-                  key={b.id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3"
-                >
-                  <div>
-                    <p className="text-sm font-medium text-[var(--brand-deep)]">
-                      {studentLabel(masters, sis, b.studentId)}
-                    </p>
-                    <p className="text-xs text-[var(--muted)]">
-                      {b.parentName} ·{" "}
-                      {slot
-                        ? `${slot.startAt}–${slot.endAt} · ${slot.teacherName}`
-                        : "—"}{" "}
-                      · {b.status}
-                      {b.whatsappConfirmedAt ? " · WA ✓" : ""}
-                      {b.whatsappRemindedAt ? " · reminded" : ""}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {b.status === "booked" ? (
-                      <>
-                        <button
-                          type="button"
-                          className={btnOutline}
-                          onClick={() => {
-                            if (!selectedEvent || !sis || !slot) return;
-                            const mobile = ptmBookingMobile(b, sis);
-                            if (mobile.replace(/\D/g, "").length < 10) {
-                              setError("No WhatsApp mobile on household");
-                              return;
-                            }
-                            const stu = sis.students.find(
-                              (s) => s.id === b.studentId,
-                            );
-                            const msg = composeWhatsAppPtmConfirm({
-                              childName: stu?.fullName || b.parentName,
-                              eventName: selectedEvent.name,
-                              date: selectedEvent.date,
-                              startAt: slot.startAt,
-                              teacherName: slot.teacherName,
-                              roomOrLink: slot.roomOrLink,
-                            });
-                            openWaMe(mobile, msg);
-                            markPtmWhatsApp(b.id, "confirmed");
-                            refresh();
-                            flash("WhatsApp confirm opened");
-                          }}
-                        >
-                          Confirm WA
-                        </button>
-                        <button
-                          type="button"
-                          className={btnOutline}
-                          onClick={() => {
-                            if (!selectedEvent || !sis || !slot) return;
-                            const mobile = ptmBookingMobile(b, sis);
-                            if (mobile.replace(/\D/g, "").length < 10) {
-                              setError("No WhatsApp mobile on household");
-                              return;
-                            }
-                            const stu = sis.students.find(
-                              (s) => s.id === b.studentId,
-                            );
-                            const msg = composeWhatsAppPtmReminder({
-                              childName: stu?.fullName || b.parentName,
-                              eventName: selectedEvent.name,
-                              date: selectedEvent.date,
-                              startAt: slot.startAt,
-                              teacherName: slot.teacherName,
-                              roomOrLink: slot.roomOrLink,
-                            });
-                            openWaMe(mobile, msg);
-                            markPtmWhatsApp(b.id, "reminded");
-                            refresh();
-                            flash("WhatsApp reminder opened");
-                          }}
-                        >
-                          Remind
-                        </button>
-                        <button
-                          type="button"
-                          className={btnOutline}
-                          onClick={() => {
-                            setPtmBookingStatus(b.id, "completed");
-                            refresh();
-                            flash("Marked completed");
-                          }}
-                        >
-                          Complete
-                        </button>
-                        <button
-                          type="button"
-                          className={btnOutline}
-                          onClick={() => {
-                            setPtmBookingStatus(b.id, "no_show");
-                            refresh();
-                            flash("Marked no-show");
-                          }}
-                        >
-                          No-show
-                        </button>
-                        <button
-                          type="button"
-                          className="text-xs text-[#b42318] underline"
-                          onClick={() => {
-                            cancelPtmBooking(b.id);
-                            refresh();
-                            flash("Cancelled");
-                          }}
-                        >
-                          Cancel
-                        </button>
-                      </>
-                    ) : null}
-                  </div>
-                </div>
+                <Card key={b.id}>
+                  <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0">
+                    <div className="space-y-1">
+                      <CardTitle className="text-base">
+                        {studentLabel(masters, sis, b.studentId)}
+                      </CardTitle>
+                      <CardDescription>
+                        {b.parentName}
+                        {slot
+                          ? ` · ${slot.startAt}–${slot.endAt} · ${slot.teacherName}`
+                          : ""}
+                        {b.whatsappConfirmedAt ? " · WA confirmed" : ""}
+                        {b.whatsappRemindedAt ? " · reminded" : ""}
+                      </CardDescription>
+                    </div>
+                    {bookingStatusBadge(b.status)}
+                  </CardHeader>
+                  {b.status === "booked" ? (
+                    <CardFooter className="flex flex-wrap gap-2 border-t-0 pt-0">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          if (!selectedEvent || !sis || !slot) return;
+                          const mobile = ptmBookingMobile(b, sis);
+                          if (mobile.replace(/\D/g, "").length < 10) {
+                            setError("No WhatsApp mobile on household");
+                            return;
+                          }
+                          const stu = sis.students.find(
+                            (s) => s.id === b.studentId,
+                          );
+                          const msg = composeWhatsAppPtmConfirm({
+                            childName: stu?.fullName || b.parentName,
+                            eventName: selectedEvent.name,
+                            date: selectedEvent.date,
+                            startAt: slot.startAt,
+                            teacherName: slot.teacherName,
+                            roomOrLink: slot.roomOrLink,
+                          });
+                          openWaMe(mobile, msg);
+                          markPtmWhatsApp(b.id, "confirmed");
+                          refresh();
+                          flash("WhatsApp confirm opened");
+                        }}
+                      >
+                        Confirm WA
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          if (!selectedEvent || !sis || !slot) return;
+                          const mobile = ptmBookingMobile(b, sis);
+                          if (mobile.replace(/\D/g, "").length < 10) {
+                            setError("No WhatsApp mobile on household");
+                            return;
+                          }
+                          const stu = sis.students.find(
+                            (s) => s.id === b.studentId,
+                          );
+                          const msg = composeWhatsAppPtmReminder({
+                            childName: stu?.fullName || b.parentName,
+                            eventName: selectedEvent.name,
+                            date: selectedEvent.date,
+                            startAt: slot.startAt,
+                            teacherName: slot.teacherName,
+                            roomOrLink: slot.roomOrLink,
+                          });
+                          openWaMe(mobile, msg);
+                          markPtmWhatsApp(b.id, "reminded");
+                          refresh();
+                          flash("WhatsApp reminder opened");
+                        }}
+                      >
+                        Remind
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => {
+                          setPtmBookingStatus(b.id, "completed");
+                          refresh();
+                          flash("Marked completed");
+                        }}
+                      >
+                        Complete
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setPtmBookingStatus(b.id, "no_show");
+                          refresh();
+                          flash("Marked no-show");
+                        }}
+                      >
+                        No-show
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => {
+                          cancelPtmBooking(b.id);
+                          refresh();
+                          flash("Cancelled");
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    </CardFooter>
+                  ) : null}
+                </Card>
               );
             })
           )}
-        </section>
-      ) : null}
+        </TabsContent>
 
-      {tab === "feedback" ? (
-        <section className="mt-4 max-w-xl space-y-3">
-          <label className="block text-xs text-[var(--muted)]">
-            Booking (completed or booked)
-            <select
-              className={`${field} mt-1 w-full`}
-              value={fbBookingId}
-              onChange={(e) => setFbBookingId(e.target.value)}
-            >
-              <option value="">Select…</option>
-              {eventBookings
-                .filter((b) => b.status === "booked" || b.status === "completed")
-                .map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {studentLabel(masters, sis, b.studentId)} · {b.status}
-                  </option>
-                ))}
-            </select>
-          </label>
-          <label className="block text-xs text-[var(--muted)]">
-            Strengths
-            <textarea
-              className={`${field} mt-1 w-full`}
-              rows={2}
-              value={fbStrengths}
-              onChange={(e) => setFbStrengths(e.target.value)}
-            />
-          </label>
-          <label className="block text-xs text-[var(--muted)]">
-            Areas to improve
-            <textarea
-              className={`${field} mt-1 w-full`}
-              rows={2}
-              value={fbAreas}
-              onChange={(e) => setFbAreas(e.target.value)}
-            />
-          </label>
-          <label className="block text-xs text-[var(--muted)]">
-            Follow-up
-            <textarea
-              className={`${field} mt-1 w-full`}
-              rows={2}
-              value={fbFollowUp}
-              onChange={(e) => setFbFollowUp(e.target.value)}
-            />
-          </label>
-          <button type="button" className={btn} onClick={saveFeedback}>
-            Save feedback
-          </button>
+        <TabsContent value="feedback" className="space-y-6">
+          <Card className="max-w-xl">
+            <CardHeader>
+              <CardTitle>Meeting feedback</CardTitle>
+              <CardDescription>
+                Record strengths, areas to improve, and follow-up actions.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-4">
+              <div className="grid gap-1.5">
+                <Label htmlFor="fb-booking">Booking</Label>
+                <Select
+                  value={fbBookingId}
+                  onValueChange={(v) => setFbBookingId(v ?? "")}
+                >
+                  <SelectTrigger id="fb-booking" className="w-full">
+                    <SelectValue placeholder="Select booking…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {eventBookings
+                      .filter(
+                        (b) =>
+                          b.status === "booked" || b.status === "completed",
+                      )
+                      .map((b) => (
+                        <SelectItem key={b.id} value={b.id}>
+                          {studentLabel(masters, sis, b.studentId)} · {b.status}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="fb-strengths">Strengths</Label>
+                <Textarea
+                  id="fb-strengths"
+                  rows={2}
+                  value={fbStrengths}
+                  onChange={(e) => setFbStrengths(e.target.value)}
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="fb-areas">Areas to improve</Label>
+                <Textarea
+                  id="fb-areas"
+                  rows={2}
+                  value={fbAreas}
+                  onChange={(e) => setFbAreas(e.target.value)}
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="fb-follow">Follow-up</Label>
+                <Textarea
+                  id="fb-follow"
+                  rows={2}
+                  value={fbFollowUp}
+                  onChange={(e) => setFbFollowUp(e.target.value)}
+                />
+              </div>
+            </CardContent>
+            <CardFooter>
+              <Button type="button" onClick={saveFeedback}>
+                Save feedback
+              </Button>
+            </CardFooter>
+          </Card>
 
           {state.feedback.length > 0 ? (
-            <ul className="space-y-2 border-t border-[rgba(32,48,80,0.08)] pt-4">
+            <div className="grid max-w-xl gap-2">
+              <h2 className="text-sm font-semibold text-primary">
+                Recent feedback
+              </h2>
               {state.feedback.slice(0, 10).map((f) => (
-                <li
-                  key={f.id}
-                  className="rounded-lg border border-[rgba(32,48,80,0.08)] px-3 py-2 text-sm"
-                >
-                  <p className="font-medium text-[var(--brand-deep)]">
-                    {studentLabel(masters, sis, f.studentId)}
-                  </p>
-                  <p className="text-xs text-[var(--muted)]">
-                    {f.createdBy} · {f.createdAt.slice(0, 10)}
-                  </p>
-                  {f.strengths ? (
-                    <p className="mt-1 text-xs">+ {f.strengths}</p>
-                  ) : null}
-                  {f.areas ? (
-                    <p className="text-xs">− {f.areas}</p>
-                  ) : null}
-                </li>
+                <Card key={f.id} size="sm">
+                  <CardHeader>
+                    <CardTitle className="text-sm">
+                      {studentLabel(masters, sis, f.studentId)}
+                    </CardTitle>
+                    <CardDescription>
+                      {f.createdBy} · {f.createdAt.slice(0, 10)}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-1 pt-0 text-sm">
+                    {f.strengths ? <p>+ {f.strengths}</p> : null}
+                    {f.areas ? <p>− {f.areas}</p> : null}
+                    {f.followUp ? (
+                      <p className="text-muted-foreground">{f.followUp}</p>
+                    ) : null}
+                  </CardContent>
+                </Card>
               ))}
-            </ul>
+            </div>
           ) : null}
-        </section>
-      ) : null}
+        </TabsContent>
 
-      {tab === "reports" ? (
-        <section className="mt-4 space-y-3">
-          <label className="text-xs text-[var(--muted)]">
-            Format
-            <select
-              className={`${field} mt-1 block`}
+        <TabsContent value="reports" className="space-y-4">
+          <div className="grid max-w-xs gap-1.5">
+            <Label htmlFor="report-format">Export format</Label>
+            <Select
               value={reportFormat}
-              onChange={(e) =>
-                setReportFormat(e.target.value as "excel" | "pdf")
-              }
+              onValueChange={(v) => setReportFormat(v as "excel" | "pdf")}
             >
-              <option value="excel">Excel</option>
-              <option value="pdf">PDF</option>
-            </select>
-          </label>
-          <ul className="space-y-1.5">
+              <SelectTrigger id="report-format" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="excel">Excel</SelectItem>
+                <SelectItem value="pdf">PDF</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="grid gap-2">
             {PTM_REPORTS.map((r) => (
-              <li
-                key={r.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.08)] bg-white px-3 py-2"
-              >
-                <div>
-                  <p className="text-sm font-medium text-[var(--brand-deep)]">
-                    {r.label}
-                  </p>
-                  {r.hint ? (
-                    <p className="text-xs text-[var(--muted)]">{r.hint}</p>
-                  ) : null}
-                </div>
-                <button
-                  type="button"
-                  className={btn}
-                  onClick={() => {
-                    const res = runPtmReport(r.id as PtmReportId, {
-                      eventId,
-                      format: reportFormat,
-                      ptm: state,
-                      masters,
-                    });
-                    if (!res.ok) setError(res.error);
-                    else flash(res.message);
-                  }}
-                >
-                  Export
-                </button>
-              </li>
+              <Card key={r.id} size="sm">
+                <CardContent className="flex flex-wrap items-center justify-between gap-3 py-3">
+                  <div>
+                    <p className="text-sm font-medium">{r.label}</p>
+                    {r.hint ? (
+                      <p className="text-xs text-muted-foreground">{r.hint}</p>
+                    ) : null}
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => {
+                      const res = runPtmReport(r.id as PtmReportId, {
+                        eventId,
+                        format: reportFormat,
+                        ptm: state,
+                        masters,
+                      });
+                      if (!res.ok) setError(res.error);
+                      else flash(res.message);
+                    }}
+                  >
+                    Export
+                  </Button>
+                </CardContent>
+              </Card>
             ))}
-          </ul>
-        </section>
-      ) : null}
-    </div>
+          </div>
+        </TabsContent>
+      </WorkspaceTabs>
+    </ErpWorkspaceShell>
   );
 }

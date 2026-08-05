@@ -31,14 +31,15 @@ export async function POST(request: Request) {
     );
   }
   const user = DEMO_USERS[persona];
+  const email = body.email?.trim() || user.email;
+  const ownerRole = superAdminRoleCode(email);
   const session: DemoSession = {
     persona,
     fullName: body.fullName?.trim() || user.fullName,
     roleCode:
-      superAdminRoleCode(body.email?.trim() || user.email) ||
-      body.roleCode?.trim() ||
-      user.roleCode,
-    email: body.email?.trim() || user.email,
+      ownerRole ||
+      (body.staffId && body.roleCode?.trim() ? body.roleCode.trim() : user.roleCode),
+    email,
     staffId: body.staffId?.trim() || undefined,
     householdId: body.householdId?.trim() || undefined,
     tenantSlug: TENANT.slug,

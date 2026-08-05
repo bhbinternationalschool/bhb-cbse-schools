@@ -15,6 +15,13 @@ import {
 import { mergeDbDeskIntoMastersState } from "@/lib/mastersNormalizedMerge";
 import { mastersReadFromDbEnabled } from "@/lib/mastersDbConfig";
 import { deskSkipMirrorBlobSliceClient } from "@/lib/deskCutover";
+import {
+  isDeskHydrated,
+  markDeskHydrated,
+  resetDeskHydrated,
+} from "@/lib/deskHydrateGuard";
+
+const MODULE = "masters";
 
 const STORAGE_KEY = "bhb_masters_v5";
 
@@ -71,6 +78,9 @@ export async function pushMastersRemoteServer(
 }
 
 export async function ensureMastersHydrated(): Promise<boolean> {
+  if (isDeskHydrated(MODULE)) return false;
+  markDeskHydrated(MODULE);
+
   const readFromDb = mastersReadFromDbEnabled();
   let mirrorChanged = false;
 
@@ -88,22 +98,29 @@ export async function ensureMastersHydrated(): Promise<boolean> {
   }
 
   let normChanged = false;
+  const localBefore = loadMasters();
   const { bundle, changed } = await hydrateMastersDeskFromDb(readFromDb);
   if (
     changed &&
     (bundle.classes.length > 0 ||
       bundle.feeHeads.length > 0 ||
       readFromDb ||
-      mastersMirrorIsEmpty(loadMasters()))
+      mastersMirrorIsEmpty(localBefore))
   ) {
     writeMastersLocalRaw(
-      mergeDbDeskIntoMastersState(loadMasters(), bundle, {
+      mergeDbDeskIntoMastersState(localBefore, bundle, {
         preferDb: readFromDb,
       }),
     );
     normChanged = true;
+    // DB-read mode: hydrate is pull-only — edits sync via saveMasters().
+    if (!readFromDb) {
+      scheduleMastersSync(loadMasters());
+    }
   }
-
-  if (normChanged) scheduleMastersSync(loadMasters());
   return mirrorChanged || normChanged;
+}
+
+export function resetMastersPersistenceCache() {
+  resetDeskHydrated(MODULE);
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, Fragment } from "react";
 import Link from "next/link";
+import { Wallet } from "lucide-react";
 import { loadMasters, currentAcademicYearCode, type MastersState } from "@/lib/masters";
 import {
   loadSalarySetup,
@@ -49,11 +50,20 @@ import { outstandingForStaff } from "@/lib/staffAdvance";
 import {
   canApprovePayroll,
   canManagePayroll,
+  canManageStaffAdvances,
+  canViewStaffAdvancesDesk,
   resolveSessionStaff,
 } from "@/lib/staffResolve";
 import { loadIncrementState } from "@/lib/salaryIncrement";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { JuneHoldPanel } from "@/components/payroll/JuneHoldPanel";
 import { StatutoryRemitPanel } from "@/components/payroll/StatutoryRemitPanel";
@@ -159,6 +169,16 @@ export function PayrollWorkspace() {
   const allowed = useMemo(() => {
     if (!masters) return false;
     return canManagePayroll(session, masters);
+  }, [masters, session]);
+
+  const advancesDesk = useMemo(() => {
+    if (!masters) return false;
+    return canViewStaffAdvancesDesk(session, masters);
+  }, [masters, session]);
+
+  const advancesEdit = useMemo(() => {
+    if (!masters) return false;
+    return canManageStaffAdvances(session, masters);
   }, [masters, session]);
 
   const isApprover = useMemo(() => {
@@ -529,57 +549,66 @@ export function PayrollWorkspace() {
           { id: "mine", label: "My payslip", tone: "violet" },
           { id: "myAdvances", label: "My advances", tone: "teal" },
         ]
-      : [
-          { id: "mine", label: "My payslip", tone: "violet" },
-          { id: "myAdvances", label: "My advances", tone: "teal" },
-        ];
+      : advancesDesk
+        ? [
+            { id: "advances", label: "Staff advances", tone: "teal" },
+            { id: "myAdvances", label: "My advances", tone: "teal" },
+          ]
+        : [
+            { id: "mine", label: "My payslip", tone: "violet" },
+            { id: "myAdvances", label: "My advances", tone: "teal" },
+          ];
 
   useEffect(() => {
-    if (!allowed && tab !== "mine" && tab !== "myAdvances") setTab("mine");
-  }, [allowed, tab]);
+    if (allowed) return;
+    if (advancesDesk && tab !== "advances" && tab !== "myAdvances") {
+      setTab("advances");
+      return;
+    }
+    if (!advancesDesk && tab !== "mine" && tab !== "myAdvances") setTab("mine");
+  }, [allowed, advancesDesk, tab]);
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="font-display text-2xl font-bold text-[var(--brand-deep)]">
-            {allowed ? "Payroll" : "My salary"}
-          </h1>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            {allowed ? (
-              <>
-                Salary run from attendance, leave & holiday policy · Draft until
-                publish (accounts untouched) · Admin / Principal ·{" "}
-                <Link
-                  href="/masters"
-                  className="font-semibold text-[var(--brand-deep)] underline-offset-2 hover:underline"
-                >
-                  Masters → Salary setup
-                </Link>
-              </>
-            ) : (
-              <>
-                View and print your payslips · Check advance balance and salary
-                recoveries
-              </>
-            )}
-          </p>
-        </div>
-        {pendingCount > 0 && allowed ? (
+    <ErpWorkspaceShell
+      title={
+        allowed ? "Payroll" : advancesDesk ? "Staff advances" : "My salary"
+      }
+      subtitle={
+        allowed ? (
+          <>
+            Salary run from attendance, leave & holiday policy · Draft until
+            publish (accounts untouched) · Admin / Principal ·{" "}
+            <Link
+              href="/masters"
+              className="font-semibold text-[var(--brand-deep)] underline-offset-2 hover:underline"
+            >
+              Masters → Salary setup
+            </Link>
+          </>
+        ) : advancesDesk ? (
+          <>
+            Record staff salary advances (cash / UPI / bank) — no access to
+            salary runs, bank file, or payroll publish.
+          </>
+        ) : (
+          <>
+            View and print your payslips · Check advance balance and salary
+            recoveries
+          </>
+        )
+      }
+      icon={<Wallet className="size-6" aria-hidden />}
+      notice={notice}
+      error={error}
+      actions={
+        pendingCount > 0 && allowed ? (
           <div className="rounded-lg border border-[rgba(197,160,40,0.45)] bg-[rgba(197,160,40,0.12)] px-3 py-2 text-sm font-semibold text-[var(--brand-deep)]">
             {pendingCount} item(s) pending approval
           </div>
-        ) : null}
-      </div>
-
-      {notice ? (
-        <p className="text-sm font-medium text-[var(--brand-deep)]">{notice}</p>
-      ) : null}
-      {error ? (
-        <p className="text-sm font-medium text-[#b42318]">{error}</p>
-      ) : null}
-
-      {!allowed ? (
+        ) : null
+      }
+    >
+      {!allowed && !advancesDesk ? (
         <p className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3 text-sm text-[var(--muted)]">
           Staff self-service — payslips and advances for{" "}
           <strong className="text-[var(--brand-deep)]">
@@ -810,7 +839,9 @@ export function PayrollWorkspace() {
         <IncrementPanel mode="full" />
       ) : null}
 
-      {tab === "advances" && allowed ? <AdvancesPanel /> : null}
+      {tab === "advances" && advancesDesk ? (
+        <AdvancesPanel readOnly={readOnly || !advancesEdit} />
+      ) : null}
 
       {tab === "mine" ? (
         <StaffMyPayslips staffId={selfStaff?.id || ""} />
@@ -819,7 +850,7 @@ export function PayrollWorkspace() {
       {tab === "myAdvances" ? (
         <StaffMyAdvances staffId={selfStaff?.id || ""} />
       ) : null}
-    </div>
+    </ErpWorkspaceShell>
   );
 }
 
@@ -1088,21 +1119,21 @@ function RunDetail({
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
-        <table className="w-full min-w-[780px] text-left text-sm">
-          <thead>
-            <tr className="border-b border-[rgba(32,48,80,0.1)] text-[11px] text-[var(--muted)]">
-              <th className="px-3 py-2 font-medium">Staff</th>
-              <th className="px-3 py-2 font-medium">P / A / HD / LWP</th>
-              <th className="px-3 py-2 font-medium">Gross</th>
-              <th className="px-3 py-2 font-medium">Net</th>
-              <th className="px-3 py-2 font-medium">Payable</th>
-              <th className="px-3 py-2 font-medium">Govt PF/ESIC</th>
-              <th className="px-3 py-2 font-medium">Hold</th>
-              <th className="px-3 py-2 font-medium" />
+      <ErpTableShell>
+        <ErpTable minWidth="min-w-[780px]">
+          <ErpTableHead>
+            <tr>
+              <th className="px-4 py-2.5 font-bold">Staff</th>
+              <th className="px-4 py-2.5 font-bold">P / A / HD / LWP</th>
+              <th className="px-4 py-2.5 font-bold">Gross</th>
+              <th className="px-4 py-2.5 font-bold">Net</th>
+              <th className="px-4 py-2.5 font-bold">Payable</th>
+              <th className="px-4 py-2.5 font-bold">Govt PF/ESIC</th>
+              <th className="px-4 py-2.5 font-bold">Hold</th>
+              <th className="px-4 py-2.5 font-bold" />
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {run.lines.map((l) => {
               const open = expandedStaffId === l.staffId;
               const lockedDue = editable
@@ -1427,9 +1458,9 @@ function RunDetail({
                 </Fragment>
               );
             })}
-          </tbody>
-        </table>
-      </div>
+          </ErpTableBody>
+        </ErpTable>
+      </ErpTableShell>
     </div>
   );
 }

@@ -30,6 +30,7 @@ export type RbacModule =
   | "vault"
   | "rte"
   | "payroll"
+  | "staff_advances"
   | "exams"
   | "certificates"
   | "compliance"
@@ -38,7 +39,11 @@ export type RbacModule =
   | "gallery"
   | "notifications"
   | "settings"
-  | "policies";
+  | "policies"
+  | "wa_templates"
+  | "wa_automation"
+  | "wa_chatbot"
+  | "documents";
 
 export type RbacAction =
   | "view"
@@ -115,6 +120,7 @@ export const RBAC_MODULES: {
   id: RbacModule;
   label: string;
   href?: string;
+  group?: string;
 }[] = [
   { id: "home", label: "Home", href: "/home" },
   { id: "masters", label: "Masters", href: "/masters" },
@@ -134,7 +140,13 @@ export const RBAC_MODULES: {
   { id: "student_leave", label: "Student leave", href: "/attendance?tab=leave" },
   { id: "vault", label: "Document vault", href: "/vault" },
   { id: "rte", label: "RTE / EWS", href: "/admissions?tab=rte" },
-  { id: "payroll", label: "Payroll", href: "/payroll" },
+  { id: "payroll", label: "Payroll (full)", href: "/payroll", group: "payroll" },
+  {
+    id: "staff_advances",
+    label: "Staff advances only",
+    href: "/payroll?tab=advances",
+    group: "payroll",
+  },
   { id: "exams", label: "Exams", href: "/exams" },
   { id: "certificates", label: "Certificates", href: "/certificates" },
   { id: "compliance", label: "Compliance / UDISE" },
@@ -142,8 +154,40 @@ export const RBAC_MODULES: {
   { id: "news", label: "News", href: "/comms?tab=news" },
   { id: "gallery", label: "Gallery", href: "/comms?tab=gallery" },
   { id: "notifications", label: "Notifications", href: "/comms?tab=inbox" },
-  { id: "settings", label: "Settings / RBAC" },
-  { id: "policies", label: "Policies (leave / holiday)" },
+  {
+    id: "wa_templates",
+    label: "WA templates",
+    href: "/masters?tab=wa-templates",
+    group: "whatsapp",
+  },
+  {
+    id: "wa_automation",
+    label: "WA automation",
+    href: "/masters?tab=automation",
+    group: "whatsapp",
+  },
+  {
+    id: "wa_chatbot",
+    label: "WA chatbot builder",
+    href: "/masters?tab=wa-chatbot",
+    group: "whatsapp",
+  },
+  {
+    id: "documents",
+    label: "Document maker",
+    href: "/documents",
+    group: "optional",
+  },
+  { id: "settings", label: "Settings / RBAC", group: "admin" },
+  { id: "policies", label: "Policies (leave / holiday)", group: "admin" },
+];
+
+export const RBAC_MODULE_GROUPS: { id: string; label: string }[] = [
+  { id: "core", label: "Core modules" },
+  { id: "payroll", label: "Payroll & advances" },
+  { id: "whatsapp", label: "WhatsApp & automation" },
+  { id: "optional", label: "Optional add-ons" },
+  { id: "admin", label: "Administration" },
 ];
 
 export const RBAC_ACTIONS: { id: RbacAction; label: string }[] = [
@@ -272,11 +316,15 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("rte", ops),
         grant("exams", ops),
         grant("certificates", ops),
+        grant("documents", ["view", "create", "export"]),
         grant("compliance", ["view", "edit", "export"]),
         grant("notices", ops),
         grant("news", ops),
         grant("gallery", ops),
         grant("notifications", ["view", "edit"]),
+        grant("wa_templates", ops),
+        grant("wa_automation", [...ops, "approve"]),
+        grant("wa_chatbot", ops),
         grant("settings", ["view", "edit"]),
         grant("policies", ["view", "edit", "approve"]),
         // no payroll
@@ -310,11 +358,16 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("accounts", ["view", "create", "edit", "export", "approve"]),
         grant("trust", ["view", "export"]),
         grant("payroll", ["view", "create", "edit", "export"]),
+        grant("staff_advances", ["view", "create", "edit", "delete", "export"]),
         grant("certificates", ops),
+        grant("documents", ["view", "create", "export"]),
         grant("notices", ops),
         grant("news", ops),
         grant("gallery", ops),
         grant("notifications", ["view"]),
+        grant("wa_templates", ["view", "create", "edit", "export"]),
+        grant("wa_automation", ["view", "create", "edit", "approve", "export"]),
+        grant("wa_chatbot", ["view"]),
         grant("policies", ["view"]),
         grant("settings", ["view"]),
       ],
@@ -338,6 +391,7 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("news", ["view"]),
         grant("gallery", ["view"]),
         grant("notifications", ["view"]),
+        grant("staff_advances", ["view", "create", "edit", "export"]),
         grant("store", ["view", "export"]),
         grant("purchase", ["view", "create", "edit", "approve", "export"]),
         grant("transport", ["view", "edit", "export"]),
@@ -372,10 +426,10 @@ export function defaultBuiltInRoles(): RbacRole[] {
       isBuiltIn: true,
       isActive: true,
       makerChecker: false,
-      note: "Own class(es) only — mark attendance & exams",
+      note: "Own class(es) only — mark attendance & exams; verify parent-uploaded docs",
       permissions: [
         grant("home", ["view"]),
-        grant("students", ["view"]),
+        grant("students", ["view", "approve"]),
         grant("staff", ["view"]),
         grant("attendance", teachOps),
         grant("homework", [...teachOps, "export"]),
@@ -622,6 +676,123 @@ export function cloneRole(
   return { ok: true, state: next, role };
 }
 
+function cloneScope(scope: RoleScope): RoleScope {
+  return {
+    campusIds: [...scope.campusIds],
+    classIds: [...scope.classIds],
+    departmentIds: [...scope.departmentIds],
+  };
+}
+
+/**
+ * Copy explicit role assignments from one staff member to another.
+ * Does not copy designation-based inference — source must have Assignments rows.
+ */
+export function copyStaffRoleAssignments(
+  state: RbacState,
+  fromStaffId: string,
+  toStaffId: string,
+  by: string,
+  opts?: {
+    /** When true (default), target's explicit assignments are replaced. */
+    replace?: boolean;
+    fromLabel?: string;
+    toLabel?: string;
+  },
+):
+  | { ok: true; state: RbacState; copied: number; skipped: number }
+  | { ok: false; reason: string } {
+  if (!fromStaffId || !toStaffId) {
+    return { ok: false, reason: "Pick both staff members" };
+  }
+  if (fromStaffId === toStaffId) {
+    return { ok: false, reason: "Source and target must be different staff" };
+  }
+
+  const source = state.assignments.filter(
+    (a) => a.staffId === fromStaffId && assignmentActive(a),
+  );
+  if (!source.length) {
+    return {
+      ok: false,
+      reason:
+        "Source has no explicit role assignments (access may come from designation only). Assign roles to the source staff first, or clone a role template under Roles.",
+    };
+  }
+
+  const replace = opts?.replace !== false;
+  let assignments = replace
+    ? state.assignments.filter((a) => a.staffId !== toStaffId)
+    : [...state.assignments];
+
+  const existingRoleIds = new Set(
+    assignments
+      .filter((a) => a.staffId === toStaffId && assignmentActive(a))
+      .map((a) => a.roleId),
+  );
+
+  let copied = 0;
+  let skipped = 0;
+  const fromLabel = opts?.fromLabel?.trim() || fromStaffId;
+  const stamp = `Copied from ${fromLabel}`;
+
+  for (const src of source) {
+    if (!replace && existingRoleIds.has(src.roleId)) {
+      skipped += 1;
+      continue;
+    }
+    const row: UserRoleAssignment = {
+      id: newRbacId("ura"),
+      staffId: toStaffId,
+      roleId: src.roleId,
+      isPrimary: false,
+      scope: cloneScope(src.scope),
+      expiresOn: src.expiresOn,
+      note: src.note?.trim() ? `${src.note.trim()} · ${stamp}` : stamp,
+    };
+    assignments.push(row);
+    copied += 1;
+    existingRoleIds.add(src.roleId);
+  }
+
+  if (copied === 0) {
+    return {
+      ok: false,
+      reason:
+        skipped > 0
+          ? "Target already has all roles from the source (try Replace existing)."
+          : "Nothing to copy",
+    };
+  }
+
+  const targetRows = assignments.filter((a) => a.staffId === toStaffId);
+  const sourcePrimary = source.find((a) => a.isPrimary)?.roleId;
+  let primarySet = false;
+  assignments = assignments.map((a) => {
+    if (a.staffId !== toStaffId) return a;
+    const wantPrimary =
+      !primarySet &&
+      (sourcePrimary
+        ? a.roleId === sourcePrimary
+        : a.id === targetRows[0]?.id);
+    if (wantPrimary) {
+      primarySet = true;
+      return { ...a, isPrimary: true };
+    }
+    return { ...a, isPrimary: false };
+  });
+
+  const toLabel = opts?.toLabel?.trim() || toStaffId;
+  let next: RbacState = { ...state, assignments };
+  next = appendRbacAudit(
+    next,
+    by,
+    "copy_staff_access",
+    `${fromLabel} → ${toLabel} (${copied} role${copied === 1 ? "" : "s"})`,
+  );
+  return { ok: true, state: next, copied, skipped };
+}
+
 export function setRolePermission(
   state: RbacState,
   roleId: string,
@@ -695,7 +866,14 @@ export function moduleForHref(href: string): RbacModule | null {
   if (path.startsWith("/modules")) return "settings";
   if (path.startsWith("/fees/defaulters")) return "fees";
   if (path.startsWith("/fees")) return "fees";
-  if (path.startsWith("/masters")) return "masters";
+  if (path.startsWith("/masters")) {
+    const tab = params.get("tab");
+    if (tab === "wa-templates") return "wa_templates";
+    if (tab === "automation") return "wa_automation";
+    if (tab === "wa-chatbot") return "wa_chatbot";
+    if (tab === "roles") return "settings";
+    return "masters";
+  }
   if (path.startsWith("/students")) {
     // Students → UDISE+ tab is compliance-scoped
     if (params.get("tab") === "udise") return "compliance";
@@ -716,9 +894,15 @@ export function moduleForHref(href: string): RbacModule | null {
   if (path.startsWith("/student-leave")) return "student_leave";
   if (path.startsWith("/vault")) return "vault";
   if (path.startsWith("/rte")) return "rte";
-  if (path.startsWith("/payroll")) return "payroll";
+  if (path.startsWith("/payroll")) {
+    const tab = params.get("tab");
+    if (tab === "advances") return "staff_advances";
+    if (tab === "myAdvances" || tab === "mine") return "payroll";
+    return "payroll";
+  }
   if (path.startsWith("/exams")) return "exams";
   if (path.startsWith("/certificates")) return "certificates";
+  if (path.startsWith("/documents")) return "documents";
   if (path.startsWith("/comms") || path.startsWith("/notices") || path.startsWith("/news") || path.startsWith("/gallery")) {
     const tab = params.get("tab");
     if (tab === "news" || path.startsWith("/news")) return "news";
@@ -859,6 +1043,31 @@ export function canAccessModule(
   return hasPermission(session, masters, module, "view", rbac);
 }
 
+/** Masters sub-tab → RBAC module (fee setup tabs use `masters`). */
+export function moduleForMastersTab(tab: string | null | undefined): RbacModule {
+  if (tab === "wa-templates") return "wa_templates";
+  if (tab === "automation") return "wa_automation";
+  if (tab === "wa-chatbot") return "wa_chatbot";
+  if (tab === "roles") return "settings";
+  return "masters";
+}
+
+export function canAccessMastersTab(
+  session: SessionLike,
+  masters: MastersState | null | undefined,
+  tab: string | null | undefined,
+  rbac?: RbacState,
+  action: RbacAction = "view",
+): boolean {
+  return hasPermission(
+    session,
+    masters,
+    moduleForMastersTab(tab),
+    action,
+    rbac,
+  );
+}
+
 export function canAccessHref(
   session: SessionLike,
   masters: MastersState | null | undefined,
@@ -926,6 +1135,27 @@ export function canAccessHref(
       );
     }
   }
+  if (path.startsWith("/payroll")) {
+    const qs = href.includes("?") ? href.split("?")[1] : "";
+    const tab = new URLSearchParams(qs).get("tab");
+    if (tab === "advances") {
+      return (
+        (canAccessModule(session, masters, "staff_advances", rbac) ||
+          canAccessModule(session, masters, "payroll", rbac)) &&
+        canAccessModuleHref(href)
+      );
+    }
+    if (tab === "myAdvances" || tab === "mine") {
+      return canAccessModuleHref(href);
+    }
+    if (
+      canAccessModule(session, masters, "payroll", rbac) ||
+      canAccessModule(session, masters, "staff_advances", rbac)
+    ) {
+      return canAccessModuleHref(href);
+    }
+    return false;
+  }
   const mod = moduleForHref(href);
   if (!mod) return canAccessModuleHref(href);
   if (mod === "home") return canAccessModuleHref(href);
@@ -962,9 +1192,29 @@ export function principalAccessSummary(rbac: RbacState): AccessSummaryRow[] {
       { capability: "Manage admissions (enroll)", module: "admissions", action: "edit" },
       { capability: "Edit exam marks", module: "exams", action: "edit" },
       { capability: "Export UDISE / compliance", module: "compliance", action: "export" },
+      {
+        capability: "Issue staff salary advances",
+        module: "staff_advances",
+        action: "edit",
+      },
       { capability: "Approve payroll", module: "payroll", action: "approve" },
       { capability: "Edit masters", module: "masters", action: "edit" },
       { capability: "Configure policies", module: "policies", action: "edit" },
+      {
+        capability: "Submit WhatsApp templates to Meta",
+        module: "wa_templates",
+        action: "edit",
+      },
+      {
+        capability: "Approve WA automation sends",
+        module: "wa_automation",
+        action: "approve",
+      },
+      {
+        capability: "Edit WhatsApp chatbot flows",
+        module: "wa_chatbot",
+        action: "edit",
+      },
       { capability: "Impersonate users", module: "settings", action: "impersonate" },
     ];
 

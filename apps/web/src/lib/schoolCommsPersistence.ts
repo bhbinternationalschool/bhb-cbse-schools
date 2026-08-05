@@ -16,6 +16,13 @@ import {
 import { mergeDbDeskIntoSchoolCommsState } from "@/lib/schoolCommsNormalizedMerge";
 import { schoolCommsReadFromDbEnabled } from "@/lib/schoolCommsDbConfig";
 import { deskSkipBlobHydrateClient, deskSkipBlobPushClient } from "@/lib/deskCutover";
+import {
+  isDeskHydrated,
+  markDeskHydrated,
+  resetDeskHydrated,
+} from "@/lib/deskHydrateGuard";
+
+const MODULE = "school_comms";
 
 const blob = createDomainBlobPersistence<SchoolCommsState>({
   table: "school_comms_state",
@@ -42,6 +49,9 @@ export const scheduleSchoolCommsSync = (state: SchoolCommsState) => {
   });
 };
 export const ensureSchoolCommsHydrated = async () => {
+  if (isDeskHydrated(MODULE)) return false;
+  markDeskHydrated(MODULE);
+
   const readFromDb = schoolCommsReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("school_comms")
     ? false
@@ -136,4 +146,7 @@ export async function ensureSchoolCommsHydratedServer(): Promise<boolean> {
   return changed;
 }
 
-export const resetSchoolCommsPersistenceCache = blob.resetCache;
+export function resetSchoolCommsPersistenceCache() {
+  resetDeskHydrated(MODULE);
+  blob.resetCache();
+}

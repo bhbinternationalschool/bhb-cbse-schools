@@ -171,10 +171,9 @@ export function TransportGoogleMap({
             Maps JavaScript API key needed
           </p>
           <p className="mt-2 max-w-md text-xs leading-relaxed">
-            Enable <strong>Maps JavaScript API</strong> on your Google key and
-            allow HTTP referrers for this site. Uses{" "}
-            <code className="rounded bg-[rgba(32,48,80,0.06)] px-1">GOOGLE_MAPS_API_KEY</code>{" "}
-            from <code className="rounded bg-[rgba(32,48,80,0.06)] px-1">.env.local</code>.
+            Google Maps is not enabled for this site yet. Your school
+            administrator can turn on the Maps JavaScript API and add the key to
+            server settings.
           </p>
         </div>
       ) : null}

@@ -113,10 +113,11 @@ export async function fetchStudentLeaveDeskFromApi(): Promise<{
   }
 }
 
+type StudentLeaveDeskBundle = Pick<StudentLeaveState, "requests">;
+
 export async function hydrateStudentLeaveDeskFromDb(
   preferDb?: boolean,
 ): Promise<{ bundle: StudentLeaveDeskBundle; changed: boolean }> {
-  type StudentLeaveDeskBundle = Pick<StudentLeaveState, "requests">;
   const remote = await fetchStudentLeaveDeskFromApi();
   const empty: StudentLeaveDeskBundle = { requests: [] };
   if (!remote) return { bundle: empty, changed: false };

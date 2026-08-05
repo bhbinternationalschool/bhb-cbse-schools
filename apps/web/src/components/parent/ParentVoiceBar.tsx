@@ -18,7 +18,8 @@ type PortalTab =
   | "subjects"
   | "notices"
   | "news"
-  | "gallery";
+  | "gallery"
+  | "profile";
 
 export function ParentVoiceBar({
   onNavigate,

@@ -1,18 +1,24 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { formatInr } from "@/lib/masters";
+import { formatInr, loadMasters, type MastersState } from "@/lib/masters";
+import { seedAccountsIfEmpty } from "@/lib/accounts";
+import { RemoveControl } from "@/components/masters/RemoveControl";
+import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import {
   adjustStock,
   bulkSetOpeningStock,
   bulkSetSalePrice,
   categoryLabel,
+  checkStoreCategoryRemoval,
+  deleteStoreCategory,
   downloadStoreCatalogTemplate,
   exportStoreCatalogCsv,
   importStoreCatalogCsv,
   listActiveStoreCategories,
   loadStore,
   seedStoreIfEmpty,
+  syncAccountsVendorsToStoreSources,
   upsertStoreCategory,
   upsertStoreInfraLevel,
   upsertStoreItem,
@@ -58,14 +64,7 @@ const STOCK_MASTER_MENU: { id: StockMasterScreen; label: string }[] = [
   { id: "import_item", label: "Import Item" },
 ];
 
-const field =
-  "rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2.5 py-1.5 text-sm text-[var(--brand-deep)]";
 const card = "rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4";
-const btn =
-  "rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50";
-const btnOutline =
-  "rounded-lg border border-[rgba(32,48,80,0.2)] bg-white px-3 py-1.5 text-sm text-[var(--brand-deep)]";
-
 type CatalogDraft = {
   id: string;
   sku: string;
@@ -237,12 +236,24 @@ export function StockMasterWorkspace() {
   const [notice, setNotice] = useState<string | null>(null);
 
   const [newCategoryName, setNewCategoryName] = useState("");
+  const [newCategorySourceIds, setNewCategorySourceIds] = useState<string[]>(
+    [],
+  );
   const [catEditId, setCatEditId] = useState<string | null>(null);
   const [catEditName, setCatEditName] = useState("");
+  const [catEditActive, setCatEditActive] = useState(true);
 
+  const [masters, setMasters] = useState<MastersState | null>(null);
   const [newSaleGroupName, setNewSaleGroupName] = useState("");
+  const [newSaleGroupCategoryId, setNewSaleGroupCategoryId] = useState("");
+  const [newSaleGroupClassIds, setNewSaleGroupClassIds] = useState<string[]>(
+    [],
+  );
   const [saleEditId, setSaleEditId] = useState<string | null>(null);
   const [saleEditName, setSaleEditName] = useState("");
+  const [saleEditCategoryId, setSaleEditCategoryId] = useState("");
+  const [saleEditClassIds, setSaleEditClassIds] = useState<string[]>([]);
+  const [catEditSourceIds, setCatEditSourceIds] = useState<string[]>([]);
 
   const [newUomName, setNewUomName] = useState("");
   const [uomEditId, setUomEditId] = useState<string | null>(null);
@@ -281,7 +292,10 @@ export function StockMasterWorkspace() {
 
   function refresh() {
     seedStoreIfEmpty();
+    seedAccountsIfEmpty();
+    syncAccountsVendorsToStoreSources();
     const store = loadStore();
+    setMasters(loadMasters());
     setCategories(store.categories);
     setSaleGroups(store.saleGroups);
     setUoms(store.uoms);
@@ -306,6 +320,101 @@ export function StockMasterWorkspace() {
 
   const activeScreenLabel =
     STOCK_MASTER_MENU.find((m) => m.id === screen)?.label ?? "Stock Master";
+
+  const classOptions = useMemo(() => {
+    if (!masters) return [];
+    return masters.classes.filter((c) => c.isActive);
+  }, [masters]);
+
+  function classLabels(ids: string[]): string {
+    if (!ids.length) return "All classes";
+    return ids
+      .map((id) => classOptions.find((c) => c.id === id)?.name || id)
+      .join(", ");
+  }
+
+  function toggleClassId(
+    id: string,
+    current: string[],
+    setter: (next: string[]) => void,
+  ) {
+    setter(
+      current.includes(id)
+        ? current.filter((x) => x !== id)
+        : [...current, id],
+    );
+  }
+
+  function saveCategoryDraft(opts: {
+    id?: string;
+    name: string;
+    preferredSourceIds: string[];
+    isActive?: boolean;
+    clearNew?: boolean;
+  }) {
+    const r = upsertStoreCategory({
+      id: opts.id,
+      name: opts.name,
+      preferredSourceIds: opts.preferredSourceIds,
+      isActive: opts.isActive,
+    });
+    if (!r.ok) {
+      setError(r.error);
+      return;
+    }
+    if (opts.clearNew) {
+      setNewCategoryName("");
+      setNewCategorySourceIds([]);
+    }
+    if (opts.id) {
+      setCatEditId(null);
+    }
+    refresh();
+    flash(`Stock group “${r.category.name}” saved`);
+  }
+
+  function removeCategory(categoryId: string) {
+    const r = deleteStoreCategory(categoryId);
+    if (!r.ok) {
+      setError(r.error);
+      return;
+    }
+    if (catEditId === categoryId) {
+      setCatEditId(null);
+      setCatEditSourceIds([]);
+    }
+    refresh();
+    flash("Stock group removed");
+  }
+
+  function saveSaleGroupDraft(opts: {
+    id?: string;
+    name: string;
+    categoryId: string;
+    classIds: string[];
+    clearNew?: boolean;
+  }) {
+    const r = upsertStoreSaleGroup({
+      id: opts.id,
+      name: opts.name,
+      categoryId: opts.categoryId,
+      classIds: opts.classIds,
+    });
+    if (!r.ok) {
+      setError(r.error);
+      return;
+    }
+    if (opts.clearNew) {
+      setNewSaleGroupName("");
+      setNewSaleGroupCategoryId("");
+      setNewSaleGroupClassIds([]);
+    }
+    if (opts.id) {
+      setSaleEditId(null);
+    }
+    refresh();
+    flash(`Sale group “${r.row.name}” saved`);
+  }
 
   function saveCatalog() {
     const purchase = Math.round(
@@ -470,83 +579,448 @@ export function StockMasterWorkspace() {
           </h2>
 
           {screen === "stock_group" ? (
-            <MasterListPanel
-              title="Stock Group"
-              hint="Inventory classification — books, uniform, stationery, etc."
-              rows={categories.map((c) => ({
-                id: c.id,
-                name: c.name,
-                meta: `${allItems.filter((i) => i.categoryId === c.id).length} item(s)`,
-                isActive: c.isActive,
-              }))}
-              name={newCategoryName}
-              onName={setNewCategoryName}
-              onSave={() => {
-                const r = upsertStoreCategory({ name: newCategoryName });
-                if (!r.ok) return setError(r.error);
-                setNewCategoryName("");
-                refresh();
-                flash(`Stock group “${r.category.name}” saved`);
-              }}
-              editId={catEditId}
-              editName={catEditName}
-              onEdit={(id, current) => {
-                setCatEditId(id);
-                setCatEditName(current);
-              }}
-              onEditName={setCatEditName}
-              onSaveEdit={() => {
-                if (!catEditId) return;
-                const r = upsertStoreCategory({
-                  id: catEditId,
-                  name: catEditName,
-                });
-                if (!r.ok) return setError(r.error);
-                setCatEditId(null);
-                refresh();
-                flash("Stock group renamed");
-              }}
-            />
+            <div className={card}>
+              <h2 className="text-sm font-bold text-[var(--brand-deep)]">
+                Stock Group
+              </h2>
+              <p className="mt-1 text-[11px] text-[var(--muted)]">
+                Broad inventory classes — books, uniform, stationery, kits. Link
+                preferred vendors; sale groups and items sit under each group.
+              </p>
+
+              <div className="mt-4 rounded-lg border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.02)] p-3">
+                <h3 className="text-[12px] font-bold text-[var(--brand-deep)]">
+                  Add stock group
+                </h3>
+                <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                  <label className="text-sm sm:col-span-2">
+                    <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                      Name
+                    </span>
+                    <input
+                      className={`${field} w-full`}
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      placeholder="e.g. Books & Stationery"
+                    />
+                  </label>
+                  <div className="text-sm sm:col-span-2">
+                    <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                      Preferred vendors / sources (optional)
+                    </span>
+                    <div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto rounded-lg border border-[rgba(32,48,80,0.12)] bg-white p-2">
+                      {sources
+                        .filter((s) => s.isActive)
+                        .map((s) => (
+                          <label
+                            key={s.id}
+                            className="flex items-center gap-1 text-[11px]"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={newCategorySourceIds.includes(s.id)}
+                              onChange={() =>
+                                toggleClassId(
+                                  s.id,
+                                  newCategorySourceIds,
+                                  setNewCategorySourceIds,
+                                )
+                              }
+                            />
+                            {s.name}
+                          </label>
+                        ))}
+                      {!sources.length ? (
+                        <span className="text-[11px] text-[var(--muted)]">
+                          Sync vendors from Accounts via Source Master.
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className={`${btn} mt-3`}
+                  onClick={() =>
+                    saveCategoryDraft({
+                      name: newCategoryName,
+                      preferredSourceIds: newCategorySourceIds,
+                      clearNew: true,
+                    })
+                  }
+                >
+                  Add stock group
+                </button>
+              </div>
+
+              <div className="mt-4 overflow-x-auto rounded-lg border border-[rgba(32,48,80,0.12)]">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-[rgba(32,48,80,0.04)] text-left text-[11px] text-[var(--muted)]">
+                    <tr>
+                      <th className="px-3 py-2 font-semibold">Name</th>
+                      <th className="px-3 py-2 font-semibold">Items</th>
+                      <th className="px-3 py-2 font-semibold">Sale groups</th>
+                      <th className="px-3 py-2 font-semibold">Vendors</th>
+                      <th className="px-3 py-2 font-semibold">Status</th>
+                      <th className="px-3 py-2 text-right font-semibold">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[rgba(32,48,80,0.08)]">
+                    {[...categories]
+                      .sort(
+                        (a, b) =>
+                          a.sortOrder - b.sortOrder ||
+                          a.name.localeCompare(b.name),
+                      )
+                      .map((c) => {
+                        const itemN = allItems.filter(
+                          (i) => i.categoryId === c.id,
+                        ).length;
+                        const sgN = saleGroups.filter(
+                          (g) => g.categoryId === c.id,
+                        ).length;
+                        const vendorNames = (c.preferredSourceIds ?? [])
+                          .map(
+                            (id) =>
+                              sources.find((s) => s.id === id)?.name || id,
+                          )
+                          .join(", ");
+                        const removal = checkStoreCategoryRemoval(c.id);
+                        return (
+                          <tr
+                            key={c.id}
+                            className={c.isActive === false ? "opacity-55" : ""}
+                          >
+                            <td className="px-3 py-2 font-semibold text-[var(--brand-deep)]">
+                              {c.name}
+                            </td>
+                            <td className="px-3 py-2 text-[var(--muted)]">
+                              {itemN}
+                            </td>
+                            <td className="px-3 py-2 text-[var(--muted)]">
+                              {sgN}
+                            </td>
+                            <td className="max-w-[10rem] truncate px-3 py-2 text-[11px] text-[var(--muted)]">
+                              {vendorNames || "—"}
+                            </td>
+                            <td className="px-3 py-2 text-[11px]">
+                              {c.isActive === false ? (
+                                <span className="text-[#c2410c]">Inactive</span>
+                              ) : (
+                                <span className="text-[#0f766e]">Active</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2">
+                              <div className="flex flex-wrap items-start justify-end gap-2">
+                                <button
+                                  type="button"
+                                  className="text-[11px] font-semibold text-[var(--brand-deep)]"
+                                  onClick={() => {
+                                    setCatEditId(c.id);
+                                    setCatEditName(c.name);
+                                    setCatEditActive(c.isActive !== false);
+                                    setCatEditSourceIds(
+                                      c.preferredSourceIds ?? [],
+                                    );
+                                  }}
+                                >
+                                  Edit
+                                </button>
+                                <RemoveControl
+                                  check={removal}
+                                  onRemove={() => removeCategory(c.id)}
+                                  compact
+                                />
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    {!categories.length ? (
+                      <tr>
+                        <td
+                          colSpan={6}
+                          className="px-3 py-6 text-center text-[var(--muted)]"
+                        >
+                          No stock groups yet.
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+
+              {catEditId ? (
+                <div className={`${card} mt-4 border-[var(--brand-deep)]/20`}>
+                  <h3 className="text-sm font-bold text-[var(--brand-deep)]">
+                    Edit stock group
+                  </h3>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <label className="text-sm sm:col-span-2">
+                      <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                        Name
+                      </span>
+                      <input
+                        className={`${field} w-full`}
+                        value={catEditName}
+                        onChange={(e) => setCatEditName(e.target.value)}
+                      />
+                    </label>
+                    <label className="flex items-center gap-2 text-sm sm:col-span-2">
+                      <input
+                        type="checkbox"
+                        checked={catEditActive}
+                        onChange={(e) => setCatEditActive(e.target.checked)}
+                      />
+                      <span className="text-[12px] text-[var(--brand-deep)]">
+                        Active (shown on sell screen)
+                      </span>
+                    </label>
+                    <div className="text-sm sm:col-span-2">
+                      <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                        Preferred vendors / sources
+                      </span>
+                      <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto rounded-lg border border-[rgba(32,48,80,0.12)] p-2">
+                        {sources
+                          .filter((s) => s.isActive)
+                          .map((s) => (
+                            <label
+                              key={s.id}
+                              className="flex items-center gap-1 text-[11px]"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={catEditSourceIds.includes(s.id)}
+                                onChange={() =>
+                                  toggleClassId(
+                                    s.id,
+                                    catEditSourceIds,
+                                    setCatEditSourceIds,
+                                  )
+                                }
+                              />
+                              {s.name}
+                            </label>
+                          ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className={btn}
+                      onClick={() =>
+                        saveCategoryDraft({
+                          id: catEditId,
+                          name: catEditName,
+                          preferredSourceIds: catEditSourceIds,
+                          isActive: catEditActive,
+                        })
+                      }
+                    >
+                      Save changes
+                    </button>
+                    <button
+                      type="button"
+                      className={btnOutline}
+                      onClick={() => {
+                        setCatEditId(null);
+                        setCatEditSourceIds([]);
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
           ) : null}
 
           {screen === "sale_group" ? (
-            <MasterListPanel
-              title="Sale Group"
-              hint="Counter / POS grouping for sale screens."
-              rows={saleGroups.map((c) => ({
-                id: c.id,
-                name: c.name,
-                meta: `${allItems.filter((i) => i.saleGroupId === c.id).length} item(s)`,
-                isActive: c.isActive,
-              }))}
-              name={newSaleGroupName}
-              onName={setNewSaleGroupName}
-              onSave={() => {
-                const r = upsertStoreSaleGroup({ name: newSaleGroupName });
-                if (!r.ok) return setError(r.error);
-                setNewSaleGroupName("");
-                refresh();
-                flash(`Sale group “${r.row.name}” saved`);
-              }}
-              editId={saleEditId}
-              editName={saleEditName}
-              onEdit={(id, current) => {
-                setSaleEditId(id);
-                setSaleEditName(current);
-              }}
-              onEditName={setSaleEditName}
-              onSaveEdit={() => {
-                if (!saleEditId) return;
-                const r = upsertStoreSaleGroup({
-                  id: saleEditId,
-                  name: saleEditName,
-                });
-                if (!r.ok) return setError(r.error);
-                setSaleEditId(null);
-                refresh();
-                flash("Sale group renamed");
-              }}
-            />
+            <div className={card}>
+              <h2 className="text-sm font-bold text-[var(--brand-deep)]">
+                Sale Group
+              </h2>
+              <p className="mt-1 text-[11px] text-[var(--muted)]">
+                POS kits — link to a stock group and optional classes (empty =
+                all classes).
+              </p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <label className="text-sm sm:col-span-2">
+                  <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                    Name
+                  </span>
+                  <input
+                    className={`${field} w-full`}
+                    value={newSaleGroupName}
+                    onChange={(e) => setNewSaleGroupName(e.target.value)}
+                    placeholder="e.g. Foundation kit"
+                  />
+                </label>
+                <label className="text-sm">
+                  <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                    Stock group
+                  </span>
+                  <select
+                    className={`${field} w-full`}
+                    value={newSaleGroupCategoryId}
+                    onChange={(e) => setNewSaleGroupCategoryId(e.target.value)}
+                  >
+                    <option value="">Select…</option>
+                    {categories
+                      .filter((c) => c.isActive)
+                      .map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <div className="text-sm">
+                  <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                    Classes (optional)
+                  </span>
+                  <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto rounded-lg border border-[rgba(32,48,80,0.12)] p-2">
+                    {classOptions.map((c) => (
+                      <label
+                        key={c.id}
+                        className="flex items-center gap-1 text-[11px]"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={newSaleGroupClassIds.includes(c.id)}
+                          onChange={() =>
+                            toggleClassId(
+                              c.id,
+                              newSaleGroupClassIds,
+                              setNewSaleGroupClassIds,
+                            )
+                          }
+                        />
+                        {c.name}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                className={`${btn} mt-3`}
+                onClick={() =>
+                  saveSaleGroupDraft({
+                    name: newSaleGroupName,
+                    categoryId: newSaleGroupCategoryId,
+                    classIds: newSaleGroupClassIds,
+                    clearNew: true,
+                  })
+                }
+              >
+                Save sale group
+              </button>
+              <ul className="mt-4 divide-y text-sm">
+                {saleGroups.map((g) => (
+                  <li key={g.id} className="py-3">
+                    {saleEditId === g.id ? (
+                      <div className="space-y-2">
+                        <input
+                          className={`${field} w-full`}
+                          value={saleEditName}
+                          onChange={(e) => setSaleEditName(e.target.value)}
+                        />
+                        <select
+                          className={`${field} w-full`}
+                          value={saleEditCategoryId}
+                          onChange={(e) =>
+                            setSaleEditCategoryId(e.target.value)
+                          }
+                        >
+                          <option value="">Stock group…</option>
+                          {categories
+                            .filter((c) => c.isActive)
+                            .map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.name}
+                              </option>
+                            ))}
+                        </select>
+                        <div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto rounded-lg border border-[rgba(32,48,80,0.12)] p-2">
+                          {classOptions.map((c) => (
+                            <label
+                              key={c.id}
+                              className="flex items-center gap-1 text-[11px]"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={saleEditClassIds.includes(c.id)}
+                                onChange={() =>
+                                  toggleClassId(
+                                    c.id,
+                                    saleEditClassIds,
+                                    setSaleEditClassIds,
+                                  )
+                                }
+                              />
+                              {c.name}
+                            </label>
+                          ))}
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            className={btnOutline}
+                            onClick={() =>
+                              saveSaleGroupDraft({
+                                id: g.id,
+                                name: saleEditName,
+                                categoryId: saleEditCategoryId,
+                                classIds: saleEditClassIds,
+                              })
+                            }
+                          >
+                            Update
+                          </button>
+                          <button
+                            type="button"
+                            className="text-xs font-semibold text-[var(--muted)]"
+                            onClick={() => setSaleEditId(null)}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-semibold text-[var(--brand-deep)]">
+                          {g.name}
+                        </span>
+                        <span className="text-[10px] text-[var(--muted)]">
+                          {categoryLabel(g.categoryId)} · {classLabels(g.classIds)}{" "}
+                          · {allItems.filter((i) => i.saleGroupId === g.id).length}{" "}
+                          item(s)
+                        </span>
+                        <button
+                          type="button"
+                          className="text-[11px] font-semibold text-[var(--brand-deep)]"
+                          onClick={() => {
+                            setSaleEditId(g.id);
+                            setSaleEditName(g.name);
+                            setSaleEditCategoryId(g.categoryId);
+                            setSaleEditClassIds(g.classIds);
+                          }}
+                        >
+                          Edit
+                        </button>
+                      </div>
+                    )}
+                  </li>
+                ))}
+                {!saleGroups.length ? (
+                  <li className="py-3 text-[var(--muted)]">No sale groups yet.</li>
+                ) : null}
+              </ul>
+            </div>
           ) : null}
 
           {screen === "single_item" ? (

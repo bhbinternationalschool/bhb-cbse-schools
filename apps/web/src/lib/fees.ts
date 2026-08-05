@@ -33,6 +33,10 @@ import {
   type MastersState,
 } from "@/lib/masters";
 import {
+  persistSeriesUse,
+  suggestFromSeriesCode,
+} from "@/lib/numberSeries";
+import {
   householdOf,
   householdWhatsApp,
   isValidMobile,
@@ -50,9 +54,11 @@ import {
   stopFutureBlocks,
 } from "@/lib/feeAdjustments";
 import {
+  isStoreIssueDueOnFeeTake,
   listStoreIssuesForStudent,
   loadStore,
   storeDueKey,
+  storeIssueNetBilledPaise,
   type StoreIssueLine,
 } from "@/lib/store";
 import {
@@ -1357,9 +1363,6 @@ export function saveFees(state: FeesState) {
 
   if (typeof window === "undefined") {
     setMirrorSlice("fees", state);
-    void import("@/lib/feesPersistence").then(({ scheduleFeesSync }) => {
-      scheduleFeesSync(state);
-    });
     return;
   }
   persistFeesClient(state);
@@ -2082,7 +2085,6 @@ export function computeStudentDues(
     }
     // Cash / already settled at counter — not a Fee Take due
     if (
-      iss.paymentMode === "cash" ||
       iss.paymentStatus === "paid" ||
       iss.paymentStatus === "void" ||
       iss.recipientKind === "staff" ||
@@ -2090,12 +2092,16 @@ export function computeStudentDues(
     ) {
       continue;
     }
+    if (!isStoreIssueDueOnFeeTake(iss)) {
+      continue;
+    }
     if (!includeFuture && isAfterRunningSessionMonth(iss.issuedOn, asOf)) {
       continue;
     }
     const dueKey = storeDueKey(student.id, iss.id);
-    const billed = Math.max(0, iss.totalPaise - (iss.returnedPaise || 0));
-    const paid = paidMap.get(dueKey) ?? 0;
+    const billed = storeIssueNetBilledPaise(iss);
+    const counterPaid = Math.max(0, iss.counterPaidPaise || 0);
+    const paid = (paidMap.get(dueKey) ?? 0) + counterPaid;
     const balance = Math.max(0, billed - paid);
     if (balance <= 0) {
       if (!(includePaid && paid > 0)) continue;
@@ -2802,6 +2808,17 @@ export function nextReceiptNo(
   ayCode = DEFAULT_AY,
   series: FeeReceiptSeries = "F",
 ): string {
+  if (typeof window !== "undefined") {
+    const masters = loadMasters();
+    const fromSeries = suggestFromSeriesCode(
+      masters.numberSeries,
+      "RECEIPT",
+      ayCode,
+      fees.vouchers.map((v) => v.receiptNo),
+    );
+    if (fromSeries) return fromSeries;
+  }
+
   const prefixes =
     series === "R"
       ? [`R/${ayCode}/`]
@@ -3034,6 +3051,12 @@ export function collectPayment(input: {
     installmentPlans: finalized.installmentPlans,
     planAllocations: finalized.planAllocations,
   });
+
+  persistSeriesUse(
+    "RECEIPT",
+    input.academicYearCode ?? DEFAULT_AY,
+    voucher.receiptNo,
+  );
 
   void import("@/lib/accounts")
     .then((m) => {

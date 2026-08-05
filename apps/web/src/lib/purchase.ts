@@ -852,6 +852,8 @@ export function receiveGrn(input: {
   const fallbackLedgerCategoryId = resolvePurchaseExpenseCategoryId();
   if (!fallbackLedgerCategoryId) return fail("No expense category in accounts");
 
+  const billDate = input.ocr?.billDate || input.date || todayIso();
+
   for (const row of input.lines) {
     if (row.qtyReceived <= 0) continue;
     const poLine = po.lines.find((l) => l.id === row.poLineId);
@@ -881,9 +883,14 @@ export function receiveGrn(input: {
     grossPaise += amountPaise;
     vendorBillLines.push({
       id: nid("vbln"),
+      lineDate: billDate,
+      itemName: row.description ?? poLine.description,
       description: row.description ?? poLine.description,
       qty: row.qtyReceived,
+      unit: poLine.uom || "pcs",
       ratePaise,
+      discountPaise: 0,
+      taxPaise: 0,
       amountPaise,
       categoryId: ledgerCategoryId,
     });
@@ -902,8 +909,6 @@ export function receiveGrn(input: {
       if (res.ok) stockApplied = true;
     }
   }
-
-  const billDate = input.ocr?.billDate || input.date || todayIso();
 
   const billNo = input.ocr?.billNo?.trim() || `GRN-${po.poNo}`;
   const dueOn = input.ocr?.dueOn?.trim() || billDate;

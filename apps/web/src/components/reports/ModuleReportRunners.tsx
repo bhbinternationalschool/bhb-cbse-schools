@@ -41,13 +41,7 @@ import {
 import { loadTrust, seedTrustIfEmpty } from "@/lib/trust";
 import { loadMasters } from "@/lib/masters";
 import { loadSis } from "@/lib/sis";
-
-const field =
-  "rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2.5 py-1.5 text-sm text-[var(--brand-deep)]";
-const btn =
-  "rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50";
-const btnOutline =
-  "rounded-lg border border-[rgba(32,48,80,0.2)] bg-white px-3 py-1.5 text-sm text-[var(--brand-deep)]";
+import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);

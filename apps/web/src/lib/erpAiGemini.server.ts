@@ -34,6 +34,8 @@ export async function generateGeminiText(opts: {
   system: string;
   history?: GeminiChatTurn[];
   userMessage: string;
+  maxTokens?: number;
+  temperature?: number;
 }): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
   const key = geminiApiKey();
   if (!key) {
@@ -63,8 +65,8 @@ export async function generateGeminiText(opts: {
         system_instruction: { parts: [{ text: opts.system }] },
         contents,
         generationConfig: {
-          temperature: 0.35,
-          maxOutputTokens: 1024,
+          temperature: opts.temperature ?? 0.35,
+          maxOutputTokens: opts.maxTokens ?? 1024,
         },
         safetySettings: [
           {

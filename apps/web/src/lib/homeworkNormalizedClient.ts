@@ -130,13 +130,14 @@ export async function fetchHomeworkDeskFromApi(): Promise<{
   }
 }
 
+type HomeworkDeskBundle = Pick<
+  HomeworkState,
+  "posts" | "diary" | "submissions" | "seen" | "settings"
+>;
+
 export async function hydrateHomeworkDeskFromDb(
   preferDb?: boolean,
 ): Promise<{ bundle: HomeworkDeskBundle; changed: boolean }> {
-  type HomeworkDeskBundle = Pick<
-    HomeworkState,
-    "posts" | "diary" | "submissions" | "seen" | "settings"
-  >;
   const remote = await fetchHomeworkDeskFromApi();
   const empty: HomeworkDeskBundle = {
     posts: [],

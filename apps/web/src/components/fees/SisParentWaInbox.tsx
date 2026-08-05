@@ -101,7 +101,7 @@ export function SisParentWaInbox({
         household / father / mother mobile). Keywords:{" "}
         <strong className="text-[var(--brand-deep)]">{keywords}</strong>. PAY
         creates a UPI link; ledger + auto receipt update when they confirm.
-        {configured ? " · API configured" : " · Set WHATSAPP_* env for live send"}
+        {configured ? " · Connected" : " · Configure WhatsApp in Masters → Integrations"}
       </p>
 
       {notice ? (

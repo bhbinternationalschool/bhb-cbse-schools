@@ -86,6 +86,16 @@ export const DESK_SLICE_MODULE_DEFS: DeskSliceModuleDef[] = [
     signalSlice: "advances",
   },
   {
+    id: "staff_agreements",
+    label: "Staff agreements",
+    envPrefix: "STAFF_AGREEMENTS",
+    deskPrefix: "staff_agreements",
+    blobTable: "staff_agreements_state",
+    sliceKeys: ["agreements"],
+    objectSlices: [],
+    signalSlice: "agreements",
+  },
+  {
     id: "module_registry",
     label: "Module registry",
     envPrefix: "MODULE_REGISTRY",

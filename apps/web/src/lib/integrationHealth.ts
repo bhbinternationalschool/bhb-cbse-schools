@@ -18,6 +18,11 @@ export type IntegrationHealth = {
   paymentConfigured: boolean;
   supabase: boolean;
   objectStorage: "supabase" | "gcs" | "local" | "none";
+  socialCrossPostEnabled: boolean;
+  socialFacebook: boolean;
+  socialInstagram: boolean;
+  socialTelegram: boolean;
+  socialNotes: string[];
 };
 
 export function getObjectStorageMode(): IntegrationHealth["objectStorage"] {
@@ -46,6 +51,7 @@ export function getIntegrationHealth(): IntegrationHealth {
       "Set WHATSAPP_TOKEN + WHATSAPP_PHONE_ID on the server for live sends. Until then, buttons open wa.me on your phone.",
     );
   }
+
   return {
     whatsappOutbound: outbound,
     whatsappWabaConfigured: false,
@@ -58,5 +64,12 @@ export function getIntegrationHealth(): IntegrationHealth {
     paymentConfigured: pg.configured,
     supabase: isSupabaseConfigured(),
     objectStorage: getObjectStorageMode(),
+    socialCrossPostEnabled: false,
+    socialFacebook: false,
+    socialInstagram: false,
+    socialTelegram: false,
+    socialNotes: [
+      "Configure social accounts in Communications → Social.",
+    ],
   };
 }

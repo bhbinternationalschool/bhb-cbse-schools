@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { FeeReceiptSheet } from "@/components/fees/FeeReceiptSheet";
+import { FeeReceiptSheet, printFeeReceipt } from "@/components/fees/FeeReceiptSheet";
 import {
   decodeReceiptSharePayload,
   type ReceiptSharePayload,
@@ -46,7 +46,7 @@ export default function SharedReceiptPage() {
   }
 
   return (
-    <main className="mx-auto max-w-2xl px-3 py-6 sm:px-4">
+    <main className="receipt-share-page mx-auto max-w-2xl px-3 py-6 sm:px-4">
       <div className="mb-4 print:hidden">
         <p className="text-center font-brand-name text-base text-[var(--brand-deep)]">
           {TENANT.nameDisplay}
@@ -58,7 +58,7 @@ export default function SharedReceiptPage() {
           <button
             type="button"
             className="rounded-lg bg-[var(--brand-deep)] px-4 py-2 text-xs font-bold text-white"
-            onClick={() => window.print()}
+            onClick={() => printFeeReceipt(payload.voucher.id)}
           >
             Print / save PDF
           </button>

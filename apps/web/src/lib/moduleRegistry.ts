@@ -35,7 +35,8 @@ export type RegistryModuleId =
   | "certificates"
   | "comms"
   | "reports"
-  | "rte_ews";
+  | "rte_ews"
+  | "documents";
 
 export type RegistryModuleGroup =
   | "setup"
@@ -202,6 +203,14 @@ export const REGISTRY_MODULES: RegistryModuleDef[] = [
     blurb: "TC, bonafide, fee and character certificates",
     href: "/certificates",
     group: "academics",
+    defaultEnabled: true,
+  },
+  {
+    id: "documents",
+    label: "Document maker",
+    blurb: "AI letters & govt submissions EN/HI",
+    href: "/documents",
+    group: "optional",
     defaultEnabled: true,
   },
   {
@@ -465,6 +474,7 @@ export function registryModuleForHref(href: string): RegistryModuleId | null {
   if (path === "/exams" || path.startsWith("/exams/")) return "exams";
   if (path === "/certificates" || path.startsWith("/certificates/"))
     return "certificates";
+  if (path === "/documents" || path.startsWith("/documents/")) return "documents";
   if (
     path === "/comms" ||
     path.startsWith("/comms/") ||

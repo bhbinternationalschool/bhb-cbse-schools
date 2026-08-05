@@ -14,6 +14,7 @@ import type {
   CashPool,
   CoaAccount,
   ExpenseCategory,
+  ExpensePaymentSplit,
   ExpenseVoucher,
   ExpenseVoucherLine,
   FiscalYear,
@@ -153,6 +154,7 @@ function cashLedgerToRow(
     source_type: e.sourceType || "",
     source_id: e.sourceId || "",
     narration: e.narration || "",
+    transaction_ref: e.transactionRef || "",
     running_balance_paise: e.runningBalancePaise ?? 0,
     created_at: e.createdAt || nowIso(),
     voided_at: e.voidedAt || null,
@@ -171,6 +173,7 @@ function rowToCashLedger(r: Record<string, unknown>): CashLedgerEntry {
     sourceType: String(r.source_type || ""),
     sourceId: String(r.source_id || ""),
     narration: String(r.narration || ""),
+    transactionRef: String(r.transaction_ref || ""),
     runningBalancePaise: Number(r.running_balance_paise ?? 0),
     createdAt: String(r.created_at || nowIso()),
     voidedAt: r.voided_at ? String(r.voided_at) : null,
@@ -227,6 +230,7 @@ function bankLedgerToRow(
     source_type: e.sourceType || "",
     source_id: e.sourceId || "",
     narration: e.narration || "",
+    transaction_ref: e.transactionRef || "",
     created_at: e.createdAt || nowIso(),
     voided_at: e.voidedAt || null,
     cancel_reason: e.cancelReason || "",
@@ -245,6 +249,7 @@ function rowToBankLedger(r: Record<string, unknown>): BankLedgerEntry {
     sourceType: String(r.source_type || ""),
     sourceId: String(r.source_id || ""),
     narration: String(r.narration || ""),
+    transactionRef: String(r.transaction_ref || ""),
     createdAt: String(r.created_at || nowIso()),
     voidedAt: r.voided_at ? String(r.voided_at) : null,
     cancelReason: String(r.cancel_reason || ""),
@@ -348,12 +353,17 @@ function expenseCategoryToRow(
 }
 
 function rowToExpenseCategory(r: Record<string, unknown>): ExpenseCategory {
+  const rawVendorIds = r.vendor_ids;
+  const vendorIds = Array.isArray(rawVendorIds)
+    ? rawVendorIds.filter((id): id is string => typeof id === "string")
+    : [];
   return {
     id: String(r.id),
     parentId: String(r.parent_id || ""),
     name: String(r.name || ""),
     coaCode: String(r.coa_code || ""),
     isActive: r.is_active !== false,
+    vendorIds,
   };
 }
 
@@ -384,6 +394,7 @@ function expenseVoucherToRow(
     cancelled_at: v.cancelledAt || null,
     cancelled_by: v.cancelledBy || "",
     cancel_reason: v.cancelReason || "",
+    payment_splits: v.paymentSplits ?? [],
     updated_at: nowIso(),
   };
 }
@@ -401,6 +412,7 @@ function expenseVoucherLineToRow(
     line_index: idx,
     category_id: line.categoryId || "",
     subcategory_id: line.subcategoryId || "",
+    vendor_id: line.vendorId || "",
     description: line.description || "",
     amount_paise: line.amountPaise ?? 0,
     tax_paise: line.taxPaise ?? 0,
@@ -416,6 +428,7 @@ function rowToExpenseVoucherLine(r: Record<string, unknown>): ExpenseVoucherLine
     id: String(r.id),
     categoryId: String(r.category_id || ""),
     subcategoryId: String(r.subcategory_id || ""),
+    vendorId: String(r.vendor_id || ""),
     description: String(r.description || ""),
     amountPaise: Number(r.amount_paise ?? 0),
     taxPaise: Number(r.tax_paise ?? 0),
@@ -429,6 +442,20 @@ function rowToExpenseVoucher(
   r: Record<string, unknown>,
   lines: ExpenseVoucherLine[],
 ): ExpenseVoucher {
+  const rawSplits = r.payment_splits;
+  const paymentSplits: ExpensePaymentSplit[] = Array.isArray(rawSplits)
+    ? rawSplits.map((s) => {
+        const x = s as Record<string, unknown>;
+        return {
+          id: String(x.id || ""),
+          mode: String(x.mode || "cash") as ExpensePaymentSplit["mode"],
+          amountPaise: Number(x.amountPaise ?? x.amount_paise ?? 0),
+          poolId: String(x.poolId ?? x.pool_id ?? ""),
+          bankId: String(x.bankId ?? x.bank_id ?? ""),
+          transactionRef: String(x.transactionRef ?? x.transaction_ref ?? ""),
+        };
+      })
+    : [];
   return {
     id: String(r.id),
     voucherNo: String(r.voucher_no || ""),
@@ -452,6 +479,7 @@ function rowToExpenseVoucher(
     cancelledAt: r.cancelled_at ? String(r.cancelled_at) : null,
     cancelledBy: String(r.cancelled_by || ""),
     cancelReason: String(r.cancel_reason || ""),
+    paymentSplits,
   };
 }
 
@@ -549,9 +577,14 @@ function vendorBillLineToRow(
     tenant_id: tenantId,
     bill_id: billId,
     line_index: idx,
-    description: line.description || "",
+    line_date: line.lineDate || null,
+    item_name: line.itemName || line.description || "",
+    description: line.itemName || line.description || "",
     qty: line.qty ?? 0,
+    unit: line.unit || "pcs",
     rate_paise: line.ratePaise ?? 0,
+    discount_paise: line.discountPaise ?? 0,
+    tax_paise: line.taxPaise ?? 0,
     amount_paise: line.amountPaise ?? 0,
     category_id: line.categoryId || "",
     updated_at: nowIso(),
@@ -559,11 +592,18 @@ function vendorBillLineToRow(
 }
 
 function rowToVendorBillLine(r: Record<string, unknown>): VendorBillLine {
+  const itemName = String(r.item_name || r.description || "");
+  const unitRaw = String(r.unit || "pcs");
   return {
     id: String(r.id),
-    description: String(r.description || ""),
+    lineDate: r.line_date ? String(r.line_date).slice(0, 10) : "",
+    itemName,
+    description: itemName,
     qty: Number(r.qty ?? 0),
+    unit: unitRaw,
     ratePaise: Number(r.rate_paise ?? 0),
+    discountPaise: Number(r.discount_paise ?? 0),
+    taxPaise: Number(r.tax_paise ?? 0),
     amountPaise: Number(r.amount_paise ?? 0),
     categoryId: String(r.category_id || ""),
   };

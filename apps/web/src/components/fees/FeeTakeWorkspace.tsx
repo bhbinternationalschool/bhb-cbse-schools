@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { IndianRupee } from "lucide-react";
 import { PaymentChannelSelect } from "@/components/accounts/PaymentChannelSelect";
 import {
   decodeTenderChannel,
@@ -53,17 +54,8 @@ import {
   FeeReceiptSheet,
   printFeeReceipt,
 } from "@/components/fees/FeeReceiptSheet";
-import { ChequesPanel } from "@/components/fees/ChequesPanel";
-import { ManualBookPanel } from "@/components/fees/ManualBookPanel";
-import { DayClosePanel } from "@/components/fees/DayClosePanel";
-import { TransportFeeSchedulePanel } from "@/components/fees/TransportFeeSchedulePanel";
 import { DueBreakupPicker } from "@/components/fees/DueBreakupPicker";
-import { PayLinksPanel } from "@/components/fees/PayLinksPanel";
-import { SisParentWaInbox } from "@/components/fees/SisParentWaInbox";
-import {
-  FeeAdjustmentsBadge,
-  FeeAdjustmentsPanel,
-} from "@/components/fees/FeeAdjustmentsPanel";
+import { FeeAdjustmentsBadge } from "@/components/fees/FeeAdjustmentsPanel";
 import {
   buildPerLineDiscountSlices,
   FEE_ADJUST_AUTO_LIMIT_PAISE,
@@ -76,9 +68,7 @@ import {
   listFutureConcessionCandidates,
   type FutureConcessionCandidate,
 } from "@/lib/counterConcession";
-import { FeeReportsPanel } from "@/components/fees/FeeFinancePanels";
-import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
-import { ChargeVouchersPanel } from "@/components/fees/ChargeVouchersPanel";
+import { lazyNamedTabPanel } from "@/components/ui/lazyTabPanel";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
 import {
   buildEnrichedPaymentSharePayload,
@@ -98,6 +88,50 @@ import {
 import {
   ModuleTabButton,
 } from "@/components/ui/ModuleTabs";
+import { MODULE_TAB_CONTAINER_CLASS } from "@/components/ui/modern-tab-bar";
+import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
+import { ErpPanel, ErpTableShell } from "@/components/ui/erp-roster";
+
+const ChequesPanel = lazyNamedTabPanel(
+  () => import("@/components/fees/ChequesPanel"),
+  "ChequesPanel",
+);
+const ManualBookPanel = lazyNamedTabPanel(
+  () => import("@/components/fees/ManualBookPanel"),
+  "ManualBookPanel",
+);
+const DayClosePanel = lazyNamedTabPanel(
+  () => import("@/components/fees/DayClosePanel"),
+  "DayClosePanel",
+);
+const PayLinksPanel = lazyNamedTabPanel(
+  () => import("@/components/fees/PayLinksPanel"),
+  "PayLinksPanel",
+);
+const SisParentWaInbox = lazyNamedTabPanel(
+  () => import("@/components/fees/SisParentWaInbox"),
+  "SisParentWaInbox",
+);
+const FeeAdjustmentsPanel = lazyNamedTabPanel(
+  () => import("@/components/fees/FeeAdjustmentsPanel"),
+  "FeeAdjustmentsPanel",
+);
+const FeeReportsPanel = lazyNamedTabPanel(
+  () => import("@/components/fees/FeeFinancePanels"),
+  "FeeReportsPanel",
+);
+const ModuleDashboardHost = lazyNamedTabPanel(
+  () => import("@/components/dashboard/ModuleDashboardHost"),
+  "ModuleDashboardHost",
+);
+const ChargeVouchersPanel = lazyNamedTabPanel(
+  () => import("@/components/fees/ChargeVouchersPanel"),
+  "ChargeVouchersPanel",
+);
+const TransportFeeSchedulePanel = lazyNamedTabPanel(
+  () => import("@/components/fees/TransportFeeSchedulePanel"),
+  "TransportFeeSchedulePanel",
+);
 
 function FeeAgreementPdfLogo({ className = "" }: { className?: string }) {
   return (
@@ -252,10 +286,12 @@ export function FeeTakeWorkspace() {
       const { ensurePaymentsHydrated } = await import(
         "@/lib/paymentsPersistence"
       );
-      await ensureSisHydrated();
-      await ensureFeesHydrated();
+      await Promise.all([
+        ensureSisHydrated(),
+        ensureFeesHydrated(),
+        ensurePaymentsHydrated(),
+      ]);
       await hydrateFeesStore();
-      await ensurePaymentsHydrated();
       const { applyCollectionWipeSignalIfNeeded } = await import(
         "@/lib/feeCollectionWipe"
       );
@@ -966,23 +1002,18 @@ export function FeeTakeWorkspace() {
   }
 
   return (
-    <div>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-[var(--brand-deep)]">
-            Fee Take
-          </h1>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            Collect academic + transport + special + store dues · counter or UPI
-            link · dated receipt
-          </p>
-        </div>
-        <div className="module-tabs flex flex-wrap gap-2.5 rounded-2xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] p-3">
+    <ErpWorkspaceShell
+      title="Fee Take"
+      subtitle="Collect academic + transport + special + store dues · counter or UPI link · dated receipt"
+      icon={<IndianRupee className="size-6" aria-hidden />}
+      notice={notice}
+      toolbar={
+        <div className={MODULE_TAB_CONTAINER_CLASS}>
           <ModuleTabButton
             active={tab === "dashboard"}
             onClick={() => setTab("dashboard")}
             tone="navy"
-            size="xl"
+            size="md"
           >
             Dashboard
           </ModuleTabButton>
@@ -990,7 +1021,7 @@ export function FeeTakeWorkspace() {
             active={tab === "collect"}
             onClick={() => setTab("collect")}
             tone="green"
-            size="xl"
+            size="md"
           >
             Collect
           </ModuleTabButton>
@@ -998,7 +1029,7 @@ export function FeeTakeWorkspace() {
             active={tab === "receipts"}
             onClick={() => setTab("receipts")}
             tone="teal"
-            size="xl"
+            size="md"
           >
             Receipts
           </ModuleTabButton>
@@ -1006,7 +1037,7 @@ export function FeeTakeWorkspace() {
             active={tab === "cheques"}
             onClick={() => setTab("cheques")}
             tone="amber"
-            size="xl"
+            size="md"
           >
             Cheques
             {mounted && openChequeCount > 0 ? ` (${openChequeCount})` : ""}
@@ -1015,7 +1046,7 @@ export function FeeTakeWorkspace() {
             active={tab === "manual"}
             onClick={() => setTab("manual")}
             tone="slate"
-            size="xl"
+            size="md"
           >
             Manual book
           </ModuleTabButton>
@@ -1023,7 +1054,7 @@ export function FeeTakeWorkspace() {
             active={tab === "paylinks"}
             onClick={() => setTab("paylinks")}
             tone="sky"
-            size="xl"
+            size="md"
           >
             Pay links
             {mounted && openPayLinkCount > 0 ? ` (${openPayLinkCount})` : ""}
@@ -1032,7 +1063,7 @@ export function FeeTakeWorkspace() {
             active={tab === "wa_sis"}
             onClick={() => setTab("wa_sis")}
             tone="teal"
-            size="xl"
+            size="md"
           >
             WA parents
           </ModuleTabButton>
@@ -1040,7 +1071,7 @@ export function FeeTakeWorkspace() {
             active={tab === "dayclose"}
             onClick={() => setTab("dayclose")}
             tone="coral"
-            size="xl"
+            size="md"
           >
             Day close{mounted && dayClosePending ? " ●" : ""}
           </ModuleTabButton>
@@ -1048,7 +1079,7 @@ export function FeeTakeWorkspace() {
             active={tab === "adjustments"}
             onClick={() => setTab("adjustments")}
             tone="violet"
-            size="xl"
+            size="md"
           >
             Adjustments
             {mounted ? <FeeAdjustmentsBadge /> : null}
@@ -1057,7 +1088,7 @@ export function FeeTakeWorkspace() {
             active={tab === "vouchers"}
             onClick={() => setTab("vouchers")}
             tone="rose"
-            size="xl"
+            size="md"
           >
             Vouchers
             {mounted && openChargeCount > 0 ? ` (${openChargeCount})` : ""}
@@ -1066,25 +1097,19 @@ export function FeeTakeWorkspace() {
             active={tab === "reports"}
             onClick={() => setTab("reports")}
             tone="green"
-            size="xl"
+            size="md"
           >
             Reports
           </ModuleTabButton>
           <Link
             href="/fees/defaulters"
-            className="inline-flex items-center rounded-xl bg-[rgba(180,35,24,0.12)] px-5 py-3 text-base font-extrabold text-[#b42318] transition hover:bg-[rgba(180,35,24,0.2)]"
+            className="inline-flex items-center rounded-lg bg-[rgba(180,35,24,0.12)] px-3 py-2 text-sm font-bold text-[#b42318] transition hover:bg-[rgba(180,35,24,0.2)]"
           >
             Defaulters
           </Link>
         </div>
-      </div>
-
-      {notice ? (
-        <p className="mt-3 rounded-lg bg-[rgba(32,48,80,0.06)] px-3 py-2 text-sm text-[var(--brand-deep)]">
-          {notice}
-        </p>
-      ) : null}
-
+      }
+    >
       {tab === "collect" ? (
         <div className="mt-6 space-y-5">
           <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
@@ -1508,7 +1533,7 @@ export function FeeTakeWorkspace() {
           }}
         />
       ) : null}
-    </div>
+    </ErpWorkspaceShell>
   );
 }
 
@@ -3044,16 +3069,11 @@ function ReceiptsPanel({
 
   return (
     <div className="mt-6 space-y-4">
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-bold text-[var(--brand-deep)]">
-              Receipt register
-            </h2>
-            <p className="text-xs text-[var(--muted)]">
-              Filter by date, student, parent, or class — click a row to open
-            </p>
-          </div>
+      <ErpPanel
+        title="Receipt register"
+        description="Filter by date, student, parent, or class — click a row to open"
+      >
+        <div className="mb-3 flex flex-wrap justify-end">
           <FilterExportButtons
             title="Fee receipts"
             filterNote={filterSummary}
@@ -3085,7 +3105,7 @@ function ReceiptsPanel({
           />
         </div>
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           <label className="block text-xs font-semibold text-[var(--muted)]">
             From date
             <input
@@ -3174,9 +3194,9 @@ function ReceiptsPanel({
             </button>
           ) : null}
         </div>
-      </div>
+      </ErpPanel>
 
-      <div className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
+      <ErpTableShell>
         {filtered.length === 0 ? (
           <p className="px-4 py-10 text-center text-sm text-[var(--muted)]">
             No receipts match these filters.
@@ -3261,7 +3281,7 @@ function ReceiptsPanel({
             })}
           </ul>
         )}
-      </div>
+      </ErpTableShell>
     </div>
   );
 }

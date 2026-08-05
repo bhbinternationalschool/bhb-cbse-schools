@@ -12,6 +12,7 @@ apps/web/out/
 .env
 .env.local
 apps/web/.env.local
+deploy/.generated/
 *.pem
 
 # OS / IDE
@@ -26,3 +27,4 @@ dist/
 backups/
 tsconfig.tsbuildinfo
 apps/web/tsconfig.tsbuildinfo
+.vercel

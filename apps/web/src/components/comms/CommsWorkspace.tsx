@@ -2,10 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Megaphone, Newspaper, Images, Bell, MessagesSquare } from "lucide-react";
+import { Images, Megaphone } from "lucide-react";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
+import { ErpTableShell } from "@/components/ui/erp-roster";
+import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ClassChannelsPanel } from "@/components/comms/ClassChannelsPanel";
+import { SocialCredentialsPanel } from "@/components/comms/SocialCredentialsPanel";
+import { SocialCrossPostPrefsPanel } from "@/components/comms/SocialCrossPostPanel";
 import { WaChatHubPanel } from "@/components/comms/WaChatHubPanel";
 import {
   addGalleryPhoto,
@@ -13,9 +17,9 @@ import {
   listAlbums,
   listNews,
   listNotices,
+  listScheduledComms,
   loadSchoolComms,
   photosForAlbum,
-  seedSchoolCommsDemo,
   setAlbumStatus,
   setNoticeStatus,
   setNewsStatus,
@@ -39,25 +43,35 @@ import {
   type NotificationsState,
 } from "@/lib/notifications";
 import { uploadSchoolObject } from "@/lib/objectStorage";
+import { publicPortalOrigin } from "@/lib/admissions";
+import {
+  buildCrossPostPayload,
+  loadSocialCrossPostPrefs,
+  requestSocialCrossPost,
+  summarizeCrossPostResult,
+  type SocialCrossPostLogEntry,
+} from "@/lib/socialCrossPost";
 import { TENANT } from "@/lib/types";
+import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 
-type CommsTab = "notices" | "news" | "gallery" | "inbox" | "channels" | "wa_hub";
+type CommsTab =
+  | "notices"
+  | "news"
+  | "gallery"
+  | "social"
+  | "inbox"
+  | "channels"
+  | "wa_hub";
 
 const TABS: ModuleTabItem[] = [
   { id: "notices", label: "Notices", tone: "navy" },
   { id: "news", label: "News", tone: "teal" },
   { id: "gallery", label: "Gallery", tone: "amber" },
+  { id: "social", label: "Social", tone: "rose" },
   { id: "channels", label: "Class WA", tone: "violet" },
   { id: "wa_hub", label: "WhatsApp hub", tone: "teal" },
   { id: "inbox", label: "Inbox", tone: "slate" },
 ];
-
-const field =
-  "w-full rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2.5 py-1.5 text-sm text-[var(--brand-deep)]";
-const btn =
-  "rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50";
-const btnOutline =
-  "rounded-lg border border-[rgba(32,48,80,0.2)] bg-white px-3 py-1.5 text-sm text-[var(--brand-deep)]";
 
 function tabFromSearch(raw: string | null, path: string): CommsTab {
   if (path.startsWith("/news")) return "news";
@@ -66,6 +80,7 @@ function tabFromSearch(raw: string | null, path: string): CommsTab {
   if (
     raw === "news" ||
     raw === "gallery" ||
+    raw === "social" ||
     raw === "inbox" ||
     raw === "notices" ||
     raw === "channels" ||
@@ -87,12 +102,14 @@ export function CommsWorkspace() {
   const [inbox, setInbox] = useState<NotificationsState | null>(null);
   const [noticeMsg, setNoticeMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [listQuery, setListQuery] = useState("");
 
   // Notice form
   const [nTitle, setNTitle] = useState("");
   const [nBody, setNBody] = useState("");
   const [nAudience, setNAudience] = useState<CommsAudience>("all");
   const [nPinned, setNPinned] = useState(false);
+  const [nScheduleAt, setNScheduleAt] = useState("");
   const [editNoticeId, setEditNoticeId] = useState<string | null>(null);
 
   // News form
@@ -100,13 +117,17 @@ export function CommsWorkspace() {
   const [wSummary, setWSummary] = useState("");
   const [wBody, setWBody] = useState("");
   const [wCover, setWCover] = useState("");
+  const [wScheduleAt, setWScheduleAt] = useState("");
   const [editNewsId, setEditNewsId] = useState<string | null>(null);
 
   // Gallery
   const [aTitle, setATitle] = useState("");
   const [aDesc, setADesc] = useState("");
+  const [aScheduleAt, setAScheduleAt] = useState("");
   const [activeAlbumId, setActiveAlbumId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [socialLogs, setSocialLogs] = useState<SocialCrossPostLogEntry[]>([]);
+  const [socialBusy, setSocialBusy] = useState(false);
 
   const actor = session.fullName || "Office";
   const recipientKey = currentStaffRecipientKey();
@@ -117,8 +138,89 @@ export function CommsWorkspace() {
     window.setTimeout(() => setNoticeMsg(null), 2800);
   }
 
+  function reloadSocialLogs() {
+    void fetch("/api/integrations/social/cross-post?limit=40")
+      .then((r) => (r.ok ? r.json() : { logs: [] }))
+      .then((j: { logs?: SocialCrossPostLogEntry[] }) =>
+        setSocialLogs(j.logs ?? []),
+      )
+      .catch(() => setSocialLogs([]));
+  }
+
+  async function runCrossPost(
+    payload: Parameters<typeof buildCrossPostPayload>[0],
+    opts?: { force?: boolean },
+  ) {
+    const prefs = loadSocialCrossPostPrefs();
+    if (!prefs.enabled && !opts?.force) return;
+    if (!prefs.platforms.length && !opts?.force) return;
+
+    setSocialBusy(true);
+    try {
+      const result = await requestSocialCrossPost(
+        buildCrossPostPayload({ ...payload, force: opts?.force }),
+      );
+      const summary = summarizeCrossPostResult(result);
+      if (result.ok || result.results.some((r) => r.skipped)) {
+        flash(`Social: ${summary}`);
+      } else {
+        setError(`Social cross-post: ${summary}`);
+      }
+      reloadSocialLogs();
+    } finally {
+      setSocialBusy(false);
+    }
+  }
+
+  function crossPostNotice(notice: SchoolNotice, force = false) {
+    if (notice.audience !== "all" && notice.audience !== "parents") return;
+    void runCrossPost(
+      {
+        kind: "notice",
+        contentId: notice.id,
+        title: notice.title,
+        body: notice.body,
+        linkUrl: `${publicPortalOrigin()}/parent?tab=notices`,
+      },
+      { force },
+    );
+  }
+
+  function crossPostNewsItem(item: SchoolNewsItem, force = false) {
+    void runCrossPost(
+      {
+        kind: "news",
+        contentId: item.id,
+        title: item.title,
+        body: item.body,
+        summary: item.summary,
+        imageUrl: item.coverUrl,
+        linkUrl: `${publicPortalOrigin()}/parent?tab=news`,
+      },
+      { force },
+    );
+  }
+
+  function crossPostAlbum(album: GalleryAlbum, state: SchoolCommsState, force = false) {
+    const photos = photosForAlbum(album.id, state)
+      .map((p) => p.url)
+      .filter(Boolean);
+    void runCrossPost(
+      {
+        kind: "gallery",
+        contentId: album.id,
+        title: album.title,
+        body: album.description || album.title,
+        summary: album.description,
+        imageUrl: album.coverUrl || photos[0],
+        imageUrls: photos.slice(0, 10),
+        linkUrl: `${publicPortalOrigin()}/parent?tab=gallery`,
+      },
+      { force },
+    );
+  }
+
   function reload() {
-    seedSchoolCommsDemo(actor);
     setComms(loadSchoolComms());
     setInbox(loadNotifications());
   }
@@ -137,6 +239,7 @@ export function CommsWorkspace() {
       ]);
       if (!cancelled) reload();
     })();
+    reloadSocialLogs();
     function onNf() {
       setInbox(loadNotifications());
     }
@@ -153,18 +256,53 @@ export function CommsWorkspace() {
     url.pathname = "/comms";
     url.searchParams.set("tab", next);
     router.replace(`${url.pathname}?${url.searchParams.toString()}`);
+    setListQuery("");
+  }
+
+  function matchesListQuery(blob: string, q: string): boolean {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return true;
+    return blob.toLowerCase().includes(needle);
   }
 
   const notices = useMemo(
     () => (comms ? listNotices(comms) : []),
     [comms],
   );
+  const noticesFiltered = useMemo(
+    () =>
+      notices.filter((n) =>
+        matchesListQuery(
+          `${n.title} ${n.body} ${n.status} ${audienceLabel(n.audience)}`,
+          listQuery,
+        ),
+      ),
+    [notices, listQuery],
+  );
   const news = useMemo(() => (comms ? listNews(comms) : []), [comms]);
+  const newsFiltered = useMemo(
+    () =>
+      news.filter((n) =>
+        matchesListQuery(`${n.title} ${n.summary} ${n.body} ${n.status}`, listQuery),
+      ),
+    [news, listQuery],
+  );
   const albums = useMemo(() => (comms ? listAlbums(comms) : []), [comms]);
+  const albumsFiltered = useMemo(
+    () =>
+      albums.filter((a) =>
+        matchesListQuery(`${a.title} ${a.description} ${a.status}`, listQuery),
+      ),
+    [albums, listQuery],
+  );
   const albumPhotos = useMemo(
     () =>
       activeAlbumId && comms ? photosForAlbum(activeAlbumId, comms) : [],
     [activeAlbumId, comms],
+  );
+  const scheduledItems = useMemo(
+    () => (comms ? listScheduledComms(comms) : []),
+    [comms],
   );
   const notifications = useMemo(
     () =>
@@ -172,6 +310,13 @@ export function CommsWorkspace() {
         ? listNotificationsFor(recipientKey, "staff", inbox)
         : [],
     [inbox, recipientKey],
+  );
+  const notificationsFiltered = useMemo(
+    () =>
+      notifications.filter((n) =>
+        matchesListQuery(`${n.title} ${n.body} ${n.kind}`, listQuery),
+      ),
+    [notifications, listQuery],
   );
 
   function beginEditNotice(n: SchoolNotice) {
@@ -208,6 +353,33 @@ export function CommsWorkspace() {
     setComms(res.state);
     resetNoticeForm();
     flash(publish ? "Notice published" : "Notice saved");
+    if (publish) crossPostNotice(res.notice);
+  }
+
+  function scheduleNotice() {
+    if (!nScheduleAt) {
+      setError("Pick a publish date & time");
+      return;
+    }
+    const res = upsertNotice({
+      id: editNoticeId || undefined,
+      title: nTitle,
+      body: nBody,
+      audience: nAudience,
+      pinned: nPinned,
+      createdBy: actor,
+      schedule: true,
+      scheduledPublishAt: nScheduleAt,
+      academicYearCode: session.academicYearCode,
+    });
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    setComms(res.state);
+    resetNoticeForm();
+    setNScheduleAt("");
+    flash(`Scheduled for ${new Date(res.notice.scheduledPublishAt).toLocaleString()}`);
   }
 
   function beginEditNews(n: SchoolNewsItem) {
@@ -244,6 +416,33 @@ export function CommsWorkspace() {
     setComms(res.state);
     resetNewsForm();
     flash(publish ? "News published" : "News saved");
+    if (publish) crossPostNewsItem(res.item);
+  }
+
+  function scheduleNews() {
+    if (!wScheduleAt) {
+      setError("Pick a publish date & time");
+      return;
+    }
+    const res = upsertNews({
+      id: editNewsId || undefined,
+      title: wTitle,
+      summary: wSummary,
+      body: wBody,
+      coverUrl: wCover,
+      createdBy: actor,
+      schedule: true,
+      scheduledPublishAt: wScheduleAt,
+      academicYearCode: session.academicYearCode,
+    });
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    setComms(res.state);
+    resetNewsForm();
+    setWScheduleAt("");
+    flash(`Scheduled for ${new Date(res.item.scheduledPublishAt).toLocaleString()}`);
   }
 
   function createAlbum(publish: boolean) {
@@ -263,6 +462,32 @@ export function CommsWorkspace() {
     setATitle("");
     setADesc("");
     flash(publish ? "Album published" : "Album created");
+    if (publish) crossPostAlbum(res.album, res.state);
+  }
+
+  function scheduleAlbum() {
+    if (!aScheduleAt) {
+      setError("Pick a publish date & time");
+      return;
+    }
+    const res = upsertAlbum({
+      title: aTitle,
+      description: aDesc,
+      createdBy: actor,
+      schedule: true,
+      scheduledPublishAt: aScheduleAt,
+      academicYearCode: session.academicYearCode,
+    });
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    setComms(res.state);
+    setActiveAlbumId(res.album.id);
+    setATitle("");
+    setADesc("");
+    setAScheduleAt("");
+    flash(`Album scheduled for ${new Date(res.album.scheduledPublishAt).toLocaleString()}`);
   }
 
   async function onPhotoFiles(files: FileList | null) {
@@ -301,50 +526,37 @@ export function CommsWorkspace() {
     }
   }
 
-  const headerIcon =
-    tab === "news" ? (
-      <Newspaper className="h-5 w-5" />
-    ) : tab === "gallery" ? (
-      <Images className="h-5 w-5" />
-    ) : tab === "inbox" ? (
-      <Bell className="h-5 w-5" />
-    ) : tab === "channels" ? (
-      <MessagesSquare className="h-5 w-5" />
-    ) : (
-      <Megaphone className="h-5 w-5" />
-    );
-
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--muted)]">
-            School communications
-          </p>
-          <h1 className="font-display mt-1 flex items-center gap-2 text-2xl font-semibold text-[var(--brand-deep)]">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[rgba(32,48,80,0.1)] text-[var(--brand-deep)]">
-              {headerIcon}
-            </span>
-            Notices · News · Gallery
-          </h1>
-          <p className="mt-1 max-w-xl text-sm text-[var(--muted)]">
-            Publish circulars and campus updates to staff and the parent portal.
-            Publishing also pushes an in-app notification.
-          </p>
-        </div>
-      </div>
-
+    <ErpWorkspaceShell
+      title="Notices · News · Gallery"
+      subtitle="Publish circulars and campus updates to staff and the parent portal. Publishing can also cross-post to Facebook, Instagram, and Telegram."
+      icon={<Megaphone className="size-6" aria-hidden />}
+      error={error}
+      notice={noticeMsg}
+    >
       <ModuleTabs items={TABS} value={tab} onChange={(id) => setTab(id as CommsTab)} />
 
-      {noticeMsg ? (
-        <p className="rounded-lg bg-[rgba(22,163,74,0.12)] px-3 py-2 text-sm text-[#15803d]">
-          {noticeMsg}
-        </p>
-      ) : null}
-      {error ? (
-        <p className="rounded-lg bg-[rgba(180,35,24,0.1)] px-3 py-2 text-sm text-[#b42318]">
-          {error}
-        </p>
+      {tab === "notices" ||
+      tab === "news" ||
+      tab === "gallery" ||
+      tab === "inbox" ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            className={`${field} max-w-md`}
+            placeholder="Search title, body, status…"
+            value={listQuery}
+            onChange={(e) => setListQuery(e.target.value)}
+          />
+          {listQuery ? (
+            <button
+              type="button"
+              className={btnOutline}
+              onClick={() => setListQuery("")}
+            >
+              Clear
+            </button>
+          ) : null}
+        </div>
       ) : null}
 
       {tab === "notices" ? (
@@ -390,12 +602,25 @@ export function CommsWorkspace() {
                 Pin
               </label>
             </div>
+            <SocialCrossPostPrefsPanel compact />
+            <label className="block text-xs text-[var(--muted)]">
+              Publish at (schedule)
+              <input
+                type="datetime-local"
+                className={`${field} mt-1`}
+                value={nScheduleAt}
+                onChange={(e) => setNScheduleAt(e.target.value)}
+              />
+            </label>
             <div className="flex flex-wrap gap-2">
               <button type="button" className={btnOutline} onClick={() => saveNotice(false)}>
                 Save draft
               </button>
+              <button type="button" className={btnOutline} onClick={scheduleNotice}>
+                Schedule
+              </button>
               <button type="button" className={btn} onClick={() => saveNotice(true)}>
-                Publish
+                Publish now
               </button>
               {editNoticeId ? (
                 <button type="button" className={btnOutline} onClick={resetNoticeForm}>
@@ -405,14 +630,16 @@ export function CommsWorkspace() {
             </div>
           </section>
           <section className="space-y-2">
-            {notices.length === 0 ? (
-              <p className="text-sm text-[var(--muted)]">No notices yet.</p>
+            {noticesFiltered.length === 0 ? (
+              <p className="text-sm text-[var(--muted)]">
+                {listQuery ? "No notices match your search." : "No notices yet."}
+              </p>
             ) : (
-              notices.map((n) => (
-                <article
-                  key={n.id}
-                  className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-3"
-                >
+              <ErpTableShell>
+                <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+                {noticesFiltered.map((n) => (
+                  <li key={n.id} className="p-3">
+                <article>
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
                       <h3 className="text-sm font-semibold text-[var(--brand-deep)]">
@@ -443,6 +670,8 @@ export function CommsWorkspace() {
                             if (r.ok) {
                               setComms(r.state);
                               flash("Published");
+                              const notice = r.state.notices.find((x) => x.id === n.id);
+                              if (notice) crossPostNotice(notice);
                             } else setError(r.error);
                           }}
                         >
@@ -463,13 +692,27 @@ export function CommsWorkspace() {
                           Archive
                         </button>
                       )}
+                      {n.status === "published" &&
+                      (n.audience === "all" || n.audience === "parents") ? (
+                        <button
+                          type="button"
+                          className="text-[11px] font-semibold text-[#7c3aed]"
+                          disabled={socialBusy}
+                          onClick={() => crossPostNotice(n, true)}
+                        >
+                          Post to social
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                   <p className="mt-2 whitespace-pre-wrap text-sm text-[var(--brand-deep)]">
                     {n.body}
                   </p>
                 </article>
-              ))
+                  </li>
+                ))}
+                </ul>
+              </ErpTableShell>
             )}
           </section>
         </div>
@@ -505,12 +748,25 @@ export function CommsWorkspace() {
               value={wCover}
               onChange={(e) => setWCover(e.target.value)}
             />
+            <SocialCrossPostPrefsPanel compact />
+            <label className="block text-xs text-[var(--muted)]">
+              Publish at (schedule)
+              <input
+                type="datetime-local"
+                className={`${field} mt-1`}
+                value={wScheduleAt}
+                onChange={(e) => setWScheduleAt(e.target.value)}
+              />
+            </label>
             <div className="flex flex-wrap gap-2">
               <button type="button" className={btnOutline} onClick={() => saveNews(false)}>
                 Save draft
               </button>
+              <button type="button" className={btnOutline} onClick={scheduleNews}>
+                Schedule
+              </button>
               <button type="button" className={btn} onClick={() => saveNews(true)}>
-                Publish
+                Publish now
               </button>
               {editNewsId ? (
                 <button type="button" className={btnOutline} onClick={resetNewsForm}>
@@ -520,11 +776,18 @@ export function CommsWorkspace() {
             </div>
           </section>
           <section className="space-y-2">
-            {news.map((n) => (
-              <article
-                key={n.id}
-                className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.1)] bg-white"
-              >
+            {newsFiltered.length === 0 ? (
+              <p className="text-sm text-[var(--muted)]">
+                {listQuery ? "No news matches your search." : "No news yet."}
+              </p>
+            ) : (
+              <ErpTableShell>
+                <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+                {newsFiltered.map((n) => (
+                  <li key={n.id}>
+                <article
+                  className="overflow-hidden"
+                >
                 {n.coverUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
@@ -555,12 +818,23 @@ export function CommsWorkspace() {
                             if (r.ok) {
                               setComms(r.state);
                               flash("Published");
+                              const item = r.state.news.find((x) => x.id === n.id);
+                              if (item) crossPostNewsItem(item);
                             } else setError(r.error);
                           }}
                         >
                           Publish
                         </button>
-                      ) : null}
+                      ) : (
+                        <button
+                          type="button"
+                          className="text-[11px] font-semibold text-[#7c3aed]"
+                          disabled={socialBusy}
+                          onClick={() => crossPostNewsItem(n, true)}
+                        >
+                          Post to social
+                        </button>
+                      )}
                     </div>
                   </div>
                   <p className="mt-1 text-[11px] text-[var(--muted)]">{n.status}</p>
@@ -572,7 +846,11 @@ export function CommsWorkspace() {
                   </p>
                 </div>
               </article>
-            ))}
+                  </li>
+                ))}
+                </ul>
+              </ErpTableShell>
+            )}
           </section>
         </div>
       ) : null}
@@ -597,16 +875,34 @@ export function CommsWorkspace() {
                 onChange={(e) => setADesc(e.target.value)}
               />
             </label>
+            <label className="min-w-[200px] text-xs text-[var(--muted)]">
+              Publish at
+              <input
+                type="datetime-local"
+                className={`${field} mt-1`}
+                value={aScheduleAt}
+                onChange={(e) => setAScheduleAt(e.target.value)}
+              />
+            </label>
             <button type="button" className={btnOutline} onClick={() => createAlbum(false)}>
               Create draft
             </button>
+            <button type="button" className={btnOutline} onClick={scheduleAlbum}>
+              Schedule
+            </button>
             <button type="button" className={btn} onClick={() => createAlbum(true)}>
-              Create & publish
+              Publish now
             </button>
           </section>
+          <SocialCrossPostPrefsPanel compact />
 
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {albums.map((a: GalleryAlbum) => (
+            {albumsFiltered.length === 0 ? (
+              <p className="text-sm text-[var(--muted)] sm:col-span-2 lg:col-span-3">
+                {listQuery ? "No albums match your search." : "No albums yet."}
+              </p>
+            ) : (
+            albumsFiltered.map((a: GalleryAlbum) => (
               <button
                 key={a.id}
                 type="button"
@@ -630,7 +926,8 @@ export function CommsWorkspace() {
                   <p className="text-[11px] text-[var(--muted)]">{a.status}</p>
                 </div>
               </button>
-            ))}
+            ))
+            )}
           </div>
 
           {activeAlbumId ? (
@@ -664,6 +961,10 @@ export function CommsWorkspace() {
                         if (r.ok) {
                           setComms(r.state);
                           flash("Album published");
+                          const album = r.state.albums.find(
+                            (x) => x.id === activeAlbumId,
+                          );
+                          if (album) crossPostAlbum(album, r.state);
                         } else setError(r.error);
                       }}
                     >
@@ -691,6 +992,92 @@ export function CommsWorkspace() {
               )}
             </section>
           ) : null}
+        </div>
+      ) : null}
+
+      {tab === "social" ? (
+        <div className="space-y-5">
+          <SocialCredentialsPanel onSaved={reloadSocialLogs} />
+          <SocialCrossPostPrefsPanel />
+          <section className="rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+            <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
+              Scheduled queue
+            </h2>
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              Scheduled items publish automatically when their time arrives.
+            </p>
+            {scheduledItems.length === 0 ? (
+              <p className="mt-3 text-sm text-[var(--muted)]">No scheduled posts.</p>
+            ) : (
+              <ErpTableShell className="mt-3">
+                <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+                {scheduledItems.map((item) => (
+                  <li
+                    key={`${item.kind}-${item.id}`}
+                    className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-sm"
+                  >
+                    <span className="font-medium text-[var(--brand-deep)]">
+                      {item.title}
+                    </span>
+                    <span className="text-[11px] text-[var(--muted)]">
+                      {item.kind} ·{" "}
+                      {new Date(item.scheduledPublishAt).toLocaleString()}
+                    </span>
+                  </li>
+                ))}
+                </ul>
+              </ErpTableShell>
+            )}
+          </section>
+          <section className="rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
+                Recent cross-posts
+              </h2>
+              <button type="button" className={btnOutline} onClick={reloadSocialLogs}>
+                Refresh
+              </button>
+            </div>
+            {socialLogs.length === 0 ? (
+              <p className="text-sm text-[var(--muted)]">
+                No cross-posts yet. Publish news or gallery with social enabled.
+              </p>
+            ) : (
+              <ErpTableShell>
+                <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+                {socialLogs.map((log) => (
+                  <li
+                    key={`${log.contentId}-${log.platform}-${log.postedAt}`}
+                    className="px-4 py-2.5 text-sm"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-medium text-[var(--brand-deep)]">
+                        {log.title || log.contentId}
+                      </span>
+                      <span className="text-[11px] text-[var(--muted)]">
+                        {log.platform} · {log.status} ·{" "}
+                        {new Date(log.postedAt).toLocaleString()}
+                      </span>
+                    </div>
+                    {log.postUrl ? (
+                      <a
+                        href={log.postUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-1 inline-block text-[11px] text-[#0f766e]"
+                      >
+                        View post
+                      </a>
+                    ) : null}
+                    {log.error ? (
+                      <p className="mt-1 text-[11px] text-[#b42318]">{log.error}</p>
+                    ) : null}
+                  </li>
+                ))}
+                </ul>
+              </ErpTableShell>
+            )}
+          </section>
         </div>
       ) : null}
 
@@ -724,12 +1111,14 @@ export function CommsWorkspace() {
               Prune inbox
             </button>
           </div>
-          {notifications.length === 0 ? (
+          {notificationsFiltered.length === 0 ? (
             <p className="text-sm text-[var(--muted)]">
-              No notifications for {TENANT.nameDisplay} staff yet.
+              {listQuery
+                ? "No notifications match your search."
+                : `No notifications for ${TENANT.nameDisplay} staff yet.`}
             </p>
           ) : (
-            notifications.map((n: AppNotification) => {
+            notificationsFiltered.map((n: AppNotification) => {
               const unread = !n.readBy.includes(recipientKey);
               return (
                 <button
@@ -764,6 +1153,6 @@ export function CommsWorkspace() {
           )}
         </section>
       ) : null}
-    </div>
+    </ErpWorkspaceShell>
   );
 }

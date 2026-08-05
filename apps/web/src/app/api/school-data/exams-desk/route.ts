@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { getDemoSession } from "@/lib/auth";
+import {
+  authorizeSchoolDataDesk,
+  SCHOOL_DATA_DESK_RBAC,
+} from "@/lib/apiRouteAuth.server";
 import type { ExamsState } from "@/lib/exams";
 import { examsDualWriteDbEnabled } from "@/lib/examsDbConfig";
 import {
@@ -9,19 +12,10 @@ import {
 
 export const runtime = "nodejs";
 
-async function authorize(req: Request): Promise<boolean> {
-  const secret = process.env.MIRROR_SYNC_SECRET?.trim();
-  const header = req.headers.get("x-mirror-secret")?.trim();
-  if (secret && header && header === secret) return true;
-  const session = await getDemoSession();
-  return !!session;
-}
-
 /** GET — pull exam desk from normalized tables */
 export async function GET(req: Request) {
-  if (!(await authorize(req))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["exams-desk"], "GET");
+  if (!auth.ok) return auth.response
   const { bundle, meta } = await fetchExamDeskFromDb();
   return NextResponse.json({
     ok: true,
@@ -44,9 +38,8 @@ type ExamsDeskPostBody = Pick<
 
 /** POST — push full exam desk snapshot */
 export async function POST(req: Request) {
-  if (!(await authorize(req))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["exams-desk"], "POST");
+  if (!auth.ok) return auth.response
   if (!examsDualWriteDbEnabled()) {
     return NextResponse.json({
       ok: true,

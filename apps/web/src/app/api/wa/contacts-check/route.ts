@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import {
   checkWhatsAppContacts,
   waOutboundConfigured,
@@ -13,6 +14,9 @@ export const runtime = "nodejs";
  * Requires WHATSAPP_TOKEN + WHATSAPP_PHONE_ID (or WA_BSP_CONTACTS_URL).
  */
 export async function POST(req: Request) {
+  const auth = await requireStaffPermission(req, "admissions", "view");
+  if (!auth.ok) return auth.response;
+
   let body: { mobiles?: unknown };
   try {
     body = (await req.json()) as { mobiles?: unknown };

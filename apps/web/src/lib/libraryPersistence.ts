@@ -16,6 +16,12 @@ import {
 import { mergeDbDeskIntoLibraryState } from "@/lib/libraryNormalizedMerge";
 import { libraryReadFromDbEnabled } from "@/lib/libraryDbConfig";
 import { deskSkipBlobHydrateClient, deskSkipBlobPushClient } from "@/lib/deskCutover";
+import {
+  isDeskHydrated,
+  markDeskHydrated,
+} from "@/lib/deskHydrateGuard";
+
+const MODULE = "library";
 
 const blob = createDomainBlobPersistence<LibraryState>({
   table: "library_state",
@@ -36,6 +42,9 @@ export const scheduleLibrarySync = (state: LibraryState) => {
   scheduleLibraryDeskSync(state);
 };
 export const ensureLibraryHydrated = async () => {
+  if (isDeskHydrated(MODULE)) return false;
+  markDeskHydrated(MODULE);
+
   const readFromDb = libraryReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("library")
     ? false

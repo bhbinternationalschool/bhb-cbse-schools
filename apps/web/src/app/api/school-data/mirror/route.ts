@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { getDemoSession } from "@/lib/auth";
+import {
+  authorizeSchoolDataDesk,
+  hasMirrorSyncSecret,
+  requireStaffApi,
+  requireStaffPermission,
+} from "@/lib/apiRouteAuth.server";
 import {
   ensureSchoolMirrorHydrated,
   ensureSchoolMirrorLoaded,
@@ -9,18 +14,25 @@ import { getSchoolMirrorSync } from "@/lib/schoolDataMirror";
 
 export const runtime = "nodejs";
 
-async function authorizeMirrorRequest(req: Request): Promise<boolean> {
-  const secret = process.env.MIRROR_SYNC_SECRET?.trim();
-  const header = req.headers.get("x-mirror-secret")?.trim();
-  if (secret && header && header === secret) return true;
-  const session = await getDemoSession();
-  return !!session;
-}
+type MirrorSlice = "sis" | "fees" | "payments" | "masters" | "admissions";
+
+const SLICE_RBAC: Record<
+  MirrorSlice,
+  "students" | "fees" | "masters" | "admissions"
+> = {
+  sis: "students",
+  fees: "fees",
+  payments: "fees",
+  masters: "masters",
+  admissions: "admissions",
+};
 
 export async function GET(req: Request) {
-  if (!(await authorizeMirrorRequest(req))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = hasMirrorSyncSecret(req)
+    ? await requireStaffApi(req)
+    : await requireStaffPermission(req, "masters", "view");
+  if (!auth.ok) return auth.response;
+
   const mirror = await ensureSchoolMirrorHydrated();
   const leadCount = Array.isArray(
     (mirror.admissions as { leads?: unknown[] } | null)?.leads,
@@ -45,9 +57,6 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  if (!(await authorizeMirrorRequest(req))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
   let body: {
     sis?: unknown;
     fees?: unknown;
@@ -60,6 +69,27 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
+  const slices = Object.keys(body).filter(
+    (k) => body[k as keyof typeof body] !== undefined,
+  ) as MirrorSlice[];
+  if (slices.length === 0) {
+    return NextResponse.json({ error: "No slices" }, { status: 400 });
+  }
+
+  if (hasMirrorSyncSecret(req)) {
+    const auth = await requireStaffApi(req);
+    if (!auth.ok) return auth.response;
+  } else {
+    for (const slice of slices) {
+      const auth = await authorizeSchoolDataDesk(
+        req,
+        SLICE_RBAC[slice],
+        "POST",
+      );
+      if (!auth.ok) return auth.response;
+    }
+  }
+
   await ensureSchoolMirrorLoaded();
   const patch: {
     sis?: unknown;
@@ -73,9 +103,6 @@ export async function POST(req: Request) {
   if (body.payments !== undefined) patch.payments = body.payments;
   if (body.masters !== undefined) patch.masters = body.masters;
   if (body.admissions !== undefined) patch.admissions = body.admissions;
-  if (Object.keys(patch).length === 0) {
-    return NextResponse.json({ error: "No slices" }, { status: 400 });
-  }
   const result = await writeSchoolMirror(patch);
   const status = result.supabaseSynced ? 200 : 502;
   return NextResponse.json(

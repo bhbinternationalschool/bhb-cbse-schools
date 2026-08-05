@@ -64,6 +64,7 @@ export function ExamPapersPanel({
   const [printCount, setPrintCount] = useState(1);
   const [showPreview, setShowPreview] = useState(false);
   const [aiHardness, setAiHardness] = useState<ExamPaperHardness>("mixed");
+  const [aiLoading, setAiLoading] = useState(false);
 
   const [newExamTermId, setNewExamTermId] = useState(terms[0]?.id ?? "");
   const [newClassId, setNewClassId] = useState("");
@@ -192,8 +193,53 @@ export function ExamPapersPanel({
     onNotice(`Saved ${r.paper.paperCode}`);
   }
 
-  function onAiFill() {
-    if (!draft || !canEdit) return;
+  async function onAiFill() {
+    if (!draft || !canEdit || aiLoading) return;
+    setAiLoading(true);
+    try {
+      const res = await fetch("/api/ai/exam-paper", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "draft",
+          classId: draft.classId,
+          subjectId: draft.subjectId,
+          hardness: aiHardness,
+          maxMarks: draft.maxMarks,
+        }),
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        sections?: ExamPaperSection[];
+        explanation?: string[];
+        engine?: string;
+        source?: string;
+        error?: string;
+      };
+      if (res.ok && json.ok && json.sections?.length) {
+        mutateActiveSet((set) => ({
+          ...set,
+          sections: json.sections!,
+        }));
+        updateDraft({ hardness: aiHardness });
+        onNotice(
+          [
+            ...(json.explanation || []),
+            json.engine && json.engine !== "local"
+              ? `(Engine: ${json.engine})`
+              : "",
+          ]
+            .filter(Boolean)
+            .join(" "),
+        );
+        return;
+      }
+    } catch {
+      /* fallback below */
+    } finally {
+      setAiLoading(false);
+    }
+
     const result = suggestExamPaperDraft({
       masters,
       classId: draft.classId,
@@ -206,14 +252,54 @@ export function ExamPapersPanel({
       sections: result.sections,
     }));
     updateDraft({ hardness: aiHardness });
-    onNotice(result.explanation.join(" "));
+    onNotice(`${result.explanation.join(" ")} (offline draft)`);
   }
 
-  function onAiMore(sectionId: string) {
-    if (!draft || !canEdit) return;
+  async function onAiMore(sectionId: string) {
+    if (!draft || !canEdit || aiLoading) return;
     const set = activeSet(draft);
     const section = set.sections.find((s) => s.id === sectionId);
     if (!section) return;
+
+    setAiLoading(true);
+    try {
+      const res = await fetch("/api/ai/exam-paper", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "more",
+          classId: draft.classId,
+          subjectId: draft.subjectId,
+          hardness: draft.hardness,
+          count: 2,
+          excludeTexts: section.questions.map((q) => q.text),
+        }),
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        questions?: ExamPaperQuestion[];
+        engine?: string;
+      };
+      if (res.ok && json.ok && json.questions?.length) {
+        mutateActiveSet((s) => ({
+          ...s,
+          sections: s.sections.map((sec) =>
+            sec.id === sectionId
+              ? { ...sec, questions: [...sec.questions, ...json.questions!] }
+              : sec,
+          ),
+        }));
+        onNotice(
+          `Added ${json.questions.length} AI suggestion(s)${json.engine && json.engine !== "local" ? ` (${json.engine})` : ""} — edit as needed`,
+        );
+        return;
+      }
+    } catch {
+      /* fallback */
+    } finally {
+      setAiLoading(false);
+    }
+
     const more = suggestMoreQuestions({
       masters,
       classId: draft.classId,
@@ -234,7 +320,7 @@ export function ExamPapersPanel({
           : sec,
       ),
     }));
-    onNotice(`Added ${more.length} AI suggestion(s) — edit as needed`);
+    onNotice(`Added ${more.length} offline suggestion(s) — edit as needed`);
   }
 
   function onAddSet() {
@@ -571,10 +657,11 @@ export function ExamPapersPanel({
               </select>
               <button
                 type="button"
-                className="rounded-lg bg-[#6d28d9] px-3 py-1.5 text-sm font-bold text-white"
-                onClick={onAiFill}
+                className="rounded-lg bg-[#6d28d9] px-3 py-1.5 text-sm font-bold text-white disabled:opacity-50"
+                onClick={() => void onAiFill()}
+                disabled={aiLoading}
               >
-                AI draft this set
+                {aiLoading ? "Drafting…" : "AI draft this set"}
               </button>
             </div>
           ) : null}

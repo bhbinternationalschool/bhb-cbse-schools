@@ -4,7 +4,7 @@
 
 import type { FeesState } from "@/lib/fees";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
-import type { FeeDeskAncillary } from "@/lib/feesDeskAncillary.server";
+import type { FeeDeskAncillary } from "@/lib/feesDeskAncillary.types";
 
 const META_KEY = "bhb_fees_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;

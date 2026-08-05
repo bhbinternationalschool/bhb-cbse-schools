@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -11,7 +11,12 @@ import {
   UserRound,
   Users,
 } from "lucide-react";
-import { STAFF_STREAMS, type StaffStream, type StaffRecord } from "@/lib/foundationMasters";
+import {
+  STAFF_STREAMS,
+  isStaffActive,
+  type StaffStream,
+  type StaffRecord,
+} from "@/lib/foundationMasters";
 import { loadMasters, saveMasters, currentAcademicYearCode, type MastersState } from "@/lib/masters";
 import {
   applyStaffImport,
@@ -24,28 +29,42 @@ import {
 import {
   checkStaffRemoval,
   removeStaff,
+  resolveSessionStaff,
 } from "@/lib/staffResolve";
 import { RemoveControl } from "@/components/masters/RemoveControl";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import {
+  ErpBarChart,
+  ErpPieChart,
+  type ErpChartRow,
+} from "@/components/ui/erp-charts";
+import {
+  ErpChartCard,
+  ErpChartGrid,
+  ErpMetricCard,
+  ErpMetricGrid,
+  ErpPanel,
+  ErpStatusBadge,
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+  ErpToolbar,
+  ErpToolbarBtn,
+} from "@/components/ui/erp-roster";
+import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
+import { field, btn } from "@/components/ui/erp-ui";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { StaffLeavePanel } from "@/components/staff/StaffLeavePanel";
 import { StaffLeaveReportsPanel } from "@/components/staff/StaffLeaveReportsPanel";
 import { StaffAppraisalPanel } from "@/components/staff/StaffAppraisalPanel";
 import { StaffPayslipsPanel } from "@/components/staff/StaffPayslipsPanel";
+import { StaffMyProfileDocs } from "@/components/staff/StaffMyProfileDocs";
+import { StaffAgreementPanel, StaffAgreementSelfPanel } from "@/components/staff/StaffAgreementPanel";
+import { DocVerificationQueuePanel } from "@/components/students/DocVerificationQueuePanel";
 import { useDemoSession } from "@/components/shell/SessionContext";
 
-const CHART_COLORS = [
-  "#2563eb",
-  "#ef4444",
-  "#f97316",
-  "#16a34a",
-  "#8b5cf6",
-  "#0891b2",
-  "#e11d48",
-  "#ca8a04",
-];
-
-type NamedCount = { key: string; label: string; count: number };
+type NamedCount = ErpChartRow;
 
 type StaffMainTab =
   | "dashboard"
@@ -53,7 +72,10 @@ type StaffMainTab =
   | "leave"
   | "appraisal"
   | "reports"
-  | "payslips";
+  | "payslips"
+  | "my_docs"
+  | "doc_verify"
+  | "agreements";
 
 export function StaffWorkspace() {
   const router = useRouter();
@@ -71,6 +93,9 @@ export function StaffWorkspace() {
       "appraisal",
       "reports",
       "payslips",
+      "my_docs",
+      "doc_verify",
+      "agreements",
     ];
     if (raw && (allowed as string[]).includes(raw)) setTab(raw as StaffMainTab);
   }, []);
@@ -128,8 +153,8 @@ export function StaffWorkspace() {
   const stats = useMemo(() => {
     if (!state) return null;
     const staff = state.staff ?? [];
-    const active = staff.filter((s) => s.status === "active");
-    const inactive = staff.filter((s) => s.status === "inactive");
+    const active = staff.filter(isStaffActive);
+    const inactive = staff.filter((s) => !isStaffActive(s));
     const male = staff.filter((s) => s.gender === "M").length;
     const female = staff.filter((s) => s.gender === "F").length;
 
@@ -202,7 +227,8 @@ export function StaffWorkspace() {
     const q = query.trim().toLowerCase();
     return (state.staff ?? [])
       .filter((s) => {
-        if (statusFilter !== "all" && s.status !== statusFilter) return false;
+        if (statusFilter === "active" && !isStaffActive(s)) return false;
+        if (statusFilter === "inactive" && isStaffActive(s)) return false;
         if (streamFilter && s.stream !== streamFilter) return false;
         if (!q) return true;
         const dep = state.departments.find((d) => d.id === s.departmentId);
@@ -236,29 +262,21 @@ export function StaffWorkspace() {
   }
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-[var(--brand-deep)]">
-            Staff
-          </h1>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            Roster · leave · appraisal · {stats.active} active ·{" "}
-            <Link
-              href="/masters"
-              className="font-medium text-[var(--brand-deep)] underline-offset-2 hover:underline"
-            >
-              Departments & designations in Masters
-            </Link>
-          </p>
-        </div>
-        {notice ? (
-          <span className="rounded-lg bg-[rgba(197,160,40,0.18)] px-3 py-1.5 text-xs font-medium text-[var(--brand-deep)]">
-            {notice}
-          </span>
-        ) : null}
-      </div>
-
+    <ErpWorkspaceShell
+      title="Staff"
+      subtitle={
+        <>
+          Roster · leave · appraisal · {stats.active} active ·{" "}
+          <Link
+            href="/masters"
+            className="font-medium text-[var(--brand-deep)] underline-offset-2 hover:underline"
+          >
+            Departments & designations in Masters
+          </Link>
+        </>
+      }
+      notice={notice}
+    >
       <ModuleTabs
         aria-label="Staff"
         value={tab}
@@ -266,6 +284,9 @@ export function StaffWorkspace() {
         items={[
           { id: "dashboard", label: "Dashboard", tone: "navy" },
           { id: "roster", label: "Roster", tone: "navy" },
+          { id: "my_docs", label: "My docs", tone: "sky" },
+          { id: "agreements", label: "Agreements", tone: "teal" },
+          { id: "doc_verify", label: "Doc verify", tone: "amber" },
           { id: "leave", label: "Leave", tone: "teal" },
           { id: "appraisal", label: "Appraisal", tone: "violet" },
           { id: "payslips", label: "Payslips", tone: "green" },
@@ -280,6 +301,35 @@ export function StaffWorkspace() {
         />
       ) : null}
 
+      {tab === "my_docs" ? (
+        <ErpPanel>
+          <StaffAgreementSelfPanel />
+          <div className="mt-6 border-t border-[rgba(32,48,80,0.08)] pt-6">
+            <StaffMyProfileDocs
+              staffId={
+                state ? resolveSessionStaff(session, state)?.id || "" : ""
+              }
+              actorName={session.fullName || ""}
+            />
+          </div>
+        </ErpPanel>
+      ) : null}
+
+      {tab === "agreements" ? (
+        <ErpPanel title="Employment agreements">
+          <StaffAgreementPanel mode="hr" />
+        </ErpPanel>
+      ) : null}
+
+      {tab === "doc_verify" ? (
+        <ErpPanel className="bg-[rgba(246,245,239,0.6)]">
+          <DocVerificationQueuePanel
+            mode="staff"
+            onChanged={() => setState(loadMasters())}
+          />
+        </ErpPanel>
+      ) : null}
+
       {tab === "leave" ? <StaffLeavePanel ay={ay} /> : null}
       {tab === "reports" ? (
         <StaffLeaveReportsPanel ay={ay} scope="leave" />
@@ -289,89 +339,89 @@ export function StaffWorkspace() {
 
       {tab === "roster" ? (
       <>
-      <div className="flex flex-wrap justify-end gap-2">
-        <ToolbarBtn
+      <ErpToolbar>
+        <ErpToolbarBtn
           icon={<UserPlus className="h-4 w-4" />}
           label="Add"
           onClick={() => router.push("/staff/new")}
         />
-        <ToolbarBtn
+        <ErpToolbarBtn
           icon={<List className="h-4 w-4" />}
           label="Staff"
           onClick={() => scrollTo("staff-list")}
         />
-        <ToolbarBtn
+        <ErpToolbarBtn
           icon={<Download className="h-4 w-4" />}
           label="Download"
           onClick={() => downloadStaffRosterCsv(state)}
         />
-        <ToolbarBtn
+        <ErpToolbarBtn
           icon={<FileUp className="h-4 w-4" />}
           label="Import"
           onClick={() => scrollTo("staff-import")}
         />
-      </div>
+      </ErpToolbar>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard
+      <ErpMetricGrid>
+        <ErpMetricCard
           title="Active Staff"
           value={stats.active}
           tone="green"
           icon={<UserRound className="h-7 w-7" />}
         />
-        <MetricCard
+        <ErpMetricCard
           title="InActive Staff"
           value={stats.inactive}
           tone="rose"
           icon={<UserRound className="h-7 w-7" />}
         />
-        <MetricCard
+        <ErpMetricCard
           title="Male"
           value={stats.male}
           tone="sky"
           icon={<Users className="h-7 w-7" />}
         />
-        <MetricCard
+        <ErpMetricCard
           title="Female"
           value={stats.female}
           tone="violet"
           icon={<Users className="h-7 w-7" />}
         />
-      </div>
+      </ErpMetricGrid>
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <ChartCard title="Department-wise Analysis">
-          <BarChart
+      <ErpChartGrid cols={3}>
+        <ErpChartCard title="Department-wise Analysis">
+          <ErpBarChart
             rows={stats.departmentRows}
             yLabel="No. Of Staffs"
             xLabel="Department"
             barColor="#f97316"
           />
-        </ChartCard>
-        <ChartCard title="Religion-wise Analysis">
-          <PieChart rows={stats.religionRows} />
-        </ChartCard>
-        <ChartCard title="Teaching vs Non-teaching">
-          <PieChart
+        </ErpChartCard>
+        <ErpChartCard title="Religion-wise Analysis">
+          <ErpPieChart rows={stats.religionRows} />
+        </ErpChartCard>
+        <ErpChartCard title="Teaching vs Non-teaching">
+          <ErpPieChart
             rows={stats.streamRows}
             colors={["#2563eb", "#f97316"]}
           />
-        </ChartCard>
-      </div>
+        </ErpChartCard>
+      </ErpChartGrid>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <ChartCard title="Caste-wise Analysis">
-          <PieChart rows={stats.casteRows} />
-        </ChartCard>
-        <ChartCard title="Designation-wise Analysis">
-          <BarChart
+      <ErpChartGrid cols={2}>
+        <ErpChartCard title="Caste-wise Analysis">
+          <ErpPieChart rows={stats.casteRows} />
+        </ErpChartCard>
+        <ErpChartCard title="Designation-wise Analysis">
+          <ErpBarChart
             rows={stats.designationRows}
             yLabel="No. Of Staffs"
             xLabel="Designation"
             barColor="#fb7185"
           />
-        </ChartCard>
-      </div>
+        </ErpChartCard>
+      </ErpChartGrid>
 
       <div id="staff-list" className="scroll-mt-24 space-y-4">
         <div className="flex flex-wrap items-end gap-2">
@@ -423,9 +473,9 @@ export function StaffWorkspace() {
           </Link>
         </div>
 
-        <div className="overflow-hidden rounded-2xl border border-[rgba(32,48,80,0.12)] bg-white shadow-sm">
-          <table className="w-full min-w-[720px] text-left text-sm">
-            <thead className="border-b border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] text-[11px] uppercase tracking-wide text-[var(--muted)]">
+        <ErpTableShell>
+          <ErpTable>
+            <ErpTableHead>
               <tr>
                 <th className="px-4 py-3 font-bold">Photo</th>
                 <th className="px-4 py-3 font-bold">Code</th>
@@ -437,8 +487,8 @@ export function StaffWorkspace() {
                 <th className="px-4 py-3 font-bold">Status</th>
                 <th className="px-4 py-3 font-bold" />
               </tr>
-            </thead>
-            <tbody className="divide-y divide-[rgba(32,48,80,0.08)]">
+            </ErpTableHead>
+            <ErpTableBody>
               {filtered.map((s) => {
                 const dep = state.departments.find(
                   (d) => d.id === s.departmentId,
@@ -489,15 +539,11 @@ export function StaffWorkspace() {
                     </td>
                     <td className="px-4 py-3">{s.mobile || "—"}</td>
                     <td className="px-4 py-3">
-                      <span
-                        className={`rounded-md px-2 py-0.5 text-[10px] font-black uppercase ${
-                          s.status === "active"
-                            ? "bg-[rgba(21,128,61,0.12)] text-[#15803d]"
-                            : "bg-[rgba(32,48,80,0.08)] text-[var(--muted)]"
-                        }`}
-                      >
-                        {s.status}
-                      </span>
+                      <ErpStatusBadge
+                        active={s.status === "active"}
+                        activeLabel={s.status}
+                        inactiveLabel={s.status}
+                      />
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="inline-flex flex-col items-end gap-1">
@@ -540,9 +586,9 @@ export function StaffWorkspace() {
                   </td>
                 </tr>
               ) : null}
-            </tbody>
-          </table>
-        </div>
+            </ErpTableBody>
+          </ErpTable>
+        </ErpTableShell>
       </div>
 
       <div id="staff-import" className="scroll-mt-24">
@@ -555,317 +601,7 @@ export function StaffWorkspace() {
       </div>
       </>
       ) : null}
-    </div>
-  );
-}
-
-function ToolbarBtn({
-  icon,
-  label,
-  onClick,
-}: {
-  icon: ReactNode;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="inline-flex items-center gap-2 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-3.5 py-2 text-sm font-semibold text-[var(--brand-deep)] shadow-sm transition hover:border-[rgba(37,99,235,0.35)] hover:bg-[#eff6ff]"
-    >
-      <span className="text-[#2563eb]">{icon}</span>
-      {label}
-    </button>
-  );
-}
-
-function MetricCard({
-  title,
-  value,
-  tone,
-  icon,
-}: {
-  title: string;
-  value: number;
-  tone: "green" | "rose" | "sky" | "violet";
-  icon: ReactNode;
-}) {
-  const tones = {
-    green: {
-      title: "text-[#2563eb]",
-      icon: "bg-[#dcfce7] text-[#15803d]",
-    },
-    rose: {
-      title: "text-[#2563eb]",
-      icon: "bg-[#fee2e2] text-[#b91c1c]",
-    },
-    sky: {
-      title: "text-[#2563eb]",
-      icon: "bg-[#dbeafe] text-[#1d4ed8]",
-    },
-    violet: {
-      title: "text-[#2563eb]",
-      icon: "bg-[#ede9fe] text-[#6d28d9]",
-    },
-  }[tone];
-
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white px-5 py-4 shadow-sm">
-      <div>
-        <div className={`text-sm font-semibold ${tones.title}`}>{title}</div>
-        <div className="mt-1 text-3xl font-bold tabular-nums text-[#0f172a]">
-          {value}
-        </div>
-      </div>
-      <span
-        className={`inline-flex h-14 w-14 items-center justify-center rounded-full ${tones.icon}`}
-      >
-        {icon}
-      </span>
-    </div>
-  );
-}
-
-function ChartCard({
-  title,
-  children,
-}: {
-  title: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white p-4 shadow-sm">
-      <h2 className="text-base font-semibold text-[#2563eb]">{title}</h2>
-      <div className="mt-3">{children}</div>
-    </div>
-  );
-}
-
-function BarChart({
-  rows,
-  yLabel,
-  xLabel,
-  barColor,
-}: {
-  rows: NamedCount[];
-  yLabel: string;
-  xLabel: string;
-  barColor: string;
-}) {
-  const max = Math.max(1, ...rows.map((r) => r.count));
-  const niceMax = Math.ceil(max / 2) * 2 || 2;
-  const w = 420;
-  const h = 220;
-  const padL = 42;
-  const padR = 12;
-  const padT = 12;
-  const padB = 58;
-  const plotW = w - padL - padR;
-  const plotH = h - padT - padB;
-  const gap = 8;
-  const barW =
-    rows.length > 0 ? Math.max(10, (plotW - gap * rows.length) / rows.length) : 20;
-
-  if (rows.length === 0) {
-    return (
-      <p className="py-10 text-center text-sm text-[var(--muted)]">
-        No staff data yet
-      </p>
-    );
-  }
-
-  return (
-    <div className="overflow-x-auto">
-      <svg
-        viewBox={`0 0 ${w} ${h}`}
-        className="mx-auto h-auto w-full min-w-[280px] max-w-full"
-        role="img"
-        aria-label={`${xLabel} bar chart`}
-      >
-        {[0, 0.25, 0.5, 0.75, 1].map((t) => {
-          const y = padT + plotH * (1 - t);
-          const val = Math.round(niceMax * t);
-          return (
-            <g key={t}>
-              <line
-                x1={padL}
-                x2={w - padR}
-                y1={y}
-                y2={y}
-                stroke="#e2e8f0"
-                strokeWidth={1}
-              />
-              <text
-                x={padL - 8}
-                y={y + 3}
-                textAnchor="end"
-                className="fill-[#64748b]"
-                fontSize={10}
-              >
-                {val}
-              </text>
-            </g>
-          );
-        })}
-        {rows.map((r, i) => {
-          const bh = (r.count / niceMax) * plotH;
-          const x = padL + gap / 2 + i * (barW + gap);
-          const y = padT + plotH - bh;
-          return (
-            <g key={r.key}>
-              <rect
-                x={x}
-                y={y}
-                width={barW}
-                height={Math.max(bh, 1)}
-                fill={barColor}
-                rx={3}
-              />
-              <text
-                x={x + barW / 2}
-                y={h - 28}
-                textAnchor="middle"
-                className="fill-[#475569]"
-                fontSize={9}
-                transform={`rotate(-28 ${x + barW / 2} ${h - 28})`}
-              >
-                {r.label.length > 12 ? `${r.label.slice(0, 11)}…` : r.label}
-              </text>
-              {r.count > 0 ? (
-                <text
-                  x={x + barW / 2}
-                  y={y - 4}
-                  textAnchor="middle"
-                  className="fill-[#334155]"
-                  fontSize={10}
-                  fontWeight={600}
-                >
-                  {r.count}
-                </text>
-              ) : null}
-            </g>
-          );
-        })}
-        <text
-          x={16}
-          y={h / 2}
-          textAnchor="middle"
-          className="fill-[#64748b]"
-          fontSize={10}
-          transform={`rotate(-90 16 ${h / 2})`}
-        >
-          {yLabel}
-        </text>
-        <text
-          x={padL + plotW / 2}
-          y={h - 6}
-          textAnchor="middle"
-          className="fill-[#64748b]"
-          fontSize={10}
-        >
-          {xLabel}
-        </text>
-      </svg>
-    </div>
-  );
-}
-
-function PieChart({
-  rows,
-  colors = CHART_COLORS,
-}: {
-  rows: NamedCount[];
-  colors?: string[];
-}) {
-  const total = rows.reduce((s, r) => s + r.count, 0);
-  if (total === 0) {
-    return (
-      <p className="py-10 text-center text-sm text-[var(--muted)]">
-        No staff data yet
-      </p>
-    );
-  }
-
-  const size = 180;
-  const cx = size / 2;
-  const cy = size / 2;
-  const r = 68;
-  let angle = -Math.PI / 2;
-
-  const slices = rows.map((row, i) => {
-    const frac = row.count / total;
-    const start = angle;
-    const sweep = frac * Math.PI * 2;
-    angle += sweep;
-    const end = angle;
-    const large = sweep > Math.PI ? 1 : 0;
-    const x1 = cx + r * Math.cos(start);
-    const y1 = cy + r * Math.sin(start);
-    const x2 = cx + r * Math.cos(end);
-    const y2 = cy + r * Math.sin(end);
-    const mid = start + sweep / 2;
-    const lx = cx + r * 0.62 * Math.cos(mid);
-    const ly = cy + r * 0.62 * Math.sin(mid);
-    const path =
-      frac >= 0.999
-        ? `M ${cx} ${cy - r} A ${r} ${r} 0 1 1 ${cx - 0.01} ${cy - r} Z`
-        : `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} Z`;
-    return {
-      ...row,
-      path,
-      color: colors[i % colors.length]!,
-      pct: Math.round(frac * 1000) / 10,
-      lx,
-      ly,
-      showLabel: frac >= 0.08,
-    };
-  });
-
-  return (
-    <div className="flex flex-wrap items-center justify-center gap-4">
-      <svg
-        viewBox={`0 0 ${size} ${size}`}
-        className="h-44 w-44"
-        role="img"
-        aria-label="Pie chart"
-      >
-        {slices.map((s) => (
-          <g key={s.key}>
-            <path d={s.path} fill={s.color} />
-            {s.showLabel ? (
-              <text
-                x={s.lx}
-                y={s.ly}
-                textAnchor="middle"
-                dominantBaseline="middle"
-                fill="white"
-                fontSize={11}
-                fontWeight={700}
-              >
-                {s.pct}%
-              </text>
-            ) : null}
-          </g>
-        ))}
-      </svg>
-      <ul className="min-w-[7rem] space-y-1.5 text-sm">
-        {slices.map((s) => (
-          <li key={s.key} className="flex items-center gap-2 text-[#334155]">
-            <span
-              className="h-2.5 w-2.5 shrink-0 rounded-full"
-              style={{ background: s.color }}
-            />
-            <span>
-              {s.label}{" "}
-              <span className="tabular-nums text-[var(--muted)]">
-                ({s.count})
-              </span>
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
+    </ErpWorkspaceShell>
   );
 }
 
@@ -965,18 +701,8 @@ function StaffImportPanel({
   }
 
   return (
-    <div className="space-y-4 rounded-2xl border border-[rgba(32,48,80,0.12)] bg-white p-5 shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-bold text-[var(--brand-deep)]">
-            Import staff
-          </h2>
-          <p className="mt-1 text-[11px] text-[var(--muted)]">
-            CSV or Teacher.xlsx · maps vendor columns (Biometric, Job Type,
-            Basic Pay, OASIS ID, …). Open each profile afterward for photo &
-            docs.
-          </p>
-        </div>
+    <ErpPanel title="Import staff" description="CSV or Teacher.xlsx · maps vendor columns (Biometric, Job Type, Basic Pay, OASIS ID, …). Open each profile afterward for photo & docs.">
+      <div className="mb-3 flex justify-end">
         <button
           type="button"
           className="text-xs font-semibold text-[var(--brand-deep)] underline-offset-2 hover:underline"
@@ -985,7 +711,6 @@ function StaffImportPanel({
           Download template
         </button>
       </div>
-
       <label className="block text-xs font-semibold text-[var(--muted)]">
         Staff file
         <input
@@ -1067,6 +792,6 @@ function StaffImportPanel({
       >
         {busy ? "Importing…" : replaceAll ? "Replace & import" : "Import staff"}
       </button>
-    </div>
+    </ErpPanel>
   );
 }

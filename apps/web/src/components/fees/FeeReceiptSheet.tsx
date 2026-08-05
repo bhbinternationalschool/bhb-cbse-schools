@@ -9,6 +9,7 @@ import {
   tenderModeLabel,
   voucherHasUnclearedCheque,
   type CollectionVoucher,
+  type VoucherLine,
 } from "@/lib/fees";
 import { type MastersState } from "@/lib/masters";
 import { type SisState } from "@/lib/sis";
@@ -23,6 +24,10 @@ function formatDisplayDate(isoDate: string) {
     month: "short",
     year: "numeric",
   });
+}
+
+function inrCell(paise: number) {
+  return formatInr(paise).replace(/^₹\s?/, "");
 }
 
 export type ReceiptStudentRow = {
@@ -59,6 +64,506 @@ export function receiptStudentRows(
   return rows;
 }
 
+const KIND_ORDER = [
+  "arrears",
+  "academic",
+  "transport",
+  "special",
+  "voucher",
+  "store",
+  "plan",
+] as const;
+
+type FeeKind = (typeof KIND_ORDER)[number];
+
+function sectionTitle(kind: FeeKind) {
+  switch (kind) {
+    case "arrears":
+      return "Arrears";
+    case "academic":
+      return "A — Academic";
+    case "transport":
+      return "B — Transport";
+    case "special":
+      return "C — Special / misc";
+    case "voucher":
+      return "V — Charge vouchers";
+    case "store":
+      return "D — Store / books";
+    case "plan":
+      return "E — Installment plan";
+    default:
+      return kind;
+  }
+}
+
+type StudentFeeGroup = {
+  student: ReceiptStudentRow;
+  lines: VoucherLine[];
+  subtotalPaise: number;
+};
+
+function groupVoucherLinesByStudent(
+  voucher: CollectionVoucher,
+  studentRows: ReceiptStudentRow[],
+): StudentFeeGroup[] {
+  const ids: string[] = [];
+  for (const row of studentRows) {
+    if (!ids.includes(row.studentId)) ids.push(row.studentId);
+  }
+  for (const line of voucher.lines) {
+    if (!ids.includes(line.studentId)) ids.push(line.studentId);
+  }
+
+  return ids.map((studentId) => {
+    const student =
+      studentRows.find((s) => s.studentId === studentId) ??
+      ({
+        studentId,
+        admissionNo: "—",
+        fullName:
+          voucher.lines.find((l) => l.studentId === studentId)?.studentName ??
+          "—",
+        fatherName: "—",
+        classSection: "—",
+      } satisfies ReceiptStudentRow);
+    const lines = voucher.lines.filter((l) => l.studentId === studentId);
+    return {
+      student,
+      lines,
+      subtotalPaise: lines.reduce((s, l) => s + l.amountPaise, 0),
+    };
+  });
+}
+
+function FeeLineParticulars({ line }: { line: VoucherLine }) {
+  const issueRef =
+    line.kind === "store"
+      ? line.storeIssueNo || (line.label.match(/ISS\/[^\s·]+/)?.[0] ?? "")
+      : "";
+
+  const headLabel =
+    line.kind === "store"
+      ? `Store${issueRef ? ` · ${issueRef}` : ""}`
+      : line.kind === "transport"
+        ? `Transport${line.transport ? ` · ${line.transport.periodLabel}` : ""}`
+        : line.label;
+
+  return (
+    <div>
+      <span className="font-semibold">{headLabel}</span>
+      {line.kind === "store" && line.storeItems && line.storeItems.length > 0 ? (
+        <ul className="mt-0.5 space-y-0.5 text-[9px] leading-snug text-[var(--brand-deep)]">
+          {line.storeItems.map((it, idx) => (
+            <li
+              key={`${line.dueKey}-it-${idx}`}
+              className="flex justify-between gap-2"
+            >
+              <span>
+                <span className="text-[var(--muted)]">{it.sku}</span>
+                {" · "}
+                {it.name}
+                {it.sizeLabel ? ` (${it.sizeLabel})` : ""}
+                {" ×"}
+                {it.qty} @ {inrCell(it.unitPricePaise)}
+              </span>
+              <span className="shrink-0 tabular-nums font-semibold">
+                {inrCell(it.linePaise)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {line.kind === "transport" && line.transport ? (
+        <div className="mt-0.5 text-[9px] leading-snug text-[var(--muted)]">
+          {line.transport.routeCode} · {line.transport.routeName} ·{" "}
+          {line.transport.busNo}
+          {line.transport.vehicleReg ? ` (${line.transport.vehicleReg})` : ""}
+          {" · Stop "}
+          {line.transport.stopName}
+        </div>
+      ) : null}
+      {line.concessionPaise && line.concessionPaise > 0 ? (
+        <div className="mt-0.5 space-y-0.5 text-[9px] leading-snug text-[var(--muted)]">
+          {line.billedPaise ? (
+            <div>
+              Billed {inrCell(line.billedPaise)} · discount{" "}
+              {inrCell(line.concessionPaise)}
+            </div>
+          ) : (
+            <div>Discount {inrCell(line.concessionPaise)}</div>
+          )}
+          {line.concessionDetails?.map((c) => (
+            <div key={`${line.dueKey}-${c.grantId}`}>
+              · {formatConcessionDetailLine(c)}
+              {c.code ? ` (${c.code})` : ""}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function renderStudentFeeRows(lines: VoucherLine[], keyPrefix: string): ReactNode[] {
+  const rows: ReactNode[] = [];
+  let n = 0;
+  const known = new Set<string>(KIND_ORDER);
+
+  for (const kind of KIND_ORDER) {
+    const chunk = lines.filter((l) => l.kind === kind);
+    if (chunk.length === 0) continue;
+    rows.push(
+      <tr key={`${keyPrefix}-sec-${kind}`} className="bg-[rgba(32,48,80,0.06)]">
+        <td
+          colSpan={3}
+          className="px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-[var(--brand-deep)]"
+        >
+          {sectionTitle(kind)}
+        </td>
+      </tr>,
+    );
+    for (const l of chunk) {
+      n += 1;
+      rows.push(
+        <tr
+          key={`${keyPrefix}-${l.dueKey}-${n}`}
+          className="border-b border-[rgba(32,48,80,0.1)]"
+        >
+          <td className="w-6 px-1 py-0.5 align-top text-[var(--muted)]">{n}</td>
+          <td className="px-1 py-0.5 text-[var(--brand-deep)]">
+            <FeeLineParticulars line={l} />
+          </td>
+          <td className="w-16 px-1 py-0.5 align-top text-right font-semibold tabular-nums">
+            {inrCell(l.amountPaise)}
+          </td>
+        </tr>,
+      );
+    }
+  }
+
+  for (const l of lines.filter((x) => !known.has(x.kind as FeeKind))) {
+    n += 1;
+    rows.push(
+      <tr
+        key={`${keyPrefix}-${l.dueKey}-x-${n}`}
+        className="border-b border-[rgba(32,48,80,0.1)]"
+      >
+        <td className="w-6 px-1 py-0.5 text-[var(--muted)]">{n}</td>
+        <td className="px-1 py-0.5 text-[var(--brand-deep)]">
+          <FeeLineParticulars line={l} />
+        </td>
+        <td className="w-16 px-1 py-0.5 text-right font-semibold tabular-nums">
+          {inrCell(l.amountPaise)}
+        </td>
+      </tr>,
+    );
+  }
+
+  return rows;
+}
+
+function FeeReceiptCopy({
+  copyLabel,
+  voucher,
+  householdHint,
+  studentRows,
+  studentGroups,
+  multiSibling,
+  voided,
+  stc,
+  showRemainingPayQr,
+  remainingPayQrDataUrl,
+  remainingPayAmountPaise,
+  remainingPayUrl,
+}: {
+  copyLabel: "Parent copy" | "Office copy";
+  voucher: CollectionVoucher;
+  householdHint?: string;
+  studentRows: ReceiptStudentRow[];
+  studentGroups: StudentFeeGroup[];
+  multiSibling: boolean;
+  voided: boolean;
+  stc: boolean;
+  showRemainingPayQr: boolean;
+  remainingPayQrDataUrl?: string | null;
+  remainingPayAmountPaise?: number;
+  remainingPayUrl?: string | null;
+}) {
+  const discountTotal = voucher.lines.reduce(
+    (s, l) => s + (l.concessionPaise ?? 0),
+    0,
+  );
+
+  return (
+    <div className="fee-receipt-copy relative flex min-h-0 flex-1 flex-col">
+      <div className="fee-receipt-inner relative flex min-h-0 flex-1 flex-col border-[2px] border-[var(--brand-deep)]">
+        <div
+          className="fee-receipt-watermark pointer-events-none absolute inset-0 z-0 flex items-center justify-center overflow-hidden"
+          aria-hidden
+        >
+          <span
+            className={`select-none text-[3rem] font-black uppercase tracking-[0.18em] ${
+              voided
+                ? "text-[rgba(180,35,24,0.12)]"
+                : "text-[rgba(15,122,76,0.11)]"
+            }`}
+            style={{ transform: "rotate(-28deg)" }}
+          >
+            {voided ? "Void" : "Paid"}
+          </span>
+        </div>
+
+        <div className="relative z-10 flex min-h-0 flex-1 flex-col border border-[var(--brand-gold)] p-2 sm:p-2.5">
+          <div className="mb-1 flex items-center justify-between gap-2 border-b border-[var(--brand-deep)] pb-1">
+            <span className="rounded bg-[var(--brand-deep)] px-2 py-0.5 text-[8px] font-bold uppercase tracking-[0.14em] text-white">
+              {copyLabel}
+            </span>
+            <span className="text-[8px] font-bold uppercase tracking-[0.12em] text-[var(--muted)]">
+              {voucher.receiptNo}
+            </span>
+          </div>
+
+          <header className="flex items-start gap-2 border-b border-[rgba(32,48,80,0.15)] pb-1.5">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={TENANT.logoUrl}
+              alt=""
+              width={40}
+              height={40}
+              className="h-10 w-10 shrink-0 object-contain"
+            />
+            <div className="min-w-0 flex-1 text-center">
+              <p className="font-brand-name text-[11px] leading-tight text-[var(--brand-deep)]">
+                {TENANT.nameDisplay}
+              </p>
+              <p className="text-[8px] text-[var(--brand-gold)]">{TENANT.tagline}</p>
+            </div>
+            <div className="w-10 shrink-0" aria-hidden />
+          </header>
+
+          <div className="mt-1 flex flex-wrap items-center justify-between gap-1 text-[8px]">
+            <span className="font-bold uppercase tracking-wide text-[var(--brand-deep)]">
+              {receiptSeriesOf(voucher.receiptNo) === "R"
+                ? "Registration receipt"
+                : "Fee receipt"}
+              {voided ? " · void" : ""}
+            </span>
+            <span>
+              <span className="text-[var(--muted)]">Date </span>
+              <span className="font-semibold">
+                {formatDisplayDate(voucher.collectionDate)}
+              </span>
+              {" · "}
+              <span className="text-[var(--muted)]">AY </span>
+              <span className="font-semibold">{voucher.academicYearCode}</span>
+            </span>
+          </div>
+
+          {stc ? (
+            <div className="mt-1 border border-[var(--brand-gold)] bg-[rgba(197,160,40,0.1)] px-2 py-0.5 text-center text-[7px] font-bold uppercase text-[var(--brand-deep)]">
+              Cheque subject to clearance
+            </div>
+          ) : null}
+
+          <dl className="mt-1 grid grid-cols-2 gap-x-2 gap-y-0.5 text-[8px]">
+            <div>
+              <dt className="text-[var(--muted)]">Guardian</dt>
+              <dd className="font-semibold">{householdHint || "—"}</dd>
+            </div>
+            <div>
+              <dt className="text-[var(--muted)]">Received by</dt>
+              <dd className="font-semibold">{voucher.cashierName}</dd>
+            </div>
+          </dl>
+
+          <div className="mt-1.5">
+            <p className="mb-0.5 text-[7px] font-bold uppercase tracking-[0.12em] text-[var(--muted)]">
+              Student particulars
+            </p>
+            <table className="w-full border-collapse text-[8px]">
+              <thead>
+                <tr className="bg-[rgba(32,48,80,0.08)] text-left text-[var(--brand-deep)]">
+                  <th className="w-4 border border-[rgba(32,48,80,0.12)] px-0.5 py-0.5 font-semibold">
+                    #
+                  </th>
+                  <th className="border border-[rgba(32,48,80,0.12)] px-0.5 py-0.5 font-semibold">
+                    Reg.
+                  </th>
+                  <th className="border border-[rgba(32,48,80,0.12)] px-0.5 py-0.5 font-semibold">
+                    Name
+                  </th>
+                  <th className="border border-[rgba(32,48,80,0.12)] px-0.5 py-0.5 font-semibold">
+                    Father
+                  </th>
+                  <th className="border border-[rgba(32,48,80,0.12)] px-0.5 py-0.5 font-semibold">
+                    Class
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {studentRows.map((row, i) => (
+                  <tr key={row.studentId}>
+                    <td className="border border-[rgba(32,48,80,0.1)] px-0.5 py-0.5 text-[var(--muted)]">
+                      {i + 1}
+                    </td>
+                    <td className="border border-[rgba(32,48,80,0.1)] px-0.5 py-0.5 font-semibold tabular-nums">
+                      {row.admissionNo}
+                    </td>
+                    <td className="border border-[rgba(32,48,80,0.1)] px-0.5 py-0.5 font-semibold">
+                      {row.fullName}
+                    </td>
+                    <td className="border border-[rgba(32,48,80,0.1)] px-0.5 py-0.5">
+                      {row.fatherName}
+                    </td>
+                    <td className="border border-[rgba(32,48,80,0.1)] px-0.5 py-0.5 font-semibold">
+                      {row.classSection}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="mt-1.5 min-h-0 flex-1 space-y-1.5">
+            {studentGroups.map((group) => (
+              <div key={`${copyLabel}-${group.student.studentId}`}>
+                <p className="mb-0.5 text-[7px] font-bold uppercase tracking-[0.1em] text-[var(--brand-deep)]">
+                  {multiSibling
+                    ? `Fee particulars — ${group.student.fullName} (${group.student.classSection}) · Reg. ${group.student.admissionNo}`
+                    : "Fee particulars"}
+                </p>
+                <table className="w-full border-collapse text-[8px]">
+                  <thead>
+                    <tr className="bg-[var(--brand-deep)] text-left text-white">
+                      <th className="w-6 px-1 py-0.5 font-semibold">#</th>
+                      <th className="px-1 py-0.5 font-semibold">Fee head</th>
+                      <th className="w-16 px-1 py-0.5 text-right font-semibold">
+                        ₹
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {renderStudentFeeRows(
+                      group.lines,
+                      `${copyLabel}-${group.student.studentId}`,
+                    )}
+                    {multiSibling ? (
+                      <tr className="bg-[rgba(32,48,80,0.05)] font-bold">
+                        <td colSpan={2} className="px-1 py-0.5 text-right">
+                          {group.student.fullName} subtotal
+                        </td>
+                        <td className="px-1 py-0.5 text-right tabular-nums">
+                          {inrCell(group.subtotalPaise)}
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-1.5 shrink-0">
+            {discountTotal > 0 ? (
+              <div className="flex justify-between text-[8px] font-semibold text-[#0f7a4c]">
+                <span>Total discount</span>
+                <span>−{formatInr(discountTotal)}</span>
+              </div>
+            ) : null}
+            <div className="flex justify-between rounded bg-[rgba(197,160,40,0.15)] px-1.5 py-0.5 text-[9px] font-extrabold text-[var(--brand-deep)]">
+              <span className="uppercase tracking-wide">
+                {multiSibling ? "Grand total received" : "Total received"}
+              </span>
+              <span className="tabular-nums">{formatInr(voucher.totalPaise)}</span>
+            </div>
+            <p className="mt-0.5 text-[7px] leading-snug text-[var(--brand-deep)]">
+              <span className="font-semibold text-[var(--muted)]">In words: </span>
+              {amountInWordsPaise(voucher.totalPaise)}
+            </p>
+          </div>
+
+          <div className="mt-1 shrink-0">
+            <p className="mb-0.5 text-[7px] font-bold uppercase tracking-[0.1em] text-[var(--muted)]">
+              Mode of payment
+            </p>
+            <table className="w-full border-collapse text-[8px]">
+              <tbody>
+                {voucher.tenders.map((t, i) => (
+                  <tr
+                    key={`${copyLabel}-t-${t.mode}-${i}`}
+                    className="border-b border-[rgba(32,48,80,0.08)]"
+                  >
+                    <td className="py-0.5 pr-1 font-semibold">
+                      {tenderModeLabel(t.mode)}
+                    </td>
+                    <td className="py-0.5 pr-1 text-[var(--muted)]">
+                      {[
+                        t.ref,
+                        t.instrumentDate
+                          ? formatDisplayDate(t.instrumentDate)
+                          : "",
+                        t.bankName,
+                        t.realisation === "subject_to_clearance"
+                          ? "Subject to realisation"
+                          : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" · ") || "—"}
+                    </td>
+                    <td className="py-0.5 text-right font-semibold tabular-nums">
+                      {formatInr(t.amountPaise)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {showRemainingPayQr &&
+          !voided &&
+          remainingPayQrDataUrl &&
+          (remainingPayAmountPaise || 0) > 0 ? (
+            <div className="mt-1 flex shrink-0 items-center gap-2 rounded border border-[rgba(15,118,110,0.25)] bg-[rgba(15,118,110,0.06)] px-1.5 py-1">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={remainingPayQrDataUrl}
+                alt="UPI QR for remaining dues"
+                className="h-14 w-14 shrink-0 rounded border border-white bg-white p-0.5"
+              />
+              <div className="min-w-0 text-[7px] leading-snug text-[var(--brand-deep)]">
+                <p className="font-bold uppercase text-[#0f766e]">
+                  Pay remaining dues
+                </p>
+                <p className="font-semibold tabular-nums">
+                  {formatInr(remainingPayAmountPaise || 0)}
+                </p>
+                {remainingPayUrl ? (
+                  <p className="mt-0.5 break-all text-[6px] text-[#0f766e]">
+                    {remainingPayUrl}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="mt-1.5 grid shrink-0 grid-cols-2 gap-3 text-[8px] text-[var(--brand-deep)]">
+            <div className="border-t border-[rgba(32,48,80,0.35)] pt-0.5">
+              Parent / payer
+            </div>
+            <div className="border-t border-[rgba(32,48,80,0.35)] pt-0.5 text-right">
+              Authorised signatory
+              <div className="text-[7px] text-[var(--muted)]">
+                {voucher.cashierName}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function printFeeReceipt(receiptId: string) {
   const sheet = document.getElementById(`receipt-${receiptId}`);
   if (!sheet) {
@@ -91,9 +596,7 @@ export function FeeReceiptSheet({
   householdHint?: string;
   sis?: SisState | null;
   masters?: MastersState | null;
-  /** When set (e.g. shared digital receipt), skip SIS/masters lookup */
   students?: ReceiptStudentRow[];
-  /** Optional UPI QR for balance still due (current / future) */
   remainingPayQrDataUrl?: string | null;
   remainingPayAmountPaise?: number;
   remainingPayUrl?: string | null;
@@ -102,541 +605,55 @@ export function FeeReceiptSheet({
   const stc = voucherHasUnclearedCheque(voucher);
   const studentRows =
     studentsProp ?? receiptStudentRows(voucher, sis, masters);
+  const studentGroups = groupVoucherLinesByStudent(voucher, studentRows);
+  const multiSibling = studentGroups.length > 1;
+
+  const copyProps = {
+    voucher,
+    householdHint,
+    studentRows,
+    studentGroups,
+    multiSibling,
+    voided,
+    stc,
+    remainingPayQrDataUrl,
+    remainingPayAmountPaise,
+    remainingPayUrl,
+  };
 
   return (
     <div
       id={`receipt-${voucher.id}`}
       data-voided={voided ? "true" : "false"}
-      className={`fee-receipt-sheet overflow-hidden rounded-xl border bg-white shadow-[0_8px_28px_rgba(32,48,80,0.08)] ${
+      className={`fee-receipt-sheet fee-receipt-dual overflow-hidden rounded-xl border bg-white shadow-[0_8px_28px_rgba(32,48,80,0.08)] ${
         voided
           ? "border-[rgba(180,60,60,0.35)] opacity-80"
           : "border-[rgba(32,48,80,0.14)]"
       }`}
     >
-      <div className="fee-receipt-inner relative m-3 border-[3px] border-[var(--brand-deep)] sm:m-4">
+      <div className="fee-receipt-dual-a4 flex flex-col p-2 sm:p-3">
+        <FeeReceiptCopy copyLabel="Parent copy" showRemainingPayQr {...copyProps} />
+
         <div
-          className="fee-receipt-watermark pointer-events-none absolute inset-0 z-0 flex items-center justify-center overflow-hidden"
+          className="fee-receipt-perforation my-2 flex shrink-0 items-center justify-center gap-2 py-1"
           aria-hidden
         >
-          <span
-            className={`select-none text-[4.5rem] font-black uppercase tracking-[0.2em] sm:text-[5.5rem] ${
-              voided
-                ? "text-[rgba(180,35,24,0.14)]"
-                : "text-[rgba(15,122,76,0.13)]"
-            }`}
-            style={{ transform: "rotate(-28deg)" }}
-          >
-            {voided ? "Void" : "Paid"}
+          <span className="text-[var(--muted)]">✂</span>
+          <span className="text-[8px] font-bold uppercase tracking-[0.2em] text-[var(--muted)]">
+            Tear along perforation
           </span>
+          <span className="text-[var(--muted)]">✂</span>
         </div>
-        <div className="relative z-10 m-1 border border-[var(--brand-gold)] p-4 sm:p-5">
-          <header className="flex items-start gap-3 border-b-2 border-[var(--brand-deep)] pb-3">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={TENANT.logoUrl}
-              alt=""
-              width={56}
-              height={56}
-              className="h-14 w-14 shrink-0 object-contain"
-            />
-            <div className="min-w-0 flex-1 text-center">
-              <p className="font-brand-name text-[15px] leading-tight text-[var(--brand-deep)] sm:text-lg">
-                {TENANT.nameDisplay}
-              </p>
-              <p className="mt-0.5 font-tagline text-xs text-[var(--brand-gold)]">
-                {TENANT.tagline}
-              </p>
-              <p className="mt-1 text-[10px] leading-snug text-[var(--muted)] sm:text-[11px]">
-                {TENANT.city}, {TENANT.state} · Affiliated to CBSE
-              </p>
-            </div>
-            <div className="w-14 shrink-0" aria-hidden />
-          </header>
 
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-b border-[rgba(32,48,80,0.15)] pb-2">
-            <div className="rounded bg-[var(--brand-deep)] px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-white">
-              {receiptSeriesOf(voucher.receiptNo) === "R"
-                ? "Registration receipt"
-                : "Fee receipt"}
-              {voided ? " · void" : ""}
-              {voucher.source === "manual_book" ? " · manual book" : ""}
-              {voucher.source === "payment_link" ? " · UPI link" : ""}
-            </div>
-            <div className="text-right text-xs">
-              <div>
-                <span className="text-[var(--muted)]">Receipt no. </span>
-                <span className="font-bold text-[var(--brand-deep)]">
-                  {voucher.receiptNo}
-                </span>
-              </div>
-              {voucher.schoolReceiptNo ? (
-                <div>
-                  <span className="text-[var(--muted)]">School book no. </span>
-                  <span className="font-semibold text-[var(--brand-deep)]">
-                    {voucher.schoolReceiptNo}
-                  </span>
-                </div>
-              ) : null}
-            </div>
-          </div>
-
-          {stc ? (
-            <div className="mt-3 border border-[var(--brand-gold)] bg-[rgba(197,160,40,0.12)] px-3 py-1.5 text-center text-[10px] font-bold uppercase tracking-wide text-[var(--brand-deep)]">
-              Cheque realisation subject to clearance
-            </div>
-          ) : null}
-
-          <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px] sm:grid-cols-4 sm:text-xs">
-            <div>
-              <dt className="text-[var(--muted)]">Collection date</dt>
-              <dd className="font-semibold text-[var(--brand-deep)]">
-                {formatDisplayDate(voucher.collectionDate)}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-[var(--muted)]">Academic year</dt>
-              <dd className="font-semibold text-[var(--brand-deep)]">
-                {voucher.academicYearCode}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-[var(--muted)]">Guardian / household</dt>
-              <dd className="font-semibold text-[var(--brand-deep)]">
-                {householdHint || "—"}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-[var(--muted)]">Received by</dt>
-              <dd className="font-semibold text-[var(--brand-deep)]">
-                {voucher.cashierName}
-              </dd>
-            </div>
-          </dl>
-
-          <div className="mt-3">
-            <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--muted)]">
-              Student particulars
-            </p>
-            <table className="w-full border-collapse text-[11px] sm:text-xs">
-              <thead>
-                <tr className="bg-[rgba(32,48,80,0.08)] text-left text-[var(--brand-deep)]">
-                  <th className="w-7 border border-[rgba(32,48,80,0.15)] px-1.5 py-1.5 font-semibold">
-                    #
-                  </th>
-                  <th className="border border-[rgba(32,48,80,0.15)] px-1.5 py-1.5 font-semibold">
-                    Reg. no.
-                  </th>
-                  <th className="border border-[rgba(32,48,80,0.15)] px-1.5 py-1.5 font-semibold">
-                    Student name
-                  </th>
-                  <th className="border border-[rgba(32,48,80,0.15)] px-1.5 py-1.5 font-semibold">
-                    Father&apos;s name
-                  </th>
-                  <th className="border border-[rgba(32,48,80,0.15)] px-1.5 py-1.5 font-semibold">
-                    Class / sec.
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {studentRows.map((row, i) => (
-                  <tr key={row.studentId}>
-                    <td className="border border-[rgba(32,48,80,0.12)] px-1.5 py-1.5 text-[var(--muted)]">
-                      {i + 1}
-                    </td>
-                    <td className="border border-[rgba(32,48,80,0.12)] px-1.5 py-1.5 font-semibold tabular-nums text-[var(--brand-deep)]">
-                      {row.admissionNo}
-                    </td>
-                    <td className="border border-[rgba(32,48,80,0.12)] px-1.5 py-1.5 font-semibold text-[var(--brand-deep)]">
-                      {row.fullName}
-                    </td>
-                    <td className="border border-[rgba(32,48,80,0.12)] px-1.5 py-1.5 text-[var(--brand-deep)]">
-                      {row.fatherName}
-                    </td>
-                    <td className="border border-[rgba(32,48,80,0.12)] px-1.5 py-1.5 font-semibold text-[var(--brand-deep)]">
-                      {row.classSection}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <table className="mt-3 w-full border-collapse text-[11px] sm:text-xs">
-            <thead>
-              <tr className="bg-[var(--brand-deep)] text-left text-white">
-                <th className="w-8 px-2 py-1.5 font-semibold">#</th>
-                <th className="px-2 py-1.5 font-semibold">Particulars</th>
-                <th className="w-28 px-2 py-1.5 text-right font-semibold">
-                  Amount (₹)
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {(() => {
-                const order: Array<
-                  | "academic"
-                  | "transport"
-                  | "special"
-                  | "store"
-                  | "voucher"
-                  | "arrears"
-                  | "plan"
-                > = [
-                  "arrears",
-                  "academic",
-                  "transport",
-                  "special",
-                  "voucher",
-                  "store",
-                  "plan",
-                ];
-                const sectionTitle = (k: (typeof order)[number]) =>
-                  k === "arrears"
-                    ? "Arrears"
-                    : k === "academic"
-                      ? "A — Academic"
-                      : k === "transport"
-                        ? "B — Transport"
-                        : k === "special"
-                          ? "C — Special / misc"
-                          : k === "voucher"
-                            ? "V — Charge vouchers"
-                            : k === "store"
-                              ? "D — Store / books"
-                              : "E — Installment plan";
-                const rows: ReactNode[] = [];
-                let n = 0;
-                for (const kind of order) {
-                  const chunk = voucher.lines.filter((l) => l.kind === kind);
-                  if (chunk.length === 0) continue;
-                  rows.push(
-                    <tr key={`sec-${kind}`} className="bg-[rgba(32,48,80,0.06)]">
-                      <td
-                        colSpan={3}
-                        className="px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-[var(--brand-deep)]"
-                      >
-                        {sectionTitle(kind)}
-                      </td>
-                    </tr>,
-                  );
-                  for (const l of chunk) {
-                    n += 1;
-                    const issueRef =
-                      l.kind === "store"
-                        ? l.storeIssueNo ||
-                          (l.label.match(/ISS\/[^\s·]+/)?.[0] ?? "")
-                        : "";
-                    rows.push(
-                      <tr
-                        key={`${l.dueKey}-${n}`}
-                        className="border-b border-[rgba(32,48,80,0.12)]"
-                      >
-                        <td className="px-2 py-1.5 align-top text-[var(--muted)]">
-                          {n}
-                        </td>
-                        <td className="px-2 py-1.5 text-[var(--brand-deep)]">
-                          <div>
-                            <span className="font-semibold">{l.studentName}</span>
-                            {l.kind === "store" ? (
-                              <span className="text-[var(--muted)]">
-                                {" "}
-                                — Store
-                                {issueRef ? ` · ${issueRef}` : ""}
-                              </span>
-                            ) : l.kind === "transport" ? (
-                              <span className="text-[var(--muted)]">
-                                {" "}
-                                — Transport
-                                {l.transport
-                                  ? ` · ${l.transport.periodLabel}`
-                                  : ""}
-                              </span>
-                            ) : (
-                              <span className="text-[var(--muted)]">
-                                {" "}
-                                — {l.label}
-                              </span>
-                            )}
-                          </div>
-                          {l.kind === "store" &&
-                          l.storeItems &&
-                          l.storeItems.length > 0 ? (
-                            <ul className="mt-1 space-y-0.5 text-[10px] leading-snug text-[var(--brand-deep)] sm:text-[11px]">
-                              {l.storeItems.map((it, idx) => (
-                                <li
-                                  key={`${l.dueKey}-it-${idx}`}
-                                  className="flex justify-between gap-2"
-                                >
-                                  <span>
-                                    <span className="text-[var(--muted)]">
-                                      {it.sku}
-                                    </span>
-                                    {" · "}
-                                    {it.name}
-                                    {it.sizeLabel ? ` (${it.sizeLabel})` : ""}
-                                    {" ×"}
-                                    {it.qty} @{" "}
-                                    {formatInr(it.unitPricePaise).replace(
-                                      /^₹\s?/,
-                                      "",
-                                    )}
-                                  </span>
-                                  <span className="shrink-0 tabular-nums font-semibold">
-                                    {formatInr(it.linePaise).replace(
-                                      /^₹\s?/,
-                                      "",
-                                    )}
-                                  </span>
-                                </li>
-                              ))}
-                            </ul>
-                          ) : null}
-                          {l.kind === "transport" && l.transport ? (
-                            <div className="mt-1 text-[10px] leading-snug text-[var(--muted)] sm:text-[11px]">
-                              {l.transport.routeCode} · {l.transport.routeName} ·{" "}
-                              {l.transport.busNo}
-                              {l.transport.vehicleReg
-                                ? ` (${l.transport.vehicleReg})`
-                                : ""}
-                              {" · Stop "}
-                              {l.transport.stopName}
-                            </div>
-                          ) : null}
-                          {l.concessionPaise && l.concessionPaise > 0 ? (
-                            <div className="mt-1 space-y-0.5 text-[10px] leading-snug text-[var(--muted)] sm:text-[11px]">
-                              {l.billedPaise ? (
-                                <div>
-                                  Billed{" "}
-                                  {formatInr(l.billedPaise).replace(/^₹\s?/, "")}
-                                  {" · discount "}
-                                  {formatInr(l.concessionPaise).replace(
-                                    /^₹\s?/,
-                                    "",
-                                  )}
-                                </div>
-                              ) : (
-                                <div>
-                                  Discount{" "}
-                                  {formatInr(l.concessionPaise).replace(
-                                    /^₹\s?/,
-                                    "",
-                                  )}
-                                </div>
-                              )}
-                              {l.concessionDetails?.map((c) => (
-                                <div key={`${l.dueKey}-${c.grantId}`}>
-                                  · {formatConcessionDetailLine(c)}
-                                  {c.code ? ` (${c.code})` : ""}
-                                </div>
-                              ))}
-                            </div>
-                          ) : null}
-                        </td>
-                        <td className="px-2 py-1.5 align-top text-right font-semibold tabular-nums text-[var(--brand-deep)]">
-                          {formatInr(l.amountPaise).replace(/^₹\s?/, "")}
-                        </td>
-                      </tr>,
-                    );
-                  }
-                }
-                // Legacy lines without kind / unknown
-                const known = new Set(order);
-                voucher.lines
-                  .filter((l) => !known.has(l.kind as (typeof order)[number]))
-                  .forEach((l) => {
-                    n += 1;
-                    rows.push(
-                      <tr
-                        key={`${l.dueKey}-x-${n}`}
-                        className="border-b border-[rgba(32,48,80,0.12)]"
-                      >
-                        <td className="px-2 py-1.5 text-[var(--muted)]">{n}</td>
-                        <td className="px-2 py-1.5 text-[var(--brand-deep)]">
-                          <span className="font-semibold">{l.studentName}</span>
-                          <span className="text-[var(--muted)]"> — {l.label}</span>
-                          {l.concessionPaise && l.concessionPaise > 0 ? (
-                            <div className="mt-1 space-y-0.5 text-[10px] leading-snug text-[var(--muted)]">
-                              {l.billedPaise ? (
-                                <div>
-                                  Billed{" "}
-                                  {formatInr(l.billedPaise).replace(/^₹\s?/, "")}
-                                  {" · discount "}
-                                  {formatInr(l.concessionPaise).replace(
-                                    /^₹\s?/,
-                                    "",
-                                  )}
-                                </div>
-                              ) : null}
-                              {l.concessionDetails?.map((c) => (
-                                <div key={`${l.dueKey}-x-${c.grantId}`}>
-                                  · {formatConcessionDetailLine(c)}
-                                  {c.code ? ` (${c.code})` : ""}
-                                </div>
-                              ))}
-                            </div>
-                          ) : null}
-                        </td>
-                        <td className="px-2 py-1.5 text-right font-semibold tabular-nums text-[var(--brand-deep)]">
-                          {formatInr(l.amountPaise).replace(/^₹\s?/, "")}
-                        </td>
-                      </tr>,
-                    );
-                  });
-                return rows;
-              })()}
-            </tbody>
-            <tfoot>
-              {(() => {
-                const discountTotal = voucher.lines.reduce(
-                  (s, l) => s + (l.concessionPaise ?? 0),
-                  0,
-                );
-                return (
-                  <>
-                    {discountTotal > 0 ? (
-                      <tr className="bg-[rgba(15,122,76,0.08)]">
-                        <td
-                          colSpan={2}
-                          className="px-2 py-1.5 text-right text-[10px] font-semibold uppercase tracking-wide text-[#0f7a4c]"
-                        >
-                          Total discount applied
-                        </td>
-                        <td className="px-2 py-1.5 text-right text-xs font-bold tabular-nums text-[#0f7a4c]">
-                          −{formatInr(discountTotal)}
-                        </td>
-                      </tr>
-                    ) : null}
-                    <tr className="bg-[rgba(197,160,40,0.15)]">
-                      <td
-                        colSpan={2}
-                        className="px-2 py-2 text-right text-xs font-bold uppercase tracking-wide text-[var(--brand-deep)]"
-                      >
-                        Total received
-                      </td>
-                      <td className="px-2 py-2 text-right text-sm font-extrabold tabular-nums text-[var(--brand-deep)]">
-                        {formatInr(voucher.totalPaise)}
-                      </td>
-                    </tr>
-                  </>
-                );
-              })()}
-            </tfoot>
-          </table>
-
-          <p className="mt-3 rounded border border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.03)] px-3 py-2 text-[11px] leading-snug text-[var(--brand-deep)] sm:text-xs">
-            <span className="font-semibold text-[var(--muted)]">
-              Amount in words:{" "}
-            </span>
-            {amountInWordsPaise(voucher.totalPaise)}
-          </p>
-
-          <div className="mt-3">
-            <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--muted)]">
-              Mode of payment
-            </p>
-            <table className="w-full border-collapse text-[11px] sm:text-xs">
-              <thead>
-                <tr className="border-b-2 border-[var(--brand-deep)] text-left">
-                  <th className="py-1 pr-2 font-semibold text-[var(--brand-deep)]">
-                    Mode
-                  </th>
-                  <th className="py-1 pr-2 font-semibold text-[var(--brand-deep)]">
-                    Details
-                  </th>
-                  <th className="py-1 text-right font-semibold text-[var(--brand-deep)]">
-                    Amount
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {voucher.tenders.map((t, i) => (
-                  <tr
-                    key={`${t.mode}-${i}`}
-                    className="border-b border-[rgba(32,48,80,0.1)]"
-                  >
-                    <td className="py-1.5 pr-2 font-semibold text-[var(--brand-deep)]">
-                      {tenderModeLabel(t.mode)}
-                    </td>
-                    <td className="py-1.5 pr-2 text-[var(--muted)]">
-                      {[
-                        t.ref,
-                        t.instrumentDate
-                          ? formatDisplayDate(t.instrumentDate)
-                          : "",
-                        t.bankName,
-                        t.realisation === "subject_to_clearance"
-                          ? "Subject to realisation"
-                          : "",
-                      ]
-                        .filter(Boolean)
-                        .join(" · ") || "—"}
-                    </td>
-                    <td className="py-1.5 text-right font-semibold tabular-nums text-[var(--brand-deep)]">
-                      {formatInr(t.amountPaise)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {voucher.note ? (
-            <p className="mt-3 text-[11px] text-[var(--muted)]">
-              <span className="font-semibold">Note:</span> {voucher.note}
-            </p>
-          ) : null}
-
-          {!voided &&
-          remainingPayQrDataUrl &&
-          (remainingPayAmountPaise || 0) > 0 ? (
-            <div className="mt-4 flex flex-wrap items-center gap-4 rounded border border-[rgba(15,118,110,0.25)] bg-[rgba(15,118,110,0.06)] px-3 py-3">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={remainingPayQrDataUrl}
-                alt="UPI QR for remaining dues"
-                className="h-24 w-24 rounded border border-white bg-white p-0.5"
-              />
-              <div className="min-w-0 flex-1 text-[11px] leading-snug text-[var(--brand-deep)]">
-                <p className="font-bold uppercase tracking-wide text-[#0f766e]">
-                  Pay remaining / next dues
-                </p>
-                <p className="mt-1 tabular-nums font-semibold">
-                  {formatInr(remainingPayAmountPaise || 0)}
-                </p>
-                <p className="mt-1 text-[var(--muted)]">
-                  Scan UPI QR after this payment, or open the school pay link.
-                </p>
-                {remainingPayUrl ? (
-                  <p className="mt-1 break-all text-[10px] text-[#0f766e]">
-                    {remainingPayUrl}
-                  </p>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
-
-          <div className="mt-8 grid grid-cols-2 gap-6 text-[11px] text-[var(--brand-deep)]">
-            <div className="border-t border-[rgba(32,48,80,0.35)] pt-1.5">
-              Parent / payer
-            </div>
-            <div className="border-t border-[rgba(32,48,80,0.35)] pt-1.5 text-right">
-              Authorised signatory
-              <div className="mt-0.5 text-[10px] text-[var(--muted)]">
-                {voucher.cashierName}
-              </div>
-            </div>
-          </div>
-
-          <p className="mt-4 text-center text-[9px] leading-snug text-[var(--muted)]">
-            Computer-generated fee receipt · This is a valid proof of payment for
-            the heads listed above
-            {voucher.lines.some((l) => (l.concessionPaise ?? 0) > 0)
-              ? " · Discounts shown are as approved on the student ledger"
-              : ""}{" "}
-            · {TENANT.shortName}
-          </p>
-        </div>
+        <FeeReceiptCopy copyLabel="Office copy" showRemainingPayQr={false} {...copyProps} />
       </div>
+
+      <p className="print-hide px-3 pb-3 text-center text-[9px] text-[var(--muted)]">
+        Dual copy · Parent (top) + Office (bottom) · fits one A4 when printed
+        {multiSibling
+          ? ` · ${studentGroups.length} students on this receipt`
+          : ""}
+      </p>
     </div>
   );
 }

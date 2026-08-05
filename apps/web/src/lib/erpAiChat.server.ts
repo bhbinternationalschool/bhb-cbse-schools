@@ -1,5 +1,5 @@
 /**
- * ERP AI assistant — local knowledge + optional Gemini.
+ * ERP AI assistant — local knowledge + optional LLM (OpenAI / Gemini).
  */
 
 import type { DemoSession } from "@/lib/auth";
@@ -14,11 +14,8 @@ import {
   buildErpAiGeminiSystemPrompt,
   inferLinksFromGeminiText,
 } from "@/lib/erpAiContext.server";
-import {
-  geminiConfigured,
-  generateGeminiText,
-  type GeminiChatTurn,
-} from "@/lib/erpAiGemini.server";
+import { generateTutorText, llmConfigured, type LlmEngine } from "@/lib/aiLlm.server";
+import { geminiConfigured } from "@/lib/erpAiGemini.server";
 import { loadMasters, type MastersState } from "@/lib/masters";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 
@@ -42,28 +39,29 @@ export async function replyErpAiChatServer(opts: {
   masters?: MastersState | null;
 }): Promise<{
   message: ErpAiMessage;
-  engine: "local" | "gemini";
+  engine: "local" | LlmEngine;
   geminiConfigured: boolean;
+  llmConfigured: boolean;
 }> {
   await ensureSchoolMirrorHydrated();
   const masters = opts.masters ?? loadMasters();
   const ctx: ErpAiChatContext = buildErpAiChatContext(opts.session, masters);
   const local = replyErpAiChat(opts.message, ctx);
+  const anyLlm = llmConfigured();
 
-  if (!geminiConfigured() || !isErpAiGenericFallback(local)) {
+  if (!anyLlm || !isErpAiGenericFallback(local)) {
     return {
       message: local,
       engine: "local",
       geminiConfigured: geminiConfigured(),
+      llmConfigured: anyLlm,
     };
   }
 
-  const history: GeminiChatTurn[] = (opts.history || [])
-    .slice(-8)
-    .map((h) => ({
-      role: h.role === "assistant" ? ("model" as const) : ("user" as const),
-      text: h.text,
-    }));
+  const history = (opts.history || []).slice(-8).map((h) => ({
+    role: h.role,
+    content: h.text,
+  }));
 
   const system = buildErpAiGeminiSystemPrompt({
     ctx,
@@ -71,24 +69,25 @@ export async function replyErpAiChatServer(opts: {
     tab: opts.tab,
   });
 
-  const gemini = await generateGeminiText({
+  const llm = await generateTutorText({
     system,
     history,
     userMessage: opts.message,
   });
 
-  if (!gemini.ok) {
+  if (!llm.ok) {
     return {
       message: {
         ...local,
-        text: `${local.text}\n\n_(Gemini unavailable: ${gemini.error})_`,
+        text: `${local.text}\n\n_(AI unavailable: ${llm.error})_`,
       },
       engine: "local",
-      geminiConfigured: true,
+      geminiConfigured: geminiConfigured(),
+      llmConfigured: anyLlm,
     };
   }
 
-  const links = inferLinksFromGeminiText(gemini.text, ctx);
+  const links = inferLinksFromGeminiText(llm.text, ctx);
   const fallback = accessibleModuleLinks(ctx).slice(0, 2);
 
   return {
@@ -96,10 +95,11 @@ export async function replyErpAiChatServer(opts: {
       id: nid(),
       role: "assistant",
       at: new Date().toISOString(),
-      text: gemini.text,
+      text: llm.text,
       links: links.length ? links : fallback.length ? fallback : undefined,
     },
-    engine: "gemini",
-    geminiConfigured: true,
+    engine: llm.engine,
+    geminiConfigured: geminiConfigured(),
+    llmConfigured: anyLlm,
   };
 }

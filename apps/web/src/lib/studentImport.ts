@@ -26,6 +26,21 @@ import {
   studentToRegisterExportRow,
 } from "@/lib/studentRegisterExport";
 import { downloadExcelCsv } from "@/lib/reportExport";
+import type { NumberSeries } from "@/lib/foundationMasters";
+import {
+  findNumberSeries,
+  peekNextSeriesNumber,
+  persistSeriesUse,
+  resolveSeriesPrefix,
+} from "@/lib/numberSeries";
+import {
+  findEarlierEnrollmentByLegacy,
+  isImportNameDuplicateSuspected,
+  isPendingSystemAdmission,
+  pendingSystemAdmissionNo,
+  suggestSystemAdmissionForImport,
+  touchImportNameCount,
+} from "@/lib/studentLegacyAdmission";
 import { ACADEMIC_YEARS, TENANT } from "@/lib/types";
 
 export type StudentImportPlacement =
@@ -50,6 +65,16 @@ export type StudentImportOptions = {
   defaultStudentType: FeeStudentType;
   /** Update existing students matched by admission no. */
   upsert: boolean;
+  /**
+   * When admission no is blank, assign from Masters ADMISSION series with session
+   * in the prefix, ordered by admission date. Blank SRN filled in the same order.
+   */
+  autoAssignNumbers: boolean;
+  /**
+   * When CSV has admission no, store it as old ERP admission no and assign a new
+   * unique system admission no (import only — manual add is unchanged).
+   */
+  mapLegacyErpAdmission: boolean;
 };
 
 export type StudentImportRowError = {
@@ -673,6 +698,276 @@ function applyPlacementSession(
   );
 }
 
+/** Session always in prefix for import auto-assigned admission numbers. */
+function importAdmissionPrefix(series: NumberSeries, session: string): string {
+  const ay = session.trim();
+  const base = series.prefix;
+  if (base.endsWith("/")) return `${base}${ay}/`;
+  if (base.endsWith("-")) return `${base}${ay}-`;
+  return `${base}-${ay}-`;
+}
+
+function formatSeriesCounter(
+  prefix: string,
+  padWidth: number,
+  counter: number,
+): string {
+  return `${prefix}${String(counter).padStart(padWidth, "0")}`;
+}
+
+function maxNumericTail(values: string[], prefix: string): number {
+  let max = 0;
+  for (const raw of values) {
+    const val = (raw || "").trim();
+    if (!val.startsWith(prefix)) continue;
+    const n = Number(val.slice(prefix.length));
+    if (Number.isFinite(n) && n > max) max = n;
+  }
+  return max;
+}
+
+type ImportAutoPatch = { admissionNo?: string; srn?: string };
+
+/**
+ * Pre-assign admission nos (session prefix) and SRNs ordered by admission date.
+ * Rows with admission no / SRN already set are left unchanged.
+ */
+function buildImportAutoNumbers(
+  rows: ParsedRow[],
+  masters: MastersState,
+  options: StudentImportOptions,
+  roster: SisStudent[],
+): Map<number, ImportAutoPatch> {
+  const out = new Map<number, ImportAutoPatch>();
+  if (!options.autoAssignNumbers) return out;
+
+  const admSeries = findNumberSeries(masters.numberSeries, "ADMISSION");
+  const srnSeries = findNumberSeries(masters.numberSeries, "SRN");
+
+  type Candidate = {
+    lineNo: number;
+    session: string;
+    joinedOn: string;
+    needsAdm: boolean;
+    needsSrn: boolean;
+  };
+  const candidates: Candidate[] = [];
+
+  for (const r of rows) {
+    const f = r.fields;
+    const name = f.fullName?.trim() ?? "";
+    if (!name) continue;
+    const csvSession = (f.academicYear ?? "").trim();
+    const csvAy = csvSession ? normalizeSessionCode(csvSession) : "";
+    const filterAy = options.sourceSessionFilter
+      ? normalizeSessionCode(options.sourceSessionFilter)
+      : "";
+    if (filterAy && csvAy && csvAy !== filterAy) continue;
+
+    const session = applyPlacementSession(csvAy || csvSession, options);
+    const adm = (f.admissionNo ?? "").trim();
+    const joinedOn = (f.joinedOn ?? "").trim();
+    const srn = (f.srn ?? "").trim();
+
+    if (!adm) {
+      if (!joinedOn) continue;
+      candidates.push({
+        lineNo: r.lineNo,
+        session,
+        joinedOn,
+        needsAdm: true,
+        needsSrn: !srn,
+      });
+    } else if (!srn && joinedOn) {
+      candidates.push({
+        lineNo: r.lineNo,
+        session,
+        joinedOn,
+        needsAdm: false,
+        needsSrn: true,
+      });
+    }
+  }
+
+  if (candidates.length === 0) return out;
+
+  candidates.sort((a, b) => {
+    const byDate = a.joinedOn.localeCompare(b.joinedOn);
+    if (byDate !== 0) return byDate;
+    return a.lineNo - b.lineNo;
+  });
+
+  const existingAdm = roster.map((s) => s.admissionNo);
+  const existingSrn = roster.map((s) => s.srn || "");
+  const admNextBySession = new Map<string, number>();
+
+  let srnNext = 0;
+  if (srnSeries) {
+    const srnPrefix = resolveSeriesPrefix(srnSeries, undefined);
+    srnNext = Math.max(
+      peekNextSeriesNumber(srnSeries, undefined),
+      maxNumericTail(existingSrn, srnPrefix) + 1,
+    );
+  }
+
+  for (const c of candidates) {
+    const patch: ImportAutoPatch = {};
+
+    if (c.needsAdm && admSeries) {
+      const prefix = importAdmissionPrefix(admSeries, c.session);
+      if (!admNextBySession.has(c.session)) {
+        admNextBySession.set(
+          c.session,
+          Math.max(
+            peekNextSeriesNumber(admSeries, c.session),
+            maxNumericTail(existingAdm, prefix) + 1,
+          ),
+        );
+      }
+      const n = admNextBySession.get(c.session)!;
+      patch.admissionNo = formatSeriesCounter(
+        prefix,
+        admSeries.padWidth,
+        n,
+      );
+      admNextBySession.set(c.session, n + 1);
+      existingAdm.push(patch.admissionNo);
+    }
+
+    if (c.needsSrn && srnSeries) {
+      const srnPrefix = resolveSeriesPrefix(srnSeries, undefined);
+      patch.srn = formatSeriesCounter(srnPrefix, srnSeries.padWidth, srnNext);
+      srnNext += 1;
+      existingSrn.push(patch.srn);
+    }
+
+    if (patch.admissionNo || patch.srn) {
+      out.set(c.lineNo, patch);
+    }
+  }
+
+  return out;
+}
+
+type ResolvedImportAdmission = {
+  admissionNo: string;
+  legacyErpAdmissionNo: string;
+  importedViaLegacyList: boolean;
+  systemAdmissionPending: boolean;
+};
+
+function resolveImportAdmission(input: {
+  fields: Record<string, string>;
+  auto?: ImportAutoPatch;
+  options: StudentImportOptions;
+  masters: MastersState;
+  roster: SisStudent[];
+  session: string;
+  batchNameCounts: Map<string, number>;
+  pendingIdSeed: string;
+  assignedInBatch: string[];
+}): ResolvedImportAdmission {
+  const csvAdmRaw = (input.fields.admissionNo ?? "").trim();
+  const autoAdm = input.auto?.admissionNo;
+
+  if (
+    input.options.mapLegacyErpAdmission &&
+    csvAdmRaw &&
+    !autoAdm
+  ) {
+    const legacy = csvAdmRaw;
+    const earlier = findEarlierEnrollmentByLegacy(
+      input.roster,
+      legacy,
+      input.session,
+    );
+    if (
+      earlier?.admissionNo &&
+      !isPendingSystemAdmission(earlier.admissionNo)
+    ) {
+      return {
+        admissionNo: earlier.admissionNo,
+        legacyErpAdmissionNo: legacy,
+        importedViaLegacyList: true,
+        systemAdmissionPending: false,
+      };
+    }
+    const name = input.fields.fullName?.trim() ?? "";
+    if (
+      isImportNameDuplicateSuspected(
+        name,
+        input.session,
+        input.roster,
+        input.batchNameCounts,
+      )
+    ) {
+      return {
+        admissionNo: pendingSystemAdmissionNo(input.pendingIdSeed),
+        legacyErpAdmissionNo: legacy,
+        importedViaLegacyList: true,
+        systemAdmissionPending: true,
+      };
+    }
+    const virtualRoster = [
+      ...input.roster,
+      ...input.assignedInBatch.map(
+        (admissionNo, i) =>
+          ({ id: `_b${i}`, admissionNo }) as SisStudent,
+      ),
+    ];
+    const system = suggestSystemAdmissionForImport(
+      input.masters,
+      virtualRoster,
+      input.session,
+    );
+    const admissionNo = system || legacy;
+    if (system) input.assignedInBatch.push(system);
+    return {
+      admissionNo,
+      legacyErpAdmissionNo: legacy,
+      importedViaLegacyList: true,
+      systemAdmissionPending: false,
+    };
+  }
+
+  return {
+    admissionNo: csvAdmRaw || autoAdm || "",
+    legacyErpAdmissionNo: "",
+    importedViaLegacyList: false,
+    systemAdmissionPending: false,
+  };
+}
+
+function persistImportAutoNumbers(
+  patches: Map<number, ImportAutoPatch>,
+  rows: ParsedRow[],
+  options: StudentImportOptions,
+): void {
+  if (!options.autoAssignNumbers || typeof window === "undefined") return;
+
+  const admBySession = new Map<string, string>();
+  for (const r of rows) {
+    const patch = patches.get(r.lineNo);
+    if (!patch?.admissionNo) continue;
+    const csvSession = (r.fields.academicYear ?? "").trim();
+    const csvAy = csvSession ? normalizeSessionCode(csvSession) : "";
+    const session = applyPlacementSession(csvAy || csvSession, options);
+    const prev = admBySession.get(session);
+    if (!prev || patch.admissionNo > prev) {
+      admBySession.set(session, patch.admissionNo);
+    }
+  }
+  for (const [session, no] of admBySession) {
+    persistSeriesUse("ADMISSION", session, no);
+  }
+
+  let maxSrn = "";
+  for (const patch of patches.values()) {
+    if (patch.srn && patch.srn > maxSrn) maxSrn = patch.srn;
+  }
+  if (maxSrn) persistSeriesUse("SRN", undefined, maxSrn);
+}
+
 export function previewStudentImport(
   text: string,
   masters: MastersState,
@@ -694,10 +989,13 @@ export function previewStudentImport(
   let accepted = 0;
   let skipped = 0;
   const roster = sis?.students ?? [];
+  const autoNumbers = buildImportAutoNumbers(rows, masters, options, roster);
+  const batchNameCounts = new Map<string, number>();
+  const assignedInBatch: string[] = [];
 
   for (const r of rows) {
     const f = r.fields;
-    const adm = f.admissionNo?.trim() ?? "";
+    const auto = autoNumbers.get(r.lineNo);
     const name = f.fullName?.trim() ?? "";
     const csvSession = (f.academicYear ?? "").trim();
     const csvAy = csvSession ? normalizeSessionCode(csvSession) : "";
@@ -708,11 +1006,11 @@ export function previewStudentImport(
       skipped += 1;
       continue;
     }
-    if (!adm || !name) {
+    if (!name) {
       errors.push({
         row: r.lineNo,
-        admissionNo: adm,
-        message: "Admission no and Student name are required",
+        admissionNo: f.admissionNo?.trim() ?? "",
+        message: "Student name is required",
       });
       continue;
     }
@@ -722,11 +1020,40 @@ export function previewStudentImport(
       f.section ?? "",
     );
     if ("error" in cls) {
-      errors.push({ row: r.lineNo, admissionNo: adm, message: cls.error });
+      errors.push({
+        row: r.lineNo,
+        admissionNo: f.admissionNo?.trim() ?? "",
+        message: cls.error,
+      });
       continue;
     }
     const session = applyPlacementSession(csvAy || csvSession, options);
-    const earlier = findEarlierEnrollment(roster, adm, session);
+    const resolved = resolveImportAdmission({
+      fields: f,
+      auto,
+      options,
+      masters,
+      roster,
+      session,
+      batchNameCounts,
+      pendingIdSeed: `preview_${r.lineNo}`,
+      assignedInBatch,
+    });
+    const adm = resolved.admissionNo;
+    if (!adm) {
+      errors.push({
+        row: r.lineNo,
+        admissionNo: "",
+        message: options.autoAssignNumbers
+          ? "Admission no or Admission date is required (date used for auto-numbering)"
+          : "Admission no is required",
+      });
+      continue;
+    }
+    touchImportNameCount(batchNameCounts, name);
+    const earlier = resolved.legacyErpAdmissionNo
+      ? findEarlierEnrollmentByLegacy(roster, resolved.legacyErpAdmissionNo, session)
+      : findEarlierEnrollment(roster, adm, session);
     const csvTypeRaw = (f.studentType ?? "").trim();
     const typeFallback: FeeStudentType = earlier
       ? earlier.studentType === "RTE"
@@ -804,9 +1131,14 @@ export function applyStudentImport(
     hhIndex.set(householdKey(h.mobile, h.guardianName), h);
   }
 
+  const autoNumbers = buildImportAutoNumbers(rows, masters, options, students);
+  const batchNameCounts = new Map<string, number>();
+  const assignedInBatch: string[] = [];
+  const legacySystemAssigned: { session: string; admissionNo: string }[] = [];
+
   for (const r of rows) {
     const f = r.fields;
-    const adm = (f.admissionNo ?? "").trim();
+    const auto = autoNumbers.get(r.lineNo);
     const name = (f.fullName ?? "").trim();
     const csvSession = (f.academicYear ?? "").trim();
     const csvAy = csvSession ? normalizeSessionCode(csvSession) : "";
@@ -816,7 +1148,7 @@ export function applyStudentImport(
     if (filterAy && csvAy && csvAy !== filterAy) {
       continue;
     }
-    if (!adm || !name) continue;
+    if (!name) continue;
     const placed = resolveClassSection(
       masters,
       f.className ?? "",
@@ -826,10 +1158,49 @@ export function applyStudentImport(
 
     const session = applyPlacementSession(csvAy || csvSession, options);
     resolvedTargetSession = session;
+
+    const draftStudentId = newSisId("stu");
+    const resolved = resolveImportAdmission({
+      fields: f,
+      auto,
+      options,
+      masters,
+      roster: students,
+      session,
+      batchNameCounts,
+      pendingIdSeed: draftStudentId,
+      assignedInBatch,
+    });
+    const adm = resolved.admissionNo;
+    if (!adm) continue;
+    touchImportNameCount(batchNameCounts, name);
+
+    if (
+      resolved.importedViaLegacyList &&
+      !resolved.systemAdmissionPending &&
+      !isPendingSystemAdmission(adm)
+    ) {
+      legacySystemAssigned.push({ session, admissionNo: adm });
+    }
+
     const key = enrollmentKey(adm, session);
-    const existing = byEnrollment.get(key);
+    let existing = byEnrollment.get(key);
+    if (!existing && resolved.legacyErpAdmissionNo) {
+      existing = students.find(
+        (s) =>
+          normalizeSessionCode(s.academicYearCode) === session &&
+          s.legacyErpAdmissionNo?.trim().toUpperCase() ===
+            resolved.legacyErpAdmissionNo.trim().toUpperCase(),
+      );
+    }
     /** Prefer prior year for promote + identity; never mutate that year. */
-    const earlierYear = findEarlierEnrollment(students, adm, session);
+    const earlierYear = resolved.legacyErpAdmissionNo
+      ? findEarlierEnrollmentByLegacy(
+          students,
+          resolved.legacyErpAdmissionNo,
+          session,
+        )
+      : findEarlierEnrollment(students, adm, session);
     const peerYear =
       earlierYear ??
       (!existing ? findPeerEnrollment(students, adm, session) : undefined);
@@ -903,8 +1274,18 @@ export function applyStudentImport(
     const identitySource = existing ?? peerYear;
 
     const patch: Partial<SisStudent> & { id: string } = {
-      id: existing?.id ?? newSisId("stu"),
+      id: existing?.id ?? draftStudentId,
       admissionNo: adm,
+      legacyErpAdmissionNo:
+        resolved.legacyErpAdmissionNo ||
+        existing?.legacyErpAdmissionNo ||
+        identitySource?.legacyErpAdmissionNo ||
+        "",
+      systemAdmissionPending: resolved.systemAdmissionPending,
+      importedViaLegacyList:
+        resolved.importedViaLegacyList ||
+        existing?.importedViaLegacyList ||
+        false,
       fullName: name,
       gender: mapGender(f.gender ?? "") || identitySource?.gender || "",
       dob: f.dob || identitySource?.dob || "",
@@ -954,7 +1335,7 @@ export function applyStudentImport(
       penStatus:
         mapPenStatus(f.penStatus ?? "") || identitySource?.penStatus || "",
       apaarId: f.apaarId || identitySource?.apaarId || "",
-      srn: f.srn || identitySource?.srn || "",
+      srn: f.srn || auto?.srn || identitySource?.srn || "",
       previousSchool: f.previousSchool || existing?.previousSchool || "",
       previousTcNo: f.previousTcNo || existing?.previousTcNo || "",
       previousUdise: f.previousUdise || existing?.previousUdise || "",
@@ -1034,6 +1415,11 @@ export function applyStudentImport(
     tags: sis.tags ?? [],
     classUpgrades: sis.classUpgrades ?? [],
   };
+
+  persistImportAutoNumbers(autoNumbers, rows, options);
+  for (const row of legacySystemAssigned) {
+    persistSeriesUse("ADMISSION", row.session, row.admissionNo);
+  }
 
   return {
     totalRows: preview.totalRows,

@@ -103,7 +103,7 @@ export function SurveyAgentWaInbox({
         <strong>END</strong> with location. Keywords:{" "}
         <strong className="text-[var(--brand-deep)]">{keywords}</strong>. Open
         Admissions once so the team syncs to the server mirror.
-        {configured ? " · API configured" : " · Set WHATSAPP_* env for live send"}
+        {configured ? " · Connected" : " · Configure WhatsApp in Masters → Integrations"}
       </p>
 
       {notice ? (

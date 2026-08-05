@@ -330,9 +330,8 @@ export function AdmissionCampaignsPanel({
     <div className="space-y-4">
       <p className="rounded-lg border border-[rgba(32,48,80,0.12)] bg-[rgba(248,248,240,0.8)] px-3 py-2 text-[11px] text-[var(--muted)]">
         Campaigns push registration/pay links to CRM parents. Two-way chat uses
-        the <strong>CRM parent chat → WhatsApp bot</strong> tab (webhook{" "}
-        <code className="text-[10px]">/api/wa/webhook</code>
-        ). Keywords: FEE · REGISTER · DOCS · STATUS · VISIT · HUMAN.
+        the <strong>CRM parent chat → WhatsApp bot</strong> tab. Keywords: FEE ·
+        REGISTER · DOCS · STATUS · VISIT · HUMAN.
       </p>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-[12px] text-[var(--muted)]">
@@ -892,7 +891,7 @@ export function AdmissionCampaignsPanel({
         <div className="space-y-4">
           <MastersWorkCard
             title="Dispatch"
-            hint="Processes due scheduled campaigns. Real auto-broadcast requires BSP credentials + cron hitting /api/wa/dispatch."
+            hint="Processes due scheduled campaigns. Configure WhatsApp for live broadcast."
           >
             <div className="flex flex-wrap gap-2">
               {canEdit ? (

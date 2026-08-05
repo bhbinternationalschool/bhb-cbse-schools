@@ -134,11 +134,16 @@ export function pushFullSchoolMirrorToServer(): void {
       payments?: unknown;
       masters?: unknown;
       admissions?: unknown;
-    } = {
-      fees: loadFees(),
-      payments: loadPayments(),
-      masters: loadMasters(),
-    };
+    } = {};
+    if (!deskSkipMirrorBlobSliceClient("fees")) {
+      partial.fees = loadFees();
+    }
+    if (!deskSkipMirrorBlobSliceClient("payments")) {
+      partial.payments = loadPayments();
+    }
+    if (!deskSkipMirrorBlobSliceClient("masters")) {
+      partial.masters = loadMasters();
+    }
     if (!deskSkipMirrorBlobSliceClient("sis")) {
       partial.sis = loadSis();
     }

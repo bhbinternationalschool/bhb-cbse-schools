@@ -16,6 +16,13 @@ import {
 import { mergeDbDeskIntoHomeworkState } from "@/lib/homeworkNormalizedMerge";
 import { homeworkReadFromDbEnabled } from "@/lib/homeworkDbConfig";
 import { deskSkipBlobHydrateClient, deskSkipBlobPushClient } from "@/lib/deskCutover";
+import {
+  isDeskHydrated,
+  markDeskHydrated,
+  resetDeskHydrated,
+} from "@/lib/deskHydrateGuard";
+
+const MODULE = "homework";
 
 const blob = createDomainBlobPersistence<HomeworkState>({
   table: "homework_state",
@@ -27,7 +34,10 @@ const blob = createDomainBlobPersistence<HomeworkState>({
 });
 
 export const homeworkRemoteEnabled = blob.remoteEnabled;
-export const resetHomeworkPersistenceCache = blob.resetCache;
+export function resetHomeworkPersistenceCache() {
+  resetDeskHydrated(MODULE);
+  blob.resetCache();
+}
 
 export function scheduleHomeworkSync(state: HomeworkState) {
   if (typeof window === "undefined") {
@@ -66,6 +76,9 @@ export async function pushHomeworkRemoteServer(
  * DB wins when NEXT_PUBLIC_HOMEWORK_READ_FROM_DB=true or local is empty.
  */
 export async function ensureHomeworkHydrated(): Promise<boolean> {
+  if (isDeskHydrated(MODULE)) return false;
+  markDeskHydrated(MODULE);
+
   const readFromDb = homeworkReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("homework")
     ? false

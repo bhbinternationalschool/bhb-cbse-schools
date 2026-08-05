@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { ClipboardList } from "lucide-react";
 import {
   applyPromotionsToSis,
   buildClassResultSheet,
@@ -40,6 +41,13 @@ import {
   StudentNameLabel,
 } from "@/components/students/StudentAvatar";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import {
@@ -133,8 +141,7 @@ export function ExamsWorkspace() {
     void (async () => {
       const { ensureSisHydrated } = await import("@/lib/sisPersistence");
       const { ensureExamsHydrated } = await import("@/lib/examsPersistence");
-      await ensureSisHydrated();
-      await ensureExamsHydrated();
+      await Promise.all([ensureSisHydrated(), ensureExamsHydrated()]);
       refresh();
     })();
   }, []);
@@ -594,21 +601,20 @@ export function ExamsWorkspace() {
   }
 
   return (
-    <div>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-[var(--brand-deep)]">
-            Exams / report cards
-          </h1>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            Marks · report cards · promote / detain · result sheet (hold from{" "}
-            {policy.reportCardHoldFromStage})
-          </p>
-        </div>
-      </div>
+    <ErpWorkspaceShell
+      title="Exams / report cards"
+      subtitle={
+        <>
+          Marks · report cards · promote / detain · result sheet (hold from{" "}
+          {policy.reportCardHoldFromStage})
+        </>
+      }
+      icon={<ClipboardList className="size-6" aria-hidden />}
+      error={error}
+      notice={notice}
+    >
       <ModuleTabs
         aria-label="Exams sections"
-        size="xl"
         value={tab}
         onChange={(id) => setTab(id as Tab)}
         items={[
@@ -621,17 +627,6 @@ export function ExamsWorkspace() {
           { id: "setup", label: "Exams & policy", tone: "navy" },
         ]}
       />
-
-      {error ? (
-        <p className="mt-3 rounded-lg bg-[#dc2626]/10 px-3 py-2 text-sm text-[#dc2626]">
-          {error}
-        </p>
-      ) : null}
-      {notice ? (
-        <p className="mt-3 rounded-lg bg-[rgba(32,48,80,0.06)] px-3 py-2 text-sm text-[var(--brand-deep)]">
-          {notice}
-        </p>
-      ) : null}
 
       {tab !== "setup" &&
       tab !== "dashboard" &&
@@ -1474,17 +1469,17 @@ export function ExamsWorkspace() {
                 </div>
               </div>
 
-              <div className="overflow-x-auto rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
-                <table className="min-w-full border-collapse text-xs sm:text-sm">
-                  <thead>
-                    <tr className="border-b border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.03)] text-left">
-                      <th className="sticky left-0 z-10 bg-[rgba(248,248,240,0.95)] px-3 py-2 font-semibold text-[var(--brand-deep)]">
+              <ErpTableShell>
+                <ErpTable minWidth="min-w-full" className="text-xs sm:text-sm">
+                  <ErpTableHead>
+                    <tr>
+                      <th className="sticky left-0 z-10 bg-[rgba(32,48,80,0.03)] px-4 py-2.5 font-bold text-[var(--brand-deep)]">
                         Student
                       </th>
                       {subjects.map((sub) => (
                         <th
                           key={sub.id}
-                          className="px-2 py-2 text-center font-semibold text-[var(--brand-deep)]"
+                          className="px-4 py-2.5 text-center font-bold text-[var(--brand-deep)]"
                         >
                           {sub.code}
                           <div className="text-[10px] font-normal text-[var(--muted)]">
@@ -1493,8 +1488,8 @@ export function ExamsWorkspace() {
                         </th>
                       ))}
                     </tr>
-                  </thead>
-                  <tbody>
+                  </ErpTableHead>
+                  <ErpTableBody>
                     {roster.map((st) => (
                       <tr
                         key={st.id}
@@ -1554,9 +1549,9 @@ export function ExamsWorkspace() {
                         })}
                       </tr>
                     ))}
-                  </tbody>
-                </table>
-              </div>
+                  </ErpTableBody>
+                </ErpTable>
+              </ErpTableShell>
             </>
           )}
         </div>
@@ -1719,23 +1714,23 @@ export function ExamsWorkspace() {
                 </div>
               </div>
 
-              <div className="overflow-x-auto rounded-xl border border-[rgba(32,48,80,0.12)] bg-white print-hide">
-                <table className="min-w-full border-collapse text-xs sm:text-sm">
-                  <thead>
-                    <tr className="border-b border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.03)] text-left">
-                      <th className="px-3 py-2 font-semibold text-[var(--brand-deep)]">
+              <ErpTableShell className="print-hide">
+                <ErpTable minWidth="min-w-full" className="text-xs sm:text-sm">
+                  <ErpTableHead>
+                    <tr>
+                      <th className="px-4 py-2.5 font-bold text-[var(--brand-deep)]">
                         Student
                       </th>
-                      <th className="px-2 py-2 text-right font-semibold">%</th>
-                      <th className="px-2 py-2 text-right font-semibold">
+                      <th className="px-4 py-2.5 text-right font-bold">%</th>
+                      <th className="px-4 py-2.5 text-right font-bold">
                         Grade
                       </th>
-                      <th className="px-2 py-2 font-semibold">Pass</th>
-                      <th className="px-2 py-2 font-semibold">Decision</th>
-                      <th className="px-2 py-2 font-semibold">Next class</th>
+                      <th className="px-4 py-2.5 font-bold">Pass</th>
+                      <th className="px-4 py-2.5 font-bold">Decision</th>
+                      <th className="px-4 py-2.5 font-bold">Next class</th>
                     </tr>
-                  </thead>
-                  <tbody>
+                  </ErpTableHead>
+                  <ErpTableBody>
                     {classResult.sheet.rows.map((row) => {
                       const decision =
                         row.record?.decision ??
@@ -1831,9 +1826,9 @@ export function ExamsWorkspace() {
                         </tr>
                       );
                     })}
-                  </tbody>
-                </table>
-              </div>
+                  </ErpTableBody>
+                </ErpTable>
+              </ErpTableShell>
 
               <ClassResultSheetView sheet={classResult.sheet} />
             </>
@@ -1858,6 +1853,6 @@ export function ExamsWorkspace() {
           onGranted={retryReportAfterUnlock}
         />
       ) : null}
-    </div>
+    </ErpWorkspaceShell>
   );
 }

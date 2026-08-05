@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireWaStaffApi } from "@/lib/apiRouteAuth.server";
 import {
   listWaHubThreads,
   markWaHubThreadRead,
@@ -28,6 +29,8 @@ const CATEGORIES = new Set([
 
 /** GET ?category=parent — categorized WhatsApp threads + stats */
 export async function GET(req: Request) {
+  const auth = await requireWaStaffApi(req);
+  if (!auth.ok) return auth.response;
   await ensureSchoolMirrorHydrated();
   const url = new URL(req.url);
   const raw = url.searchParams.get("category") || "all";
@@ -45,6 +48,8 @@ export async function GET(req: Request) {
 
 /** POST { action, mobile?, category?, threadId?, text?, by?, template? } */
 export async function POST(req: Request) {
+  const auth = await requireWaStaffApi(req);
+  if (!auth.ok) return auth.response;
   await ensureSchoolMirrorHydrated();
   let body: {
     action?: string;

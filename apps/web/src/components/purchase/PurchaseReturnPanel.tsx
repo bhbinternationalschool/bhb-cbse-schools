@@ -11,13 +11,9 @@ import {
   type PurchaseReturn,
 } from "@/lib/purchase";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 
-const field =
-  "rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2.5 py-1.5 text-sm text-[var(--brand-deep)]";
 const card = "rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4";
-const btn =
-  "rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50";
-
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }

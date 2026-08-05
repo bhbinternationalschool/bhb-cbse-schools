@@ -1,0 +1,15 @@
+{
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "https://school-erp-web-lgeutmxlnq-as.a.run.app/$1"
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/",
+      "destination": "/login",
+      "permanent": false
+    }
+  ]
+}

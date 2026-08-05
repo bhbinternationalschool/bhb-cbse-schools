@@ -417,6 +417,41 @@ export function canManagePayroll(
   );
 }
 
+/** Issue / edit staff advances without full payroll desk access. */
+export function canManageStaffAdvances(
+  session: {
+    roleCode: string;
+    staffId?: string;
+    email?: string;
+    fullName: string;
+    persona?: string;
+  },
+  masters: MastersState,
+): boolean {
+  if (canManagePayroll(session, masters)) return true;
+  return (
+    hasPermission(session, masters, "staff_advances", "edit") ||
+    hasPermission(session, masters, "staff_advances", "create")
+  );
+}
+
+export function canViewStaffAdvancesDesk(
+  session: {
+    roleCode: string;
+    staffId?: string;
+    email?: string;
+    fullName: string;
+    persona?: string;
+  },
+  masters: MastersState,
+): boolean {
+  if (canManageStaffAdvances(session, masters)) return true;
+  return (
+    hasPermission(session, masters, "staff_advances", "view") ||
+    hasPermission(session, masters, "payroll", "view")
+  );
+}
+
 /**
  * Principal / Admin / HM / Owner — approve payroll & increments (RBAC `payroll.approve`).
  */

@@ -181,6 +181,7 @@ export function ParentFeesPortal({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             linkId: created.link.id,
+            code: created.link.code,
             sendWhatsApp: true,
           }),
         });
@@ -283,7 +284,6 @@ export function ParentFeesPortal({
 
         <ModuleTabs
           aria-label="Parent fees"
-          size="lg"
           className="!mt-3"
           value={tab}
           onChange={(id) => setTab(id as "dues" | "receipts")}

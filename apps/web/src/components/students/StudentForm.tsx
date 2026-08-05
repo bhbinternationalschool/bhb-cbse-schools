@@ -12,6 +12,7 @@ import {
   type FeeStudentType,
   type MastersState,
 } from "@/lib/masters";
+import { bumpStudentSeriesUses } from "@/lib/numberSeries";
 import {
   BLOOD_GROUPS,
   DOC_LABELS,
@@ -37,6 +38,7 @@ import {
   saveSis,
   sharedFamilyContactsOf,
   suggestAdmissionNo,
+  suggestRegistrationNo,
   syncPhotoDoc,
   type AadhaarVerificationStatus,
   type CurriculumRequest,
@@ -212,6 +214,9 @@ export function StudentForm({
   const [tab, setTab] = useState<Tab>("basic");
 
   const [admissionNo, setAdmissionNo] = useState("");
+  const [legacyErpAdmissionNo, setLegacyErpAdmissionNo] = useState("");
+  const [importedViaLegacyList, setImportedViaLegacyList] = useState(false);
+  const [systemAdmissionPending, setSystemAdmissionPending] = useState(false);
   const [fullName, setFullName] = useState("");
   const [gender, setGender] = useState<SisStudent["gender"]>("");
   const [dob, setDob] = useState("");
@@ -319,6 +324,9 @@ export function StudentForm({
       setAcademicYearCode(s.academicYearCode || session.academicYearCode);
       const hh = householdOf(sis, s.householdId);
       setAdmissionNo(s.admissionNo);
+      setLegacyErpAdmissionNo(s.legacyErpAdmissionNo || "");
+      setImportedViaLegacyList(!!s.importedViaLegacyList);
+      setSystemAdmissionPending(!!s.systemAdmissionPending);
       setFullName(s.fullName);
       setGender(s.gender);
       setDob(s.dob);
@@ -396,7 +404,20 @@ export function StudentForm({
       return;
     }
 
-    setAdmissionNo(suggestAdmissionNo(sis.students));
+    setAdmissionNo(
+      suggestAdmissionNo(sis.students, m, session.academicYearCode),
+    );
+    setLegacyErpAdmissionNo("");
+    setImportedViaLegacyList(false);
+    setSystemAdmissionPending(false);
+    setExtra((prev) => ({
+      ...prev,
+      registrationNo: suggestRegistrationNo(
+        sis.students,
+        m,
+        session.academicYearCode,
+      ),
+    }));
     setAcademicYearCode(session.academicYearCode);
     setStudentType("NEW");
     setFeeGroupId("");
@@ -742,6 +763,9 @@ export function StudentForm({
     const payload = normalizeStudent({
       id: studentId ?? newSisId("stu"),
       admissionNo: nextAdm,
+      legacyErpAdmissionNo: legacyErpAdmissionNo.trim(),
+      importedViaLegacyList,
+      systemAdmissionPending,
       fullName: fullName.trim(),
       gender,
       dob,
@@ -901,6 +925,8 @@ export function StudentForm({
       students,
     });
 
+    bumpStudentSeriesUses(payload, academicYearCode);
+
     if (mode === "edit" && studentId) {
       router.push("/students");
       return;
@@ -962,7 +988,6 @@ export function StudentForm({
 
       <ModuleTabs
         aria-label="Student form sections"
-        size="lg"
         value={tab}
         onChange={(id) => setTab(id as Tab)}
         items={[
@@ -985,14 +1010,30 @@ export function StudentForm({
               Enrollment essentials for the SIS register and Fee Take.
             </p>
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Admission no">
+              <Field label="Admission no (system)">
                 <input
                   className="field"
                   value={admissionNo}
                   onChange={(e) => setAdmissionNo(e.target.value)}
                   required
+                  readOnly={importedViaLegacyList && !systemAdmissionPending}
                 />
               </Field>
+              {importedViaLegacyList ? (
+                <Field label="Old ERP admission no. (import only)">
+                  <input
+                    className="field bg-[rgba(32,48,80,0.04)]"
+                    value={legacyErpAdmissionNo}
+                    readOnly
+                  />
+                </Field>
+              ) : null}
+              {systemAdmissionPending ? (
+                <p className="sm:col-span-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+                  System admission pending — duplicate name on import. Verify on{" "}
+                  <strong>Students → Roster</strong> to assign a unique number.
+                </p>
+              ) : null}
               <Field label="Full name">
                 <input
                   className="field"

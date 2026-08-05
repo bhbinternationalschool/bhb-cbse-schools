@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Landmark } from "lucide-react";
 import {
   AccountsMastersPanel,
 } from "@/components/accounts/AccountsMastersPanel";
@@ -17,6 +18,7 @@ import {
 } from "@/components/accounts/AccountsPanels";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
+import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import {
   loadAccounts,
@@ -133,37 +135,23 @@ export function AccountsWorkspace() {
   );
 
   return (
-    <div>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-[var(--brand-deep)]">
-            Accounts
-          </h1>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            Cash · bank · expenses · payables · owner loans · books · day close
-          </p>
-        </div>
-        {state ? (
+    <ErpWorkspaceShell
+      title="Accounts"
+      subtitle="Cash · bank · expenses · payables · owner loans · books · day close"
+      icon={<Landmark className="size-6" aria-hidden />}
+      error={error}
+      notice={notice}
+      actions={
+        state ? (
           <div className="text-right text-xs text-[var(--muted)]">
             Signed in as{" "}
             <span className="font-semibold text-[var(--brand-deep)]">
               {actorName}
             </span>
           </div>
-        ) : null}
-      </div>
-
-      {notice ? (
-        <div className="mt-4 rounded-xl border border-[#16a34a]/30 bg-[#16a34a]/10 px-4 py-2 text-sm text-[#15803d]">
-          {notice}
-        </div>
-      ) : null}
-      {error ? (
-        <div className="mt-4 rounded-xl border border-[#dc2626]/30 bg-[#dc2626]/10 px-4 py-2 text-sm text-[#dc2626]">
-          {error}
-        </div>
-      ) : null}
-
+        ) : null
+      }
+    >
       <ModuleTabs
         items={tabsWithBadge}
         value={tab}
@@ -200,6 +188,6 @@ export function AccountsWorkspace() {
       ) : tab === "reports" ? (
         <ReportsPanel {...panelProps} />
       ) : null}
-    </div>
+    </ErpWorkspaceShell>
   );
 }

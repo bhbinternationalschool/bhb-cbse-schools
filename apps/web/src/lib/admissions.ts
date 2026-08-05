@@ -53,6 +53,7 @@ export type AdmissionSource =
   | "social"
   | "google"
   | "phone"
+  | "whatsapp"
   | "other";
 
 export type TransportInterest = "yes" | "no" | "undecided";
@@ -451,6 +452,8 @@ export function sourceTagClass(source: AdmissionSource): string {
       return "bg-[rgba(126,34,206,0.1)] text-[#7e22ce]";
     case "phone":
       return "bg-[rgba(71,85,105,0.14)] text-[#334155]";
+    case "whatsapp":
+      return "bg-[rgba(37,211,102,0.14)] text-[#128c7e]";
     default:
       return "bg-[rgba(32,48,80,0.08)] text-[var(--brand-deep)]";
   }
@@ -547,6 +550,7 @@ export const ADMISSION_SOURCES: {
   { value: "field_survey", label: "Field survey" },
   { value: "referral", label: "Referral" },
   { value: "phone", label: "Phone" },
+  { value: "whatsapp", label: "WhatsApp" },
   { value: "other", label: "Other" },
 ];
 

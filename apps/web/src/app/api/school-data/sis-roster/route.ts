@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { getDemoSession } from "@/lib/auth";
+import {
+  authorizeSchoolDataDesk,
+  SCHOOL_DATA_DESK_RBAC,
+} from "@/lib/apiRouteAuth.server";
 import type { SisState } from "@/lib/sis";
 import { sisDualWriteDbEnabled } from "@/lib/sisDbConfig";
 import {
@@ -9,19 +12,10 @@ import {
 
 export const runtime = "nodejs";
 
-async function authorize(req: Request): Promise<boolean> {
-  const secret = process.env.MIRROR_SYNC_SECRET?.trim();
-  const header = req.headers.get("x-mirror-secret")?.trim();
-  if (secret && header && header === secret) return true;
-  const session = await getDemoSession();
-  return !!session;
-}
-
 /** GET — pull SIS roster from normalized tables */
 export async function GET(req: Request) {
-  if (!(await authorize(req))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["sis-roster"], "GET");
+  if (!auth.ok) return auth.response
   const { bundle, meta } = await fetchSisFromDb();
   return NextResponse.json({
     ok: true,
@@ -38,9 +32,8 @@ type RosterPostBody = Pick<SisState, "households" | "students">;
 
 /** POST — push full SIS roster snapshot */
 export async function POST(req: Request) {
-  if (!(await authorize(req))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["sis-roster"], "POST");
+  if (!auth.ok) return auth.response
   if (!sisDualWriteDbEnabled()) {
     return NextResponse.json({
       ok: true,

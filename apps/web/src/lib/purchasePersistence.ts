@@ -16,6 +16,13 @@ import {
 import { mergeDbDeskIntoPurchaseState } from "@/lib/purchaseNormalizedMerge";
 import { purchaseReadFromDbEnabled } from "@/lib/purchaseDbConfig";
 import { deskSkipBlobHydrateClient, deskSkipBlobPushClient } from "@/lib/deskCutover";
+import {
+  isDeskHydrated,
+  markDeskHydrated,
+  resetDeskHydrated,
+} from "@/lib/deskHydrateGuard";
+
+const MODULE = "purchase";
 
 const blob = createDomainBlobPersistence<PurchaseState>({
   table: "purchase_state",
@@ -36,6 +43,9 @@ export const schedulePurchaseSync = (state: PurchaseState) => {
   schedulePurchaseDeskSync(state);
 };
 export const ensurePurchaseHydrated = async () => {
+  if (isDeskHydrated(MODULE)) return false;
+  markDeskHydrated(MODULE);
+
   const readFromDb = purchaseReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("purchase")
     ? false
@@ -107,4 +117,7 @@ export async function ensurePurchaseHydratedServer(): Promise<boolean> {
   return changed;
 }
 
-export const resetPurchasePersistenceCache = blob.resetCache;
+export function resetPurchasePersistenceCache() {
+  resetDeskHydrated(MODULE);
+  blob.resetCache();
+}

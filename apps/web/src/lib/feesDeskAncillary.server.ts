@@ -11,19 +11,11 @@ import type {
   ManualBookSeries,
 } from "@/lib/fees";
 import type { InstallmentPlan, PlanAllocation } from "@/lib/installmentPlans";
+import type { FeeDeskAncillary } from "@/lib/feesDeskAncillary.types";
 import { feesDualWriteDbEnabled } from "@/lib/feesDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
 
-export type FeeDeskAncillary = Pick<
-  FeesState,
-  | "cheques"
-  | "manualBooks"
-  | "dayCloses"
-  | "installmentPlans"
-  | "planAllocations"
-  | "carriedForwardDues"
-  | "chargeVouchers"
->;
+export type { FeeDeskAncillary };
 
 function emptyAncillary(): FeeDeskAncillary {
   return {

@@ -367,7 +367,6 @@ export function FeeStructurePanel({
       </p>
       <ModuleTabs
         aria-label="Fee structure by student type"
-        size="lg"
         value={tab}
         onChange={(id) => setTab(id as FeeStudentType)}
         items={STUDENT_TYPES.map((t, i) => {

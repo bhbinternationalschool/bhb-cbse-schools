@@ -16,6 +16,13 @@ import {
 import { mergeDbDeskIntoExamsState } from "@/lib/examsNormalizedMerge";
 import { examsReadFromDbEnabled } from "@/lib/examsDbConfig";
 import { deskSkipBlobHydrateClient, deskSkipBlobPushClient } from "@/lib/deskCutover";
+import {
+  isDeskHydrated,
+  markDeskHydrated,
+  resetDeskHydrated,
+} from "@/lib/deskHydrateGuard";
+
+const MODULE = "exams";
 
 const blob = createDomainBlobPersistence<ExamsState>({
   table: "exams_state",
@@ -27,7 +34,10 @@ const blob = createDomainBlobPersistence<ExamsState>({
 });
 
 export const examsRemoteEnabled = blob.remoteEnabled;
-export const resetExamsPersistenceCache = blob.resetCache;
+export function resetExamsPersistenceCache() {
+  resetDeskHydrated(MODULE);
+  blob.resetCache();
+}
 
 export function scheduleExamsSync(state: ExamsState) {
   if (typeof window === "undefined") {
@@ -66,6 +76,9 @@ export async function pushExamsRemoteServer(
  * DB wins when NEXT_PUBLIC_EXAMS_READ_FROM_DB=true or local sheets empty.
  */
 export async function ensureExamsHydrated(): Promise<boolean> {
+  if (isDeskHydrated(MODULE)) return false;
+  markDeskHydrated(MODULE);
+
   const readFromDb = examsReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("exams")
     ? false

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { NextResponse } from "next/server";
+import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 
 const execFileAsync = promisify(execFile);
 
@@ -18,6 +19,9 @@ print("\\n".join(parts))
 `;
 
 export async function POST(req: Request) {
+  const auth = await requireStaffPermission(req, "fees", "view");
+  if (!auth.ok) return auth.response;
+
   try {
     const form = await req.formData();
     const file = form.get("file");

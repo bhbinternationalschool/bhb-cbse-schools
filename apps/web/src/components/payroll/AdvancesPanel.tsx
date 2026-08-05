@@ -24,7 +24,7 @@ import {
 } from "@/lib/staffAdvance";
 import { useDemoSession } from "@/components/shell/SessionContext";
 
-export function AdvancesPanel() {
+export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
   const session = useDemoSession();
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [advances, setAdvances] = useState<StaffAdvance[]>([]);
@@ -215,7 +215,16 @@ export function AdvancesPanel() {
         </div>
       </div>
 
-      <div className="grid gap-3 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4 sm:grid-cols-2 lg:grid-cols-3">
+      {readOnly ? (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+          View only — you need <strong>Staff advances only → Edit</strong> to
+          issue advances or record returns.
+        </p>
+      ) : null}
+
+      <div
+        className={`grid gap-3 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4 sm:grid-cols-2 lg:grid-cols-3 ${readOnly ? "pointer-events-none opacity-60" : ""}`}
+      >
         <p className="sm:col-span-2 lg:col-span-3 text-xs font-bold uppercase tracking-wide text-[var(--muted)]">
           Issue advance (cash / direct)
         </p>
@@ -287,7 +296,9 @@ export function AdvancesPanel() {
         </div>
       </div>
 
-      <div className="grid gap-3 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div
+        className={`grid gap-3 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4 sm:grid-cols-2 lg:grid-cols-3 ${readOnly ? "pointer-events-none opacity-60" : ""}`}
+      >
         <p className="sm:col-span-2 lg:col-span-3 text-xs font-bold uppercase tracking-wide text-[var(--muted)]">
           Return to school (cash / UPI / bank)
         </p>
@@ -481,7 +492,8 @@ export function AdvancesPanel() {
                       )}
                     </td>
                     <td className="py-2 text-right">
-                      {a.recoveries.length === 0 &&
+                      {!readOnly &&
+                      a.recoveries.length === 0 &&
                       a.source !== "with_salary" ? (
                         <button
                           type="button"

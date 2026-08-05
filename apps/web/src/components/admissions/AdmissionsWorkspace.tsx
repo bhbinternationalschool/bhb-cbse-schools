@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
+import { UserPlus } from "lucide-react";
 import {
   ADMISSION_SOURCES,
   ADMISSION_STAGES,
@@ -65,22 +66,20 @@ import {
 import { canAccessModule, hasPermission, loadRbac } from "@/lib/rbac";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+} from "@/components/ui/erp-roster";
 import { AddressAutocompleteField } from "@/components/maps/AddressAutocompleteField";
-import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
+import { lazyNamedTabPanel } from "@/components/ui/lazyTabPanel";
 import {
   MastersEmptyRow,
   MastersTableCard,
   MastersWorkCard,
 } from "@/components/masters/MastersLayout";
 import { AdmissionCaptureLinks } from "@/components/admissions/AdmissionCaptureLinks";
-import { AdmissionFieldSurveyPanel } from "@/components/admissions/AdmissionFieldSurveyPanel";
-import { AdmissionImportPanel } from "@/components/admissions/AdmissionImportPanel";
-import { AdmissionRegistrationPanel } from "@/components/admissions/AdmissionRegistrationPanel";
-import { RteWorkspace } from "@/components/rte/RteWorkspace";
-import { AdmissionCampaignsPanel } from "@/components/admissions/AdmissionCampaignsPanel";
-import { AdmissionDocOcrPanel } from "@/components/admissions/AdmissionDocOcrPanel";
-import { AdmissionCrmChatInbox } from "@/components/admissions/AdmissionCrmChatInbox";
-import { AdmissionReportsPanel } from "@/components/admissions/AdmissionReportsPanel";
 import { SisParentMatchBanner } from "@/components/admissions/SisParentMatchBanner";
 import {
   AdmissionSisMatchLists,
@@ -88,6 +87,40 @@ import {
 } from "@/components/admissions/AdmissionSisMatchLists";
 import { StudentProfileModal } from "@/components/students/StudentProfileModal";
 import { LeadMobileWaCheckPanel } from "@/components/admissions/LeadMobileWaCheckPanel";
+import { AdmissionDocOcrPanel } from "@/components/admissions/AdmissionDocOcrPanel";
+
+const ModuleDashboardHost = lazyNamedTabPanel(
+  () => import("@/components/dashboard/ModuleDashboardHost"),
+  "ModuleDashboardHost",
+);
+const AdmissionFieldSurveyPanel = lazyNamedTabPanel(
+  () => import("@/components/admissions/AdmissionFieldSurveyPanel"),
+  "AdmissionFieldSurveyPanel",
+);
+const AdmissionImportPanel = lazyNamedTabPanel(
+  () => import("@/components/admissions/AdmissionImportPanel"),
+  "AdmissionImportPanel",
+);
+const AdmissionRegistrationPanel = lazyNamedTabPanel(
+  () => import("@/components/admissions/AdmissionRegistrationPanel"),
+  "AdmissionRegistrationPanel",
+);
+const RteWorkspace = lazyNamedTabPanel(
+  () => import("@/components/rte/RteWorkspace"),
+  "RteWorkspace",
+);
+const AdmissionCampaignsPanel = lazyNamedTabPanel(
+  () => import("@/components/admissions/AdmissionCampaignsPanel"),
+  "AdmissionCampaignsPanel",
+);
+const AdmissionCrmChatInbox = lazyNamedTabPanel(
+  () => import("@/components/admissions/AdmissionCrmChatInbox"),
+  "AdmissionCrmChatInbox",
+);
+const AdmissionReportsPanel = lazyNamedTabPanel(
+  () => import("@/components/admissions/AdmissionReportsPanel"),
+  "AdmissionReportsPanel",
+);
 
 type AdmTab =
   | "dashboard"
@@ -878,18 +911,13 @@ export function AdmissionsWorkspace() {
     );
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-lg font-bold text-[var(--brand-deep)]">
-            Admissions
-          </h1>
-          <p className="mt-0.5 text-[11px] text-[var(--muted)]">
-            Walk-in desk · QR / form links for digital sources · CRM by capture
-            year
-          </p>
-        </div>
-        {counts ? (
+    <ErpWorkspaceShell
+      title="Admissions"
+      subtitle="Walk-in desk · QR / form links for digital sources · CRM by capture year"
+      icon={<UserPlus className="size-6" aria-hidden />}
+      notice={notice}
+      actions={
+        counts ? (
           <div className="flex flex-wrap gap-2 text-[11px]">
             {fuCounts ? (
               <>
@@ -939,13 +967,9 @@ export function AdmissionsWorkspace() {
               </button>
             ))}
           </div>
-        ) : null}
-      </div>
-
-      {notice ? (
-        <p className="text-sm font-medium text-[var(--brand-deep)]">{notice}</p>
-      ) : null}
-
+        ) : null
+      }
+    >
       <ModuleTabs
         aria-label="Admissions"
         value={tab}
@@ -1246,21 +1270,21 @@ export function AdmissionsWorkspace() {
             {filtered.length === 0 ? (
               <MastersEmptyRow label="No leads in this view — use New enquiry to capture." />
             ) : (
-              <table className="min-w-full text-left text-sm">
-                <thead className="text-[11px] text-[var(--muted)]">
+              <ErpTable minWidth="min-w-full">
+                <ErpTableHead>
                   <tr>
-                    <th className="px-3 py-2">Lead no.</th>
-                    <th className="px-3 py-2">Lead date</th>
-                    <th className="px-3 py-2">Adm. year</th>
-                    <th className="px-3 py-2">Status</th>
-                    <th className="px-3 py-2">Source</th>
-                    <th className="px-3 py-2">Child</th>
-                    <th className="px-3 py-2">Guardian / mobile</th>
-                    <th className="px-3 py-2">Counsellor</th>
-                    <th className="px-3 py-2">Next follow-up</th>
+                    <th className="px-4 py-2.5 font-bold">Lead no.</th>
+                    <th className="px-4 py-2.5 font-bold">Lead date</th>
+                    <th className="px-4 py-2.5 font-bold">Adm. year</th>
+                    <th className="px-4 py-2.5 font-bold">Status</th>
+                    <th className="px-4 py-2.5 font-bold">Source</th>
+                    <th className="px-4 py-2.5 font-bold">Child</th>
+                    <th className="px-4 py-2.5 font-bold">Guardian / mobile</th>
+                    <th className="px-4 py-2.5 font-bold">Counsellor</th>
+                    <th className="px-4 py-2.5 font-bold">Next follow-up</th>
                   </tr>
-                </thead>
-                <tbody>
+                </ErpTableHead>
+                <ErpTableBody>
                   {filtered.map((l) => {
                     const hh = householdOf(state, l.householdId);
                     const showOnly = isConvertedShowOnly(l.stage);
@@ -1431,8 +1455,8 @@ export function AdmissionsWorkspace() {
                       </tr>
                     );
                   })}
-                </tbody>
-              </table>
+                </ErpTableBody>
+              </ErpTable>
             )}
           </MastersTableCard>
 
@@ -1922,7 +1946,7 @@ export function AdmissionsWorkspace() {
             );
           })()
         : null}
-    </div>
+    </ErpWorkspaceShell>
   );
 }
 

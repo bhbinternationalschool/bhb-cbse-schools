@@ -33,6 +33,7 @@ import {
   type Subject,
   type SubjectCategory,
 } from "@/lib/foundationMasters";
+import { formatSeriesNumber } from "@/lib/numberSeries";
 import {
   appliesToIncludesNonTeaching,
   appliesToIncludesStudents,
@@ -1905,16 +1906,37 @@ export function NumberSeriesPanel({
   state: MastersState;
   commit: Commit;
 }) {
+  const session = useDemoSession();
+  const ayCode = session.academicYearCode;
   const [editingId, setEditingId] = useState<string | null>(null);
   const [prefix, setPrefix] = useState("");
   const [nextNumber, setNextNumber] = useState(1);
   const [padWidth, setPadWidth] = useState(4);
+  const [resetOnAy, setResetOnAy] = useState(false);
+  const [includeSessionInPrefix, setIncludeSessionInPrefix] = useState(false);
+
+  const editingSeries = editingId
+    ? state.numberSeries.find((s) => s.id === editingId)
+    : null;
+
+  const previewDraft: NumberSeries | null = editingSeries
+    ? {
+        ...editingSeries,
+        prefix,
+        nextNumber,
+        padWidth,
+        resetOnAy,
+        includeSessionInPrefix,
+      }
+    : null;
 
   function startEdit(s: NumberSeries) {
     setEditingId(s.id);
     setPrefix(s.prefix);
     setNextNumber(s.nextNumber);
     setPadWidth(s.padWidth);
+    setResetOnAy(s.resetOnAy);
+    setIncludeSessionInPrefix(s.includeSessionInPrefix);
   }
 
   function saveEdit() {
@@ -1924,7 +1946,14 @@ export function NumberSeriesPanel({
         ...state,
         numberSeries: state.numberSeries.map((s) =>
           s.id === editingId
-            ? { ...s, prefix, nextNumber, padWidth }
+            ? {
+                ...s,
+                prefix,
+                nextNumber,
+                padWidth,
+                resetOnAy,
+                includeSessionInPrefix,
+              }
             : s,
         ),
       },
@@ -1935,7 +1964,7 @@ export function NumberSeriesPanel({
 
   return (
     <MastersTabStack
-      intro="Prefix + next number for admission, receipts, SRN, TC. Demo only — live numbering locks on Supabase."
+      intro="Prefix and counter for admission, registration, receipts, SRN, TC, staff ID, and expense vouchers. Yearly reset and session-in-prefix are optional — counters can continue across academic years."
       tables={
         <MastersTablesRow cols={1}>
           <MastersTableCard title="Numbering series">
@@ -1950,10 +1979,20 @@ export function NumberSeriesPanel({
                       {s.label}
                     </div>
                     <p className="text-[11px] text-[var(--muted)]">
-                      Next: {s.prefix}
-                      {String(s.nextNumber).padStart(s.padWidth, "0")}
-                      {s.resetOnAy ? " · resets each AY" : ""}
+                      Next: {formatSeriesNumber(s, ayCode)}
                     </p>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {s.resetOnAy ? (
+                        <span className="rounded-full bg-[rgba(15,118,110,0.12)] px-2 py-0.5 text-[10px] font-semibold text-[#0f766e]">
+                          resets each AY
+                        </span>
+                      ) : null}
+                      {s.includeSessionInPrefix ? (
+                        <span className="rounded-full bg-[rgba(32,48,80,0.08)] px-2 py-0.5 text-[10px] font-semibold text-[var(--muted)]">
+                          session in prefix
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
                   <EditControl
                     active={editingId === s.id}
@@ -1974,54 +2013,91 @@ export function NumberSeriesPanel({
           }
           hint="Working form"
         >
-          {editingId ? (
-            <div className="flex max-w-xl flex-wrap items-end gap-2">
-              <label className="text-sm">
-                <span className="mb-1 block text-[11px] text-[var(--muted)]">
-                  Prefix
-                </span>
-                <input
-                  className="field !py-1.5"
-                  value={prefix}
-                  onChange={(e) => setPrefix(e.target.value)}
-                />
-              </label>
-              <label className="text-sm">
-                <span className="mb-1 block text-[11px] text-[var(--muted)]">
-                  Next #
-                </span>
-                <input
-                  className="field !py-1.5 w-24"
-                  type="number"
-                  value={nextNumber}
-                  onChange={(e) => setNextNumber(Number(e.target.value) || 1)}
-                />
-              </label>
-              <label className="text-sm">
-                <span className="mb-1 block text-[11px] text-[var(--muted)]">
-                  Pad
-                </span>
-                <input
-                  className="field !py-1.5 w-20"
-                  type="number"
-                  value={padWidth}
-                  onChange={(e) => setPadWidth(Number(e.target.value) || 4)}
-                />
-              </label>
-              <button
-                type="button"
-                className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
-                onClick={saveEdit}
-              >
-                Save
-              </button>
-              <button
-                type="button"
-                className="text-xs text-[var(--muted)]"
-                onClick={() => setEditingId(null)}
-              >
-                Cancel
-              </button>
+          {editingId && previewDraft ? (
+            <div className="flex max-w-xl flex-col gap-3">
+              <div className="flex flex-wrap items-end gap-2">
+                <label className="text-sm">
+                  <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                    Prefix
+                  </span>
+                  <input
+                    className="field !py-1.5"
+                    value={prefix}
+                    onChange={(e) => setPrefix(e.target.value)}
+                  />
+                </label>
+                <label className="text-sm">
+                  <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                    Next #
+                  </span>
+                  <input
+                    className="field !py-1.5 w-24"
+                    type="number"
+                    value={nextNumber}
+                    onChange={(e) => setNextNumber(Number(e.target.value) || 1)}
+                  />
+                </label>
+                <label className="text-sm">
+                  <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                    Pad
+                  </span>
+                  <input
+                    className="field !py-1.5 w-20"
+                    type="number"
+                    value={padWidth}
+                    onChange={(e) => setPadWidth(Number(e.target.value) || 4)}
+                  />
+                </label>
+              </div>
+              <div className="flex flex-col gap-2 text-[11px] text-[var(--brand-deep)]">
+                <label className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={resetOnAy}
+                    onChange={(e) => setResetOnAy(e.target.checked)}
+                  />
+                  <span>
+                    <span className="font-semibold">Reset counter each academic year</span>
+                    <span className="mt-0.5 block text-[var(--muted)]">
+                      Optional — when off, the same series continues across sessions.
+                    </span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={includeSessionInPrefix}
+                    onChange={(e) => setIncludeSessionInPrefix(e.target.checked)}
+                  />
+                  <span>
+                    <span className="font-semibold">Include session in prefix</span>
+                    <span className="mt-0.5 block text-[var(--muted)]">
+                      Inserts {ayCode} into the prefix (e.g. BHB-{ayCode}-).
+                    </span>
+                  </span>
+                </label>
+              </div>
+              <p className="text-sm font-semibold text-[var(--brand-deep)]">
+                Preview: {formatSeriesNumber(previewDraft, ayCode)}
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
+                  onClick={saveEdit}
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  className="text-xs text-[var(--muted)]"
+                  onClick={() => setEditingId(null)}
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           ) : (
             <p className="text-sm text-[var(--muted)]">

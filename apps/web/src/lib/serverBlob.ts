@@ -36,11 +36,13 @@ export type ServerBlobTable =
   | "wa_templates_state"
   | "staff_hr_state"
   | "staff_advances_state"
+  | "staff_agreements_state"
   | "module_registry_state"
   | "fee_recovery_tasks_state"
   | "automation_state"
   | "erp_chat_state"
-  | "staff_chat_state";
+  | "staff_chat_state"
+  | "social_integrations_state";
 
 export async function fetchServerBlob<T>(
   table: ServerBlobTable,

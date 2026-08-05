@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { formatInr } from "@/lib/masters";
 import type { PrincipalSnapshot } from "@/lib/principalSnapshot.server";
+import { isProtectedSuperAdminEmail } from "@/lib/superAdmin";
 import { useDemoSession } from "@/components/shell/SessionContext";
 
 function KpiCard({
@@ -236,9 +237,12 @@ export function PrincipalCockpit() {
 }
 
 export function shouldShowPrincipalCockpit(
-  session: { roleCode: string; persona?: string },
+  session: { roleCode: string; persona?: string; email?: string | null },
 ): boolean {
   if ((session.persona || "staff") !== "staff") return false;
+  // Super admin (owner) gets the full school dashboard, not the principal cockpit.
   const rc = (session.roleCode || "").toLowerCase();
-  return /principal|owner|admin|director|hm|head.?master|vice.?principal/.test(rc);
+  if (rc === "owner" || /super.?admin/.test(rc)) return false;
+  if (isProtectedSuperAdminEmail(session.email)) return false;
+  return /principal|admin|hm|head.?master|vice.?principal/.test(rc);
 }

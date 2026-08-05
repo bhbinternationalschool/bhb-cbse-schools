@@ -21,6 +21,7 @@ import {
 } from "@/components/staff/StaffLeaveReportsPanel";
 import { SisReportsPanel } from "@/components/students/SisReportsPanel";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
+import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
 import {
@@ -43,11 +44,9 @@ import {
   type ReportsCenterModuleId,
 } from "@/lib/reportsCenterCatalog";
 import { isModuleEnabled } from "@/lib/moduleRegistry";
+import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 
 type HubTab = "dashboard" | "catalog" | "recent" | ReportsCenterModuleId;
-
-const field =
-  "rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2.5 py-1.5 text-sm text-[var(--brand-deep)]";
 
 export function ReportsCenterWorkspace() {
   const session = useDemoSession();
@@ -146,20 +145,17 @@ export function ReportsCenterWorkspace() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-4 pb-10 pt-4">
-      <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold text-[var(--brand-deep)]">
-            <FileBarChart2 className="h-7 w-7" aria-hidden />
-            Reports Center
-          </h1>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            Search every module report · run exports here · or open the module
-            Reports tab
-            {ay ? ` · Session ${ay}` : ""}
-            {!canExport ? " · view only (no export on your roles)" : ""}
-          </p>
-        </div>
+    <ErpWorkspaceShell
+      title="Reports Center"
+      subtitle={
+        <>
+          Search every module report · run exports here · or open the module Reports tab
+          {ay ? ` · Session ${ay}` : ""}
+          {!canExport ? " · view only (no export on your roles)" : ""}
+        </>
+      }
+      icon={<FileBarChart2 className="size-6" aria-hidden />}
+      actions={
         <p className="rounded-lg bg-[rgba(32,48,80,0.06)] px-3 py-2 text-sm text-[var(--brand-deep)]">
           <span className="font-semibold">{filtered.length}</span> report
           {filtered.length === 1 ? "" : "s"}
@@ -167,8 +163,8 @@ export function ReportsCenterWorkspace() {
             ? " matching"
             : ` · ${allowedModules.length} modules`}
         </p>
-      </header>
-
+      }
+    >
       <ModuleTabs
         items={hubTabs}
         value={tab}
@@ -371,7 +367,7 @@ export function ReportsCenterWorkspace() {
           <ModuleRunner id={tab} ay={ay} />
         </section>
       ) : null}
-    </div>
+    </ErpWorkspaceShell>
   );
 }
 

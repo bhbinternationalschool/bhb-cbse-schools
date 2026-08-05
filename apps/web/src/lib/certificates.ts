@@ -2,7 +2,9 @@
  * Certificates — TC (CBSE Annexure-I), bonafide, character, fee clearance.
  */
 
-import { assertModulePermission } from "@/lib/rbacGuard";
+import { assertSessionWritable } from "@/lib/sessionWriteGuard";
+import { getSessionActor } from "@/lib/sessionActor";
+import { hasPermission } from "@/lib/rbac";
 import {
   amountInWordsPaise,
   computeStudentDues,
@@ -13,6 +15,10 @@ import {
 } from "@/lib/fees";
 import { checkHold, holdCodeForCertificate } from "@/lib/holds";
 import { DEFAULT_AY, loadMasters } from "@/lib/masters";
+import {
+  persistSeriesUse,
+  suggestFromSeriesCode,
+} from "@/lib/numberSeries";
 import {
   loadSis,
   saveSis,
@@ -137,6 +143,10 @@ export type CertificateIssue = {
   tc: TcDetails | null;
   /** Fees paid / reimbursement block — present for kind=fees_paid */
   feesPaid: FeesPaidDetails | null;
+  /** AI-drafted certificate title (optional) */
+  customTitle: string;
+  /** AI-drafted or edited certificate body — when set, printed instead of template */
+  customBody: string;
 };
 
 export type CertificatesState = {
@@ -330,7 +340,26 @@ export function loadCertificates(): CertificatesState {
 }
 
 export function saveCertificates(state: CertificatesState) {
-  if (!assertModulePermission("certificates", "edit", "saveCertificates")) return;
+  if (!assertSessionWritable("saveCertificates")) return;
+  const session = getSessionActor();
+  if (session && typeof window !== "undefined") {
+    const masters = loadMasters();
+    const allowed =
+      hasPermission(session, masters, "certificates", "edit") ||
+      hasPermission(session, masters, "certificates", "create");
+    if (!allowed) {
+      window.dispatchEvent(
+        new CustomEvent("bhb-rbac-denied", {
+          detail: {
+            module: "certificates",
+            action: "create",
+            label: "saveCertificates",
+          },
+        }),
+      );
+      return;
+    }
+  }
 
   if (typeof window === "undefined") return;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -422,7 +451,86 @@ function normalizeIssue(c: CertificateIssue): CertificateIssue {
         : c.feesPaid
           ? normalizeFeesPaid(c.feesPaid)
           : null,
+    customTitle: c.customTitle || "",
+    customBody: c.customBody || "",
   };
+}
+
+export function seriesCodeForCertificateKind(kind: CertificateKind): string {
+  switch (kind) {
+    case "tc":
+      return "TC";
+    case "bonafide":
+      return "CERT_BONAFIDE";
+    case "character":
+      return "CERT_CHARACTER";
+    case "fee_clearance":
+      return "CERT_CLEARANCE";
+    case "fees_paid":
+      return "CERT_FEES_PAID";
+    default:
+      return "TC";
+  }
+}
+
+function allocateCertificateNumber(
+  kind: CertificateKind,
+  ay: string,
+  state: CertificatesState,
+): string {
+  const masters = loadMasters();
+  const code = seriesCodeForCertificateKind(kind);
+  const existing = state.issues.map((i) => i.certNo);
+  const suggested = suggestFromSeriesCode(
+    masters.numberSeries,
+    code,
+    ay,
+    existing,
+  );
+  if (suggested) {
+    persistSeriesUse(code, ay, suggested);
+    return suggested;
+  }
+  return legacyCertNo(kind, ay, state);
+}
+
+/** Preview next certificate number from Masters numbering (for UI). */
+export function suggestNextCertificateNumber(
+  kind: CertificateKind,
+  ay: string,
+): string {
+  const masters = loadMasters();
+  const state = loadCertificates();
+  const code = seriesCodeForCertificateKind(kind);
+  const suggested = suggestFromSeriesCode(
+    masters.numberSeries,
+    code,
+    ay,
+    state.issues.map((i) => i.certNo),
+  );
+  return suggested ?? legacyCertNo(kind, ay, state);
+}
+
+function legacyCertNo(
+  kind: CertificateKind,
+  ay: string,
+  state: CertificatesState,
+): string {
+  const prefix =
+    kind === "tc"
+      ? "TC"
+      : kind === "bonafide"
+        ? "BNF"
+        : kind === "character"
+          ? "CHR"
+          : kind === "fees_paid"
+            ? "FEE"
+            : "ND";
+  const ayTag = ay.replace(/[^0-9]/g, "").slice(0, 4) || "AY";
+  const existing = state.issues.filter(
+    (i) => i.kind === kind && i.academicYearCode === ay && !i.voidedAt,
+  ).length;
+  return `${prefix}-${ayTag}-${String(existing + 1).padStart(4, "0")}`;
 }
 
 function normalizeFeesPaid(
@@ -667,28 +775,6 @@ export function certificateEligibility(
   };
 }
 
-function nextCertNo(
-  kind: CertificateKind,
-  ay: string,
-  state: CertificatesState,
-): string {
-  const prefix =
-    kind === "tc"
-      ? "TC"
-      : kind === "bonafide"
-        ? "BNF"
-        : kind === "character"
-          ? "CHR"
-          : kind === "fees_paid"
-            ? "FEE"
-            : "ND";
-  const ayTag = ay.replace(/[^0-9]/g, "").slice(0, 4) || "AY";
-  const existing = state.issues.filter(
-    (i) => i.kind === kind && i.academicYearCode === ay && !i.voidedAt,
-  ).length;
-  return `${prefix}-${ayTag}-${String(existing + 1).padStart(4, "0")}`;
-}
-
 function monthNameFromIso(iso: string): string {
   if (!iso) return "";
   const d = new Date(`${iso}T12:00:00`);
@@ -720,6 +806,8 @@ export type IssueCertificateInput = {
   feesPaidPeriodTo?: string;
   feesPaidClaimFor?: string;
   feesPaidIncludeSiblings?: boolean;
+  customTitle?: string;
+  customBody?: string;
 };
 
 export function issueCertificate(
@@ -840,7 +928,7 @@ export function issueCertificate(
   const issue = normalizeIssue({
     id: id("cert"),
     kind: input.kind,
-    certNo: nextCertNo(input.kind, ay, state),
+    certNo: allocateCertificateNumber(input.kind, ay, state),
     studentId: student.id,
     householdId: student.householdId,
     academicYearCode: ay,
@@ -861,6 +949,8 @@ export function issueCertificate(
     promotedTo: promoted,
     conduct: input.conduct?.trim() || "Good",
     remarks: input.remarks?.trim() || "",
+    customTitle: input.customTitle?.trim() || "",
+    customBody: input.customBody?.trim() || "",
     openBalancePaise: eligibility.openBalancePaise,
     duesCleared,
     overrideDues: !!input.overrideDues && eligibility.requiresOverride,

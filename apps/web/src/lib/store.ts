@@ -6,6 +6,7 @@
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { DEFAULT_AY } from "@/lib/masters";
 import { checkHold } from "@/lib/holds";
+import { loadAccounts, seedAccountsIfEmpty } from "@/lib/accounts";
 
 /** Legacy fixed codes — still accepted on import / migration. */
 export type StoreCategoryCode = "book" | "uniform" | "stationery" | "other";
@@ -20,6 +21,17 @@ export type StoreIssuePolicy =
 
 export type StorePaymentMode = "cash" | "credit";
 export type StorePaymentStatus = "paid" | "due" | "void";
+
+/** Counter tender when collecting at sell (matches Fee Take tender modes). */
+export type StoreTenderMode =
+  | "cash"
+  | "upi"
+  | "card"
+  | "cheque"
+  | "rtgs"
+  | "neft"
+  | "imps"
+  | "bank";
 
 export type StoreIssueKind =
   | "first"
@@ -48,6 +60,8 @@ export type StoreCategoryDef = {
   code: string;
   isActive: boolean;
   sortOrder: number;
+  /** Linked store source / vendor ids for this stock group. */
+  preferredSourceIds: string[];
 };
 
 /** Counter / POS grouping (Sale Group). */
@@ -57,6 +71,10 @@ export type StoreSaleGroup = {
   code: string;
   isActive: boolean;
   sortOrder: number;
+  /** Parent stock group (StoreCategoryDef id). */
+  categoryId: string;
+  /** Classes this sale group applies to; empty = all classes. */
+  classIds: string[];
 };
 
 /** Unit of measurement master. */
@@ -85,6 +103,8 @@ export type StoreSource = {
   phone: string;
   isActive: boolean;
   sortOrder: number;
+  /** Linked Accounts vendor id (synced from Accounts Masters). */
+  accountsVendorId: string;
 };
 
 export type StoreItem = {
@@ -157,6 +177,15 @@ export type StoreIssue = {
   voidedAt: string | null;
   paymentMode: StorePaymentMode;
   paymentStatus: StorePaymentStatus;
+  /** Tender used when paid at counter (cash / UPI / card / …). */
+  tenderMode: StoreTenderMode;
+  /** Encoded payment channel (mode:bankId) from accounts tender picker. */
+  paymentChannel: string;
+  /** Amount collected at counter at issue time (partial or full). */
+  counterPaidPaise: number;
+  /** Stock / sale group used for POS kit sell (optional). */
+  stockGroupId: string;
+  saleGroupId: string;
   issueKind: StoreIssueKind;
   replacesIssueId: string;
   replacementReason: string;
@@ -268,12 +297,16 @@ function normalizeCategory(c: Partial<StoreCategoryDef>): StoreCategoryDef {
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_|_$/g, "")
     .slice(0, 32);
+  const preferredSourceIds = Array.isArray(c.preferredSourceIds)
+    ? c.preferredSourceIds.map(String).filter(Boolean)
+    : [];
   return {
     id: c.id || nid("scat"),
     name,
     code: code || nid("c"),
     isActive: c.isActive !== false,
     sortOrder: Math.max(0, Math.floor(Number(c.sortOrder) || 0)),
+    preferredSourceIds,
   };
 }
 
@@ -301,7 +334,15 @@ function normalizeNamedMaster<
 }
 
 function normalizeSaleGroup(c: Partial<StoreSaleGroup>): StoreSaleGroup {
-  return normalizeNamedMaster(c, "ssg", "Sale group");
+  const base = normalizeNamedMaster(c, "ssg", "Sale group");
+  const classIds = Array.isArray(c.classIds)
+    ? c.classIds.map(String).filter(Boolean)
+    : [];
+  return {
+    ...base,
+    categoryId: (c.categoryId ?? "").trim(),
+    classIds,
+  };
 }
 
 function normalizeUom(c: Partial<StoreUom>): StoreUom {
@@ -314,7 +355,29 @@ function normalizeInfraLevel(c: Partial<StoreInfraLevel>): StoreInfraLevel {
 
 function normalizeSource(c: Partial<StoreSource>): StoreSource {
   const base = normalizeNamedMaster(c, "ssrc", "Source");
-  return { ...base, phone: (c.phone ?? "").trim() };
+  return {
+    ...base,
+    phone: (c.phone ?? "").trim(),
+    accountsVendorId: (c.accountsVendorId ?? "").trim(),
+  };
+}
+
+const STORE_TENDER_MODES: StoreTenderMode[] = [
+  "cash",
+  "upi",
+  "card",
+  "cheque",
+  "rtgs",
+  "neft",
+  "imps",
+  "bank",
+];
+
+function normalizeTenderMode(v: unknown): StoreTenderMode {
+  if (typeof v === "string" && STORE_TENDER_MODES.includes(v as StoreTenderMode)) {
+    return v as StoreTenderMode;
+  }
+  return "cash";
 }
 
 export function defaultStoreCategories(): StoreCategoryDef[] {
@@ -582,6 +645,10 @@ function normalizeIssue(iss: Partial<StoreIssue>): StoreIssue {
       ? Math.max(0, Math.round(Number(iss.totalPaise)))
       : Math.max(0, linesTotal - discount);
   const voided = iss.voidedAt ?? null;
+  const counterPaidPaise = Math.max(
+    0,
+    Math.round(Number(iss.counterPaidPaise) || 0),
+  );
   const paymentMode: StorePaymentMode =
     iss.paymentMode === "cash" ? "cash" : "credit";
   let paymentStatus: StorePaymentStatus =
@@ -593,6 +660,19 @@ function normalizeIssue(iss: Partial<StoreIssue>): StoreIssue {
         ? "paid"
         : "due";
   if (voided) paymentStatus = "void";
+  else if (
+    !voided &&
+    counterPaidPaise > 0 &&
+    counterPaidPaise < total
+  ) {
+    paymentStatus = "due";
+  } else if (
+    !voided &&
+    counterPaidPaise >= total &&
+    total > 0
+  ) {
+    paymentStatus = "paid";
+  }
   const issueKind = (iss.issueKind || "first") as StoreIssueKind;
   const recipientKind: "student" | "staff" =
     iss.recipientKind === "staff" || (!!iss.staffId && !iss.studentId)
@@ -615,6 +695,11 @@ function normalizeIssue(iss: Partial<StoreIssue>): StoreIssue {
     voidedAt: voided,
     paymentMode,
     paymentStatus,
+    tenderMode: normalizeTenderMode(iss.tenderMode),
+    paymentChannel: (iss.paymentChannel ?? "").trim(),
+    counterPaidPaise,
+    stockGroupId: (iss.stockGroupId ?? "").trim(),
+    saleGroupId: (iss.saleGroupId ?? "").trim(),
     issueKind: [
       "first",
       "replacement_lost",
@@ -705,6 +790,10 @@ function normalizeSellReturn(r: Partial<StoreSellReturn>): StoreSellReturn {
     createdAt: r.createdAt ?? nowIso(),
     createdBy: r.createdBy ?? "",
   };
+}
+
+export function emptyStoreState(): StoreState {
+  return emptyStore();
 }
 
 function emptyStore(): StoreState {
@@ -866,6 +955,7 @@ export function upsertStoreCategory(input: {
   code?: string;
   isActive?: boolean;
   sortOrder?: number;
+  preferredSourceIds?: string[];
 }):
   | { ok: true; state: StoreState; category: StoreCategoryDef }
   | { ok: false; error: string } {
@@ -887,6 +977,8 @@ export function upsertStoreCategory(input: {
       code: input.code ?? existing.code,
       isActive: input.isActive ?? existing.isActive,
       sortOrder: input.sortOrder ?? existing.sortOrder,
+      preferredSourceIds:
+        input.preferredSourceIds ?? existing.preferredSourceIds,
     });
     const dupName = store.categories.find(
       (c) =>
@@ -912,6 +1004,7 @@ export function upsertStoreCategory(input: {
     code: input.code,
     sortOrder,
     isActive: input.isActive !== false,
+    preferredSourceIds: input.preferredSourceIds,
   });
   const dup = store.categories.find(
     (c) => c.name.toLowerCase() === category.name.toLowerCase(),
@@ -941,6 +1034,71 @@ export function deactivateStoreCategory(categoryId: string): boolean {
     ),
   });
   return true;
+}
+
+export type StoreCategoryRemovalCheck = {
+  canRemove: boolean;
+  blockers: string[];
+  confirmMessage: string;
+  suggestion: string;
+};
+
+export function checkStoreCategoryRemoval(
+  categoryId: string,
+  store?: StoreState,
+): StoreCategoryRemovalCheck {
+  const s = store ?? loadStore();
+  const cat = s.categories.find((c) => c.id === categoryId);
+  if (!cat) {
+    return {
+      canRemove: false,
+      blockers: ["Not found"],
+      confirmMessage: "",
+      suggestion: "Not found",
+    };
+  }
+  const blockers: string[] = [];
+  const itemCount = s.items.filter((i) => i.categoryId === categoryId).length;
+  if (itemCount > 0) {
+    blockers.push(
+      `${itemCount} catalog item(s) use this stock group`,
+    );
+  }
+  const sgCount = s.saleGroups.filter((g) => g.categoryId === categoryId).length;
+  if (sgCount > 0) {
+    blockers.push(`${sgCount} sale group(s) linked`);
+  }
+  const issueCount = s.issues.filter((i) => i.stockGroupId === categoryId).length;
+  if (issueCount > 0) {
+    blockers.push(`${issueCount} past issue(s) reference this group`);
+  }
+  if (blockers.length > 0) {
+    return {
+      canRemove: false,
+      blockers,
+      confirmMessage: "",
+      suggestion: `${blockers.join(" · ")} — reassign or remove linked data first.`,
+    };
+  }
+  return {
+    canRemove: true,
+    blockers: [],
+    confirmMessage: `Remove stock group “${cat.name}”?`,
+    suggestion: "This cannot be undone.",
+  };
+}
+
+export function deleteStoreCategory(
+  categoryId: string,
+): { ok: true } | { ok: false; error: string } {
+  const store = loadStore();
+  const check = checkStoreCategoryRemoval(categoryId, store);
+  if (!check.canRemove) return { ok: false, error: check.suggestion };
+  saveStore({
+    ...store,
+    categories: store.categories.filter((c) => c.id !== categoryId),
+  });
+  return { ok: true };
 }
 
 function upsertSimpleMaster<
@@ -997,15 +1155,46 @@ export function upsertStoreSaleGroup(input: {
   code?: string;
   isActive?: boolean;
   sortOrder?: number;
+  categoryId?: string;
+  classIds?: string[];
 }) {
-  return upsertSimpleMaster(
-    loadStore(),
-    "saleGroups",
-    input,
-    normalizeSaleGroup,
-    "ssg",
-    "Sale group",
-  );
+  const store = loadStore();
+  const name = input.name.trim();
+  if (!name) return { ok: false as const, error: "Name is required" };
+  const list = store.saleGroups;
+  const existing = input.id
+    ? list.find((c) => c.id === input.id)
+    : list.find((c) => c.name.toLowerCase() === name.toLowerCase());
+  if (existing) {
+    const next = normalizeSaleGroup({
+      ...existing,
+      ...input,
+      name,
+      id: existing.id,
+    });
+    const state = {
+      ...store,
+      saleGroups: list.map((c) => (c.id === existing.id ? next : c)),
+    };
+    saveStore(state);
+    return { ok: true as const, state, row: next };
+  }
+  const sortOrder =
+    input.sortOrder ?? list.reduce((m, c) => Math.max(m, c.sortOrder), 0) + 1;
+  const row = normalizeSaleGroup({
+    id: nid("ssg"),
+    name,
+    code: input.code,
+    sortOrder,
+    isActive: input.isActive !== false,
+    categoryId: input.categoryId,
+    classIds: input.classIds,
+  });
+  const dup = list.find((c) => c.name.toLowerCase() === row.name.toLowerCase());
+  if (dup) return { ok: false as const, error: "Name already exists" };
+  const state = { ...store, saleGroups: [...list, row] };
+  saveStore(state);
+  return { ok: true as const, state, row };
 }
 
 export function upsertStoreUom(input: {
@@ -1049,6 +1238,7 @@ export function upsertStoreSource(input: {
   phone?: string;
   isActive?: boolean;
   sortOrder?: number;
+  accountsVendorId?: string;
 }) {
   const store = loadStore();
   const name = input.name.trim();
@@ -1057,7 +1247,12 @@ export function upsertStoreSource(input: {
     ? store.sources.find((c) => c.id === input.id)
     : store.sources.find((c) => c.name.toLowerCase() === name.toLowerCase());
   if (existing) {
-    const next = normalizeSource({ ...existing, ...input, name, id: existing.id });
+    const next = normalizeSource({
+      ...existing,
+      ...input,
+      name,
+      id: existing.id,
+    });
     const state = {
       ...store,
       sources: store.sources.map((c) => (c.id === existing.id ? next : c)),
@@ -1075,6 +1270,7 @@ export function upsertStoreSource(input: {
     phone: input.phone,
     sortOrder,
     isActive: input.isActive !== false,
+    accountsVendorId: input.accountsVendorId,
   });
   const state = { ...store, sources: [...store.sources, row] };
   saveStore(state);
@@ -1226,12 +1422,20 @@ export function storeDueKey(studentId: string, issueId: string): string {
   return `store:${studentId}:${issueId}`;
 }
 
+/** Net billed minus counter collection at sell (before Fee Take vouchers). */
+export function storeIssueBalanceDuePaise(iss: StoreIssue): number {
+  if (iss.voidedAt || iss.paymentStatus === "void") return 0;
+  const billed = storeIssueNetBilledPaise(iss);
+  const counterPaid = Math.max(0, iss.counterPaidPaise || 0);
+  return Math.max(0, billed - counterPaid);
+}
+
 /** Whether a credit issue should appear as a Fee Take due. */
 export function isStoreIssueDueOnFeeTake(iss: StoreIssue): boolean {
   if (iss.voidedAt || iss.paymentStatus === "void") return false;
   if (iss.recipientKind === "staff" || !iss.studentId) return false;
-  if (iss.paymentMode === "cash" || iss.paymentStatus === "paid") return false;
-  return iss.paymentStatus === "due";
+  if (storeIssueBalanceDuePaise(iss) <= 0) return false;
+  return true;
 }
 
 export type PriorIssueHit = {
@@ -1574,6 +1778,14 @@ export function createStoreIssue(input: {
   note?: string;
   academicYearCode?: string;
   paymentMode?: StorePaymentMode;
+  /** Credit sale — nothing collected at counter. */
+  notPaid?: boolean;
+  /** Amount collected at counter now (partial or full). */
+  counterPaidPaise?: number;
+  tenderMode?: StoreTenderMode;
+  paymentChannel?: string;
+  stockGroupId?: string;
+  saleGroupId?: string;
   saleDiscountPaise?: number;
   issueKind?: StoreIssueKind;
   replacesIssueId?: string;
@@ -1583,6 +1795,8 @@ export function createStoreIssue(input: {
   returnToStock?: boolean;
   returnLines?: { itemId: string; qty: number }[];
   skipHoldCheck?: boolean;
+  /** Optional UPI / receipt reference for cash sales */
+  paymentTransactionRef?: string;
 }):
   | { ok: true; issue: StoreIssue; state: StoreState }
   | { ok: false; error: string; prior?: PriorIssueHit } {
@@ -1606,22 +1820,11 @@ export function createStoreIssue(input: {
   }
 
   const paymentMode: StorePaymentMode =
-    input.paymentMode === "cash" ? "cash" : "credit";
+    input.notPaid || input.paymentMode === "credit" ? "credit" : "cash";
   const issueKind: StoreIssueKind = input.issueKind || "first";
   const ay = input.academicYearCode ?? DEFAULT_AY;
   const studentId = input.studentId || "";
   const staffId = input.staffId || "";
-
-  if (
-    recipientKind === "student" &&
-    paymentMode === "credit" &&
-    !input.skipHoldCheck
-  ) {
-    const hold = checkHold(studentId, "HOLD_STORE_CREDIT");
-    if (!hold.allowed) {
-      return { ok: false, error: hold.message };
-    }
-  }
 
   const lines: StoreIssueLine[] = [];
   for (const row of input.lines) {
@@ -1700,6 +1903,33 @@ export function createStoreIssue(input: {
   }
   const totalPaise = linesTotal - discount;
 
+  const counterPaidRaw = input.notPaid
+    ? 0
+    : Math.max(0, Math.round(Number(input.counterPaidPaise) || 0));
+  if (!input.notPaid && counterPaidRaw > totalPaise) {
+    return { ok: false, error: "Counter payment cannot exceed total" };
+  }
+  const counterPaidPaise =
+    !input.notPaid && counterPaidRaw <= 0 && paymentMode === "cash"
+      ? totalPaise
+      : counterPaidRaw;
+  const balanceDue = Math.max(0, totalPaise - counterPaidPaise);
+
+  if (
+    recipientKind === "student" &&
+    balanceDue > 0 &&
+    !input.skipHoldCheck
+  ) {
+    const hold = checkHold(studentId, "HOLD_STORE_CREDIT");
+    if (!hold.allowed) {
+      return { ok: false, error: hold.message };
+    }
+  }
+  const resolvedPaymentMode: StorePaymentMode =
+    balanceDue <= 0 ? "cash" : paymentMode === "cash" && counterPaidPaise > 0 ? "credit" : paymentMode;
+  const paymentStatus: StorePaymentStatus =
+    balanceDue <= 0 ? "paid" : "due";
+
   const issue = normalizeIssue({
     id: nid("iss"),
     issueNo: nextStoreIssueNo(store, ay),
@@ -1715,8 +1945,13 @@ export function createStoreIssue(input: {
     note: input.note?.trim() ?? "",
     createdAt: nowIso(),
     voidedAt: null,
-    paymentMode,
-    paymentStatus: paymentMode === "cash" ? "paid" : "due",
+    paymentMode: resolvedPaymentMode,
+    paymentStatus,
+    tenderMode: input.tenderMode,
+    paymentChannel: input.paymentChannel?.trim(),
+    counterPaidPaise,
+    stockGroupId: input.stockGroupId || "",
+    saleGroupId: input.saleGroupId || "",
     issueKind,
     replacesIssueId: input.replacesIssueId || "",
     replacementReason: input.replacementReason || "",
@@ -1772,13 +2007,28 @@ export function createStoreIssue(input: {
   // Post to Accounts (cashbook / daybook / BS) — non-blocking if accounts unavailable
   void import("@/lib/accounts")
     .then((m) => {
-      m.postStoreSaleToAccounts({
-        issueId: issue.id,
-        issueNo: issue.issueNo,
-        issuedOn: issue.issuedOn,
-        amountPaise: issue.totalPaise,
-        paymentMode: issue.paymentMode,
-      });
+      if (issue.counterPaidPaise > 0) {
+        m.postStoreSaleToAccounts({
+          issueId: issue.id,
+          issueNo: issue.issueNo,
+          issuedOn: issue.issuedOn,
+          amountPaise: issue.counterPaidPaise,
+          paymentMode: "cash",
+          tenderMode: issue.tenderMode,
+          paymentChannel: issue.paymentChannel,
+          transactionRef: input.paymentTransactionRef?.trim(),
+        });
+      }
+      if (storeIssueBalanceDuePaise(issue) > 0) {
+        m.postStoreSaleToAccounts({
+          issueId: `${issue.id}_ar`,
+          issueNo: issue.issueNo,
+          issuedOn: issue.issuedOn,
+          amountPaise: storeIssueBalanceDuePaise(issue),
+          paymentMode: "credit",
+          narration: `Store credit balance · ${issue.issueNo}`,
+        });
+      }
     })
     .catch(() => {
       /* accounts optional */
@@ -1888,6 +2138,146 @@ export function listStoreIssuesForStudent(
         i.recipientKind !== "staff",
     )
     .sort((a, b) => b.issuedOn.localeCompare(a.issuedOn));
+}
+
+/** Prior store issues for a student in the current academic year. */
+export function listStoreIssuesForStudentSession(
+  studentId: string,
+  academicYearCode: string,
+  store?: StoreState,
+): StoreIssue[] {
+  return listStoreIssuesForStudent(studentId, store).filter(
+    (i) => i.academicYearCode === academicYearCode,
+  );
+}
+
+/** Active sale groups for a stock group, optionally filtered by class. */
+export function listSaleGroupsForStockGroup(
+  categoryId: string,
+  opts?: { classId?: string; store?: StoreState },
+): StoreSaleGroup[] {
+  const s = opts?.store ?? loadStore();
+  return s.saleGroups
+    .filter((g) => g.isActive && g.categoryId === categoryId)
+    .filter((g) => {
+      if (!opts?.classId || g.classIds.length === 0) return true;
+      return g.classIds.includes(opts.classId);
+    })
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+}
+
+/** Catalog items in a sale group kit, filtered for recipient / class. */
+export function itemsForSaleGroup(
+  saleGroupId: string,
+  opts?: {
+    audience?: "student" | "staff";
+    classId?: string;
+    store?: StoreState;
+  },
+): StoreItem[] {
+  const s = opts?.store ?? loadStore();
+  const audience = opts?.audience ?? "student";
+  return s.items
+    .filter((i) => i.isActive && i.saleGroupId === saleGroupId)
+    .filter((i) =>
+      itemAppliesToRecipient(i, { audience, classId: opts?.classId }),
+    )
+    .sort((a, b) => a.sku.localeCompare(b.sku));
+}
+
+/** Resolve store source for an accounts vendor id. */
+export function storeSourceForAccountsVendor(
+  vendorId: string,
+  store?: StoreState,
+): StoreSource | null {
+  const s = store ?? loadStore();
+  return (
+    s.sources.find(
+      (src) => src.accountsVendorId === vendorId && src.isActive,
+    ) ?? null
+  );
+}
+
+/**
+ * Sync Accounts Masters vendors into Store Source Master (by id or name).
+ * Returns count of sources created or linked.
+ */
+export function syncAccountsVendorsToStoreSources(): {
+  ok: true;
+  linked: number;
+  created: number;
+  state: StoreState;
+} {
+  const store = loadStore();
+  let linked = 0;
+  let created = 0;
+  let sources = [...store.sources];
+
+  seedAccountsIfEmpty();
+  const vendors = loadAccounts().vendors.filter((v) => v.isActive !== false);
+
+  for (const vendor of vendors) {
+    const byId = sources.find((s) => s.accountsVendorId === vendor.id);
+    if (byId) continue;
+    const byName = sources.find(
+      (s) => s.name.toLowerCase() === vendor.name.toLowerCase(),
+    );
+    if (byName) {
+      if (!byName.accountsVendorId) {
+        sources = sources.map((s) =>
+          s.id === byName.id
+            ? normalizeSource({ ...s, accountsVendorId: vendor.id })
+            : s,
+        );
+        linked += 1;
+      }
+      continue;
+    }
+    const row = normalizeSource({
+      id: nid("ssrc"),
+      name: vendor.name,
+      phone: vendor.phone ?? "",
+      accountsVendorId: vendor.id,
+      sortOrder: sources.reduce((m, c) => Math.max(m, c.sortOrder), 0) + 1,
+    });
+    sources.push(row);
+    created += 1;
+  }
+
+  const state = { ...store, sources };
+  if (linked > 0 || created > 0) {
+    saveStore(state);
+  }
+  return { ok: true, linked, created, state };
+}
+
+/** Set item vendor/source from accounts vendor after GRN. */
+export function linkStoreItemSourceFromVendor(
+  itemId: string,
+  accountsVendorId: string,
+): { ok: true; item: StoreItem } | { ok: false; error: string } {
+  const store = loadStore();
+  const item = store.items.find((i) => i.id === itemId);
+  if (!item) return { ok: false, error: "Item not found" };
+  let source =
+    store.sources.find((s) => s.accountsVendorId === accountsVendorId) ||
+    null;
+  if (!source) {
+    const sync = syncAccountsVendorsToStoreSources();
+    source =
+      sync.state.sources.find((s) => s.accountsVendorId === accountsVendorId) ||
+      null;
+  }
+  if (!source) return { ok: false, error: "No store source for vendor" };
+  const r = upsertStoreItem({
+    id: item.id,
+    sku: item.sku,
+    name: item.name,
+    categoryId: item.categoryId,
+    sourceId: source.id,
+  });
+  if (!r.ok) return r;
+  return { ok: true, item: r.item };
 }
 
 export function issuePolicyLabel(p: StoreIssuePolicy): string {

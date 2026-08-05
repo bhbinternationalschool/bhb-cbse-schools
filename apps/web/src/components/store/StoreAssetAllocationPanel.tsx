@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import {
   categoryLabel,
   deleteStoreAssetAllocation,
@@ -11,12 +12,7 @@ import {
   type StoreItem,
 } from "@/lib/store";
 
-const field =
-  "rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2.5 py-1.5 text-sm text-[var(--brand-deep)]";
 const card = "rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4";
-const btn =
-  "rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50";
-
 export function StoreAssetAllocationPanel() {
   const [items, setItems] = useState<StoreItem[]>([]);
   const [allocations, setAllocations] = useState<StoreAssetAllocation[]>([]);

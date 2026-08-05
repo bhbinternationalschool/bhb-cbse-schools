@@ -9,6 +9,11 @@ import {
   deskSkipBlobHydrateClient,
   deskSkipBlobPushClient,
 } from "@/lib/deskCutover";
+import {
+  isDeskHydrated,
+  markDeskHydrated,
+  resetDeskHydrated,
+} from "@/lib/deskHydrateGuard";
 import { deskSliceDef, deskSliceEnvReadFromDb } from "@/lib/deskSliceRegistry";
 import {
   hydrateDeskSliceFromDb,
@@ -82,6 +87,9 @@ export function createDeskSlicePersistence<T extends { version: number }>(opts: 
   }
 
   async function ensureHydrated(): Promise<boolean> {
+    if (isDeskHydrated(opts.moduleId)) return false;
+    markDeskHydrated(opts.moduleId);
+
     const readFromDb = readFromDbEnabled();
     const blobChanged = deskSkipBlobHydrateClient(opts.moduleId)
       ? false
@@ -105,7 +113,10 @@ export function createDeskSlicePersistence<T extends { version: number }>(opts: 
 
   return {
     remoteEnabled: blob.remoteEnabled,
-    resetCache: blob.resetCache,
+    resetCache: () => {
+      resetDeskHydrated(opts.moduleId);
+      blob.resetCache();
+    },
     scheduleSync,
     ensureHydrated,
     pushRemoteServer,

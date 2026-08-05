@@ -253,10 +253,9 @@ export function AdmissionCrmChatInbox({
         <p className="rounded-lg border border-[rgba(32,48,80,0.12)] bg-[rgba(248,248,240,0.8)] px-3 py-2 text-[11px] text-[var(--muted)]">
           Parents message your WhatsApp Business number. Keywords:{" "}
           <strong className="text-[var(--brand-deep)]">{keywords}</strong>.
-          Webhook: <code className="text-[10px]">/api/wa/webhook</code>
           {waConfigured
-            ? " · Outbound API configured"
-            : " · Set WA_META_* or WA_BSP_* env to reply automatically"}
+            ? " · Connected"
+            : " · Configure WhatsApp in Masters → Integrations"}
         </p>
       ) : null}
 

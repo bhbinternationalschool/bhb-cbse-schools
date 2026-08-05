@@ -69,3 +69,29 @@ export function assertCanConfigureRbac(label = "saveRbac"): boolean {
   }
   return true;
 }
+
+/** Staff advance ledger — `staff_advances` or full payroll edit. */
+export function assertStaffAdvancesPermission(
+  action: RbacAction,
+  label = "saveAdvances",
+): boolean {
+  if (!assertSessionWritable(label)) return false;
+  const session = getSessionActor();
+  if (!session) return true;
+  if (typeof window === "undefined") return true;
+  const masters = loadMastersSafe();
+  if (
+    hasPermission(session, masters, "staff_advances", action) ||
+    hasPermission(session, masters, "payroll", "edit")
+  ) {
+    return true;
+  }
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent("bhb-rbac-denied", {
+        detail: { module: "staff_advances", action, label },
+      }),
+    );
+  }
+  return false;
+}

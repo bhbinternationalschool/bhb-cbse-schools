@@ -8,6 +8,7 @@ import {
 } from "@/lib/parentPortal";
 import { loadSis, type Household, type SisStudent } from "@/lib/sis";
 import { StudentNameLabel } from "@/components/students/StudentAvatar";
+import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import {
   cancelStudentLeaveRequest,
   createStudentLeaveRequest,
@@ -20,11 +21,6 @@ import {
   type StudentLeaveState,
   type StudentLeaveType,
 } from "@/lib/studentLeave";
-
-const field =
-  "rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2.5 py-1.5 text-sm text-[var(--brand-deep)]";
-const btn =
-  "rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50";
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);

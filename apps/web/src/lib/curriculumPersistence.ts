@@ -16,6 +16,13 @@ import {
   type StudentCurriculum,
 } from "@/lib/studentCurriculum";
 import type { ClassCurriculumTemplate } from "@/lib/officeCurriculumWorkflow";
+import {
+  isDeskHydrated,
+  markDeskHydrated,
+  resetDeskHydrated,
+} from "@/lib/deskHydrateGuard";
+
+const MODULE = "curriculum";
 
 export type CurriculumRemoteBundle = {
   byStudentKey: Record<string, StudentCurriculum>;
@@ -68,15 +75,14 @@ type TemplateRow = {
 let tenantIdCache: string | null = null;
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingPush: SisLike | null = null;
-let hydratedOnce = false;
 
 export function curriculumRemoteEnabled() {
   return isSupabaseConfigured();
 }
 
 export function resetCurriculumPersistenceCache() {
+  resetDeskHydrated(MODULE);
   tenantIdCache = null;
-  hydratedOnce = false;
   pendingPush = null;
   if (pushTimer) {
     clearTimeout(pushTimer);
@@ -390,8 +396,6 @@ export function scheduleTemplateSync(list: ClassCurriculumTemplate[]) {
  */
 export async function hydrateCurriculumRemoteOnce(): Promise<CurriculumRemoteBundle | null> {
   if (!curriculumRemoteEnabled()) return null;
-  if (hydratedOnce) return null;
-  hydratedOnce = true;
   return fetchCurriculumRemote();
 }
 
@@ -401,6 +405,9 @@ export async function hydrateCurriculumRemoteOnce(): Promise<CurriculumRemoteBun
  */
 export async function ensureCurriculumHydrated(): Promise<boolean> {
   if (!curriculumRemoteEnabled()) return false;
+  if (isDeskHydrated(MODULE)) return false;
+  markDeskHydrated(MODULE);
+
   const remote = await hydrateCurriculumRemoteOnce();
   if (!remote) return false;
   const { loadSis, saveSis } = await import("@/lib/sis");

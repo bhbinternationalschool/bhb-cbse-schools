@@ -209,7 +209,7 @@ export function WaChatHubPanel({
         {configured ? (
           <span className="text-[#166534]">Outbound API on.</span>
         ) : (
-          <span className="text-[#9a3412]">Configure WHATSAPP_* env.</span>
+          <span className="text-[#9a3412]">WhatsApp is not configured yet.</span>
         )}
       </p>
 

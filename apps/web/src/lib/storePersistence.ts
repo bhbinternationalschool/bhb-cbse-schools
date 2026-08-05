@@ -16,6 +16,13 @@ import {
 import { mergeDbDeskIntoStoreState } from "@/lib/storeNormalizedMerge";
 import { storeReadFromDbEnabled } from "@/lib/storeDbConfig";
 import { deskSkipBlobHydrateClient, deskSkipBlobPushClient } from "@/lib/deskCutover";
+import {
+  isDeskHydrated,
+  markDeskHydrated,
+  resetDeskHydrated,
+} from "@/lib/deskHydrateGuard";
+
+const MODULE = "store";
 
 const blob = createDomainBlobPersistence<StoreState>({
   table: "store_state",
@@ -36,6 +43,9 @@ export const scheduleStoreSync = (state: StoreState) => {
   scheduleStoreDeskSync(state);
 };
 export const ensureStoreHydrated = async () => {
+  if (isDeskHydrated(MODULE)) return false;
+  markDeskHydrated(MODULE);
+
   const readFromDb = storeReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("store")
     ? false
@@ -107,4 +117,7 @@ export async function ensureStoreHydratedServer(): Promise<boolean> {
   return changed;
 }
 
-export const resetStorePersistenceCache = blob.resetCache;
+export function resetStorePersistenceCache() {
+  resetDeskHydrated(MODULE);
+  blob.resetCache();
+}

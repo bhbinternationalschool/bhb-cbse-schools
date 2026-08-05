@@ -16,6 +16,13 @@ import {
 import { mergeDbDeskIntoStudentLeaveState } from "@/lib/studentLeaveNormalizedMerge";
 import { studentLeaveReadFromDbEnabled } from "@/lib/studentLeaveDbConfig";
 import { deskSkipBlobHydrateClient, deskSkipBlobPushClient } from "@/lib/deskCutover";
+import {
+  isDeskHydrated,
+  markDeskHydrated,
+  resetDeskHydrated,
+} from "@/lib/deskHydrateGuard";
+
+const MODULE = "student_leave";
 
 const blob = createDomainBlobPersistence<StudentLeaveState>({
   table: "student_leave_state",
@@ -27,7 +34,10 @@ const blob = createDomainBlobPersistence<StudentLeaveState>({
 });
 
 export const studentLeaveRemoteEnabled = blob.remoteEnabled;
-export const resetStudentLeavePersistenceCache = blob.resetCache;
+export function resetStudentLeavePersistenceCache() {
+  resetDeskHydrated(MODULE);
+  blob.resetCache();
+}
 
 export function scheduleStudentLeaveSync(state: StudentLeaveState) {
   if (typeof window === "undefined") {
@@ -68,6 +78,9 @@ export async function pushStudentLeaveRemoteServer(
  * DB wins when NEXT_PUBLIC_STUDENT_LEAVE_READ_FROM_DB=true or local is empty.
  */
 export async function ensureStudentLeaveHydrated(): Promise<boolean> {
+  if (isDeskHydrated(MODULE)) return false;
+  markDeskHydrated(MODULE);
+
   const readFromDb = studentLeaveReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("student_leave")
     ? false

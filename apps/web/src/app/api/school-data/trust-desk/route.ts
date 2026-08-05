@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { getDemoSession } from "@/lib/auth";
+import {
+  authorizeSchoolDataDesk,
+  SCHOOL_DATA_DESK_RBAC,
+} from "@/lib/apiRouteAuth.server";
 import type { TrustState } from "@/lib/trust";
 import { trustDualWriteDbEnabled } from "@/lib/trustDbConfig";
 import {
@@ -9,18 +12,9 @@ import {
 
 export const runtime = "nodejs";
 
-async function authorize(req: Request): Promise<boolean> {
-  const secret = process.env.MIRROR_SYNC_SECRET?.trim();
-  const header = req.headers.get("x-mirror-secret")?.trim();
-  if (secret && header && header === secret) return true;
-  const session = await getDemoSession();
-  return !!session;
-}
-
 export async function GET(req: Request) {
-  if (!(await authorize(req))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["trust-desk"], "GET");
+  if (!auth.ok) return auth.response
   const { bundle, meta } = await fetchTrustDeskFromDb();
   return NextResponse.json({
     ok: true,
@@ -32,9 +26,8 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  if (!(await authorize(req))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["trust-desk"], "POST");
+  if (!auth.ok) return auth.response
   if (!trustDualWriteDbEnabled()) {
     return NextResponse.json({
       ok: true,

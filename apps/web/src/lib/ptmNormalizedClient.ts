@@ -124,10 +124,11 @@ export async function fetchPtmDeskFromApi(): Promise<{
   }
 }
 
+type PtmDeskBundle = Pick<PtmState, "events" | "slots" | "bookings" | "feedback">;
+
 export async function hydratePtmDeskFromDb(
   preferDb?: boolean,
 ): Promise<{ bundle: PtmDeskBundle; changed: boolean }> {
-  type PtmDeskBundle = Pick<PtmState, "events" | "slots" | "bookings" | "feedback">;
   const remote = await fetchPtmDeskFromApi();
   const empty: PtmDeskBundle = {
     events: [],

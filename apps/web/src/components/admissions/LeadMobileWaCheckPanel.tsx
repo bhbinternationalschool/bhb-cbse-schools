@@ -308,7 +308,7 @@ export function LeadMobileWaCheckPanel({
           className="shrink-0 rounded-lg bg-[#166534] px-2.5 py-1.5 text-[11px] font-semibold text-white hover:brightness-110 disabled:opacity-50"
           title={
             apiConfigured === false
-              ? "Will report not configured until WHATSAPP_* env is set"
+              ? "Configure WhatsApp in Masters → Integrations first"
               : "Verify numbers via WhatsApp Business API"
           }
         >

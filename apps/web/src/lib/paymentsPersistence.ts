@@ -16,6 +16,13 @@ import {
 import { mergeDbDeskIntoPaymentsState } from "@/lib/paymentsNormalizedMerge";
 import { paymentsReadFromDbEnabled } from "@/lib/paymentsDbConfig";
 import { deskSkipBlobHydrateClient, deskSkipBlobPushClient } from "@/lib/deskCutover";
+import {
+  isDeskHydrated,
+  markDeskHydrated,
+  resetDeskHydrated,
+} from "@/lib/deskHydrateGuard";
+
+const MODULE = "payments";
 
 const blob = createDomainBlobPersistence<PaymentsState>({
   table: "payments_state",
@@ -27,7 +34,10 @@ const blob = createDomainBlobPersistence<PaymentsState>({
 });
 
 export const paymentsRemoteEnabled = blob.remoteEnabled;
-export const resetPaymentsPersistenceCache = blob.resetCache;
+export function resetPaymentsPersistenceCache() {
+  resetDeskHydrated(MODULE);
+  blob.resetCache();
+}
 
 export function schedulePaymentsSync(state: PaymentsState) {
   if (typeof window === "undefined") {
@@ -66,6 +76,9 @@ export async function pushPaymentsRemoteServer(
  * DB wins when NEXT_PUBLIC_PAYMENTS_READ_FROM_DB=true or local is empty.
  */
 export async function ensurePaymentsHydrated(): Promise<boolean> {
+  if (isDeskHydrated(MODULE)) return false;
+  markDeskHydrated(MODULE);
+
   const readFromDb = paymentsReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("payments")
     ? false

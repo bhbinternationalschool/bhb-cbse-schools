@@ -2,13 +2,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { Package } from "lucide-react";
 import {
   formatInr,
   loadFees,
   paidByDueKey,
   searchFeeStudents,
+  TENDER_MODES,
   type StudentSearchHit,
 } from "@/lib/fees";
+import { loadAccounts, seedAccountsIfEmpty, type AccountsState } from "@/lib/accounts";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
 import { loadSis, type SisState } from "@/lib/sis";
 import {
@@ -17,6 +20,11 @@ import {
   checkItemIssuePolicy,
   createStoreIssue,
   issuePolicyLabel,
+  itemsForSaleGroup,
+  listSaleGroupsForStockGroup,
+  listStoreIssuesForStudentSession,
+  storeIssueBalanceDuePaise,
+  type StoreCategoryDef,
   itemAppliesToRecipient,
   listActiveStoreItems,
   listLowStockItems,
@@ -29,7 +37,7 @@ import {
   type StoreIssue,
   type StoreIssueKind,
   type StoreItem,
-  type StorePaymentMode,
+  type StoreTenderMode,
 } from "@/lib/store";
 import {
   runStoreReport,
@@ -43,21 +51,54 @@ import {
   HoldStatusBanner,
   PrincipalHoldOverrideDialog,
 } from "@/components/fees/PrincipalHoldOverrideDialog";
+import { PaymentChannelSelect } from "@/components/accounts/PaymentChannelSelect";
+import {
+  decodeTenderChannel,
+  defaultTenderChannel,
+} from "@/lib/paymentChannels";
 import { checkHold, type HoldCheck } from "@/lib/holds";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
-import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
-import { PurchaseWorkspace } from "@/components/purchase/PurchaseWorkspace";
-import { StockMasterWorkspace } from "@/components/store/StockMasterWorkspace";
+import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
+import { ErpPanel, ErpTableShell } from "@/components/ui/erp-roster";
+import { lazyNamedTabPanel } from "@/components/ui/lazyTabPanel";
 import {
   StoreModuleNav,
   type StoreSubScreen,
   type StoreTab,
 } from "@/components/store/StoreModuleNav";
-import { StoreReportsPanel } from "@/components/store/StoreReportsPanel";
-import { StoreInventoryAllocationPanel } from "@/components/store/StoreInventoryAllocationPanel";
-import { StoreAssetAllocationPanel } from "@/components/store/StoreAssetAllocationPanel";
-import { StoreAccountsWorkspace } from "@/components/store/StoreAccountsWorkspace";
-import { StoreSellReturnPanel } from "@/components/store/StoreSellReturnPanel";
+
+const ModuleDashboardHost = lazyNamedTabPanel(
+  () => import("@/components/dashboard/ModuleDashboardHost"),
+  "ModuleDashboardHost",
+);
+const PurchaseWorkspace = lazyNamedTabPanel(
+  () => import("@/components/purchase/PurchaseWorkspace"),
+  "PurchaseWorkspace",
+);
+const StockMasterWorkspace = lazyNamedTabPanel(
+  () => import("@/components/store/StockMasterWorkspace"),
+  "StockMasterWorkspace",
+);
+const StoreReportsPanel = lazyNamedTabPanel(
+  () => import("@/components/store/StoreReportsPanel"),
+  "StoreReportsPanel",
+);
+const StoreInventoryAllocationPanel = lazyNamedTabPanel(
+  () => import("@/components/store/StoreInventoryAllocationPanel"),
+  "StoreInventoryAllocationPanel",
+);
+const StoreAssetAllocationPanel = lazyNamedTabPanel(
+  () => import("@/components/store/StoreAssetAllocationPanel"),
+  "StoreAssetAllocationPanel",
+);
+const StoreAccountsWorkspace = lazyNamedTabPanel(
+  () => import("@/components/store/StoreAccountsWorkspace"),
+  "StoreAccountsWorkspace",
+);
+const StoreSellReturnPanel = lazyNamedTabPanel(
+  () => import("@/components/store/StoreSellReturnPanel"),
+  "StoreSellReturnPanel",
+);
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -139,7 +180,20 @@ export function StoreWorkspace() {
   const [note, setNote] = useState("");
   const [cart, setCart] = useState<CartRow[]>([]);
   const [pickItemId, setPickItemId] = useState("");
-  const [paymentMode, setPaymentMode] = useState<StorePaymentMode>("credit");
+  const [notPaid, setNotPaid] = useState(true);
+  const [paymentChannel, setPaymentChannel] = useState(() => {
+    seedAccountsIfEmpty();
+    return defaultTenderChannel();
+  });
+  const [counterPaidInr, setCounterPaidInr] = useState("");
+  const [paymentTxnRef, setPaymentTxnRef] = useState("");
+  const [stockGroupId, setStockGroupId] = useState("");
+  const [saleGroupId, setSaleGroupId] = useState("");
+  const [categories, setCategories] = useState<StoreCategoryDef[]>([]);
+  const [accounts, setAccounts] = useState<AccountsState>(() => {
+    seedAccountsIfEmpty();
+    return loadAccounts();
+  });
   const [discountInr, setDiscountInr] = useState("");
   const [issueKind, setIssueKind] = useState<StoreIssueKind>("first");
   const [replacesIssueId, setReplacesIssueId] = useState("");
@@ -174,11 +228,14 @@ export function StoreWorkspace() {
   }
 
   function refresh() {
+    seedAccountsIfEmpty();
     const m = loadMasters();
     const s = loadSis();
     const store = loadStore();
+    setAccounts(loadAccounts());
     setMasters(m);
     setSis(s);
+    setCategories(store.categories.filter((c) => c.isActive));
     setAllItems(store.items);
     setItems(listActiveStoreItems(store));
     setIssues(
@@ -262,6 +319,54 @@ export function StoreWorkspace() {
     return { total: Math.max(0, sum - clamped), maxDisc, linesTotal: sum };
   }, [cart, items, discountInr]);
 
+  const saleGroupOptions = useMemo(() => {
+    if (!stockGroupId) return [];
+    return listSaleGroupsForStockGroup(stockGroupId, {
+      classId: selected?.student.classId,
+    });
+  }, [stockGroupId, selected?.student.classId, tick]);
+
+  const counterPaidPaise = useMemo(() => {
+    if (notPaid) return 0;
+    return Math.max(0, Math.round(Number(counterPaidInr || "0") * 100) || 0);
+  }, [notPaid, counterPaidInr]);
+
+  const balanceDuePaise = useMemo(() => {
+    if (notPaid) return cartTotal.total;
+    return Math.max(0, cartTotal.total - counterPaidPaise);
+  }, [notPaid, cartTotal.total, counterPaidPaise]);
+
+  const tenderMode = useMemo((): StoreTenderMode => {
+    return decodeTenderChannel(paymentChannel).mode;
+  }, [paymentChannel]);
+
+  const tenderMeta = useMemo(
+    () => TENDER_MODES.find((m) => m.value === tenderMode),
+    [tenderMode],
+  );
+
+  const sessionSells = useMemo(() => {
+    if (!selected) return [];
+    return listStoreIssuesForStudentSession(
+      selected.student.id,
+      selected.student.academicYearCode || DEFAULT_AY,
+    );
+  }, [selected, issues, tick]);
+
+  useEffect(() => {
+    if (notPaid) return;
+    setCounterPaidInr(
+      (cartTotal.total / 100).toFixed(cartTotal.total % 100 === 0 ? 0 : 2),
+    );
+  }, [cartTotal.total, notPaid]);
+
+  useEffect(() => {
+    if (!saleGroupId) return;
+    if (!saleGroupOptions.some((g) => g.id === saleGroupId)) {
+      setSaleGroupId("");
+    }
+  }, [saleGroupId, saleGroupOptions]);
+
   const issueableItems = useMemo(() => {
     return items.filter((item) =>
       itemAppliesToRecipient(item, {
@@ -301,6 +406,27 @@ export function StoreWorkspace() {
     setNotice(msg);
     setError(null);
     window.setTimeout(() => setNotice(null), 3200);
+  }
+
+  function loadSaleGroupKit(groupId: string) {
+    const kitItems = itemsForSaleGroup(groupId, {
+      audience: recipientKind,
+      classId: selected?.student.classId,
+    });
+    if (!kitItems.length) {
+      setError("No items in this sale group for this student / class");
+      return;
+    }
+    setCart(
+      kitItems.map((i) => ({
+        itemId: i.id,
+        qty: "1",
+        sizeLabel: i.sizeLabel || "",
+      })),
+    );
+    setSaleGroupId(groupId);
+    setError(null);
+    flash(`Loaded ${kitItems.length} item(s) from sale group`);
   }
 
   function addToCart() {
@@ -406,7 +532,7 @@ export function StoreWorkspace() {
     }
     if (
       recipientKind === "student" &&
-      paymentMode === "credit" &&
+      balanceDuePaise > 0 &&
       !skipHold &&
       selected
     ) {
@@ -417,6 +543,18 @@ export function StoreWorkspace() {
         setError(hold.message);
         return;
       }
+    }
+
+    if (
+      !notPaid &&
+      counterPaidPaise > 0 &&
+      tenderMeta?.needsRef &&
+      !paymentTxnRef.trim()
+    ) {
+      setError(
+        `${tenderMeta.label}: enter ${tenderMeta.refLabel.toLowerCase()}`,
+      );
+      return;
     }
 
     const discPaise = Math.min(
@@ -442,7 +580,13 @@ export function StoreWorkspace() {
       issuedOn,
       academicYearCode: selected?.student.academicYearCode || DEFAULT_AY,
       note,
-      paymentMode,
+      notPaid,
+      counterPaidPaise,
+      tenderMode,
+      paymentChannel,
+      stockGroupId: stockGroupId || undefined,
+      saleGroupId: saleGroupId || undefined,
+      paymentTransactionRef: paymentTxnRef.trim() || undefined,
       saleDiscountPaise: discPaise,
       issueKind,
       replacesIssueId: replacesIssueId || undefined,
@@ -451,7 +595,7 @@ export function StoreWorkspace() {
       returnToStock: issueKind === "size_exchange" && returnToStock,
       returnLines,
       skipHoldCheck:
-        skipHold || paymentMode === "cash" || recipientKind === "staff",
+        skipHold || balanceDuePaise <= 0 || recipientKind === "staff",
       lines: cart.map((r) => ({
         itemId: r.itemId,
         qty: Math.max(1, Math.floor(Number(r.qty) || 1)),
@@ -472,17 +616,23 @@ export function StoreWorkspace() {
     setCart([]);
     setNote("");
     setDiscountInr("");
+    setStockGroupId("");
+    setSaleGroupId("");
+    setPaymentTxnRef("");
     setIssueKind("first");
     setReplacesIssueId("");
     setReplacementReason("");
     setPolicyBlock(null);
     refresh();
+    const bal = storeIssueBalanceDuePaise(result.issue);
     flash(
-      paymentMode === "cash"
-        ? `Cash sale ${result.issue.issueNo} · ${formatInr(result.issue.totalPaise)}`
-        : `Credit ${result.issue.issueNo} · ${formatInr(result.issue.totalPaise)}${
-            recipientKind === "student" ? " due on Fee Take" : ""
-          }`,
+      bal <= 0
+        ? `Paid sale ${result.issue.issueNo} · ${formatInr(result.issue.totalPaise)}`
+        : `Issued ${result.issue.issueNo} · ${formatInr(result.issue.totalPaise)}${
+            result.issue.counterPaidPaise > 0
+              ? ` (${formatInr(result.issue.counterPaidPaise)} collected)`
+              : ""
+          } · ${formatInr(bal)} due on Fee Take`,
     );
   }
 
@@ -564,17 +714,14 @@ export function StoreWorkspace() {
   }, [issues, historyQ, historyMode, sis, masters]);
 
   return (
-    <div>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-[var(--brand-deep)]">
-            Store / books
-          </h1>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            Stock master · issue · purchase (indent → PO → GRN) · reports
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
+    <ErpWorkspaceShell
+      title="Store / books"
+      subtitle="Stock master · issue · purchase (indent → PO → GRN) · reports"
+      icon={<Package className="size-6" aria-hidden />}
+      error={error}
+      notice={notice}
+      actions={
+        <>
           {items.length === 0 ? (
             <button
               type="button"
@@ -594,31 +741,21 @@ export function StoreWorkspace() {
           >
             Open Fee Take
           </Link>
-        </div>
-      </div>
-
-      {lowStock.length > 0 ? (
-        <p className="mt-3 rounded-lg border border-[rgba(180,83,9,0.25)] bg-[rgba(180,83,9,0.08)] px-3 py-2 text-[12px] text-[#9a3412]">
-          Low stock:{" "}
-          {lowStock
-            .slice(0, 4)
-            .map((i) => `${i.sku} (${i.stockOnHand})`)
-            .join(" · ")}
-          {lowStock.length > 4 ? ` · +${lowStock.length - 4} more` : ""}
-        </p>
-      ) : null}
-
-      {error ? (
-        <p className="mt-3 rounded-lg bg-[#dc2626]/10 px-3 py-2 text-sm text-[#dc2626]">
-          {error}
-        </p>
-      ) : null}
-      {notice ? (
-        <p className="mt-3 rounded-lg bg-[rgba(32,48,80,0.06)] px-3 py-2 text-sm text-[var(--brand-deep)]">
-          {notice}
-        </p>
-      ) : null}
-
+        </>
+      }
+      toolbar={
+        lowStock.length > 0 ? (
+          <p className="rounded-lg border border-[rgba(180,83,9,0.25)] bg-[rgba(180,83,9,0.08)] px-3 py-2 text-[12px] text-[#9a3412]">
+            Low stock:{" "}
+            {lowStock
+              .slice(0, 4)
+              .map((i) => `${i.sku} (${i.stockOnHand})`)
+              .join(" · ")}
+            {lowStock.length > 4 ? ` · +${lowStock.length - 4} more` : ""}
+          </p>
+        ) : null
+      }
+    >
       <StoreModuleNav
         tab={tab}
         subScreen={subScreen}
@@ -846,11 +983,36 @@ export function StoreWorkspace() {
                       Change
                     </button>
                   </div>
-                  {paymentMode === "credit" ? (
+                  {balanceDuePaise > 0 && recipientKind === "student" ? (
                     <HoldStatusBanner
                       check={holdCheck}
                       onOverride={() => setHoldDialog(true)}
                     />
+                  ) : null}
+                  {sessionSells.length > 0 ? (
+                    <div className="rounded-lg border border-[rgba(32,48,80,0.12)] bg-white px-3 py-2">
+                      <div className="text-[11px] font-semibold text-[var(--brand-deep)]">
+                        Earlier sells this session ({sessionSells.length})
+                      </div>
+                      <ul className="mt-1 max-h-28 divide-y overflow-y-auto text-[11px]">
+                        {sessionSells.slice(0, 8).map((iss) => (
+                          <li
+                            key={iss.id}
+                            className="flex justify-between gap-2 py-1 text-[var(--muted)]"
+                          >
+                            <span>
+                              {iss.issueNo} · {iss.issuedOn}
+                            </span>
+                            <span className="font-semibold text-[var(--brand-deep)]">
+                              {formatInr(iss.totalPaise)}
+                              {storeIssueBalanceDuePaise(iss) > 0
+                                ? ` · due ${formatInr(storeIssueBalanceDuePaise(iss))}`
+                                : ""}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   ) : null}
                 </div>
               ) : null}
@@ -974,21 +1136,6 @@ export function StoreWorkspace() {
                 </label>
                 <label className="block text-sm">
                   <span className="mb-1 block text-[11px] text-[var(--muted)]">
-                    Payment
-                  </span>
-                  <select
-                    className="field !py-1.5"
-                    value={paymentMode}
-                    onChange={(e) =>
-                      setPaymentMode(e.target.value as StorePaymentMode)
-                    }
-                  >
-                    <option value="credit">Credit → Fee Take</option>
-                    <option value="cash">Cash at counter</option>
-                  </select>
-                </label>
-                <label className="block text-sm">
-                  <span className="mb-1 block text-[11px] text-[var(--muted)]">
                     Discount ₹ (max {formatInr(cartTotal.maxDisc)})
                   </span>
                   <input
@@ -1035,7 +1182,59 @@ export function StoreWorkspace() {
                     <option value="extra_optional">Extra / optional</option>
                   </select>
                 </label>
+                <label className="flex items-end gap-2 text-sm sm:col-span-2 lg:col-span-1">
+                  <input
+                    type="checkbox"
+                    className="mb-2"
+                    checked={notPaid}
+                    onChange={(e) => setNotPaid(e.target.checked)}
+                  />
+                  <span className="pb-2 text-[12px] text-[var(--brand-deep)]">
+                    Not paid — full balance to Fee Take
+                  </span>
+                </label>
               </div>
+
+              {!notPaid ? (
+                <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  <label className="block text-sm sm:col-span-2">
+                    <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                      Payment mode & account
+                    </span>
+                    <PaymentChannelSelect
+                      variant="tender"
+                      accounts={accounts}
+                      value={paymentChannel}
+                      onChange={setPaymentChannel}
+                      className="field !py-1.5"
+                    />
+                  </label>
+                  <label className="block text-sm">
+                    <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                      Collected now ₹
+                    </span>
+                    <input
+                      className="field !py-1.5"
+                      inputMode="decimal"
+                      value={counterPaidInr}
+                      onChange={(e) => setCounterPaidInr(e.target.value)}
+                      placeholder="0"
+                    />
+                  </label>
+                  {tenderMeta?.needsRef ? (
+                    <label className="block text-sm sm:col-span-2 lg:col-span-3">
+                      <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                        {tenderMeta.refLabel}
+                      </span>
+                      <input
+                        className="field !py-1.5"
+                        value={paymentTxnRef}
+                        onChange={(e) => setPaymentTxnRef(e.target.value)}
+                      />
+                    </label>
+                  ) : null}
+                </div>
+              ) : null}
 
               {issueKind !== "first" && issueKind !== "extra_optional" ? (
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -1093,6 +1292,64 @@ export function StoreWorkspace() {
                   placeholder="e.g. New session book set"
                 />
               </label>
+
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <label className="block text-sm">
+                  <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                    Stock group
+                  </span>
+                  <select
+                    className="field !py-1.5"
+                    value={stockGroupId}
+                    onChange={(e) => {
+                      setStockGroupId(e.target.value);
+                      setSaleGroupId("");
+                    }}
+                  >
+                    <option value="">Manual / pick items…</option>
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block text-sm">
+                  <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                    Sale group (kit)
+                  </span>
+                  <div className="flex gap-2">
+                    <select
+                      className="field !min-w-0 flex-1 !py-1.5"
+                      value={saleGroupId}
+                      disabled={!stockGroupId}
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        if (id) loadSaleGroupKit(id);
+                        else setSaleGroupId("");
+                      }}
+                    >
+                      <option value="">
+                        {stockGroupId ? "Select kit…" : "Pick stock group first"}
+                      </option>
+                      {saleGroupOptions.map((g) => (
+                        <option key={g.id} value={g.id}>
+                          {g.name}
+                        </option>
+                      ))}
+                    </select>
+                    {saleGroupId ? (
+                      <button
+                        type="button"
+                        className="shrink-0 rounded-lg border border-[rgba(32,48,80,0.2)] px-2 py-1 text-[11px] font-semibold text-[var(--brand-deep)]"
+                        onClick={() => loadSaleGroupKit(saleGroupId)}
+                      >
+                        Reload
+                      </button>
+                    ) : null}
+                  </div>
+                </label>
+              </div>
 
               <div className="mt-3 flex flex-wrap items-end gap-2">
                 <label className="min-w-[12rem] flex-1 text-sm">
@@ -1203,12 +1460,20 @@ export function StoreWorkspace() {
 
               <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <div className="text-[11px] text-[var(--muted)]">
-                    {paymentMode === "cash" ? "Cash total" : "Credit due"}
-                  </div>
+                  <div className="text-[11px] text-[var(--muted)]">Bill total</div>
                   <div className="text-xl font-extrabold text-[var(--brand-deep)]">
                     {formatInr(cartTotal.total)}
                   </div>
+                  {!notPaid && counterPaidPaise > 0 ? (
+                    <div className="text-[11px] text-[var(--muted)]">
+                      Collected {formatInr(counterPaidPaise)}
+                    </div>
+                  ) : null}
+                  {balanceDuePaise > 0 ? (
+                    <div className="text-[11px] font-semibold text-[#c2410c]">
+                      Fee Take due {formatInr(balanceDuePaise)}
+                    </div>
+                  ) : null}
                   <div className="text-[10px] text-[var(--muted)]">
                     Max discount locked: {formatInr(cartTotal.maxDisc)}
                   </div>
@@ -1222,7 +1487,11 @@ export function StoreWorkspace() {
                   }
                   onClick={onIssue}
                 >
-                  {paymentMode === "cash" ? "Take cash & issue" : "Issue on credit"}
+                  {balanceDuePaise <= 0
+                    ? "Collect & issue"
+                    : counterPaidPaise > 0
+                      ? "Partial pay & issue"
+                      : "Issue on credit"}
                 </button>
               </div>
             </div>
@@ -1320,7 +1589,7 @@ export function StoreWorkspace() {
           ) : issueSubTab === "return" ? (
             <StoreSellReturnPanel />
           ) : (
-        <div className="mt-4 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+        <ErpPanel title="Issue history">
           <div className="flex flex-wrap items-end gap-3">
             <label className="text-sm">
               <span className="mb-1 block text-[11px] text-[var(--muted)]">
@@ -1350,7 +1619,8 @@ export function StoreWorkspace() {
               </select>
             </label>
           </div>
-          <ul className="mt-4 divide-y">
+          <ErpTableShell className="mt-4">
+          <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
             {filteredHistory.length === 0 ? (
               <li className="py-4 text-sm text-[var(--muted)]">No issues.</li>
             ) : (
@@ -1409,7 +1679,8 @@ export function StoreWorkspace() {
               })
             )}
           </ul>
-        </div>
+          </ErpTableShell>
+        </ErpPanel>
           )}
         </>
       ) : null}
@@ -1491,6 +1762,6 @@ export function StoreWorkspace() {
           }}
         />
       ) : null}
-    </div>
+    </ErpWorkspaceShell>
   );
 }

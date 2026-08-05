@@ -120,10 +120,11 @@ export async function fetchVaultDeskFromApi(): Promise<{
   }
 }
 
+type VaultDeskBundle = Pick<VaultState, "documents" | "settings">;
+
 export async function hydrateVaultDeskFromDb(
   preferDb?: boolean,
 ): Promise<{ bundle: VaultDeskBundle; changed: boolean }> {
-  type VaultDeskBundle = Pick<VaultState, "documents" | "settings">;
   const remote = await fetchVaultDeskFromApi();
   const empty: VaultDeskBundle = {
     documents: [],

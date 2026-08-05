@@ -25,6 +25,14 @@ export function ModuleDashboardHost({
 }) {
   const session = useDemoSessionOptional();
   const [model, setModel] = useState<ModuleDashboardModel | null>(null);
+  const [mastersTick, setMastersTick] = useState(0);
+
+  useEffect(() => {
+    const onMastersUpdated = () => setMastersTick((t) => t + 1);
+    window.addEventListener("bhb-masters-updated", onMastersUpdated);
+    return () =>
+      window.removeEventListener("bhb-masters-updated", onMastersUpdated);
+  }, []);
 
   useEffect(() => {
     setModel(
@@ -32,7 +40,7 @@ export function ModuleDashboardHost({
         academicYearCode: session?.academicYearCode,
       }),
     );
-  }, [moduleId, refreshKey, session?.academicYearCode]);
+  }, [moduleId, refreshKey, mastersTick, session?.academicYearCode]);
 
   if (!model) {
     return (

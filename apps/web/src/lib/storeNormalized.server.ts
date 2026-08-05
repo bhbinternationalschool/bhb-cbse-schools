@@ -124,12 +124,70 @@ function rowToNamedMaster(r: Record<string, unknown>): NamedMaster {
   };
 }
 
+function categoryToRow(
+  tenantId: string,
+  c: StoreCategoryDef,
+): Record<string, unknown> {
+  return namedMasterToRow(tenantId, c, {
+    preferred_source_ids: c.preferredSourceIds ?? [],
+  });
+}
+
+function rowToCategory(r: Record<string, unknown>): StoreCategoryDef {
+  const ids = r.preferred_source_ids;
+  return {
+    ...rowToNamedMaster(r),
+    preferredSourceIds: Array.isArray(ids) ? ids.map((x) => String(x)) : [],
+  };
+}
+
+function saleGroupToRow(
+  tenantId: string,
+  g: StoreSaleGroup,
+): Record<string, unknown> {
+  return namedMasterToRow(tenantId, g, {
+    category_id: g.categoryId || "",
+    class_ids: g.classIds ?? [],
+  });
+}
+
+function rowToSaleGroup(r: Record<string, unknown>): StoreSaleGroup {
+  const classIds = r.class_ids;
+  return normalizeSaleGroupFromRow({
+    ...rowToNamedMaster(r),
+    categoryId: String(r.category_id || ""),
+    classIds: Array.isArray(classIds) ? classIds.map((x) => String(x)) : [],
+  });
+}
+
+function normalizeSaleGroupFromRow(c: Partial<StoreSaleGroup>): StoreSaleGroup {
+  const classIds = Array.isArray(c.classIds)
+    ? c.classIds.map(String).filter(Boolean)
+    : [];
+  return {
+    id: c.id || "",
+    name: c.name || "",
+    code: c.code || "",
+    isActive: c.isActive !== false,
+    sortOrder: Number(c.sortOrder ?? 0),
+    categoryId: (c.categoryId ?? "").trim(),
+    classIds,
+  };
+}
+
 function sourceToRow(tenantId: string, s: StoreSource): Record<string, unknown> {
-  return namedMasterToRow(tenantId, s, { phone: s.phone || "" });
+  return namedMasterToRow(tenantId, s, {
+    phone: s.phone || "",
+    accounts_vendor_id: s.accountsVendorId || "",
+  });
 }
 
 function rowToSource(r: Record<string, unknown>): StoreSource {
-  return { ...rowToNamedMaster(r), phone: String(r.phone || "") };
+  return {
+    ...rowToNamedMaster(r),
+    phone: String(r.phone || ""),
+    accountsVendorId: String(r.accounts_vendor_id || ""),
+  };
 }
 
 function itemToRow(tenantId: string, i: StoreItem): Record<string, unknown> {
@@ -216,6 +274,11 @@ function issueToRow(tenantId: string, i: StoreIssue): Record<string, unknown> {
     voided_at: i.voidedAt || null,
     payment_mode: i.paymentMode || "credit",
     payment_status: i.paymentStatus || "due",
+    tender_mode: i.tenderMode || "cash",
+    payment_channel: i.paymentChannel || "",
+    counter_paid_paise: i.counterPaidPaise ?? 0,
+    stock_group_id: i.stockGroupId || "",
+    sale_group_id: i.saleGroupId || "",
     issue_kind: i.issueKind || "first",
     replaces_issue_id: i.replacesIssueId || "",
     replacement_reason: i.replacementReason || "",
@@ -288,6 +351,14 @@ function rowToIssue(
       r.payment_status === "paid" || r.payment_status === "void"
         ? r.payment_status
         : "due",
+    tenderMode:
+      typeof r.tender_mode === "string" && r.tender_mode
+        ? (r.tender_mode as StoreIssue["tenderMode"])
+        : "cash",
+    paymentChannel: String(r.payment_channel || ""),
+    counterPaidPaise: Number(r.counter_paid_paise ?? 0),
+    stockGroupId: String(r.stock_group_id || ""),
+    saleGroupId: String(r.sale_group_id || ""),
     issueKind: String(r.issue_kind || "first") as StoreIssue["issueKind"],
     replacesIssueId: String(r.replaces_issue_id || ""),
     replacementReason: String(r.replacement_reason || ""),
@@ -539,8 +610,8 @@ export async function pushStoreDeskToDb(
   ]);
 
   const tables: [string, Record<string, unknown>[]][] = [
-    ["store_desk_categories", categories.map((c) => namedMasterToRow(tenantId, c))],
-    ["store_desk_sale_groups", saleGroups.map((c) => namedMasterToRow(tenantId, c))],
+    ["store_desk_categories", categories.map((c) => categoryToRow(tenantId, c))],
+    ["store_desk_sale_groups", saleGroups.map((g) => saleGroupToRow(tenantId, g))],
     ["store_desk_uoms", uoms.map((c) => namedMasterToRow(tenantId, c))],
     ["store_desk_infra_levels", infraLevels.map((c) => namedMasterToRow(tenantId, c))],
     ["store_desk_sources", sources.map((s) => sourceToRow(tenantId, s))],
@@ -689,11 +760,11 @@ export async function fetchStoreDeskFromDb(): Promise<{
   return {
     bundle: {
       categories: (categoryRows ?? []).map((r) =>
-        rowToNamedMaster(r as Record<string, unknown>),
-      ) as StoreCategoryDef[],
+        rowToCategory(r as Record<string, unknown>),
+      ),
       saleGroups: (saleGroupRows ?? []).map((r) =>
-        rowToNamedMaster(r as Record<string, unknown>),
-      ) as StoreSaleGroup[],
+        rowToSaleGroup(r as Record<string, unknown>),
+      ),
       uoms: (uomRows ?? []).map((r) =>
         rowToNamedMaster(r as Record<string, unknown>),
       ) as StoreUom[],

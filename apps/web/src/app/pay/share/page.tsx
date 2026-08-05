@@ -66,10 +66,10 @@ export default function PaySharePage() {
 
   const razorpayMode = !!serverLink?.gatewayCheckoutUrl;
 
-  const refreshPaidStatus = useCallback(async (linkId: string) => {
-    const res = await fetch(
-      `/api/payments/parent-pay?linkId=${encodeURIComponent(linkId)}`,
-    );
+  const refreshPaidStatus = useCallback(async (linkId: string, code?: string) => {
+    const q = new URLSearchParams({ linkId });
+    if (code) q.set("code", code);
+    const res = await fetch(`/api/payments/parent-pay?${q.toString()}`);
     if (!res.ok) return false;
     const json = (await res.json()) as { link?: ServerLink };
     const link = json.link;
@@ -88,15 +88,16 @@ export default function PaySharePage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const queryLinkId = params.get("linkId") || "";
+    const queryCode = params.get("code") || "";
     const raw = window.location.hash.replace(/^#/, "");
 
     async function bootstrap() {
       if (queryLinkId) {
-        const ok = await refreshPaidStatus(queryLinkId);
+        const ok = await refreshPaidStatus(queryLinkId, queryCode || undefined);
         if (ok) return;
-        const res = await fetch(
-          `/api/payments/parent-pay?linkId=${encodeURIComponent(queryLinkId)}`,
-        );
+        const q = new URLSearchParams({ linkId: queryLinkId });
+        if (queryCode) q.set("code", queryCode);
+        const res = await fetch(`/api/payments/parent-pay?${q.toString()}`);
         if (!res.ok) {
           setError("Could not open this payment link. Ask the school to resend.");
           return;
@@ -142,11 +143,13 @@ export default function PaySharePage() {
         return;
       }
 
-      void refreshPaidStatus(decoded.linkId).then(async (paid) => {
+      void refreshPaidStatus(decoded.linkId, decoded.code).then(async (paid) => {
         if (paid) return;
-        const res = await fetch(
-          `/api/payments/parent-pay?linkId=${encodeURIComponent(decoded.linkId)}`,
-        );
+        const q = new URLSearchParams({
+          linkId: decoded.linkId,
+          code: decoded.code,
+        });
+        const res = await fetch(`/api/payments/parent-pay?${q.toString()}`);
         if (!res.ok) return;
         const json = (await res.json()) as { link?: ServerLink };
         if (json.link) setServerLink(json.link);
@@ -222,6 +225,7 @@ export default function PaySharePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           linkId: payload.linkId,
+          code: payload.code,
           sendWhatsApp: true,
         }),
       });

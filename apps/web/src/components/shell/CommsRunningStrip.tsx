@@ -7,7 +7,6 @@ import {
   listNews,
   listNotices,
   loadSchoolComms,
-  seedSchoolCommsDemo,
   type SchoolNewsItem,
   type SchoolNotice,
 } from "@/lib/schoolComms";
@@ -81,7 +80,6 @@ export function CommsRunningStrip({
       );
       await ensureSchoolCommsHydrated();
       if (cancelled) return;
-      seedSchoolCommsDemo("Office");
       setReady(true);
       setTick((n) => n + 1);
     })();

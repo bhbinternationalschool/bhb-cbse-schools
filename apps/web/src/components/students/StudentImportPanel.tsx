@@ -54,6 +54,8 @@ export function StudentImportPanel({ masters, sis, onApplied }: Props) {
   const [defaultStudentType, setDefaultStudentType] =
     useState<FeeStudentType>("NEW");
   const [upsert, setUpsert] = useState(true);
+  const [autoAssignNumbers, setAutoAssignNumbers] = useState(false);
+  const [mapLegacyErpAdmission, setMapLegacyErpAdmission] = useState(true);
   const [preview, setPreview] = useState<StudentImportPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -71,6 +73,8 @@ export function StudentImportPanel({ masters, sis, onApplied }: Props) {
     sourceSessionFilter,
     defaultStudentType,
     upsert,
+    autoAssignNumbers,
+    mapLegacyErpAdmission,
   };
 
   function onFile(file: File | null) {
@@ -354,6 +358,51 @@ export function StudentImportPanel({ masters, sis, onApplied }: Props) {
                 onChange={(e) => setUpsert(e.target.checked)}
               />
               Update if same admission already exists in this session
+            </label>
+            <label className="flex items-start gap-2 pb-2 text-xs text-[var(--brand-deep)] sm:col-span-2">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={autoAssignNumbers}
+                onChange={(e) => {
+                  setAutoAssignNumbers(e.target.checked);
+                  setPreview(null);
+                }}
+              />
+              <span>
+                <span className="font-semibold">
+                  Auto-assign admission no. &amp; SRN from admission date
+                </span>
+                <span className="mt-0.5 block text-[11px] font-normal text-[var(--muted)]">
+                  Leave admission no. blank when the file has{" "}
+                  <strong>Admission date</strong> — numbers use Masters →
+                  Numbering (session in admission prefix; SRN serial by date,
+                  earliest first).
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 pb-2 text-xs text-[var(--brand-deep)] sm:col-span-2">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={mapLegacyErpAdmission}
+                onChange={(e) => {
+                  setMapLegacyErpAdmission(e.target.checked);
+                  setPreview(null);
+                }}
+              />
+              <span>
+                <span className="font-semibold">
+                  Map file admission no. → Old ERP number (import only)
+                </span>
+                <span className="mt-0.5 block text-[11px] font-normal text-[var(--muted)]">
+                  When the CSV has an admission number, store it as{" "}
+                  <strong>Old ERP admission no.</strong> and assign a new unique{" "}
+                  <strong>system admission no.</strong> from Masters → Numbering.
+                  Duplicate names in the session are held for verification first.
+                  Manual add-student is unchanged.
+                </span>
+              </span>
             </label>
           </div>
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { ClipboardCheck } from "lucide-react";
 import {
   ATTENDANCE_STATUSES,
   attendanceLockReason,
@@ -31,6 +32,8 @@ import { describeFilters } from "@/lib/reportExport";
 import { TENANT } from "@/lib/types";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
+import { ErpTableShell } from "@/components/ui/erp-roster";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { StaffAttendancePanel } from "@/components/attendance/StaffAttendancePanel";
 import { AttendanceExceptionsPanel } from "@/components/attendance/AttendanceExceptionsPanel";
@@ -322,22 +325,16 @@ export function AttendanceWorkspace() {
   }
 
   return (
-    <div>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-[var(--brand-deep)]">
-            Attendance
-          </h1>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            Class teacher marks students on phone/tablet (bulk All present /
-            All absent). Staff uses punch / rules separately.
-          </p>
-        </div>
+    <ErpWorkspaceShell
+      title="Attendance"
+      subtitle="Class teacher marks students on phone/tablet (bulk All present / All absent). Staff uses punch / rules separately."
+      icon={<ClipboardCheck className="size-6" aria-hidden />}
+      actions={
         <span className="rounded-lg bg-[rgba(15,122,76,0.1)] px-3 py-1.5 text-[11px] font-semibold text-[var(--ok)]">
           Never blocked by fee holds
         </span>
-      </div>
-
+      }
+    >
       <ModuleTabs
         aria-label="Attendance"
         value={tab}
@@ -649,7 +646,8 @@ export function AttendanceWorkspace() {
                     No active students in this section for {ay}.
                   </p>
                 ) : (
-                  <ul className="mt-3 max-h-[28rem] divide-y divide-[rgba(32,48,80,0.08)] overflow-y-auto rounded-lg border border-[rgba(32,48,80,0.1)]">
+                  <ErpTableShell className="mt-3">
+                    <ul className="max-h-[28rem] divide-y divide-[rgba(32,48,80,0.08)] overflow-y-auto">
                     {roster.map((st) => {
                       const mark =
                         marks.find((m) => m.studentId === st.id) ?? {
@@ -702,7 +700,8 @@ export function AttendanceWorkspace() {
                         </li>
                       );
                     })}
-                  </ul>
+                    </ul>
+                  </ErpTableShell>
                 )}
 
                 <label className="mt-3 block text-sm">
@@ -861,6 +860,6 @@ export function AttendanceWorkspace() {
       </div>
       </>
       ) : null}
-    </div>
+    </ErpWorkspaceShell>
   );
 }

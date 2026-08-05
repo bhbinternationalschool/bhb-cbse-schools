@@ -2,7 +2,15 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { Library } from "lucide-react";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
+import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import {
   addCopy,
   issueBook,
@@ -122,31 +130,21 @@ export function LibraryWorkspace() {
   }
 
   return (
-    <div className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h1 className="font-display text-xl font-semibold text-[var(--brand-deep)]">
-              Library
-            </h1>
-            <p className="text-sm text-[var(--muted)]">
-              {stats.titles} titles · {stats.issued} issued · {stats.overdue} overdue
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={seedDemoTitle}
-            className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
-          >
-            + Demo book
-          </button>
-        </div>
-
-        {notice ? (
-          <p className="rounded-lg bg-[rgba(32,48,80,0.06)] px-3 py-2 text-sm text-[var(--brand-deep)]">
-            {notice}
-          </p>
-        ) : null}
-
+    <ErpWorkspaceShell
+      title="Library"
+      subtitle={`${stats.titles} titles · ${stats.issued} issued · ${stats.overdue} overdue`}
+      icon={<Library className="size-6" aria-hidden />}
+      notice={notice}
+      actions={
+        <button
+          type="button"
+          onClick={seedDemoTitle}
+          className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
+        >
+          + Demo book
+        </button>
+      }
+    >
         <ModuleTabs
           value={tab}
           onChange={(id) => setTab(id as LibTab)}
@@ -215,7 +213,8 @@ export function LibraryWorkspace() {
               <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
                 Open loans
               </h2>
-              <ul className="mt-3 space-y-2 text-sm">
+              <ErpTableShell className="mt-3">
+                <ul className="divide-y divide-[rgba(32,48,80,0.08)] text-sm">
                 {state.issues
                   .filter((i) => !i.returnedOn)
                   .slice(0, 12)
@@ -226,7 +225,7 @@ export function LibraryWorkspace() {
                     return (
                       <li
                         key={issue.id}
-                        className="flex items-center justify-between gap-2 rounded-lg border px-3 py-2"
+                        className="flex items-center justify-between gap-2 px-4 py-2.5"
                       >
                         <div className="min-w-0">
                           <p className="truncate font-medium">{title?.title || "Book"}</p>
@@ -244,47 +243,51 @@ export function LibraryWorkspace() {
                       </li>
                     );
                   })}
-              </ul>
+                </ul>
+              </ErpTableShell>
             </div>
           </div>
         ) : null}
 
         {tab === "catalog" ? (
-          <div className="overflow-x-auto rounded-xl border bg-white">
-            <table className="min-w-full text-sm">
-              <thead>
-                <tr className="border-b text-left text-xs text-[var(--muted)]">
-                  <th className="p-3">Title</th>
-                  <th className="p-3">Author</th>
-                  <th className="p-3">Shelf</th>
-                  <th className="p-3">Copies</th>
-                </tr>
-              </thead>
-              <tbody>
-                {titles.map((t: LibraryTitle) => (
-                  <tr key={t.id} className="border-b">
-                    <td className="p-3 font-medium">{t.title}</td>
-                    <td className="p-3">{t.author}</td>
-                    <td className="p-3">{t.shelf}</td>
-                    <td className="p-3">{t.copiesTotal}</td>
+          <ErpTableShell>
+            <div className="overflow-x-auto">
+              <ErpTable minWidth="min-w-full">
+                <ErpTableHead>
+                  <tr>
+                    <th className="px-4 py-2.5 font-bold">Title</th>
+                    <th className="px-4 py-2.5 font-bold">Author</th>
+                    <th className="px-4 py-2.5 font-bold">Shelf</th>
+                    <th className="px-4 py-2.5 font-bold">Copies</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </ErpTableHead>
+                <ErpTableBody>
+                  {titles.map((t: LibraryTitle) => (
+                    <tr key={t.id} className="hover:bg-[rgba(32,48,80,0.02)]">
+                      <td className="px-4 py-2 font-medium">{t.title}</td>
+                      <td className="px-4 py-2">{t.author}</td>
+                      <td className="px-4 py-2">{t.shelf}</td>
+                      <td className="px-4 py-2">{t.copiesTotal}</td>
+                    </tr>
+                  ))}
+                </ErpTableBody>
+              </ErpTable>
+            </div>
+          </ErpTableShell>
         ) : null}
 
         {tab === "overdue" ? (
-          <ul className="space-y-2">
-            {overdue.length === 0 ? (
-              <p className="text-sm text-[var(--muted)]">No overdue books</p>
-            ) : (
-              overdue.map((issue) => {
+          overdue.length === 0 ? (
+            <p className="text-sm text-[var(--muted)]">No overdue books</p>
+          ) : (
+            <ErpTableShell>
+              <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+              {overdue.map((issue) => {
                 const st = sis.students.find((s) => s.id === issue.studentId);
                 return (
                   <li
                     key={issue.id}
-                    className="rounded-lg border bg-white px-4 py-3 text-sm"
+                    className="px-4 py-3 text-sm"
                   >
                     <span className="font-medium">{st?.fullName}</span>
                     <span className="text-[var(--muted)]"> · due {issue.dueOn}</span>
@@ -296,9 +299,10 @@ export function LibraryWorkspace() {
                     </Link>
                   </li>
                 );
-              })
-            )}
-          </ul>
+              })}
+              </ul>
+            </ErpTableShell>
+          )
         ) : null}
 
         {tab === "reports" ? (
@@ -306,6 +310,6 @@ export function LibraryWorkspace() {
             Export overdue list from Reports Center (library catalog coming next sprint).
           </p>
         ) : null}
-    </div>
+    </ErpWorkspaceShell>
   );
 }

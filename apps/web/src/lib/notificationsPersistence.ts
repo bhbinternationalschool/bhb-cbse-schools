@@ -16,6 +16,13 @@ import {
 import { mergeDbDeskIntoNotificationsState } from "@/lib/notificationsNormalizedMerge";
 import { notificationsReadFromDbEnabled } from "@/lib/notificationsDbConfig";
 import { deskSkipBlobHydrateClient, deskSkipBlobPushClient } from "@/lib/deskCutover";
+import {
+  isDeskHydrated,
+  markDeskHydrated,
+  resetDeskHydrated,
+} from "@/lib/deskHydrateGuard";
+
+const MODULE = "notifications";
 
 const blob = createDomainBlobPersistence<NotificationsState>({
   table: "notifications_state",
@@ -27,7 +34,10 @@ const blob = createDomainBlobPersistence<NotificationsState>({
 });
 
 export const notificationsRemoteEnabled = blob.remoteEnabled;
-export const resetNotificationsPersistenceCache = blob.resetCache;
+export function resetNotificationsPersistenceCache() {
+  resetDeskHydrated(MODULE);
+  blob.resetCache();
+}
 
 export function scheduleNotificationsSync(state: NotificationsState) {
   if (typeof window === "undefined") {
@@ -60,6 +70,9 @@ export async function pushNotificationsRemoteServer(
 }
 
 export async function ensureNotificationsHydrated(): Promise<boolean> {
+  if (isDeskHydrated(MODULE)) return false;
+  markDeskHydrated(MODULE);
+
   const readFromDb = notificationsReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("notifications")
     ? false

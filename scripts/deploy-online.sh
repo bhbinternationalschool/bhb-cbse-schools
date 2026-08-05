@@ -30,11 +30,16 @@ PY
 
 SUPABASE_URL="$(get_env NEXT_PUBLIC_SUPABASE_URL)"
 SUPABASE_ANON="$(get_env NEXT_PUBLIC_SUPABASE_ANON_KEY)"
+# Production deploy URL — never read localhost from .env.local
 APP_URL="${NEXT_PUBLIC_APP_URL_OVERRIDE:-https://bhbinternational.school}"
-DEMO_AUTH="${NEXT_PUBLIC_DEMO_AUTH_OVERRIDE:-true}"
+DEMO_AUTH="${NEXT_PUBLIC_DEMO_AUTH_OVERRIDE:-$(get_env NEXT_PUBLIC_DEMO_AUTH)}"
+DEMO_AUTH="${DEMO_AUTH:-false}"
 
-# Optional server runtime secrets (WhatsApp, Supabase admin, super-admin allowlist)
+# Optional server runtime secrets (WhatsApp, Supabase admin, job guards)
 SUPABASE_SERVICE_ROLE_KEY="$(get_env SUPABASE_SERVICE_ROLE_KEY)"
+CRON_SECRET="$(get_env CRON_SECRET)"
+WA_DISPATCH_SECRET="$(get_env WA_DISPATCH_SECRET)"
+MIRROR_SYNC_SECRET="$(get_env MIRROR_SYNC_SECRET)"
 WHATSAPP_TOKEN="$(get_env WHATSAPP_TOKEN)"
 WHATSAPP_PHONE_ID="$(get_env WHATSAPP_PHONE_ID)"
 WHATSAPP_VERIFY_TOKEN="$(get_env WHATSAPP_VERIFY_TOKEN)"
@@ -52,6 +57,19 @@ WHATSAPP_GRAPH_VERSION="${WHATSAPP_GRAPH_VERSION:-v21.0}"
 if [[ -z "$SUPABASE_URL" || -z "$SUPABASE_ANON" ]]; then
   echo "NEXT_PUBLIC_SUPABASE_URL / ANON_KEY missing in .env.local"
   exit 1
+fi
+
+echo "Generating desk cutover env for Cloud Run + Docker build…"
+python3 "$ROOT/scripts/lib/collectDeskCutoverEnv.py" "$ENV_FILE" --write
+DESK_PUBLIC_COUNT="$(grep -c '^NEXT_PUBLIC_' "$ROOT/deploy/.generated/desk-cutover-build.env" 2>/dev/null || echo 0)"
+DESK_RUNTIME_COUNT="$(grep -c ':' "$ROOT/deploy/.generated/desk-cutover-runtime.yaml" 2>/dev/null || echo 0)"
+echo "Desk cutover: ${DESK_PUBLIC_COUNT} NEXT_PUBLIC build vars, ${DESK_RUNTIME_COUNT} runtime vars"
+
+if [[ "${SKIP_DESK_ENV_CHECK:-}" != "1" ]]; then
+  python3 "$ROOT/scripts/lib/collectDeskCutoverEnv.py" "$ENV_FILE" --check || {
+    echo "Desk env check failed — copy deploy/desk-cutover.env.example into .env.local or set SKIP_DESK_ENV_CHECK=1"
+    exit 1
+  }
 fi
 
 echo "Project:  $PROJECT_ID"
@@ -79,6 +97,31 @@ if [[ -n "$GOOGLE_OAUTH_CLIENT_ID" && -n "$GOOGLE_OAUTH_CLIENT_SECRET" ]]; then
 else
   echo "Google OAuth: not configured — Classroom tab will show setup instructions"
 fi
+if [[ -n "$CRON_SECRET" ]]; then
+  echo "Cron guard: CRON_SECRET present (scheduled comms + automation)"
+else
+  echo "Cron guard: CRON_SECRET missing — set in .env.local before production go-live"
+fi
+if [[ -n "$WA_DISPATCH_SECRET" ]]; then
+  echo "WA dispatch: WA_DISPATCH_SECRET present"
+else
+  echo "WA dispatch: WA_DISPATCH_SECRET optional (staff UI works without it)"
+fi
+if [[ -n "$MIRROR_SYNC_SECRET" ]]; then
+  echo "Mirror sync: MIRROR_SYNC_SECRET present"
+else
+  echo "Mirror sync: MIRROR_SYNC_SECRET optional (browser desk sync uses staff session)"
+fi
+BIGQUERY_PROJECT_ID="$(get_env BIGQUERY_PROJECT_ID)"
+BIGQUERY_DATASET="$(get_env BIGQUERY_DATASET)"
+BIGQUERY_LOCATION="$(get_env BIGQUERY_LOCATION)"
+BIGQUERY_TENANT_SLUG="$(get_env BIGQUERY_TENANT_SLUG)"
+DIRECT_URL="$(get_env DIRECT_URL)"
+if [[ -n "$BIGQUERY_PROJECT_ID" ]]; then
+  echo "BigQuery: ${BIGQUERY_PROJECT_ID}/${BIGQUERY_DATASET:-bhb_erp} (nightly sync)"
+else
+  echo "BigQuery: not configured — run ./scripts/setup-bigquery-gcp.sh after deploy"
+fi
 echo ""
 echo "Submitting Cloud Build (this replaces school-erp-web)…"
 
@@ -105,7 +148,6 @@ fi
 gcloud config set project "$PROJECT_ID" >/dev/null
 gcloud config set account "${GCLOUD_ACCOUNT:-director@bhbinternational.school}" >/dev/null 2>&1 || true
 
-# Use @ delimiter so secret values may contain commas
 SUBSTITUTIONS="^@^"
 SUBSTITUTIONS+="_NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}"
 SUBSTITUTIONS+="@_NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON}"
@@ -123,11 +165,45 @@ SUBSTITUTIONS+="@_GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}"
 SUBSTITUTIONS+="@_GEMINI_API_KEY=${GEMINI_API_KEY}"
 SUBSTITUTIONS+="@_GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}"
 SUBSTITUTIONS+="@_GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET}"
+SUBSTITUTIONS+="@_CRON_SECRET=${CRON_SECRET}"
+SUBSTITUTIONS+="@_WA_DISPATCH_SECRET=${WA_DISPATCH_SECRET}"
+SUBSTITUTIONS+="@_MIRROR_SYNC_SECRET=${MIRROR_SYNC_SECRET}"
 
 gcloud builds submit "$ROOT" \
   --project="$PROJECT_ID" \
   --config="$ROOT/cloudbuild.yaml" \
   --substitutions="${SUBSTITUTIONS}"
+
+echo ""
+echo "Applying desk cutover env (additive update)…"
+DESK_UPDATE="$(python3 "$ROOT/scripts/lib/formatDeskCutoverUpdate.py" "$ROOT/deploy/.generated/desk-cutover-runtime.yaml")"
+gcloud run services update school-erp-web \
+  --project="$PROJECT_ID" \
+  --region="$REGION" \
+  --update-env-vars="^@^${DESK_UPDATE}" \
+  >/dev/null
+
+gcloud run services update-traffic school-erp-web \
+  --project="$PROJECT_ID" \
+  --region="$REGION" \
+  --to-latest \
+  >/dev/null
+
+if [[ -n "${BIGQUERY_PROJECT_ID:-}" ]]; then
+  echo "Applying BigQuery + Postgres env on Cloud Run…"
+  BQ_DATASET="${BIGQUERY_DATASET:-bhb_erp}"
+  BQ_LOCATION="${BIGQUERY_LOCATION:-asia-south1}"
+  BQ_TENANT="${BIGQUERY_TENANT_SLUG:-bhb-international}"
+  BQ_UPDATE="BIGQUERY_PROJECT_ID=${BIGQUERY_PROJECT_ID}|BIGQUERY_DATASET=${BQ_DATASET}|BIGQUERY_LOCATION=${BQ_LOCATION}|BIGQUERY_TENANT_SLUG=${BQ_TENANT}"
+  if [[ -n "${DIRECT_URL:-}" ]]; then
+    BQ_UPDATE="${BQ_UPDATE}|DIRECT_URL=${DIRECT_URL}"
+  fi
+  gcloud run services update school-erp-web \
+    --project="$PROJECT_ID" \
+    --region="$REGION" \
+    --update-env-vars="^|^${BQ_UPDATE}" \
+    >/dev/null
+fi
 
 echo ""
 echo "Deploy submitted. When green:"

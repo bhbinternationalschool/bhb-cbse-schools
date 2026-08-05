@@ -29,7 +29,13 @@ ENV NEXT_PUBLIC_SCHOOL_NAME=$NEXT_PUBLIC_SCHOOL_NAME
 ENV NEXT_PUBLIC_TENANT_SLUG=$NEXT_PUBLIC_TENANT_SLUG
 ENV NODE_OPTIONS=--max-old-space-size=4096
 
-RUN test -x apps/web/node_modules/.bin/next \
+# Track C desk cutover — NEXT_PUBLIC_*_READ_FROM_DB baked into client bundle
+COPY deploy/.generated/desk-cutover-build.env ./desk-cutover-build.env
+
+RUN set -a \
+  && . ./desk-cutover-build.env \
+  && set +a \
+  && test -x apps/web/node_modules/.bin/next \
   && npm run build -w web
 
 FROM node:22-bookworm-slim AS runner

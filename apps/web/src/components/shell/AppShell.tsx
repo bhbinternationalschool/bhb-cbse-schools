@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { formatIst } from "@bhb/time";
 import { SessionSelector } from "./SessionSelector";
@@ -12,6 +12,7 @@ import { StaffInternalChatButton } from "./StaffInternalChatButton";
 import { CommsRunningStrip } from "./CommsRunningStrip";
 import { ErpAiChatbot } from "./ErpAiChatbot";
 import { ErpSidebar, ErpSidebarMenuButton } from "./ErpSidebar";
+import { UserAccountMenu } from "./UserAccountMenu";
 import { PwaInstallBanner } from "@/components/pwa/PwaInstallBanner";
 import { StaffBottomNav } from "@/components/pwa/StaffBottomNav";
 import { staffPwaInstallCopy } from "@/lib/pwaApps";
@@ -19,6 +20,7 @@ import { useMobileAppShell, usePwaStandalone } from "@/lib/pwaStandalone";
 import { TENANT } from "@/lib/types";
 import type { DemoSession } from "@/lib/auth";
 import { SessionProvider } from "./SessionContext";
+import { SchoolFavicon } from "./SchoolFavicon";
 import {
   currentAcademicYearCode,
   listSessionYearOptions,
@@ -44,8 +46,9 @@ export function AppShell({
     ReturnType<typeof listSessionYearOptions>
   >([]);
   const [clock, setClock] = useState("");
+  const skipRouteHydrateRef = useRef(true);
 
-  // Hydration-safe: pull cloud mirror BEFORE pushing local seed; then hydrate blobs.
+  // Hydration-safe: pull cloud mirror, then hydrate desk in background (route-priority + idle).
   useEffect(() => {
     markModuleRegistryClientReady();
     setYears(listSessionYearOptions());
@@ -53,32 +56,38 @@ export function AppShell({
     const t = window.setInterval(() => setClock(formatIst()), 30_000);
 
     void (async () => {
-      const { ensureClientSchoolMirrorHydrated, ensureAllDeskHydrated } =
-        await import("@/lib/schoolDataMirrorClientHydrate");
+      const {
+        ensureClientSchoolMirrorHydrated,
+        startDeskHydrationBackground,
+      } = await import("@/lib/schoolDataMirrorClientHydrate");
       const { pushFullSchoolMirrorToServer } = await import(
         "@/lib/schoolDataMirror"
       );
 
       const mirrorChanged = await ensureClientSchoolMirrorHydrated();
-      const results = await Promise.allSettled([
-        ensureAllDeskHydrated(),
-        import("@/lib/admissionsPersistence").then((m) =>
-          m.ensureAdmissionsHydrated(),
-        ),
-      ]);
-      const admResult = results[1];
-      if (admResult.status === "fulfilled" && admResult.value) {
-        window.dispatchEvent(new CustomEvent("bhb-admissions-hydrated"));
-      }
       if (mirrorChanged) {
         window.dispatchEvent(new CustomEvent("bhb-desk-hydrated"));
       }
       applyFeeDiscountSeedNow();
       pushFullSchoolMirrorToServer();
+
+      // Non-blocking — priority tier + idle batches; does not delay mirror push.
+      startDeskHydrationBackground(pathname);
     })();
 
     return () => window.clearInterval(t);
   }, []);
+
+  // When navigating, hydrate that module's desk slices early (guards skip already-done).
+  useEffect(() => {
+    if (skipRouteHydrateRef.current) {
+      skipRouteHydrateRef.current = false;
+      return;
+    }
+    void import("@/lib/schoolDataMirrorClientHydrate").then((m) =>
+      m.ensureDeskHydratedPriority(pathname),
+    );
+  }, [pathname]);
 
   // Keep header session list aligned with Masters; fix cookie if year was removed
   useEffect(() => {
@@ -148,6 +157,7 @@ export function AppShell({
 
   return (
     <SessionProvider session={session} readOnly={readOnly}>
+      <SchoolFavicon />
       <div className="flex h-screen overflow-hidden bg-[var(--surface)]">
         <Suspense fallback={null}>
           <ErpSidebar
@@ -201,33 +211,11 @@ export function AppShell({
                   Read-only · {session.academicYearCode}
                 </span>
               ) : null}
-              <div className="flex items-center gap-2">
-                <span
-                  className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold"
-                  style={{
-                    background: TENANT.goldColor,
-                    color: TENANT.primaryColor,
-                  }}
-                  title={session.fullName}
-                >
-                  {initials(session.fullName)}
-                </span>
-                <div className="hidden text-right md:block">
-                  <div className="text-xs font-medium text-[var(--brand-deep)]">
-                    {session.fullName}
-                  </div>
-                  <div className="text-[10px] text-[var(--muted)]" suppressHydrationWarning>
-                    {clock || "\u00a0"}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={logout}
-                  className="hidden text-xs text-[var(--muted)] hover:text-[var(--brand-deep)] sm:inline"
-                >
-                  Sign out
-                </button>
-              </div>
+              <UserAccountMenu
+                session={session}
+                clock={clock}
+                onLogout={logout}
+              />
             </div>
           </div>
           <CommsRunningStrip audience="staff" />
@@ -262,13 +250,4 @@ export function AppShell({
       </div>
     </SessionProvider>
   );
-}
-
-function initials(name: string) {
-  return name
-    .split(" ")
-    .map((p) => p[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
 }

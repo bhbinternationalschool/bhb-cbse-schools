@@ -1,7 +1,10 @@
 import { assertModulePermission } from "@/lib/rbacGuard";
 import type { FoundationSlice } from "@/lib/foundationMasters";
-import { ensureFoundationOnMasters } from "@/lib/foundationMasters";
-import { defaultFoundationSlice } from "@/lib/foundationMasters";
+import {
+  ensureFoundationOnMasters,
+  defaultFoundationSlice,
+  normalizeMastersStaffRoster,
+} from "@/lib/foundationMasters";
 import { ensureFoundationFeeStructure202627 } from "@/lib/feeStructureFoundation202627";
 import { ensurePrimaryFeeStructure202627 } from "@/lib/feeStructurePrimary202627";
 import { ensureMiddleFeeStructure202627 } from "@/lib/feeStructureMiddle202627";
@@ -1796,8 +1799,11 @@ export function loadMasters(): MastersState {
     if (raw) {
       const parsed = ensureFeeSetup(JSON.parse(raw) as MastersState);
       const migrated = migrateDemoStaffToTeacherRoster(parsed);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
-      return migrated;
+      const normalized = normalizeMastersStaffRoster(migrated);
+      if (normalized !== migrated || migrated !== parsed) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+      }
+      return normalized;
     }
     for (const key of LEGACY_KEYS) {
       const legacy = localStorage.getItem(key);
@@ -1851,6 +1857,7 @@ function persistMastersClient(state: MastersState) {
   void import("@/lib/mastersPersistence").then(({ scheduleMastersSync }) => {
     scheduleMastersSync(state);
   });
+  window.dispatchEvent(new CustomEvent("bhb-masters-updated"));
 }
 
 const MASTERS_MIRROR_META = "bhb_masters_mirror_meta_v1";

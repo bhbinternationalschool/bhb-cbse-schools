@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireWaStaffApi } from "@/lib/apiRouteAuth.server";
 import {
   listWaSisBotThreads,
   staffReplyWaSisBot,
@@ -8,7 +9,9 @@ import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(req: Request) {
+  const auth = await requireWaStaffApi(req);
+  if (!auth.ok) return auth.response;
   await ensureSchoolMirrorHydrated();
   const threads = await listWaSisBotThreads();
   return NextResponse.json({
@@ -20,6 +23,8 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const auth = await requireWaStaffApi(req);
+  if (!auth.ok) return auth.response;
   let body: { threadId?: string; text?: string; by?: string };
   try {
     body = (await req.json()) as typeof body;

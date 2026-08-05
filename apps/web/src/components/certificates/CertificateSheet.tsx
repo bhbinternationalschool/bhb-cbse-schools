@@ -72,7 +72,7 @@ export function CertificateSheet({ issue }: { issue: CertificateIssue }) {
               </div>
               <div className="text-right text-xs">
                 <div>
-                  <span className="text-[var(--muted)]">No. </span>
+                  <span className="text-[var(--muted)]">Certificate No. </span>
                   <span className="font-bold text-[var(--brand-deep)]">
                     {issue.certNo}
                   </span>
@@ -87,7 +87,9 @@ export function CertificateSheet({ issue }: { issue: CertificateIssue }) {
             </div>
 
             <div className="mt-6 space-y-4 text-sm leading-relaxed text-[var(--brand-deep)]">
-              {issue.kind === "bonafide" ? (
+              {issue.customBody ? (
+                <CustomCertificateBody issue={issue} />
+              ) : issue.kind === "bonafide" ? (
                 <BonafideBody issue={issue} />
               ) : issue.kind === "character" ? (
                 <CharacterBody issue={issue} />
@@ -173,7 +175,7 @@ function TcSheet({
           <strong>{tc?.bookNo || "1"}</strong>
         </div>
         <div>
-          <span className="text-[var(--muted)]">Sl. No. </span>
+          <span className="text-[var(--muted)]">Certificate No. </span>
           <strong>{issue.certNo}</strong>
         </div>
         <div>
@@ -450,6 +452,19 @@ function StudentIntro({ issue }: { issue: CertificateIssue }) {
         </p>
       )}
     </>
+  );
+}
+
+function CustomCertificateBody({ issue }: { issue: CertificateIssue }) {
+  return (
+    <div className="space-y-3">
+      {issue.customTitle ? (
+        <p className="text-center text-sm font-bold">{issue.customTitle}</p>
+      ) : null}
+      <div className="whitespace-pre-wrap text-sm leading-relaxed">
+        {issue.customBody}
+      </div>
+    </div>
   );
 }
 

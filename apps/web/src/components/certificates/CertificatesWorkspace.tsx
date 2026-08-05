@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Award, Sparkles } from "lucide-react";
 import {
   CERTIFICATE_KINDS,
   categoryForTc,
@@ -15,6 +16,7 @@ import {
   listCertificates,
   loadCertificates,
   previewFeesPaidForStudent,
+  suggestNextCertificateNumber,
   voidCertificate,
   type CertificateIssue,
   type CertificateKind,
@@ -34,6 +36,8 @@ import {
 } from "@/lib/staffResolve";
 import { StudentNameLabel } from "@/components/students/StudentAvatar";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
+import { ErpTableShell } from "@/components/ui/erp-roster";
+import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { StudentHitsFilterExport } from "@/components/reports/StudentHitsFilterExport";
 import {
   CertificateSheet,
@@ -94,6 +98,12 @@ export function CertificatesWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
+  const [aiLanguage, setAiLanguage] = useState<"en" | "hi" | "both">("both");
+  const [aiPurpose, setAiPurpose] = useState("");
+  const [aiDetails, setAiDetails] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [customTitle, setCustomTitle] = useState("");
+  const [customBody, setCustomBody] = useState("");
 
   function refresh() {
     const m = loadMasters();
@@ -232,6 +242,66 @@ export function CertificatesWorkspace() {
     [issues, previewId],
   );
 
+  const nextCertNoPreview = useMemo(() => {
+    if (!student) return "";
+    const ay = student.academicYearCode || session.academicYearCode || DEFAULT_AY;
+    return suggestNextCertificateNumber(kind, ay);
+  }, [student, kind, session.academicYearCode]);
+
+  async function onGenerateCertificateAi() {
+    if (!student) {
+      setError("Pick a student first");
+      return;
+    }
+    setAiLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/ai/student-certificate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind,
+          studentId: student.id,
+          language: aiLanguage,
+          purpose: aiPurpose || remarks,
+          details: aiDetails,
+          currentBody: customBody,
+          mode: customBody ? "revise" : "create",
+        }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        title?: string;
+        body?: string;
+        remarks?: string;
+        tcSubjectsStudied?: string;
+        tcGamesActivities?: string;
+        tcAnnualExamResult?: string;
+      };
+      if (!res.ok || data.error) {
+        setError(data.error || "AI generation failed");
+        return;
+      }
+      setCustomTitle(data.title || "");
+      setCustomBody(data.body || "");
+      if (data.remarks) setRemarks(data.remarks);
+      if (kind === "tc") {
+        setTcForm((prev) => ({
+          ...prev,
+          subjectsStudied: data.tcSubjectsStudied || prev.subjectsStudied,
+          gamesActivities: data.tcGamesActivities || prev.gamesActivities,
+          annualExamResult: data.tcAnnualExamResult || prev.annualExamResult,
+        }));
+      }
+      flash("AI certificate text ready — review before issue");
+    } catch {
+      setError("Network error — try again");
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
   function flash(msg: string) {
     setNotice(msg);
     setError(null);
@@ -267,6 +337,8 @@ export function CertificatesWorkspace() {
       promotedTo: kind === "tc" ? promotedTo : "",
       conduct,
       remarks,
+      customTitle: customBody ? customTitle : undefined,
+      customBody: customBody || undefined,
       inactivateOnTc,
       pen,
       apaarId,
@@ -305,40 +377,27 @@ export function CertificatesWorkspace() {
     );
     setRemarks("");
     setReasonForLeaving("");
+    setCustomTitle("");
+    setCustomBody("");
     refresh();
     setPreviewId(result.issue.id);
     window.setTimeout(() => printCertificate(result.issue.id), 200);
   }
 
   return (
-    <div>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-[var(--brand-deep)]">
-            Certificates
-          </h1>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            Issue TC, bonafide, character, fee clearance, and fees-paid certificates for
-            reimbursement — open dues gate TC / no-dues.
-          </p>
-        </div>
+    <ErpWorkspaceShell
+      title="Certificates"
+      subtitle="Issue TC, bonafide, character, fee clearance, and fees-paid certificates for reimbursement — open dues gate TC / no-dues."
+      icon={<Award className="size-6" aria-hidden />}
+      error={error}
+      notice={notice}
+      actions={
         <p className="text-[11px] text-[var(--muted)]">
           Officer: {session.fullName} · Session{" "}
           {session.academicYearCode || DEFAULT_AY}
         </p>
-      </div>
-
-      {error ? (
-        <p className="mt-3 rounded-lg bg-[#dc2626]/10 px-3 py-2 text-sm text-[#dc2626]">
-          {error}
-        </p>
-      ) : null}
-      {notice ? (
-        <p className="mt-3 rounded-lg bg-[rgba(32,48,80,0.06)] px-3 py-2 text-sm text-[var(--brand-deep)]">
-          {notice}
-        </p>
-      ) : null}
-
+      }
+    >
       <div className="mt-4">
         <ModuleDashboardHost moduleId="certificates" />
       </div>
@@ -544,6 +603,14 @@ export function CertificatesWorkspace() {
                   ))}
                 </select>
               </label>
+              {student && nextCertNoPreview ? (
+                <p className="text-[11px] text-[var(--muted)] sm:col-span-2">
+                  Next certificate no. (from Masters numbering):{" "}
+                  <strong className="text-[var(--brand-deep)]">
+                    {nextCertNoPreview}
+                  </strong>
+                </p>
+              ) : null}
               <label className="block text-sm">
                 <span className="mb-1 block text-[11px] text-[var(--muted)]">
                   Issue date
@@ -940,6 +1007,69 @@ export function CertificatesWorkspace() {
               </div>
             ) : null}
 
+            <div className="mt-4 rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.02)] p-3">
+              <h3 className="text-xs font-bold text-[var(--brand-deep)]">
+                Draft with AI (CBSE + UP Basic Education)
+              </h3>
+              <p className="mt-1 text-[10px] text-[var(--muted)]">
+                Generates certificate text per CBSE affiliation norms and UP
+                Basic Shiksha guidelines — English, Hindi, or both.
+              </p>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                <label className="text-[11px] font-semibold text-[var(--muted)]">
+                  Language
+                  <select
+                    className="field mt-1 !py-1.5 text-xs"
+                    value={aiLanguage}
+                    onChange={(e) =>
+                      setAiLanguage(e.target.value as "en" | "hi" | "both")
+                    }
+                  >
+                    <option value="en">English</option>
+                    <option value="hi">Hindi</option>
+                    <option value="both">English + Hindi</option>
+                  </select>
+                </label>
+                <label className="text-[11px] font-semibold text-[var(--muted)]">
+                  Purpose
+                  <input
+                    className="field mt-1 !py-1.5 text-xs"
+                    value={aiPurpose}
+                    onChange={(e) => setAiPurpose(e.target.value)}
+                    placeholder="Bank, visa, employer, transfer…"
+                  />
+                </label>
+              </div>
+              <label className="mt-2 block text-[11px] font-semibold text-[var(--muted)]">
+                Extra details for AI
+                <textarea
+                  className="field mt-1 min-h-[60px] !py-1.5 text-xs"
+                  value={aiDetails}
+                  onChange={(e) => setAiDetails(e.target.value)}
+                  placeholder="Special clauses, board exam year, scholarship name…"
+                />
+              </label>
+              <button
+                type="button"
+                className="mt-2 rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)] disabled:opacity-50"
+                disabled={aiLoading || !student}
+                onClick={() => void onGenerateCertificateAi()}
+              >
+                <Sparkles className="mr-1 inline h-3.5 w-3.5" />
+                {aiLoading ? "Generating…" : "Generate certificate (AI)"}
+              </button>
+              {customBody ? (
+                <label className="mt-3 block text-[11px] font-semibold text-[var(--muted)]">
+                  AI certificate text (edit before issue)
+                  <textarea
+                    className="field mt-1 min-h-[120px] !py-2 text-xs leading-relaxed"
+                    value={customBody}
+                    onChange={(e) => setCustomBody(e.target.value)}
+                  />
+                </label>
+              ) : null}
+            </div>
+
             <label className="mt-3 block text-sm">
               <span className="mb-1 block text-[11px] text-[var(--muted)]">
                 Remarks / purpose (optional)
@@ -1020,13 +1150,14 @@ export function CertificatesWorkspace() {
                 No certificates issued yet.
               </p>
             ) : (
-              <ul className="mt-2 max-h-72 divide-y divide-[rgba(32,48,80,0.08)] overflow-y-auto">
+              <ErpTableShell className="mt-2">
+                <ul className="max-h-72 divide-y divide-[rgba(32,48,80,0.08)] overflow-y-auto">
                 {issues.slice(0, 25).map((iss) => {
                   const voided = !!iss.voidedAt;
                   return (
                     <li
                       key={iss.id}
-                      className={`flex flex-wrap items-start justify-between gap-2 py-2 ${
+                      className={`flex flex-wrap items-start justify-between gap-2 px-4 py-2.5 ${
                         voided ? "opacity-55" : ""
                       }`}
                     >
@@ -1082,7 +1213,8 @@ export function CertificatesWorkspace() {
                     </li>
                   );
                 })}
-              </ul>
+                </ul>
+              </ErpTableShell>
             )}
           </div>
 
@@ -1124,6 +1256,6 @@ export function CertificatesWorkspace() {
           }}
         />
       ) : null}
-    </div>
+    </ErpWorkspaceShell>
   );
 }

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ShieldCheck } from "lucide-react";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
+import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { useModuleTabQuery } from "@/lib/useModuleTabQuery";
 import {
@@ -27,6 +28,7 @@ import {
 } from "@/lib/vault";
 import { readImageAsDataUrl } from "@/lib/homework";
 import { openWaMe, waMeUrl } from "@/lib/waMe";
+import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 
 type VaultTab = "dashboard" | "alerts" | "documents" | "add" | "reports";
 
@@ -37,13 +39,6 @@ const TABS: ModuleTabItem[] = [
   { id: "add", label: "Add", tone: "teal" },
   { id: "reports", label: "Reports", tone: "slate" },
 ];
-
-const field =
-  "rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2.5 py-1.5 text-sm text-[var(--brand-deep)]";
-const btn =
-  "rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50";
-const btnOutline =
-  "rounded-lg border border-[rgba(32,48,80,0.2)] bg-white px-3 py-1.5 text-sm text-[var(--brand-deep)]";
 
 function statusLabel(status: ReturnType<typeof vaultExpiryStatus>): string {
   if (status === "expired") return "Expired";
@@ -128,6 +123,11 @@ export function VaultWorkspace() {
   const [fileUrl, setFileUrl] = useState("");
   const [fileName, setFileName] = useState("");
   const [digestMobiles, setDigestMobiles] = useState("");
+  const [docQuery, setDocQuery] = useState("");
+  const [docTypeFilter, setDocTypeFilter] = useState<VaultDocType | "all">("all");
+  const [docStatusFilter, setDocStatusFilter] = useState<
+    "all" | "expired" | "due_soon" | "ok" | "none"
+  >("all");
 
   function flash(msg: string) {
     setNotice(msg);
@@ -158,6 +158,20 @@ export function VaultWorkspace() {
     if (!state) return [];
     return listVaultAlerts(state);
   }, [state]);
+
+  const filteredDocuments = useMemo(() => {
+    if (!state) return [];
+    const q = docQuery.trim().toLowerCase();
+    return state.documents.filter((doc) => {
+      if (docTypeFilter !== "all" && doc.docType !== docTypeFilter) return false;
+      const status = vaultExpiryStatus(doc);
+      if (docStatusFilter !== "all" && status !== docStatusFilter) return false;
+      if (!q) return true;
+      const blob =
+        `${doc.title} ${doc.note} ${doc.ownerRole} ${vaultDocTypeLabel(doc.docType)}`.toLowerCase();
+      return blob.includes(q);
+    });
+  }, [state, docQuery, docTypeFilter, docStatusFilter]);
 
   function resetForm() {
     setEditId("");
@@ -218,33 +232,18 @@ export function VaultWorkspace() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-4 pb-10 pt-4">
-      <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold text-[var(--brand-deep)]">
-            <ShieldCheck className="h-7 w-7" aria-hidden />
-            Document vault
-          </h1>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            Statutory certificates · expiry alerts · compliance (§21a)
-          </p>
-        </div>
+    <ErpWorkspaceShell
+      title="Document vault"
+      subtitle="Statutory certificates · expiry alerts · compliance (§21a)"
+      icon={<ShieldCheck className="size-6" aria-hidden />}
+      error={error}
+      notice={notice}
+      actions={
         <Link href="/reports?module=vault" className={btnOutline}>
           Reports Center
         </Link>
-      </header>
-
-      {error ? (
-        <p className="mb-3 rounded-lg bg-[rgba(180,35,24,0.08)] px-3 py-2 text-sm text-[#b42318]">
-          {error}
-        </p>
-      ) : null}
-      {notice ? (
-        <p className="mb-3 rounded-lg bg-[rgba(15,122,76,0.1)] px-3 py-2 text-sm text-[#0f7a4c]">
-          {notice}
-        </p>
-      ) : null}
-
+      }
+    >
       <ModuleTabs
         items={TABS.map((t) =>
           t.id === "alerts"
@@ -393,21 +392,71 @@ export function VaultWorkspace() {
       ) : null}
 
       {tab === "documents" ? (
-        <section className="mt-4">
-          {state.documents.length === 0 ? (
-            <p className="text-sm text-[var(--muted)]">
-              No documents yet.{" "}
-              <button
-                type="button"
-                className="underline"
-                onClick={() => setTab("add")}
+        <section className="mt-4 space-y-3">
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="min-w-[200px] flex-1 text-xs text-[var(--muted)]">
+              Search
+              <input
+                className={`${field} mt-1`}
+                placeholder="Title, note, owner…"
+                value={docQuery}
+                onChange={(e) => setDocQuery(e.target.value)}
+              />
+            </label>
+            <label className="text-xs text-[var(--muted)]">
+              Type
+              <select
+                className={`${field} mt-1`}
+                value={docTypeFilter}
+                onChange={(e) =>
+                  setDocTypeFilter(e.target.value as VaultDocType | "all")
+                }
               >
-                Add one
-              </button>
+                <option value="all">All types</option>
+                {VAULT_DOC_TYPES.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs text-[var(--muted)]">
+              Status
+              <select
+                className={`${field} mt-1`}
+                value={docStatusFilter}
+                onChange={(e) =>
+                  setDocStatusFilter(
+                    e.target.value as typeof docStatusFilter,
+                  )
+                }
+              >
+                <option value="all">All</option>
+                <option value="expired">Expired</option>
+                <option value="due_soon">Due soon</option>
+                <option value="ok">OK</option>
+                <option value="none">No expiry</option>
+              </select>
+            </label>
+          </div>
+          {filteredDocuments.length === 0 ? (
+            <p className="text-sm text-[var(--muted)]">
+              {state.documents.length === 0
+                ? "No documents yet. "
+                : "No documents match your filters. "}
+              {state.documents.length === 0 ? (
+                <button
+                  type="button"
+                  className="underline"
+                  onClick={() => setTab("add")}
+                >
+                  Add one
+                </button>
+              ) : null}
             </p>
           ) : (
             <ul className="space-y-2">
-              {state.documents.map((doc) => (
+              {filteredDocuments.map((doc) => (
                 <DocRow
                   key={doc.id}
                   doc={doc}
@@ -591,6 +640,6 @@ export function VaultWorkspace() {
           </ul>
         </section>
       ) : null}
-    </div>
+    </ErpWorkspaceShell>
   );
 }

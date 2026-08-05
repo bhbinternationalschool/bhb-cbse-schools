@@ -227,6 +227,11 @@ export function extractBirthRegistrationNo(text: string): string {
   return m?.[1]?.toUpperCase() || "";
 }
 
+export function extractPan(text: string): string {
+  const m = text.match(/\b([A-Z]{5}\d{4}[A-Z])\b/);
+  return m?.[1]?.toUpperCase() || "";
+}
+
 export function parseAdmissionDocFromText(
   text: string,
   kind: AdmissionDocOcrKind,

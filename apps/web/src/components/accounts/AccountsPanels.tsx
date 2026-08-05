@@ -20,6 +20,7 @@ import {
   isExpenseVoucherCancelled,
   listExpenseSubcategories,
   listJournals,
+  listLinkedVendorsForExpense,
   listOwnerLoanDue,
   listRootExpenseCategories,
   listUnifiedPayables,
@@ -36,6 +37,7 @@ import {
   recordOwnerLoanPayment,
   runRecurringExpensesForMonth,
   saveAccounts,
+  sessionExpenseCategoryTotals,
   setFiscalYearStatus,
   syncTransportPayables,
   totalBankBalancePaise,
@@ -46,8 +48,12 @@ import {
   upsertExpenseCategory,
   upsertRecurringRule,
   upsertTrustee,
-  upsertVendor,
+  vendorBillLineTotalPaise,
+  vendorOutstandingBalancePaise,
+  VENDOR_BILL_UNITS,
   type AccountsState,
+  type ExpensePaymentSplit,
+  type ExpenseVoucher,
   type FiscalYearStatus,
   type JournalLine,
   type OwnerLoanType,
@@ -76,6 +82,12 @@ import {
   exportAccountsTallyCsv,
   exportAccountsTallyXml,
 } from "@/lib/accountsTallyExport";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
 
 export type AccountsPanelProps = {
   state: AccountsState;
@@ -92,6 +104,106 @@ function todayIso() {
 
 function paiseFromInr(v: string) {
   return Math.round((Number(v) || 0) * 100);
+}
+
+function paymentChannelAvailablePaise(
+  channel: string,
+  poolId: string,
+  state: AccountsState,
+): number {
+  const { mode, bankId } = decodePaymentChannel(channel);
+  if (mode === "cash") {
+    const pool = state.cashPools.find((p) => p.id === poolId);
+    return pool?.balancePaise ?? 0;
+  }
+  if (bankId) return bankBalancePaise(bankId, state);
+  return 0;
+}
+
+function formatExpensePaymentSplit(
+  split: ExpensePaymentSplit,
+  state: AccountsState,
+): string {
+  const modeLabel = BANK_PAYMENT_MODE_LABELS[split.mode] ?? split.mode;
+  if (split.mode === "cash") {
+    const pool = state.cashPools.find((p) => p.id === split.poolId);
+    return `${modeLabel}${pool ? ` · ${pool.name}` : ""} · ${formatInr(split.amountPaise)}${split.transactionRef ? ` · ${split.transactionRef}` : ""}`;
+  }
+  const bank = state.bankAccounts.find((b) => b.id === split.bankId);
+  return `${modeLabel}${bank ? ` · ${bank.name}` : ""} · ${formatInr(split.amountPaise)}${split.transactionRef ? ` · ${split.transactionRef}` : ""}`;
+}
+
+function expenseVoucherPayDate(v: ExpenseVoucher): string {
+  return v.paidOn || v.date;
+}
+
+function printExpenseVoucher(v: ExpenseVoucher, state: AccountsState) {
+  const lines =
+    v.lines.length > 0
+      ? v.lines
+      : [
+          {
+            categoryId: v.categoryId,
+            subcategoryId: "",
+            description: v.narration,
+            totalPaise: v.grandTotalPaise || v.amountPaise,
+          },
+        ];
+  const lineRows = lines
+    .map((line) => {
+      const cat = getExpenseCategory(line.categoryId, state);
+      const sub = line.subcategoryId
+        ? getExpenseCategory(line.subcategoryId, state)
+        : undefined;
+      return `<tr>
+        <td>${cat?.name || "—"}</td>
+        <td>${sub?.name || "—"}</td>
+        <td>${line.description || ""}</td>
+        <td style="text-align:right">${formatInr(line.totalPaise)}</td>
+      </tr>`;
+    })
+    .join("");
+  const splitRows =
+    v.paymentSplits.length > 0
+      ? v.paymentSplits
+          .map(
+            (s) =>
+              `<tr><td colspan="3">${formatExpensePaymentSplit(s, state)}</td><td style="text-align:right">${formatInr(s.amountPaise)}</td></tr>`,
+          )
+          .join("")
+      : `<tr><td colspan="4">No payment splits recorded</td></tr>`;
+  const html = `<!DOCTYPE html><html><head><title>${v.voucherNo}</title>
+    <style>
+      body { font-family: system-ui, sans-serif; padding: 24px; color: #0f2744; }
+      h1 { font-size: 18px; margin: 0 0 4px; }
+      .meta { font-size: 12px; color: #555; margin-bottom: 16px; }
+      table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+      th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; }
+      th { background: #f4f6f9; }
+      h2 { font-size: 14px; margin: 20px 0 6px; }
+    </style></head><body>
+    <h1>Expense voucher ${v.voucherNo || v.id.slice(-8)}</h1>
+    <div class="meta">Date: ${v.date} · Paid on: ${v.paidOn || "—"} · Status: ${v.paymentStatus}</div>
+    <div class="meta">${v.narration || ""}</div>
+    <h2>Expense lines</h2>
+    <table>
+      <thead><tr><th>Category</th><th>Sub-category</th><th>Description</th><th>Amount</th></tr></thead>
+      <tbody>${lineRows}</tbody>
+      <tfoot><tr><th colspan="3">Total</th><th style="text-align:right">${formatInr(v.grandTotalPaise || v.amountPaise)}</th></tr></tfoot>
+    </table>
+    <h2>Payment splits</h2>
+    <table>
+      <thead><tr><th colspan="3">Mode / account / reference</th><th>Amount</th></tr></thead>
+      <tbody>${splitRows}</tbody>
+      <tfoot><tr><th colspan="3">Paid</th><th style="text-align:right">${formatInr(v.paidPaise)}</th></tr></tfoot>
+    </table>
+    </body></html>`;
+  const win = window.open("", "_blank", "noopener,noreferrer");
+  if (!win) return;
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  win.print();
 }
 
 const CARD =
@@ -228,6 +340,12 @@ export function DayBookPanel({ state }: AccountsPanelProps) {
       !isExpenseVoucherCancelled(v) &&
       (v.paymentStatus === "draft" || v.paymentStatus === "pending_approval"),
   );
+  const paidExpenses = state.expenseVouchers.filter(
+    (v) =>
+      !isExpenseVoucherCancelled(v) &&
+      v.paidPaise > 0 &&
+      expenseVoucherPayDate(v) === date,
+  );
   const cashMoves = state.cashLedger.filter((e) => e.date === date && !e.voidedAt);
   const bankMoves = state.bankLedger.filter((e) => e.date === date && !e.voidedAt);
   const storeJournals = state.journalEntries.filter(
@@ -317,6 +435,72 @@ export function DayBookPanel({ state }: AccountsPanelProps) {
               <tr>
                 <td colSpan={3} className="py-4 text-[var(--muted)]">
                   No fee collections on this date
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </section>
+
+      <section className={CARD}>
+        <h3 className="text-sm font-bold text-[var(--brand-deep)]">
+          Expense payments (with splits)
+        </h3>
+        <p className="mt-0.5 text-[11px] text-[var(--muted)]">
+          Paid vouchers on this date — cash / UPI / bank breakdown.
+        </p>
+        <table className="mt-3 w-full text-sm">
+          <thead>
+            <tr className="text-left text-[var(--muted)]">
+              <th className="pb-2">Voucher</th>
+              <th className="pb-2">Category lines</th>
+              <th className="pb-2">Payment splits</th>
+              <th className="pb-2 text-right">Paid</th>
+            </tr>
+          </thead>
+          <tbody>
+            {paidExpenses.map((v) => (
+              <tr key={v.id} className="border-t border-[rgba(32,48,80,0.08)]">
+                <td className="py-2 align-top font-mono text-xs">
+                  {v.voucherNo || v.id.slice(-8)}
+                  <div className="mt-0.5 font-sans text-[10px] text-[var(--muted)]">
+                    {v.narration || "—"}
+                  </div>
+                </td>
+                <td className="py-2 align-top text-xs text-[var(--muted)]">
+                  {(v.lines.length ? v.lines : [{ categoryId: v.categoryId, subcategoryId: "", description: v.narration, totalPaise: v.grandTotalPaise || v.amountPaise }]).map((line, i) => {
+                    const cat = getExpenseCategory(line.categoryId, state);
+                    const sub = line.subcategoryId
+                      ? getExpenseCategory(line.subcategoryId, state)
+                      : undefined;
+                    return (
+                      <div key={i}>
+                        {cat?.name || "—"}
+                        {sub ? ` / ${sub.name}` : ""}
+                        {" · "}
+                        {formatInr(line.totalPaise)}
+                      </div>
+                    );
+                  })}
+                </td>
+                <td className="py-2 align-top text-xs">
+                  {v.paymentSplits.length > 0 ? (
+                    v.paymentSplits.map((s) => (
+                      <div key={s.id}>{formatExpensePaymentSplit(s, state)}</div>
+                    ))
+                  ) : (
+                    <span className="text-[var(--muted)]">—</span>
+                  )}
+                </td>
+                <td className="py-2 text-right align-top font-medium">
+                  {formatInr(v.paidPaise)}
+                </td>
+              </tr>
+            ))}
+            {paidExpenses.length === 0 ? (
+              <tr>
+                <td colSpan={4} className="py-4 text-[var(--muted)]">
+                  No paid expense vouchers on this date
                 </td>
               </tr>
             ) : null}
@@ -614,32 +798,36 @@ export function CashBookPanel({
             ))}
           </select>
         </div>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
-              <th className="pb-2">Date</th>
-              <th className="pb-2">Pool</th>
-              <th className="pb-2">Dir</th>
-              <th className="pb-2 text-right">Amount</th>
-              <th className="pb-2 text-right">Balance</th>
-              <th className="pb-2">Narration</th>
-            </tr>
-          </thead>
-          <tbody>
-            {ledger.map((e) => (
-              <tr key={e.id} className="border-t border-[rgba(32,48,80,0.08)]">
-                <td className="py-2">{e.date}</td>
-                <td className="py-2">
-                  {state.cashPools.find((p) => p.id === e.poolId)?.name}
-                </td>
-                <td className="py-2">{e.direction}</td>
-                <td className="py-2 text-right">{formatInr(e.amountPaise)}</td>
-                <td className="py-2 text-right">{formatInr(e.runningBalancePaise)}</td>
-                <td className="py-2 text-[var(--muted)]">{e.narration}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <ErpTableShell>
+          <div className="overflow-x-auto">
+            <ErpTable>
+              <ErpTableHead>
+                <tr>
+                  <th className="px-4 py-2.5 font-bold">Date</th>
+                  <th className="px-4 py-2.5 font-bold">Pool</th>
+                  <th className="px-4 py-2.5 font-bold">Dir</th>
+                  <th className="px-4 py-2.5 font-bold text-right">Amount</th>
+                  <th className="px-4 py-2.5 font-bold text-right">Balance</th>
+                  <th className="px-4 py-2.5 font-bold">Narration</th>
+                </tr>
+              </ErpTableHead>
+              <ErpTableBody>
+                {ledger.map((e) => (
+                  <tr key={e.id} className="hover:bg-[rgba(32,48,80,0.02)]">
+                    <td className="px-4 py-2">{e.date}</td>
+                    <td className="px-4 py-2">
+                      {state.cashPools.find((p) => p.id === e.poolId)?.name}
+                    </td>
+                    <td className="px-4 py-2">{e.direction}</td>
+                    <td className="px-4 py-2 text-right">{formatInr(e.amountPaise)}</td>
+                    <td className="px-4 py-2 text-right">{formatInr(e.runningBalancePaise)}</td>
+                    <td className="px-4 py-2 text-[var(--muted)]">{e.narration}</td>
+                  </tr>
+                ))}
+              </ErpTableBody>
+            </ErpTable>
+          </div>
+        </ErpTableShell>
       </section>
     </div>
   );
@@ -893,14 +1081,42 @@ export function ExpensesPanel({
 
   const [vDate, setVDate] = useState(todayIso());
   const [voucherNo, setVoucherNo] = useState(() => nextExpenseVoucherNo(state));
-  const [paymentChannel, setPaymentChannel] = useState(() =>
-    defaultPaymentChannel(state),
-  );
   const [payChannel, setPayChannel] = useState(() => defaultPaymentChannel(state));
   const [vNote, setVNote] = useState("");
   const [payPool, setPayPool] = useState(state.cashPools[0]?.id ?? "");
 
-  const { mode: vMode, bankId: payBank } = decodePaymentChannel(paymentChannel);
+  type PaymentSplitDraft = {
+    key: string;
+    channel: string;
+    amount: string;
+    transactionRef: string;
+    poolId: string;
+  };
+
+  const [paymentSplits, setPaymentSplits] = useState<PaymentSplitDraft[]>([]);
+
+  const sessionTotals = useMemo(
+    () => sessionExpenseCategoryTotals(state, vDate),
+    [state, vDate],
+  );
+
+  function addPaymentSplit() {
+    setPaymentSplits((prev) => [
+      ...prev,
+      {
+        key: `ps_${Math.random().toString(36).slice(2, 8)}`,
+        channel: defaultPaymentChannel(state),
+        amount: "",
+        transactionRef: "",
+        poolId: state.cashPools[0]?.id ?? "",
+      },
+    ]);
+  }
+
+  const splitSumPaise = useMemo(
+    () => paymentSplits.reduce((n, s) => n + paiseFromInr(s.amount), 0),
+    [paymentSplits],
+  );
 
   const [recCat, setRecCat] = useState(rootCategories[0]?.id ?? "");
   const [recAmt, setRecAmt] = useState("");
@@ -911,6 +1127,7 @@ export function ExpensesPanel({
     id: string;
     categoryId: string;
     subcategoryId: string;
+    vendorId: string;
     description: string;
     amount: string;
     tax: string;
@@ -922,6 +1139,7 @@ export function ExpensesPanel({
       id: `ln_${Math.random().toString(36).slice(2, 8)}`,
       categoryId: rootCategories[0]?.id ?? "",
       subcategoryId: "",
+      vendorId: "",
       description: "",
       amount: "",
       tax: "",
@@ -966,6 +1184,13 @@ export function ExpensesPanel({
         const next = { ...l, ...patch };
         if (patch.categoryId !== undefined && patch.categoryId !== l.categoryId) {
           next.subcategoryId = "";
+          next.vendorId = "";
+        }
+        if (
+          patch.subcategoryId !== undefined &&
+          patch.subcategoryId !== l.subcategoryId
+        ) {
+          next.vendorId = "";
         }
         return next;
       }),
@@ -973,32 +1198,82 @@ export function ExpensesPanel({
   }
 
   function createVoucher() {
-    if (totals.paid > 0) {
-      if (!paymentChannel) {
-        onError("Select payment mode & account");
-        return;
-      }
-      if (vMode === "cash" && !payPool) {
-        onError("Select a cash pool for payment");
-        return;
-      }
-      if (vMode !== "cash" && !payBank) {
-        onError("Select a bank account for this payment mode");
+    const vendorTotals = new Map<string, number>();
+    for (const l of lines) {
+      if (!l.vendorId) continue;
+      const paidPaise = paiseFromInr(l.paid);
+      if (paidPaise <= 0) continue;
+      vendorTotals.set(
+        l.vendorId,
+        (vendorTotals.get(l.vendorId) ?? 0) + paidPaise,
+      );
+    }
+    for (const [vendorId, amount] of vendorTotals) {
+      const balance = vendorOutstandingBalancePaise(vendorId, state);
+      if (amount > balance) {
+        const vendor = state.vendors.find((v) => v.id === vendorId);
+        onError(
+          `Payment to ${vendor?.name ?? "vendor"} (${formatInr(amount)}) exceeds outstanding balance (${formatInr(balance)})`,
+        );
         return;
       }
     }
+
+    if (totals.paid > 0) {
+      if (paymentSplits.length === 0) {
+        onError("Add at least one payment mode (cash / UPI / bank)");
+        return;
+      }
+      if (splitSumPaise !== totals.paid) {
+        onError(
+          `Payment splits (${formatInr(splitSumPaise)}) must equal paid (${formatInr(totals.paid)})`,
+        );
+        return;
+      }
+      for (const split of paymentSplits) {
+        const { mode, bankId } = decodePaymentChannel(split.channel);
+        if (mode !== "cash" && !split.transactionRef.trim()) {
+          onError("Transaction ID is required for non-cash payments");
+          return;
+        }
+        if (mode === "cash" && !split.poolId) {
+          onError("Select cash pool for cash payment");
+          return;
+        }
+        if (mode !== "cash" && !bankId) {
+          onError("Select bank account for non-cash payment");
+          return;
+        }
+      }
+    }
+    const firstSplit = paymentSplits[0];
+    const firstMode = firstSplit
+      ? decodePaymentChannel(firstSplit.channel).mode
+      : "cash";
     const res = createExpenseVoucher({
       date: vDate,
       voucherNo,
-      mode: vMode,
+      mode: firstMode,
       narration: vNote,
       paidPaise: totals.paid,
       taxPaise: totals.tax,
-      poolId: vMode === "cash" ? payPool : undefined,
-      bankId: vMode !== "cash" ? payBank : undefined,
+      paymentSplits:
+        totals.paid > 0
+          ? paymentSplits.map((s) => {
+              const { mode, bankId } = decodePaymentChannel(s.channel);
+              return {
+                mode,
+                amountPaise: paiseFromInr(s.amount),
+                poolId: mode === "cash" ? s.poolId : "",
+                bankId: mode !== "cash" ? bankId : "",
+                transactionRef: s.transactionRef.trim(),
+              };
+            })
+          : undefined,
       lines: lines.map((l) => ({
         categoryId: l.categoryId,
         subcategoryId: l.subcategoryId,
+        vendorId: l.vendorId,
         description: l.description,
         amountPaise: paiseFromInr(l.amount),
         taxPaise: paiseFromInr(l.tax),
@@ -1018,12 +1293,24 @@ export function ExpensesPanel({
     );
     setVNote("");
     setLines([emptyLine()]);
+    setPaymentSplits([]);
     setVoucherNo(nextExpenseVoucherNo());
     onRefresh();
   }
 
   function payVoucher(id: string, voucherMode: PaymentMode, duePaise: number) {
     const { mode, bankId } = decodePaymentChannel(payChannel);
+    let txnId = "";
+    if (mode !== "cash") {
+      const promptVal = window.prompt("Transaction ID (required):");
+      if (!promptVal?.trim()) {
+        if (promptVal !== null) {
+          onError("Transaction ID is required for non-cash payments");
+        }
+        return;
+      }
+      txnId = promptVal.trim();
+    }
     if (mode !== voucherMode) {
       onError(
         `Select a ${BANK_PAYMENT_MODE_LABELS[voucherMode]} account to pay this voucher`,
@@ -1034,6 +1321,7 @@ export function ExpensesPanel({
       poolId: mode === "cash" ? payPool : undefined,
       bankId: mode !== "cash" ? bankId : undefined,
       amountPaise: duePaise,
+      transactionRef: txnId.trim(),
     });
     if (!res.ok) {
       onError(res.error);
@@ -1109,15 +1397,6 @@ export function ExpensesPanel({
             />
           </label>
           <label className="block text-[11px] font-semibold text-[var(--muted)] sm:col-span-2">
-            Payment mode & account
-            <PaymentChannelSelect
-              className={`${FIELD} mt-1`}
-              value={paymentChannel}
-              onChange={setPaymentChannel}
-              accounts={state}
-            />
-          </label>
-          <label className="block text-[11px] font-semibold text-[var(--muted)]">
             Narration
             <input
               className={`${FIELD} mt-1`}
@@ -1128,21 +1407,132 @@ export function ExpensesPanel({
           </label>
         </div>
 
-        {totals.paid > 0 && vMode === "cash" ? (
-          <label className="block max-w-xs text-[11px] font-semibold text-[var(--muted)]">
-            Pay from cash pool
-            <select
-              className={`${FIELD} mt-1`}
-              value={payPool}
-              onChange={(e) => setPayPool(e.target.value)}
-            >
-              {state.cashPools.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </label>
+        {totals.paid > 0 ? (
+          <div className="space-y-2 rounded-lg border border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.03)] p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h4 className="text-xs font-bold text-[var(--brand-deep)]">
+                Payment modes (split cash + UPI / bank)
+              </h4>
+              <button type="button" className={BTN_OUTLINE} onClick={addPaymentSplit}>
+                + Add payment
+              </button>
+            </div>
+            {paymentSplits.length === 0 ? (
+              <p className="text-[11px] text-[var(--muted)]">
+                Add payment rows — total must match paid column ({formatInr(totals.paid)}).
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {paymentSplits.map((s) => {
+                  const { mode } = decodePaymentChannel(s.channel);
+                  const available = paymentChannelAvailablePaise(
+                    s.channel,
+                    s.poolId,
+                    state,
+                  );
+                  return (
+                    <div
+                      key={s.key}
+                      className="space-y-1 rounded-lg border border-[rgba(32,48,80,0.08)] bg-white p-2"
+                    >
+                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                        <div>
+                          <PaymentChannelSelect
+                            className={FIELD}
+                            value={s.channel}
+                            onChange={(ch) =>
+                              setPaymentSplits((prev) =>
+                                prev.map((x) =>
+                                  x.key === s.key ? { ...x, channel: ch } : x,
+                                ),
+                              )
+                            }
+                            accounts={state}
+                          />
+                          <p className="mt-0.5 text-[10px] font-medium text-emerald-800">
+                            Available: {formatInr(available)}
+                          </p>
+                        </div>
+                        {mode === "cash" ? (
+                          <div>
+                            <select
+                              className={FIELD}
+                              value={s.poolId}
+                              onChange={(e) =>
+                                setPaymentSplits((prev) =>
+                                  prev.map((x) =>
+                                    x.key === s.key
+                                      ? { ...x, poolId: e.target.value }
+                                      : x,
+                                  ),
+                                )
+                              }
+                            >
+                              {state.cashPools.map((p) => (
+                                <option key={p.id} value={p.id}>
+                                  {p.name}
+                                </option>
+                              ))}
+                            </select>
+                            <p className="mt-0.5 text-[10px] text-[var(--muted)]">
+                              Pool balance shown above
+                            </p>
+                          </div>
+                        ) : (
+                          <div />
+                        )}
+                        <input
+                          className={`${FIELD} text-right`}
+                          placeholder="Amount ₹"
+                          value={s.amount}
+                          onChange={(e) =>
+                            setPaymentSplits((prev) =>
+                              prev.map((x) =>
+                                x.key === s.key ? { ...x, amount: e.target.value } : x,
+                              ),
+                            )
+                          }
+                        />
+                        <input
+                          className={FIELD}
+                          placeholder={
+                            mode === "cash"
+                              ? "Txn ID (optional)"
+                              : "Transaction ID *"
+                          }
+                          value={s.transactionRef}
+                          onChange={(e) =>
+                            setPaymentSplits((prev) =>
+                              prev.map((x) =>
+                                x.key === s.key
+                                  ? { ...x, transactionRef: e.target.value }
+                                  : x,
+                              ),
+                            )
+                          }
+                        />
+                        <button
+                          type="button"
+                          className={BTN_OUTLINE}
+                          onClick={() =>
+                            setPaymentSplits((prev) =>
+                              prev.filter((x) => x.key !== s.key),
+                            )
+                          }
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+                <p className="text-[11px] text-[var(--muted)]">
+                  Split total: {formatInr(splitSumPaise)} / {formatInr(totals.paid)}
+                  {splitSumPaise !== totals.paid ? " — must match" : ""}
+                </p>
+              </div>
+            )}
+          </div>
         ) : null}
 
         <div className="overflow-x-auto">
@@ -1151,6 +1541,7 @@ export function ExpensesPanel({
               <tr className="text-left text-[var(--muted)]">
                 <th className="pb-2 pr-2">Category</th>
                 <th className="pb-2 pr-2">Sub-category</th>
+                <th className="pb-2 pr-2">Vendor</th>
                 <th className="pb-2 pr-2">Description</th>
                 <th className="pb-2 pr-2 text-right">Amount ₹</th>
                 <th className="pb-2 pr-2 text-right">Tax ₹</th>
@@ -1164,6 +1555,13 @@ export function ExpensesPanel({
               {lines.map((l) => {
                 const subs = l.categoryId
                   ? listExpenseSubcategories(l.categoryId, state)
+                  : [];
+                const linkedVendors = l.categoryId
+                  ? listLinkedVendorsForExpense(
+                      l.categoryId,
+                      l.subcategoryId,
+                      state,
+                    )
                   : [];
                 return (
                   <tr key={l.id} className="border-t border-[rgba(32,48,80,0.08)]">
@@ -1201,6 +1599,39 @@ export function ExpensesPanel({
                       </select>
                     </td>
                     <td className="py-1 pr-2">
+                      {linkedVendors.length > 0 ? (
+                        <div>
+                          <select
+                            className={FIELD}
+                            value={l.vendorId}
+                            onChange={(e) =>
+                              updateLine(l.id, {
+                                vendorId: e.target.value,
+                                paid: "",
+                              })
+                            }
+                          >
+                            <option value="">— Optional —</option>
+                            {linkedVendors.map((v) => (
+                              <option key={v.id} value={v.id}>
+                                {v.name}
+                              </option>
+                            ))}
+                          </select>
+                          {l.vendorId ? (
+                            <p className="mt-0.5 text-[10px] font-semibold text-amber-800">
+                              Outstanding:{" "}
+                              {formatInr(
+                                vendorOutstandingBalancePaise(l.vendorId, state),
+                              )}
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <span className="text-[10px] text-[var(--muted)]">—</span>
+                      )}
+                    </td>
+                    <td className="py-1 pr-2">
                       <input
                         className={FIELD}
                         value={l.description}
@@ -1231,13 +1662,43 @@ export function ExpensesPanel({
                       {formatInr(lineTotal(l))}
                     </td>
                     <td className="py-1 pr-2">
-                      <input
-                        className={`${FIELD} text-right`}
-                        value={l.paid}
-                        onChange={(e) =>
-                          updateLine(l.id, { paid: e.target.value })
-                        }
-                      />
+                      <div className="flex flex-col gap-1">
+                        <input
+                          className={`${FIELD} text-right`}
+                          value={l.paid}
+                          onChange={(e) => {
+                            let paid = e.target.value;
+                            if (l.vendorId) {
+                              const bal = vendorOutstandingBalancePaise(
+                                l.vendorId,
+                                state,
+                              );
+                              if (paiseFromInr(paid) > bal) {
+                                paid = bal > 0 ? (bal / 100).toFixed(2) : "0";
+                              }
+                            }
+                            updateLine(l.id, { paid });
+                          }}
+                        />
+                        {l.vendorId &&
+                        vendorOutstandingBalancePaise(l.vendorId, state) > 0 ? (
+                          <button
+                            type="button"
+                            className="text-[10px] font-semibold text-[var(--brand-deep)] underline"
+                            onClick={() => {
+                              const bal = vendorOutstandingBalancePaise(
+                                l.vendorId,
+                                state,
+                              );
+                              updateLine(l.id, {
+                                paid: (bal / 100).toFixed(2),
+                              });
+                            }}
+                          >
+                            Pay full balance
+                          </button>
+                        ) : null}
+                      </div>
                     </td>
                     <td className="py-1 pr-2 text-right text-amber-800">
                       {formatInr(lineDue(l))}
@@ -1294,6 +1755,54 @@ export function ExpensesPanel({
         </p>
       </section>
 
+      {sessionTotals.length > 0 ? (
+        <section className={CARD}>
+          <h3 className="text-sm font-bold text-[var(--brand-deep)]">
+            Session expenses — {vDate}
+          </h3>
+          <p className="text-[11px] text-[var(--muted)]">
+            Paid vouchers on this date (category & sub-category totals).
+          </p>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full min-w-[480px] text-sm">
+              <thead>
+                <tr className="text-left text-[var(--muted)]">
+                  <th className="pb-2">Category</th>
+                  <th className="pb-2">Sub-category</th>
+                  <th className="pb-2 text-right">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sessionTotals.map((row) => (
+                  <tr
+                    key={`${row.categoryId}:${row.subcategoryId}`}
+                    className="border-t border-[rgba(32,48,80,0.08)]"
+                  >
+                    <td className="py-2">{row.categoryName}</td>
+                    <td className="py-2">{row.subcategoryName}</td>
+                    <td className="py-2 text-right font-medium">
+                      {formatInr(row.amountPaise)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 font-bold">
+                  <td colSpan={2} className="py-2 text-right">
+                    Total
+                  </td>
+                  <td className="py-2 text-right">
+                    {formatInr(
+                      sessionTotals.reduce((n, r) => n + r.amountPaise, 0),
+                    )}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </section>
+      ) : null}
+
       <section className={CARD}>
         <h3 className="text-sm font-bold text-[var(--brand-deep)]">Vouchers</h3>
         <div className="mb-3 flex flex-wrap items-end gap-2 text-sm">
@@ -1305,6 +1814,12 @@ export function ExpensesPanel({
               onChange={setPayChannel}
               accounts={state}
             />
+            <span className="mt-0.5 block text-[10px] font-medium text-emerald-800">
+              Available:{" "}
+              {formatInr(
+                paymentChannelAvailablePaise(payChannel, payPool, state),
+              )}
+            </span>
           </label>
           {decodePaymentChannel(payChannel).mode === "cash" ? (
             <select className={FIELD} value={payPool} onChange={(e) => setPayPool(e.target.value)}>
@@ -1316,35 +1831,36 @@ export function ExpensesPanel({
             </select>
           ) : null}
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-sm">
-            <thead>
-              <tr className="text-left text-[var(--muted)]">
-                <th className="pb-2">Date</th>
-                <th className="pb-2">Voucher</th>
-                <th className="pb-2">Lines</th>
-                <th className="pb-2">Status</th>
-                <th className="pb-2 text-right">Total</th>
-                <th className="pb-2 text-right">Paid</th>
-                <th className="pb-2 text-right">Due</th>
-                <th className="pb-2">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {openVouchers.slice(0, 30).map((v) => (
-                <tr key={v.id} className="border-t border-[rgba(32,48,80,0.08)]">
-                  <td className="py-2">{v.date}</td>
-                  <td className="py-2 font-mono text-xs">{v.voucherNo || v.id.slice(-8)}</td>
-                  <td className="py-2 text-xs text-[var(--muted)]">
-                    {v.lines.length || 1} line(s)
-                  </td>
-                  <td className="py-2">{v.paymentStatus}</td>
-                  <td className="py-2 text-right">
-                    {formatInr(v.grandTotalPaise || v.amountPaise)}
-                  </td>
-                  <td className="py-2 text-right">{formatInr(v.paidPaise)}</td>
-                  <td className="py-2 text-right">{formatInr(v.duePaise)}</td>
-                  <td className="py-2">
+        <ErpTableShell>
+          <div className="overflow-x-auto">
+            <ErpTable minWidth="min-w-[720px]">
+              <ErpTableHead>
+                <tr>
+                  <th className="px-4 py-2.5 font-bold">Date</th>
+                  <th className="px-4 py-2.5 font-bold">Voucher</th>
+                  <th className="px-4 py-2.5 font-bold">Lines</th>
+                  <th className="px-4 py-2.5 font-bold">Status</th>
+                  <th className="px-4 py-2.5 font-bold text-right">Total</th>
+                  <th className="px-4 py-2.5 font-bold text-right">Paid</th>
+                  <th className="px-4 py-2.5 font-bold text-right">Due</th>
+                  <th className="px-4 py-2.5 font-bold">Actions</th>
+                </tr>
+              </ErpTableHead>
+              <ErpTableBody>
+                {openVouchers.slice(0, 30).map((v) => (
+                  <tr key={v.id} className="hover:bg-[rgba(32,48,80,0.02)]">
+                    <td className="px-4 py-2">{v.date}</td>
+                    <td className="px-4 py-2 font-mono text-xs">{v.voucherNo || v.id.slice(-8)}</td>
+                    <td className="px-4 py-2 text-xs text-[var(--muted)]">
+                      {v.lines.length || 1} line(s)
+                    </td>
+                    <td className="px-4 py-2">{v.paymentStatus}</td>
+                    <td className="px-4 py-2 text-right">
+                      {formatInr(v.grandTotalPaise || v.amountPaise)}
+                    </td>
+                    <td className="px-4 py-2 text-right">{formatInr(v.paidPaise)}</td>
+                    <td className="px-4 py-2 text-right">{formatInr(v.duePaise)}</td>
+                    <td className="px-4 py-2">
                     <div className="flex flex-wrap gap-1">
                       {v.paymentStatus === "pending_approval" ? (
                         <button
@@ -1383,13 +1899,23 @@ export function ExpensesPanel({
                           Cancel
                         </button>
                       ) : null}
+                      {v.paidPaise > 0 ? (
+                        <button
+                          type="button"
+                          className={BTN_OUTLINE}
+                          onClick={() => printExpenseVoucher(v, state)}
+                        >
+                          Print
+                        </button>
+                      ) : null}
                     </div>
                   </td>
                 </tr>
               ))}
-            </tbody>
-          </table>
-        </div>
+              </ErpTableBody>
+            </ErpTable>
+          </div>
+        </ErpTableShell>
       </section>
 
       <section className={`${CARD} space-y-3`}>
@@ -1450,13 +1976,53 @@ export function BillsPanel({
   onFlash,
   onError,
 }: AccountsPanelProps) {
-  const [vendorName, setVendorName] = useState("");
-  const [billVendor, setBillVendor] = useState(state.vendors[0]?.id ?? "");
-  const [billAmt, setBillAmt] = useState("");
-  const [billCat, setBillCat] = useState(state.expenseCategories[0]?.id ?? "");
+  const rootCategories = useMemo(
+    () => listRootExpenseCategories(state),
+    [state.expenseCategories],
+  );
+  const activeVendors = useMemo(
+    () => state.vendors.filter((v) => v.isActive !== false),
+    [state.vendors],
+  );
+
+  const [billVendor, setBillVendor] = useState(activeVendors[0]?.id ?? "");
+  const [billDate, setBillDate] = useState(todayIso());
+  const [dueOn, setDueOn] = useState(todayIso());
   const [billNo, setBillNo] = useState("");
+  const [receiptNo, setReceiptNo] = useState("");
+  const [billNarration, setBillNarration] = useState("");
+  const [billDiscount, setBillDiscount] = useState("");
+  const [billTax, setBillTax] = useState("");
   const [payChannel, setPayChannel] = useState(() => defaultPaymentChannel(state));
   const [payPool, setPayPool] = useState(state.cashPools[0]?.id ?? "");
+
+  type BillLineDraft = {
+    id: string;
+    lineDate: string;
+    itemName: string;
+    qty: string;
+    unit: string;
+    rate: string;
+    discount: string;
+    tax: string;
+    categoryId: string;
+  };
+
+  function emptyBillLine(): BillLineDraft {
+    return {
+      id: `bl_${Math.random().toString(36).slice(2, 8)}`,
+      lineDate: billDate,
+      itemName: "",
+      qty: "1",
+      unit: "pcs",
+      rate: "",
+      discount: "",
+      tax: "",
+      categoryId: rootCategories[0]?.id ?? "",
+    };
+  }
+
+  const [billLines, setBillLines] = useState<BillLineDraft[]>([emptyBillLine()]);
 
   useEffect(() => {
     syncTransportPayables();
@@ -1466,31 +2032,84 @@ export function BillsPanel({
 
   const payables = listUnifiedPayables(state);
 
-  function addVendor() {
-    const res = upsertVendor({ name: vendorName });
-    if (!res.ok) {
-      onError(res.error);
-      return;
-    }
-    onFlash("Vendor saved");
-    setVendorName("");
-    onRefresh();
+  function billLineTotalPaise(l: BillLineDraft) {
+    return vendorBillLineTotalPaise({
+      qty: Number(l.qty) || 0,
+      ratePaise: paiseFromInr(l.rate),
+      discountPaise: paiseFromInr(l.discount),
+      taxPaise: paiseFromInr(l.tax),
+    });
+  }
+
+  const billTotals = useMemo(() => {
+    const subtotal = billLines.reduce((s, l) => s + billLineTotalPaise(l), 0);
+    const lineTax = billLines.reduce((s, l) => s + paiseFromInr(l.tax), 0);
+    const discount = paiseFromInr(billDiscount);
+    const headerTax = paiseFromInr(billTax);
+    const tax = lineTax + headerTax;
+    const grand = Math.max(0, subtotal - Math.min(discount, subtotal) + headerTax);
+    return { subtotal, discount, tax, grand };
+  }, [billLines, billDiscount, billTax]);
+
+  function updateBillLine(id: string, patch: Partial<BillLineDraft>) {
+    setBillLines((prev) =>
+      prev.map((l) => (l.id === id ? { ...l, ...patch } : l)),
+    );
   }
 
   function addBill() {
+    if (!billVendor) {
+      onError("Select a vendor — add vendors under Masters → Vendors");
+      return;
+    }
+    if (!billLines.some((l) => l.itemName.trim())) {
+      onError("Add at least one line item with a name");
+      return;
+    }
+    const lines = billLines
+      .filter((l) => l.itemName.trim())
+      .map((l) => {
+        const amountPaise = billLineTotalPaise(l);
+        return {
+          id: l.id,
+          lineDate: l.lineDate || billDate,
+          itemName: l.itemName.trim(),
+          description: l.itemName.trim(),
+          qty: Number(l.qty) || 0,
+          unit: l.unit || "pcs",
+          ratePaise: paiseFromInr(l.rate),
+          discountPaise: paiseFromInr(l.discount),
+          taxPaise: paiseFromInr(l.tax),
+          amountPaise,
+          categoryId: l.categoryId,
+        };
+      });
     const res = createVendorBill({
       vendorId: billVendor,
       billNo,
-      amountPaise: paiseFromInr(billAmt),
-      categoryId: billCat,
+      supplierInvoiceNo: billNo,
+      receiptNo,
+      billDate,
+      dueOn: dueOn || billDate,
+      narration: billNarration,
+      discountType: billTotals.discount > 0 ? "amount" : "none",
+      discountPaise: billTotals.discount,
+      taxPaise: paiseFromInr(billTax),
+      grandTotalPaise: billTotals.grand,
+      lines,
+      categoryId: lines[0]?.categoryId,
     });
     if (!res.ok) {
       onError(res.error);
       return;
     }
-    onFlash("Bill created");
-    setBillAmt("");
+    onFlash(`Bill ${res.bill.billNo || res.bill.id} created`);
     setBillNo("");
+    setReceiptNo("");
+    setBillNarration("");
+    setBillDiscount("");
+    setBillTax("");
+    setBillLines([emptyBillLine()]);
     onRefresh();
   }
 
@@ -1512,43 +2131,239 @@ export function BillsPanel({
 
   return (
     <div className="mt-4 space-y-4">
-      <div className="grid gap-4 lg:grid-cols-2">
-        <section className={`${CARD} space-y-3`}>
-          <h3 className="text-sm font-bold text-[var(--brand-deep)]">Vendors</h3>
-          <input className={FIELD} placeholder="Vendor name" value={vendorName} onChange={(e) => setVendorName(e.target.value)} />
-          <button type="button" className={BTN} onClick={addVendor}>
-            Add vendor
-          </button>
-          <ul className="text-sm">
-            {state.vendors.map((v) => (
-              <li key={v.id}>{v.name}</li>
-            ))}
-          </ul>
-        </section>
+      <section className={`${CARD} space-y-4`}>
+        <h3 className="text-sm font-bold text-[var(--brand-deep)]">
+          Vendor bill entry
+        </h3>
+        <p className="text-[11px] text-[var(--muted)]">
+          Select an existing vendor from Masters. Add line items with qty, unit, rate,
+          discount and tax — bill total is computed automatically.
+        </p>
 
-        <section className={`${CARD} space-y-3`}>
-          <h3 className="text-sm font-bold text-[var(--brand-deep)]">Create bill</h3>
-          <select className={FIELD} value={billVendor} onChange={(e) => setBillVendor(e.target.value)}>
-            {state.vendors.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.name}
-              </option>
-            ))}
-          </select>
-          <input className={FIELD} placeholder="Bill no." value={billNo} onChange={(e) => setBillNo(e.target.value)} />
-          <input className={FIELD} placeholder="Amount ₹" value={billAmt} onChange={(e) => setBillAmt(e.target.value)} />
-          <select className={FIELD} value={billCat} onChange={(e) => setBillCat(e.target.value)}>
-            {state.expenseCategories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <label className="block text-[11px] font-semibold text-[var(--muted)]">
+            Vendor *
+            <select
+              className={`${FIELD} mt-1`}
+              value={billVendor}
+              onChange={(e) => setBillVendor(e.target.value)}
+            >
+              <option value="">— Select vendor —</option>
+              {activeVendors.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-[11px] font-semibold text-[var(--muted)]">
+            Bill date
+            <input
+              type="date"
+              className={`${FIELD} mt-1`}
+              value={billDate}
+              onChange={(e) => setBillDate(e.target.value)}
+            />
+          </label>
+          <label className="block text-[11px] font-semibold text-[var(--muted)]">
+            Due on
+            <input
+              type="date"
+              className={`${FIELD} mt-1`}
+              value={dueOn}
+              onChange={(e) => setDueOn(e.target.value)}
+            />
+          </label>
+          <label className="block text-[11px] font-semibold text-[var(--muted)]">
+            Supplier invoice #
+            <input
+              className={`${FIELD} mt-1`}
+              value={billNo}
+              onChange={(e) => setBillNo(e.target.value)}
+              placeholder="Bill / invoice number"
+            />
+          </label>
+          <label className="block text-[11px] font-semibold text-[var(--muted)]">
+            GRN / receipt #
+            <input
+              className={`${FIELD} mt-1`}
+              value={receiptNo}
+              onChange={(e) => setReceiptNo(e.target.value)}
+              placeholder="Optional"
+            />
+          </label>
+          <label className="col-span-full block text-[11px] font-semibold text-[var(--muted)]">
+            Narration
+            <input
+              className={`${FIELD} mt-1`}
+              value={billNarration}
+              onChange={(e) => setBillNarration(e.target.value)}
+              placeholder="Optional note"
+            />
+          </label>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1100px] text-xs">
+            <thead>
+              <tr className="text-left text-[var(--muted)]">
+                <th className="pb-2 pr-2">Date</th>
+                <th className="pb-2 pr-2">Item</th>
+                <th className="pb-2 pr-2 text-right">Qty</th>
+                <th className="pb-2 pr-2">Unit</th>
+                <th className="pb-2 pr-2 text-right">Rate ₹</th>
+                <th className="pb-2 pr-2 text-right">Discount ₹</th>
+                <th className="pb-2 pr-2 text-right">Tax ₹</th>
+                <th className="pb-2 pr-2">Category</th>
+                <th className="pb-2 pr-2 text-right">Line total</th>
+                <th className="pb-2" />
+              </tr>
+            </thead>
+            <tbody>
+              {billLines.map((l) => (
+                <tr key={l.id} className="border-t border-[rgba(32,48,80,0.08)]">
+                  <td className="py-1 pr-2">
+                    <input
+                      type="date"
+                      className={FIELD}
+                      value={l.lineDate || billDate}
+                      onChange={(e) =>
+                        updateBillLine(l.id, { lineDate: e.target.value })
+                      }
+                    />
+                  </td>
+                  <td className="py-1 pr-2">
+                    <input
+                      className={FIELD}
+                      placeholder="Item name"
+                      value={l.itemName}
+                      onChange={(e) =>
+                        updateBillLine(l.id, { itemName: e.target.value })
+                      }
+                    />
+                  </td>
+                  <td className="py-1 pr-2">
+                    <input
+                      className={`${FIELD} text-right`}
+                      value={l.qty}
+                      onChange={(e) => updateBillLine(l.id, { qty: e.target.value })}
+                    />
+                  </td>
+                  <td className="py-1 pr-2">
+                    <select
+                      className={FIELD}
+                      value={l.unit}
+                      onChange={(e) => updateBillLine(l.id, { unit: e.target.value })}
+                    >
+                      {VENDOR_BILL_UNITS.map((u) => (
+                        <option key={u} value={u}>
+                          {u}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="py-1 pr-2">
+                    <input
+                      className={`${FIELD} text-right`}
+                      placeholder="0"
+                      value={l.rate}
+                      onChange={(e) => updateBillLine(l.id, { rate: e.target.value })}
+                    />
+                  </td>
+                  <td className="py-1 pr-2">
+                    <input
+                      className={`${FIELD} text-right`}
+                      placeholder="0"
+                      value={l.discount}
+                      onChange={(e) =>
+                        updateBillLine(l.id, { discount: e.target.value })
+                      }
+                    />
+                  </td>
+                  <td className="py-1 pr-2">
+                    <input
+                      className={`${FIELD} text-right`}
+                      placeholder="0"
+                      value={l.tax}
+                      onChange={(e) => updateBillLine(l.id, { tax: e.target.value })}
+                    />
+                  </td>
+                  <td className="py-1 pr-2">
+                    <select
+                      className={FIELD}
+                      value={l.categoryId}
+                      onChange={(e) =>
+                        updateBillLine(l.id, { categoryId: e.target.value })
+                      }
+                    >
+                      {rootCategories.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="py-1 pr-2 text-right font-semibold">
+                    {formatInr(billLineTotalPaise(l))}
+                  </td>
+                  <td className="py-1">
+                    <button
+                      type="button"
+                      className={BTN_OUTLINE}
+                      onClick={() =>
+                        setBillLines((prev) =>
+                          prev.length > 1
+                            ? prev.filter((x) => x.id !== l.id)
+                            : prev,
+                        )
+                      }
+                    >
+                      ×
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="flex flex-wrap items-end gap-3">
+          <button
+            type="button"
+            className={BTN_OUTLINE}
+            onClick={() => setBillLines((prev) => [...prev, emptyBillLine()])}
+          >
+            + Add line
+          </button>
+          <label className="text-[11px] font-semibold text-[var(--muted)]">
+            Bill discount ₹
+            <input
+              className={`${FIELD} mt-1 w-28 text-right`}
+              value={billDiscount}
+              onChange={(e) => setBillDiscount(e.target.value)}
+            />
+          </label>
+          <label className="text-[11px] font-semibold text-[var(--muted)]">
+            Bill tax ₹
+            <input
+              className={`${FIELD} mt-1 w-28 text-right`}
+              value={billTax}
+              onChange={(e) => setBillTax(e.target.value)}
+            />
+          </label>
+          <div className="ml-auto text-right text-sm">
+            <p className="text-[var(--muted)]">
+              Subtotal: {formatInr(billTotals.subtotal)}
+            </p>
+            <p className="font-bold text-[var(--brand-deep)]">
+              Bill total: {formatInr(billTotals.grand)}
+            </p>
+          </div>
           <button type="button" className={BTN} onClick={addBill}>
             Create bill
           </button>
-        </section>
-      </div>
+        </div>
+      </section>
 
       <section className={CARD}>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">

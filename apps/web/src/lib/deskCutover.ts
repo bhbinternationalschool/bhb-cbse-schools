@@ -126,6 +126,7 @@ export type DeskModuleId =
   | "wa_templates"
   | "staff_hr"
   | "staff_advances"
+  | "staff_agreements"
   | "module_registry"
   | "fee_recovery_tasks"
   | "automation"

@@ -93,7 +93,9 @@ export function StaffDocUpload({ label, value, onChange, onError }: Props) {
         >
           <option value="missing">Missing</option>
           <option value="received">Received</option>
+          <option value="pending">Pending verification</option>
           <option value="verified">Verified</option>
+          <option value="rejected">Rejected</option>
         </select>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2">

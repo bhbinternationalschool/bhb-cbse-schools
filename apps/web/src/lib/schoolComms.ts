@@ -12,7 +12,7 @@ const STORAGE_KEY = "bhb_school_comms_v1";
 let serverSchoolCommsCache: SchoolCommsState | null = null;
 
 export type CommsAudience = "all" | "staff" | "parents" | "students";
-export type NoticeStatus = "draft" | "published" | "archived";
+export type NoticeStatus = "draft" | "scheduled" | "published" | "archived";
 
 export type SchoolNotice = {
   id: string;
@@ -23,6 +23,7 @@ export type SchoolNotice = {
   pinned: boolean;
   academicYearCode: string;
   publishedAt: string;
+  scheduledPublishAt: string;
   createdAt: string;
   createdBy: string;
   updatedAt: string;
@@ -37,6 +38,7 @@ export type SchoolNewsItem = {
   status: NoticeStatus;
   academicYearCode: string;
   publishedAt: string;
+  scheduledPublishAt: string;
   createdAt: string;
   createdBy: string;
   updatedAt: string;
@@ -59,6 +61,7 @@ export type GalleryAlbum = {
   status: NoticeStatus;
   academicYearCode: string;
   publishedAt: string;
+  scheduledPublishAt: string;
   createdAt: string;
   createdBy: string;
   updatedAt: string;
@@ -79,6 +82,102 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function parseScheduleAt(raw?: string): string {
+  const v = raw?.trim();
+  if (!v) return "";
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toISOString();
+}
+
+function resolvePublishSchedule(opts: {
+  publish?: boolean;
+  schedule?: boolean;
+  scheduledPublishAt?: string;
+  explicitStatus?: NoticeStatus;
+  prevStatus?: NoticeStatus;
+  prevScheduledAt?: string;
+}): { status: NoticeStatus; scheduledPublishAt: string; publishNow: boolean } {
+  if (opts.publish) {
+    return { status: "published", scheduledPublishAt: "", publishNow: true };
+  }
+  const at = parseScheduleAt(opts.scheduledPublishAt ?? opts.prevScheduledAt);
+  if (opts.schedule && at) {
+    if (new Date(at).getTime() <= Date.now()) {
+      return { status: "published", scheduledPublishAt: "", publishNow: true };
+    }
+    return { status: "scheduled", scheduledPublishAt: at, publishNow: false };
+  }
+  if (opts.explicitStatus) {
+    return {
+      status: opts.explicitStatus,
+      scheduledPublishAt:
+        opts.explicitStatus === "scheduled" ? at || opts.prevScheduledAt || "" : "",
+      publishNow: opts.explicitStatus === "published",
+    };
+  }
+  const status =
+    opts.prevStatus === "scheduled" || opts.prevStatus === "published"
+      ? "draft"
+      : (opts.prevStatus ?? "draft");
+  return { status, scheduledPublishAt: "", publishNow: false };
+}
+
+export type ScheduledCommsItem = {
+  kind: "notice" | "news" | "gallery";
+  id: string;
+  title: string;
+  scheduledPublishAt: string;
+  status: NoticeStatus;
+};
+
+export function listScheduledComms(state?: SchoolCommsState): ScheduledCommsItem[] {
+  const s = state ?? loadSchoolComms();
+  const items: ScheduledCommsItem[] = [];
+  for (const n of s.notices) {
+    if (n.status === "scheduled" && n.scheduledPublishAt) {
+      items.push({
+        kind: "notice",
+        id: n.id,
+        title: n.title,
+        scheduledPublishAt: n.scheduledPublishAt,
+        status: n.status,
+      });
+    }
+  }
+  for (const n of s.news) {
+    if (n.status === "scheduled" && n.scheduledPublishAt) {
+      items.push({
+        kind: "news",
+        id: n.id,
+        title: n.title,
+        scheduledPublishAt: n.scheduledPublishAt,
+        status: n.status,
+      });
+    }
+  }
+  for (const a of s.albums) {
+    if (a.status === "scheduled" && a.scheduledPublishAt) {
+      items.push({
+        kind: "gallery",
+        id: a.id,
+        title: a.title,
+        scheduledPublishAt: a.scheduledPublishAt,
+        status: a.status,
+      });
+    }
+  }
+  return items.sort((a, b) =>
+    a.scheduledPublishAt.localeCompare(b.scheduledPublishAt),
+  );
+}
+
+function withScheduleDefaults<T extends { scheduledPublishAt?: string }>(row: T): T & {
+  scheduledPublishAt: string;
+} {
+  return { ...row, scheduledPublishAt: row.scheduledPublishAt ?? "" };
+}
+
 export function emptySchoolComms(): SchoolCommsState {
   return { version: 1, notices: [], news: [], albums: [], photos: [] };
 }
@@ -88,9 +187,15 @@ function normalize(raw: Partial<SchoolCommsState> | null): SchoolCommsState {
   if (!raw) return base;
   return {
     version: 1,
-    notices: Array.isArray(raw.notices) ? (raw.notices as SchoolNotice[]) : [],
-    news: Array.isArray(raw.news) ? (raw.news as SchoolNewsItem[]) : [],
-    albums: Array.isArray(raw.albums) ? (raw.albums as GalleryAlbum[]) : [],
+    notices: Array.isArray(raw.notices)
+      ? (raw.notices as SchoolNotice[]).map((n) => withScheduleDefaults(n))
+      : [],
+    news: Array.isArray(raw.news)
+      ? (raw.news as SchoolNewsItem[]).map((n) => withScheduleDefaults(n))
+      : [],
+    albums: Array.isArray(raw.albums)
+      ? (raw.albums as GalleryAlbum[]).map((a) => withScheduleDefaults(a))
+      : [],
     photos: Array.isArray(raw.photos) ? (raw.photos as GalleryPhoto[]) : [],
   };
 }
@@ -192,6 +297,8 @@ export function upsertNotice(input: {
   academicYearCode?: string;
   createdBy: string;
   publish?: boolean;
+  schedule?: boolean;
+  scheduledPublishAt?: string;
 }):
   | { ok: true; notice: SchoolNotice; state: SchoolCommsState }
   | { ok: false; error: string } {
@@ -209,50 +316,63 @@ export function upsertNotice(input: {
 
   const state = loadSchoolComms();
   const now = nowIso();
-  const publish = input.publish === true || input.status === "published";
   let notice: SchoolNotice;
   if (input.id) {
     const i = state.notices.findIndex((n) => n.id === input.id);
     if (i < 0) return { ok: false, error: "Notice not found" };
     const prev = state.notices[i]!;
+    const resolved = resolvePublishSchedule({
+      publish: input.publish,
+      schedule: input.schedule,
+      scheduledPublishAt: input.scheduledPublishAt,
+      explicitStatus: input.status,
+      prevStatus: prev.status,
+      prevScheduledAt: prev.scheduledPublishAt,
+    });
     notice = {
       ...prev,
       title,
       body,
       audience: input.audience,
       pinned: input.pinned ?? prev.pinned,
-      status: publish ? "published" : (input.status ?? prev.status),
-      publishedAt: publish
-        ? prev.publishedAt || now
-        : prev.publishedAt,
+      status: resolved.status,
+      publishedAt: resolved.publishNow ? prev.publishedAt || now : prev.publishedAt,
+      scheduledPublishAt: resolved.scheduledPublishAt,
       updatedAt: now,
     };
     const notices = [...state.notices];
     notices[i] = notice;
     const next = { ...state, notices };
     saveSchoolComms(next);
-    if (publish && prev.status !== "published") {
+    if (resolved.publishNow && prev.status !== "published") {
       void pushNoticeNotifications(notice);
     }
     return { ok: true, notice, state: next };
   }
 
+  const resolved = resolvePublishSchedule({
+    publish: input.publish,
+    schedule: input.schedule,
+    scheduledPublishAt: input.scheduledPublishAt,
+    explicitStatus: input.status,
+  });
   notice = {
     id: nid("ntc"),
     title,
     body,
     audience: input.audience,
-    status: publish ? "published" : "draft",
+    status: resolved.status,
     pinned: !!input.pinned,
     academicYearCode: input.academicYearCode || DEFAULT_AY,
-    publishedAt: publish ? now : "",
+    publishedAt: resolved.publishNow ? now : "",
+    scheduledPublishAt: resolved.scheduledPublishAt,
     createdAt: now,
     createdBy: input.createdBy || "office",
     updatedAt: now,
   };
   const next = { ...state, notices: [notice, ...state.notices] };
   saveSchoolComms(next);
-  if (publish) void pushNoticeNotifications(notice);
+  if (resolved.publishNow) void pushNoticeNotifications(notice);
   return { ok: true, notice, state: next };
 }
 
@@ -271,6 +391,7 @@ export function setNoticeStatus(
     status,
     publishedAt:
       status === "published" ? prev.publishedAt || now : prev.publishedAt,
+    scheduledPublishAt: status === "published" ? "" : prev.scheduledPublishAt,
     updatedAt: now,
   };
   const notices = [...state.notices];
@@ -319,6 +440,8 @@ export function upsertNews(input: {
   academicYearCode?: string;
   createdBy: string;
   publish?: boolean;
+  schedule?: boolean;
+  scheduledPublishAt?: string;
 }):
   | { ok: true; item: SchoolNewsItem; state: SchoolCommsState }
   | { ok: false; error: string } {
@@ -336,48 +459,63 @@ export function upsertNews(input: {
 
   const state = loadSchoolComms();
   const now = nowIso();
-  const publish = input.publish === true || input.status === "published";
   let item: SchoolNewsItem;
   if (input.id) {
     const i = state.news.findIndex((n) => n.id === input.id);
     if (i < 0) return { ok: false, error: "News not found" };
     const prev = state.news[i]!;
+    const resolved = resolvePublishSchedule({
+      publish: input.publish,
+      schedule: input.schedule,
+      scheduledPublishAt: input.scheduledPublishAt,
+      explicitStatus: input.status,
+      prevStatus: prev.status,
+      prevScheduledAt: prev.scheduledPublishAt,
+    });
     item = {
       ...prev,
       title,
       summary: (input.summary ?? prev.summary).trim(),
       body,
       coverUrl: input.coverUrl ?? prev.coverUrl,
-      status: publish ? "published" : (input.status ?? prev.status),
-      publishedAt: publish ? prev.publishedAt || now : prev.publishedAt,
+      status: resolved.status,
+      publishedAt: resolved.publishNow ? prev.publishedAt || now : prev.publishedAt,
+      scheduledPublishAt: resolved.scheduledPublishAt,
       updatedAt: now,
     };
     const news = [...state.news];
     news[i] = item;
     const next = { ...state, news };
     saveSchoolComms(next);
-    if (publish && prev.status !== "published") {
+    if (resolved.publishNow && prev.status !== "published") {
       void pushNewsNotifications(item);
     }
     return { ok: true, item, state: next };
   }
 
+  const resolved = resolvePublishSchedule({
+    publish: input.publish,
+    schedule: input.schedule,
+    scheduledPublishAt: input.scheduledPublishAt,
+    explicitStatus: input.status,
+  });
   item = {
     id: nid("nws"),
     title,
     summary: (input.summary || "").trim() || body.slice(0, 120),
     body,
     coverUrl: input.coverUrl || "",
-    status: publish ? "published" : "draft",
+    status: resolved.status,
     academicYearCode: input.academicYearCode || DEFAULT_AY,
-    publishedAt: publish ? now : "",
+    publishedAt: resolved.publishNow ? now : "",
+    scheduledPublishAt: resolved.scheduledPublishAt,
     createdAt: now,
     createdBy: input.createdBy || "office",
     updatedAt: now,
   };
   const next = { ...state, news: [item, ...state.news] };
   saveSchoolComms(next);
-  if (publish) void pushNewsNotifications(item);
+  if (resolved.publishNow) void pushNewsNotifications(item);
   return { ok: true, item, state: next };
 }
 
@@ -396,6 +534,7 @@ export function setNewsStatus(
     status,
     publishedAt:
       status === "published" ? prev.publishedAt || now : prev.publishedAt,
+    scheduledPublishAt: status === "published" ? "" : prev.scheduledPublishAt,
     updatedAt: now,
   };
   const news = [...state.news];
@@ -453,6 +592,8 @@ export function upsertAlbum(input: {
   academicYearCode?: string;
   createdBy: string;
   publish?: boolean;
+  schedule?: boolean;
+  scheduledPublishAt?: string;
 }):
   | { ok: true; album: GalleryAlbum; state: SchoolCommsState }
   | { ok: false; error: string } {
@@ -468,19 +609,27 @@ export function upsertAlbum(input: {
 
   const state = loadSchoolComms();
   const now = nowIso();
-  const publish = input.publish === true || input.status === "published";
   let album: GalleryAlbum;
   if (input.id) {
     const i = state.albums.findIndex((a) => a.id === input.id);
     if (i < 0) return { ok: false, error: "Album not found" };
     const prev = state.albums[i]!;
+    const resolved = resolvePublishSchedule({
+      publish: input.publish,
+      schedule: input.schedule,
+      scheduledPublishAt: input.scheduledPublishAt,
+      explicitStatus: input.status,
+      prevStatus: prev.status,
+      prevScheduledAt: prev.scheduledPublishAt,
+    });
     album = {
       ...prev,
       title,
       description: (input.description ?? prev.description).trim(),
       coverUrl: input.coverUrl ?? prev.coverUrl,
-      status: publish ? "published" : (input.status ?? prev.status),
-      publishedAt: publish ? prev.publishedAt || now : prev.publishedAt,
+      status: resolved.status,
+      publishedAt: resolved.publishNow ? prev.publishedAt || now : prev.publishedAt,
+      scheduledPublishAt: resolved.scheduledPublishAt,
       updatedAt: now,
     };
     const albums = [...state.albums];
@@ -490,14 +639,21 @@ export function upsertAlbum(input: {
     return { ok: true, album, state: next };
   }
 
+  const resolved = resolvePublishSchedule({
+    publish: input.publish,
+    schedule: input.schedule,
+    scheduledPublishAt: input.scheduledPublishAt,
+    explicitStatus: input.status,
+  });
   album = {
     id: nid("alb"),
     title,
     description: (input.description || "").trim(),
     coverUrl: input.coverUrl || "",
-    status: publish ? "published" : "draft",
+    status: resolved.status,
     academicYearCode: input.academicYearCode || DEFAULT_AY,
-    publishedAt: publish ? now : "",
+    publishedAt: resolved.publishNow ? now : "",
+    scheduledPublishAt: resolved.scheduledPublishAt,
     createdAt: now,
     createdBy: input.createdBy || "office",
     updatedAt: now,
@@ -562,6 +718,7 @@ export function setAlbumStatus(
     status,
     publishedAt:
       status === "published" ? prev.publishedAt || now : prev.publishedAt,
+    scheduledPublishAt: status === "published" ? "" : prev.scheduledPublishAt,
     updatedAt: now,
   };
   const albums = [...state.albums];
@@ -581,48 +738,4 @@ export function setAlbumStatus(
     });
   }
   return { ok: true, state: next };
-}
-
-export function seedSchoolCommsDemo(by = "Office"): SchoolCommsState {
-  let state = loadSchoolComms();
-  if (!schoolCommsIsEmpty(state)) return state;
-  const now = nowIso();
-  const notice: SchoolNotice = {
-    id: nid("ntc"),
-    title: `Welcome to ${TENANT.nameDisplay}`,
-    body: "Circulars and school notices will appear here for staff and parents.",
-    audience: "all",
-    status: "published",
-    pinned: true,
-    academicYearCode: DEFAULT_AY,
-    publishedAt: now,
-    createdAt: now,
-    createdBy: by,
-    updatedAt: now,
-  };
-  const news: SchoolNewsItem = {
-    id: nid("nws"),
-    title: "School year highlights",
-    summary: "Stay tuned for events, achievements and campus updates.",
-    body: "This is your school news feed. Office can publish stories with optional cover images.",
-    coverUrl: "",
-    status: "published",
-    academicYearCode: DEFAULT_AY,
-    publishedAt: now,
-    createdAt: now,
-    createdBy: by,
-    updatedAt: now,
-  };
-  state = {
-    version: 1,
-    notices: [notice],
-    news: [news],
-    albums: [],
-    photos: [],
-  };
-  writeSchoolCommsLocalRaw(state);
-  void import("@/lib/schoolCommsPersistence").then(({ scheduleSchoolCommsSync }) => {
-    scheduleSchoolCommsSync(state);
-  });
-  return state;
 }

@@ -22,6 +22,7 @@ export type DomainBlobTable =
   | "staff_attendance_state"
   | "staff_hr_state"
   | "staff_advances_state"
+  | "staff_agreements_state"
   | "rbac_state"
   | "module_registry_state"
   | "trust_state"

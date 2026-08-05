@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { getDemoSession } from "@/lib/auth";
+import {
+  authorizeSchoolDataDesk,
+  SCHOOL_DATA_DESK_RBAC,
+} from "@/lib/apiRouteAuth.server";
 import type { AttendanceState } from "@/lib/attendance";
 import type { AttendanceDeskAncillary } from "@/lib/attendanceDeskAncillary.server";
 import {
@@ -10,19 +13,10 @@ import {
 
 export const runtime = "nodejs";
 
-async function authorize(req: Request): Promise<boolean> {
-  const secret = process.env.MIRROR_SYNC_SECRET?.trim();
-  const header = req.headers.get("x-mirror-secret")?.trim();
-  if (secret && header && header === secret) return true;
-  const session = await getDemoSession();
-  return !!session;
-}
-
 /** GET — pull full attendance desk from normalized tables */
 export async function GET(req: Request) {
-  if (!(await authorize(req))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["attendance-registers"], "GET");
+  if (!auth.ok) return auth.response
   const desk = await fetchAttendanceDeskFromDb();
   return NextResponse.json({
     ok: true,
@@ -39,9 +33,8 @@ type DeskPostBody = Pick<AttendanceState, "registers"> &
 
 /** POST — push attendance desk snapshot (registers + policy + nudges + exceptions) */
 export async function POST(req: Request) {
-  if (!(await authorize(req))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["attendance-registers"], "POST");
+  if (!auth.ok) return auth.response
   if (!attendanceDualWriteDbEnabled()) {
     return NextResponse.json({
       ok: true,

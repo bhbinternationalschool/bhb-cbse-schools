@@ -9,7 +9,6 @@ import {
   listNotices,
   loadSchoolComms,
   photosForAlbum,
-  seedSchoolCommsDemo,
   type GalleryAlbum,
   type SchoolCommsState,
   type SchoolNewsItem,
@@ -36,7 +35,6 @@ export function ParentCommsPortal({
       );
       await ensureSchoolCommsHydrated();
       if (cancelled) return;
-      seedSchoolCommsDemo(guardianDisplayName);
       setComms(loadSchoolComms());
     })();
     return () => {

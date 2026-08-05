@@ -5,6 +5,7 @@ import Link from "next/link";
 import { BookOpen } from "lucide-react";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
+import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import {
   DEFAULT_AY,
@@ -44,6 +45,7 @@ import {
 } from "@/lib/homework";
 import { ClassroomSyncPanel } from "@/components/homework/ClassroomSyncPanel";
 import { TENANT } from "@/lib/types";
+import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 
 type HwTab =
   | "dashboard"
@@ -63,13 +65,6 @@ const TABS: ModuleTabItem[] = [
   { id: "submissions", label: "Submissions", tone: "green" },
   { id: "reports", label: "Reports", tone: "slate" },
 ];
-
-const field =
-  "rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2.5 py-1.5 text-sm text-[var(--brand-deep)]";
-const btn =
-  "rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50";
-const btnOutline =
-  "rounded-lg border border-[rgba(32,48,80,0.2)] bg-white px-3 py-1.5 text-sm text-[var(--brand-deep)]";
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -420,19 +415,14 @@ export function HomeworkWorkspace() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-4 pb-10 pt-4">
-      <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold text-[var(--brand-deep)]">
-            <BookOpen className="h-7 w-7" aria-hidden />
-            Homework &amp; Class diary
-          </h1>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            Daily posts by class–subject · diary for whole class · parent seen &amp;
-            submissions (§19a)
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
+    <ErpWorkspaceShell
+      title="Homework & Class diary"
+      subtitle="Daily posts by class–subject · diary for whole class · parent seen & submissions (§19a)"
+      icon={<BookOpen className="size-6" aria-hidden />}
+      error={error}
+      notice={notice}
+      actions={
+        <>
           <label className="flex items-center gap-2 text-xs text-[var(--muted)]">
             <input
               type="checkbox"
@@ -452,66 +442,56 @@ export function HomeworkWorkspace() {
           <Link href="/reports?module=homework" className={btnOutline}>
             Reports Center
           </Link>
+        </>
+      }
+      toolbar={
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="text-xs text-[var(--muted)]">
+            Date
+            <input
+              type="date"
+              className={`${field} mt-1 block`}
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+            />
+          </label>
+          <label className="text-xs text-[var(--muted)]">
+            Class
+            <select
+              className={`${field} mt-1 block min-w-[8rem]`}
+              value={classId}
+              onChange={(e) => {
+                setClassId(e.target.value);
+                setSectionId("");
+              }}
+            >
+              {classOptions.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-xs text-[var(--muted)]">
+            Section
+            <select
+              className={`${field} mt-1 block min-w-[6rem]`}
+              value={sectionId}
+              onChange={(e) => setSectionId(e.target.value)}
+            >
+              {sectionOptions.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {defaultsNote ? (
+            <p className="self-end pb-2 text-xs text-[#0f766e]">{defaultsNote}</p>
+          ) : null}
         </div>
-      </header>
-
-      {error ? (
-        <p className="mb-3 rounded-lg bg-[rgba(180,35,24,0.08)] px-3 py-2 text-sm text-[#b42318]">
-          {error}
-        </p>
-      ) : null}
-      {notice ? (
-        <p className="mb-3 rounded-lg bg-[rgba(15,122,76,0.1)] px-3 py-2 text-sm text-[#0f7a4c]">
-          {notice}
-        </p>
-      ) : null}
-
-      <div className="mb-3 flex flex-wrap items-end gap-2">
-        <label className="text-xs text-[var(--muted)]">
-          Date
-          <input
-            type="date"
-            className={`${field} mt-1 block`}
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-          />
-        </label>
-        <label className="text-xs text-[var(--muted)]">
-          Class
-          <select
-            className={`${field} mt-1 block min-w-[8rem]`}
-            value={classId}
-            onChange={(e) => {
-              setClassId(e.target.value);
-              setSectionId("");
-            }}
-          >
-            {classOptions.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-xs text-[var(--muted)]">
-          Section
-          <select
-            className={`${field} mt-1 block min-w-[6rem]`}
-            value={sectionId}
-            onChange={(e) => setSectionId(e.target.value)}
-          >
-            {sectionOptions.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        {defaultsNote ? (
-          <p className="self-end pb-2 text-xs text-[#0f766e]">{defaultsNote}</p>
-        ) : null}
-      </div>
-
+      }
+    >
       {notifyTarget ? (
         <div className="mb-4 rounded-xl border border-[rgba(21,128,61,0.25)] bg-[rgba(21,128,61,0.06)] px-4 py-3">
           <div className="flex flex-wrap items-start justify-between gap-2">
@@ -1065,7 +1045,7 @@ export function HomeworkWorkspace() {
           </ul>
         </section>
       ) : null}
-    </div>
+    </ErpWorkspaceShell>
   );
 }
 

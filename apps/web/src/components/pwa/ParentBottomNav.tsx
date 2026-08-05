@@ -10,6 +10,7 @@ import {
   MoreHorizontal,
   Newspaper,
   Images,
+  UserRound,
 } from "lucide-react";
 import { TENANT } from "@/lib/types";
 
@@ -21,7 +22,8 @@ export type ParentNavTab =
   | "leave"
   | "subjects"
   | "news"
-  | "gallery";
+  | "gallery"
+  | "profile";
 
 type PrimaryId = "fees" | "homework" | "notices" | "ptm" | "more";
 
@@ -40,6 +42,7 @@ const PRIMARY: {
 
 const MORE_ITEMS: { tab: ParentNavTab; label: string; icon: typeof Newspaper }[] =
   [
+    { tab: "profile", label: "Profile", icon: UserRound },
     { tab: "news", label: "News", icon: Newspaper },
     { tab: "gallery", label: "Gallery", icon: Images },
     { tab: "leave", label: "Leave", icon: Calendar },

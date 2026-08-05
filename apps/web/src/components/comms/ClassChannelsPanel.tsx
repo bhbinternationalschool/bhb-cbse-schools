@@ -5,6 +5,7 @@ import { useDemoSession } from "@/components/shell/SessionContext";
 import { applyClassChannelDraftToErp } from "@/lib/waClassChannelApply";
 import { loadMasters } from "@/lib/masters";
 import { TENANT } from "@/lib/types";
+import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 
 type Channel = {
   id: string;
@@ -46,13 +47,6 @@ type Thread = {
   updatedAt: string;
   messages: { role: string; text: string; at: string; by: string }[];
 };
-
-const btn =
-  "rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50";
-const btnOutline =
-  "rounded-lg border border-[rgba(32,48,80,0.2)] bg-white px-3 py-1.5 text-sm text-[var(--brand-deep)]";
-const field =
-  "w-full rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2.5 py-1.5 text-sm text-[var(--brand-deep)]";
 
 export function ClassChannelsPanel() {
   const session = useDemoSession();

@@ -16,6 +16,13 @@ import {
 import { mergeDbDeskIntoStaffAttendanceState } from "@/lib/staffAttendanceNormalizedMerge";
 import { staffAttendanceReadFromDbEnabled } from "@/lib/staffAttendanceDbConfig";
 import { deskSkipBlobHydrateClient, deskSkipBlobPushClient } from "@/lib/deskCutover";
+import {
+  isDeskHydrated,
+  markDeskHydrated,
+  resetDeskHydrated,
+} from "@/lib/deskHydrateGuard";
+
+const MODULE = "staff_attendance";
 
 const blob = createDomainBlobPersistence<StaffAttendanceState>({
   table: "staff_attendance_state",
@@ -27,7 +34,10 @@ const blob = createDomainBlobPersistence<StaffAttendanceState>({
 });
 
 export const staffAttendanceRemoteEnabled = blob.remoteEnabled;
-export const resetStaffAttendancePersistenceCache = blob.resetCache;
+export function resetStaffAttendancePersistenceCache() {
+  resetDeskHydrated(MODULE);
+  blob.resetCache();
+}
 
 export function scheduleStaffAttendanceSync(state: StaffAttendanceState) {
   if (typeof window === "undefined") {
@@ -66,6 +76,9 @@ export async function pushStaffAttendanceRemoteServer(
 }
 
 export async function ensureStaffAttendanceHydrated(): Promise<boolean> {
+  if (isDeskHydrated(MODULE)) return false;
+  markDeskHydrated(MODULE);
+
   const readFromDb = staffAttendanceReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("staff_attendance")
     ? false

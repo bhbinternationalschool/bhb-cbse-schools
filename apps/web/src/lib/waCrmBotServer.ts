@@ -264,7 +264,26 @@ export async function handleWaCrmBotInbound(opts: {
       : detectCrmBotIntent(text);
   const { findAdmissionLeadByMobile, loadAdmissions, stageLabel } =
     await import("@/lib/admissions");
-  const leadRow = findAdmissionLeadByMobile(loadAdmissions(), mobile10);
+
+  let admissionsState = loadAdmissions();
+  let leadCreatedEnquiryNo: string | null = null;
+  let leadRow = findAdmissionLeadByMobile(admissionsState, mobile10);
+  if (!leadRow) {
+    const { ingestWhatsAppAdmissionLead } = await import(
+      "@/lib/admissionsLeadIngest.server"
+    );
+    const ingested = await ingestWhatsAppAdmissionLead({
+      mobile10,
+      profileName: profile || opts.profileName,
+      waId: opts.fromWaId,
+      inboundText: text,
+    });
+    if (ingested.ok) {
+      admissionsState = ingested.state;
+      leadRow = findAdmissionLeadByMobile(admissionsState, mobile10);
+      if (ingested.created) leadCreatedEnquiryNo = ingested.enquiryNo;
+    }
+  }
   const leadCtx = leadRow
     ? {
         childName: leadRow.childName,
@@ -290,6 +309,15 @@ export async function handleWaCrmBotInbound(opts: {
         : `We have enquiry *${leadRow.enquiryNo}* on file.`,
       "",
       "Reply: FEE · REGISTER · DOCS · STATUS · VISIT · HUMAN",
+    ].join("\n");
+  }
+  if (leadCreatedEnquiryNo && intent === "unknown" && !opts.forceEscalate && !isGreeting) {
+    replyText = [
+      `Thank you for contacting *${TENANT.nameDisplay} Admissions*.`,
+      `We created enquiry *${leadCreatedEnquiryNo}* for this WhatsApp number.`,
+      "",
+      "Reply: FEE · REGISTER · DOCS · STATUS · VISIT · HUMAN",
+      `Register online: ${publicRegisterUrl()}`,
     ].join("\n");
   }
   if (leadRow?.guardianName && !thread.parentName) {

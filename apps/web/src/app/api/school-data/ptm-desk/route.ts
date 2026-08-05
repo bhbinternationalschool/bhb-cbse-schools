@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { getDemoSession } from "@/lib/auth";
+import {
+  authorizeSchoolDataDesk,
+  SCHOOL_DATA_DESK_RBAC,
+} from "@/lib/apiRouteAuth.server";
 import type { PtmState } from "@/lib/ptm";
 import { ptmDualWriteDbEnabled } from "@/lib/ptmDbConfig";
 import {
@@ -9,19 +12,10 @@ import {
 
 export const runtime = "nodejs";
 
-async function authorize(req: Request): Promise<boolean> {
-  const secret = process.env.MIRROR_SYNC_SECRET?.trim();
-  const header = req.headers.get("x-mirror-secret")?.trim();
-  if (secret && header && header === secret) return true;
-  const session = await getDemoSession();
-  return !!session;
-}
-
 /** GET — pull PTM desk from normalized tables */
 export async function GET(req: Request) {
-  if (!(await authorize(req))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["ptm-desk"], "GET");
+  if (!auth.ok) return auth.response
   const { bundle, meta } = await fetchPtmDeskFromDb();
   return NextResponse.json({
     ok: true,
@@ -42,9 +36,8 @@ type PtmDeskPostBody = Pick<
 
 /** POST — push full PTM desk snapshot */
 export async function POST(req: Request) {
-  if (!(await authorize(req))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["ptm-desk"], "POST");
+  if (!auth.ok) return auth.response
   if (!ptmDualWriteDbEnabled()) {
     return NextResponse.json({
       ok: true,

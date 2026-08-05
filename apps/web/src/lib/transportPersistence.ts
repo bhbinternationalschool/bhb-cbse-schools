@@ -16,6 +16,13 @@ import {
 import { mergeDbDeskIntoTransportState } from "@/lib/transportNormalizedMerge";
 import { transportReadFromDbEnabled } from "@/lib/transportDbConfig";
 import { deskSkipBlobHydrateClient, deskSkipBlobPushClient } from "@/lib/deskCutover";
+import {
+  isDeskHydrated,
+  markDeskHydrated,
+  resetDeskHydrated,
+} from "@/lib/deskHydrateGuard";
+
+const MODULE = "transport";
 
 const blob = createDomainBlobPersistence<TransportState>({
   table: "transport_state",
@@ -27,7 +34,10 @@ const blob = createDomainBlobPersistence<TransportState>({
 });
 
 export const transportRemoteEnabled = blob.remoteEnabled;
-export const resetTransportPersistenceCache = blob.resetCache;
+export function resetTransportPersistenceCache() {
+  resetDeskHydrated(MODULE);
+  blob.resetCache();
+}
 
 export function scheduleTransportSync(state: TransportState) {
   if (typeof window === "undefined") {
@@ -60,6 +70,9 @@ export async function pushTransportRemoteServer(
 }
 
 export async function ensureTransportHydrated(): Promise<boolean> {
+  if (isDeskHydrated(MODULE)) return false;
+  markDeskHydrated(MODULE);
+
   const readFromDb = transportReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("transport")
     ? false

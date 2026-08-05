@@ -11,6 +11,11 @@
 
 import { NextResponse } from "next/server";
 import {
+  isProductionEnv,
+  requireJobSecret,
+  requireStaffPermission,
+} from "@/lib/apiRouteAuth.server";
+import {
   buildWaTemplateBodyComponent,
   buildWaTemplateMediaHeader,
   sendWhatsAppTemplate,
@@ -52,12 +57,15 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const secret = process.env.WA_DISPATCH_SECRET;
+  const secret = process.env.WA_DISPATCH_SECRET?.trim();
   if (secret) {
     const hdr = req.headers.get("x-wa-dispatch-secret") || "";
     if (hdr !== secret) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+  } else if (isProductionEnv()) {
+    const auth = await requireStaffPermission(req, "admissions", "edit");
+    if (!auth.ok) return auth.response;
   }
 
   let body: { messages?: DispatchItem[]; dryRun?: boolean };

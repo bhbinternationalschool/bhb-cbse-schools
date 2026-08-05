@@ -55,6 +55,8 @@ export type WaCarouselCard = {
   id: string;
   headerFormat: "IMAGE" | "VIDEO" | "NONE";
   mediaUrl?: string;
+  /** Original filename for document / image uploads */
+  mediaFileName?: string;
   body: string;
   buttons: WaTemplateButton[];
 };
@@ -82,6 +84,8 @@ export type WaTemplate = {
   /** Named placeholders e.g. guardianName, childName */
   variables: string[];
   mediaUrl: string;
+  /** Uploaded header media filename (PDF/JPG etc.) */
+  mediaFileName: string;
   carousel: WaCarouselCard[];
   /** Free-text fallback for 24h session / wa.me */
   localFallbackBody: string;
@@ -103,6 +107,116 @@ function nid(prefix: string) {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+export function collectTemplateVariables(parts: {
+  headerText?: string;
+  body?: string;
+  footer?: string;
+  carousel?: WaCarouselCard[];
+}): string[] {
+  const carouselText = (parts.carousel || []).map((c) => c.body).join("\n");
+  return extractVariables(
+    `${parts.headerText || ""}\n${parts.body || ""}\n${parts.footer || ""}\n${carouselText}`,
+  );
+}
+
+export type WaTemplateVariableDef = {
+  key: string;
+  label: string;
+  group: string;
+  sample: string;
+  hint?: string;
+};
+
+/** Named placeholders for WhatsApp template body / automation payloads. */
+export const WA_TEMPLATE_VARIABLES: WaTemplateVariableDef[] = [
+  { key: "guardianName", label: "Guardian / parent name", group: "Parent", sample: "Priya Sharma" },
+  { key: "childName", label: "Child name", group: "Student", sample: "Aarav Sharma" },
+  { key: "studentName", label: "Student name", group: "Student", sample: "Aarav Sharma" },
+  { key: "classLabel", label: "Class & section", group: "Student", sample: "Class 5 A" },
+  { key: "className", label: "Class name", group: "Student", sample: "Class 5" },
+  { key: "schoolName", label: "School name", group: "School", sample: "BHB International School" },
+  { key: "feeDue", label: "Fee amount due", group: "Fees", sample: "₹12,500" },
+  { key: "amount", label: "Amount", group: "Fees", sample: "₹5,000" },
+  { key: "dueDate", label: "Due date", group: "Fees", sample: "15 Aug 2026" },
+  { key: "payLink", label: "Payment link", group: "Fees", sample: "https://school.example/pay" },
+  { key: "receiptNo", label: "Receipt number", group: "Fees", sample: "RCP-1042" },
+  { key: "paidOn", label: "Paid on date", group: "Fees", sample: "4 Aug 2026" },
+  { key: "stage", label: "Reminder stage", group: "Fees", sample: "2" },
+  { key: "registerLink", label: "Registration link", group: "Admissions", sample: "https://school.example/register" },
+  { key: "homeworkTitle", label: "Homework title", group: "Academic", sample: "Math worksheet ch.4" },
+  { key: "subject", label: "Subject", group: "Academic", sample: "Mathematics" },
+  { key: "examName", label: "Exam name", group: "Academic", sample: "Term 1" },
+  { key: "ptmDate", label: "PTM date", group: "Academic", sample: "12 Aug 2026" },
+  { key: "ptmTime", label: "PTM time", group: "Academic", sample: "10:00 AM" },
+  { key: "ptmLink", label: "PTM booking link", group: "Academic", sample: "https://school.example/ptm" },
+  { key: "leaveStatus", label: "Leave status", group: "Leave", sample: "Approved" },
+  { key: "leaveFrom", label: "Leave from", group: "Leave", sample: "5 Aug 2026" },
+  { key: "leaveTo", label: "Leave to", group: "Leave", sample: "7 Aug 2026" },
+  { key: "staffName", label: "Staff name", group: "Staff", sample: "Rajesh Kumar" },
+  { key: "noticeTitle", label: "Notice title", group: "Comms", sample: "Holiday announcement" },
+  { key: "noticeBody", label: "Notice body", group: "Comms", sample: "School closed on Friday." },
+  { key: "docTitle", label: "Document title", group: "Vault", sample: "Fire NOC" },
+  { key: "expiryDate", label: "Expiry date", group: "Vault", sample: "31 Dec 2026" },
+  { key: "orderNo", label: "Store order no.", group: "Store", sample: "STR-882" },
+  { key: "orderStatus", label: "Store order status", group: "Store", sample: "Ready" },
+  { key: "routeName", label: "Transport route", group: "Transport", sample: "Route 3 — City" },
+  { key: "certType", label: "Certificate type", group: "Certificates", sample: "Bonafide" },
+  { key: "date", label: "Date", group: "General", sample: "4 Aug 2026" },
+  { key: "time", label: "Time", group: "General", sample: "10:30 AM" },
+  { key: "otp", label: "OTP code", group: "General", sample: "482910" },
+];
+
+export function waTemplateVariableGroups(): string[] {
+  return [...new Set(WA_TEMPLATE_VARIABLES.map((v) => v.group))];
+}
+
+export function insertWaVariableToken(text: string, key: string): string {
+  const token = `{{${key}}}`;
+  const trimmed = text.trimEnd();
+  if (!trimmed) return token;
+  if (trimmed.endsWith(" ")) return `${trimmed}${token}`;
+  return `${trimmed} ${token}`;
+}
+
+export const WA_TEMPLATE_MEDIA_MAX_BYTES = 1_200_000;
+
+export async function readWaTemplateMediaFile(
+  file: File,
+  kind: "image" | "video" | "document",
+): Promise<
+  | { ok: true; dataUrl: string; fileName: string }
+  | { ok: false; error: string }
+> {
+  if (file.size > WA_TEMPLATE_MEDIA_MAX_BYTES) {
+    return {
+      ok: false,
+      error: "File too large — max 1.2 MB for desk storage. Use a CDN URL for production.",
+    };
+  }
+  if (kind === "image" && !/^image\/(jpeg|png|webp)$/i.test(file.type)) {
+    return { ok: false, error: "Use JPG, PNG, or WebP for image headers." };
+  }
+  if (kind === "video" && !/^video\/mp4$/i.test(file.type)) {
+    return { ok: false, error: "Use MP4 for video headers." };
+  }
+  if (kind === "document" && file.type !== "application/pdf") {
+    return { ok: false, error: "Use PDF for document headers." };
+  }
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result || "");
+      if (!dataUrl.startsWith("data:")) {
+        resolve({ ok: false, error: "Could not read file" });
+        return;
+      }
+      resolve({ ok: true, dataUrl, fileName: file.name });
+    };
+    reader.onerror = () => resolve({ ok: false, error: "Upload failed" });
+    reader.readAsDataURL(file);
+  });
 }
 
 function extractVariables(body: string): string[] {
@@ -494,6 +608,7 @@ function buildSeedTemplate(
       [headerText, body, footer, ...carousel.map((c) => c.body)].join("\n"),
     ),
     mediaUrl: def.mediaUrl || "",
+    mediaFileName: "",
     carousel,
     localFallbackBody: body,
     paused: false,
@@ -559,6 +674,7 @@ function normalizeTemplate(raw: Partial<WaTemplate> | null): WaTemplate | null {
       ? raw.variables.map(String)
       : extractVariables(body),
     mediaUrl: String(raw.mediaUrl || ""),
+    mediaFileName: String(raw.mediaFileName || ""),
     carousel: Array.isArray(raw.carousel)
       ? raw.carousel.map((c, i) => ({
           id: String(c?.id || `card_${i}`),
@@ -567,6 +683,7 @@ function normalizeTemplate(raw: Partial<WaTemplate> | null): WaTemplate | null {
               ? c.headerFormat
               : "NONE",
           mediaUrl: String(c?.mediaUrl || ""),
+          mediaFileName: String(c?.mediaFileName || ""),
           body: String(c?.body || ""),
           buttons: Array.isArray(c?.buttons) ? c.buttons : [],
         }))
@@ -705,6 +822,10 @@ export function updateTemplateLocal(
       | "headerText"
       | "localFallbackBody"
       | "mediaUrl"
+      | "mediaFileName"
+      | "headerFormat"
+      | "headerText"
+      | "carousel"
       | "paused"
       | "status"
       | "metaName"
@@ -720,9 +841,12 @@ export function updateTemplateLocal(
     const next = {
       ...t,
       ...patch,
-      variables: extractVariables(
-        `${patch.headerText ?? t.headerText}\n${patch.body ?? t.body}\n${patch.footer ?? t.footer}`,
-      ),
+      variables: collectTemplateVariables({
+        headerText: patch.headerText ?? t.headerText,
+        body: patch.body ?? t.body,
+        footer: patch.footer ?? t.footer,
+        carousel: patch.carousel ?? t.carousel,
+      }),
       updatedAt: nowIso(),
     };
     return next;
@@ -869,6 +993,116 @@ export function buildMetaTemplateCreatePayload(template: WaTemplate): {
   };
 }
 
+export type WaTemplateLayoutKind =
+  | "text"
+  | "image"
+  | "video"
+  | "document"
+  | "carousel";
+
+export type WaTemplateContentPurpose =
+  | "fee_reminder"
+  | "ptm"
+  | "homework"
+  | "transport"
+  | "admission"
+  | "general";
+
+export const WA_TEMPLATE_CONTENT_SNIPPETS: {
+  id: WaTemplateContentPurpose;
+  label: string;
+  module: WaTemplateModule;
+  body: string;
+  footer: string;
+}[] = [
+  {
+    id: "fee_reminder",
+    label: "Fee reminder",
+    module: "fees",
+    body:
+      "Namaste {{guardianName}}, fee of {{feeDue}} for {{childName}} ({{classLabel}}) is due by {{dueDate}}. Pay securely: {{payLink}}",
+    footer: "{{schoolName}}",
+  },
+  {
+    id: "ptm",
+    label: "PTM invite",
+    module: "general",
+    body:
+      "Dear {{guardianName}}, PTM for {{childName}} is on {{ptmDate}} at {{ptmTime}}. Book your slot: {{ptmLink}}",
+    footer: "{{schoolName}}",
+  },
+  {
+    id: "homework",
+    label: "Homework published",
+    module: "comms",
+    body:
+      "{{guardianName}}, new homework for {{childName}} ({{classLabel}}): {{homeworkTitle}} — {{subject}}.",
+    footer: "{{schoolName}}",
+  },
+  {
+    id: "transport",
+    label: "Transport update",
+    module: "transport",
+    body:
+      "Update for {{childName}}: route {{routeName}} — please check timing with transport desk.",
+    footer: "{{schoolName}}",
+  },
+  {
+    id: "admission",
+    label: "Admission follow-up",
+    module: "admissions",
+    body:
+      "Hello {{guardianName}}, thank you for your interest in {{schoolName}}. Complete registration: {{registerLink}}",
+    footer: "Admissions desk",
+  },
+  {
+    id: "general",
+    label: "General notice",
+    module: "general",
+    body:
+      "Namaste {{guardianName}}, {{noticeTitle}} — {{noticeBody}}",
+    footer: "{{schoolName}}",
+  },
+];
+
+export const WA_TEMPLATE_LAYOUT_OPTIONS: {
+  id: WaTemplateLayoutKind;
+  label: string;
+  description: string;
+  headerFormat: WaHeaderFormat;
+}[] = [
+  {
+    id: "text",
+    label: "Text only",
+    description: "Body message with variables — no media header.",
+    headerFormat: "NONE",
+  },
+  {
+    id: "image",
+    label: "Image header",
+    description: "JPG / PNG banner on top + body text.",
+    headerFormat: "IMAGE",
+  },
+  {
+    id: "video",
+    label: "Video header",
+    description: "MP4 clip on top + body text.",
+    headerFormat: "VIDEO",
+  },
+  {
+    id: "document",
+    label: "Document header",
+    description: "PDF attachment on top + body text.",
+    headerFormat: "DOCUMENT",
+  },
+  {
+    id: "carousel",
+    label: "Carousel",
+    description: "Multiple swipeable cards — image per card + text.",
+    headerFormat: "NONE",
+  },
+];
+
 export function createDraftWaTemplate(
   state: WaTemplatesState,
   opts: {
@@ -880,14 +1114,39 @@ export function createDraftWaTemplate(
     body: string;
     footer?: string;
     buttons?: WaTemplateButton[];
+    layoutKind?: WaTemplateLayoutKind;
+    headerFormat?: WaHeaderFormat;
+    headerText?: string;
+    mediaUrl?: string;
+    mediaFileName?: string;
+    carousel?: Omit<WaCarouselCard, "id">[];
+    localFallbackBody?: string;
     by: string;
   },
-): WaTemplatesState {
+): { state: WaTemplatesState; template: WaTemplate } {
   const body = opts.body.trim();
   const metaName = opts.metaName
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9_]/g, "_");
+  const layout =
+    WA_TEMPLATE_LAYOUT_OPTIONS.find((o) => o.id === opts.layoutKind) ||
+    WA_TEMPLATE_LAYOUT_OPTIONS[0]!;
+  const headerFormat = opts.headerFormat ?? layout.headerFormat;
+  const carousel =
+    opts.layoutKind === "carousel"
+      ? (opts.carousel || defaultCarouselCards()).map((c, i) => ({
+          id: nid(`wcc_${i}`),
+          headerFormat: c.headerFormat || "IMAGE",
+          mediaUrl: c.mediaUrl || "",
+          mediaFileName: c.mediaFileName || "",
+          body: c.body || "",
+          buttons: c.buttons || [],
+        }))
+      : (opts.carousel || []).map((c, i) => ({
+          id: nid(`wcc_${i}`),
+          ...c,
+        }));
   const tpl: WaTemplate = {
     id: nid("wtp"),
     familyKey: `custom_${metaName}`,
@@ -901,25 +1160,47 @@ export function createDraftWaTemplate(
     metaTemplateId: "",
     rejectionReason: "",
     syncedAt: "",
-    headerFormat: "NONE",
-    headerText: "",
+    headerFormat,
+    headerText: opts.headerText || "",
     body,
     footer: opts.footer || "",
     buttons: opts.buttons || [],
-    variables: extractVariables(body),
-    mediaUrl: "",
-    carousel: [],
-    localFallbackBody: body,
+    variables: collectTemplateVariables({
+      headerText: opts.headerText,
+      body,
+      footer: opts.footer,
+      carousel,
+    }),
+    mediaUrl: opts.mediaUrl || "",
+    mediaFileName: opts.mediaFileName || "",
+    carousel,
+    localFallbackBody: opts.localFallbackBody?.trim() || body,
     paused: false,
     updatedAt: nowIso(),
     createdAt: nowIso(),
   };
-  return appendWaTemplatesAudit(
+  const nextState = appendWaTemplatesAudit(
     { ...state, templates: [...state.templates, tpl] },
     opts.by,
     "create_draft",
     tpl.metaName,
   );
+  return { state: nextState, template: tpl };
+}
+
+function defaultCarouselCards(): Omit<WaCarouselCard, "id">[] {
+  return [
+    {
+      headerFormat: "IMAGE",
+      body: "{{schoolName}} — card 1",
+      buttons: [],
+    },
+    {
+      headerFormat: "IMAGE",
+      body: "{{schoolName}} — card 2",
+      buttons: [],
+    },
+  ];
 }
 
 export function markTemplateSubmittedToMeta(
@@ -1024,6 +1305,7 @@ export function applyMetaTemplateSync(
         buttons: [],
         variables: [],
         mediaUrl: "",
+        mediaFileName: "",
         carousel: [],
         localFallbackBody: "",
         paused: status === "paused",

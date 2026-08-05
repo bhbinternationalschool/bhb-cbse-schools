@@ -46,6 +46,20 @@ export type SchoolProfile = {
   google: string;
   youtube: string;
   logoUrl: string;
+  /** Browser tab icon (falls back to logo) */
+  faviconUrl: string;
+  /** Center watermark on letters / certificates */
+  watermarkUrl: string;
+  /** Full-page tiled background image for documents */
+  pageBackgroundUrl: string;
+  /** Tile school display name across page when no background image */
+  pageBackgroundSchoolNameRepeat: boolean;
+  /** Director signature for govt submissions */
+  directorSignatureUrl: string;
+  /** Principal stamp + signature composite (PNG, transparent) */
+  principalStampSignatureUrl: string;
+  /** Director stamp + signature composite (PNG, transparent; blue tint in previews) */
+  directorStampSignatureUrl: string;
   /** School merchant UPI VPA for collections (registration / fees) */
   collectionsUpiVpa: string;
 };
@@ -188,8 +202,53 @@ export type NumberSeries = {
   prefix: string;
   nextNumber: number;
   padWidth: number;
+  /** When true, counter resets per academic year via countersByAy. */
   resetOnAy: boolean;
+  /** Insert academic session code into the prefix (e.g. BHB-2025-26-). */
+  includeSessionInPrefix: boolean;
+  /** Per-AY counters when resetOnAy is enabled. */
+  countersByAy?: Record<string, number>;
 };
+
+export function normalizeNumberSeries(raw: Partial<NumberSeries> & Pick<NumberSeries, "id" | "code" | "label">): NumberSeries {
+  return {
+    id: raw.id,
+    code: raw.code,
+    label: raw.label,
+    prefix: raw.prefix ?? "",
+    nextNumber: Math.max(1, raw.nextNumber ?? 1),
+    padWidth: Math.max(1, raw.padWidth ?? 4),
+    resetOnAy: raw.resetOnAy ?? false,
+    includeSessionInPrefix: raw.includeSessionInPrefix ?? false,
+    countersByAy: raw.countersByAy,
+  };
+}
+
+/** Merge saved series with seed defaults — backfill missing codes and new fields. */
+export function mergeNumberSeries(
+  partial: NumberSeries[] | undefined,
+  seed: NumberSeries[],
+): NumberSeries[] {
+  const seedByCode = new Map(
+    seed.map((s) => [s.code, normalizeNumberSeries(s)]),
+  );
+  const merged: NumberSeries[] = [];
+  const seen = new Set<string>();
+
+  for (const s of partial ?? []) {
+    const norm = normalizeNumberSeries(s);
+    seen.add(norm.code);
+    merged.push(norm);
+  }
+
+  for (const seedItem of seed) {
+    if (!seen.has(seedItem.code)) {
+      merged.push(seedByCode.get(seedItem.code) ?? normalizeNumberSeries(seedItem));
+    }
+  }
+
+  return merged;
+}
 
 export type HolidayKind =
   | "gazetted"
@@ -451,7 +510,12 @@ export type StaffDocKey =
   | "drivingLicense"
   | "other";
 
-export type StaffDocStatus = "missing" | "received" | "verified";
+export type StaffDocStatus =
+  | "missing"
+  | "received"
+  | "pending"
+  | "verified"
+  | "rejected";
 
 export type StaffDocFile = {
   status: StaffDocStatus;
@@ -460,6 +524,11 @@ export type StaffDocFile = {
   size: number;
   fileUrl: string;
   uploadedAt: string;
+  submittedBy?: string;
+  submittedAt?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  reviewNote?: string;
 };
 
 export type StaffDocs = Record<StaffDocKey, StaffDocFile>;
@@ -489,7 +558,27 @@ export function emptyStaffDocFile(
     size: 0,
     fileUrl: "",
     uploadedAt: "",
+    submittedBy: "",
+    submittedAt: "",
+    reviewedBy: "",
+    reviewedAt: "",
+    reviewNote: "",
   };
+}
+
+export function staffDocStatusLabel(status: StaffDocStatus): string {
+  switch (status) {
+    case "pending":
+      return "Pending verification";
+    case "verified":
+      return "Verified";
+    case "rejected":
+      return "Rejected — re-upload";
+    case "received":
+      return "Received (HR)";
+    default:
+      return "Missing";
+  }
 }
 
 export function emptyStaffDocs(): StaffDocs {
@@ -513,7 +602,11 @@ function normalizeStaffDocFile(raw: unknown): StaffDocFile {
   if (!raw || typeof raw !== "object") return emptyStaffDocFile();
   const o = raw as Partial<StaffDocFile>;
   const status: StaffDocStatus =
-    o.status === "received" || o.status === "verified" || o.status === "missing"
+    o.status === "received" ||
+    o.status === "verified" ||
+    o.status === "missing" ||
+    o.status === "pending" ||
+    o.status === "rejected"
       ? o.status
       : "missing";
   return {
@@ -523,6 +616,11 @@ function normalizeStaffDocFile(raw: unknown): StaffDocFile {
     size: typeof o.size === "number" ? o.size : 0,
     fileUrl: typeof o.fileUrl === "string" ? o.fileUrl : "",
     uploadedAt: str(o.uploadedAt),
+    submittedBy: str(o.submittedBy),
+    submittedAt: str(o.submittedAt),
+    reviewedBy: str(o.reviewedBy),
+    reviewedAt: str(o.reviewedAt),
+    reviewNote: str(o.reviewNote),
   };
 }
 
@@ -789,6 +887,33 @@ export function staffQrPayload(empCode: string, id: string): string {
     empCode: empCode.trim().toUpperCase(),
     id,
   });
+}
+
+/** Treat missing/legacy status as active (only explicit inactive is excluded). */
+export function isStaffActive(s: Pick<StaffRecord, "status">): boolean {
+  return s.status !== "inactive";
+}
+
+/** Re-normalize roster rows loaded from localStorage / mirror (fixes legacy status gaps). */
+export function normalizeMastersStaffRoster(
+  state: MastersState & Partial<FoundationSlice>,
+): MastersState & Partial<FoundationSlice> {
+  if (!Array.isArray(state.staff) || state.staff.length === 0) return state;
+  const needsNorm = state.staff.some(
+    (s) => s.status !== "active" && s.status !== "inactive",
+  );
+  if (!needsNorm) return state;
+  return {
+    ...state,
+    staff: state.staff.map((s) =>
+      normalizeStaffRecord({
+        ...s,
+        id: s.id,
+        empCode: s.empCode || "STAFF",
+        fullName: s.fullName || s.empCode || "Staff",
+      }),
+    ),
+  };
 }
 
 export function normalizeStaffRecord(
@@ -1122,6 +1247,13 @@ export function defaultSchoolProfile(): SchoolProfile {
     google: "",
     youtube: "",
     logoUrl: TENANT.logoUrl,
+    faviconUrl: "",
+    watermarkUrl: "",
+    pageBackgroundUrl: "",
+    pageBackgroundSchoolNameRepeat: false,
+    directorSignatureUrl: "",
+    principalStampSignatureUrl: "",
+    directorStampSignatureUrl: "",
     collectionsUpiVpa: "bhbschool@upi",
   };
 }
@@ -1343,7 +1475,18 @@ export function defaultFoundationSlice(classes: SchoolClass[]): FoundationSlice 
       prefix: "BHB-",
       nextNumber: 1001,
       padWidth: 4,
-      resetOnAy: true,
+      resetOnAy: false,
+      includeSessionInPrefix: false,
+    },
+    {
+      id: nid("ns"),
+      code: "REGISTRATION",
+      label: "Registration number",
+      prefix: "REG-",
+      nextNumber: 1,
+      padWidth: 4,
+      resetOnAy: false,
+      includeSessionInPrefix: false,
     },
     {
       id: nid("ns"),
@@ -1352,7 +1495,8 @@ export function defaultFoundationSlice(classes: SchoolClass[]): FoundationSlice 
       prefix: "RCV-",
       nextNumber: 1,
       padWidth: 5,
-      resetOnAy: true,
+      resetOnAy: false,
+      includeSessionInPrefix: false,
     },
     {
       id: nid("ns"),
@@ -1362,6 +1506,7 @@ export function defaultFoundationSlice(classes: SchoolClass[]): FoundationSlice 
       nextNumber: 1,
       padWidth: 5,
       resetOnAy: false,
+      includeSessionInPrefix: false,
     },
     {
       id: nid("ns"),
@@ -1370,7 +1515,78 @@ export function defaultFoundationSlice(classes: SchoolClass[]): FoundationSlice 
       prefix: "TC-",
       nextNumber: 1,
       padWidth: 4,
-      resetOnAy: true,
+      resetOnAy: false,
+      includeSessionInPrefix: false,
+    },
+    {
+      id: nid("ns"),
+      code: "CERT_BONAFIDE",
+      label: "Bonafide certificate",
+      prefix: "BNF-",
+      nextNumber: 1,
+      padWidth: 4,
+      resetOnAy: false,
+      includeSessionInPrefix: false,
+    },
+    {
+      id: nid("ns"),
+      code: "CERT_CHARACTER",
+      label: "Character certificate",
+      prefix: "CHR-",
+      nextNumber: 1,
+      padWidth: 4,
+      resetOnAy: false,
+      includeSessionInPrefix: false,
+    },
+    {
+      id: nid("ns"),
+      code: "CERT_CLEARANCE",
+      label: "Fee clearance / no-dues",
+      prefix: "ND-",
+      nextNumber: 1,
+      padWidth: 4,
+      resetOnAy: false,
+      includeSessionInPrefix: false,
+    },
+    {
+      id: nid("ns"),
+      code: "CERT_FEES_PAID",
+      label: "Fees paid certificate",
+      prefix: "FEE-",
+      nextNumber: 1,
+      padWidth: 4,
+      resetOnAy: false,
+      includeSessionInPrefix: false,
+    },
+    {
+      id: nid("ns"),
+      code: "STAFF_AGREEMENT",
+      label: "Staff employment agreement",
+      prefix: "AGR-",
+      nextNumber: 1,
+      padWidth: 4,
+      resetOnAy: false,
+      includeSessionInPrefix: false,
+    },
+    {
+      id: nid("ns"),
+      code: "STAFF_ID",
+      label: "Staff ID",
+      prefix: "EMP-",
+      nextNumber: 1,
+      padWidth: 4,
+      resetOnAy: false,
+      includeSessionInPrefix: false,
+    },
+    {
+      id: nid("ns"),
+      code: "EXPENSE_VOUCHER",
+      label: "Expense voucher",
+      prefix: "EXP-",
+      nextNumber: 1,
+      padWidth: 5,
+      resetOnAy: false,
+      includeSessionInPrefix: false,
     },
   ];
 
@@ -1691,6 +1907,13 @@ export function normalizeSchoolProfile(
     google: p?.google ?? "",
     youtube: p?.youtube ?? "",
     logoUrl: p?.logoUrl ?? d.logoUrl,
+    faviconUrl: p?.faviconUrl ?? "",
+    watermarkUrl: p?.watermarkUrl ?? "",
+    pageBackgroundUrl: p?.pageBackgroundUrl ?? "",
+    pageBackgroundSchoolNameRepeat: p?.pageBackgroundSchoolNameRepeat ?? false,
+    directorSignatureUrl: p?.directorSignatureUrl ?? "",
+    principalStampSignatureUrl: p?.principalStampSignatureUrl ?? "",
+    directorStampSignatureUrl: p?.directorStampSignatureUrl ?? "",
     collectionsUpiVpa: (p?.collectionsUpiVpa || d.collectionsUpiVpa || "bhbschool@upi")
       .trim()
       .toLowerCase(),
@@ -1739,9 +1962,7 @@ export function ensureFoundationOnMasters(state: MastersState): MastersState {
       }
       return seed.seniorStreams;
     })(),
-    numberSeries: partial.numberSeries?.length
-      ? partial.numberSeries
-      : seed.numberSeries,
+    numberSeries: mergeNumberSeries(partial.numberSeries, seed.numberSeries),
     holidays: (
       Array.isArray(partial.holidays) ? partial.holidays : seed.holidays
     ).map((h) =>
@@ -1782,8 +2003,7 @@ export function mastersCompleteness(
   const publishedHolidays = (state.holidays ?? []).filter(
     (h) => h.isPublished,
   ).length;
-  const staffN = (state.staff ?? []).filter((s) => s.status === "active")
-    .length;
+  const staffN = (state.staff ?? []).filter(isStaffActive).length;
   const deptN = (state.departments ?? []).filter((d) => d.isActive).length;
   const desN = (state.designations ?? []).filter((d) => d.isActive).length;
   const seriesN = (state.numberSeries ?? []).length;
@@ -1851,7 +2071,7 @@ export function mastersCompleteness(
     {
       id: "series",
       label: "Numbering series",
-      ok: seriesN >= 3,
+      ok: seriesN >= 5,
       detail: `${seriesN} series`,
       tab: "series",
     },

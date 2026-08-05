@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { Bus } from "lucide-react";
 import { HoldStatusBanner, PrincipalHoldOverrideDialog } from "@/components/fees/PrincipalHoldOverrideDialog";
 import { StudentHitsFilterExport } from "@/components/reports/StudentHitsFilterExport";
 import { useDemoSession } from "@/components/shell/SessionContext";
@@ -21,6 +22,8 @@ import {
 } from "@/components/transport/TransportOpsPanels";
 import { TransportPlannerPanel } from "@/components/transport/TransportPlannerPanel";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
+import { ErpTableShell } from "@/components/ui/erp-roster";
+import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { formatInr, searchFeeStudents, type StudentSearchHit } from "@/lib/fees";
 import { checkHold, type HoldCheck } from "@/lib/holds";
@@ -298,25 +301,21 @@ export function TransportWorkspace() {
   };
 
   return (
-    <div>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-[var(--brand-deep)]">
-            Transport
-          </h1>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            Riders, routes, fleet operations, boarding, compliance, and
-            transport finance in one workspace.
-          </p>
-        </div>
+    <ErpWorkspaceShell
+      title="Transport"
+      subtitle="Riders, routes, fleet operations, boarding, compliance, and transport finance in one workspace."
+      icon={<Bus className="size-6" aria-hidden />}
+      error={error}
+      notice={notice}
+      actions={
         <Link
           href="/fees"
           className="btn-accent rounded-lg px-3 py-1.5 text-sm font-semibold"
         >
           Open Fee Take
         </Link>
-      </div>
-
+      }
+    >
       <ModuleTabs
         items={TABS}
         value={tab}
@@ -324,20 +323,6 @@ export function TransportWorkspace() {
         aria-label="Transport workspace"
         size="md"
       />
-
-      {error ? (
-        <div className="mt-3 flex items-start justify-between gap-3 rounded-lg bg-[#dc2626]/10 px-3 py-2 text-sm text-[#dc2626]">
-          <span>{error}</span>
-          <button type="button" className="font-bold" onClick={() => setError(null)}>
-            ×
-          </button>
-        </div>
-      ) : null}
-      {notice ? (
-        <p className="mt-3 rounded-lg bg-[rgba(32,48,80,0.06)] px-3 py-2 text-sm text-[var(--brand-deep)]">
-          {notice}
-        </p>
-      ) : null}
 
       {!state ? (
         <p className="mt-6 text-sm text-[var(--muted)]">Loading transport…</p>
@@ -485,7 +470,7 @@ export function TransportWorkspace() {
           }}
         />
       ) : null}
-    </div>
+    </ErpWorkspaceShell>
   );
 }
 
@@ -837,7 +822,8 @@ function RidersPanel(props: RidersPanelProps) {
               No active assignments yet.
             </p>
           ) : (
-            <ul className="mt-2 max-h-96 divide-y divide-[rgba(32,48,80,0.08)] overflow-y-auto">
+            <ErpTableShell className="mt-2">
+              <ul className="max-h-96 divide-y divide-[rgba(32,48,80,0.08)] overflow-y-auto">
               {riders.map((assignment) => {
                 const student = sis?.students.find(
                   (row) => row.id === assignment.studentId,
@@ -857,7 +843,7 @@ function RidersPanel(props: RidersPanelProps) {
                 return (
                   <li
                     key={assignment.id}
-                    className="flex flex-wrap items-start justify-between gap-2 py-2"
+                    className="flex flex-wrap items-start justify-between gap-2 px-4 py-2.5"
                   >
                     <div>
                       <div className="text-sm font-semibold text-[var(--brand-deep)]">
@@ -896,7 +882,8 @@ function RidersPanel(props: RidersPanelProps) {
                   </li>
                 );
               })}
-            </ul>
+              </ul>
+            </ErpTableShell>
           )}
         </section>
       </div>
