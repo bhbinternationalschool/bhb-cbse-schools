@@ -8,15 +8,16 @@ export function mergeDbDeskIntoMastersState(
   bundle: MastersDeskBundle,
   opts?: { preferDb?: boolean },
 ): MastersState {
+  const preferDb = !!opts?.preferDb || mastersReadFromDbEnabled();
   const hasRemote =
     bundle.classes.length > 0 ||
     bundle.feeHeads.length > 0 ||
-    bundle.subjects.length > 0;
-  if (!hasRemote && !mastersReadFromDbEnabled() && !opts?.preferDb) {
+    bundle.subjects.length > 0 ||
+    !!bundle.schoolProfile ||
+    (bundle.campuses?.length ?? 0) > 0;
+  if (!hasRemote && !preferDb) {
     return state;
   }
-
-  const preferDb = !!opts?.preferDb || mastersReadFromDbEnabled();
   const next: MastersState = { ...state, version: 2 };
 
   for (const key of MASTERS_OBJECT_SLICES) {

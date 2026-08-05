@@ -108,9 +108,9 @@ export async function ensureMastersHydrated(): Promise<boolean> {
   const { bundle, changed } = await hydrateMastersDeskFromDb(readFromDb);
   if (
     changed &&
-    (bundle.classes.length > 0 ||
+    (readFromDb ||
+      bundle.classes.length > 0 ||
       bundle.feeHeads.length > 0 ||
-      readFromDb ||
       mastersMirrorIsEmpty(localBefore))
   ) {
     writeMastersLocalRaw(

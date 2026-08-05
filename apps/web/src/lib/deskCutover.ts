@@ -394,12 +394,15 @@ export function deskSkipBlobHydrate(id: DeskModuleId): boolean {
   return mod.readFromDb();
 }
 
-/** Browser: skip blob when public read-from-db flag is on. */
+/** Browser: skip blob when public read-from-db flag is on or desk dual-write is active. */
 export function deskSkipBlobHydrateClient(id: DeskModuleId): boolean {
   const mod = deskModuleById(id);
   if (!mod) return false;
-  if (typeof window === "undefined") return mod.readFromDb();
-  return mod.readFromDbClient();
+  if (typeof window === "undefined") {
+    return mod.readFromDb() || mod.dualWrite();
+  }
+  if (mod.readFromDbClient()) return true;
+  return mod.dualWrite();
 }
 
 /** When true, skip jsonb blob upsert — desk tables are authoritative. */

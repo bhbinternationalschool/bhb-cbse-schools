@@ -48,6 +48,21 @@ export function AppShell({
   const [clock, setClock] = useState("");
   const skipRouteHydrateRef = useRef(true);
 
+  useEffect(() => {
+    function flushDeskSync() {
+      void import("@/lib/mastersNormalizedClient").then((m) =>
+        m.flushMastersDeskSyncPending(),
+      );
+    }
+    window.addEventListener("pagehide", flushDeskSync);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") flushDeskSync();
+    });
+    return () => {
+      window.removeEventListener("pagehide", flushDeskSync);
+    };
+  }, []);
+
   // Hydration-safe: pull cloud mirror, then hydrate desk in background (route-priority + idle).
   useEffect(() => {
     markModuleRegistryClientReady();

@@ -22,6 +22,7 @@ export async function GET(req: Request) {
     classCount: bundle.classes.length,
     feeHeadCount: bundle.feeHeads.length,
     subjectCount: bundle.subjects.length,
+    sliceCount: meta?.sliceCount ?? 0,
     updatedAt: meta?.updatedAt || new Date().toISOString(),
     meta,
   });
@@ -46,13 +47,17 @@ export async function POST(req: Request) {
   }
 
   const { version: _v, ...rest } = body;
-  const result = await pushMastersDeskToDb({ version: 2, ...rest });
+  const state = { version: 2 as const, ...rest };
+  const result = await pushMastersDeskToDb(state);
   if (!result.ok) {
     return NextResponse.json(
       { ok: false, error: result.error || "Sync failed" },
       { status: 502 },
     );
   }
+
+  const { pushMastersRemoteServer } = await import("@/lib/mastersPersistence");
+  void pushMastersRemoteServer(state);
 
   return NextResponse.json({
     ok: true,

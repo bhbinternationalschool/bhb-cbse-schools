@@ -66,13 +66,32 @@ export function touchMastersDeskLocalMeta(state: MastersState, at?: string) {
 
 function remoteDeskHasData(
   bundle: Omit<MastersState, "version">,
-  body: { classCount?: number; feeHeadCount?: number },
+  body: {
+    classCount?: number;
+    feeHeadCount?: number;
+    sliceCount?: number;
+    updatedAt?: string;
+  },
 ): boolean {
+  if ((body.sliceCount ?? 0) > 0) return true;
   return (
     (body.classCount ?? bundle.classes?.length ?? 0) > 0 ||
     (body.feeHeadCount ?? bundle.feeHeads?.length ?? 0) > 0 ||
-    (bundle.subjects?.length ?? 0) > 0
+    (bundle.subjects?.length ?? 0) > 0 ||
+    !!bundle.schoolProfile ||
+    (bundle.campuses?.length ?? 0) > 0
   );
+}
+
+export function flushMastersDeskSyncPending(): void {
+  if (typeof window === "undefined") return;
+  if (pushTimer) {
+    clearTimeout(pushTimer);
+    pushTimer = null;
+  }
+  const batch = pending;
+  pending = null;
+  if (batch) void pushMastersDeskApi(batch);
 }
 
 export function scheduleMastersDeskSync(state: MastersState) {
@@ -135,13 +154,21 @@ export async function hydrateMastersDeskFromDb(
       updatedAt?: string;
       classCount?: number;
       feeHeadCount?: number;
+      sliceCount?: number;
+      meta?: { sliceCount?: number; updatedAt?: string };
     };
     const bundle = body as Omit<MastersState, "version">;
     const meta = readMeta();
     const localEditAt = readLocalMastersEditAt();
-    const remoteAt = body.updatedAt || "";
+    const remoteAt = body.updatedAt || body.meta?.updatedAt || "";
+    const sliceCount = body.sliceCount ?? body.meta?.sliceCount ?? 0;
     const remoteClasses = body.classCount ?? bundle.classes?.length ?? 0;
-    const hasRemote = remoteDeskHasData(bundle, body);
+    const hasRemote = remoteDeskHasData(bundle, {
+      classCount: body.classCount,
+      feeHeadCount: body.feeHeadCount,
+      sliceCount,
+      updatedAt: remoteAt,
+    });
 
     const readFromDb =
       preferDb || process.env.NEXT_PUBLIC_MASTERS_READ_FROM_DB === "true";
@@ -154,9 +181,9 @@ export async function hydrateMastersDeskFromDb(
     const bootstrapNewDevice =
       hasRemote && !meta.updatedAt && !localEditAt;
 
-    const shouldTake =
-      (readFromDb && hasRemote) ||
-      (hasRemote && (bootstrapNewDevice || remoteIsNewer));
+    const shouldTake = readFromDb
+      ? !localEditAt || remoteIsNewer || hasRemote
+      : hasRemote && (bootstrapNewDevice || remoteIsNewer);
 
     if (!shouldTake) return { bundle: empty, changed: false };
     writeMeta({
