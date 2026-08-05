@@ -1890,7 +1890,11 @@ function persistMastersClient(state: MastersState) {
     });
     return;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, version: 2 }));
+  const serialized = JSON.stringify({ ...state, version: 2 });
+  const prev = localStorage.getItem(STORAGE_KEY);
+  if (prev === serialized) return;
+
+  localStorage.setItem(STORAGE_KEY, serialized);
   writeMastersMirrorMeta(new Date().toISOString());
   void import("@/lib/staffPersistence").then(
     ({ scheduleStaffSync, stripStaffFromMastersForBlob }) => {

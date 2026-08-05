@@ -1002,6 +1002,35 @@ export function ensureStaffWardDemo(sis: SisState): SisState {
 }
 
 /** Push slim roster into Masters so special fees / concessions stay in sync. */
+function demoStudentsEqual(a: DemoStudent[], b: DemoStudent[]): boolean {
+  if (a.length !== b.length) return false;
+  const byId = new Map(b.map((s) => [s.id, s]));
+  for (const x of a) {
+    const y = byId.get(x.id);
+    if (!y) return false;
+    if (
+      x.admissionNo !== y.admissionNo ||
+      x.fullName !== y.fullName ||
+      x.classId !== y.classId ||
+      x.sectionId !== y.sectionId ||
+      x.status !== y.status
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function demoStudentLinksValid(m: MastersState, s: DemoStudent): boolean {
+  const classIds = new Set(m.classes.map((c) => c.id));
+  return (
+    classIds.has(s.classId) &&
+    m.sections.some(
+      (sec) => sec.id === s.sectionId && sec.classId === s.classId,
+    )
+  );
+}
+
 export function syncSisIntoMasters(
   sis: SisState,
   masters?: MastersState,
@@ -1018,14 +1047,18 @@ export function syncSisIntoMasters(
     (s) => normalizeAyCode(s.academicYearCode) === ay,
   );
   const source = scoped.length ? scoped : sis.students;
-  const demo: DemoStudent[] = source.map((s) => ({
-    id: s.id,
-    admissionNo: s.admissionNo,
-    fullName: s.fullName,
-    classId: s.classId,
-    sectionId: s.sectionId,
-    status: s.status,
-  }));
+  const demo: DemoStudent[] = source
+    .map((s) => ({
+      id: s.id,
+      admissionNo: s.admissionNo,
+      fullName: s.fullName,
+      classId: s.classId,
+      sectionId: s.sectionId,
+      status: s.status,
+    }))
+    .filter((s) => demoStudentLinksValid(m, s));
+  const current = m.students ?? [];
+  if (demoStudentsEqual(current, demo)) return;
   saveMasters({ ...m, students: demo });
 }
 
