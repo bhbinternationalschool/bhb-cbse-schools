@@ -22,6 +22,7 @@ import {
   scheduleClientSchoolMirrorSync,
   setMirrorSlice,
 } from "@/lib/schoolDataMirror";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
 
 export type Campus = {
   id: string;
@@ -1298,6 +1299,46 @@ export function defaultMasters(): MastersState {
   return buildTeacherRosterOntoMasters({ ...base, staff: [] });
 }
 
+/** Go-live empty slate — session shell only; no demo classes, fees, staff, or depts. */
+export function emptyMastersShell(): MastersState {
+  const foundation = defaultFoundationSlice([]);
+  return {
+    ...foundation,
+    version: 2 as const,
+    campuses: [
+      {
+        id: id("cam"),
+        code: "MAIN",
+        name: "Main Campus",
+        isPrimary: true,
+        isActive: true,
+      },
+    ],
+    feeHeadCategories: defaultFeeHeadCategories(),
+    classes: [],
+    sections: [],
+    feeHeads: [],
+    feeGroups: [],
+    feeStructureLines: [],
+    installments: [],
+    lateFeeRules: [],
+    midYearFeePolicy: DEFAULT_MID_YEAR_FEE_POLICY,
+    students: [],
+    specialFees: [],
+    specialFeeAssignments: [],
+    concessionKinds: defaultConcessionKinds(),
+    concessions: [],
+    concessionGrants: [],
+    subjects: [],
+    classSubjects: [],
+    staff: [],
+    departments: [],
+    designations: [],
+    holidays: [],
+    academicTerms: [],
+  };
+}
+
 export function defaultFeeHeadCategories(): FeeHeadCategoryDef[] {
   const seed: { code: string; label: string }[] = [
     { code: "tuition", label: "Tuition" },
@@ -1814,12 +1855,17 @@ export function loadMasters(): MastersState {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
       return merged;
     }
-    const seed = defaultMasters();
+    const seed = shouldSeedEmptyMastersShell() ? emptyMastersShell() : defaultMasters();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(seed));
     return seed;
   } catch {
-    return defaultMasters();
+    return shouldSeedEmptyMastersShell() ? emptyMastersShell() : defaultMasters();
   }
+}
+
+function shouldSeedEmptyMastersShell(): boolean {
+  if (typeof window === "undefined") return false;
+  return isSupabaseConfigured();
 }
 
 export function saveMasters(state: MastersState) {

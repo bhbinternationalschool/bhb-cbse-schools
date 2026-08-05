@@ -11,7 +11,7 @@ import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { loadEnvLocal } from "./lib/loadEnvLocal";
 import { foundationMastersDeleteSql } from "./lib/clearTenantDataTables";
-import { defaultMasters } from "../src/lib/masters";
+import { emptyMastersShell } from "../src/lib/masters";
 
 loadEnvLocal();
 
@@ -30,36 +30,6 @@ function runPsql(url: string, sql: string): void {
     encoding: "utf8",
     stdio: ["pipe", "pipe", "pipe"],
   });
-}
-
-/** Empty masters — one campus shell only; no classes/fee setup. */
-function emptyMastersState() {
-  const base = defaultMasters();
-  return {
-    ...base,
-    version: 2 as const,
-    classes: [],
-    sections: [],
-    feeHeads: [],
-    feeGroups: [],
-    feeStructureLines: [],
-    installments: [],
-    lateFeeRules: [],
-    concessions: [],
-    concessionGrants: [],
-    specialFees: [],
-    specialFeeAssignments: [],
-    subjects: [],
-    classSubjects: [],
-    students: [],
-    staff: [],
-    departments: [],
-    designations: [],
-    teacherRoster: [],
-    numberingRules: [],
-    holidays: [],
-    academicTerms: [],
-  };
 }
 
 async function main() {
@@ -102,7 +72,7 @@ async function main() {
     console.warn("  DATABASE_URL not set — skipped foundation SQL");
   }
 
-  const emptyMasters = emptyMastersState();
+  const emptyMasters = emptyMastersShell();
   const { data: mirrorRow } = await sb
     .from("school_mirror_state")
     .select("state")

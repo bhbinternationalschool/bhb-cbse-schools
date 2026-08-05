@@ -38,7 +38,7 @@ import {
 } from "@/lib/homeworkNormalized.server";
 import type { MastersState } from "@/lib/masters";
 import { defaultRbacState } from "@/lib/rbac";
-import { defaultMasters } from "@/lib/masters";
+import { defaultMasters, emptyMastersShell } from "@/lib/masters";
 import {
   fetchMastersDeskFromDb,
   pushMastersDeskToDb,
@@ -234,7 +234,7 @@ async function ensurePrimaryModule(id: DeskModuleId): Promise<EnsureDeskAction> 
       );
       const blobRows = blob.state?.masters?.classes?.length ?? 0;
       if (blobRows > 0 && deskRows < 5) {
-        const state = blob.state?.masters ?? defaultMasters();
+        const state = blob.state?.masters ?? emptyMastersShell();
         const ok = (await pushMastersDeskToDb(state)).ok;
         return {
           module: id,
@@ -243,11 +243,11 @@ async function ensurePrimaryModule(id: DeskModuleId): Promise<EnsureDeskAction> 
         };
       }
       if (deskRows === 0) {
-        const ok = (await pushMastersDeskToDb(defaultMasters())).ok;
+        const ok = (await pushMastersDeskToDb(emptyMastersShell())).ok;
         return {
           module: id,
           action: ok ? "seed" : "skip",
-          detail: "default masters",
+          detail: "empty masters shell",
         };
       }
       break;

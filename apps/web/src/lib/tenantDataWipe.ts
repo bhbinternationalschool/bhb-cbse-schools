@@ -36,6 +36,9 @@ export async function applyTenantDataWipeSignalIfNeeded(): Promise<boolean> {
   localStorage.removeItem("bhb_masters_desk_db_meta_v1");
   localStorage.removeItem("bhb_masters_mirror_meta_v1");
 
+  const { emptyMastersShell } = await import("@/lib/masters");
+  localStorage.setItem("bhb_masters_v5", JSON.stringify(emptyMastersShell()));
+
   localStorage.setItem(SEEN_KEY, signal.wipedAt);
 
   const resets = [

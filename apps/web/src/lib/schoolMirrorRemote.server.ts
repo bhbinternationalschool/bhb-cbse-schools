@@ -12,7 +12,7 @@ import {
 import { fetchServerBlob } from "@/lib/serverBlob";
 import { defaultAdmissionsState, type AdmissionsState, admissionsStateIsEmpty } from "@/lib/admissions";
 import { fetchAdmissionsRemoteServer } from "@/lib/admissionsPersistence";
-import { defaultMasters, type MastersState } from "@/lib/masters";
+import { emptyMastersShell, type MastersState } from "@/lib/masters";
 import { emptyFeesState, type FeesState } from "@/lib/fees";
 import { emptyPaymentsState, type PaymentsState } from "@/lib/payments";
 import { emptySisState, type SisState } from "@/lib/sis";
@@ -109,7 +109,7 @@ export async function hydrateSchoolMirrorFromRemote(
     (next.masters as MastersState | null) &&
     Array.isArray((next.masters as MastersState).classes)
       ? (next.masters as MastersState)
-      : defaultMasters();
+      : emptyMastersShell();
   const staffRemote = await fetchStaffRemoteServer();
   if (
     staffRemote &&
@@ -146,7 +146,7 @@ export async function hydrateSchoolMirrorFromRemote(
 
   if (!next.fees) next = { ...next, fees: emptyFeesState() };
   if (!next.payments) next = { ...next, payments: emptyPaymentsState() };
-  if (!next.masters) next = { ...next, masters: defaultMasters() };
+  if (!next.masters) next = { ...next, masters: emptyMastersShell() };
   if (!next.sis) next = { ...next, sis: emptySisState() };
   if (!next.admissions) next = { ...next, admissions: defaultAdmissionsState() };
 

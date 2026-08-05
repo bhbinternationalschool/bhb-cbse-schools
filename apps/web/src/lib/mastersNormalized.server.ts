@@ -4,7 +4,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { MastersState } from "@/lib/masters";
-import { defaultMasters } from "@/lib/masters";
+import { emptyMastersShell } from "@/lib/masters";
 import { mastersDualWriteDbEnabled } from "@/lib/mastersDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { stripStaffFromMastersForBlob } from "@/lib/staffPersistence";
@@ -76,8 +76,7 @@ function nowIso() {
 }
 
 function emptyBundle(): MastersDeskBundle {
-  const d = defaultMasters();
-  const { version: _v, ...rest } = d;
+  const { version: _v, ...rest } = emptyMastersShell();
   return rest;
 }
 

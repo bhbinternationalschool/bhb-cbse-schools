@@ -3,7 +3,7 @@
  */
 
 import type { MastersState } from "@/lib/masters";
-import { defaultMasters } from "@/lib/masters";
+import { emptyMastersShell } from "@/lib/masters";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { stripStaffFromMastersForBlob } from "@/lib/staffPersistence";
 
@@ -87,7 +87,7 @@ async function pushMastersDeskApi(state: MastersState) {
 export async function hydrateMastersDeskFromDb(
   preferDb?: boolean,
 ): Promise<{ bundle: Omit<MastersState, "version">; changed: boolean }> {
-  const { version: _v, ...empty } = defaultMasters();
+  const { version: _v, ...empty } = emptyMastersShell();
 
   if (!isSupabaseConfigured()) return { bundle: empty, changed: false };
   try {

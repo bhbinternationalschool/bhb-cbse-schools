@@ -15,7 +15,7 @@ import {
 } from "@/lib/feesNormalized.server";
 import { mergeDbDeskIntoFeesState } from "@/lib/feesNormalizedMerge";
 import type { MastersState } from "@/lib/masters";
-import { defaultMasters } from "@/lib/masters";
+import { emptyMastersShell } from "@/lib/masters";
 import {
   fetchMastersDeskFromDb,
   pushMastersDeskToDb,
@@ -72,7 +72,7 @@ export async function loadOpsMasters(): Promise<MastersState> {
   if ((bundle.classes?.length ?? 0) > 0 || (bundle.feeHeads?.length ?? 0) > 0) {
     return { version: 2, ...bundle };
   }
-  return defaultMasters();
+  return emptyMastersShell();
 }
 
 export async function saveOpsMasters(state: MastersState): Promise<void> {

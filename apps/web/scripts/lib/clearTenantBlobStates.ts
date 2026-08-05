@@ -14,7 +14,7 @@ import { emptyFeeRecoveryTasks } from "@/lib/feeRecoveryTasks";
 import { emptyFeesState } from "@/lib/fees";
 import { emptyHomeworkState } from "@/lib/homework";
 import { emptyLibraryState } from "@/lib/library";
-import { defaultMasters } from "@/lib/masters";
+import { emptyMastersShell } from "@/lib/masters";
 import { emptyNotifications } from "@/lib/notifications";
 import { emptyPaymentsState } from "@/lib/payments";
 import { emptyPtmState } from "@/lib/ptm";
@@ -35,29 +35,7 @@ import { emptyVaultState } from "@/lib/vault";
 import { emptyWaTemplates } from "@/lib/waTemplates";
 
 function emptyMirrorMasters() {
-  const base = defaultMasters();
-  return {
-    ...base,
-    version: 2 as const,
-    classes: [],
-    sections: [],
-    feeHeads: [],
-    feeGroups: [],
-    feeStructureLines: [],
-    installments: [],
-    lateFeeRules: [],
-    concessions: [],
-    concessionGrants: [],
-    specialFees: [],
-    specialFeeAssignments: [],
-    subjects: [],
-    classSubjects: [],
-    staff: [],
-    departments: [],
-    designations: [],
-    holidays: [],
-    academicTerms: [],
-  };
+  return emptyMastersShell();
 }
 
 function emptyMirrorState() {
