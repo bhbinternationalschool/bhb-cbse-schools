@@ -10,7 +10,8 @@ export function mergeDbDeskIntoLibraryState(
   const hasRemote =
     bundle.titles.length > 0 ||
     bundle.copies.length > 0 ||
-    bundle.issues.length > 0;
+    bundle.issues.length > 0 ||
+    bundle.procurementDocs.length > 0;
   if (!hasRemote && !opts?.preferDb && !libraryReadFromDbEnabled()) return state;
 
   const preferDb = !!opts?.preferDb || libraryReadFromDbEnabled();
@@ -35,7 +36,7 @@ export function mergeDbDeskIntoLibraryState(
 
   return {
     ...state,
-    version: 1,
+    version: 2,
     titles: mergeById(
       state.titles ?? [],
       bundle.titles,
@@ -51,6 +52,20 @@ export function mergeDbDeskIntoLibraryState(
       bundle.issues,
       preferDb || bundle.issues.length >= (state.issues?.length ?? 0),
     ),
-    settings: bundle.settings ?? state.settings,
+    procurementDocs: mergeById(
+      state.procurementDocs ?? [],
+      bundle.procurementDocs,
+      preferDb ||
+        bundle.procurementDocs.length >= (state.procurementDocs?.length ?? 0),
+    ),
+    settings: {
+      maxBooksPerStudent:
+        bundle.settings?.maxBooksPerStudent ?? state.settings?.maxBooksPerStudent ?? 2,
+      maxBooksPerStaff:
+        bundle.settings?.maxBooksPerStaff ?? state.settings?.maxBooksPerStaff ?? 3,
+      loanDays: bundle.settings?.loanDays ?? state.settings?.loanDays ?? 14,
+      finePaisePerDay:
+        bundle.settings?.finePaisePerDay ?? state.settings?.finePaisePerDay ?? 500,
+    },
   };
 }

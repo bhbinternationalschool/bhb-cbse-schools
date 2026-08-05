@@ -7,8 +7,15 @@ import type {
   LibraryCopy,
   LibraryCopyStatus,
   LibraryIssue,
+  LibraryItemCondition,
+  LibraryProcurementDoc,
   LibraryState,
   LibraryTitle,
+} from "@/lib/library";
+import {
+  issueDbStudentId,
+  parseIssueDbStudentId,
+  parseIssueNote,
 } from "@/lib/library";
 import { libraryDualWriteDbEnabled } from "@/lib/libraryDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
@@ -26,6 +33,7 @@ export type LibraryDeskBundle = {
   titles: LibraryTitle[];
   copies: LibraryCopy[];
   issues: LibraryIssue[];
+  procurementDocs: LibraryProcurementDoc[];
   settings: LibraryState["settings"];
 };
 
@@ -67,6 +75,21 @@ async function upsertChunks(
   return { ok: true };
 }
 
+function parsePackedPublisher(publisherRaw: string): {
+  publisher: string;
+  edition: string;
+  purchaseDate: string;
+  pricePaise: number;
+} {
+  const parts = publisherRaw.split(" | ");
+  return {
+    publisher: parts[0] || "",
+    edition: parts[1] || "",
+    purchaseDate: parts[2] || "",
+    pricePaise: Number(parts[3]) || 0,
+  };
+}
+
 function titleToRow(tenantId: string, t: LibraryTitle): Record<string, unknown> {
   const now = new Date().toISOString();
   return {
@@ -75,8 +98,11 @@ function titleToRow(tenantId: string, t: LibraryTitle): Record<string, unknown> 
     isbn: t.isbn || "",
     title: t.title || "",
     author: t.author || "",
-    publisher: t.publisher || "",
-    category: t.category || "general",
+    publisher: (t.publisher || "").slice(0, 500),
+    edition: t.edition || "",
+    purchase_date: t.purchaseDate || null,
+    price_paise: t.pricePaise ?? 0,
+    category: t.category || "book",
     shelf: t.shelf || "",
     copies_total: t.copiesTotal ?? 1,
     is_active: t.isActive !== false,
@@ -86,14 +112,35 @@ function titleToRow(tenantId: string, t: LibraryTitle): Record<string, unknown> 
 }
 
 function rowToTitle(r: Record<string, unknown>): LibraryTitle {
+  const packed = parsePackedPublisher(String(r.publisher || ""));
+  const editionCol = String(r.edition ?? "");
+  const purchaseCol = r.purchase_date ? String(r.purchase_date).slice(0, 10) : "";
+  const priceCol = r.price_paise != null ? Number(r.price_paise) : null;
+
+  const publisher = packed.publisher;
+  const edition = editionCol || packed.edition;
+  const purchaseDate = purchaseCol || packed.purchaseDate;
+  const pricePaise = priceCol != null && !Number.isNaN(priceCol) ? priceCol : packed.pricePaise;
+
+  const cat = String(r.category || "book");
+  const category =
+    cat === "magazine" ||
+    cat === "newspaper" ||
+    cat === "project" ||
+    cat === "other"
+      ? cat
+      : "book";
   return {
     id: String(r.id),
     isbn: String(r.isbn || ""),
     title: String(r.title || ""),
     author: String(r.author || ""),
-    publisher: String(r.publisher || ""),
-    category: String(r.category || "general"),
+    publisher,
+    edition,
+    category,
     shelf: String(r.shelf || ""),
+    purchaseDate,
+    pricePaise,
     copiesTotal: Number(r.copies_total ?? 1),
     isActive: r.is_active !== false,
   };
@@ -136,13 +183,23 @@ function rowToCopy(r: Record<string, unknown>): LibraryCopy {
   };
 }
 
+function normalizeDbCondition(raw: unknown): LibraryItemCondition {
+  const v = String(raw || "").toLowerCase();
+  if (v === "fair") return "fair";
+  if (v === "damaged") return "damaged";
+  if (v === "torn") return "torn";
+  return "good";
+}
+
 function issueToRow(tenantId: string, i: LibraryIssue): Record<string, unknown> {
   const now = new Date().toISOString();
   return {
     id: i.id,
     tenant_id: tenantId,
     copy_id: i.copyId,
-    student_id: i.studentId,
+    student_id: issueDbStudentId(i),
+    borrower_type: i.borrowerType,
+    staff_id: i.borrowerType === "staff" ? i.staffId || "" : "",
     academic_year_code: i.academicYearCode,
     issued_on: i.issuedOn,
     due_on: i.dueOn,
@@ -150,23 +207,114 @@ function issueToRow(tenantId: string, i: LibraryIssue): Record<string, unknown> 
     fine_paise: i.finePaise ?? 0,
     issued_by: i.issuedBy || "",
     note: i.note || "",
+    issue_condition: i.issueCondition || "good",
+    return_condition: i.returnCondition || null,
+    damage_note_on_issue: i.damageNoteOnIssue || "",
+    damage_note_on_return: i.damageNoteOnReturn || "",
     created_at: now,
     updated_at: now,
   };
 }
 
 function rowToIssue(r: Record<string, unknown>): LibraryIssue {
+  const borrower = parseIssueDbStudentId(String(r.student_id || ""));
+  const meta = parseIssueNote(String(r.note || ""));
+  const borrowerTypeCol = String(r.borrower_type || "");
+  const borrowerType =
+    borrowerTypeCol === "staff" || borrowerTypeCol === "student"
+      ? borrowerTypeCol
+      : meta.borrowerType || borrower.borrowerType;
+
+  const staffIdCol = String(r.staff_id || "");
+  const issueConditionCol = r.issue_condition
+    ? normalizeDbCondition(r.issue_condition)
+    : undefined;
+  const returnConditionCol = r.return_condition
+    ? normalizeDbCondition(r.return_condition)
+    : undefined;
+
   return {
     id: String(r.id),
     copyId: String(r.copy_id),
-    studentId: String(r.student_id),
+    borrowerType,
+    studentId: borrowerType === "student" ? borrower.studentId : "",
+    staffId:
+      borrowerType === "staff"
+        ? staffIdCol || meta.staffId || borrower.staffId
+        : "",
     academicYearCode: String(r.academic_year_code),
     issuedOn: String(r.issued_on).slice(0, 10),
     dueOn: String(r.due_on).slice(0, 10),
     returnedOn: r.returned_on ? String(r.returned_on).slice(0, 10) : undefined,
     finePaise: Number(r.fine_paise ?? 0),
     issuedBy: String(r.issued_by || ""),
+    note: meta.note || String(r.note || ""),
+    issueCondition: issueConditionCol || meta.issueCondition || "good",
+    returnCondition: returnConditionCol || meta.returnCondition,
+    damageNoteOnIssue:
+      String(r.damage_note_on_issue || "") || meta.damageNoteOnIssue || "",
+    damageNoteOnReturn:
+      String(r.damage_note_on_return || "") || meta.damageNoteOnReturn || "",
+  };
+}
+
+function procurementToRow(
+  tenantId: string,
+  d: LibraryProcurementDoc,
+): Record<string, unknown> {
+  const now = new Date().toISOString();
+  const isDataUrl = d.fileUrl.startsWith("data:");
+  const ocrJson = {
+    ...(d.ocrJson ?? {}),
+    _fileName: d.fileName || "",
+    _mimeType: d.mimeType || "",
+    _size: d.size ?? 0,
+  };
+  return {
+    id: d.id,
+    tenant_id: tenantId,
+    label: d.label || "",
+    vendor: d.vendor || "",
+    bill_no: d.billNo || "",
+    purchase_date: d.purchaseDate || null,
+    amount_paise: d.amountPaise ?? 0,
+    file_url: isDataUrl ? "" : d.fileUrl || "",
+    file_data_ref: isDataUrl ? d.fileUrl : "",
+    note: d.note || "",
+    ocr_json: ocrJson,
+    created_at: d.uploadedAt || now,
+    updated_at: now,
+  };
+}
+
+function rowToProcurement(r: Record<string, unknown>): LibraryProcurementDoc {
+  const fileUrl = String(r.file_url || "");
+  const fileDataRef = String(r.file_data_ref || "");
+  const resolvedUrl = fileUrl || fileDataRef;
+  const ocrRaw = r.ocr_json;
+  const ocrMeta =
+    ocrRaw && typeof ocrRaw === "object" && !Array.isArray(ocrRaw)
+      ? (ocrRaw as Record<string, unknown>)
+      : {};
+  const { _fileName, _mimeType, _size, ...ocrJson } = ocrMeta;
+  const mimeFromData =
+    resolvedUrl.startsWith("data:") && resolvedUrl.includes(";")
+      ? resolvedUrl.slice(5, resolvedUrl.indexOf(";"))
+      : "";
+  return {
+    id: String(r.id),
+    label: String(r.label || ""),
+    vendor: String(r.vendor || ""),
+    billNo: String(r.bill_no || ""),
+    purchaseDate: r.purchase_date ? String(r.purchase_date).slice(0, 10) : "",
+    amountPaise: Number(r.amount_paise ?? 0),
+    fileName: String(_fileName || r.label || "document"),
+    mimeType: String(_mimeType || mimeFromData || ""),
+    fileUrl: resolvedUrl,
+    size: Number(_size ?? 0),
+    uploadedAt: String(r.created_at || new Date().toISOString()),
     note: String(r.note || ""),
+    ocrJson: Object.keys(ocrJson).length > 0 ? ocrJson : undefined,
   };
 }
 
@@ -182,8 +330,10 @@ export async function pushLibraryDeskToDb(
   const titles = state.titles ?? [];
   const copies = state.copies ?? [];
   const issues = state.issues ?? [];
+  const procurementDocs = state.procurementDocs ?? [];
   const settings = state.settings ?? {
     maxBooksPerStudent: 2,
+    maxBooksPerStaff: 3,
     loanDays: 14,
     finePaisePerDay: 500,
   };
@@ -192,6 +342,12 @@ export async function pushLibraryDeskToDb(
     deleteStale(sb, tenantId, "library_desk_titles", new Set(titles.map((t) => t.id))),
     deleteStale(sb, tenantId, "library_desk_copies", new Set(copies.map((c) => c.id))),
     deleteStale(sb, tenantId, "library_desk_issues", new Set(issues.map((i) => i.id))),
+    deleteStale(
+      sb,
+      tenantId,
+      "library_desk_procurement_docs",
+      new Set(procurementDocs.map((d) => d.id)),
+    ),
   ]);
 
   let r = await upsertChunks(
@@ -215,10 +371,18 @@ export async function pushLibraryDeskToDb(
   );
   if (!r.ok) return r;
 
+  r = await upsertChunks(
+    sb,
+    "library_desk_procurement_docs",
+    procurementDocs.map((d) => procurementToRow(tenantId, d)),
+  );
+  if (!r.ok) return r;
+
   await sb.from("library_desk_settings").upsert(
     {
       tenant_id: tenantId,
       max_books_per_student: settings.maxBooksPerStudent ?? 2,
+      max_books_per_staff: settings.maxBooksPerStaff ?? 3,
       loan_days: settings.loanDays ?? 14,
       fine_paise_per_day: settings.finePaisePerDay ?? 500,
       updated_at: now,
@@ -258,7 +422,13 @@ export async function fetchLibraryDeskFromDb(): Promise<{
     titles: [],
     copies: [],
     issues: [],
-    settings: { maxBooksPerStudent: 2, loanDays: 14, finePaisePerDay: 500 },
+    procurementDocs: [],
+    settings: {
+      maxBooksPerStudent: 2,
+      maxBooksPerStaff: 3,
+      loanDays: 14,
+      finePaisePerDay: 500,
+    },
   };
   if (!ctx) return { bundle: empty, meta: null };
   const { sb, tenantId } = ctx;
@@ -267,15 +437,19 @@ export async function fetchLibraryDeskFromDb(): Promise<{
     { data: titleRows },
     { data: copyRows },
     { data: issueRows },
+    { data: procurementRows },
     { data: settingsRow },
     { data: metaRow },
   ] = await Promise.all([
     sb.from("library_desk_titles").select("*").eq("tenant_id", tenantId),
     sb.from("library_desk_copies").select("*").eq("tenant_id", tenantId),
     sb.from("library_desk_issues").select("*").eq("tenant_id", tenantId),
+    sb.from("library_desk_procurement_docs").select("*").eq("tenant_id", tenantId),
     sb
       .from("library_desk_settings")
-      .select("max_books_per_student, loan_days, fine_paise_per_day")
+      .select(
+        "max_books_per_student, max_books_per_staff, loan_days, fine_paise_per_day",
+      )
       .eq("tenant_id", tenantId)
       .maybeSingle(),
     sb
@@ -287,6 +461,7 @@ export async function fetchLibraryDeskFromDb(): Promise<{
 
   const s = settingsRow as {
     max_books_per_student?: number;
+    max_books_per_staff?: number;
     loan_days?: number;
     fine_paise_per_day?: number;
   } | null;
@@ -296,8 +471,12 @@ export async function fetchLibraryDeskFromDb(): Promise<{
       titles: (titleRows ?? []).map((r) => rowToTitle(r as Record<string, unknown>)),
       copies: (copyRows ?? []).map((r) => rowToCopy(r as Record<string, unknown>)),
       issues: (issueRows ?? []).map((r) => rowToIssue(r as Record<string, unknown>)),
+      procurementDocs: (procurementRows ?? []).map((r) =>
+        rowToProcurement(r as Record<string, unknown>),
+      ),
       settings: {
         maxBooksPerStudent: s?.max_books_per_student ?? 2,
+        maxBooksPerStaff: s?.max_books_per_staff ?? 3,
         loanDays: s?.loan_days ?? 14,
         finePaisePerDay: s?.fine_paise_per_day ?? 500,
       },

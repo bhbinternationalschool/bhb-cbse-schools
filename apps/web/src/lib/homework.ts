@@ -451,6 +451,30 @@ export function withdrawHomeworkPost(
   return { ok: true };
 }
 
+export function updateHomeworkPost(
+  input: CreatePostInput & { id: string },
+): { ok: true; post: HomeworkPost } | { ok: false; error: string } {
+  const state = loadHomework();
+  const i = state.posts.findIndex((p) => p.id === input.id);
+  if (i < 0) return { ok: false, error: "Post not found" };
+  if (!input.title.trim()) return { ok: false, error: "Title is required" };
+  if (!input.bodyEn.trim() && !(input.bodyHi || "").trim()) {
+    return { ok: false, error: "Add homework text (English or Hindi)" };
+  }
+  const prev = state.posts[i]!;
+  const post = normalizePost({
+    ...prev,
+    ...input,
+    attachments: input.attachments ?? prev.attachments,
+    status: prev.status,
+    createdAt: prev.createdAt,
+  });
+  const posts = [...state.posts];
+  posts[i] = post;
+  saveHomework({ ...state, posts });
+  return { ok: true, post };
+}
+
 export type CreateDiaryInput = {
   academicYearCode: string;
   classId: string;
@@ -481,6 +505,45 @@ export function createDiaryEntry(
   });
   saveHomework({ ...state, diary: [entry, ...state.diary] });
   return { ok: true, entry };
+}
+
+export function updateDiaryEntry(
+  input: CreateDiaryInput & { id: string },
+): { ok: true; entry: DiaryEntry } | { ok: false; error: string } {
+  const state = loadHomework();
+  const i = state.diary.findIndex((d) => d.id === input.id);
+  if (i < 0) return { ok: false, error: "Diary entry not found" };
+  if (!input.title.trim()) return { ok: false, error: "Title is required" };
+  if (!input.bodyEn.trim() && !(input.bodyHi || "").trim()) {
+    return { ok: false, error: "Add diary text" };
+  }
+  const prev = state.diary[i]!;
+  const entry = normalizeDiary({
+    ...prev,
+    ...input,
+    createdAt: prev.createdAt,
+  });
+  const diary = [...state.diary];
+  diary[i] = entry;
+  saveHomework({ ...state, diary });
+  return { ok: true, entry };
+}
+
+export function deleteDiaryEntry(
+  entryId: string,
+): { ok: true } | { ok: false; error: string } {
+  const state = loadHomework();
+  if (!state.diary.some((d) => d.id === entryId)) {
+    return { ok: false, error: "Diary entry not found" };
+  }
+  saveHomework({
+    ...state,
+    diary: state.diary.filter((d) => d.id !== entryId),
+    seen: state.seen.filter(
+      (s) => !(s.kind === "diary" && s.refId === entryId),
+    ),
+  });
+  return { ok: true };
 }
 
 /* ─── Teacher defaults (subject / class-teacher mapping) ───── */

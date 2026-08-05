@@ -4,6 +4,7 @@
 
 import type { LibraryState } from "@/lib/library";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
 
 const META_KEY = "bhb_library_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -48,7 +49,7 @@ export function scheduleLibraryDeskSync(state: LibraryState) {
     pending = null;
     pushTimer = null;
     if (batch) void pushLibraryDeskApi(batch);
-  }, 600);
+  }, DESK_PUSH_DEBOUNCE_MS);
 }
 
 async function pushLibraryDeskApi(state: LibraryState) {
@@ -60,6 +61,7 @@ async function pushLibraryDeskApi(state: LibraryState) {
         titles: state.titles,
         copies: state.copies,
         issues: state.issues,
+        procurementDocs: state.procurementDocs,
         settings: state.settings,
       }),
     });
@@ -89,6 +91,7 @@ export async function fetchLibraryDeskFromApi() {
       titles?: LibraryState["titles"];
       copies?: LibraryState["copies"];
       issues?: LibraryState["issues"];
+      procurementDocs?: LibraryState["procurementDocs"];
       settings?: LibraryState["settings"];
       updatedAt?: string;
       titleCount?: number;
@@ -99,8 +102,10 @@ export async function fetchLibraryDeskFromApi() {
         titles: body.titles,
         copies: body.copies ?? [],
         issues: body.issues ?? [],
+        procurementDocs: body.procurementDocs ?? [],
         settings: body.settings ?? {
           maxBooksPerStudent: 2,
+          maxBooksPerStaff: 3,
           loanDays: 14,
           finePaisePerDay: 500,
         },
@@ -120,7 +125,13 @@ export async function hydrateLibraryDeskFromDb(preferDb?: boolean) {
       titles: [] as LibraryState["titles"],
       copies: [] as LibraryState["copies"],
       issues: [] as LibraryState["issues"],
-      settings: { maxBooksPerStudent: 2, loanDays: 14, finePaisePerDay: 500 },
+      procurementDocs: [] as LibraryState["procurementDocs"],
+      settings: {
+        maxBooksPerStudent: 2,
+        maxBooksPerStaff: 3,
+        loanDays: 14,
+        finePaisePerDay: 500,
+      },
     },
     changed: false,
   };

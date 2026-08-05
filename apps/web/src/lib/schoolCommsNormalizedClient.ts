@@ -4,6 +4,7 @@
 
 import type { SchoolCommsState } from "@/lib/schoolComms";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
 
 const META_KEY = "bhb_school_comms_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -50,7 +51,7 @@ export function scheduleSchoolCommsDeskSync(state: SchoolCommsState) {
     pending = null;
     pushTimer = null;
     if (batch) void pushSchoolCommsDeskApi(batch);
-  }, 600);
+  }, DESK_PUSH_DEBOUNCE_MS);
 }
 
 async function pushSchoolCommsDeskApi(state: SchoolCommsState) {

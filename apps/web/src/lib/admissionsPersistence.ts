@@ -26,6 +26,7 @@ import {
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
 
 const MODULE = "admissions";
 
@@ -127,7 +128,7 @@ export function scheduleAdmissionsSync(state: AdmissionsState) {
       void pushBlobState(payload);
     }
     scheduleAdmissionsDeskSync(payload);
-  }, 500);
+  }, DESK_PUSH_DEBOUNCE_MS);
 }
 
 /** Pull blob + normalized desk; remote wins when newer or local empty. */

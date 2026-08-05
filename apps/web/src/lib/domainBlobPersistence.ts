@@ -9,6 +9,7 @@ import {
   isSupabaseConfigured,
 } from "@/lib/supabase/client";
 import { TENANT } from "@/lib/types";
+import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
 
 export type DomainBlobTable =
   | "fees_state"
@@ -183,7 +184,7 @@ export function createDomainBlobPersistence<T>(opts: {
       pushTimer = null;
       if (!payload) return;
       void pushState(payload);
-    }, 500);
+    }, DESK_PUSH_DEBOUNCE_MS);
   }
 
   /**

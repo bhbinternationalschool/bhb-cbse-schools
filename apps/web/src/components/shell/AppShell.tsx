@@ -24,10 +24,15 @@ import { SchoolFavicon } from "./SchoolFavicon";
 import {
   listSessionYearOptions,
 } from "@/lib/masters";
-import { alignWorkspaceSessionFromMasters } from "@/lib/workspaceSession";
+import { alignWorkspaceSessionFromMasters, bootstrapWorkspaceSession } from "@/lib/workspaceSession";
 import { markModuleRegistryClientReady } from "@/lib/moduleRegistry";
-import { setSessionWriteLock } from "@/lib/sessionWriteGuard";
+import {
+  setSessionWriteLock,
+  setWorkspaceBootstrapPending,
+} from "@/lib/sessionWriteGuard";
 import { applyFeeDiscountSeedNow } from "@/lib/feeDiscountImportHydrate";
+import { consumeFreshLoginSession, flushAllDeskSyncPending, resetAllWorkspacePersistenceCaches } from "@/lib/workspaceClientSession";
+import { useWorkspaceInactivityLogout } from "./useWorkspaceInactivityLogout";
 
 export function AppShell({
   session,
@@ -45,13 +50,18 @@ export function AppShell({
     ReturnType<typeof listSessionYearOptions>
   >([]);
   const [clock, setClock] = useState("");
+  const [bootReady, setBootReady] = useState(false);
   const skipRouteHydrateRef = useRef(true);
+  const bootstrapAyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    setWorkspaceBootstrapPending(true);
+    return () => setWorkspaceBootstrapPending(false);
+  }, []);
 
   useEffect(() => {
     function flushDeskSync() {
-      void import("@/lib/mastersNormalizedClient").then((m) =>
-        m.flushMastersDeskSyncPending(),
-      );
+      void flushAllDeskSyncPending();
     }
     window.addEventListener("pagehide", flushDeskSync);
     document.addEventListener("visibilitychange", () => {
@@ -62,14 +72,20 @@ export function AppShell({
     };
   }, []);
 
-  // Hydration-safe: pull cloud mirror, then hydrate desk in background (route-priority + idle).
+  // Pull cloud data, align session, then reveal ERP (avoids stale 2025-26 flash).
   useEffect(() => {
+    if (bootReady) return;
+
     markModuleRegistryClientReady();
-    setYears(listSessionYearOptions());
     setClock(formatIst());
     const t = window.setInterval(() => setClock(formatIst()), 30_000);
+    let cancelled = false;
 
     void (async () => {
+      if (consumeFreshLoginSession()) {
+        await resetAllWorkspacePersistenceCaches();
+      }
+
       const {
         ensureClientSchoolMirrorHydrated,
         startDeskHydrationBackground,
@@ -82,18 +98,36 @@ export function AppShell({
       if (mirrorChanged) {
         window.dispatchEvent(new CustomEvent("bhb-desk-hydrated"));
       }
+
+      const boot = await bootstrapWorkspaceSession(
+        pathname,
+        session.academicYearCode,
+      );
+      if (cancelled) return;
+      if (boot === "refresh") {
+        router.refresh();
+        return;
+      }
+
+      bootstrapAyRef.current = session.academicYearCode;
+      setYears(listSessionYearOptions());
       applyFeeDiscountSeedNow();
       pushFullSchoolMirrorToServer();
-
-      // Non-blocking — priority tier + idle batches; does not delay mirror push.
       startDeskHydrationBackground(pathname);
+      setWorkspaceBootstrapPending(false);
+      setBootReady(true);
+      window.dispatchEvent(new CustomEvent("bhb-desk-hydrated"));
     })();
 
-    return () => window.clearInterval(t);
-  }, []);
+    return () => {
+      cancelled = true;
+      window.clearInterval(t);
+    };
+  }, [pathname, router, session.academicYearCode, bootReady]);
 
   // When navigating, hydrate that module's desk slices early (guards skip already-done).
   useEffect(() => {
+    if (!bootReady) return;
     if (skipRouteHydrateRef.current) {
       skipRouteHydrateRef.current = false;
       return;
@@ -101,11 +135,11 @@ export function AppShell({
     void import("@/lib/schoolDataMirrorClientHydrate").then((m) =>
       m.ensureDeskHydratedPriority(pathname),
     );
-  }, [pathname]);
+  }, [pathname, bootReady]);
 
-  // Keep header session list aligned with Masters; sync cookie once after desk hydrate.
+  // After Masters edits, re-align header session if needed (once per tab).
   useEffect(() => {
-    setYears(listSessionYearOptions());
+    if (!bootReady) return;
 
     function alignFromMasters() {
       void alignWorkspaceSessionFromMasters(session.academicYearCode).then(
@@ -115,22 +149,18 @@ export function AppShell({
       );
     }
 
-    window.addEventListener("bhb-desk-hydrated", alignFromMasters);
     window.addEventListener("bhb-masters-updated", alignFromMasters);
-    const t = window.setTimeout(alignFromMasters, 2000);
-
-    return () => {
-      window.clearTimeout(t);
-      window.removeEventListener("bhb-desk-hydrated", alignFromMasters);
+    return () =>
       window.removeEventListener("bhb-masters-updated", alignFromMasters);
-    };
-  }, [session.academicYearCode, router]);
+  }, [session.academicYearCode, router, bootReady]);
 
   const ay =
     years.find((y) => y.code === session.academicYearCode) ??
     years.find((y) => y.status === "current");
   const readOnly = ay?.status === "closed";
   const staffPwa = staffPwaInstallCopy(session.roleCode);
+
+  useWorkspaceInactivityLogout(bootReady);
 
   useEffect(() => {
     setSessionWriteLock({
@@ -161,10 +191,14 @@ export function AppShell({
   }, [session.academicYearCode]);
 
   async function logout() {
+    await flushAllDeskSyncPending();
     const { clearWorkspaceSessionAlignFlag } = await import(
       "@/lib/workspaceSession"
     );
     clearWorkspaceSessionAlignFlag();
+    bootstrapAyRef.current = null;
+    setBootReady(false);
+    setWorkspaceBootstrapPending(true);
     await fetch("/api/auth/demo", { method: "DELETE" });
     try {
       const { createBrowserSupabase, isDemoAuth } = await import(
@@ -179,6 +213,17 @@ export function AppShell({
     }
     router.push("/login");
     router.refresh();
+  }
+
+  if (!bootReady) {
+    return (
+      <SessionProvider session={session} readOnly={false}>
+        <SchoolFavicon />
+        <div className="flex h-screen items-center justify-center bg-[var(--surface)]">
+          <p className="text-sm text-[var(--muted)]">Loading workspace…</p>
+        </div>
+      </SessionProvider>
+    );
   }
 
   return (

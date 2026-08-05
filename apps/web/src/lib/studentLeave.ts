@@ -203,6 +203,57 @@ export function cancelStudentLeaveRequest(
   return { ok: true };
 }
 
+export function updateStudentLeaveRequest(input: {
+  id: string;
+  fromDate: string;
+  toDate: string;
+  leaveType: StudentLeaveType;
+  reason: string;
+}): { ok: true; request: StudentLeaveRequest } | { ok: false; error: string } {
+  const state = loadStudentLeave();
+  const i = state.requests.findIndex((r) => r.id === input.id);
+  if (i < 0) return { ok: false, error: "Request not found" };
+  const req = state.requests[i];
+  if (req.status !== "pending") {
+    return { ok: false, error: "Only pending requests can be edited" };
+  }
+  if (!input.fromDate) return { ok: false, error: "From date required" };
+  const toDate = input.toDate || input.fromDate;
+  if (toDate < input.fromDate) {
+    return { ok: false, error: "To date must be on or after from date" };
+  }
+  if (!input.reason.trim()) return { ok: false, error: "Reason required" };
+  const requests = [...state.requests];
+  requests[i] = {
+    ...req,
+    fromDate: input.fromDate,
+    toDate,
+    leaveType: input.leaveType,
+    reason: input.reason.trim(),
+  };
+  saveStudentLeave({ ...state, requests });
+  return { ok: true, request: requests[i]! };
+}
+
+export function deleteStudentLeaveRequest(
+  id: string,
+): { ok: true } | { ok: false; error: string } {
+  const state = loadStudentLeave();
+  const req = state.requests.find((r) => r.id === id);
+  if (!req) return { ok: false, error: "Request not found" };
+  if (req.status !== "pending" && req.status !== "cancelled") {
+    return {
+      ok: false,
+      error: "Only pending or cancelled requests can be deleted",
+    };
+  }
+  saveStudentLeave({
+    ...state,
+    requests: state.requests.filter((r) => r.id !== id),
+  });
+  return { ok: true };
+}
+
 export function decideStudentLeave(input: {
   id: string;
   approve: boolean;

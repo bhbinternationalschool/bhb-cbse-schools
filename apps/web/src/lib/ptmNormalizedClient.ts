@@ -4,6 +4,7 @@
 
 import type { PtmState } from "@/lib/ptm";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
 
 const META_KEY = "bhb_ptm_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -54,7 +55,7 @@ export function schedulePtmDeskSync(state: PtmState) {
     pushTimer = null;
     if (!batch) return;
     void pushPtmDeskApi(batch);
-  }, 600);
+  }, DESK_PUSH_DEBOUNCE_MS);
 }
 
 async function pushPtmDeskApi(state: PtmState) {

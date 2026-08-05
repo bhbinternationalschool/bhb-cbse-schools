@@ -739,3 +739,70 @@ export function setAlbumStatus(
   }
   return { ok: true, state: next };
 }
+
+export function deleteNotice(
+  id: string,
+): { ok: true; state: SchoolCommsState } | { ok: false; error: string } {
+  if (!canEditComms("notices")) return { ok: false, error: "No permission" };
+  const state = loadSchoolComms();
+  if (!state.notices.some((n) => n.id === id)) {
+    return { ok: false, error: "Not found" };
+  }
+  const next = { ...state, notices: state.notices.filter((n) => n.id !== id) };
+  saveSchoolComms(next);
+  return { ok: true, state: next };
+}
+
+export function deleteNews(
+  id: string,
+): { ok: true; state: SchoolCommsState } | { ok: false; error: string } {
+  if (!canEditComms("news")) return { ok: false, error: "No permission" };
+  const state = loadSchoolComms();
+  if (!state.news.some((n) => n.id === id)) {
+    return { ok: false, error: "Not found" };
+  }
+  const next = { ...state, news: state.news.filter((n) => n.id !== id) };
+  saveSchoolComms(next);
+  return { ok: true, state: next };
+}
+
+export function deleteAlbum(
+  id: string,
+): { ok: true; state: SchoolCommsState } | { ok: false; error: string } {
+  if (!canEditComms("gallery")) return { ok: false, error: "No permission" };
+  const state = loadSchoolComms();
+  if (!state.albums.some((a) => a.id === id)) {
+    return { ok: false, error: "Not found" };
+  }
+  const next = {
+    ...state,
+    albums: state.albums.filter((a) => a.id !== id),
+    photos: state.photos.filter((p) => p.albumId !== id),
+  };
+  saveSchoolComms(next);
+  return { ok: true, state: next };
+}
+
+export function deleteGalleryPhoto(
+  id: string,
+): { ok: true; state: SchoolCommsState } | { ok: false; error: string } {
+  if (!canEditComms("gallery")) return { ok: false, error: "No permission" };
+  const state = loadSchoolComms();
+  const photo = state.photos.find((p) => p.id === id);
+  if (!photo) return { ok: false, error: "Not found" };
+  const photos = state.photos.filter((p) => p.id !== id);
+  let albums = state.albums;
+  const alb = albums.find((a) => a.id === photo.albumId);
+  if (alb?.coverUrl === photo.url) {
+    const nextCover =
+      photos.find((p) => p.albumId === photo.albumId)?.url || "";
+    albums = albums.map((a) =>
+      a.id === photo.albumId
+        ? { ...a, coverUrl: nextCover, updatedAt: nowIso() }
+        : a,
+    );
+  }
+  const next = { ...state, albums, photos };
+  saveSchoolComms(next);
+  return { ok: true, state: next };
+}

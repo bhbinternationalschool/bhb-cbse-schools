@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Images, Megaphone } from "lucide-react";
-import { useDemoSession } from "@/components/shell/SessionContext";
+import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpTableShell } from "@/components/ui/erp-roster";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
@@ -14,6 +14,10 @@ import { WaChatHubPanel } from "@/components/comms/WaChatHubPanel";
 import {
   addGalleryPhoto,
   audienceLabel,
+  deleteAlbum,
+  deleteGalleryPhoto,
+  deleteNews,
+  deleteNotice,
   listAlbums,
   listNews,
   listNotices,
@@ -53,6 +57,7 @@ import {
 } from "@/lib/socialCrossPost";
 import { TENANT } from "@/lib/types";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
+import { DeskListActions } from "@/components/ui/desk-list-actions";
 
 type CommsTab =
   | "notices"
@@ -93,6 +98,7 @@ function tabFromSearch(raw: string | null, path: string): CommsTab {
 
 export function CommsWorkspace() {
   const session = useDemoSession();
+  const readOnly = useSessionReadOnly();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -124,6 +130,7 @@ export function CommsWorkspace() {
   const [aTitle, setATitle] = useState("");
   const [aDesc, setADesc] = useState("");
   const [aScheduleAt, setAScheduleAt] = useState("");
+  const [editAlbumId, setEditAlbumId] = useState<string | null>(null);
   const [activeAlbumId, setActiveAlbumId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [socialLogs, setSocialLogs] = useState<SocialCrossPostLogEntry[]>([]);
@@ -446,7 +453,9 @@ export function CommsWorkspace() {
   }
 
   function createAlbum(publish: boolean) {
+    const wasEdit = !!editAlbumId;
     const res = upsertAlbum({
+      id: editAlbumId || undefined,
       title: aTitle,
       description: aDesc,
       createdBy: actor,
@@ -459,10 +468,31 @@ export function CommsWorkspace() {
     }
     setComms(res.state);
     setActiveAlbumId(res.album.id);
+    setEditAlbumId(null);
     setATitle("");
     setADesc("");
-    flash(publish ? "Album published" : "Album created");
+    flash(
+      publish
+        ? "Album published"
+        : wasEdit
+          ? "Album updated"
+          : "Album created",
+    );
     if (publish) crossPostAlbum(res.album, res.state);
+  }
+
+  function beginEditAlbum(a: GalleryAlbum) {
+    setEditAlbumId(a.id);
+    setATitle(a.title);
+    setADesc(a.description);
+    setActiveAlbumId(a.id);
+  }
+
+  function resetAlbumForm() {
+    setEditAlbumId(null);
+    setATitle("");
+    setADesc("");
+    setAScheduleAt("");
   }
 
   function scheduleAlbum() {
@@ -471,6 +501,7 @@ export function CommsWorkspace() {
       return;
     }
     const res = upsertAlbum({
+      id: editAlbumId || undefined,
       title: aTitle,
       description: aDesc,
       createdBy: actor,
@@ -484,9 +515,7 @@ export function CommsWorkspace() {
     }
     setComms(res.state);
     setActiveAlbumId(res.album.id);
-    setATitle("");
-    setADesc("");
-    setAScheduleAt("");
+    resetAlbumForm();
     flash(`Album scheduled for ${new Date(res.album.scheduledPublishAt).toLocaleString()}`);
   }
 
@@ -654,14 +683,20 @@ export function CommsWorkspace() {
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-1">
-                      <button
-                        type="button"
-                        className="text-[11px] font-semibold text-[var(--brand-deep)]"
-                        onClick={() => beginEditNotice(n)}
-                      >
-                        Edit
-                      </button>
-                      {n.status !== "published" ? (
+                      <DeskListActions
+                        readOnly={readOnly}
+                        onEdit={() => beginEditNotice(n)}
+                        onDelete={() => {
+                          const r = deleteNotice(n.id);
+                          if (r.ok) {
+                            setComms(r.state);
+                            if (editNoticeId === n.id) resetNoticeForm();
+                            flash("Notice deleted");
+                          } else setError(r.error);
+                        }}
+                        deleteConfirm={`Delete notice "${n.title}"?`}
+                      />
+                      {!readOnly && n.status !== "published" ? (
                         <button
                           type="button"
                           className="text-[11px] font-semibold text-[#0f766e]"
@@ -802,14 +837,20 @@ export function CommsWorkspace() {
                       {n.title}
                     </h3>
                     <div className="flex gap-2">
-                      <button
-                        type="button"
-                        className="text-[11px] font-semibold"
-                        onClick={() => beginEditNews(n)}
-                      >
-                        Edit
-                      </button>
-                      {n.status !== "published" ? (
+                      <DeskListActions
+                        readOnly={readOnly}
+                        onEdit={() => beginEditNews(n)}
+                        onDelete={() => {
+                          const r = deleteNews(n.id);
+                          if (r.ok) {
+                            setComms(r.state);
+                            if (editNewsId === n.id) resetNewsForm();
+                            flash("News deleted");
+                          } else setError(r.error);
+                        }}
+                        deleteConfirm={`Delete story "${n.title}"?`}
+                      />
+                      {!readOnly && n.status !== "published" ? (
                         <button
                           type="button"
                           className="text-[11px] font-semibold text-[#0f766e]"
@@ -858,6 +899,9 @@ export function CommsWorkspace() {
       {tab === "gallery" ? (
         <div className="space-y-5">
           <section className="flex flex-wrap items-end gap-3 rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+            <p className="w-full text-sm font-semibold text-[var(--brand-deep)]">
+              {editAlbumId ? "Edit album" : "New album"}
+            </p>
             <label className="min-w-[180px] flex-1 text-xs text-[var(--muted)]">
               Album title
               <input
@@ -893,6 +937,11 @@ export function CommsWorkspace() {
             <button type="button" className={btn} onClick={() => createAlbum(true)}>
               Publish now
             </button>
+            {editAlbumId ? (
+              <button type="button" className={btnOutline} onClick={resetAlbumForm}>
+                Cancel
+              </button>
+            ) : null}
           </section>
           <SocialCrossPostPrefsPanel compact />
 
@@ -903,29 +952,49 @@ export function CommsWorkspace() {
               </p>
             ) : (
             albumsFiltered.map((a: GalleryAlbum) => (
-              <button
+              <div
                 key={a.id}
-                type="button"
-                onClick={() => setActiveAlbumId(a.id)}
                 className={`overflow-hidden rounded-xl border text-left transition ${
                   activeAlbumId === a.id
                     ? "border-[var(--brand-deep)] ring-2 ring-[var(--brand-gold)]"
                     : "border-[rgba(32,48,80,0.1)]"
                 } bg-white`}
               >
-                <div className="flex h-28 items-center justify-center bg-[rgba(32,48,80,0.06)]">
-                  {a.coverUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={a.coverUrl} alt="" className="h-full w-full object-cover" />
-                  ) : (
-                    <Images className="h-8 w-8 text-[var(--muted)]" />
-                  )}
+                <button
+                  type="button"
+                  onClick={() => setActiveAlbumId(a.id)}
+                  className="w-full text-left"
+                >
+                  <div className="flex h-28 items-center justify-center bg-[rgba(32,48,80,0.06)]">
+                    {a.coverUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={a.coverUrl} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <Images className="h-8 w-8 text-[var(--muted)]" />
+                    )}
+                  </div>
+                  <div className="p-3">
+                    <p className="text-sm font-semibold text-[var(--brand-deep)]">{a.title}</p>
+                    <p className="text-[11px] text-[var(--muted)]">{a.status}</p>
+                  </div>
+                </button>
+                <div className="px-3 pb-3">
+                  <DeskListActions
+                    readOnly={readOnly}
+                    onEdit={() => beginEditAlbum(a)}
+                    onDelete={() => {
+                      const r = deleteAlbum(a.id);
+                      if (r.ok) {
+                        setComms(r.state);
+                        if (activeAlbumId === a.id) setActiveAlbumId(null);
+                        if (editAlbumId === a.id) resetAlbumForm();
+                        flash("Album deleted");
+                      } else setError(r.error);
+                    }}
+                    deleteConfirm={`Delete album "${a.title}" and all its photos?`}
+                  />
                 </div>
-                <div className="p-3">
-                  <p className="text-sm font-semibold text-[var(--brand-deep)]">{a.title}</p>
-                  <p className="text-[11px] text-[var(--muted)]">{a.status}</p>
-                </div>
-              </button>
+              </div>
             ))
             )}
           </div>
@@ -978,13 +1047,29 @@ export function CommsWorkspace() {
               ) : (
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
                   {albumPhotos.map((p) => (
-                    <figure key={p.id} className="overflow-hidden rounded-lg bg-[rgba(32,48,80,0.05)]">
+                    <figure key={p.id} className="relative overflow-hidden rounded-lg bg-[rgba(32,48,80,0.05)]">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={p.url} alt={p.caption} className="aspect-square w-full object-cover" />
                       {p.caption ? (
                         <figcaption className="truncate px-1.5 py-1 text-[10px] text-[var(--muted)]">
                           {p.caption}
                         </figcaption>
+                      ) : null}
+                      {!readOnly ? (
+                        <button
+                          type="button"
+                          className="absolute right-1 top-1 rounded bg-white/90 px-1.5 py-0.5 text-[10px] font-semibold text-[#b42318]"
+                          onClick={() => {
+                            if (!window.confirm("Remove this photo?")) return;
+                            const r = deleteGalleryPhoto(p.id);
+                            if (r.ok) {
+                              setComms(r.state);
+                              flash("Photo removed");
+                            } else setError(r.error);
+                          }}
+                        >
+                          Delete
+                        </button>
                       ) : null}
                     </figure>
                   ))}
@@ -1084,7 +1169,7 @@ export function CommsWorkspace() {
       {tab === "channels" ? <ClassChannelsPanel /> : null}
 
       {tab === "wa_hub" ? (
-        <WaChatHubPanel by={session.fullName} canEdit />
+        <WaChatHubPanel by={session.fullName} canEdit={!readOnly} />
       ) : null}
 
       {tab === "inbox" ? (

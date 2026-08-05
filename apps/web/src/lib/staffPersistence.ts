@@ -21,6 +21,7 @@ import {
 } from "@/lib/foundationMasters";
 import type { MastersState } from "@/lib/masters";
 import { staffDualWriteDbEnabled, staffReadFromDbEnabled } from "@/lib/staffDbConfig";
+import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
 import {
   isDeskHydrated,
   markDeskHydrated,
@@ -466,7 +467,7 @@ export function scheduleStaffSync(state: MastersState) {
     pushTimer = null;
     if (!payload) return;
     void pushStaffSlice(payload);
-  }, 500);
+  }, DESK_PUSH_DEBOUNCE_MS);
 }
 
 /**

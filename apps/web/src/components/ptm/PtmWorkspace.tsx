@@ -11,7 +11,7 @@ import {
   Star,
   UsersRound,
 } from "lucide-react";
-import { useDemoSession } from "@/components/shell/SessionContext";
+import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { Badge } from "@/components/ui/badge";
@@ -37,6 +37,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { TabsContent, WorkspaceTabs, type WorkspaceTabItem } from "@/components/ui/workspace-tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { DeskListActions } from "@/components/ui/desk-list-actions";
 import { cn } from "@/lib/utils";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
 import { loadSis, type SisState } from "@/lib/sis";
@@ -47,6 +48,8 @@ import {
   composeWhatsAppPtmConfirm,
   composeWhatsAppPtmReminder,
   createPtmEvent,
+  deletePtmEvent,
+  deletePtmSlot,
   markPtmWhatsApp,
   modeLabel,
   PTM_REPORTS,
@@ -56,7 +59,9 @@ import {
   seedPtmIfEmpty,
   setPtmBookingStatus,
   slotBookedCount,
+  updatePtmEvent,
   type PtmMode,
+  type PtmEvent,
   type PtmReportId,
   type PtmState,
 } from "@/lib/ptm";
@@ -122,6 +127,7 @@ function bookingStatusBadge(status: string) {
 
 export function PtmWorkspace() {
   const session = useDemoSession();
+  const readOnly = useSessionReadOnly();
   const ay = session.academicYearCode || DEFAULT_AY;
   const [tab, setTab] = useModuleTabQuery<PtmTab>("dashboard", [
     "dashboard",
@@ -147,6 +153,7 @@ export function PtmWorkspace() {
   const [evMode, setEvMode] = useState<PtmMode>("in_person");
   const [evNote, setEvNote] = useState("");
   const [evClassIds, setEvClassIds] = useState<string[]>([]);
+  const [editingEventId, setEditingEventId] = useState<string | null>(null);
 
   const [slotTeacherId, setSlotTeacherId] = useState("");
   const [slotStarts, setSlotStarts] = useState("10:00,10:15,10:30");
@@ -232,7 +239,49 @@ export function PtmWorkspace() {
     );
   }
 
+  function resetEventForm() {
+    setEditingEventId(null);
+    setEvName("");
+    setEvDate(new Date().toISOString().slice(0, 10));
+    setEvEndDate("");
+    setEvMode("in_person");
+    setEvNote("");
+    setEvClassIds([]);
+  }
+
+  function beginEditEvent(e: PtmEvent) {
+    setEditingEventId(e.id);
+    setEvName(e.name);
+    setEvDate(e.date);
+    setEvEndDate(e.endDate !== e.date ? e.endDate : "");
+    setEvMode(e.mode);
+    setEvNote(e.note);
+    setEvClassIds(e.classIds);
+    setEventId(e.id);
+  }
+
   function createEvent() {
+    if (editingEventId) {
+      const r = updatePtmEvent({
+        id: editingEventId,
+        name: evName,
+        date: evDate,
+        endDate: evEndDate || evDate,
+        classIds: evClassIds.length
+          ? evClassIds
+          : classOptions.slice(0, 3).map((c) => c.id),
+        mode: evMode,
+        note: evNote,
+      });
+      if (!r.ok) {
+        setError(r.error);
+        return;
+      }
+      resetEventForm();
+      refresh();
+      flash("PTM event updated");
+      return;
+    }
     const r = createPtmEvent({
       academicYearCode: ay,
       name: evName,
@@ -248,8 +297,7 @@ export function PtmWorkspace() {
       setError(r.error);
       return;
     }
-    setEvName("");
-    setEvNote("");
+    resetEventForm();
     refresh();
     setEventId(r.event.id);
     flash("PTM event created");
@@ -406,6 +454,23 @@ export function PtmWorkspace() {
                   {e.note ? (
                     <CardContent className="pt-0 text-sm">{e.note}</CardContent>
                   ) : null}
+                  <CardFooter className="border-t-0 pt-0">
+                    <DeskListActions
+                      readOnly={readOnly}
+                      onEdit={() => beginEditEvent(e)}
+                      onDelete={() => {
+                        const r = deletePtmEvent(e.id);
+                        if (!r.ok) setError(r.error);
+                        else {
+                          if (eventId === e.id) setEventId("");
+                          if (editingEventId === e.id) resetEventForm();
+                          refresh();
+                          flash("Event deleted");
+                        }
+                      }}
+                      deleteConfirm={`Delete PTM event "${e.name}"?`}
+                    />
+                  </CardFooter>
                 </Card>
               ))
             )}
@@ -415,7 +480,7 @@ export function PtmWorkspace() {
 
           <Card>
             <CardHeader>
-              <CardTitle>New PTM event</CardTitle>
+              <CardTitle>{editingEventId ? "Edit PTM event" : "New PTM event"}</CardTitle>
               <CardDescription>
                 Schedule a parent–teacher meeting for selected classes.
               </CardDescription>
@@ -493,10 +558,15 @@ export function PtmWorkspace() {
                 />
               </div>
             </CardContent>
-            <CardFooter>
-              <Button type="button" onClick={createEvent}>
-                Create event
+            <CardFooter className="flex flex-wrap gap-2">
+              <Button type="button" onClick={createEvent} disabled={readOnly}>
+                {editingEventId ? "Save changes" : "Create event"}
               </Button>
+              {editingEventId ? (
+                <Button type="button" variant="outline" onClick={resetEventForm}>
+                  Cancel
+                </Button>
+              ) : null}
             </CardFooter>
           </Card>
         </TabsContent>
@@ -519,9 +589,28 @@ export function PtmWorkspace() {
                             {s.teacherName} · {s.startAt}–{s.endAt}
                             {s.roomOrLink ? ` · ${s.roomOrLink}` : ""}
                           </span>
-                          <Badge variant="outline">
-                            {booked}/{s.capacity} booked
-                          </Badge>
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline">
+                              {booked}/{s.capacity} booked
+                            </Badge>
+                            {!readOnly && booked === 0 ? (
+                              <button
+                                type="button"
+                                className="text-xs font-semibold text-[#b42318]"
+                                onClick={() => {
+                                  if (!window.confirm("Delete this slot?")) return;
+                                  const r = deletePtmSlot(s.id);
+                                  if (!r.ok) setError(r.error);
+                                  else {
+                                    refresh();
+                                    flash("Slot deleted");
+                                  }
+                                }}
+                              >
+                                Delete
+                              </button>
+                            ) : null}
+                          </div>
                         </CardContent>
                       </Card>
                     );

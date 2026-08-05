@@ -5,6 +5,7 @@
 import type { AttendanceState } from "@/lib/attendance";
 import type { AttendanceDeskAncillary } from "@/lib/attendanceDeskAncillary.server";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
 
 const META_KEY = "bhb_attendance_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -57,7 +58,7 @@ export function scheduleAttendanceDeskSync(state: AttendanceState) {
     pushTimer = null;
     if (!batch) return;
     void pushAttendanceDeskApi(batch);
-  }, 600);
+  }, DESK_PUSH_DEBOUNCE_MS);
 }
 
 async function pushAttendanceDeskApi(state: AttendanceState) {

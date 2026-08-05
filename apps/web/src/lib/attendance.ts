@@ -718,6 +718,21 @@ export function upsertRegister(input: {
   };
 }
 
+export function deleteRegister(
+  registerId: string,
+): { ok: true } | { ok: false; error: string } {
+  const state = loadAttendance();
+  const i = state.registers.findIndex((r) => r.id === registerId);
+  if (i < 0) return { ok: false, error: "Register not found" };
+  const next: AttendanceState = {
+    ...state,
+    registers: state.registers.filter((r) => r.id !== registerId),
+    absentNudges: state.absentNudges.filter((n) => n.registerId !== registerId),
+  };
+  saveAttendance(rebuildExceptionsInto(next));
+  return { ok: true };
+}
+
 function loadApprovedLeaveForDate(
   academicYearCode: string,
   date: string,

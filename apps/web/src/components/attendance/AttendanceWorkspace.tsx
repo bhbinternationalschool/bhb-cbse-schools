@@ -13,6 +13,7 @@ import {
   listOpenAttendanceExceptions,
   listRecentRegisters,
   rosterForSection,
+  deleteRegister,
   statusTone,
   summarizeMarks,
   todayIso,
@@ -30,7 +31,7 @@ import {
 import { FilterExportButtons } from "@/components/reports/FilterExportButtons";
 import { describeFilters } from "@/lib/reportExport";
 import { TENANT } from "@/lib/types";
-import { useDemoSession } from "@/components/shell/SessionContext";
+import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ErpTableShell } from "@/components/ui/erp-roster";
@@ -53,6 +54,7 @@ type AttTab =
 
 export function AttendanceWorkspace() {
   const session = useDemoSession();
+  const readOnly = useSessionReadOnly();
   const [tab, setTab] = useState<AttTab>("dashboard");
 
   useEffect(() => {
@@ -832,10 +834,10 @@ export function AttendanceWorkspace() {
                 {recent.map((r) => {
                   const s = summarizeMarks(r.marks);
                   return (
-                    <li key={r.id}>
+                    <li key={r.id} className="flex items-center gap-2">
                       <button
                         type="button"
-                        className="w-full py-2 text-left hover:bg-[rgba(32,48,80,0.03)]"
+                        className="min-w-0 flex-1 py-2 text-left hover:bg-[rgba(32,48,80,0.03)]"
                         onClick={() => {
                           setClassId(r.classId);
                           setSectionId(r.sectionId);
@@ -850,6 +852,30 @@ export function AttendanceWorkspace() {
                           {r.markedBy}
                         </div>
                       </button>
+                      {!readOnly ? (
+                        <button
+                          type="button"
+                          className="shrink-0 px-2 text-[10px] font-semibold text-[#b42318]"
+                          title="Delete register"
+                          onClick={() => {
+                            if (
+                              !window.confirm(
+                                `Delete register for ${classLabel(r.classId, r.sectionId)} on ${r.date}?`,
+                              )
+                            ) {
+                              return;
+                            }
+                            const res = deleteRegister(r.id);
+                            if (!res.ok) setError(res.error);
+                            else {
+                              refresh();
+                              setNotice("Register deleted");
+                            }
+                          }}
+                        >
+                          Delete
+                        </button>
+                      ) : null}
                     </li>
                   );
                 })}

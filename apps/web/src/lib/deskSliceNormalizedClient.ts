@@ -5,6 +5,7 @@
 import type { DeskModuleId } from "@/lib/deskCutover";
 import { deskSliceDef, deskSliceEnvReadFromDb } from "@/lib/deskSliceRegistry";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
 
 type DeskMeta = { updatedAt: string; rowCount: number };
 
@@ -51,7 +52,7 @@ export function scheduleDeskSliceSync(
       timers.delete(id);
       if (!batch) return;
       void pushDeskSliceApi(id, batch);
-    }, 600),
+    }, DESK_PUSH_DEBOUNCE_MS),
   );
 }
 

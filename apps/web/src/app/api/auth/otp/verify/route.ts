@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { demoSessionCookieName, type DemoSession } from "@/lib/auth";
+import { appSessionCookieOptions } from "@/lib/authCookies.server";
 import { DEFAULT_AY } from "@/lib/masters";
 import { resolveParentHousehold } from "@/lib/parentPortal";
 import { verifyParentOtp } from "@/lib/parentOtp.server";
@@ -58,13 +59,7 @@ export async function POST(request: Request) {
     res.cookies.set(
       demoSessionCookieName(),
       encodeURIComponent(JSON.stringify(session)),
-      {
-        httpOnly: true,
-        sameSite: "lax",
-        path: "/",
-        maxAge: 60 * 60 * 24 * 14,
-        secure: process.env.NODE_ENV === "production",
-      },
+      appSessionCookieOptions(),
     );
     return res;
   } catch (e) {

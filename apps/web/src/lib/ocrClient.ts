@@ -95,6 +95,58 @@ export async function runBillOcrApi(opts: {
   };
 }
 
+export type LibraryProcurementOcrSuggestion = {
+  vendor: string;
+  billNo: string;
+  billDate: string;
+  lineItems: { description?: string; qty?: number; amount?: number }[];
+  totalAmount: number | null;
+  gst: string;
+  notes: string;
+  confidence: "high" | "medium" | "low" | "partial";
+};
+
+export async function runLibraryProcurementOcrApi(opts: {
+  imageBase64: string;
+  mimeType?: string;
+}): Promise<{
+  ok: boolean;
+  suggestion?: LibraryProcurementOcrSuggestion;
+  openAiConfigured?: boolean;
+  error?: string;
+  warning?: string;
+}> {
+  const res = await fetch("/api/library/procurement-ocr", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      imageBase64: opts.imageBase64,
+      mimeType: opts.mimeType,
+    }),
+  });
+  const json = (await res.json().catch(() => ({}))) as {
+    ok?: boolean;
+    suggestion?: LibraryProcurementOcrSuggestion;
+    openAiConfigured?: boolean;
+    error?: string;
+    warning?: string;
+  };
+  if (!res.ok) {
+    return {
+      ok: false,
+      error: json.error || "OCR failed",
+      openAiConfigured: json.openAiConfigured,
+    };
+  }
+  return {
+    ok: json.ok !== false,
+    suggestion: json.suggestion,
+    openAiConfigured: json.openAiConfigured,
+    warning: json.warning,
+    error: json.error,
+  };
+}
+
 export async function runAdmissionDocOcrApi(opts: {
   dataUrl: string;
   mimeType?: string;

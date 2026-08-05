@@ -52,7 +52,7 @@ export const ensureLibraryHydrated = async () => {
 
   let normChanged = false;
   const { bundle, changed } = await hydrateLibraryDeskFromDb(readFromDb);
-  if (changed && (bundle.titles.length > 0 || readFromDb)) {
+  if (changed && (bundle.titles.length > 0 || bundle.procurementDocs.length > 0 || readFromDb)) {
     writeLibraryLocalRaw(
       mergeDbDeskIntoLibraryState(loadLibrary(), bundle, { preferDb: readFromDb }),
     );
@@ -105,7 +105,7 @@ export async function ensureLibraryHydratedServer(): Promise<boolean> {
   }
 
   const dbDesk = await fetchLibraryDeskFromDb();
-  if (dbDesk.bundle.titles.length > 0 || libraryReadFromDbEnabled()) {
+  if (dbDesk.bundle.titles.length > 0 || dbDesk.bundle.procurementDocs.length > 0 || libraryReadFromDbEnabled()) {
     state = mergeDbDeskIntoLibraryState(state, dbDesk.bundle, {
       preferDb: libraryReadFromDbEnabled() || (state.titles?.length ?? 0) === 0,
     });

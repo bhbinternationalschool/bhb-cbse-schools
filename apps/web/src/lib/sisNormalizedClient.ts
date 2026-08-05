@@ -4,6 +4,7 @@
 
 import type { SisState } from "@/lib/sis";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
 import type { SisRemoteBundle } from "@/lib/sisNormalized.server";
 
 const META_KEY = "bhb_sis_db_meta_v1";
@@ -59,7 +60,7 @@ export function scheduleSisDeskSync(state: Pick<SisState, "households" | "studen
     pushTimer = null;
     if (!batch) return;
     void pushSisDeskApi(batch);
-  }, 600);
+  }, DESK_PUSH_DEBOUNCE_MS);
 }
 
 async function pushSisDeskApi(state: Pick<SisState, "households" | "students">) {

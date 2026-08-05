@@ -4,6 +4,7 @@
 
 import type { VaultState } from "@/lib/vault";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
 
 const META_KEY = "bhb_vault_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -56,7 +57,7 @@ export function scheduleVaultDeskSync(state: VaultState) {
     pushTimer = null;
     if (!batch) return;
     void pushVaultDeskApi(batch);
-  }, 600);
+  }, DESK_PUSH_DEBOUNCE_MS);
 }
 
 async function pushVaultDeskApi(state: VaultState) {

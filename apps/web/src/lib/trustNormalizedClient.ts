@@ -4,6 +4,7 @@
 
 import type { TrustState } from "@/lib/trust";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
 
 const META_KEY = "bhb_trust_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -42,7 +43,7 @@ export function scheduleTrustDeskSync(state: TrustState) {
     pushTimer = null;
     if (!batch) return;
     void pushTrustDeskApi(batch);
-  }, 600);
+  }, DESK_PUSH_DEBOUNCE_MS);
 }
 
 async function pushTrustDeskApi(state: TrustState) {

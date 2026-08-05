@@ -32,7 +32,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, skipped: true });
   }
 
-  let body: Pick<LibraryState, "titles" | "copies" | "issues" | "settings">;
+  let body: Pick<
+    LibraryState,
+    "titles" | "copies" | "issues" | "procurementDocs" | "settings"
+  >;
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -40,12 +43,14 @@ export async function POST(req: Request) {
   }
 
   const result = await pushLibraryDeskToDb({
-    version: 1,
+    version: 2,
     titles: body.titles ?? [],
     copies: body.copies ?? [],
     issues: body.issues ?? [],
+    procurementDocs: body.procurementDocs ?? [],
     settings: body.settings ?? {
       maxBooksPerStudent: 2,
+      maxBooksPerStaff: 3,
       loanDays: 14,
       finePaisePerDay: 500,
     },

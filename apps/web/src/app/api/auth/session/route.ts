@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { DEMO_USERS, demoSessionCookieName, type DemoSession } from "@/lib/auth";
+import { appSessionCookieOptions } from "@/lib/authCookies.server";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { superAdminRoleCode } from "@/lib/superAdmin";
 import { TENANT, type Persona } from "@/lib/types";
@@ -141,13 +142,7 @@ export async function POST(request: Request) {
   res.cookies.set(
     demoSessionCookieName(),
     encodeURIComponent(JSON.stringify(session)),
-    {
-      httpOnly: true,
-      sameSite: "lax",
-      path: "/",
-      maxAge: 60 * 60 * 24 * 14,
-      secure: process.env.NODE_ENV === "production",
-    },
+    appSessionCookieOptions(),
   );
   return res;
 }

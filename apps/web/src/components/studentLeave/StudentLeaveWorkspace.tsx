@@ -10,7 +10,7 @@ import {
   LayoutDashboard,
   List,
 } from "lucide-react";
-import { useDemoSession } from "@/components/shell/SessionContext";
+import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { Badge } from "@/components/ui/badge";
@@ -42,6 +42,7 @@ import {
   cancelStudentLeaveRequest,
   createStudentLeaveRequest,
   decideStudentLeave,
+  deleteStudentLeaveRequest,
   leaveDayCount,
   leaveTypeLabel,
   loadStudentLeave,
@@ -49,6 +50,7 @@ import {
   runStudentLeaveReport,
   STUDENT_LEAVE_REPORTS,
   STUDENT_LEAVE_TYPES,
+  updateStudentLeaveRequest,
   type StudentLeaveReportId,
   type StudentLeaveRequest,
   type StudentLeaveState,
@@ -103,6 +105,8 @@ function RequestRow({
   onFlash,
   onError,
   showActions,
+  readOnly,
+  onEdit,
 }: {
   req: StudentLeaveRequest;
   masters: MastersState;
@@ -112,6 +116,8 @@ function RequestRow({
   onFlash: (msg: string) => void;
   onError: (msg: string) => void;
   showActions: boolean;
+  readOnly?: boolean;
+  onEdit?: (req: StudentLeaveRequest) => void;
 }) {
   const student = sis.students.find((s) => s.id === req.studentId);
 
@@ -141,7 +147,7 @@ function RequestRow({
           {req.attendanceApplied ? " · Attendance applied" : ""}
         </p>
       </CardContent>
-      {showActions && req.status === "pending" ? (
+      {showActions && req.status === "pending" && !readOnly ? (
         <CardFooter className="flex flex-wrap gap-2 border-t-0 pt-0">
           <Button
             type="button"
@@ -199,22 +205,68 @@ function RequestRow({
           ) : null}
         </CardFooter>
       ) : null}
-      {!showActions && req.status === "pending" && req.requestedBy === actorName ? (
+      {!showActions && req.status === "pending" && !readOnly ? (
+        <CardFooter className="flex flex-wrap gap-2 border-t-0 pt-0">
+          {onEdit ? (
+            <Button type="button" variant="outline" size="sm" onClick={() => onEdit(req)}>
+              Edit
+            </Button>
+          ) : null}
+          {req.requestedBy === actorName ? (
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              onClick={() => {
+                const r = cancelStudentLeaveRequest(req.id);
+                if (!r.ok) onError(r.error);
+                else {
+                  onRefresh();
+                  onFlash("Cancelled");
+                }
+              }}
+            >
+              Cancel
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              onClick={() => {
+                if (!window.confirm("Delete this leave request?")) return;
+                const r = deleteStudentLeaveRequest(req.id);
+                if (!r.ok) onError(r.error);
+                else {
+                  onRefresh();
+                  onFlash("Request deleted");
+                }
+              }}
+            >
+              Delete
+            </Button>
+          )}
+        </CardFooter>
+      ) : null}
+      {!showActions &&
+      req.status === "cancelled" &&
+      !readOnly ? (
         <CardFooter className="border-t-0 pt-0">
           <Button
             type="button"
             variant="destructive"
             size="sm"
             onClick={() => {
-              const r = cancelStudentLeaveRequest(req.id);
+              if (!window.confirm("Delete this cancelled request?")) return;
+              const r = deleteStudentLeaveRequest(req.id);
               if (!r.ok) onError(r.error);
               else {
                 onRefresh();
-                onFlash("Cancelled");
+                onFlash("Request deleted");
               }
             }}
           >
-            Cancel
+            Delete
           </Button>
         </CardFooter>
       ) : null}
@@ -229,6 +281,7 @@ export function StudentLeaveWorkspace({
   embedded?: boolean;
 }) {
   const session = useDemoSession();
+  const readOnly = useSessionReadOnly();
   const ay = session.academicYearCode || DEFAULT_AY;
   const [tab, setTab] = useModuleTabQuery<LeaveTab>("dashboard", [
     "dashboard",
@@ -248,6 +301,7 @@ export function StudentLeaveWorkspace({
   const [leaveType, setLeaveType] = useState<StudentLeaveType>("SL");
   const [reason, setReason] = useState("");
   const [studentId, setStudentId] = useState("");
+  const [editingRequestId, setEditingRequestId] = useState<string | null>(null);
 
   const [reportFrom, setReportFrom] = useState(monthStart);
   const [reportTo, setReportTo] = useState(todayIso);
@@ -332,7 +386,43 @@ export function StudentLeaveWorkspace({
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }, [state, ay]);
 
+  function beginEditRequest(req: StudentLeaveRequest) {
+    setEditingRequestId(req.id);
+    setStudentId(req.studentId);
+    setFromDate(req.fromDate);
+    setToDate(req.toDate);
+    setLeaveType(req.leaveType);
+    setReason(req.reason);
+    setTab("apply");
+  }
+
+  function resetApplyForm() {
+    setEditingRequestId(null);
+    setReason("");
+    setFromDate(todayIso());
+    setToDate(todayIso());
+    setLeaveType("SL");
+  }
+
   function submitApply() {
+    if (editingRequestId) {
+      const r = updateStudentLeaveRequest({
+        id: editingRequestId,
+        fromDate,
+        toDate,
+        leaveType,
+        reason,
+      });
+      if (!r.ok) {
+        setError(r.error);
+        return;
+      }
+      resetApplyForm();
+      refresh();
+      flash("Leave request updated");
+      setTab("all");
+      return;
+    }
     const student = activeStudents.find((s) => s.id === studentId);
     const r = createStudentLeaveRequest({
       academicYearCode: ay,
@@ -348,7 +438,7 @@ export function StudentLeaveWorkspace({
       setError(r.error);
       return;
     }
-    setReason("");
+    resetApplyForm();
     refresh();
     flash("Leave request submitted");
     setTab("pending");
@@ -366,6 +456,8 @@ export function StudentLeaveWorkspace({
     masters,
     sis,
     actorName,
+    readOnly,
+    onEdit: beginEditRequest,
     onRefresh: refresh,
     onFlash: flash,
     onError: (msg: string) => {
@@ -445,7 +537,9 @@ export function StudentLeaveWorkspace({
         <TabsContent value="apply">
           <Card className="max-w-xl">
             <CardHeader>
-              <CardTitle>Apply on behalf of student</CardTitle>
+              <CardTitle>
+                {editingRequestId ? "Edit leave request" : "Apply on behalf of student"}
+              </CardTitle>
               <CardDescription>
                 Staff can submit leave for a student (e.g. office walk-in).
               </CardDescription>
@@ -517,10 +611,15 @@ export function StudentLeaveWorkspace({
                 />
               </div>
             </CardContent>
-            <CardFooter>
-              <Button type="button" onClick={submitApply}>
-                Submit request
+            <CardFooter className="flex flex-wrap gap-2">
+              <Button type="button" onClick={submitApply} disabled={readOnly}>
+                {editingRequestId ? "Save changes" : "Submit request"}
               </Button>
+              {editingRequestId ? (
+                <Button type="button" variant="outline" onClick={resetApplyForm}>
+                  Cancel
+                </Button>
+              ) : null}
             </CardFooter>
           </Card>
         </TabsContent>

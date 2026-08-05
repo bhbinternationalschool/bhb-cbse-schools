@@ -8,6 +8,10 @@ import { fetchSchoolMirror } from "@/lib/schoolDataMirror";
 const META_KEY = "bhb_client_mirror_hydrate_v1";
 let hydratedOnce = false;
 
+export function resetClientSchoolMirrorHydrated(): void {
+  hydratedOnce = false;
+}
+
 function readMeta(): string {
   if (typeof window === "undefined") return "";
   try {

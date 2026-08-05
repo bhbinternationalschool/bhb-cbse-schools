@@ -5,6 +5,7 @@
 import type { ExamsState } from "@/lib/exams";
 import { defaultExamPolicy } from "@/lib/exams";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
 
 const META_KEY = "bhb_exams_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -55,7 +56,7 @@ export function scheduleExamsDeskSync(state: ExamsState) {
     pushTimer = null;
     if (!batch) return;
     void pushExamsDeskApi(batch);
-  }, 600);
+  }, DESK_PUSH_DEBOUNCE_MS);
 }
 
 async function pushExamsDeskApi(state: ExamsState) {

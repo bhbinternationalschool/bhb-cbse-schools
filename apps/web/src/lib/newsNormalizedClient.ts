@@ -4,6 +4,7 @@
 
 import { loadSchoolComms } from "@/lib/schoolComms";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
 
 const META_KEY = "bhb_news_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -37,7 +38,7 @@ export function scheduleNewsDeskSync() {
     pushTimer = null;
     const state = loadSchoolComms();
     void pushNewsDeskApi({ news: state.news });
-  }, 600);
+  }, DESK_PUSH_DEBOUNCE_MS);
 }
 
 async function pushNewsDeskApi(bundle: {

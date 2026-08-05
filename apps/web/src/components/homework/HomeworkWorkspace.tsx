@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { BookOpen } from "lucide-react";
-import { useDemoSession } from "@/components/shell/SessionContext";
+import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
@@ -19,6 +19,7 @@ import {
   composeWhatsAppHomeworkNotify,
   createDiaryEntry,
   createHomeworkPost,
+  deleteDiaryEntry,
   HOMEWORK_REPORTS,
   homeworkWhatsAppUrl,
   isSeen,
@@ -35,6 +36,8 @@ import {
   setHomeworkExamFreeze,
   subjectLabel,
   submissionForStudent,
+  updateDiaryEntry,
+  updateHomeworkPost,
   withdrawHomeworkPost,
   type DiaryEntry,
   type HomeworkParentContact,
@@ -46,6 +49,7 @@ import {
 import { ClassroomSyncPanel } from "@/components/homework/ClassroomSyncPanel";
 import { TENANT } from "@/lib/types";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
+import { DeskListActions } from "@/components/ui/desk-list-actions";
 
 type HwTab =
   | "dashboard"
@@ -76,6 +80,7 @@ function monthStart() {
 
 export function HomeworkWorkspace() {
   const session = useDemoSession();
+  const readOnly = useSessionReadOnly();
   const ay = session.academicYearCode || DEFAULT_AY;
   const [tab, setTab] = useState<HwTab>("dashboard");
   const [masters, setMasters] = useState<MastersState | null>(null);
@@ -108,6 +113,8 @@ export function HomeworkWorkspace() {
   const [diaryTitle, setDiaryTitle] = useState("");
   const [diaryEn, setDiaryEn] = useState("");
   const [diaryHi, setDiaryHi] = useState("");
+  const [editingPostId, setEditingPostId] = useState<string | null>(null);
+  const [editingDiaryId, setEditingDiaryId] = useState<string | null>(null);
 
   // Reports
   const [fromDate, setFromDate] = useState(monthStart);
@@ -267,8 +274,34 @@ export function HomeworkWorkspace() {
       );
   }, [state, sis]);
 
+  function resetComposeForm() {
+    setEditingPostId(null);
+    setTitle("");
+    setBodyEn("");
+    setBodyHi("");
+    setAttachUrl("");
+    setAttachLabel("");
+    setRequiresSubmit(false);
+    setAiHint("");
+  }
+
+  function beginEditPost(p: HomeworkPost) {
+    setEditingPostId(p.id);
+    setSubjectId(p.subjectId);
+    setTitle(p.title);
+    setBodyEn(p.bodyEn);
+    setBodyHi(p.bodyHi);
+    setDueAt(p.dueAt || date);
+    setRequiresSubmit(p.requiresSubmit);
+    setAiHint(p.aiTutorHint || "");
+    const att = p.attachments[0];
+    setAttachUrl(att?.url || "");
+    setAttachLabel(att?.label || "");
+    setTab("compose");
+  }
+
   function publishHw() {
-    const r = createHomeworkPost({
+    const payload = {
       academicYearCode: ay,
       classId,
       sectionId,
@@ -291,25 +324,42 @@ export function HomeworkWorkspace() {
             },
           ]
         : [],
-    });
+    };
+    const wasEdit = !!editingPostId;
+    const r = editingPostId
+      ? updateHomeworkPost({ ...payload, id: editingPostId })
+      : createHomeworkPost(payload);
     if (!r.ok) {
       setError(r.error);
       return;
     }
-    setTitle("");
-    setBodyEn("");
-    setBodyHi("");
-    setAttachUrl("");
-    setAttachLabel("");
-    setRequiresSubmit(false);
+    resetComposeForm();
     refresh();
-    setNotifyTarget({ kind: "homework", post: r.post });
-    flash("Homework published — notify parents below");
+    if (wasEdit) {
+      flash("Homework updated");
+    } else {
+      setNotifyTarget({ kind: "homework", post: r.post });
+      flash("Homework published — notify parents below");
+    }
     setTab("today");
   }
 
+  function resetDiaryForm() {
+    setEditingDiaryId(null);
+    setDiaryTitle("");
+    setDiaryEn("");
+    setDiaryHi("");
+  }
+
+  function beginEditDiary(d: DiaryEntry) {
+    setEditingDiaryId(d.id);
+    setDiaryTitle(d.title);
+    setDiaryEn(d.bodyEn);
+    setDiaryHi(d.bodyHi);
+  }
+
   function publishDiary() {
-    const r = createDiaryEntry({
+    const payload = {
       academicYearCode: ay,
       classId,
       sectionId,
@@ -319,17 +369,23 @@ export function HomeworkWorkspace() {
       title: diaryTitle,
       bodyEn: diaryEn,
       bodyHi: diaryHi,
-    });
+    };
+    const wasEdit = !!editingDiaryId;
+    const r = editingDiaryId
+      ? updateDiaryEntry({ ...payload, id: editingDiaryId })
+      : createDiaryEntry(payload);
     if (!r.ok) {
       setError(r.error);
       return;
     }
-    setDiaryTitle("");
-    setDiaryEn("");
-    setDiaryHi("");
+    resetDiaryForm();
     refresh();
-    setNotifyTarget({ kind: "diary", diary: r.entry });
-    flash("Diary posted — notify parents below");
+    if (wasEdit) {
+      flash("Diary updated");
+    } else {
+      setNotifyTarget({ kind: "diary", diary: r.entry });
+      flash("Diary posted — notify parents below");
+    }
     setTab("today");
   }
 
@@ -660,6 +716,15 @@ export function HomeworkWorkspace() {
                     ) : null}
                     {p.status === "published" ? (
                       <div className="mt-2 flex flex-wrap gap-3">
+                        {!readOnly ? (
+                          <button
+                            type="button"
+                            className="text-xs text-[var(--brand-deep)] underline"
+                            onClick={() => beginEditPost(p)}
+                          >
+                            Edit
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           className="text-xs text-[#0f766e] underline"
@@ -669,17 +734,19 @@ export function HomeworkWorkspace() {
                         >
                           Notify WhatsApp
                         </button>
-                        <button
-                          type="button"
-                          className="text-xs text-[#b42318] underline"
-                          onClick={() => {
-                            withdrawHomeworkPost(p.id);
-                            refresh();
-                            flash("Post withdrawn");
-                          }}
-                        >
-                          Withdraw
-                        </button>
+                        {!readOnly ? (
+                          <button
+                            type="button"
+                            className="text-xs text-[#b42318] underline"
+                            onClick={() => {
+                              withdrawHomeworkPost(p.id);
+                              refresh();
+                              flash("Post withdrawn");
+                            }}
+                          >
+                            Withdraw
+                          </button>
+                        ) : null}
                       </div>
                     ) : null}
                   </li>
@@ -707,15 +774,46 @@ export function HomeworkWorkspace() {
                   <p className="mt-2 whitespace-pre-wrap text-sm">
                     {d.bodyEn || d.bodyHi}
                   </p>
-                  <button
-                    type="button"
-                    className="mt-2 text-xs text-[#0f766e] underline"
-                    onClick={() =>
-                      setNotifyTarget({ kind: "diary", diary: d })
-                    }
-                  >
-                    Notify WhatsApp
-                  </button>
+                  <div className="mt-2 flex flex-wrap gap-3">
+                    {!readOnly ? (
+                      <>
+                        <button
+                          type="button"
+                          className="text-xs text-[var(--brand-deep)] underline"
+                          onClick={() => {
+                            beginEditDiary(d);
+                            setTab("diary");
+                          }}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          className="text-xs text-[#b42318] underline"
+                          onClick={() => {
+                            if (!window.confirm("Delete this diary entry?")) return;
+                            const r = deleteDiaryEntry(d.id);
+                            if (!r.ok) setError(r.error);
+                            else {
+                              refresh();
+                              flash("Diary deleted");
+                            }
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="text-xs text-[#0f766e] underline"
+                      onClick={() =>
+                        setNotifyTarget({ kind: "diary", diary: d })
+                      }
+                    >
+                      Notify WhatsApp
+                    </button>
+                  </div>
                 </li>
               ))}
             </ul>
@@ -740,6 +838,9 @@ export function HomeworkWorkspace() {
 
       {tab === "compose" ? (
         <section className="mt-4 max-w-xl space-y-3">
+          <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
+            {editingPostId ? "Edit homework" : "Compose homework"}
+          </h2>
           <label className="block text-xs text-[var(--muted)]">
             Subject
             <select
@@ -854,14 +955,22 @@ export function HomeworkWorkspace() {
               placeholder="e.g. MATH-FRAC-01"
             />
           </label>
-          <button type="button" className={btn} onClick={publishHw}>
-            Publish homework
+          <button type="button" className={btn} onClick={publishHw} disabled={readOnly}>
+            {editingPostId ? "Save changes" : "Publish homework"}
           </button>
+          {editingPostId ? (
+            <button type="button" className={btnOutline} onClick={resetComposeForm}>
+              Cancel
+            </button>
+          ) : null}
         </section>
       ) : null}
 
       {tab === "diary" ? (
         <section className="mt-4 max-w-xl space-y-3">
+          <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
+            {editingDiaryId ? "Edit diary entry" : "New diary entry"}
+          </h2>
           <p className="text-sm text-[var(--muted)]">
             Class-level note (no subject) — assembly, holiday reminder, etc.
           </p>
@@ -891,9 +1000,47 @@ export function HomeworkWorkspace() {
               onChange={(e) => setDiaryHi(e.target.value)}
             />
           </label>
-          <button type="button" className={btn} onClick={publishDiary}>
-            Post diary
+          <button type="button" className={btn} onClick={publishDiary} disabled={readOnly}>
+            {editingDiaryId ? "Save changes" : "Post diary"}
           </button>
+          {editingDiaryId ? (
+            <button type="button" className={btnOutline} onClick={resetDiaryForm}>
+              Cancel
+            </button>
+          ) : null}
+          {todayDiary.length > 0 ? (
+            <div className="mt-6 space-y-2 border-t border-[rgba(32,48,80,0.1)] pt-4">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+                Entries for {date}
+              </h3>
+              <ul className="space-y-2">
+                {todayDiary.map((d) => (
+                  <li
+                    key={d.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.1)] px-3 py-2"
+                  >
+                    <span className="text-sm font-medium text-[var(--brand-deep)]">
+                      {d.title}
+                    </span>
+                    <DeskListActions
+                      readOnly={readOnly}
+                      onEdit={() => beginEditDiary(d)}
+                      onDelete={() => {
+                        const r = deleteDiaryEntry(d.id);
+                        if (!r.ok) setError(r.error);
+                        else {
+                          if (editingDiaryId === d.id) resetDiaryForm();
+                          refresh();
+                          flash("Diary deleted");
+                        }
+                      }}
+                      deleteConfirm={`Delete diary "${d.title}"?`}
+                    />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </section>
       ) : null}
 

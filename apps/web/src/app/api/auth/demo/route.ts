@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { DEMO_USERS, demoSessionCookieName, type DemoSession } from "@/lib/auth";
+import {
+  appSessionCookieOptions,
+  clearAppSessionCookieOptions,
+} from "@/lib/authCookies.server";
 import type { Persona } from "@/lib/types";
 import { TENANT } from "@/lib/types";
 import { isDemoAuth } from "@/lib/supabase/client";
@@ -49,23 +53,13 @@ export async function POST(request: Request) {
   res.cookies.set(
     demoSessionCookieName(),
     encodeURIComponent(JSON.stringify(session)),
-    {
-      httpOnly: true,
-      sameSite: "lax",
-      path: "/",
-      maxAge: 60 * 60 * 24 * 14,
-      secure: process.env.NODE_ENV === "production",
-    },
+    appSessionCookieOptions(),
   );
   return res;
 }
 
 export async function DELETE() {
   const res = NextResponse.json({ ok: true });
-  res.cookies.set(demoSessionCookieName(), "", {
-    httpOnly: true,
-    path: "/",
-    maxAge: 0,
-  });
+  res.cookies.set(demoSessionCookieName(), "", clearAppSessionCookieOptions());
   return res;
 }

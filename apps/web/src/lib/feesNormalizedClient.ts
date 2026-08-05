@@ -4,6 +4,7 @@
 
 import type { FeesState } from "@/lib/fees";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
 import type { FeeDeskAncillary } from "@/lib/feesDeskAncillary.types";
 
 const META_KEY = "bhb_fees_desk_db_meta_v1";
@@ -78,7 +79,7 @@ export function scheduleFeesDeskSync(state: FeesState) {
     pushTimer = null;
     if (!batch) return;
     void pushFeesDeskApi(batch);
-  }, 600);
+  }, DESK_PUSH_DEBOUNCE_MS);
 }
 
 async function pushFeesDeskApi(state: FeesState) {

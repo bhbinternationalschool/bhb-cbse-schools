@@ -83,3 +83,84 @@ export async function generateOpenAiText(opts: {
     };
   }
 }
+
+export type OpenAiVisionJsonResult<T> =
+  | { ok: true; data: T; rawText: string }
+  | { ok: false; error: string };
+
+/** Vision + JSON mode — e.g. bill/challan OCR. */
+export async function generateOpenAiVisionJson<T extends Record<string, unknown>>(opts: {
+  system: string;
+  imageBase64: string;
+  mimeType: string;
+  userHint?: string;
+  maxTokens?: number;
+}): Promise<OpenAiVisionJsonResult<T>> {
+  const key = openAiApiKey();
+  if (!key) {
+    return { ok: false, error: "OPENAI_API_KEY not configured" };
+  }
+
+  const mime = opts.mimeType || "image/jpeg";
+  const dataUrl = `data:${mime};base64,${opts.imageBase64.replace(/^data:[^;]+;base64,/, "")}`;
+
+  try {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: openAiModel(),
+        messages: [
+          { role: "system", content: opts.system },
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text:
+                  opts.userHint ||
+                  "Extract structured fields from this bill/challan image. Return JSON only.",
+              },
+              { type: "image_url", image_url: { url: dataUrl } },
+            ],
+          },
+        ],
+        temperature: 0.1,
+        max_tokens: opts.maxTokens ?? 1500,
+        response_format: { type: "json_object" },
+      }),
+    });
+
+    const json = (await res.json().catch(() => ({}))) as {
+      choices?: { message?: { content?: string } }[];
+      error?: { message?: string };
+    };
+
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: json.error?.message || `OpenAI HTTP ${res.status}`,
+      };
+    }
+
+    const rawText = (json.choices?.[0]?.message?.content || "").trim();
+    if (!rawText) {
+      return { ok: false, error: "Empty OpenAI response" };
+    }
+
+    try {
+      const data = JSON.parse(rawText) as T;
+      return { ok: true, data, rawText };
+    } catch {
+      return { ok: false, error: "OpenAI returned invalid JSON" };
+    }
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "OpenAI vision request failed",
+    };
+  }
+}

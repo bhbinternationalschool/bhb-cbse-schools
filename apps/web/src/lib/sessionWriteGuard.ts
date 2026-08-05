@@ -6,6 +6,11 @@
 
 let activeAy: string | null = null;
 let locked = false;
+let bootstrapPending = true;
+
+export function setWorkspaceBootstrapPending(pending: boolean): void {
+  bootstrapPending = pending;
+}
 
 export function setSessionWriteLock(input: {
   academicYearCode: string;
@@ -30,6 +35,7 @@ export function lockedSessionCode(): string | null {
 
 /** Returns false when writes must be blocked (closed session selected). */
 export function assertSessionWritable(action = "save"): boolean {
+  if (bootstrapPending) return true;
   if (!locked || !activeAy) return true;
   if (typeof window !== "undefined") {
     window.dispatchEvent(

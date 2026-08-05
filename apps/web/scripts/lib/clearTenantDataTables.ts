@@ -126,6 +126,7 @@ export const TENANT_SCOPED_DELETE_ORDER: string[] = [
   "library_desk_issues",
   "library_desk_copies",
   "library_desk_titles",
+  "library_desk_procurement_docs",
   "library_desk_settings",
   "library_desk_sync_meta",
 

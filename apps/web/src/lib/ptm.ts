@@ -200,6 +200,97 @@ export function seedPtmIfEmpty(ay?: string): PtmState {
   return next;
 }
 
+export function updatePtmEvent(input: {
+  id: string;
+  name: string;
+  date: string;
+  endDate?: string;
+  classIds: string[];
+  mode: PtmMode;
+  note?: string;
+  isActive?: boolean;
+}): { ok: true; event: PtmEvent } | { ok: false; error: string } {
+  if (!input.name.trim()) return { ok: false, error: "Name required" };
+  if (!input.date) return { ok: false, error: "Date required" };
+  if (!input.classIds.length) {
+    return { ok: false, error: "Select at least one class" };
+  }
+  const state = loadPtm();
+  const i = state.events.findIndex((e) => e.id === input.id);
+  if (i < 0) return { ok: false, error: "Event not found" };
+  const prev = state.events[i]!;
+  const event: PtmEvent = {
+    ...prev,
+    name: input.name.trim(),
+    date: input.date,
+    endDate: input.endDate || input.date,
+    classIds: input.classIds,
+    mode: input.mode,
+    note: input.note || "",
+    isActive: input.isActive ?? prev.isActive,
+  };
+  const events = [...state.events];
+  events[i] = event;
+  savePtm({ ...state, events });
+  return { ok: true, event };
+}
+
+export function deletePtmEvent(
+  eventId: string,
+): { ok: true } | { ok: false; error: string } {
+  const state = loadPtm();
+  if (!state.events.some((e) => e.id === eventId)) {
+    return { ok: false, error: "Event not found" };
+  }
+  const hasActiveBookings = state.bookings.some(
+    (b) =>
+      b.eventId === eventId &&
+      (b.status === "booked" || b.status === "completed"),
+  );
+  if (hasActiveBookings) {
+    return {
+      ok: false,
+      error: "Cancel or complete all bookings before deleting this event",
+    };
+  }
+  savePtm({
+    ...state,
+    events: state.events.filter((e) => e.id !== eventId),
+    slots: state.slots.filter((s) => s.eventId !== eventId),
+    bookings: state.bookings.filter((b) => b.eventId !== eventId),
+    feedback: state.feedback.filter((f) => {
+      const booking = state.bookings.find((b) => b.id === f.bookingId);
+      return booking?.eventId !== eventId;
+    }),
+  });
+  return { ok: true };
+}
+
+export function deletePtmSlot(
+  slotId: string,
+): { ok: true } | { ok: false; error: string } {
+  const state = loadPtm();
+  const slot = state.slots.find((s) => s.id === slotId);
+  if (!slot) return { ok: false, error: "Slot not found" };
+  const booked = state.bookings.some(
+    (b) =>
+      b.slotId === slotId &&
+      (b.status === "booked" || b.status === "completed"),
+  );
+  if (booked) {
+    return {
+      ok: false,
+      error: "Slot has active bookings — cancel them first",
+    };
+  }
+  savePtm({
+    ...state,
+    slots: state.slots.filter((s) => s.id !== slotId),
+    bookings: state.bookings.filter((b) => b.slotId !== slotId),
+  });
+  return { ok: true };
+}
+
 export function createPtmEvent(input: {
   academicYearCode: string;
   name: string;

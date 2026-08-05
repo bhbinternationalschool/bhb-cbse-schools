@@ -10,6 +10,7 @@ import {
 import { setMirrorSlice } from "@/lib/schoolDataMirror";
 import {
   hydrateMastersDeskFromDb,
+  mastersDeskPushPending,
   scheduleMastersDeskSync,
 } from "@/lib/mastersNormalizedClient";
 import { mergeDbDeskIntoMastersState } from "@/lib/mastersNormalizedMerge";
@@ -123,6 +124,9 @@ export async function ensureMastersHydrated(): Promise<boolean> {
     if (!readFromDb) {
       scheduleMastersSync(loadMasters());
     }
+  } else if (readFromDb && mastersDeskPushPending()) {
+    // Local edits never reached DB (tab closed, failed push) — push now.
+    scheduleMastersSync(loadMasters());
   }
   return mirrorChanged || normChanged;
 }

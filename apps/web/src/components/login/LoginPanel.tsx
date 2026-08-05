@@ -5,7 +5,7 @@ import { useState, useTransition } from "react";
 import Image from "next/image";
 import type { Persona } from "@/lib/types";
 import { TENANT } from "@/lib/types";
-import { clearWorkspaceSessionAlignFlag } from "@/lib/workspaceSession";
+import { prepareWorkspaceAfterLogin } from "@/lib/workspaceClientSession";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import {
   createBrowserSupabase,
@@ -64,6 +64,12 @@ export function LoginPanel() {
   const demoAuth = isDemoAuth();
   const supabaseReady = isSupabaseConfigured();
 
+  async function finishLogin() {
+    await prepareWorkspaceAfterLogin();
+    router.push(routeForPersona(persona));
+    router.refresh();
+  }
+
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -118,9 +124,7 @@ export function LoginPanel() {
           await sb.auth.signOut();
           return;
         }
-        clearWorkspaceSessionAlignFlag();
-        router.push(routeForPersona(persona));
-        router.refresh();
+        await finishLogin();
         return;
       }
 
@@ -232,9 +236,7 @@ export function LoginPanel() {
             setError(body?.error || "Invalid OTP.");
             return;
           }
-          clearWorkspaceSessionAlignFlag();
-          router.push(routeForPersona(persona));
-          router.refresh();
+          await finishLogin();
           return;
         }
         const { loadSis } = await import("@/lib/sis");
@@ -266,9 +268,7 @@ export function LoginPanel() {
         setError(body?.error || "Could not sign in. Try again.");
         return;
       }
-      clearWorkspaceSessionAlignFlag();
-      router.push(routeForPersona(persona));
-      router.refresh();
+      await finishLogin();
     });
   }
 

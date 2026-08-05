@@ -6,6 +6,7 @@ import type { MastersState } from "@/lib/masters";
 import { emptyMastersShell } from "@/lib/masters";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { stripStaffFromMastersForBlob } from "@/lib/staffPersistence";
+import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
 
 const META_KEY = "bhb_masters_desk_db_meta_v1";
 const LOCAL_EDIT_META_KEY = "bhb_masters_mirror_meta_v1";
@@ -51,6 +52,14 @@ export function readLocalMastersEditAt(): string {
   } catch {
     return "";
   }
+}
+
+/** True when local save is newer than last successful desk push meta. */
+export function mastersDeskPushPending(): boolean {
+  const localEditAt = readLocalMastersEditAt();
+  if (!localEditAt) return false;
+  const meta = readMeta();
+  return !meta.updatedAt || localEditAt > meta.updatedAt;
 }
 
 /** Optimistic desk meta after local save — prevents stale DB overwriting edits on refresh. */
@@ -105,7 +114,7 @@ export function scheduleMastersDeskSync(state: MastersState) {
     pushTimer = null;
     if (!batch) return;
     void pushMastersDeskApi(batch);
-  }, 600);
+  }, DESK_PUSH_DEBOUNCE_MS);
 }
 
 async function pushMastersDeskApi(state: MastersState) {
@@ -181,8 +190,9 @@ export async function hydrateMastersDeskFromDb(
     const bootstrapNewDevice =
       hasRemote && !meta.updatedAt && !localEditAt;
 
+    // Never let "remote has rows" alone clobber newer local edits (read-from-DB mode).
     const shouldTake = readFromDb
-      ? !localEditAt || remoteIsNewer || hasRemote
+      ? remoteIsNewer || (!localEditAt && hasRemote)
       : hasRemote && (bootstrapNewDevice || remoteIsNewer);
 
     if (!shouldTake) return { bundle: empty, changed: false };
