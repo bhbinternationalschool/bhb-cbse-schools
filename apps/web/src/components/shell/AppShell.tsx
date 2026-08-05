@@ -22,10 +22,9 @@ import type { DemoSession } from "@/lib/auth";
 import { SessionProvider } from "./SessionContext";
 import { SchoolFavicon } from "./SchoolFavicon";
 import {
-  currentAcademicYearCode,
   listSessionYearOptions,
-  syncWorkspaceAcademicYear,
 } from "@/lib/masters";
+import { alignWorkspaceSessionFromMasters } from "@/lib/workspaceSession";
 import { markModuleRegistryClientReady } from "@/lib/moduleRegistry";
 import { setSessionWriteLock } from "@/lib/sessionWriteGuard";
 import { applyFeeDiscountSeedNow } from "@/lib/feeDiscountImportHydrate";
@@ -104,20 +103,28 @@ export function AppShell({
     );
   }, [pathname]);
 
-  // Keep header session list aligned with Masters; fix cookie if year was removed
+  // Keep header session list aligned with Masters; sync cookie once after desk hydrate.
   useEffect(() => {
-    const nextYears = listSessionYearOptions();
-    setYears(nextYears);
-    const known = nextYears.some((y) => y.code === session.academicYearCode);
-    if (!known) {
-      const mastersCurrent = currentAcademicYearCode();
-      if (mastersCurrent && mastersCurrent !== session.academicYearCode) {
-        void syncWorkspaceAcademicYear(mastersCurrent).then((ok) => {
-          if (ok) router.refresh();
-        });
-      }
+    setYears(listSessionYearOptions());
+
+    function alignFromMasters() {
+      void alignWorkspaceSessionFromMasters(session.academicYearCode).then(
+        (changed) => {
+          if (changed) router.refresh();
+        },
+      );
     }
-  }, [pathname, session.academicYearCode, router]);
+
+    window.addEventListener("bhb-desk-hydrated", alignFromMasters);
+    window.addEventListener("bhb-masters-updated", alignFromMasters);
+    const t = window.setTimeout(alignFromMasters, 2000);
+
+    return () => {
+      window.clearTimeout(t);
+      window.removeEventListener("bhb-desk-hydrated", alignFromMasters);
+      window.removeEventListener("bhb-masters-updated", alignFromMasters);
+    };
+  }, [session.academicYearCode, router]);
 
   const ay =
     years.find((y) => y.code === session.academicYearCode) ??
@@ -154,6 +161,10 @@ export function AppShell({
   }, [session.academicYearCode]);
 
   async function logout() {
+    const { clearWorkspaceSessionAlignFlag } = await import(
+      "@/lib/workspaceSession"
+    );
+    clearWorkspaceSessionAlignFlag();
     await fetch("/api/auth/demo", { method: "DELETE" });
     try {
       const { createBrowserSupabase, isDemoAuth } = await import(

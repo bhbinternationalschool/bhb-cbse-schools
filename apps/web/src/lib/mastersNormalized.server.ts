@@ -217,3 +217,12 @@ export async function fetchMastersDeskFromDb(): Promise<{
 export function deskBundleToMastersState(bundle: MastersDeskBundle): MastersState {
   return { version: 2, ...bundle };
 }
+
+export async function fetchCurrentAcademicYearFromDesk(): Promise<string | null> {
+  const { bundle } = await fetchMastersDeskFromDb();
+  const years = bundle.academicYears ?? [];
+  const cur = years.find(
+    (y) => y.status === "current" && y.isActive !== false,
+  );
+  return cur?.code ?? null;
+}

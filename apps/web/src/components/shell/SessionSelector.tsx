@@ -6,6 +6,7 @@ import {
   listSessionYearOptions,
   type SessionYearOption,
 } from "@/lib/masters";
+import { WORKSPACE_AY_ALIGNED_KEY } from "@/lib/workspaceSession";
 
 export function SessionSelector({ currentCode }: { currentCode: string }) {
   const router = useRouter();
@@ -21,6 +22,7 @@ export function SessionSelector({ currentCode }: { currentCode: string }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ academicYearCode: code }),
     });
+    sessionStorage.setItem(WORKSPACE_AY_ALIGNED_KEY, "1");
     router.refresh();
   }
 

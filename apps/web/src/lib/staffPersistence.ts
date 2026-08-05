@@ -483,7 +483,22 @@ export async function ensureStaffHydrated(): Promise<boolean> {
   let next = loadMasters();
   let changed = false;
 
-  if (
+  const remoteEmpty =
+    !remote ||
+    ((remote.staff?.length ?? 0) === 0 &&
+      (remote.departments?.length ?? 0) === 0 &&
+      (remote.designations?.length ?? 0) === 0);
+
+  if (readFromDb && remoteEmpty) {
+    if (
+      (next.staff?.length ?? 0) > 0 ||
+      (next.departments?.length ?? 0) > 0 ||
+      (next.designations?.length ?? 0) > 0
+    ) {
+      next = { ...next, staff: [], departments: [], designations: [] };
+      changed = true;
+    }
+  } else if (
     remote &&
     (remote.departments.length > 0 ||
       remote.designations.length > 0 ||

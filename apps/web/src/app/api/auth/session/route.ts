@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { DEMO_USERS, demoSessionCookieName, type DemoSession } from "@/lib/auth";
-import { DEFAULT_AY } from "@/lib/masters";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { superAdminRoleCode } from "@/lib/superAdmin";
 import { TENANT, type Persona } from "@/lib/types";
+import { resolveLoginAcademicYearCode } from "@/lib/workspaceSession.server";
 
 /**
  * Mint app session cookie after Supabase Auth sign-in.
@@ -134,7 +134,7 @@ export async function POST(request: Request) {
     email: email || undefined,
     staffId,
     tenantSlug: TENANT.slug,
-    academicYearCode: body.academicYearCode?.trim() || DEFAULT_AY,
+    academicYearCode: await resolveLoginAcademicYearCode(body.academicYearCode),
   };
 
   const res = NextResponse.json({ ok: true, session });

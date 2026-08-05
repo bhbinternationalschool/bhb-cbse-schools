@@ -56,6 +56,7 @@ import {
 const CBSE_SUBJECT_GROUPS = NCF_SUBJECT_TAGS;
 type CbseGroupId = NcfTagId;
 import { syncWorkspaceAcademicYear, type MastersState } from "@/lib/masters";
+import { WORKSPACE_AY_ALIGNED_KEY } from "@/lib/workspaceSession";
 import {
   CLASS_GROUPS,
   classesInGroup,
@@ -552,7 +553,10 @@ export function AcademicPanel({
 
   async function applyWorkspaceSession(ayCode: string) {
     const ok = await syncWorkspaceAcademicYear(ayCode);
-    if (ok) router.refresh();
+    if (ok) {
+      sessionStorage.setItem(WORKSPACE_AY_ALIGNED_KEY, "1");
+      router.refresh();
+    }
   }
 
   function addYear() {

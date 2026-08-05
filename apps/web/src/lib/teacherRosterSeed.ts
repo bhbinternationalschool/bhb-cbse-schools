@@ -7,6 +7,7 @@ import {
   type StaffRecord,
 } from "@/lib/foundationMasters";
 import type { MastersState } from "@/lib/masters";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
 
 type SeedStaff = {
   empCode: string;
@@ -235,6 +236,11 @@ export function buildTeacherRosterOntoMasters(
 export function migrateDemoStaffToTeacherRoster(
   state: MastersState,
 ): MastersState {
+  if (typeof window !== "undefined") {
+    if (isSupabaseConfigured()) return state;
+  } else if (process.env.NEXT_PUBLIC_SUPABASE_URL) {
+    return state;
+  }
   if (!looksLikeDemoStaffRoster(state.staff ?? [])) return state;
   return buildTeacherRosterOntoMasters(state);
 }

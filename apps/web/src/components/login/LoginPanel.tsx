@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 import Image from "next/image";
 import type { Persona } from "@/lib/types";
 import { TENANT } from "@/lib/types";
+import { clearWorkspaceSessionAlignFlag } from "@/lib/workspaceSession";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import {
   createBrowserSupabase,
@@ -117,6 +118,7 @@ export function LoginPanel() {
           await sb.auth.signOut();
           return;
         }
+        clearWorkspaceSessionAlignFlag();
         router.push(routeForPersona(persona));
         router.refresh();
         return;
@@ -230,6 +232,7 @@ export function LoginPanel() {
             setError(body?.error || "Invalid OTP.");
             return;
           }
+          clearWorkspaceSessionAlignFlag();
           router.push(routeForPersona(persona));
           router.refresh();
           return;
@@ -263,6 +266,7 @@ export function LoginPanel() {
         setError(body?.error || "Could not sign in. Try again.");
         return;
       }
+      clearWorkspaceSessionAlignFlag();
       router.push(routeForPersona(persona));
       router.refresh();
     });
