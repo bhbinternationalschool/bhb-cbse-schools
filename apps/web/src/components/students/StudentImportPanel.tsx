@@ -161,8 +161,8 @@ export function StudentImportPanel({ masters, sis, onApplied }: Props) {
         return;
       }
       saveSis(result.state);
-      void import("@/lib/sisPersistence").then(({ flushSisSync }) => {
-        flushSisSync().catch(console.error);
+      void import("@/lib/sisPersistence").then(({ pushSisState, flushSisSync }) => {
+        pushSisState(result.state).then(() => flushSisSync()).catch(console.error);
       });
       setPreview(result);
       onApplied(
