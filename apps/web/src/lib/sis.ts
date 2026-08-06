@@ -595,7 +595,7 @@ export function normalizeStudent(s: Partial<SisStudent> & { id: string }): SisSt
     legacyErpAdmissionNo: s.legacyErpAdmissionNo ?? "",
     systemAdmissionPending: !!s.systemAdmissionPending,
     importedViaLegacyList: !!s.importedViaLegacyList,
-    fullName: s.fullName ?? "",
+    fullName: cleanRepeatedName(s.fullName ?? ""),
     gender: s.gender ?? "",
     dob: s.dob ?? "",
     status: s.status === "inactive" ? "inactive" : "active",
@@ -607,8 +607,8 @@ export function normalizeStudent(s: Partial<SisStudent> & { id: string }): SisSt
     studentType: s.studentType ?? "NEW",
     feeGroupId: s.feeGroupId ?? null,
     joinedOn: s.joinedOn ?? "",
-    fatherName: s.fatherName ?? "",
-    motherName: s.motherName ?? "",
+    fatherName: cleanRepeatedName(s.fatherName ?? ""),
+    motherName: cleanRepeatedName(s.motherName ?? ""),
     fatherMobile: normalizeMobile(s.fatherMobile ?? ""),
     motherMobile: normalizeMobile(s.motherMobile ?? ""),
     fatherAadhaarLast4: (() => {
@@ -761,6 +761,22 @@ function householdAddressKey(
     .join("|");
 }
 
+export function cleanRepeatedName(rawName: string): string {
+  if (!rawName) return "";
+  const parts = rawName.split(/[,/|]/).map((p) => p.trim()).filter(Boolean);
+  if (parts.length <= 1) return rawName.trim();
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const part of parts) {
+    const key = part.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push(part);
+    }
+  }
+  return unique.join(" / ");
+}
+
 export function normalizeHousehold(h: Partial<Household> & { id: string }): Household {
   const mobile = normalizeMobile(h.mobile ?? "");
   const whatsappRaw = normalizeMobile(h.whatsappMobile ?? "");
@@ -782,7 +798,7 @@ export function normalizeHousehold(h: Partial<Household> & { id: string }): Hous
   return {
     id: h.id,
     code: h.code ?? "",
-    guardianName: h.guardianName ?? "",
+    guardianName: cleanRepeatedName(h.guardianName ?? ""),
     mobile,
     /** Legacy households without WhatsApp inherit guardian mobile */
     whatsappMobile: whatsappRaw || mobile,

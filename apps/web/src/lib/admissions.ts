@@ -19,6 +19,7 @@ import {
   setMirrorSlice,
 } from "@/lib/schoolDataMirror";
 import {
+  cleanRepeatedName,
   loadSis,
   newSisId,
   normalizeHousehold,
@@ -653,9 +654,19 @@ export function emptyAdmissionHousehold(
   partial?: Partial<AdmissionHousehold>,
 ): AdmissionHousehold {
   const now = new Date().toISOString();
-  const guardians = Array.isArray(partial?.guardians)
+  const rawGuardians = Array.isArray(partial?.guardians)
     ? partial!.guardians.map((g) => emptyGuardian(g))
     : [];
+  const seenGuardians = new Set<string>();
+  const guardians: AdmissionGuardian[] = [];
+  for (const g of rawGuardians) {
+    const name = (g.fullName || "").trim();
+    if (!name) continue;
+    const key = `${name.toLowerCase()}:${(g.relation || "other").toLowerCase()}`;
+    if (seenGuardians.has(key)) continue;
+    seenGuardians.add(key);
+    guardians.push(g);
+  }
   return {
     id: partial?.id || nid("ahh"),
     code: partial?.code || "",
@@ -687,7 +698,7 @@ export function emptyAdmissionLead(
     stage: partial?.stage || "enquiry",
     academicYearCode: partial?.academicYearCode || ayCode(),
     source: partial?.source || "walk_in",
-    childName: partial?.childName || "",
+    childName: cleanRepeatedName(partial?.childName || ""),
     dob: partial?.dob || "",
     gender: partial?.gender || "",
     classSoughtId: partial?.classSoughtId || "",
@@ -695,8 +706,8 @@ export function emptyAdmissionLead(
     sectionId: partial?.sectionId || "",
     medium: partial?.medium || "English",
     admissionKind: partial?.admissionKind || "new",
-    guardianName: partial?.guardianName || "",
-    motherName: partial?.motherName || "",
+    guardianName: cleanRepeatedName(partial?.guardianName || ""),
+    motherName: cleanRepeatedName(partial?.motherName || ""),
     mobile: normalizeMobile(partial?.mobile || ""),
     whatsappSame: partial?.whatsappSame !== false,
     whatsapp: normalizeMobile(partial?.whatsapp || ""),
@@ -1704,13 +1715,26 @@ export function addGuardian(
   if (makePrimary) {
     guardians = guardians.map((g) => ({ ...g, isPrimary: false }));
   }
-  guardians.push(
-    emptyGuardian({
+  const nameLower = name.toLowerCase();
+  const existingIdx = guardians.findIndex(
+    (g) => g.fullName.trim().toLowerCase() === nameLower,
+  );
+  if (existingIdx >= 0) {
+    guardians[existingIdx] = emptyGuardian({
+      ...guardians[existingIdx],
       ...guardian,
       fullName: name,
-      isPrimary: makePrimary,
-    }),
-  );
+      isPrimary: makePrimary || guardians[existingIdx].isPrimary,
+    });
+  } else {
+    guardians.push(
+      emptyGuardian({
+        ...guardian,
+        fullName: name,
+        isPrimary: makePrimary,
+      }),
+    );
+  }
 
   const nextHh = emptyAdmissionHousehold({
     ...hh,
