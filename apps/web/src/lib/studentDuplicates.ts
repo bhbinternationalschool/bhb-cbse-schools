@@ -339,6 +339,9 @@ export function mergeStudents(
     households: state.households.filter((h) => usedHouseholds.has(h.id)),
   };
   saveSis(next);
+  void import("@/lib/sisPersistence").then(({ flushSisSync }) => {
+    flushSisSync().catch(console.error);
+  });
   return { ok: true, state: next, merged: drops.length };
 }
 
@@ -359,5 +362,8 @@ export function removeDuplicateStudents(
     households: state.households.filter((h) => usedHouseholds.has(h.id)),
   };
   saveSis(next);
+  void import("@/lib/sisPersistence").then(({ flushSisSync }) => {
+    flushSisSync().catch(console.error);
+  });
   return next;
 }

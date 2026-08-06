@@ -15,6 +15,7 @@ type SisMeta = {
   updatedAt: string;
   studentCount: number;
   householdCount: number;
+  lastPushedAt?: number;
 };
 
 function readMeta(): SisMeta {
@@ -27,6 +28,7 @@ function readMeta(): SisMeta {
       updatedAt: String(p.updatedAt || ""),
       studentCount: Number(p.studentCount) || 0,
       householdCount: Number(p.householdCount) || 0,
+      lastPushedAt: p.lastPushedAt,
     };
   } catch {
     return { updatedAt: "", studentCount: 0, householdCount: 0 };
@@ -45,6 +47,12 @@ export function sisNormalizedSyncEnabled(): boolean {
   return isSupabaseConfigured();
 }
 
+export function sisSyncRecentlyPushed(): boolean {
+  const meta = readMeta();
+  if (!meta.lastPushedAt) return false;
+  return Date.now() - meta.lastPushedAt < 30_000;
+}
+
 export function sisReadFromDbClientEnabled(): boolean {
   return process.env.NEXT_PUBLIC_SIS_READ_FROM_DB === "true";
 }
@@ -55,12 +63,17 @@ export function scheduleSisDeskSync(state: Pick<SisState, "households" | "studen
   pending = state;
   if (pushTimer) clearTimeout(pushTimer);
   pushTimer = setTimeout(() => {
-    const batch = pending;
-    pending = null;
-    pushTimer = null;
-    if (!batch) return;
-    void pushSisDeskApi(batch);
+    void flushSisDeskSync();
   }, DESK_PUSH_DEBOUNCE_MS);
+}
+
+export async function flushSisDeskSync(): Promise<void> {
+  if (pushTimer) clearTimeout(pushTimer);
+  const batch = pending;
+  pending = null;
+  pushTimer = null;
+  if (!batch) return;
+  await pushSisDeskApi(batch);
 }
 
 async function pushSisDeskApi(
@@ -88,6 +101,7 @@ async function pushSisDeskApi(
         updatedAt: body.updatedAt || new Date().toISOString(),
         studentCount: body.studentCount ?? state.students.length,
         householdCount: body.householdCount ?? state.households.length,
+        lastPushedAt: Date.now(),
       });
       if (typeof window !== "undefined") {
         window.dispatchEvent(

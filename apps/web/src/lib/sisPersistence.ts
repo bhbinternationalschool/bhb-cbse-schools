@@ -42,8 +42,13 @@ export function resetSisPersistenceCache() {
 
 /**
  * Merge remote roster into local SIS.
- * Remote wins on id collision; local-only rows kept.
- * Curriculum on local students is preserved (synced separately).
+ *
+ * When `preferDb` is true the DB is the source of truth: local state is
+ * **replaced** by DB records (not unioned).  Curriculum stored on local
+ * students is preserved because curriculum syncs via its own persistence.
+ *
+ * When `preferDb` is false, local wins on id collision and remote-only
+ * rows are added (additive merge — used only for first-time bootstrap).
  */
 export function mergeSisRemoteIntoState(
   local: SisState,
@@ -55,28 +60,45 @@ export function mergeSisRemoteIntoState(
     sisReadFromDbEnabled() ??
     false;
 
-  const hhMap = new Map<string, Household>();
-  for (const h of local.households) hhMap.set(h.id, h);
-  for (const h of remote.households) {
-    if (!hhMap.has(h.id) || prefer) {
-      hhMap.set(h.id, h);
-    }
-  }
-
   const curriculumById = new Map(
     local.students.map((s) => [s.id, s.curriculum] as const),
   );
+
+  if (prefer) {
+    // ── Replace mode: DB is source of truth ──
+    // Use ONLY the remote records.  Local-only rows that are NOT in the DB
+    // are intentionally dropped — they were deleted via merge/cleanup.
+    const households = remote.households.length > 0
+      ? remote.households
+      : local.households;
+    const students = (remote.students.length > 0
+      ? remote.students
+      : local.students
+    ).map((s) =>
+      normalizeStudent({
+        ...s,
+        curriculum: curriculumById.get(s.id) ?? s.curriculum ?? null,
+      }),
+    );
+    return { ...local, version: 1, households, students };
+  }
+
+  // ── Additive merge: local wins, remote fills gaps ──
+  const hhMap = new Map<string, Household>();
+  for (const h of local.households) hhMap.set(h.id, h);
+  for (const h of remote.households) {
+    if (!hhMap.has(h.id)) hhMap.set(h.id, h);
+  }
+
   const stuMap = new Map<string, SisStudent>();
-  // Always preserve local students so newly uploaded/imported rows are never lost
   for (const s of local.students) stuMap.set(s.id, s);
   for (const s of remote.students) {
-    const prev = stuMap.get(s.id);
-    if (!prev || prefer) {
+    if (!stuMap.has(s.id)) {
       stuMap.set(
         s.id,
         normalizeStudent({
           ...s,
-          curriculum: prev?.curriculum ?? curriculumById.get(s.id) ?? null,
+          curriculum: curriculumById.get(s.id) ?? null,
         }),
       );
     }
@@ -136,12 +158,31 @@ export function scheduleSisSync(state: SisState) {
   scheduleSisDeskSync(state);
 }
 
+export async function flushSisSync() {
+  if (!sisRemoteEnabled() || typeof window === "undefined") return;
+  const { flushSisDeskSync } = await import("@/lib/sisNormalizedClient");
+  await flushSisDeskSync();
+}
+
 /**
  * Pull roster once, merge into localStorage, then hydrate curriculum.
  */
 export async function ensureSisHydrated(): Promise<boolean> {
   if (!sisRemoteEnabled()) return false;
   if (isDeskHydrated(MODULE)) return false;
+
+  const {
+    hydrateSisDeskFromDb,
+    scheduleSisDeskSync,
+    sisNormalizedSyncEnabled,
+    sisSyncRecentlyPushed,
+  } = await import("@/lib/sisNormalizedClient");
+
+  if (typeof window !== "undefined" && sisSyncRecentlyPushed()) {
+    markDeskHydrated(MODULE);
+    return false;
+  }
+
   markDeskHydrated(MODULE);
 
   const { loadSis, saveSis, writeSisLocalRaw, isLikelyDemoRoster } =
@@ -175,14 +216,15 @@ export async function ensureSisHydrated(): Promise<boolean> {
       await wipeRemoteSisRoster();
     } else {
       next = mergeSisRemoteIntoState(next, bundle, {
-        preferDb: false,
+        preferDb: readFromDb,
       });
       changed = true;
     }
   }
 
-  // Ensure any local roster modifications are pushed to remote DB
-  if (next.students.length > 0) {
+  // If we just replaced local state from the DB, we don't need to push it back
+  // Push is only needed if there are local-only rows or we didn't prefer the DB
+  if (next.students.length > 0 && !readFromDb) {
     void pushSisState(next);
   }
 
