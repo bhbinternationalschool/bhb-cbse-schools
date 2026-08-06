@@ -126,8 +126,8 @@ exception when others then
   null;
 end $$;
 
-create unique index if not exists sis_students_tenant_admission_uidx
-  on public.sis_students (tenant_id, admission_no)
+create unique index if not exists sis_students_tenant_admission_ay_uidx
+  on public.sis_students (tenant_id, admission_no, academic_year_code)
   where admission_no <> '';
 
 create index if not exists sis_students_tenant_status_idx
