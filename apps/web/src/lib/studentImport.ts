@@ -560,6 +560,59 @@ function findPeerEnrollment(
   );
 }
 
+export function findExistingStudentInRoster(
+  roster: SisStudent[],
+  fields: {
+    admissionNo?: string;
+    fullName?: string;
+    fatherName?: string;
+    dob?: string;
+    pen?: string;
+    apaarId?: string;
+    aadhaarNumber?: string;
+  },
+): SisStudent | undefined {
+  const adm = (fields.admissionNo || "").trim().toUpperCase();
+  if (adm) {
+    const hit = roster.find((s) => s.admissionNo.trim().toUpperCase() === adm);
+    if (hit) return hit;
+  }
+  const pen = (fields.pen || "").trim().toUpperCase();
+  if (pen && pen.length >= 3 && !/^(0|na|none|-)+$/i.test(pen)) {
+    const hit = roster.find((s) => (s.pen || "").trim().toUpperCase() === pen);
+    if (hit) return hit;
+  }
+  const apaar = (fields.apaarId || "").replace(/\D/g, "");
+  if (apaar && apaar.length >= 10) {
+    const hit = roster.find(
+      (s) => (s.apaarId || "").replace(/\D/g, "") === apaar,
+    );
+    if (hit) return hit;
+  }
+  const aadhaar = (fields.aadhaarNumber || "").replace(/\D/g, "");
+  if (aadhaar && aadhaar.length >= 12) {
+    const hit = roster.find(
+      (s) => (s.aadhaarNumber || "").replace(/\D/g, "") === aadhaar,
+    );
+    if (hit) return hit;
+  }
+  const name = (fields.fullName || "").trim().toLowerCase();
+  const father = (fields.fatherName || "").trim().toLowerCase();
+  const dob = (fields.dob || "").trim();
+  if (name && (father || dob)) {
+    const hit = roster.find((s) => {
+      const sName = (s.fullName || "").trim().toLowerCase();
+      if (sName !== name) return false;
+      if (dob && s.dob && s.dob.slice(0, 10) === dob.slice(0, 10)) return true;
+      if (father && (s.fatherName || "").trim().toLowerCase() === father)
+        return true;
+      return false;
+    });
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
 export function downloadStudentImportTemplate(masters: MastersState): void {
   const sampleClass = masters.classes.find((c) => c.isActive !== false);
   const sampleSec = sampleClass
@@ -930,6 +983,24 @@ function resolveImportAdmission(input: {
     };
   }
 
+  const existingPeer = findExistingStudentInRoster(input.roster, {
+    admissionNo: csvAdmRaw,
+    fullName: input.fields.fullName,
+    fatherName: input.fields.fatherName,
+    dob: input.fields.dob,
+    pen: input.fields.pen,
+    apaarId: input.fields.apaarId,
+    aadhaarNumber: input.fields.aadhaarNumber,
+  });
+  if (existingPeer?.admissionNo && !isPendingSystemAdmission(existingPeer.admissionNo)) {
+    return {
+      admissionNo: existingPeer.admissionNo,
+      legacyErpAdmissionNo: existingPeer.legacyErpAdmissionNo || "",
+      importedViaLegacyList: false,
+      systemAdmissionPending: false,
+    };
+  }
+
   return {
     admissionNo: csvAdmRaw || autoAdm || "",
     legacyErpAdmissionNo: "",
@@ -1236,7 +1307,13 @@ export function applyStudentImport(
       f.guardianMobile || f.fatherMobile || f.motherMobile || "",
     );
     const whatsapp = normalizeMobile(f.whatsapp || guardianMobile);
-    let hh = hhIndex.get(householdKey(guardianMobile, guardianName));
+    const identitySource = existing ?? peerYear;
+    let hh = identitySource?.householdId
+      ? households.find((h) => h.id === identitySource.householdId)
+      : undefined;
+    if (!hh) {
+      hh = hhIndex.get(householdKey(guardianMobile, guardianName));
+    }
     if (!hh && guardianMobile) {
       hh = households.find(
         (h) => normalizeMobile(h.mobile) === guardianMobile,
@@ -1270,8 +1347,6 @@ export function applyStudentImport(
       });
       continue;
     }
-
-    const identitySource = existing ?? peerYear;
 
     const patch: Partial<SisStudent> & { id: string } = {
       id: existing?.id ?? draftStudentId,

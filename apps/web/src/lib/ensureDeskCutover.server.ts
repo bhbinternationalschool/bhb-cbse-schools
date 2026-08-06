@@ -140,8 +140,8 @@ async function backfillSliceModule(id: DeskModuleId): Promise<boolean> {
   const blob = await fetchServerBlob<BlobState>(def.blobTable);
   if (!blob.state) return false;
   const deskRows = await deskSliceRows(id);
-  const blobRows = countDeskSliceStateRows(id, blob.state);
-  if (blobRows <= deskRows) return false;
+  // Never overwrite an existing active desk table — backfill is strictly for first-time migration when desk is empty.
+  if (deskRows > 0) return false;
   const result = await pushDeskSliceToDb(
     id,
     blob.state as BlobState & { version: number },
