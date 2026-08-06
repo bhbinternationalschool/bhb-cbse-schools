@@ -391,6 +391,13 @@ export async function pushSisToDb(
     }
   }
 
+  const keepHh = new Set(households.map((h) => h.id));
+  const keepStu = new Set(students.map((s) => s.id));
+  await Promise.all([
+    deleteStale(sb, tenantId, "sis_households", keepHh),
+    deleteStale(sb, tenantId, "sis_students", keepStu),
+  ]);
+
   const activeCount = students.filter((s) => s.status === "active").length;
   await sb.from("sis_sync_meta").upsert(
     {
