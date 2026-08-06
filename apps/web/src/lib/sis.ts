@@ -1474,6 +1474,40 @@ export function householdOf(
   return state.households.find((h) => h.id === householdId);
 }
 
+/**
+ * Count active unique families/households for active enrolled students.
+ * Filters out unassigned/orphaned households and inactive students.
+ */
+export function countActiveHouseholds(
+  state: SisState,
+  academicYearCode?: string,
+): number {
+  if (!state || !Array.isArray(state.students)) return 0;
+  const targetAy =
+    academicYearCode && academicYearCode !== "all"
+      ? normalizeAyCode(academicYearCode)
+      : "";
+
+  const activeStudents = state.students.filter((s) => {
+    if (s.status !== "active") return false;
+    if (targetAy) {
+      return normalizeAyCode(s.academicYearCode || "") === targetAy;
+    }
+    return true;
+  });
+
+  const householdIds = new Set<string>();
+  for (const s of activeStudents) {
+    if (s.householdId) {
+      householdIds.add(s.householdId);
+    } else {
+      const mob = s.fatherMobile || s.motherMobile || s.admissionNo;
+      if (mob) householdIds.add(`unlinked_${mob}`);
+    }
+  }
+  return householdIds.size;
+}
+
 /** `2023-2024` / `2023–24` → `2023-24` for cross-record comparison. */
 function normalizeAyCode(code: string): string {
   const t = (code || "").trim().replace(/\s+/g, "").replace(/–/g, "-");

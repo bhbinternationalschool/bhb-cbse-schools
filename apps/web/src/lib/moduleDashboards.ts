@@ -52,7 +52,7 @@ import { loadPayroll } from "@/lib/payroll";
 import { loadPtm } from "@/lib/ptm";
 import { loadPurchase } from "@/lib/purchase";
 import { loadReportsCenterRecent } from "@/lib/reportsCenter";
-import { loadSis } from "@/lib/sis";
+import { countActiveHouseholds, loadSis } from "@/lib/sis";
 import { loadStaffAttendance, summarizeStaffMarks } from "@/lib/staffAttendance";
 import { loadStaffHr } from "@/lib/staffHr";
 import {
@@ -430,7 +430,7 @@ function studentsDash(academicYearCode?: string): ModuleDashboardModel {
       {
         id: "hh",
         label: "Households",
-        value: String(sis.households?.length ?? 0),
+        value: String(countActiveHouseholds(sis, ay)),
         tone: "teal",
         tab: "siblings",
       },
@@ -2373,7 +2373,7 @@ export function buildSchoolDashboard(
             {
               id: "households",
               label: "Households",
-              value: String(sis.households?.length ?? 0),
+              value: String(countActiveHouseholds(sis, ay)),
               tone: "teal",
               href: "/students",
             },
