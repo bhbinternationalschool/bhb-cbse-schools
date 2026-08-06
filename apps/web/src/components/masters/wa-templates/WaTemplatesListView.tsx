@@ -193,13 +193,11 @@ export function WaTemplatesListView({
         }
       >
         {filtered.length === 0 ? (
-          <MastersEmptyRow
-            label={
-              tab === "approved"
-                ? "No approved templates yet. Create one and submit to Meta."
-                : "No drafts or pending templates."
-            }
-          />
+          <div className="px-4 py-10 text-center text-sm text-[var(--muted)]">
+            {tab === "approved"
+              ? "No approved templates yet. Create one and submit to Meta."
+              : "No drafts or pending templates."}
+          </div>
         ) : (
           <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
             {filtered.map((t) => (

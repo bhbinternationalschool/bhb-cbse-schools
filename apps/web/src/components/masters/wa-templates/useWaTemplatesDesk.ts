@@ -15,7 +15,9 @@ import {
 export function useWaTemplatesDesk() {
   const session = useDemoSession();
   const readOnly = useSessionReadOnly();
-  const [state, setState] = useState<WaTemplatesState | null>(null);
+  const [state, setState] = useState<WaTemplatesState | null>(() =>
+    typeof window !== "undefined" ? loadWaTemplates() : null,
+  );
   const [notice, setNotice] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [submitting, setSubmitting] = useState(false);

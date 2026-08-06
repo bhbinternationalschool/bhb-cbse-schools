@@ -303,7 +303,9 @@ export function FeeGroupsPanel({
             maxHeight="max-h-[min(70vh,560px)]"
           >
             {groupCount === 0 ? (
-              <MastersEmptyRow label="No fee groups yet" />
+              <div className="px-4 py-8 text-center text-sm text-[var(--muted)]">
+                No fee groups yet
+              </div>
             ) : (
               <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
                 {bandSections.map((section) => {

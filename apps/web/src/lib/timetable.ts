@@ -339,7 +339,11 @@ export function saveTimetable(state: TimetableState) {
   if (!assertModulePermission("timetable", "edit", "saveTimetable")) return;
   if (typeof window === "undefined") return;
   const next = normalizeTimetableState(state);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  } catch (e) {
+    console.warn("[timetable] localStorage quota exceeded — relying on server DB sync", e);
+  }
   void import("@/lib/timetablePersistence").then(({ scheduleTimetableSync }) => {
     scheduleTimetableSync(next);
   });
@@ -347,10 +351,14 @@ export function saveTimetable(state: TimetableState) {
 
 export function writeTimetableLocalRaw(state: TimetableState) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(
-    STORAGE_KEY,
-    JSON.stringify(normalizeTimetableState(state)),
-  );
+  try {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(normalizeTimetableState(state)),
+    );
+  } catch (e) {
+    console.warn("[timetable] localStorage quota exceeded — relying on server DB sync", e);
+  }
 }
 
 export function timetableStateIsEmpty(state: TimetableState): boolean {

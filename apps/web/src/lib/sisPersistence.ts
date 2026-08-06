@@ -56,27 +56,30 @@ export function mergeSisRemoteIntoState(
     false;
 
   const hhMap = new Map<string, Household>();
-  if (!prefer) {
-    for (const h of local.households) hhMap.set(h.id, h);
+  for (const h of local.households) hhMap.set(h.id, h);
+  for (const h of remote.households) {
+    if (!hhMap.has(h.id) || prefer) {
+      hhMap.set(h.id, h);
+    }
   }
-  for (const h of remote.households) hhMap.set(h.id, h);
 
   const curriculumById = new Map(
     local.students.map((s) => [s.id, s.curriculum] as const),
   );
   const stuMap = new Map<string, SisStudent>();
-  if (!prefer) {
-    for (const s of local.students) stuMap.set(s.id, s);
-  }
+  // Always preserve local students so newly uploaded/imported rows are never lost
+  for (const s of local.students) stuMap.set(s.id, s);
   for (const s of remote.students) {
     const prev = stuMap.get(s.id);
-    stuMap.set(
-      s.id,
-      normalizeStudent({
-        ...s,
-        curriculum: prev?.curriculum ?? curriculumById.get(s.id) ?? null,
-      }),
-    );
+    if (!prev || prefer) {
+      stuMap.set(
+        s.id,
+        normalizeStudent({
+          ...s,
+          curriculum: prev?.curriculum ?? curriculumById.get(s.id) ?? null,
+        }),
+      );
+    }
   }
 
   return {
@@ -153,17 +156,9 @@ export async function ensureSisHydrated(): Promise<boolean> {
   const remoteEmpty =
     bundle.households.length === 0 && bundle.students.length === 0;
 
-  if (readFromDb && remoteEmpty) {
-    if (next.students.length > 0 || next.households.length > 0) {
-      const { emptySisState, writeSisLocalRaw } = await import("@/lib/sis");
-      next = {
-        ...emptySisState(),
-        tags: next.tags ?? [],
-        classUpgrades: next.classUpgrades ?? [],
-      };
-      writeSisLocalRaw(next);
-      changed = true;
-    }
+  if (remoteEmpty && (next.students.length > 0 || next.households.length > 0)) {
+    // If remote DB is empty but browser has local uploaded students, push local students to DB!
+    void pushSisState(next);
   } else if (
     remoteChanged &&
     (bundle.households.length > 0 || bundle.students.length > 0)
@@ -180,15 +175,15 @@ export async function ensureSisHydrated(): Promise<boolean> {
       await wipeRemoteSisRoster();
     } else {
       next = mergeSisRemoteIntoState(next, bundle, {
-        preferDb: readFromDb || next.students.length === 0,
+        preferDb: false,
       });
       changed = true;
     }
   }
 
-  // DB-read mode: hydrate is pull-only — never push stale browser roster back.
-  if (!readFromDb) {
-    await pushSisState(next);
+  // Ensure any local roster modifications are pushed to remote DB
+  if (next.students.length > 0) {
+    void pushSisState(next);
   }
 
   if (changed) {

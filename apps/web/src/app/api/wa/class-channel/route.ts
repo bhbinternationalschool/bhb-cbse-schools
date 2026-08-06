@@ -14,7 +14,6 @@ import { ensureSchoolMirrorLoaded } from "@/lib/schoolDataMirror.server";
 export const runtime = "nodejs";
 
 export async function GET() {
-  await ensureSchoolMirrorLoaded();
   await syncClassChannels();
   const state = await listClassChannelState();
   return NextResponse.json({
@@ -26,7 +25,6 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  await ensureSchoolMirrorLoaded();
   let body: {
     action?: string;
     draftId?: string;

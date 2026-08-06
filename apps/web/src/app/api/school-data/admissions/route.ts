@@ -48,10 +48,6 @@ export async function POST(req: Request) {
     );
   }
 
-  // Keep WhatsApp mirror slice warm
-  const { writeSchoolMirror } = await import("@/lib/schoolDataMirror.server");
-  await writeSchoolMirror({ admissions: normalized });
-
   return NextResponse.json({
     ok: true,
     leadCount: normalized.leads.length,

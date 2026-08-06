@@ -66,8 +66,12 @@ export function LoginPanel() {
 
   async function finishLogin() {
     await prepareWorkspaceAfterLogin();
-    router.push(routeForPersona(persona));
-    router.refresh();
+    const target = routeForPersona(persona);
+    if (typeof window !== "undefined") {
+      window.location.href = target;
+    } else {
+      router.push(target);
+    }
   }
 
   function onSubmit(e: React.FormEvent) {

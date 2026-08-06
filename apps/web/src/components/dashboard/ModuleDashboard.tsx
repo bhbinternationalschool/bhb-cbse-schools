@@ -1194,7 +1194,11 @@ export function ModuleDashboardView({
       return;
     }
     if (kpi.href) {
-      router.push(kpi.href);
+      if (typeof window !== "undefined") {
+        window.location.href = kpi.href;
+      } else {
+        router.push(kpi.href);
+      }
       return;
     }
     if (kpi.tab && onNavigateTab) {

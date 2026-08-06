@@ -99,7 +99,9 @@ export function StaffWorkspace() {
     ];
     if (raw && (allowed as string[]).includes(raw)) setTab(raw as StaffMainTab);
   }, []);
-  const [state, setState] = useState<MastersState | null>(null);
+  const [state, setState] = useState<MastersState | null>(() =>
+    typeof window !== "undefined" ? loadMasters() : null,
+  );
   const [notice, setNotice] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [streamFilter, setStreamFilter] = useState<"" | StaffStream>("");

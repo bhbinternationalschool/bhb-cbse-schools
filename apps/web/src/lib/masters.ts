@@ -1894,7 +1894,11 @@ function persistMastersClient(state: MastersState) {
   const prev = localStorage.getItem(STORAGE_KEY);
   if (prev === serialized) return;
 
-  localStorage.setItem(STORAGE_KEY, serialized);
+  try {
+    localStorage.setItem(STORAGE_KEY, serialized);
+  } catch (e) {
+    console.warn("[masters] localStorage quota exceeded — using server DB persistence", e);
+  }
   writeMastersMirrorMeta(new Date().toISOString());
   void import("@/lib/staffPersistence").then(
     ({ scheduleStaffSync, stripStaffFromMastersForBlob }) => {

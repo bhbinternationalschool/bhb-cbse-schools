@@ -108,10 +108,15 @@ export function ClassChannelsPanel() {
   }, [selectedChannelId]);
 
   useEffect(() => {
-    void refresh();
+    void (async () => {
+      await refresh();
+      if (channels.length === 0) {
+        await syncMembers();
+      }
+    })();
     const t = window.setInterval(() => void refresh(), 15_000);
     return () => window.clearInterval(t);
-  }, [refresh]);
+  }, [refresh, channels.length]);
 
   function flash(msg: string) {
     setNotice(msg);

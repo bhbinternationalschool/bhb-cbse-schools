@@ -237,7 +237,9 @@ export function WaChatHubPanel({
       <div className="grid gap-4 lg:grid-cols-2">
         <MastersTableCard title="Received · by category">
           {threads.length === 0 ? (
-            <MastersEmptyRow label="No WhatsApp threads yet — parents/staff message +91 94519 38805." />
+            <div className="px-4 py-10 text-center text-sm text-[var(--muted)]">
+              No WhatsApp threads yet — parents/staff message +91 94519 38805.
+            </div>
           ) : (
             <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
               {threads.map((t) => (

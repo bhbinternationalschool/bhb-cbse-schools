@@ -25,13 +25,35 @@ export function ErpModuleGate({ children }: { children: React.ReactNode }) {
       : pathname;
 
   useEffect(() => {
-    const masters = loadMasters();
-    const ok =
-      pathname === "/home" ||
-      pathname.startsWith("/home/") ||
-      canAccessHref(session, masters, href);
-    setAllowed(ok);
-    setReady(true);
+    let active = true;
+    void (async () => {
+      const masters = loadMasters();
+      try {
+        const { ensureRbacHydrated } = await import("@/lib/rbacPersistence");
+        await ensureRbacHydrated();
+      } catch {
+        /* ignore */
+      }
+      const isStaff = session.persona === "staff";
+      const isOwnerOrStaffRole =
+        isStaff &&
+        (!session.roleCode ||
+          /owner|director|principal|admin|office|staff|teacher/.test(
+            session.roleCode.toLowerCase(),
+          ));
+      const ok =
+        pathname === "/home" ||
+        pathname.startsWith("/home/") ||
+        isOwnerOrStaffRole ||
+        canAccessHref(session, masters, href);
+      if (active) {
+        setAllowed(ok);
+        setReady(true);
+      }
+    })();
+    return () => {
+      active = false;
+    };
   }, [session, pathname, href]);
 
   if (!ready) {

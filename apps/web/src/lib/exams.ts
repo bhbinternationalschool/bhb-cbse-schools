@@ -667,7 +667,11 @@ export function loadExams(): ExamsState {
     );
     const missingPolicy = !parsed.policy;
     if (migrated || missingPolicy) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      } catch (e) {
+        console.warn("[exams] localStorage quota exceeded", e);
+      }
     }
     return next;
   } catch {
@@ -687,7 +691,11 @@ export function saveExams(state: ExamsState) {
     });
     return;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) {
+    console.warn("[exams] localStorage quota exceeded — relying on server DB sync", e);
+  }
   void import("@/lib/examsPersistence").then(({ scheduleExamsSync }) => {
     scheduleExamsSync(state);
   });
@@ -698,7 +706,11 @@ export function writeExamsLocalRaw(state: ExamsState) {
     serverExamsCache = state;
     return;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) {
+    console.warn("[exams] localStorage quota exceeded — relying on server DB sync", e);
+  }
 }
 
 export function examsStateIsEmpty(state: ExamsState): boolean {

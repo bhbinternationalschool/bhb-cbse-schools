@@ -431,7 +431,7 @@ export function deskSkipMirrorBlobSlice(slice: MirrorBlobSlice): boolean {
 }
 
 export function deskSkipMirrorBlobSliceClient(slice: MirrorBlobSlice): boolean {
-  return deskSkipBlobPushClient(MIRROR_SLICE_MODULE[slice]);
+  return true;
 }
 
 export type DeskReadinessRow = {

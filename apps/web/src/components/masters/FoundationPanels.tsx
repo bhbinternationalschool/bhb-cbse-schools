@@ -681,7 +681,9 @@ export function AcademicPanel({
                   </li>
                 ))}
               {state.academicTerms.length === 0 ? (
-                <MastersEmptyRow />
+                <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">
+                  No academic terms yet
+                </li>
               ) : null}
             </ul>
           </MastersTableCard>
@@ -1586,7 +1588,9 @@ export function SubjectsPanel({
             title={`Class–subject map · ${activeGroupDef?.shortLabel ?? ""}`}
           >
             {groupLinks.length === 0 ? (
-              <MastersEmptyRow label="No links for this class group yet" />
+              <div className="px-4 py-8 text-center text-sm text-[var(--muted)]">
+                No links for this class group yet
+              </div>
             ) : null}
             {linksByCbse.map(({ group, rows }) => (
               <div key={group.id}>
@@ -2378,7 +2382,9 @@ export function HolidaysPanel({
                   />
                 ))}
                 {published.length === 0 ? (
-                  <MastersEmptyRow label="No published holidays" />
+                  <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">
+                    No published holidays
+                  </li>
                 ) : null}
               </ul>
             </MastersTableCard>
@@ -2411,7 +2417,9 @@ export function HolidaysPanel({
                   />
                 ))}
                 {drafts.length === 0 ? (
-                  <MastersEmptyRow label="No drafts" />
+                  <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">
+                    No drafts
+                  </li>
                 ) : null}
               </ul>
             </MastersTableCard>
@@ -2744,7 +2752,11 @@ export function StaffMastersPanel({
                   {d.name}
                 </li>
               ))}
-              {activeDepts.length === 0 ? <MastersEmptyRow /> : null}
+              {activeDepts.length === 0 ? (
+                <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">
+                  No active departments
+                </li>
+              ) : null}
             </ul>
           </MastersTableCard>
           <MastersTableCard title="Designations">
@@ -2764,7 +2776,11 @@ export function StaffMastersPanel({
                   </li>
                 );
               })}
-              {activeDes.length === 0 ? <MastersEmptyRow /> : null}
+              {activeDes.length === 0 ? (
+                <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">
+                  No active designations
+                </li>
+              ) : null}
             </ul>
           </MastersTableCard>
         </MastersTablesRow>

@@ -59,6 +59,7 @@ export function scheduleDeskSliceSync(
 async function pushDeskSliceApi(
   id: DeskModuleId,
   state: { version: number } & Record<string, unknown>,
+  attempt = 1,
 ) {
   try {
     const res = await fetch(`/api/school-data/desk-slice/${id}`, {
@@ -77,9 +78,33 @@ async function pushDeskSliceApi(
         updatedAt: body.updatedAt || new Date().toISOString(),
         rowCount: body.rowCount ?? readMeta(id).rowCount,
       });
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("bhb-desk-synced", { detail: { id } }),
+        );
+      }
+    } else if (attempt < 3) {
+      setTimeout(
+        () => void pushDeskSliceApi(id, state, attempt + 1),
+        1500 * attempt,
+      );
+    } else {
+      console.warn(`[${id}-db] desk push failed after 3 attempts`, body?.error || res.status);
     }
   } catch (e) {
-    console.warn(`[${id}-db] desk push error`, e);
+    if (attempt < 3) {
+      setTimeout(
+        () => void pushDeskSliceApi(id, state, attempt + 1),
+        1500 * attempt,
+      );
+    } else {
+      console.warn(`[${id}-db] desk push error after 3 attempts`, e);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("bhb-sync-error", { detail: { id, error: String(e) } }),
+        );
+      }
+    }
   }
 }
 

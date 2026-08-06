@@ -154,7 +154,11 @@ export function deskSliceDef(id: DeskModuleId): DeskSliceModuleDef | undefined {
 }
 
 export function deskSliceEnvDualWrite(prefix: string): boolean {
-  const flag = process.env[`${prefix}_DUAL_WRITE_DB`]?.trim().toLowerCase();
+  const flag =
+    (typeof window !== "undefined"
+      ? process.env[`NEXT_PUBLIC_${prefix}_DUAL_WRITE_DB`]
+      : process.env[`${prefix}_DUAL_WRITE_DB`])?.trim().toLowerCase() ||
+    process.env[`${prefix}_DUAL_WRITE_DB`]?.trim().toLowerCase();
   if (flag === "false" || flag === "0") return false;
   return true;
 }

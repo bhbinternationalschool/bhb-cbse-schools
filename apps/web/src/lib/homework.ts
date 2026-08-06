@@ -238,11 +238,14 @@ export function saveHomework(state: HomeworkState): void {
   if (!assertModulePermission("homework", "edit", "saveHomework")) return;
 
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) {
+    console.warn("[homework] localStorage quota exceeded — relying on server DB sync", e);
+  }
   void import("@/lib/homeworkPersistence").then(({ scheduleHomeworkSync }) => {
     scheduleHomeworkSync(state);
   });
-
 }
 
 export function writeHomeworkLocalRaw(state: HomeworkState) {
@@ -250,7 +253,11 @@ export function writeHomeworkLocalRaw(state: HomeworkState) {
     serverHomeworkCache = state;
     return;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) {
+    console.warn("[homework] localStorage quota exceeded — relying on server DB sync", e);
+  }
 }
 
 export function homeworkStateIsEmpty(state: HomeworkState): boolean {

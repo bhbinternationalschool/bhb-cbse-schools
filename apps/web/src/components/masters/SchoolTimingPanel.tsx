@@ -383,7 +383,11 @@ export function SchoolTimingPanel({
               ))}
             </select>
           </label>
-          {classes.length === 0 ? <MastersEmptyRow label="No classes yet" /> : null}
+          {classes.length === 0 ? (
+            <div className="px-4 py-8 text-center text-sm text-[var(--muted)]">
+              No classes yet
+            </div>
+          ) : null}
           <TimingFields value={classTiming} onChange={setClassTiming} />
           <button
             type="button"

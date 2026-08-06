@@ -86,37 +86,44 @@ export function AppShell({
         await resetAllWorkspacePersistenceCaches();
       }
 
-      const {
-        ensureClientSchoolMirrorHydrated,
-        startDeskHydrationBackground,
-      } = await import("@/lib/schoolDataMirrorClientHydrate");
-      const { pushFullSchoolMirrorToServer } = await import(
-        "@/lib/schoolDataMirror"
-      );
-
-      const mirrorChanged = await ensureClientSchoolMirrorHydrated();
-      if (mirrorChanged) {
-        window.dispatchEvent(new CustomEvent("bhb-desk-hydrated"));
-      }
-
-      const boot = await bootstrapWorkspaceSession(
-        pathname,
-        session.academicYearCode,
-      );
-      if (cancelled) return;
-      if (boot === "refresh") {
-        router.refresh();
-        return;
-      }
-
       bootstrapAyRef.current = session.academicYearCode;
       setYears(listSessionYearOptions());
       applyFeeDiscountSeedNow();
-      pushFullSchoolMirrorToServer();
-      startDeskHydrationBackground(pathname);
       setWorkspaceBootstrapPending(false);
       setBootReady(true);
-      window.dispatchEvent(new CustomEvent("bhb-desk-hydrated"));
+
+      void (async () => {
+        try {
+          const {
+            ensureClientSchoolMirrorHydrated,
+            startDeskHydrationBackground,
+          } = await import("@/lib/schoolDataMirrorClientHydrate");
+          const { pushFullSchoolMirrorToServer } = await import(
+            "@/lib/schoolDataMirror"
+          );
+
+          const mirrorChanged = await ensureClientSchoolMirrorHydrated();
+          if (mirrorChanged) {
+            window.dispatchEvent(new CustomEvent("bhb-desk-hydrated"));
+          }
+
+          const boot = await bootstrapWorkspaceSession(
+            pathname,
+            session.academicYearCode,
+          );
+          if (cancelled) return;
+          if (boot === "refresh") {
+            router.refresh();
+            return;
+          }
+
+          pushFullSchoolMirrorToServer();
+          startDeskHydrationBackground(pathname);
+          window.dispatchEvent(new CustomEvent("bhb-desk-hydrated"));
+        } catch {
+          /* ignore */
+        }
+      })();
     })();
 
     return () => {
@@ -125,23 +132,14 @@ export function AppShell({
     };
   }, [pathname, router, session.academicYearCode, bootReady]);
 
-  // When navigating, hydrate that module's desk slices early (guards skip already-done).
-  useEffect(() => {
-    if (!bootReady) return;
-    if (skipRouteHydrateRef.current) {
-      skipRouteHydrateRef.current = false;
-      return;
-    }
-    void import("@/lib/schoolDataMirrorClientHydrate").then((m) =>
-      m.ensureDeskHydratedPriority(pathname),
-    );
-  }, [pathname, bootReady]);
+
 
   // After Masters edits, re-align header session if needed (once per tab).
   useEffect(() => {
     if (!bootReady) return;
 
     function alignFromMasters() {
+      setYears(listSessionYearOptions());
       void alignWorkspaceSessionFromMasters(session.academicYearCode).then(
         (changed) => {
           if (changed) router.refresh();
@@ -150,8 +148,11 @@ export function AppShell({
     }
 
     window.addEventListener("bhb-masters-updated", alignFromMasters);
-    return () =>
+    window.addEventListener("bhb-desk-hydrated", alignFromMasters);
+    return () => {
       window.removeEventListener("bhb-masters-updated", alignFromMasters);
+      window.removeEventListener("bhb-desk-hydrated", alignFromMasters);
+    };
   }, [session.academicYearCode, router, bootReady]);
 
   const ay =

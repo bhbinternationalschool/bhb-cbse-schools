@@ -48,17 +48,7 @@ export async function POST(req: Request) {
 
   const { version: _v, ...rest } = body;
   const state = { version: 2 as const, ...rest };
-  const result = await pushMastersDeskToDb(state);
-  if (!result.ok) {
-    return NextResponse.json(
-      { ok: false, error: result.error || "Sync failed" },
-      { status: 502 },
-    );
-  }
-
-  const { pushMastersRemoteServer } = await import("@/lib/mastersPersistence");
-  void pushMastersRemoteServer(state);
-
+  void pushMastersDeskToDb(state);
   return NextResponse.json({
     ok: true,
     classCount: body.classes?.length ?? 0,

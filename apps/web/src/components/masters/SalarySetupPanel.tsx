@@ -359,7 +359,11 @@ function HeadsPanel({
                 </button>
               </li>
             ))}
-            {heads.length === 0 ? <MastersEmptyRow label="No heads" /> : null}
+            {heads.length === 0 ? (
+              <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">
+                No heads
+              </li>
+            ) : null}
           </ul>
         </MastersTableCard>
       </MastersTablesRow>
@@ -651,7 +655,9 @@ function StructuresPanel({
               );
             })}
             {state.structures.length === 0 ? (
-              <MastersEmptyRow label="No structures yet" />
+              <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">
+                No structures yet
+              </li>
             ) : null}
           </ul>
         </MastersTableCard>

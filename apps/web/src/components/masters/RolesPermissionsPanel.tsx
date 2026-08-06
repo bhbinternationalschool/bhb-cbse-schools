@@ -629,7 +629,9 @@ export function RolesPermissionsPanel() {
           </MastersWorkCard>
           <MastersTableCard title="Assignments">
             {state.assignments.length === 0 ? (
-              <MastersEmptyRow label="No explicit assignments — roles inferred from designation / login." />
+              <div className="px-4 py-8 text-center text-sm text-[var(--muted)]">
+                No explicit assignments — roles inferred from designation / login.
+              </div>
             ) : (
               <table className="min-w-full text-left text-sm">
                 <thead className="text-[11px] text-[var(--muted)]">
@@ -711,7 +713,9 @@ export function RolesPermissionsPanel() {
           </MastersTableCard>
           <MastersTableCard title="Staff with explicit roles">
             {staffRows.length === 0 ? (
-              <MastersEmptyRow label="No assignment overrides yet." />
+              <div className="px-4 py-8 text-center text-sm text-[var(--muted)]">
+                No assignment overrides yet.
+              </div>
             ) : (
               <table className="min-w-full text-left text-sm">
                 <thead className="text-[11px] text-[var(--muted)]">
@@ -749,7 +753,9 @@ export function RolesPermissionsPanel() {
       {tab === "audit" ? (
         <MastersTableCard title="Permission change audit">
           {state.audit.length === 0 ? (
-            <MastersEmptyRow label="No RBAC changes logged yet." />
+            <div className="px-4 py-8 text-center text-sm text-[var(--muted)]">
+              No RBAC changes logged yet.
+            </div>
           ) : (
             <table className="min-w-full text-left text-sm">
               <thead className="text-[11px] text-[var(--muted)]">

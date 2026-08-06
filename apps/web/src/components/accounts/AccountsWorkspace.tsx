@@ -76,7 +76,9 @@ export function AccountsWorkspace() {
     ];
     if (raw && (allowed as string[]).includes(raw)) setTab(raw as AccountsTab);
   }, []);
-  const [state, setState] = useState<AccountsState | null>(null);
+  const [state, setState] = useState<AccountsState | null>(() =>
+    typeof window !== "undefined" ? seedAccountsIfEmpty() : null,
+  );
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [tick, setTick] = useState(0);

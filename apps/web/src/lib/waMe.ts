@@ -14,5 +14,15 @@ export function openWaMe(mobile: string, text: string): void {
   if (typeof window === "undefined") return;
   const digits = mobile.replace(/\D/g, "");
   if (digits.length < 10) return;
+
+  // Dispatch via official WhatsApp Business Cloud API first
+  void fetch("/api/wa/dispatch", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messages: [{ mobile: digits, body: text }],
+    }),
+  }).catch(() => null);
+
   window.open(waMeUrl(mobile, text), "_blank", "noopener,noreferrer");
 }

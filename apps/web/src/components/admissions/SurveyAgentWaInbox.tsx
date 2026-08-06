@@ -115,7 +115,9 @@ export function SurveyAgentWaInbox({
       <div className="grid gap-4 lg:grid-cols-2">
         <MastersTableCard title="Survey agent WhatsApp threads">
           {threads.length === 0 ? (
-            <MastersEmptyRow label="No agent chats yet — assigned survey mobiles text your Business number." />
+            <div className="px-4 py-10 text-center text-sm text-[var(--muted)]">
+              No agent chats yet — assigned survey mobiles text your Business number.
+            </div>
           ) : (
             <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
               {threads.map((t) => (

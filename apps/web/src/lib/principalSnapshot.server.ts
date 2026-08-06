@@ -55,13 +55,15 @@ export type PrincipalSnapshot = {
 export async function buildPrincipalSnapshot(
   academicYearCode?: string,
 ): Promise<PrincipalSnapshot> {
-  await ensureSchoolMirrorHydrated();
-  await ensureSisHydratedServer();
-  await ensureAdmissionsHydratedServer();
-  await ensurePaymentsHydratedServer();
-  await ensureExamsHydratedServer();
-  await ensureAttendanceHydratedServer();
-  await ensureStaffAttendanceHydratedServer();
+  await Promise.all([
+    ensureSchoolMirrorHydrated(),
+    ensureSisHydratedServer(),
+    ensureAdmissionsHydratedServer(),
+    ensurePaymentsHydratedServer(),
+    ensureExamsHydratedServer(),
+    ensureAttendanceHydratedServer(),
+    ensureStaffAttendanceHydratedServer(),
+  ]);
   const masters = loadMasters();
   const ay = academicYearCode || currentAcademicYearCode(masters);
   const today = todayIso();

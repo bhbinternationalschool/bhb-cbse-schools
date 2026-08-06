@@ -290,9 +290,15 @@ export function StudentLeaveWorkspace({
     "apply",
     "reports",
   ]);
-  const [masters, setMasters] = useState<MastersState | null>(null);
-  const [sis, setSis] = useState<SisState | null>(null);
-  const [state, setState] = useState<StudentLeaveState | null>(null);
+  const [masters, setMasters] = useState<MastersState | null>(() =>
+    typeof window !== "undefined" ? loadMasters() : null,
+  );
+  const [sis, setSis] = useState<SisState | null>(() =>
+    typeof window !== "undefined" ? loadSis() : null,
+  );
+  const [state, setState] = useState<StudentLeaveState | null>(() =>
+    typeof window !== "undefined" ? loadStudentLeave() : null,
+  );
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 

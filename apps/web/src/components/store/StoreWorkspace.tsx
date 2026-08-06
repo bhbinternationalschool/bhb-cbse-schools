@@ -67,38 +67,14 @@ import {
   type StoreTab,
 } from "@/components/store/StoreModuleNav";
 
-const ModuleDashboardHost = lazyNamedTabPanel(
-  () => import("@/components/dashboard/ModuleDashboardHost"),
-  "ModuleDashboardHost",
-);
-const PurchaseWorkspace = lazyNamedTabPanel(
-  () => import("@/components/purchase/PurchaseWorkspace"),
-  "PurchaseWorkspace",
-);
-const StockMasterWorkspace = lazyNamedTabPanel(
-  () => import("@/components/store/StockMasterWorkspace"),
-  "StockMasterWorkspace",
-);
-const StoreReportsPanel = lazyNamedTabPanel(
-  () => import("@/components/store/StoreReportsPanel"),
-  "StoreReportsPanel",
-);
-const StoreInventoryAllocationPanel = lazyNamedTabPanel(
-  () => import("@/components/store/StoreInventoryAllocationPanel"),
-  "StoreInventoryAllocationPanel",
-);
-const StoreAssetAllocationPanel = lazyNamedTabPanel(
-  () => import("@/components/store/StoreAssetAllocationPanel"),
-  "StoreAssetAllocationPanel",
-);
-const StoreAccountsWorkspace = lazyNamedTabPanel(
-  () => import("@/components/store/StoreAccountsWorkspace"),
-  "StoreAccountsWorkspace",
-);
-const StoreSellReturnPanel = lazyNamedTabPanel(
-  () => import("@/components/store/StoreSellReturnPanel"),
-  "StoreSellReturnPanel",
-);
+import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
+import { PurchaseWorkspace } from "@/components/purchase/PurchaseWorkspace";
+import { StockMasterWorkspace } from "@/components/store/StockMasterWorkspace";
+import { StoreReportsPanel } from "@/components/store/StoreReportsPanel";
+import { StoreInventoryAllocationPanel } from "@/components/store/StoreInventoryAllocationPanel";
+import { StoreAssetAllocationPanel } from "@/components/store/StoreAssetAllocationPanel";
+import { StoreAccountsWorkspace } from "@/components/store/StoreAccountsWorkspace";
+import { StoreSellReturnPanel } from "@/components/store/StoreSellReturnPanel";
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);

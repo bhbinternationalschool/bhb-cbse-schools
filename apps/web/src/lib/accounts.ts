@@ -1164,7 +1164,11 @@ export function saveAccounts(state: AccountsState): void {
   if (!assertModulePermission("accounts", "edit", "saveAccounts")) return;
 
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, version: 1 }));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, version: 1 }));
+  } catch (e) {
+    console.warn("[accounts] localStorage quota exceeded — relying on server DB sync", e);
+  }
   void import("@/lib/accountsPersistence").then(({ scheduleAccountsSync }) => {
     scheduleAccountsSync(state);
   });
@@ -1175,7 +1179,11 @@ export function writeAccountsLocalRaw(state: AccountsState): void {
     serverAccountsCache = state;
     return;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, version: 1 }));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, version: 1 }));
+  } catch (e) {
+    console.warn("[accounts] localStorage quota exceeded — relying on server DB sync", e);
+  }
 }
 
 export function accountsStateIsEmpty(state: AccountsState): boolean {

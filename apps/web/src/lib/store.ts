@@ -886,7 +886,11 @@ export function saveStore(state: StoreState) {
   if (!assertModulePermission("store", "edit", "saveStore")) return;
 
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) {
+    console.warn("[store] localStorage quota exceeded — relying on server DB sync", e);
+  }
   void import("@/lib/storePersistence").then(({ scheduleStoreSync }) => {
     scheduleStoreSync(state);
   });
@@ -897,7 +901,11 @@ export function writeStoreLocalRaw(state: StoreState) {
     serverStoreCache = state;
     return;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) {
+    console.warn("[store] localStorage quota exceeded — relying on server DB sync", e);
+  }
 }
 
 export function storeStateIsEmpty(state: StoreState): boolean {

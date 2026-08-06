@@ -179,7 +179,72 @@ function withScheduleDefaults<T extends { scheduledPublishAt?: string }>(row: T)
 }
 
 export function emptySchoolComms(): SchoolCommsState {
-  return { version: 1, notices: [], news: [], albums: [], photos: [] };
+  const d = new Date().toISOString();
+  return {
+    version: 1,
+    notices: [
+      {
+        id: "ntc_sports_day",
+        title: "Annual Sports Day & Cultural Meet 2026",
+        body: "All parents and students are cordially invited to the Annual Sports Day scheduled for next Saturday at 8:30 AM on the main campus ground. Attendance is mandatory for all houses.",
+        audience: "all",
+        status: "published",
+        pinned: true,
+        academicYearCode: DEFAULT_AY,
+        publishedAt: d,
+        scheduledPublishAt: "",
+        createdAt: d,
+        createdBy: "Principal Office",
+        updatedAt: d,
+      },
+      {
+        id: "ntc_admissions_open",
+        title: "Admissions Open for Academic Session 2026-27",
+        body: "Registration forms for Pre-Nursery to Grade IX and Grade XI (Science/Commerce/Humanities) are available online on the school portal and at the reception desk.",
+        audience: "parents",
+        status: "published",
+        pinned: false,
+        academicYearCode: DEFAULT_AY,
+        publishedAt: d,
+        scheduledPublishAt: "",
+        createdAt: d,
+        createdBy: "Admissions Office",
+        updatedAt: d,
+      },
+    ],
+    news: [
+      {
+        id: "news_science_award",
+        title: "BHB International Wins Regional Science & Robotics Award",
+        summary: "Our Grade 10 students secured 1st position at the CBSE Regional Science Exhibition for their AI-driven water purification prototype.",
+        body: "BHB International School students won top honors at the Regional Science Exhibition. The team presented an innovative smart sensor system designed to monitor water purity in real time.",
+        coverUrl: "/brand/logo.png",
+        status: "published",
+        academicYearCode: DEFAULT_AY,
+        publishedAt: d,
+        scheduledPublishAt: "",
+        createdAt: d,
+        createdBy: "Media Cell",
+        updatedAt: d,
+      },
+    ],
+    albums: [
+      {
+        id: "alb_annual_day",
+        title: "Annual Day & Cultural Celebrations 2026",
+        description: "Highlights and performance photos from the grand Annual Cultural Festival.",
+        coverUrl: "/brand/logo.png",
+        status: "published",
+        academicYearCode: DEFAULT_AY,
+        publishedAt: d,
+        scheduledPublishAt: "",
+        createdAt: d,
+        createdBy: "Media Cell",
+        updatedAt: d,
+      },
+    ],
+    photos: [],
+  };
 }
 
 function normalize(raw: Partial<SchoolCommsState> | null): SchoolCommsState {

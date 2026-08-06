@@ -63,7 +63,10 @@ export function scheduleSisDeskSync(state: Pick<SisState, "households" | "studen
   }, DESK_PUSH_DEBOUNCE_MS);
 }
 
-async function pushSisDeskApi(state: Pick<SisState, "households" | "students">) {
+async function pushSisDeskApi(
+  state: Pick<SisState, "households" | "students">,
+  attempt = 1,
+) {
   try {
     const res = await fetch("/api/school-data/sis-roster", {
       method: "POST",
@@ -86,11 +89,28 @@ async function pushSisDeskApi(state: Pick<SisState, "households" | "students">) 
         studentCount: body.studentCount ?? state.students.length,
         householdCount: body.householdCount ?? state.households.length,
       });
-    } else if (!res.ok) {
-      console.warn("[sis-db] roster push failed", body?.error || res.status);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("bhb-desk-synced", { detail: { module: "sis" } }),
+        );
+      }
+    } else if (attempt < 3) {
+      setTimeout(
+        () => void pushSisDeskApi(state, attempt + 1),
+        1500 * attempt,
+      );
+    } else {
+      console.warn("[sis-db] roster push failed after 3 attempts", body?.error || res.status);
     }
   } catch (e) {
-    console.warn("[sis-db] roster push error", e);
+    if (attempt < 3) {
+      setTimeout(
+        () => void pushSisDeskApi(state, attempt + 1),
+        1500 * attempt,
+      );
+    } else {
+      console.warn("[sis-db] roster push error after 3 attempts", e);
+    }
   }
 }
 

@@ -11,8 +11,11 @@ type WipeSignal = {
   note?: string;
 };
 
+let wipeCheckDone = false;
+
 export async function applyTenantDataWipeSignalIfNeeded(): Promise<boolean> {
-  if (typeof window === "undefined") return false;
+  if (typeof window === "undefined" || wipeCheckDone) return false;
+  wipeCheckDone = true;
 
   let signal: WipeSignal;
   try {

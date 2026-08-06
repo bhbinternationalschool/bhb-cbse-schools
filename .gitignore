@@ -28,3 +28,20 @@ backups/
 tsconfig.tsbuildinfo
 apps/web/tsconfig.tsbuildinfo
 .vercel
+
+# Flutter (cbse_school_mobile)
+cbse_school_mobile/.dart_tool/
+cbse_school_mobile/.flutter-plugins
+cbse_school_mobile/.flutter-plugins-dependencies
+cbse_school_mobile/.packages
+cbse_school_mobile/build/
+cbse_school_mobile/.pub-cache/
+cbse_school_mobile/.pub/
+cbse_school_mobile/**/Generated.xcconfig
+cbse_school_mobile/**/flutter_export_environment.sh
+cbse_school_mobile/ios/Pods/
+cbse_school_mobile/ios/.symlinks/
+cbse_school_mobile/android/.gradle/
+cbse_school_mobile/android/local.properties
+cbse_school_mobile/**/*.iml
+cbse_school_mobile/.idea/

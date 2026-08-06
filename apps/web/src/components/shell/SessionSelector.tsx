@@ -13,7 +13,20 @@ export function SessionSelector({ currentCode }: { currentCode: string }) {
   const [years, setYears] = useState<SessionYearOption[]>([]);
 
   useEffect(() => {
-    setYears(listSessionYearOptions());
+    function refresh() {
+      setYears(listSessionYearOptions());
+    }
+    refresh();
+    window.addEventListener("bhb-masters-updated", refresh);
+    window.addEventListener("bhb-desk-hydrated", refresh);
+    window.addEventListener("bhb-desk-synced", refresh);
+    window.addEventListener("storage", refresh);
+    return () => {
+      window.removeEventListener("bhb-masters-updated", refresh);
+      window.removeEventListener("bhb-desk-hydrated", refresh);
+      window.removeEventListener("bhb-desk-synced", refresh);
+      window.removeEventListener("storage", refresh);
+    };
   }, [currentCode]);
 
   async function onChange(code: string) {

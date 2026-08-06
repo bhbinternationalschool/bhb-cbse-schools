@@ -163,7 +163,11 @@ export function saveHolds(state: HoldsState) {
   if (!assertModulePermission("fees", "edit", "saveHolds")) return;
 
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) {
+    console.warn("[holds] localStorage quota exceeded", e);
+  }
 }
 
 /** Effective from-stage for a hold (report card follows exam policy). */

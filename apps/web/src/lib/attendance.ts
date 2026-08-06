@@ -294,7 +294,11 @@ export function saveAttendance(state: AttendanceState) {
     );
     return;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  } catch (e) {
+    console.warn("[attendance] localStorage quota exceeded — relying on server DB sync", e);
+  }
   void import("@/lib/attendancePersistence").then(
     ({ scheduleAttendanceSync }) => {
       scheduleAttendanceSync(next);
@@ -308,7 +312,11 @@ export function writeAttendanceLocalRaw(state: AttendanceState) {
     serverAttendanceCache = next;
     return;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  } catch (e) {
+    console.warn("[attendance] localStorage quota exceeded — relying on server DB sync", e);
+  }
 }
 
 export function attendanceStateIsEmpty(state: AttendanceState): boolean {

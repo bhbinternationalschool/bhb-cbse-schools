@@ -130,11 +130,14 @@ export function savePtm(state: PtmState): void {
   if (!assertModulePermission("ptm", "edit", "savePtm")) return;
 
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) {
+    console.warn("[ptm] localStorage quota exceeded — relying on server DB sync", e);
+  }
   void import("@/lib/ptmPersistence").then(({ schedulePtmSync }) => {
     schedulePtmSync(state);
   });
-
 }
 
 export function writePtmLocalRaw(state: PtmState) {
@@ -142,7 +145,11 @@ export function writePtmLocalRaw(state: PtmState) {
     serverPtmCache = state;
     return;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) {
+    console.warn("[ptm] localStorage quota exceeded — relying on server DB sync", e);
+  }
 }
 
 export function ptmStateIsEmpty(state: PtmState): boolean {

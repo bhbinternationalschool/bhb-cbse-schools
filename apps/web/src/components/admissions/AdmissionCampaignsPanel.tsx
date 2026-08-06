@@ -619,7 +619,9 @@ export function AdmissionCampaignsPanel({
 
           <MastersTableCard title="Saved lists">
             {wa.lists.length === 0 ? (
-              <MastersEmptyRow label="No lists yet — build one from filters." />
+              <div className="px-4 py-8 text-center text-sm text-[var(--muted)]">
+                No lists yet — build one from filters.
+              </div>
             ) : (
               <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
                 {wa.lists.map((list) => (
@@ -810,7 +812,9 @@ export function AdmissionCampaignsPanel({
 
           <MastersTableCard title="All campaigns">
             {wa.campaigns.length === 0 ? (
-              <MastersEmptyRow label="No campaigns yet." />
+              <div className="px-4 py-8 text-center text-sm text-[var(--muted)]">
+                No campaigns yet.
+              </div>
             ) : (
               <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
                 {wa.campaigns.map((c) => {
@@ -923,9 +927,13 @@ export function AdmissionCampaignsPanel({
             }
           >
             {!selectedCampaign ? (
-              <MastersEmptyRow label="Select a campaign, then Enqueue." />
+              <div className="px-4 py-8 text-center text-sm text-[var(--muted)]">
+                Select a campaign, then Enqueue.
+              </div>
             ) : selectedMessages.length === 0 ? (
-              <MastersEmptyRow label="No messages — click Enqueue on the campaign." />
+              <div className="px-4 py-8 text-center text-sm text-[var(--muted)]">
+                No messages — click Enqueue on the campaign.
+              </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="min-w-full text-left text-[12px]">

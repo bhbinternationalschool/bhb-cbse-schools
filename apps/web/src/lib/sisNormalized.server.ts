@@ -359,19 +359,6 @@ export async function pushSisToDb(
   const households = state.households ?? [];
   const students = state.students ?? [];
 
-  await deleteStale(
-    sb,
-    tenantId,
-    "sis_households",
-    new Set(households.map((h) => h.id)),
-  );
-  await deleteStale(
-    sb,
-    tenantId,
-    "sis_students",
-    new Set(students.map((s) => s.id)),
-  );
-
   const householdRows = households.map((h) => householdToRow(h, tenantId, now));
   if (householdRows.length > 0) {
     const { error } = await sb

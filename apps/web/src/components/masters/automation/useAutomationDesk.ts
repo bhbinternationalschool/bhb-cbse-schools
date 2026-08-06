@@ -25,7 +25,9 @@ import {
 export function useAutomationDesk() {
   const session = useDemoSession();
   const readOnly = useSessionReadOnly();
-  const [state, setState] = useState<AutomationState | null>(null);
+  const [state, setState] = useState<AutomationState | null>(() =>
+    typeof window !== "undefined" ? loadAutomation() : null,
+  );
   const [notice, setNotice] = useState<string | null>(null);
   const by = session.fullName || session.roleCode || "masters";
 

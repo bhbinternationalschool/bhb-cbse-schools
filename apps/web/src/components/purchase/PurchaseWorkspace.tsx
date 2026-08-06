@@ -350,7 +350,9 @@ export function PurchaseWorkspace({
     "returns",
     "reports",
   ]);
-  const [state, setState] = useState<PurchaseState | null>(null);
+  const [state, setState] = useState<PurchaseState | null>(() =>
+    typeof window !== "undefined" ? seedPurchaseIfEmpty() : null,
+  );
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 

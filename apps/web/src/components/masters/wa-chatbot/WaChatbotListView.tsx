@@ -119,13 +119,11 @@ export function WaChatbotListView({
         }
       >
         {filtered.length === 0 ? (
-          <MastersEmptyRow
-            label={
-              tab === "built_in"
-                ? "No built-in bots found."
-                : "No custom bots yet — create one or duplicate a built-in bot."
-            }
-          />
+          <div className="px-4 py-10 text-center text-sm text-[var(--muted)]">
+            {tab === "built_in"
+              ? "No built-in bots found."
+              : "No custom bots yet — create one or duplicate a built-in bot."}
+          </div>
         ) : (
           <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
             {filtered.map((f) => (

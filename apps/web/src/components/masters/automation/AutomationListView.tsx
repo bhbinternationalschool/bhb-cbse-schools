@@ -192,13 +192,11 @@ export function AutomationListView({
             }
           >
             {filteredRules.length === 0 ? (
-              <MastersEmptyRow
-                label={
-                  tab === "active"
-                    ? "No active rules. Enable a rule or create a new one."
-                    : "No paused rules."
-                }
-              />
+              <div className="px-4 py-10 text-center text-sm text-[var(--muted)]">
+                {tab === "active"
+                  ? "No active rules. Enable a rule or create a new one."
+                  : "No paused rules."}
+              </div>
             ) : (
               <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
                 {filteredRules.map((r) => (

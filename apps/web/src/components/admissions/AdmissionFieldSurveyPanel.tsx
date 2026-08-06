@@ -1282,7 +1282,9 @@ export function AdmissionFieldSurveyPanel({
           </div>
         ) : null}
         {filtered.length === 0 ? (
-          <MastersEmptyRow label="No field survey leads in this beat yet." />
+          <div className="px-4 py-10 text-center text-sm text-[var(--muted)]">
+            No field survey leads in this beat yet.
+          </div>
         ) : (
           <table className="min-w-full text-left text-sm">
             <thead className="text-[11px] text-[var(--muted)]">

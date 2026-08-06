@@ -92,38 +92,14 @@ import { MODULE_TAB_CONTAINER_CLASS } from "@/components/ui/modern-tab-bar";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ErpPanel, ErpTableShell } from "@/components/ui/erp-roster";
 
-const ChequesPanel = lazyNamedTabPanel(
-  () => import("@/components/fees/ChequesPanel"),
-  "ChequesPanel",
-);
-const ManualBookPanel = lazyNamedTabPanel(
-  () => import("@/components/fees/ManualBookPanel"),
-  "ManualBookPanel",
-);
-const DayClosePanel = lazyNamedTabPanel(
-  () => import("@/components/fees/DayClosePanel"),
-  "DayClosePanel",
-);
-const PayLinksPanel = lazyNamedTabPanel(
-  () => import("@/components/fees/PayLinksPanel"),
-  "PayLinksPanel",
-);
-const SisParentWaInbox = lazyNamedTabPanel(
-  () => import("@/components/fees/SisParentWaInbox"),
-  "SisParentWaInbox",
-);
-const FeeAdjustmentsPanel = lazyNamedTabPanel(
-  () => import("@/components/fees/FeeAdjustmentsPanel"),
-  "FeeAdjustmentsPanel",
-);
-const FeeReportsPanel = lazyNamedTabPanel(
-  () => import("@/components/fees/FeeFinancePanels"),
-  "FeeReportsPanel",
-);
-const ModuleDashboardHost = lazyNamedTabPanel(
-  () => import("@/components/dashboard/ModuleDashboardHost"),
-  "ModuleDashboardHost",
-);
+import { ChequesPanel } from "@/components/fees/ChequesPanel";
+import { ManualBookPanel } from "@/components/fees/ManualBookPanel";
+import { DayClosePanel } from "@/components/fees/DayClosePanel";
+import { PayLinksPanel } from "@/components/fees/PayLinksPanel";
+import { SisParentWaInbox } from "@/components/fees/SisParentWaInbox";
+import { FeeAdjustmentsPanel } from "@/components/fees/FeeAdjustmentsPanel";
+import { FeeReportsPanel } from "@/components/fees/FeeFinancePanels";
+import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 const ChargeVouchersPanel = lazyNamedTabPanel(
   () => import("@/components/fees/ChargeVouchersPanel"),
   "ChargeVouchersPanel",

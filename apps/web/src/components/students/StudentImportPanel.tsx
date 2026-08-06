@@ -183,6 +183,13 @@ export function StudentImportPanel({ masters, sis, onApplied }: Props) {
           missing: gap.missing,
         });
       }
+    } catch (e) {
+      console.error("[sisImport] Import failed:", e);
+      setLocalError(
+        e instanceof Error
+          ? `Import error: ${e.message}`
+          : "An unexpected error occurred during import.",
+      );
     } finally {
       setBusy(false);
     }

@@ -649,6 +649,15 @@ export function whatsAppPaymentLinkUrl(
 ): string {
   const digits = mobile.replace(/\D/g, "");
   const phone = digits.length === 10 ? `91${digits}` : digits;
+  if (typeof window !== "undefined") {
+    void fetch("/api/wa/dispatch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages: [{ mobile: phone, body: message }],
+      }),
+    }).catch(() => null);
+  }
   return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
 }
 

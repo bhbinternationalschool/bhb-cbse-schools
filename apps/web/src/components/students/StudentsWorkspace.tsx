@@ -215,12 +215,26 @@ export function StudentsWorkspace() {
   const headerAy =
     session.academicYearCode ||
     (masters ? currentAcademicYearCode(masters) : "");
+
+  const hasStudentsInHeaderAy = useMemo(() => {
+    if (!state || !headerAy) return false;
+    return state.students.some(
+      (s) =>
+        normalizeSessionCode(s.academicYearCode || "") ===
+        normalizeSessionCode(headerAy),
+    );
+  }, [state, headerAy]);
+
   const effectiveSession =
-    sessionFilter === "all" ? "" : sessionFilter || headerAy;
+    sessionFilter === "all"
+      ? ""
+      : sessionFilter
+        ? sessionFilter
+        : hasStudentsInHeaderAy
+          ? headerAy
+          : "";
 
   useEffect(() => {
-    // The header selector is the system-wide source of truth.
-    setSessionFilter("");
     setProfileId("");
   }, [headerAy]);
 

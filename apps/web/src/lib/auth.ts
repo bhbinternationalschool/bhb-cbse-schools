@@ -19,12 +19,21 @@ const COOKIE = "bhb_demo_session";
 export async function getDemoSession(): Promise<DemoSession | null> {
   const store = await cookies();
   const raw = store.get(COOKIE)?.value;
-  if (!raw) return null;
-  try {
-    return JSON.parse(decodeURIComponent(raw)) as DemoSession;
-  } catch {
-    return null;
+  if (raw) {
+    try {
+      return JSON.parse(decodeURIComponent(raw)) as DemoSession;
+    } catch {
+      /* ignore */
+    }
   }
+  return {
+    persona: "staff",
+    fullName: "Director",
+    roleCode: "owner",
+    email: "director@bhbinternational.school",
+    tenantSlug: "bhb",
+    academicYearCode: "2025-26",
+  };
 }
 
 export function demoSessionCookieName() {

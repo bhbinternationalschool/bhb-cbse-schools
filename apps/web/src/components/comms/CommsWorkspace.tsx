@@ -104,8 +104,12 @@ export function CommsWorkspace() {
   const searchParams = useSearchParams();
   const tab = tabFromSearch(searchParams.get("tab"), pathname || "/comms");
 
-  const [comms, setComms] = useState<SchoolCommsState | null>(null);
-  const [inbox, setInbox] = useState<NotificationsState | null>(null);
+  const [comms, setComms] = useState<SchoolCommsState | null>(() =>
+    typeof window !== "undefined" ? loadSchoolComms() : null,
+  );
+  const [inbox, setInbox] = useState<NotificationsState | null>(() =>
+    typeof window !== "undefined" ? loadNotifications() : null,
+  );
   const [noticeMsg, setNoticeMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [listQuery, setListQuery] = useState("");

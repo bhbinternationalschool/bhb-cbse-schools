@@ -50,42 +50,50 @@ export function mergeAndPersistFeeDiscountSeed(
   masters: MastersState,
   sis: SisState,
 ): { masters: MastersState; applied: number; pending: number } {
-  if (typeof window === "undefined") {
-    return { masters, applied: 0, pending: bundledSeed.grants.length };
-  }
-
-  masters = mergeDiscountRulesFromSeed(masters);
-  const rulesOnly = !sis.students.length;
-
-  if (rulesOnly) {
-    persistMastersSystemImport(masters);
-    return { masters, applied: 0, pending: bundledSeed.grants.length };
-  }
-
-  if (isSeedFullyApplied(masters, bundledSeed)) {
+  if (typeof window === "undefined" || running) {
     return { masters, applied: 0, pending: 0 };
   }
 
-  const { masters: next, applied, pending } = mergeFeeDiscountSeedGrants(
-    masters,
-    sis,
-    bundledSeed,
-  );
+  running = true;
+  try {
+    const initialConcessionsLength = masters.concessions.length;
+    const initialGrantsLength = masters.concessionGrants?.length ?? 0;
+    masters = mergeDiscountRulesFromSeed(masters);
+    const rulesOnly = !sis.students.length;
 
-  const shouldPersist =
-    applied > 0 ||
-    next.concessions.length !== masters.concessions.length ||
-    (next.concessionGrants?.length ?? 0) !== (masters.concessionGrants?.length ?? 0);
-
-  if (shouldPersist) {
-    persistMastersSystemImport(next);
-    if (applied > 0 && pending === 0) {
-      localStorage.setItem(APPLIED_KEY, seedMarker(bundledSeed));
+    if (rulesOnly) {
+      if (masters.concessions.length !== initialConcessionsLength) {
+        persistMastersSystemImport(masters);
+      }
+      return { masters, applied: 0, pending: bundledSeed.grants.length };
     }
-    return { masters: next, applied, pending };
-  }
 
-  return { masters: next, applied, pending };
+    if (isSeedFullyApplied(masters, bundledSeed)) {
+      return { masters, applied: 0, pending: 0 };
+    }
+
+    const { masters: next, applied, pending } = mergeFeeDiscountSeedGrants(
+      masters,
+      sis,
+      bundledSeed,
+    );
+
+    const shouldPersist =
+      applied > 0 ||
+      next.concessions.length !== initialConcessionsLength ||
+      (next.concessionGrants?.length ?? 0) !== initialGrantsLength;
+
+    localStorage.setItem(APPLIED_KEY, seedMarker(bundledSeed));
+
+    if (shouldPersist) {
+      persistMastersSystemImport(next);
+      return { masters: next, applied, pending };
+    }
+
+    return { masters: next, applied, pending };
+  } finally {
+    running = false;
+  }
 }
 
 /** Load current desk state and apply bundled seed (safe to call after SIS hydrate). */

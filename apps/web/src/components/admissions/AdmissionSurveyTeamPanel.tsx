@@ -483,7 +483,9 @@ export function AdmissionSurveyTeamPanel({
         </div>
 
         {dayAnalytics.byAgent.length === 0 ? (
-          <MastersEmptyRow label="No survey sessions this day — agents can Start via WhatsApp (START CODE + location pin) or /field/survey." />
+          <div className="px-4 py-10 text-center text-sm text-[var(--muted)]">
+            No survey sessions this day — agents can Start via WhatsApp (START CODE + location pin) or /field/survey.
+          </div>
         ) : (
           <table className="min-w-full text-left text-sm">
             <thead className="text-[11px] text-[var(--muted)]">

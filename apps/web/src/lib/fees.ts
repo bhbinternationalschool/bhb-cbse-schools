@@ -3454,47 +3454,60 @@ export async function deliverWhatsAppFeeReceipt(input: {
   // Live WhatsApp Business API — message from school number (+91 94519 38805)
   if (typeof window !== "undefined") {
     try {
-      const health = (await fetch("/api/integrations/health").then((r) =>
-        r.json(),
-      )) as { whatsappOutbound?: boolean };
-      if (health?.whatsappOutbound) {
-        const res = await fetch("/api/wa/dispatch", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            messages: [{ mobile, body: message }],
-          }),
-        });
-        const dispatch = (await res.json()) as {
-          results?: { status: string; error?: string }[];
-          hint?: string;
-        };
-        const row = dispatch.results?.[0];
-        if (row?.status === "sent") {
-          if (input.markSent !== false) {
-            markWhatsAppReceiptSent(input.voucher.id);
+      const { loadWaTemplates, listApprovedTemplates } = await import(
+        "@/lib/waTemplates"
+      );
+      const approvedFees = listApprovedTemplates(loadWaTemplates(), {
+        module: "fees",
+      });
+      const feeTpl = approvedFees[0];
+      const template = feeTpl
+        ? {
+            name: feeTpl.metaName,
+            language: feeTpl.metaLanguage || feeTpl.language,
+            variables: {
+              "1": input.voucher.receiptNo,
+              "2": String(input.voucher.totalPaise / 100),
+            },
           }
-          return {
-            ok: true,
-            mobile,
-            mode: "api",
-            pdfDownloaded: false,
-            receiptUrl,
-          };
+        : undefined;
+
+      const res = await fetch("/api/wa/dispatch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: [{ mobile, body: message, template }],
+        }),
+      });
+      const dispatch = (await res.json()) as {
+        results?: { status: string; error?: string }[];
+        hint?: string;
+      };
+      const row = dispatch.results?.[0];
+      if (row?.status === "sent") {
+        if (input.markSent !== false) {
+          markWhatsAppReceiptSent(input.voucher.id);
         }
-        const apiErr = (row?.error || dispatch.hint || "").toLowerCase();
-        const sessionBlocked =
-          apiErr.includes("24 hour") ||
-          apiErr.includes("customer service") ||
-          apiErr.includes("re-engagement") ||
-          apiErr.includes("131047") ||
-          apiErr.includes("131026");
-        if (!sessionBlocked && row?.error) {
-          return {
-            ok: false,
-            error: `WhatsApp API: ${row.error}`,
-          };
-        }
+        return {
+          ok: true,
+          mobile,
+          mode: "api",
+          pdfDownloaded: false,
+          receiptUrl,
+        };
+      }
+      const apiErr = (row?.error || dispatch.hint || "").toLowerCase();
+      const sessionBlocked =
+        apiErr.includes("24 hour") ||
+        apiErr.includes("customer service") ||
+        apiErr.includes("re-engagement") ||
+        apiErr.includes("131047") ||
+        apiErr.includes("131026");
+      if (!sessionBlocked && row?.error) {
+        return {
+          ok: false,
+          error: `WhatsApp API: ${row.error}`,
+        };
       }
     } catch {
       /* fall through to wa.me / share */

@@ -269,7 +269,9 @@ export function AdmissionCrmChatInbox({
         <div className="grid gap-4 lg:grid-cols-2">
           <MastersTableCard title="CRM parent threads (web)">
             {webThreads.length === 0 ? (
-              <MastersEmptyRow label="No chats yet — parents use Admissions chat on /apply or /register." />
+              <div className="px-4 py-10 text-center text-sm text-[var(--muted)]">
+                No chats yet — parents use Admissions chat on /apply or /register.
+              </div>
             ) : (
               <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
                 {webThreads.map((t) => (
@@ -337,7 +339,9 @@ export function AdmissionCrmChatInbox({
         <div className="grid gap-4 lg:grid-cols-2">
           <MastersTableCard title="WhatsApp CRM bot threads">
             {waThreads.length === 0 ? (
-              <MastersEmptyRow label="No WhatsApp chats yet — parents text your Business number; Meta webhook posts to /api/wa/webhook." />
+              <div className="px-4 py-10 text-center text-sm text-[var(--muted)]">
+                No WhatsApp chats yet — parents text your Business number; Meta webhook posts to /api/wa/webhook.
+              </div>
             ) : (
               <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
                 {waThreads.map((t) => (

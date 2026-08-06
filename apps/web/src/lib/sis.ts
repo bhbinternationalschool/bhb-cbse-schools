@@ -1021,14 +1021,8 @@ function demoStudentsEqual(a: DemoStudent[], b: DemoStudent[]): boolean {
   return true;
 }
 
-function demoStudentLinksValid(m: MastersState, s: DemoStudent): boolean {
-  const classIds = new Set(m.classes.map((c) => c.id));
-  return (
-    classIds.has(s.classId) &&
-    m.sections.some(
-      (sec) => sec.id === s.sectionId && sec.classId === s.classId,
-    )
-  );
+function demoStudentLinksValid(validSections: Set<string>, s: DemoStudent): boolean {
+  return validSections.has(`${s.classId}:${s.sectionId}`);
 }
 
 export function syncSisIntoMasters(
@@ -1047,6 +1041,7 @@ export function syncSisIntoMasters(
     (s) => normalizeAyCode(s.academicYearCode) === ay,
   );
   const source = scoped.length ? scoped : sis.students;
+  const validSections = new Set(m.sections.map((sec) => `${sec.classId}:${sec.id}`));
   const demo: DemoStudent[] = source
     .map((s) => ({
       id: s.id,
@@ -1056,7 +1051,7 @@ export function syncSisIntoMasters(
       sectionId: s.sectionId,
       status: s.status,
     }))
-    .filter((s) => demoStudentLinksValid(m, s));
+    .filter((s) => demoStudentLinksValid(validSections, s));
   const current = m.students ?? [];
   if (demoStudentsEqual(current, demo)) return;
   saveMasters({ ...m, students: demo });
@@ -1246,7 +1241,11 @@ export function saveSis(state: SisState) {
     });
     return;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) {
+    console.warn("[sis] localStorage quota exceeded — using server DB persistence", e);
+  }
   syncSisIntoMasters(state);
   if (!deskSkipBlobPushClient("sis")) {
     scheduleClientSchoolMirrorSync({ sis: state });

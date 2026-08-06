@@ -775,7 +775,9 @@ export function AdmissionRegistrationPanel({
       {!(selected && collectFocusIds.length > 0) ? (
       <MastersTableCard title="Registration queue — from Lead CRM">
         {queue.length === 0 ? (
-          <MastersEmptyRow label="No Registered / Verified leads — Register from Lead CRM or use New registration." />
+          <div className="px-4 py-10 text-center text-sm text-[var(--muted)]">
+            No Registered / Verified leads — Register from Lead CRM or use New registration.
+          </div>
         ) : (
           <table className="min-w-full text-left text-sm">
             <thead className="text-[11px] text-[var(--muted)]">

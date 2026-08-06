@@ -124,7 +124,11 @@ export function writeStudentLeaveLocalRaw(state: StudentLeaveState) {
     serverStudentLeaveCache = state;
     return;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) {
+    console.warn("[studentLeave] localStorage quota exceeded — relying on server DB sync", e);
+  }
 }
 
 export function studentLeaveStateIsEmpty(state: StudentLeaveState): boolean {
@@ -135,7 +139,11 @@ export function saveStudentLeave(state: StudentLeaveState): void {
   if (!assertModulePermission("student_leave", "edit", "saveStudentLeave")) return;
 
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) {
+    console.warn("[studentLeave] localStorage quota exceeded — relying on server DB sync", e);
+  }
   void import("@/lib/studentLeavePersistence").then(({ scheduleStudentLeaveSync }) => {
     scheduleStudentLeaveSync(state);
   });
@@ -303,7 +311,7 @@ export function applyLeaveToAttendance(
   req: StudentLeaveRequest,
 ): { ok: true } | { ok: false; error: string } {
   const sis = loadSis();
-  const student = sis.students.find((s) => s.id === req.studentId);
+  const student = (sis?.students ?? []).find((s) => s.id === req.studentId);
   if (!student) return { ok: false, error: "Student not found" };
   const typeMeta = STUDENT_LEAVE_TYPES.find((t) => t.code === req.leaveType);
   const status: AttendanceStatus = typeMeta?.attendance ?? "LE";
@@ -317,7 +325,7 @@ export function applyLeaveToAttendance(
       student.sectionId,
       date,
     );
-    const roster = rosterForSection(sis.students, student.sectionId, {
+    const roster = rosterForSection(sis?.students ?? [], student.sectionId, {
       classId: student.classId,
       academicYearCode: req.academicYearCode,
     });
@@ -377,6 +385,10 @@ export const STUDENT_LEAVE_REPORTS: {
   },
 ];
 
+export function describeStudentLeaveFilters(filters: string[]): string {
+  return filters.filter(Boolean).join(" · ");
+}
+
 export function runStudentLeaveReport(
   id: StudentLeaveReportId,
   filters: {
@@ -397,7 +409,7 @@ export function runStudentLeaveReport(
   ]);
 
   function studentOf(id: string): SisStudent | undefined {
-    return sis.students.find((s) => s.id === id);
+    return (sis?.students ?? []).find((s) => s.id === id);
   }
   function classLabel(s?: SisStudent) {
     if (!s) return "";

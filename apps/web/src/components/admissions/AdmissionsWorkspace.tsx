@@ -88,39 +88,16 @@ import {
 import { StudentProfileModal } from "@/components/students/StudentProfileModal";
 import { LeadMobileWaCheckPanel } from "@/components/admissions/LeadMobileWaCheckPanel";
 import { AdmissionDocOcrPanel } from "@/components/admissions/AdmissionDocOcrPanel";
+import { openWaMe } from "@/lib/waMe";
 
-const ModuleDashboardHost = lazyNamedTabPanel(
-  () => import("@/components/dashboard/ModuleDashboardHost"),
-  "ModuleDashboardHost",
-);
-const AdmissionFieldSurveyPanel = lazyNamedTabPanel(
-  () => import("@/components/admissions/AdmissionFieldSurveyPanel"),
-  "AdmissionFieldSurveyPanel",
-);
-const AdmissionImportPanel = lazyNamedTabPanel(
-  () => import("@/components/admissions/AdmissionImportPanel"),
-  "AdmissionImportPanel",
-);
-const AdmissionRegistrationPanel = lazyNamedTabPanel(
-  () => import("@/components/admissions/AdmissionRegistrationPanel"),
-  "AdmissionRegistrationPanel",
-);
-const RteWorkspace = lazyNamedTabPanel(
-  () => import("@/components/rte/RteWorkspace"),
-  "RteWorkspace",
-);
-const AdmissionCampaignsPanel = lazyNamedTabPanel(
-  () => import("@/components/admissions/AdmissionCampaignsPanel"),
-  "AdmissionCampaignsPanel",
-);
-const AdmissionCrmChatInbox = lazyNamedTabPanel(
-  () => import("@/components/admissions/AdmissionCrmChatInbox"),
-  "AdmissionCrmChatInbox",
-);
-const AdmissionReportsPanel = lazyNamedTabPanel(
-  () => import("@/components/admissions/AdmissionReportsPanel"),
-  "AdmissionReportsPanel",
-);
+import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
+import { AdmissionFieldSurveyPanel } from "@/components/admissions/AdmissionFieldSurveyPanel";
+import { AdmissionImportPanel } from "@/components/admissions/AdmissionImportPanel";
+import { AdmissionRegistrationPanel } from "@/components/admissions/AdmissionRegistrationPanel";
+import { RteWorkspace } from "@/components/rte/RteWorkspace";
+import { AdmissionCampaignsPanel } from "@/components/admissions/AdmissionCampaignsPanel";
+import { AdmissionCrmChatInbox } from "@/components/admissions/AdmissionCrmChatInbox";
+import { AdmissionReportsPanel } from "@/components/admissions/AdmissionReportsPanel";
 
 type AdmTab =
   | "dashboard"
@@ -137,8 +114,12 @@ type AdmTab =
 export function AdmissionsWorkspace() {
   const session = useDemoSession();
   const sessionReadOnly = useSessionReadOnly();
-  const [masters, setMasters] = useState<MastersState | null>(null);
-  const [state, setState] = useState<AdmissionsState | null>(null);
+  const [masters, setMasters] = useState<MastersState | null>(() =>
+    typeof window !== "undefined" ? loadMasters() : null,
+  );
+  const [state, setState] = useState<AdmissionsState | null>(() =>
+    typeof window !== "undefined" ? loadAdmissions() : null,
+  );
   const [sis, setSis] = useState<SisState>(() => loadSis());
   const [sisMatchPanel, setSisMatchPanel] = useState<
     "" | "admitted" | "suspected"
@@ -2374,14 +2355,18 @@ function LeadDetail({
                 Call {lead.mobile || "—"}
               </a>
               {lead.mobile ? (
-                <a
-                  href={`https://wa.me/91${lead.mobile}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-2 text-[11px] font-semibold text-[var(--brand-deep)]"
+                <button
+                  type="button"
+                  onClick={() =>
+                    openWaMe(
+                      lead.mobile,
+                      `Hello ${lead.guardianName || "Parent"}, regarding admission enquiry for ${lead.childName || "your child"} at BHB International School.`,
+                    )
+                  }
+                  className="rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-2 text-[11px] font-semibold text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.05)]"
                 >
-                  WhatsApp
-                </a>
+                  WhatsApp Business
+                </button>
               ) : null}
             </div>
           </div>

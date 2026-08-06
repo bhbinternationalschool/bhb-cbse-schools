@@ -240,7 +240,11 @@ export function StaffAttendanceRulesPanel() {
                 </div>
               </li>
             ))}
-            {state.rules.length === 0 ? <MastersEmptyRow /> : null}
+            {state.rules.length === 0 ? (
+              <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">
+                No attendance rules defined yet
+              </li>
+            ) : null}
           </ul>
         </MastersTableCard>
 

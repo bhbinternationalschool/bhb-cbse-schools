@@ -38,10 +38,7 @@ async function loadServerRbac(): Promise<RbacState> {
 }
 
 async function loadServerMasters(): Promise<MastersState> {
-  await ensureSchoolMirrorHydrated();
-  const { getSchoolMirrorSync } = await import("@/lib/schoolDataMirror");
-  const m = getSchoolMirrorSync().masters as MastersState | null;
-  return m && m.classes ? m : defaultMasters();
+  return defaultMasters();
 }
 
 async function authFromApiKey(request: Request): Promise<ApiAuthContext | null> {

@@ -111,6 +111,12 @@ function SidebarPanel({
             <Link
               href="/home"
               title="Home dashboard"
+              onClick={() => {
+                onClose();
+                if (typeof window !== "undefined") {
+                  window.location.href = "/home";
+                }
+              }}
               className={`erp-sidebar-link mb-3 flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-semibold transition ${
                 homeActive
                   ? "bg-[var(--brand-deep)] text-white shadow-[0_4px_14px_rgba(32,48,80,0.2)]"
@@ -191,6 +197,12 @@ function SidebarPanel({
                     <Link
                       href={hub.href}
                       title={`${hub.title} — ${hub.blurb}`}
+                      onClick={() => {
+                        onClose();
+                        if (typeof window !== "undefined") {
+                          window.location.href = hub.href;
+                        }
+                      }}
                       className={`erp-sidebar-link flex min-h-11 items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium transition ${
                         active
                           ? "bg-[rgba(197,160,40,0.16)] text-[var(--brand-deep)] ring-1 ring-[rgba(197,160,40,0.35)]"

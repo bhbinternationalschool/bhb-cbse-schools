@@ -40,6 +40,41 @@ export async function uploadSchoolObject(input: {
   const contentType =
     input.contentType || input.blob.type || "application/octet-stream";
 
+  if (typeof window !== "undefined") {
+    try {
+      const formData = new FormData();
+      const filename = path.split("/").pop() || "upload.bin";
+      const file = new File([input.blob], filename, { type: contentType });
+      formData.append("file", file);
+      formData.append("path", path);
+
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        credentials: "same-origin",
+        body: formData,
+      });
+
+      if (res.ok) {
+        const body = (await res.json()) as {
+          ok?: boolean;
+          url?: string;
+          mode?: "supabase" | "gcs" | "local";
+          path?: string;
+        };
+        if (body.ok && body.url) {
+          return {
+            ok: true,
+            url: body.url,
+            mode: body.mode || "supabase",
+            path: body.path || path,
+          };
+        }
+      }
+    } catch (e) {
+      console.warn("[objectStorage] /api/upload failed, trying client fallback", e);
+    }
+  }
+
   if (isSupabaseConfigured()) {
     const sb = createBrowserSupabase();
     if (sb) {

@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
   ArrowRight,
   BookOpen,
   GraduationCap,
   IndianRupee,
+  RefreshCw,
   Users,
 } from "lucide-react";
 import { formatInr } from "@/lib/masters";
@@ -56,7 +57,15 @@ function KpiCard({
   );
   if (href) {
     return (
-      <Link href={href} className="block">
+      <Link
+        href={href}
+        className="block cursor-pointer"
+        onClick={() => {
+          if (typeof window !== "undefined") {
+            window.location.href = href;
+          }
+        }}
+      >
         {inner}
       </Link>
     );
@@ -68,71 +77,129 @@ export function PrincipalCockpit() {
   const session = useDemoSession();
   const [snap, setSnap] = useState<PrincipalSnapshot | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await fetch(
-          `/api/v1/principal/snapshot?academicYearCode=${encodeURIComponent(session.academicYearCode)}`,
-        );
-        const body = (await res.json()) as {
-          ok?: boolean;
-          data?: PrincipalSnapshot;
-          error?: { message?: string };
-        };
-        if (!res.ok || !body.ok || !body.data) {
-          if (!cancelled) setErr(body.error?.message || "Could not load dashboard");
-          return;
-        }
-        if (!cancelled) setSnap(body.data);
-      } catch {
-        if (!cancelled) setErr("Network error loading principal snapshot");
+  const fetchSnapshot = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(
+        `/api/v1/principal/snapshot?academicYearCode=${encodeURIComponent(session.academicYearCode)}&_t=${Date.now()}`,
+        {
+          cache: "no-store",
+          headers: { "Cache-Control": "no-cache" },
+        },
+      );
+      const body = (await res.json()) as {
+        ok?: boolean;
+        data?: PrincipalSnapshot;
+        error?: { message?: string };
+      };
+      if (!res.ok || !body.ok || !body.data) {
+        setErr(body.error?.message || "Could not load dashboard");
+        return;
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
+      setErr(null);
+      setSnap(body.data);
+    } catch {
+      setErr("Network error loading principal snapshot");
+    } finally {
+      setLoading(false);
+    }
   }, [session.academicYearCode]);
 
+  useEffect(() => {
+    void fetchSnapshot();
+
+    function onDataUpdate() {
+      void fetchSnapshot();
+    }
+
+    function onVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        void fetchSnapshot();
+      }
+    }
+
+    window.addEventListener("bhb-desk-hydrated", onDataUpdate);
+    window.addEventListener("bhb-desk-synced", onDataUpdate);
+    window.addEventListener("bhb-masters-updated", onDataUpdate);
+    window.addEventListener("focus", onDataUpdate);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      window.removeEventListener("bhb-desk-hydrated", onDataUpdate);
+      window.removeEventListener("bhb-desk-synced", onDataUpdate);
+      window.removeEventListener("bhb-masters-updated", onDataUpdate);
+      window.removeEventListener("focus", onDataUpdate);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [fetchSnapshot]);
+
   if (err) {
-    return <p className="text-sm text-[#b42318]">{err}</p>;
+    return (
+      <div className="p-4">
+        <p className="text-sm text-[#b42318]">{err}</p>
+        <button
+          onClick={() => void fetchSnapshot()}
+          className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--brand-deep)] underline"
+        >
+          Retry
+        </button>
+      </div>
+    );
   }
-  if (!snap) {
-    return <p className="text-sm text-[var(--muted)]">Loading principal desk…</p>;
-  }
+  const displaySnap: PrincipalSnapshot = snap ?? {
+    generatedAt: new Date().toISOString(),
+    academicYearCode: session.academicYearCode || "2025-26",
+    fees: { todayCollectionPaise: 0, mtdCollectionPaise: 0, openDuesPaise: 0, defaulterHouseholds: 0 },
+    attendance: { date: "Today", studentPresent: 0, studentAbsent: 0, studentLeave: 0, studentMarkedPct: 0, sectionsMarked: 0 },
+    staff: { activeCount: 0, presentToday: 0, absentToday: 0 },
+    admissions: { pipeline: 0, enrolled: 0, followUpsDue: 0 },
+    alerts: { vaultExpiring30d: 0, lowStockSkus: 0, attendanceRegistersPending: 0 },
+  };
 
   const alerts: { text: string; href: string }[] = [];
-  if (snap.alerts.attendanceRegistersPending > 0) {
+  if (displaySnap.alerts.attendanceRegistersPending > 0) {
     alerts.push({
-      text: `${snap.alerts.attendanceRegistersPending} class registers not marked today`,
+      text: `${displaySnap.alerts.attendanceRegistersPending} class registers not marked today`,
       href: "/attendance?tab=students",
     });
   }
-  if (snap.fees.defaulterHouseholds > 0) {
+  if (displaySnap.fees.defaulterHouseholds > 0) {
     alerts.push({
-      text: `${snap.fees.defaulterHouseholds} students with open dues`,
+      text: `${displaySnap.fees.defaulterHouseholds} students with open dues`,
       href: "/fees/defaulters",
     });
   }
-  if (snap.alerts.vaultExpiring30d > 0) {
+  if (displaySnap.alerts.vaultExpiring30d > 0) {
     alerts.push({
-      text: `${snap.alerts.vaultExpiring30d} compliance docs expiring soon`,
+      text: `${displaySnap.alerts.vaultExpiring30d} compliance docs expiring soon`,
       href: "/vault",
     });
   }
 
   return (
     <div className="principal-cockpit mx-auto max-w-5xl space-y-5 pb-4">
-      <section className="rounded-2xl border border-[rgba(32,48,80,0.1)] bg-[var(--brand-deep)] px-5 py-6 text-white">
-        <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-white/70">
-          Principal desk · {snap.academicYearCode}
-        </p>
+      <section className="relative rounded-2xl border border-[rgba(32,48,80,0.1)] bg-[var(--brand-deep)] px-5 py-6 text-white">
+        <div className="flex items-center justify-between">
+          <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-white/70">
+            Principal desk · {displaySnap.academicYearCode}
+          </p>
+          <button
+            onClick={() => void fetchSnapshot()}
+            disabled={loading}
+            title="Refresh Dashboard Data"
+            className="flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-1 text-xs font-medium text-white hover:bg-white/20 disabled:opacity-50 transition"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+            {loading ? "Refreshing..." : "Refresh"}
+          </button>
+        </div>
         <h1 className="mt-1 font-display text-2xl font-semibold">
           Good day, {session.fullName.split(/\s+/)[0]}
         </h1>
         <p className="mt-1 text-sm text-white/75">
-          School pulse for {snap.attendance.date}
+          School pulse for {displaySnap.attendance.date}
         </p>
       </section>
 
@@ -155,29 +222,29 @@ export function PrincipalCockpit() {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard
           label="Today&apos;s collection"
-          value={formatInr(snap.fees.todayCollectionPaise)}
-          hint={`MTD ${formatInr(snap.fees.mtdCollectionPaise)}`}
+          value={formatInr(displaySnap.fees.todayCollectionPaise)}
+          hint={`MTD ${formatInr(displaySnap.fees.mtdCollectionPaise)}`}
           href="/fees"
           tone="gold"
         />
         <KpiCard
           label="Open dues"
-          value={formatInr(snap.fees.openDuesPaise)}
-          hint={`${snap.fees.defaulterHouseholds} students`}
+          value={formatInr(displaySnap.fees.openDuesPaise)}
+          hint={`${displaySnap.fees.defaulterHouseholds} students`}
           href="/fees/defaulters"
           tone="rose"
         />
         <KpiCard
           label="Student attendance"
-          value={`${snap.attendance.studentMarkedPct}%`}
-          hint={`${snap.attendance.sectionsMarked} sections marked`}
+          value={`${displaySnap.attendance.studentMarkedPct}%`}
+          hint={`${displaySnap.attendance.sectionsMarked} sections marked`}
           href="/attendance"
           tone="teal"
         />
         <KpiCard
           label="Staff present"
-          value={`${snap.staff.presentToday}/${snap.staff.activeCount}`}
-          hint={`${snap.staff.absentToday} absent today`}
+          value={`${displaySnap.staff.presentToday}/${displaySnap.staff.activeCount}`}
+          hint={`${displaySnap.staff.absentToday} absent today`}
           href="/attendance?tab=staff"
         />
       </div>
@@ -185,13 +252,13 @@ export function PrincipalCockpit() {
       <div className="grid gap-3 sm:grid-cols-3">
         <KpiCard
           label="Admissions pipeline"
-          value={String(snap.admissions.pipeline)}
-          hint={`${snap.admissions.enrolled} enrolled · ${snap.admissions.followUpsDue} follow-ups`}
+          value={String(displaySnap.admissions.pipeline)}
+          hint={`${displaySnap.admissions.enrolled} enrolled · ${displaySnap.admissions.followUpsDue} follow-ups`}
           href="/admissions"
         />
         <KpiCard
           label="Low stock SKUs"
-          value={String(snap.alerts.lowStockSkus)}
+          value={String(displaySnap.alerts.lowStockSkus)}
           href="/store"
         />
         <KpiCard
@@ -214,7 +281,12 @@ export function PrincipalCockpit() {
             <Link
               key={item.href}
               href={item.href}
-              className="flex items-center gap-2 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-3 py-3 text-sm font-semibold text-[var(--brand-deep)]"
+              onClick={() => {
+                if (typeof window !== "undefined") {
+                  window.location.href = item.href;
+                }
+              }}
+              className="flex items-center gap-2 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-3 py-3 text-sm font-semibold text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.05)] cursor-pointer"
             >
               <Icon className="h-4 w-4 opacity-70" />
               {item.label}

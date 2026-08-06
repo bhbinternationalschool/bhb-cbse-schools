@@ -164,7 +164,11 @@ export function StaffLeaveTypesPanel() {
                 </div>
               </li>
             ))}
-            {hr.leaveTypes.length === 0 ? <MastersEmptyRow /> : null}
+            {hr.leaveTypes.length === 0 ? (
+              <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">
+                No leave types defined yet
+              </li>
+            ) : null}
           </ul>
         </MastersTableCard>
 

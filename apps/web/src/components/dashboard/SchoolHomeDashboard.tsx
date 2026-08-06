@@ -17,11 +17,10 @@ import { useDemoSession } from "@/components/shell/SessionContext";
 export function SchoolHomeDashboard() {
   const session = useDemoSession();
   const searchParams = useSearchParams();
-  const [tick, setTick] = useState(0);
+  const [tick, setTick] = useState(1);
   const forceFull = searchParams.get("view") === "full";
 
   useEffect(() => {
-    setTick((n) => n + 1);
     function refresh() {
       setTick((n) => n + 1);
     }
@@ -32,12 +31,6 @@ export function SchoolHomeDashboard() {
       window.removeEventListener("storage", refresh);
     };
   }, []);
-
-  if (tick === 0) {
-    return (
-      <p className="text-base text-[var(--muted)]">Loading school dashboard…</p>
-    );
-  }
 
   if (!forceFull && shouldShowPrincipalCockpit(session)) {
     return <PrincipalCockpit />;

@@ -392,7 +392,9 @@ export function FeeStructurePanel({
           maxHeight="max-h-[min(70vh,640px)]"
         >
           {groupsForTab.length === 0 ? (
-            <MastersEmptyRow label="No groups for this tab" />
+            <div className="px-4 py-8 text-center text-sm text-[var(--muted)]">
+              No groups for this tab
+            </div>
           ) : (
             <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
               {bandSections.map((section) => (

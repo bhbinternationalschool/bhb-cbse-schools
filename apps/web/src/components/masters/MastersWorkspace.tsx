@@ -683,7 +683,9 @@ function CampusesPanel({
                 </li>
               ))}
               {state.campuses.length === 0 ? (
-                <MastersEmptyRow label="No campuses yet" />
+                <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">
+                  No campuses yet
+                </li>
               ) : null}
             </ul>
           </MastersTableCard>
@@ -1044,7 +1046,9 @@ function ClassesPanel({
                 </li>
               ))}
               {sectionsForClass.length === 0 ? (
-                <MastersEmptyRow label="No sections yet" />
+                <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">
+                  No sections yet
+                </li>
               ) : null}
             </ul>
           </MastersTableCard>
