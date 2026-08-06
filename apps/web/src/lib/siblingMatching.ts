@@ -102,7 +102,7 @@ export function listExistingSiblingGroups(
   const dedupePerChild = (students: SisStudent[]): SisStudent[] => {
     const byChild = new Map<string, SisStudent>();
     for (const s of students) {
-      const key = s.admissionNo.trim().toUpperCase() || s.id;
+      const key = s.admissionNo.trim().toUpperCase() || (s.fullName || "").trim().toLowerCase() || s.id;
       const prev = byChild.get(key);
       if (!prev || ayValue(s.academicYearCode) > ayValue(prev.academicYearCode)) {
         byChild.set(key, s);
@@ -152,7 +152,7 @@ export function listRealSiblingGroups(sis: SisState): RealSiblingGroup[] {
         motherName: s.motherName.trim(),
         students: new Map<string, SisStudent>(),
       };
-    const childKey = s.admissionNo.trim().toUpperCase() || s.id;
+    const childKey = s.admissionNo.trim().toUpperCase() || (s.fullName || "").trim().toLowerCase() || s.id;
     const prev = bucket.students.get(childKey);
     if (!prev || ayValue(s.academicYearCode) > ayValue(prev.academicYearCode)) {
       bucket.students.set(childKey, s);

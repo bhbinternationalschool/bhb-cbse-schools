@@ -1522,14 +1522,16 @@ export function siblingsOf(
 ): SisStudent[] {
   const ay = normalizeAyCode(student.academicYearCode);
   const selfAdm = student.admissionNo.trim().toUpperCase();
+  const selfName = (student.fullName || "").trim().toLowerCase();
   return state.students.filter(
     (s) =>
       s.householdId === student.householdId &&
       s.id !== student.id &&
       // Same academic year only — never show a prior/next-year record as a sibling
       normalizeAyCode(s.academicYearCode) === ay &&
-      // Exclude the same child appearing across years
-      s.admissionNo.trim().toUpperCase() !== selfAdm,
+      // Exclude the same child (via admission no or name match)
+      (selfAdm ? s.admissionNo.trim().toUpperCase() !== selfAdm : true) &&
+      (s.fullName || "").trim().toLowerCase() !== selfName,
   );
 }
 
