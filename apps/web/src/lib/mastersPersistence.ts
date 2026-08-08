@@ -80,7 +80,6 @@ export async function pushMastersRemoteServer(
 
 export async function ensureMastersHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = mastersReadFromDbEnabled();
   let mirrorChanged = false;
@@ -106,7 +105,10 @@ export async function ensureMastersHydrated(): Promise<boolean> {
 
   let normChanged = false;
   const localBefore = loadMasters();
-  const { bundle, changed } = await hydrateMastersDeskFromDb(readFromDb);
+  const { bundle, changed, ok } = await hydrateMastersDeskFromDb(readFromDb);
+  if (!ok) return false;
+
+  markDeskHydrated(MODULE);
   if (
     changed &&
     (readFromDb ||

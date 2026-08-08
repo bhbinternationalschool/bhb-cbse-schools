@@ -4,6 +4,7 @@
  * then routes to the right flow with a common school greeting.
  */
 
+import { createHmac, timingSafeEqual } from "crypto";
 import { NextResponse } from "next/server";
 import {
   parseGenericBspInbound,
@@ -17,8 +18,35 @@ import {
 } from "@/lib/waTemplatesMeta.server";
 import { ensureWabaWebhookSubscription } from "@/lib/waMeta.server";
 import { handleWaUnifiedInbound } from "@/lib/waUnifiedBotServer";
+import { isProductionEnv } from "@/lib/apiRouteAuth.server";
 
 export const runtime = "nodejs";
+
+function waAppSecret(): string {
+  return (
+    process.env.WA_APP_SECRET ||
+    process.env.META_APP_SECRET ||
+    process.env.FACEBOOK_APP_SECRET ||
+    ""
+  ).trim();
+}
+
+/** Verify Meta's X-Hub-Signature-256 (HMAC-SHA256 over the raw body). */
+function verifyMetaSignature(rawBody: string, header: string | null): boolean {
+  const secret = waAppSecret();
+  if (!secret) return !isProductionEnv();
+  const sig = (header || "").replace(/^sha256=/i, "").trim();
+  if (!sig) return false;
+  const expected = createHmac("sha256", secret).update(rawBody).digest("hex");
+  try {
+    const a = Buffer.from(expected, "utf8");
+    const b = Buffer.from(sig, "utf8");
+    if (a.length !== b.length) return false;
+    return timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -46,12 +74,17 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const rawBody = await req.text();
+  if (!verifyMetaSignature(rawBody, req.headers.get("x-hub-signature-256"))) {
+    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+  }
+
   await ensureSchoolMirrorHydrated();
   void ensureWabaWebhookSubscription();
 
   let body: unknown;
   try {
-    body = await req.json();
+    body = JSON.parse(rawBody);
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }

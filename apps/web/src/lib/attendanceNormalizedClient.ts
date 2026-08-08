@@ -44,7 +44,9 @@ export function attendanceNormalizedSyncEnabled(): boolean {
 }
 
 export function attendanceReadFromDbClientEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_ATTENDANCE_READ_FROM_DB === "true";
+  const flag = process.env.NEXT_PUBLIC_ATTENDANCE_READ_FROM_DB?.trim().toLowerCase();
+  if (flag === "false" || flag === "0") return false;
+  return true;
 }
 
 export function scheduleAttendanceDeskSync(state: AttendanceState) {
@@ -139,6 +141,7 @@ export async function hydrateAttendanceDeskFromDb(
   registers: AttendanceState["registers"];
   ancillary: AttendanceDeskAncillary;
   changed: boolean;
+  ok: boolean;
 }> {
   const remote = await fetchAttendanceDeskFromApi();
   if (!remote) {
@@ -155,6 +158,7 @@ export async function hydrateAttendanceDeskFromDb(
         exceptions: [],
       },
       changed: false,
+      ok: false,
     };
   }
 
@@ -171,7 +175,7 @@ export async function hydrateAttendanceDeskFromDb(
     hasAncillary;
 
   if (!shouldTake) {
-    return { registers: [], ancillary: remote.ancillary, changed: false };
+    return { registers: [], ancillary: remote.ancillary, changed: false, ok: true };
   }
 
   writeMeta({
@@ -183,5 +187,6 @@ export async function hydrateAttendanceDeskFromDb(
     registers: remote.registers,
     ancillary: remote.ancillary,
     changed: true,
+    ok: true,
   };
 }

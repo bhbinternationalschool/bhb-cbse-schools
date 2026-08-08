@@ -41,7 +41,9 @@ export function admissionsNormalizedSyncEnabled(): boolean {
 }
 
 export function admissionsReadFromDbClientEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_ADMISSIONS_READ_FROM_DB === "true";
+  const flag = process.env.NEXT_PUBLIC_ADMISSIONS_READ_FROM_DB?.trim().toLowerCase();
+  if (flag === "false" || flag === "0") return false;
+  return true;
 }
 
 export function scheduleAdmissionsDeskSync(state: AdmissionsState) {
@@ -116,9 +118,9 @@ export async function fetchAdmissionsDeskFromApi(): Promise<{
 
 export async function hydrateAdmissionsDeskFromDb(
   preferDb?: boolean,
-): Promise<{ state: AdmissionsState | null; changed: boolean }> {
+): Promise<{ state: AdmissionsState | null; changed: boolean; ok: boolean }> {
   const remote = await fetchAdmissionsDeskFromApi();
-  if (!remote) return { state: null, changed: false };
+  if (!remote) return { state: null, changed: false, ok: false };
 
   const meta = readMeta();
   const shouldTake =
@@ -128,12 +130,12 @@ export async function hydrateAdmissionsDeskFromDb(
     (remote.updatedAt && remote.updatedAt >= meta.updatedAt) ||
     remote.leadCount > meta.leadCount;
 
-  if (!shouldTake) return { state: null, changed: false };
+  if (!shouldTake) return { state: null, changed: false, ok: true };
 
   writeMeta({
     updatedAt: remote.updatedAt,
     leadCount: remote.leadCount,
   });
 
-  return { state: remote.state, changed: true };
+  return { state: remote.state, changed: true, ok: true };
 }

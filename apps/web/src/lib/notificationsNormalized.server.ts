@@ -133,13 +133,15 @@ export async function pushNotificationsDeskToDb(
 export async function fetchNotificationsDeskFromDb(): Promise<{
   bundle: NotificationsDeskBundle;
   meta: NotificationsDeskSyncMeta | null;
+  /** false = tenant/query could not be resolved; bundle is NOT a confirmed empty state. */
+  ok: boolean;
 }> {
   const ctx = await resolveCtx();
   const empty: NotificationsDeskBundle = { items: [] };
-  if (!ctx) return { bundle: empty, meta: null };
+  if (!ctx) return { bundle: empty, meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
-  const [{ data: itemRows }, { data: metaRow }] = await Promise.all([
+  const [{ data: itemRows, error: itemErr }, { data: metaRow }] = await Promise.all([
     sb
       .from("notifications_desk_items")
       .select("*")
@@ -151,6 +153,11 @@ export async function fetchNotificationsDeskFromDb(): Promise<{
       .eq("tenant_id", tenantId)
       .maybeSingle(),
   ]);
+
+  if (itemErr) {
+    console.warn("[notifications-db] fetch failed", itemErr.message);
+    return { bundle: empty, meta: null, ok: false };
+  }
 
   const items = (itemRows ?? []).map((r) =>
     rowToItem(r as Record<string, unknown>),
@@ -166,5 +173,5 @@ export async function fetchNotificationsDeskFromDb(): Promise<{
       }
     : null;
 
-  return { bundle: { items }, meta };
+  return { bundle: { items }, meta, ok: true };
 }

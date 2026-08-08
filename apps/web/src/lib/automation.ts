@@ -734,7 +734,7 @@ export function evaluateAutomationTick(
   opts?: { forceRuleIds?: string[]; now?: Date },
 ): AutomationState {
   const now = opts?.now || new Date();
-  let rules = [...state.rules];
+  const rules = [...state.rules];
   let approvals = [...state.approvals];
   let runs = [...state.runs];
 

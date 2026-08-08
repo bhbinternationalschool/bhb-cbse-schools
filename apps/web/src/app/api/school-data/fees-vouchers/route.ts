@@ -18,6 +18,12 @@ export async function GET(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["fees-vouchers"], "GET");
   if (!auth.ok) return auth.response
   const desk = await fetchFeeDeskFromDb();
+  if (!desk.ok) {
+    return NextResponse.json(
+      { ok: false, error: "Fee desk fetch failed — tenant/db unavailable" },
+      { status: 503 },
+    );
+  }
   return NextResponse.json({
     ok: true,
     vouchers: desk.vouchers,

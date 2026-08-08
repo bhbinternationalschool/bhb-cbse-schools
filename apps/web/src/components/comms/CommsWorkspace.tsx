@@ -259,7 +259,7 @@ export function CommsWorkspace() {
       cancelled = true;
       window.removeEventListener("bhb-notifications", onNf);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount hydrate
+     
   }, []);
 
   function setTab(next: CommsTab) {

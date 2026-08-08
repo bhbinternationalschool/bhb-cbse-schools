@@ -125,13 +125,13 @@ type VaultDeskBundle = Pick<VaultState, "documents" | "settings">;
 
 export async function hydrateVaultDeskFromDb(
   preferDb?: boolean,
-): Promise<{ bundle: VaultDeskBundle; changed: boolean }> {
+): Promise<{ bundle: VaultDeskBundle; changed: boolean; ok: boolean }> {
   const remote = await fetchVaultDeskFromApi();
   const empty: VaultDeskBundle = {
     documents: [],
     settings: { digestMobiles: "" },
   };
-  if (!remote) return { bundle: empty, changed: false };
+  if (!remote) return { bundle: empty, changed: false, ok: false };
 
   const meta = readMeta();
   const shouldTake =
@@ -141,12 +141,12 @@ export async function hydrateVaultDeskFromDb(
     (remote.updatedAt && remote.updatedAt >= meta.updatedAt) ||
     remote.documentCount > meta.documentCount;
 
-  if (!shouldTake) return { bundle: empty, changed: false };
+  if (!shouldTake) return { bundle: empty, changed: false, ok: true };
 
   writeMeta({
     updatedAt: remote.updatedAt,
     documentCount: remote.documentCount,
   });
 
-  return { bundle: remote.bundle, changed: true };
+  return { bundle: remote.bundle, changed: true, ok: true };
 }

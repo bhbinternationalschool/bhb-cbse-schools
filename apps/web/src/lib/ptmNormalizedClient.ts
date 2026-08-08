@@ -129,7 +129,7 @@ type PtmDeskBundle = Pick<PtmState, "events" | "slots" | "bookings" | "feedback"
 
 export async function hydratePtmDeskFromDb(
   preferDb?: boolean,
-): Promise<{ bundle: PtmDeskBundle; changed: boolean }> {
+): Promise<{ bundle: PtmDeskBundle; changed: boolean; ok: boolean }> {
   const remote = await fetchPtmDeskFromApi();
   const empty: PtmDeskBundle = {
     events: [],
@@ -137,7 +137,7 @@ export async function hydratePtmDeskFromDb(
     bookings: [],
     feedback: [],
   };
-  if (!remote) return { bundle: empty, changed: false };
+  if (!remote) return { bundle: empty, changed: false, ok: false };
 
   const meta = readMeta();
   const shouldTake =
@@ -147,12 +147,12 @@ export async function hydratePtmDeskFromDb(
     (remote.updatedAt && remote.updatedAt >= meta.updatedAt) ||
     remote.eventCount > meta.eventCount;
 
-  if (!shouldTake) return { bundle: empty, changed: false };
+  if (!shouldTake) return { bundle: empty, changed: false, ok: true };
 
   writeMeta({
     updatedAt: remote.updatedAt,
     eventCount: remote.eventCount,
   });
 
-  return { bundle: remote.bundle, changed: true };
+  return { bundle: remote.bundle, changed: true, ok: true };
 }

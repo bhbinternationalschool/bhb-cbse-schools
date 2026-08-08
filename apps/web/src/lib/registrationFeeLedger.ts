@@ -227,7 +227,7 @@ export function postRegistrationFeeToStudentLedger(
 
   const masters = loadMasters();
   const ay = student.academicYearCode || lead.academicYearCode || "";
-  let dues = computeStudentDues(student, masters, loadFees(), {
+  const dues = computeStudentDues(student, masters, loadFees(), {
     includePaid: true,
   });
 

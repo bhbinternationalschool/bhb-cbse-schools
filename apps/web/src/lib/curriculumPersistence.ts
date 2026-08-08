@@ -3,15 +3,9 @@
  * when Supabase is configured, push/pull overlays remote rows.
  */
 
-import type { SupabaseClient } from "@supabase/supabase-js";
-import {
-  createBrowserSupabase,
-  isSupabaseConfigured,
-} from "@/lib/supabase/client";
-import { TENANT } from "@/lib/types";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
 import {
   normalizeCurriculum,
-  normalizeCurriculumRequest,
   type CurriculumRequest,
   type StudentCurriculum,
 } from "@/lib/studentCurriculum";
@@ -39,40 +33,6 @@ type SisLike = {
   curriculumRequests: CurriculumRequest[];
 };
 
-type StudentCurriculumRow = {
-  student_key: string;
-  academic_year_code: string;
-  senior_stream_id: string | null;
-  chosen_subject_ids: string[] | null;
-  confirmed_at: string | null;
-  confirmed_by: "office" | "system" | null;
-  updated_at?: string;
-};
-
-type CurriculumRequestRow = {
-  id: string;
-  student_key: string;
-  academic_year_code: string;
-  proposed_stream_id: string | null;
-  proposed_chosen_subject_ids: string[] | null;
-  note: string | null;
-  status: "pending" | "approved" | "rejected";
-  requested_at: string;
-  reviewed_at: string | null;
-  review_note: string | null;
-};
-
-type TemplateRow = {
-  id: string;
-  class_key: string;
-  academic_year_code: string;
-  label: string;
-  chosen_subject_ids: string[] | null;
-  senior_stream_id: string | null;
-  updated_at: string;
-};
-
-let tenantIdCache: string | null = null;
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingPush: SisLike | null = null;
 
@@ -82,7 +42,6 @@ export function curriculumRemoteEnabled() {
 
 export function resetCurriculumPersistenceCache() {
   resetDeskHydrated(MODULE);
-  tenantIdCache = null;
   pendingPush = null;
   if (pushTimer) {
     clearTimeout(pushTimer);
@@ -90,117 +49,36 @@ export function resetCurriculumPersistenceCache() {
   }
 }
 
-async function clientAndTenant(): Promise<{
-  sb: SupabaseClient;
-  tenantId: string;
-} | null> {
-  const sb = createBrowserSupabase();
-  if (!sb) return null;
-  if (tenantIdCache) return { sb, tenantId: tenantIdCache };
-  const { data, error } = await sb
-    .from("tenants")
-    .select("id")
-    .eq("slug", TENANT.slug)
-    .maybeSingle();
-  if (error || !data?.id) {
-    console.warn("[curriculum] tenant resolve failed", error?.message);
-    return null;
-  }
-  tenantIdCache = data.id as string;
-  return { sb, tenantId: tenantIdCache };
-}
-
-function rowToCurriculum(row: StudentCurriculumRow): StudentCurriculum {
-  return normalizeCurriculum(
-    {
-      academicYearCode: row.academic_year_code,
-      seniorStreamId: row.senior_stream_id,
-      chosenSubjectIds: row.chosen_subject_ids ?? [],
-      confirmedAt: row.confirmed_at ?? "",
-      confirmedBy: row.confirmed_by ?? "system",
-    },
-    row.academic_year_code,
-  )!;
-}
-
-function rowToRequest(row: CurriculumRequestRow): CurriculumRequest {
-  return normalizeCurriculumRequest({
-    id: row.id,
-    studentId: row.student_key,
-    academicYearCode: row.academic_year_code,
-    proposedStreamId: row.proposed_stream_id,
-    proposedChosenSubjectIds: row.proposed_chosen_subject_ids ?? [],
-    note: row.note ?? "",
-    status: row.status,
-    requestedAt: row.requested_at,
-    reviewedAt: row.reviewed_at,
-    reviewNote: row.review_note ?? "",
-  });
-}
-
-function rowToTemplate(row: TemplateRow): ClassCurriculumTemplate {
-  return {
-    id: row.id,
-    classId: row.class_key,
-    academicYearCode: row.academic_year_code,
-    label: row.label || "Class template",
-    chosenSubjectIds: row.chosen_subject_ids ?? [],
-    seniorStreamId: row.senior_stream_id,
-    updatedAt: row.updated_at,
-  };
-}
-
-/** Pull curriculum + requests + templates for the BHB tenant. */
+/** Browser: pull curriculum + requests + templates via the server API. */
 export async function fetchCurriculumRemote(): Promise<CurriculumRemoteBundle | null> {
   if (!curriculumRemoteEnabled()) return null;
-  const ctx = await clientAndTenant();
-  if (!ctx) return null;
-  const { sb, tenantId } = ctx;
-
-  const [curRes, reqRes, tmplRes] = await Promise.all([
-    sb
-      .from("student_curriculum")
-      .select(
-        "student_key, academic_year_code, senior_stream_id, chosen_subject_ids, confirmed_at, confirmed_by, updated_at",
-      )
-      .eq("tenant_id", tenantId),
-    sb
-      .from("curriculum_requests")
-      .select(
-        "id, student_key, academic_year_code, proposed_stream_id, proposed_chosen_subject_ids, note, status, requested_at, reviewed_at, review_note",
-      )
-      .eq("tenant_id", tenantId),
-    sb
-      .from("class_curriculum_templates")
-      .select(
-        "id, class_key, academic_year_code, label, chosen_subject_ids, senior_stream_id, updated_at",
-      )
-      .eq("tenant_id", tenantId),
-  ]);
-
-  if (curRes.error) {
-    console.warn("[curriculum] pull curricula failed", curRes.error.message);
+  if (typeof window === "undefined") return null;
+  try {
+    const res = await fetch("/api/school-data/curriculum", {
+      method: "GET",
+      credentials: "same-origin",
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      console.warn("[curriculum] pull failed", res.status);
+      return null;
+    }
+    const body = (await res.json()) as {
+      ok?: boolean;
+      byStudentKey?: Record<string, StudentCurriculum>;
+      requests?: CurriculumRequest[];
+      templates?: ClassCurriculumTemplate[];
+    };
+    if (!body.ok) return null;
+    return {
+      byStudentKey: body.byStudentKey ?? {},
+      requests: body.requests ?? [],
+      templates: body.templates ?? [],
+    };
+  } catch (e) {
+    console.warn("[curriculum] pull error", e);
     return null;
   }
-  if (reqRes.error) {
-    console.warn("[curriculum] pull requests failed", reqRes.error.message);
-    return null;
-  }
-  if (tmplRes.error) {
-    console.warn("[curriculum] pull templates failed", tmplRes.error.message);
-    return null;
-  }
-
-  const byStudentKey: Record<string, StudentCurriculum> = {};
-  for (const row of (curRes.data ?? []) as StudentCurriculumRow[]) {
-    byStudentKey[row.student_key] = rowToCurriculum(row);
-  }
-
-  return {
-    byStudentKey,
-    requests: ((reqRes.data ?? []) as CurriculumRequestRow[]).map(rowToRequest),
-    templates: ((tmplRes.data ?? []) as TemplateRow[]).map(rowToTemplate),
-  };
 }
 
 /**
@@ -267,106 +145,50 @@ export function mergeCurriculumTemplates(
   return [...map.values()];
 }
 
+async function postCurriculum(
+  body: Record<string, unknown>,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!curriculumRemoteEnabled()) return { ok: true };
+  if (typeof window === "undefined") return { ok: true };
+  try {
+    const res = await fetch("/api/school-data/curriculum", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const resBody = (await res.json().catch(() => null)) as {
+      ok?: boolean;
+      error?: string;
+    } | null;
+    if (!res.ok || !resBody?.ok) {
+      const message = resBody?.error || `HTTP ${res.status}`;
+      console.warn("[curriculum] push failed", message);
+      return { ok: false, error: message };
+    }
+    return { ok: true };
+  } catch (e) {
+    console.warn("[curriculum] push error", e);
+    return { ok: false, error: String(e) };
+  }
+}
+
+/** Browser: push curriculum choices + requests via the server API. */
 export async function pushCurriculumState(
   state: SisLike,
 ): Promise<{ ok: boolean; error?: string }> {
-  if (!curriculumRemoteEnabled()) return { ok: true };
-  const ctx = await clientAndTenant();
-  if (!ctx) return { ok: false, error: "Tenant not resolved" };
-  const { sb, tenantId } = ctx;
-  const now = new Date().toISOString();
-
-  const curriculumRows: Array<{
-    tenant_id: string;
-    student_key: string;
-    academic_year_code: string;
-    senior_stream_id: string | null;
-    chosen_subject_ids: string[];
-    confirmed_at: string | null;
-    confirmed_by: "office" | "system" | null;
-    updated_at: string;
-  }> = [];
-  for (const s of state.students) {
-    const cur = normalizeCurriculum(s.curriculum, s.academicYearCode);
-    if (!cur || cur.chosenSubjectIds.length === 0) continue;
-    curriculumRows.push({
-      tenant_id: tenantId,
-      student_key: s.id,
-      academic_year_code: cur.academicYearCode || s.academicYearCode,
-      senior_stream_id: cur.seniorStreamId,
-      chosen_subject_ids: cur.chosenSubjectIds,
-      confirmed_at: cur.confirmedAt || null,
-      confirmed_by: cur.confirmedAt ? cur.confirmedBy : null,
-      updated_at: now,
-    });
-  }
-
-  if (curriculumRows.length > 0) {
-    const { error } = await sb.from("student_curriculum").upsert(curriculumRows, {
-      onConflict: "tenant_id,student_key,academic_year_code",
-    });
-    if (error) {
-      console.warn("[curriculum] push curricula failed", error.message);
-      return { ok: false, error: error.message };
-    }
-  }
-
-  const requestRows = (state.curriculumRequests ?? []).map((r) => ({
-    id: r.id,
-    tenant_id: tenantId,
-    student_key: r.studentId,
-    academic_year_code: r.academicYearCode,
-    proposed_stream_id: r.proposedStreamId,
-    proposed_chosen_subject_ids: r.proposedChosenSubjectIds,
-    note: r.note ?? "",
-    status: r.status,
-    requested_at: r.requestedAt,
-    reviewed_at: r.reviewedAt,
-    review_note: r.reviewNote ?? "",
-  }));
-
-  if (requestRows.length > 0) {
-    const { error } = await sb.from("curriculum_requests").upsert(requestRows, {
-      onConflict: "id",
-    });
-    if (error) {
-      console.warn("[curriculum] push requests failed", error.message);
-      return { ok: false, error: error.message };
-    }
-  }
-
-  return { ok: true };
+  return postCurriculum({
+    students: state.students,
+    curriculumRequests: state.curriculumRequests ?? [],
+  });
 }
 
+/** Browser: push class curriculum templates via the server API. */
 export async function pushClassCurriculumTemplatesRemote(
   list: ClassCurriculumTemplate[],
 ): Promise<{ ok: boolean; error?: string }> {
-  if (!curriculumRemoteEnabled()) return { ok: true };
-  const ctx = await clientAndTenant();
-  if (!ctx) return { ok: false, error: "Tenant not resolved" };
-  const { sb, tenantId } = ctx;
-
   if (list.length === 0) return { ok: true };
-
-  const rows = list.map((t) => ({
-    id: t.id,
-    tenant_id: tenantId,
-    class_key: t.classId,
-    academic_year_code: t.academicYearCode,
-    label: t.label,
-    chosen_subject_ids: t.chosenSubjectIds,
-    senior_stream_id: t.seniorStreamId,
-    updated_at: t.updatedAt || new Date().toISOString(),
-  }));
-
-  const { error } = await sb.from("class_curriculum_templates").upsert(rows, {
-    onConflict: "id",
-  });
-  if (error) {
-    console.warn("[curriculum] push templates failed", error.message);
-    return { ok: false, error: error.message };
-  }
-  return { ok: true };
+  return postCurriculum({ templates: list });
 }
 
 /** Debounced push after local saveSis. */

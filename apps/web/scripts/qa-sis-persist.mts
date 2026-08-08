@@ -90,34 +90,46 @@ const remote: SisRemoteBundle = {
   studentUpdatedAt: {},
 };
 
-const merged = mergeSisRemoteIntoState(local, remote);
+// ── 1. Replace mode (preferDb: true) ──
+const mergedReplace = mergeSisRemoteIntoState(local, remote, { preferDb: true });
 
 assert(
-  merged.households.some((h) => h.id === "hh_remote"),
-  "remote-only household kept",
+  mergedReplace.households.some((h) => h.id === "hh_remote"),
+  "replace mode: remote-only household kept",
 );
 assert(
-  merged.households.find((h) => h.id === "hh_local")?.guardianName ===
+  mergedReplace.households.find((h) => h.id === "hh_local")?.guardianName ===
     "Remote Wins HH",
-  "remote household overwrites same id",
+  "replace mode: remote household overwrites same id",
 );
 assert(
-  merged.students.some((s) => s.id === "stu_local"),
-  "local-only student kept",
+  !mergedReplace.students.some((s) => s.id === "stu_local"),
+  "replace mode: local-only deleted student purged",
 );
 assert(
-  merged.students.some((s) => s.id === "stu_remote"),
-  "remote-only student kept",
+  mergedReplace.students.some((s) => s.id === "stu_remote"),
+  "replace mode: remote-only student kept",
 );
 assert(
-  merged.students.find((s) => s.id === "stu_both")?.fullName === "Remote Name",
-  "remote student profile wins on collision",
+  mergedReplace.students.find((s) => s.id === "stu_both")?.fullName === "Remote Name",
+  "replace mode: remote student profile wins on collision",
 );
 assert(
-  merged.students
+  mergedReplace.students
     .find((s) => s.id === "stu_both")
     ?.curriculum?.chosenSubjectIds.join(",") === "subLocal",
-  "local curriculum preserved across roster merge",
+  "replace mode: local curriculum preserved across roster merge",
+);
+
+// ── 2. Additive mode (preferDb: false) ──
+const mergedAdditive = mergeSisRemoteIntoState(local, remote, { preferDb: false });
+assert(
+  mergedAdditive.students.some((s) => s.id === "stu_local"),
+  "additive mode: local-only student kept",
+);
+assert(
+  mergedAdditive.students.find((s) => s.id === "stu_both")?.fullName === "Local Name",
+  "additive mode: local student wins on collision",
 );
 
 if (failed > 0) {

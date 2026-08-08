@@ -312,17 +312,27 @@ export function FeeTakeWorkspace() {
     }
   }, []);
 
+  const [debouncedQuery, setDebouncedQuery] = useState(query);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedQuery(query);
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [query]);
+
   useEffect(() => {
     if (!sis || !masters) return;
+    const fees = loadFees();
     setHits(
-      searchFeeStudents(query, sis, masters, loadFees(), {
+      searchFeeStudents(debouncedQuery, sis, masters, fees, {
         classId,
         sectionId,
         academicYearCode: ay,
         includeFuture,
       }),
     );
-  }, [query, classId, sectionId, sis, masters, tick, ay, includeFuture]);
+  }, [debouncedQuery, classId, sectionId, sis, masters, tick, ay, includeFuture]);
 
   const classOptions = useMemo(() => {
     if (!masters) return [];
@@ -1386,6 +1396,7 @@ export function FeeTakeWorkspace() {
               onOpenReceipt={setPreviewReceiptId}
               transferPreviews={lastSessionPreviews}
               onTransferLastSession={onTransferLastSessionDues}
+              onSelectStudent={setSelectedId}
             />
           )}
         </div>
@@ -1554,11 +1565,11 @@ function FeeSummaryChip({
   };
   const s = styles[tone];
   return (
-    <div className={`rounded-xl border px-3 py-2.5 ${s.box}`}>
-      <div className={`text-xs font-bold uppercase tracking-wide sm:text-sm ${s.label}`}>
+    <div className={`rounded-lg border px-2.5 py-1.5 ${s.box}`}>
+      <div className={`text-[10px] font-bold uppercase tracking-wide ${s.label}`}>
         {label}
       </div>
-      <div className={`mt-0.5 text-lg font-semibold tabular-nums sm:text-xl ${s.value}`}>
+      <div className={`mt-0.5 text-sm font-bold tabular-nums ${s.value}`}>
         {formatInr(value)}
       </div>
     </div>
@@ -1615,6 +1626,7 @@ function CollectPanel({
   transferPreviews,
   onTransferLastSession,
   readOnly = false,
+  onSelectStudent,
 }: {
   student: SisStudent;
   householdBundle: { student: SisStudent; dues: FeeDueLine[] }[];
@@ -1665,6 +1677,7 @@ function CollectPanel({
   transferPreviews: LastSessionTransferPreview[];
   onTransferLastSession: () => void;
   readOnly?: boolean;
+  onSelectStudent?: (id: string) => void;
 }) {
   const today = todayIso();
   const composerMode = composer.channel
@@ -1758,13 +1771,13 @@ function CollectPanel({
 
   return (
     <div className="fee-collect-ui space-y-4">
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-3.5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-lg font-bold text-[var(--brand-deep)] sm:text-xl">
-              Household fees
+            <h2 className="text-base font-bold text-[var(--brand-deep)]">
+              Household Fee Collection
             </h2>
-            <p className="mt-0.5 text-sm text-[var(--muted)] sm:text-base">
+            <p className="mt-0.5 text-xs text-[var(--muted)]">
               {siblingCount} student{siblingCount === 1 ? "" : "s"}
               {siblingCount > 1 ? " (siblings)" : ""} · open dues{" "}
               <span
@@ -1799,12 +1812,12 @@ function CollectPanel({
                   discount)
                 </span>
               ) : null}
-              <span className="mt-0.5 block font-normal text-sm leading-snug">
-                Grouped by month — tick a month or only the heads to clear
+              <span className="mt-0.5 block font-normal text-xs text-[var(--muted)]">
+                Grouped by month — tick a month or individual fee heads to clear
               </span>
             </p>
           </div>
-          <label className="flex max-w-[14rem] items-start gap-2 text-sm text-[var(--muted)] sm:text-base">
+          <label className="flex max-w-[13rem] items-start gap-2 text-xs text-[var(--muted)]">
             <input
               type="checkbox"
               className="mt-0.5"
@@ -1813,7 +1826,7 @@ function CollectPanel({
             />
             <span>
               Include future months
-              <span className="mt-0.5 block font-normal text-sm leading-snug">
+              <span className="mt-0.5 block font-normal text-[11px] text-[var(--muted)]">
                 Off = only through this month
               </span>
             </span>
@@ -1849,7 +1862,7 @@ function CollectPanel({
         </div>
 
         {canTransfer.length > 0 ? (
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[rgba(220,38,38,0.25)] bg-[rgba(220,38,38,0.06)] px-3 py-2.5 text-xs text-[var(--brand-deep)]">
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[rgba(220,38,38,0.25)] bg-[rgba(220,38,38,0.06)] px-3 py-2 text-xs text-[var(--brand-deep)]">
             <div>
               <strong>Last session dues:</strong>{" "}
               {canTransfer.length === 1
@@ -1875,642 +1888,622 @@ function CollectPanel({
             Last session transfer: {transferHint}
           </p>
         ) : null}
-
-        <div className="mt-3 flex flex-wrap gap-2">
-          {siblingCount > 1 ? (
-            <MiniBtn onClick={onSelectAllSiblings}>
-              Select all siblings
-            </MiniBtn>
-          ) : (
-            <MiniBtn onClick={onSelectAllSiblings}>Select all dues</MiniBtn>
-          )}
-          <MiniBtn onClick={onSelectOverdue}>Select all overdue</MiniBtn>
-          <MiniBtn onClick={onClear}>Clear all</MiniBtn>
-        </div>
-
-        <div
-          className={`mt-4 grid max-h-[min(70vh,40rem)] gap-3 overflow-auto ${
-            siblingCount > 1
-              ? "sm:grid-cols-2 xl:grid-cols-[repeat(auto-fit,minmax(17rem,1fr))]"
-              : "grid-cols-1"
-          }`}
-        >
-          {householdBundle.every((r) => openFeeDues(r.dues).length === 0) &&
-          householdBundle.every((r) => r.dues.length === 0) ? (
-            <p className="text-sm text-[var(--muted)] sm:col-span-full">
-              No open dues
-              {!student.feeGroupId
-                ? " — assign a fee group on the student profile"
-                : ""}
-              .
-            </p>
-          ) : (
-            householdBundle.map((row) => {
-              const openDues = openFeeDues(row.dues);
-              const dueKeys = openDues.map((d) => d.dueKey);
-              const selectedForStudent = openDues.filter((d) =>
-                selectedKeys.has(d.dueKey),
-              );
-              const allSelected =
-                dueKeys.length > 0 &&
-                dueKeys.every((k) => selectedKeys.has(k));
-              const someSelected =
-                !allSelected && selectedForStudent.length > 0;
-              const rowTotal = openDues.reduce(
-                (s, d) => s + d.balancePaise,
-                0,
-              );
-              const rowSelected = selectedForStudent.reduce(
-                (s, d) => s + d.balancePaise,
-                0,
-              );
-              const hasOverdue = openDues.some((d) => d.dueOn <= today);
-              const isFocus = row.student.id === student.id;
-              const isSibling = !isFocus && siblingCount > 1;
-
-              return (
-                <div
-                  key={row.student.id}
-                  className={`flex min-h-0 flex-col rounded-xl border p-3 ${
-                    isFocus
-                      ? "border-[rgba(197,160,40,0.45)] bg-[rgba(197,160,40,0.06)]"
-                      : "border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.02)]"
-                  }`}
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <label className="flex min-w-0 cursor-pointer items-start gap-2.5">
-                      <input
-                        type="checkbox"
-                        className="mt-1.5"
-                        checked={allSelected}
-                        ref={(el) => {
-                          if (el) el.indeterminate = someSelected;
-                        }}
-                        onChange={() => onToggleStudentAll(row.student.id)}
-                        disabled={openDues.length === 0}
-                      />
-                      <div className="min-w-0">
-                        <div className="text-sm font-bold text-[var(--brand-deep)]">
-                          <StudentNameLabel student={row.student} />
-                          {isSibling ? (
-                            <span className="ml-2 text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
-                              Sibling
-                            </span>
-                          ) : siblingCount > 1 ? (
-                            <span className="ml-2 text-sm font-semibold uppercase tracking-wide text-[var(--brand-gold)]">
-                              Opened
-                            </span>
-                          ) : null}
-                        </div>
-                        <div className="mt-0.5 text-sm text-[var(--muted)] sm:text-base">
-                          {row.student.admissionNo} · {classLabel(row.student)}
-                        </div>
-                        <div className="text-sm text-[var(--muted)]">
-                          {feeGroupLabel(row.student)}
-                        </div>
-                      </div>
-                    </label>
-                    <div className="text-right">
-                      <div
-                        className={`text-base font-bold sm:text-lg ${
-                          hasOverdue
-                            ? "text-[#dc2626]"
-                            : rowTotal === 0 && row.dues.length > 0
-                              ? "text-[#15803d]"
-                              : "text-[var(--brand-deep)]"
-                        }`}
-                      >
-                        {formatInr(rowTotal)}
-                      </div>
-                      <div
-                        className={`text-sm font-semibold sm:text-base ${
-                          rowSelected > 0
-                            ? "text-[#16a34a]"
-                            : "text-[var(--muted)]"
-                        }`}
-                      >
-                        {selectedForStudent.length}/{openDues.length} open ·{" "}
-                        {formatInr(rowSelected)}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    <MiniBtn
-                      onClick={() => onToggleStudentAll(row.student.id)}
-                    >
-                      {allSelected ? "Unselect" : "Select child"}
-                    </MiniBtn>
-                    <MiniBtn
-                      onClick={() => onSelectStudentOverdue(row.student.id)}
-                    >
-                      Overdue
-                    </MiniBtn>
-                    {someSelected || allSelected ? (
-                      <MiniBtn onClick={() => onClearStudent(row.student.id)}>
-                        Clear
-                      </MiniBtn>
-                    ) : null}
-                  </div>
-
-                  {row.dues.length === 0 ? (
-                    <p className="mt-2 text-sm text-[var(--muted)] sm:text-base">
-                      No fee lines for this student
-                    </p>
-                  ) : (
-                    <>
-                      <TransportFeeSchedulePanel
-                        studentId={row.student.id}
-                        academicYearCode={row.student.academicYearCode}
-                        dues={row.dues}
-                      />
-                      <DueBreakupPicker
-                      dues={row.dues}
-                      selectedKeys={selectedKeys}
-                      today={today}
-                      onToggle={onToggle}
-                      onToggleMonth={onToggleMonth}
-                      lineDiscountRupees={lineDiscountRupees}
-                      onLineDiscount={onLineDiscount}
-                    />
-                    </>
-                  )}
-                </div>
-              );
-            })
-          )}
-        </div>
       </div>
 
-      <div
-        className="relative overflow-hidden rounded-2xl border border-[rgba(32,48,80,0.14)] shadow-[0_12px_40px_rgba(32,48,80,0.1)]"
-        style={{
-          background:
-            "linear-gradient(165deg, #203050 0%, #2a3d66 42%, #1a2740 100%)",
-        }}
-      >
-        <div
-          className="pointer-events-none absolute -right-8 -top-10 h-40 w-40 rounded-full bg-[rgba(197,160,40,0.18)] blur-2xl"
-          aria-hidden
-        />
-        <div
-          className="pointer-events-none absolute -bottom-16 left-10 h-44 w-44 rounded-full bg-[rgba(197,160,40,0.12)] blur-3xl"
-          aria-hidden
-        />
-        <div className="relative p-4 sm:p-5">
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <p className="text-sm font-bold uppercase tracking-[0.16em] text-[#f0d878] sm:text-base">
-                Counter collection
-              </p>
-              <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                <span className="text-4xl font-extrabold tracking-tight text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.35)] sm:text-5xl">
-                  {formatInr(collectTarget)}
+      {/* ── Side-by-Side Layout: 
+             LEFT COLUMN = Dynamic Sibling Tabs & Month Dues Breakdown
+             RIGHT COLUMN = Household Card & Collect Fee Payment Counter Panel
+      ── */}
+      <div className="grid gap-5 lg:grid-cols-[1.25fr_1fr] items-start">
+        {/* ── LEFT COLUMN: Dynamic Sibling Tabs & Month Dues Breakdown ── */}
+        <div className="space-y-4 min-w-0">
+          {/* Dynamic Sibling Selector Bar */}
+          {siblingCount > 1 ? (
+            <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-3 shadow-sm">
+              <div className="flex items-center justify-between border-b border-[rgba(32,48,80,0.08)] pb-2 mb-2.5">
+                <span className="text-xs font-bold uppercase tracking-wider text-[var(--brand-deep)]">
+                  Household Siblings ({siblingCount})
                 </span>
-                {isPartialCollect ? (
-                  <span className="text-base font-semibold text-[#f0d878] sm:text-lg">
-                    partial · {formatInr(netAfterDiscount)} net
-                  </span>
-                ) : counterDiscountPaise > 0 ? (
-                  <span className="text-base font-semibold text-[#f0d878] sm:text-lg">
-                    after {formatInr(counterDiscountPaise)} discount
-                  </span>
-                ) : siblingCount > 1 ? (
-                  <span className="rounded-full bg-[#c5a028] px-2.5 py-0.5 text-xs font-bold text-[#1a2740] sm:text-sm">
-                    Household · {siblingCount} students
-                  </span>
-                ) : (
-                  <span className="text-base font-semibold text-[#f0d878] sm:text-lg">
-                    to collect
-                  </span>
-                )}
+                <button
+                  type="button"
+                  className="text-xs font-semibold text-[var(--brand-mid)] hover:underline"
+                  onClick={onSelectAllSiblings}
+                >
+                  Select all siblings
+                </button>
               </div>
-            </div>
-            <label className="block text-base">
-              <span className="mb-1 block text-sm font-medium text-white/75">
-                Collection date
-              </span>
-              <input
-                className="field !border-white/20 !bg-white/95 !py-2 !text-base !text-[var(--brand-deep)] sm:!text-lg"
-                type="date"
-                value={collectionDate}
-                onChange={(e) => onCollectionDate(e.target.value)}
-                required
-              />
-              {isCollectionDateLocked(collectionDate) ? (
-                <span className="mt-1 block text-sm font-semibold leading-snug text-[#fca5a5]">
-                  This date is day-closed — pick another date or reject handover
-                </span>
-              ) : null}
-            </label>
-            <label className="block min-w-[10rem] text-base sm:min-w-[12rem]">
-              <span className="mb-1 block text-sm font-medium text-white/75">
-                School receipt no.
-              </span>
-              <input
-                className="field !border-white/20 !bg-white/95 !py-2 !text-base !text-[var(--brand-deep)] sm:!text-lg"
-                value={schoolReceiptNo}
-                onChange={(e) => onSchoolReceiptNo(e.target.value)}
-                placeholder="Optional · e.g. FEE-BOOK-A/4521"
-                autoComplete="off"
-              />
-              <span className="mt-1 block text-sm leading-snug text-white/65">
-                Same pool as Manual book leaves — duplicates blocked. Prefer
-                Manual book tab for full paper postings.
-              </span>
-            </label>
-          </div>
 
-          {collectTotal > 0 && counterDiscountPaise > 0 ? (
-            <div className="mt-4 rounded-xl border border-[rgba(197,160,40,0.35)] bg-[rgba(255,255,255,0.06)] px-3 py-3 backdrop-blur-sm sm:px-4">
-              <p className="text-sm font-bold uppercase tracking-[0.12em] text-[#f0d878]">
-                Head-wise discount summary
-              </p>
-              <ul className="mt-2 space-y-1 text-sm text-white/90 sm:text-base">
-                {discountSlices.map((s) => (
-                  <li
-                    key={s.dueKey}
-                    className="flex justify-between gap-2 rounded-md bg-white/5 px-2 py-1"
-                  >
-                    <span className="min-w-0 truncate">{s.label}</span>
-                    <span className="shrink-0 font-bold text-[#f0d878]">
-                      −{formatInr(s.amountPaise)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-              <label className="mt-3 block text-base">
-                <span className="mb-1 block text-sm font-medium text-white/75">
-                  Reason for discount
-                </span>
-                <input
-                  className="field w-full !border-white/25 !bg-white !py-2.5 !text-base !text-[var(--brand-deep)]"
-                  value={counterDiscountReason}
-                  onChange={(e) => onCounterDiscountReason(e.target.value)}
-                  placeholder="e.g. Security deposit relaxed on management approval"
-                  autoComplete="off"
-                />
-              </label>
-              <p className="mt-2 text-sm leading-snug text-white/65">
-                Waivers post on collect · auto-limit{" "}
-                {formatInr(FEE_ADJUST_AUTO_LIMIT_PAISE)} per head
-              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                {householdBundle.map((row) => {
+                  const isCur = row.student.id === student.id;
+                  const openDs = openFeeDues(row.dues);
+                  const rDue = openDs.reduce((s, d) => s + d.balancePaise, 0);
+                  const rOver = openDs.some((d) => d.dueOn <= today);
+
+                  return (
+                    <button
+                      key={row.student.id}
+                      type="button"
+                      onClick={() => onSelectStudent?.(row.student.id)}
+                      className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-bold transition active:scale-95 ${
+                        isCur
+                          ? "bg-[var(--brand-deep)] text-white shadow-md ring-2 ring-[var(--brand-deep)]/30"
+                          : "border border-[rgba(32,48,80,0.15)] bg-white text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.04)]"
+                      }`}
+                    >
+                      <span>{row.student.fullName}</span>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold ${
+                          isCur
+                            ? "bg-white/20 text-white"
+                            : rOver
+                              ? "bg-[#fee2e2] text-[#b91c1c]"
+                              : rDue > 0
+                                ? "bg-[rgba(197,160,40,0.18)] text-[var(--brand-deep)]"
+                                : "bg-[#dcfce7] text-[#15803d]"
+                        }`}
+                      >
+                        {classLabel(row.student)} · {formatInr(rDue)}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           ) : null}
 
-          {collectTotal > 0 ? (
-            <div className="mt-4 rounded-xl border border-[rgba(197,160,40,0.45)] bg-[rgba(255,255,255,0.08)] px-3 py-3 backdrop-blur-sm sm:px-4">
-              <div className="flex flex-wrap items-end justify-between gap-3">
-                <label className="block min-w-[11rem] flex-1 text-base">
-                  <span className="mb-1 flex items-center gap-2 text-sm font-bold uppercase tracking-[0.12em] text-[#f0d878] sm:text-base">
-                    Amount to collect
-                    {isPartialCollect ? (
-                      <span className="rounded-full bg-[#c5a028] px-2 py-0.5 text-xs font-extrabold tracking-wide text-[#1a2740] sm:text-sm">
-                        Partial
-                      </span>
-                    ) : null}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl font-bold text-white/80">₹</span>
-                    <input
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      max={netAfterDiscount / 100}
-                      className="field w-full !border-white/25 !bg-white !py-3 !text-2xl !font-bold !text-[var(--brand-deep)] sm:!text-3xl"
-                      value={collectAmountRupees}
-                      onChange={(e) => onCollectAmount(e.target.value)}
-                      placeholder="0"
-                      aria-label="Amount to collect in rupees"
-                    />
-                  </div>
-                  <span className="mt-1 block text-sm leading-snug text-white/70 sm:text-base">
-                    {counterDiscountPaise > 0
-                      ? `Net due ${formatInr(netAfterDiscount)} after discount — lower for partial pay`
-                      : `Selected dues ${formatInr(collectTotal)} — lower for partial payment (oldest months first)`}
-                  </span>
-                </label>
-                {isPartialCollect ? (
-                  <button
-                    type="button"
-                    className="rounded-lg border border-white/25 bg-white/10 px-3 py-2.5 text-sm font-bold text-white hover:bg-white/15 sm:text-base"
-                    onClick={onFillFullSelected}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap gap-1.5">
+              {siblingCount > 1 ? (
+                <MiniBtn onClick={onSelectAllSiblings}>
+                  Select all siblings
+                </MiniBtn>
+              ) : (
+                <MiniBtn onClick={onSelectAllSiblings}>Select all dues</MiniBtn>
+              )}
+              <MiniBtn onClick={onSelectOverdue}>Select all overdue</MiniBtn>
+              <MiniBtn onClick={onClear}>Clear all</MiniBtn>
+            </div>
+          </div>
+
+          <div className="max-h-[min(70vh,40rem)] space-y-3 overflow-y-auto pr-1">
+            {householdBundle.every((r) => openFeeDues(r.dues).length === 0) &&
+            householdBundle.every((r) => r.dues.length === 0) ? (
+              <p className="text-xs text-[var(--muted)]">
+                No open dues
+                {!student.feeGroupId
+                  ? " — assign a fee group on the student profile"
+                  : ""}
+                .
+              </p>
+            ) : (
+              householdBundle.map((row) => {
+                const openDues = openFeeDues(row.dues);
+                const dueKeys = openDues.map((d) => d.dueKey);
+                const selectedForStudent = openDues.filter((d) =>
+                  selectedKeys.has(d.dueKey),
+                );
+                const allSelected =
+                  dueKeys.length > 0 &&
+                  dueKeys.every((k) => selectedKeys.has(k));
+                const someSelected =
+                  !allSelected && selectedForStudent.length > 0;
+                const rowTotal = openDues.reduce(
+                  (s, d) => s + d.balancePaise,
+                  0,
+                );
+                const rowSelected = selectedForStudent.reduce(
+                  (s, d) => s + d.balancePaise,
+                  0,
+                );
+                const hasOverdue = openDues.some((d) => d.dueOn <= today);
+                const isFocus = row.student.id === student.id;
+                const isSibling = !isFocus && siblingCount > 1;
+
+                return (
+                  <div
+                    key={row.student.id}
+                    className={`flex min-h-0 flex-col rounded-xl border p-3 ${
+                      isFocus
+                        ? "border-[rgba(197,160,40,0.45)] bg-[rgba(197,160,40,0.06)]"
+                        : "border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.02)]"
+                    }`}
                   >
-                    Use full {formatInr(netAfterDiscount)}
-                  </button>
-                ) : null}
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <label className="flex min-w-0 cursor-pointer items-start gap-2.5">
+                        <input
+                          type="checkbox"
+                          className="mt-1"
+                          checked={allSelected}
+                          ref={(el) => {
+                            if (el) el.indeterminate = someSelected;
+                          }}
+                          onChange={() => onToggleStudentAll(row.student.id)}
+                          disabled={openDues.length === 0}
+                        />
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold text-[var(--brand-deep)]">
+                            <StudentNameLabel student={row.student} />
+                            {isSibling ? (
+                              <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                                Sibling
+                              </span>
+                            ) : siblingCount > 1 ? (
+                              <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--brand-gold)]">
+                                Selected
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="mt-0.5 text-xs text-[var(--muted)]">
+                            {row.student.admissionNo} · {classLabel(row.student)}
+                          </div>
+                          <div className="text-[11px] text-[var(--muted)]">
+                            {feeGroupLabel(row.student)}
+                          </div>
+                        </div>
+                      </label>
+                      <div className="text-right">
+                        <div
+                          className={`text-sm font-bold ${
+                            hasOverdue
+                              ? "text-[#dc2626]"
+                              : rowTotal === 0 && row.dues.length > 0
+                                ? "text-[#15803d]"
+                                : "text-[var(--brand-deep)]"
+                          }`}
+                        >
+                          {formatInr(rowTotal)}
+                        </div>
+                        <div
+                          className={`text-xs font-semibold ${
+                            rowSelected > 0
+                              ? "text-[#16a34a]"
+                              : "text-[var(--muted)]"
+                          }`}
+                        >
+                          {selectedForStudent.length}/{openDues.length} open ·{" "}
+                          {formatInr(rowSelected)}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      <MiniBtn
+                        onClick={() => onToggleStudentAll(row.student.id)}
+                      >
+                        {allSelected ? "Unselect" : "Select child"}
+                      </MiniBtn>
+                      <MiniBtn
+                        onClick={() => onSelectStudentOverdue(row.student.id)}
+                      >
+                        Overdue
+                      </MiniBtn>
+                      {someSelected || allSelected ? (
+                        <MiniBtn onClick={() => onClearStudent(row.student.id)}>
+                          Clear
+                        </MiniBtn>
+                      ) : null}
+                    </div>
+
+                    {row.dues.length === 0 ? (
+                      <p className="mt-2 text-xs text-[var(--muted)]">
+                        No fee lines for this student
+                      </p>
+                    ) : (
+                      <>
+                        <TransportFeeSchedulePanel
+                          studentId={row.student.id}
+                          academicYearCode={row.student.academicYearCode}
+                          dues={row.dues}
+                        />
+                        <DueBreakupPicker
+                          dues={row.dues}
+                          selectedKeys={selectedKeys}
+                          today={today}
+                          onToggle={onToggle}
+                          onToggleMonth={onToggleMonth}
+                          lineDiscountRupees={lineDiscountRupees}
+                          onLineDiscount={onLineDiscount}
+                        />
+                      </>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* ── RIGHT COLUMN: Household Card & Collect Fee Payment Panel ── */}
+        <div className="space-y-4 min-w-0">
+          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-3.5 shadow-sm">
+            <div className="flex items-center justify-between border-b border-[rgba(32,48,80,0.08)] pb-2.5 mb-3">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--brand-deep)]">
+                Household Information
+              </h3>
+              {siblingCount > 1 ? (
+                <span className="rounded bg-[rgba(197,160,40,0.16)] px-2 py-0.5 text-[10px] font-bold text-[var(--brand-gold)]">
+                  {siblingCount} Siblings
+                </span>
+              ) : null}
+            </div>
+
+            <div className="space-y-2 text-xs">
+              <div className="flex justify-between gap-2">
+                <span className="text-[var(--muted)]">Guardian Name:</span>
+                <span className="font-bold text-[var(--brand-deep)]">
+                  {student.fatherName || student.motherName || "Guardian"}
+                </span>
               </div>
-              {allocationPreview && allocationPreview.length > 0 ? (
-                <div className="mt-3 border-t border-white/10 pt-3">
-                  <p className="text-sm font-bold uppercase tracking-wide text-white/65">
-                    Will apply to
+
+              {student.fatherMobile || student.motherMobile ? (
+                <div className="flex justify-between gap-2 items-center">
+                  <span className="text-[var(--muted)]">Primary Mobile:</span>
+                  <span className="font-bold text-[var(--brand-deep)]">
+                    {student.fatherMobile || student.motherMobile}
+                  </span>
+                </div>
+              ) : null}
+
+              <div className="flex justify-between gap-2">
+                <span className="text-[var(--muted)]">Active Student:</span>
+                <span className="font-semibold text-[var(--brand-deep)]">
+                  {student.fullName} ({classLabel(student)})
+                </span>
+              </div>
+
+              <div className="flex justify-between gap-2">
+                <span className="text-[var(--muted)]">Admission No:</span>
+                <span className="font-semibold text-[var(--brand-deep)]">
+                  {student.admissionNo}
+                </span>
+              </div>
+
+              <div className="flex justify-between gap-2">
+                <span className="text-[var(--muted)]">Fee Group:</span>
+                <span className="font-semibold text-[var(--brand-deep)]">
+                  {feeGroupLabel(student)}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div
+            className="relative overflow-hidden rounded-2xl border border-[rgba(32,48,80,0.14)] shadow-[0_12px_40px_rgba(32,48,80,0.1)]"
+            style={{
+              background:
+                "linear-gradient(165deg, #203050 0%, #2a3d66 42%, #1a2740 100%)",
+            }}
+          >
+            <div
+              className="pointer-events-none absolute -right-8 -top-10 h-40 w-40 rounded-full bg-[rgba(197,160,40,0.18)] blur-2xl"
+              aria-hidden
+            />
+            <div
+              className="pointer-events-none absolute -bottom-16 left-10 h-44 w-44 rounded-full bg-[rgba(197,160,40,0.12)] blur-3xl"
+              aria-hidden
+            />
+            <div className="relative p-3.5 sm:p-4">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-[#f0d878]">
+                    Counter collection
                   </p>
-                  <ul className="mt-1.5 max-h-32 space-y-1 overflow-y-auto text-sm text-white/90 sm:text-base">
-                    {allocationPreview.map((l) => (
+                  <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                    <span className="text-2xl font-bold tracking-tight text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.35)] sm:text-3xl">
+                      {formatInr(collectTarget)}
+                    </span>
+                    {isPartialCollect ? (
+                      <span className="text-xs font-semibold text-[#f0d878]">
+                        partial · {formatInr(netAfterDiscount)} net
+                      </span>
+                    ) : counterDiscountPaise > 0 ? (
+                      <span className="text-xs font-semibold text-[#f0d878]">
+                        after {formatInr(counterDiscountPaise)} discount
+                      </span>
+                    ) : siblingCount > 1 ? (
+                      <span className="rounded-full bg-[#c5a028] px-2 py-0.5 text-[11px] font-bold text-[#1a2740]">
+                        Household · {siblingCount} students
+                      </span>
+                    ) : (
+                      <span className="text-xs font-semibold text-[#f0d878]">
+                        to collect
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <label className="block text-xs">
+                  <span className="mb-1 block text-xs font-medium text-white/75">
+                    Collection date
+                  </span>
+                  <input
+                    className="field !border-white/20 !bg-white/95 !py-1.5 !text-xs !text-[var(--brand-deep)]"
+                    type="date"
+                    value={collectionDate}
+                    onChange={(e) => onCollectionDate(e.target.value)}
+                    required
+                  />
+                  {isCollectionDateLocked(collectionDate) ? (
+                    <span className="mt-1 block text-[11px] font-semibold leading-snug text-[#fca5a5]">
+                      This date is day-closed — pick another date or reject handover
+                    </span>
+                  ) : null}
+                </label>
+                <label className="block min-w-[9rem] text-xs sm:min-w-[11rem]">
+                  <span className="mb-1 block text-xs font-medium text-white/75">
+                    School receipt no.
+                  </span>
+                  <input
+                    className="field !border-white/20 !bg-white/95 !py-1.5 !text-xs !text-[var(--brand-deep)]"
+                    value={schoolReceiptNo}
+                    onChange={(e) => onSchoolReceiptNo(e.target.value)}
+                    placeholder="Optional · e.g. FEE-BOOK-A/4521"
+                    autoComplete="off"
+                  />
+                </label>
+              </div>
+
+              {collectTotal > 0 && counterDiscountPaise > 0 ? (
+                <div className="mt-4 rounded-xl border border-[rgba(197,160,40,0.35)] bg-[rgba(255,255,255,0.06)] px-3 py-3 backdrop-blur-sm sm:px-4">
+                  <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#f0d878]">
+                    Head-wise discount summary
+                  </p>
+                  <ul className="mt-2 space-y-1 text-xs text-white/90">
+                    {discountSlices.map((s) => (
                       <li
-                        key={`${l.dueKey}-${l.amountPaise}`}
+                        key={s.dueKey}
                         className="flex justify-between gap-2 rounded-md bg-white/5 px-2 py-1"
                       >
-                        <span className="min-w-0 truncate">{l.label}</span>
-                        <span className="shrink-0 font-bold tabular-nums text-[#f0d878]">
-                          {formatInr(l.amountPaise)}
+                        <span className="min-w-0 truncate">{s.label}</span>
+                        <span className="shrink-0 font-bold text-[#f0d878]">
+                          −{formatInr(s.amountPaise)}
                         </span>
                       </li>
                     ))}
                   </ul>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-
-          {/* Added payments */}
-          {tenderLines.length > 0 ? (
-            <ul className="mt-4 space-y-2">
-              {tenderLines.map((t, i) => (
-                <li
-                  key={t.key}
-                  className="flex flex-wrap items-start justify-between gap-2 rounded-xl border border-white/15 bg-white/10 px-3 py-2.5 backdrop-blur-sm"
-                >
-                  <div className="min-w-0 text-base sm:text-lg">
-                    <div className="font-semibold text-white">
-                      <span className="mr-2 inline-flex h-6 w-6 items-center justify-center rounded-full bg-[var(--brand-gold)] text-xs font-bold text-[var(--brand-deep)] sm:text-sm">
-                        {i + 1}
-                      </span>
-                      {tenderChannelLabel(
-                        encodeTenderChannel(t.mode, t.bankAccountId),
-                      )}{" "}
-                      ·{" "}
-                      {formatInr(Math.round((Number(t.amount) || 0) * 100))}
-                    </div>
-                    <div className="mt-0.5 text-sm text-white/75 sm:text-base">
-                      {[t.ref, t.instrumentDate, t.bankName]
-                        .filter(Boolean)
-                        .join(" · ")}
-                      {t.mode === "cheque"
-                        ? " · Subject to realisation"
-                        : ""}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    className="rounded-lg bg-white/10 px-3 py-1.5 text-sm font-semibold text-[#ffb4a8] hover:bg-white/15 sm:text-base"
-                    onClick={() => onRemoveTender(t.key)}
-                  >
-                    Remove
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-
-          {/* Single-row composer — locked when amount already fully matched */}
-          {collectTarget > 0 && tenderSum >= collectTarget ? (
-            <div className="mt-4 rounded-xl border border-[rgba(60,160,100,0.45)] bg-[rgba(60,160,100,0.12)] px-3 py-2.5 text-base font-semibold text-[#b8f0cc] sm:text-lg">
-              Amount fully matched — remove a payment if you need to change modes.
-            </div>
-          ) : (
-          <div className="mt-4 rounded-xl border border-[rgba(197,160,40,0.35)] bg-[rgba(248,248,240,0.97)] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]">
-              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <div className="text-sm font-extrabold uppercase tracking-[0.14em] text-[var(--brand-deep)] sm:text-base">
-                {tenderLines.length === 0 ? "Add payment" : "Add another"}
-              </div>
-              {remainingPaise > 0 && composer.channel ? (
-                <button
-                  type="button"
-                  className="rounded-full bg-[rgba(197,160,40,0.2)] px-3 py-1 text-sm font-bold text-[var(--brand-deep)] sm:text-base"
-                  onClick={onFillRemaining}
-                >
-                  Use remaining {formatInr(remainingPaise)}
-                </button>
-              ) : null}
-            </div>
-
-            <div className="flex flex-col gap-2 lg:flex-row lg:items-end">
-              <label className="block min-w-0 flex-1 text-base lg:max-w-[14rem]">
-                <span className="mb-1 block text-sm font-medium text-[var(--muted)] sm:text-base">
-                  Mode & account
-                </span>
-                <PaymentChannelSelect
-                  className="field !border-[rgba(32,48,80,0.18)] !py-2 !text-base sm:!text-lg"
-                  variant="tender"
-                  value={composer.channel}
-                  onChange={(channel) =>
-                    onPatchComposer({
-                      channel,
-                      ref: "",
-                      bankName: "",
-                      amount: "",
-                      instrumentDate: collectionDate || todayIso(),
-                    })
-                  }
-                />
-              </label>
-
-              {composer.channel && modeMeta ? (
-                <>
-                  {modeMeta.needsRef ? (
-                    <label className="block min-w-0 flex-[1.2] text-base">
-                      <span className="mb-1 block text-sm font-medium text-[var(--muted)] sm:text-base">
-                        {modeMeta.refLabel}
-                      </span>
-                      <input
-                        className="field !border-[rgba(32,48,80,0.18)] !py-2 !text-base sm:!text-lg"
-                        value={composer.ref}
-                        onChange={(e) =>
-                          onPatchComposer({ ref: e.target.value })
-                        }
-                        placeholder={modeMeta.refLabel}
-                        autoComplete="off"
-                      />
-                    </label>
-                  ) : null}
-
-                  {modeMeta.needsBank ? (
-                    <label className="block min-w-0 flex-1 text-base">
-                      <span className="mb-1 block text-sm font-medium text-[var(--muted)] sm:text-base">
-                        Instrument bank
-                      </span>
-                      <input
-                        className="field !border-[rgba(32,48,80,0.18)] !py-2 !text-base sm:!text-lg"
-                        value={composer.bankName}
-                        onChange={(e) =>
-                          onPatchComposer({ bankName: e.target.value })
-                        }
-                        placeholder="Bank name"
-                        autoComplete="off"
-                      />
-                    </label>
-                  ) : null}
-
-                  {modeMeta.needsInstrumentDate ? (
-                    <label className="block min-w-0 text-base lg:w-[9.5rem]">
-                      <span className="mb-1 block text-sm font-medium text-[var(--muted)] sm:text-base">
-                        Date
-                      </span>
-                      <input
-                        className="field !border-[rgba(32,48,80,0.18)] !py-2 !text-base sm:!text-lg"
-                        type="date"
-                        value={composer.instrumentDate}
-                        onChange={(e) =>
-                          onPatchComposer({ instrumentDate: e.target.value })
-                        }
-                      />
-                    </label>
-                  ) : null}
-
-                  <label className="block min-w-0 text-base lg:w-[8.5rem]">
-                    <span className="mb-1 block text-sm font-medium text-[var(--muted)] sm:text-base">
-                      Amount (₹)
+                  <label className="mt-3 block text-xs">
+                    <span className="mb-1 block text-xs font-medium text-white/75">
+                      Reason for discount
                     </span>
                     <input
-                      className="field !border-[rgba(197,160,40,0.45)] !bg-[rgba(197,160,40,0.08)] !py-2 !text-lg font-semibold sm:!text-xl"
-                      inputMode="decimal"
-                      value={composer.amount}
-                      onChange={(e) =>
-                        onPatchComposer({
-                          amount: e.target.value.replace(/[^\d.]/g, ""),
-                        })
-                      }
-                      placeholder="0"
+                      className="field w-full !border-white/25 !bg-white !py-2 !text-xs !text-[var(--brand-deep)]"
+                      value={counterDiscountReason}
+                      onChange={(e) => onCounterDiscountReason(e.target.value)}
+                      placeholder="e.g. Security deposit relaxed on management approval"
                       autoComplete="off"
                     />
                   </label>
+                </div>
+              ) : null}
 
+              {collectTotal > 0 ? (
+                <div className="mt-4 rounded-xl border border-[rgba(197,160,40,0.45)] bg-[rgba(255,255,255,0.08)] px-3 py-3 backdrop-blur-sm sm:px-4">
+                  <div className="flex flex-wrap items-end justify-between gap-3">
+                    <label className="block min-w-[11rem] flex-1 text-xs">
+                      <span className="mb-1 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.12em] text-[#f0d878]">
+                        Amount to collect
+                        {isPartialCollect ? (
+                          <span className="rounded-full bg-[#c5a028] px-2 py-0.5 text-[10px] font-extrabold text-[#1a2740]">
+                            Partial
+                          </span>
+                        ) : null}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl font-bold text-white/80">₹</span>
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          max={netAfterDiscount / 100}
+                          className="field w-full !border-white/25 !bg-white !py-2 !text-xl !font-bold !text-[var(--brand-deep)]"
+                          value={collectAmountRupees}
+                          onChange={(e) => onCollectAmount(e.target.value)}
+                          placeholder="0"
+                          aria-label="Amount to collect in rupees"
+                        />
+                      </div>
+                    </label>
+                    {isPartialCollect ? (
+                      <button
+                        type="button"
+                        className="rounded-lg border border-white/25 bg-white/10 px-3 py-2 text-xs font-bold text-white hover:bg-white/15"
+                        onClick={onFillFullSelected}
+                      >
+                        Use full {formatInr(netAfterDiscount)}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Added payments */}
+              {tenderLines.length > 0 ? (
+                <ul className="mt-4 space-y-2">
+                  {tenderLines.map((t, i) => (
+                    <li
+                      key={t.key}
+                      className="flex flex-wrap items-start justify-between gap-2 rounded-xl border border-white/15 bg-white/10 px-3 py-2.5 backdrop-blur-sm"
+                    >
+                      <div className="min-w-0 text-xs">
+                        <div className="font-semibold text-white">
+                          <span className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-[var(--brand-gold)] text-[10px] font-bold text-[var(--brand-deep)]">
+                            {i + 1}
+                          </span>
+                          {tenderChannelLabel(
+                            encodeTenderChannel(t.mode, t.bankAccountId),
+                          )}{" "}
+                          ·{" "}
+                          {formatInr(Math.round((Number(t.amount) || 0) * 100))}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="rounded-md border border-white/20 bg-white/10 px-2 py-1 text-xs font-semibold text-white/90 hover:bg-white/20"
+                        onClick={() => onRemoveTender(t.key)}
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+
+              {remainingPaise > 0 ? (
+                <div className="mt-4 rounded-xl border border-[rgba(197,160,40,0.35)] bg-[rgba(248,248,240,0.97)] p-3 shadow-sm">
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-xs font-extrabold uppercase tracking-wider text-[var(--brand-deep)]">
+                      {tenderLines.length === 0 ? "Add payment" : "Add another"}
+                    </div>
+                    {remainingPaise > 0 && composer.channel ? (
+                      <button
+                        type="button"
+                        className="rounded-full bg-[rgba(197,160,40,0.2)] px-2.5 py-0.5 text-xs font-bold text-[var(--brand-deep)]"
+                        onClick={onFillRemaining}
+                      >
+                        Use remaining {formatInr(remainingPaise)}
+                      </button>
+                    ) : null}
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    <label className="block text-xs">
+                      <span className="mb-1 block text-xs font-medium text-[var(--muted)]">
+                        Mode & account
+                      </span>
+                      <PaymentChannelSelect
+                        className="field !border-[rgba(32,48,80,0.18)] !py-1.5 !text-xs"
+                        variant="tender"
+                        value={composer.channel}
+                        onChange={(channel) =>
+                          onPatchComposer({
+                            channel,
+                            ref: "",
+                            bankName: "",
+                            amount: "",
+                            instrumentDate: collectionDate || todayIso(),
+                          })
+                        }
+                      />
+                    </label>
+
+                    {composer.channel && modeMeta ? (
+                      <div className="flex flex-wrap items-end gap-2">
+                        {modeMeta.needsRef ? (
+                          <label className="block flex-1 text-xs">
+                            <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                              {modeMeta.refLabel}
+                            </span>
+                            <input
+                              className="field !py-1.5 !text-xs"
+                              value={composer.ref}
+                              onChange={(e) =>
+                                onPatchComposer({ ref: e.target.value })
+                              }
+                              placeholder={modeMeta.refLabel}
+                              autoComplete="off"
+                            />
+                          </label>
+                        ) : null}
+
+                        <label className="block w-28 text-xs">
+                          <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                            Amount (₹)
+                          </span>
+                          <input
+                            className="field !border-[rgba(197,160,40,0.45)] !bg-[rgba(197,160,40,0.08)] !py-1.5 !text-xs font-bold"
+                            inputMode="decimal"
+                            value={composer.amount}
+                            onChange={(e) =>
+                              onPatchComposer({ amount: e.target.value })
+                            }
+                            placeholder="0"
+                          />
+                        </label>
+
+                        <button
+                          type="button"
+                          className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-bold text-white hover:opacity-95"
+                          onClick={onAddTender}
+                        >
+                          Add line
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+
+              {(() => {
+                const discountOnly =
+                  collectTarget <= 0 && counterDiscountPaise > 0;
+                const matched =
+                  discountOnly ||
+                  (collectTarget > 0 &&
+                    tenderSum === collectTarget &&
+                    tenderSum > 0);
+                return (
                   <button
                     type="button"
-                    className="rounded-xl bg-[#c5a028] px-5 py-3 text-base font-extrabold text-[#152238] shadow-[0_4px_14px_rgba(197,160,40,0.4)] hover:bg-[#f0d878] lg:shrink-0 sm:text-lg"
-                    onClick={onAddTender}
+                    className={`mt-4 w-full rounded-xl px-4 py-3 text-sm font-extrabold uppercase tracking-wide transition active:scale-[0.99] disabled:cursor-not-allowed ${
+                      matched
+                        ? "bg-[#22c55e] text-white shadow-lg hover:bg-[#16a34a]"
+                        : "bg-[#ef4444] text-white hover:bg-[#dc2626] disabled:opacity-90"
+                    }`}
+                    disabled={!matched || readOnly}
+                    onClick={onCollect}
                   >
-                    Add
+                    {readOnly
+                      ? "Session closed — read-only"
+                      : discountOnly
+                        ? `Post discount · ${formatInr(counterDiscountPaise)}`
+                        : matched
+                          ? isPartialCollect
+                            ? `Collect partial · ${formatInr(collectTarget)}`
+                            : counterDiscountPaise > 0
+                              ? `Collect · ${formatInr(collectTarget)} (incl. discount)`
+                              : "Collect & print receipt"
+                          : collectTarget <= 0
+                            ? "Enter amount to collect"
+                            : tenderSum <= 0
+                              ? "Add payment to match amount"
+                              : tenderSum < collectTarget
+                                ? `Still need ${formatInr(collectTarget - tenderSum)}`
+                                : `Reduce by ${formatInr(tenderSum - collectTarget)}`}
                   </button>
-                </>
-              ) : null}
-            </div>
-
-            {composerMode === "cheque" ? (
-              <p className="mt-2 rounded-lg bg-[rgba(197,160,40,0.2)] px-3 py-2 text-sm font-semibold text-[var(--brand-deep)] sm:text-base">
-                Cheque will be marked: realisation subject to clearance
-              </p>
-            ) : null}
-          </div>
-          )}
-
-          {hasUncleared ? (
-            <p className="mt-3 rounded-lg bg-[rgba(197,160,40,0.18)] px-3 py-2.5 text-sm font-semibold text-[var(--brand-gold-soft)] sm:text-base">
-              Receipt will show: cheque realisation subject to clearance.
-            </p>
-          ) : null}
-
-          {(() => {
-            const matched = collectTarget > 0 && tenderSum === collectTarget;
-            const short =
-              collectTarget > 0 && tenderSum > 0 && tenderSum < collectTarget;
-            const over = collectTarget > 0 && tenderSum > collectTarget;
-            const gap = Math.abs(collectTarget - tenderSum);
-            return (
-              <div
-                className={`mt-4 rounded-xl px-3 py-3 text-lg font-bold sm:text-xl ${
-                  matched
-                    ? "bg-[rgba(60,160,100,0.22)] text-[#b8f0cc]"
-                    : short || over
-                      ? "bg-[rgba(180,60,60,0.28)] text-[#ffc9c2]"
-                      : "bg-white/10 text-white/70"
-                }`}
-              >
-                Payments {formatInr(tenderSum)}
-                {isPartialCollect && collectTarget > 0
-                  ? ` · target ${formatInr(collectTarget)}`
-                  : ""}
-                {short ? ` · still need ${formatInr(gap)}` : ""}
-                {over ? ` · ${formatInr(gap)} more than required` : ""}
-                {matched ? (isPartialCollect ? " · partial matched ✓" : " · matched ✓") : ""}
-              </div>
-            );
-          })()}
-
-          <label className="mt-4 block text-base">
-            <span className="mb-1.5 block text-sm font-medium text-white/75 sm:text-base">
-              Notes
-            </span>
-            <input
-              className="field !border-white/20 !bg-white/95 !py-2 !text-base !text-[var(--brand-deep)] sm:!text-lg"
-              value={note}
-              onChange={(e) => onNote(e.target.value)}
-              placeholder="Optional note on receipt"
-              autoComplete="off"
-            />
-          </label>
-
-          {(() => {
-            const discountOnly =
-              collectTarget <= 0 && counterDiscountPaise > 0;
-            const matched =
-              discountOnly ||
-              (collectTarget > 0 &&
-                tenderSum === collectTarget &&
-                tenderSum > 0);
-            return (
+                );
+              })()}
               <button
                 type="button"
-                className={`mt-4 w-full rounded-xl px-4 py-4 text-lg font-extrabold uppercase tracking-wide transition active:scale-[0.99] disabled:cursor-not-allowed sm:text-xl ${
-                  matched
-                    ? "bg-[#22c55e] text-white shadow-[0_0_0_2px_rgba(255,255,255,0.35),0_10px_28px_rgba(34,197,94,0.55)] hover:bg-[#16a34a] hover:shadow-[0_0_0_2px_rgba(255,255,255,0.5),0_12px_32px_rgba(34,197,94,0.65)]"
-                    : "bg-[#ef4444] text-white shadow-[0_0_0_2px_rgba(255,255,255,0.2),0_10px_28px_rgba(239,68,68,0.4)] hover:bg-[#dc2626] disabled:bg-[#ef4444] disabled:opacity-90 disabled:shadow-[0_0_0_2px_rgba(255,255,255,0.15)]"
-                }`}
-                disabled={!matched || readOnly}
-                onClick={onCollect}
+                className="mt-2 w-full rounded-xl border-2 border-[#128C7E] bg-[#128C7E]/15 px-4 py-2.5 text-xs font-bold text-[#0f766e] hover:bg-[#128C7E]/25 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={collectTotal <= 0 || readOnly}
+                onClick={onSendUpiLink}
               >
-                {readOnly
-                  ? "Session closed — read-only"
-                  : discountOnly
-                    ? `Post discount · ${formatInr(counterDiscountPaise)}`
-                    : matched
-                      ? isPartialCollect
-                        ? `Collect partial · ${formatInr(collectTarget)}`
-                        : counterDiscountPaise > 0
-                          ? `Collect · ${formatInr(collectTarget)} (incl. discount)`
-                          : "Collect & print receipt"
-                      : collectTarget <= 0
-                        ? "Enter amount to collect"
-                        : tenderSum <= 0
-                          ? "Add payment to match amount"
-                          : tenderSum < collectTarget
-                            ? `Still need ${formatInr(collectTarget - tenderSum)}`
-                            : `Reduce by ${formatInr(tenderSum - collectTarget)}`}
+                {collectTotal > 0
+                  ? `Send UPI link · ${formatInr(collectTotal)}`
+                  : "Select dues for UPI link"}
               </button>
-            );
-          })()}
-          <button
-            type="button"
-            className="mt-2 w-full rounded-xl border-2 border-[#128C7E] bg-[#128C7E]/15 px-4 py-3.5 text-base font-bold text-[#0f766e] hover:bg-[#128C7E]/25 disabled:cursor-not-allowed disabled:opacity-50 sm:text-lg"
-            disabled={collectTotal <= 0 || readOnly}
-            onClick={onSendUpiLink}
-          >
-            {collectTotal > 0
-              ? `Send UPI link · ${formatInr(collectTotal)}`
-              : "Select dues for UPI link"}
-          </button>
-          <p className="mt-2 text-center text-sm text-white/75 sm:text-base">
-            Collecting as{" "}
-            <span className="font-semibold text-[#f0d878]">{cashierName}</span>
-          </p>
-        </div>
-      </div>
+              <p className="mt-2 text-center text-xs text-white/75">
+                Collecting as{" "}
+                <span className="font-semibold text-[#f0d878]">{cashierName}</span>
+              </p>
+            </div>
+          </div>
 
-      <div className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
-        <div className="border-b border-[rgba(32,48,80,0.08)] px-4 py-3">
-          <h2 className="text-sm font-bold text-[var(--brand-deep)]">
-            Earlier receipts
-          </h2>
-          <p className="text-xs text-[var(--muted)]">
-            Household history · open to view / print / WhatsApp
-          </p>
-        </div>
-        {priorReceipts.length === 0 ? (
-          <p className="px-4 py-6 text-sm text-[var(--muted)]">
-            No earlier receipts for this household yet.
-          </p>
-        ) : (
+          {/* Earlier receipts */}
+          <div className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
+            <div className="border-b border-[rgba(32,48,80,0.08)] px-4 py-3">
+              <h2 className="text-xs font-bold text-[var(--brand-deep)]">
+                Earlier receipts
+              </h2>
+              <p className="text-[11px] text-[var(--muted)]">
+                Household history · view / print / WhatsApp
+              </p>
+            </div>
+            {priorReceipts.length === 0 ? (
+              <p className="px-4 py-4 text-xs text-[var(--muted)]">
+                No earlier receipts for this household yet.
+              </p>
+            ) : (
           <ul className="max-h-64 divide-y divide-[rgba(32,48,80,0.08)] overflow-y-auto">
             {priorReceipts.map((v) => {
               const voided = !!v.voidedAt;
@@ -2574,6 +2567,8 @@ function CollectPanel({
         )}
       </div>
     </div>
+  </div>
+</div>
   );
 }
 
@@ -2719,6 +2714,14 @@ function ReceiptPreviewModal({
     setWaError(null);
     setWaNotice(null);
   }, [voucher.id, household?.id, household?.whatsappMobile, household?.mobile]);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   useEffect(() => {
     let cancelled = false;

@@ -69,7 +69,6 @@ export async function pushTrustRemoteServer(
 
 export async function ensureTrustHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = trustReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("trust")
@@ -77,7 +76,12 @@ export async function ensureTrustHydrated(): Promise<boolean> {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { bundle, changed } = await hydrateTrustDeskFromDb(readFromDb);
+  const { bundle, changed, ok } = await hydrateTrustDeskFromDb(readFromDb);
+  if (!ok) {
+    // Fetch failed — do not lock hydration flag; caller can retry later.
+    return blobChanged;
+  }
+  markDeskHydrated(MODULE);
   if (
     changed &&
     (bundle.projects.length > 0 || bundle.workItems.length > 0 || readFromDb)

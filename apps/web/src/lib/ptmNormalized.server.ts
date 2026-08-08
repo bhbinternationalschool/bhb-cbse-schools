@@ -304,6 +304,7 @@ export async function pushPtmDeskToDb(
 export async function fetchPtmDeskFromDb(): Promise<{
   bundle: PtmDeskBundle;
   meta: PtmDeskSyncMeta | null;
+  ok: boolean;
 }> {
   const ctx = await resolveCtx();
   const empty: PtmDeskBundle = {
@@ -312,22 +313,41 @@ export async function fetchPtmDeskFromDb(): Promise<{
     bookings: [],
     feedback: [],
   };
-  if (!ctx) return { bundle: empty, meta: null };
+  if (!ctx) return { bundle: empty, meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
-  const [
-    { data: eventRows },
-    { data: slotRows },
-    { data: bookingRows },
-    { data: feedbackRows },
-    { data: metaRow },
-  ] = await Promise.all([
-    sb.from("ptm_desk_events").select("*").eq("tenant_id", tenantId),
-    sb.from("ptm_desk_slots").select("*").eq("tenant_id", tenantId),
-    sb.from("ptm_desk_bookings").select("*").eq("tenant_id", tenantId),
-    sb.from("ptm_desk_feedback").select("*").eq("tenant_id", tenantId),
-    sb.from("ptm_desk_sync_meta").select(META_SELECT).eq("tenant_id", tenantId).maybeSingle(),
-  ]);
+  const [eventRes, slotRes, bookingRes, feedbackRes, metaRes] =
+    await Promise.all([
+      sb.from("ptm_desk_events").select("*").eq("tenant_id", tenantId),
+      sb.from("ptm_desk_slots").select("*").eq("tenant_id", tenantId),
+      sb.from("ptm_desk_bookings").select("*").eq("tenant_id", tenantId),
+      sb.from("ptm_desk_feedback").select("*").eq("tenant_id", tenantId),
+      sb
+        .from("ptm_desk_sync_meta")
+        .select(META_SELECT)
+        .eq("tenant_id", tenantId)
+        .maybeSingle(),
+    ]);
+
+  if (
+    eventRes.error ||
+    slotRes.error ||
+    bookingRes.error ||
+    feedbackRes.error ||
+    metaRes.error
+  ) {
+    console.warn(
+      "[ptm-db] fetchPtmDeskFromDb query error",
+      eventRes.error || slotRes.error || bookingRes.error || feedbackRes.error || metaRes.error,
+    );
+    return { bundle: empty, meta: null, ok: false };
+  }
+
+  const eventRows = eventRes.data;
+  const slotRows = slotRes.data;
+  const bookingRows = bookingRes.data;
+  const feedbackRows = feedbackRes.data;
+  const metaRow = metaRes.data;
 
   return {
     bundle: {
@@ -341,5 +361,6 @@ export async function fetchPtmDeskFromDb(): Promise<{
       ),
     },
     meta: mapMetaRow(metaRow as Record<string, unknown> | null),
+    ok: true,
   };
 }

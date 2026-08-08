@@ -88,7 +88,6 @@ export function createDeskSlicePersistence<T extends { version: number }>(opts: 
 
   async function ensureHydrated(): Promise<boolean> {
     if (isDeskHydrated(opts.moduleId)) return false;
-    markDeskHydrated(opts.moduleId);
 
     const readFromDb = readFromDbEnabled();
     const blobChanged = deskSkipBlobHydrateClient(opts.moduleId)
@@ -96,10 +95,13 @@ export function createDeskSlicePersistence<T extends { version: number }>(opts: 
       : await blob.ensureHydrated();
 
     let normChanged = false;
-    const { bundle, changed } = await hydrateDeskSliceFromDb(
+    const { bundle, changed, ok } = await hydrateDeskSliceFromDb(
       opts.moduleId,
       readFromDb,
     );
+    if (!ok) return false;
+
+    markDeskHydrated(opts.moduleId);
     if (changed && (opts.hasRemoteData(bundle) || readFromDb)) {
       opts.writeLocalRaw(
         mergeDeskSliceBundle(opts.loadLocal(), bundle, { preferDb: readFromDb }),

@@ -1,14 +1,11 @@
 /**
- * Shared Supabase jsonb blob sync (one row per tenant).
- * Used by fees / payments / attendance / exams Week 3–6 overlays.
+ * Shared jsonb blob sync (one row per tenant), routed through the
+ * server-side /api/school-data/domain-blob endpoint — the browser never
+ * talks to Supabase directly for these tables (keeps RBAC enforcement
+ * server-side rather than relying on RLS for authorization).
  */
 
-import type { SupabaseClient } from "@supabase/supabase-js";
-import {
-  createBrowserSupabase,
-  isSupabaseConfigured,
-} from "@/lib/supabase/client";
-import { TENANT } from "@/lib/types";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
 
 export type DomainBlobTable =
@@ -47,7 +44,6 @@ export type DomainBlobTable =
   | "library_state";
 
 type BlobRow = {
-  tenant_id: string;
   state: unknown;
   updated_at: string;
 };
@@ -73,7 +69,6 @@ export function createDomainBlobPersistence<T>(opts: {
    */
   writeLocalRaw: (state: T) => void;
 }): DomainBlobPersistence<T> {
-  let tenantIdCache: string | null = null;
   let hydratedOnce = false;
   let pushTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingPush: T | null = null;
@@ -83,7 +78,6 @@ export function createDomainBlobPersistence<T>(opts: {
   }
 
   function resetCache() {
-    tenantIdCache = null;
     hydratedOnce = false;
     pendingPush = null;
     if (pushTimer) {
@@ -112,64 +106,57 @@ export function createDomainBlobPersistence<T>(opts: {
     );
   }
 
-  async function clientAndTenant(): Promise<{
-    sb: SupabaseClient;
-    tenantId: string;
-  } | null> {
-    const sb = createBrowserSupabase();
-    if (!sb) return null;
-    if (tenantIdCache) return { sb, tenantId: tenantIdCache };
-    const { data, error } = await sb
-      .from("tenants")
-      .select("id")
-      .eq("slug", TENANT.slug)
-      .maybeSingle();
-    if (error || !data?.id) {
-      console.warn(`[${opts.label}] tenant resolve failed`, error?.message);
-      return null;
-    }
-    tenantIdCache = data.id as string;
-    return { sb, tenantId: tenantIdCache };
-  }
-
   async function fetchRemote(): Promise<BlobRow | null> {
     if (!remoteEnabled()) return null;
-    const ctx = await clientAndTenant();
-    if (!ctx) return null;
-    const { sb, tenantId } = ctx;
-    const { data, error } = await sb
-      .from(opts.table)
-      .select("tenant_id, state, updated_at")
-      .eq("tenant_id", tenantId)
-      .maybeSingle();
-    if (error) {
-      console.warn(`[${opts.label}] pull failed`, error.message);
+    if (typeof window === "undefined") return null;
+    try {
+      const res = await fetch(
+        `/api/school-data/domain-blob?table=${encodeURIComponent(opts.table)}`,
+        { method: "GET", credentials: "same-origin", cache: "no-store" },
+      );
+      if (!res.ok) {
+        console.warn(`[${opts.label}] pull failed`, res.status);
+        return null;
+      }
+      const body = (await res.json()) as {
+        ok?: boolean;
+        state?: unknown;
+        updatedAt?: string;
+      };
+      if (!body.ok) return null;
+      return { state: body.state ?? null, updated_at: body.updatedAt || "" };
+    } catch (e) {
+      console.warn(`[${opts.label}] pull error`, e);
       return null;
     }
-    if (!data) return null;
-    return data as BlobRow;
   }
 
   async function pushState(state: T): Promise<{ ok: boolean; error?: string }> {
     if (!remoteEnabled()) return { ok: true };
-    const ctx = await clientAndTenant();
-    if (!ctx) return { ok: false, error: "Tenant not resolved" };
-    const { sb, tenantId } = ctx;
-    const now = new Date().toISOString();
-    const { error } = await sb.from(opts.table).upsert(
-      {
-        tenant_id: tenantId,
-        state,
-        updated_at: now,
-      },
-      { onConflict: "tenant_id" },
-    );
-    if (error) {
-      console.warn(`[${opts.label}] push failed`, error.message);
-      return { ok: false, error: error.message };
+    if (typeof window === "undefined") return { ok: true };
+    try {
+      const res = await fetch("/api/school-data/domain-blob", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ table: opts.table, state }),
+      });
+      const body = (await res.json().catch(() => null)) as {
+        ok?: boolean;
+        updatedAt?: string;
+        error?: string;
+      } | null;
+      if (!res.ok || !body?.ok) {
+        const message = body?.error || `HTTP ${res.status}`;
+        console.warn(`[${opts.label}] push failed`, message);
+        return { ok: false, error: message };
+      }
+      writeMetaUpdatedAt(body.updatedAt || new Date().toISOString());
+      return { ok: true };
+    } catch (e) {
+      console.warn(`[${opts.label}] push error`, e);
+      return { ok: false, error: String(e) };
     }
-    writeMetaUpdatedAt(now);
-    return { ok: true };
   }
 
   function scheduleSync(state: T) {

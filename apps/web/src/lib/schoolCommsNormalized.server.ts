@@ -282,6 +282,8 @@ export async function pushSchoolCommsDeskToDb(
 export async function fetchSchoolCommsDeskFromDb(): Promise<{
   bundle: SchoolCommsDeskBundle;
   meta: SchoolCommsDeskSyncMeta | null;
+  /** false = tenant/query could not be resolved; bundle is NOT a confirmed empty state. */
+  ok: boolean;
 }> {
   const ctx = await resolveCtx();
   const empty: SchoolCommsDeskBundle = {
@@ -290,14 +292,14 @@ export async function fetchSchoolCommsDeskFromDb(): Promise<{
     albums: [],
     photos: [],
   };
-  if (!ctx) return { bundle: empty, meta: null };
+  if (!ctx) return { bundle: empty, meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
   const [
-    { data: noticeRows },
-    { data: newsRows },
-    { data: albumRows },
-    { data: photoRows },
+    { data: noticeRows, error: noticeErr },
+    { data: newsRows, error: newsErr },
+    { data: albumRows, error: albumErr },
+    { data: photoRows, error: photoErr },
     { data: metaRow },
   ] = await Promise.all([
     sb.from("school_comms_desk_notices").select("*").eq("tenant_id", tenantId),
@@ -310,6 +312,17 @@ export async function fetchSchoolCommsDeskFromDb(): Promise<{
       .eq("tenant_id", tenantId)
       .maybeSingle(),
   ]);
+
+  if (noticeErr || newsErr || albumErr || photoErr) {
+    console.warn(
+      "[school-comms-db] fetch failed",
+      noticeErr?.message,
+      newsErr?.message,
+      albumErr?.message,
+      photoErr?.message,
+    );
+    return { bundle: empty, meta: null, ok: false };
+  }
 
   return {
     bundle: {
@@ -329,6 +342,7 @@ export async function fetchSchoolCommsDeskFromDb(): Promise<{
           updatedAt: String((metaRow as { updated_at: string }).updated_at),
         }
       : null,
+    ok: true,
   };
 }
 
@@ -403,22 +417,36 @@ export async function pushGalleryDeskToDb(
 export async function fetchGalleryDeskFromDb(): Promise<{
   bundle: GalleryDeskBundle;
   meta: GalleryDeskSyncMeta | null;
+  /** false = tenant/query could not be resolved; bundle is NOT a confirmed empty state. */
+  ok: boolean;
 }> {
   const ctx = await resolveCtx();
   const empty: GalleryDeskBundle = { albums: [], photos: [] };
-  if (!ctx) return { bundle: empty, meta: null };
+  if (!ctx) return { bundle: empty, meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
-  const [{ data: albumRows }, { data: photoRows }, { data: metaRow }] =
-    await Promise.all([
-      sb.from("school_comms_desk_albums").select("*").eq("tenant_id", tenantId),
-      sb.from("school_comms_desk_photos").select("*").eq("tenant_id", tenantId),
-      sb
-        .from("school_comms_desk_sync_meta")
-        .select("album_count, photo_count, updated_at")
-        .eq("tenant_id", tenantId)
-        .maybeSingle(),
-    ]);
+  const [
+    { data: albumRows, error: albumErr },
+    { data: photoRows, error: photoErr },
+    { data: metaRow },
+  ] = await Promise.all([
+    sb.from("school_comms_desk_albums").select("*").eq("tenant_id", tenantId),
+    sb.from("school_comms_desk_photos").select("*").eq("tenant_id", tenantId),
+    sb
+      .from("school_comms_desk_sync_meta")
+      .select("album_count, photo_count, updated_at")
+      .eq("tenant_id", tenantId)
+      .maybeSingle(),
+  ]);
+
+  if (albumErr || photoErr) {
+    console.warn(
+      "[gallery-db] fetch failed",
+      albumErr?.message,
+      photoErr?.message,
+    );
+    return { bundle: empty, meta: null, ok: false };
+  }
 
   return {
     bundle: {
@@ -432,6 +460,7 @@ export async function fetchGalleryDeskFromDb(): Promise<{
           updatedAt: String(metaRow.updated_at || ""),
         }
       : null,
+    ok: true,
   };
 }
 
@@ -504,20 +533,28 @@ export async function pushNewsDeskToDb(
 export async function fetchNewsDeskFromDb(): Promise<{
   bundle: NewsDeskBundle;
   meta: NewsDeskSyncMeta | null;
+  /** false = tenant/query could not be resolved; bundle is NOT a confirmed empty state. */
+  ok: boolean;
 }> {
   const ctx = await resolveCtx();
   const empty: NewsDeskBundle = { news: [] };
-  if (!ctx) return { bundle: empty, meta: null };
+  if (!ctx) return { bundle: empty, meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
-  const [{ data: newsRows }, { data: metaRow }] = await Promise.all([
-    sb.from("school_comms_desk_news").select("*").eq("tenant_id", tenantId),
-    sb
-      .from("school_comms_desk_sync_meta")
-      .select("news_count, updated_at")
-      .eq("tenant_id", tenantId)
-      .maybeSingle(),
-  ]);
+  const [{ data: newsRows, error: newsErr }, { data: metaRow }] =
+    await Promise.all([
+      sb.from("school_comms_desk_news").select("*").eq("tenant_id", tenantId),
+      sb
+        .from("school_comms_desk_sync_meta")
+        .select("news_count, updated_at")
+        .eq("tenant_id", tenantId)
+        .maybeSingle(),
+    ]);
+
+  if (newsErr) {
+    console.warn("[news-db] fetch failed", newsErr.message);
+    return { bundle: empty, meta: null, ok: false };
+  }
 
   return {
     bundle: {
@@ -529,5 +566,6 @@ export async function fetchNewsDeskFromDb(): Promise<{
           updatedAt: String(metaRow.updated_at || ""),
         }
       : null,
+    ok: true,
   };
 }

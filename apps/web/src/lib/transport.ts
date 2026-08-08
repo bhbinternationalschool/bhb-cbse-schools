@@ -1548,7 +1548,7 @@ export function upsertInsurance(
     : [policy, ...state.insurancePolicies];
 
   // Sync insurance compliance doc
-  let vehicles = state.vehicles.map((v) => {
+  const vehicles = state.vehicles.map((v) => {
     if (v.id !== policy.vehicleId) return v;
     const others = v.compliance.filter((c) => c.certType !== "insurance");
     return {

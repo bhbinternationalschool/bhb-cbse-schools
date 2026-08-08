@@ -131,7 +131,7 @@ export function StaffRegistrationCollectApp({
       setMsg(ready.reason);
       return;
     }
-    let { state, id } = ready;
+    const { state, id } = ready;
     const head = feeHeads.find((h) => h.id === feeHeadId);
     const lead = state.leads.find((l) => l.id === id)!;
     const bal = registrationBalancePaise(state, lead);

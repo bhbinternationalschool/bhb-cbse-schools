@@ -69,7 +69,6 @@ export async function pushRteRemoteServer(
 
 export async function ensureRteHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = rteReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("rte")
@@ -77,7 +76,12 @@ export async function ensureRteHydrated(): Promise<boolean> {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { bundle, changed } = await hydrateRteDeskFromDb(readFromDb);
+  const { bundle, changed, ok } = await hydrateRteDeskFromDb(readFromDb);
+  if (!ok) {
+    // Fetch failed — do not lock hydration flag; caller can retry later.
+    return blobChanged;
+  }
+  markDeskHydrated(MODULE);
   if (
     changed &&
     (bundle.seats.length > 0 ||

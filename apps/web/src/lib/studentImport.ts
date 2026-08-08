@@ -253,7 +253,8 @@ function normalizeDateField(raw: string): string {
   if (/^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$/.test(v)) {
     const parts = v.split(/[/-]/).map((p) => Number(p));
     if (parts.length === 3) {
-      let [a, b, c] = parts as [number, number, number];
+      const [a, b, rawYear] = parts as [number, number, number];
+      let c = rawYear;
       if (c < 100) c += 2000;
       // prefer D/M/Y when day > 12
       const day = a > 12 ? a : b > 12 ? b : a;
@@ -1175,7 +1176,7 @@ export function applyStudentImport(
   }
 
   const { rows } = rowsToFieldMaps(text);
-  let households = [...sis.households];
+  const households = [...sis.households];
   let students = [...sis.students];
   /** Upsert key is admission + session so years stay separate. */
   const enrollmentKey = (admissionNo: string, ay: string) =>

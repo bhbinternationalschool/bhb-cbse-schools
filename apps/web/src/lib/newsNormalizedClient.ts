@@ -71,15 +71,17 @@ export async function hydrateNewsDeskFromDb(
 ): Promise<{
   bundle: { news: ReturnType<typeof loadSchoolComms>["news"] };
   changed: boolean;
+  /** false = fetch failed/unauthenticated; caller must not treat bundle as confirmed-empty. */
+  ok: boolean;
 }> {
   const empty = { news: [] };
-  if (!isSupabaseConfigured()) return { bundle: empty, changed: false };
+  if (!isSupabaseConfigured()) return { bundle: empty, changed: false, ok: false };
   try {
     const res = await fetch("/api/school-data/news-desk", {
       method: "GET",
       cache: "no-store",
     });
-    if (!res.ok) return { bundle: empty, changed: false };
+    if (!res.ok) return { bundle: empty, changed: false, ok: false };
     const body = (await res.json()) as {
       news?: ReturnType<typeof loadSchoolComms>["news"];
       updatedAt?: string;
@@ -95,13 +97,13 @@ export async function hydrateNewsDeskFromDb(
       (body.updatedAt && body.updatedAt >= meta.updatedAt) ||
       remoteNews > meta.newsCount ||
       bundle.news.length > 0;
-    if (!shouldTake) return { bundle: empty, changed: false };
+    if (!shouldTake) return { bundle: empty, changed: false, ok: true };
     writeMeta({
       updatedAt: body.updatedAt || new Date().toISOString(),
       newsCount: remoteNews,
     });
-    return { bundle, changed: true };
+    return { bundle, changed: true, ok: true };
   } catch {
-    return { bundle: empty, changed: false };
+    return { bundle: empty, changed: false, ok: false };
   }
 }

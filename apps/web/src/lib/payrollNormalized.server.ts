@@ -325,16 +325,18 @@ export async function pushPayrollDeskToDb(
 export async function fetchPayrollDeskFromDb(): Promise<{
   bundle: PayrollDeskBundle;
   meta: PayrollDeskSyncMeta | null;
+  /** false = tenant/query could not be resolved; bundle is NOT a confirmed empty state. */
+  ok: boolean;
 }> {
   const ctx = await resolveCtx();
   const empty: PayrollDeskBundle = { runs: [], audit: [] };
-  if (!ctx) return { bundle: empty, meta: null };
+  if (!ctx) return { bundle: empty, meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
   const [
-    { data: runRows },
-    { data: lineRows },
-    { data: auditRows },
+    { data: runRows, error: runErr },
+    { data: lineRows, error: lineErr },
+    { data: auditRows, error: auditErr },
     { data: metaRow },
   ] = await Promise.all([
     sb.from("payroll_desk_runs").select("*").eq("tenant_id", tenantId),
@@ -346,6 +348,16 @@ export async function fetchPayrollDeskFromDb(): Promise<{
       .eq("tenant_id", tenantId)
       .maybeSingle(),
   ]);
+
+  if (runErr || lineErr || auditErr) {
+    console.warn(
+      "[payroll-db] fetch failed",
+      runErr?.message,
+      lineErr?.message,
+      auditErr?.message,
+    );
+    return { bundle: empty, meta: null, ok: false };
+  }
 
   const linesByRun = new Map<string, PayrollStaffLine[]>();
   for (const row of lineRows ?? []) {
@@ -377,5 +389,6 @@ export async function fetchPayrollDeskFromDb(): Promise<{
           updatedAt: String((metaRow as { updated_at: string }).updated_at),
         }
       : null,
+    ok: true,
   };
 }

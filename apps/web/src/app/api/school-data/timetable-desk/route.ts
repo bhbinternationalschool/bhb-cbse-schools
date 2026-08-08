@@ -15,7 +15,13 @@ export const runtime = "nodejs";
 export async function GET(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["timetable-desk"], "GET");
   if (!auth.ok) return auth.response
-  const { bundle, meta } = await fetchTimetableDeskFromDb();
+  const { bundle, meta, ok } = await fetchTimetableDeskFromDb();
+  if (!ok) {
+    return NextResponse.json(
+      { ok: false, error: "Timetable desk fetch failed — tenant/db unavailable" },
+      { status: 503 },
+    );
+  }
   return NextResponse.json({
     ok: true,
     ...bundle,

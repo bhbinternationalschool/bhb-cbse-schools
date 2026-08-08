@@ -124,6 +124,8 @@ function photoForRemote(photoUrl: string): string {
 
 function rowToHousehold(row: HouseholdRow): Household {
   return normalizeHousehold({
+    // Optimistic-locking token: the version this record was read at.
+    revisionAt: row.updated_at,
     id: row.id,
     code: row.code ?? "",
     guardianName: row.guardian_name ?? "",
@@ -142,6 +144,8 @@ function rowToHousehold(row: HouseholdRow): Household {
 
 function rowToStudent(row: StudentRow): SisStudent {
   return normalizeStudent({
+    // Optimistic-locking token: the version this record was read at.
+    revisionAt: row.updated_at,
     id: row.id,
     admissionNo: row.admission_no ?? "",
     fullName: row.full_name ?? "",
@@ -280,6 +284,8 @@ async function deleteStale(
 export async function fetchSisFromDb(): Promise<{
   bundle: SisRemoteBundle;
   meta: SisSyncMeta | null;
+  /** false = tenant/query could not be resolved; bundle is NOT a confirmed empty state. */
+  ok: boolean;
 }> {
   const ctx = await resolveCtx();
   if (!ctx) {
@@ -291,6 +297,7 @@ export async function fetchSisFromDb(): Promise<{
         studentUpdatedAt: {},
       },
       meta: null,
+      ok: false,
     };
   }
   const { sb, tenantId } = ctx;
@@ -302,6 +309,11 @@ export async function fetchSisFromDb(): Promise<{
   ]);
 
   if (hhRes.error || stuRes.error) {
+    console.warn(
+      "[sis-db] fetch failed",
+      hhRes.error?.message,
+      stuRes.error?.message,
+    );
     return {
       bundle: {
         households: [],
@@ -310,6 +322,7 @@ export async function fetchSisFromDb(): Promise<{
         studentUpdatedAt: {},
       },
       meta: null,
+      ok: false,
     };
   }
 
@@ -335,12 +348,91 @@ export async function fetchSisFromDb(): Promise<{
           updatedAt: String(metaRow.updated_at),
         }
       : null,
+    ok: true,
+  };
+}
+
+export type SisPushConflict = {
+  table: string;
+  id: string;
+  stored: string;
+};
+
+export type SisPushResult = {
+  ok: boolean;
+  error?: string;
+  householdCount: number;
+  studentCount: number;
+  /**
+   * Records another user saved after this client last read them. They were
+   * NOT written — the newer server copy is kept and the caller should tell
+   * the user to reload rather than silently losing the other person's work.
+   */
+  conflicts?: SisPushConflict[];
+  /** True when the atomic, conflict-guarded path was used. */
+  guarded?: boolean;
+};
+
+/**
+ * Atomic + conflict-guarded push via the `sis_push_guarded` RPC.
+ *
+ * Returns null when the RPC is unavailable for ANY reason (migration not
+ * applied yet, signature drift, a column added to sis_students but not to
+ * studentToRow), so the caller can fall back to the legacy path. That makes
+ * the deploy order irrelevant and means the worst case is today's
+ * behaviour — never worse than it.
+ */
+async function pushSisGuarded(
+  sb: SupabaseClient,
+  tenantId: string,
+  households: Household[],
+  students: SisStudent[],
+  now: string,
+): Promise<SisPushResult | null> {
+  const { data, error } = await sb.rpc("sis_push_guarded", {
+    p_tenant_id: tenantId,
+    p_households: households.map((h) => ({
+      row: householdToRow(h, tenantId, now),
+      base: h.revisionAt || null,
+    })),
+    p_students: students.map((s) => ({
+      row: studentToRow(s, tenantId, now),
+      base: s.revisionAt || null,
+    })),
+  });
+
+  if (error) {
+    console.warn(
+      "[sis-db] guarded push unavailable, falling back to legacy upsert:",
+      error.message,
+    );
+    return null;
+  }
+
+  const result = (data ?? {}) as {
+    applied_households?: number;
+    applied_students?: number;
+    unversioned?: number;
+    conflicts?: SisPushConflict[];
+  };
+  const conflicts = Array.isArray(result.conflicts) ? result.conflicts : [];
+  if (conflicts.length > 0) {
+    console.warn(
+      `[sis-db] ${conflicts.length} record(s) skipped — changed by another user since this client last read them`,
+    );
+  }
+  return {
+    ok: true,
+    householdCount: result.applied_households ?? 0,
+    studentCount: result.applied_students ?? 0,
+    conflicts,
+    guarded: true,
   };
 }
 
 export async function pushSisToDb(
   state: Pick<SisState, "households" | "students">,
-): Promise<{ ok: boolean; error?: string; householdCount: number; studentCount: number }> {
+): Promise<SisPushResult> {
   if (!sisDualWriteDbEnabled()) {
     return { ok: true, householdCount: 0, studentCount: 0 };
   }
@@ -359,6 +451,10 @@ export async function pushSisToDb(
   const households = state.households ?? [];
   const students = state.students ?? [];
 
+  const guarded = await pushSisGuarded(sb, tenantId, households, students, now);
+  if (guarded) return guarded;
+
+  // ── Legacy fallback: non-atomic, last-write-wins ──────────────────
   const householdRows = households.map((h) => householdToRow(h, tenantId, now));
   if (householdRows.length > 0) {
     const { error } = await sb
@@ -390,6 +486,19 @@ export async function pushSisToDb(
       };
     }
   }
+
+  await deleteStale(
+    sb,
+    tenantId,
+    "sis_students",
+    new Set(students.map((s) => s.id)),
+  );
+  await deleteStale(
+    sb,
+    tenantId,
+    "sis_households",
+    new Set(households.map((h) => h.id)),
+  );
 
   const activeCount = students.filter((s) => s.status === "active").length;
   await sb.from("sis_sync_meta").upsert(

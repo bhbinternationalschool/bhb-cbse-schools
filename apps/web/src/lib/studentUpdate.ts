@@ -315,12 +315,13 @@ export async function bulkUploadParentImages(
   let applied = 0;
   let skipped = 0;
   const errors: string[] = [];
-  let students = [...sis.students];
-  let households = [...sis.households];
+  const students = [...sis.students];
+  const households = [...sis.households];
 
   for (const file of list) {
     const parsed = parseBulkImageName(file.name);
-    let { admissionNo, kind } = parsed;
+    const { admissionNo } = parsed;
+    let { kind } = parsed;
     if (kind === "student") {
       // Bare admission no → treat as guardian/parent photo
       kind = "parent";
@@ -421,8 +422,8 @@ export function setParentPhoto(
   const idx = sis.students.findIndex((s) => s.id === studentId);
   if (idx < 0) return { ok: false, error: "Student not found" };
   const prev = sis.students[idx]!;
-  let students = [...sis.students];
-  let households = [...sis.households];
+  const students = [...sis.students];
+  const households = [...sis.households];
 
   if (which === "father") {
     students[idx] = normalizeStudent({ ...prev, fatherPhotoUrl: photoUrl });

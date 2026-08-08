@@ -44,7 +44,6 @@ export const schedulePayrollSync = (state: PayrollState) => {
 };
 export const ensurePayrollHydrated = async () => {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = payrollReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("payroll")
@@ -52,7 +51,12 @@ export const ensurePayrollHydrated = async () => {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { bundle, changed } = await hydratePayrollDeskFromDb(readFromDb);
+  const { bundle, changed, ok } = await hydratePayrollDeskFromDb(readFromDb);
+  if (!ok) {
+    // Fetch failed — do not lock hydration flag; caller can retry later.
+    return blobChanged;
+  }
+  markDeskHydrated(MODULE);
   if (changed && (bundle.runs.length > 0 || readFromDb)) {
     writePayrollLocalRaw(
       mergeDbDeskIntoPayrollState(loadPayroll(), bundle, { preferDb: readFromDb }),

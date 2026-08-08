@@ -174,13 +174,18 @@ export async function pushTransportDeskToDb(
 export async function fetchTransportDeskFromDb(): Promise<{
   bundle: TransportDeskBundle;
   meta: TransportDeskSyncMeta | null;
+  /** false = tenant/query could not be resolved; bundle is NOT a confirmed empty state. */
+  ok: boolean;
 }> {
   const ctx = await resolveCtx();
   const empty = emptyBundle();
-  if (!ctx) return { bundle: empty, meta: null };
+  if (!ctx) return { bundle: empty, meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
-  const [{ data: sliceRows }, { data: metaRow }] = await Promise.all([
+  const [
+    { data: sliceRows, error: sliceErr },
+    { data: metaRow },
+  ] = await Promise.all([
     sb.from("transport_desk_slices").select("*").eq("tenant_id", tenantId),
     sb
       .from("transport_desk_sync_meta")
@@ -188,6 +193,11 @@ export async function fetchTransportDeskFromDb(): Promise<{
       .eq("tenant_id", tenantId)
       .maybeSingle(),
   ]);
+
+  if (sliceErr) {
+    console.warn("[transport-db] fetch failed", sliceErr.message);
+    return { bundle: empty, meta: null, ok: false };
+  }
 
   const sliceMap: Partial<Record<TransportSliceKey, unknown>> = {};
   for (const row of sliceRows ?? []) {
@@ -213,7 +223,7 @@ export async function fetchTransportDeskFromDb(): Promise<{
       }
     : null;
 
-  return { bundle, meta };
+  return { bundle, meta, ok: true };
 }
 
 export function deskBundleToTransportState(

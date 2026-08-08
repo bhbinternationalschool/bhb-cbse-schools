@@ -99,6 +99,7 @@ export async function hydrateTimetableDeskFromDb(
     | "meta"
   >;
   changed: boolean;
+  ok: boolean;
 }> {
   const emptyBundle = {
     workingWeekdays: [] as number[],
@@ -116,14 +117,14 @@ export async function hydrateTimetableDeskFromDb(
   };
 
   if (!isSupabaseConfigured()) {
-    return { bundle: emptyBundle, changed: false };
+    return { bundle: emptyBundle, changed: false, ok: false };
   }
   try {
     const res = await fetch("/api/school-data/timetable-desk", {
       method: "GET",
       cache: "no-store",
     });
-    if (!res.ok) return { bundle: emptyBundle, changed: false };
+    if (!res.ok) return { bundle: emptyBundle, changed: false, ok: false };
     const body = (await res.json()) as Partial<TimetableState> & {
       updatedAt?: string;
       gridCount?: number;
@@ -153,7 +154,7 @@ export async function hydrateTimetableDeskFromDb(
       remoteGrids > meta.gridCount ||
       bundle.bellTemplate.length > 0;
 
-    if (!shouldTake) return { bundle: emptyBundle, changed: false };
+    if (!shouldTake) return { bundle: emptyBundle, changed: false, ok: true };
 
     writeMeta({
       updatedAt: body.updatedAt || new Date().toISOString(),
@@ -162,8 +163,8 @@ export async function hydrateTimetableDeskFromDb(
         body.substitutionCount ?? bundle.substitutions.length,
     });
 
-    return { bundle, changed: true };
+    return { bundle, changed: true, ok: true };
   } catch {
-    return { bundle: emptyBundle, changed: false };
+    return { bundle: emptyBundle, changed: false, ok: false };
   }
 }

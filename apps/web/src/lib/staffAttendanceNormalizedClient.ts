@@ -131,6 +131,8 @@ export async function hydrateStaffAttendanceDeskFromDb(
   registers: StaffAttendanceState["registers"];
   ancillary: StaffAttendanceDeskAncillary;
   changed: boolean;
+  /** false = fetch failed/unauthenticated; caller must not treat result as confirmed-empty. */
+  ok: boolean;
 }> {
   const remote = await fetchStaffAttendanceDeskFromApi();
   if (!remote) {
@@ -138,6 +140,7 @@ export async function hydrateStaffAttendanceDeskFromDb(
       registers: [],
       ancillary: { settings: defaultAttendanceSettings() },
       changed: false,
+      ok: false,
     };
   }
 
@@ -150,7 +153,7 @@ export async function hydrateStaffAttendanceDeskFromDb(
     remote.count > meta.registerCount;
 
   if (!shouldTake) {
-    return { registers: [], ancillary: remote.ancillary, changed: false };
+    return { registers: [], ancillary: remote.ancillary, changed: false, ok: true };
   }
 
   writeMeta({
@@ -161,5 +164,6 @@ export async function hydrateStaffAttendanceDeskFromDb(
     registers: remote.registers,
     ancillary: remote.ancillary,
     changed: true,
+    ok: true,
   };
 }

@@ -1336,7 +1336,7 @@ export function sendAllottedRteToSis(input: {
     return { ok: false, error: "Assign a section (Masters) before SIS send" };
   }
 
-  let sis = loadSis();
+  const sis = loadSis();
   const admissionDate = todayIso();
   const admissionNo = suggestAdmissionNo(sis.students);
   const srn = suggestSrn(sis.students);

@@ -41,7 +41,9 @@ export function paymentsNormalizedSyncEnabled(): boolean {
 }
 
 export function paymentsReadFromDbClientEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_PAYMENTS_READ_FROM_DB === "true";
+  const flag = process.env.NEXT_PUBLIC_PAYMENTS_READ_FROM_DB?.trim().toLowerCase();
+  if (flag === "false" || flag === "0") return false;
+  return true;
 }
 
 export function schedulePaymentsDeskSync(state: PaymentsState) {
@@ -114,9 +116,9 @@ export async function fetchPaymentsDeskFromApi(): Promise<{
 
 export async function hydratePaymentsDeskFromDb(
   preferDb?: boolean,
-): Promise<{ links: PaymentsState["links"]; changed: boolean }> {
+): Promise<{ links: PaymentsState["links"]; changed: boolean; ok: boolean }> {
   const remote = await fetchPaymentsDeskFromApi();
-  if (!remote) return { links: [], changed: false };
+  if (!remote) return { links: [], changed: false, ok: false };
 
   const meta = readMeta();
   const shouldTake =
@@ -126,11 +128,11 @@ export async function hydratePaymentsDeskFromDb(
     (remote.updatedAt && remote.updatedAt >= meta.updatedAt) ||
     remote.count > meta.linkCount;
 
-  if (!shouldTake) return { links: [], changed: false };
+  if (!shouldTake) return { links: [], changed: false, ok: true };
 
   writeMeta({
     updatedAt: remote.updatedAt,
     linkCount: remote.count,
   });
-  return { links: remote.links, changed: true };
+  return { links: remote.links, changed: true, ok: true };
 }

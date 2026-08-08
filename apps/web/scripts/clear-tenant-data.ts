@@ -363,7 +363,7 @@ async function main() {
   }
   const tenantId = tenant.id as string;
 
-  let tables = buildTenantDeleteTables(opts);
+  const tables = buildTenantDeleteTables(opts);
   const blobTables = buildBlobTables(opts);
 
   console.log(

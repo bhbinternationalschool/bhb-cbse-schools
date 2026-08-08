@@ -217,9 +217,11 @@ export async function pushStaffAttendanceRegistersToDb(
 export async function fetchStaffAttendanceRegistersFromDb(): Promise<{
   registers: StaffAttendanceRegister[];
   meta: StaffAttendanceDeskSyncMeta | null;
+  /** false = tenant/query could not be resolved; result is NOT a confirmed empty state. */
+  ok: boolean;
 }> {
   const ctx = await resolveCtx();
-  if (!ctx) return { registers: [], meta: null };
+  if (!ctx) return { registers: [], meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
   const { data: headers, error: hErr } = await sb
@@ -228,7 +230,12 @@ export async function fetchStaffAttendanceRegistersFromDb(): Promise<{
     .eq("tenant_id", tenantId)
     .order("attendance_date", { ascending: false });
 
-  if (hErr || !headers?.length) {
+  if (hErr) {
+    console.warn("[staff-attendance-db] fetch registers failed", hErr.message);
+    return { registers: [], meta: null, ok: false };
+  }
+
+  if (!headers?.length) {
     const { data: metaRow } = await sb
       .from("staff_attendance_desk_sync_meta")
       .select(META_SELECT)
@@ -237,22 +244,29 @@ export async function fetchStaffAttendanceRegistersFromDb(): Promise<{
     return {
       registers: [],
       meta: mapMetaRow(metaRow as Record<string, unknown> | null),
+      ok: true,
     };
   }
 
   const ids = headers.map((h) => h.id as string);
-  const [{ data: markRows }, { data: metaRow }] = await Promise.all([
-    sb
-      .from("staff_attendance_desk_marks")
-      .select("*")
-      .eq("tenant_id", tenantId)
-      .in("register_id", ids),
-    sb
-      .from("staff_attendance_desk_sync_meta")
-      .select(META_SELECT)
-      .eq("tenant_id", tenantId)
-      .maybeSingle(),
-  ]);
+  const [{ data: markRows, error: mErr }, { data: metaRow }] =
+    await Promise.all([
+      sb
+        .from("staff_attendance_desk_marks")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .in("register_id", ids),
+      sb
+        .from("staff_attendance_desk_sync_meta")
+        .select(META_SELECT)
+        .eq("tenant_id", tenantId)
+        .maybeSingle(),
+    ]);
+
+  if (mErr) {
+    console.warn("[staff-attendance-db] fetch marks failed", mErr.message);
+    return { registers: [], meta: null, ok: false };
+  }
 
   const marksByRegister = new Map<string, Record<string, unknown>[]>();
   for (const row of markRows ?? []) {
@@ -272,6 +286,7 @@ export async function fetchStaffAttendanceRegistersFromDb(): Promise<{
   return {
     registers,
     meta: mapMetaRow(metaRow as Record<string, unknown> | null),
+    ok: true,
   };
 }
 
@@ -301,14 +316,16 @@ export type StaffAttendanceDeskSnapshot = {
   registers: StaffAttendanceRegister[];
   ancillary: StaffAttendanceDeskAncillary;
   meta: StaffAttendanceDeskSyncMeta | null;
+  /** false = tenant/query could not be resolved; result is NOT a confirmed empty state. */
+  ok: boolean;
 };
 
 export async function fetchStaffAttendanceDeskFromDb(): Promise<StaffAttendanceDeskSnapshot> {
-  const [{ registers, meta }, settings] = await Promise.all([
+  const [{ registers, meta, ok }, settings] = await Promise.all([
     fetchStaffAttendanceRegistersFromDb(),
     fetchStaffAttendanceSettingsFromDb(),
   ]);
-  return { registers, ancillary: { settings }, meta };
+  return { registers, ancillary: { settings }, meta, ok };
 }
 
 export async function pushStaffAttendanceRegisterToDb(

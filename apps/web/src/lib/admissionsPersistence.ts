@@ -4,6 +4,7 @@
 
 import {
   admissionsStateIsEmpty,
+  defaultAdmissionsState,
   loadAdmissions,
   normalizeAdmissionsState,
   writeAdmissionsLocalRaw,
@@ -135,7 +136,6 @@ export function scheduleAdmissionsSync(state: AdmissionsState) {
 export async function ensureAdmissionsHydrated(): Promise<boolean> {
   if (!admissionsRemoteEnabled()) return false;
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   let changed = false;
   const skipBlob = deskSkipBlobHydrateClient("admissions");
@@ -159,18 +159,35 @@ export async function ensureAdmissionsHydrated(): Promise<boolean> {
     }
   }
 
-  const { state: deskState, changed: deskChanged } =
+  const { state: deskState, changed: deskChanged, ok } =
     await hydrateAdmissionsDeskFromDb(admissionsReadFromDbEnabled());
-  if (deskChanged && deskState) {
+  if (!ok) {
+    if (typeof window !== "undefined") {
+      const { reportLoadFailure } = await import("@/components/shell/Toast");
+      reportLoadFailure("admissions data");
+    }
+    return false;
+  }
+
+  markDeskHydrated(MODULE);
+  const readFromDb = admissionsReadFromDbEnabled();
+  if (readFromDb && deskState && admissionsStateIsEmpty(deskState)) {
+    const local = loadAdmissions();
+    if (!admissionsStateIsEmpty(local)) {
+      const empty = defaultAdmissionsState();
+      writeAdmissionsLocalRaw(empty);
+      changed = true;
+    }
+  } else if (deskChanged && deskState) {
     const merged = mergeDbDeskIntoAdmissionsState(loadAdmissions(), deskState, {
-      preferDb: admissionsReadFromDbEnabled(),
+      preferDb: readFromDb,
     });
     writeAdmissionsLocalRaw(merged);
     changed = true;
   }
 
   const next = loadAdmissions();
-  if (!admissionsStateIsEmpty(next)) {
+  if (!readFromDb && !admissionsStateIsEmpty(next)) {
     scheduleAdmissionsSync(next);
   } else if (!skipBlob) {
     const remote = await fetchRemoteBlob();
@@ -178,6 +195,10 @@ export async function ensureAdmissionsHydrated(): Promise<boolean> {
       writeAdmissionsLocalRaw(remote.state);
       changed = true;
     }
+  }
+
+  if (changed && typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("bhb-admissions-hydrated"));
   }
 
   return changed;

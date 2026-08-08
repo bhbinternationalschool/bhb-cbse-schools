@@ -1712,7 +1712,7 @@ function ensureFeeHeads(state: MastersState): MastersState {
   const categories = resolveFeeHeadCategories(state);
   // Ensure every head category exists in the catalog
   const codes = new Set(categories.map((c) => c.code));
-  let nextCats = [...categories];
+  const nextCats = [...categories];
   for (const h of heads) {
     const code = (h.category || "misc").toLowerCase();
     if (!codes.has(code)) {

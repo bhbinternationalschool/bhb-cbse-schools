@@ -77,7 +77,6 @@ export async function pushPtmRemoteServer(
  */
 export async function ensurePtmHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = ptmReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("ptm")
@@ -85,7 +84,12 @@ export async function ensurePtmHydrated(): Promise<boolean> {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { bundle, changed } = await hydratePtmDeskFromDb(readFromDb);
+  const { bundle, changed, ok } = await hydratePtmDeskFromDb(readFromDb);
+  if (!ok) {
+    // Fetch failed — do not lock hydration flag; caller can retry later.
+    return blobChanged;
+  }
+  markDeskHydrated(MODULE);
   const hasDesk =
     bundle.events.length > 0 ||
     bundle.slots.length > 0 ||

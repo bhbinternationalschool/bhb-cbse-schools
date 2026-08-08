@@ -23,9 +23,21 @@ export function consumeFreshLoginSession(): boolean {
 }
 
 export function clearWorkspaceLocalStorage(): void {
-  // Never delete working data from localStorage on login or session switch.
-  // Local storage holds the primary workspace state and is merged with remote DB.
-  return;
+  if (typeof window === "undefined") return;
+  try {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(DESK_PREFIX) && !LOCAL_STORAGE_KEEP.has(key)) {
+        keysToRemove.push(key);
+      }
+    }
+    for (const key of keysToRemove) {
+      localStorage.removeItem(key);
+    }
+  } catch {
+    /* ignore */
+  }
 }
 
 export async function resetAllWorkspacePersistenceCaches(): Promise<void> {

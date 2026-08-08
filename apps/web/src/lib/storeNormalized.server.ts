@@ -671,6 +671,8 @@ export async function pushStoreDeskToDb(
 export async function fetchStoreDeskFromDb(): Promise<{
   bundle: StoreDeskBundle;
   meta: StoreDeskSyncMeta | null;
+  /** false = tenant/query could not be resolved; bundle is NOT a confirmed empty state. */
+  ok: boolean;
 }> {
   const ctx = await resolveCtx();
   const empty: StoreDeskBundle = {
@@ -686,23 +688,23 @@ export async function fetchStoreDeskFromDb(): Promise<{
     assetAllocations: [],
     sellReturns: [],
   };
-  if (!ctx) return { bundle: empty, meta: null };
+  if (!ctx) return { bundle: empty, meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
   const [
-    { data: categoryRows },
-    { data: saleGroupRows },
-    { data: uomRows },
-    { data: infraRows },
-    { data: sourceRows },
-    { data: itemRows },
-    { data: issueRows },
-    { data: issueLineRows },
-    { data: movementRows },
-    { data: invAllocRows },
-    { data: assetAllocRows },
-    { data: sellReturnRows },
-    { data: sellReturnLineRows },
+    { data: categoryRows, error: categoryErr },
+    { data: saleGroupRows, error: saleGroupErr },
+    { data: uomRows, error: uomErr },
+    { data: infraRows, error: infraErr },
+    { data: sourceRows, error: sourceErr },
+    { data: itemRows, error: itemErr },
+    { data: issueRows, error: issueErr },
+    { data: issueLineRows, error: issueLineErr },
+    { data: movementRows, error: movementErr },
+    { data: invAllocRows, error: invAllocErr },
+    { data: assetAllocRows, error: assetAllocErr },
+    { data: sellReturnRows, error: sellReturnErr },
+    { data: sellReturnLineRows, error: sellReturnLineErr },
     { data: metaRow },
   ] = await Promise.all([
     sb.from("store_desk_categories").select("*").eq("tenant_id", tenantId),
@@ -724,6 +726,40 @@ export async function fetchStoreDeskFromDb(): Promise<{
       .eq("tenant_id", tenantId)
       .maybeSingle(),
   ]);
+
+  if (
+    categoryErr ||
+    saleGroupErr ||
+    uomErr ||
+    infraErr ||
+    sourceErr ||
+    itemErr ||
+    issueErr ||
+    issueLineErr ||
+    movementErr ||
+    invAllocErr ||
+    assetAllocErr ||
+    sellReturnErr ||
+    sellReturnLineErr
+  ) {
+    console.warn(
+      "[store-db] fetch failed",
+      categoryErr?.message,
+      saleGroupErr?.message,
+      uomErr?.message,
+      infraErr?.message,
+      sourceErr?.message,
+      itemErr?.message,
+      issueErr?.message,
+      issueLineErr?.message,
+      movementErr?.message,
+      invAllocErr?.message,
+      assetAllocErr?.message,
+      sellReturnErr?.message,
+      sellReturnLineErr?.message,
+    );
+    return { bundle: empty, meta: null, ok: false };
+  }
 
   const linesByIssue = new Map<string, StoreIssueLine[]>();
   for (const row of issueLineRows ?? []) {
@@ -796,5 +832,6 @@ export async function fetchStoreDeskFromDb(): Promise<{
           updatedAt: String((metaRow as { updated_at: string }).updated_at),
         }
       : null,
+    ok: true,
   };
 }

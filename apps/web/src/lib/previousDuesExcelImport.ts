@@ -125,7 +125,7 @@ export function applyPreviousDuesImport(input: {
   const carried = [...(input.fees.carriedForwardDues ?? [])];
   let created = 0;
   let updated = 0;
-  let cleared = 0;
+  const cleared = 0;
   let skipped = 0;
   const errors: string[] = [];
   const matched: {

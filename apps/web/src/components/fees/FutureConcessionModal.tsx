@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { formatInr } from "@/lib/masters";
 import type { FutureConcessionCandidate } from "@/lib/counterConcession";
 
@@ -16,6 +17,14 @@ export function FutureConcessionModal({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onCancel();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
   const selectedCount = candidates.filter((c) => selectedKeys.has(c.key)).length;
 
   return (

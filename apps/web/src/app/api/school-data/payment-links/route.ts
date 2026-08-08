@@ -16,7 +16,13 @@ export const runtime = "nodejs";
 export async function GET(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["payment-links"], "GET");
   if (!auth.ok) return auth.response
-  const { links, meta } = await fetchPaymentDeskFromDb();
+  const { links, meta, ok } = await fetchPaymentDeskFromDb();
+  if (!ok) {
+    return NextResponse.json(
+      { ok: false, error: "Payment desk fetch failed — tenant/db unavailable" },
+      { status: 503 },
+    );
+  }
   return NextResponse.json({
     ok: true,
     links,

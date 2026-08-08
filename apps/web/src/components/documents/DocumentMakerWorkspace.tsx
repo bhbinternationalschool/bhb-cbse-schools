@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { FileText } from "lucide-react";
-import { jsPDF } from "jspdf";
 import { loadMasters, type MastersState } from "@/lib/masters";
 import {
   SCHOOL_DOCUMENT_PRESETS,
@@ -110,6 +109,7 @@ export function DocumentMakerWorkspace() {
     const m = masters ?? loadMasters();
     const letterhead = await resolvePdfLetterhead(m);
     const brand = await resolveSchoolBrandAssets(m);
+    const { jsPDF } = await import("jspdf");
     const doc = new jsPDF({ unit: "pt", format: "a4" });
     const margin = 48;
     const pageW = doc.internal.pageSize.getWidth();

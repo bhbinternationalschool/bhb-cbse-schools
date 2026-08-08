@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { TENANT } from "@/lib/types";
+import { mapsRateLimited } from "@/lib/mapsRateLimit";
 
 /**
  * Road distance (km) from origin address to destination (school by default).
@@ -22,6 +23,9 @@ function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): nu
 }
 
 export async function GET(req: NextRequest) {
+  if (mapsRateLimited(req)) {
+    return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+  }
   const origin = req.nextUrl.searchParams.get("origin")?.trim() || "";
   const originLat = req.nextUrl.searchParams.get("originLat")?.trim();
   const originLng = req.nextUrl.searchParams.get("originLng")?.trim();

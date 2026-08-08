@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { MastersState } from "@/lib/masters";
 import {
   applySessionGapActions,
@@ -38,6 +38,14 @@ export function SessionImportGapDialog({
   onClose,
   onApplied,
 }: Props) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   const [choices, setChoices] = useState<Record<string, SessionGapAction>>(
     () =>
       Object.fromEntries(missing.map((m) => [m.studentId, "leave" as const])),

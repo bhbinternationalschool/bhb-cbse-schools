@@ -71,7 +71,6 @@ export async function pushTransportRemoteServer(
 
 export async function ensureTransportHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = transportReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("transport")
@@ -79,7 +78,12 @@ export async function ensureTransportHydrated(): Promise<boolean> {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { bundle, changed } = await hydrateTransportDeskFromDb(readFromDb);
+  const { bundle, changed, ok } = await hydrateTransportDeskFromDb(readFromDb);
+  if (!ok) {
+    // Fetch failed — do not lock hydration flag; caller can retry later.
+    return blobChanged;
+  }
+  markDeskHydrated(MODULE);
   if (
     changed &&
     (bundle.routes.length > 0 ||
