@@ -14,6 +14,7 @@
     "test:sis-revision": "npx tsx src/lib/sisRevision.selftest.ts",
     "test:sis-prune": "npx tsx src/lib/sisPrune.selftest.ts",
     "test:audit-redaction": "npx tsx src/lib/auditRedaction.selftest.ts",
+    "test:student-filters": "npx tsx src/lib/studentFilters.selftest.ts",
     "test:erp-chat": "npx tsx src/lib/erpChat.selftest.ts",
     "test:wa-templates-automation": "npx tsx src/lib/waTemplatesAutomation.selftest.ts",
     "import:leads": "npx tsx scripts/import-lead-excels.ts",
