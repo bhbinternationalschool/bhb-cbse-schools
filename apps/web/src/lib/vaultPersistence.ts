@@ -73,7 +73,6 @@ export async function pushVaultRemoteServer(
 
 export async function ensureVaultHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = vaultReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("vault")
@@ -81,7 +80,12 @@ export async function ensureVaultHydrated(): Promise<boolean> {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { bundle, changed } = await hydrateVaultDeskFromDb(readFromDb);
+  const { bundle, changed, ok } = await hydrateVaultDeskFromDb(readFromDb);
+  if (!ok) {
+    // Fetch failed — do not lock hydration flag; caller can retry later.
+    return blobChanged;
+  }
+  markDeskHydrated(MODULE);
   if (changed && (bundle.documents.length > 0 || readFromDb)) {
     const merged = mergeDbDeskIntoVaultState(loadVault(), bundle, {
       preferDb: readFromDb,

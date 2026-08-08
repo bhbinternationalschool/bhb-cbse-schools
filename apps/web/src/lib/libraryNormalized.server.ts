@@ -416,6 +416,8 @@ export async function pushLibraryDeskToDb(
 export async function fetchLibraryDeskFromDb(): Promise<{
   bundle: LibraryDeskBundle;
   meta: LibraryDeskSyncMeta | null;
+  /** false = tenant/query could not be resolved; bundle is NOT a confirmed empty state. */
+  ok: boolean;
 }> {
   const ctx = await resolveCtx();
   const empty: LibraryDeskBundle = {
@@ -430,15 +432,15 @@ export async function fetchLibraryDeskFromDb(): Promise<{
       finePaisePerDay: 500,
     },
   };
-  if (!ctx) return { bundle: empty, meta: null };
+  if (!ctx) return { bundle: empty, meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
   const [
-    { data: titleRows },
-    { data: copyRows },
-    { data: issueRows },
-    { data: procurementRows },
-    { data: settingsRow },
+    { data: titleRows, error: titleErr },
+    { data: copyRows, error: copyErr },
+    { data: issueRows, error: issueErr },
+    { data: procurementRows, error: procurementErr },
+    { data: settingsRow, error: settingsErr },
     { data: metaRow },
   ] = await Promise.all([
     sb.from("library_desk_titles").select("*").eq("tenant_id", tenantId),
@@ -458,6 +460,18 @@ export async function fetchLibraryDeskFromDb(): Promise<{
       .eq("tenant_id", tenantId)
       .maybeSingle(),
   ]);
+
+  if (titleErr || copyErr || issueErr || procurementErr || settingsErr) {
+    console.warn(
+      "[library-db] fetch failed",
+      titleErr?.message,
+      copyErr?.message,
+      issueErr?.message,
+      procurementErr?.message,
+      settingsErr?.message,
+    );
+    return { bundle: empty, meta: null, ok: false };
+  }
 
   const s = settingsRow as {
     max_books_per_student?: number;
@@ -491,5 +505,6 @@ export async function fetchLibraryDeskFromDb(): Promise<{
           updatedAt: String((metaRow as { updated_at: string }).updated_at),
         }
       : null,
+    ok: true,
   };
 }

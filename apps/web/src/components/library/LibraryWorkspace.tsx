@@ -172,7 +172,7 @@ export function LibraryWorkspace() {
     void ensureLibraryHydrated().then((changed) => {
       if (changed) refresh();
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, []);
 
   useEffect(() => {

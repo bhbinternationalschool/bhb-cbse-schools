@@ -44,7 +44,6 @@ export const schedulePurchaseSync = (state: PurchaseState) => {
 };
 export const ensurePurchaseHydrated = async () => {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = purchaseReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("purchase")
@@ -52,7 +51,12 @@ export const ensurePurchaseHydrated = async () => {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { bundle, changed } = await hydratePurchaseDeskFromDb(readFromDb);
+  const { bundle, changed, ok } = await hydratePurchaseDeskFromDb(readFromDb);
+  if (!ok) {
+    // Fetch failed — do not lock hydration flag; caller can retry later.
+    return blobChanged;
+  }
+  markDeskHydrated(MODULE);
   if (changed && (bundle.indents.length > 0 || readFromDb)) {
     writePurchaseLocalRaw(
       mergeDbDeskIntoPurchaseState(loadPurchase(), bundle, { preferDb: readFromDb }),

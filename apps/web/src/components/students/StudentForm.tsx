@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -13,6 +13,7 @@ import {
   type MastersState,
 } from "@/lib/masters";
 import { bumpStudentSeriesUses } from "@/lib/numberSeries";
+import { suggestSystemAdmissionForImport } from "@/lib/studentLegacyAdmission";
 import {
   BLOOD_GROUPS,
   DOC_LABELS,
@@ -508,6 +509,8 @@ export function StudentForm({
     });
     const hhDraft: Household = {
       id: "draft",
+      // Local preview object, never pushed — no server version to carry.
+      revisionAt: "",
       code: "",
       guardianName,
       mobile,
@@ -556,6 +559,84 @@ export function StudentForm({
     setNotice(msg);
     window.setTimeout(() => setNotice(null), 2200);
   }
+
+  const dirtyRef = useRef(false);
+
+  const [liveDuplicate, setLiveDuplicate] = useState<{
+    reasons: string[];
+    matches: { id: string; fullName: string; admissionNo: string }[];
+  } | null>(null);
+
+  useEffect(() => {
+    const draftName = fullName.trim();
+    if (draftName.length < 3) {
+      setLiveDuplicate(null);
+      return;
+    }
+    const t = window.setTimeout(async () => {
+      const { listSuspectedDuplicates, DUPLICATE_REASON_LABEL } = await import(
+        "@/lib/studentDuplicates"
+      );
+      const sis = loadSis();
+      const draft = normalizeStudent({
+        id: "__draft__",
+        fullName: draftName,
+        dob,
+        fatherName,
+        admissionNo,
+        pen,
+        aadhaarNumber,
+        aadhaarLast4,
+        apaarId,
+        academicYearCode,
+      });
+      const roster = sis.students.filter((s) => s.id !== studentId);
+      const groups = listSuspectedDuplicates(
+        { ...sis, students: [...roster, draft] },
+        { academicYearCode },
+      ).filter((g) => g.students.some((s) => s.id === "__draft__"));
+      if (groups.length === 0) {
+        setLiveDuplicate(null);
+        return;
+      }
+      const reasons = [
+        ...new Set(
+          groups.flatMap((g) => g.reasons.map((r) => DUPLICATE_REASON_LABEL[r])),
+        ),
+      ];
+      const matches = groups
+        .flatMap((g) => g.students)
+        .filter((s) => s.id !== "__draft__")
+        .map((s) => ({
+          id: s.id,
+          fullName: s.fullName,
+          admissionNo: s.admissionNo,
+        }));
+      setLiveDuplicate({ reasons, matches });
+    }, 500);
+    return () => window.clearTimeout(t);
+  }, [
+    fullName,
+    dob,
+    fatherName,
+    admissionNo,
+    pen,
+    aadhaarNumber,
+    aadhaarLast4,
+    apaarId,
+    academicYearCode,
+    studentId,
+  ]);
+
+  useEffect(() => {
+    function onBeforeUnload(e: BeforeUnloadEvent) {
+      if (!dirtyRef.current) return;
+      e.preventDefault();
+      e.returnValue = "";
+    }
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, []);
 
   function setDocFile(key: StudentDocKey, file: StudentDocFile) {
     setDocs((prev) => {
@@ -924,6 +1005,7 @@ export function StudentForm({
       households,
       students,
     });
+    dirtyRef.current = false;
 
     bumpStudentSeriesUses(payload, academicYearCode);
 
@@ -980,7 +1062,11 @@ export function StudentForm({
           </p>
         </div>
         {notice ? (
-          <span className="rounded-lg bg-[rgba(197,160,40,0.18)] px-3 py-1.5 text-xs font-medium text-[var(--brand-deep)]">
+          <span
+            role="status"
+            aria-live="polite"
+            className="rounded-lg bg-[rgba(197,160,40,0.18)] px-3 py-1.5 text-xs font-medium text-[var(--brand-deep)]"
+          >
             {notice}
           </span>
         ) : null}
@@ -1002,6 +1088,9 @@ export function StudentForm({
 
       <form
         onSubmit={saveStudent}
+        onChange={() => {
+          dirtyRef.current = true;
+        }}
         className="mt-5 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-5"
       >
         {tab === "basic" ? (
@@ -1009,8 +1098,30 @@ export function StudentForm({
             <p className="mb-3 text-xs text-[var(--muted)]">
               Enrollment essentials for the SIS register and Fee Take.
             </p>
+            {liveDuplicate ? (
+              <div
+                role="status"
+                aria-live="polite"
+                className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-950"
+              >
+                <p className="font-semibold">
+                  Possible duplicate — {liveDuplicate.reasons.join(", ")}
+                </p>
+                <p className="mt-0.5">
+                  Matches:{" "}
+                  {liveDuplicate.matches
+                    .map(
+                      (m) =>
+                        `${m.fullName}${m.admissionNo ? ` (${m.admissionNo})` : ""}`,
+                    )
+                    .join(", ")}
+                  . Check the Duplicates tab under Students before saving if
+                  this isn&apos;t a sibling.
+                </p>
+              </div>
+            ) : null}
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Admission no (system)">
+              <Field label="Admission no (system)" required>
                 <input
                   className="field"
                   value={admissionNo}
@@ -1029,12 +1140,35 @@ export function StudentForm({
                 </Field>
               ) : null}
               {systemAdmissionPending ? (
-                <p className="sm:col-span-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
-                  System admission pending — duplicate name on import. Verify on{" "}
-                  <strong>Students → Roster</strong> to assign a unique number.
-                </p>
+                <div className="sm:col-span-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-950">
+                  <div>
+                    <span className="font-semibold">System admission pending</span> — duplicate name on import. Auto-assign a unique admission number to rectify.
+                  </div>
+                  <button
+                    type="button"
+                    className="rounded-lg bg-amber-800 px-3 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-amber-900"
+                    onClick={() => {
+                      const m = loadMasters();
+                      const sis = loadSis();
+                      const sug = suggestSystemAdmissionForImport(
+                        m,
+                        sis.students,
+                        academicYearCode || "2025-26",
+                      );
+                      if (sug) {
+                        setAdmissionNo(sug);
+                        setSystemAdmissionPending(false);
+                        flash(`Assigned system admission number: ${sug}`);
+                      } else {
+                        flash("Could not generate admission number — check Masters number series");
+                      }
+                    }}
+                  >
+                    Auto-assign Admission No.
+                  </button>
+                </div>
               ) : null}
-              <Field label="Full name">
+              <Field label="Full name" required>
                 <input
                   className="field"
                   value={fullName}
@@ -1050,7 +1184,7 @@ export function StudentForm({
               onError={flash}
             />
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
-              <Field label="Class">
+              <Field label="Class" required>
                 <select
                   className="field"
                   value={classId}
@@ -1083,7 +1217,7 @@ export function StudentForm({
                     ))}
                 </select>
               </Field>
-              <Field label="Section">
+              <Field label="Section" required>
                 <select
                   className="field"
                   value={sectionId}
@@ -1864,7 +1998,7 @@ export function StudentForm({
                     placeholder="Father / Mother / Other"
                   />
                 </Field>
-                <Field label="Mobile (10 digits)">
+                <Field label="Mobile (10 digits)" required>
                   <input
                     className="field"
                     value={mobile}
@@ -2369,14 +2503,23 @@ export function StudentForm({
 
 function Field({
   label,
+  required,
   children,
 }: {
   label: string;
+  required?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <label className="mt-3 block text-sm first:mt-0">
-      <span className="mb-1.5 block text-[var(--muted)]">{label}</span>
+      <span className="mb-1.5 block text-[var(--muted)]">
+        {label}
+        {required ? (
+          <span className="ml-0.5 text-[var(--danger,#b3261e)]" aria-hidden="true">
+            *
+          </span>
+        ) : null}
+      </span>
       {children}
     </label>
   );

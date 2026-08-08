@@ -94,6 +94,7 @@ export async function hydrateRteDeskFromDb(
 ): Promise<{
   bundle: Pick<RteState, "seats" | "applications" | "settings">;
   changed: boolean;
+  ok: boolean;
 }> {
   if (!isSupabaseConfigured()) {
     return {
@@ -103,6 +104,7 @@ export async function hydrateRteDeskFromDb(
         settings: { mandatedPct: 25, autoApplyFeeWaiver: true, note: "" },
       },
       changed: false,
+      ok: false,
     };
   }
   try {
@@ -118,6 +120,7 @@ export async function hydrateRteDeskFromDb(
           settings: { mandatedPct: 25, autoApplyFeeWaiver: true, note: "" },
         },
         changed: false,
+        ok: false,
       };
     }
     const body = (await res.json()) as {
@@ -161,6 +164,7 @@ export async function hydrateRteDeskFromDb(
           settings: { mandatedPct: 25, autoApplyFeeWaiver: true, note: "" },
         },
         changed: false,
+        ok: true,
       };
     }
 
@@ -170,7 +174,7 @@ export async function hydrateRteDeskFromDb(
       applicationCount: body.applicationCount ?? bundle.applications.length,
     });
 
-    return { bundle, changed: true };
+    return { bundle, changed: true, ok: true };
   } catch {
     return {
       bundle: {
@@ -179,6 +183,7 @@ export async function hydrateRteDeskFromDb(
         settings: { mandatedPct: 25, autoApplyFeeWaiver: true, note: "" },
       },
       changed: false,
+      ok: false,
     };
   }
 }

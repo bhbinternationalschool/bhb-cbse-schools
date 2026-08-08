@@ -77,7 +77,6 @@ export async function pushPaymentsRemoteServer(
  */
 export async function ensurePaymentsHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = paymentsReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("payments")
@@ -85,7 +84,10 @@ export async function ensurePaymentsHydrated(): Promise<boolean> {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { links, changed } = await hydratePaymentsDeskFromDb(readFromDb);
+  const { links, changed, ok } = await hydratePaymentsDeskFromDb(readFromDb);
+  if (!ok) return false;
+
+  markDeskHydrated(MODULE);
   if (changed && (links.length > 0 || readFromDb)) {
     const merged = mergeDbDeskIntoPaymentsState(
       loadPayments(),

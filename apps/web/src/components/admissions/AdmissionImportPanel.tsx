@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import * as XLSX from "xlsx";
 import {
   ADMISSION_SOURCES,
   ADMISSION_STAGES,
@@ -107,6 +106,7 @@ export function AdmissionImportPanel({
     const name = file.name.toLowerCase();
     if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
       try {
+        const XLSX = await import("xlsx");
         const buf = await file.arrayBuffer();
         const wb = XLSX.read(buf, { type: "array", cellDates: true });
         const sheetName = wb.SheetNames[0] || "Sheet1";

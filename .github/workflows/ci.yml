@@ -1,0 +1,90 @@
+name: CI
+
+# Merge gate for the BHB ERP. Typecheck and lint are both currently clean,
+# so any new error here is a genuine regression introduced by the change —
+# not pre-existing debt. Keep it that way.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A newer push to the same branch supersedes an in-flight run.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Typecheck · Lint · Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # `npm ci` installs exactly the lockfile — never silently resolves
+      # a different tree than the one that was reviewed.
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      # Self-test harnesses (no test framework in this repo by design —
+      # these run as plain tsx scripts and exit non-zero on failure).
+      - name: Test — session cookie cannot be forged
+        working-directory: apps/web
+        run: npm run test:session-cookie
+
+      - name: Test — failed reads never look like empty data
+        working-directory: apps/web
+        run: npm run test:hydrate-failure-safety
+
+      - name: Test — optimistic-locking token survives normalization
+        working-directory: apps/web
+        run: npm run test:sis-revision
+
+      - name: Test — fee structure / import / automation suites
+        working-directory: apps/web
+        run: |
+          npm run test:playbook
+          npm run test:erp-chat
+          npm run test:wa-templates-automation
+
+  build:
+    name: Production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # Catches anything that only fails at build time (bad dynamic
+      # imports, server/client boundary violations) before it reaches
+      # Cloud Run. Placeholder env values: the build must not require
+      # real secrets, and if it starts to, that itself is worth knowing.
+      - name: Build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key
+        run: npm run build

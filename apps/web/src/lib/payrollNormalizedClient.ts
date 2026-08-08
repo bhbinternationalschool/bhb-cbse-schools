@@ -107,6 +107,7 @@ export async function hydratePayrollDeskFromDb(preferDb?: boolean) {
   const empty = {
     bundle: { runs: [] as PayrollState["runs"], audit: [] as PayrollState["audit"] },
     changed: false,
+    ok: false,
   };
   if (!remote) return empty;
 
@@ -118,8 +119,8 @@ export async function hydratePayrollDeskFromDb(preferDb?: boolean) {
     (remote.updatedAt && remote.updatedAt >= meta.updatedAt) ||
     remote.runCount > meta.runCount;
 
-  if (!shouldTake) return empty;
+  if (!shouldTake) return { ...empty, bundle: remote.bundle, ok: true };
 
   writeMeta({ updatedAt: remote.updatedAt, runCount: remote.runCount });
-  return { bundle: remote.bundle, changed: true };
+  return { bundle: remote.bundle, changed: true, ok: true };
 }

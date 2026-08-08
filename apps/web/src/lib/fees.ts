@@ -1178,7 +1178,7 @@ export function createChargeVoucher(input: {
 
   let installmentLabel = input.installmentLabel || "Session";
   let dueOn = input.dueOn || new Date().toISOString().slice(0, 10);
-  let installmentId = input.installmentId ?? null;
+  const installmentId = input.installmentId ?? null;
   if (installmentId) {
     const inst = masters.installments.find((i) => i.id === installmentId);
     if (inst) {

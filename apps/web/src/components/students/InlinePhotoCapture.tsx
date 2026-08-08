@@ -124,7 +124,7 @@ export function InlinePhotoCapture({
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={photoUrl}
-            alt=""
+            alt={label ? `${label} preview` : "Student photo preview"}
             width={size}
             height={size}
             className="shrink-0 rounded-full object-cover ring-1 ring-[rgba(32,48,80,0.12)]"

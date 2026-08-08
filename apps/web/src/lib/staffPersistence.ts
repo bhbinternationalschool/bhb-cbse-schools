@@ -4,11 +4,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import {
-  createBrowserSupabase,
-  isSupabaseConfigured,
-} from "@/lib/supabase/client";
-import { TENANT } from "@/lib/types";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
 import {
   normalizeStaffRecord,
   type Department,
@@ -69,7 +65,6 @@ type StaffRow = {
   updated_at: string;
 };
 
-let tenantIdCache: string | null = null;
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingPush: MastersState | null = null;
 
@@ -81,32 +76,11 @@ export function staffRemoteEnabled() {
 
 export function resetStaffPersistenceCache() {
   resetDeskHydrated(MODULE);
-  tenantIdCache = null;
   pendingPush = null;
   if (pushTimer) {
     clearTimeout(pushTimer);
     pushTimer = null;
   }
-}
-
-async function clientAndTenant(): Promise<{
-  sb: SupabaseClient;
-  tenantId: string;
-} | null> {
-  const sb = createBrowserSupabase();
-  if (!sb) return null;
-  if (tenantIdCache) return { sb, tenantId: tenantIdCache };
-  const { data, error } = await sb
-    .from("tenants")
-    .select("id")
-    .eq("slug", TENANT.slug)
-    .maybeSingle();
-  if (error || !data?.id) {
-    console.warn("[staff] tenant resolve failed", error?.message);
-    return null;
-  }
-  tenantIdCache = data.id as string;
-  return { sb, tenantId: tenantIdCache };
 }
 
 function photoForRemote(url: string): string {
@@ -182,38 +156,36 @@ function rowToStaff(row: StaffRow): StaffRecord {
   });
 }
 
+/** Browser: pull staff/departments/designations via the server API. */
 export async function fetchStaffRemote(): Promise<StaffRemoteBundle | null> {
   if (!staffRemoteEnabled()) return null;
-  const ctx = await clientAndTenant();
-  if (!ctx) return null;
-  const { sb, tenantId } = ctx;
-
-  const [depRes, desRes, stfRes] = await Promise.all([
-    sb.from("sis_departments").select("*").eq("tenant_id", tenantId),
-    sb.from("sis_designations").select("*").eq("tenant_id", tenantId),
-    sb.from("sis_staff").select("*").eq("tenant_id", tenantId),
-  ]);
-
-  if (depRes.error) {
-    console.warn("[staff] pull departments failed", depRes.error.message);
+  if (typeof window === "undefined") return null;
+  try {
+    const res = await fetch("/api/school-data/staff-roster", {
+      method: "GET",
+      credentials: "same-origin",
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      console.warn("[staff] pull failed", res.status);
+      return null;
+    }
+    const body = (await res.json()) as {
+      ok?: boolean;
+      departments?: Department[];
+      designations?: Designation[];
+      staff?: StaffRecord[];
+    };
+    if (!body.ok) return null;
+    return {
+      departments: body.departments ?? [],
+      designations: body.designations ?? [],
+      staff: body.staff ?? [],
+    };
+  } catch (e) {
+    console.warn("[staff] pull error", e);
     return null;
   }
-  if (desRes.error) {
-    console.warn("[staff] pull designations failed", desRes.error.message);
-    return null;
-  }
-  if (stfRes.error) {
-    console.warn("[staff] pull staff failed", stfRes.error.message);
-    return null;
-  }
-
-  return {
-    departments: ((depRes.data ?? []) as DepartmentRow[]).map(rowToDepartment),
-    designations: ((desRes.data ?? []) as DesignationRow[]).map(
-      rowToDesignation,
-    ),
-    staff: ((stfRes.data ?? []) as StaffRow[]).map(rowToStaff),
-  };
 }
 
 /** Service-role pull for WhatsApp / server mirror (no browser session). */
@@ -390,24 +362,39 @@ export async function pushStaffRemoteServer(
   return upsertStaffBundle(ctx.sb, ctx.tenantId, state);
 }
 
+/** Browser: push a Masters state's staff slice via the server API. */
 export async function pushStaffSlice(
   state: MastersState,
 ): Promise<{ ok: boolean; error?: string }> {
   if (!staffRemoteEnabled()) return { ok: true };
-  const ctx = await clientAndTenant();
-  if (!ctx) return { ok: false, error: "Tenant not resolved" };
-  return upsertStaffBundle(ctx.sb, ctx.tenantId, state);
+  if (typeof window === "undefined") return { ok: true };
+  try {
+    const res = await fetch("/api/school-data/staff-roster", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state }),
+    });
+    const body = (await res.json().catch(() => null)) as {
+      ok?: boolean;
+      error?: string;
+    } | null;
+    if (!res.ok || !body?.ok) {
+      const message = body?.error || `HTTP ${res.status}`;
+      console.warn("[staff] push failed", message);
+      return { ok: false, error: message };
+    }
+    return { ok: true };
+  } catch (e) {
+    console.warn("[staff] push error", e);
+    return { ok: false, error: String(e) };
+  }
 }
 
-export async function wipeRemoteStaffRoster(): Promise<{
-  ok: boolean;
-  error?: string;
-}> {
-  if (!staffRemoteEnabled()) return { ok: true };
-  const ctx = await clientAndTenant();
-  if (!ctx) return { ok: false, error: "Tenant not resolved" };
-  const { sb, tenantId } = ctx;
-
+async function wipeStaffBundle(
+  sb: SupabaseClient,
+  tenantId: string,
+): Promise<{ ok: boolean; error?: string }> {
   const { error: stfErr } = await sb
     .from("sis_staff")
     .delete()
@@ -432,12 +419,52 @@ export async function wipeRemoteStaffRoster(): Promise<{
     console.warn("[staff] wipe departments failed", depErr.message);
     return { ok: false, error: depErr.message };
   }
-  resetStaffPersistenceCache();
   return { ok: true };
 }
 
+/** Service-role wipe — used by the API route (tenant reset flows). */
+export async function wipeRemoteStaffRosterServer(): Promise<{
+  ok: boolean;
+  error?: string;
+}> {
+  const { getServerTenantContext } = await import("@/lib/serverTenant");
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
+  const result = await wipeStaffBundle(ctx.sb, ctx.tenantId);
+  if (result.ok) resetStaffPersistenceCache();
+  return result;
+}
+
+/** Browser: wipe staff roster via the server API. */
+export async function wipeRemoteStaffRoster(): Promise<{
+  ok: boolean;
+  error?: string;
+}> {
+  if (!staffRemoteEnabled()) return { ok: true };
+  if (typeof window === "undefined") return { ok: true };
+  try {
+    const res = await fetch("/api/school-data/staff-roster", {
+      method: "DELETE",
+      credentials: "same-origin",
+    });
+    const body = (await res.json().catch(() => null)) as {
+      ok?: boolean;
+      error?: string;
+    } | null;
+    if (!res.ok || !body?.ok) {
+      return { ok: false, error: body?.error || `HTTP ${res.status}` };
+    }
+    resetStaffPersistenceCache();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
 export function staffReadFromDbClientEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_STAFF_READ_FROM_DB === "true";
+  const flag = process.env.NEXT_PUBLIC_STAFF_READ_FROM_DB?.trim().toLowerCase();
+  if (flag === "false" || flag === "0") return false;
+  return true;
 }
 
 /** Strip staff roster from masters before school_mirror blob upsert. */
@@ -476,10 +503,12 @@ export function scheduleStaffSync(state: MastersState) {
 export async function ensureStaffHydrated(): Promise<boolean> {
   if (!staffRemoteEnabled()) return false;
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = staffReadFromDbEnabled();
   const remote = await fetchStaffRemote();
+  if (!remote) return false;
+
+  markDeskHydrated(MODULE);
   const { loadMasters, saveMasters } = await import("@/lib/masters");
   let next = loadMasters();
   let changed = false;

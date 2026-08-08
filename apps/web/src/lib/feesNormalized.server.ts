@@ -317,9 +317,11 @@ export async function pushFeeVouchersToDb(
 export async function fetchFeeVouchersFromDb(): Promise<{
   vouchers: CollectionVoucher[];
   meta: FeeDeskSyncMeta | null;
+  /** false = tenant/query could not be resolved; result is NOT a confirmed empty state. */
+  ok: boolean;
 }> {
   const ctx = await resolveCtx();
-  if (!ctx) return { vouchers: [], meta: null };
+  if (!ctx) return { vouchers: [], meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
   const { data: headers, error: hErr } = await sb
@@ -328,38 +330,61 @@ export async function fetchFeeVouchersFromDb(): Promise<{
     .eq("tenant_id", tenantId)
     .order("collected_at", { ascending: false });
 
-  if (hErr || !headers?.length) {
-    const { data: metaRow } = await sb
+  if (hErr) {
+    console.warn("[fees-db] fetch failed", hErr.message);
+    return { vouchers: [], meta: null, ok: false };
+  }
+
+  if (!headers?.length) {
+    const { data: metaRow, error: metaErr } = await sb
       .from("fee_desk_sync_meta")
       .select(FEE_DESK_META_SELECT)
       .eq("tenant_id", tenantId)
       .maybeSingle();
+    if (metaErr) {
+      console.warn("[fees-db] meta fetch failed", metaErr.message);
+      return { vouchers: [], meta: null, ok: false };
+    }
     return {
       vouchers: [],
       meta: mapFeeDeskMetaRow(metaRow as Record<string, unknown> | null),
+      ok: true,
     };
   }
 
   const ids = headers.map((h) => h.id as string);
 
-  const [{ data: lineRows }, { data: tenderRows }, { data: metaRow }] =
-    await Promise.all([
-      sb
-        .from("fee_desk_voucher_lines")
-        .select("*")
-        .eq("tenant_id", tenantId)
-        .in("voucher_id", ids),
-      sb
-        .from("fee_desk_voucher_tenders")
-        .select("*")
-        .eq("tenant_id", tenantId)
-        .in("voucher_id", ids),
-      sb
-        .from("fee_desk_sync_meta")
-        .select(FEE_DESK_META_SELECT)
-        .eq("tenant_id", tenantId)
-        .maybeSingle(),
-    ]);
+  const [
+    { data: lineRows, error: lErr },
+    { data: tenderRows, error: tErr },
+    { data: metaRow, error: metaErr },
+  ] = await Promise.all([
+    sb
+      .from("fee_desk_voucher_lines")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .in("voucher_id", ids),
+    sb
+      .from("fee_desk_voucher_tenders")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .in("voucher_id", ids),
+    sb
+      .from("fee_desk_sync_meta")
+      .select(FEE_DESK_META_SELECT)
+      .eq("tenant_id", tenantId)
+      .maybeSingle(),
+  ]);
+
+  if (lErr || tErr || metaErr) {
+    console.warn(
+      "[fees-db] fetch failed",
+      lErr?.message,
+      tErr?.message,
+      metaErr?.message,
+    );
+    return { vouchers: [], meta: null, ok: false };
+  }
 
   const linesByVoucher = new Map<string, Record<string, unknown>[]>();
   for (const row of lineRows ?? []) {
@@ -388,6 +413,7 @@ export async function fetchFeeVouchersFromDb(): Promise<{
   return {
     vouchers,
     meta: mapFeeDeskMetaRow(metaRow as Record<string, unknown> | null),
+    ok: true,
   };
 }
 
@@ -395,6 +421,8 @@ export type FeeDeskSnapshot = {
   vouchers: CollectionVoucher[];
   ancillary: FeeDeskAncillary;
   meta: FeeDeskSyncMeta | null;
+  /** false = tenant/query could not be resolved; result is NOT a confirmed empty state. */
+  ok: boolean;
 };
 
 /** Push full fee desk (vouchers + ancillary) and rebuild open dues cache. */
@@ -446,9 +474,9 @@ export async function pushFeeDeskToDb(
 }
 
 export async function fetchFeeDeskFromDb(): Promise<FeeDeskSnapshot> {
-  const [{ vouchers, meta }, ancillary] = await Promise.all([
+  const [{ vouchers, meta, ok }, ancillary] = await Promise.all([
     fetchFeeVouchersFromDb(),
     fetchFeeDeskAncillaryFromDb(),
   ]);
-  return { vouchers, ancillary, meta };
+  return { vouchers, ancillary, meta, ok };
 }

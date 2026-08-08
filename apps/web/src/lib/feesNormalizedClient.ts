@@ -50,22 +50,9 @@ export function feesNormalizedSyncEnabled(): boolean {
 }
 
 export function feesReadFromDbClientEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_FEES_READ_FROM_DB === "true";
-}
-
-/** @deprecated use scheduleFeesDeskSync */
-export function scheduleFeesNormalizedSync(vouchers: FeesState["vouchers"]) {
-  scheduleFeesDeskSync({
-    version: 1,
-    vouchers: vouchers ?? [],
-    cheques: [],
-    manualBooks: [],
-    dayCloses: [],
-    installmentPlans: [],
-    planAllocations: [],
-    carriedForwardDues: [],
-    chargeVouchers: [],
-  });
+  const flag = process.env.NEXT_PUBLIC_FEES_READ_FROM_DB?.trim().toLowerCase();
+  if (flag === "false" || flag === "0") return false;
+  return true;
 }
 
 export function scheduleFeesDeskSync(state: FeesState) {
@@ -166,6 +153,7 @@ export async function hydrateFeesDeskFromDb(
   vouchers: FeesState["vouchers"];
   ancillary: FeeDeskAncillary;
   changed: boolean;
+  ok: boolean;
 }> {
   const remote = await fetchFeesDeskFromApi();
   if (!remote) {
@@ -181,6 +169,7 @@ export async function hydrateFeesDeskFromDb(
         chargeVouchers: [],
       },
       changed: false,
+      ok: false,
     };
   }
 
@@ -193,7 +182,7 @@ export async function hydrateFeesDeskFromDb(
     remote.count > meta.voucherCount;
 
   if (!shouldTake) {
-    return { vouchers: [], ancillary: remote.ancillary, changed: false };
+    return { vouchers: [], ancillary: remote.ancillary, changed: false, ok: true };
   }
 
   writeMeta({
@@ -205,11 +194,6 @@ export async function hydrateFeesDeskFromDb(
     vouchers: remote.vouchers,
     ancillary: remote.ancillary,
     changed: true,
+    ok: true,
   };
-}
-
-/** @deprecated use hydrateFeesDeskFromDb */
-export async function hydrateFeesVouchersFromDb(preferDb?: boolean) {
-  const r = await hydrateFeesDeskFromDb(preferDb);
-  return { vouchers: r.vouchers, changed: r.changed };
 }

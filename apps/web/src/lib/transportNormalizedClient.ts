@@ -83,7 +83,12 @@ async function pushTransportDeskApi(state: TransportState) {
 
 export async function hydrateTransportDeskFromDb(
   preferDb?: boolean,
-): Promise<{ bundle: Omit<TransportState, "version">; changed: boolean }> {
+): Promise<{
+  bundle: Omit<TransportState, "version">;
+  changed: boolean;
+  /** false = fetch failed; bundle is NOT a confirmed empty state. */
+  ok: boolean;
+}> {
   const empty = {
     feePolicy: {
       academicYearCode: "",
@@ -111,13 +116,13 @@ export async function hydrateTransportDeskFromDb(
     boardingEvents: [],
     gpsPings: [],
   };
-  if (!isSupabaseConfigured()) return { bundle: empty, changed: false };
+  if (!isSupabaseConfigured()) return { bundle: empty, changed: false, ok: false };
   try {
     const res = await fetch("/api/school-data/transport-desk", {
       method: "GET",
       cache: "no-store",
     });
-    if (!res.ok) return { bundle: empty, changed: false };
+    if (!res.ok) return { bundle: empty, changed: false, ok: false };
     const body = (await res.json()) as Omit<TransportState, "version"> & {
       updatedAt?: string;
       routeCount?: number;
@@ -166,14 +171,14 @@ export async function hydrateTransportDeskFromDb(
       remoteRoutes > meta.routeCount ||
       bundle.routes.length > 0 ||
       bundle.vehicles.length > 0;
-    if (!shouldTake) return { bundle: empty, changed: false };
+    if (!shouldTake) return { bundle: empty, changed: false, ok: true };
     writeMeta({
       updatedAt: body.updatedAt || new Date().toISOString(),
       routeCount: remoteRoutes,
       vehicleCount: body.vehicleCount ?? bundle.vehicles.length,
     });
-    return { bundle, changed: true };
+    return { bundle, changed: true, ok: true };
   } catch {
-    return { bundle: empty, changed: false };
+    return { bundle: empty, changed: false, ok: false };
   }
 }

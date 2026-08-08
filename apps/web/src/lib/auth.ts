@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { verifySessionCookie } from "./sessionCookie.server";
 import type { Persona } from "./types";
 
 export type DemoSession = {
@@ -16,24 +17,17 @@ export type DemoSession = {
 
 const COOKIE = "bhb_demo_session";
 
+/**
+ * Resolve the signed session cookie.
+ *
+ * Returns null for a missing, malformed, unsigned (legacy), or tampered
+ * cookie — never a fallback identity. The role carried here is trusted
+ * for authorization, so it must only ever come from a value this server
+ * signed itself.
+ */
 export async function getDemoSession(): Promise<DemoSession | null> {
   const store = await cookies();
-  const raw = store.get(COOKIE)?.value;
-  if (raw) {
-    try {
-      return JSON.parse(decodeURIComponent(raw)) as DemoSession;
-    } catch {
-      /* ignore */
-    }
-  }
-  return {
-    persona: "staff",
-    fullName: "Director",
-    roleCode: "owner",
-    email: "director@bhbinternational.school",
-    tenantSlug: "bhb",
-    academicYearCode: "2025-26",
-  };
+  return verifySessionCookie(store.get(COOKIE)?.value);
 }
 
 export function demoSessionCookieName() {

@@ -18,6 +18,12 @@ export async function GET(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["attendance-registers"], "GET");
   if (!auth.ok) return auth.response
   const desk = await fetchAttendanceDeskFromDb();
+  if (!desk.ok) {
+    return NextResponse.json(
+      { ok: false, error: "Attendance desk fetch failed — tenant/db unavailable" },
+      { status: 503 },
+    );
+  }
   return NextResponse.json({
     ok: true,
     registers: desk.registers,

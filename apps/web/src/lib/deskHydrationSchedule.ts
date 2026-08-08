@@ -42,7 +42,7 @@ const CORE_IDS: DeskHydrateId[] = [
 
 /** Extra hydrators to run early when the user opens a module route. */
 const ROUTE_IDS: Record<string, DeskHydrateId[]> = {
-  home: [],
+  home: ["sis", "admissions", "fees", "payments", "staff", "attendance"],
   fees: ["fees", "payments", "feeRecoveryTasks"],
   admissions: ["admissions"],
   attendance: ["attendance", "staffAttendance"],

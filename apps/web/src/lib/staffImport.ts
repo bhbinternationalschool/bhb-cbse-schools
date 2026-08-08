@@ -565,7 +565,7 @@ export function applyStaffImport(
 
   let departments = [...(masters.departments ?? [])];
   let designations = [...(masters.designations ?? [])];
-  let staff = replaceAll ? [] : [...(masters.staff ?? [])];
+  const staff = replaceAll ? [] : [...(masters.staff ?? [])];
   const byCode = new Map(
     staff.map((s) => [s.empCode.trim().toUpperCase(), s] as const),
   );

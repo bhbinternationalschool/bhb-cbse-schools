@@ -54,7 +54,9 @@ export function sisSyncRecentlyPushed(): boolean {
 }
 
 export function sisReadFromDbClientEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_SIS_READ_FROM_DB === "true";
+  const flag = process.env.NEXT_PUBLIC_SIS_READ_FROM_DB?.trim().toLowerCase();
+  if (flag === "false" || flag === "0") return false;
+  return true;
 }
 
 export function scheduleSisDeskSync(state: Pick<SisState, "households" | "students">) {
@@ -94,6 +96,7 @@ async function pushSisDeskApi(
       updatedAt?: string;
       studentCount?: number;
       householdCount?: number;
+      conflicts?: { table: string; id: string }[];
       error?: string;
     } | null;
     if (res.ok && body?.ok) {
@@ -103,6 +106,27 @@ async function pushSisDeskApi(
         householdCount: body.householdCount ?? state.households.length,
         lastPushedAt: Date.now(),
       });
+
+      // Someone else saved these records after we read them. Their version
+      // was kept rather than being overwritten by our stale copy — tell the
+      // user plainly instead of letting the change vanish, and drop the
+      // hydrate guard so the next read pulls the newer server state.
+      const conflicts = body.conflicts ?? [];
+      if (conflicts.length > 0 && typeof window !== "undefined") {
+        const [{ pushToast }, { resetDeskHydrated }] = await Promise.all([
+          import("@/components/shell/Toast"),
+          import("@/lib/deskHydrateGuard"),
+        ]);
+        resetDeskHydrated("sis");
+        pushToast({
+          kind: "error",
+          message:
+            conflicts.length === 1
+              ? "1 record was changed by someone else and was not overwritten. Reload to see their version before editing again."
+              : `${conflicts.length} records were changed by someone else and were not overwritten. Reload to see the current versions before editing again.`,
+          durationMs: 0,
+        });
+      }
       if (typeof window !== "undefined") {
         window.dispatchEvent(
           new CustomEvent("bhb-desk-synced", { detail: { module: "sis" } }),
@@ -168,6 +192,7 @@ export async function fetchSisDeskFromApi(): Promise<{
 export async function hydrateSisDeskFromDb(preferDb?: boolean): Promise<{
   bundle: SisRemoteBundle;
   changed: boolean;
+  ok: boolean;
 }> {
   const remote = await fetchSisDeskFromApi();
   if (!remote) {
@@ -179,25 +204,28 @@ export async function hydrateSisDeskFromDb(preferDb?: boolean): Promise<{
         studentUpdatedAt: {},
       },
       changed: false,
+      ok: false,
     };
   }
 
   const meta = readMeta();
+  const hasRemoteStudents = remote.bundle.students.length > 0 || remote.bundle.households.length > 0;
   const shouldTake =
     preferDb ||
     sisReadFromDbClientEnabled() ||
+    hasRemoteStudents ||
     meta.studentCount === 0 ||
     (remote.updatedAt && remote.updatedAt >= meta.updatedAt) ||
     remote.studentCount > meta.studentCount;
 
   if (!shouldTake) {
-    return { bundle: remote.bundle, changed: false };
+    return { bundle: remote.bundle, changed: false, ok: true };
   }
 
   writeMeta({
-    updatedAt: remote.updatedAt,
+    updatedAt: remote.updatedAt || new Date().toISOString(),
     studentCount: remote.studentCount,
     householdCount: remote.householdCount,
   });
-  return { bundle: remote.bundle, changed: true };
+  return { bundle: remote.bundle, changed: true, ok: true };
 }

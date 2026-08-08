@@ -224,9 +224,11 @@ export async function pushAttendanceRegistersToDb(
 export async function fetchAttendanceRegistersFromDb(): Promise<{
   registers: AttendanceRegister[];
   meta: AttendanceDeskSyncMeta | null;
+  /** false = tenant/query could not be resolved; result is NOT a confirmed empty state. */
+  ok: boolean;
 }> {
   const ctx = await resolveCtx();
-  if (!ctx) return { registers: [], meta: null };
+  if (!ctx) return { registers: [], meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
   const { data: headers, error: hErr } = await sb
@@ -235,21 +237,34 @@ export async function fetchAttendanceRegistersFromDb(): Promise<{
     .eq("tenant_id", tenantId)
     .order("attendance_date", { ascending: false });
 
-  if (hErr || !headers?.length) {
-    const { data: metaRow } = await sb
+  if (hErr) {
+    console.warn("[attendance-db] fetch failed", hErr.message);
+    return { registers: [], meta: null, ok: false };
+  }
+
+  if (!headers?.length) {
+    const { data: metaRow, error: metaErr } = await sb
       .from("attendance_desk_sync_meta")
       .select(META_SELECT)
       .eq("tenant_id", tenantId)
       .maybeSingle();
+    if (metaErr) {
+      console.warn("[attendance-db] meta fetch failed", metaErr.message);
+      return { registers: [], meta: null, ok: false };
+    }
     return {
       registers: [],
       meta: mapMetaRow(metaRow as Record<string, unknown> | null),
+      ok: true,
     };
   }
 
   const ids = headers.map((h) => h.id as string);
 
-  const [{ data: markRows }, { data: metaRow }] = await Promise.all([
+  const [
+    { data: markRows, error: mErr },
+    { data: metaRow, error: metaErr },
+  ] = await Promise.all([
     sb
       .from("attendance_desk_marks")
       .select("*")
@@ -261,6 +276,11 @@ export async function fetchAttendanceRegistersFromDb(): Promise<{
       .eq("tenant_id", tenantId)
       .maybeSingle(),
   ]);
+
+  if (mErr || metaErr) {
+    console.warn("[attendance-db] fetch failed", mErr?.message, metaErr?.message);
+    return { registers: [], meta: null, ok: false };
+  }
 
   const marksByRegister = new Map<string, Record<string, unknown>[]>();
   for (const row of markRows ?? []) {
@@ -280,6 +300,7 @@ export async function fetchAttendanceRegistersFromDb(): Promise<{
   return {
     registers,
     meta: mapMetaRow(metaRow as Record<string, unknown> | null),
+    ok: true,
   };
 }
 
@@ -319,14 +340,16 @@ export type AttendanceDeskSnapshot = {
   registers: AttendanceRegister[];
   ancillary: AttendanceDeskAncillary;
   meta: AttendanceDeskSyncMeta | null;
+  /** false = tenant/query could not be resolved; result is NOT a confirmed empty state. */
+  ok: boolean;
 };
 
 export async function fetchAttendanceDeskFromDb(): Promise<AttendanceDeskSnapshot> {
-  const [{ registers, meta }, ancillary] = await Promise.all([
+  const [{ registers, meta, ok }, ancillary] = await Promise.all([
     fetchAttendanceRegistersFromDb(),
     fetchAttendanceDeskAncillaryFromDb(),
   ]);
-  return { registers, ancillary, meta };
+  return { registers, ancillary, meta, ok };
 }
 
 /** Push a single register after API mark (incremental). */

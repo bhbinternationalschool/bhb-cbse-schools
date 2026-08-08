@@ -88,7 +88,7 @@ export function PublicFamilyRegisterForm({
   }, [activeLeadId, step, paymentId]);
 
   async function preparePayForLead(lead: AdmissionLead) {
-    let state = loadAdmissions();
+    const state = loadAdmissions();
     const bal = registrationBalancePaise(state, lead);
     if (bal <= 0) {
       const nextUnpaid = leadIds

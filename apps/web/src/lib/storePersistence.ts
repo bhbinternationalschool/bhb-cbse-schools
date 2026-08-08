@@ -44,7 +44,6 @@ export const scheduleStoreSync = (state: StoreState) => {
 };
 export const ensureStoreHydrated = async () => {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = storeReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("store")
@@ -52,7 +51,12 @@ export const ensureStoreHydrated = async () => {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { bundle, changed } = await hydrateStoreDeskFromDb(readFromDb);
+  const { bundle, changed, ok } = await hydrateStoreDeskFromDb(readFromDb);
+  if (!ok) {
+    // Fetch failed — do not lock hydration flag; caller can retry later.
+    return blobChanged;
+  }
+  markDeskHydrated(MODULE);
   if (changed && (bundle.items.length > 0 || readFromDb)) {
     writeStoreLocalRaw(
       mergeDbDeskIntoStoreState(loadStore(), bundle, { preferDb: readFromDb }),

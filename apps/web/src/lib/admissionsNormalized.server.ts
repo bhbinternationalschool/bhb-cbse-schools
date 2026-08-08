@@ -293,27 +293,14 @@ export async function pushAdmissionDeskToDb(
   const leads = normalized.leads ?? [];
   const payments = normalized.registrationPayments ?? [];
 
-  await Promise.all([
-    deleteStale(
-      sb,
-      tenantId,
-      "admission_desk_households",
-      new Set(households.map((h) => h.id)),
-    ),
-    deleteStale(
-      sb,
-      tenantId,
-      "admission_desk_leads",
-      new Set(leads.map((l) => l.id)),
-    ),
-    deleteStale(
-      sb,
-      tenantId,
-      "admission_desk_registration_payments",
-      new Set(payments.map((p) => p.id)),
-    ),
-  ]);
-
+  // Write first, prune afterwards.
+  //
+  // These are separate round trips with no enclosing transaction, so a
+  // failure part-way through is possible. Deleting first meant a failed
+  // upsert left rows deleted and not re-written — permanent data loss.
+  // Writing first inverts the failure mode: an interrupted push leaves
+  // stale extra rows, which the next successful push prunes. Recoverable
+  // beats destructive.
   let r = await upsertChunks(
     sb,
     "admission_desk_households",
@@ -334,6 +321,27 @@ export async function pushAdmissionDeskToDb(
     payments.map((p) => paymentToRow(tenantId, p)),
   );
   if (!r.ok) return r;
+
+  await Promise.all([
+    deleteStale(
+      sb,
+      tenantId,
+      "admission_desk_households",
+      new Set(households.map((h) => h.id)),
+    ),
+    deleteStale(
+      sb,
+      tenantId,
+      "admission_desk_leads",
+      new Set(leads.map((l) => l.id)),
+    ),
+    deleteStale(
+      sb,
+      tenantId,
+      "admission_desk_registration_payments",
+      new Set(payments.map((p) => p.id)),
+    ),
+  ]);
 
   const ops = fieldOpsFromState(normalized);
   await sb.from("admission_desk_field_ops").upsert({
@@ -386,17 +394,19 @@ export async function pushAdmissionDeskToDb(
 export async function fetchAdmissionDeskFromDb(): Promise<{
   state: AdmissionsState;
   meta: AdmissionDeskSyncMeta | null;
+  /** false = tenant/query could not be resolved; state is NOT a confirmed empty state. */
+  ok: boolean;
 }> {
   const ctx = await resolveCtx();
   if (!ctx) {
-    return { state: defaultAdmissionsState(), meta: null };
+    return { state: defaultAdmissionsState(), meta: null, ok: false };
   }
   const { sb, tenantId } = ctx;
 
   const [
-    { data: hhRows },
-    { data: leadRows },
-    { data: payRows },
+    { data: hhRows, error: hhErr },
+    { data: leadRows, error: leadErr },
+    { data: payRows, error: payErr },
     { data: opsRow },
     { data: metaRow },
   ] = await Promise.all([
@@ -421,6 +431,16 @@ export async function fetchAdmissionDeskFromDb(): Promise<{
       .eq("tenant_id", tenantId)
       .maybeSingle(),
   ]);
+
+  if (hhErr || leadErr || payErr) {
+    console.warn(
+      "[admissions-db] fetch failed",
+      hhErr?.message,
+      leadErr?.message,
+      payErr?.message,
+    );
+    return { state: defaultAdmissionsState(), meta: null, ok: false };
+  }
 
   const households = (hhRows ?? []).map((r) =>
     rowToHousehold(r as Record<string, unknown>),
@@ -456,6 +476,7 @@ export async function fetchAdmissionDeskFromDb(): Promise<{
   return {
     state: fieldOpsToState(null, base),
     meta: mapMetaRow(metaRow as Record<string, unknown> | null),
+    ok: true,
   };
 }
 

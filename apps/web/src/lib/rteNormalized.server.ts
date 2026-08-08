@@ -267,6 +267,7 @@ export async function pushRteDeskToDb(
 export async function fetchRteDeskFromDb(): Promise<{
   bundle: RteDeskBundle;
   meta: RteDeskSyncMeta | null;
+  ok: boolean;
 }> {
   const ctx = await resolveCtx();
   const empty: RteDeskBundle = {
@@ -274,15 +275,10 @@ export async function fetchRteDeskFromDb(): Promise<{
     applications: [],
     settings: { ...DEFAULT_SETTINGS },
   };
-  if (!ctx) return { bundle: empty, meta: null };
+  if (!ctx) return { bundle: empty, meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
-  const [
-    { data: seatRows },
-    { data: appRows },
-    { data: settingsRow },
-    { data: metaRow },
-  ] = await Promise.all([
+  const [seatRes, appRes, settingsRes, metaRes] = await Promise.all([
     sb.from("rte_desk_seats").select("*").eq("tenant_id", tenantId),
     sb.from("rte_desk_applications").select("*").eq("tenant_id", tenantId),
     sb.from("rte_desk_settings").select("*").eq("tenant_id", tenantId).maybeSingle(),
@@ -292,6 +288,19 @@ export async function fetchRteDeskFromDb(): Promise<{
       .eq("tenant_id", tenantId)
       .maybeSingle(),
   ]);
+
+  if (seatRes.error || appRes.error || settingsRes.error || metaRes.error) {
+    console.warn(
+      "[rte-db] fetchRteDeskFromDb query error",
+      seatRes.error || appRes.error || settingsRes.error || metaRes.error,
+    );
+    return { bundle: empty, meta: null, ok: false };
+  }
+
+  const seatRows = seatRes.data;
+  const appRows = appRes.data;
+  const settingsRow = settingsRes.data;
+  const metaRow = metaRes.data;
 
   const bundle: RteDeskBundle = {
     seats: (seatRows ?? []).map((r) => rowToSeat(r as Record<string, unknown>)),
@@ -316,5 +325,5 @@ export async function fetchRteDeskFromDb(): Promise<{
       }
     : null;
 
-  return { bundle, meta };
+  return { bundle, meta, ok: true };
 }

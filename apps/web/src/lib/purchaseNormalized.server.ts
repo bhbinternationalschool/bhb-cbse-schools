@@ -508,6 +508,8 @@ export async function pushPurchaseDeskToDb(
 export async function fetchPurchaseDeskFromDb(): Promise<{
   bundle: PurchaseDeskBundle;
   meta: PurchaseDeskSyncMeta | null;
+  /** false = tenant/query could not be resolved; bundle is NOT a confirmed empty state. */
+  ok: boolean;
 }> {
   const ctx = await resolveCtx();
   const emptySettings: PurchaseSettings = {
@@ -521,19 +523,19 @@ export async function fetchPurchaseDeskFromDb(): Promise<{
     returns: [],
     settings: emptySettings,
   };
-  if (!ctx) return { bundle: empty, meta: null };
+  if (!ctx) return { bundle: empty, meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
   const [
-    { data: indentRows },
-    { data: indentLineRows },
-    { data: orderRows },
-    { data: orderLineRows },
-    { data: grnRows },
-    { data: grnLineRows },
-    { data: returnRows },
-    { data: returnLineRows },
-    { data: settingsRow },
+    { data: indentRows, error: indentErr },
+    { data: indentLineRows, error: indentLineErr },
+    { data: orderRows, error: orderErr },
+    { data: orderLineRows, error: orderLineErr },
+    { data: grnRows, error: grnErr },
+    { data: grnLineRows, error: grnLineErr },
+    { data: returnRows, error: returnErr },
+    { data: returnLineRows, error: returnLineErr },
+    { data: settingsRow, error: settingsErr },
     { data: metaRow },
   ] = await Promise.all([
     sb.from("purchase_desk_indents").select("*").eq("tenant_id", tenantId),
@@ -555,6 +557,32 @@ export async function fetchPurchaseDeskFromDb(): Promise<{
       .eq("tenant_id", tenantId)
       .maybeSingle(),
   ]);
+
+  if (
+    indentErr ||
+    indentLineErr ||
+    orderErr ||
+    orderLineErr ||
+    grnErr ||
+    grnLineErr ||
+    returnErr ||
+    returnLineErr ||
+    settingsErr
+  ) {
+    console.warn(
+      "[purchase-db] fetch failed",
+      indentErr?.message,
+      indentLineErr?.message,
+      orderErr?.message,
+      orderLineErr?.message,
+      grnErr?.message,
+      grnLineErr?.message,
+      returnErr?.message,
+      returnLineErr?.message,
+      settingsErr?.message,
+    );
+    return { bundle: empty, meta: null, ok: false };
+  }
 
   const linesByIndent = new Map<string, IndentLine[]>();
   for (const row of indentLineRows ?? []) {
@@ -631,5 +659,6 @@ export async function fetchPurchaseDeskFromDb(): Promise<{
           updatedAt: String((metaRow as { updated_at: string }).updated_at),
         }
       : null,
+    ok: true,
   };
 }

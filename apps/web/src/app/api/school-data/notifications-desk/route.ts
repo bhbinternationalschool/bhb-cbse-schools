@@ -15,7 +15,13 @@ export const runtime = "nodejs";
 export async function GET(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["notifications-desk"], "GET");
   if (!auth.ok) return auth.response
-  const { bundle, meta } = await fetchNotificationsDeskFromDb();
+  const { bundle, meta, ok } = await fetchNotificationsDeskFromDb();
+  if (!ok) {
+    return NextResponse.json(
+      { ok: false, error: "Failed to fetch notifications desk" },
+      { status: 503 },
+    );
+  }
   return NextResponse.json({
     ok: true,
     items: bundle.items,

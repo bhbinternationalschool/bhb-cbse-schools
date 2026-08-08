@@ -16,7 +16,13 @@ export const runtime = "nodejs";
 export async function GET(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["student-leave-desk"], "GET");
   if (!auth.ok) return auth.response
-  const { bundle, meta } = await fetchStudentLeaveDeskFromDb();
+  const { bundle, meta, ok } = await fetchStudentLeaveDeskFromDb();
+  if (!ok) {
+    return NextResponse.json(
+      { ok: false, error: "Failed to fetch student leave desk" },
+      { status: 503 },
+    );
+  }
   return NextResponse.json({
     ok: true,
     requests: bundle.requests,

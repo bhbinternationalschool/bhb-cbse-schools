@@ -3,7 +3,6 @@
  */
 
 import html2canvas from "html2canvas";
-import { jsPDF } from "jspdf";
 import {
   amountInWordsPaise,
   formatConcessionDetailLine,
@@ -123,6 +122,7 @@ export async function captureReceiptPdfFile(
     logging: false,
   });
   const imgData = canvas.toDataURL("image/jpeg", 0.92);
+  const { jsPDF } = await import("jspdf");
   const pdf = new jsPDF({
     orientation: "portrait",
     unit: "mm",

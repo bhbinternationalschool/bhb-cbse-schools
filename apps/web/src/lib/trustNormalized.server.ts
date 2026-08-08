@@ -142,13 +142,18 @@ export async function pushTrustDeskToDb(
 export async function fetchTrustDeskFromDb(): Promise<{
   bundle: TrustDeskBundle;
   meta: TrustDeskSyncMeta | null;
+  /** false = tenant/query could not be resolved; bundle is NOT a confirmed empty state. */
+  ok: boolean;
 }> {
   const ctx = await resolveCtx();
   const empty = emptyBundle();
-  if (!ctx) return { bundle: empty, meta: null };
+  if (!ctx) return { bundle: empty, meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
-  const [{ data: sliceRows }, { data: metaRow }] = await Promise.all([
+  const [
+    { data: sliceRows, error: sliceErr },
+    { data: metaRow },
+  ] = await Promise.all([
     sb.from("trust_desk_slices").select("*").eq("tenant_id", tenantId),
     sb
       .from("trust_desk_sync_meta")
@@ -156,6 +161,11 @@ export async function fetchTrustDeskFromDb(): Promise<{
       .eq("tenant_id", tenantId)
       .maybeSingle(),
   ]);
+
+  if (sliceErr) {
+    console.warn("[trust-db] fetch failed", sliceErr.message);
+    return { bundle: empty, meta: null, ok: false };
+  }
 
   const sliceMap: Partial<Record<TrustSliceKey, unknown>> = {};
   for (const row of sliceRows ?? []) {
@@ -180,5 +190,5 @@ export async function fetchTrustDeskFromDb(): Promise<{
       }
     : null;
 
-  return { bundle, meta };
+  return { bundle, meta, ok: true };
 }

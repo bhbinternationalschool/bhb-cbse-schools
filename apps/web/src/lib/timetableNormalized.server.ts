@@ -183,13 +183,14 @@ export async function pushTimetableDeskToDb(
 export async function fetchTimetableDeskFromDb(): Promise<{
   bundle: TimetableDeskBundle;
   meta: TimetableDeskSyncMeta | null;
+  ok: boolean;
 }> {
   const ctx = await resolveCtx();
   const empty = emptyBundle();
-  if (!ctx) return { bundle: empty, meta: null };
+  if (!ctx) return { bundle: empty, meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
-  const [{ data: sliceRows }, { data: metaRow }] = await Promise.all([
+  const [sliceRes, metaRes] = await Promise.all([
     sb.from("timetable_desk_slices").select("*").eq("tenant_id", tenantId),
     sb
       .from("timetable_desk_sync_meta")
@@ -197,6 +198,17 @@ export async function fetchTimetableDeskFromDb(): Promise<{
       .eq("tenant_id", tenantId)
       .maybeSingle(),
   ]);
+
+  if (sliceRes.error || metaRes.error) {
+    console.warn(
+      "[timetable-db] fetchTimetableDeskFromDb query error",
+      sliceRes.error || metaRes.error,
+    );
+    return { bundle: empty, meta: null, ok: false };
+  }
+
+  const sliceRows = sliceRes.data;
+  const metaRow = metaRes.data;
 
   const sliceMap: Partial<Record<TimetableSliceKey, unknown>> = {};
   for (const row of sliceRows ?? []) {
@@ -226,5 +238,5 @@ export async function fetchTimetableDeskFromDb(): Promise<{
       }
     : null;
 
-  return { bundle, meta };
+  return { bundle, meta, ok: true };
 }

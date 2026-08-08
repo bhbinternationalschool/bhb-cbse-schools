@@ -50,7 +50,6 @@ export const scheduleSchoolCommsSync = (state: SchoolCommsState) => {
 };
 export const ensureSchoolCommsHydrated = async () => {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = schoolCommsReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("school_comms")
@@ -58,7 +57,12 @@ export const ensureSchoolCommsHydrated = async () => {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { bundle, changed } = await hydrateSchoolCommsDeskFromDb(readFromDb);
+  const { bundle, changed, ok } = await hydrateSchoolCommsDeskFromDb(readFromDb);
+  if (!ok) {
+    // Fetch failed — do not lock hydration flag; caller can retry later.
+    return blobChanged;
+  }
+  markDeskHydrated(MODULE);
   if (
     changed &&
     (bundle.notices.length > 0 ||

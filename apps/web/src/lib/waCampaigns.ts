@@ -935,7 +935,7 @@ export function dispatchDueCampaigns(
     return Number.isFinite(t) && t <= asOfMs;
   });
 
-  let next = { ...wa, messages: [...wa.messages], campaigns: [...wa.campaigns] };
+  const next = { ...wa, messages: [...wa.messages], campaigns: [...wa.campaigns] };
   const opened: string[] = [];
   let markedSent = 0;
   const pending: {
@@ -1025,7 +1025,7 @@ export function applyCampaignDispatchResults(
     error?: string;
   }[],
 ): WaCampaignsState {
-  let next = { ...wa, messages: [...wa.messages], campaigns: [...wa.campaigns] };
+  const next = { ...wa, messages: [...wa.messages], campaigns: [...wa.campaigns] };
   const byId = new Map(
     results
       .filter((r) => r.messageId)

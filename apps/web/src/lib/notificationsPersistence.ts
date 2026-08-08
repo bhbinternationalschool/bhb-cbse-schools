@@ -71,7 +71,6 @@ export async function pushNotificationsRemoteServer(
 
 export async function ensureNotificationsHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = notificationsReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("notifications")
@@ -79,7 +78,12 @@ export async function ensureNotificationsHydrated(): Promise<boolean> {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { bundle, changed } = await hydrateNotificationsDeskFromDb(readFromDb);
+  const { bundle, changed, ok } = await hydrateNotificationsDeskFromDb(readFromDb);
+  if (!ok) {
+    // Fetch failed — do not lock hydration flag; caller can retry later.
+    return blobChanged;
+  }
+  markDeskHydrated(MODULE);
   if (changed && (bundle.items.length > 0 || readFromDb)) {
     writeNotificationsLocalRaw(
       mergeDbDeskIntoNotificationsState(loadNotifications(), bundle, {

@@ -41,7 +41,9 @@ export function homeworkNormalizedSyncEnabled(): boolean {
 }
 
 export function homeworkReadFromDbClientEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_HOMEWORK_READ_FROM_DB === "true";
+  const flag = process.env.NEXT_PUBLIC_HOMEWORK_READ_FROM_DB?.trim().toLowerCase();
+  if (flag === "false" || flag === "0") return false;
+  return true;
 }
 
 export function scheduleHomeworkDeskSync(state: HomeworkState) {
@@ -138,7 +140,7 @@ type HomeworkDeskBundle = Pick<
 
 export async function hydrateHomeworkDeskFromDb(
   preferDb?: boolean,
-): Promise<{ bundle: HomeworkDeskBundle; changed: boolean }> {
+): Promise<{ bundle: HomeworkDeskBundle; changed: boolean; ok: boolean }> {
   const remote = await fetchHomeworkDeskFromApi();
   const empty: HomeworkDeskBundle = {
     posts: [],
@@ -147,7 +149,7 @@ export async function hydrateHomeworkDeskFromDb(
     seen: [],
     settings: { examModeFreeze: false },
   };
-  if (!remote) return { bundle: empty, changed: false };
+  if (!remote) return { bundle: empty, changed: false, ok: false };
 
   const meta = readMeta();
   const shouldTake =
@@ -157,12 +159,12 @@ export async function hydrateHomeworkDeskFromDb(
     (remote.updatedAt && remote.updatedAt >= meta.updatedAt) ||
     remote.postCount > meta.postCount;
 
-  if (!shouldTake) return { bundle: empty, changed: false };
+  if (!shouldTake) return { bundle: empty, changed: false, ok: true };
 
   writeMeta({
     updatedAt: remote.updatedAt,
     postCount: remote.postCount,
   });
 
-  return { bundle: remote.bundle, changed: true };
+  return { bundle: remote.bundle, changed: true, ok: true };
 }

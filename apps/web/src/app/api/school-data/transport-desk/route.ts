@@ -15,7 +15,13 @@ export const runtime = "nodejs";
 export async function GET(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["transport-desk"], "GET");
   if (!auth.ok) return auth.response
-  const { bundle, meta } = await fetchTransportDeskFromDb();
+  const { bundle, meta, ok } = await fetchTransportDeskFromDb();
+  if (!ok) {
+    return NextResponse.json(
+      { ok: false, error: "Transport desk fetch failed — tenant/db unavailable" },
+      { status: 503 },
+    );
+  }
   return NextResponse.json({
     ok: true,
     ...bundle,
