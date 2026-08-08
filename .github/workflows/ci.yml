@@ -61,6 +61,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:sis-prune
 
+      - name: Test — audit trail never stores identity numbers
+        working-directory: apps/web
+        run: npm run test:audit-redaction
+
       - name: Test — fee structure / import / automation suites
         working-directory: apps/web
         run: |

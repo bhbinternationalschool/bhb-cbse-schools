@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { GraduationCap } from "lucide-react";
+import { recordAudit } from "@/lib/auditClient";
 import {
   STUDENT_TYPES,
   currentAcademicYearCode,
@@ -575,6 +576,15 @@ export function StudentsWorkspace() {
       },
       s.status === "active" ? "Student inactivated" : "Student activated",
     );
+    recordAudit({
+      module: "students",
+      action: "status_change",
+      entityType: "student",
+      entityId: s.id,
+      summary: `${s.status === "active" ? "Inactivated" : "Activated"} ${s.fullName} (${s.admissionNo})`,
+      before: { status: s.status },
+      after: { status: s.status === "active" ? "inactive" : "active" },
+    });
   }
 
   function onRemove(s: SisStudent) {
@@ -589,6 +599,24 @@ export function StudentsWorkspace() {
       "";
     setSelectedId(nextId);
     commit(result.state, "Student removed");
+    // Hard delete with no soft-delete or restore — the audit entry is the
+    // only remaining record that this student ever existed.
+    recordAudit({
+      module: "students",
+      action: "delete",
+      entityType: "student",
+      entityId: s.id,
+      summary: `Removed ${s.fullName} (${s.admissionNo}) from ${s.academicYearCode}`,
+      before: {
+        fullName: s.fullName,
+        admissionNo: s.admissionNo,
+        academicYearCode: s.academicYearCode,
+        classId: s.classId,
+        sectionId: s.sectionId,
+        status: s.status,
+        householdId: s.householdId,
+      },
+    });
   }
 
   const emptyMsg =
