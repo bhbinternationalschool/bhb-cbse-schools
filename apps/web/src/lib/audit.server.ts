@@ -19,11 +19,27 @@ export type AuditInput = {
   userAgent?: string | null;
 };
 
-export async function writeAudit(input: AuditInput): Promise<void> {
+export type AuditResult = { ok: boolean; error?: string };
+
+/**
+ * Write one audit entry.
+ *
+ * Returns whether it was actually persisted rather than resolving void.
+ * This previously warned and returned on failure, so a misconfigured
+ * grant meant every audit write was silently discarded while callers
+ * reported success — which is how `permission denied for table
+ * audit_events` went unnoticed. Callers must surface a false result.
+ */
+export async function writeAudit(input: AuditInput): Promise<AuditResult> {
   const ctx = await getServerTenantContext();
   if (!ctx) {
-    console.info("[audit]", input.module, input.action, input.summary || input.entityId);
-    return;
+    console.error(
+      "[audit] NOT RECORDED — no tenant context:",
+      input.module,
+      input.action,
+      input.summary || input.entityId,
+    );
+    return { ok: false, error: "No tenant context" };
   }
   const { sb, tenantId } = ctx;
   const row = {
@@ -42,8 +58,17 @@ export async function writeAudit(input: AuditInput): Promise<void> {
   };
   const { error } = await sb.from("audit_events").insert(row);
   if (error) {
-    console.warn("[audit] insert failed", error.message);
+    console.error(
+      "[audit] NOT RECORDED —",
+      error.message,
+      "|",
+      input.module,
+      input.action,
+      input.summary || input.entityId,
+    );
+    return { ok: false, error: error.message };
   }
+  return { ok: true };
 }
 
 export function hashOtpCode(code: string): string {

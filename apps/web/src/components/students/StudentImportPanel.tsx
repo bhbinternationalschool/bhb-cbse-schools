@@ -1,5 +1,6 @@
 "use client";
 
+import { recordAudit } from "@/lib/auditClient";
 import { useEffect, useMemo, useState } from "react";
 import {
   STUDENT_TYPES,
@@ -165,6 +166,27 @@ export function StudentImportPanel({ masters, sis, onApplied }: Props) {
         pushSisState(result.state).then(() => flushSisSync()).catch(console.error);
       });
       setPreview(result);
+      // A bulk import can create or rewrite hundreds of student records in
+      // one click — the highest-impact action in the module, and the one
+      // most likely to need explaining afterwards.
+      recordAudit({
+        module: "students",
+        action: "import",
+        entityType: "student_roster",
+        summary:
+          `Imported ${result.created} new, updated ${result.updated}` +
+          (result.skipped ? `, skipped ${result.skipped}` : "") +
+          (result.errors.length ? `, ${result.errors.length} error(s)` : "") +
+          (fileName ? ` from ${fileName}` : " from pasted CSV"),
+        after: {
+          created: result.created,
+          updated: result.updated,
+          skipped: result.skipped,
+          errors: result.errors.length,
+          rosterSizeAfter: result.state.students.length,
+          source: fileName || "pasted-csv",
+        },
+      });
       onApplied(
         result.state,
         `Imported ${result.created} new, updated ${result.updated}` +
