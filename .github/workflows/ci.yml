@@ -57,6 +57,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:sis-revision
 
+      - name: Test — a partial sync can never wipe the roster
+        working-directory: apps/web
+        run: npm run test:sis-prune
+
       - name: Test — fee structure / import / automation suites
         working-directory: apps/web
         run: |
