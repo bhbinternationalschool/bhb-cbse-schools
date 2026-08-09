@@ -38,6 +38,55 @@
 --
 -- Idempotent: identity mappings are excluded when the map is built, so a
 -- second run produces an empty map, changes nothing, and still verifies.
+--
+-- GUARDED — read this before removing the guard below.
+--
+-- The counts above hold only while the desk generation is the one every
+-- repaired table was mapped onto. Checked against the live database on
+-- 2026-08-09 that was NOT true:
+--
+--   05:23  20260809110000 applied
+--   05:26  20260809120000 applied (admission_desk_leads.updated_at agrees)
+--   08:10  masters re-seeded — masters_desk_sync_meta.last_updated_at,
+--          15 classes, all ids new
+--   08:11  all 711 sis_students rewritten with ids matching nothing:
+--          not the desk, not the blob, not 120000's extinct set
+--
+-- Every id repair so far has been undone by the next re-seed. In that state
+-- this migration is actively harmful: its own checks only look at the blob,
+-- so it reports success while rewriting the last self-consistent snapshot of
+-- the old id space onto a desk generation that is itself unstable, and
+-- repairs none of the live breakage.
+--
+-- So it refuses to run unless the live roster already resolves against the
+-- desk. That is the cheapest available proof that masters have not been
+-- re-seeded since the normalized tables were repaired. Fix the cause first
+-- (a cold loadMasters() handing out defaultMasters() ids that a sync then
+-- writes), then the normalized tables, then run this.
+
+-- ── Guard: refuse to run while the live roster is broken ─────────────
+do $$
+declare unresolved int;
+begin
+  select count(*) into unresolved
+    from public.sis_students s
+   where (
+     coalesce(s.class_id, '') <> '' and not exists (
+       select 1 from public.masters_desk_slices d, jsonb_array_elements(d.payload) e
+        where d.tenant_id = s.tenant_id and d.slice_key = 'classes'
+          and e ->> 'id' = s.class_id)
+   ) or (
+     coalesce(s.section_id, '') <> '' and not exists (
+       select 1 from public.masters_desk_slices d, jsonb_array_elements(d.payload) e
+        where d.tenant_id = s.tenant_id and d.slice_key = 'sections'
+          and e ->> 'id' = s.section_id)
+   );
+  if unresolved > 0 then
+    raise exception
+      'refusing to reconcile the mirror blob: % sis_students row(s) have a class or section id that does not resolve against masters_desk_slices. Masters have been re-seeded since the normalized tables were repaired, so the desk generation this migration would map onto is not the one the live data uses. Repair sis_students (and admission_desk_leads) first, then re-run.',
+      unresolved;
+  end if;
+end $$;
 
 -- ── Snapshot (only once — never overwrite a good one with migrated data) ──
 do $$
