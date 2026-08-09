@@ -32,14 +32,9 @@ jobs:
           node-version: 20
           cache: npm
 
-      # `npm ci` installs exactly the lockfile — never silently resolves
-      # a different tree than the one that was reviewed.
+      # Use npm install to ensure native modules (lightningcss) download properly
       - name: Install
-        run: npm ci
-
-      # Rebuild native modules (lightningcss) for the current platform
-      - name: Rebuild native modules
-        run: npm rebuild lightningcss
+        run: npm install
 
       - name: Typecheck
         run: npm run typecheck
