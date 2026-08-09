@@ -59,6 +59,11 @@ SELFTESTS=(
   test:masters-write-guard
   test:hydrate-failure-safety
   test:sis-revision
+  test:sis-prune
+  test:audit-redaction
+  test:student-filters
+  test:masters-merge
+  test:accounts
   test:playbook
   test:erp-chat
   test:wa-templates-automation
