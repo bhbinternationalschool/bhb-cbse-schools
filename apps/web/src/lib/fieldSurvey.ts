@@ -411,7 +411,11 @@ export function flushOfflineSurveyQueue(
         parentGroupKey: item.mobile,
       },
       item.by || by,
-      { allowMissingClass: !item.classSoughtId },
+      // Offline queue draining: SurveyOfflineDraft carries only a class id,
+      // and a surveyor often has none. Rejecting here would strand the
+      // queued lead in `remaining` forever. Literal, not
+      // `!item.classSoughtId` — that form can never refuse anything.
+      { allowMissingClass: true },
     );
     if (!r.ok) {
       failed.push({ id: item.id, reason: r.reason });
@@ -502,7 +506,8 @@ export function captureFieldSurveyWithExtras(
       parentGroupKey: normalizeMobile(draft.mobile || ""),
     },
     by,
-    { allowMissingClass: !draft.classSoughtId },
+    // Same field-survey rule as flushOfflineSurveyQueue above.
+    { allowMissingClass: true },
   );
   if (!r.ok) return r;
   return { ok: true, state: r.state, lead: r.lead };

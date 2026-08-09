@@ -2972,7 +2972,11 @@ export function createFieldSurveyEnquiry(
       assignedTo: by,
     },
     by || "Field survey",
-    { allowMissingClass: !draft.classSoughtId, publicSubmit: false },
+    // Deliberately optional: a surveyor walking a beat often does not know
+    // the class yet, and losing the lead is worse than losing the class.
+    // Spelled as a literal, not `!draft.classSoughtId` — deriving the flag
+    // from the condition it guards makes the check unable to ever fire.
+    { allowMissingClass: true, publicSubmit: false },
   );
   if (!r.ok) return r;
   return { ok: true, state: r.state, lead: r.lead };
@@ -3002,7 +3006,11 @@ export function createRegistrationFromDesk(
       leadDate: draft.leadDate || today(),
     },
     by,
-    { allowMissingClass: !draft.classSoughtId },
+    // A paid registration always has a class: the only caller,
+    // createFamilyRegistrationsFromDesk, refuses the whole family first
+    // ("Class required for child N"). Enforced here too so the invariant
+    // survives a future second caller.
+    { allowMissingClass: false },
   );
   if (!created.ok) return created;
 
@@ -3897,7 +3905,10 @@ export function createStaffMobileEnquiry(
       nextFollowUpAt: draft.nextFollowUpAt || today(),
     },
     by,
-    { allowMissingClass: !draft.classSoughtId },
+    // Staff capturing a lead on their phone: the class picker is labelled
+    // "Class (optional)", so blank is a supported answer, not an accident.
+    // Literal rather than `!draft.classSoughtId` — see createFieldSurveyEnquiry.
+    { allowMissingClass: true },
   );
 }
 

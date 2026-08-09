@@ -69,7 +69,13 @@ the concrete items. Check things off in the PR that fixes them.
   change. Collapse to one source: either a composite action / shared step,
   or regenerate the lockfile with all platforms
   (`npm install --os=linux --cpu=x64`) so `npm ci` alone is enough.
-- [ ] **`allowMissingClass` defeats its own check at 6 call sites.**
+- [x] **`allowMissingClass` defeats its own check at 6 call sites.**
+  Fixed 2026-08-10 (`d8b1ef5`). Five were deliberate capture-first flows —
+  behaviour unchanged, now spelled as a literal `true` with the reason;
+  making them strict would have started rejecting field-collected leads.
+  The sixth, `createRegistrationFromDesk`, passes `false`: its only caller
+  already refuses a family with no class, so the flag was dead code.
+  Original finding below for the record.
   `createEnquiry` (`admissions.ts:1518`) refuses a lead with no
   `classSoughtId` — *unless* `opts.allowMissingClass`. Six of the thirteen
   callers pass `allowMissingClass: !draft.classSoughtId`, i.e. "if the class

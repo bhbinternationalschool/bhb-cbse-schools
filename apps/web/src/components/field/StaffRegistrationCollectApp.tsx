@@ -95,7 +95,10 @@ export function StaffRegistrationCollectApp({
           docsPhoto: true,
         }),
         by,
-        { allowMissingClass: !classSoughtId },
+        // The picker below is labelled "Class (optional)" — blank is a
+        // supported answer here. Literal rather than `!classSoughtId`,
+        // which reads like a check but can never refuse anything.
+        { allowMissingClass: true },
       );
       if (!created.ok) return { ok: false, reason: created.reason };
       state = created.state;
