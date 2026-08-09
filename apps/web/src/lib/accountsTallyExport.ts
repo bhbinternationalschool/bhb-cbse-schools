@@ -3,11 +3,11 @@
  */
 
 import {
-  COA_FEE_INCOME,
   getCoaByCode,
   getExpenseCategory,
-  loadAccounts,
-} from "@/lib/accounts";
+} from "@/lib/accountsLookups";
+import { loadAccounts } from "@/lib/accountsStore";
+import { COA_FEE_INCOME } from "@/lib/accountsTypes";
 import { buildDayBook, tenderModeLabel } from "@/lib/fees";
 import { loadMasters } from "@/lib/masters";
 import { downloadTextFile } from "@/lib/payroll";

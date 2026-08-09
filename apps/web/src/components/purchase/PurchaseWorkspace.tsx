@@ -41,7 +41,10 @@ import {
 import { readImageAsDataUrl } from "@/lib/homework";
 import { runBillOcrApi } from "@/lib/ocrClient";
 import { openWaMe } from "@/lib/waMe";
-import { loadAccounts, seedAccountsIfEmpty } from "@/lib/accounts";
+import {
+  loadAccounts,
+  seedAccountsIfEmpty,
+} from "@/lib/accountsStore";
 import { PurchaseReturnPanel } from "@/components/purchase/PurchaseReturnPanel";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 

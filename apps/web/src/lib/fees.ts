@@ -3058,7 +3058,7 @@ export function collectPayment(input: {
     voucher.receiptNo,
   );
 
-  void import("@/lib/accounts")
+  void import("@/lib/accountsPostings")
     .then((m) => {
       const storeAmountPaise = voucher.lines
         .filter((l) => l.kind === "store")
@@ -4322,7 +4322,7 @@ export function approveDayClose(input: {
     resolvedAt: now,
   };
   saveFees(upsertDayClose(session, fees));
-  void import("@/lib/accounts")
+  void import("@/lib/accountsPostings")
     .then((m) => {
       m.applyDayCloseHandover(session);
     })

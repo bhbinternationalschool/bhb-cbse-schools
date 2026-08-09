@@ -7,7 +7,7 @@ import { assertModulePermission } from "@/lib/rbacGuard";
 import {
   capitaliseTrustProject,
   postTrustCostLineToCwip,
-} from "@/lib/accounts";
+} from "@/lib/accountsCapex";
 
 /* ─── Types ─────────────────────────────────────────────────── */
 

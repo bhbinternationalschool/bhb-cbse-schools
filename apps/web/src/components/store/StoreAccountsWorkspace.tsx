@@ -1,16 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { payUnifiedPayable } from "@/lib/accountsPayables";
 import {
   loadAccounts,
-  payUnifiedPayable,
   seedAccountsIfEmpty,
-  vendorBillBalancePaise,
-  type AccountsPayable,
-  type AccountsVendor,
-  type PaymentMode,
-  type VendorBill,
-} from "@/lib/accounts";
+} from "@/lib/accountsStore";
+import type {
+  AccountsPayable,
+  AccountsVendor,
+  PaymentMode,
+  VendorBill,
+} from "@/lib/accountsTypes";
+import { vendorBillBalancePaise } from "@/lib/accountsVendors";
 import { formatInr, loadFees, paidByDueKey } from "@/lib/fees";
 import { loadMasters, type MastersState } from "@/lib/masters";
 import {

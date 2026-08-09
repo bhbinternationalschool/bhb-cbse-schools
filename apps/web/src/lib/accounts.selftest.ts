@@ -1,11 +1,12 @@
 /**
  * Accounts — characterization harness.
  *
- * accounts.ts is the finance core (cash book, bank book, expense vouchers,
- * vendor bills, payables, owner loans, chart of accounts + journal, reports)
- * and had no test coverage. This pins the behaviour that must survive the
- * split into per-domain modules: every posting path is exercised end to end
- * and checked against the one invariant that cannot be negotiated —
+ * The accounts family (cash book, bank book, expense vouchers, vendor bills,
+ * payables, owner loans, chart of accounts + journal, reports) is the finance
+ * core, and had no test coverage until it was split out of one 4,500-line
+ * file. This is what the split had to survive, and what any future change to
+ * a posting path still has to: every path is exercised end to end and checked
+ * against the one invariant that cannot be negotiated —
  *
  *     the books balance.
  *
@@ -47,41 +48,53 @@ const store = new Map<string, string>();
 };
 
 import {
-  balanceSheet,
   bankBalancePaise,
-  cancelExpenseVoucher,
   cashInHandPaise,
-  coaLedgerRows,
-  createExpenseVoucher,
-  createOwnerLoan,
-  createVendorBill,
-  dashboardSnapshot,
-  getCoaByCode,
-  groupSummary,
-  listJournals,
-  listUnifiedPayables,
-  loadAccounts,
   postBankMovement,
   postCashMovement,
-  postFeeCollectionToAccounts,
-  postJournal,
-  profitAndLoss,
   recordBankDeposit,
-  seedAccountsIfEmpty,
-  setFiscalYearStatus,
   totalBankBalancePaise,
   transferCashBetweenPools,
-  trialBalance,
-  upsertVendor,
-  vendorOutstandingBalancePaise,
+} from "@/lib/accountsCashBank";
+import {
+  cancelExpenseVoucher,
+  createExpenseVoucher,
+} from "@/lib/accountsExpenseVouchers";
+import {
+  coaLedgerRows,
+  listJournals,
+  postJournal,
+  setFiscalYearStatus,
   voidJournalEntry,
+} from "@/lib/accountsJournal";
+import { createOwnerLoan } from "@/lib/accountsLoans";
+import { getCoaByCode } from "@/lib/accountsLookups";
+import { listUnifiedPayables } from "@/lib/accountsPayables";
+import { postFeeCollectionToAccounts } from "@/lib/accountsPostings";
+import {
+  balanceSheet,
+  dashboardSnapshot,
+  groupSummary,
+  profitAndLoss,
+  trialBalance,
+} from "@/lib/accountsReports";
+import {
+  loadAccounts,
+  seedAccountsIfEmpty,
+} from "@/lib/accountsStore";
+import {
   COA_ACCOUNTS_PAYABLE,
   COA_BANK_ACCOUNTS,
   COA_CASH_IN_HAND,
   COA_FEE_INCOME,
   COA_OWNER_LOANS,
   type AccountsState,
-} from "@/lib/accounts";
+} from "@/lib/accountsTypes";
+import {
+  createVendorBill,
+  upsertVendor,
+  vendorOutstandingBalancePaise,
+} from "@/lib/accountsVendors";
 
 console.log("accounts.selftest.ts");
 

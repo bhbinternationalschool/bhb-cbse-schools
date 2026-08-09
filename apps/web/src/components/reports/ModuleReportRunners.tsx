@@ -17,8 +17,8 @@ import {
 import {
   loadAccounts,
   seedAccountsIfEmpty,
-  type AccountsState,
-} from "@/lib/accounts";
+} from "@/lib/accountsStore";
+import type { AccountsState } from "@/lib/accountsTypes";
 import {
   STORE_REPORT_CATEGORIES,
   STORE_REPORTS,

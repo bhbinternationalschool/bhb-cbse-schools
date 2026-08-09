@@ -23,11 +23,11 @@ import {
 } from "@/lib/admissions";
 import {
   bankBalancePaise,
-  dashboardSnapshot,
-  listUnifiedPayables,
-  loadAccounts,
   totalBankBalancePaise,
-} from "@/lib/accounts";
+} from "@/lib/accountsCashBank";
+import { listUnifiedPayables } from "@/lib/accountsPayables";
+import { dashboardSnapshot } from "@/lib/accountsReports";
+import { loadAccounts } from "@/lib/accountsStore";
 import { loadAttendance, summarizeMarks } from "@/lib/attendance";
 import { loadCertificates } from "@/lib/certificates";
 import { loadExams } from "@/lib/exams";

@@ -11,7 +11,11 @@ import {
   TENDER_MODES,
   type StudentSearchHit,
 } from "@/lib/fees";
-import { loadAccounts, seedAccountsIfEmpty, type AccountsState } from "@/lib/accounts";
+import {
+  loadAccounts,
+  seedAccountsIfEmpty,
+} from "@/lib/accountsStore";
+import type { AccountsState } from "@/lib/accountsTypes";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
 import { loadSis, type SisState } from "@/lib/sis";
 import {

@@ -6,7 +6,10 @@
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { DEFAULT_AY } from "@/lib/masters";
 import { checkHold } from "@/lib/holds";
-import { loadAccounts, seedAccountsIfEmpty } from "@/lib/accounts";
+import {
+  loadAccounts,
+  seedAccountsIfEmpty,
+} from "@/lib/accountsStore";
 
 /** Legacy fixed codes — still accepted on import / migration. */
 export type StoreCategoryCode = "book" | "uniform" | "stationery" | "other";
@@ -2013,7 +2016,7 @@ export function createStoreIssue(input: {
   saveStore(state);
 
   // Post to Accounts (cashbook / daybook / BS) — non-blocking if accounts unavailable
-  void import("@/lib/accounts")
+  void import("@/lib/accountsPostings")
     .then((m) => {
       if (issue.counterPaidPaise > 0) {
         m.postStoreSaleToAccounts({
@@ -2114,7 +2117,7 @@ export function voidStoreIssue(
 
   const netBilled = Math.max(0, issue.totalPaise - (issue.returnedPaise || 0));
   if (netBilled > 0) {
-    void import("@/lib/accounts")
+    void import("@/lib/accountsPostings")
       .then((m) => {
         m.postStoreSellReturnToAccounts({
           returnId: `void_${issue.id}`,
@@ -2830,7 +2833,7 @@ export function createStoreSellReturn(input: {
   };
   saveStore(state);
 
-  void import("@/lib/accounts")
+  void import("@/lib/accountsPostings")
     .then((m) => {
       m.postStoreSellReturnToAccounts({
         returnId: sellReturn.id,
