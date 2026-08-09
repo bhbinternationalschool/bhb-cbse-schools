@@ -7,13 +7,18 @@ the concrete items. Check things off in the PR that fixes them.
 
 ## Blocking / owner actions
 
-- [ ] **GitHub account is locked over billing.** Actions now parses and
-  queues workflows (progress over the 2026-08-09 `startup_failure`s), but
-  every job dies in ~2s, no runner, with GitHub's annotation:
-  *"The job was not started because your account is locked due to a billing
-  issue."* Fix at github.com/settings/billing (payment method / failed
-  charge), then confirm by watching one push to `main` produce a green run.
-  Until then `npm run verify` is the only gate.
+- [x] **GitHub account was locked over billing** — resolved 2026-08-10 by
+  moving the repo, not by fixing the billing. Updating the card, verifying
+  it with the bank and downgrading the plan all left the account locked
+  (*"The job was not started because your account is locked due to a billing
+  issue."*), so all 14 branches were pushed to
+  `bhbinternationalschool/bhb-cbse-schools`, where Actions runs normally.
+  `ashishsingh80-web` still holds the old PRs and remains locked.
+- [ ] **Point the remaining tooling at the new origin.** The worktree's
+  `origin` was re-pointed; anything else that names `ashishsingh80-web`
+  (other clones, bookmarks, the old PRs #1–#11) still refers to the locked
+  account. Deploys are unaffected — `scripts/deploy-online.sh` goes through
+  `gcloud builds submit` and never touches GitHub.
 
 ## Review findings (PR #5) — confirmed, unfixed
 
@@ -41,11 +46,29 @@ the concrete items. Check things off in the PR that fixes them.
 - [ ] **`mastersDeskPushPending()` client path** (`mastersNormalizedClient.ts`)
   can still push whole masters state; server guards now cover it, but the
   client behaviour is unexamined.
-- [ ] **PR #1 rehome + close.** Its branch holds two migrations not on
-  `main`: `20260809125000_repair_ids_from_mirror_snapshot.sql` (applied to
-  prod manually, should be committed for the record) and
+- [ ] **Rehome `fix/public-form-class-ids` (old-repo PR #1) + close.**
+  Numbering now collides: PR #1 on the *new* repo is the revision guard;
+  this is the old `ashishsingh80-web` PR #1. Its branch holds two migrations
+  not on `main`: `20260809125000_repair_ids_from_mirror_snapshot.sql`
+  (applied to prod manually, should be committed for the record) and
   `20260809130000_reconcile_mirror_blob_to_desk.sql` (written, guarded,
-  never applied). Move both onto `main`, close PR #1.
+  never applied). Move both onto `main` in the new repo; the old PR closes
+  itself when that account is abandoned.
+- [ ] **Linux native-binary pins are duplicated in three places.**
+  `package-lock.json` is generated on macOS, and npm prunes every non-darwin
+  platform binary out of it (npm/cli#4828) — the tree carries
+  `lightningcss-darwin-arm64` and no `linux-x64-gnu` entry at all. Any Linux
+  build therefore dies in Tailwind v4 with *"Cannot find module
+  '../lightningcss.linux-x64-gnu.node'"*; this is why the CI production-build
+  job had never passed (masked until 2026-08-10 by the billing lock).
+  Both CI jobs now install the Linux binaries explicitly after `npm ci`,
+  the way `apps/web/Dockerfile` already did — so `lightningcss@1.32.0` and
+  `@tailwindcss/oxide@4.3.2` are each pinned in **three** spots
+  (Dockerfile + two CI jobs) on top of the lockfile. Bump one and miss
+  another and CI or the deploy breaks in a way that looks unrelated to the
+  change. Collapse to one source: either a composite action / shared step,
+  or regenerate the lockfile with all platforms
+  (`npm install --os=linux --cpu=x64`) so `npm ci` alone is enough.
 - [ ] **Snapshot-table cleanup.** Drop
   `sis_students_pre_snapshotrepair_20260809`,
   `admission_desk_leads_pre_snapshotrepair_20260809`,
