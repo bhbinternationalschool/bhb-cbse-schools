@@ -49,6 +49,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:session-cookie
 
+      - name: Test — a client cannot replace the masters id generation
+        working-directory: apps/web
+        run: npm run test:masters-write-guard
+
       - name: Test — failed reads never look like empty data
         working-directory: apps/web
         run: npm run test:hydrate-failure-safety

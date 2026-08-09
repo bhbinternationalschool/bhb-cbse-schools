@@ -9,6 +9,7 @@ import {
   fetchMastersDeskFromDb,
   pushMastersDeskToDb,
 } from "@/lib/mastersNormalized.server";
+import { guardMastersOverwrite } from "@/lib/mastersWriteGuard";
 
 export const runtime = "nodejs";
 
@@ -48,7 +49,42 @@ export async function POST(req: Request) {
 
   const { version: _v, ...rest } = body;
   const state = { version: 2 as const, ...rest };
-  void pushMastersDeskToDb(state);
+
+  // A client must not be able to replace the class-id generation wholesale.
+  // This is checked before the write, not after, because pushMastersDeskToDb
+  // upserts every slice in one go — by the time it returns, every student,
+  // lead and RTE seat referencing a class is already orphaned.
+  const { bundle: stored } = await fetchMastersDeskFromDb();
+  const verdict = guardMastersOverwrite(
+    (stored.classes ?? []).map((c) => c.id),
+    (state.classes ?? []).map((c) => c.id),
+  );
+  if (!verdict.allow) {
+    console.warn(
+      `[masters-desk] rejected ${verdict.reason} push`,
+      `stored=${verdict.storedCount} incoming=${verdict.incomingCount}`,
+    );
+    return NextResponse.json(
+      {
+        error: verdict.message,
+        reason: verdict.reason,
+        storedClassCount: verdict.storedCount,
+        incomingClassCount: verdict.incomingCount,
+      },
+      { status: 409 },
+    );
+  }
+
+  // Awaited: the previous fire-and-forget meant a failed write still returned
+  // ok:true, so a client could believe its masters were saved when they were
+  // not.
+  const pushed = await pushMastersDeskToDb(state);
+  if (!pushed.ok) {
+    return NextResponse.json(
+      { error: pushed.error || "Masters push failed" },
+      { status: 500 },
+    );
+  }
   return NextResponse.json({
     ok: true,
     classCount: body.classes?.length ?? 0,

@@ -109,7 +109,15 @@ export function createDeskSlicePersistence<T extends { version: number }>(opts: 
       normChanged = true;
     }
 
-    if (normChanged) scheduleSync(opts.loadLocal());
+    // Hydration must never push. Writing the merged local copy straight back
+    // is how a client with a stale cache overwrites the desk on every
+    // navigation: Cloud Run logs showed one device POSTing rbac,
+    // module_registry, erp_chat, news, gallery, comms and curriculum within
+    // two seconds of each page load, republishing whatever it happened to
+    // hold. When the desk is the source of truth the client is a cache, so
+    // local state reaches the DB only through an explicit save. This mirrors
+    // the guard already applied to masters and admissions.
+    if (normChanged && !readFromDb) scheduleSync(opts.loadLocal());
     return blobChanged || normChanged;
   }
 
