@@ -1833,7 +1833,13 @@ export function loadMasters(): MastersState {
     if (mirrored && Array.isArray(mirrored.classes)) {
       return ensureFeeSetup(mirrored);
     }
-    return defaultMasters();
+    // Cold mirror. Seeding demo masters here mints fresh random class, section
+    // and fee-head ids on every call, and anything written against them lands
+    // in the DB pointing at nothing — this is how admission leads ended up
+    // with an unresolvable classSoughtId. Fail closed on a real tenant and let
+    // the caller hydrate; keep demo seeding only when there is no Supabase to
+    // hydrate from. Matches what the browser already does with empty storage.
+    return shouldSeedEmptyMastersShell() ? emptyMastersShell() : defaultMasters();
   }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -1863,8 +1869,13 @@ export function loadMasters(): MastersState {
   }
 }
 
+/**
+ * A real tenant gets an empty shell, never generated demo masters: the ids in
+ * defaultMasters() are freshly random, so anything saved against them dangles.
+ * Applies on both sides — the server has the same NEXT_PUBLIC_SUPABASE_* env
+ * the browser is built with.
+ */
 function shouldSeedEmptyMastersShell(): boolean {
-  if (typeof window === "undefined") return false;
   return isSupabaseConfigured();
 }
 
