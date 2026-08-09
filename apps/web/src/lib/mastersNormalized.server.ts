@@ -111,7 +111,7 @@ function slicesToBundle(
 
 export async function pushMastersDeskToDb(
   state: MastersState,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; updatedAt?: string }> {
   if (!mastersDualWriteDbEnabled()) return { ok: true };
   const ctx = await resolveCtx();
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
@@ -168,7 +168,11 @@ export async function pushMastersDeskToDb(
     { onConflict: "tenant_id" },
   );
 
-  return { ok: true };
+  // The exact revision written to sync meta. The route returns this to the
+  // client, which stores it as the base for its next push — a freshly
+  // minted timestamp here would differ from the stored one and make every
+  // second push falsely stale under the revision guard.
+  return { ok: true, updatedAt: now };
 }
 
 export async function fetchMastersDeskFromDb(): Promise<{

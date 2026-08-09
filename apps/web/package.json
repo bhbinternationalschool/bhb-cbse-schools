@@ -9,6 +9,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test:playbook": "npx tsx src/lib/playbook.selftest.ts",
+    "test:masters-revision-guard": "npx tsx src/lib/mastersRevisionGuard.selftest.ts",
     "test:masters-write-guard": "npx tsx src/lib/mastersWriteGuard.selftest.ts",
     "test:hydrate-failure-safety": "npx tsx src/lib/hydrateFailureSafety.selftest.ts",
     "test:session-cookie": "npx tsx src/lib/sessionCookie.selftest.ts",

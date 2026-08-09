@@ -57,6 +57,7 @@ run() {
 SELFTESTS=(
   test:session-cookie
   test:masters-write-guard
+  test:masters-revision-guard
   test:hydrate-failure-safety
   test:sis-revision
   test:sis-prune

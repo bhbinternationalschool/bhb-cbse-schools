@@ -53,6 +53,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:masters-write-guard
 
+      - name: Test — a stale masters push cannot overwrite a newer save
+        working-directory: apps/web
+        run: npm run test:masters-revision-guard
+
       - name: Test — failed reads never look like empty data
         working-directory: apps/web
         run: npm run test:hydrate-failure-safety
