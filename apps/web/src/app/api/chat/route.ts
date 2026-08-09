@@ -23,7 +23,13 @@ import {
   saveErpChatServer,
 } from "@/lib/erpChatServer";
 import { DEFAULT_AY, type MastersState } from "@/lib/masters";
-import { ensureSchoolMirrorLoaded } from "@/lib/schoolDataMirror.server";
+// Hydrated, not merely loaded: ensureSchoolMirrorLoaded() reads only
+// .data/school_mirror.json, which never exists on Cloud Run's ephemeral
+// filesystem. That left masters null on every request — GET degraded to an
+// empty state and POST returned 503, which the 8s poll in
+// StaffInternalChatButton retried forever. Every other API route already
+// hydrates from Supabase; this one was the outlier.
+import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import type { SisState } from "@/lib/sis";
 
 export const runtime = "nodejs";
@@ -46,6 +52,30 @@ function mirrorMasters(raw: unknown): MastersState | null {
   return raw as MastersState;
 }
 
+/**
+ * Masters, or a forced re-hydrate if the mirror came back without them.
+ *
+ * ensureSchoolMirrorHydrated() calls ensureSchoolMirrorLoaded() first, which
+ * replaceSchoolMirror()s from .data/school_mirror.json. When that file is
+ * absent or was written before a hydrate finished, it overwrites good
+ * in-memory masters with nothing, and the 45s hydrate TTL then keeps
+ * returning that empty mirror. Observed directly: one call resolves masters,
+ * the next reports the mirror empty. Forcing past the TTL once recovers it
+ * rather than serving a 503 that the client retries every 8 seconds.
+ */
+async function mirrorWithMasters(): Promise<{
+  masters: MastersState | null;
+  sis: SisState | undefined;
+}> {
+  let mirror = await ensureSchoolMirrorHydrated();
+  let masters = mirrorMasters(mirror.masters);
+  if (!masters) {
+    mirror = await ensureSchoolMirrorHydrated({ force: true });
+    masters = mirrorMasters(mirror.masters);
+  }
+  return { masters, sis: mirrorSis(mirror.sis) };
+}
+
 function mirrorSis(raw: unknown): SisState | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   return raw as SisState;
@@ -56,8 +86,7 @@ export async function GET() {
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const mirror = await ensureSchoolMirrorLoaded();
-  const masters = mirrorMasters(mirror.masters);
+  const { masters, sis } = await mirrorWithMasters();
   if (!masters) {
     return NextResponse.json({
       ok: true,
@@ -65,7 +94,7 @@ export async function GET() {
       warning: "School mirror empty — open ERP once to sync masters/SIS",
     });
   }
-  const actor = resolveChatActor(session, masters, mirrorSis(mirror.sis));
+  const actor = resolveChatActor(session, masters, sis);
   if (!actor) {
     return NextResponse.json(
       { error: "Could not resolve chat identity" },
@@ -105,9 +134,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const mirror = await ensureSchoolMirrorLoaded();
-  const masters = mirrorMasters(mirror.masters);
-  const sis = mirrorSis(mirror.sis);
+  const { masters, sis } = await mirrorWithMasters();
   if (!masters) {
     return NextResponse.json(
       { error: "School data not mirrored yet" },
