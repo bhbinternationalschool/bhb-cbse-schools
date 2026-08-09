@@ -124,7 +124,14 @@ async function pushMastersDeskApi(state: MastersState) {
     const res = await fetch("/api/school-data/masters-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ version: 2, ...rest }),
+      body: JSON.stringify({
+        version: 2,
+        ...rest,
+        // Optimistic locking: the desk revision this client last hydrated
+        // or pushed at. The server refuses the push (409 "stale") when the
+        // desk has moved since — see mastersRevisionGuard.ts.
+        baseUpdatedAt: readMeta().updatedAt || null,
+      }),
     });
     const body = (await res.json().catch(() => null)) as {
       ok?: boolean;
@@ -132,6 +139,7 @@ async function pushMastersDeskApi(state: MastersState) {
       classCount?: number;
       feeHeadCount?: number;
       error?: string;
+      reason?: string;
     } | null;
     if (res.ok && body?.ok) {
       writeMeta({
@@ -139,6 +147,22 @@ async function pushMastersDeskApi(state: MastersState) {
         classCount: body.classCount ?? state.classes.length,
         feeHeadCount: body.feeHeadCount ?? state.feeHeads.length,
       });
+    } else if (res.status === 409 && body?.reason === "stale") {
+      // Another device saved after this one loaded. The stale edit loses,
+      // visibly: tell the user, then drop the hydrate latch so the next
+      // ensureMastersHydrated() pulls the current desk state.
+      console.warn("[masters-db] stale push refused — rehydrating", body.error);
+      void import("@/components/shell/Toast").then(({ pushToast }) => {
+        pushToast({
+          kind: "error",
+          message:
+            "Masters changed on another device — your last change was not saved. " +
+            "The screen will refresh with the current data; please re-apply it.",
+          durationMs: 0,
+        });
+      });
+      const { resetDeskHydrated } = await import("@/lib/deskHydrateGuard");
+      resetDeskHydrated("masters");
     } else if (!res.ok) {
       console.warn("[masters-db] desk push failed", body?.error || res.status);
     }
