@@ -69,6 +69,34 @@ the concrete items. Check things off in the PR that fixes them.
   change. Collapse to one source: either a composite action / shared step,
   or regenerate the lockfile with all platforms
   (`npm install --os=linux --cpu=x64`) so `npm ci` alone is enough.
+- [ ] **`allowMissingClass` defeats its own check at 6 call sites.**
+  `createEnquiry` (`admissions.ts:1518`) refuses a lead with no
+  `classSoughtId` — *unless* `opts.allowMissingClass`. Six of the thirteen
+  callers pass `allowMissingClass: !draft.classSoughtId`, i.e. "if the class
+  is missing, permit it to be missing", so the check can never fire there:
+  `fieldSurvey.ts:414`, `fieldSurvey.ts:505`, `admissions.ts:2975`,
+  `admissions.ts:3005`, `admissions.ts:3900`,
+  `StaffRegistrationCollectApp.tsx:98`. (The public form and
+  `admissionsLeadIngest.server.ts` pass a bare `true` — deliberate, so a
+  parent enquiry is never lost, and they compensate by writing the class
+  *name* into `campaignNote`. Those two are fine; the six are not.)
+  Decide per call site whether the class is genuinely optional; where it is,
+  capture the class as text the way the public form does, so it stays
+  recoverable.
+- [ ] **30 leads carry a blank `class_sought_id`.** Found while verifying the
+  post-deploy baseline on 2026-08-10. *Not* incident damage: re-seed orphans
+  hold a stale-but-non-empty id from an old generation, these hold `''`.
+  All 30 arrived on **2026-07-18** from two spreadsheet imports
+  (`BHB_School_Enquiry_Survey.xlsx` ×28, `Field_Leads.xlsx` ×2),
+  `source=field_survey`, all still at stage `enquiry`, none converted to a
+  student. No `classAdmittedId`, no `sectionId` and no `dob` to infer from —
+  but **23 of 30 mention a class in the free-text `note`**, so they are
+  recoverable by hand, not by script. Worth an admissions-desk sweep before
+  these leads are worked.
+- [ ] **Baseline query should count blanks.** The "zero unresolved
+  references" baseline below was measured in a way that ignored empty-string
+  ids, which is why these 30 never showed. Any future check should treat
+  `''` and a stale id as two distinct failures, not fold both into "null".
 - [ ] **Snapshot-table cleanup.** Drop
   `sis_students_pre_snapshotrepair_20260809`,
   `admission_desk_leads_pre_snapshotrepair_20260809`,
@@ -80,10 +108,15 @@ the concrete items. Check things off in the PR that fixes them.
 - [ ] Watch prod logs for **409s on `/api/school-data/masters-desk`** — a
   409 means a device is pushing stale/regenerated masters; the fix is
   clearing that device's site data (proven 2026-08-09).
-- [ ] Current known-good baseline (2026-08-10): class-id generation
-  `cls_p7bw8cpc…`, 711 students / 919 leads / 10 RTE seats, **zero
-  unresolved references**. Any deviation without a deliberate masters edit
-  is an incident.
+- [ ] Current known-good baseline, re-measured post-deploy 2026-08-10 on
+  revision `school-erp-web-00202-sb4`: 15 classes, generation
+  `cls_p7bw8cpc…` (Nursery), masters revision `2026-08-09 19:06:35+00`,
+  711 students / 919 leads / 10 RTE seats. **Zero stale-id references** —
+  no student, lead or RTE seat points at a class id from a dead generation.
+  The only blanks are the 30 July-import leads noted above (`''`, not a
+  stale id). Any *stale-id* deviation without a deliberate masters edit is
+  an incident; a moved masters revision without a deliberate edit is a
+  re-seed.
 
 ## Phase 1 — server-authoritative data layer (in progress)
 
