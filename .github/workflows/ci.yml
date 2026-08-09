@@ -1,0 +1,82 @@
+name: CI
+
+# Merge gate for the BHB ERP.
+#
+# This lives on main deliberately. A workflow that only exists on a feature
+# branch registers no workflow on the default branch, so nothing gates main
+# and PRs into it report no checks at all — which is how the public
+# registration fix reached production unverified.
+#
+# Lint is not a step yet: main currently has 30 pre-existing prefer-const
+# errors, so adding it would make the gate red on debt rather than on
+# regressions. The cleanup and the lint step land together, next.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A newer push to the same branch supersedes an in-flight run.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Typecheck · Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # `npm ci` installs exactly the lockfile — never silently resolves
+      # a different tree than the one that was reviewed.
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Self-test harnesses (no test framework in this repo by design —
+      # these run as plain tsx scripts and exit non-zero on failure).
+      - name: Test — fee structure / import / automation suites
+        working-directory: apps/web
+        run: |
+          npm run test:playbook
+          npm run test:erp-chat
+          npm run test:wa-templates-automation
+
+  build:
+    name: Production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # Catches anything that only fails at build time (bad dynamic
+      # imports, server/client boundary violations) before it reaches
+      # Cloud Run. Placeholder env values: the build must not require
+      # real secrets, and if it starts to, that itself is worth knowing.
+      - name: Build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key
+        run: npm run build
