@@ -73,6 +73,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:masters-merge
 
+      - name: Test — the accounts books balance
+        working-directory: apps/web
+        run: npm run test:accounts
+
       - name: Test — fee structure / import / automation suites
         working-directory: apps/web
         run: |

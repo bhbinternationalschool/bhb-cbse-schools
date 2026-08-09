@@ -17,6 +17,7 @@
     "test:student-filters": "npx tsx src/lib/studentFilters.selftest.ts",
     "test:masters-merge": "npx tsx src/lib/mastersMergePolicy.selftest.ts",
     "test:erp-chat": "npx tsx src/lib/erpChat.selftest.ts",
+    "test:accounts": "npx tsx src/lib/accounts.selftest.ts",
     "test:wa-templates-automation": "npx tsx src/lib/waTemplatesAutomation.selftest.ts",
     "import:leads": "npx tsx scripts/import-lead-excels.ts",
     "import:fee-discounts": "npx tsx scripts/import-fee-discounts-excel.ts",
