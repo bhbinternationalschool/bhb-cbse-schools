@@ -23,8 +23,8 @@ import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost"
 import {
   loadAccounts,
   seedAccountsIfEmpty,
-  type AccountsState,
-} from "@/lib/accounts";
+} from "@/lib/accountsStore";
+import type { AccountsState } from "@/lib/accountsTypes";
 import { dayCloseNeedsAttention } from "@/lib/fees";
 
 type AccountsTab =

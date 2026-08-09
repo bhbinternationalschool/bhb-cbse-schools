@@ -4,52 +4,69 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { DayClosePanel } from "@/components/fees/DayClosePanel";
 import {
-  approveExpenseVoucher,
-  applyDayCloseHandover,
   bankBalancePaise,
-  BANK_PAYMENT_MODE_LABELS,
-  BANK_PAYMENT_MODES,
-  cancelExpenseVoucher,
   cashInHandPaise,
-  createExpenseVoucher,
-  createOwnerLoan,
-  createVendorBill,
-  dashboardSnapshot,
   deleteBankAccount,
-  getExpenseCategory,
-  isExpenseVoucherCancelled,
-  listExpenseSubcategories,
-  listJournals,
-  listLinkedVendorsForExpense,
-  listOwnerLoanDue,
-  listRootExpenseCategories,
-  listUnifiedPayables,
-  markBillPaid,
-  nextExpenseVoucherNo,
-  payExpenseVoucher,
-  payUnifiedPayable,
   postBankMovement,
   postCashMovement,
-  postInterTrusteeTransfer,
-  postJournal,
   recordBankDeposit,
   recordOwnerCashHandover,
-  recordOwnerLoanPayment,
-  runRecurringExpensesForMonth,
-  saveAccounts,
-  sessionExpenseCategoryTotals,
-  setFiscalYearStatus,
-  syncTransportPayables,
   totalBankBalancePaise,
-  trialBalance,
-  profitAndLoss,
-  balanceSheet,
   upsertBankAccount,
+} from "@/lib/accountsCashBank";
+import {
+  sessionExpenseCategoryTotals,
   upsertExpenseCategory,
-  upsertRecurringRule,
+} from "@/lib/accountsExpenseCategories";
+import {
+  approveExpenseVoucher,
+  cancelExpenseVoucher,
+  createExpenseVoucher,
+  payExpenseVoucher,
+} from "@/lib/accountsExpenseVouchers";
+import {
+  listJournals,
+  postJournal,
+  setFiscalYearStatus,
+} from "@/lib/accountsJournal";
+import {
+  createOwnerLoan,
+  listOwnerLoanDue,
+  postInterTrusteeTransfer,
+  recordOwnerLoanPayment,
   upsertTrustee,
+} from "@/lib/accountsLoans";
+import {
+  getExpenseCategory,
+  listExpenseSubcategories,
+  listLinkedVendorsForExpense,
+  listRootExpenseCategories,
+  nextExpenseVoucherNo,
+} from "@/lib/accountsLookups";
+import {
+  isExpenseVoucherCancelled,
   vendorBillLineTotalPaise,
-  vendorOutstandingBalancePaise,
+} from "@/lib/accountsNormalize";
+import {
+  listUnifiedPayables,
+  payUnifiedPayable,
+  syncTransportPayables,
+} from "@/lib/accountsPayables";
+import { applyDayCloseHandover } from "@/lib/accountsPostings";
+import {
+  runRecurringExpensesForMonth,
+  upsertRecurringRule,
+} from "@/lib/accountsRecurring";
+import {
+  balanceSheet,
+  dashboardSnapshot,
+  profitAndLoss,
+  trialBalance,
+} from "@/lib/accountsReports";
+import { saveAccounts } from "@/lib/accountsStore";
+import {
+  BANK_PAYMENT_MODES,
+  BANK_PAYMENT_MODE_LABELS,
   VENDOR_BILL_UNITS,
   type AccountsState,
   type ExpensePaymentSplit,
@@ -58,7 +75,12 @@ import {
   type JournalLine,
   type OwnerLoanType,
   type PaymentMode,
-} from "@/lib/accounts";
+} from "@/lib/accountsTypes";
+import {
+  createVendorBill,
+  markBillPaid,
+  vendorOutstandingBalancePaise,
+} from "@/lib/accountsVendors";
 import { PaymentChannelSelect } from "@/components/accounts/PaymentChannelSelect";
 import {
   decodePaymentChannel,

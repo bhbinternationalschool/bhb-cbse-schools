@@ -2,7 +2,7 @@
  * Resolve WhatsApp sender identity against school roster, SIS, admissions, survey team.
  */
 
-import { loadAccounts } from "@/lib/accounts";
+import { loadAccounts } from "@/lib/accountsStore";
 import { findAdmissionLeadByMobile, loadAdmissions } from "@/lib/admissions";
 import { findSurveyMemberForSession } from "@/lib/fieldSurvey";
 import type { StaffRecord } from "@/lib/foundationMasters";

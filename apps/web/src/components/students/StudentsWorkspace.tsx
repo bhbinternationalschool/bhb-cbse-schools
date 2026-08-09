@@ -1,8 +1,25 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { GraduationCap } from "lucide-react";
+import { recordAudit } from "@/lib/auditClient";
+import {
+  BUILT_IN_VIEWS,
+  EMPTY_FILTERS,
+  MISSING_FIELD_LABELS,
+  countActiveFilters,
+  filtersFromSearchParams,
+  filtersToSearchParams,
+  isMissing,
+  loadFilters,
+  loadSavedViews,
+  saveFilters,
+  saveSavedViews,
+  type MissingField,
+  type SavedView,
+  type StudentFilterState,
+} from "@/lib/studentFilters";
 import {
   STUDENT_TYPES,
   currentAcademicYearCode,
@@ -113,6 +130,18 @@ export function StudentsWorkspace() {
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   /** all = every set filter must match; any = at least one set filter */
   const [matchMode, setMatchMode] = useState<"all" | "any">("all");
+  /** "Show only students missing X" — the completeness work list. */
+  const [missingFilter, setMissingFilter] = useState<MissingField>("");
+  const [savedViews, setSavedViews] = useState<SavedView[]>([]);
+  /**
+   * Gate for the persist effect. Must be state, not a ref: a ref set
+   * synchronously during restore lets the persist effect run in the same
+   * commit with the still-empty defaults, which overwrites the URL before
+   * the restored values land — silently discarding a shared filter link.
+   * As state it batches with the restore, so persistence only begins on a
+   * render where the filters are actually populated.
+   */
+  const [filtersReady, setFiltersReady] = useState(false);
   const [selectedId, setSelectedId] = useState("");
   const [profileId, setProfileId] = useState("");
   const [view, setView] = useState<ViewMode>("list");
@@ -171,6 +200,136 @@ export function StudentsWorkspace() {
       if (did) setState(loadSis());
     })();
   }, []);
+
+  /** Current filters as one object — for persistence, URL and saved views. */
+  const currentFilters: StudentFilterState = {
+    query,
+    sessionFilter,
+    classFilter,
+    sectionFilter,
+    statusFilter,
+    typeFilter,
+    genderFilter,
+    categoryFilter,
+    feeGroupFilter,
+    campusFilter,
+    penStatusFilter,
+    bloodFilter,
+    joinedFrom,
+    joinedTo,
+    missingFilter,
+    matchMode,
+    sortBy,
+    sortOrder,
+  };
+
+  const applyFilters = useCallback((f: Partial<StudentFilterState>) => {
+    if (f.query !== undefined) setQuery(f.query);
+    if (f.sessionFilter !== undefined) setSessionFilter(f.sessionFilter);
+    if (f.classFilter !== undefined) setClassFilter(f.classFilter);
+    if (f.sectionFilter !== undefined) setSectionFilter(f.sectionFilter);
+    if (f.statusFilter !== undefined) {
+      setStatusFilter(f.statusFilter as "all" | StudentStatus);
+    }
+    if (f.typeFilter !== undefined) setTypeFilter(f.typeFilter as "" | FeeStudentType);
+    if (f.genderFilter !== undefined) {
+      setGenderFilter(f.genderFilter as "" | SisStudent["gender"]);
+    }
+    if (f.categoryFilter !== undefined) {
+      setCategoryFilter(f.categoryFilter as "" | StudentCategory);
+    }
+    if (f.feeGroupFilter !== undefined) setFeeGroupFilter(f.feeGroupFilter);
+    if (f.campusFilter !== undefined) setCampusFilter(f.campusFilter);
+    if (f.penStatusFilter !== undefined) {
+      setPenStatusFilter(f.penStatusFilter as "" | PenStatus);
+    }
+    if (f.bloodFilter !== undefined) setBloodFilter(f.bloodFilter);
+    if (f.joinedFrom !== undefined) setJoinedFrom(f.joinedFrom);
+    if (f.joinedTo !== undefined) setJoinedTo(f.joinedTo);
+    if (f.missingFilter !== undefined) setMissingFilter(f.missingFilter);
+    if (f.matchMode !== undefined) setMatchMode(f.matchMode);
+    if (f.sortBy !== undefined) {
+      setSortBy(f.sortBy as "rollNo" | "name" | "admissionNo" | "joinedOn");
+    }
+    if (f.sortOrder !== undefined) setSortOrder(f.sortOrder);
+  }, []);
+
+  // Restore filters on mount: an explicit URL wins (shared link), else the
+  // last state this browser was left in. Without this, every filter reset
+  // whenever a user opened a student and came back.
+  useEffect(() => {
+    try {
+      const fromUrl = filtersFromSearchParams(
+        new URLSearchParams(window.location.search),
+      );
+      applyFilters(
+        Object.keys(fromUrl).length > 0 ? fromUrl : loadFilters(),
+      );
+      setSavedViews([...BUILT_IN_VIEWS, ...loadSavedViews()]);
+    } catch {
+      /* ignore */
+    } finally {
+      // Batched with the applyFilters setters above, so the persist effect
+      // first runs on a render that already has the restored values.
+      setFiltersReady(true);
+    }
+  }, [applyFilters]);
+
+  // Persist + reflect in the URL. Guarded so the restore above isn't
+  // immediately overwritten by an empty initial render.
+  useEffect(() => {
+    if (!filtersReady) return;
+    saveFilters(currentFilters);
+    try {
+      const url = new URL(window.location.href);
+      const next = filtersToSearchParams(currentFilters);
+      const tab = url.searchParams.get("tab");
+      url.search = next.toString();
+      if (tab) url.searchParams.set("tab", tab);
+      window.history.replaceState({}, "", url.toString());
+    } catch {
+      /* ignore */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    filtersReady,
+    query, sessionFilter, classFilter, sectionFilter, statusFilter,
+    typeFilter, genderFilter, categoryFilter, feeGroupFilter, campusFilter,
+    penStatusFilter, bloodFilter, joinedFrom, joinedTo, missingFilter,
+    matchMode, sortBy, sortOrder,
+  ]);
+
+  const activeFilterCount = countActiveFilters(currentFilters);
+
+  function resetFilters() {
+    applyFilters(EMPTY_FILTERS);
+  }
+
+  function applySavedView(v: SavedView) {
+    applyFilters(v.filters);
+    setMainTabPersist("register");
+  }
+
+  function saveCurrentAsView() {
+    const name = window.prompt("Name this view");
+    if (!name?.trim()) return;
+    const view: SavedView = {
+      id: `view_${Date.now().toString(36)}`,
+      name: name.trim().slice(0, 60),
+      filters: currentFilters,
+    };
+    const next = [...savedViews, view];
+    setSavedViews(next);
+    saveSavedViews(next);
+    setNotice(`Saved view “${view.name}”`);
+    window.setTimeout(() => setNotice(null), 2500);
+  }
+
+  function deleteSavedView(id: string) {
+    const next = savedViews.filter((v) => v.id !== id);
+    setSavedViews(next);
+    saveSavedViews(next);
+  }
 
   function setViewMode(next: ViewMode) {
     setView(next);
@@ -329,6 +488,9 @@ export function StudentsWorkspace() {
     if (joinedFrom || joinedTo) {
       predicates.push(matchesAdmissionRange);
     }
+    if (missingFilter) {
+      predicates.push((s) => isMissing(s, missingFilter));
+    }
     if (query.trim()) predicates.push(matchesSearch);
 
     const list = state.students.filter((s) => {
@@ -378,6 +540,7 @@ export function StudentsWorkspace() {
     bloodFilter,
     joinedFrom,
     joinedTo,
+    missingFilter,
     query,
     matchMode,
     sortBy,
@@ -575,6 +738,15 @@ export function StudentsWorkspace() {
       },
       s.status === "active" ? "Student inactivated" : "Student activated",
     );
+    recordAudit({
+      module: "students",
+      action: "status_change",
+      entityType: "student",
+      entityId: s.id,
+      summary: `${s.status === "active" ? "Inactivated" : "Activated"} ${s.fullName} (${s.admissionNo})`,
+      before: { status: s.status },
+      after: { status: s.status === "active" ? "inactive" : "active" },
+    });
   }
 
   function onRemove(s: SisStudent) {
@@ -589,6 +761,24 @@ export function StudentsWorkspace() {
       "";
     setSelectedId(nextId);
     commit(result.state, "Student removed");
+    // Hard delete with no soft-delete or restore — the audit entry is the
+    // only remaining record that this student ever existed.
+    recordAudit({
+      module: "students",
+      action: "delete",
+      entityType: "student",
+      entityId: s.id,
+      summary: `Removed ${s.fullName} (${s.admissionNo}) from ${s.academicYearCode}`,
+      before: {
+        fullName: s.fullName,
+        admissionNo: s.admissionNo,
+        academicYearCode: s.academicYearCode,
+        classId: s.classId,
+        sectionId: s.sectionId,
+        status: s.status,
+        householdId: s.householdId,
+      },
+    });
   }
 
   const emptyMsg =
@@ -793,6 +983,68 @@ export function StudentsWorkspace() {
       {mainTab === "register" ? (
         <>
       <div className="mt-5 space-y-2">
+        {/* Saved views — one click to the work lists staff actually need,
+            including the completeness gaps the filters could not express. */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+            Views
+          </span>
+          {savedViews.map((v) => (
+            <span key={v.id} className="inline-flex items-center">
+              <button
+                type="button"
+                onClick={() => applySavedView(v)}
+                className={`rounded-l-lg border border-[rgba(32,48,80,0.14)] px-2.5 py-1 text-[11px] font-medium hover:bg-[rgba(32,48,80,0.06)] ${
+                  v.builtIn ? "bg-white" : "bg-[rgba(197,160,40,0.12)]"
+                } ${v.builtIn ? "rounded-r-lg" : ""}`}
+                title={v.builtIn ? "Built-in view" : "Saved view"}
+              >
+                {v.name}
+              </button>
+              {!v.builtIn ? (
+                <button
+                  type="button"
+                  onClick={() => deleteSavedView(v.id)}
+                  aria-label={`Delete saved view ${v.name}`}
+                  className="rounded-r-lg border border-l-0 border-[rgba(32,48,80,0.14)] bg-[rgba(197,160,40,0.12)] px-1.5 py-1 text-[11px] text-[var(--muted)] hover:text-[#c0392b]"
+                >
+                  ✕
+                </button>
+              ) : null}
+            </span>
+          ))}
+          <button
+            type="button"
+            onClick={saveCurrentAsView}
+            disabled={activeFilterCount === 0}
+            className="rounded-lg border border-dashed border-[rgba(32,48,80,0.28)] px-2.5 py-1 text-[11px] font-medium text-[var(--brand-mid)] disabled:opacity-40"
+            title={
+              activeFilterCount === 0
+                ? "Set some filters first"
+                : "Save the current filters as a view"
+            }
+          >
+            + Save current
+          </button>
+          {activeFilterCount > 0 ? (
+            <span className="ml-auto flex items-center gap-2">
+              <span
+                className="rounded-full bg-[rgba(32,48,80,0.08)] px-2 py-0.5 text-[11px] font-semibold text-[var(--brand-deep)]"
+                aria-live="polite"
+              >
+                {activeFilterCount} filter{activeFilterCount === 1 ? "" : "s"} active
+              </span>
+              <button
+                type="button"
+                onClick={resetFilters}
+                className="text-[11px] font-semibold text-[var(--brand-mid)] underline"
+              >
+                Clear all
+              </button>
+            </span>
+          ) : null}
+        </div>
+
         <div className="flex flex-wrap items-center gap-2">
           <div
             className="inline-flex rounded-lg border border-[rgba(32,48,80,0.12)] bg-white p-0.5"
@@ -1070,6 +1322,24 @@ export function StudentsWorkspace() {
             {BLOOD_GROUPS.filter(Boolean).map((b) => (
               <option key={b} value={b}>
                 {b}
+              </option>
+            ))}
+          </select>
+          {/* "Missing X" — the completeness work list. Every other filter
+              matches a value; this one matches its absence. */}
+          <select
+            className="field max-w-[13rem]"
+            value={missingFilter}
+            onChange={(e) => setMissingFilter(e.target.value as MissingField)}
+            aria-label="Show only students missing a field"
+            title="Show only students where this field is blank"
+          >
+            <option value="">Completeness: any</option>
+            {(
+              Object.keys(MISSING_FIELD_LABELS) as (keyof typeof MISSING_FIELD_LABELS)[]
+            ).map((k) => (
+              <option key={k} value={k}>
+                {MISSING_FIELD_LABELS[k]}
               </option>
             ))}
           </select>

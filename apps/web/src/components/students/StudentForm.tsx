@@ -13,6 +13,7 @@ import {
   type MastersState,
 } from "@/lib/masters";
 import { bumpStudentSeriesUses } from "@/lib/numberSeries";
+import { diffForAudit, recordAudit } from "@/lib/auditClient";
 import { suggestSystemAdmissionForImport } from "@/lib/studentLegacyAdmission";
 import {
   BLOOD_GROUPS,
@@ -1006,6 +1007,36 @@ export function StudentForm({
       students,
     });
     dirtyRef.current = false;
+
+    // Audit trail — student records carry Aadhaar references, PAN, DOB and
+    // guardian contacts, so every change needs an attributable record.
+    // Recorded here rather than server-side because the roster syncs as a
+    // bulk snapshot, which cannot tell who changed what.
+    if (mode === "edit" && studentId) {
+      const { changedFields, before, after } = diffForAudit(
+        previousStudent as unknown as Record<string, unknown> | null,
+        payload as unknown as Record<string, unknown>,
+      );
+      if (changedFields.length > 0) {
+        recordAudit({
+          module: "students",
+          action: "update",
+          entityType: "student",
+          entityId: payload.id,
+          summary: `Updated ${payload.fullName} (${payload.admissionNo}) — ${changedFields.length} field(s): ${changedFields.slice(0, 8).join(", ")}`,
+          before,
+          after,
+        });
+      }
+    } else {
+      recordAudit({
+        module: "students",
+        action: "create",
+        entityType: "student",
+        entityId: payload.id,
+        summary: `Admitted ${payload.fullName} (${payload.admissionNo}) to ${academicYearCode}`,
+      });
+    }
 
     bumpStudentSeriesUses(payload, academicYearCode);
 

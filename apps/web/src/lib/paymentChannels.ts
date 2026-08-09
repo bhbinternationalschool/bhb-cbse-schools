@@ -1,11 +1,11 @@
+import { listBanksForPaymentMode } from "@/lib/accountsLookups";
+import { loadAccounts } from "@/lib/accountsStore";
 import {
-  BANK_PAYMENT_MODE_LABELS,
   BANK_PAYMENT_MODES,
-  listBanksForPaymentMode,
-  loadAccounts,
+  BANK_PAYMENT_MODE_LABELS,
   type AccountsState,
   type PaymentMode,
-} from "@/lib/accounts";
+} from "@/lib/accountsTypes";
 import { TENDER_MODES, type TenderMode } from "@/lib/fees";
 
 export type PaymentChannelGroup = {

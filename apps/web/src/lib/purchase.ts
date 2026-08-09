@@ -5,12 +5,14 @@
 
 import { assertModulePermission } from "@/lib/rbacGuard";
 import {
-  createVendorBill,
-  creditVendorBill,
   loadAccounts,
   seedAccountsIfEmpty,
+} from "@/lib/accountsStore";
+import {
+  createVendorBill,
+  creditVendorBill,
   upsertVendor,
-} from "@/lib/accounts";
+} from "@/lib/accountsVendors";
 import { DEFAULT_AY, formatInr } from "@/lib/masters";
 import {
   describeFilters,
@@ -839,7 +841,7 @@ export function receiveGrn(input: {
   }
 
   const grnLines: GrnLine[] = [];
-  const vendorBillLines: import("@/lib/accounts").VendorBillLine[] = [];
+  const vendorBillLines: import("@/lib/accountsTypes").VendorBillLine[] = [];
   let grossPaise = 0;
   let stockApplied = false;
 

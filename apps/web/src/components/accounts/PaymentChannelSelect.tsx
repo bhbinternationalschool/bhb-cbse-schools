@@ -6,8 +6,8 @@ import {
   buildTenderChannelGroups,
   channelsForPaymentMode,
 } from "@/lib/paymentChannels";
-import type { AccountsState } from "@/lib/accounts";
-import type { PaymentMode } from "@/lib/accounts";
+import type { AccountsState } from "@/lib/accountsTypes";
+import type { PaymentMode } from "@/lib/accountsTypes";
 
 const FIELD =
   "w-full rounded-xl border border-[rgba(32,48,80,0.18)] px-3 py-2 text-sm";

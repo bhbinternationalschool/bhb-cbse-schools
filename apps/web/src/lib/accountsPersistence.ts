@@ -7,8 +7,8 @@ import {
   accountsStateIsEmpty,
   loadAccounts,
   writeAccountsLocalRaw,
-  type AccountsState,
-} from "@/lib/accounts";
+} from "@/lib/accountsStore";
+import type { AccountsState } from "@/lib/accountsTypes";
 import {
   hydrateAccountsDeskFromDb,
   scheduleAccountsDeskSync,

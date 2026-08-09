@@ -8,6 +8,7 @@ import {
   type MastersState,
 } from "@/lib/masters";
 import { type SisState, type SisStudent } from "@/lib/sis";
+import { isMissing } from "@/lib/studentFilters";
 import { loadTransport } from "@/lib/transport";
 import { FilterExportButtons } from "@/components/reports/FilterExportButtons";
 import { describeFilters } from "@/lib/reportExport";
@@ -258,6 +259,121 @@ function StudentListDrawer({
   );
 }
 
+/**
+ * Compliance readiness.
+ *
+ * Every other tile on this dashboard counts what the roster *is*. These
+ * count what still needs doing, and each one links into the register
+ * already filtered to exactly those students — so the number is the
+ * start of the work, not a fact to write down and act on elsewhere.
+ */
+function ComplianceCard({
+  activeCount,
+  udiseReady,
+  qualityPct,
+  missingCounts,
+  sessionAy,
+}: {
+  activeCount: number;
+  udiseReady: number;
+  qualityPct: number;
+  missingCounts: Record<string, number>;
+  sessionAy: string;
+}) {
+  const readyPct =
+    activeCount === 0 ? 100 : Math.round((udiseReady / activeCount) * 100);
+
+  const gaps: { field: string; label: string; count: number }[] = [
+    { field: "apaar", label: "APAAR ID", count: missingCounts.apaar ?? 0 },
+    { field: "pen", label: "PEN", count: missingCounts.pen ?? 0 },
+    { field: "aadhaar", label: "Aadhaar", count: missingCounts.aadhaar ?? 0 },
+    { field: "dob", label: "Date of birth", count: missingCounts.dob ?? 0 },
+    { field: "household", label: "Household link", count: missingCounts.household ?? 0 },
+    { field: "photo", label: "Photo", count: missingCounts.photo ?? 0 },
+  ].sort((a, b) => b.count - a.count);
+
+  const tone =
+    readyPct >= 90 ? "#2e7d32" : readyPct >= 50 ? "#f9a825" : "#c62828";
+
+  return (
+    <div className="overflow-hidden rounded-md border border-[#cfd8dc] bg-white shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#ffcc80] bg-[#fff8e1] px-3 py-2">
+        <span className="text-sm font-semibold text-[#e65100]">
+          Compliance &amp; data quality · {sessionAy}
+        </span>
+        <span className="text-[11px] text-[#8d6e63]">
+          Active roster only · UDISE+ needs PEN, APAAR, Aadhaar and DOB
+        </span>
+      </div>
+
+      <div className="grid gap-4 px-3 py-3 md:grid-cols-[minmax(0,18rem)_1fr]">
+        <div>
+          <div className="text-[12px] text-[#607d8b]">UDISE+ ready</div>
+          <div className="mt-0.5 flex items-baseline gap-2">
+            <span
+              className="text-2xl font-semibold tabular-nums"
+              style={{ color: tone }}
+            >
+              {udiseReady}
+            </span>
+            <span className="text-sm text-[#607d8b]">
+              of {activeCount} students
+            </span>
+          </div>
+          <div
+            className="mt-2 h-2 w-full overflow-hidden rounded-full bg-[#eceff1]"
+            role="progressbar"
+            aria-valuenow={readyPct}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label="UDISE+ readiness"
+          >
+            <div
+              className="h-full rounded-full transition-all"
+              style={{ width: `${readyPct}%`, background: tone }}
+            />
+          </div>
+          <div className="mt-1.5 text-[11px] text-[#607d8b]">
+            {readyPct}% filing-ready · {qualityPct}% of all tracked fields present
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+          {gaps.map((g) => {
+            const clean = g.count === 0;
+            return (
+              <Link
+                key={g.field}
+                href={`/students?tab=register&missingFilter=${g.field}&sortBy=name`}
+                className={`rounded-md border px-2.5 py-2 transition ${
+                  clean
+                    ? "border-[#c8e6c9] bg-[#f1f8e9]"
+                    : "border-[#ffcdd2] bg-[#fff5f5] hover:bg-[#ffebee]"
+                }`}
+                title={
+                  clean
+                    ? `Every active student has ${g.label}`
+                    : `Open the ${g.count} student(s) missing ${g.label}`
+                }
+              >
+                <div
+                  className="text-lg font-semibold tabular-nums"
+                  style={{ color: clean ? "#2e7d32" : "#c62828" }}
+                >
+                  {g.count}
+                </div>
+                <div className="text-[11px] leading-tight text-[#546e7a]">
+                  missing {g.label}
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function StudentStatsDashboard({
   sis,
   masters,
@@ -366,7 +482,51 @@ export function StudentStatsDashboard({
       .sort((a, b) => b[1] - a[1])
       .map(([label, count]) => ({ key: label, label, count }));
 
+    /**
+     * Compliance readiness for the active roster.
+     *
+     * PEN and APAAR are UDISE+/CBSE requirements and were invisible on
+     * this dashboard, which reported gender splits and transport counts
+     * while 98% of the roster had no APAAR ID. Counted against active
+     * students only — inactive records are not filed.
+     */
+    const COMPLIANCE_FIELDS = [
+      "apaar",
+      "pen",
+      "aadhaar",
+      "dob",
+      "household",
+      "photo",
+    ] as const;
+
+    const missingCounts = Object.fromEntries(
+      COMPLIANCE_FIELDS.map((f) => [
+        f,
+        active.filter((s) => isMissing(s, f)).length,
+      ]),
+    ) as Record<(typeof COMPLIANCE_FIELDS)[number], number>;
+
+    /** UDISE+ filing needs PEN, APAAR, Aadhaar and DOB on every child. */
+    const udiseReady = active.filter(
+      (s) =>
+        !isMissing(s, "pen") &&
+        !isMissing(s, "apaar") &&
+        !isMissing(s, "aadhaar") &&
+        !isMissing(s, "dob"),
+    ).length;
+
+    /** Share of all tracked fields present across the active roster. */
+    const totalChecks = active.length * COMPLIANCE_FIELDS.length;
+    const filledChecks =
+      totalChecks -
+      COMPLIANCE_FIELDS.reduce((sum, f) => sum + missingCounts[f], 0);
+    const qualityPct =
+      totalChecks === 0 ? 100 : Math.round((filledChecks / totalChecks) * 100);
+
     return {
+      missingCounts,
+      udiseReady,
+      qualityPct,
       active: active.length,
       inactive: inactive.length,
       oldCount,
@@ -456,6 +616,14 @@ export function StudentStatsDashboard({
           />
         </div>
       </div>
+
+      <ComplianceCard
+        activeCount={stats.active}
+        udiseReady={stats.udiseReady}
+        qualityPct={stats.qualityPct}
+        missingCounts={stats.missingCounts}
+        sessionAy={stats.sessionAy}
+      />
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <PairCard

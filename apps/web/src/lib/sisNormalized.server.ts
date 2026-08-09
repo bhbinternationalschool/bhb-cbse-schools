@@ -266,19 +266,66 @@ function studentToRow(s: SisStudent, tenantId: string, now: string) {
   };
 }
 
+/**
+ * Fraction of a table this is allowed to delete in one push before it
+ * refuses. A genuine bulk removal above this threshold should be done
+ * deliberately, not as a side effect of a sync.
+ */
+const MAX_PRUNE_FRACTION = 0.2;
+
+/**
+ * Delete rows absent from the pushed snapshot.
+ *
+ * DANGEROUS BY NATURE: it deletes on the basis of "not in this payload",
+ * so a caller that sends a partial roster deletes everything else. That
+ * has already cost this project real data — a 3-record test payload
+ * removed 708 students and 190 households from production. It is now
+ * opt-in (`pruneMissing`) and additionally refuses any prune that would
+ * remove more than MAX_PRUNE_FRACTION of the table, which is the shape
+ * every accidental wipe takes.
+ */
 async function deleteStale(
   sb: SupabaseClient,
   tenantId: string,
   table: "sis_households" | "sis_students",
   keepIds: Set<string>,
-) {
-  const { data } = await sb.from(table).select("id").eq("tenant_id", tenantId);
-  const stale = (data ?? [])
-    .map((r) => String((r as { id: string }).id))
-    .filter((id) => !keepIds.has(id));
-  if (stale.length > 0) {
-    await sb.from(table).delete().in("id", stale);
+): Promise<{ deleted: number; refused?: string }> {
+  const { data, error } = await sb
+    .from(table)
+    .select("id")
+    .eq("tenant_id", tenantId);
+  if (error) {
+    console.warn(`[sis-db] prune skipped for ${table}:`, error.message);
+    return { deleted: 0, refused: error.message };
   }
+
+  const existing = (data ?? []).map((r) => String((r as { id: string }).id));
+  const stale = existing.filter((id) => !keepIds.has(id));
+  if (stale.length === 0) return { deleted: 0 };
+
+  // An empty or tiny payload against a populated table is never a real
+  // "the user deleted these" — it is a partial/failed sync. Refuse it.
+  if (keepIds.size === 0 && existing.length > 0) {
+    const refused = `refused to prune all ${existing.length} row(s) from ${table} for an empty payload`;
+    console.error(`[sis-db] ${refused}`);
+    return { deleted: 0, refused };
+  }
+  const fraction = stale.length / Math.max(existing.length, 1);
+  if (fraction > MAX_PRUNE_FRACTION) {
+    const refused =
+      `refused to prune ${stale.length} of ${existing.length} row(s) from ${table} ` +
+      `(${Math.round(fraction * 100)}% > ${MAX_PRUNE_FRACTION * 100}% cap) — ` +
+      `likely a partial sync, not a deletion`;
+    console.error(`[sis-db] ${refused}`);
+    return { deleted: 0, refused };
+  }
+
+  const { error: delErr } = await sb.from(table).delete().in("id", stale);
+  if (delErr) {
+    console.warn(`[sis-db] prune failed for ${table}:`, delErr.message);
+    return { deleted: 0, refused: delErr.message };
+  }
+  return { deleted: stale.length };
 }
 
 export async function fetchSisFromDb(): Promise<{
@@ -371,6 +418,14 @@ export type SisPushResult = {
   conflicts?: SisPushConflict[];
   /** True when the atomic, conflict-guarded path was used. */
   guarded?: boolean;
+  /**
+   * Authoritative `updated_at` per record id after the push. The client
+   * must re-stamp its local copies with these, otherwise the next push of
+   * a record it just changed carries the pre-write version and conflicts
+   * with itself.
+   */
+  studentVersions?: Record<string, string>;
+  householdVersions?: Record<string, string>;
 };
 
 /**
@@ -412,8 +467,11 @@ async function pushSisGuarded(
   const result = (data ?? {}) as {
     applied_households?: number;
     applied_students?: number;
+    unchanged?: number;
     unversioned?: number;
     conflicts?: SisPushConflict[];
+    student_versions?: Record<string, string>;
+    household_versions?: Record<string, string>;
   };
   const conflicts = Array.isArray(result.conflicts) ? result.conflicts : [];
   if (conflicts.length > 0) {
@@ -427,11 +485,20 @@ async function pushSisGuarded(
     studentCount: result.applied_students ?? 0,
     conflicts,
     guarded: true,
+    studentVersions: result.student_versions ?? {},
+    householdVersions: result.household_versions ?? {},
   };
 }
 
 export async function pushSisToDb(
   state: Pick<SisState, "households" | "students">,
+  /**
+   * `pruneMissing` deletes stored records absent from this payload. Only
+   * pass it when `state` is genuinely the complete roster — a partial
+   * payload with this set will delete everything else (subject to the
+   * safety cap in deleteStale). Routine syncs must leave it off.
+   */
+  opts?: { pruneMissing?: boolean },
 ): Promise<SisPushResult> {
   if (!sisDualWriteDbEnabled()) {
     return { ok: true, householdCount: 0, studentCount: 0 };
@@ -487,18 +554,23 @@ export async function pushSisToDb(
     }
   }
 
-  await deleteStale(
-    sb,
-    tenantId,
-    "sis_students",
-    new Set(students.map((s) => s.id)),
-  );
-  await deleteStale(
-    sb,
-    tenantId,
-    "sis_households",
-    new Set(households.map((h) => h.id)),
-  );
+  // Off unless the caller explicitly declares this payload is a complete
+  // roster snapshot. A sync must never delete records just because they
+  // are absent from whatever the client happened to send.
+  if (opts?.pruneMissing) {
+    await deleteStale(
+      sb,
+      tenantId,
+      "sis_students",
+      new Set(students.map((s) => s.id)),
+    );
+    await deleteStale(
+      sb,
+      tenantId,
+      "sis_households",
+      new Set(households.map((h) => h.id)),
+    );
+  }
 
   const activeCount = students.filter((s) => s.status === "active").length;
   await sb.from("sis_sync_meta").upsert(

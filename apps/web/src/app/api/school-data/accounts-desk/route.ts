@@ -3,7 +3,7 @@ import {
   authorizeSchoolDataDesk,
   SCHOOL_DATA_DESK_RBAC,
 } from "@/lib/apiRouteAuth.server";
-import type { AccountsState } from "@/lib/accounts";
+import type { AccountsState } from "@/lib/accountsTypes";
 import { accountsDualWriteDbEnabled } from "@/lib/accountsDbConfig";
 import {
   fetchAccountsDeskFromDb,

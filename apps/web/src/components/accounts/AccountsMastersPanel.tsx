@@ -2,24 +2,32 @@
 
 import { useMemo, useState } from "react";
 import {
-  accountKindFromCoaGroup,
   checkCoaAccountRemoval,
-  checkExpenseCategoryRemoval,
-  checkVendorRemoval,
   deleteCoaAccount,
+  upsertCoaAccount,
+} from "@/lib/accountsCoa";
+import {
+  checkExpenseCategoryRemoval,
   deleteExpenseCategory,
-  deleteVendor,
+  upsertExpenseCategory,
+} from "@/lib/accountsExpenseCategories";
+import {
+  accountKindFromCoaGroup,
   listExpenseSubcategories,
   listRootExpenseCategories,
-  upsertCoaAccount,
-  upsertExpenseCategory,
+} from "@/lib/accountsLookups";
+import type {
+  AccountsState,
+  AccountsVendor,
+  CoaAccount,
+  CoaGroup,
+  ExpenseCategory,
+} from "@/lib/accountsTypes";
+import {
+  checkVendorRemoval,
+  deleteVendor,
   upsertVendor,
-  type AccountsState,
-  type AccountsVendor,
-  type CoaAccount,
-  type CoaGroup,
-  type ExpenseCategory,
-} from "@/lib/accounts";
+} from "@/lib/accountsVendors";
 import { formatInr } from "@/lib/fees";
 import type { AccountsPanelProps } from "@/components/accounts/AccountsPanels";
 import { RemoveControl } from "@/components/masters/RemoveControl";

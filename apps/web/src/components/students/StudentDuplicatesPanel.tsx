@@ -1,5 +1,6 @@
 "use client";
 
+import { recordAudit } from "@/lib/auditClient";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
@@ -99,6 +100,26 @@ export function StudentDuplicatesPanel({
       return;
     }
     const keeper = g.students.find((s) => s.id === keep);
+    recordAudit({
+      module: "students",
+      action: "merge",
+      entityType: "student",
+      entityId: keep,
+      summary: `Merged ${res.merged} duplicate record(s) into ${keeper?.fullName ?? "student"} (${keeper?.admissionNo ?? keep}) — matched on ${g.reasons.join(", ")}`,
+      before: {
+        droppedIds: dropIds,
+        dropped: g.students
+          .filter((s) => s.id !== keep)
+          .map((s) => ({
+            id: s.id,
+            fullName: s.fullName,
+            admissionNo: s.admissionNo,
+          })),
+        matchReasons: g.reasons,
+        score: g.score,
+      },
+      after: { keptId: keep, keptAdmissionNo: keeper?.admissionNo },
+    });
     flash(
       `Merged ${res.merged} record${res.merged === 1 ? "" : "s"} into ${
         keeper?.fullName ?? "student"
@@ -116,6 +137,19 @@ export function StudentDuplicatesPanel({
     )
       return;
     const next = removeDuplicateStudents(sis, [s.id]);
+    recordAudit({
+      module: "students",
+      action: "delete",
+      entityType: "student",
+      entityId: s.id,
+      summary: `Removed duplicate ${s.fullName} (${s.admissionNo}) — matched on ${g.reasons.join(", ")}`,
+      before: {
+        fullName: s.fullName,
+        admissionNo: s.admissionNo,
+        academicYearCode: s.academicYearCode,
+        matchReasons: g.reasons,
+      },
+    });
     flash(`Removed duplicate ${s.fullName}.`, next);
   }
 

@@ -30,7 +30,7 @@ import type {
   Trustee,
   VendorBill,
   VendorBillLine,
-} from "@/lib/accounts";
+} from "@/lib/accountsTypes";
 import { accountsDualWriteDbEnabled } from "@/lib/accountsDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
 

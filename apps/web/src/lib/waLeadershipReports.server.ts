@@ -8,7 +8,8 @@ import {
   loadAdmissions,
   type AdmissionStage,
 } from "@/lib/admissions";
-import { totalBankBalancePaise, loadAccounts } from "@/lib/accounts";
+import { totalBankBalancePaise } from "@/lib/accountsCashBank";
+import { loadAccounts } from "@/lib/accountsStore";
 import { loadAttendance, summarizeMarks } from "@/lib/attendance";
 import { computeFeeKpis } from "@/lib/feeFinance";
 import { formatInr, loadFees } from "@/lib/fees";

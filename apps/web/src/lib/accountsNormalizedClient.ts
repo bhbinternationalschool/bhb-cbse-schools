@@ -2,7 +2,7 @@
  * Client → server sync for normalized accounts desk.
  */
 
-import type { AccountsState } from "@/lib/accounts";
+import type { AccountsState } from "@/lib/accountsTypes";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
 

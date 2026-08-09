@@ -97,6 +97,8 @@ async function pushSisDeskApi(
       studentCount?: number;
       householdCount?: number;
       conflicts?: { table: string; id: string }[];
+      studentVersions?: Record<string, string>;
+      householdVersions?: Record<string, string>;
       error?: string;
     } | null;
     if (res.ok && body?.ok) {
@@ -106,6 +108,29 @@ async function pushSisDeskApi(
         householdCount: body.householdCount ?? state.households.length,
         lastPushedAt: Date.now(),
       });
+
+      // Adopt the server's authoritative versions for what we just wrote.
+      // Without this the next push of a record we just changed still
+      // carries the pre-write token and conflicts with itself.
+      const sv = body.studentVersions ?? {};
+      const hv = body.householdVersions ?? {};
+      if (Object.keys(sv).length > 0 || Object.keys(hv).length > 0) {
+        const { loadSis, writeSisLocalRaw } = await import("@/lib/sis");
+        const cur = loadSis();
+        writeSisLocalRaw({
+          ...cur,
+          students: cur.students.map((s) =>
+            sv[s.id] && sv[s.id] !== s.revisionAt
+              ? { ...s, revisionAt: sv[s.id] }
+              : s,
+          ),
+          households: cur.households.map((h) =>
+            hv[h.id] && hv[h.id] !== h.revisionAt
+              ? { ...h, revisionAt: hv[h.id] }
+              : h,
+          ),
+        });
+      }
 
       // Someone else saved these records after we read them. Their version
       // was kept rather than being overwritten by our stale copy — tell the

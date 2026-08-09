@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { loadAccounts } from "@/lib/accounts";
+import { loadAccounts } from "@/lib/accountsStore";
 import { formatInr } from "@/lib/masters";
 import {
   approveRaBill,

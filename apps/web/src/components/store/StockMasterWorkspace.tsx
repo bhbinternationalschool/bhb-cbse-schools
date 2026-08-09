@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { formatInr, loadMasters, type MastersState } from "@/lib/masters";
-import { seedAccountsIfEmpty } from "@/lib/accounts";
+import { seedAccountsIfEmpty } from "@/lib/accountsStore";
 import { RemoveControl } from "@/components/masters/RemoveControl";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import {
