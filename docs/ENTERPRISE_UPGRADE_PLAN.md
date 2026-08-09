@@ -257,16 +257,17 @@ calibrates them.
 
 ---
 
-## 6. Decisions needed from the director
+## 6. Decisions — taken by the director, 2026-08-10
 
-| # | Question | Options | Recommendation |
-|---|---|---|---|
-| 1 | Bilingual UI (Hindi labels alongside English)? | English-only / bilingual toggle | **Bilingual toggle** — biggest usability win for front-office staff; adds ~1 week to Phase 2 |
-| 2 | Density default | Comfortable (14px, spacious) / Compact | **Comfortable default**, compact toggle for power users |
-| 3 | Wave 1 pilot module | Fees vs Students | **Fees** — most daily use, fastest feedback |
-| 4 | GitHub Actions billing | Fix now / stay local-only | **Fix now** — everything else inherits safety from it |
+| # | Question | Decision |
+|---|---|---|
+| 1 | Bilingual UI (Hindi labels)? | **English only** for now; revisit after rollout if staff feedback asks for it |
+| 2 | Density default | **Comfortable, 14px body**, with a compact toggle for power users |
+| 3 | Wave 1 pilot module | **Fees** |
+| 4 | GitHub Actions billing | **Being fixed now** — CI gates every merge for the duration of this project |
 
----
+These are inputs to Phase 0/2 and are considered settled; changing one later
+is fine but re-opens the affected phase's estimate.
 
 ## 7. Verification (per phase, not at the end)
 
