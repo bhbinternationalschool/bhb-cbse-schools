@@ -96,9 +96,16 @@ the concrete items. Check things off in the PR that fixes them.
   (`BHB_School_Enquiry_Survey.xlsx` ×28, `Field_Leads.xlsx` ×2),
   `source=field_survey`, all still at stage `enquiry`, none converted to a
   student. No `classAdmittedId`, no `sectionId` and no `dob` to infer from —
-  but **23 of 30 mention a class in the free-text `note`**, so they are
-  recoverable by hand, not by script. Worth an admissions-desk sweep before
-  these leads are worked.
+  and **only 1 of the 30 is recoverable**: `adm_6aipg2wf`, whose note reads
+  `Classes noted: Eleventh` → class `XI` (`cls_azz0fhyx`). An earlier pass
+  claimed 23 were recoverable; that was a bad regex matching the word
+  "Classes" inside `Classes noted: No`, which records the *opposite*. The
+  true split is 22 × `Classes noted: No`, 2 × a current-school name only
+  (`Primary`, `Gyandeep` — not a class sought), 2 × `Interest:` only, 3 ×
+  `Imported from …` only. The source spreadsheets recorded no class, so
+  for 29 of them there is nothing in the system to repair from — only
+  re-contacting the family recovers it. Decide whether to chase them,
+  flag them for a callback, or leave them; do not let a script guess.
 - [ ] **Baseline query should count blanks.** The "zero unresolved
   references" baseline below was measured in a way that ignored empty-string
   ids, which is why these 30 never showed. Any future check should treat
