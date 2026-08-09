@@ -74,6 +74,9 @@ export async function POST(req: Request) {
     // were deliberately not overwritten; the client warns and re-hydrates.
     conflicts: result.conflicts ?? [],
     guarded: result.guarded ?? false,
+    // Authoritative versions so the client can re-stamp what it just wrote.
+    studentVersions: result.studentVersions ?? {},
+    householdVersions: result.householdVersions ?? {},
     updatedAt: new Date().toISOString(),
   });
 }

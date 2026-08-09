@@ -418,6 +418,14 @@ export type SisPushResult = {
   conflicts?: SisPushConflict[];
   /** True when the atomic, conflict-guarded path was used. */
   guarded?: boolean;
+  /**
+   * Authoritative `updated_at` per record id after the push. The client
+   * must re-stamp its local copies with these, otherwise the next push of
+   * a record it just changed carries the pre-write version and conflicts
+   * with itself.
+   */
+  studentVersions?: Record<string, string>;
+  householdVersions?: Record<string, string>;
 };
 
 /**
@@ -459,8 +467,11 @@ async function pushSisGuarded(
   const result = (data ?? {}) as {
     applied_households?: number;
     applied_students?: number;
+    unchanged?: number;
     unversioned?: number;
     conflicts?: SisPushConflict[];
+    student_versions?: Record<string, string>;
+    household_versions?: Record<string, string>;
   };
   const conflicts = Array.isArray(result.conflicts) ? result.conflicts : [];
   if (conflicts.length > 0) {
@@ -474,6 +485,8 @@ async function pushSisGuarded(
     studentCount: result.applied_students ?? 0,
     conflicts,
     guarded: true,
+    studentVersions: result.student_versions ?? {},
+    householdVersions: result.household_versions ?? {},
   };
 }
 
