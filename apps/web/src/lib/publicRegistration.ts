@@ -14,7 +14,7 @@ export type PublicRegistrationConfig = {
   /** Collections UPI for the payment QR. */
   upi: { vpa: string; payeeName: string } | null;
   /** Where the masters came from — for diagnostics, not shown to parents. */
-  source: "desk" | "mirror" | "none";
+  source: "desk" | "none";
 };
 
 export const UNAVAILABLE_REGISTRATION_CONFIG: PublicRegistrationConfig = {

@@ -23,45 +23,29 @@ import {
   UNAVAILABLE_REGISTRATION_CONFIG,
   type PublicRegistrationConfig,
 } from "@/lib/publicRegistration";
-import type { SchoolMirrorBundle } from "@/lib/schoolDataMirror";
-import { fetchServerBlob } from "@/lib/serverBlob";
 
 /**
- * masters_desk_slices is the source of truth; the school_mirror_state blob is
- * the pre-cutover fallback. Neither is ever replaced by generated defaults.
+ * masters_desk_slices is the only source of truth, and there is deliberately
+ * no fallback. The school_mirror_state blob still holds the pre-re-seed
+ * generation of class ids — 20260809110000_remap_blob_ids_to_desk_ids.sql
+ * keeps it that way on purpose, because it is that migration's mapping
+ * source. Serving those ids to a parent would recreate the exact orphaned
+ * classSoughtId this module exists to prevent, so a cold or empty desk fails
+ * closed instead.
  */
-async function resolveMasters(): Promise<{
-  masters: MastersState;
-  source: "desk" | "mirror";
-} | null> {
+async function resolveMasters(): Promise<MastersState | null> {
   try {
     const { bundle } = await fetchMastersDeskFromDb();
-    if (bundle.classes.length > 0) {
-      return { masters: deskBundleToMastersState(bundle), source: "desk" };
-    }
+    if (bundle.classes.length > 0) return deskBundleToMastersState(bundle);
   } catch (e) {
     console.warn("[publicRegistration] masters desk read failed", e);
   }
-
-  try {
-    const blob = await fetchServerBlob<SchoolMirrorBundle>(
-      "school_mirror_state",
-    );
-    const masters = blob.state?.masters as MastersState | null;
-    if (masters && (masters.classes?.length ?? 0) > 0) {
-      return { masters, source: "mirror" };
-    }
-  } catch (e) {
-    console.warn("[publicRegistration] mirror blob read failed", e);
-  }
-
   return null;
 }
 
 export async function loadPublicRegistrationConfig(): Promise<PublicRegistrationConfig> {
-  const resolved = await resolveMasters();
-  if (!resolved) return UNAVAILABLE_REGISTRATION_CONFIG;
-  const { masters, source } = resolved;
+  const masters = await resolveMasters();
+  if (!masters) return UNAVAILABLE_REGISTRATION_CONFIG;
 
   const classes = (masters.classes ?? [])
     .filter((c) => c.isActive)
@@ -76,6 +60,6 @@ export async function loadPublicRegistrationConfig(): Promise<PublicRegistration
     classes,
     feeHead: head ? { id: head.id, name: head.name } : null,
     upi: { vpa, payeeName },
-    source,
+    source: "desk",
   };
 }
