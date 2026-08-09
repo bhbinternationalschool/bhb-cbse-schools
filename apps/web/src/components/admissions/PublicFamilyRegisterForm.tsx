@@ -11,14 +11,12 @@ import {
   createRegistrationUpiLink,
   loadAdmissions,
   registrationBalancePaise,
-  registrationFeeHeads,
-  resolveSchoolCollectionsUpi,
   saveAdmissions,
   whatsAppUrl,
   type AdmissionLead,
 } from "@/lib/admissions";
 import { formatInr } from "@/lib/fees";
-import { loadMasters } from "@/lib/masters";
+import type { PublicRegistrationConfig } from "@/lib/publicRegistration";
 import { TENANT } from "@/lib/types";
 
 const inp =
@@ -42,21 +40,21 @@ function emptyChild(fee: string): ChildRow {
 
 export function PublicFamilyRegisterForm({
   initialSrc,
+  config,
 }: {
   initialSrc?: string | null;
+  config: PublicRegistrationConfig;
 }) {
-  const masters = useMemo(() => loadMasters(), []);
-  const feeHeads = useMemo(() => registrationFeeHeads(masters), [masters]);
-  const classes = useMemo(
-    () => (masters.classes ?? []).filter((c) => c.isActive),
-    [masters],
-  );
-  const { vpa, payeeName } = useMemo(
-    () => resolveSchoolCollectionsUpi(masters),
-    [masters],
-  );
+  // Classes / fee head / UPI are resolved from the DB on the server and passed
+  // in. Never derive them from loadMasters() here: this page is public, so the
+  // browser has no masters and the fallback would invent ids (see
+  // lib/publicRegistration.server.ts).
+  const classes = config.classes;
+  const feeHead = config.feeHead;
+  const vpa = config.upi?.vpa ?? "";
+  const payeeName = config.upi?.payeeName ?? "";
   const defaultFee = "500";
-  const feeHeadId = feeHeads[0]?.id || "";
+  const feeHeadId = feeHead?.id || "";
 
   const [guardianName, setGuardianName] = useState("");
   const [motherName, setMotherName] = useState("");
@@ -106,7 +104,7 @@ export function PublicFamilyRegisterForm({
       state,
       lead.id,
       "Parent self-register",
-      feeHeads[0]?.name || "Registration fee",
+      feeHead?.name || "Registration fee",
       bal,
     );
     if (!link.ok) {
@@ -140,6 +138,11 @@ export function PublicFamilyRegisterForm({
       setError("School has not configured a registration fee head yet.");
       return;
     }
+    const known = new Set(classes.map((c) => c.id));
+    if (children.some((c) => !known.has(c.classSoughtId))) {
+      setError("Please pick a class for every student.");
+      return;
+    }
     const state = loadAdmissions();
     const r = createFamilyRegistrationsFromPublic(
       state,
@@ -148,7 +151,7 @@ export function PublicFamilyRegisterForm({
         motherName,
         mobile,
         campaignSrc: initialSrc || "website",
-        feeHeadName: feeHeads[0]?.name || "Registration fee",
+        feeHeadName: feeHead?.name || "Registration fee",
         children: children.map((c) => ({
           childName: c.childName,
           classSoughtId: c.classSoughtId,
@@ -214,6 +217,34 @@ export function PublicFamilyRegisterForm({
       return;
     }
     setStep("done");
+  }
+
+  // Fail closed: without real classes / a real fee head from the DB there is
+  // nothing valid to submit, so don't show a form that would file a broken lead.
+  if (classes.length === 0 || !feeHeadId) {
+    return (
+      <main className="mx-auto max-w-lg px-4 py-12 text-center">
+        <Image
+          src={TENANT.logoCrestUrl}
+          alt=""
+          width={64}
+          height={66}
+          className="logo-mark mx-auto object-contain"
+          priority
+          aria-hidden
+        />
+        <h1 className="mt-6 text-xl font-bold text-[var(--brand-deep)]">
+          Online registration
+        </h1>
+        <p className="mt-3 text-[13px] text-[var(--muted)]">
+          Online registration is not open right now. Please call the school
+          office to register your child.
+        </p>
+        <p className="mt-4 text-[12px] text-[var(--brand-deep)]">
+          {TENANT.nameDisplay}
+        </p>
+      </main>
+    );
   }
 
   if (step === "done") {

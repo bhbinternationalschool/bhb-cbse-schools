@@ -11,7 +11,7 @@ import {
   sourceLabel,
   type AdmissionSource,
 } from "@/lib/admissions";
-import { loadMasters } from "@/lib/masters";
+import type { PublicRegistrationConfig } from "@/lib/publicRegistration";
 import { TENANT } from "@/lib/types";
 import { AddressAutocompleteField } from "@/components/maps/AddressAutocompleteField";
 
@@ -44,16 +44,24 @@ function resolveSource(raw: string | null): AdmissionSource {
 
 export function PublicEnquiryForm({
   initialSource,
+  config,
 }: {
   initialSource?: string | null;
+  config: PublicRegistrationConfig;
 }) {
   const source = resolveSource(initialSource ?? null);
-  const masters = useMemo(() => loadMasters(), []);
-  const classes = useMemo(() => {
-    const active = (masters.classes ?? []).filter((c) => c.isActive);
-    if (active.length) return active.map((c) => ({ id: c.id, name: c.name }));
-    return FALLBACK_CLASSES.map((name) => ({ id: "", name }));
-  }, [masters]);
+  // Classes come from the DB via the server. Never call loadMasters() here:
+  // this page is public, so masters are cold and the fallback would mint
+  // random class ids (see lib/publicRegistration.server.ts). When the DB has
+  // no classes we fall back to name-only options with an empty id, which
+  // createEnquiry accepts (allowMissingClass) and records in the campaign note.
+  const classes = useMemo(
+    () =>
+      config.classes.length > 0
+        ? config.classes
+        : FALLBACK_CLASSES.map((name) => ({ id: "", name })),
+    [config.classes],
+  );
 
   const [childName, setChildName] = useState("");
   const [dob, setDob] = useState("");
