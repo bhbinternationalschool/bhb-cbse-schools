@@ -69,6 +69,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:student-filters
 
+      - name: Test — server masters come from desk without wiping staff
+        working-directory: apps/web
+        run: npm run test:masters-merge
+
       - name: Test — fee structure / import / automation suites
         working-directory: apps/web
         run: |

@@ -20,6 +20,7 @@ import {
   fetchStaffRemoteServer,
   mergeStaffRemoteIntoMasters,
 } from "@/lib/staffPersistence";
+import { mergeDeskMastersOverBlob } from "@/lib/mastersMergePolicy";
 
 let lastHydrateMs = 0;
 let inFlightPromise: Promise<boolean> | null = null;
@@ -109,6 +110,32 @@ export async function hydrateSchoolMirrorFromRemote(
         const hydrated = getSchoolMirrorSync().payments as PaymentsState | null;
         if (hydrated) {
           next = { ...next, payments: hydrated, updatedAt: nowIso() };
+        }
+      }
+
+      // Masters must come from the desk tables when the cutover is on,
+      // for the same reason sis/fees/payments do above. Without this the
+      // server keeps serving the pre-cutover blob copy, whose class,
+      // section, campus and fee-group ids were replaced when masters were
+      // re-seeded. Everything server-side that resolves a class — the
+      // WhatsApp bot, class-channel sync — then works in a dead id space
+      // while the browser and the desk tables use the live one, and any
+      // server write reintroduces the stale ids.
+      const { mastersReadFromDbEnabled } = await import("@/lib/mastersDbConfig");
+      if (mastersReadFromDbEnabled()) {
+        const { fetchMastersDeskFromDb, deskBundleToMastersState } =
+          await import("@/lib/mastersNormalized.server");
+        const { bundle: mastersBundle } = await fetchMastersDeskFromDb();
+        const deskMasters = deskBundleToMastersState(mastersBundle);
+        if ((deskMasters.classes?.length ?? 0) > 0) {
+          next = {
+            ...next,
+            masters: mergeDeskMastersOverBlob(
+              next.masters as MastersState | null,
+              deskMasters,
+            ),
+            updatedAt: nowIso(),
+          };
         }
       }
 
