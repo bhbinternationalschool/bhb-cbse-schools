@@ -5,8 +5,7 @@
  * Everything is denominated in paise (integer) to avoid float drift.
  */
 
-import { loadMasters } from "@/lib/masters";
-import { suggestFromSeriesCode, persistSeriesUse } from "@/lib/numberSeries";
+import { persistSeriesUse } from "@/lib/numberSeries";
 import {
   listOpenPayables as listOpenTransportPayables,
   markPayablePaid as markTransportPayablePaid,
@@ -37,14 +36,11 @@ import type {
   CashDirection,
   CashLedgerEntry,
   CashPool,
-  CoaAccount,
   CoaGroup,
   ExpenseCategory,
   ExpensePaymentSplit,
   ExpenseVoucher,
   ExpenseVoucherLine,
-  FiscalYear,
-  FiscalYearStatus,
   JournalEntry,
   JournalLine,
   ModeBankMapEntry,
@@ -69,10 +65,8 @@ import {
   ensureStoreCoaAccounts,
   normalizeBank,
   normalizeBill,
-  normalizeCoa,
   normalizeExpenseCategory,
   normalizeExpenseVoucherLine,
-  normalizeJournal,
   normalizeLoan,
   normalizeLoanRow,
   normalizePayable,
@@ -92,258 +86,23 @@ import {
   saveAccounts,
   seedAccountsIfEmpty,
 } from "@/lib/accountsStore";
+import {
+  getCoaByCode,
+  getExpenseCategory,
+  nextExpenseVoucherNo,
+  resolveBankForPaymentMode,
+  expenseVoucherHasLedgerPayment,
+} from "@/lib/accountsLookups";
+import {
+  postJournal,
+} from "@/lib/accountsJournal";
 
 export * from "@/lib/accountsTypes";
 export * from "@/lib/accountsNormalize";
 export * from "@/lib/accountsStore";
-/* ─── Lookups ──────────────────────────────────────────────── */
-
-export function getPool(poolId: string, state?: AccountsState): CashPool | undefined {
-  const s = state ?? loadAccounts();
-  return s.cashPools.find((p) => p.id === poolId);
-}
-
-export function getBank(bankId: string, state?: AccountsState): BankAccount | undefined {
-  const s = state ?? loadAccounts();
-  return s.bankAccounts.find((b) => b.id === bankId);
-}
-
-export function bankSupportsPaymentMode(
-  bank: BankAccount,
-  mode: PaymentMode,
-): boolean {
-  if (mode === "cash") return false;
-  return bank.isActive !== false && bank.paymentModes.includes(mode);
-}
-
-export function listBanksForPaymentMode(
-  mode: PaymentMode,
-  state?: AccountsState,
-): BankAccount[] {
-  if (mode === "cash") return [];
-  const s = state ?? loadAccounts();
-  return s.bankAccounts.filter((b) => bankSupportsPaymentMode(b, mode));
-}
-
-export function resolveBankForPaymentMode(
-  mode: PaymentMode,
-  state?: AccountsState,
-  preferredBankId?: string,
-): string | undefined {
-  if (mode === "cash") return undefined;
-  const s = state ?? loadAccounts();
-  if (preferredBankId) {
-    const preferred = s.bankAccounts.find((b) => b.id === preferredBankId);
-    if (preferred && bankSupportsPaymentMode(preferred, mode)) {
-      return preferred.id;
-    }
-  }
-  const match = listBanksForPaymentMode(mode, s)[0];
-  if (match) return match.id;
-  return s.modeBankMap.find((m) => m.mode === mode)?.bankId;
-}
-
-export function getCoaByCode(code: string, state?: AccountsState): CoaAccount | undefined {
-  const s = state ?? loadAccounts();
-  return s.coaAccounts.find((c) => c.code === code);
-}
-
-export function getExpenseCategory(
-  categoryId: string,
-  state?: AccountsState,
-): ExpenseCategory | undefined {
-  const s = state ?? loadAccounts();
-  return s.expenseCategories.find((c) => c.id === categoryId);
-}
-
-export function listRootExpenseCategories(state?: AccountsState): ExpenseCategory[] {
-  const s = state ?? loadAccounts();
-  return s.expenseCategories.filter((c) => c.isActive !== false && !c.parentId);
-}
-
-export function listExpenseSubcategories(
-  parentId: string,
-  state?: AccountsState,
-): ExpenseCategory[] {
-  const s = state ?? loadAccounts();
-  return s.expenseCategories.filter(
-    (c) => c.isActive !== false && c.parentId === parentId,
-  );
-}
-
-/** Vendor IDs linked to category or sub-category (sub-category overrides when set). */
-export function linkedVendorIdsForExpense(
-  categoryId: string,
-  subcategoryId: string,
-  state?: AccountsState,
-): string[] {
-  const s = state ?? loadAccounts();
-  if (subcategoryId) {
-    const sub = s.expenseCategories.find((c) => c.id === subcategoryId);
-    if (sub?.vendorIds?.length) return sub.vendorIds;
-  }
-  const cat = s.expenseCategories.find((c) => c.id === categoryId);
-  return cat?.vendorIds ?? [];
-}
-
-export function listLinkedVendorsForExpense(
-  categoryId: string,
-  subcategoryId: string,
-  state?: AccountsState,
-): AccountsVendor[] {
-  const ids = linkedVendorIdsForExpense(categoryId, subcategoryId, state);
-  if (!ids.length) return [];
-  const s = state ?? loadAccounts();
-  return ids
-    .map((vid) => s.vendors.find((v) => v.id === vid && v.isActive !== false))
-    .filter((v): v is AccountsVendor => !!v);
-}
-
-export function accountKindFromCoaGroup(
-  group: CoaGroup,
-): "expense" | "collection" | "other" {
-  if (group === "expense") return "expense";
-  if (group === "income") return "collection";
-  return "other";
-}
-
-export function nextExpenseVoucherNo(state?: AccountsState): string {
-  const s = state ?? loadAccounts();
-  if (typeof window !== "undefined") {
-    const masters = loadMasters();
-    const fromSeries = suggestFromSeriesCode(
-      masters.numberSeries,
-      "EXPENSE_VOUCHER",
-      undefined,
-      s.expenseVouchers.map((v) => v.voucherNo),
-    );
-    if (fromSeries) return fromSeries;
-  }
-
-  const year = new Date().getFullYear();
-  const prefix = `EXP-${year}-`;
-  const nums = s.expenseVouchers
-    .map((v) => v.voucherNo)
-    .filter((n) => n.startsWith(prefix))
-    .map((n) => Number(n.slice(prefix.length)) || 0);
-  const next = (nums.length ? Math.max(...nums) : 0) + 1;
-  return `${prefix}${String(next).padStart(4, "0")}`;
-}
-
-export function expenseVoucherHasLedgerPayment(
-  voucherId: string,
-  state?: AccountsState,
-): boolean {
-  const s = state ?? loadAccounts();
-  return (
-    s.cashLedger.some(
-      (e) =>
-        !e.voidedAt &&
-        e.sourceType === "expense_voucher" &&
-        e.sourceId === voucherId,
-    ) ||
-    s.bankLedger.some(
-      (e) =>
-        !e.voidedAt &&
-        e.sourceType === "expense_voucher" &&
-        e.sourceId === voucherId,
-    )
-  );
-}
-
-export function upsertCoaAccount(
-  patch: Partial<CoaAccount> & { code: string; name: string; group: CoaGroup },
-): { ok: true; account: CoaAccount } | { ok: false; error: string } {
-  const code = patch.code.trim();
-  const name = patch.name.trim();
-  if (!code) return fail("Account code required");
-  if (!name) return fail("Account name required");
-  const state = loadAccounts();
-  const dup = state.coaAccounts.find(
-    (c) => c.code === code && c.id !== patch.id,
-  );
-  if (dup) return fail(`Account code ${code} already exists`);
-  const existing = patch.id
-    ? state.coaAccounts.find((c) => c.id === patch.id)
-    : undefined;
-  const account = normalizeCoa({
-    ...existing,
-    ...patch,
-    code,
-    name,
-    id: existing?.id ?? patch.id ?? id("coa"),
-  });
-  const coaAccounts = existing
-    ? state.coaAccounts.map((c) => (c.id === account.id ? account : c))
-    : [...state.coaAccounts, account];
-  saveAccounts({ ...state, coaAccounts });
-  return { ok: true, account };
-}
-
-/** Non-void journal lines posted against a COA account. */
-export function coaAccountHasJournalActivity(
-  coaId: string,
-  state?: AccountsState,
-): boolean {
-  const s = state ?? loadAccounts();
-  return s.journalEntries.some(
-    (j) =>
-      !j.voidedAt &&
-      j.lines.some(
-        (l) =>
-          l.coaId === coaId && (l.debitPaise > 0 || l.creditPaise > 0),
-      ),
-  );
-}
-
-export function checkCoaAccountRemoval(
-  coaId: string,
-  state?: AccountsState,
-): AccountsRemovalCheck {
-  const s = state ?? loadAccounts();
-  const account = s.coaAccounts.find((c) => c.id === coaId);
-  const label = account ? `${account.code} · ${account.name}` : "this account";
-  const blockers: string[] = [];
-  if (coaAccountHasJournalActivity(coaId, s)) {
-    blockers.push("journal entries");
-  }
-  const categoryN = account
-    ? s.expenseCategories.filter((c) => c.coaCode === account.code).length
-    : 0;
-  if (categoryN > 0) {
-    blockers.push(`${categoryN} expense categor${categoryN === 1 ? "y" : "ies"}`);
-  }
-  if (blockers.length > 0) {
-    return {
-      canRemove: false,
-      blockers,
-      suggestion: `Cannot delete — linked to ${blockers.join(" and ")}. Mark inactive instead.`,
-      confirmMessage: `Delete account “${label}”?`,
-    };
-  }
-  return {
-    canRemove: true,
-    blockers: [],
-    suggestion: "This cannot be undone.",
-    confirmMessage: `Delete account “${label}”?`,
-  };
-}
-
-export function deleteCoaAccount(
-  coaId: string,
-): { ok: true } | { ok: false; error: string } {
-  const state = loadAccounts();
-  const account = state.coaAccounts.find((c) => c.id === coaId);
-  if (!account) return fail("Account not found");
-  const check = checkCoaAccountRemoval(coaId, state);
-  if (!check.canRemove) return fail(check.suggestion);
-  saveAccounts({
-    ...state,
-    coaAccounts: state.coaAccounts.filter((c) => c.id !== coaId),
-  });
-  return { ok: true };
-}
-
+export * from "@/lib/accountsLookups";
+export * from "@/lib/accountsCoa";
+export * from "@/lib/accountsJournal";
 /* ─── Cash book ────────────────────────────────────────────── */
 
 export function cashInHandPaise(state?: AccountsState): number {
@@ -2153,149 +1912,6 @@ export function listOwnerLoanDue(
     .sort((a, b) => a.dueOn.localeCompare(b.dueOn));
 }
 
-/* ─── Journal / ledger ─────────────────────────────────────── */
-
-export function postJournal(input: {
-  date?: string;
-  voucherNo?: string;
-  narration?: string;
-  lines: JournalLine[];
-  sourceType?: string;
-  sourceId?: string;
-  fiscalYearCode?: string;
-}): { ok: true; entry: JournalEntry } | { ok: false; error: string } {
-  const lines = (input.lines ?? []).filter(
-    (l) => l.coaId && (l.debitPaise > 0 || l.creditPaise > 0),
-  );
-  if (lines.length === 0) return fail("At least one journal line is required");
-  const totalDebit = lines.reduce((n, l) => n + Math.round(l.debitPaise), 0);
-  const totalCredit = lines.reduce((n, l) => n + Math.round(l.creditPaise), 0);
-  if (totalDebit !== totalCredit) return fail("Journal entry is not balanced");
-  if (totalDebit <= 0) return fail("Journal entry amount must be greater than zero");
-
-  const state = loadAccounts();
-  const date = input.date || todayIso();
-  const fy =
-    (input.fiscalYearCode
-      ? state.fiscalYears.find((f) => f.code === input.fiscalYearCode)
-      : undefined) ?? resolveFiscalYearForDate(date, state);
-  if (fy?.status === "closed") {
-    return fail(`Fiscal year ${fy.label} is closed — reopen to post journals`);
-  }
-
-  const entry = normalizeJournal({
-    id: id("jv"),
-    date,
-    voucherNo: input.voucherNo ?? "",
-    narration: input.narration ?? "",
-    lines,
-    sourceType: input.sourceType ?? "",
-    sourceId: input.sourceId ?? "",
-    fiscalYearCode: fy?.code ?? input.fiscalYearCode ?? "",
-    createdAt: new Date().toISOString(),
-    voidedAt: null,
-  });
-  saveAccounts({ ...state, journalEntries: [entry, ...state.journalEntries] });
-  return { ok: true, entry };
-}
-
-export function resolveFiscalYearForDate(
-  date: string,
-  state?: AccountsState,
-): FiscalYear | undefined {
-  const s = state ?? loadAccounts();
-  return s.fiscalYears.find(
-    (fy) => fy.startDate <= date && fy.endDate >= date,
-  );
-}
-
-export function setFiscalYearStatus(
-  code: string,
-  status: FiscalYearStatus,
-): { ok: true; fiscalYear: FiscalYear } | { ok: false; error: string } {
-  const state = loadAccounts();
-  const fy = state.fiscalYears.find((f) => f.code === code);
-  if (!fy) return fail("Fiscal year not found");
-  const updated = { ...fy, status };
-  saveAccounts({
-    ...state,
-    fiscalYears: state.fiscalYears.map((f) => (f.code === code ? updated : f)),
-  });
-  return { ok: true, fiscalYear: updated };
-}
-
-export function listJournals(state?: AccountsState): JournalEntry[] {
-  const s = state ?? loadAccounts();
-  return [...s.journalEntries].sort((a, b) => {
-    const byDate = b.date.localeCompare(a.date);
-    return byDate !== 0 ? byDate : b.createdAt.localeCompare(a.createdAt);
-  });
-}
-
-/** Active (non-void) journal lines for one COA in a period, with running balance. */
-export function coaLedgerRows(
-  coaId: string,
-  from: string,
-  to: string,
-  state?: AccountsState,
-): {
-  date: string;
-  voucherNo: string;
-  narration: string;
-  sourceType: string;
-  debitPaise: number;
-  creditPaise: number;
-  balancePaise: number;
-}[] {
-  const s = state ?? loadAccounts();
-  const coa = s.coaAccounts.find((c) => c.id === coaId);
-  if (!coa) return [];
-  const debitNormal = coa.group === "assets" || coa.group === "expense";
-  const lines: {
-    date: string;
-    voucherNo: string;
-    narration: string;
-    sourceType: string;
-    debitPaise: number;
-    creditPaise: number;
-    sortKey: string;
-  }[] = [];
-  for (const entry of s.journalEntries) {
-    if (entry.voidedAt) continue;
-    if (entry.date < from || entry.date > to) continue;
-    for (const line of entry.lines) {
-      if (line.coaId !== coaId) continue;
-      if (!line.debitPaise && !line.creditPaise) continue;
-      lines.push({
-        date: entry.date,
-        voucherNo: entry.voucherNo || entry.id.slice(-8),
-        narration: line.narration || entry.narration,
-        sourceType: entry.sourceType,
-        debitPaise: line.debitPaise,
-        creditPaise: line.creditPaise,
-        sortKey: `${entry.date}_${entry.createdAt}`,
-      });
-    }
-  }
-  lines.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
-  let bal = 0;
-  return lines.map((l) => {
-    bal += debitNormal
-      ? l.debitPaise - l.creditPaise
-      : l.creditPaise - l.debitPaise;
-    return {
-      date: l.date,
-      voucherNo: l.voucherNo,
-      narration: l.narration,
-      sourceType: l.sourceType,
-      debitPaise: l.debitPaise,
-      creditPaise: l.creditPaise,
-      balancePaise: bal,
-    };
-  });
-}
-
-/** Group-wise totals from trial balance (assets / liabilities / …). */
 export function groupSummary(
   asOf = todayIso(),
   state?: AccountsState,
@@ -2379,26 +1995,6 @@ export function voidBankLedgerEntry(
 }
 
 /** Cancel a journal voucher (excluded from TB / P&L thereafter). */
-export function voidJournalEntry(
-  journalId: string,
-  reason = "",
-): { ok: true } | { ok: false; error: string } {
-  const state = loadAccounts();
-  const entry = state.journalEntries.find((j) => j.id === journalId);
-  if (!entry) return fail("Journal not found");
-  if (entry.voidedAt) return fail("Already cancelled");
-  const now = new Date().toISOString();
-  saveAccounts({
-    ...state,
-    journalEntries: state.journalEntries.map((j) =>
-      j.id === journalId
-        ? { ...j, voidedAt: now, cancelReason: reason.trim() || j.cancelReason }
-        : j,
-    ),
-  });
-  return { ok: true };
-}
-
 /* ─── Reports ──────────────────────────────────────────────── */
 
 export type TrialBalanceRow = {
