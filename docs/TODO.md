@@ -104,8 +104,13 @@ the concrete items. Check things off in the PR that fixes them.
   (`Primary`, `Gyandeep` — not a class sought), 2 × `Interest:` only, 3 ×
   `Imported from …` only. The source spreadsheets recorded no class, so
   for 29 of them there is nothing in the system to repair from — only
-  re-contacting the family recovers it. Decide whether to chase them,
-  flag them for a callback, or leave them; do not let a script guess.
+  re-contacting the family recovers it.
+  **Decided 2026-08-10 (director): leave all 30 as they are.** Including
+  `adm_6aipg2wf` — "Eleventh" is an inference from a survey note, not a
+  parent's confirmed answer, and a wrong class on a real child is worse
+  than a blank one. They stay at stage `enquiry` and surface whenever
+  someone opens them; staff record the class when they next speak to the
+  family. No script should backfill these.
 - [ ] **Baseline query should count blanks.** The "zero unresolved
   references" baseline below was measured in a way that ignored empty-string
   ids, which is why these 30 never showed. Any future check should treat
