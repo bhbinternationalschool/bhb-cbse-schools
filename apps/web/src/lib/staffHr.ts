@@ -1256,7 +1256,7 @@ export function carryForwardLeaveBalances(input: {
     return { ok: false, error: "No leave types allow carry-forward (set max on EL)" };
   }
 
-  let balances = [...state.leaveBalances];
+  const balances = [...state.leaveBalances];
   const touchedStaff = new Set<string>();
 
   for (const s of input.staff.filter((x) => x.status === "active")) {
@@ -1312,7 +1312,7 @@ export function encashLeave(input: {
   if (days <= 0) return { ok: false, error: "Days must be greater than zero" };
   if (!input.staffId) return { ok: false, error: "Staff required" };
 
-  let state = loadStaffHr();
+  const state = loadStaffHr();
   const type = state.leaveTypes.find(
     (t) => t.code === input.typeCode.toUpperCase(),
   );

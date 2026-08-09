@@ -5,8 +5,11 @@ export function homeworkDualWriteDbEnabled(): boolean {
 }
 
 export function homeworkReadFromDbEnabled(): boolean {
-  if (typeof window !== "undefined") {
-    return process.env.NEXT_PUBLIC_HOMEWORK_READ_FROM_DB === "true";
-  }
-  return process.env.HOMEWORK_READ_FROM_DB === "true";
+  const flag = (
+    typeof window !== "undefined"
+      ? process.env.NEXT_PUBLIC_HOMEWORK_READ_FROM_DB
+      : process.env.HOMEWORK_READ_FROM_DB
+  )?.trim().toLowerCase();
+  if (flag === "false" || flag === "0") return false;
+  return true;
 }

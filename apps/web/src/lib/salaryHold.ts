@@ -295,7 +295,7 @@ export function syncHoldsFromPayrollRun(input: {
   if (!monthIsHoldMonth(input.month, cfg)) return state;
 
   const year = Number(input.month.split("-")[0]);
-  let holds = [...state.holds];
+  const holds = [...state.holds];
 
   for (const line of input.lines) {
     if (!line.juneHold || line.netPay <= 0) continue;
@@ -417,7 +417,7 @@ export function openExitSettlement(input: {
   };
 
   // Update hold statuses
-  let holds = state.holds.map((h) => {
+  const holds = state.holds.map((h) => {
     if (juneHoldIds.includes(h.id)) {
       return {
         ...h,

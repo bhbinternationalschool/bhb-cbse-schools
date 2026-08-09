@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { demoSessionCookieName, type DemoSession } from "@/lib/auth";
 import { appSessionCookieOptions } from "@/lib/authCookies.server";
+import { signSession } from "@/lib/sessionCookie.server";
 import { DEFAULT_AY } from "@/lib/masters";
 import { resolveParentHousehold } from "@/lib/parentPortal";
 import { verifyParentOtp } from "@/lib/parentOtp.server";
@@ -55,12 +56,16 @@ export async function POST(request: Request) {
       summary: `Parent OTP login ${mobile.slice(-4)}`,
     });
 
+    const signed = signSession(session);
+    if (!signed) {
+      return NextResponse.json(
+        { error: "Server session signing is not configured" },
+        { status: 503 },
+      );
+    }
+
     const res = NextResponse.json({ ok: true, session });
-    res.cookies.set(
-      demoSessionCookieName(),
-      encodeURIComponent(JSON.stringify(session)),
-      appSessionCookieOptions(),
-    );
+    res.cookies.set(demoSessionCookieName(), signed, appSessionCookieOptions());
     return res;
   } catch (e) {
     console.error("[otp/verify]", e);

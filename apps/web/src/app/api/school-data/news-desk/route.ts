@@ -15,7 +15,13 @@ export const runtime = "nodejs";
 export async function GET(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["news-desk"], "GET");
   if (!auth.ok) return auth.response
-  const { bundle, meta } = await fetchNewsDeskFromDb();
+  const { bundle, meta, ok } = await fetchNewsDeskFromDb();
+  if (!ok) {
+    return NextResponse.json(
+      { ok: false, error: "News desk fetch failed — tenant/db unavailable" },
+      { status: 503 },
+    );
+  }
   return NextResponse.json({
     ok: true,
     news: bundle.news,

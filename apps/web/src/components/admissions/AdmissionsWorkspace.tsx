@@ -233,8 +233,12 @@ export function AdmissionsWorkspace() {
           setNotice(`Synced ${next.leads.length} lead(s) from Supabase.`);
           window.setTimeout(() => setNotice(null), 6000);
         }
-      } catch {
-        /* remote optional */
+      } catch (e) {
+        console.warn("[admissions] hydrate error", e);
+        if (!cancelled) {
+          const { reportLoadFailure } = await import("@/components/shell/Toast");
+          reportLoadFailure("admissions data");
+        }
       }
     })();
 
@@ -321,13 +325,14 @@ export function AdmissionsWorkspace() {
   const filtered = useMemo(() => {
     if (!state) return [];
     if (!canBrowseLeadLists) return [];
-    const me = session.fullName.trim().toLowerCase();
+    const me = (session?.fullName || "").trim().toLowerCase();
     const list = state.leads.filter((l) => {
+      const assigned = (l.assignedTo || "").trim().toLowerCase();
       if (callerOnly) {
         return (
           l.stage !== "enrolled" &&
           l.stage !== "lost" &&
-          l.assignedTo.trim().toLowerCase() === me
+          assigned === me
         );
       }
       if (
@@ -350,14 +355,14 @@ export function AdmissionsWorkspace() {
         return (
           l.stage !== "enrolled" &&
           l.stage !== "lost" &&
-          !l.assignedTo.trim()
+          !assigned
         );
       }
       if (filter === "mine") {
         return (
           l.stage !== "enrolled" &&
           l.stage !== "lost" &&
-          l.assignedTo.trim().toLowerCase() === me
+          assigned === me
         );
       }
       if (
@@ -372,9 +377,9 @@ export function AdmissionsWorkspace() {
       return l.source === filter;
     });
     return [...list].sort((a, b) => {
-      const dateCmp = (b.leadDate || b.createdAt).localeCompare(
-        a.leadDate || a.createdAt,
-      );
+      const dateA = String(a.leadDate || a.createdAt || "");
+      const dateB = String(b.leadDate || b.createdAt || "");
+      const dateCmp = dateB.localeCompare(dateA);
       if (dateCmp !== 0) return dateCmp;
       const ba = leadFollowUpBucket(a);
       const bb = leadFollowUpBucket(b);

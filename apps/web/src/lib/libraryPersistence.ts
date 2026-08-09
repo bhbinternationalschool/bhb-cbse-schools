@@ -43,7 +43,6 @@ export const scheduleLibrarySync = (state: LibraryState) => {
 };
 export const ensureLibraryHydrated = async () => {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = libraryReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("library")
@@ -51,7 +50,12 @@ export const ensureLibraryHydrated = async () => {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { bundle, changed } = await hydrateLibraryDeskFromDb(readFromDb);
+  const { bundle, changed, ok } = await hydrateLibraryDeskFromDb(readFromDb);
+  if (!ok) {
+    // Fetch failed — do not lock hydration flag; caller can retry later.
+    return blobChanged;
+  }
+  markDeskHydrated(MODULE);
   if (changed && (bundle.titles.length > 0 || bundle.procurementDocs.length > 0 || readFromDb)) {
     writeLibraryLocalRaw(
       mergeDbDeskIntoLibraryState(loadLibrary(), bundle, { preferDb: readFromDb }),

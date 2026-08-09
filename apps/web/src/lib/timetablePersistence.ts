@@ -71,7 +71,6 @@ export async function pushTimetableRemoteServer(
 
 export async function ensureTimetableHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = timetableReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("timetable")
@@ -79,7 +78,12 @@ export async function ensureTimetableHydrated(): Promise<boolean> {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { bundle, changed } = await hydrateTimetableDeskFromDb(readFromDb);
+  const { bundle, changed, ok } = await hydrateTimetableDeskFromDb(readFromDb);
+  if (!ok) {
+    // Fetch failed — do not lock hydration flag; caller can retry later.
+    return blobChanged;
+  }
+  markDeskHydrated(MODULE);
   if (
     changed &&
     (bundle.bellTemplate.length > 0 ||

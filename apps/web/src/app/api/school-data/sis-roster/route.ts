@@ -16,7 +16,13 @@ export const runtime = "nodejs";
 export async function GET(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["sis-roster"], "GET");
   if (!auth.ok) return auth.response
-  const { bundle, meta } = await fetchSisFromDb();
+  const { bundle, meta, ok } = await fetchSisFromDb();
+  if (!ok) {
+    return NextResponse.json(
+      { ok: false, error: "SIS roster fetch failed — tenant/db unavailable" },
+      { status: 503 },
+    );
+  }
   return NextResponse.json({
     ok: true,
     households: bundle.households,
@@ -64,6 +70,10 @@ export async function POST(req: Request) {
     ok: true,
     householdCount: result.householdCount,
     studentCount: result.studentCount,
+    // Records another user changed since this client last read them. They
+    // were deliberately not overwritten; the client warns and re-hydrates.
+    conflicts: result.conflicts ?? [],
+    guarded: result.guarded ?? false,
     updatedAt: new Date().toISOString(),
   });
 }

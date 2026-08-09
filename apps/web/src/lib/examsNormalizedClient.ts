@@ -42,7 +42,9 @@ export function examsNormalizedSyncEnabled(): boolean {
 }
 
 export function examsReadFromDbClientEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_EXAMS_READ_FROM_DB === "true";
+  const flag = process.env.NEXT_PUBLIC_EXAMS_READ_FROM_DB?.trim().toLowerCase();
+  if (flag === "false" || flag === "0") return false;
+  return true;
 }
 
 export function scheduleExamsDeskSync(state: ExamsState) {
@@ -141,7 +143,7 @@ export async function fetchExamsDeskFromApi(): Promise<{
 
 export async function hydrateExamsDeskFromDb(
   preferDb?: boolean,
-): Promise<{ bundle: ExamsState; changed: boolean }> {
+): Promise<{ bundle: ExamsState; changed: boolean; ok: boolean }> {
   const remote = await fetchExamsDeskFromApi();
   if (!remote) {
     return {
@@ -155,6 +157,7 @@ export async function hydrateExamsDeskFromDb(
         promotions: [],
       },
       changed: false,
+      ok: false,
     };
   }
 
@@ -178,6 +181,7 @@ export async function hydrateExamsDeskFromDb(
         promotions: [],
       },
       changed: false,
+      ok: true,
     };
   }
 
@@ -192,5 +196,6 @@ export async function hydrateExamsDeskFromDb(
       ...remote.bundle,
     },
     changed: true,
+    ok: true,
   };
 }

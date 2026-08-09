@@ -20,6 +20,16 @@ const eslintConfig = [
       "next-env.d.ts",
     ],
   },
+  {
+    // Dev-only QA harnesses and one-off scripts: these stub globals
+    // (globalThis.window/localStorage) and narrow string literals to tag
+    // unions, where `any` is the pragmatic choice. Shipped code under
+    // src/ keeps the strict rule.
+    files: ["scripts/**/*.{ts,mts,mjs,js}", "src/**/*.selftest.ts"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+    },
+  },
 ];
 
 export default eslintConfig;

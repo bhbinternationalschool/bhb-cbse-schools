@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { DEMO_USERS, demoSessionCookieName, type DemoSession } from "@/lib/auth";
 import { appSessionCookieOptions } from "@/lib/authCookies.server";
+import { signSession } from "@/lib/sessionCookie.server";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { superAdminRoleCode } from "@/lib/superAdmin";
 import { TENANT, type Persona } from "@/lib/types";
@@ -138,11 +139,15 @@ export async function POST(request: Request) {
     academicYearCode: await resolveLoginAcademicYearCode(body.academicYearCode),
   };
 
+  const signed = signSession(session);
+  if (!signed) {
+    return NextResponse.json(
+      { error: "Server session signing is not configured" },
+      { status: 503 },
+    );
+  }
+
   const res = NextResponse.json({ ok: true, session });
-  res.cookies.set(
-    demoSessionCookieName(),
-    encodeURIComponent(JSON.stringify(session)),
-    appSessionCookieOptions(),
-  );
+  res.cookies.set(demoSessionCookieName(), signed, appSessionCookieOptions());
   return res;
 }

@@ -79,7 +79,6 @@ export async function pushAttendanceRemoteServer(
  */
 export async function ensureAttendanceHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = attendanceReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("attendance")
@@ -87,8 +86,11 @@ export async function ensureAttendanceHydrated(): Promise<boolean> {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { registers, ancillary, changed } =
+  const { registers, ancillary, changed, ok } =
     await hydrateAttendanceDeskFromDb(readFromDb);
+  if (!ok) return false;
+
+  markDeskHydrated(MODULE);
   const hasAncillary =
     ancillary.absentNudges.length > 0 || ancillary.exceptions.length > 0;
   if (

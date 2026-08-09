@@ -74,13 +74,12 @@ async function main() {
   const tenantId = tenant.id as string;
   console.log("Tenant:", tenant.name, tenantId);
 
-  let ownerRoleId: string | undefined;
   const { data: ownerRole } = await sb
     .from("roles")
     .select("id, code")
     .eq("code", "owner")
     .maybeSingle();
-  ownerRoleId = ownerRole?.id as string | undefined;
+  const ownerRoleId = ownerRole?.id as string | undefined;
   if (!ownerRoleId) {
     console.warn(
       "  roles.owner not readable via API — app RBAC blob will still grant owner to super admin emails.",
@@ -119,7 +118,7 @@ async function main() {
 
   for (const email of emails) {
     console.log("\n— Super admin:", email);
-    let authUserId = await findAuthUserId(sb, email);
+    const authUserId = await findAuthUserId(sb, email);
 
     if (!authUserId) {
       console.warn(

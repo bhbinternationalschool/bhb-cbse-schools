@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   DEFAULT_PRINCIPAL_PIN,
   HOLD_LABELS,
@@ -37,6 +37,14 @@ export function PrincipalHoldOverrideDialog({
   const [error, setError] = useState<string | null>(null);
   const label = block?.label ?? HOLD_LABELS[holdCode];
   const isRehold = mode === "rehold";
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();

@@ -183,43 +183,44 @@ export async function ensureSisHydrated(): Promise<boolean> {
     return false;
   }
 
-  markDeskHydrated(MODULE);
-
-  const { loadSis, saveSis, writeSisLocalRaw, isLikelyDemoRoster } =
+  const { loadSis, saveSis, writeSisLocalRaw, emptySisState } =
     await import("@/lib/sis");
   let next = loadSis();
   let changed = false;
 
   const readFromDb = sisReadFromDbEnabled();
-  const { bundle, changed: remoteChanged } = await hydrateSisDeskFromDb(
+  const { bundle, changed: remoteChanged, ok } = await hydrateSisDeskFromDb(
     readFromDb,
   );
+
+  if (!ok) {
+    // Unauthenticated or fetch failed — do not lock hydration flag
+    if (typeof window !== "undefined") {
+      const { reportLoadFailure } = await import("@/components/shell/Toast");
+      reportLoadFailure("student records");
+    }
+    return false;
+  }
+
+  markDeskHydrated(MODULE);
   const remoteEmpty =
     bundle.households.length === 0 && bundle.students.length === 0;
 
-  if (remoteEmpty && (next.students.length > 0 || next.households.length > 0)) {
-    // If remote DB is empty but browser has local uploaded students, push local students to DB!
-    void pushSisState(next);
-  } else if (
-    remoteChanged &&
-    (bundle.households.length > 0 || bundle.students.length > 0)
-  ) {
-    const remoteAsSis = {
-      version: 1 as const,
-      households: bundle.households,
-      students: bundle.students,
-      curriculumRequests: [] as [],
-      tags: next.tags ?? [],
-      classUpgrades: next.classUpgrades ?? [],
-    };
-    if (next.students.length === 0 && isLikelyDemoRoster(remoteAsSis)) {
-      await wipeRemoteSisRoster();
-    } else {
-      next = mergeSisRemoteIntoState(next, bundle, {
-        preferDb: readFromDb,
-      });
+  if (readFromDb && remoteEmpty) {
+    if (next.students.length > 0 || next.households.length > 0) {
+      next = emptySisState();
+      writeSisLocalRaw(next);
+      saveSis(next);
       changed = true;
     }
+  } else if (
+    (remoteChanged || bundle.students.length > 0) &&
+    (bundle.households.length > 0 || bundle.students.length > 0)
+  ) {
+    next = mergeSisRemoteIntoState(next, bundle, {
+      preferDb: readFromDb,
+    });
+    changed = true;
   }
 
   // If we just replaced local state from the DB, we don't need to push it back

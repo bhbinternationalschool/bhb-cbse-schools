@@ -54,7 +54,6 @@ export function scheduleFeesSync(state: FeesState) {
  */
 export async function ensureFeesHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = feesReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("fees")
@@ -62,7 +61,16 @@ export async function ensureFeesHydrated(): Promise<boolean> {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { vouchers, ancillary, changed } = await hydrateFeesDeskFromDb(readFromDb);
+  const { vouchers, ancillary, changed, ok } = await hydrateFeesDeskFromDb(readFromDb);
+  if (!ok) {
+    if (typeof window !== "undefined" && feesRemoteEnabled()) {
+      const { reportLoadFailure } = await import("@/components/shell/Toast");
+      reportLoadFailure("fee records");
+    }
+    return false;
+  }
+
+  markDeskHydrated(MODULE);
   const hasAncillary =
     ancillary.cheques.length > 0 ||
     ancillary.manualBooks.length > 0 ||

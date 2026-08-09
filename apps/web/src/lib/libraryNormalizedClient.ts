@@ -134,6 +134,7 @@ export async function hydrateLibraryDeskFromDb(preferDb?: boolean) {
       },
     },
     changed: false,
+    ok: false,
   };
   if (!remote) return empty;
 
@@ -145,8 +146,8 @@ export async function hydrateLibraryDeskFromDb(preferDb?: boolean) {
     (remote.updatedAt && remote.updatedAt >= meta.updatedAt) ||
     remote.titleCount > meta.titleCount;
 
-  if (!shouldTake) return empty;
+  if (!shouldTake) return { ...empty, bundle: remote.bundle, ok: true };
 
   writeMeta({ updatedAt: remote.updatedAt, titleCount: remote.titleCount });
-  return { bundle: remote.bundle, changed: true };
+  return { bundle: remote.bundle, changed: true, ok: true };
 }

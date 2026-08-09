@@ -128,6 +128,7 @@ export async function hydratePurchaseDeskFromDb(preferDb?: boolean) {
       },
     },
     changed: false,
+    ok: false,
   };
   if (!remote) return empty;
 
@@ -139,8 +140,8 @@ export async function hydratePurchaseDeskFromDb(preferDb?: boolean) {
     (remote.updatedAt && remote.updatedAt >= meta.updatedAt) ||
     remote.indentCount > meta.indentCount;
 
-  if (!shouldTake) return empty;
+  if (!shouldTake) return { ...empty, bundle: remote.bundle, ok: true };
 
   writeMeta({ updatedAt: remote.updatedAt, indentCount: remote.indentCount });
-  return { bundle: remote.bundle, changed: true };
+  return { bundle: remote.bundle, changed: true, ok: true };
 }

@@ -19,7 +19,13 @@ export const runtime = "nodejs";
 export async function GET(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["admissions-desk"], "GET");
   if (!auth.ok) return auth.response
-  const { state, meta } = await fetchAdmissionDeskFromDb();
+  const { state, meta, ok } = await fetchAdmissionDeskFromDb();
+  if (!ok) {
+    return NextResponse.json(
+      { ok: false, error: "Admissions desk fetch failed — tenant/db unavailable" },
+      { status: 503 },
+    );
+  }
   return NextResponse.json({
     ok: true,
     state,

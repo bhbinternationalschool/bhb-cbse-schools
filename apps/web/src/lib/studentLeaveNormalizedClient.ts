@@ -118,10 +118,15 @@ type StudentLeaveDeskBundle = Pick<StudentLeaveState, "requests">;
 
 export async function hydrateStudentLeaveDeskFromDb(
   preferDb?: boolean,
-): Promise<{ bundle: StudentLeaveDeskBundle; changed: boolean }> {
+): Promise<{
+  bundle: StudentLeaveDeskBundle;
+  changed: boolean;
+  /** false = fetch failed / not authenticated; bundle is NOT a confirmed empty state. */
+  ok: boolean;
+}> {
   const remote = await fetchStudentLeaveDeskFromApi();
   const empty: StudentLeaveDeskBundle = { requests: [] };
-  if (!remote) return { bundle: empty, changed: false };
+  if (!remote) return { bundle: empty, changed: false, ok: false };
 
   const meta = readMeta();
   const shouldTake =
@@ -131,12 +136,12 @@ export async function hydrateStudentLeaveDeskFromDb(
     (remote.updatedAt && remote.updatedAt >= meta.updatedAt) ||
     remote.requestCount > meta.requestCount;
 
-  if (!shouldTake) return { bundle: empty, changed: false };
+  if (!shouldTake) return { bundle: empty, changed: false, ok: true };
 
   writeMeta({
     updatedAt: remote.updatedAt,
     requestCount: remote.requestCount,
   });
 
-  return { bundle: remote.bundle, changed: true };
+  return { bundle: remote.bundle, changed: true, ok: true };
 }

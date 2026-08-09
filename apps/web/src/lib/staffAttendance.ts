@@ -346,7 +346,7 @@ export function upsertStaffMarkInState(
     input.date,
     input.academicYearCode,
   );
-  let marks = existing
+  const marks = existing
     ? [...existing.marks]
     : defaultStaffMarks(input.roster);
 
@@ -497,7 +497,7 @@ export function upsertStaffMark(input: {
     input.date,
     input.academicYearCode,
   );
-  let marks = existing
+  const marks = existing
     ? [...existing.marks]
     : defaultStaffMarks(input.roster);
 

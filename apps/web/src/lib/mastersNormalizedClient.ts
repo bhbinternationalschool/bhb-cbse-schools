@@ -149,16 +149,16 @@ async function pushMastersDeskApi(state: MastersState) {
 
 export async function hydrateMastersDeskFromDb(
   preferDb?: boolean,
-): Promise<{ bundle: Omit<MastersState, "version">; changed: boolean }> {
+): Promise<{ bundle: Omit<MastersState, "version">; changed: boolean; ok: boolean }> {
   const { version: _v, ...empty } = emptyMastersShell();
 
-  if (!isSupabaseConfigured()) return { bundle: empty, changed: false };
+  if (!isSupabaseConfigured()) return { bundle: empty, changed: false, ok: true };
   try {
     const res = await fetch("/api/school-data/masters-desk", {
       method: "GET",
       cache: "no-store",
     });
-    if (!res.ok) return { bundle: empty, changed: false };
+    if (!res.ok) return { bundle: empty, changed: false, ok: false };
     const body = (await res.json()) as Omit<MastersState, "version"> & {
       updatedAt?: string;
       classCount?: number;
@@ -179,8 +179,8 @@ export async function hydrateMastersDeskFromDb(
       updatedAt: remoteAt,
     });
 
-    const readFromDb =
-      preferDb || process.env.NEXT_PUBLIC_MASTERS_READ_FROM_DB === "true";
+    const flag = process.env.NEXT_PUBLIC_MASTERS_READ_FROM_DB?.trim().toLowerCase();
+    const readFromDb = preferDb || flag !== "false";
 
     const remoteIsNewer =
       !!remoteAt &&
@@ -195,14 +195,14 @@ export async function hydrateMastersDeskFromDb(
       ? remoteIsNewer || (!localEditAt && hasRemote)
       : hasRemote && (bootstrapNewDevice || remoteIsNewer);
 
-    if (!shouldTake) return { bundle: empty, changed: false };
+    if (!shouldTake) return { bundle: empty, changed: false, ok: true };
     writeMeta({
       updatedAt: remoteAt || new Date().toISOString(),
       classCount: remoteClasses,
       feeHeadCount: body.feeHeadCount ?? bundle.feeHeads?.length ?? 0,
     });
-    return { bundle, changed: true };
+    return { bundle, changed: true, ok: true };
   } catch {
-    return { bundle: empty, changed: false };
+    return { bundle: empty, changed: false, ok: false };
   }
 }

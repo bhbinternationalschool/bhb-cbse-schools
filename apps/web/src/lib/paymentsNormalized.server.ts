@@ -249,9 +249,11 @@ export async function pushPaymentLinksToDb(
 export async function fetchPaymentLinksFromDb(): Promise<{
   links: PaymentLink[];
   meta: PaymentDeskSyncMeta | null;
+  /** false = tenant/query could not be resolved; result is NOT a confirmed empty state. */
+  ok: boolean;
 }> {
   const ctx = await resolveCtx();
-  if (!ctx) return { links: [], meta: null };
+  if (!ctx) return { links: [], meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
   const { data: headers, error: hErr } = await sb
@@ -260,17 +262,33 @@ export async function fetchPaymentLinksFromDb(): Promise<{
     .eq("tenant_id", tenantId)
     .order("created_at", { ascending: false });
 
-  if (hErr || !headers?.length) {
-    const { data: metaRow } = await sb
+  if (hErr) {
+    console.warn("[payments-db] fetch failed", hErr.message);
+    return { links: [], meta: null, ok: false };
+  }
+
+  if (!headers?.length) {
+    const { data: metaRow, error: metaErr } = await sb
       .from("payment_desk_sync_meta")
       .select(META_SELECT)
       .eq("tenant_id", tenantId)
       .maybeSingle();
-    return { links: [], meta: mapMetaRow(metaRow as Record<string, unknown> | null) };
+    if (metaErr) {
+      console.warn("[payments-db] meta fetch failed", metaErr.message);
+      return { links: [], meta: null, ok: false };
+    }
+    return {
+      links: [],
+      meta: mapMetaRow(metaRow as Record<string, unknown> | null),
+      ok: true,
+    };
   }
 
   const ids = headers.map((h) => h.id as string);
-  const [{ data: lineRows }, { data: metaRow }] = await Promise.all([
+  const [
+    { data: lineRows, error: lErr },
+    { data: metaRow, error: metaErr },
+  ] = await Promise.all([
     sb
       .from("payment_desk_link_lines")
       .select("*")
@@ -282,6 +300,11 @@ export async function fetchPaymentLinksFromDb(): Promise<{
       .eq("tenant_id", tenantId)
       .maybeSingle(),
   ]);
+
+  if (lErr || metaErr) {
+    console.warn("[payments-db] fetch failed", lErr?.message, metaErr?.message);
+    return { links: [], meta: null, ok: false };
+  }
 
   const linesByLink = new Map<string, Record<string, unknown>[]>();
   for (const row of lineRows ?? []) {
@@ -301,6 +324,7 @@ export async function fetchPaymentLinksFromDb(): Promise<{
   return {
     links,
     meta: mapMetaRow(metaRow as Record<string, unknown> | null),
+    ok: true,
   };
 }
 
@@ -318,6 +342,8 @@ export async function pushPaymentDeskToDb(
 export async function fetchPaymentDeskFromDb(): Promise<{
   links: PaymentLink[];
   meta: PaymentDeskSyncMeta | null;
+  /** false = tenant/query could not be resolved; result is NOT a confirmed empty state. */
+  ok: boolean;
 }> {
   return fetchPaymentLinksFromDb();
 }

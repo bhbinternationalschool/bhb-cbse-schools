@@ -124,6 +124,8 @@ export type Household = {
   geoConfidence?: "high" | "low" | "failed";
   /** Fingerprint of address fields when geo was set */
   geoAddressKey?: string;
+  /** Optimistic-locking token — see SisStudent.revisionAt. Server-owned. */
+  revisionAt: string;
 };
 
 export type SisStudent = {
@@ -276,6 +278,15 @@ export type SisStudent = {
   curriculum: StudentCurriculum | null;
   /** Assigned student tag ids (shown before name across the ERP) */
   tagIds: string[];
+  /**
+   * Optimistic-locking token — the `updated_at` this record carried when it
+   * was last read from the database. Server-owned: never set or edited by
+   * feature code. On push the server compares it against the stored value
+   * and refuses the write if another user has saved in the meantime, which
+   * is what stops two staff overwriting each other. Empty means "no known
+   * base version" (a record created locally and not yet synced).
+   */
+  revisionAt: string;
 };
 
 /** School-defined labels (RTE cohort, sports, staff ward, etc.) */
@@ -730,6 +741,7 @@ export function normalizeStudent(s: Partial<SisStudent> & { id: string }): SisSt
     tagIds: Array.isArray(s.tagIds)
       ? [...new Set(s.tagIds.filter((id): id is string => typeof id === "string"))]
       : [],
+    revisionAt: typeof s.revisionAt === "string" ? s.revisionAt : "",
   };
 }
 
@@ -812,6 +824,7 @@ export function normalizeHousehold(h: Partial<Household> & { id: string }): Hous
     altMobile: normalizeMobile(h.altMobile ?? ""),
     guardianPhotoUrl:
       typeof h.guardianPhotoUrl === "string" ? h.guardianPhotoUrl : "",
+    revisionAt: typeof h.revisionAt === "string" ? h.revisionAt : "",
     ...(keepGeo
       ? {
           geoLat: h.geoLat,

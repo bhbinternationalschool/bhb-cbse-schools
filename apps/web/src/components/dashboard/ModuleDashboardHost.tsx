@@ -35,6 +35,29 @@ export function ModuleDashboardHost({
   }, []);
 
   useEffect(() => {
+    void (async () => {
+      let did = false;
+      if (moduleId === "admissions") {
+        const { ensureAdmissionsHydrated } = await import("@/lib/admissionsPersistence");
+        did = await ensureAdmissionsHydrated();
+      } else if (moduleId === "students") {
+        const { ensureSisHydrated } = await import("@/lib/sisPersistence");
+        did = await ensureSisHydrated();
+      } else if (moduleId === "fees") {
+        const { ensureFeesHydrated } = await import("@/lib/feesPersistence");
+        did = await ensureFeesHydrated();
+      } else if (moduleId === "staff") {
+        const { ensureStaffHydrated } = await import("@/lib/staffPersistence");
+        did = await ensureStaffHydrated();
+      } else if (moduleId === "attendance") {
+        const { ensureAttendanceHydrated } = await import("@/lib/attendancePersistence");
+        did = await ensureAttendanceHydrated();
+      } else if (moduleId === "exams") {
+        const { ensureExamsHydrated } = await import("@/lib/examsPersistence");
+        did = await ensureExamsHydrated();
+      }
+      if (did) setMastersTick((t) => t + 1);
+    })();
     setModel(
       buildModuleDashboard(moduleId, {
         academicYearCode: session?.academicYearCode,

@@ -131,24 +131,27 @@ export async function hydrateSchoolMirrorFromRemote(
         };
       }
 
+      const { fetchSisFromDb } = await import("@/lib/sisNormalized.server");
+      const { bundle: sisBundle } = await fetchSisFromDb();
+      if (sisBundle.students.length > 0 || sisBundle.households.length > 0) {
+        next = {
+          ...next,
+          sis: {
+            version: 1,
+            households: sisBundle.households,
+            students: sisBundle.students,
+            audit: [],
+          },
+          updatedAt: nowIso(),
+        };
+      }
+
       const [admissionsRemote] = await Promise.all([
         fetchAdmissionsRemoteServer(),
       ]);
 
-      const { admissionsReadFromDbEnabled } = await import("@/lib/admissionsDbConfig");
-      const mirrorAdmissions = next.admissions as AdmissionsState | null;
-      const mirrorLeads = admissionsLeadCount(mirrorAdmissions);
-      const blobLeads = admissionsLeadCount(admissionsRemote);
-      if (
-        !admissionsReadFromDbEnabled() &&
-        blobLeads > 0 &&
-        admissionsRemote
-      ) {
+      if (admissionsRemote && !admissionsStateIsEmpty(admissionsRemote)) {
         next = { ...next, admissions: admissionsRemote, updatedAt: nowIso() };
-      } else if (admissionsReadFromDbEnabled() && admissionsRemote) {
-        next = { ...next, admissions: admissionsRemote, updatedAt: nowIso() };
-      } else if (mirrorLeads === 0 && !next.admissions) {
-        next = { ...next, admissions: defaultAdmissionsState() };
       }
 
       if (!next.fees) next = { ...next, fees: emptyFeesState() };
@@ -156,25 +159,6 @@ export async function hydrateSchoolMirrorFromRemote(
       if (!next.masters) next = { ...next, masters: emptyMastersShell() };
       if (!next.sis) next = { ...next, sis: emptySisState() };
       if (!next.admissions) next = { ...next, admissions: defaultAdmissionsState() };
-
-      const { ensureAttendanceHydratedServer } = await import(
-        "@/lib/attendancePersistence"
-      );
-      await ensureAttendanceHydratedServer();
-
-      const { ensureExamsHydratedServer } = await import("@/lib/examsPersistence");
-      await ensureExamsHydratedServer();
-
-      const { ensureAdmissionsHydratedServer } = await import(
-        "@/lib/admissionsPersistence"
-      );
-      await ensureAdmissionsHydratedServer();
-
-      const { loadAdmissions } = await import("@/lib/admissions");
-      const hydratedAdmissions = loadAdmissions();
-      if (!admissionsStateIsEmpty(hydratedAdmissions)) {
-        next = { ...next, admissions: hydratedAdmissions, updatedAt: nowIso() };
-      }
 
       replaceSchoolMirror(next);
       lastHydrateMs = Date.now();

@@ -152,6 +152,7 @@ export async function hydrateStoreDeskFromDb(preferDb?: boolean) {
       sellReturns: [] as StoreState["sellReturns"],
     },
     changed: false,
+    ok: false,
   };
   if (!remote) return empty;
 
@@ -163,8 +164,8 @@ export async function hydrateStoreDeskFromDb(preferDb?: boolean) {
     (remote.updatedAt && remote.updatedAt >= meta.updatedAt) ||
     remote.itemCount > meta.itemCount;
 
-  if (!shouldTake) return empty;
+  if (!shouldTake) return { ...empty, bundle: remote.bundle, ok: true };
 
   writeMeta({ updatedAt: remote.updatedAt, itemCount: remote.itemCount });
-  return { bundle: remote.bundle, changed: true };
+  return { bundle: remote.bundle, changed: true, ok: true };
 }

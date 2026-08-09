@@ -23,10 +23,14 @@ export { scheduleNewsDeskSync };
 
 export async function ensureNewsHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = newsReadFromDbEnabled();
-  const { bundle, changed } = await hydrateNewsDeskFromDb(readFromDb);
+  const { bundle, changed, ok } = await hydrateNewsDeskFromDb(readFromDb);
+  if (!ok) {
+    // Fetch failed — do not lock hydration flag; caller can retry later.
+    return false;
+  }
+  markDeskHydrated(MODULE);
   if (!changed || (bundle.news.length === 0 && !readFromDb)) return false;
 
   writeSchoolCommsLocalRaw(

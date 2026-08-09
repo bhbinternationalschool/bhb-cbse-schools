@@ -277,7 +277,7 @@ export function ErpSidebar({
         canAccessHref(session, masters, h.href, rbac),
       ),
     })).filter((g) => g.hubs.length > 0);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [session, navTick]);
 
   useEffect(() => {

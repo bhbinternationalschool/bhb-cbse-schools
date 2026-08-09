@@ -185,13 +185,15 @@ export async function pushStudentLeaveDeskToDb(
 export async function fetchStudentLeaveDeskFromDb(): Promise<{
   bundle: StudentLeaveDeskBundle;
   meta: StudentLeaveDeskSyncMeta | null;
+  /** false = tenant/query could not be resolved; bundle is NOT a confirmed empty state. */
+  ok: boolean;
 }> {
   const ctx = await resolveCtx();
   const empty: StudentLeaveDeskBundle = { requests: [] };
-  if (!ctx) return { bundle: empty, meta: null };
+  if (!ctx) return { bundle: empty, meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
-  const [{ data: requestRows }, { data: metaRow }] = await Promise.all([
+  const [{ data: requestRows, error: requestErr }, { data: metaRow }] = await Promise.all([
     sb.from("student_leave_desk_requests").select("*").eq("tenant_id", tenantId),
     sb
       .from("student_leave_desk_sync_meta")
@@ -200,6 +202,11 @@ export async function fetchStudentLeaveDeskFromDb(): Promise<{
       .maybeSingle(),
   ]);
 
+  if (requestErr) {
+    console.warn("[student-leave-db] fetch failed", requestErr.message);
+    return { bundle: empty, meta: null, ok: false };
+  }
+
   return {
     bundle: {
       requests: (requestRows ?? []).map((r) =>
@@ -207,5 +214,6 @@ export async function fetchStudentLeaveDeskFromDb(): Promise<{
       ),
     },
     meta: mapMetaRow(metaRow as Record<string, unknown> | null),
+    ok: true,
   };
 }

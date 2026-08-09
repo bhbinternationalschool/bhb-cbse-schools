@@ -84,23 +84,25 @@ export async function hydrateNotificationsDeskFromDb(
 ): Promise<{
   bundle: { items: NotificationsState["items"] };
   changed: boolean;
+  /** false = fetch failed / not authenticated; bundle is NOT a confirmed empty state. */
+  ok: boolean;
 }> {
   if (!isSupabaseConfigured()) {
-    return { bundle: { items: [] }, changed: false };
+    return { bundle: { items: [] }, changed: false, ok: false };
   }
   try {
     const res = await fetch("/api/school-data/notifications-desk", {
       method: "GET",
       cache: "no-store",
     });
-    if (!res.ok) return { bundle: { items: [] }, changed: false };
+    if (!res.ok) return { bundle: { items: [] }, changed: false, ok: false };
     const body = (await res.json()) as {
       items?: NotificationsState["items"];
       updatedAt?: string;
       itemCount?: number;
     };
     if (!Array.isArray(body.items)) {
-      return { bundle: { items: [] }, changed: false };
+      return { bundle: { items: [] }, changed: false, ok: false };
     }
 
     const meta = readMeta();
@@ -112,15 +114,15 @@ export async function hydrateNotificationsDeskFromDb(
       (body.updatedAt && body.updatedAt >= meta.updatedAt) ||
       remoteCount > meta.itemCount;
 
-    if (!shouldTake) return { bundle: { items: [] }, changed: false };
+    if (!shouldTake) return { bundle: { items: [] }, changed: false, ok: true };
 
     writeMeta({
       updatedAt: body.updatedAt || new Date().toISOString(),
       itemCount: remoteCount,
     });
 
-    return { bundle: { items: body.items }, changed: true };
+    return { bundle: { items: body.items }, changed: true, ok: true };
   } catch {
-    return { bundle: { items: [] }, changed: false };
+    return { bundle: { items: [] }, changed: false, ok: false };
   }
 }

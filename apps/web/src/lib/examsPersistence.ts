@@ -77,7 +77,6 @@ export async function pushExamsRemoteServer(
  */
 export async function ensureExamsHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = examsReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("exams")
@@ -85,7 +84,10 @@ export async function ensureExamsHydrated(): Promise<boolean> {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { bundle, changed } = await hydrateExamsDeskFromDb(readFromDb);
+  const { bundle, changed, ok } = await hydrateExamsDeskFromDb(readFromDb);
+  if (!ok) return false;
+
+  markDeskHydrated(MODULE);
   const hasDesk =
     bundle.sheets.length > 0 ||
     bundle.promotions.length > 0 ||

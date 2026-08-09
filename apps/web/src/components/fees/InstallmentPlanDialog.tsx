@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   cancelInstallmentPlan,
   createInstallmentPlan,
@@ -38,6 +38,14 @@ export function InstallmentPlanDialog({
   onClose: () => void;
   onSaved: (msg: string) => void;
 }) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   const fees = loadFees();
   const existing = activePlanForStudent(
     fees.installmentPlans,

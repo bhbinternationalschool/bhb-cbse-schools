@@ -33,6 +33,7 @@ import {
 import { applyFeeDiscountSeedNow } from "@/lib/feeDiscountImportHydrate";
 import { consumeFreshLoginSession, flushAllDeskSyncPending, resetAllWorkspacePersistenceCaches } from "@/lib/workspaceClientSession";
 import { useWorkspaceInactivityLogout } from "./useWorkspaceInactivityLogout";
+import { ToastHost } from "./Toast";
 
 export function AppShell({
   session,
@@ -318,6 +319,7 @@ export function AppShell({
           <StaffBottomNav onOpenMenu={() => setMobileNavOpen(true)} />
         ) : null}
         <ErpAiChatbot />
+        <ToastHost />
         </div>
       </div>
     </SessionProvider>

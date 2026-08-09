@@ -4,6 +4,7 @@ import {
   appSessionCookieOptions,
   clearAppSessionCookieOptions,
 } from "@/lib/authCookies.server";
+import { signSession } from "@/lib/sessionCookie.server";
 import type { Persona } from "@/lib/types";
 import { TENANT } from "@/lib/types";
 import { isDemoAuth } from "@/lib/supabase/client";
@@ -24,12 +25,19 @@ export async function POST(request: Request) {
   if (!["staff", "parent", "field"].includes(persona)) {
     return NextResponse.json({ error: "Invalid persona" }, { status: 400 });
   }
-  // When demo auth is off, staff must use Supabase Auth → /api/auth/session
-  if (!isDemoAuth() && persona === "staff") {
+  // When demo auth is off this route mints identities with no credential
+  // check at all, so it must be closed for EVERY persona — not just staff.
+  // Staff sign in via Supabase Auth (/api/auth/session); parents via OTP
+  // (/api/auth/otp/verify). Previously only "staff" was blocked, which let
+  // anyone POST persona:"parent" with an arbitrary householdId and read
+  // that family's records.
+  if (!isDemoAuth()) {
     return NextResponse.json(
       {
         error:
-          "Demo staff login is disabled. Sign in with your school email and password.",
+          persona === "staff"
+            ? "Demo staff login is disabled. Sign in with your school email and password."
+            : "Demo login is disabled. Sign in with the OTP sent to your registered mobile.",
       },
       { status: 403 },
     );
@@ -49,12 +57,16 @@ export async function POST(request: Request) {
     tenantSlug: TENANT.slug,
     academicYearCode: await resolveLoginAcademicYearCode(body.academicYearCode),
   };
+  const signed = signSession(session);
+  if (!signed) {
+    return NextResponse.json(
+      { error: "Server session signing is not configured" },
+      { status: 503 },
+    );
+  }
+
   const res = NextResponse.json({ ok: true, session });
-  res.cookies.set(
-    demoSessionCookieName(),
-    encodeURIComponent(JSON.stringify(session)),
-    appSessionCookieOptions(),
-  );
+  res.cookies.set(demoSessionCookieName(), signed, appSessionCookieOptions());
   return res;
 }
 

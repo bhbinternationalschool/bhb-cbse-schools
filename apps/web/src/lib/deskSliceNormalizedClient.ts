@@ -111,17 +111,17 @@ async function pushDeskSliceApi(
 export async function hydrateDeskSliceFromDb(
   id: DeskModuleId,
   preferDb?: boolean,
-): Promise<{ bundle: Record<string, unknown>; changed: boolean }> {
+): Promise<{ bundle: Record<string, unknown>; changed: boolean; ok: boolean }> {
   const def = deskSliceDef(id);
   if (!def || !isSupabaseConfigured()) {
-    return { bundle: {}, changed: false };
+    return { bundle: {}, changed: false, ok: true };
   }
   try {
     const res = await fetch(`/api/school-data/desk-slice/${id}`, {
       method: "GET",
       cache: "no-store",
     });
-    if (!res.ok) return { bundle: {}, changed: false };
+    if (!res.ok) return { bundle: {}, changed: false, ok: false };
     const body = (await res.json()) as Record<string, unknown> & {
       updatedAt?: string;
       rowCount?: number;
@@ -145,13 +145,13 @@ export async function hydrateDeskSliceFromDb(
       meta.rowCount === 0 ||
       (body.updatedAt && body.updatedAt >= meta.updatedAt) ||
       remoteRows > meta.rowCount;
-    if (!shouldTake) return { bundle: {}, changed: false };
+    if (!shouldTake) return { bundle: {}, changed: false, ok: true };
     writeMeta(id, {
       updatedAt: body.updatedAt || new Date().toISOString(),
       rowCount: remoteRows,
     });
-    return { bundle, changed: true };
+    return { bundle, changed: true, ok: true };
   } catch {
-    return { bundle: {}, changed: false };
+    return { bundle: {}, changed: false, ok: false };
   }
 }

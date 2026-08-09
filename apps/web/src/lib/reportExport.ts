@@ -2,7 +2,6 @@
  * Export current filter/search results as Excel-friendly CSV or PDF.
  */
 
-import { jsPDF } from "jspdf";
 import { TENANT } from "@/lib/types";
 
 export type ReportColumn = {
@@ -56,14 +55,7 @@ export function downloadExcelCsv(input: ReportExportInput): void {
       .map((c) => csvEscape(safeCell(row[c.key])))
       .join(","),
   );
-  const meta = [
-    csvEscape(input.title),
-    csvEscape(input.subtitle ?? TENANT.shortName),
-    csvEscape(input.filterNote ?? ""),
-    csvEscape(`Generated ${new Date().toLocaleString("en-IN")}`),
-    "",
-  ];
-  const body = [...meta, header, ...lines].join("\r\n");
+  const body = [header, ...lines].join("\r\n");
   const blob = new Blob(["\uFEFF" + body], {
     type: "text/csv;charset=utf-8",
   });
@@ -71,24 +63,45 @@ export function downloadExcelCsv(input: ReportExportInput): void {
 }
 
 /** Simple multi-page PDF table of the filtered rows. */
-export function downloadPdfReport(input: ReportExportInput): void {
+export async function downloadPdfReport(input: ReportExportInput): Promise<void> {
+  const { jsPDF } = await import("jspdf");
+  let cols = input.columns;
+  if (cols.length > 12) {
+    const priorityKeys = new Set([
+      "admissionNo",
+      "fullName",
+      "gender",
+      "className",
+      "section",
+      "rollNo",
+      "fatherName",
+      "fatherMobile",
+      "status",
+      "pen",
+      "category",
+      "academicYear",
+    ]);
+    const filteredCols = cols.filter((c) => priorityKeys.has(c.key));
+    cols = filteredCols.length > 0 ? filteredCols.slice(0, 12) : cols.slice(0, 12);
+  }
+
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const margin = 36;
   const usable = pageW - margin * 2;
 
-  const totalWeight = input.columns.reduce(
+  const totalWeight = cols.reduce(
     (s, c) => s + (c.width ?? 1),
     0,
   );
-  const colWidths = input.columns.map(
+  const colWidths = cols.map(
     (c) => ((c.width ?? 1) / totalWeight) * usable,
   );
 
   let y = margin;
   const titleSize = 14;
-  const bodySize = input.columns.length > 14 ? 5.5 : input.columns.length > 10 ? 7 : 8;
+  const bodySize = cols.length > 10 ? 7 : 8;
   const lineH = bodySize + 4;
 
   function drawHeaderBlock() {
@@ -126,7 +139,7 @@ export function downloadPdfReport(input: ReportExportInput): void {
     doc.setFontSize(bodySize);
     doc.setTextColor(255, 255, 255);
     let x = margin;
-    input.columns.forEach((c, i) => {
+    cols.forEach((c, i) => {
       const w = colWidths[i]!;
       const align = c.align === "right" ? "right" : "left";
       doc.text(c.header, align === "right" ? x + w - 2 : x + 2, y, {
@@ -160,7 +173,7 @@ export function downloadPdfReport(input: ReportExportInput): void {
       doc.rect(margin, y - 9, usable, lineH + 2, "F");
     }
     let x = margin;
-    input.columns.forEach((c, i) => {
+    cols.forEach((c, i) => {
       const w = colWidths[i]!;
       const text = safeCell(row[c.key]);
       const align = c.align === "right" ? "right" : "left";

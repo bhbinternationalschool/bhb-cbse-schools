@@ -1258,7 +1258,7 @@ export function applyMetaTemplateSync(
   rows: MetaTemplateSyncRow[],
   by = "meta_sync",
 ): WaTemplatesState {
-  let templates = [...state.templates];
+  const templates = [...state.templates];
   const now = nowIso();
   for (const row of rows) {
     const lang: WaTemplateLanguage = (row.language || "")

@@ -5,8 +5,11 @@ export function paymentsDualWriteDbEnabled(): boolean {
 }
 
 export function paymentsReadFromDbEnabled(): boolean {
-  if (typeof window !== "undefined") {
-    return process.env.NEXT_PUBLIC_PAYMENTS_READ_FROM_DB === "true";
-  }
-  return process.env.PAYMENTS_READ_FROM_DB === "true";
+  const flag = (
+    typeof window !== "undefined"
+      ? process.env.NEXT_PUBLIC_PAYMENTS_READ_FROM_DB
+      : process.env.PAYMENTS_READ_FROM_DB
+  )?.trim().toLowerCase();
+  if (flag === "false" || flag === "0") return false;
+  return true;
 }

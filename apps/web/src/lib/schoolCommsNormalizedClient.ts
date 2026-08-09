@@ -121,6 +121,7 @@ export async function hydrateSchoolCommsDeskFromDb(preferDb?: boolean) {
       photos: [] as SchoolCommsState["photos"],
     },
     changed: false,
+    ok: false,
   };
   if (!remote) return empty;
 
@@ -132,8 +133,8 @@ export async function hydrateSchoolCommsDeskFromDb(preferDb?: boolean) {
     (remote.updatedAt && remote.updatedAt >= meta.updatedAt) ||
     remote.noticeCount > meta.noticeCount;
 
-  if (!shouldTake) return empty;
+  if (!shouldTake) return { ...empty, bundle: remote.bundle, ok: true };
 
   writeMeta({ updatedAt: remote.updatedAt, noticeCount: remote.noticeCount });
-  return { bundle: remote.bundle, changed: true };
+  return { bundle: remote.bundle, changed: true, ok: true };
 }

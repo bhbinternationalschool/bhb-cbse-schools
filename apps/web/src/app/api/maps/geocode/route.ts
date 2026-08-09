@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { geocodeAddressWithGoogle } from "@/lib/mapsGeocode";
+import { mapsRateLimited } from "@/lib/mapsRateLimit";
 
 const MAX_BATCH = 20;
 
@@ -10,6 +11,9 @@ const MAX_BATCH = 20;
  */
 
 export async function GET(req: NextRequest) {
+  if (mapsRateLimited(req)) {
+    return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+  }
   const address = req.nextUrl.searchParams.get("address")?.trim() || "";
   if (!address) {
     return NextResponse.json({ error: "address required" }, { status: 400 });
@@ -18,6 +22,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  if (mapsRateLimited(req)) {
+    return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+  }
   let body: { address?: string; addresses?: string[] };
   try {
     body = (await req.json()) as { address?: string; addresses?: string[] };

@@ -75,15 +75,17 @@ export async function hydrateGalleryDeskFromDb(
 ): Promise<{
   bundle: { albums: ReturnType<typeof loadSchoolComms>["albums"]; photos: ReturnType<typeof loadSchoolComms>["photos"] };
   changed: boolean;
+  /** false = fetch failed/unauthenticated; caller must not treat bundle as confirmed-empty. */
+  ok: boolean;
 }> {
   const empty = { albums: [], photos: [] };
-  if (!isSupabaseConfigured()) return { bundle: empty, changed: false };
+  if (!isSupabaseConfigured()) return { bundle: empty, changed: false, ok: false };
   try {
     const res = await fetch("/api/school-data/gallery-desk", {
       method: "GET",
       cache: "no-store",
     });
-    if (!res.ok) return { bundle: empty, changed: false };
+    if (!res.ok) return { bundle: empty, changed: false, ok: false };
     const body = (await res.json()) as {
       albums?: ReturnType<typeof loadSchoolComms>["albums"];
       photos?: ReturnType<typeof loadSchoolComms>["photos"];
@@ -103,13 +105,13 @@ export async function hydrateGalleryDeskFromDb(
       (body.updatedAt && body.updatedAt >= meta.updatedAt) ||
       remoteAlbums > meta.albumCount ||
       bundle.albums.length > 0;
-    if (!shouldTake) return { bundle: empty, changed: false };
+    if (!shouldTake) return { bundle: empty, changed: false, ok: true };
     writeMeta({
       updatedAt: body.updatedAt || new Date().toISOString(),
       albumCount: remoteAlbums,
     });
-    return { bundle, changed: true };
+    return { bundle, changed: true, ok: true };
   } catch {
-    return { bundle: empty, changed: false };
+    return { bundle: empty, changed: false, ok: false };
   }
 }

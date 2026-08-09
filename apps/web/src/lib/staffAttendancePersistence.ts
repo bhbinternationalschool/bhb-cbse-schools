@@ -77,7 +77,6 @@ export async function pushStaffAttendanceRemoteServer(
 
 export async function ensureStaffAttendanceHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = staffAttendanceReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("staff_attendance")
@@ -85,8 +84,13 @@ export async function ensureStaffAttendanceHydrated(): Promise<boolean> {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { registers, ancillary, changed } =
+  const { registers, ancillary, changed, ok } =
     await hydrateStaffAttendanceDeskFromDb(readFromDb);
+  if (!ok) {
+    // Fetch failed — do not lock hydration flag; caller can retry later.
+    return blobChanged;
+  }
+  markDeskHydrated(MODULE);
   if (changed && (registers.length > 0 || ancillary.settings || readFromDb)) {
     const merged = mergeDbDeskIntoStaffAttendanceState(
       loadStaffAttendance(),
@@ -132,9 +136,10 @@ export async function ensureStaffAttendanceHydratedServer(): Promise<boolean> {
 
   const dbDesk = await fetchStaffAttendanceDeskFromDb();
   if (
-    dbDesk.registers.length > 0 ||
-    dbDesk.ancillary.settings ||
-    staffAttendanceReadFromDbEnabled()
+    dbDesk.ok &&
+    (dbDesk.registers.length > 0 ||
+      dbDesk.ancillary.settings ||
+      staffAttendanceReadFromDbEnabled())
   ) {
     state = mergeDbDeskIntoStaffAttendanceState(
       state,

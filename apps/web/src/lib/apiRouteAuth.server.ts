@@ -2,6 +2,7 @@
  * Shared API route authorization — staff session, RBAC, mirror sync secret, cron guards.
  */
 
+import { timingSafeEqual } from "crypto";
 import { NextResponse } from "next/server";
 import type { DemoSession } from "@/lib/auth";
 import {
@@ -37,10 +38,22 @@ export function isProductionEnv(): boolean {
   return process.env.NODE_ENV === "production";
 }
 
+/** Constant-time string comparison — use for all secret/token checks. */
+export function timingSafeStringEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, "utf8");
+  const bufB = Buffer.from(b, "utf8");
+  if (bufA.length !== bufB.length) return false;
+  try {
+    return timingSafeEqual(bufA, bufB);
+  } catch {
+    return false;
+  }
+}
+
 export function hasMirrorSyncSecret(req: Request): boolean {
   const secret = process.env.MIRROR_SYNC_SECRET?.trim();
   const header = req.headers.get("x-mirror-secret")?.trim();
-  return !!(secret && header && header === secret);
+  return !!(secret && header && timingSafeStringEqual(header, secret));
 }
 
 function authFailure(status: number, error: string): RouteAuthFailure {
@@ -107,7 +120,11 @@ export function requireJobSecret(
     /^Bearer\s+/i,
     "",
   );
-  return secrets.some((s) => hdr === s || bearer === s);
+  return secrets.some(
+    (s) =>
+      (hdr && timingSafeStringEqual(hdr, s)) ||
+      (bearer && timingSafeStringEqual(bearer, s)),
+  );
 }
 
 export async function requireStaffApi(

@@ -174,29 +174,41 @@ export async function pushVaultDeskToDb(
 export async function fetchVaultDeskFromDb(): Promise<{
   bundle: VaultDeskBundle;
   meta: VaultDeskSyncMeta | null;
+  ok: boolean;
 }> {
   const ctx = await resolveCtx();
   const empty: VaultDeskBundle = {
     documents: [],
     settings: { digestMobiles: "" },
   };
-  if (!ctx) return { bundle: empty, meta: null };
+  if (!ctx) return { bundle: empty, meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
-  const [{ data: docRows }, { data: settingsRow }, { data: metaRow }] =
-    await Promise.all([
-      sb.from("vault_desk_documents").select("*").eq("tenant_id", tenantId),
-      sb
-        .from("vault_desk_settings")
-        .select("digest_mobiles, last_expiry_digest_at")
-        .eq("tenant_id", tenantId)
-        .maybeSingle(),
-      sb
-        .from("vault_desk_sync_meta")
-        .select(META_SELECT)
-        .eq("tenant_id", tenantId)
-        .maybeSingle(),
-    ]);
+  const [docRes, settingsRes, metaRes] = await Promise.all([
+    sb.from("vault_desk_documents").select("*").eq("tenant_id", tenantId),
+    sb
+      .from("vault_desk_settings")
+      .select("digest_mobiles, last_expiry_digest_at")
+      .eq("tenant_id", tenantId)
+      .maybeSingle(),
+    sb
+      .from("vault_desk_sync_meta")
+      .select(META_SELECT)
+      .eq("tenant_id", tenantId)
+      .maybeSingle(),
+  ]);
+
+  if (docRes.error || settingsRes.error || metaRes.error) {
+    console.warn(
+      "[vault-db] fetchVaultDeskFromDb query error",
+      docRes.error || settingsRes.error || metaRes.error,
+    );
+    return { bundle: empty, meta: null, ok: false };
+  }
+
+  const docRows = docRes.data;
+  const settingsRow = settingsRes.data;
+  const metaRow = metaRes.data;
 
   const settingsRowTyped = settingsRow as {
     digest_mobiles?: string;
@@ -222,5 +234,6 @@ export async function fetchVaultDeskFromDb(): Promise<{
           updatedAt: String((metaRow as { updated_at: string }).updated_at),
         }
       : null,
+    ok: true,
   };
 }

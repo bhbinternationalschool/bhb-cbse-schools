@@ -79,7 +79,6 @@ export async function pushStudentLeaveRemoteServer(
  */
 export async function ensureStudentLeaveHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = studentLeaveReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("student_leave")
@@ -87,7 +86,12 @@ export async function ensureStudentLeaveHydrated(): Promise<boolean> {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { bundle, changed } = await hydrateStudentLeaveDeskFromDb(readFromDb);
+  const { bundle, changed, ok } = await hydrateStudentLeaveDeskFromDb(readFromDb);
+  if (!ok) {
+    // Fetch failed — do not lock hydration flag; caller can retry later.
+    return blobChanged;
+  }
+  markDeskHydrated(MODULE);
   if (changed && (bundle.requests.length > 0 || readFromDb)) {
     const merged = mergeDbDeskIntoStudentLeaveState(loadStudentLeave(), bundle, {
       preferDb: readFromDb,

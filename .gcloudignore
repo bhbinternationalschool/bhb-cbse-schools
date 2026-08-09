@@ -9,3 +9,5 @@ backups
 apps/web/.env*
 .env*
 .cursor
+cbse_school_mobile/
+assets/

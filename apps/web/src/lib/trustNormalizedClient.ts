@@ -72,7 +72,12 @@ async function pushTrustDeskApi(state: TrustState) {
 
 export async function hydrateTrustDeskFromDb(
   preferDb?: boolean,
-): Promise<{ bundle: Omit<TrustState, "version">; changed: boolean }> {
+): Promise<{
+  bundle: Omit<TrustState, "version">;
+  changed: boolean;
+  /** false = fetch failed; bundle is NOT a confirmed empty state. */
+  ok: boolean;
+}> {
   const empty = {
     projects: [],
     workItems: [],
@@ -85,13 +90,13 @@ export async function hydrateTrustDeskFromDb(
     costLines: [],
     rateCard: [],
   };
-  if (!isSupabaseConfigured()) return { bundle: empty, changed: false };
+  if (!isSupabaseConfigured()) return { bundle: empty, changed: false, ok: false };
   try {
     const res = await fetch("/api/school-data/trust-desk", {
       method: "GET",
       cache: "no-store",
     });
-    if (!res.ok) return { bundle: empty, changed: false };
+    if (!res.ok) return { bundle: empty, changed: false, ok: false };
     const body = (await res.json()) as Omit<TrustState, "version"> & {
       updatedAt?: string;
       projectCount?: number;
@@ -116,13 +121,13 @@ export async function hydrateTrustDeskFromDb(
       meta.projectCount === 0 ||
       (body.updatedAt && body.updatedAt >= meta.updatedAt) ||
       remoteProjects > meta.projectCount;
-    if (!shouldTake) return { bundle: empty, changed: false };
+    if (!shouldTake) return { bundle: empty, changed: false, ok: true };
     writeMeta({
       updatedAt: body.updatedAt || new Date().toISOString(),
       projectCount: remoteProjects,
     });
-    return { bundle, changed: true };
+    return { bundle, changed: true, ok: true };
   } catch {
-    return { bundle: empty, changed: false };
+    return { bundle: empty, changed: false, ok: false };
   }
 }

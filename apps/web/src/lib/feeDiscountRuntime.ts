@@ -36,7 +36,7 @@ export function mergeDiscountRulesFromSeed(masters: MastersState): MastersState 
   const ruleByCode = new Map(
     masters.concessions.map((c) => [c.code.toUpperCase(), c]),
   );
-  let concessions = [...masters.concessions];
+  const concessions = [...masters.concessions];
   let changed = false;
 
   for (const r of bundledSeed.rules) {

@@ -655,7 +655,7 @@ function normalizeExpenseVoucherLine(
 
 function normalizeVoucher(v: Partial<ExpenseVoucher>): ExpenseVoucher {
   const rawLines = Array.isArray(v.lines) ? v.lines : [];
-  let lines =
+  const lines =
     rawLines.length > 0
       ? rawLines.map((l) => normalizeExpenseVoucherLine(l))
       : v.categoryId || v.amountPaise

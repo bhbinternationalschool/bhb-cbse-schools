@@ -15,7 +15,13 @@ export const runtime = "nodejs";
 export async function GET(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["gallery-desk"], "GET");
   if (!auth.ok) return auth.response
-  const { bundle, meta } = await fetchGalleryDeskFromDb();
+  const { bundle, meta, ok } = await fetchGalleryDeskFromDb();
+  if (!ok) {
+    return NextResponse.json(
+      { ok: false, error: "Gallery desk fetch failed — tenant/db unavailable" },
+      { status: 503 },
+    );
+  }
   return NextResponse.json({
     ok: true,
     albums: bundle.albums,

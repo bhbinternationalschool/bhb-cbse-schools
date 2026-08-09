@@ -109,6 +109,8 @@ export function StudentsWorkspace() {
   const [bloodFilter, setBloodFilter] = useState("");
   const [joinedFrom, setJoinedFrom] = useState("");
   const [joinedTo, setJoinedTo] = useState("");
+  const [sortBy, setSortBy] = useState<"rollNo" | "name" | "admissionNo" | "joinedOn">("rollNo");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   /** all = every set filter must match; any = at least one set filter */
   const [matchMode, setMatchMode] = useState<"all" | "any">("all");
   const [selectedId, setSelectedId] = useState("");
@@ -339,9 +341,26 @@ export function StudentsWorkspace() {
     });
 
     return list.sort((a, b) => {
-      const roll = Number(a.rollNo) - Number(b.rollNo);
-      if (Number.isFinite(roll) && roll !== 0) return roll;
-      return a.fullName.localeCompare(b.fullName);
+      let cmp = 0;
+      if (sortBy === "rollNo") {
+        const ra = Number(a.rollNo);
+        const rb = Number(b.rollNo);
+        if (Number.isFinite(ra) && Number.isFinite(rb) && ra !== rb) {
+          cmp = ra - rb;
+        } else {
+          cmp = (a.rollNo || "").localeCompare(b.rollNo || "");
+        }
+      } else if (sortBy === "name") {
+        cmp = a.fullName.localeCompare(b.fullName);
+      } else if (sortBy === "admissionNo") {
+        cmp = a.admissionNo.localeCompare(b.admissionNo);
+      } else if (sortBy === "joinedOn") {
+        cmp = (a.joinedOn || "").localeCompare(b.joinedOn || "");
+      }
+      if (cmp === 0) {
+        cmp = a.fullName.localeCompare(b.fullName);
+      }
+      return sortOrder === "asc" ? cmp : -cmp;
     });
   }, [
     state,
@@ -361,6 +380,8 @@ export function StudentsWorkspace() {
     joinedTo,
     query,
     matchMode,
+    sortBy,
+    sortOrder,
   ]);
 
   function clearFilters() {
@@ -853,6 +874,7 @@ export function StudentsWorkspace() {
                     (!effectiveSession ||
                       normalizeSessionCode(s.academicYearCode || "") ===
                         normalizeSessionCode(effectiveSession)) &&
+                    (statusFilter === "all" || s.status === statusFilter) &&
                     (s.classId === c.id ||
                       m.sections.find((sec) => sec.id === s.sectionId)
                         ?.classId === c.id),
@@ -909,6 +931,32 @@ export function StudentsWorkspace() {
             <option value="inactive">Inactive</option>
             <option value="all">All status</option>
           </select>
+          <div className="flex items-center gap-1">
+            <select
+              className="field max-w-[9.5rem]"
+              value={sortBy}
+              onChange={(e) =>
+                setSortBy(
+                  e.target.value as "rollNo" | "name" | "admissionNo" | "joinedOn",
+                )
+              }
+              aria-label="Sort student list"
+              title="Sort student list"
+            >
+              <option value="rollNo">Sort: Roll No</option>
+              <option value="name">Sort: Name</option>
+              <option value="admissionNo">Sort: Adm No</option>
+              <option value="joinedOn">Sort: Joined Date</option>
+            </select>
+            <button
+              type="button"
+              className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2 py-2 text-xs font-bold text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.04)]"
+              onClick={() => setSortOrder((o) => (o === "asc" ? "desc" : "asc"))}
+              title={`Sorting ${sortOrder === "asc" ? "Ascending (A-Z / 1-9)" : "Descending (Z-A / 9-1)"}`}
+            >
+              {sortOrder === "asc" ? "↑ Asc" : "↓ Desc"}
+            </button>
+          </div>
           <FilterExportButtons
             title="Student register (full form)"
             subtitle={`${TENANT.shortName} · ${headerAy}`}
