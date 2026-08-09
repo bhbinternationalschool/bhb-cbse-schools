@@ -32,9 +32,20 @@ jobs:
           node-version: 22
           cache: npm
 
-      # Use npm install to ensure native modules (lightningcss) download properly
+      # `npm ci` installs exactly the lockfile — never silently resolves
+      # a different tree than the one that was reviewed.
+      #
+      # The lockfile is generated on macOS, so npm prunes every non-darwin
+      # platform binary from it (npm/cli#4828) — on a Linux runner Tailwind v4
+      # then dies with "Cannot find module '../lightningcss.linux-x64-gnu.node'".
+      # Install the Linux binaries explicitly, at the same pinned versions
+      # apps/web/Dockerfile uses, so CI builds the same tree production does.
       - name: Install
-        run: npm install
+        run: |
+          npm ci
+          npm install --no-save --workspace=web \
+            lightningcss-linux-x64-gnu@1.32.0 \
+            @tailwindcss/oxide-linux-x64-gnu@4.3.2
 
       - name: Typecheck
         run: npm run typecheck
@@ -103,8 +114,14 @@ jobs:
           node-version: 22
           cache: npm
 
+      # Same Linux-binary install as the verify job and apps/web/Dockerfile —
+      # the macOS-generated lockfile carries no linux-x64-gnu binaries.
       - name: Install
-        run: npm ci
+        run: |
+          npm ci
+          npm install --no-save --workspace=web \
+            lightningcss-linux-x64-gnu@1.32.0 \
+            @tailwindcss/oxide-linux-x64-gnu@4.3.2
 
       # Catches anything that only fails at build time (bad dynamic
       # imports, server/client boundary violations) before it reaches
