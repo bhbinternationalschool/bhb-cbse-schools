@@ -37,6 +37,10 @@ jobs:
       - name: Install
         run: npm ci
 
+      # Rebuild native modules (lightningcss) for the current platform
+      - name: Rebuild native modules
+        run: npm rebuild lightningcss
+
       - name: Typecheck
         run: npm run typecheck
 
