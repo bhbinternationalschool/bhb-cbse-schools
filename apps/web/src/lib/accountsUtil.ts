@@ -1,10 +1,9 @@
 /**
  * Accounts — internal helpers shared across the accounts modules.
  *
- * Deliberately NOT re-exported from `@/lib/accounts`: `id`, `todayIso` and
- * `fail` are private helpers in ~20 other lib modules too, and putting these
- * on the barrel would make a name collision silently shadow one of them.
- * Import this file directly.
+ * Internal to the accounts family — import it from an accounts* module, not
+ * from feature code. `id`, `todayIso` and `fail` are private helpers in ~20
+ * other lib modules too, so these names are only unambiguous in here.
  */
 
 export function id(prefix: string): string {

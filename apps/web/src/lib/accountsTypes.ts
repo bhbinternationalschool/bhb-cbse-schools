@@ -7,6 +7,35 @@
  * accounts family depends on this file, so it must never depend back.
  *
  * Everything is denominated in paise (integer) to avoid float drift.
+ *
+ * ─── The accounts family ─────────────────────────────────────
+ *
+ * Cash book, bank book, expenses/vendors, payables, owner loans, chart of
+ * accounts + journal, and financial reports. Was one 4,500-line file; split
+ * into the modules below, each of which may only reach downward:
+ *
+ *   accountsTypes         shapes, COA codes         (this file, no imports)
+ *   accountsUtil          id / dates / fail
+ *   accountsNormalize     defaults, field repair
+ *   accountsStore         load / save / seed        (owns the storage key)
+ *   accountsLookups       resolvers over the book
+ *   accountsJournal       the general ledger
+ *   accountsCoa           chart-of-accounts admin
+ *   accountsCashBank      cash + bank sub-ledgers
+ *   accountsVendors       vendors, bills, allocation
+ *   accountsExpense*      categories, vouchers, recurring rules
+ *   accountsPayables      unified payables
+ *   accountsLoans         trustees + owner loans
+ *   accountsReports       TB / P&L / balance sheet / dashboard
+ *   accountsPostings      fee, store, day-close, recon
+ *   accountsCapex         trust CWIP + capitalisation
+ *
+ * Import the module you need directly. There is deliberately no barrel: one
+ * would invite a submodule to import it and close a cycle, which surfaces as
+ * an undefined function at call time rather than as a type error.
+ *
+ * accounts.selftest.ts covers the family end to end and is the thing to run
+ * after touching any posting path — `npm run test:accounts`.
  */
 
 /* ─── Cash book ────────────────────────────────────────────── */
