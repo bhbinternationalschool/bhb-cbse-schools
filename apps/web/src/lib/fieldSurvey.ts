@@ -49,7 +49,8 @@ export type SurveyOfflineDraft = {
   motherName: string;
   mobile: string;
   classSoughtId: string;
-  surveyPhotoDataUrl: string;
+  /** URL of the uploaded photo. NEVER a data: URL — see admissions.ts. */
+  surveyPhotoUrl: string;
   parentConsent: boolean;
   by: string;
 };
@@ -401,7 +402,7 @@ export function flushOfflineSurveyQueue(
         campaignNote: item.beatName,
         locality: item.beatName,
         surveyBeatId: item.beatId,
-        surveyPhotoDataUrl: item.surveyPhotoDataUrl,
+        surveyPhotoUrl: item.surveyPhotoUrl,
         declarationAccepted: item.parentConsent,
         parentConsentAt: item.parentConsent ? new Date().toISOString() : "",
         parentConsentBy: item.parentConsent ? item.by || by : "",
@@ -472,7 +473,7 @@ export function captureFieldSurveyWithExtras(
   draft: Partial<AdmissionLead> & {
     beatId?: string;
     beatName?: string;
-    surveyPhotoDataUrl?: string;
+    surveyPhotoUrl?: string;
     parentConsent?: boolean;
   },
   by: string,
@@ -496,7 +497,7 @@ export function captureFieldSurveyWithExtras(
       campaignNote: beatName,
       locality: draft.locality || beatName,
       surveyBeatId: draft.beatId || draft.surveyBeatId || "",
-      surveyPhotoDataUrl: draft.surveyPhotoDataUrl || "",
+      surveyPhotoUrl: draft.surveyPhotoUrl || "",
       declarationAccepted: true,
       parentConsentAt: new Date().toISOString(),
       parentConsentBy: by,

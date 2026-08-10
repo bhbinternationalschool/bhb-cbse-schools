@@ -123,6 +123,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:projection
 
+      - name: Test — an image is never stored inside a lead row
+        working-directory: apps/web
+        run: npm run test:survey-photo
+
       - name: Test — a failing guard refuses the push, never falls back silently
         working-directory: apps/web
         run: npm run test:sis-guard-fallback

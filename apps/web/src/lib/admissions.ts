@@ -240,7 +240,17 @@ export type AdmissionLead = {
   /** Field survey beat id (from beat master) */
   surveyBeatId: string;
   /** Compressed photo from tablet capture (data URL) */
-  surveyPhotoDataUrl: string;
+  /**
+   * URL of the survey photo, never the image itself.
+   *
+   * This was `surveyPhotoDataUrl` and held base64. At ~200 KB a photo it
+   * would have put a single lead well past the size of the entire 919-lead
+   * list, inside `lead_json`, which every admissions read carried. The field
+   * was never populated in production — 0 of 919 rows — so it was changed
+   * before it could cost anything. sanitizeSurveyPhotoUrl() refuses a data:
+   * URL so it cannot regress by accident.
+   */
+  surveyPhotoUrl: string;
   parentConsentAt: string;
   parentConsentBy: string;
   createdAt: string;
@@ -792,7 +802,7 @@ export function emptyAdmissionLead(
       normalizeMobile(partial?.parentGroupKey || partial?.mobile || "") ||
       "",
     surveyBeatId: partial?.surveyBeatId || "",
-    surveyPhotoDataUrl: partial?.surveyPhotoDataUrl || "",
+    surveyPhotoUrl: sanitizeSurveyPhotoUrl(partial?.surveyPhotoUrl),
     parentConsentAt: partial?.parentConsentAt || "",
     parentConsentBy: partial?.parentConsentBy || "",
     createdAt: partial?.createdAt || now,
@@ -1258,6 +1268,32 @@ export function loadAdmissions(): AdmissionsState {
   } catch {
     return defaultAdmissionsState();
   }
+}
+
+/**
+ * Keep image data out of lead rows.
+ *
+ * A survey photo belongs in object storage with a URL on the lead. A `data:`
+ * URL is the image itself — roughly 200 KB of base64 for one compressed
+ * photo, which is more than the entire 919-lead list projection, carried
+ * inside `lead_json` on every admissions read and every localStorage write.
+ *
+ * objectStorage.uploadSchoolObject has a `local` mode that RETURNS a data URL
+ * when no bucket is configured. That is fine for an on-screen preview and
+ * must never be persisted, so the check is here at the boundary rather than
+ * trusting each caller to remember which mode it got back.
+ */
+export function sanitizeSurveyPhotoUrl(value?: string | null): string {
+  const url = (value ?? "").trim();
+  if (!url) return "";
+  if (/^data:/i.test(url)) {
+    console.warn(
+      "[admissions] refusing to store a data: URL as a survey photo " +
+        `(${Math.round(url.length / 1024)} KB). Upload it and store the URL.`,
+    );
+    return "";
+  }
+  return url;
 }
 
 export function saveAdmissions(state: AdmissionsState): void {

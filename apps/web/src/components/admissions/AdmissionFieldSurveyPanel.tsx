@@ -159,7 +159,11 @@ export function AdmissionFieldSurveyPanel({
   const [childrenRows, setChildrenRows] = useState<ChildRow[]>([
     emptyChildRow(),
   ]);
+  // photoDataUrl is the on-screen PREVIEW only and is never persisted.
+  // photoUrl is what reaches the lead — see sanitizeSurveyPhotoUrl.
   const [photoDataUrl, setPhotoDataUrl] = useState("");
+  const [photoUrl, setPhotoUrl] = useState("");
+  const [photoUploading, setPhotoUploading] = useState(false);
   const [parentConsent, setParentConsent] = useState(false);
   const [qr, setQr] = useState<string | null>(null);
   const [online, setOnline] = useState(true);
@@ -284,6 +288,7 @@ export function AdmissionFieldSurveyPanel({
     setExtraGuardian({ fullName: "", relation: "uncle", mobile: "" });
     setChildrenRows([emptyChildRow()]);
     setPhotoDataUrl("");
+    setPhotoUrl("");
     setParentConsent(false);
   }
 
@@ -295,11 +300,44 @@ export function AdmissionFieldSurveyPanel({
 
   async function onPhotoPick(file: File | null) {
     if (!file) return;
+    setPhotoUrl("");
+    let dataUrl = "";
     try {
-      const url = await compressSurveyPhoto(file);
-      setPhotoDataUrl(url);
+      dataUrl = await compressSurveyPhoto(file);
+      setPhotoDataUrl(dataUrl);
     } catch {
       onCommit(state, "Could not read photo — try a smaller image");
+      return;
+    }
+
+    // Upload immediately. The lead stores a URL, never the image: a base64
+    // photo is ~200 KB inside lead_json, which every admissions read and every
+    // localStorage write would then carry.
+    setPhotoUploading(true);
+    try {
+      const blob = await (await fetch(dataUrl)).blob();
+      const { uploadSchoolObject } = await import("@/lib/objectStorage");
+      const res = await uploadSchoolObject({
+        path: `survey/${todayYmd()}/photo_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}.jpg`,
+        blob,
+        contentType: "image/jpeg",
+      });
+      // `local` mode returns a data URL when no bucket is configured. Usable
+      // as a preview, never as a stored value.
+      if (res.ok && !/^data:/i.test(res.url)) {
+        setPhotoUrl(res.url);
+      } else {
+        setPhotoDataUrl("");
+        onCommit(
+          state,
+          "Photo could not be uploaded, so it was not attached. The survey can still be saved.",
+        );
+      }
+    } catch {
+      setPhotoDataUrl("");
+      onCommit(state, "Photo upload failed — the survey can still be saved without it");
+    } finally {
+      setPhotoUploading(false);
     }
   }
 
@@ -332,7 +370,7 @@ export function AdmissionFieldSurveyPanel({
       campaignNote: beat.name,
       locality: draft.locality || beat.area || beat.name,
       surveyBeatId: beat.id,
-      surveyPhotoDataUrl: photoDataUrl,
+      surveyPhotoUrl: photoUrl,
       declarationAccepted: true,
       parentConsentAt: new Date().toISOString(),
       parentConsentBy: by,
@@ -351,7 +389,7 @@ export function AdmissionFieldSurveyPanel({
           motherName: draft.motherName,
           mobile: draft.mobile,
           classSoughtId: child.classSoughtId,
-          surveyPhotoDataUrl: photoDataUrl,
+          surveyPhotoUrl: photoUrl,
           parentConsent: true,
           by,
         });
@@ -429,7 +467,7 @@ export function AdmissionFieldSurveyPanel({
       }
       next = updateLead(s.state, s.lead.id, {
         surveyBeatId: beat.id,
-        surveyPhotoDataUrl: photoDataUrl,
+        surveyPhotoUrl: photoUrl,
         declarationAccepted: true,
         parentConsentAt: householdDraft.parentConsentAt,
         parentConsentBy: by,
@@ -1359,10 +1397,10 @@ export function AdmissionFieldSurveyPanel({
                       {l.assignedTo || l.createdBy || "—"}
                     </td>
                     <td className="px-3 py-2">
-                      {l.surveyPhotoDataUrl ? (
+                      {l.surveyPhotoUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
-                          src={l.surveyPhotoDataUrl}
+                          src={l.surveyPhotoUrl}
                           alt=""
                           className="h-8 w-8 rounded object-cover"
                         />
