@@ -68,6 +68,7 @@ SELFTESTS=(
   test:tenant-wipe-expiry
   test:data-contract
   test:projection
+  test:read-client
   test:survey-photo
   test:hydrate-failure-safety
   test:sis-revision

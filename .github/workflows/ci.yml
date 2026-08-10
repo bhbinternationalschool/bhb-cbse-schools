@@ -127,6 +127,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:survey-photo
 
+      - name: Test — a failed read is never shaped like data
+        working-directory: apps/web
+        run: npm run test:read-client
+
       - name: Test — a failing guard refuses the push, never falls back silently
         working-directory: apps/web
         run: npm run test:sis-guard-fallback

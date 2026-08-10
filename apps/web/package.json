@@ -15,6 +15,7 @@
     "test:masters-cold-client": "NEXT_PUBLIC_SUPABASE_URL=https://selftest.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=selftest-anon npx tsx src/lib/mastersColdClient.selftest.ts",
     "test:data-contract": "npx tsx src/lib/data/contract.selftest.ts",
     "test:projection": "npx tsx src/lib/data/projection.selftest.ts",
+    "test:read-client": "npx tsx src/lib/data/readClient.selftest.ts",
     "test:survey-photo": "npx tsx src/lib/surveyPhoto.selftest.ts",
     "test:masters-write-guard": "npx tsx src/lib/mastersWriteGuard.selftest.ts",
     "test:hydrate-failure-safety": "npx tsx src/lib/hydrateFailureSafety.selftest.ts",
