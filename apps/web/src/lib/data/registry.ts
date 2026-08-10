@@ -18,6 +18,8 @@
  * deliberate steps, in two systems, so neither can be done absent-mindedly.
  */
 
+import type { RbacModule } from "@/lib/rbac";
+
 /** Scope filters the repo will refuse to build a query without. */
 export type ScopeKey = "tenant_id" | "academic_year_code";
 
@@ -30,9 +32,11 @@ export type CollectionDef = {
   readonly table: string;
   /**
    * Permission keys checked against the caller's role. Reads and writes are
-   * separate: plenty of roles may view a roster and not edit it.
+   * separate: plenty of roles may view a roster and not edit it. Typed as
+   * RbacModule so a key that does not exist fails to compile rather than
+   * silently authorising nothing — or, worse, defaulting to something.
    */
-  readonly rbac: { readonly view: string; readonly edit: string };
+  readonly rbac: { readonly view: RbacModule; readonly edit: RbacModule };
   /**
    * Filters that MUST be present on every query. `tenant_id` is always
    * required; `academic_year_code` is required wherever records belong to a
