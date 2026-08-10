@@ -1,4 +1,9 @@
 {
-  "wipedAt": "2026-08-05T07:44:19.406Z",
-  "note": "Masters desk cleared — clear browser site data and hard-refresh."
+  "wipedAt": null,
+  "note": "No active wipe signal. RETIRED 2026-08-10 — see below before re-arming.",
+  "retired": {
+    "was": "2026-08-05T07:44:19.406Z",
+    "why": "It never stopped firing. A cold client has no seen-marker, so it applied the wipe on first load: masters emptied, bhb_masters_desk_db_meta_v1 stamped with the 2026-08-05 timestamp and classCount 0. Clearing site data DELETES the seen-marker, so clearing re-triggered the wipe — which is why 'clear your browser', the advice staff were given, left devices worse than before. Combined with the cold-client fabrication (fixed in the same change), the emptied masters was refilled with freshly invented class ids, and the device then had every push refused as 'regenerated'.",
+    "ifYouReArmThis": "It is still a valid tool for forcing stale desks to drop after an id re-seed. Two things to know: (1) the signal now expires after MAX_WIPE_SIGNAL_AGE_DAYS in lib/tenantDataWipe.ts, so it cannot haunt new clients indefinitely; (2) set wipedAt to the moment of the re-seed, and retire it once devices have drained."
+  }
 }

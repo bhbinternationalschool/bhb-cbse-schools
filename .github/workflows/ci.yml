@@ -75,6 +75,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:masters-cold-client
 
+      - name: Test — a stale wipe signal expires
+        working-directory: apps/web
+        run: npm run test:tenant-wipe-expiry
+
       - name: Test — a failed read cannot be mistaken for empty data
         working-directory: apps/web
         run: npm run test:data-contract

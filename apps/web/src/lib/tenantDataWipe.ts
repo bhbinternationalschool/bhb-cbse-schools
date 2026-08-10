@@ -6,6 +6,23 @@ const SEEN_KEY = "bhb_tenant_data_wipe_seen_v1";
 
 const DESK_PREFIX = "bhb_";
 
+/**
+ * A wipe signal expires.
+ *
+ * The "seen" marker lives in localStorage, so a client with empty storage has
+ * never seen anything and applies the signal on first load — forever. That is
+ * not hypothetical: the 2026-08-05 signal was still firing on 2026-08-10,
+ * emptying masters on every cold client and stamping a five-day-old revision
+ * as its push base. Worse, clearing site data DELETES the marker, so clearing
+ * re-triggered the wipe — which is why "clear your browser" made devices
+ * worse rather than better.
+ *
+ * A signal is an instruction to drop desks that predate a re-seed. A browser
+ * that first loaded a week later has nothing of the sort to drop, so age is
+ * the right bound: past this, assume affected devices have drained.
+ */
+const MAX_WIPE_SIGNAL_AGE_DAYS = 7;
+
 type WipeSignal = {
   wipedAt: string;
   note?: string;
@@ -28,6 +45,26 @@ export async function applyTenantDataWipeSignalIfNeeded(): Promise<boolean> {
 
   if (!signal?.wipedAt) return false;
   if (localStorage.getItem(SEEN_KEY) === signal.wipedAt) return false;
+
+  // Expired signals are ignored — see MAX_WIPE_SIGNAL_AGE_DAYS. An
+  // unparseable timestamp is treated as expired rather than as "now":
+  // guessing here means wiping a browser on the strength of a malformed
+  // file, and the failure mode of ignoring it is merely that a stale desk
+  // survives one more reload.
+  const wipedMs = Date.parse(signal.wipedAt);
+  const ageDays = Number.isFinite(wipedMs)
+    ? (Date.now() - wipedMs) / 86_400_000
+    : Number.POSITIVE_INFINITY;
+  if (ageDays > MAX_WIPE_SIGNAL_AGE_DAYS) {
+    console.warn(
+      `[tenant-wipe] ignoring signal from ${signal.wipedAt} — ` +
+        `${Math.floor(ageDays)} days old, past the ${MAX_WIPE_SIGNAL_AGE_DAYS}-day limit. ` +
+        "Retire it in public/tenant_data_wiped.json.",
+    );
+    // Recorded as seen so the warning does not repeat every load.
+    localStorage.setItem(SEEN_KEY, signal.wipedAt);
+    return false;
+  }
 
   const keys: string[] = [];
   for (let i = 0; i < localStorage.length; i++) {
