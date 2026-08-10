@@ -9,6 +9,7 @@ import {
   type ReportColumn,
 } from "@/lib/reportExport";
 import { TENANT } from "@/lib/types";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 export type LibraryCopyStatus =
   | "available"
@@ -391,7 +392,7 @@ export function writeLibraryLocalRaw(state: LibraryState) {
     serverLibraryCache = normalized;
     return;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(normalized));
 }
 
 export function libraryStateIsEmpty(state: LibraryState): boolean {
@@ -405,7 +406,7 @@ export function libraryStateIsEmpty(state: LibraryState): boolean {
 export function saveLibrary(state: LibraryState) {
   const normalized = migrateLibraryState(state);
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(normalized));
   void import("@/lib/libraryPersistence").then((m) => m.scheduleLibrarySync(normalized));
 }
 

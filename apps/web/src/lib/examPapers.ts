@@ -6,6 +6,7 @@
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { DEFAULT_AY } from "@/lib/masters";
 import { TENANT } from "@/lib/types";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 export type ExamPaperQuestionType =
   | "mcq"
@@ -436,7 +437,7 @@ export function saveExamPapers(state: ExamPapersState) {
   if (!assertModulePermission("exams", "edit", "saveExamPapers")) return;
   if (typeof window === "undefined") return;
   const next = normalizeExamPapersState(state);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
   void import("@/lib/examPapersPersistence").then(
     ({ scheduleExamPapersSync }) => {
       scheduleExamPapersSync(next);

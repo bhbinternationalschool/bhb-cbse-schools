@@ -1,4 +1,5 @@
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 /**
  * Tenant feature / module registry (§24.0).
@@ -354,7 +355,7 @@ export function readModuleRegistryStorage(): ModuleRegistryState {
 export function saveModuleRegistry(state: ModuleRegistryState): void {
   if (!assertModulePermission("settings", "edit", "saveModuleRegistry")) return;
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   void import("@/lib/moduleRegistryPersistence").then(
     ({ scheduleModuleRegistrySync }) => {
       scheduleModuleRegistrySync(state);
@@ -365,7 +366,7 @@ export function saveModuleRegistry(state: ModuleRegistryState): void {
 export function writeModuleRegistryLocalRaw(state: ModuleRegistryState): void {
   if (typeof window === "undefined") return;
   registryClientReady = true;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
 }
 
 export function moduleRegistryStateIsEmpty(

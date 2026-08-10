@@ -5,6 +5,7 @@
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { DEFAULT_AY } from "@/lib/masters";
 import type { StaffRecord } from "@/lib/foundationMasters";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 export type LeaveTypeCode = string;
 
@@ -439,7 +440,7 @@ export function saveStaffHr(state: StaffHrState) {
   if (!assertModulePermission("staff", "edit", "saveStaffHr")) return;
 
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeState(state)));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(normalizeState(state)));
   void import("@/lib/staffHrPersistence").then(({ scheduleStaffHrSync }) => {
     scheduleStaffHrSync(state);
   });
@@ -447,7 +448,7 @@ export function saveStaffHr(state: StaffHrState) {
 
 export function writeStaffHrLocalRaw(state: StaffHrState) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeState(state)));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(normalizeState(state)));
 }
 
 export function staffHrStateIsEmpty(state: StaffHrState): boolean {

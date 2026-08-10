@@ -17,6 +17,7 @@ import {
 } from "@/lib/fees";
 import { loadMasters } from "@/lib/masters";
 import { loadSis } from "@/lib/sis";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 const STORAGE_KEY = "bhb_holds_v1";
 /** Demo Principal PIN — changeable in local storage via setPrincipalPin. */
@@ -164,7 +165,7 @@ export function saveHolds(state: HoldsState) {
 
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   } catch (e) {
     console.warn("[holds] localStorage quota exceeded", e);
   }

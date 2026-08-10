@@ -12,6 +12,7 @@ import {
 } from "@/lib/waStaffBotEngine";
 import { TRANSPORT_BOT_PROMPTS } from "@/lib/waTransportBotEngine";
 import { VISITOR_PURPOSE_OPTIONS } from "@/lib/waUnifiedBotEngine";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 const STORAGE_KEY = "bhb_wa_chatbot_flows_v1";
 
@@ -338,7 +339,7 @@ export function writeWaChatbotFlowsLocalRaw(state: WaChatbotFlowsState) {
     ...state,
     flows: state.flows.filter((f) => f.status !== "built_in"),
   };
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(toSave));
 }
 
 export function saveWaChatbotFlows(state: WaChatbotFlowsState) {

@@ -6,6 +6,7 @@
 import type { MastersState } from "@/lib/masters";
 import type { PayrollPaymentMode, PayrollRun } from "@/lib/payroll";
 import { assertStaffAdvancesPermission } from "@/lib/rbacGuard";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 export type AdvanceStatus = "open" | "closed";
 
 export type AdvanceSource = "cash" | "with_salary" | "other";
@@ -78,7 +79,7 @@ export function loadAdvances(): AdvanceState {
 export function saveAdvances(state: AdvanceState) {
   if (!assertStaffAdvancesPermission("edit", "saveAdvances")) return;
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   void import("@/lib/staffAdvancesPersistence").then(
     ({ scheduleStaffAdvancesSync }) => {
       scheduleStaffAdvancesSync(state);
@@ -88,7 +89,7 @@ export function saveAdvances(state: AdvanceState) {
 
 export function writeAdvancesLocalRaw(state: AdvanceState) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
 }
 
 export function advancesStateIsEmpty(state: AdvanceState): boolean {

@@ -54,6 +54,7 @@ import {
   repairOrphanedCancelledVoucherLedger,
   syncModeBankMapFromBanks,
 } from "@/lib/accountsNormalize";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 const STORAGE_KEY = "bhb_accounts_v1";
 
@@ -148,7 +149,7 @@ export function saveAccounts(state: AccountsState): void {
 
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, version: 1 }));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify({ ...state, version: 1 }));
   } catch (e) {
     console.warn("[accounts] localStorage quota exceeded — relying on server DB sync", e);
   }
@@ -163,7 +164,7 @@ export function writeAccountsLocalRaw(state: AccountsState): void {
     return;
   }
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, version: 1 }));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify({ ...state, version: 1 }));
   } catch (e) {
     console.warn("[accounts] localStorage quota exceeded — relying on server DB sync", e);
   }

@@ -10,6 +10,7 @@ import type {
   StaffStream,
 } from "@/lib/foundationMasters";
 import { DEFAULT_AY } from "@/lib/masters";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 export type SalaryHeadKind = "earning" | "deduction" | "employer";
 
@@ -374,7 +375,7 @@ export function loadSalarySetup(): SalarySetupState {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
       const seed = defaultSalarySetupState();
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(seed));
+      writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(seed));
       return seed;
     }
     const parsed = JSON.parse(raw) as Partial<SalarySetupState>;
@@ -403,7 +404,7 @@ export function saveSalarySetup(state: SalarySetupState) {
   if (!assertModulePermission("payroll", "edit", "saveSalarySetup")) return;
 
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
 }
 
 function normalizeHead(h: Partial<SalaryHead>): SalaryHead {

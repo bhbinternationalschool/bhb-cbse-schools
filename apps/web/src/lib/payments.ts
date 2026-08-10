@@ -26,6 +26,7 @@ import {
   setMirrorSlice,
 } from "@/lib/schoolDataMirror";
 import { loadSis } from "@/lib/sis";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 export type PaymentLinkStatus =
   | "open"
@@ -140,7 +141,7 @@ export function savePayments(state: PaymentsState) {
     });
     return;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   scheduleClientSchoolMirrorSync({ payments: state });
   void import("@/lib/paymentsPersistence").then(({ schedulePaymentsSync }) => {
     schedulePaymentsSync(state);
@@ -152,7 +153,7 @@ export function writePaymentsLocalRaw(state: PaymentsState) {
     setMirrorSlice("payments", state);
     return;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   scheduleClientSchoolMirrorSync({ payments: state });
 }
 

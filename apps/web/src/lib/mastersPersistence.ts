@@ -21,6 +21,7 @@ import {
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 const MODULE = "masters";
 
@@ -31,7 +32,7 @@ export function writeMastersLocalRaw(state: MastersState): void {
     setMirrorSlice("masters", state);
     return;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, version: 2 }));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify({ ...state, version: 2 }));
   setMirrorSlice("masters", state);
 }
 

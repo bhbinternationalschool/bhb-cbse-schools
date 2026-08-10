@@ -17,6 +17,7 @@ import {
   exportFilterReport,
   type ReportColumn,
 } from "@/lib/reportExport";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 const STORAGE_KEY = "bhb_homework_v1";
 
@@ -239,7 +240,7 @@ export function saveHomework(state: HomeworkState): void {
 
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   } catch (e) {
     console.warn("[homework] localStorage quota exceeded — relying on server DB sync", e);
   }
@@ -254,7 +255,7 @@ export function writeHomeworkLocalRaw(state: HomeworkState) {
     return;
   }
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   } catch (e) {
     console.warn("[homework] localStorage quota exceeded — relying on server DB sync", e);
   }

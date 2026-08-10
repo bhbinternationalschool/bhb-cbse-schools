@@ -7,6 +7,7 @@ import { ATTENDANCE_STATUSES, type AttendanceStatus } from "@/lib/attendance";
 import type { StaffRecord } from "@/lib/foundationMasters";
 import { DEFAULT_AY } from "@/lib/masters";
 import { loadStaffHr } from "@/lib/staffHr";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 /** How this attendance mark was captured */
 export type AttendancePunchWay =
@@ -259,7 +260,7 @@ export function saveStaffAttendance(state: StaffAttendanceState) {
     );
     return;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
   void import("@/lib/staffAttendancePersistence").then(
     ({ scheduleStaffAttendanceSync }) => {
       scheduleStaffAttendanceSync(next);
@@ -273,7 +274,7 @@ export function writeStaffAttendanceLocalRaw(state: StaffAttendanceState) {
     serverStaffAttendanceCache = next;
     return;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
 }
 
 export function staffAttendanceStateIsEmpty(

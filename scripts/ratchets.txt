@@ -33,3 +33,4 @@ fake_success|28|API routes that can report success without writing
 # not debt being paid down, they are the invariants the layer exists for.
 data_layer_localstorage|0|localStorage anywhere under lib/data
 data_layer_whole_state|0|Whole-module state bodies in the data layer
+unguarded_cache_writes|0|Bare localStorage.setItem on module state

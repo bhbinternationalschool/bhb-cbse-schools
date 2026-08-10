@@ -33,6 +33,7 @@ import {
 } from "@/lib/attendance";
 import type { Subject as MasterSubject } from "@/lib/foundationMasters";
 import { ncfTagForSubject } from "@/lib/cbseSubjectGroups";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 export type ExamTerm = {
   id: string;
@@ -668,7 +669,7 @@ export function loadExams(): ExamsState {
     const missingPolicy = !parsed.policy;
     if (migrated || missingPolicy) {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+        writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
       } catch (e) {
         console.warn("[exams] localStorage quota exceeded", e);
       }
@@ -692,7 +693,7 @@ export function saveExams(state: ExamsState) {
     return;
   }
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   } catch (e) {
     console.warn("[exams] localStorage quota exceeded — relying on server DB sync", e);
   }
@@ -707,7 +708,7 @@ export function writeExamsLocalRaw(state: ExamsState) {
     return;
   }
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   } catch (e) {
     console.warn("[exams] localStorage quota exceeded — relying on server DB sync", e);
   }

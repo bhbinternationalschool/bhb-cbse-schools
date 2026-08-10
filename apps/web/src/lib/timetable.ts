@@ -6,6 +6,7 @@
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { DEFAULT_AY } from "@/lib/masters";
 import type { MastersState } from "@/lib/masters";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 export type BellPeriodKind = "teaching" | "break" | "assembly";
 
@@ -340,7 +341,7 @@ export function saveTimetable(state: TimetableState) {
   if (typeof window === "undefined") return;
   const next = normalizeTimetableState(state);
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
   } catch (e) {
     console.warn("[timetable] localStorage quota exceeded — relying on server DB sync", e);
   }

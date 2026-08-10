@@ -18,6 +18,7 @@ import {
   exportFilterReport,
   type ReportColumn,
 } from "@/lib/reportExport";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 const STORAGE_KEY = "bhb_student_leave_v1";
 
@@ -125,7 +126,7 @@ export function writeStudentLeaveLocalRaw(state: StudentLeaveState) {
     return;
   }
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   } catch (e) {
     console.warn("[studentLeave] localStorage quota exceeded — relying on server DB sync", e);
   }
@@ -140,7 +141,7 @@ export function saveStudentLeave(state: StudentLeaveState): void {
 
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   } catch (e) {
     console.warn("[studentLeave] localStorage quota exceeded — relying on server DB sync", e);
   }

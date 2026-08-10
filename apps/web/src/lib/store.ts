@@ -10,6 +10,7 @@ import {
   loadAccounts,
   seedAccountsIfEmpty,
 } from "@/lib/accountsStore";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 /** Legacy fixed codes — still accepted on import / migration. */
 export type StoreCategoryCode = "book" | "uniform" | "stationery" | "other";
@@ -890,7 +891,7 @@ export function saveStore(state: StoreState) {
 
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   } catch (e) {
     console.warn("[store] localStorage quota exceeded — relying on server DB sync", e);
   }
@@ -905,7 +906,7 @@ export function writeStoreLocalRaw(state: StoreState) {
     return;
   }
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   } catch (e) {
     console.warn("[store] localStorage quota exceeded — relying on server DB sync", e);
   }

@@ -1,4 +1,5 @@
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 /**
  * PF / ESIC remittance to Government.
  * When staff avails PF and/or ESIC, employee deduction + employer
@@ -159,7 +160,7 @@ export function loadStatutoryRemit(): StatutoryRemitState {
 export function saveStatutoryRemit(state: StatutoryRemitState) {
   if (!assertModulePermission("payroll", "edit", "saveStatutoryRemit")) return;
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
 }
 
 /** Create / refresh remittance batch when payroll is published to accounts. */

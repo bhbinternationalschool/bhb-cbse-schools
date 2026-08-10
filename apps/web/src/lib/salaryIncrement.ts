@@ -16,6 +16,7 @@ import {
 } from "@/lib/salarySetup";
 
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 export type IncrementCycle = "april" | "anniversary" | "hold_month";
 export type IncrementMode = "percent" | "fixed";
 
@@ -168,7 +169,7 @@ export function loadIncrementState(): IncrementState {
         policy: defaultIncrementPolicy(),
         batches: [],
       };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(seed));
+      writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(seed));
       return seed;
     }
     const parsed = JSON.parse(raw) as Partial<IncrementState>;
@@ -213,7 +214,7 @@ function normalizeBatch(b: Partial<IncrementBatch>): IncrementBatch {
 export function saveIncrementState(state: IncrementState) {
   if (!assertModulePermission("payroll", "edit", "saveIncrementState")) return;
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
 }
 
 export function monthsOfService(joiningDate: string, asOf: string): number {

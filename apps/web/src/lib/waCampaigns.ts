@@ -20,6 +20,7 @@ import { formatInr } from "@/lib/fees";
 import { TENANT } from "@/lib/types";
 
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 const STORAGE_KEY = "bhb_wa_campaigns_v1";
 export const WA_ME_BATCH_CAP = 20;
 
@@ -351,7 +352,7 @@ export function loadWaCampaigns(): WaCampaignsState {
 export function saveWaCampaigns(state: WaCampaignsState): void {
   if (!assertModulePermission("admissions", "edit", "saveWaCampaigns")) return;
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
 }
 
 export function feeStatusOfLead(

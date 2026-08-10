@@ -18,6 +18,7 @@ import {
 } from "@/lib/salarySetup";
 
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 export type TallyJvSide = "debit" | "credit";
 
 export type TallyJvLine = {
@@ -92,7 +93,7 @@ export function loadTallySync(): TallySyncState {
 export function saveTallySync(state: TallySyncState) {
   if (!assertModulePermission("payroll", "edit", "saveTallySync")) return;
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
 }
 
 export function listTallySync(limit = 40): TallySyncRecord[] {

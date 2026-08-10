@@ -20,6 +20,7 @@ import {
 
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { isSuperAdminSession } from "@/lib/superAdmin";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 export type JuneHoldStatus =
   | "held"
   | "forfeited_incomplete_year"
@@ -156,7 +157,7 @@ export function loadSalaryHold(): SalaryHoldState {
         holds: [],
         settlements: [],
       };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(seed));
+      writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(seed));
       return seed;
     }
     const parsed = JSON.parse(raw) as Partial<SalaryHoldState>;
@@ -179,7 +180,7 @@ export function loadSalaryHold(): SalaryHoldState {
 export function saveSalaryHold(state: SalaryHoldState) {
   if (!assertModulePermission("payroll", "edit", "saveSalaryHold")) return;
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
 }
 
 export function monthIsHoldMonth(

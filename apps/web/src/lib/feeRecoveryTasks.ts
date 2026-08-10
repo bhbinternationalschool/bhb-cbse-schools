@@ -5,6 +5,7 @@
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { formatInr } from "@/lib/masters";
 import { TENANT } from "@/lib/types";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 const STORAGE_KEY = "bhb_fee_recovery_tasks_v1";
 
@@ -69,7 +70,7 @@ export function writeFeeRecoveryTasksLocalRaw(
   state: FeeRecoveryTasksState,
 ): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
 }
 
 export function feeRecoveryTasksIsEmpty(state: FeeRecoveryTasksState): boolean {
@@ -79,7 +80,7 @@ export function feeRecoveryTasksIsEmpty(state: FeeRecoveryTasksState): boolean {
 export function saveFeeRecoveryTasks(state: FeeRecoveryTasksState): void {
   if (!assertModulePermission("fees", "edit", "saveFeeRecoveryTasks")) return;
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   void import("@/lib/feeRecoveryTasksPersistence").then((m) => {
     m.scheduleFeeRecoveryTasksSync(state);
   });

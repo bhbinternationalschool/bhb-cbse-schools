@@ -6,6 +6,7 @@
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { getSessionActor } from "@/lib/sessionActor";
 import type { CommsAudience } from "@/lib/schoolComms";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 const STORAGE_KEY = "bhb_notifications_v1";
 
@@ -65,7 +66,7 @@ export function loadNotifications(): NotificationsState {
 
 export function writeNotificationsLocalRaw(state: NotificationsState): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
 }
 
 export function notificationsIsEmpty(state: NotificationsState): boolean {
@@ -74,7 +75,7 @@ export function notificationsIsEmpty(state: NotificationsState): boolean {
 
 export function saveNotifications(state: NotificationsState): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   void import("@/lib/notificationsPersistence").then(
     ({ scheduleNotificationsSync }) => {
       scheduleNotificationsSync(state);

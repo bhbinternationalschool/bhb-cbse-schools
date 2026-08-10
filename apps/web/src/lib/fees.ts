@@ -81,6 +81,7 @@ import {
   type InstallmentPlanInterval,
   type PlanAllocation,
 } from "@/lib/installmentPlans";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 export type DueKind =
   | "academic"
@@ -966,7 +967,7 @@ function persistFeesClient(state: FeesState) {
   });
 
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(compact));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(compact));
   } catch (err) {
     if (!isStorageQuotaError(err)) throw err;
     console.warn(
@@ -1389,7 +1390,7 @@ export async function wipeFeeCollections(): Promise<{
     const compact = compactFeesForStorage(next);
     feesWorkingCopy = next;
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(compact));
+      writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(compact));
     } catch {
       localStorage.removeItem(STORAGE_KEY);
     }

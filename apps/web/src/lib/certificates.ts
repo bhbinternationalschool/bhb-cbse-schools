@@ -25,6 +25,7 @@ import {
   type SisStudent,
   type StudentCategory,
 } from "@/lib/sis";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 export type CertificateKind =
   | "tc"
@@ -362,7 +363,7 @@ export function saveCertificates(state: CertificatesState) {
   }
 
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   void import("@/lib/certificatesPersistence").then(({ scheduleCertificatesSync }) => {
     scheduleCertificatesSync(state);
   });
@@ -371,7 +372,7 @@ export function saveCertificates(state: CertificatesState) {
 
 export function writeCertificatesLocalRaw(state: CertificatesState) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
 }
 
 export function certificatesStateIsEmpty(state: CertificatesState): boolean {

@@ -11,6 +11,7 @@ import {
   suggestFromSeriesCode,
 } from "@/lib/numberSeries";
 import type { StaffRecord } from "@/lib/foundationMasters";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 export type AgreementTemplateId =
   | "appointment_letter"
@@ -327,7 +328,7 @@ export function loadAgreements(): AgreementState {
 
 function persistAgreements(state: AgreementState) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   void import("@/lib/staffAgreementPersistence").then(
     ({ scheduleStaffAgreementsSync }) => {
       scheduleStaffAgreementsSync(state);
@@ -342,7 +343,7 @@ export function saveAgreements(state: AgreementState) {
 
 export function writeAgreementsLocalRaw(state: AgreementState) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
 }
 
 export function agreementsStateIsEmpty(state: AgreementState): boolean {

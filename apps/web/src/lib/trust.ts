@@ -8,6 +8,7 @@ import {
   capitaliseTrustProject,
   postTrustCostLineToCwip,
 } from "@/lib/accountsCapex";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 /* ─── Types ─────────────────────────────────────────────────── */
 
@@ -462,7 +463,7 @@ export function saveTrust(state: TrustState): void {
   if (!assertModulePermission("trust", "edit", "saveTrust")) return;
 
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, version: 1 }));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify({ ...state, version: 1 }));
   void import("@/lib/trustPersistence").then(({ scheduleTrustSync }) => {
     scheduleTrustSync(state);
   });
@@ -471,7 +472,7 @@ export function saveTrust(state: TrustState): void {
 
 export function writeTrustLocalRaw(state: TrustState) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, version: 1 }));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify({ ...state, version: 1 }));
 }
 
 export function trustStateIsEmpty(state: TrustState): boolean {

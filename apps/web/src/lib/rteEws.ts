@@ -24,6 +24,7 @@ import {
 } from "@/lib/sis";
 import { ensureRteEwsTagIds } from "@/lib/studentTags";
 import { TENANT } from "@/lib/types";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 const STORAGE_KEY = "bhb_rte_ews_v1";
 
@@ -233,7 +234,7 @@ export function saveRte(state: RteState): void {
   if (!assertModulePermission("rte", "edit", "saveRte")) return;
 
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   void import("@/lib/rtePersistence").then(({ scheduleRteSync }) => {
     scheduleRteSync(state);
   });
@@ -242,7 +243,7 @@ export function saveRte(state: RteState): void {
 
 export function writeRteLocalRaw(state: RteState) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
 }
 
 export function rteStateIsEmpty(state: RteState): boolean {

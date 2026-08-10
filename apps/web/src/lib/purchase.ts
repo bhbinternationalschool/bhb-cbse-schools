@@ -22,6 +22,7 @@ import {
 import { adjustStock, loadStore } from "@/lib/store";
 import { parseBillOcrFromText } from "@/lib/ocrParse";
 import { TENANT } from "@/lib/types";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 const STORAGE_KEY = "bhb_purchase_v1";
 
@@ -412,7 +413,7 @@ export function savePurchase(state: PurchaseState): void {
   if (!assertModulePermission("purchase", "edit", "savePurchase")) return;
 
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   void import("@/lib/purchasePersistence").then(({ schedulePurchaseSync }) => {
     schedulePurchaseSync(state);
   });
@@ -423,7 +424,7 @@ export function writePurchaseLocalRaw(state: PurchaseState): void {
     serverPurchaseCache = state;
     return;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
 }
 
 export function purchaseStateIsEmpty(state: PurchaseState): boolean {

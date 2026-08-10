@@ -6,6 +6,7 @@
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { DEFAULT_AY } from "@/lib/masters";
 import { TENANT } from "@/lib/types";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 const STORAGE_KEY = "bhb_school_comms_v1";
 
@@ -284,7 +285,7 @@ export function writeSchoolCommsLocalRaw(state: SchoolCommsState): void {
     serverSchoolCommsCache = normalize(state);
     return;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalize(state)));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(normalize(state)));
   window.dispatchEvent(new CustomEvent("bhb-school-comms"));
 }
 
@@ -300,7 +301,7 @@ export function saveSchoolComms(state: SchoolCommsState): void {
   // Publishing uses create/edit on specific modules; raw save gated by notices edit
   // when actor present — allow if any of the three modules can edit.
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalize(state)));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(normalize(state)));
   window.dispatchEvent(new CustomEvent("bhb-school-comms"));
   void import("@/lib/schoolCommsPersistence").then(({ scheduleSchoolCommsSync }) => {
     scheduleSchoolCommsSync(state);

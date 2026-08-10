@@ -1242,7 +1242,7 @@ export function loadSis(): SisState {
       if (next.students.length > 0) {
         next = alignSisToMasters(next, masters);
       }
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
       syncSisIntoMasters(next, masters);
       if (next.students.length > 0) {
         void import("@/lib/feeDiscountImportHydrate").then(
@@ -1254,7 +1254,7 @@ export function loadSis(): SisState {
       return next;
     }
     const empty = emptySisState();
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(empty));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(empty));
     localStorage.setItem(DEMO_CLEARED_KEY, "1");
     syncSisIntoMasters(empty, masters);
     return empty;

@@ -11,6 +11,7 @@ import {
   sessionStartYear,
 } from "@/lib/masters";
 import { checkHold } from "@/lib/holds";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 /* ─── Core ops ─────────────────────────────────────────────── */
 
@@ -636,7 +637,7 @@ export function saveTransport(state: TransportState) {
   if (!assertModulePermission("transport", "edit", "saveTransport")) return;
 
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, version: 2 }));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify({ ...state, version: 2 }));
   void import("@/lib/transportPersistence").then(({ scheduleTransportSync }) => {
     scheduleTransportSync(state);
   });
@@ -645,7 +646,7 @@ export function saveTransport(state: TransportState) {
 
 export function writeTransportLocalRaw(state: TransportState) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, version: 2 }));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify({ ...state, version: 2 }));
 }
 
 export function transportStateIsEmpty(state: TransportState): boolean {

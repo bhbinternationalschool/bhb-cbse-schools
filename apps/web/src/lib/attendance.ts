@@ -17,6 +17,7 @@ import {
 } from "@/lib/sis";
 import { TENANT } from "@/lib/types";
 import { openWaMe, waMeUrl } from "@/lib/waMe";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 export type AttendanceStatus = "P" | "A" | "L" | "HD" | "LE";
 
@@ -295,7 +296,7 @@ export function saveAttendance(state: AttendanceState) {
     return;
   }
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
   } catch (e) {
     console.warn("[attendance] localStorage quota exceeded — relying on server DB sync", e);
   }
@@ -313,7 +314,7 @@ export function writeAttendanceLocalRaw(state: AttendanceState) {
     return;
   }
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
   } catch (e) {
     console.warn("[attendance] localStorage quota exceeded — relying on server DB sync", e);
   }

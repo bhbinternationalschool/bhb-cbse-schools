@@ -22,6 +22,7 @@ import type { SessionLike } from "@/lib/rbac";
 import { resolveSessionStaff } from "@/lib/staffResolve";
 import type { SisState } from "@/lib/sis";
 import type { StaffRecord } from "@/lib/foundationMasters";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 export type ErpChatThreadKind =
   | "staff_dm"
@@ -278,7 +279,7 @@ export function loadErpChat(): ErpChatState {
     const legacy = localStorage.getItem(LEGACY_KEY);
     if (legacy) {
       const migrated = normalizeErpChatState(JSON.parse(legacy));
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
+      writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(migrated));
       return migrated;
     }
     return emptyErpChatState();
@@ -290,7 +291,7 @@ export function loadErpChat(): ErpChatState {
 export function saveErpChat(state: ErpChatState) {
   if (typeof window === "undefined") return;
   const next = normalizeErpChatState(state);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
   window.dispatchEvent(new Event(ERP_CHAT_EVENT));
   window.dispatchEvent(new Event("bhb-staff-chat"));
   void import("@/lib/erpChatPersistence").then(({ scheduleErpChatSync }) => {

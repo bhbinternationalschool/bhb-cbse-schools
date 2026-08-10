@@ -12,6 +12,7 @@ import {
   exportFilterReport,
   type ReportColumn,
 } from "@/lib/reportExport";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 const STORAGE_KEY = "bhb_ptm_v1";
 
@@ -131,7 +132,7 @@ export function savePtm(state: PtmState): void {
 
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   } catch (e) {
     console.warn("[ptm] localStorage quota exceeded — relying on server DB sync", e);
   }
@@ -146,7 +147,7 @@ export function writePtmLocalRaw(state: PtmState) {
     return;
   }
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   } catch (e) {
     console.warn("[ptm] localStorage quota exceeded — relying on server DB sync", e);
   }

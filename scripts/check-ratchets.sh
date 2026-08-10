@@ -38,6 +38,13 @@ count_metric() {
     data_layer_localstorage)
       # The whole point of the layer is that the browser holds no truth.
       code_grep 'localStorage' "$SRC/lib/data" ;;
+    unguarded_cache_writes)
+      # A bare setItem on a module's whole state throws when the origin is
+      # full, and on 2026-08-10 that aborted SIS hydration and rendered an
+      # empty roster against a database holding 711 students. Every one of
+      # these must go through writeCacheOrInvalidate, which never throws for
+      # a full disk and drops the stale entry instead.
+      code_grep '(window\.)?localStorage\.setItem\(STORAGE_KEY' "$SRC/lib" ;;
     data_layer_whole_state)
       # `body.state` / `{ state }` is the whole-module payload shape.
       code_grep 'body\.state|\{ state \}' "$SRC/lib/data" "$SRC/app/api/data" ;;

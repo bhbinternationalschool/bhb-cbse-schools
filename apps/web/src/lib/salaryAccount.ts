@@ -7,6 +7,7 @@ import { loadSalarySetup, normalizeSalarySettings } from "@/lib/salarySetup";
 import type { PayrollRun, PayrollStaffLine } from "@/lib/payroll";
 
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 export type SalaryAccountEntryType =
   | "net_payable"
   | "june_hold"
@@ -60,7 +61,7 @@ export function loadSalaryAccount(): SalaryAccountState {
 export function saveSalaryAccount(state: SalaryAccountState) {
   if (!assertModulePermission("payroll", "edit", "saveSalaryAccount")) return;
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
 }
 
 function entriesFromLine(

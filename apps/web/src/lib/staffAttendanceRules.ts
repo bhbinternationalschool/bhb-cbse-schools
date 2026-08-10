@@ -17,6 +17,7 @@ import { loadMasters, saveMasters } from "@/lib/masters";
 import { getGracePeriodMinutes } from "@/lib/staffHr";
 
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 export type { SchoolWeekTiming };
 
 export type RuleStepKind =
@@ -358,7 +359,7 @@ export function loadAttendanceRules(): StaffAttendanceRulesState {
 export function saveAttendanceRules(state: StaffAttendanceRulesState) {
   if (!assertModulePermission("staff", "edit", "saveAttendanceRules")) return;
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeState(state)));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(normalizeState(state)));
 }
 
 export function upsertAttendanceRule(

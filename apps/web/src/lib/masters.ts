@@ -23,6 +23,7 @@ import {
   setMirrorSlice,
 } from "@/lib/schoolDataMirror";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 export type Campus = {
   id: string;
@@ -1900,7 +1901,7 @@ export function loadMasters(): MastersState {
       const migrated = migrateDemoStaffToTeacherRoster(parsed);
       const normalized = normalizeMastersStaffRoster(migrated);
       if (normalized !== migrated || migrated !== parsed) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+        writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(normalized));
       }
       return normalized;
     }
@@ -1910,11 +1911,11 @@ export function loadMasters(): MastersState {
       // One-time upgrade: turn on full Apr–Mar monthly calendar
       let merged = ensureFeeSetup(JSON.parse(legacy) as MastersState);
       merged = applyInstallmentPattern(merged, "monthly", DEFAULT_AY);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+      writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(merged));
       return merged;
     }
     const seed = shouldSeedEmptyMastersShell() ? emptyMastersShell() : defaultMasters();
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(seed));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(seed));
     return seed;
   } catch {
     return shouldSeedEmptyMastersShell() ? emptyMastersShell() : defaultMasters();
@@ -1979,7 +1980,7 @@ async function persistMastersClient(
   if (prev === serialized) return { ok: true, reason: "unchanged" };
 
   try {
-    localStorage.setItem(STORAGE_KEY, serialized);
+    writeCacheOrInvalidate(STORAGE_KEY, serialized);
   } catch (e) {
     console.warn("[masters] localStorage quota exceeded — using server DB persistence", e);
   }

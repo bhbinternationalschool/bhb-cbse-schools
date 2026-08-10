@@ -10,6 +10,7 @@ import {
   exportFilterReport,
   type ReportColumn,
 } from "@/lib/reportExport";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 const STORAGE_KEY = "bhb_vault_v1";
 
@@ -123,7 +124,7 @@ export function saveVault(state: VaultState): void {
   if (!assertModulePermission("vault", "edit", "saveVault")) return;
 
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   void import("@/lib/vaultPersistence").then(({ scheduleVaultSync }) => {
     scheduleVaultSync(state);
   });
@@ -135,7 +136,7 @@ export function writeVaultLocalRaw(state: VaultState) {
     serverVaultCache = state;
     return;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
 }
 
 export function vaultStateIsEmpty(state: VaultState): boolean {

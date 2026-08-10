@@ -4,6 +4,7 @@
  */
 
 import type { WaTemplateLanguage } from "@/lib/waTemplates";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 const STORAGE_KEY = "bhb_automation_v1";
 
@@ -446,7 +447,7 @@ export function loadAutomation(): AutomationState {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
       const seeded = emptyAutomation();
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
+      writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(seeded));
       return seeded;
     }
     return normalizeAutomationState(JSON.parse(raw) as Partial<AutomationState>);
@@ -471,7 +472,7 @@ export function automationIsEmpty(state: AutomationState): boolean {
 export function saveAutomation(state: AutomationState): void {
   if (typeof window === "undefined") return;
   const next = normalizeAutomationState(state);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
   window.dispatchEvent(new CustomEvent("bhb-automation"));
   void import("@/lib/automationPersistence").then(({ scheduleAutomationSync }) => {
     scheduleAutomationSync(next);

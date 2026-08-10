@@ -7,6 +7,7 @@ import type { MastersState } from "@/lib/masters";
 import type { StaffRecord } from "@/lib/foundationMasters";
 import { resolveSessionStaff } from "@/lib/staffResolve";
 import type { SessionLike } from "@/lib/rbac";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 export type StaffChatMessage = {
   id: string;
@@ -102,7 +103,7 @@ export function loadStaffChat(): StaffChatState {
 export function saveStaffChat(state: StaffChatState) {
   if (typeof window === "undefined") return;
   const next = normalizeStaffChatState(state);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
   window.dispatchEvent(new Event("bhb-staff-chat"));
   void import("@/lib/staffChatPersistence").then(({ scheduleStaffChatSync }) => {
     scheduleStaffChatSync(next);
