@@ -211,19 +211,18 @@ export async function fetchMastersDeskFromDb(): Promise<{
   if (!ctx) return { bundle: empty, meta: null };
   const { sb, tenantId } = ctx;
 
-  // NOT YET reading from the row tables. The switch was written here and
-  // reverted: importing mastersRowTables.server.ts from this module pulls a
-  // `server-only` file into the CLIENT bundle graph, because masters.ts is
-  // reachable from client pages —
+  // This module deliberately does NOT read the row tables, and must not.
+  //
+  // Importing mastersRowTables.server.ts here pulls a `server-only` file
+  // into the CLIENT bundle graph, because masters.ts is reachable from
+  // client pages:
   //
   //   mastersRowTables.server.ts -> mastersNormalized.server.ts
   //     -> mastersPersistence.ts -> masters.ts -> app/pay/share/page.tsx
   //
-  // which fails the production build and 500s the route in dev. The flip
-  // therefore belongs in the API route (already server-only) rather than in
-  // this shared module, and that is the next piece of work. See
-  // mastersRowTables.server.ts and /api/school-data/masters-parity, both of
-  // which are verified and ready for it.
+  // That fails the production build outright. The row-table read lives in
+  // the API route instead, which nothing imports and is server-only by
+  // nature. See app/api/school-data/masters-desk/route.ts.
 
   const [{ data: sliceRows }, { data: metaRow }] = await Promise.all([
     sb.from("masters_desk_slices").select("*").eq("tenant_id", tenantId),
@@ -243,6 +242,28 @@ export async function fetchMastersDeskFromDb(): Promise<{
 
   const bundle = slicesToBundle(sliceMap);
   return { bundle, meta: metaFromRow(metaRow, bundle) };
+}
+
+/**
+ * The desk revision, independent of which source served the bundle.
+ *
+ * The row-table read path needs this without also reading the slices —
+ * otherwise "switching the read path" would still read both. `updatedAt` is
+ * what the client sends back as `baseUpdatedAt` for optimistic locking, so
+ * it must come from masters_desk_sync_meta either way; anything else would
+ * make every save falsely stale under the revision guard.
+ */
+export async function fetchMastersSyncMeta(
+  bundle: MastersDeskBundle,
+): Promise<MastersDeskSyncMeta | null> {
+  const ctx = await resolveCtx();
+  if (!ctx) return null;
+  const { data } = await ctx.sb
+    .from("masters_desk_sync_meta")
+    .select(META_SELECT)
+    .eq("tenant_id", ctx.tenantId)
+    .maybeSingle();
+  return metaFromRow(data, bundle);
 }
 
 /**
