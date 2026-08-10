@@ -7,16 +7,66 @@ import type { MastersState } from "@/lib/masters";
 import { mastersDualWriteDbEnabled } from "@/lib/mastersDbConfig";
 import {
   fetchMastersDeskFromDb,
+  fetchMastersSyncMeta,
   pushMastersDeskToDb,
 } from "@/lib/mastersNormalized.server";
+import { fetchMastersFromRowTables } from "@/lib/mastersRowTables.server";
 import { guardMastersOverwrite } from "@/lib/mastersWriteGuard";
 import { guardMastersRevision } from "@/lib/mastersRevisionGuard";
 
 export const runtime = "nodejs";
 
+/**
+ * Serve masters from the masters_desk_* row tables instead of the JSONB
+ * slices.
+ *
+ * OPT-IN via MASTERS_READ_FROM_ROWS. Rollback is removing the variable —
+ * no code change, no redeploy of a different build.
+ *
+ * This lives in the route, not in mastersNormalized.server.ts, because that
+ * module is reachable from client pages (via mastersPersistence -> masters.ts
+ * -> app/pay/share/page.tsx) and importing a `server-only` file there breaks
+ * the production build. Nothing imports a route, so here it is safe.
+ */
+function readFromRowTables(): boolean {
+  const flag = process.env.MASTERS_READ_FROM_ROWS?.trim().toLowerCase();
+  return flag === "true" || flag === "1";
+}
+
 export async function GET(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["masters-desk"], "GET");
   if (!auth.ok) return auth.response
+
+  if (readFromRowTables()) {
+    const rows = await fetchMastersFromRowTables();
+    if (rows.ok) {
+      // The revision still comes from masters_desk_sync_meta, so the
+      // optimistic-locking base is identical whichever source served the
+      // bundle. Anything else would make every save falsely stale.
+      const meta = await fetchMastersSyncMeta(rows.bundle);
+      return NextResponse.json({
+        ok: true,
+        ...rows.bundle,
+        classCount: rows.bundle.classes.length,
+        feeHeadCount: rows.bundle.feeHeads.length,
+        subjectCount: rows.bundle.subjects.length,
+        sliceCount: meta?.sliceCount ?? 0,
+        updatedAt: meta?.updatedAt || new Date().toISOString(),
+        meta,
+        source: "rows",
+      });
+    }
+    // Falling back to the slices, which are still written on every push and
+    // are therefore correct — this is not an error dressed as data. It is
+    // logged at error level so a broken row path is visible rather than
+    // silent. Once the slices go in Stage 10 there is nothing to fall back
+    // to and this becomes a hard failure.
+    console.error(
+      "[masters-desk] row-table read failed — serving slices instead. " +
+        "The row path is broken and needs attention.",
+    );
+  }
+
   const { bundle, meta } = await fetchMastersDeskFromDb();
   return NextResponse.json({
     ok: true,
@@ -27,6 +77,7 @@ export async function GET(req: Request) {
     sliceCount: meta?.sliceCount ?? 0,
     updatedAt: meta?.updatedAt || new Date().toISOString(),
     meta,
+    source: "slices",
   });
 }
 
