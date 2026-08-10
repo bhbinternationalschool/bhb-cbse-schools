@@ -103,6 +103,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:masters-freeze
 
+      - name: Test — a guessed academic year never reaches the server session
+        working-directory: apps/web
+        run: npm run test:session-year
+
       - name: Test — a failing guard refuses the push, never falls back silently
         working-directory: apps/web
         run: npm run test:sis-guard-fallback

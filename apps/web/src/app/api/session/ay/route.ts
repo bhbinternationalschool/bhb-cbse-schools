@@ -16,6 +16,32 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "No session" }, { status: 401 });
   }
 
+  // The year must be one Masters actually defines.
+  //
+  // This route writes into a SIGNED cookie, which makes whatever it accepts
+  // authoritative for every scoped query afterwards. It used to take the
+  // client's string as-is, so when a frozen desk fabricated "2025-26" the
+  // server laundered that guess into a signed session and the school ran for
+  // months in a year that ended 2026-03-31.
+  //
+  // Switching to a closed year stays allowed — looking at last year's records
+  // is ordinary work. What is refused is a year Masters has never heard of,
+  // which can only be a fabrication or a forgery.
+  const { listAcademicYearCodesFromDesk } = await import(
+    "@/lib/mastersNormalized.server"
+  );
+  const known = await listAcademicYearCodesFromDesk();
+  if (known.length > 0 && !known.includes(academicYearCode)) {
+    console.warn(
+      `[session/ay] refused unknown academic year ${academicYearCode}; ` +
+        `Masters defines ${known.join(", ")}`,
+    );
+    return NextResponse.json(
+      { error: `Unknown academic year: ${academicYearCode}` },
+      { status: 422 },
+    );
+  }
+
   const next = { ...session, academicYearCode };
   const signed = signSession(next);
   if (!signed) {

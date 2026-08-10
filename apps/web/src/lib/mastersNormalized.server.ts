@@ -300,6 +300,22 @@ export function deskBundleToMastersState(bundle: MastersDeskBundle): MastersStat
   return { version: 2, ...bundle };
 }
 
+/**
+ * Every academic year code Masters defines, current or not.
+ *
+ * Used to validate what may be written into the signed session cookie. An
+ * empty array means Masters could not be read — the caller must treat that as
+ * "cannot validate" and not as "no year is valid", or an unreadable desk would
+ * lock everyone out of switching sessions.
+ */
+export async function listAcademicYearCodesFromDesk(): Promise<string[]> {
+  const { bundle } = await fetchMastersDeskFromDb();
+  return (bundle.academicYears ?? [])
+    .filter((y) => y.isActive !== false)
+    .map((y) => y.code)
+    .filter((c): c is string => !!c);
+}
+
 export async function fetchCurrentAcademicYearFromDesk(): Promise<string | null> {
   const { bundle } = await fetchMastersDeskFromDb();
   const years = bundle.academicYears ?? [];

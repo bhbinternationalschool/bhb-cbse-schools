@@ -3,7 +3,7 @@
  */
 
 import {
-  currentAcademicYearCode,
+  resolvedAcademicYearCode,
   syncWorkspaceAcademicYear,
 } from "@/lib/masters";
 
@@ -23,8 +23,15 @@ export async function alignWorkspaceSessionFromMasters(
   const { isDeskHydrated } = await import("@/lib/deskHydrateGuard");
   if (!isDeskHydrated("masters")) return false;
 
-  const mastersCurrent = currentAcademicYearCode();
-  if (!mastersCurrent || mastersCurrent === cookieAy) {
+  // Strict: null when Masters holds no academic years. The loose
+  // currentAcademicYearCode() would hand back DEFAULT_AY here, and this
+  // function writes its answer into the signed SERVER session cookie — so a
+  // frozen desk with no years PATCHed a fabricated "2025-26" onto the server
+  // and the whole school ran in a session that ended 2026-03-31. A guess must
+  // never leave the browser.
+  const mastersCurrent = resolvedAcademicYearCode();
+  if (!mastersCurrent) return false; // unknown: leave the session alone
+  if (mastersCurrent === cookieAy) {
     sessionStorage.setItem(WORKSPACE_AY_ALIGNED_KEY, "1");
     return false;
   }
