@@ -279,6 +279,59 @@ export async function fetchMastersFromRowTables(): Promise<{
     })) as unknown as MastersDeskBundle["holidays"],
   };
 
+  // ── students: carried through from sis_students ────────────────────────
+  //
+  // Not a masters entity at all — it is a mirror of the SIS roster that
+  // syncSisIntoMasters writes on every hydrate, and that write is what
+  // stamps localEditAt and freezes the client. It has exactly one real
+  // consumer: alignSisToMasters (sis.ts:1135) matches a student by admission
+  // number or name to recover their class after an id re-seed. That is the
+  // client-side sibling of the repair migration run on 2026-08-09.
+  //
+  // guardMastersOverwrite now blocks wholesale id regeneration server-side,
+  // so that fallback should be obsolete — but "should" has been live for one
+  // day, and the read-path switch is not the place to quietly delete a
+  // safety net. It is carried through here so the flip changes only WHERE
+  // masters is read from. Removing it belongs with removing
+  // syncSisIntoMasters in Stage 4, where the fallback's removal is the
+  // subject rather than a side effect.
+  const sisRows = await load("sis_students");
+  if (sisRows === null) return { bundle: empty, ok: false };
+
+  const currentAy = (bundle.academicYears ?? []).find(
+    (y) => (y as { status?: string }).status === "current",
+  ) as { code?: string } | undefined;
+  const ayCode = currentAy?.code ?? "";
+
+  // Same rule as syncSisIntoMasters: prefer the current session, but fall
+  // back to the whole roster rather than showing nothing.
+  const scoped = ayCode
+    ? (sisRows as Row[]).filter((r) => s(r.academic_year_code) === ayCode)
+    : [];
+  const source = scoped.length > 0 ? scoped : (sisRows as Row[]);
+
+  const validSections = new Set(
+    (bundle.sections ?? []).map(
+      (sec) =>
+        `${(sec as { classId?: string }).classId}:${(sec as { id?: string }).id}`,
+    ),
+  );
+
+  bundle.students = (source as Row[])
+    .map((r) => ({
+      id: s(r.id), admissionNo: s(r.admission_no), fullName: s(r.full_name),
+      classId: s(r.class_id), sectionId: s(r.section_id), status: s(r.status),
+    }))
+    // A student whose class/section no longer exists is dropped, exactly as
+    // demoStudentLinksValid does — a broken link here would send
+    // alignSisToMasters to a class that is not there.
+    .filter((x) => validSections.has(`${x.classId}:${x.sectionId}`))
+    // Ordered by id, not by the slice's arbitrary order. The slice inherited
+    // whatever order localStorage held; both consumers build Maps keyed by
+    // admissionNo/fullName, so order carries no meaning for this one.
+    .sort((a, z) => sortStr(a.id).localeCompare(sortStr(z.id)))
+    .map((x) => x) as unknown as MastersDeskBundle["students"];
+
   // The three single-document slices.
   const profile = settingsFor("schoolProfile");
   const timing = settingsFor("schoolTiming");
@@ -313,7 +366,16 @@ export function diffMastersBundles(
   for (const k of keys) {
     const a = (fromSlices as Record<string, unknown>)[k];
     const z = (fromRows as Record<string, unknown>)[k];
-    if (canonical(a) === canonical(z)) continue;
+    // `students` is the one collection compared without regard to order.
+    // The slice inherited whatever order localStorage held; the row reader
+    // sorts by id. Both consumers (alignSisToMasters, ensureStudentClassLinks)
+    // build Maps keyed by admissionNo/fullName, so position carries no
+    // meaning here — unlike every other collection, where lists render in
+    // array order and `ordinal` exists to preserve it.
+    const orderless = k === "students";
+    if (canonical(orderless ? byIdAsc(a) : a) === canonical(orderless ? byIdAsc(z) : z)) {
+      continue;
+    }
     out.push({
       key: k,
       slices: Array.isArray(a) ? a.length : typeof a,
@@ -338,6 +400,14 @@ export function diffMastersBundles(
  * wrong, not the mapper. Reordering the mapper to match would have encoded
  * an incidental detail of how the slice happened to be written.
  */
+/** Sort an array of records by id, for the one order-insensitive compare. */
+function byIdAsc(v: unknown): unknown {
+  if (!Array.isArray(v)) return v;
+  return [...v].sort((a, z) =>
+    sortStr((a as Row)?.id).localeCompare(sortStr((z as Row)?.id)),
+  );
+}
+
 function canonical(v: unknown): string {
   return JSON.stringify(sortKeys(v ?? null));
 }
