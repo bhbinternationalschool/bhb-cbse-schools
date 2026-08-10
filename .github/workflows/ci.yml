@@ -111,6 +111,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:masters-read-failure
 
+      - name: Test — a full localStorage never blocks the database write
+        working-directory: apps/web
+        run: npm run test:save-full-cache
+
       - name: Test — a failing guard refuses the push, never falls back silently
         working-directory: apps/web
         run: npm run test:sis-guard-fallback

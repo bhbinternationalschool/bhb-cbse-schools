@@ -63,6 +63,7 @@ SELFTESTS=(
   test:masters-freeze
   test:session-year
   test:masters-read-failure
+  test:save-full-cache
   test:tenant-wipe-expiry
   test:data-contract
   test:hydrate-failure-safety

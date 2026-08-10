@@ -5,6 +5,7 @@
  */
 
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import {
   currentAcademicYearCode,
   DEFAULT_AY,
@@ -1273,11 +1274,17 @@ export function saveAdmissions(state: AdmissionsState): void {
     });
     return;
   }
-  writeAdmissionsLocalRaw(normalized);
+  // The database write is scheduled FIRST, and never depends on the cache.
+  //
+  // These three lines used to run in the opposite order, and on a phone that
+  // silently cost the save: writeAdmissionsLocalRaw threw QuotaExceededError
+  // on a 2.37 MB payload, so neither sync below ever ran. A full cache stopped
+  // the record from being written at all. See lib/browserStorage.ts.
   scheduleClientSchoolMirrorSync({ admissions: normalized });
   void import("@/lib/admissionsPersistence").then(({ scheduleAdmissionsSync }) => {
     scheduleAdmissionsSync(normalized);
   });
+  writeAdmissionsLocalRaw(normalized);
 }
 
 /** Hydrate path — localStorage only, no cloud schedule. */
@@ -1288,7 +1295,11 @@ export function writeAdmissionsLocalRaw(state: AdmissionsState): void {
     setMirrorSlice("admissions", normalized);
     return;
   }
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+  // Caching only. A browser that cannot hold 2.37 MB drops the entry and the
+  // module re-reads from the database — which is the intended behaviour under
+  // the no-offline decision anyway. It must not throw: this is called from
+  // saveAdmissions, and an exception here used to abort the save.
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(normalized));
 }
 
 export function admissionsStateIsEmpty(state: AdmissionsState): boolean {
