@@ -60,6 +60,34 @@ export function AppShell({
     return () => setWorkspaceBootstrapPending(false);
   }, []);
 
+  // Last line of defence: a promise nobody handled must still be visible.
+  //
+  // The four gates in front of this (typed results, the no-void ratchet,
+  // useSaveMutation, and the push paths' own toasts) all depend on someone
+  // having written the handling. This one does not. On 2026-08-09 a rejected
+  // save reached a console.warn and the user was told the opposite; a
+  // failure the user never sees is worse than a crash.
+  useEffect(() => {
+    function onUnhandled(e: PromiseRejectionEvent) {
+      const detail =
+        e.reason instanceof Error
+          ? e.reason.message
+          : typeof e.reason === "string"
+            ? e.reason
+            : "Unexpected error";
+      console.error("[unhandled rejection]", e.reason);
+      void import("@/components/shell/Toast").then(({ pushToast }) => {
+        pushToast({
+          kind: "error",
+          message: `Something failed and was not reported properly: ${detail}. If you were saving, check the change was kept.`,
+          durationMs: 0,
+        });
+      });
+    }
+    window.addEventListener("unhandledrejection", onUnhandled);
+    return () => window.removeEventListener("unhandledrejection", onUnhandled);
+  }, []);
+
   useEffect(() => {
     function flushDeskSync() {
       void flushAllDeskSyncPending();

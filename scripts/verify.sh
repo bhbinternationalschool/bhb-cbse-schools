@@ -100,6 +100,15 @@ else
 fi
 echo
 
+# ── Ratchets: the patterns being retired may not regrow ────────────────
+# The migration runs for months across 39 modules. Without this, the
+# patterns removed in one module quietly reappear in another and the whole
+# exercise nets to zero. See scripts/ratchets.txt.
+if ! bash "$ROOT/scripts/check-ratchets.sh"; then
+  FAILED+=("ratchets|")
+fi
+echo
+
 # ── Drift check: this script must cover every self-test CI runs ────────
 # A test added to CI but not here would give false confidence locally.
 if [ -f "$CI_FILE" ]; then

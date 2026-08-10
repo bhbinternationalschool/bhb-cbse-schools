@@ -1,0 +1,35 @@
+# Ratchet budgets — these numbers may only ever go DOWN.
+#
+# Each line is: metric|budget|description
+#
+# scripts/check-ratchets.sh counts the current occurrences and fails the
+# build if a count EXCEEDS its budget. When a count drops, lower the budget
+# in the same commit — check-ratchets.sh reminds you.
+#
+# Why this exists: the migration in docs/ENTERPRISE_UPGRADE_PLAN.md runs for
+# months across 39 modules. Without a ratchet, the patterns being removed
+# quietly regrow in the modules not yet migrated, and the whole exercise
+# nets to zero. A number that can only fall is the cheapest possible
+# enforcement.
+
+# Hardcoded academic-year fallbacks. `DEFAULT_AY = "2025-26"` is returned as
+# though it were real data when masters is unknown, and the client then
+# PATCHes that invented year into the SERVER session cookie. It is why the
+# school ran four months inside an expired session with no warning.
+# Retire per module during Stage 8; target is 0.
+default_ay|249|Hardcoded DEFAULT_AY fallbacks
+
+# Fire-and-forget writes. `void pushX()` discards the outcome, so a failed
+# save reaches a console.warn and the user is told nothing. This is the
+# mechanism behind "it said saved and it wasn't". Target is 0.
+void_writes|70|Writes whose result is discarded (void push/flush/schedule)
+
+# Routes that answer HTTP 200 {ok:true, skipped:true} when a dual-write flag
+# is off. The client records success; the database is untouched. The
+# cleanest false-success mechanism in the codebase. Target is 0.
+fake_success|28|API routes that can report success without writing
+
+# Hard rules for the new data layer. These are 0 and must stay 0 — they are
+# not debt being paid down, they are the invariants the layer exists for.
+data_layer_localstorage|0|localStorage anywhere under lib/data
+data_layer_whole_state|0|Whole-module state bodies in the data layer
