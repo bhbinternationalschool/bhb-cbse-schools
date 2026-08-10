@@ -39,24 +39,45 @@ the concrete items. Check things off in the PR that fixes them.
 
 ## Known debt (from the incident work)
 
-- [ ] **`sis_push_guarded` is row-by-row and will time out again as the roster
-  grows.** Fixed on 2026-08-10 by pinning `statement_timeout=120s` on the
-  function (migration `20260810090000`), because the `authenticator` role sets
-  8s and the function took ~17s at 904 records. Every push in production was
-  timing out and falling through to the legacy last-write-wins upsert, which
-  rewrote all 904 rows — that is what churned `updated_at` across the roster
-  and produced the 903 phantom conflicts staff were seeing.
+- [x] **A migration recorded as applied was not the code in the database.**
+  Resolved 2026-08-10 (`20260810110000`), and the lesson outlives the fix.
+  `20260808150000_sis_push_guarded_stable_versions` was recorded as applied —
+  twice — but the live function had no no-op skip at all: it checked the base
+  revision, then wrote unconditionally with `updated_at = now()`. Its return
+  had no `unchanged` key, though the TypeScript destructured one. The file was
+  edited after it ran, and a recorded version is never re-run, so the database
+  kept the old body while the repo showed the new one and every review of the
+  repo looked correct.
 
-  **That fix buys headroom, it does not make the function fast.** The loop is
-  still O(n) statements inside plpgsql, so ~17s at 904 records scales roughly
-  linearly: about 2,000 students puts it near 40s, and several thousand will
-  reach 120s. Rewriting it set-based (one `insert … on conflict` against a
-  `jsonb_to_recordset` of the payload, with the conflict check as a join)
-  belongs with the Stage 4 SIS migration and should not wait for the timeout
-  to be hit a second time.
+  That was the real cause of the conflict storm: every push rewrote all 904
+  rows, so every other device's revision tokens went stale at once and its
+  next push returned ~903 conflicts on records nobody had touched. Measured
+  before: `applied_students=711, unchanged=NULL`. After: `applied=0,
+  unchanged=904`.
 
-  The related fix — a failing guard now REFUSES the push instead of falling
-  back — is in `sisNormalized.server.ts` and pinned by
+  **Do not trust `schema_migrations` as evidence that a function's body is
+  current.** Verify with `pg_get_functiondef` against the repo. Worth a
+  verify.sh check that diffs deployed function bodies against the migrations
+  that claim to define them — this class of drift is invisible to CI, to code
+  review, and to the migration list.
+
+- [ ] **`sis_push_guarded` is still row-by-row.** `statement_timeout=120s` is
+  pinned on the function (`20260810090000`) because the `authenticator` role
+  sets 8s and production logged `canceling statement due to statement
+  timeout`, after which the client silently fell back to a last-write-wins
+  upsert. Note the function measures 136–186ms for the full 711+193 payload in
+  isolation, so the 8s timeouts were almost certainly **lock contention**
+  between concurrent full-roster pushes, each rewriting all 904 rows — a
+  consequence of the missing skip above, not of raw function speed. The skip
+  should remove the contention; the pinned timeout and the refuse-don't-fall-
+  back change are defence in depth.
+
+  Still worth making set-based (one `insert … on conflict` over
+  `jsonb_to_recordset`, conflict check as a join) during the Stage 4 SIS
+  migration, since the whole-roster push itself is the deeper problem.
+
+  The companion fix — a failing guard now REFUSES the push instead of falling
+  back — is in `sisNormalized.server.ts`, pinned by
   `test:sis-guard-fallback`. Only "the function is not deployed" still falls
   back. Do not widen that set; the catch-all is exactly how this shipped.
 
