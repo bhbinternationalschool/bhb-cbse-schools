@@ -429,13 +429,41 @@ export type SisPushResult = {
 };
 
 /**
+ * Postgres/PostgREST codes meaning "this function is not there yet".
+ *
+ * These, and only these, justify the legacy fallback: the migration has not
+ * reached this database, so the guarded path cannot run and the pre-guard
+ * behaviour is the honest best available.
+ */
+const RPC_ABSENT_CODES = new Set([
+  "PGRST202", // not found in PostgREST's schema cache
+  "PGRST203", // ambiguous overload — signature drift
+  "42883", // undefined_function
+]);
+
+/**
  * Atomic + conflict-guarded push via the `sis_push_guarded` RPC.
  *
- * Returns null when the RPC is unavailable for ANY reason (migration not
- * applied yet, signature drift, a column added to sis_students but not to
- * studentToRow), so the caller can fall back to the legacy path. That makes
- * the deploy order irrelevant and means the worst case is today's
- * behaviour — never worse than it.
+ * Returns null ONLY when the function is absent (see RPC_ABSENT_CODES), so a
+ * deploy that lands the code before the migration still works. Every other
+ * error returns a FAILED result, because falling back means silently
+ * reverting to last-write-wins.
+ *
+ * It previously returned null on any error at all, and that is exactly what
+ * went wrong: the `authenticator` role sets statement_timeout=8s, this
+ * function takes ~17s at 904 records, so every push in production timed out,
+ * fell through to the legacy upsert, and rewrote all 904 rows. updated_at
+ * churned on the whole roster, every other device's revision tokens were
+ * invalidated, and the next push reported 903 conflicts on a roster nobody
+ * had touched. Optimistic locking was off for the entire SIS module and
+ * nothing said so — the fallback logged console.warn and returned success.
+ *
+ * "Never worse than the old behaviour" was the wrong frame. The old
+ * behaviour was last-write-wins, and quietly resuming it while the UI
+ * reports a clean save is worse than refusing: the director cannot see it,
+ * and two staff editing at once lose each other's work with no trace.
+ *
+ * So: absent → fall back. Present but failing → say so and write nothing.
  */
 async function pushSisGuarded(
   sb: SupabaseClient,
@@ -457,11 +485,32 @@ async function pushSisGuarded(
   });
 
   if (error) {
-    console.warn(
-      "[sis-db] guarded push unavailable, falling back to legacy upsert:",
-      error.message,
+    const code = (error as { code?: string }).code ?? "";
+    if (RPC_ABSENT_CODES.has(code)) {
+      console.warn(
+        `[sis-db] sis_push_guarded not present (${code}) — using the legacy ` +
+          "upsert. This is last-write-wins: concurrent edits overwrite each " +
+          "other. Apply the migration.",
+        error.message,
+      );
+      return null;
+    }
+
+    // Present but failing. Refuse rather than silently dropping the guard.
+    const timedOut = code === "57014";
+    console.error(
+      "[sis-db] sis_push_guarded failed — push REFUSED, nothing written:",
+      { code, message: error.message, students: students.length },
     );
-    return null;
+    return {
+      ok: false,
+      error: timedOut
+        ? `The roster is too large to save safely in one request (${students.length} students timed out). ` +
+          "Nothing was saved. Please report this — saving cannot proceed until it is fixed."
+        : `Save refused: ${error.message}. Nothing was written.`,
+      householdCount: 0,
+      studentCount: 0,
+    };
   }
 
   const result = (data ?? {}) as {

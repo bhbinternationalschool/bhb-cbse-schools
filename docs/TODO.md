@@ -39,6 +39,27 @@ the concrete items. Check things off in the PR that fixes them.
 
 ## Known debt (from the incident work)
 
+- [ ] **`sis_push_guarded` is row-by-row and will time out again as the roster
+  grows.** Fixed on 2026-08-10 by pinning `statement_timeout=120s` on the
+  function (migration `20260810090000`), because the `authenticator` role sets
+  8s and the function took ~17s at 904 records. Every push in production was
+  timing out and falling through to the legacy last-write-wins upsert, which
+  rewrote all 904 rows — that is what churned `updated_at` across the roster
+  and produced the 903 phantom conflicts staff were seeing.
+
+  **That fix buys headroom, it does not make the function fast.** The loop is
+  still O(n) statements inside plpgsql, so ~17s at 904 records scales roughly
+  linearly: about 2,000 students puts it near 40s, and several thousand will
+  reach 120s. Rewriting it set-based (one `insert … on conflict` against a
+  `jsonb_to_recordset` of the payload, with the conflict check as a join)
+  belongs with the Stage 4 SIS migration and should not wait for the timeout
+  to be hit a second time.
+
+  The related fix — a failing guard now REFUSES the push instead of falling
+  back — is in `sisNormalized.server.ts` and pinned by
+  `test:sis-guard-fallback`. Only "the function is not deployed" still falls
+  back. Do not widen that set; the catch-all is exactly how this shipped.
+
 - [ ] **8-second unconditional chat sync.** `StaffInternalChatButton` POSTs
   full `erp_chat` state every 8s whether or not anything changed (noted in
   PR #6). Remove as part of the Phase 1 data-layer sweep — naive

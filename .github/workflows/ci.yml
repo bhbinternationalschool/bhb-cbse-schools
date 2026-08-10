@@ -99,6 +99,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:sis-delete
 
+      - name: Test — a failing guard refuses the push, never falls back silently
+        working-directory: apps/web
+        run: npm run test:sis-guard-fallback
+
       - name: Test — audit trail never stores identity numbers
         working-directory: apps/web
         run: npm run test:audit-redaction

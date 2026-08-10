@@ -66,6 +66,7 @@ SELFTESTS=(
   test:sis-revision
   test:sis-prune
   test:sis-delete
+  test:sis-guard-fallback
   test:audit-redaction
   test:student-filters
   test:masters-merge

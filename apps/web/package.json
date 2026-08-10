@@ -20,6 +20,7 @@
     "test:sis-revision": "npx tsx src/lib/sisRevision.selftest.ts",
     "test:sis-prune": "npx tsx src/lib/sisPrune.selftest.ts",
     "test:sis-delete": "npx tsx src/lib/sisDelete.selftest.ts",
+    "test:sis-guard-fallback": "npx tsx src/lib/sisGuardFallback.selftest.ts",
     "test:audit-redaction": "npx tsx src/lib/auditRedaction.selftest.ts",
     "test:student-filters": "npx tsx src/lib/studentFilters.selftest.ts",
     "test:masters-merge": "npx tsx src/lib/mastersMergePolicy.selftest.ts",
