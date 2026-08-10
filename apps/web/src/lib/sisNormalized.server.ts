@@ -591,6 +591,88 @@ export async function pushSisToDb(
   };
 }
 
+/**
+ * Delete specific students/households by id.
+ *
+ * Until now a removal never reached the database at all: `removeStudent`
+ * filtered the roster locally and the push only ever upserted, so the row
+ * survived and the "deleted" student reappeared on the next hydrate.
+ *
+ * This is deliberately id-scoped rather than the `pruneMissing` path in
+ * `pushSisToDb`. Prune infers deletions from whatever the client happened
+ * to send, so a truncated or partially-hydrated payload silently erases the
+ * difference — the failure `test:sis-prune` exists to prevent. An explicit
+ * id list cannot do that: it deletes exactly what the user removed.
+ */
+export async function deleteSisRecordsInDb(input: {
+  studentIds?: string[];
+  householdIds?: string[];
+}): Promise<{
+  ok: boolean;
+  error?: string;
+  deletedStudents: number;
+  deletedHouseholds: number;
+}> {
+  const studentIds = (input.studentIds ?? []).filter(Boolean);
+  const householdIds = (input.householdIds ?? []).filter(Boolean);
+  if (studentIds.length === 0 && householdIds.length === 0) {
+    return { ok: true, deletedStudents: 0, deletedHouseholds: 0 };
+  }
+
+  const ctx = await resolveCtx();
+  if (!ctx) {
+    return {
+      ok: false,
+      error: "Supabase tenant not configured",
+      deletedStudents: 0,
+      deletedHouseholds: 0,
+    };
+  }
+  const { sb, tenantId } = ctx;
+
+  let deletedStudents = 0;
+  if (studentIds.length > 0) {
+    const { data, error } = await sb
+      .from("sis_students")
+      .delete()
+      .eq("tenant_id", tenantId)
+      .in("id", studentIds)
+      .select("id");
+    if (error) {
+      return {
+        ok: false,
+        error: error.message,
+        deletedStudents: 0,
+        deletedHouseholds: 0,
+      };
+    }
+    deletedStudents = data?.length ?? 0;
+  }
+
+  // Households only after their students are gone, so a failure mid-way
+  // leaves an empty household rather than orphaned students.
+  let deletedHouseholds = 0;
+  if (householdIds.length > 0) {
+    const { data, error } = await sb
+      .from("sis_households")
+      .delete()
+      .eq("tenant_id", tenantId)
+      .in("id", householdIds)
+      .select("id");
+    if (error) {
+      return {
+        ok: false,
+        error: error.message,
+        deletedStudents,
+        deletedHouseholds: 0,
+      };
+    }
+    deletedHouseholds = data?.length ?? 0;
+  }
+
+  return { ok: true, deletedStudents, deletedHouseholds };
+}
+
 export async function wipeSisRosterInDb(): Promise<{ ok: boolean; error?: string }> {
   const ctx = await resolveCtx();
   if (!ctx) return { ok: false, error: "No tenant" };

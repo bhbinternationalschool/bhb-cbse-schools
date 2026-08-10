@@ -92,15 +92,23 @@ function remoteDeskHasData(
   );
 }
 
-export function flushMastersDeskSyncPending(): void {
-  if (typeof window === "undefined") return;
+/**
+ * Push any pending masters state now and report what happened.
+ *
+ * Returns the push result so a caller can await the real outcome; `null`
+ * means there was nothing pending. Existing callers that ignore the return
+ * value (pagehide, logout) keep their previous behaviour.
+ */
+export function flushMastersDeskSyncPending(): Promise<MastersPushResult | null> {
+  if (typeof window === "undefined") return Promise.resolve(null);
   if (pushTimer) {
     clearTimeout(pushTimer);
     pushTimer = null;
   }
   const batch = pending;
   pending = null;
-  if (batch) void pushMastersDeskApi(batch);
+  if (!batch) return Promise.resolve(null);
+  return pushMastersDeskApi(batch);
 }
 
 export function scheduleMastersDeskSync(state: MastersState) {
@@ -117,7 +125,17 @@ export function scheduleMastersDeskSync(state: MastersState) {
   }, DESK_PUSH_DEBOUNCE_MS);
 }
 
-async function pushMastersDeskApi(state: MastersState) {
+/**
+ * Result of a masters push. Returned rather than swallowed so a caller can
+ * await the outcome instead of assuming success — the UI currently reports
+ * "saved" synchronously, which is how 16 refused writes looked like 16
+ * successful ones. Stage 2 makes the workspace await this.
+ */
+export type MastersPushResult = { ok: true } | { ok: false; reason: string };
+
+async function pushMastersDeskApi(
+  state: MastersState,
+): Promise<MastersPushResult> {
   try {
     const payload = stripStaffFromMastersForBlob(state);
     const { version: _v, ...rest } = payload;
@@ -142,33 +160,80 @@ async function pushMastersDeskApi(state: MastersState) {
       reason?: string;
     } | null;
     if (res.ok && body?.ok) {
+      // Never invent a revision. This value becomes `baseUpdatedAt` on the
+      // next push, so a local clock here is exactly what made every masters
+      // save 409 in production. If the server omitted it, keep the last
+      // known server value and let the next hydrate correct it.
+      if (!body.updatedAt) {
+        console.warn("[masters-db] push accepted but server returned no revision");
+      }
       writeMeta({
-        updatedAt: body.updatedAt || new Date().toISOString(),
+        updatedAt: body.updatedAt || readMeta().updatedAt,
         classCount: body.classCount ?? state.classes.length,
         feeHeadCount: body.feeHeadCount ?? state.feeHeads.length,
       });
-    } else if (res.status === 409 && body?.reason === "stale") {
-      // Another device saved after this one loaded. The stale edit loses,
-      // visibly: tell the user, then drop the hydrate latch so the next
-      // ensureMastersHydrated() pulls the current desk state.
-      console.warn("[masters-db] stale push refused — rehydrating", body.error);
-      void import("@/components/shell/Toast").then(({ pushToast }) => {
-        pushToast({
-          kind: "error",
-          message:
-            "Masters changed on another device — your last change was not saved. " +
-            "The screen will refresh with the current data; please re-apply it.",
-          durationMs: 0,
-        });
-      });
-      const { resetDeskHydrated } = await import("@/lib/deskHydrateGuard");
-      resetDeskHydrated("masters");
-    } else if (!res.ok) {
-      console.warn("[masters-db] desk push failed", body?.error || res.status);
+      return { ok: true };
     }
+
+    // Every rejection below used to be invisible except `stale`. On
+    // 2026-08-09 a device holding a foreign class-id generation had 16
+    // consecutive saves refused with `regenerated` while the screen kept
+    // reporting success — the academic session could not be changed all
+    // evening and nothing on screen said why. A refused write must always
+    // reach the user.
+    if (res.status === 409) {
+      const rehydrate =
+        body?.reason === "stale" ||
+        body?.reason === "regenerated" ||
+        body?.reason === "wipe";
+      console.warn(`[masters-db] push refused (${body?.reason})`, body?.error);
+      await reportMastersPushFailure(
+        body?.reason === "stale"
+          ? "Masters changed on another device — your last change was NOT saved. " +
+              "The screen will refresh with the current data; please re-apply it."
+          : body?.reason === "regenerated"
+            ? "Your last change was NOT saved. This device is holding an older " +
+              "copy of the class list, so the server refused it to protect the " +
+              "student records. The screen will refresh — please re-apply your change."
+            : body?.reason === "wipe"
+              ? "Your last change was NOT saved. It would have removed every class, " +
+                "which the server refuses. Reload and try again."
+              : `Your last change was NOT saved. ${body?.error || "The server refused it."}`,
+      );
+      if (rehydrate) {
+        const { resetDeskHydrated } = await import("@/lib/deskHydrateGuard");
+        resetDeskHydrated("masters");
+      }
+      return { ok: false, reason: body?.reason ?? "conflict" };
+    }
+
+    // 401/403/500/503 and anything else: also silent until now.
+    console.warn("[masters-db] desk push failed", body?.error || res.status);
+    await reportMastersPushFailure(
+      res.status === 401 || res.status === 403
+        ? "Your last change was NOT saved — your session has expired or you do not " +
+            "have permission. Sign in again and re-apply the change."
+        : `Your last change was NOT saved — the server returned ${res.status}. ` +
+            "Please try again.",
+    );
+    return { ok: false, reason: `http_${res.status}` };
   } catch (e) {
+    // A genuine network fault. Say that specifically — do NOT tell the user
+    // to check their connection for a server-side failure, which is what the
+    // generic loader message did and sent the director hunting a fine router.
     console.warn("[masters-db] desk push error", e);
+    await reportMastersPushFailure(
+      "Your last change was NOT saved — could not reach the server. " +
+        "Check your connection and try again.",
+    );
+    return { ok: false, reason: "network" };
   }
+}
+
+async function reportMastersPushFailure(message: string) {
+  if (typeof window === "undefined") return;
+  const { pushToast } = await import("@/components/shell/Toast");
+  pushToast({ kind: "error", message, durationMs: 0 });
 }
 
 export async function hydrateMastersDeskFromDb(
@@ -221,7 +286,9 @@ export async function hydrateMastersDeskFromDb(
 
     if (!shouldTake) return { bundle: empty, changed: false, ok: true };
     writeMeta({
-      updatedAt: remoteAt || new Date().toISOString(),
+      // Same rule as the push path: a revision only ever comes from the
+      // server. Keep the previous one rather than stamping a local clock.
+      updatedAt: remoteAt || meta.updatedAt,
       classCount: remoteClasses,
       feeHeadCount: body.feeHeadCount ?? bundle.feeHeads?.length ?? 0,
     });

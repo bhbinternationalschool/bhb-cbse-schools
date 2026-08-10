@@ -59,6 +59,43 @@ export function sisReadFromDbClientEnabled(): boolean {
   return true;
 }
 
+/**
+ * Ids the user explicitly removed, awaiting confirmation from the server.
+ *
+ * A removal used to exist only as an absence from the next roster push, and
+ * since the push only upserts, the row was never deleted — the "removed"
+ * student came back on the next hydrate. Deletions are now stated
+ * explicitly, and they stay queued until the server confirms, so a failed
+ * push cannot quietly drop them.
+ */
+const pendingDeletes = {
+  studentIds: new Set<string>(),
+  householdIds: new Set<string>(),
+};
+
+export function recordSisDeletion(input: {
+  studentIds?: string[];
+  householdIds?: string[];
+}): void {
+  for (const id of input.studentIds ?? []) {
+    if (id) pendingDeletes.studentIds.add(id);
+  }
+  for (const id of input.householdIds ?? []) {
+    if (id) pendingDeletes.householdIds.add(id);
+  }
+}
+
+/** Test seam — lets the selftest observe what would go on the wire. */
+export function peekPendingSisDeletions(): {
+  studentIds: string[];
+  householdIds: string[];
+} {
+  return {
+    studentIds: [...pendingDeletes.studentIds],
+    householdIds: [...pendingDeletes.householdIds],
+  };
+}
+
 export function scheduleSisDeskSync(state: Pick<SisState, "households" | "students">) {
   if (!sisNormalizedSyncEnabled()) return;
   if (typeof window === "undefined") return;
@@ -89,6 +126,10 @@ async function pushSisDeskApi(
       body: JSON.stringify({
         households: state.households ?? [],
         students: state.students ?? [],
+        // Stated deletions. Kept in the payload on retry and only cleared
+        // once the server confirms — see below.
+        deleteStudentIds: [...pendingDeletes.studentIds],
+        deleteHouseholdIds: [...pendingDeletes.householdIds],
       }),
     });
     const body = (await res.json().catch(() => null)) as {
@@ -102,6 +143,12 @@ async function pushSisDeskApi(
       error?: string;
     } | null;
     if (res.ok && body?.ok) {
+      // The server accepted the batch, deletions included. Only now is it
+      // safe to forget them; clearing before this point would lose the
+      // deletion on any failed or retried push.
+      pendingDeletes.studentIds.clear();
+      pendingDeletes.householdIds.clear();
+
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         studentCount: body.studentCount ?? state.students.length,

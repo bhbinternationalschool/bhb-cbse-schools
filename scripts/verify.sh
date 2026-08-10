@@ -58,9 +58,11 @@ SELFTESTS=(
   test:session-cookie
   test:masters-write-guard
   test:masters-revision-guard
+  test:masters-revision-lifecycle
   test:hydrate-failure-safety
   test:sis-revision
   test:sis-prune
+  test:sis-delete
   test:audit-redaction
   test:student-filters
   test:masters-merge

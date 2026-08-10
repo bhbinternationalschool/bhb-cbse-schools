@@ -67,6 +67,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:masters-revision-guard
 
+      - name: Test — a refused client can recover and save again
+        working-directory: apps/web
+        run: npm run test:masters-revision-lifecycle
+
       - name: Test — failed reads never look like empty data
         working-directory: apps/web
         run: npm run test:hydrate-failure-safety
@@ -78,6 +82,10 @@ jobs:
       - name: Test — a partial sync can never wipe the roster
         working-directory: apps/web
         run: npm run test:sis-prune
+
+      - name: Test — a removed student is actually deleted
+        working-directory: apps/web
+        run: npm run test:sis-delete
 
       - name: Test — audit trail never stores identity numbers
         working-directory: apps/web

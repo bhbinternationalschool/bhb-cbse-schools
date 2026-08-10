@@ -1879,31 +1879,52 @@ function shouldSeedEmptyMastersShell(): boolean {
   return isSupabaseConfigured();
 }
 
-export function saveMasters(state: MastersState) {
-  if (!assertModulePermission("masters", "edit", "saveMasters")) return;
-  persistMastersClient(state);
+/**
+ * Save masters and report whether the write actually reached the database.
+ *
+ * Returns the real outcome so a caller can stop assuming success. Callers
+ * that ignore the promise behave exactly as before. `blocked` means the
+ * write never left the browser (RBAC or a closed session) — previously
+ * indistinguishable from a successful save, so the UI reported "saved"
+ * either way.
+ */
+export function saveMasters(
+  state: MastersState,
+): Promise<MastersSaveOutcome> {
+  if (!assertModulePermission("masters", "edit", "saveMasters")) {
+    return Promise.resolve({ ok: false, reason: "blocked" });
+  }
+  return persistMastersClient(state);
 }
+
+export type MastersSaveOutcome =
+  | { ok: true; reason?: "unchanged" }
+  | { ok: false; reason: string };
 
 /** System imports (fee discounts seed) — bypass RBAC / closed-session guards. */
-export function persistMastersSystemImport(state: MastersState) {
+export function persistMastersSystemImport(
+  state: MastersState,
+): Promise<MastersSaveOutcome> {
   if (typeof window === "undefined") {
     setMirrorSlice("masters", state);
-    return;
+    return Promise.resolve({ ok: true });
   }
-  persistMastersClient(state);
+  return persistMastersClient(state);
 }
 
-function persistMastersClient(state: MastersState) {
+async function persistMastersClient(
+  state: MastersState,
+): Promise<MastersSaveOutcome> {
   if (typeof window === "undefined") {
     setMirrorSlice("masters", state);
     void import("@/lib/staffPersistence").then(({ scheduleStaffSync }) => {
       scheduleStaffSync(state);
     });
-    return;
+    return { ok: true };
   }
   const serialized = JSON.stringify({ ...state, version: 2 });
   const prev = localStorage.getItem(STORAGE_KEY);
-  if (prev === serialized) return;
+  if (prev === serialized) return { ok: true, reason: "unchanged" };
 
   try {
     localStorage.setItem(STORAGE_KEY, serialized);
@@ -1919,15 +1940,29 @@ function persistMastersClient(state: MastersState) {
       scheduleStaffSync(state);
     },
   );
-  void import("@/lib/mastersNormalizedClient").then(
-    ({ touchMastersDeskLocalMeta }) => {
-      touchMastersDeskLocalMeta(state);
-    },
-  );
-  void import("@/lib/mastersPersistence").then(({ scheduleMastersSync }) => {
-    scheduleMastersSync(state);
-  });
+  // Deliberately does NOT touch the desk meta. `bhb_masters_desk_db_meta_v1`
+  // holds the desk revision this client last saw, and it is sent back as
+  // `baseUpdatedAt` for optimistic locking (mastersNormalizedClient.ts).
+  // Stamping it with a local clock here made the client claim to have
+  // hydrated at a revision that never existed on the server, so every save
+  // after the first was refused 409 "stale" — masters became unsavable in
+  // production on 2026-08-10. That key is now only ever written from a
+  // server response: the push result, a hydrate, or the wipe signal.
+  // Awaited, not fire-and-forget: the caller needs the real outcome.
+  // scheduleMastersSync queues the state synchronously, so flushing straight
+  // after is safe and turns the debounced push into an awaitable one.
+  const { scheduleMastersSync } = await import("@/lib/mastersPersistence");
+  scheduleMastersSync(state);
   window.dispatchEvent(new CustomEvent("bhb-masters-updated"));
+
+  const { flushMastersDeskSyncPending } = await import(
+    "@/lib/mastersNormalizedClient"
+  );
+  const pushed = await flushMastersDeskSyncPending();
+  // `null` = nothing was queued (Supabase unconfigured / demo mode). The
+  // local write stands; there is no remote write to have failed.
+  if (!pushed) return { ok: true };
+  return pushed.ok ? { ok: true } : { ok: false, reason: pushed.reason };
 }
 
 const MASTERS_MIRROR_META = "bhb_masters_mirror_meta_v1";

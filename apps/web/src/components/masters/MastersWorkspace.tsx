@@ -260,11 +260,22 @@ export function MastersWorkspace() {
       return;
     }
     setState(next);
-    saveMasters(next);
-    if (msg) {
-      setNotice(msg);
-      window.setTimeout(() => setNotice(null), 2200);
-    }
+    // The success notice must wait for the database, not for React. Showing
+    // it synchronously is what made 16 refused writes look like 16 saves on
+    // 2026-08-09 — the screen said "session changed" every time while the
+    // server was rejecting the push. On failure we stay silent here: the
+    // push path raises a sticky error toast naming the actual reason.
+    if (msg) setNotice("Saving…");
+    void saveMasters(next).then((outcome) => {
+      if (!outcome.ok) {
+        setNotice(null);
+        return;
+      }
+      if (msg) {
+        setNotice(msg);
+        window.setTimeout(() => setNotice(null), 2200);
+      }
+    });
   }
 
   if (!state) {
