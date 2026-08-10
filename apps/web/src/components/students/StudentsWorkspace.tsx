@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { GraduationCap } from "lucide-react";
 import { recordAudit } from "@/lib/auditClient";
+import { recordSisDeletion } from "@/lib/sisNormalizedClient";
 import {
   BUILT_IN_VIEWS,
   EMPTY_FILTERS,
@@ -760,6 +761,20 @@ export function StudentsWorkspace() {
       result.state.students[0]?.id ??
       "";
     setSelectedId(nextId);
+
+    // State the deletion before committing. removeStudent only filters the
+    // local roster, and the push upserts — so without this the row is never
+    // deleted in the database and the student returns on the next hydrate.
+    // removeStudent also drops the household when its last student goes, so
+    // take that from the diff rather than assuming.
+    const removedHouseholdIds = sis.households
+      .filter((h) => !result.state.households.some((x) => x.id === h.id))
+      .map((h) => h.id);
+    recordSisDeletion({
+      studentIds: [s.id],
+      householdIds: removedHouseholdIds,
+    });
+
     commit(result.state, "Student removed");
     // Hard delete with no soft-delete or restore — the audit entry is the
     // only remaining record that this student ever existed.

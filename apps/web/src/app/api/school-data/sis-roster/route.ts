@@ -6,6 +6,7 @@ import {
 import type { SisState } from "@/lib/sis";
 import { sisDualWriteDbEnabled } from "@/lib/sisDbConfig";
 import {
+  deleteSisRecordsInDb,
   fetchSisFromDb,
   pushSisToDb,
 } from "@/lib/sisNormalized.server";
@@ -34,7 +35,15 @@ export async function GET(req: Request) {
   });
 }
 
-type RosterPostBody = Pick<SisState, "households" | "students">;
+type RosterPostBody = Pick<SisState, "households" | "students"> & {
+  /**
+   * Ids the user explicitly removed. Deletions have to be stated, not
+   * inferred from what is absent in the snapshot — inference is how a
+   * partial payload wipes a roster.
+   */
+  deleteStudentIds?: string[];
+  deleteHouseholdIds?: string[];
+};
 
 /** POST — push full SIS roster snapshot */
 export async function POST(req: Request) {
@@ -53,6 +62,22 @@ export async function POST(req: Request) {
     body = (await req.json()) as RosterPostBody;
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  // Deletes run BEFORE the upsert: the roster in this same payload no longer
+  // contains the removed rows, so upserting first then deleting would be a
+  // no-op ordering hazard if the two ever disagreed.
+  const removed = await deleteSisRecordsInDb({
+    studentIds: Array.isArray(body.deleteStudentIds) ? body.deleteStudentIds : [],
+    householdIds: Array.isArray(body.deleteHouseholdIds)
+      ? body.deleteHouseholdIds
+      : [],
+  });
+  if (!removed.ok) {
+    return NextResponse.json(
+      { ok: false, error: removed.error || "Delete failed" },
+      { status: 502 },
+    );
   }
 
   const result = await pushSisToDb({
