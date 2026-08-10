@@ -89,6 +89,64 @@ export const COLLECTIONS: readonly CollectionDef[] = [
     softDelete: false,
     list: { sortColumn: "code", defaultLimit: 100, maxLimit: 500 },
   },
+
+  // ── Masters (Stage 2) ──────────────────────────────────────────────────
+  // Copied out of masters_desk_slices into masters_desk_* tables, ids
+  // byte-identical (migration 20260810040000). The slices remain the source
+  // of truth until the app is pointed here.
+  //
+  // Scope note: these are tenant-scoped only, NOT academic_year_code, even
+  // though several carry that column. Masters is deliberately read whole —
+  // the session selector lists every academic year, fee structures are
+  // compared across years, and a class outlives any one session. Making the
+  // year mandatory here would break those reads to enforce a rule that does
+  // not apply. Callers filter by year where they mean to; sis.students above
+  // is the opposite case, where an unscoped read genuinely is a bug.
+  //
+  // The whole of masters is 594 records, so the default page comfortably
+  // holds any one collection. The ceiling is still real: it stops a future
+  // caller assuming "small forever".
+  ...(
+    [
+      ["classes", "masters_desk_classes", "sort_order"],
+      ["sections", "masters_desk_sections", "name"],
+      ["campuses", "masters_desk_campuses", "code"],
+      ["academic-years", "masters_desk_academic_years", "code"],
+      ["academic-terms", "masters_desk_academic_terms", "sort_order"],
+      ["subjects", "masters_desk_subjects", "sort_order"],
+      ["class-subjects", "masters_desk_class_subjects", "id"],
+      ["fee-head-categories", "masters_desk_fee_head_categories", "sort_order"],
+      ["fee-heads", "masters_desk_fee_heads", "sort_order"],
+      ["installments", "masters_desk_installments", "sort_order"],
+      ["fee-groups", "masters_desk_fee_groups", "code"],
+      ["fee-structure-lines", "masters_desk_fee_structure_lines", "id"],
+      ["late-fee-rules", "masters_desk_late_fee_rules", "id"],
+      ["special-fees", "masters_desk_special_fees", "code"],
+      ["special-fee-assignments", "masters_desk_special_fee_assignments", "id"],
+      ["concession-kinds", "masters_desk_concession_kinds", "code"],
+      ["concessions", "masters_desk_concessions", "code"],
+      ["concession-grants", "masters_desk_concession_grants", "id"],
+      ["senior-streams", "masters_desk_senior_streams", "sort_order"],
+      ["number-series", "masters_desk_number_series", "code"],
+      ["holidays", "masters_desk_holidays", "starts_on"],
+      ["settings", "masters_desk_settings", "id"],
+    ] as const
+  ).map(
+    ([name, table, sortColumn]): CollectionDef => ({
+      id: `masters.${name}`,
+      module: "masters",
+      table,
+      rbac: { view: "masters", edit: "masters" },
+      scope: ["tenant_id"],
+      // Masters rows are referenced by student, lead and fee records by id.
+      // A soft delete would leave those references resolving to a row the
+      // UI has hidden, which is a subtler version of the orphaning this
+      // whole migration exists to prevent. Deletion stays explicit and hard,
+      // and the write guard refuses a delete on a stale revision.
+      softDelete: false,
+      list: { sortColumn, defaultLimit: 500, maxLimit: 1000 },
+    }),
+  ),
 ] as const;
 
 const BY_ID = new Map(COLLECTIONS.map((c) => [c.id, c]));
