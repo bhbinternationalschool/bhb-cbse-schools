@@ -551,35 +551,6 @@ export function currentAcademicYearCode(
   return cur?.code ?? DEFAULT_AY;
 }
 
-/**
- * The current academic year, or null when Masters has not been read yet.
- *
- * The strict counterpart to currentAcademicYearCode, which returns DEFAULT_AY
- * ("2025-26") for "I don't know". That fallback is a guess, and a guess must
- * never be written anywhere durable. On 2026-08-10 a frozen desk held no
- * academic years, so currentAcademicYearCode returned 2025-26 and the session
- * aligner PATCHed that fabrication into the signed SERVER cookie, where it
- * outlived the empty desk that produced it. The school ran in a session that
- * had ended on 2026-03-31, and every scoped query went with it — while the
- * database plainly said 2026-27 was `status: 'current'`.
- *
- * Use this anywhere the answer leaves the browser. Keep currentAcademicYearCode
- * for display paths that genuinely need a string; the fallback is being retired
- * bucket by bucket (see LEGACY_FALLBACK_AY in docs/TODO.md).
- */
-export function resolvedAcademicYearCode(
-  state?: MastersState | null,
-): string | null {
-  const m =
-    state ??
-    (typeof window !== "undefined" ? loadMasters() : null);
-  if (!m?.academicYears?.length) return null;
-  const cur = m.academicYears.find(
-    (y) => y.status === "current" && y.isActive !== false,
-  );
-  return cur?.code ?? null;
-}
-
 /** Years for header Session selector and import pickers — from Masters. */
 export function listSessionYearOptions(
   state?: MastersState | null,

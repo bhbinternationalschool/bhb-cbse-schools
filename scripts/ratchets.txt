@@ -17,7 +17,7 @@
 # PATCHes that invented year into the SERVER session cookie. It is why the
 # school ran four months inside an expired session with no warning.
 # Retire per module during Stage 8; target is 0.
-default_ay|247|Hardcoded DEFAULT_AY fallbacks
+default_ay|244|Hardcoded DEFAULT_AY fallbacks
 
 # Fire-and-forget writes. `void pushX()` discards the outcome, so a failed
 # save reaches a console.warn and the user is told nothing. This is the

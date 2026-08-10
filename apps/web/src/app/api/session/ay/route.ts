@@ -2,6 +2,37 @@ import { NextResponse } from "next/server";
 import { demoSessionCookieName, getDemoSession } from "@/lib/auth";
 import { appSessionCookieOptions } from "@/lib/authCookies.server";
 import { signSession } from "@/lib/sessionCookie.server";
+import { resolveLoginAcademicYearCode } from "@/lib/workspaceSession.server";
+
+/**
+ * GET — what the SERVER says the academic year is, and what this session holds.
+ *
+ * Exists so the client never computes the year itself. It used to:
+ * `alignWorkspaceSessionFromMasters` read the browser's masters copy, called
+ * `currentAcademicYearCode()`, and PATCHed the result. On a desk holding no
+ * academic years that returned DEFAULT_AY ("2025-26"), so a frozen browser
+ * fabricated a year and wrote it to the server, where it outlived the empty
+ * desk that produced it and scoped every query for everyone.
+ *
+ * Now the browser only relays: it asks what the year is and, if its cookie
+ * disagrees, asks for that. The answer is resolved from the calendar against
+ * Masters in the database — see lib/academicYearResolve.ts.
+ */
+export async function GET() {
+  const session = await getDemoSession();
+  if (!session) {
+    return NextResponse.json({ error: "No session" }, { status: 401 });
+  }
+
+  const resolved = await resolveLoginAcademicYearCode();
+  return NextResponse.json({
+    // null means Masters defines no usable year — a setup task, not a value
+    // to substitute something plausible for.
+    resolved,
+    session: session.academicYearCode,
+    matches: !!resolved && resolved === session.academicYearCode,
+  });
+}
 
 /** PATCH — switch the active academic year on the current session. */
 export async function PATCH(request: Request) {

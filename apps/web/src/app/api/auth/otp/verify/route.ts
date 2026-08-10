@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { demoSessionCookieName, type DemoSession } from "@/lib/auth";
 import { appSessionCookieOptions } from "@/lib/authCookies.server";
 import { signSession } from "@/lib/sessionCookie.server";
-import { DEFAULT_AY } from "@/lib/masters";
+import { resolveLoginAcademicYearCode } from "@/lib/workspaceSession.server";
 import { resolveParentHousehold } from "@/lib/parentPortal";
 import { verifyParentOtp } from "@/lib/parentOtp.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
@@ -38,13 +38,25 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Household not found" }, { status: 404 });
     }
 
+    // Resolved server-side, exactly as the staff login routes do. This line
+    // used to read `body.academicYearCode?.trim() || DEFAULT_AY` — an
+    // unvalidated value from the request, or a hardcoded 2025-26, written
+    // into a signed cookie that scopes every fee and result a parent sees.
+    const resolvedAy = await resolveLoginAcademicYearCode(body.academicYearCode);
+    if (!resolvedAy) {
+      return NextResponse.json(
+        { error: "No academic year is set up. Please contact the school." },
+        { status: 503 },
+      );
+    }
+
     const session: DemoSession = {
       persona: "parent",
       fullName: hh.guardianName || "Parent",
       roleCode: "parent",
       householdId: hh.id,
       tenantSlug: TENANT.slug,
-      academicYearCode: body.academicYearCode?.trim() || DEFAULT_AY,
+      academicYearCode: resolvedAy,
     };
 
     await writeAudit({
