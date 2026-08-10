@@ -71,6 +71,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:masters-revision-lifecycle
 
+      - name: Test — a failed read cannot be mistaken for empty data
+        working-directory: apps/web
+        run: npm run test:data-contract
+
       - name: Test — failed reads never look like empty data
         working-directory: apps/web
         run: npm run test:hydrate-failure-safety

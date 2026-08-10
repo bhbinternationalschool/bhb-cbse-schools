@@ -59,6 +59,7 @@ SELFTESTS=(
   test:masters-write-guard
   test:masters-revision-guard
   test:masters-revision-lifecycle
+  test:data-contract
   test:hydrate-failure-safety
   test:sis-revision
   test:sis-prune
