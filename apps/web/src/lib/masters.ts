@@ -1588,6 +1588,17 @@ export function preferMonthlyIfQuarterlyStub(state: MastersState): MastersState 
 }
 
 function ensureClassRoster(state: MastersState): MastersState {
+  // An empty roster means "not loaded", not "no classes". Filling it in from
+  // CLASS_GROUPS mints a fresh id per class, and those ids are what students,
+  // leads and fee lines would then be written against — pointing at a
+  // generation no other device or the server has ever seen.
+  //
+  // This is reachable with a partly-hydrated state (say fee heads arrived but
+  // classes did not), which the guard in ensureFeeSetup does not catch, so it
+  // is checked again here. Backfilling a MISSING class into a roster that
+  // already exists is still fine; conjuring the whole roster is not.
+  if (!state.classes?.length && isSupabaseConfigured()) return state;
+
   let classes = (state.classes ?? []).map((c, i) => normalizeSchoolClass(c, i));
   let sections = [...(state.sections ?? [])];
 
@@ -1735,7 +1746,43 @@ function ensureFeeHeads(state: MastersState): MastersState {
   };
 }
 
+/**
+ * Has this masters state actually been loaded, or is it just empty?
+ *
+ * A state with no classes, no fee heads and no subjects has not been
+ * hydrated yet. It is NOT "a school that has no classes" — a real school
+ * that had deleted everything would still be a case for showing nothing,
+ * never for inventing a curriculum.
+ */
+function mastersLooksUnhydrated(state: MastersState): boolean {
+  return (
+    !state.classes?.length &&
+    !state.feeHeads?.length &&
+    !state.subjects?.length
+  );
+}
+
 function ensureFeeSetup(state: MastersState): MastersState {
+  // Absent is not a default.
+  //
+  // On a cold client this function used to fabricate an entire school:
+  // `defaultMasters()` supplies `full.classes` when the roster is empty, and
+  // ensureClassRoster then mints any class still missing — each with a fresh
+  // random id. The result is a complete 15-class generation the server has
+  // never seen, written straight to localStorage by loadMasters(), which
+  // then fails guardMastersOverwrite as a `regenerated` push and leaves the
+  // device frozen on ids that exist nowhere else.
+  //
+  // That is what a cleared browser produced against production on
+  // 2026-08-10: ids cls_kwlp6sqz… while the database held cls_p7bw8cpc…, and
+  // clearing storage — the workaround staff had been told to use — made it
+  // worse rather than better.
+  //
+  // With Supabase configured there is a real roster to hydrate; seeding one
+  // locally can only conflict with it. Demo mode has nothing to hydrate
+  // from, so it still gets a usable school.
+  if (mastersLooksUnhydrated(state) && isSupabaseConfigured()) return state;
+
   let next = { ...state, version: 2 as const };
   if (!next.feeGroups?.length || !next.feeStructureLines?.length) {
     const full = defaultMasters();
