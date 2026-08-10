@@ -168,6 +168,33 @@ export async function pushMastersDeskToDb(
     { onConflict: "tenant_id" },
   );
 
+  // Derive the masters_desk_* row tables from the slices just written.
+  //
+  // The rows are a DERIVED copy, never a second writer: the slices stay
+  // authoritative and the rows follow. Two independent writers would be a
+  // merge problem, which is the disease this migration cures rather than a
+  // treatment for it.
+  //
+  // This must happen before the read path can be switched. Until it does,
+  // reads from the rows would come from somewhere the writes never reach,
+  // and every masters edit would save fine and never appear.
+  //
+  // A failure here is reported, not swallowed. The slices are already
+  // written and correct, so masters is not lost — but the rows are now stale
+  // and the caller needs to know, because after the flip stale rows are what
+  // the user would be looking at.
+  const { error: syncErr } = await sb.rpc("masters_sync_rows_from_slices", {
+    p_tenant_id: tenantId,
+  });
+  if (syncErr) {
+    console.error("[masters] row-table sync failed", syncErr.message);
+    return {
+      ok: false,
+      error: `Masters saved, but the row tables did not update: ${syncErr.message}`,
+      updatedAt: now,
+    };
+  }
+
   // The exact revision written to sync meta. The route returns this to the
   // client, which stores it as the base for its next push — a freshly
   // minted timestamp here would differ from the stored one and make every
@@ -183,6 +210,20 @@ export async function fetchMastersDeskFromDb(): Promise<{
   const empty = emptyBundle();
   if (!ctx) return { bundle: empty, meta: null };
   const { sb, tenantId } = ctx;
+
+  // NOT YET reading from the row tables. The switch was written here and
+  // reverted: importing mastersRowTables.server.ts from this module pulls a
+  // `server-only` file into the CLIENT bundle graph, because masters.ts is
+  // reachable from client pages —
+  //
+  //   mastersRowTables.server.ts -> mastersNormalized.server.ts
+  //     -> mastersPersistence.ts -> masters.ts -> app/pay/share/page.tsx
+  //
+  // which fails the production build and 500s the route in dev. The flip
+  // therefore belongs in the API route (already server-only) rather than in
+  // this shared module, and that is the next piece of work. See
+  // mastersRowTables.server.ts and /api/school-data/masters-parity, both of
+  // which are verified and ready for it.
 
   const [{ data: sliceRows }, { data: metaRow }] = await Promise.all([
     sb.from("masters_desk_slices").select("*").eq("tenant_id", tenantId),
@@ -201,21 +242,37 @@ export async function fetchMastersDeskFromDb(): Promise<{
   }
 
   const bundle = slicesToBundle(sliceMap);
+  return { bundle, meta: metaFromRow(metaRow, bundle) };
+}
 
-  const meta: MastersDeskSyncMeta | null = metaRow
-    ? {
-        sliceCount: Number(metaRow.slice_count ?? 0),
-        classCount: Number(metaRow.class_count ?? bundle.classes.length),
-        feeHeadCount: Number(metaRow.fee_head_count ?? bundle.feeHeads.length),
-        subjectCount: Number(metaRow.subject_count ?? bundle.subjects.length),
-        lastUpdatedAt: metaRow.last_updated_at
-          ? String(metaRow.last_updated_at)
-          : null,
-        updatedAt: String(metaRow.updated_at || ""),
-      }
-    : null;
-
-  return { bundle, meta };
+/**
+ * Shared meta mapping, so the two read paths cannot disagree about the
+ * revision. `updatedAt` is what the client sends back as `baseUpdatedAt`
+ * for optimistic locking — it must be identical whichever source served the
+ * bundle, or switching the read path would make every save falsely stale.
+ */
+function metaFromRow(
+  metaRow: {
+    slice_count?: number | null;
+    class_count?: number | null;
+    fee_head_count?: number | null;
+    subject_count?: number | null;
+    last_updated_at?: string | null;
+    updated_at?: string | null;
+  } | null,
+  bundle: MastersDeskBundle,
+): MastersDeskSyncMeta | null {
+  if (!metaRow) return null;
+  return {
+    sliceCount: Number(metaRow.slice_count ?? 0),
+    classCount: Number(metaRow.class_count ?? bundle.classes.length),
+    feeHeadCount: Number(metaRow.fee_head_count ?? bundle.feeHeads.length),
+    subjectCount: Number(metaRow.subject_count ?? bundle.subjects.length),
+    lastUpdatedAt: metaRow.last_updated_at
+      ? String(metaRow.last_updated_at)
+      : null,
+    updatedAt: String(metaRow.updated_at || ""),
+  };
 }
 
 export function deskBundleToMastersState(bundle: MastersDeskBundle): MastersState {
