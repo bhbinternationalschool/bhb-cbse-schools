@@ -10,6 +10,41 @@ import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
 
 const META_KEY = "bhb_masters_desk_db_meta_v1";
 const LOCAL_EDIT_META_KEY = "bhb_masters_mirror_meta_v1";
+/** Mirrors STORAGE_KEY in masters.ts — read-only, to detect an empty desk. */
+const LOCAL_STATE_KEY = "bhb_masters_v5";
+
+/**
+ * True when this browser holds no classes at all.
+ *
+ * Emptiness is not an edit. A desk with zero classes never hydrated, or was
+ * wiped — either way there is nothing in it worth defending against the
+ * server, and treating it as a local edit is what froze devices: `shouldTake`
+ * requires `remoteAt > localEditAt`, hydration itself stamps `localEditAt`, so
+ * an empty desk with a recent stamp refuses the server's data forever. The
+ * device then pushes its emptiness, the server refuses it (`rejected wipe push
+ * stored=15 incoming=0`), and nothing ever gets better. Clearing site data was
+ * the only cure, which is exactly the repair step this migration exists to
+ * abolish.
+ *
+ * Safe because it can only ever pull data IN. And there is no legitimate
+ * "I deleted every class" state to protect: guardMastersOverwrite already
+ * refuses those pushes server-side, so such a state can never be authoritative.
+ * This is the client-side half of a rule the server has enforced all along.
+ *
+ * Unreadable or absent local state counts as empty — a desk that cannot be
+ * parsed is not one whose contents should outrank the database.
+ */
+function localMastersIsEmpty(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const raw = localStorage.getItem(LOCAL_STATE_KEY);
+    if (!raw) return true;
+    const state = JSON.parse(raw) as { classes?: unknown };
+    return !Array.isArray(state.classes) || state.classes.length === 0;
+  } catch {
+    return true;
+  }
+}
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
 let pending: MastersState | null = null;
 
@@ -279,10 +314,15 @@ export async function hydrateMastersDeskFromDb(
     const bootstrapNewDevice =
       hasRemote && !meta.updatedAt && !localEditAt;
 
+    // An empty desk has nothing to defend, so it must never block hydration.
+    // See localMastersIsEmpty: this is the one case where local loses despite
+    // a newer localEditAt, and it is the case that froze every device.
+    const localIsEmpty = localMastersIsEmpty();
+
     // Never let "remote has rows" alone clobber newer local edits (read-from-DB mode).
     const shouldTake = readFromDb
-      ? remoteIsNewer || (!localEditAt && hasRemote)
-      : hasRemote && (bootstrapNewDevice || remoteIsNewer);
+      ? remoteIsNewer || ((!localEditAt || localIsEmpty) && hasRemote)
+      : hasRemote && (bootstrapNewDevice || remoteIsNewer || localIsEmpty);
 
     if (!shouldTake) return { bundle: empty, changed: false, ok: true };
     writeMeta({

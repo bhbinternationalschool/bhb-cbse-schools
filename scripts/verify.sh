@@ -60,6 +60,7 @@ SELFTESTS=(
   test:masters-revision-guard
   test:masters-revision-lifecycle
   test:masters-cold-client
+  test:masters-freeze
   test:tenant-wipe-expiry
   test:data-contract
   test:hydrate-failure-safety

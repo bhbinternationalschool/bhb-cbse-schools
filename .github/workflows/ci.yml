@@ -99,6 +99,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:sis-delete
 
+      - name: Test — an empty desk never refuses the server's masters
+        working-directory: apps/web
+        run: npm run test:masters-freeze
+
       - name: Test — a failing guard refuses the push, never falls back silently
         working-directory: apps/web
         run: npm run test:sis-guard-fallback
