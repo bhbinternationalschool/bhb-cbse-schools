@@ -56,6 +56,20 @@ export type CollectionDef = {
     readonly defaultLimit: number;
     /** Hard ceiling. No caller may ask for "everything". */
     readonly maxLimit: number;
+    /**
+     * Columns a LIST returns. Omit to return the whole row.
+     *
+     * A list view needs enough to render a row and open it; it does not need
+     * the record. `admission_desk_leads` is the case that forced this:
+     * `lead_json` is 1.82 MB of the table's 2.37 MB — 76.8% — and no list
+     * screen reads a single field of it. Sending it anyway is what made the
+     * admissions payload 2.37 MB, put it past the browser storage cap, and
+     * cost the director's phone its saves on 2026-08-10.
+     *
+     * Must include `id` and `sortColumn`, or paging cannot continue. The repo
+     * enforces that rather than trusting each definition to remember.
+     */
+    readonly columns?: readonly string[];
   };
 };
 
@@ -147,6 +161,52 @@ export const COLLECTIONS: readonly CollectionDef[] = [
       list: { sortColumn, defaultLimit: 500, maxLimit: 1000 },
     }),
   ),
+  {
+    // Stage 6. The table that made the case for projections: 919 leads,
+    // 2.37 MB, of which lead_json is 1.82 MB that no list screen reads.
+    id: "admissions.leads",
+    module: "admissions",
+    table: "admission_desk_leads",
+    rbac: { view: "admissions", edit: "admissions" },
+    // Leads belong to an intake year. Without academic_year_code a follow-up
+    // list silently mixes this year's enquiries with last year's.
+    scope: ["tenant_id", "academic_year_code"],
+    // A lead that stops being pursued is still evidence of an enquiry, and
+    // the family may return next year — so it SHOULD be soft-deleted. But
+    // admission_desk_leads has no `deleted_at` column (checked, not assumed),
+    // and declaring softDelete without it makes every list query filter on a
+    // column that does not exist. False until the column is added, which must
+    // happen before this collection accepts writes.
+    softDelete: false,
+    list: {
+      // lead_date is not unique, so keyset paging leans on (lead_date, id) —
+      // which is exactly why the repo forces `id` into every projection.
+      sortColumn: "lead_date",
+      defaultLimit: 100,
+      maxLimit: 500,
+      // What a list row renders and needs to open a detail view. Deliberately
+      // NOT lead_json: ~2 KB per row of survey answers and history that only
+      // the detail screen reads. Dropping it takes a 100-row page from
+      // ~264 KB to roughly 20 KB.
+      columns: [
+        "child_name",
+        "guardian_name",
+        "mobile",
+        "class_sought_id",
+        "stage",
+        "source",
+        "lead_date",
+        "next_follow_up_at",
+        "assigned_to",
+        "enquiry_no",
+        "application_no",
+        "admission_no",
+        "sis_student_id",
+        "academic_year_code",
+        "updated_at",
+      ],
+    },
+  },
 ] as const;
 
 const BY_ID = new Map(COLLECTIONS.map((c) => [c.id, c]));

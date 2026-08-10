@@ -67,6 +67,7 @@ SELFTESTS=(
   test:save-full-cache
   test:tenant-wipe-expiry
   test:data-contract
+  test:projection
   test:hydrate-failure-safety
   test:sis-revision
   test:sis-prune

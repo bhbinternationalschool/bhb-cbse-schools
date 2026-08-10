@@ -136,7 +136,15 @@ export async function list(
   const limit = clampLimit(def, params.limit);
   const sortCol = def.list.sortColumn;
 
-  let q = ctx.sb.from(def.table).select("*");
+  // Projection: a list returns what a row needs to render and be opened, not
+  // the whole record. `id` and the sort column are forced in — without them
+  // the cursor cannot be built and paging stops after one page, which is the
+  // kind of bug that only shows up on the second screenful.
+  const projection = def.list.columns?.length
+    ? Array.from(new Set(["id", sortCol, ...def.list.columns])).join(",")
+    : "*";
+
+  let q = ctx.sb.from(def.table).select(projection);
   for (const [k, v] of Object.entries(scope.filters)) {
     q = q.eq(k, v as string);
   }
@@ -165,7 +173,9 @@ export async function list(
     return { ok: false, code: "unavailable", error: error.message };
   }
 
-  const rows = (data ?? []) as Row[];
+  // The projection is built at runtime, so PostgREST's typed select inference
+  // cannot narrow the result. Cast through unknown rather than widen Row.
+  const rows = (data ?? []) as unknown as Row[];
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
   const last = page[page.length - 1];
