@@ -62,6 +62,7 @@ SELFTESTS=(
   test:masters-cold-client
   test:masters-freeze
   test:session-year
+  test:masters-read-failure
   test:tenant-wipe-expiry
   test:data-contract
   test:hydrate-failure-safety

@@ -102,7 +102,29 @@ export async function POST(req: Request) {
   const { version: _v, baseUpdatedAt, ...rest } = body;
   const state = { version: 2 as const, ...rest };
 
-  const { bundle: stored, meta } = await fetchMastersDeskFromDb();
+  const { bundle: stored, meta, readFailed } = await fetchMastersDeskFromDb();
+
+  // No stored state, no guard. guardMastersOverwrite reads zero stored classes
+  // as `bootstrap` and allows the write — correct for a genuinely new tenant,
+  // catastrophic when the read merely failed. On 2026-08-10 a read timed out
+  // under load, the guard saw an empty bundle, and a wholesale id replacement
+  // was accepted: all 15 class ids rewritten, 711 students orphaned on class
+  // and section in one request, 268 fee lines with them.
+  //
+  // Refusing costs a retry. Guarding against data we never read costs the
+  // school its id generation, and the repair took a hand-built remap.
+  if (readFailed) {
+    console.error("[masters-desk] refusing push: stored state unreadable");
+    return NextResponse.json(
+      {
+        error:
+          "Could not read the saved masters to check this change against. " +
+          "Nothing was written — please try again.",
+        reason: "stored_unreadable",
+      },
+      { status: 503 },
+    );
+  }
 
   // Optimistic locking: the push must carry the desk revision the client
   // hydrated at. A mismatch means another device saved after this one

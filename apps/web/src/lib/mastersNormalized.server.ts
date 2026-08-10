@@ -205,10 +205,27 @@ export async function pushMastersDeskToDb(
 export async function fetchMastersDeskFromDb(): Promise<{
   bundle: MastersDeskBundle;
   meta: MastersDeskSyncMeta | null;
+  /**
+   * True when the read did not complete. The bundle is then meaningless —
+   * NOT "this tenant has no masters".
+   *
+   * On 2026-08-10 this function swallowed the error and returned an empty
+   * bundle. The masters push route guards with
+   * `guardMastersOverwrite(stored.classes, incoming.classes)`, and that guard
+   * treats zero stored classes as `bootstrap` — a first write, allow. So a
+   * read that timed out under load read as "fresh tenant", the guard waved
+   * through a wholesale id replacement, and all 15 class ids were rewritten:
+   * 711 students orphaned on class and section in one request.
+   *
+   * A failed read must never be indistinguishable from empty data. That is
+   * the same rule ReadFail encodes in lib/data/types.ts (which deliberately
+   * has no `rows` property); this path predates it.
+   */
+  readFailed: boolean;
 }> {
   const ctx = await resolveCtx();
   const empty = emptyBundle();
-  if (!ctx) return { bundle: empty, meta: null };
+  if (!ctx) return { bundle: empty, meta: null, readFailed: true };
   const { sb, tenantId } = ctx;
 
   // This module deliberately does NOT read the row tables, and must not.
@@ -224,14 +241,25 @@ export async function fetchMastersDeskFromDb(): Promise<{
   // the API route instead, which nothing imports and is server-only by
   // nature. See app/api/school-data/masters-desk/route.ts.
 
-  const [{ data: sliceRows }, { data: metaRow }] = await Promise.all([
-    sb.from("masters_desk_slices").select("*").eq("tenant_id", tenantId),
-    sb
-      .from("masters_desk_sync_meta")
-      .select(META_SELECT)
-      .eq("tenant_id", tenantId)
-      .maybeSingle(),
-  ]);
+  // `error` is captured, not discarded. Dropping it is what turned a timed-out
+  // read into "this tenant has no classes" — see readFailed above.
+  const [{ data: sliceRows, error: sliceErr }, { data: metaRow, error: metaErr }] =
+    await Promise.all([
+      sb.from("masters_desk_slices").select("*").eq("tenant_id", tenantId),
+      sb
+        .from("masters_desk_sync_meta")
+        .select(META_SELECT)
+        .eq("tenant_id", tenantId)
+        .maybeSingle(),
+    ]);
+
+  if (sliceErr || metaErr) {
+    console.error(
+      "[masters-desk] stored-state read FAILED — reporting unknown, not empty:",
+      sliceErr?.message ?? metaErr?.message,
+    );
+    return { bundle: empty, meta: null, readFailed: true };
+  }
 
   const sliceMap: Partial<Record<MastersSliceKey, unknown>> = {};
   for (const row of sliceRows ?? []) {
@@ -241,7 +269,7 @@ export async function fetchMastersDeskFromDb(): Promise<{
   }
 
   const bundle = slicesToBundle(sliceMap);
-  return { bundle, meta: metaFromRow(metaRow, bundle) };
+  return { bundle, meta: metaFromRow(metaRow, bundle), readFailed: false };
 }
 
 /**

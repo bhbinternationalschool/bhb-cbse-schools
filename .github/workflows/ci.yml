@@ -107,6 +107,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:session-year
 
+      - name: Test — a failed masters read is never guarded as empty
+        working-directory: apps/web
+        run: npm run test:masters-read-failure
+
       - name: Test — a failing guard refuses the push, never falls back silently
         working-directory: apps/web
         run: npm run test:sis-guard-fallback
