@@ -187,9 +187,18 @@ the concrete items. Check things off in the PR that fixes them.
 
 ## Ops watchlist
 
-- [ ] Watch prod logs for **409s on `/api/school-data/masters-desk`** — a
-  409 means a device is pushing stale/regenerated masters; the fix is
-  clearing that device's site data (proven 2026-08-09).
+- [ ] Watch prod logs for **409s on `/api/school-data/masters-desk`**. A 409
+  means a device pushed stale or regenerated masters and the guard refused
+  it — the database is fine; that is the guard working.
+  **Do NOT clear the device's site data.** That advice stood here until
+  2026-08-10 and was wrong by then: clearing deletes the wipe-signal seen-
+  marker (re-triggering a wipe) and empties the desk, and an empty desk used
+  to invent a fresh class-id generation. The cure is now automatic — an empty
+  desk accepts server data on the next load (`test:masters-freeze`). Reload;
+  do not clear.
+  A `stale` 409 is ordinary concurrent editing. A `wipe` or `regenerated` 409
+  is a device that lost its desk — it should self-heal on reload, and if it
+  does not, that is an incident worth investigating rather than clearing.
 - [ ] Current known-good baseline, re-measured post-deploy 2026-08-10 on
   revision `school-erp-web-00202-sb4`: 15 classes, generation
   `cls_p7bw8cpc…` (Nursery), masters revision `2026-08-09 19:06:35+00`,
