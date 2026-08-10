@@ -216,6 +216,10 @@ begin
       end if;
     end if;
 
+    -- NOTE: superseded by 20260810050000. Naming every column here means a
+    -- column absent from the payload is inserted as an explicit NULL rather
+    -- than taking its default, so any `not null default ...` column fails on
+    -- insert. The follow-up builds the column list from the payload's keys.
     execute format(
       'insert into public.%I select * from jsonb_populate_record(null::public.%I, $1)
          on conflict (id) do update set %s',
