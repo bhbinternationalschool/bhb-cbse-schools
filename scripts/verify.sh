@@ -62,6 +62,7 @@ SELFTESTS=(
   test:masters-cold-client
   test:masters-freeze
   test:session-year
+  test:academic-year-resolve
   test:masters-read-failure
   test:save-full-cache
   test:tenant-wipe-expiry

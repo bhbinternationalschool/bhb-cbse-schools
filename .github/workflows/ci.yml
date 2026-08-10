@@ -115,6 +115,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:save-full-cache
 
+      - name: Test — an ended academic year cannot still be current
+        working-directory: apps/web
+        run: npm run test:academic-year-resolve
+
       - name: Test — a failing guard refuses the push, never falls back silently
         working-directory: apps/web
         run: npm run test:sis-guard-fallback

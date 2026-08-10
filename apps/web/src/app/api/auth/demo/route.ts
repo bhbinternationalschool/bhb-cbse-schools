@@ -45,6 +45,23 @@ export async function POST(request: Request) {
   const user = DEMO_USERS[persona];
   const email = body.email?.trim() || user.email;
   const ownerRole = superAdminRoleCode(email);
+  // Resolved before the session is built so an unresolvable year stops login
+  // rather than being stamped into a signed cookie. Null means Masters defines
+  // no academic year at all, or could not be read — in both cases every scoped
+  // query afterwards would be meaningless, and a guessed year is what ran the
+  // school inside a session that ended 2026-03-31.
+  const resolvedAy = await resolveLoginAcademicYearCode(body.academicYearCode);
+  if (!resolvedAy) {
+    return NextResponse.json(
+      {
+        error:
+          "No academic year is set up, so the session cannot be scoped. " +
+          "Add the current academic year in Masters, then sign in again.",
+      },
+      { status: 503 },
+    );
+  }
+
   const session: DemoSession = {
     persona,
     fullName: body.fullName?.trim() || user.fullName,
@@ -55,7 +72,7 @@ export async function POST(request: Request) {
     staffId: body.staffId?.trim() || undefined,
     householdId: body.householdId?.trim() || undefined,
     tenantSlug: TENANT.slug,
-    academicYearCode: await resolveLoginAcademicYearCode(body.academicYearCode),
+    academicYearCode: resolvedAy,
   };
   const signed = signSession(session);
   if (!signed) {
