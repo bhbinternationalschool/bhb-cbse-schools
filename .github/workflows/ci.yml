@@ -131,6 +131,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:read-client
 
+      - name: Test — a full cache never reads as an empty roster
+        working-directory: apps/web
+        run: npm run test:sis-memory-fallback
+
       - name: Test — a failing guard refuses the push, never falls back silently
         working-directory: apps/web
         run: npm run test:sis-guard-fallback

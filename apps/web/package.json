@@ -29,6 +29,7 @@
     "test:academic-year-resolve": "npx tsx src/lib/academicYearResolve.selftest.ts",
     "test:masters-read-failure": "npx tsx src/lib/mastersStoredReadFailure.selftest.ts",
     "test:save-full-cache": "npx tsx src/lib/saveSurvivesFullCache.selftest.ts",
+    "test:sis-memory-fallback": "npx tsx src/lib/sisMemoryFallback.selftest.ts",
     "test:audit-redaction": "npx tsx src/lib/auditRedaction.selftest.ts",
     "test:student-filters": "npx tsx src/lib/studentFilters.selftest.ts",
     "test:masters-merge": "npx tsx src/lib/mastersMergePolicy.selftest.ts",

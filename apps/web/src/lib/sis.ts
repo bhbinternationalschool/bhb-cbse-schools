@@ -5,6 +5,7 @@
 
 import { activeSessionCode } from "@/lib/sessionWriteGuard";
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import {
   DEFAULT_AY,
   DEMO_STUDENT_CLASS_BY_NAME,
@@ -929,6 +930,26 @@ export function profileCompleteness(student: SisStudent, hh?: Household): number
 
 const STORAGE_KEY = "bhb_sis_v1";
 
+/**
+ * The roster, held in memory, independent of localStorage.
+ *
+ * SIS is 2.46 MB. With admissions and ~35 other module desks the origin sits
+ * past the ~5 MB mobile cap, so caching it can simply fail — and on
+ * 2026-08-10 it did: the server returned 200 with 2,457,504 bytes, the cache
+ * write threw QuotaExceededError inside writeSisLocalRaw, hydration aborted,
+ * and the phone showed 0 students against a database holding 711.
+ *
+ * loadSis() reads from localStorage, so a dropped cache read as "no
+ * students". That is the same failure as everything else today: an absent
+ * value standing in for a known one. The data was never missing — only
+ * unstorable.
+ *
+ * This is the record for the session; localStorage is a best-effort copy for
+ * the next page load. Under the no-offline decision the database is the real
+ * source, and a browser that cannot cache must still be able to work.
+ */
+let memorySisState: SisState | null = null;
+
 function id(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -1177,8 +1198,13 @@ export function loadSis(): SisState {
     }
     return emptySisState();
   }
+  // A cache that could not be written must not read as "no students".
+  // See memorySisState.
+  const cachedRaw = localStorage.getItem(STORAGE_KEY);
+  if (!cachedRaw && memorySisState) return memorySisState;
+
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = cachedRaw;
     if (raw) {
       const parsed = JSON.parse(raw) as SisState;
       let next: SisState = {
@@ -1270,11 +1296,8 @@ export function saveSis(state: SisState) {
     });
     return;
   }
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch (e) {
-    console.warn("[sis] localStorage quota exceeded — using server DB persistence", e);
-  }
+  memorySisState = state;
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   syncSisIntoMasters(state);
   if (!deskSkipBlobPushClient("sis")) {
     scheduleClientSchoolMirrorSync({ sis: state });
@@ -1329,7 +1352,11 @@ export function writeSisLocalRaw(state: SisState) {
     setMirrorSlice("sis", next);
     return;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  // Memory first, and unconditionally: this must survive a cache that cannot
+  // hold 2.46 MB. writeCacheOrInvalidate never throws for a full disk, so
+  // hydration can no longer be aborted by one.
+  memorySisState = next;
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
   syncSisIntoMasters(next, loadMasters());
 }
 

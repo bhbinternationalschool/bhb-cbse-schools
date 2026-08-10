@@ -65,6 +65,7 @@ SELFTESTS=(
   test:academic-year-resolve
   test:masters-read-failure
   test:save-full-cache
+  test:sis-memory-fallback
   test:tenant-wipe-expiry
   test:data-contract
   test:projection
