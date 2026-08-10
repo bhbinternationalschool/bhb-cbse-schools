@@ -46,6 +46,28 @@ the concrete items. Check things off in the PR that fixes them.
 - [ ] **`mastersDeskPushPending()` client path** (`mastersNormalizedClient.ts`)
   can still push whole masters state; server guards now cover it, but the
   client behaviour is unexamined.
+- [ ] **The database holds two schemas, and one of them is abandoned.**
+  Found during the Stage 2 audit (2026-08-10). Roughly 25 tables —
+  `classes`, `sections`, `students`, `households`, `concession_rules`,
+  `fee_installments` and friends — form a complete relational design with
+  `uuid` ids and full foreign keys. Every one is **empty**, and `grep` finds
+  **zero references** to any of them in `apps/web`. The app runs on a
+  different scheme entirely: text ids like `cls_p7bw8cpc`, in `sis_*` and
+  `*_desk_*` tables. The two have coexisted since the foundation migration.
+  It is not harmless: it cost a day of Stage 2 on the assumption the typed
+  tables were usable, and it will do the same to Stage 4 (`students` vs
+  `sis_students`) and Stage 5 (`fee_installments` vs the fee desk) unless
+  it is settled first. Decide deliberately whether the abandoned schema is
+  dropped or adopted — do not let a third stage discover it.
+- [ ] **Migration `20260810020000` altered the abandoned schema for nothing.**
+  It added `tenant_id`/`updated_at`/columns to those 20 tables on the premise
+  they would receive the masters data, which turned out to be impossible
+  (their `id` is `uuid`; every masters id is text). It also created three
+  bare-named tables (`concessions`, `installments`, `fee_head_categories`)
+  superseded by the `masters_desk_*` set in `20260810030000`. All harmless:
+  empty, unreferenced, additive. Director's call was to leave them and
+  record it rather than churn another migration. Clean up together with the
+  two-schema decision above.
 - [ ] **Rehome `fix/public-form-class-ids` (old-repo PR #1) + close.**
   Numbering now collides: PR #1 on the *new* repo is the revision guard;
   this is the old `ashishsingh80-web` PR #1. Its branch holds two migrations
@@ -140,9 +162,29 @@ the concrete items. Check things off in the PR that fixes them.
 
 - [x] Masters overwrite guard: server rejects a regenerated class-id set
   (shipped 2026-08-09, `mastersWriteGuard.ts`, 409 + selftest).
-- [ ] **Masters revision guard (pilot, this PR):** optimistic locking on the
-  masters push — client sends `baseUpdatedAt` it hydrated at; server 409s
-  a stale base instead of last-write-wins.
+- [x] **Masters revision guard** — shipped, then rolled back the same night
+  because it 409'd *every* save: the client sent `readMeta().updatedAt` as
+  its base, and `touchMastersDeskLocalMeta` overwrote that key with
+  `new Date()` on each local save, so a local clock was being submitted as
+  "the revision I hydrated at". Fixed in Stage 0 (`e57015a`) and live again.
+  The lesson is in `mastersRevisionLifecycle.selftest.ts`: the original
+  shipped with tests proving it *refused* bad writes and none proving a
+  client could *recover* from a refusal.
+- [x] **Stage 0 — a save reaches the database or says so** (`e57015a`,
+  deployed `00208-bds`): the 409 loop, every rejection surfaced with its real
+  reason, and student deletes actually deleting.
+- [x] **Stage 1 — the data layer** (`3e1461d`, deployed `00211-jvw`):
+  `desk_write_guarded` + allowlist, typed contract, `/api/data/[collection]`,
+  the client write path, and the ratchets in `scripts/ratchets.txt`. Inert —
+  nothing is wired to a screen.
+- [ ] **Stage 1 leftovers:** TanStack Query and the read hooks (deferred
+  until Stage 2 gives them a consumer), and
+  `@typescript-eslint/no-floating-promises` (needs `parserOptions.project`;
+  the `void_writes` ratchet covers the same ground meanwhile).
+- [ ] **Stage 2 — masters (in progress):** audit, schema and the 594-record
+  copy into `masters_desk_*` are done (`d514eee`) and verified id-identical.
+  Remaining: register the collections, point `MastersWorkspace` at the layer
+  with explicit-Save, then flip the read path.
 - [ ] Extend the revision contract to the ~20 desk-slice modules
   (`createDeskSlicePersistence` family) — one shared implementation, not 20
   copies.
