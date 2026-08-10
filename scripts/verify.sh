@@ -59,6 +59,7 @@ SELFTESTS=(
   test:masters-write-guard
   test:masters-revision-guard
   test:masters-revision-lifecycle
+  test:data-contract
   test:hydrate-failure-safety
   test:sis-revision
   test:sis-prune
@@ -96,6 +97,15 @@ else
     NEXT_PUBLIC_SUPABASE_URL=https://placeholder.supabase.co \
     NEXT_PUBLIC_SUPABASE_ANON_KEY=placeholder-anon-key \
     npm run build
+fi
+echo
+
+# ── Ratchets: the patterns being retired may not regrow ────────────────
+# The migration runs for months across 39 modules. Without this, the
+# patterns removed in one module quietly reappear in another and the whole
+# exercise nets to zero. See scripts/ratchets.txt.
+if ! bash "$ROOT/scripts/check-ratchets.sh"; then
+  FAILED+=("ratchets|")
 fi
 echo
 
