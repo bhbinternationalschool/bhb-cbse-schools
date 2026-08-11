@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { AppShell } from "@/components/shell/AppShell";
 import { ErpModuleGate } from "@/components/shell/ErpModuleGate";
+import { SkeletonModulePage } from "@/components/ui/skeleton";
 import { getDemoSession } from "@/lib/auth";
 import { pwaManifestHref } from "@/lib/pwaApps";
 import { TENANT } from "@/lib/types";
@@ -38,11 +39,7 @@ export default async function AuthenticatedLayout({
   return (
     <div className="bhb-pwa-staff min-h-dvh">
       <AppShell session={session}>
-        <Suspense
-          fallback={
-            <div className="p-6 text-sm text-muted-foreground">Loading…</div>
-          }
-        >
+        <Suspense fallback={<SkeletonModulePage />}>
           <ErpModuleGate>
             <div className="erp-module-root">{children}</div>
           </ErpModuleGate>

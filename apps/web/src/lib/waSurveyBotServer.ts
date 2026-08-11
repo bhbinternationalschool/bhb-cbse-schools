@@ -27,6 +27,7 @@ import {
 import { loadMasters } from "@/lib/masters";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { normalizeMobile } from "@/lib/sis";
+import { TENANT } from "@/lib/types";
 import {
   detectSurveyBotIntent,
   parseSurveyStartBeatArg,
@@ -34,6 +35,7 @@ import {
   surveyBotWelcomeText,
 } from "@/lib/surveyFieldBotEngine";
 import { sendWhatsAppText, waNormalizeLocal10 } from "@/lib/waSend";
+import { generateTutorText } from "@/lib/aiLlm.server";
 
 export type WaSurveyBotMsg = {
   id: string;
@@ -476,6 +478,35 @@ function handleCaptureStep(
   };
 }
 
+/**
+ * LLM fallback for field-agent messages the keyword matcher doesn't
+ * recognize — only reachable when the agent has no active START/CAPTURE
+ * flow pending (mid-flow, structured input is required and this is never
+ * called). Points to the existing commands only; never invents survey data,
+ * beat assignments, or schedule details it wasn't given. Returns null on
+ * any failure — caller keeps the existing welcome text.
+ */
+async function tryFieldAgentAiFallback(
+  text: string,
+  agentName: string,
+): Promise<string | null> {
+  const system = `You are a WhatsApp assistant for a school's field survey agent (door-to-door admissions outreach) at ${TENANT.nameDisplay}.
+You may ONLY point the agent to the existing commands: START CODE (start a beat), BREAK, END, CAPTURE (log a household visit), STATUS, BEATS (list active beats), LINK (optional web app), HUMAN.
+You do NOT know beat assignments, schedules, or survey data — never guess at them.
+Keep the reply under 300 characters, plain text (no markdown headers).`;
+
+  const userMessage = `Field agent: ${agentName}
+Message: "${text}"`;
+
+  try {
+    const r = await generateTutorText({ system, userMessage });
+    if (!r.ok) return null;
+    return r.text.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 function buildKeywordReply(
   member: SurveyTeamMember,
   intent: ReturnType<typeof detectSurveyBotIntent>,
@@ -887,6 +918,10 @@ export async function handleWaSurveyBotInbound(opts: {
       ? ("unknown" as const)
       : detectSurveyBotIntent(text);
     result = buildKeywordReply(member, intent, text, thread.pending);
+    if (intent === "unknown" && !isGreeting && text.trim().length > 3) {
+      const aiReply = await tryFieldAgentAiFallback(text, member.fullName);
+      if (aiReply) result = { ...result, text: aiReply };
+    }
   }
 
   const botMsg: WaSurveyBotMsg = {

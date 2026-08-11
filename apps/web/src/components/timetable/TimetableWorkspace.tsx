@@ -48,10 +48,20 @@ import { SubstitutionPanel } from "@/components/timetable/SubstitutionPanel";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
+import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
+import { TimetableReportsRunner } from "@/components/reports/ModuleReportRunners";
 import { resolveSessionStaff } from "@/lib/staffResolve";
 import { hasPermission } from "@/lib/rbac";
 
-type TtTab = "setup" | "class" | "auto" | "teacher" | "subs" | "publish";
+type TtTab =
+  | "dashboard"
+  | "setup"
+  | "class"
+  | "auto"
+  | "teacher"
+  | "subs"
+  | "publish"
+  | "reports";
 
 export function TimetableWorkspace() {
   const session = useDemoSession();
@@ -134,6 +144,7 @@ export function TimetableWorkspace() {
       "teacher",
       "subs",
       "publish",
+      "reports",
     ];
     if (raw && (allowed as string[]).includes(raw)) setTab(raw as TtTab);
   }, []);
@@ -559,12 +570,14 @@ export function TimetableWorkspace() {
         value={tab}
         onChange={(id) => setTab(id as TtTab)}
         items={[
+          { id: "dashboard", label: "Dashboard", tone: "navy" },
           { id: "setup", label: "Setup", tone: "slate" },
           { id: "class", label: "By class", tone: "navy" },
           { id: "auto", label: "Auto-assign (AI)", tone: "violet" },
           { id: "teacher", label: "By teacher", tone: "teal" },
           { id: "subs", label: "Substitutes", tone: "rose" },
           { id: "publish", label: "Publish", tone: "amber" },
+          { id: "reports", label: "Reports", tone: "sky" },
         ]}
       />
 
@@ -585,6 +598,21 @@ export function TimetableWorkspace() {
         <p className="mt-3 rounded-lg bg-[rgba(32,48,80,0.06)] px-3 py-2 text-sm text-[var(--brand-deep)]">
           {notice}
         </p>
+      ) : null}
+
+      {tab === "dashboard" ? (
+        <div className="mt-6">
+          <ModuleDashboardHost
+            moduleId="timetable"
+            onNavigateTab={(t) => setTab(t as TtTab)}
+          />
+        </div>
+      ) : null}
+
+      {tab === "reports" ? (
+        <div className="mt-5">
+          <TimetableReportsRunner ay={ay} />
+        </div>
       ) : null}
 
       {tab === "setup" ? (

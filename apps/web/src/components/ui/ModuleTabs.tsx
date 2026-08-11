@@ -1,8 +1,10 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { useRef } from "react";
 import { cn } from "@/lib/utils";
 import {
+  createTablistKeyHandler,
   MODULE_TAB_CONTAINER_CLASS,
   MODULE_TAB_SIZE_CLASS,
   ModernTabButton,
@@ -40,6 +42,15 @@ export function ModuleTabs({
   className?: string;
   showOpenBadge?: boolean;
 }) {
+  const btnRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const ids = items.map((t) => t.id);
+  const handleKeyDown = createTablistKeyHandler({
+    ids,
+    activeId: value,
+    onSelect: onChange,
+    getEl: (id) => btnRefs.current[id],
+  });
+
   return (
     <div className="relative mt-4">
       <div
@@ -69,6 +80,11 @@ export function ModuleTabs({
               badge={t.badge}
               icon={t.icon}
               showOpenBadge={showOpenBadge}
+              tabIndex={active ? 0 : -1}
+              buttonRef={(el) => {
+                btnRefs.current[t.id] = el;
+              }}
+              onKeyDown={handleKeyDown}
             />
           );
         })}
@@ -131,6 +147,24 @@ export function ModuleTabGroups({
     if (!stillInGroup) onChange(g.tabs[0]!.id);
   }
 
+  const groupBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const groupIds = groups.map((g) => g.id);
+  const handleGroupKeyDown = createTablistKeyHandler({
+    ids: groupIds,
+    activeId: activeGroup.id,
+    onSelect: selectGroup,
+    getEl: (id) => groupBtnRefs.current[id],
+  });
+
+  const tabBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const tabIds = activeGroup.tabs.map((t) => t.id);
+  const handleTabKeyDown = createTablistKeyHandler({
+    ids: tabIds,
+    activeId: value,
+    onSelect: onChange,
+    getEl: (id) => tabBtnRefs.current[id],
+  });
+
   return (
     <div className={cn("mt-4 space-y-3", className)}>
       <div
@@ -149,6 +183,11 @@ export function ModuleTabGroups({
               onClick={() => selectGroup(g.id)}
               label={g.label}
               badge={g.tabs.length}
+              tabIndex={on ? 0 : -1}
+              buttonRef={(el) => {
+                groupBtnRefs.current[g.id] = el;
+              }}
+              onKeyDown={handleGroupKeyDown}
             />
           );
         })}
@@ -178,6 +217,11 @@ export function ModuleTabGroups({
               label={t.label}
               badge={t.badge}
               icon={t.icon}
+              tabIndex={active ? 0 : -1}
+              buttonRef={(el) => {
+                tabBtnRefs.current[t.id] = el;
+              }}
+              onKeyDown={handleTabKeyDown}
             />
           );
         })}

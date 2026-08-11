@@ -2,6 +2,10 @@
 
 export type ErpChartRow = { key: string; label: string; count: number };
 
+// SVG `fill` attributes need plain color values (not every renderer resolves
+// var() there reliably, including print), so this stays a literal array —
+// but it must match --chart-1..8 in globals.css byte-for-byte. Update both
+// together.
 export const ERP_CHART_COLORS = [
   "#2563eb",
   "#ef4444",

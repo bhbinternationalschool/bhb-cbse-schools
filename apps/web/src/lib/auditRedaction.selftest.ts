@@ -9,7 +9,7 @@
  * Run: npx tsx src/lib/auditRedaction.selftest.ts
  */
 import assert from "node:assert/strict";
-import { diffForAudit } from "./auditClient";
+import { diffForAudit } from "./auditRedaction";
 
 console.log("auditRedaction.selftest.ts");
 

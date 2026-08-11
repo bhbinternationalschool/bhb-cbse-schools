@@ -32,6 +32,7 @@ import { FilterExportButtons } from "@/components/reports/FilterExportButtons";
 import { describeFilters } from "@/lib/reportExport";
 import { TENANT } from "@/lib/types";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
+import { loadRbac, scopedClassIds } from "@/lib/rbac";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ErpTableShell } from "@/components/ui/erp-roster";
@@ -152,8 +153,19 @@ export function AttendanceWorkspace() {
 
   const classOptions = useMemo(() => {
     if (!masters) return [];
-    return masters.classes.filter((c) => c.isActive);
-  }, [masters]);
+    const active = masters.classes.filter((c) => c.isActive);
+    // A class-scoped assignment (Masters → Roles) restricts which classes
+    // this staff member may even pick, not just which one auto-selects —
+    // previously any teacher could hand-pick a class outside their scope.
+    const allowed = scopedClassIds(
+      session,
+      masters,
+      "attendance",
+      "edit",
+      loadRbac(),
+    );
+    return allowed ? active.filter((c) => allowed.includes(c.id)) : active;
+  }, [masters, session]);
 
   const sectionOptions = useMemo(() => {
     if (!masters || !classId) return [];

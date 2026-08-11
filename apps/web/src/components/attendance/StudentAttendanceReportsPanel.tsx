@@ -32,6 +32,7 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
   const [studentId, setStudentId] = useState("");
   const [status, setStatus] = useState<"all" | AttendanceStatus>("all");
   const [gender, setGender] = useState<"" | "M" | "F" | "O">("");
+  const [maxPercent, setMaxPercent] = useState("");
   const [studentQuery, setStudentQuery] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -117,6 +118,7 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
       studentId: studentId || undefined,
       status,
       gender: gender || undefined,
+      maxPercent: maxPercent.trim() ? Number(maxPercent) : undefined,
       masters: masters ?? undefined,
       sis: sis ?? undefined,
       attendance: loadAttendance(),
@@ -396,6 +398,23 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
                   <option value="F">Female</option>
                   <option value="O">Other</option>
                 </select>
+              </label>
+            ) : null}
+            {needs.has("percentBand") ? (
+              <label className="block text-sm">
+                <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                  At or below %
+                </span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={1}
+                  className="field !py-1.5"
+                  placeholder="e.g. 75"
+                  value={maxPercent}
+                  onChange={(e) => setMaxPercent(e.target.value)}
+                />
               </label>
             ) : null}
           </div>

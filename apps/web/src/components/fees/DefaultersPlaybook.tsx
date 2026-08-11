@@ -47,6 +47,7 @@ import {
 } from "@/lib/feeRecoveryTasks";
 import { openWaMe } from "@/lib/waMe";
 import type { HoldCode } from "@/lib/types";
+import { paymentLikelihood } from "@/lib/collectionsAi";
 
 const STAGE_FILTERS: { value: "" | OverdueStage; label: string }[] = [
   { value: "", label: "All stages" },
@@ -83,6 +84,11 @@ export function DefaultersPlaybook() {
     block: Extract<HoldCheck, { allowed: false }> | null;
   } | null>(null);
   const [meetings, setMeetings] = useState<FeeRecoveryMeeting[]>([]);
+  const [aiDraft, setAiDraft] = useState<
+    { whatsappMessage: string; callScript: string } | null
+  >(null);
+  const [aiDraftLoading, setAiDraftLoading] = useState(false);
+  const [aiDraftError, setAiDraftError] = useState<string | null>(null);
 
   function refresh() {
     const s = loadSis();
@@ -156,6 +162,62 @@ export function DefaultersPlaybook() {
       studentName: selected.fullName,
     });
   }, [selected]);
+
+  const likelihood = useMemo(() => {
+    if (!selected) return null;
+    return paymentLikelihood({
+      overdueDays: selected.overdueDays,
+      overdueAmountPaise: selected.overdueAmountPaise,
+      planCode: selected.planCode,
+    });
+  }, [selected]);
+
+  useEffect(() => {
+    setAiDraft(null);
+    setAiDraftError(null);
+  }, [selectedId]);
+
+  async function draftWithAi(row: LiveDefaulter) {
+    setAiDraftLoading(true);
+    setAiDraftError(null);
+    setAiDraft(null);
+    try {
+      const res = await fetch("/api/ai/collections-draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          studentName: row.fullName,
+          classLabel: row.classLabel,
+          amountLabel: formatInrFromPaise(row.overdueAmountPaise),
+          overdueDaysLabel:
+            row.overdueDays < 0
+              ? "upcoming"
+              : row.overdueDays === 0
+                ? "due today"
+                : `${row.overdueDays} day(s) overdue`,
+          stageLabel: row.stageLabel,
+        }),
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        whatsappMessage?: string;
+        callScript?: string;
+      };
+      if (!json.ok || !json.whatsappMessage || !json.callScript) {
+        setAiDraftError(json.error || "Draft failed");
+        return;
+      }
+      setAiDraft({
+        whatsappMessage: json.whatsappMessage,
+        callScript: json.callScript,
+      });
+    } catch (e) {
+      setAiDraftError(e instanceof Error ? e.message : "Draft failed");
+    } finally {
+      setAiDraftLoading(false);
+    }
+  }
 
   const policyHolds = useMemo(() => {
     if (!selected || !playbook) return [];
@@ -608,6 +670,11 @@ export function DefaultersPlaybook() {
             <ul className="mt-3 divide-y divide-[rgba(32,48,80,0.1)] overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
               {filtered.map((d) => {
                 const active = d.studentId === selected?.studentId;
+                const rowLikelihood = paymentLikelihood({
+                  overdueDays: d.overdueDays,
+                  overdueAmountPaise: d.overdueAmountPaise,
+                  planCode: d.planCode,
+                });
                 return (
                   <li key={d.studentId} className="flex items-stretch">
                     <label className="flex items-center px-3">
@@ -655,6 +722,17 @@ export function DefaultersPlaybook() {
                               ? "Due today"
                               : `${d.overdueDays}d overdue`}
                         </div>
+                        <div
+                          className={`mt-0.5 text-[10px] font-semibold ${
+                            rowLikelihood.tone === "good"
+                              ? "text-[#15803d]"
+                              : rowLikelihood.tone === "warn"
+                                ? "text-[#8a6400]"
+                                : "text-[var(--danger)]"
+                          }`}
+                        >
+                          {rowLikelihood.score}% likely
+                        </div>
                       </div>
                     </button>
                   </li>
@@ -690,9 +768,25 @@ export function DefaultersPlaybook() {
                     {guardianMobile(selected) || "not set"}
                   </p>
                 </div>
-                <span className="rounded-md bg-[rgba(180,35,24,0.1)] px-2 py-1 text-xs font-semibold text-[var(--danger)]">
-                  {playbook.stage}
-                </span>
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  <span className="rounded-md bg-[rgba(180,35,24,0.1)] px-2 py-1 text-xs font-semibold text-[var(--danger)]">
+                    {playbook.stage}
+                  </span>
+                  {likelihood ? (
+                    <span
+                      className={`rounded-md px-2 py-0.5 text-[10px] font-semibold ${
+                        likelihood.tone === "good"
+                          ? "bg-[rgba(21,128,61,0.1)] text-[#15803d]"
+                          : likelihood.tone === "warn"
+                            ? "bg-[rgba(180,131,0,0.12)] text-[#8a6400]"
+                            : "bg-[rgba(180,35,24,0.1)] text-[var(--danger)]"
+                      }`}
+                      title="Heuristic estimate from overdue days, amount, and any active recovery plan — not a guarantee"
+                    >
+                      {likelihood.label} · {likelihood.score}%
+                    </span>
+                  ) : null}
+                </div>
               </div>
 
               <div className="mt-4 max-h-36 overflow-y-auto rounded-lg border border-[rgba(32,48,80,0.1)]">
@@ -751,6 +845,86 @@ export function DefaultersPlaybook() {
                     </li>
                   ))}
                 </ul>
+              </div>
+
+              <div className="mt-5">
+                <div className="flex items-center justify-between gap-2">
+                  <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+                    AI DRAFT
+                  </h4>
+                  <button
+                    type="button"
+                    disabled={aiDraftLoading}
+                    className="rounded-lg border border-[rgba(32,48,80,0.2)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)] disabled:opacity-50"
+                    onClick={() => void draftWithAi(selected)}
+                  >
+                    {aiDraftLoading
+                      ? "Drafting…"
+                      : aiDraft
+                        ? "Redraft"
+                        : "Draft message + call script"}
+                  </button>
+                </div>
+                <p className="mt-1 text-[11px] text-[var(--muted)]">
+                  AI-drafted — review before sending, nothing goes out automatically.
+                </p>
+                {aiDraftError ? (
+                  <p className="mt-2 text-[11px] text-[var(--danger)]">
+                    {aiDraftError}
+                  </p>
+                ) : null}
+                {aiDraft ? (
+                  <div className="mt-2 space-y-2">
+                    <div className="rounded-lg bg-[var(--surface)] p-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                          WhatsApp message
+                        </span>
+                        <button
+                          type="button"
+                          className="text-[10px] font-semibold text-[var(--brand-deep)] underline"
+                          onClick={() =>
+                            void navigator.clipboard
+                              .writeText(aiDraft.whatsappMessage)
+                              .then(
+                                () => flash("Draft message copied"),
+                                () => setError("Could not copy"),
+                              )
+                          }
+                        >
+                          Copy
+                        </button>
+                      </div>
+                      <p className="mt-1 whitespace-pre-wrap text-[12px] text-[var(--ink)]">
+                        {aiDraft.whatsappMessage}
+                      </p>
+                    </div>
+                    <div className="rounded-lg bg-[var(--surface)] p-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                          Call script
+                        </span>
+                        <button
+                          type="button"
+                          className="text-[10px] font-semibold text-[var(--brand-deep)] underline"
+                          onClick={() =>
+                            void navigator.clipboard
+                              .writeText(aiDraft.callScript)
+                              .then(
+                                () => flash("Call script copied"),
+                                () => setError("Could not copy"),
+                              )
+                          }
+                        >
+                          Copy
+                        </button>
+                      </div>
+                      <p className="mt-1 whitespace-pre-wrap text-[12px] text-[var(--ink)]">
+                        {aiDraft.callScript}
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
               </div>
 
               <div className="mt-5">

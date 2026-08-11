@@ -7,6 +7,7 @@ import {
 import { WaTemplatesListView } from "./wa-templates/WaTemplatesListView";
 import { WaTemplatesCreateView } from "./wa-templates/WaTemplatesCreateView";
 import { WaTemplatesEditView } from "./wa-templates/WaTemplatesEditView";
+import { WaAccountHealthCard } from "./wa-templates/WaAccountHealthCard";
 import { useWaTemplatesDesk } from "./wa-templates/useWaTemplatesDesk";
 
 type Screen = "list" | "create" | "edit";
@@ -99,14 +100,17 @@ export function WaTemplatesPanel() {
   }
 
   return (
-    <WaTemplatesListView
-      state={desk.state}
-      readOnly={desk.readOnly}
-      notice={desk.notice}
-      syncing={desk.syncing}
-      onSyncMeta={() => void desk.syncMeta()}
-      onCreate={() => setScreen("create")}
-      onEdit={goEdit}
-    />
+    <>
+      <WaAccountHealthCard />
+      <WaTemplatesListView
+        state={desk.state}
+        readOnly={desk.readOnly}
+        notice={desk.notice}
+        syncing={desk.syncing}
+        onSyncMeta={() => void desk.syncMeta()}
+        onCreate={() => setScreen("create")}
+        onEdit={goEdit}
+      />
+    </>
   );
 }

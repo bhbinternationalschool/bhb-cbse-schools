@@ -1,35 +1,22 @@
-"use client";
-
-import { useEffect, useState } from "react";
-import {
-  buildMpdFeeDisclosure,
-  formatInr,
-  type MpdFeeGroupRow,
-} from "@/lib/feeFinance";
-import {
-  currentAcademicYearCode,
-  loadMasters,
-} from "@/lib/masters";
+import { formatInr, type MpdFeeGroupRow } from "@/lib/feeFinance";
 import { TENANT } from "@/lib/types";
 
 /**
  * Mandatory Public Disclosure — fee structure (CBSE / state MPD style).
- * Public route; reads Masters from localStorage when opened on the same origin.
+ * Presentational only: /mpd is a public route, so the fee rows must be
+ * resolved on the server (app/mpd/page.tsx) — a visitor's browser has no
+ * Masters in localStorage.
  */
-export function MpdFeeDisclosurePage() {
-  const [rows, setRows] = useState<MpdFeeGroupRow[]>([]);
-  const [ay, setAy] = useState("");
-  const [ready, setReady] = useState(false);
-
-  useEffect(() => {
-    const m = loadMasters();
-    setAy(currentAcademicYearCode(m));
-    setRows(buildMpdFeeDisclosure(m));
-    setReady(true);
-  }, []);
-
+export function MpdFeeDisclosurePage({
+  rows,
+  academicYearCode,
+}: {
+  rows: MpdFeeGroupRow[];
+  academicYearCode: string;
+}) {
+  const ay = academicYearCode;
   return (
-    <div className="min-h-screen bg-[var(--creamColor,#F8F8F0)] text-[var(--brand-deep,#203050)]">
+    <div className="min-h-screen bg-[var(--brand-cream,#F8F8F0)] text-[var(--brand-deep,#203050)]">
       <header className="border-b border-[rgba(32,48,80,0.12)] bg-white px-4 py-6 sm:px-8">
         <div className="mx-auto max-w-4xl">
           <p className="text-xs font-medium uppercase tracking-wider text-[var(--muted)]">
@@ -47,13 +34,10 @@ export function MpdFeeDisclosurePage() {
       </header>
 
       <main className="mx-auto max-w-4xl px-4 py-8 sm:px-8">
-        {!ready ? (
-          <p className="text-sm text-[var(--muted)]">Loading…</p>
-        ) : rows.length === 0 ? (
+        {rows.length === 0 ? (
           <p className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-6 text-sm text-[var(--muted)]">
             Fee groups are not published yet. Configure Fee Groups and Fee
-            Structure in the school ERP, then refresh this page on the same
-            browser.
+            Structure in the school ERP and sync them, then refresh this page.
           </p>
         ) : (
           <div className="space-y-6">

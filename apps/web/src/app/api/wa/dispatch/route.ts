@@ -12,9 +12,10 @@
 import { NextResponse } from "next/server";
 import {
   isProductionEnv,
-  requireJobSecret,
   requireStaffPermission,
+  timingSafeStringEqual,
 } from "@/lib/apiRouteAuth.server";
+import type { RbacModule } from "@/lib/rbac";
 import {
   buildWaTemplateBodyComponent,
   buildWaTemplateMediaHeader,
@@ -56,26 +57,46 @@ export async function GET() {
   });
 }
 
-export async function POST(req: Request) {
-  const secret = process.env.WA_DISPATCH_SECRET?.trim();
-  if (secret) {
-    const hdr = req.headers.get("x-wa-dispatch-secret") || "";
-    if (hdr !== secret) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-  } else if (isProductionEnv()) {
-    const auth = await requireStaffPermission(req, "admissions", "edit");
-    if (!auth.ok) return auth.response;
-  }
+type DispatchBody = {
+  messages?: DispatchItem[];
+  dryRun?: boolean;
+  module?: RbacModule;
+};
 
-  let body: { messages?: DispatchItem[]; dryRun?: boolean };
+export async function POST(req: Request) {
+  let body: DispatchBody | null = null;
   try {
-    body = (await req.json()) as typeof body;
+    body = (await req.json()) as DispatchBody;
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const messages = Array.isArray(body.messages) ? body.messages : [];
+  // Two independent valid callers: a job/cron dispatcher presenting the
+  // shared secret, or a signed-in staff browser session with RBAC on
+  // `module`. A configured secret used to act as a mode switch that shut
+  // out every non-secret caller outright — including legitimate staff
+  // sessions from campaigns, fee/payment WA notify, and substitution
+  // notify — the moment WA_DISPATCH_SECRET was set, in dev or prod alike.
+  // Treat a present-but-mismatched/missing header as "not this path" and
+  // fall through to RBAC instead of hard-rejecting.
+  const secret = process.env.WA_DISPATCH_SECRET?.trim();
+  const hdr = req.headers.get("x-wa-dispatch-secret")?.trim() || "";
+  const viaSecret = !!(secret && hdr && timingSafeStringEqual(hdr, secret));
+
+  if (!viaSecret && (isProductionEnv() || secret)) {
+    // Historically hardcoded to "admissions" (this route's first caller was
+    // campaign dispatch) — callers outside Admissions (e.g. substitution
+    // WA notify from Timetable) can pass `module` to be checked against
+    // their own RBAC grant instead of needing Admissions access too.
+    const auth = await requireStaffPermission(
+      req,
+      body?.module || "admissions",
+      "edit",
+    );
+    if (!auth.ok) return auth.response;
+  }
+
+  const messages = Array.isArray(body?.messages) ? body.messages : [];
   if (messages.length === 0) {
     return NextResponse.json({ error: "No messages" }, { status: 400 });
   }
@@ -86,10 +107,10 @@ export async function POST(req: Request) {
     );
   }
 
-  if (body.dryRun || !waOutboundConfigured()) {
+  if (body?.dryRun || !waOutboundConfigured()) {
     return NextResponse.json({
       ok: true,
-      mode: body.dryRun ? "dry_run" : "stub",
+      mode: body?.dryRun ? "dry_run" : "stub",
       accepted: messages.length,
       outboundConfigured: waOutboundConfigured(),
       results: messages.map((m) => ({

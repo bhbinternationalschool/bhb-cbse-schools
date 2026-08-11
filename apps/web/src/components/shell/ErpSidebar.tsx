@@ -333,14 +333,15 @@ export function ErpSidebar({
 
   return (
     <>
-      {/* Desktop — always visible */}
-      <div className="erp-sidebar-desktop hidden h-screen w-[17.5rem] shrink-0 lg:sticky lg:top-0 lg:block lg:self-start">
+      {/* Persistent rail from md (768px) up — tablet portrait and above get
+          the sidebar instead of the phone bottom-nav; see StaffBottomNav. */}
+      <div className="erp-sidebar-desktop hidden h-screen w-[17.5rem] shrink-0 md:sticky md:top-0 md:block md:self-start">
         <SidebarPanel {...panelProps} showClose={false} />
       </div>
 
       {/* Mobile drawer */}
       {mobileOpen ? (
-        <div className="erp-sidebar-mobile fixed inset-0 z-40 lg:hidden">
+        <div className="erp-sidebar-mobile fixed inset-0 z-40 md:hidden">
           <button
             type="button"
             className="absolute inset-0 bg-[rgba(32,48,80,0.45)] backdrop-blur-[2px]"
@@ -361,7 +362,7 @@ export function ErpSidebarMenuButton({ onClick }: { onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg border border-[rgba(32,48,80,0.12)] bg-white text-[var(--brand-deep)] shadow-sm transition hover:border-[rgba(197,160,40,0.4)] lg:hidden"
+      className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg border border-[rgba(32,48,80,0.12)] bg-white text-[var(--brand-deep)] shadow-sm transition hover:border-[rgba(197,160,40,0.4)] md:hidden"
       aria-label="Open module menu"
     >
       <PanelLeftOpen className="h-5 w-5" />

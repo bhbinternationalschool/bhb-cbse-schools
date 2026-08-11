@@ -298,6 +298,21 @@ function staffToRow(s: StaffRecord, tenantId: string, now: string) {
   };
 }
 
+/**
+ * Ids are minted per-browser in localStorage, so two clients (or a re-seeded
+ * client) can hold the same department/designation codes or staff empCodes
+ * under different ids. Upserting on id alone then trips the secondary unique
+ * keys — (tenant_id, code) / (tenant_id, emp_code) — and aborts the whole
+ * push, which leaves sis_staff empty and server-side RBAC without a roster.
+ * Remap incoming ids onto the DB's ids by natural key, and dedupe within the
+ * payload by the same key, before upserting.
+ */
+function dedupeByKey<T>(rows: T[], keyOf: (row: T) => string): T[] {
+  const m = new Map<string, T>();
+  for (const row of rows) m.set(keyOf(row), row);
+  return [...m.values()];
+}
+
 async function upsertStaffBundle(
   sb: SupabaseClient,
   tenantId: string,
@@ -306,9 +321,89 @@ async function upsertStaffBundle(
   if (!staffDualWriteDbEnabled()) return { ok: true };
   const now = new Date().toISOString();
 
-  const depRows = (state.departments ?? []).map((d) =>
-    departmentToRow(d, tenantId, now),
+  const [depRes, desRes, stfRes] = await Promise.all([
+    sb.from("sis_departments").select("id, code").eq("tenant_id", tenantId),
+    sb.from("sis_designations").select("id, code").eq("tenant_id", tenantId),
+    sb.from("sis_staff").select("id, emp_code").eq("tenant_id", tenantId),
+  ]);
+  if (depRes.error || desRes.error || stfRes.error) {
+    const message =
+      depRes.error?.message ||
+      desRes.error?.message ||
+      stfRes.error?.message ||
+      "read failed";
+    console.warn("[staff] push precheck failed", message);
+    return { ok: false, error: message };
+  }
+  const idByKey = (
+    rows: { id: string }[] | null,
+    key: "code" | "emp_code",
+  ): Map<string, string> => {
+    const m = new Map<string, string>();
+    for (const r of rows ?? []) {
+      const k = String((r as Record<string, unknown>)[key] ?? "").trim();
+      if (k) m.set(k, String(r.id));
+    }
+    return m;
+  };
+  const depIdByCode = idByKey(depRes.data, "code");
+  const desIdByCode = idByKey(desRes.data, "code");
+  const stfIdByEmp = idByKey(stfRes.data, "emp_code");
+
+  const depRemap = new Map<string, string>();
+  const departments = dedupeByKey(
+    (state.departments ?? []).map((d) => {
+      const code = (d.code || "").trim();
+      const dbId = code ? depIdByCode.get(code) : undefined;
+      if (dbId && dbId !== d.id) {
+        depRemap.set(d.id, dbId);
+        return { ...d, id: dbId };
+      }
+      return d;
+    }),
+    (d) => (d.code || "").trim() || d.id,
   );
+
+  const desRemap = new Map<string, string>();
+  const designations = dedupeByKey(
+    (state.designations ?? []).map((d) => {
+      const code = (d.code || "").trim();
+      const dbId = code ? desIdByCode.get(code) : undefined;
+      const departmentId = d.departmentId
+        ? depRemap.get(d.departmentId) ?? d.departmentId
+        : d.departmentId;
+      const next = { ...d, departmentId };
+      if (dbId && dbId !== d.id) {
+        desRemap.set(d.id, dbId);
+        next.id = dbId;
+      }
+      return next;
+    }),
+    (d) => (d.code || "").trim() || d.id,
+  );
+
+  const staff = dedupeByKey(
+    (state.staff ?? []).map((raw) => {
+      // The API route feeds request JSON straight through; normalize so a
+      // partial record can't crash the row builders further down.
+      const s = normalizeStaffRecord(raw);
+      const emp = (s.empCode || "").trim();
+      const dbId = emp ? stfIdByEmp.get(emp) : undefined;
+      return {
+        ...s,
+        id: dbId && dbId !== s.id ? dbId : s.id,
+        departmentId: s.departmentId
+          ? depRemap.get(s.departmentId) ?? s.departmentId
+          : s.departmentId,
+        designationId: s.designationId
+          ? desRemap.get(s.designationId) ?? s.designationId
+          : s.designationId,
+      };
+    }),
+    (s) => (s.empCode || "").trim() || s.id,
+  );
+
+  const depRows = departments.map((d) => departmentToRow(d, tenantId, now));
   if (depRows.length > 0) {
     const { error } = await sb.from("sis_departments").upsert(depRows, {
       onConflict: "id",
@@ -319,9 +414,7 @@ async function upsertStaffBundle(
     }
   }
 
-  const desRows = (state.designations ?? []).map((d) =>
-    designationToRow(d, tenantId, now),
-  );
+  const desRows = designations.map((d) => designationToRow(d, tenantId, now));
   if (desRows.length > 0) {
     const { error } = await sb.from("sis_designations").upsert(desRows, {
       onConflict: "id",
@@ -332,9 +425,7 @@ async function upsertStaffBundle(
     }
   }
 
-  const staffRows = (state.staff ?? []).map((s) =>
-    staffToRow(s, tenantId, now),
-  );
+  const staffRows = staff.map((s) => staffToRow(s, tenantId, now));
   const chunk = 40;
   for (let i = 0; i < staffRows.length; i += chunk) {
     const slice = staffRows.slice(i, i + chunk);

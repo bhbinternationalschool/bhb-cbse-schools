@@ -9,8 +9,13 @@ import { FeeReportsPanel } from "@/components/fees/FeeFinancePanels";
 import { PayrollReportsPanel } from "@/components/payroll/PayrollReportsPanel";
 import {
   AccountsReportsRunner,
+  CertificatesReportsRunner,
+  CommsReportsRunner,
+  ExamReportsRunner,
   HomeworkReportsRunner,
+  LibraryReportsRunner,
   StoreReportsRunner,
+  TimetableReportsRunner,
   TransportReportsRunner,
   TrustReportsRunner,
 } from "@/components/reports/ModuleReportRunners";
@@ -466,6 +471,16 @@ function ModuleRunner({
       return <AccountsReportsRunner />;
     case "trust":
       return <TrustReportsRunner />;
+    case "timetable":
+      return <TimetableReportsRunner ay={ay} />;
+    case "exams":
+      return <ExamReportsRunner ay={ay} />;
+    case "library":
+      return <LibraryReportsRunner />;
+    case "certificates":
+      return <CertificatesReportsRunner />;
+    case "comms":
+      return <CommsReportsRunner />;
     default:
       return null;
   }

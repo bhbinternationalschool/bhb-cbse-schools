@@ -14,7 +14,6 @@ import {
 import {
   STAFF_STREAMS,
   isStaffActive,
-  type StaffStream,
   type StaffRecord,
 } from "@/lib/foundationMasters";
 import { loadMasters, saveMasters, currentAcademicYearCode, type MastersState } from "@/lib/masters";
@@ -33,6 +32,8 @@ import {
 } from "@/lib/staffResolve";
 import { RemoveControl } from "@/components/masters/RemoveControl";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { useModuleFilters } from "@/lib/moduleFilters";
+import { FilterBar } from "@/components/ui/filter-bar";
 import {
   ErpBarChart,
   ErpPieChart,
@@ -61,14 +62,36 @@ import { StaffAppraisalPanel } from "@/components/staff/StaffAppraisalPanel";
 import { StaffPayslipsPanel } from "@/components/staff/StaffPayslipsPanel";
 import { StaffMyProfileDocs } from "@/components/staff/StaffMyProfileDocs";
 import { StaffAgreementPanel, StaffAgreementSelfPanel } from "@/components/staff/StaffAgreementPanel";
+import { DutyRosterPanel } from "@/components/staff/DutyRosterPanel";
 import { DocVerificationQueuePanel } from "@/components/students/DocVerificationQueuePanel";
 import { useDemoSession } from "@/components/shell/SessionContext";
 
 type NamedCount = ErpChartRow;
 
+type StaffFilters = {
+  query: string;
+  stream: string;
+  status: string;
+  department: string;
+  designation: string;
+  joinedFrom: string;
+  joinedTo: string;
+};
+
+const EMPTY_STAFF_FILTERS: StaffFilters = {
+  query: "",
+  stream: "",
+  status: "active",
+  department: "",
+  designation: "",
+  joinedFrom: "",
+  joinedTo: "",
+};
+
 type StaffMainTab =
   | "dashboard"
   | "roster"
+  | "duty_roster"
   | "leave"
   | "appraisal"
   | "reports"
@@ -89,6 +112,7 @@ export function StaffWorkspace() {
     const allowed: StaffMainTab[] = [
       "dashboard",
       "roster",
+      "duty_roster",
       "leave",
       "appraisal",
       "reports",
@@ -103,11 +127,16 @@ export function StaffWorkspace() {
     typeof window !== "undefined" ? loadMasters() : null,
   );
   const [notice, setNotice] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
-  const [streamFilter, setStreamFilter] = useState<"" | StaffStream>("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">(
-    "active",
-  );
+  const {
+    filters: staffFilters,
+    patch: patchStaffFilters,
+    reset: resetStaffFilters,
+    activeCount: staffActiveFilterCount,
+  } = useModuleFilters({
+    empty: EMPTY_STAFF_FILTERS,
+    storageKey: "bhb_staff_filters_v1",
+    defaults: { status: "active" },
+  });
 
   useEffect(() => {
     setState(loadMasters());
@@ -226,12 +255,33 @@ export function StaffWorkspace() {
 
   const filtered = useMemo(() => {
     if (!state) return [];
-    const q = query.trim().toLowerCase();
+    const q = staffFilters.query.trim().toLowerCase();
     return (state.staff ?? [])
       .filter((s) => {
-        if (statusFilter === "active" && !isStaffActive(s)) return false;
-        if (statusFilter === "inactive" && isStaffActive(s)) return false;
-        if (streamFilter && s.stream !== streamFilter) return false;
+        if (staffFilters.status === "active" && !isStaffActive(s)) return false;
+        if (staffFilters.status === "inactive" && isStaffActive(s)) return false;
+        if (staffFilters.stream && s.stream !== staffFilters.stream) return false;
+        if (staffFilters.department && s.departmentId !== staffFilters.department) {
+          return false;
+        }
+        if (
+          staffFilters.designation &&
+          s.designationId !== staffFilters.designation
+        ) {
+          return false;
+        }
+        if (
+          staffFilters.joinedFrom &&
+          (!s.joiningDate || s.joiningDate < staffFilters.joinedFrom)
+        ) {
+          return false;
+        }
+        if (
+          staffFilters.joinedTo &&
+          (!s.joiningDate || s.joiningDate > staffFilters.joinedTo)
+        ) {
+          return false;
+        }
         if (!q) return true;
         const dep = state.departments.find((d) => d.id === s.departmentId);
         const des = state.designations.find((d) => d.id === s.designationId);
@@ -250,7 +300,7 @@ export function StaffWorkspace() {
         return hay.includes(q);
       })
       .sort((a, b) => a.empCode.localeCompare(b.empCode));
-  }, [state, query, streamFilter, statusFilter]);
+  }, [state, staffFilters]);
 
   function scrollTo(id: string) {
     document.getElementById(id)?.scrollIntoView({
@@ -286,6 +336,7 @@ export function StaffWorkspace() {
         items={[
           { id: "dashboard", label: "Dashboard", tone: "navy" },
           { id: "roster", label: "Roster", tone: "navy" },
+          { id: "duty_roster", label: "Duty roster", tone: "coral" },
           { id: "my_docs", label: "My docs", tone: "sky" },
           { id: "agreements", label: "Agreements", tone: "teal" },
           { id: "doc_verify", label: "Doc verify", tone: "amber" },
@@ -301,6 +352,12 @@ export function StaffWorkspace() {
           moduleId="staff"
           onNavigateTab={(t) => setTab(t as StaffMainTab)}
         />
+      ) : null}
+
+      {tab === "duty_roster" ? (
+        <ErpPanel title="Duty roster">
+          <DutyRosterPanel masters={state} />
+        </ErpPanel>
       ) : null}
 
       {tab === "my_docs" ? (
@@ -426,50 +483,78 @@ export function StaffWorkspace() {
       </ErpChartGrid>
 
       <div id="staff-list" className="scroll-mt-24 space-y-4">
-        <div className="flex flex-wrap items-end gap-2">
-          <label className="min-w-[12rem] flex-1 text-xs font-semibold text-[var(--muted)]">
-            Search
-            <input
-              className="field mt-1 w-full !py-2"
-              placeholder="Code, name, mobile…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </label>
-          <label className="text-xs font-semibold text-[var(--muted)]">
-            Stream
-            <select
-              className="field mt-1 !py-2"
-              value={streamFilter}
-              onChange={(e) =>
-                setStreamFilter(e.target.value as "" | StaffStream)
-              }
-            >
-              <option value="">All</option>
-              {STAFF_STREAMS.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-xs font-semibold text-[var(--muted)]">
-            Status
-            <select
-              className="field mt-1 !py-2"
-              value={statusFilter}
-              onChange={(e) =>
-                setStatusFilter(e.target.value as "all" | "active" | "inactive")
-              }
-            >
-              <option value="all">All</option>
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-            </select>
-          </label>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <FilterBar
+            query={staffFilters.query}
+            onQueryChange={(v) => patchStaffFilters({ query: v })}
+            queryPlaceholder="Code, name, mobile…"
+            activeCount={staffActiveFilterCount}
+            onReset={resetStaffFilters}
+            facets={[
+              {
+                key: "stream",
+                label: "Stream",
+                value: staffFilters.stream,
+                onChange: (v) => patchStaffFilters({ stream: v }),
+                options: STAFF_STREAMS.map((s) => ({
+                  value: s.value,
+                  label: s.label,
+                })),
+              },
+              {
+                key: "status",
+                label: "Status",
+                value: staffFilters.status === "active" ? "" : staffFilters.status,
+                allLabel: "Active (default)",
+                onChange: (v) =>
+                  patchStaffFilters({ status: v === "" ? "active" : v }),
+                options: [
+                  { value: "all", label: "All" },
+                  { value: "inactive", label: "Inactive" },
+                ],
+              },
+              {
+                key: "department",
+                label: "Department",
+                value: staffFilters.department,
+                onChange: (v) => patchStaffFilters({ department: v }),
+                options: state.departments
+                  .filter((d) => d.isActive)
+                  .map((d) => ({ value: d.id, label: d.name })),
+              },
+              {
+                key: "designation",
+                label: "Designation",
+                value: staffFilters.designation,
+                onChange: (v) => patchStaffFilters({ designation: v }),
+                options: state.designations
+                  .filter((d) => d.isActive)
+                  .map((d) => ({ value: d.id, label: d.name })),
+              },
+            ]}
+          >
+            <label className="flex items-center gap-1.5 text-[11px] font-semibold text-[var(--muted)]">
+              Joined
+              <input
+                type="date"
+                className="field !py-1.5"
+                value={staffFilters.joinedFrom}
+                onChange={(e) => patchStaffFilters({ joinedFrom: e.target.value })}
+                aria-label="Joined from"
+              />
+              <span>–</span>
+              <input
+                type="date"
+                className="field !py-1.5"
+                value={staffFilters.joinedTo}
+                onChange={(e) => patchStaffFilters({ joinedTo: e.target.value })}
+                aria-label="Joined to"
+              />
+            </label>
+          </FilterBar>
           <Link
             href="/staff/new"
-            className="rounded-xl bg-[var(--brand-deep)] px-4 py-2.5 text-sm font-bold text-white"
+            className="shrink-0 rounded-xl bg-[var(--brand-deep)] px-4 py-2.5 text-sm font-bold text-white"
           >
             Add staff
           </Link>

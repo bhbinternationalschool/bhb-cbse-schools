@@ -52,9 +52,16 @@ import { loadPayroll } from "@/lib/payroll";
 import { loadPtm } from "@/lib/ptm";
 import { loadPurchase } from "@/lib/purchase";
 import { loadReportsCenterRecent } from "@/lib/reportsCenter";
+import { audienceLabel, loadSchoolComms } from "@/lib/schoolComms";
+import { applicationStatusLabel, loadRte } from "@/lib/rteEws";
 import { countActiveHouseholds, loadSis } from "@/lib/sis";
 import { loadStaffAttendance, summarizeStaffMarks } from "@/lib/staffAttendance";
 import { loadStaffHr } from "@/lib/staffHr";
+import {
+  loadTimetable,
+  teacherLabel,
+  teachingPeriods,
+} from "@/lib/timetable";
 import {
   listActiveStoreItems,
   listLowStockItems,
@@ -87,7 +94,10 @@ export type DashboardModuleId =
   | "reports"
   | "field"
   | "student_leave"
-  | "purchase";
+  | "purchase"
+  | "timetable"
+  | "comms"
+  | "rte";
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -1745,6 +1755,99 @@ function examsDash(academicYearCode?: string): ModuleDashboardModel {
   };
 }
 
+function timetableDash(academicYearCode?: string): ModuleDashboardModel {
+  const masters = loadMasters();
+  const state = loadTimetable();
+  const grids = state.grids.filter((g) => inAcademicYear(g, academicYearCode));
+  const teaching = teachingPeriods(state.bellTemplate);
+
+  const possibleSlots = grids.length * teaching.length;
+  const filledSlots = grids.reduce(
+    (s, g) => s + g.slots.filter((sl) => sl.teacherId).length,
+    0,
+  );
+  const fillPercent =
+    possibleSlots > 0 ? Math.round((filledSlots / possibleSlots) * 100) : 0;
+
+  const today = todayIso();
+  const subsToday = state.substitutions.filter((s) => s.date === today);
+  const subsUnfilled = subsToday.filter((s) => !s.substituteTeacherId).length;
+
+  const loadMap = new Map<string, number>();
+  for (const g of grids) {
+    for (const sl of g.slots) {
+      if (!sl.teacherId) continue;
+      loadMap.set(sl.teacherId, (loadMap.get(sl.teacherId) ?? 0) + 1);
+    }
+  }
+  const loadRows = [...loadMap.entries()]
+    .map(([teacherId, count]) => ({
+      id: teacherId,
+      name: teacherLabel(masters, teacherId),
+      count,
+    }))
+    .sort((a, b) => b.count - a.count);
+
+  const chart = loadRows.slice(0, 10).map((r) => ({
+    label: r.name,
+    value: r.count,
+  }));
+
+  return {
+    title: "Timetable",
+    subtitle: `Session ${academicYearCode || "all"} · weekly grids, fill rate, and today's substitutions.`,
+    kpis: [
+      {
+        id: "classes",
+        label: "Class grids",
+        value: String(grids.length),
+        tone: "navy",
+        tab: "class",
+      },
+      {
+        id: "fill",
+        label: "Slots filled",
+        value: `${fillPercent}%`,
+        hint:
+          possibleSlots > 0
+            ? `${filledSlots} of ${possibleSlots} teaching periods`
+            : "No grids yet",
+        tone: fillPercent >= 90 ? "green" : fillPercent >= 60 ? "gold" : "rose",
+        tab: "auto",
+      },
+      {
+        id: "published",
+        label: "Status",
+        value: state.meta.status === "published" ? "Published" : "Draft",
+        tone: state.meta.status === "published" ? "green" : "gold",
+        tab: "publish",
+      },
+      {
+        id: "subs",
+        label: "Substitutions today",
+        value: String(subsToday.length),
+        hint: subsUnfilled > 0 ? `${subsUnfilled} unfilled` : undefined,
+        tone: subsUnfilled > 0 ? "rose" : "teal",
+        tab: "subs",
+      },
+    ],
+    chartTitle: "Periods by teacher",
+    chartSeries: chart.length ? chart : [{ label: "—", value: 0 }],
+    tableTitle: "Teacher load",
+    tableColumns: [
+      { key: "name", label: "Teacher" },
+      { key: "count", label: "Periods/week", align: "right" },
+    ],
+    tableRows: loadRows.slice(0, 30),
+    quickLinks: [
+      { label: "By class", tab: "class" },
+      { label: "By teacher", tab: "teacher" },
+      { label: "Substitutes", tab: "subs" },
+      { label: "Auto-assign", tab: "auto" },
+    ],
+  };
+}
+
 function certificatesDash(academicYearCode?: string): ModuleDashboardModel {
   const certs = loadCertificates();
   const issues = (certs.issues ?? []).filter((i) =>
@@ -1826,6 +1929,183 @@ function certificatesDash(academicYearCode?: string): ModuleDashboardModel {
         type: c.kind || "—",
         date: c.issuedOn || "—",
       })),
+  };
+}
+
+function commsDash(academicYearCode?: string): ModuleDashboardModel {
+  const comms = loadSchoolComms();
+  const notices = comms.notices.filter((n) => inAcademicYear(n, academicYearCode));
+  const news = comms.news.filter((n) => inAcademicYear(n, academicYearCode));
+  const albums = comms.albums.filter((a) => inAcademicYear(a, academicYearCode));
+
+  const publishedNotices = notices.filter((n) => n.status === "published");
+  const publishedNews = news.filter((n) => n.status === "published");
+  const publishedAlbums = albums.filter((a) => a.status === "published");
+  const pendingCount =
+    [...notices, ...news, ...albums].filter(
+      (r) => r.status === "draft" || r.status === "scheduled",
+    ).length;
+
+  const byAudience = new Map<string, number>();
+  for (const n of notices) {
+    const label = audienceLabel(n.audience);
+    byAudience.set(label, (byAudience.get(label) ?? 0) + 1);
+  }
+  const chart = [...byAudience.entries()].map(([label, value]) => ({
+    label,
+    value,
+  }));
+
+  const recent = [...notices]
+    .sort((a, b) => (b.publishedAt || b.createdAt).localeCompare(a.publishedAt || a.createdAt))
+    .slice(0, 30)
+    .map((n) => ({
+      id: n.id,
+      title: n.title || "Untitled",
+      audience: audienceLabel(n.audience),
+      status: n.status,
+    }));
+
+  return {
+    title: "Comms",
+    subtitle: `Session ${academicYearCode || "all"} · notices, news, gallery, and WhatsApp reach.`,
+    kpis: [
+      {
+        id: "notices",
+        label: "Notices published",
+        value: String(publishedNotices.length),
+        tone: "navy",
+        tab: "notices",
+      },
+      {
+        id: "news",
+        label: "News published",
+        value: String(publishedNews.length),
+        tone: "teal",
+        tab: "news",
+      },
+      {
+        id: "gallery",
+        label: "Gallery albums",
+        value: String(publishedAlbums.length),
+        tone: "gold",
+        tab: "gallery",
+      },
+      {
+        id: "pending",
+        label: "Drafts pending",
+        value: String(pendingCount),
+        hint: pendingCount > 0 ? "Draft or scheduled, not yet published" : undefined,
+        tone: pendingCount > 0 ? "rose" : "green",
+        tab: "notices",
+      },
+    ],
+    chartTitle: "Notices by audience",
+    chartSeries: chart.length ? chart : [{ label: "—", value: 0 }],
+    tableTitle: "Recent notices",
+    tableColumns: [
+      { key: "title", label: "Title" },
+      { key: "audience", label: "Audience" },
+      { key: "status", label: "Status" },
+    ],
+    tableRows: recent,
+    quickLinks: [
+      { label: "Notices", tab: "notices" },
+      { label: "News", tab: "news" },
+      { label: "Gallery", tab: "gallery" },
+      { label: "WhatsApp hub", tab: "wa_hub" },
+    ],
+  };
+}
+
+function rteDash(academicYearCode?: string): ModuleDashboardModel {
+  const rte = loadRte();
+  const seats = rte.seats.filter((s) => inAcademicYear(s, academicYearCode));
+  const applications = rte.applications.filter((a) =>
+    inAcademicYear(a, academicYearCode),
+  );
+
+  const totalSeats = seats.reduce((s, r) => s + r.total, 0);
+  const enrolled = applications.filter((a) => a.status === "enrolled").length;
+  const admitted = applications.filter(
+    (a) => a.status === "admitted" || a.status === "enrolled",
+  ).length;
+  const pending = applications.filter(
+    (a) => a.status === "govt_assigned" || a.status === "waitlist",
+  ).length;
+  const fillPercent =
+    totalSeats > 0 ? Math.round((admitted / totalSeats) * 100) : 0;
+
+  const byStatus = new Map<string, number>();
+  for (const a of applications) {
+    const label = applicationStatusLabel(a.status);
+    byStatus.set(label, (byStatus.get(label) ?? 0) + 1);
+  }
+  const chart = [...byStatus.entries()].map(([label, value]) => ({
+    label,
+    value,
+  }));
+
+  const recent = [...applications]
+    .sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""))
+    .slice(0, 30)
+    .map((a) => ({
+      id: a.id,
+      child: a.childName || "—",
+      type: a.type,
+      status: applicationStatusLabel(a.status),
+    }));
+
+  return {
+    title: "RTE / EWS",
+    subtitle: `Session ${academicYearCode || "all"} · mandated seats, applications, and admissions.`,
+    kpis: [
+      {
+        id: "seats",
+        label: "Seats mandated",
+        value: String(totalSeats),
+        tone: "navy",
+        tab: "dashboard",
+      },
+      {
+        id: "fill",
+        label: "Seats filled",
+        value: `${fillPercent}%`,
+        hint: `${admitted} of ${totalSeats} seats`,
+        tone: fillPercent >= 90 ? "green" : fillPercent >= 50 ? "gold" : "rose",
+        tab: "dashboard",
+      },
+      {
+        id: "pending",
+        label: "Pending decision",
+        value: String(pending),
+        hint: pending > 0 ? "Govt-assigned or waitlisted" : undefined,
+        tone: pending > 0 ? "rose" : "green",
+        tab: "applications",
+      },
+      {
+        id: "enrolled",
+        label: "Enrolled",
+        value: String(enrolled),
+        tone: "teal",
+        tab: "enrolled",
+      },
+    ],
+    chartTitle: "Applications by status",
+    chartSeries: chart.length ? chart : [{ label: "—", value: 0 }],
+    tableTitle: "Recent applications",
+    tableColumns: [
+      { key: "child", label: "Child" },
+      { key: "type", label: "Quota" },
+      { key: "status", label: "Status" },
+    ],
+    tableRows: recent,
+    quickLinks: [
+      { label: "Seats", tab: "dashboard" },
+      { label: "Govt list", tab: "applications" },
+      { label: "Enrolled", tab: "enrolled" },
+      { label: "Reports", tab: "reports" },
+    ],
   };
 }
 
@@ -2209,6 +2489,12 @@ export function buildModuleDashboard(
         return studentLeaveDash(opts?.academicYearCode);
       case "purchase":
         return purchaseDash(opts?.academicYearCode);
+      case "timetable":
+        return timetableDash(opts?.academicYearCode);
+      case "comms":
+        return commsDash(opts?.academicYearCode);
+      case "rte":
+        return rteDash(opts?.academicYearCode);
       default:
         return emptyModel("Dashboard", "Module overview");
     }

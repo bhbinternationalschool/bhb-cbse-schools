@@ -148,6 +148,10 @@ export type CertificateIssue = {
   customTitle: string;
   /** AI-drafted or edited certificate body — when set, printed instead of template */
   customBody: string;
+  /** True if customTitle/customBody's initial draft came from the AI
+   * assistant — internal provenance only, never printed on the certificate
+   * itself. A human still reviews before Issue. */
+  aiGenerated: boolean;
 };
 
 export type CertificatesState = {
@@ -454,6 +458,7 @@ function normalizeIssue(c: CertificateIssue): CertificateIssue {
           : null,
     customTitle: c.customTitle || "",
     customBody: c.customBody || "",
+    aiGenerated: !!c.aiGenerated,
   };
 }
 
@@ -809,6 +814,8 @@ export type IssueCertificateInput = {
   feesPaidIncludeSiblings?: boolean;
   customTitle?: string;
   customBody?: string;
+  /** True when customTitle/customBody came from the AI drafting assistant */
+  aiGenerated?: boolean;
 };
 
 export function issueCertificate(
@@ -952,6 +959,7 @@ export function issueCertificate(
     remarks: input.remarks?.trim() || "",
     customTitle: input.customTitle?.trim() || "",
     customBody: input.customBody?.trim() || "",
+    aiGenerated: !!input.aiGenerated,
     openBalancePaise: eligibility.openBalancePaise,
     duesCleared,
     overrideDues: !!input.overrideDues && eligibility.requiresOverride,

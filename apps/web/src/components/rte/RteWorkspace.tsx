@@ -6,6 +6,7 @@ import { Accessibility } from "lucide-react";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
+import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
 import { isModuleEnabled, setModuleEnabled } from "@/lib/moduleRegistry";
 import { loadSis, type SisState } from "@/lib/sis";
@@ -46,6 +47,7 @@ import {
 
 type RteTab =
   | "dashboard"
+  | "kpis"
   | "applications"
   | "enrolled"
   | "settings"
@@ -53,6 +55,7 @@ type RteTab =
 
 const TABS: ModuleTabItem[] = [
   { id: "dashboard", label: "Seats", tone: "navy" },
+  { id: "kpis", label: "Dashboard", tone: "sky" },
   { id: "applications", label: "Govt list", tone: "teal" },
   { id: "enrolled", label: "Enrolled", tone: "green" },
   { id: "settings", label: "Settings", tone: "amber" },
@@ -69,6 +72,7 @@ export function RteWorkspace({
   const ay = session.academicYearCode || DEFAULT_AY;
   const [tab, setTab] = useModuleTabQuery<RteTab>("dashboard", [
     "dashboard",
+    "kpis",
     "applications",
     "enrolled",
     "settings",
@@ -367,6 +371,15 @@ export function RteWorkspace({
             )}
           </ul>
         </section>
+      ) : null}
+
+      {tab === "kpis" ? (
+        <div className="mt-4">
+          <ModuleDashboardHost
+            moduleId="rte"
+            onNavigateTab={(t) => setTab(t as RteTab)}
+          />
+        </div>
       ) : null}
 
       {tab === "applications" ? (

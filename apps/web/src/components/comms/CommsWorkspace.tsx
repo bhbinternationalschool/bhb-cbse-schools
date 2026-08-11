@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Images, Megaphone } from "lucide-react";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
+import { CommsReportsRunner } from "@/components/reports/ModuleReportRunners";
 import { ErpTableShell } from "@/components/ui/erp-roster";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ClassChannelsPanel } from "@/components/comms/ClassChannelsPanel";
@@ -58,17 +59,21 @@ import {
 import { TENANT } from "@/lib/types";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import { DeskListActions } from "@/components/ui/desk-list-actions";
+import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 
 type CommsTab =
+  | "dashboard"
   | "notices"
   | "news"
   | "gallery"
   | "social"
   | "inbox"
   | "channels"
-  | "wa_hub";
+  | "wa_hub"
+  | "reports";
 
 const TABS: ModuleTabItem[] = [
+  { id: "dashboard", label: "Dashboard", tone: "navy" },
   { id: "notices", label: "Notices", tone: "navy" },
   { id: "news", label: "News", tone: "teal" },
   { id: "gallery", label: "Gallery", tone: "amber" },
@@ -76,6 +81,7 @@ const TABS: ModuleTabItem[] = [
   { id: "channels", label: "Class WA", tone: "violet" },
   { id: "wa_hub", label: "WhatsApp hub", tone: "teal" },
   { id: "inbox", label: "Inbox", tone: "slate" },
+  { id: "reports", label: "Reports", tone: "coral" },
 ];
 
 function tabFromSearch(raw: string | null, path: string): CommsTab {
@@ -83,13 +89,15 @@ function tabFromSearch(raw: string | null, path: string): CommsTab {
   if (path.startsWith("/gallery")) return "gallery";
   if (path.startsWith("/notices")) return "notices";
   if (
+    raw === "dashboard" ||
     raw === "news" ||
     raw === "gallery" ||
     raw === "social" ||
     raw === "inbox" ||
     raw === "notices" ||
     raw === "channels" ||
-    raw === "wa_hub"
+    raw === "wa_hub" ||
+    raw === "reports"
   ) {
     return raw;
   }
@@ -568,6 +576,12 @@ export function CommsWorkspace() {
       notice={noticeMsg}
     >
       <ModuleTabs items={TABS} value={tab} onChange={(id) => setTab(id as CommsTab)} />
+
+      {tab === "dashboard" ? (
+        <div className="mt-6">
+          <ModuleDashboardHost moduleId="comms" onNavigateTab={(t) => setTab(t as CommsTab)} />
+        </div>
+      ) : null}
 
       {tab === "notices" ||
       tab === "news" ||
@@ -1241,6 +1255,12 @@ export function CommsWorkspace() {
             })
           )}
         </section>
+      ) : null}
+
+      {tab === "reports" ? (
+        <div className="mt-2">
+          <CommsReportsRunner />
+        </div>
       ) : null}
     </ErpWorkspaceShell>
   );

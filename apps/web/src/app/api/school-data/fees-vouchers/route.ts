@@ -3,6 +3,8 @@ import {
   authorizeSchoolDataDesk,
   SCHOOL_DATA_DESK_RBAC,
 } from "@/lib/apiRouteAuth.server";
+import { requestMeta } from "@/lib/api/v1/auth";
+import { auditArrayDiff } from "@/lib/auditDeskDiff.server";
 import type { CollectionVoucher, FeesState } from "@/lib/fees";
 import type { FeeDeskAncillary } from "@/lib/feesDeskAncillary.server";
 import {
@@ -10,6 +12,17 @@ import {
   feesDualWriteDbEnabled,
   pushFeeDeskToDb,
 } from "@/lib/feesNormalized.server";
+
+function voucherAuditSummary(
+  v: CollectionVoucher,
+  action: "create" | "update" | "delete",
+): string {
+  const amount = `₹${(v.totalPaise / 100).toLocaleString("en-IN")}`;
+  const verb =
+    action === "create" ? "Collected" : action === "delete" ? "Removed" : "Updated";
+  const voided = v.voidedAt ? " · VOIDED" : "";
+  return `${verb} receipt ${v.receiptNo || v.id} · ${amount}${voided}`;
+}
 
 export const runtime = "nodejs";
 
@@ -70,6 +83,15 @@ export async function POST(req: Request) {
     chargeVouchers: body.chargeVouchers ?? [],
   };
 
+  // Desk sync pushes the full voucher snapshot every time, not individual
+  // edits — fees was one of the least-governed modules (zero audit_events
+  // rows) precisely because there was never a per-record write to hang an
+  // audit entry on. Diff against what's already stored so a resync of
+  // unchanged data stays silent and only real create/edit/void/delete get
+  // written.
+  const priorDesk = await fetchFeeDeskFromDb();
+  const priorVouchers = priorDesk.ok ? priorDesk.vouchers : [];
+
   const result = await pushFeeDeskToDb(state, {
     academicYearCode: body.academicYearCode,
     rebuildOpenDues: body.rebuildOpenDues,
@@ -80,6 +102,18 @@ export async function POST(req: Request) {
       { status: 502 },
     );
   }
+
+  const { ip, userAgent } = requestMeta(req);
+  await auditArrayDiff({
+    session: auth.ctx.session,
+    module: "fees",
+    entityType: "collection_voucher",
+    before: priorVouchers,
+    after: state.vouchers,
+    ip,
+    userAgent,
+    summarize: voucherAuditSummary,
+  });
 
   return NextResponse.json({
     ok: true,

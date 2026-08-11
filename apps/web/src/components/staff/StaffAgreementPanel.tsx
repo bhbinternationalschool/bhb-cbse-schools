@@ -73,6 +73,7 @@ export function StaffAgreementPanel({
     useState<AgreementTemplateId>("appointment_letter");
   const [draftTitle, setDraftTitle] = useState("");
   const [draftBody, setDraftBody] = useState("");
+  const [draftIsAi, setDraftIsAi] = useState(false);
 
   const [aiDetails, setAiDetails] = useState("");
   const [aiLanguage, setAiLanguage] = useState<AiLanguage>("both");
@@ -228,6 +229,7 @@ export function StaffAgreementPanel({
     setTemplateId("custom");
     setDraftTitle(result.title);
     setDraftBody(result.body);
+    setDraftIsAi(true);
     flash("CBSE-style AI draft ready — review, edit, then create draft");
   }
 
@@ -247,6 +249,7 @@ export function StaffAgreementPanel({
       actorStaffId: sessionStaff?.id,
       title: draftTitle || undefined,
       bodyTemplate: draftBody || undefined,
+      aiGenerated: draftIsAi,
     });
     setBusy(false);
     if (!r.ok) {
@@ -256,6 +259,7 @@ export function StaffAgreementPanel({
     flash("Agreement created (draft)");
     setDraftTitle("");
     setDraftBody("");
+    setDraftIsAi(false);
     startEdit(r.agreement);
     setTick((t) => t + 1);
   }
@@ -587,6 +591,7 @@ export function StaffAgreementPanel({
                     if (id !== "custom") {
                       setDraftTitle("");
                       setDraftBody("");
+                      setDraftIsAi(false);
                     }
                   }}
                 >
@@ -706,6 +711,14 @@ export function StaffAgreementPanel({
                 </td>
                 <td className="px-4 py-3 text-sm">
                   {templateLabel(row.templateId)}
+                  {row.aiGenerated ? (
+                    <span
+                      className="ml-1.5 rounded-full bg-[rgba(197,160,40,0.15)] px-1.5 py-0.5 text-[9px] font-semibold text-[#8a6400]"
+                      title="Initial draft came from the AI drafting assistant — reviewed and signed by humans before it takes effect"
+                    >
+                      AI-drafted
+                    </span>
+                  ) : null}
                   <br />
                   <span className="text-[10px] text-[var(--muted)]">
                     {row.title}
@@ -860,6 +873,12 @@ export function StaffAgreementPanel({
                 <p className="mt-1 text-xs text-[var(--muted)]">
                   Save before sending. Use AI below to align with CBSE school employment norms.
                 </p>
+                {editingAgreement.aiGenerated ? (
+                  <p className="mt-1 text-[11px] font-semibold text-[#8a6400]">
+                    This draft started from AI-generated text — review every clause
+                    before sending for signature.
+                  </p>
+                ) : null}
               </div>
               <button
                 type="button"

@@ -38,6 +38,9 @@ import { StudentNameLabel } from "@/components/students/StudentAvatar";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { ErpTableShell } from "@/components/ui/erp-roster";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
+import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { CertificatesReportsRunner } from "@/components/reports/ModuleReportRunners";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { StudentHitsFilterExport } from "@/components/reports/StudentHitsFilterExport";
 import {
   CertificateSheet,
@@ -59,8 +62,11 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
+type Tab = "dashboard" | "desk" | "reports";
+
 export function CertificatesWorkspace() {
   const session = useDemoSession();
+  const [tab, setTab] = useState<Tab>("desk");
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [sis, setSis] = useState<SisState | null>(null);
   const [issues, setIssues] = useState<CertificateIssue[]>([]);
@@ -95,6 +101,7 @@ export function CertificatesWorkspace() {
   );
   const [feesIncludeSiblings, setFeesIncludeSiblings] = useState(false);
   const [previewId, setPreviewId] = useState<string | null>(null);
+  const [voidTargetId, setVoidTargetId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
@@ -104,6 +111,7 @@ export function CertificatesWorkspace() {
   const [aiLoading, setAiLoading] = useState(false);
   const [customTitle, setCustomTitle] = useState("");
   const [customBody, setCustomBody] = useState("");
+  const [customIsAi, setCustomIsAi] = useState(false);
 
   function refresh() {
     const m = loadMasters();
@@ -242,6 +250,11 @@ export function CertificatesWorkspace() {
     [issues, previewId],
   );
 
+  const voidTarget = useMemo(
+    () => issues.find((i) => i.id === voidTargetId) ?? null,
+    [issues, voidTargetId],
+  );
+
   const nextCertNoPreview = useMemo(() => {
     if (!student) return "";
     const ay = student.academicYearCode || session.academicYearCode || DEFAULT_AY;
@@ -285,6 +298,7 @@ export function CertificatesWorkspace() {
       }
       setCustomTitle(data.title || "");
       setCustomBody(data.body || "");
+      setCustomIsAi(true);
       if (data.remarks) setRemarks(data.remarks);
       if (kind === "tc") {
         setTcForm((prev) => ({
@@ -339,6 +353,7 @@ export function CertificatesWorkspace() {
       remarks,
       customTitle: customBody ? customTitle : undefined,
       customBody: customBody || undefined,
+      aiGenerated: customBody ? customIsAi : undefined,
       inactivateOnTc,
       pen,
       apaarId,
@@ -379,6 +394,7 @@ export function CertificatesWorkspace() {
     setReasonForLeaving("");
     setCustomTitle("");
     setCustomBody("");
+    setCustomIsAi(false);
     refresh();
     setPreviewId(result.issue.id);
     window.setTimeout(() => printCertificate(result.issue.id), 200);
@@ -398,10 +414,33 @@ export function CertificatesWorkspace() {
         </p>
       }
     >
-      <div className="mt-4">
-        <ModuleDashboardHost moduleId="certificates" />
-      </div>
+      <ModuleTabs
+        aria-label="Certificates sections"
+        value={tab}
+        onChange={(id) => setTab(id as Tab)}
+        items={[
+          { id: "dashboard", label: "Dashboard", tone: "navy" },
+          { id: "desk", label: "Issue & register", tone: "amber" },
+          { id: "reports", label: "Reports", tone: "teal" },
+        ]}
+      />
 
+      {tab === "dashboard" ? (
+        <div className="mt-6">
+          <ModuleDashboardHost
+            moduleId="certificates"
+            onNavigateTab={(t) => setTab(t as Tab)}
+          />
+        </div>
+      ) : null}
+
+      {tab === "reports" ? (
+        <div className="mt-6">
+          <CertificatesReportsRunner />
+        </div>
+      ) : null}
+
+      {tab === "desk" ? (
       <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
         <div className="space-y-4">
           <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
@@ -1169,6 +1208,14 @@ export function CertificatesWorkspace() {
                         <div className="text-sm font-semibold text-[var(--brand-deep)]">
                           {iss.certNo}
                           {voided ? " · void" : ""}
+                          {iss.aiGenerated ? (
+                            <span
+                              className="ml-1.5 rounded-full bg-[rgba(197,160,40,0.15)] px-1.5 py-0.5 text-[9px] font-semibold text-[#8a6400]"
+                              title="Initial text drafted by the AI assistant, reviewed before issue — internal note, never printed on the certificate"
+                            >
+                              AI-drafted
+                            </span>
+                          ) : null}
                         </div>
                         <div className="text-[11px] text-[var(--muted)]">
                           {certificateKindLabel(iss.kind)} · {iss.studentName} ·{" "}
@@ -1192,19 +1239,8 @@ export function CertificatesWorkspace() {
                         {!voided ? (
                           <button
                             type="button"
-                            className="text-[11px] font-semibold text-[#dc2626]"
-                            onClick={() => {
-                              if (
-                                !window.confirm(
-                                  `Void ${iss.certNo}? Student status is not restored.`,
-                                )
-                              ) {
-                                return;
-                              }
-                              voidCertificate(iss.id);
-                              refresh();
-                              flash("Certificate voided");
-                            }}
+                            className="text-[11px] font-semibold text-[var(--danger)]"
+                            onClick={() => setVoidTargetId(iss.id)}
                           >
                             Void
                           </button>
@@ -1237,6 +1273,7 @@ export function CertificatesWorkspace() {
           ) : null}
         </div>
       </div>
+      ) : null}
 
       {holdDialog &&
       student &&
@@ -1256,6 +1293,28 @@ export function CertificatesWorkspace() {
           }}
         />
       ) : null}
+
+      <ConfirmDialog
+        open={!!voidTarget}
+        onOpenChange={(open) => {
+          if (!open) setVoidTargetId(null);
+        }}
+        title={
+          voidTarget
+            ? `Void ${voidTarget.certNo}?`
+            : "Void this certificate?"
+        }
+        description="Student status is not restored."
+        confirmLabel="Void"
+        tone="danger"
+        onConfirm={() => {
+          if (!voidTarget) return;
+          voidCertificate(voidTarget.id);
+          refresh();
+          flash("Certificate voided");
+          setVoidTargetId(null);
+        }}
+      />
     </ErpWorkspaceShell>
   );
 }

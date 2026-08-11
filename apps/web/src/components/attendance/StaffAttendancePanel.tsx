@@ -39,6 +39,10 @@ import {
   canManageStaffLeave,
   resolveSessionStaff,
 } from "@/lib/staffResolve";
+import {
+  autoRunSubstitutionForDate,
+  notifySubstitutes,
+} from "@/lib/timetableSubstitutionAuto";
 
 type AttTab =
   | "punch"
@@ -222,6 +226,31 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
     }, 2800);
   }
 
+  /** Re-derives who's absent on `forDate` and auto-arranges + notifies any
+   * newly-uncovered periods — safe to call after every save, since it's a
+   * no-op when nothing changed (see lib/timetableSubstitutionAuto.ts). */
+  async function runSubstitutionAutomation(forDate: string) {
+    if (!masters) return;
+    const outcome = autoRunSubstitutionForDate(masters, ay, forDate);
+    if (!outcome.ran || outcome.created.length === 0) return;
+    const bits = [
+      `${outcome.created.length} substitution(s) auto-arranged for ${forDate}`,
+    ];
+    const notifyResult = await notifySubstitutes(
+      outcome.created,
+      masters,
+      forDate,
+    );
+    if (notifyResult.ok) {
+      if (notifyResult.sent > 0) {
+        bits.push(`${notifyResult.sent} substitute(s) notified on WhatsApp`);
+      }
+    } else {
+      bits.push(`WhatsApp notify failed: ${notifyResult.error}`);
+    }
+    flash(bits.join(" · "));
+  }
+
   function setStatus(id: string, st: AttendanceStatus) {
     setMarks((prev) =>
       prev.map((m) =>
@@ -344,6 +373,7 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
     setDirty(false);
     flash("Staff attendance saved");
     setTick((x) => x + 1);
+    void runSubstitutionAutomation(date);
   }
 
   function onSelfPunch(kind: "in" | "out") {
@@ -414,6 +444,7 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
     }
     flash("Direct attendance saved");
     setTick((x) => x + 1);
+    void runSubstitutionAutomation(date);
   }
 
   function onAdjust(e: React.FormEvent) {
@@ -439,6 +470,7 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
     }
     flash("Attendance adjusted");
     setTick((x) => x + 1);
+    void runSubstitutionAutomation(date);
   }
 
   function onHalfDay(e: React.FormEvent) {

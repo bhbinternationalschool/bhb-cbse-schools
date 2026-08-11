@@ -150,7 +150,7 @@ export type ModuleDashboardModel = {
   quickLinks?: DashboardQuickLink[];
 };
 
-function dashboardToneToMetric(tone: DashboardTone): ErpMetricTone {
+export function dashboardToneToMetric(tone: DashboardTone): ErpMetricTone {
   const map: Record<DashboardTone, ErpMetricTone> = {
     navy: "navy",
     gold: "amber",
@@ -164,7 +164,7 @@ function dashboardToneToMetric(tone: DashboardTone): ErpMetricTone {
   return map[tone] ?? "sky";
 }
 
-function kpiIconForTone(tone: DashboardTone) {
+export function kpiIconForTone(tone: DashboardTone) {
   switch (tone) {
     case "green":
       return <TrendingUp className="h-7 w-7" />;

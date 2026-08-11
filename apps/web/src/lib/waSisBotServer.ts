@@ -45,6 +45,7 @@ import { attachRazorpayToPaymentLink } from "@/lib/razorpay.server";
 import { loadSis, householdWhatsApp, type Household, type SisStudent } from "@/lib/sis";
 import { TENANT } from "@/lib/types";
 import { sendWhatsAppText, waNormalizeLocal10 } from "@/lib/waSend";
+import { generateTutorText } from "@/lib/aiLlm.server";
 
 export type WaSisBotMsg = {
   id: string;
@@ -170,6 +171,57 @@ function flattenOpenDues(
 function dueStudentName(due: FeeDueLine): string {
   const st = loadSis().students.find((s) => s.id === due.studentId);
   return st?.fullName || due.label;
+}
+
+/**
+ * LLM fallback for parent messages the keyword matcher doesn't recognize —
+ * grounded ONLY in this household's own real data (children, open dues), so
+ * it can answer "has X's fee been paid" style free text without guessing a
+ * fact it wasn't given. Returns null (caller keeps the existing hardcoded
+ * fallback) on any failure — this is a graceful upgrade, never a hard
+ * dependency for the bot to keep working.
+ */
+async function tryAiFallbackReply(
+  hh: Household,
+  text: string,
+): Promise<string | null> {
+  const masters = loadMasters();
+  const kids = childrenOf(hh);
+  const dues = flattenOpenDues(hh.id);
+  const totalDuePaise = dues.reduce((s, d) => s + d.balancePaise, 0);
+  const kidsLine =
+    kids
+      .map(
+        (s) =>
+          `${s.fullName} (${classLabelForStudent(s, masters)}, ${s.status})`,
+      )
+      .join("; ") || "none on record";
+  const duesLine = dues.length
+    ? dues
+        .map(
+          (d) =>
+            `${dueStudentName(d)}: ${d.label} ${formatInr(d.balancePaise)} due ${d.dueOn}`,
+        )
+        .join("; ")
+    : "no open dues";
+
+  const system = `You are a WhatsApp assistant for parents of ${TENANT.nameDisplay}.
+You may ONLY discuss the household data given below (their children, dues) — you do NOT know this school's policies, dates, timings, curriculum, transport, uniform, or any other fact not given to you, even if it seems like common knowledge for a school. Do not state or confirm anything outside the data given.
+For ANY question the household data below doesn't answer, reply that you don't have that information and to reply *HUMAN* to talk to the school office — do not attempt to answer it a different way.
+Keep the reply under 300 characters, warm and simple, plain text (no markdown headers).`;
+
+  const userMessage = `Guardian: ${hh.guardianName || "Parent"}
+Children: ${kidsLine}
+Open dues: total ${formatInr(totalDuePaise)} — ${duesLine}
+Parent's message: "${text}"`;
+
+  try {
+    const r = await generateTutorText({ system, userMessage });
+    if (!r.ok) return null;
+    return r.text.trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 export async function listWaSisBotThreads(): Promise<WaSisBotThread[]> {
@@ -502,6 +554,10 @@ export async function handleWaSisBotInbound(opts: {
   if (opts.fromUnified && intent === "unknown") {
     replyText =
       "Reply *KIDS* · *DUES* · *PAY* (GPay/UPI) · *PAY 1* · *RECEIPTS* · *HUMAN* — or *MENU* for the main school menu.";
+  }
+  if (intent === "unknown" && !isGreeting && text.trim().length > 3) {
+    const aiReply = await tryAiFallbackReply(hh, text);
+    if (aiReply) replyText = aiReply;
   }
 
   const botMsg: WaSisBotMsg = {

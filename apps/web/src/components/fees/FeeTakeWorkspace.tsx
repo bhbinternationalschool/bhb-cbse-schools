@@ -293,7 +293,8 @@ export function FeeTakeWorkspace() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const raw = new URLSearchParams(window.location.search).get("tab");
+    const params = new URLSearchParams(window.location.search);
+    const raw = params.get("tab");
     const allowed: Tab[] = [
       "collect",
       "receipts",
@@ -309,6 +310,12 @@ export function FeeTakeWorkspace() {
     ];
     if (raw && (allowed as string[]).includes(raw)) {
       setTab(raw as Tab);
+    }
+    // Deep link from global search — open a specific receipt by voucher id.
+    const openReceipt = params.get("openReceipt");
+    if (openReceipt) {
+      setTab("receipts");
+      setPreviewReceiptId(openReceipt);
     }
   }, []);
 
@@ -3041,6 +3048,9 @@ function ReceiptsPanel({
   const [parentQ, setParentQ] = useState("");
   const [classId, setClassId] = useState("");
   const [sectionId, setSectionId] = useState("");
+  const [modeFilter, setModeFilter] = useState<"" | TenderMode>("");
+  const [concessionFilter, setConcessionFilter] = useState<"" | "with" | "without">("");
+  const [collectorQ, setCollectorQ] = useState("");
 
   const guardianOf = (householdId: string) =>
     sis?.households.find((h) => h.id === householdId)?.guardianName ?? "";
@@ -3102,6 +3112,25 @@ function ReceiptsPanel({
         if (!classHit) return false;
       }
 
+      if (modeFilter && !v.tenders.some((t) => t.mode === modeFilter)) {
+        return false;
+      }
+
+      if (concessionFilter) {
+        const hasConcession = v.lines.some(
+          (l) => (l.concessionPaise ?? 0) > 0,
+        );
+        if (concessionFilter === "with" && !hasConcession) return false;
+        if (concessionFilter === "without" && hasConcession) return false;
+      }
+
+      if (
+        collectorQ.trim() &&
+        !v.cashierName.toLowerCase().includes(collectorQ.trim().toLowerCase())
+      ) {
+        return false;
+      }
+
       return true;
     });
   }, [
@@ -3112,6 +3141,9 @@ function ReceiptsPanel({
     parentQ,
     classId,
     sectionId,
+    modeFilter,
+    concessionFilter,
+    collectorQ,
     sis,
   ]);
 
@@ -3126,6 +3158,13 @@ function ReceiptsPanel({
     sectionOptions.find((s) => s.id === sectionId)?.name
       ? `Sec ${sectionOptions.find((s) => s.id === sectionId)?.name}`
       : "",
+    modeFilter ? `Mode ${tenderModeLabel(modeFilter)}` : "",
+    concessionFilter === "with"
+      ? "With concession"
+      : concessionFilter === "without"
+        ? "No concession"
+        : "",
+    collectorQ.trim() ? `Collector “${collectorQ.trim()}”` : "",
   ]);
 
   function clearFilters() {
@@ -3135,10 +3174,21 @@ function ReceiptsPanel({
     setParentQ("");
     setClassId("");
     setSectionId("");
+    setModeFilter("");
+    setConcessionFilter("");
+    setCollectorQ("");
   }
 
   const hasFilters =
-    dateFrom || dateTo || studentQ || parentQ || classId || sectionId;
+    dateFrom ||
+    dateTo ||
+    studentQ ||
+    parentQ ||
+    classId ||
+    sectionId ||
+    modeFilter ||
+    concessionFilter ||
+    collectorQ;
 
   if (receipts.length === 0) {
     return (
@@ -3258,6 +3308,45 @@ function ReceiptsPanel({
                 </option>
               ))}
             </select>
+          </label>
+          <label className="block text-xs font-semibold text-[var(--muted)]">
+            Mode
+            <select
+              value={modeFilter}
+              onChange={(e) => setModeFilter(e.target.value as "" | TenderMode)}
+              className="mt-1 w-full rounded-lg border border-[rgba(32,48,80,0.15)] px-2.5 py-2 text-sm"
+            >
+              <option value="">All modes</option>
+              {TENDER_MODES.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-xs font-semibold text-[var(--muted)]">
+            Concession
+            <select
+              value={concessionFilter}
+              onChange={(e) =>
+                setConcessionFilter(e.target.value as "" | "with" | "without")
+              }
+              className="mt-1 w-full rounded-lg border border-[rgba(32,48,80,0.15)] px-2.5 py-2 text-sm"
+            >
+              <option value="">All receipts</option>
+              <option value="with">With concession</option>
+              <option value="without">No concession</option>
+            </select>
+          </label>
+          <label className="block text-xs font-semibold text-[var(--muted)]">
+            Collector
+            <input
+              type="search"
+              value={collectorQ}
+              onChange={(e) => setCollectorQ(e.target.value)}
+              placeholder="Cashier name"
+              className="mt-1 w-full rounded-lg border border-[rgba(32,48,80,0.15)] px-2.5 py-2 text-sm"
+            />
           </label>
         </div>
 

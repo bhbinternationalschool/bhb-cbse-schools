@@ -21,11 +21,11 @@ import {
 } from "@/lib/waRoleResolver";
 import {
   detectStaffBotIntent,
-  replyStaffBotIntent,
+  replyStaffBotIntentWithAi,
 } from "@/lib/waStaffBotEngine";
 import {
   detectTransportBotIntent,
-  replyTransportBotIntent,
+  replyTransportBotIntentWithAi,
   resolveTransportDriverContext,
 } from "@/lib/waTransportBotEngine";
 import { handleWaClassChannelInbound } from "@/lib/waClassChannelServer";
@@ -223,7 +223,7 @@ async function delegateActiveFlow(
       });
       return { replied: true, escalate: false, audience: flow, stub: false };
     }
-    const bot = replyStaffBotIntent(intent, {
+    const bot = await replyStaffBotIntentWithAi(intent, opts.text, {
       fullName: session.displayName || identity.displayName,
       isOwner: flow === "owner",
     });
@@ -327,7 +327,7 @@ async function delegateActiveFlow(
         stub: false,
       };
     }
-    const bot = replyTransportBotIntent(intent, ctx);
+    const bot = await replyTransportBotIntentWithAi(intent, opts.text, ctx);
     await sendBotReply({
       mobile10,
       displayName: ctx.driverName,

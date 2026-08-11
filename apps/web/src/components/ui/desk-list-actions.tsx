@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
+
 type DeskListActionsProps = {
   onEdit?: () => void;
   onDelete?: () => void;
@@ -18,6 +20,12 @@ export function DeskListActions({
   readOnly = false,
   deleteConfirm,
 }: DeskListActionsProps) {
+  const { ask, dialog } = useConfirmDialog({
+    title: deleteConfirm || "Delete this item?",
+    confirmLabel: deleteLabel,
+    tone: "danger",
+  });
+
   if (readOnly) return null;
   return (
     <div className="flex flex-wrap gap-2">
@@ -33,15 +41,19 @@ export function DeskListActions({
       {onDelete ? (
         <button
           type="button"
-          className="text-[11px] font-semibold text-[#b42318]"
+          className="text-[11px] font-semibold text-[var(--danger)]"
           onClick={() => {
-            if (deleteConfirm && !window.confirm(deleteConfirm)) return;
+            if (deleteConfirm) {
+              ask(onDelete);
+              return;
+            }
             onDelete();
           }}
         >
           {deleteLabel}
         </button>
       ) : null}
+      {deleteConfirm ? dialog : null}
     </div>
   );
 }
