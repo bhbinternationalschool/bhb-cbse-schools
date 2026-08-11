@@ -929,8 +929,11 @@ export function buildMetaTemplateCreatePayload(template: WaTemplate): {
 
   if (template.category === "AUTHENTICATION") {
     // Meta generates the message text for AUTHENTICATION templates itself
-    // from these structured flags — custom BODY/HEADER/FOOTER/BUTTONS text
-    // (used only for local preview/fallback) is not submitted to Meta.
+    // from these structured flags — custom BODY/HEADER/FOOTER text (used
+    // only for local preview/fallback) is not submitted to Meta. Meta also
+    // requires exactly one OTP-type button on every AUTHENTICATION template
+    // (rejects creation outright otherwise) — COPY_CODE fits a web/app login
+    // flow; ONE_TAP is only for a native app with a registered signature hash.
     return {
       name: metaNameEarly,
       language: template.metaLanguage || template.language,
@@ -938,6 +941,7 @@ export function buildMetaTemplateCreatePayload(template: WaTemplate): {
       components: [
         { type: "BODY", add_security_recommendation: true },
         { type: "FOOTER", code_expiration_minutes: 10 },
+        { type: "BUTTONS", buttons: [{ type: "OTP", otp_type: "COPY_CODE" }] },
       ],
       warnings,
     };
