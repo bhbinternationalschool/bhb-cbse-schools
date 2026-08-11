@@ -1524,6 +1524,65 @@ export function FeeTakeWorkspace() {
   );
 }
 
+/**
+ * A reference section that is collapsed on a phone and open on a desktop.
+ *
+ * The fee counter carries 25 buttons and 19 inputs in one view. On a desktop
+ * that reads as dense; on a phone it becomes a long scroll where the Collect
+ * button sits below everything a clerk does not need to read.
+ *
+ * Only REFERENCE sections use this — household details, discount breakdown.
+ * Nothing in the collect path (dues, amount, tender lines, Collect) is ever
+ * hidden behind a tap: a clerk taking money must see what they are taking.
+ */
+function CollapsibleSection({
+  title,
+  badge,
+  children,
+  defaultOpenOnDesktop = true,
+}: {
+  title: string;
+  badge?: React.ReactNode;
+  children: React.ReactNode;
+  defaultOpenOnDesktop?: boolean;
+}) {
+  // Open on desktop, closed on phones. Read once on mount rather than tracked,
+  // so a clerk who opens a section does not have it snap shut on rotate.
+  const [open, setOpen] = useState(() => {
+    if (typeof window === "undefined") return defaultOpenOnDesktop;
+    return window.matchMedia("(min-width: 1024px)").matches
+      ? defaultOpenOnDesktop
+      : false;
+  });
+
+  return (
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-sm">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        // min-h-11 keeps the tap target at ~44px, the smallest a thumb hits
+        // reliably. Several controls on this page were under 32px.
+        className="flex min-h-11 w-full items-center justify-between gap-2 px-3.5 py-2.5 text-left"
+      >
+        <span className="text-xs font-bold uppercase tracking-wider text-[var(--brand-deep)]">
+          {title}
+        </span>
+        <span className="flex items-center gap-2">
+          {badge}
+          <span
+            className={`text-[var(--muted)] transition-transform ${open ? "rotate-180" : ""}`}
+            aria-hidden
+          >
+            ▾
+          </span>
+        </span>
+      </button>
+      {open ? <div className="px-3.5 pb-3.5">{children}</div> : null}
+    </div>
+  );
+}
+
 function FeeSummaryChip({
   label,
   value,
@@ -1755,6 +1814,15 @@ function CollectPanel({
     selectedKeys,
     householdBundle,
   ]);
+
+  // Computed once, used by BOTH the panel button and the sticky mobile bar.
+  // It lived inside an IIFE next to the desktop button; the mobile bar would
+  // have had to restate the expression, and two independent definitions of
+  // "is this payment complete" is how they drift apart. One value, one rule.
+  const discountOnly = collectTarget <= 0 && counterDiscountPaise > 0;
+  const matched =
+    discountOnly ||
+    (collectTarget > 0 && tenderSum === collectTarget && tenderSum > 0);
 
   function classLabel(s: SisStudent) {
     const c = masters?.classes.find((x) => x.id === s.classId)?.name ?? "—";
@@ -2116,18 +2184,17 @@ function CollectPanel({
 
         {/* ── RIGHT COLUMN: Household Card & Collect Fee Payment Panel ── */}
         <div className="space-y-4 min-w-0">
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-3.5 shadow-sm">
-            <div className="flex items-center justify-between border-b border-[rgba(32,48,80,0.08)] pb-2.5 mb-3">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--brand-deep)]">
-                Household Information
-              </h3>
-              {siblingCount > 1 ? (
-                <span className="rounded bg-[rgba(197,160,40,0.16)] px-2 py-0.5 text-[10px] font-bold text-[var(--brand-gold)]">
+          {/* Reference, not part of taking the money — collapsed on phones. */}
+          <CollapsibleSection
+            title="Household Information"
+            badge={
+              siblingCount > 1 ? (
+                <span className="rounded bg-[var(--brand-gold-soft)] px-2 py-0.5 text-[10px] font-bold text-[var(--brand-gold)]">
                   {siblingCount} Siblings
                 </span>
-              ) : null}
-            </div>
-
+              ) : null
+            }
+          >
             <div className="space-y-2 text-xs">
               <div className="flex justify-between gap-2">
                 <span className="text-[var(--muted)]">Guardian Name:</span>
@@ -2166,10 +2233,10 @@ function CollectPanel({
                 </span>
               </div>
             </div>
-          </div>
+          </CollapsibleSection>
 
           <div
-            className="relative overflow-hidden rounded-2xl border border-[rgba(32,48,80,0.14)] shadow-[0_12px_40px_rgba(32,48,80,0.1)]"
+            className="relative overflow-hidden rounded-2xl border border-[var(--border)] shadow-[0_12px_40px_rgba(32,48,80,0.1)]"
             style={{
               background:
                 "linear-gradient(165deg, #203050 0%, #2a3d66 42%, #1a2740 100%)",
@@ -2434,13 +2501,6 @@ function CollectPanel({
               ) : null}
 
               {(() => {
-                const discountOnly =
-                  collectTarget <= 0 && counterDiscountPaise > 0;
-                const matched =
-                  discountOnly ||
-                  (collectTarget > 0 &&
-                    tenderSum === collectTarget &&
-                    tenderSum > 0);
                 return (
                   <button
                     type="button"
@@ -2568,6 +2628,48 @@ function CollectPanel({
       </div>
     </div>
   </div>
+
+      {/* ── Sticky collect bar, phones only ──────────────────────────────
+          The page stacks on a phone: sibling tabs, then every month's dues,
+          then the household card, and only then the Collect button. A clerk
+          taking a payment had to scroll past all of it, and back up again to
+          check the amount.
+
+          This keeps the amount and the action in the thumb zone the whole
+          time. It is the SAME onCollect and the same disabled rule as the
+          button in the panel — deliberately not a second code path, because
+          two ways to take money is how they drift apart. Hidden on lg where
+          the panel button is already visible. */}
+      <div className="sticky bottom-0 z-20 -mx-3 mt-4 border-t border-[var(--border)] bg-[var(--card)]/95 px-3 py-2.5 backdrop-blur lg:hidden">
+        <div className="flex items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="text-[10px] font-bold uppercase tracking-wide text-[var(--muted)]">
+              {isPartialCollect ? "Partial collection" : "Amount to collect"}
+            </div>
+            <div className="truncate text-lg font-bold text-[var(--brand-deep)]">
+              {formatInr(collectTarget)}
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={!matched || readOnly}
+            onClick={onCollect}
+            className={`min-h-12 shrink-0 rounded-xl px-5 text-sm font-extrabold uppercase tracking-wide transition active:scale-[0.99] disabled:cursor-not-allowed ${
+              matched && !readOnly
+                ? "bg-[var(--ok)] text-white shadow-lg"
+                : "bg-[rgba(32,48,80,0.12)] text-[var(--muted)]"
+            }`}
+          >
+            {readOnly
+              ? "Closed"
+              : matched
+                ? "Collect"
+                : tenderSum < collectTarget && tenderSum > 0
+                  ? `Need ${formatInr(collectTarget - tenderSum)}`
+                  : "Add payment"}
+          </button>
+        </div>
+      </div>
 </div>
   );
 }
