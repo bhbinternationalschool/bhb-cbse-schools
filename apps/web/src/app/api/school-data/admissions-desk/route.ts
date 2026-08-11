@@ -19,6 +19,38 @@ export const runtime = "nodejs";
 export async function GET(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["admissions-desk"], "GET");
   if (!auth.ok) return auth.response
+
+  // ?leadId=... returns ONE complete lead, lead_json included.
+  //
+  // The list is projected (20 of 79 fields) to keep the payload off the
+  // browser's storage cap, so anything opening a lead needs the rest. A read
+  // failure is a 503, never an empty result — "could not read" must not
+  // arrive looking like "no such lead".
+  const leadId = new URL(req.url).searchParams.get("leadId")?.trim();
+  if (leadId) {
+    try {
+      const { fetchAdmissionLeadDetail } = await import(
+        "@/lib/admissionsNormalized.server"
+      );
+      const lead = await fetchAdmissionLeadDetail(leadId);
+      if (!lead) {
+        return NextResponse.json(
+          { ok: false, error: "Lead not found" },
+          { status: 404 },
+        );
+      }
+      return NextResponse.json({ ok: true, lead });
+    } catch (e) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: e instanceof Error ? e.message : "Lead read failed",
+        },
+        { status: 503 },
+      );
+    }
+  }
+
   const { state, meta, ok } = await fetchAdmissionDeskFromDb();
   if (!ok) {
     return NextResponse.json(

@@ -499,6 +499,72 @@ export async function pushAdmissionDeskToDb(
   return { ok: true };
 }
 
+/**
+ * Columns a lead LIST needs. Everything except `lead_json`.
+ *
+ * lead_json is 1.82 MB of the table's 2.37 MB — 76.8% — and holds 59 of the
+ * 79 AdmissionLead fields: dob, gender, address, motherName, email, the
+ * document checklist. No list screen reads any of them; they are needed only
+ * when a lead is opened.
+ *
+ * A lead built from these columns alone is a STUB and is marked `__partial`.
+ * Saving one back would blank those 59 fields, which is why
+ * restorePartialLeads() merges against the stored record before any write —
+ * that guard shipped first, deliberately.
+ */
+const LEAD_LIST_COLUMNS =
+  "id, tenant_id, household_id, enquiry_no, application_no, stage, " +
+  "academic_year_code, source, child_name, mobile, guardian_name, " +
+  "class_sought_id, assigned_to, next_follow_up_at, lead_date, student_id, " +
+  "admission_no, sis_match, sis_student_id, created_at, updated_at";
+
+/**
+ * Serve lead lists without lead_json.
+ *
+ * OPT-IN via ADMISSIONS_LIST_PROJECTION. Rollback is removing the variable —
+ * no code change, no redeploy of a different build. The same shape the masters
+ * row-table flip used, for the same reason: a read path this large should be
+ * reversible in seconds, not in a build.
+ */
+function leadProjectionEnabled(): boolean {
+  const flag = process.env.ADMISSIONS_LIST_PROJECTION?.trim().toLowerCase();
+  return flag === "true" || flag === "1";
+}
+
+/**
+ * The complete record for one lead, lead_json included.
+ *
+ * The other half of the projection: the list carries 20 of 79 fields, so
+ * anything that opens or edits a lead must fetch the rest. Without this the
+ * projection would silently hide dob, address, documents and 55 more from
+ * every detail screen.
+ *
+ * Returns null when the lead does not exist. A READ FAILURE throws instead —
+ * the caller must not mistake "could not read" for "no such lead" and then
+ * offer to create one, which is the mistake that has cost this system a
+ * roster and a day of attendance.
+ */
+export async function fetchAdmissionLeadDetail(
+  leadId: string,
+): Promise<AdmissionLead | null> {
+  const ctx = await resolveCtx();
+  if (!ctx) throw new Error("Supabase tenant not configured");
+  const { sb, tenantId } = ctx;
+
+  const { data, error } = await sb
+    .from("admission_desk_leads")
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .eq("id", leadId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Could not read lead ${leadId}: ${error.message}`);
+  }
+  if (!data) return null;
+  return rowToLead(data as unknown as Record<string, unknown>);
+}
+
 export async function fetchAdmissionDeskFromDb(): Promise<{
   state: AdmissionsState;
   meta: AdmissionDeskSyncMeta | null;
@@ -521,7 +587,7 @@ export async function fetchAdmissionDeskFromDb(): Promise<{
     sb.from("admission_desk_households").select("*").eq("tenant_id", tenantId),
     sb
       .from("admission_desk_leads")
-      .select("*")
+      .select(leadProjectionEnabled() ? LEAD_LIST_COLUMNS : "*")
       .eq("tenant_id", tenantId)
       .order("updated_at", { ascending: false }),
     sb
@@ -553,9 +619,18 @@ export async function fetchAdmissionDeskFromDb(): Promise<{
   const households = (hhRows ?? []).map((r) =>
     rowToHousehold(r as Record<string, unknown>),
   );
-  const leads = (leadRows ?? []).map((r) =>
-    rowToLead(r as Record<string, unknown>),
-  );
+  // Marked so the write path knows to merge rather than replace. rowToLead
+  // already falls back to the promoted columns when lead_json is absent, so
+  // the list renders identically — it is the SAVE that must know.
+  const projected = leadProjectionEnabled();
+  const leads = (leadRows ?? []).map((r) => {
+    // Cast through unknown: the projection is chosen at runtime, so
+    // PostgREST's typed select inference cannot narrow the row shape.
+    const lead = rowToLead(r as unknown as Record<string, unknown>);
+    return projected
+      ? ({ ...lead, __partial: true } as typeof lead)
+      : lead;
+  });
   const registrationPayments = (payRows ?? []).map((r) =>
     rowToPayment(r as Record<string, unknown>),
   );

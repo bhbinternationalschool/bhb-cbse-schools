@@ -1320,6 +1320,46 @@ export function loadAdmissions(): AdmissionsState {
  * leads yet, so today it changes nothing; it means the read-path work can
  * proceed without the possibility of silently destroying records.
  */
+/**
+ * Get the complete lead before editing it.
+ *
+ * The admissions list is projected — 20 of 79 fields — so a lead taken
+ * straight from it is a stub. Anything that opens a lead for editing must
+ * call this first, or the form shows blank dob, address, documents and 55
+ * other fields, and the user "corrects" them by filling in nothing.
+ *
+ * Returns the lead unchanged when it is already complete, so this is safe to
+ * call unconditionally and costs one request only when it is needed.
+ *
+ * Throws on a read failure rather than returning the stub. Editing a record
+ * you could not read is how fields get blanked — the server-side merge in
+ * restorePartialLeads is the backstop, but the user should not be shown empty
+ * fields and asked to trust them.
+ */
+export async function ensureFullLead(
+  lead: AdmissionLead,
+): Promise<AdmissionLead> {
+  if (!isPartialLead(lead)) return lead;
+
+  const res = await fetch(
+    `/api/school-data/admissions-desk?leadId=${encodeURIComponent(lead.id)}`,
+    { cache: "no-store" },
+  );
+  const body = (await res.json().catch(() => null)) as {
+    ok?: boolean;
+    lead?: AdmissionLead;
+    error?: string;
+  } | null;
+
+  if (!res.ok || !body?.ok || !body.lead) {
+    throw new Error(
+      body?.error ??
+        `Could not load the full record for this lead (${res.status}).`,
+    );
+  }
+  return body.lead;
+}
+
 export function isPartialLead(lead: unknown): boolean {
   return !!(lead as { __partial?: boolean })?.__partial;
 }
