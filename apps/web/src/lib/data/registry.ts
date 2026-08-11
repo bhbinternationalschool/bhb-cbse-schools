@@ -84,9 +84,24 @@ export const COLLECTIONS: readonly CollectionDef[] = [
     module: "students",
     table: "sis_students",
     rbac: { view: "students", edit: "students" },
-    // Students belong to a session. Without academic_year_code in scope a
-    // roster query silently spans every year the school has ever run.
-    scope: ["tenant_id", "academic_year_code"],
+    // Tenant-scoped ONLY, and this is not an oversight.
+    //
+    // The obvious reading — "students belong to a session, so scope by it" —
+    // is what this said, and it was wrong. Measured 2026-08-10:
+    // sis_students.academic_year_code does NOT track the current session. Of
+    // 680 active students it reads 2026-27 for 238, 2025-26 for 213, 2024-25
+    // for 142 and 2023-24 for 88 — while every one of those groups holds
+    // currently-enrolled children spread across Nursery to X, all with
+    // earliest_joined 2023-01-01. It records when the record was created or
+    // imported and was never advanced.
+    //
+    // So scoping a roster by it would have hidden 442 of 680 active students
+    // and looked like data loss. Nothing consumes this collection yet, which
+    // is the only reason it never shipped that way.
+    //
+    // Correct the column's meaning before adding the scope back. Until then a
+    // roster query is tenant-wide and callers filter by class or status.
+    scope: ["tenant_id"],
     // Hard delete: removing a student is deliberate and rare, and the audit
     // entry is the surviving record (see StudentsWorkspace.onRemove).
     softDelete: false,
