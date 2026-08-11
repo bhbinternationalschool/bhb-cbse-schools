@@ -5,8 +5,59 @@
 import { randomInt } from "crypto";
 import { hashOtpCode } from "@/lib/audit.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
-import { sendWhatsAppText } from "@/lib/waSend";
+import { fetchServerBlob } from "@/lib/serverBlob";
+import {
+  sendWhatsAppText,
+  sendWhatsAppTemplate,
+  buildWaTemplateBodyComponent,
+} from "@/lib/waSend";
+import {
+  normalizeWaTemplatesState,
+  getTemplateFamily,
+  type WaTemplatesState,
+} from "@/lib/waTemplates";
 import { TENANT } from "@/lib/types";
+
+const OTP_TEMPLATE_FAMILY = "auth_parent_login_otp";
+
+/**
+ * Send the OTP via the Meta-approved AUTHENTICATION template when one is
+ * live — required once a parent hasn't messaged the bot in the last 24h,
+ * which Meta's free-text session window otherwise blocks. Returns false
+ * (never throws) on any missing/unapproved template or send failure, so the
+ * caller always falls through to the existing free-text send.
+ */
+async function tryOtpLoginTemplateSend(
+  mobile: string,
+  code: string,
+): Promise<boolean> {
+  try {
+    const { state: raw } = await fetchServerBlob<WaTemplatesState>(
+      "wa_templates_state",
+    );
+    const state = normalizeWaTemplatesState(raw);
+    const template = getTemplateFamily(state, OTP_TEMPLATE_FAMILY).find(
+      (t) => t.language === "en" && t.status === "approved" && !t.paused,
+    );
+    if (!template) return false;
+    const send = await sendWhatsAppTemplate({
+      toMobile: mobile,
+      name: template.metaName,
+      language: template.metaLanguage || "en",
+      components: [buildWaTemplateBodyComponent(["otp"], { otp: code })],
+    });
+    if (!send.ok) {
+      console.warn(
+        `[parent-otp] template send failed, falling back to text: ${send.error}`,
+      );
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.warn("[parent-otp] template lookup/send error, falling back to text", e);
+    return false;
+  }
+}
 
 const OTP_TTL_MS = 10 * 60 * 1000;
 const MAX_ATTEMPTS = 5;
@@ -57,18 +108,21 @@ export async function issueParentOtp(opts: {
     });
   }
 
-  const body =
-    `*${TENANT.shortName} Parent Login*\n\n` +
-    `Your OTP is *${code}*. Valid for 10 minutes.\n\n` +
-    `Do not share this code with anyone.`;
+  const sentViaTemplate = await tryOtpLoginTemplateSend(mobile, code);
+  if (!sentViaTemplate) {
+    const body =
+      `*${TENANT.shortName} Parent Login*\n\n` +
+      `Your OTP is *${code}*. Valid for 10 minutes.\n\n` +
+      `Do not share this code with anyone.`;
 
-  const send = await sendWhatsAppText({ toMobile: mobile, body });
-  if (!send.ok && send.mode !== "stub") {
-    return { ok: false, reason: send.error || "Could not send OTP on WhatsApp" };
-  }
+    const send = await sendWhatsAppText({ toMobile: mobile, body });
+    if (!send.ok && send.mode !== "stub") {
+      return { ok: false, reason: send.error || "Could not send OTP on WhatsApp" };
+    }
 
-  if (send.mode === "stub" && process.env.NODE_ENV === "development") {
-    console.info(`[parent-otp] stub mode — OTP for ${mobile}: ${code}`);
+    if (send.mode === "stub" && process.env.NODE_ENV === "development") {
+      console.info(`[parent-otp] stub mode — OTP for ${mobile}: ${code}`);
+    }
   }
 
   return { ok: true, expiresInSec: Math.floor(OTP_TTL_MS / 1000) };

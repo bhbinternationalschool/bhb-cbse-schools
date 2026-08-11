@@ -540,6 +540,18 @@ const SEED_DEFS: SeedDef[] = [
       "नमस्ते {{guardianName}}, हमारी टीम *{{childName}}* हेतु मिली थी। पूछताछ पूरी करें: {{registerLink}} — {{schoolName}}",
   },
   {
+    familyKey: "auth_parent_login_otp",
+    nameEn: "Parent login OTP",
+    nameHi: "पालक लॉगिन OTP",
+    module: "general",
+    category: "AUTHENTICATION",
+    metaName: "bhb_parent_login_otp",
+    bodyEn:
+      "{{otp}} is your parent login verification code. Do not share this code with anyone. It expires in 10 minutes.",
+    bodyHi:
+      "{{otp}} आपका पालक लॉगिन सत्यापन कोड है। कृपया यह कोड किसी से साझा न करें। यह 10 मिनट में समाप्त हो जाएगा।",
+  },
+  {
     familyKey: "admissions_marketing_carousel",
     nameEn: "Admission highlights carousel",
     nameHi: "प्रवेश हाइलाइट कैरोसेल",
@@ -906,6 +918,31 @@ export function buildMetaTemplateCreatePayload(template: WaTemplate): {
   warnings: string[];
 } {
   const warnings: string[] = [];
+  const metaNameEarly = (template.metaName || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "_")
+    .slice(0, 512);
+  if (!metaNameEarly) {
+    warnings.push("Meta template name is required (snake_case, e.g. bhb_fee_reminder).");
+  }
+
+  if (template.category === "AUTHENTICATION") {
+    // Meta generates the message text for AUTHENTICATION templates itself
+    // from these structured flags — custom BODY/HEADER/FOOTER/BUTTONS text
+    // (used only for local preview/fallback) is not submitted to Meta.
+    return {
+      name: metaNameEarly,
+      language: template.metaLanguage || template.language,
+      category: template.category,
+      components: [
+        { type: "BODY", add_security_recommendation: true },
+        { type: "FOOTER", code_expiration_minutes: 10 },
+      ],
+      warnings,
+    };
+  }
+
   const components: Record<string, unknown>[] = [];
 
   if (template.headerFormat === "TEXT" && template.headerText.trim()) {
@@ -975,17 +1012,8 @@ export function buildMetaTemplateCreatePayload(template: WaTemplate): {
     components.push({ type: "BUTTONS", buttons });
   }
 
-  const metaName = (template.metaName || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_]/g, "_")
-    .slice(0, 512);
-  if (!metaName) {
-    warnings.push("Meta template name is required (snake_case, e.g. bhb_fee_reminder).");
-  }
-
   return {
-    name: metaName,
+    name: metaNameEarly,
     language: template.metaLanguage || template.language,
     category: template.category,
     components,
