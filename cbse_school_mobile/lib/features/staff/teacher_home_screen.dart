@@ -1,0 +1,545 @@
+import "package:flutter/material.dart";
+
+import "../../core/api/api_client.dart";
+import "../../core/theme/app_theme.dart";
+import "attendance_screen.dart";
+
+String _greeting() {
+  final h = DateTime.now().hour;
+  if (h < 12) return "Good morning";
+  if (h < 17) return "Good afternoon";
+  return "Good evening";
+}
+
+class _StaffModule {
+  const _StaffModule(this.label, this.icon, this.tone);
+
+  final String label;
+  final IconData icon;
+  final ModuleTone tone;
+}
+
+const _staffModules = [
+  _StaffModule("Attendance", Icons.fact_check_outlined, ModuleTone.teal),
+  _StaffModule("Homework", Icons.menu_book_outlined, ModuleTone.purple),
+  _StaffModule("Marks", Icons.grading_outlined, ModuleTone.amber),
+  _StaffModule("My leave", Icons.event_outlined, ModuleTone.coral),
+  _StaffModule("Timetable", Icons.calendar_view_week_outlined, ModuleTone.blue),
+  _StaffModule("Notices", Icons.campaign_outlined, ModuleTone.pink),
+  _StaffModule("Students", Icons.school_outlined, ModuleTone.green),
+  _StaffModule("Payslips", Icons.receipt_long_outlined, ModuleTone.gray),
+];
+
+class TeacherHomeScreen extends StatefulWidget {
+  const TeacherHomeScreen({
+    super.key,
+    required this.api,
+    required this.onLogout,
+  });
+
+  final ApiClient api;
+  final VoidCallback onLogout;
+
+  @override
+  State<TeacherHomeScreen> createState() => _TeacherHomeScreenState();
+}
+
+class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
+  int _tab = 0;
+  StaffSummary? _summary;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _error = null);
+    try {
+      final summary = await widget.api.fetchStaffSummary();
+      if (mounted) setState(() => _summary = summary);
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _error = "Could not reach the school server.");
+      }
+    }
+  }
+
+  Future<void> _signOut() async {
+    await widget.api.signOut();
+    if (mounted) widget.onLogout();
+  }
+
+  Future<void> _openAttendance({
+    String? classId,
+    String? sectionId,
+    String? label,
+  }) async {
+    final summary = _summary;
+    if (summary == null) return;
+
+    String? cls = classId;
+    String? sec = sectionId;
+    String title = label ?? "";
+
+    if (cls == null || sec == null) {
+      final picked = await showModalBottomSheet<(String, String, String)>(
+        context: context,
+        backgroundColor: Colors.white,
+        isScrollControlled: true,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        builder: (context) => _SectionPicker(classes: summary.classes),
+      );
+      if (picked == null) return;
+      cls = picked.$1;
+      sec = picked.$2;
+      title = picked.$3;
+    }
+
+    if (!mounted) return;
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => AttendanceScreen(
+          api: widget.api,
+          classId: cls!,
+          sectionId: sec!,
+          date: summary.date,
+          title: title,
+        ),
+      ),
+    );
+    if (changed == true) _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final summary = _summary;
+
+    if (summary == null) {
+      return Scaffold(
+        body: Center(
+          child: _error == null
+              ? const CircularProgressIndicator(color: AppColors.primary)
+              : Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.cloud_off_outlined,
+                          size: 40, color: AppColors.muted),
+                      const SizedBox(height: 12),
+                      Text(_error!, textAlign: TextAlign.center),
+                      const SizedBox(height: 16),
+                      FilledButton(onPressed: _load, child: const Text("Retry")),
+                      TextButton(
+                        onPressed: _signOut,
+                        child: const Text("Sign out"),
+                      ),
+                    ],
+                  ),
+                ),
+        ),
+      );
+    }
+
+    final ct = summary.classTeacherOf;
+
+    return Scaffold(
+      body: RefreshIndicator(
+        onRefresh: _load,
+        color: AppColors.primary,
+        child: ListView(
+          padding: EdgeInsets.zero,
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            Container(
+              decoration: const BoxDecoration(
+                color: AppColors.primary,
+                borderRadius:
+                    BorderRadius.vertical(bottom: Radius.circular(28)),
+              ),
+              padding: EdgeInsets.fromLTRB(
+                20,
+                MediaQuery.paddingOf(context).top + 18,
+                12,
+                40,
+              ),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 24,
+                    backgroundColor: AppColors.accentSoft,
+                    child: Text(
+                      summary.fullName.isEmpty
+                          ? "S"
+                          : summary.fullName
+                              .split(" ")
+                              .where((p) => p.isNotEmpty)
+                              .take(2)
+                              .map((p) => p[0].toUpperCase())
+                              .join(),
+                      style: const TextStyle(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _greeting(),
+                          style: const TextStyle(
+                            color: AppColors.accentSoft,
+                            fontSize: 12,
+                          ),
+                        ),
+                        Text(
+                          summary.fullName,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        Text(
+                          ct == null
+                              ? "Staff"
+                              : "Class teacher · ${ct.className} ${ct.sectionName}",
+                          style: const TextStyle(
+                            color: Color(0xFFB8C0D4),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: "Sign out",
+                    onPressed: _signOut,
+                    icon: const Icon(Icons.logout, color: Colors.white),
+                  ),
+                ],
+              ),
+            ),
+            Transform.translate(
+              offset: const Offset(0, -20),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: _AttendanceBanner(
+                  info: ct,
+                  onTap: () => _openAttendance(
+                    classId: ct?.classId,
+                    sectionId: ct?.sectionId,
+                    label:
+                        ct == null ? null : "${ct.className} ${ct.sectionName}",
+                  ),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    "Today's periods",
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.ink,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  if (summary.periodsToday.isEmpty)
+                    const Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(14),
+                        child: Text(
+                          "No timetable published for today yet.",
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            color: AppColors.muted,
+                          ),
+                        ),
+                      ),
+                    )
+                  else
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 4,
+                        ),
+                        child: Column(
+                          children: [
+                            for (final p in summary.periodsToday)
+                              Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 8),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        "${p.periodNo} · ${p.subjectName.isEmpty ? "Period" : p.subjectName} — ${p.className} ${p.sectionName}",
+                                        style: const TextStyle(
+                                          fontSize: 12.5,
+                                          color: AppColors.ink,
+                                        ),
+                                      ),
+                                    ),
+                                    Text(
+                                      p.startTime,
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: AppColors.muted,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    "Modules",
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.ink,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  GridView.count(
+                    crossAxisCount: 4,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    mainAxisSpacing: 12,
+                    crossAxisSpacing: 8,
+                    childAspectRatio: 0.82,
+                    children: [
+                      for (final m in _staffModules)
+                        InkWell(
+                          borderRadius: BorderRadius.circular(16),
+                          onTap: m.label == "Attendance"
+                              ? () => _openAttendance()
+                              : () {},
+                          child: Column(
+                            children: [
+                              Container(
+                                width: 52,
+                                height: 52,
+                                decoration: BoxDecoration(
+                                  color: m.tone.background,
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                child: Icon(
+                                  m.icon,
+                                  color: m.tone.foreground,
+                                  size: 26,
+                                ),
+                              ),
+                              const SizedBox(height: 5),
+                              Text(
+                                m.label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: AppColors.ink,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _tab,
+        onDestinationSelected: (i) => setState(() => _tab = i),
+        destinations: const [
+          NavigationDestination(icon: Icon(Icons.home_outlined), label: "Home"),
+          NavigationDestination(
+            icon: Icon(Icons.fact_check_outlined),
+            label: "Classes",
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.chat_bubble_outline),
+            label: "Messages",
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.person_outline),
+            label: "Profile",
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AttendanceBanner extends StatelessWidget {
+  const _AttendanceBanner({required this.info, required this.onTap});
+
+  final ClassTeacherInfo? info;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final marked = info?.attendanceMarked ?? false;
+    final color = marked ? AppColors.primaryMid : AppColors.success;
+    final title = info == null
+        ? "Mark attendance"
+        : marked
+            ? "Attendance marked · ${info!.className} ${info!.sectionName}"
+            : "Mark today's attendance";
+    final subtitle = info == null
+        ? "Choose a class and section"
+        : marked
+            ? "${info!.markedCount} students recorded — tap to review"
+            : "${info!.className} ${info!.sectionName} · ${info!.studentCount} students · not marked yet";
+    return Material(
+      color: color,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+          child: Row(
+            children: [
+              Icon(
+                marked ? Icons.task_alt : Icons.fact_check_outlined,
+                color: Colors.white,
+                size: 24,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        color: Color(0xFFE8ECE4),
+                        fontSize: 11.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right, color: Colors.white),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SectionPicker extends StatelessWidget {
+  const _SectionPicker({required this.classes});
+
+  final List<ClassRef> classes;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: SizedBox(
+        height: MediaQuery.sizeOf(context).height * 0.6,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "Choose class & section",
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.ink,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Expanded(
+                child: ListView(
+                  children: [
+                    for (final c in classes)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SizedBox(
+                              width: 64,
+                              child: Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: Text(
+                                  c.name,
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.ink,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              child: Wrap(
+                                spacing: 8,
+                                children: [
+                                  for (final s in c.sections)
+                                    ActionChip(
+                                      label: Text(s.name),
+                                      backgroundColor:
+                                          ModuleTone.teal.background,
+                                      labelStyle: TextStyle(
+                                        color: ModuleTone.teal.foreground,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                      side: BorderSide.none,
+                                      onPressed: () => Navigator.pop(
+                                        context,
+                                        (c.id, s.id, "${c.name} ${s.name}"),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

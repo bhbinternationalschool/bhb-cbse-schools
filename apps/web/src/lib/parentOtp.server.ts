@@ -10,6 +10,7 @@ import {
   sendWhatsAppText,
   sendWhatsAppTemplate,
   buildWaTemplateBodyComponent,
+  buildWaOtpCopyCodeButtonComponent,
 } from "@/lib/waSend";
 import {
   normalizeWaTemplatesState,
@@ -44,7 +45,10 @@ async function tryOtpLoginTemplateSend(
       toMobile: mobile,
       name: template.metaName,
       language: template.metaLanguage || "en",
-      components: [buildWaTemplateBodyComponent(["otp"], { otp: code })],
+      components: [
+        buildWaTemplateBodyComponent(["otp"], { otp: code }),
+        buildWaOtpCopyCodeButtonComponent(code),
+      ],
     });
     if (!send.ok) {
       console.warn(

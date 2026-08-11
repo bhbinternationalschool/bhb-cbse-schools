@@ -171,12 +171,13 @@ export type WaTemplateComponent = {
   sub_type?: string;
   index?: number;
   parameters?: {
-    type: "text" | "image" | "document" | "video" | "payload";
+    type: "text" | "image" | "document" | "video" | "payload" | "coupon_code";
     text?: string;
     image?: { link: string };
     document?: { link: string; filename?: string };
     video?: { link: string };
     payload?: string;
+    coupon_code?: string;
   }[];
   cards?: {
     card_index: number;
@@ -321,6 +322,19 @@ export function buildWaTemplateBodyComponent(
       type: "text" as const,
       text: String(vars[key] ?? "").slice(0, 1024) || "—",
     })),
+  };
+}
+
+/** Build the mandatory OTP copy-code button component for an AUTHENTICATION
+ * template send — required whenever the template was created with the OTP
+ * COPY_CODE button (Meta rejects the send otherwise: "template has buttons
+ * but request doesn't include them"). */
+export function buildWaOtpCopyCodeButtonComponent(code: string): WaTemplateComponent {
+  return {
+    type: "button",
+    sub_type: "copy_code",
+    index: 0,
+    parameters: [{ type: "coupon_code", coupon_code: code.slice(0, 15) }],
   };
 }
 
