@@ -72,6 +72,7 @@ SELFTESTS=(
   test:read-client
   test:survey-photo
   test:partial-lead
+  test:projected-lead-write
   test:hydrate-failure-safety
   test:sis-revision
   test:sis-prune

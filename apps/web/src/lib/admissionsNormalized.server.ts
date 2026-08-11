@@ -279,6 +279,70 @@ function mapMetaRow(
   };
 }
 
+/**
+ * Restore the fields a projected lead never carried, before it is written.
+ *
+ * Stage 6 sends the list without `lead_json` — 1.82 MB of the table's 2.37 MB.
+ * rowToLead() then rebuilds each lead from the ~20 promoted columns, but
+ * AdmissionLead has 79 fields: dob, gender, address, motherName, email, the
+ * document checklist and 53 others live only in lead_json. A lead that came
+ * from the list is a stub.
+ *
+ * leadToRow writes `lead_json: l` wholesale, and the client pushes whole
+ * state, so without this a single save would blank 59 fields on all 919
+ * leads at once. That is not a hypothetical: the identical shape — a partial
+ * value overwriting a complete one — orphaned 711 students earlier today.
+ *
+ * The guarantee is server-side on purpose. A client-side rule would hold only
+ * as long as every future caller remembered it; this holds even when one
+ * does not, because the stored record is read and merged here regardless of
+ * what the browser believed it was sending.
+ *
+ * One extra SELECT, and only when a stub is actually present.
+ */
+async function restorePartialLeads(
+  sb: SupabaseClient,
+  tenantId: string,
+  leads: AdmissionLead[],
+): Promise<AdmissionLead[]> {
+  const stubs = leads.filter((l) => (l as { __partial?: boolean }).__partial);
+  if (stubs.length === 0) return leads;
+
+  const { data, error } = await sb
+    .from("admission_desk_leads")
+    .select("id, lead_json")
+    .eq("tenant_id", tenantId)
+    .in("id", stubs.map((l) => l.id));
+
+  if (error) {
+    // Cannot read what we would be overwriting. Refuse rather than write a
+    // stub over a record we never saw — see mastersStoredReadFailure.
+    throw new Error(
+      `Cannot save admissions: the stored leads could not be read to merge ` +
+        `against (${error.message}). Nothing was written.`,
+    );
+  }
+
+  const stored = new Map(
+    (data ?? []).map((r) => [
+      String((r as { id: unknown }).id),
+      (r as { lead_json?: Partial<AdmissionLead> }).lead_json ?? {},
+    ]),
+  );
+
+  return leads.map((l) => {
+    if (!(l as { __partial?: boolean }).__partial) return l;
+    const base = stored.get(l.id);
+    if (!base) return l; // genuinely new: the stub IS the whole record
+    const merged: Record<string, unknown> = { ...base };
+    for (const [k, v] of Object.entries(l)) {
+      if (k === "__partial") continue;
+      if (v !== undefined) merged[k] = v;
+    }
+    return merged as AdmissionLead;
+  });
+}
+
 export async function pushAdmissionDeskToDb(
   state: AdmissionsState,
 ): Promise<{ ok: boolean; error?: string }> {
@@ -290,7 +354,9 @@ export async function pushAdmissionDeskToDb(
   const normalized = normalizeAdmissionsState(state);
 
   const households = normalized.households ?? [];
-  const leads = normalized.leads ?? [];
+  // Stubs from the projected list get their missing 59 fields back from the
+  // database before anything is written. See restorePartialLeads.
+  const leads = await restorePartialLeads(sb, tenantId, normalized.leads ?? []);
   const payments = normalized.registrationPayments ?? [];
 
   // Write first, prune afterwards.
