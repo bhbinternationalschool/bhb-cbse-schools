@@ -195,9 +195,35 @@ type Student = { id: string; fullName: string };
   // Records that belong to a session must be scoped to one.
   const students = collectionDef("sis.students");
   assert.ok(students, "sis.students must exist");
+  // NOT scoped by academic_year_code, and this assertion was the opposite
+  // until 2026-08-10. It encoded the same plausible assumption the registry
+  // did: "students belong to a session".
+  //
+  // Measured against production: of 680 ACTIVE students, academic_year_code
+  // reads 2026-27 for 238, 2025-26 for 213, 2024-25 for 142 and 2023-24 for
+  // 88 — every group holding currently enrolled children from Nursery to X,
+  // all with earliest_joined 2023-01-01. The column records when a record was
+  // created or imported and was never advanced.
+  //
+  // Scoping by it would return 238 of 680: a roster missing two thirds of the
+  // school, presented as the roster. A test written from the same assumption
+  // as the code confirms the assumption, not the behaviour — which is why
+  // this one is pinned to the measurement instead.
   assert.ok(
-    students.scope.includes("academic_year_code"),
-    "students are per-session; unscoped, a roster spans every year",
+    !students.scope.includes("academic_year_code"),
+    "sis_students.academic_year_code is an import stamp, not the current " +
+      "session — scoping by it hides 442 of 680 active students",
+  );
+  assert.deepEqual(students.scope, ["tenant_id"]);
+
+  // The admissions collection is the genuine contrast: there the column is
+  // the intake year sought, a real property of a lead, so the scope is right.
+  const leads = collectionDef("admissions.leads");
+  assert.ok(leads, "admissions.leads must exist");
+  assert.ok(
+    leads.scope.includes("academic_year_code"),
+    "a lead's academic_year_code IS the year it is for — 690 of 919 leads " +
+      "are 2025-26 enquiries and must not be mixed into this year's list",
   );
 
   // An unknown id must be undefined, never a guess — it arrives from a URL.
