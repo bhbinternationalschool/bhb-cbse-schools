@@ -200,15 +200,37 @@ export function AppShell({
   }, [session.academicYearCode, readOnly]);
 
   useEffect(() => {
+    // Toasts, not window.alert.
+    //
+    // window.alert BLOCKS the page and has to be dismissed by hand. These
+    // events fire per attempted action, so a read-only session produced a
+    // modal on every tap — the director reported dismissing it "many times".
+    // A refusal should be visible, not obstructive: the user already knows
+    // what they tried to do, and stopping them from doing anything else
+    // teaches nothing.
+    //
+    // Deduplicated too: the same refusal repeated within a few seconds is one
+    // fact, not several.
+    let lastMessage = "";
+    let lastAt = 0;
+    async function notify(message: string) {
+      const now = Date.now();
+      if (message === lastMessage && now - lastAt < 5000) return;
+      lastMessage = message;
+      lastAt = now;
+      const { pushToast } = await import("@/components/shell/Toast");
+      pushToast({ kind: "error", message, durationMs: 6000 });
+    }
+
     function onReadonly(e: Event) {
       const detail = (e as CustomEvent<{ academicYearCode?: string }>).detail;
       const code = detail?.academicYearCode || session.academicYearCode;
-      window.alert(
-        `Session ${code} is closed (read-only). Switch to the current session to make changes.`,
+      void notify(
+        `Session ${code} is closed, so this cannot be changed. Switch to the current session to make edits.`,
       );
     }
     function onRbacDenied() {
-      window.alert(
+      void notify(
         "You do not have permission for this action. Ask an admin to update Roles & permissions.",
       );
     }

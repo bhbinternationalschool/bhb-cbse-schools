@@ -95,6 +95,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:sis-prune
 
+      - name: Test — a partial attendance push never deletes history
+        working-directory: apps/web
+        run: npm run test:attendance-prune
+
       - name: Test — a removed student is actually deleted
         working-directory: apps/web
         run: npm run test:sis-delete

@@ -76,6 +76,7 @@ SELFTESTS=(
   test:hydrate-failure-safety
   test:sis-revision
   test:sis-prune
+  test:attendance-prune
   test:sis-delete
   test:sis-guard-fallback
   test:audit-redaction

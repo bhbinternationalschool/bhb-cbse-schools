@@ -324,6 +324,31 @@ export async function hydrateMastersDeskFromDb(
       ? remoteIsNewer || ((!localEditAt || localIsEmpty) && hasRemote)
       : hasRemote && (bootstrapNewDevice || remoteIsNewer || localIsEmpty);
 
+    // Record the server's revision on ANY successful read, before deciding
+    // whether to adopt its data.
+    //
+    // This used to sit after the early return below, so a client that
+    // declined the remote bundle — which is every client holding a local
+    // edit — never learned the revision it had just been shown. Its push
+    // base stayed frozen at whatever a previous response gave it, so every
+    // save came back 409 "changed on another device" and reloading could not
+    // clear it, because reloading is exactly the path that skipped this line.
+    // Observed 2026-08-11: base=10:46:42.608 against stored=10:46:42.650 —
+    // 42 milliseconds apart, same second, no other device involved.
+    //
+    // Safe: knowing the server's revision changes nothing about what this
+    // browser holds. It only means the next push is judged against what this
+    // client actually saw, which is what optimistic locking is for. Refusing
+    // to record it does not protect anyone's data — it just guarantees the
+    // next write is rejected.
+    if (remoteAt) {
+      writeMeta({
+        updatedAt: remoteAt,
+        classCount: remoteClasses,
+        feeHeadCount: body.feeHeadCount ?? bundle.feeHeads?.length ?? 0,
+      });
+    }
+
     if (!shouldTake) return { bundle: empty, changed: false, ok: true };
     writeMeta({
       // Same rule as the push path: a revision only ever comes from the

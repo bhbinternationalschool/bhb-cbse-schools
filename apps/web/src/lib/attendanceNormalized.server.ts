@@ -148,12 +148,41 @@ export async function pushAttendanceRegistersToDb(
   const now = new Date().toISOString();
 
   const active = registers ?? [];
-  await deleteStale(
-    sb,
-    tenantId,
-    "attendance_desk_registers",
-    new Set(active.map((r) => r.id)),
-  );
+
+  // Attendance is history. A push is NOT a statement that these are the only
+  // registers that ever existed.
+  //
+  // This called deleteStale unconditionally, so every push deleted every
+  // register the client did not happen to be holding — and the `!active.length`
+  // check below runs AFTER, so an empty payload wiped the entire attendance
+  // history first and noticed second.
+  //
+  // On 2026-08-11 the database held exactly one register: today's. The
+  // register for 2026-08-10, marked the day before, was gone. The browser
+  // cache was being dropped on quota all that day, so the client pushed
+  // whatever partial state it had and the server obligingly deleted the rest.
+  //
+  // sis_students has been protected from precisely this since the roster
+  // incident — pruning there requires the caller to declare a complete
+  // snapshot, and test:sis-prune enforces it. Attendance never got the same
+  // guard. It has one now: prune only what belongs to the dates this payload
+  // actually covers, and never on an empty payload.
+  if (active.length > 0) {
+    const coveredDates = new Set(active.map((r) => r.date).filter(Boolean));
+    const keepIds = new Set(active.map((r) => r.id));
+    const { data: existing } = await sb
+      .from("attendance_desk_registers")
+      .select("id, attendance_date")
+      .eq("tenant_id", tenantId)
+      .in("attendance_date", [...coveredDates]);
+
+    const stale = (existing ?? [])
+      .map((r) => String((r as { id: string }).id))
+      .filter((id) => !keepIds.has(id));
+    if (stale.length > 0) {
+      await sb.from("attendance_desk_registers").delete().in("id", stale);
+    }
+  }
 
   if (!active.length) {
     await sb.from("attendance_desk_sync_meta").upsert(

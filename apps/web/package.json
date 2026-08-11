@@ -24,6 +24,7 @@
     "test:session-cookie": "npx tsx src/lib/sessionCookie.selftest.ts",
     "test:sis-revision": "npx tsx src/lib/sisRevision.selftest.ts",
     "test:sis-prune": "npx tsx src/lib/sisPrune.selftest.ts",
+    "test:attendance-prune": "npx tsx src/lib/attendancePrune.selftest.ts",
     "test:sis-delete": "npx tsx src/lib/sisDelete.selftest.ts",
     "test:sis-guard-fallback": "npx tsx src/lib/sisGuardFallback.selftest.ts",
     "test:masters-freeze": "npx tsx src/lib/mastersFreeze.selftest.ts",
