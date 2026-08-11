@@ -4,6 +4,7 @@
  */
 
 import { NextResponse } from "next/server";
+import { getDemoSession } from "@/lib/auth";
 import {
   ensureWabaWebhookSubscription,
   getWhatsAppSetupReport,
@@ -12,6 +13,10 @@ import {
 export const runtime = "nodejs";
 
 export async function GET() {
+  const session = await getDemoSession();
+  if (!session || session.persona !== "staff") {
+    return NextResponse.json({ error: "Staff login required" }, { status: 403 });
+  }
   const report = await getWhatsAppSetupReport();
   return NextResponse.json({
     ok: report.issues.length === 0,
@@ -20,6 +25,10 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const session = await getDemoSession();
+  if (!session || session.persona !== "staff") {
+    return NextResponse.json({ error: "Staff login required" }, { status: 403 });
+  }
   let body: { action?: string } = {};
   try {
     body = (await req.json()) as typeof body;

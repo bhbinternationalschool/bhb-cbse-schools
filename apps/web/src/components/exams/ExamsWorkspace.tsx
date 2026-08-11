@@ -63,16 +63,20 @@ import {
   printClassResultSheet,
 } from "@/components/exams/ClassResultSheet";
 import { ExamDateSheetPanel } from "@/components/exams/ExamDateSheetPanel";
+import { InvigilationPanel } from "@/components/exams/InvigilationPanel";
 import { ExamPapersPanel } from "@/components/exams/ExamPapersPanel";
+import { ExamReportsRunner } from "@/components/reports/ModuleReportRunners";
 import { hasPermission } from "@/lib/rbac";
 
 type Tab =
   | "dashboard"
   | "marks"
   | "datesheet"
+  | "invigilation"
   | "papers"
   | "reports"
   | "results"
+  | "result_reports"
   | "setup";
 
 export function ExamsWorkspace() {
@@ -621,9 +625,11 @@ export function ExamsWorkspace() {
           { id: "dashboard", label: "Dashboard", tone: "navy" },
           { id: "marks", label: "Mark entry", tone: "sky" },
           { id: "datesheet", label: "Date-sheet", tone: "violet" },
+          { id: "invigilation", label: "Invigilation", tone: "coral" },
           { id: "papers", label: "Question papers", tone: "rose" },
           { id: "reports", label: "Report cards", tone: "amber" },
           { id: "results", label: "Results", tone: "green" },
+          { id: "result_reports", label: "Result reports", tone: "teal" },
           { id: "setup", label: "Exams & policy", tone: "navy" },
         ]}
       />
@@ -631,6 +637,7 @@ export function ExamsWorkspace() {
       {tab !== "setup" &&
       tab !== "dashboard" &&
       tab !== "datesheet" &&
+      tab !== "invigilation" &&
       tab !== "papers" ? (
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
           <label className="block text-sm">
@@ -703,6 +710,10 @@ export function ExamsWorkspace() {
           terms={terms}
           onChanged={refresh}
         />
+      ) : null}
+
+      {tab === "invigilation" && masters ? (
+        <InvigilationPanel academicYearCode={ay} masters={masters} terms={terms} />
       ) : null}
 
       {tab === "papers" && masters ? (
@@ -1833,6 +1844,12 @@ export function ExamsWorkspace() {
               <ClassResultSheetView sheet={classResult.sheet} />
             </>
           ) : null}
+        </div>
+      ) : null}
+
+      {tab === "result_reports" ? (
+        <div className="mt-6">
+          <ExamReportsRunner ay={ay} />
         </div>
       ) : null}
 

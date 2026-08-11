@@ -12,6 +12,13 @@ export type ReportColumn = {
   align?: "left" | "right";
 };
 
+export type ReportSheet = {
+  /** Truncated to Excel's 31-char sheet-name limit automatically. */
+  name: string;
+  columns: ReportColumn[];
+  rows: Record<string, string | number | null | undefined>[];
+};
+
 export type ReportExportInput = {
   title: string;
   subtitle?: string;
@@ -20,6 +27,10 @@ export type ReportExportInput = {
   columns: ReportColumn[];
   rows: Record<string, string | number | null | undefined>[];
   fileBaseName: string;
+  /** Extra worksheets after the main one — same workbook, e.g. a fee
+   * reconciliation pack's "By mode" / "By class" breakdown sheets
+   * alongside the full receipt list. XLSX only; ignored for CSV/PDF. */
+  extraSheets?: ReportSheet[];
 };
 
 function stamp(): string {
@@ -62,28 +73,125 @@ export function downloadExcelCsv(input: ReportExportInput): void {
   downloadBlob(`${input.fileBaseName}_${stamp()}.csv`, blob);
 }
 
+/** Excel worksheet names: max 31 chars, and `[]:*?/\` are illegal. */
+export function safeSheetName(name: string, usedNames: Set<string>): string {
+  const cleaned = (name || "Sheet").replace(/[[\]:*?/\\]/g, " ").trim().slice(0, 31) || "Sheet";
+  if (!usedNames.has(cleaned)) {
+    usedNames.add(cleaned);
+    return cleaned;
+  }
+  for (let i = 2; i < 100; i++) {
+    const suffix = ` (${i})`;
+    const candidate = cleaned.slice(0, 31 - suffix.length) + suffix;
+    if (!usedNames.has(candidate)) {
+      usedNames.add(candidate);
+      return candidate;
+    }
+  }
+  return cleaned;
+}
+
+/**
+ * Real .xlsx via exceljs — everything under the "Excel" button used to be
+ * a CSV file with an .xlsx-adjacent look, not an actual workbook: no bold
+ * headers, no frozen header row, no column widths, and no way to ship more
+ * than one sheet (a fee reconciliation pack needing a summary sheet plus
+ * the full receipt list had nowhere to put the second sheet). This builds
+ * one workbook with the main sheet plus any `extraSheets`.
+ */
+export async function downloadXlsxReport(input: ReportExportInput): Promise<void> {
+  const ExcelJS = await import("exceljs");
+  const wb = new ExcelJS.Workbook();
+  wb.creator = TENANT.shortName;
+  wb.created = new Date();
+
+  const usedNames = new Set<string>();
+  const sheets: ReportSheet[] = [
+    { name: input.title, columns: input.columns, rows: input.rows },
+    ...(input.extraSheets ?? []),
+  ];
+
+  for (const sheetDef of sheets) {
+    const ws = wb.addWorksheet(safeSheetName(sheetDef.name, usedNames));
+    ws.columns = sheetDef.columns.map((c) => ({
+      header: c.header,
+      key: c.key,
+      width: Math.max(10, Math.round((c.width ?? 1) * 14)),
+    }));
+
+    const headerRow = ws.getRow(1);
+    headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    headerRow.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FF203050" },
+    };
+    headerRow.alignment = { vertical: "middle" };
+
+    sheetDef.rows.forEach((row, i) => {
+      const r = ws.addRow(row);
+      if (i % 2 === 1) {
+        r.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FFF6F5EF" },
+        };
+      }
+      sheetDef.columns.forEach((c, colIdx) => {
+        if (c.align === "right") {
+          r.getCell(colIdx + 1).alignment = { horizontal: "right" };
+        }
+      });
+    });
+
+    ws.views = [{ state: "frozen", ySplit: 1 }];
+    ws.autoFilter = {
+      from: { row: 1, column: 1 },
+      to: { row: 1, column: sheetDef.columns.length },
+    };
+  }
+
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  downloadBlob(`${input.fileBaseName}_${stamp()}.xlsx`, blob);
+}
+
+/**
+ * A wide report (more columns than comfortably fit one landscape A4 table)
+ * used to silently drop every column past the first 12 that matched a
+ * hardcoded priority list — the PDF looked complete but was missing data
+ * with no indication anything was cut. Instead, split wide reports into
+ * column "bands": each band repeats the first (identifying) column plus a
+ * page-width slice of the rest, so every column ends up in the PDF
+ * somewhere — nothing is silently dropped — and each band's header says
+ * which slice and of how many it is.
+ */
+const MIN_COL_WIDTH_PT = 46;
+
+export function bandColumns(
+  cols: ReportColumn[],
+  usableWidth: number,
+): ReportColumn[][] {
+  if (cols.length <= 1) return [cols];
+  const maxDataColsPerBand = Math.max(
+    1,
+    Math.floor((usableWidth - MIN_COL_WIDTH_PT) / MIN_COL_WIDTH_PT),
+  );
+  const [keyCol, ...rest] = cols;
+  if (rest.length <= maxDataColsPerBand) return [cols];
+
+  const bands: ReportColumn[][] = [];
+  for (let i = 0; i < rest.length; i += maxDataColsPerBand) {
+    bands.push([keyCol!, ...rest.slice(i, i + maxDataColsPerBand)]);
+  }
+  return bands;
+}
+
 /** Simple multi-page PDF table of the filtered rows. */
 export async function downloadPdfReport(input: ReportExportInput): Promise<void> {
   const { jsPDF } = await import("jspdf");
-  let cols = input.columns;
-  if (cols.length > 12) {
-    const priorityKeys = new Set([
-      "admissionNo",
-      "fullName",
-      "gender",
-      "className",
-      "section",
-      "rollNo",
-      "fatherName",
-      "fatherMobile",
-      "status",
-      "pen",
-      "category",
-      "academicYear",
-    ]);
-    const filteredCols = cols.filter((c) => priorityKeys.has(c.key));
-    cols = filteredCols.length > 0 ? filteredCols.slice(0, 12) : cols.slice(0, 12);
-  }
 
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
@@ -91,99 +199,111 @@ export async function downloadPdfReport(input: ReportExportInput): Promise<void>
   const margin = 36;
   const usable = pageW - margin * 2;
 
-  const totalWeight = cols.reduce(
-    (s, c) => s + (c.width ?? 1),
-    0,
-  );
-  const colWidths = cols.map(
-    (c) => ((c.width ?? 1) / totalWeight) * usable,
-  );
-
-  let y = margin;
+  const bands = bandColumns(input.columns, usable);
   const titleSize = 14;
-  const bodySize = cols.length > 10 ? 7 : 8;
-  const lineH = bodySize + 4;
 
-  function drawHeaderBlock() {
-    y = margin;
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(titleSize);
-    doc.setTextColor(32, 48, 80);
-    doc.text(input.title, margin, y);
-    y += 16;
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    doc.setTextColor(92, 100, 120);
-    doc.text(
-      input.subtitle ?? `${TENANT.shortName} · ${TENANT.city}`,
-      margin,
-      y,
-    );
-    y += 12;
-    if (input.filterNote) {
-      doc.text(`Filter: ${input.filterNote}`, margin, y);
+  bands.forEach((cols, bandIndex) => {
+    if (bandIndex > 0) doc.addPage();
+
+    const totalWeight = cols.reduce((s, c) => s + (c.width ?? 1), 0);
+    const colWidths = cols.map((c) => ((c.width ?? 1) / totalWeight) * usable);
+    const bodySize = cols.length > 10 ? 7 : 8;
+    const lineH = bodySize + 4;
+    let y = margin;
+
+    function drawHeaderBlock() {
+      y = margin;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(titleSize);
+      doc.setTextColor(32, 48, 80);
+      doc.text(input.title, margin, y);
+      y += 16;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(92, 100, 120);
+      doc.text(
+        input.subtitle ?? `${TENANT.shortName} · ${TENANT.city}`,
+        margin,
+        y,
+      );
       y += 12;
+      if (input.filterNote) {
+        doc.text(`Filter: ${input.filterNote}`, margin, y);
+        y += 12;
+      }
+      doc.text(
+        `${input.rows.length} row(s) · ${new Date().toLocaleString("en-IN")}`,
+        margin,
+        y,
+      );
+      y += 12;
+      if (bands.length > 1) {
+        doc.setTextColor(180, 83, 9);
+        doc.text(
+          `Columns ${bandIndex + 1}/${bands.length} of this report — same rows, ` +
+            `next set of columns on the following page(s).`,
+          margin,
+          y,
+        );
+        y += 12;
+        doc.setTextColor(92, 100, 120);
+      }
+      y += 6;
     }
-    doc.text(
-      `${input.rows.length} row(s) · ${new Date().toLocaleString("en-IN")}`,
-      margin,
-      y,
-    );
-    y += 18;
-  }
 
-  function drawTableHeader() {
-    doc.setFillColor(32, 48, 80);
-    doc.rect(margin, y - 9, usable, lineH + 4, "F");
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(bodySize);
-    doc.setTextColor(255, 255, 255);
-    let x = margin;
-    cols.forEach((c, i) => {
-      const w = colWidths[i]!;
-      const align = c.align === "right" ? "right" : "left";
-      doc.text(c.header, align === "right" ? x + w - 2 : x + 2, y, {
-        align,
-        maxWidth: w - 4,
+    function drawTableHeader() {
+      doc.setFillColor(32, 48, 80);
+      doc.rect(margin, y - 9, usable, lineH + 4, "F");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(bodySize);
+      doc.setTextColor(255, 255, 255);
+      let x = margin;
+      cols.forEach((c, i) => {
+        const w = colWidths[i]!;
+        const align = c.align === "right" ? "right" : "left";
+        doc.text(c.header, align === "right" ? x + w - 2 : x + 2, y, {
+          align,
+          maxWidth: w - 4,
+        });
+        x += w;
       });
-      x += w;
-    });
-    y += lineH + 6;
-    doc.setTextColor(32, 48, 80);
-    doc.setFont("helvetica", "normal");
-  }
-
-  drawHeaderBlock();
-  drawTableHeader();
-
-  if (input.rows.length === 0) {
-    doc.setFontSize(10);
-    doc.setTextColor(92, 100, 120);
-    doc.text("No rows match the current filter.", margin, y + 8);
-  }
-
-  input.rows.forEach((row, rowIndex) => {
-    if (y > pageH - margin - 20) {
-      doc.addPage();
-      drawHeaderBlock();
-      drawTableHeader();
+      y += lineH + 6;
+      doc.setTextColor(32, 48, 80);
+      doc.setFont("helvetica", "normal");
     }
-    if (rowIndex % 2 === 1) {
-      doc.setFillColor(246, 245, 239);
-      doc.rect(margin, y - 9, usable, lineH + 2, "F");
+
+    drawHeaderBlock();
+    drawTableHeader();
+
+    if (input.rows.length === 0) {
+      doc.setFontSize(10);
+      doc.setTextColor(92, 100, 120);
+      doc.text("No rows match the current filter.", margin, y + 8);
     }
-    let x = margin;
-    cols.forEach((c, i) => {
-      const w = colWidths[i]!;
-      const text = safeCell(row[c.key]);
-      const align = c.align === "right" ? "right" : "left";
-      doc.text(text, align === "right" ? x + w - 2 : x + 2, y, {
-        align,
-        maxWidth: w - 4,
+
+    input.rows.forEach((row, rowIndex) => {
+      if (y > pageH - margin - 20) {
+        doc.addPage();
+        drawHeaderBlock();
+        drawTableHeader();
+      }
+      if (rowIndex % 2 === 1) {
+        doc.setFillColor(246, 245, 239);
+        doc.rect(margin, y - 9, usable, lineH + 2, "F");
+      }
+      let x = margin;
+      cols.forEach((c, i) => {
+        const w = colWidths[i]!;
+        const text = safeCell(row[c.key]);
+        const align = c.align === "right" ? "right" : "left";
+        doc.text(text, align === "right" ? x + w - 2 : x + 2, y, {
+          align,
+          maxWidth: w - 4,
+        });
+        x += w;
       });
-      x += w;
+      y += lineH + 2;
     });
-    y += lineH + 2;
   });
 
   const pageCount = doc.getNumberOfPages();
@@ -209,8 +329,8 @@ export function exportFilterReport(
   if (!input.columns.length) {
     return { ok: false, error: "Nothing to export" };
   }
-  if (format === "excel") downloadExcelCsv(input);
-  else downloadPdfReport(input);
+  if (format === "excel") void downloadXlsxReport(input);
+  else void downloadPdfReport(input);
   return { ok: true };
 }
 

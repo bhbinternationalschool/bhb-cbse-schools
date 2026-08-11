@@ -19,6 +19,11 @@ import {
 import { ensureWabaWebhookSubscription } from "@/lib/waMeta.server";
 import { handleWaUnifiedInbound } from "@/lib/waUnifiedBotServer";
 import { isProductionEnv } from "@/lib/apiRouteAuth.server";
+import { recordInboundMessage } from "@/lib/waContactState.server";
+import {
+  parseMetaStatusUpdates,
+  recordDeliveryStatuses,
+} from "@/lib/waDeliveryLog.server";
 
 export const runtime = "nodejs";
 
@@ -94,6 +99,11 @@ export async function POST(req: Request) {
     await appendTemplateStatusEvents(templateStatusEvents);
   }
 
+  const deliveryStatusEvents = parseMetaStatusUpdates(body);
+  if (deliveryStatusEvents.length > 0) {
+    await recordDeliveryStatuses(deliveryStatusEvents);
+  }
+
   let inbound = parseMetaWebhookInbound(body);
   if (inbound.length === 0) {
     inbound = parseGenericBspInbound(body);
@@ -104,11 +114,13 @@ export async function POST(req: Request) {
       ok: true,
       handled: 0,
       templateStatusUpdates: templateStatusEvents.length,
+      deliveryStatusUpdates: deliveryStatusEvents.length,
     });
   }
 
   const results = [];
   for (const msg of inbound) {
+    await recordInboundMessage(msg.fromWaId, msg.text);
     const r = await handleWaUnifiedInbound({
       fromWaId: msg.fromWaId,
       text: msg.text,
@@ -130,6 +142,7 @@ export async function POST(req: Request) {
     ok: true,
     handled: results.length,
     outboundConfigured: waOutboundConfigured(),
+    deliveryStatusUpdates: deliveryStatusEvents.length,
     results,
   });
 }

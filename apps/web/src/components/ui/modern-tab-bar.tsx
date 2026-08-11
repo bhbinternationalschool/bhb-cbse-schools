@@ -58,6 +58,46 @@ export function moduleTabTriggerClass({
   );
 }
 
+/**
+ * Arrow-key roving-tabindex handler for a `role="tablist"` — WAI-ARIA
+ * authoring practice for tabs. Left/Right (and Up/Down) move + activate the
+ * adjacent tab, Home/End jump to the ends; Tab key is left alone since only
+ * the active tab is in the page tab order (tabIndex 0 vs -1).
+ */
+export function createTablistKeyHandler({
+  ids,
+  activeId,
+  onSelect,
+  getEl,
+}: {
+  ids: string[];
+  activeId: string;
+  onSelect: (id: string) => void;
+  getEl: (id: string) => HTMLButtonElement | null | undefined;
+}) {
+  return (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (ids.length === 0) return;
+    const currentIndex = ids.indexOf(activeId);
+    const from = currentIndex < 0 ? 0 : currentIndex;
+    let nextIndex: number;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+      nextIndex = (from + 1) % ids.length;
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+      nextIndex = (from - 1 + ids.length) % ids.length;
+    } else if (e.key === "Home") {
+      nextIndex = 0;
+    } else if (e.key === "End") {
+      nextIndex = ids.length - 1;
+    } else {
+      return;
+    }
+    e.preventDefault();
+    const nextId = ids[nextIndex]!;
+    onSelect(nextId);
+    getEl(nextId)?.focus();
+  };
+}
+
 export function ModuleTabBadge({
   active,
   children,
@@ -101,6 +141,10 @@ export function ModernTabButton({
   icon,
   showOpenBadge,
   className,
+  id,
+  tabIndex,
+  buttonRef,
+  onKeyDown,
 }: {
   active: boolean;
   toneKey: ModuleTabTone;
@@ -111,13 +155,21 @@ export function ModernTabButton({
   icon?: ReactNode;
   showOpenBadge?: boolean;
   className?: string;
+  id?: string;
+  tabIndex?: number;
+  buttonRef?: (el: HTMLButtonElement | null) => void;
+  onKeyDown?: (e: React.KeyboardEvent<HTMLButtonElement>) => void;
 }) {
   return (
     <button
       type="button"
       role="tab"
+      id={id}
       aria-selected={active}
+      tabIndex={tabIndex}
+      ref={buttonRef}
       onClick={onClick}
+      onKeyDown={onKeyDown}
       className={cn(moduleTabTriggerClass({ active, toneKey, size }), className)}
     >
       {active ? (

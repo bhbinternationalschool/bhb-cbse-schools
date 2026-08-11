@@ -42,9 +42,9 @@ export function reportLoadFailure(moduleLabel: string) {
 type LiveToast = ToastDetail & { id: number };
 
 const KIND_STYLES: Record<ToastKind, string> = {
-  error: "border-[#c0392b]/30 bg-[#fdecea] text-[#7a2419]",
+  error: "border-[var(--danger)]/30 bg-[var(--danger-soft)] text-[var(--danger)]",
   info: "border-[var(--brand-deep)]/25 bg-[var(--surface,#fff)] text-[var(--brand-deep)]",
-  success: "border-[#2f6d3f]/25 bg-[#e9f5ec] text-[#1f4b2c]",
+  success: "border-[var(--success)]/25 bg-[var(--success-soft)] text-[var(--success)]",
 };
 
 export function ToastHost() {

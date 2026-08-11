@@ -26,6 +26,7 @@ import { listPaymentLinks, loadPayments } from "@/lib/payments";
 import {
   exportFilterReport,
   type ReportColumn,
+  type ReportSheet,
 } from "@/lib/reportExport";
 import {
   householdOf,
@@ -73,7 +74,8 @@ export type FeeReportId =
   | "daily_online_fee_payment"
   | "special_fee_type_report"
   | "guardian_wise_due_report"
-  | "miscellaneous_fee_report";
+  | "miscellaneous_fee_report"
+  | "fee_reconciliation_pack";
 
 export type FeeReportDef = {
   id: FeeReportId;
@@ -157,6 +159,12 @@ export const FEE_REPORTS: FeeReportDef[] = [
     id: "online_fee_transaction",
     category: "collection",
     label: "Online Fee Transaction",
+  },
+  {
+    id: "fee_reconciliation_pack",
+    category: "collection",
+    label: "Fee Reconciliation Pack",
+    hint: "Multi-sheet workbook: receipts, by-mode, by-class totals",
   },
   // Dues
   {
@@ -339,6 +347,7 @@ function emit(
   rows: Record<string, string | number | null | undefined>[],
   filterNote: string | undefined,
   format: FeeReportFormat,
+  extraSheets?: ReportSheet[],
 ) {
   const result = exportFilterReport(
     {
@@ -348,6 +357,7 @@ function emit(
       columns,
       rows,
       fileBaseName,
+      extraSheets,
     },
     format,
   );
@@ -553,6 +563,107 @@ export function runFeeReport(
           format,
         );
         return { ok: true, rows: n, message: `${def.label} · ${fmt} · ${n} day(s)` };
+      }
+
+      case "fee_reconciliation_pack": {
+        const vouchers = activeVouchers(fees, from, to, ay);
+
+        const receiptRows = vouchers
+          .slice()
+          .sort((a, b) => a.collectionDate.localeCompare(b.collectionDate))
+          .map((v) => {
+            const modes = [
+              ...new Set(v.tenders.map((t) => tenderModeLabel(t.mode))),
+            ].join(", ");
+            const studentNames = [
+              ...new Set(v.lines.map((l) => l.studentName)),
+            ].join(", ");
+            return {
+              date: v.collectionDate,
+              receiptNo: v.receiptNo || v.id,
+              student: studentNames,
+              mode: modes,
+              amount: paise(v.totalPaise),
+            };
+          });
+
+        const byMode = new Map<string, { count: number; amount: number }>();
+        for (const v of vouchers) {
+          for (const t of v.tenders) {
+            const label = tenderModeLabel(t.mode);
+            const row = byMode.get(label) ?? { count: 0, amount: 0 };
+            row.count += 1;
+            row.amount += t.amountPaise;
+            byMode.set(label, row);
+          }
+        }
+        const byModeRows = [...byMode.entries()]
+          .sort((a, b) => b[1].amount - a[1].amount)
+          .map(([mode, r]) => ({
+            mode,
+            tenders: r.count,
+            amount: paise(r.amount),
+          }));
+
+        const byClass = new Map<string, number>();
+        for (const v of vouchers) {
+          const classNames = new Set<string>();
+          for (const line of v.lines) {
+            const st = sis.students.find((s) => s.id === line.studentId);
+            classNames.add(st ? classLabel(st, masters) : "—");
+          }
+          // A multi-student voucher (siblings) would double-count the
+          // total if split across every class it touches — attribute the
+          // whole voucher to the first resolved class instead so the
+          // by-class sheet sums back to the receipt total.
+          const cls = [...classNames][0] ?? "—";
+          byClass.set(cls, (byClass.get(cls) ?? 0) + v.totalPaise);
+        }
+        const byClassRows = [...byClass.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .map(([className, amount]) => ({
+            className,
+            amount: paise(amount),
+          }));
+
+        const n = emit(
+          def.label,
+          id,
+          [
+            { key: "date", header: "Date" },
+            { key: "receiptNo", header: "Receipt no" },
+            { key: "student", header: "Student" },
+            { key: "mode", header: "Mode" },
+            { key: "amount", header: "Amount ₹" },
+          ],
+          receiptRows,
+          filterNote,
+          format,
+          [
+            {
+              name: "By mode",
+              columns: [
+                { key: "mode", header: "Mode" },
+                { key: "tenders", header: "Tenders", align: "right" },
+                { key: "amount", header: "Amount ₹", align: "right" },
+              ],
+              rows: byModeRows,
+            },
+            {
+              name: "By class",
+              columns: [
+                { key: "className", header: "Class" },
+                { key: "amount", header: "Amount ₹", align: "right" },
+              ],
+              rows: byClassRows,
+            },
+          ],
+        );
+        return {
+          ok: true,
+          rows: n,
+          message: `${def.label} · ${fmt} · ${n} receipt(s) · ${byModeRows.length} mode(s) · ${byClassRows.length} class(es)`,
+        };
       }
 
       case "headwise_daily_collection":

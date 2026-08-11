@@ -22,6 +22,7 @@ import {
 } from "@/lib/waClassChannelEngine";
 import { sendWhatsAppText, waNormalizeLocal10 } from "@/lib/waSend";
 import type { StaffRecord } from "@/lib/foundationMasters";
+import { generateTutorText } from "@/lib/aiLlm.server";
 
 export type ClassChannelMemberRole =
   | "class_teacher"
@@ -558,6 +559,35 @@ export async function listClassChannelState() {
   };
 }
 
+/**
+ * LLM fallback for teacher messages that don't parse as a class-channel
+ * command. Only ever called when there's no draft in progress. Points to
+ * the existing HW/NOTICE/HELP syntax only — never invents class rosters,
+ * schedules, or school policy, and the caller always appends the exact
+ * command syntax hint after this reply so the format guidance is never
+ * lost even if the AI answer alone isn't actionable enough.
+ */
+async function tryClassChannelAiFallback(
+  text: string,
+  teacherName: string,
+): Promise<string | null> {
+  const system = `You are a WhatsApp assistant for a teacher's class-channel bot at ${TENANT.nameDisplay} (broadcasts homework/notices to a class's parents).
+You may ONLY explain the existing commands: HW <section> <subject>: <text> (homework), NOTICE <section>: <text>, MEMBERS (channel member count), CONFIRM (publish a pending draft), CANCEL (discard it), HELP.
+You do NOT know class rosters, schedules, subjects, or school policy — never guess at them.
+Keep the reply under 250 characters, plain text (no markdown headers).`;
+
+  const userMessage = `Teacher: ${teacherName}
+Message: "${text}"`;
+
+  try {
+    const r = await generateTutorText({ system, userMessage });
+    if (!r.ok) return null;
+    return r.text.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function handleWaClassChannelInbound(msg: {
   fromWaId: string;
   text: string;
@@ -751,12 +781,22 @@ export async function handleWaClassChannelInbound(msg: {
       }
     }
   } else {
-    replyText = [
+    const syntaxHint = [
       "Could not understand. Try:",
       "HW 8A Maths: …",
       "NOTICE 8A: …",
       "Or send HELP",
     ].join("\n");
+    replyText = syntaxHint;
+    // Only when there's no draft in progress — never let a free-text AI
+    // reply interfere with an active HW/NOTICE compose-and-confirm flow.
+    if (!thread.pendingDraftId && (msg.text || "").trim().length > 3) {
+      const aiReply = await tryClassChannelAiFallback(
+        msg.text || "",
+        staff.fullName,
+      );
+      if (aiReply) replyText = `${aiReply}\n\n${syntaxHint}`;
+    }
   }
 
   thread.messages.push({

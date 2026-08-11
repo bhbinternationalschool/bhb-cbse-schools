@@ -19,8 +19,19 @@
   /* Legacy ERP secondary text — keep for text-[var(--muted)] across modules */
   --muted: #5c6478;
   --muted-surface: #f0efe8;
+  /* Semantic status tokens — the single source of truth for danger/success/
+     warning/info. Modules currently reach for their own hex per callsite
+     (six different "danger" reds, five different "ok" greens); new code
+     should use these instead of literal hex. */
   --danger: #b42318;
+  --danger-soft: #fee4e2;
   --ok: #0f7a4c;
+  --success: #0f7a4c;
+  --success-soft: #dcf5e8;
+  --warning: #b45309;
+  --warning-soft: #fef3c7;
+  --info: #1d4ed8;
+  --info-soft: #dbeafe;
   --ring: #c5a028;
   --background: #f6f5ef;
   --foreground: #203050;
@@ -38,11 +49,23 @@
   --destructive: #b42318;
   --border: rgba(32, 48, 80, 0.14);
   --input: rgba(32, 48, 80, 0.18);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  /* Categorical chart palette — one source for ErpBarChart/ErpPieChart,
+     module tab tones and dashboard series colors (today those are 3–4
+     uncoordinated arrays). Matches lib/erp-charts.tsx ERP_CHART_COLORS so
+     consolidation can point at these without a visual change. */
+  --chart-1: #2563eb;
+  --chart-2: #ef4444;
+  --chart-3: #f97316;
+  --chart-4: #16a34a;
+  --chart-5: #8b5cf6;
+  --chart-6: #0891b2;
+  --chart-7: #e11d48;
+  --chart-8: #ca8a04;
+  /* Type scale — use these (or the matching Tailwind text-* utility) instead
+     of arbitrary text-[Npx] values. Minimum default body size is text-xs
+     (12px); --text-micro is the one deliberate exception for dense table
+     captions / status pills, not a general escape hatch. */
+  --text-micro: 0.6875rem; /* 11px — intentional, not a default */
   --radius: 0.625rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
@@ -59,6 +82,17 @@
   --color-foreground: var(--foreground);
   --color-brand: var(--brand-deep);
   --color-accent: var(--brand-accent);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-chart-6: var(--chart-6);
+  --color-chart-7: var(--chart-7);
+  --color-chart-8: var(--chart-8);
   --font-sans: var(--font-sans-face), "Plus Jakarta Sans", system-ui, sans-serif;
   --font-display: var(--font-display-face), Fraunces, Georgia, serif;
   --font-heading: var(--font-sans);
@@ -196,7 +230,13 @@ h3,
   }
 
   .erp-section-title {
-    @apply text-base font-semibold text-[#2563eb];
+    @apply text-base font-semibold text-[var(--brand-deep)];
+  }
+
+  /* Deliberate 11px exception — see --text-micro comment above. */
+  .text-micro {
+    font-size: var(--text-micro);
+    line-height: 1.4;
   }
 
   .erp-data-table-wrap {
@@ -297,7 +337,7 @@ h3,
 }
 
 .module-dash-panel h3 {
-  color: #2563eb;
+  color: var(--brand-deep);
   font-size: 1rem;
   font-weight: 600;
   font-family: var(--font-sans);

@@ -63,6 +63,9 @@ export function WaChatHubPanel({
   const [approvedTemplates, setApprovedTemplates] = useState<WaTemplate[]>([]);
   const [busy, setBusy] = useState(false);
   const [configured, setConfigured] = useState(false);
+  const [summary, setSummary] = useState<string | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
 
   useEffect(() => {
     const tpl = loadWaTemplates();
@@ -119,6 +122,8 @@ export function WaChatHubPanel({
 
   async function openThread(t: HubThread) {
     setSelectedId(t.id);
+    setSummary(null);
+    setSummaryError(null);
     if (t.unreadStaff > 0) {
       await fetch("/api/wa/hub", {
         method: "POST",
@@ -158,6 +163,43 @@ export function WaChatHubPanel({
       await refresh();
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function summarizeThread() {
+    if (!selected) return;
+    setSummaryLoading(true);
+    setSummaryError(null);
+    setSummary(null);
+    try {
+      const res = await fetch("/api/ai/thread-summary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          categoryLabel: selected.categoryLabel,
+          contactName: selected.displayName || selected.mobile,
+          messages: selected.messages.map((m) => ({
+            direction: m.direction,
+            role: m.role,
+            text: m.text,
+            at: m.at,
+          })),
+        }),
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        summary?: string;
+      };
+      if (!json.ok || !json.summary) {
+        setSummaryError(json.error || "Summary failed");
+        return;
+      }
+      setSummary(json.summary);
+    } catch (e) {
+      setSummaryError(e instanceof Error ? e.message : "Summary failed");
+    } finally {
+      setSummaryLoading(false);
     }
   }
 
@@ -296,6 +338,28 @@ export function WaChatHubPanel({
             </p>
           ) : (
             <div className="space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  disabled={summaryLoading}
+                  onClick={() => void summarizeThread()}
+                  className="rounded-lg border border-[rgba(32,48,80,0.2)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)] disabled:opacity-50"
+                >
+                  {summaryLoading
+                    ? "Summarizing…"
+                    : summary
+                      ? "Re-summarize"
+                      : "Summarize with AI"}
+                </button>
+              </div>
+              {summaryError ? (
+                <p className="text-[11px] text-[var(--danger)]">{summaryError}</p>
+              ) : null}
+              {summary ? (
+                <div className="rounded-lg border border-[rgba(197,160,40,0.3)] bg-[rgba(197,160,40,0.08)] px-3 py-2 text-[12px] text-[var(--ink)]">
+                  {summary}
+                </div>
+              ) : null}
               <div className="max-h-80 space-y-2 overflow-y-auto rounded-lg border border-[rgba(32,48,80,0.1)] bg-[rgba(248,248,240,0.6)] p-2">
                 {selected.messages.map((m) => (
                   <div

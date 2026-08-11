@@ -2,6 +2,8 @@
  * WhatsApp Business send helpers — Meta Cloud API and/or generic BSP URL.
  */
 
+import { isOptedOut, isWithin24HourWindow } from "@/lib/waContactState.server";
+
 export function waDigitsToE164India(mobile: string): string {
   const d = (mobile || "").replace(/\D/g, "");
   if (d.length === 10) return `91${d}`;
@@ -57,6 +59,16 @@ export async function sendWhatsAppText(opts: {
   }
   if (!text) {
     return { ok: false, error: "Empty body", mode: "none" };
+  }
+  if (await isOptedOut(to)) {
+    return { ok: false, error: "Contact has opted out (STOP)", mode: "none" };
+  }
+  if (!(await isWithin24HourWindow(to))) {
+    return {
+      ok: false,
+      error: "Outside Meta's 24h session window — send an approved template instead",
+      mode: "none",
+    };
   }
 
   const phoneNumberId = metaPhoneNumberId();
@@ -188,6 +200,9 @@ export async function sendWhatsAppTemplate(opts: {
   }
   if (!opts.name) {
     return { ok: false, error: "Missing template name", mode: "none" };
+  }
+  if (await isOptedOut(to)) {
+    return { ok: false, error: "Contact has opted out (STOP)", mode: "none" };
   }
 
   const phoneNumberId = metaPhoneNumberId();

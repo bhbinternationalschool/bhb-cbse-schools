@@ -22,6 +22,11 @@ import { STUDENT_LEAVE_REPORTS } from "@/lib/studentLeave";
 import { VAULT_REPORTS } from "@/lib/vault";
 import { PURCHASE_REPORTS } from "@/lib/purchase";
 import { RTE_REPORTS } from "@/lib/rteEws";
+import { TIMETABLE_REPORTS } from "@/lib/timetableReportCatalog";
+import { EXAM_REPORTS } from "@/lib/examReportCatalog";
+import { LIBRARY_REPORTS } from "@/lib/library";
+import { CERTIFICATES_REPORTS } from "@/lib/certificatesReportCatalog";
+import { COMMS_REPORTS } from "@/lib/commsReportCatalog";
 import { isModuleEnabled } from "@/lib/moduleRegistry";
 import type { RbacModule } from "@/lib/rbac";
 
@@ -41,7 +46,12 @@ export type ReportsCenterModuleId =
   | "purchase"
   | "transport"
   | "accounts"
-  | "trust";
+  | "trust"
+  | "timetable"
+  | "exams"
+  | "library"
+  | "certificates"
+  | "comms";
 
 export type ReportsCenterEntry = {
   /** Stable id: module:reportId */
@@ -194,6 +204,51 @@ export const REPORTS_CENTER_MODULES: ReportsCenterModuleDef[] = [
     blurb: "Cost sheet · CWIP · allotments",
     rbacModule: "trust",
     href: "/trust?tab=reports",
+    embeddable: true,
+  },
+  {
+    id: "timetable",
+    label: "Timetable",
+    blurb: "Teacher load · free periods · substitutions",
+    rbacModule: "timetable",
+    href: "/timetable?tab=reports",
+    embeddable: true,
+  },
+  {
+    id: "exams",
+    label: "Exams",
+    blurb: "Result analysis · toppers · CBSE summary",
+    rbacModule: "exams",
+    href: "/exams?tab=result_reports",
+    embeddable: true,
+  },
+  {
+    id: "library",
+    label: "Library",
+    blurb: "Circulation · overdue · borrower ledgers",
+    // Library has no dedicated RBAC module — it's gated under "store"
+    // (see lib/library.ts's assertModulePermission calls).
+    rbacModule: "store",
+    href: "/library?tab=reports",
+    embeddable: true,
+  },
+  {
+    id: "certificates",
+    label: "Certificates",
+    blurb: "Issue register · TC register",
+    rbacModule: "certificates",
+    href: "/certificates?tab=reports",
+    embeddable: true,
+  },
+  {
+    id: "comms",
+    label: "Comms",
+    blurb: "Notices · news publish registers",
+    // Comms has no single RBAC module — notices/news/gallery are gated
+    // separately (see lib/schoolComms.ts's canEditComms). "notices" is
+    // the broadest, used here to gate the module tab itself.
+    rbacModule: "notices",
+    href: "/comms?tab=reports",
     embeddable: true,
   },
 ];
@@ -439,6 +494,71 @@ export function listReportsCenterEntries(): ReportsCenterEntry[] {
         "trust",
         "trust",
         "/trust?tab=reports",
+        r.id,
+        r.label,
+        r.category,
+        r.hint,
+      ),
+    );
+  }
+  for (const r of TIMETABLE_REPORTS) {
+    out.push(
+      entry(
+        "timetable",
+        "timetable",
+        "/timetable?tab=reports",
+        r.id,
+        r.label,
+        r.category,
+        r.hint,
+      ),
+    );
+  }
+  for (const r of EXAM_REPORTS) {
+    out.push(
+      entry(
+        "exams",
+        "exams",
+        "/exams?tab=result_reports",
+        r.id,
+        r.label,
+        r.category,
+        r.hint,
+      ),
+    );
+  }
+  for (const r of LIBRARY_REPORTS) {
+    out.push(
+      entry(
+        "library",
+        "store",
+        "/library?tab=reports",
+        r.id,
+        r.label,
+        "library",
+        r.hint,
+      ),
+    );
+  }
+  for (const r of CERTIFICATES_REPORTS) {
+    out.push(
+      entry(
+        "certificates",
+        "certificates",
+        "/certificates?tab=reports",
+        r.id,
+        r.label,
+        r.category,
+        r.hint,
+      ),
+    );
+  }
+  for (const r of COMMS_REPORTS) {
+    out.push(
+      entry(
+        "comms",
+        r.id === "news_register" ? "news" : "notices",
+        "/comms?tab=reports",
         r.id,
         r.label,
         r.category,

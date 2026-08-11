@@ -50,11 +50,42 @@ import {
   MastersTableCard,
   MastersWorkCard,
 } from "@/components/masters/MastersLayout";
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
+import type { CampaignMessage } from "@/lib/waCampaigns";
 
 const inp =
   "w-full rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm";
 
 type PanelTab = "lists" | "campaigns" | "queue";
+
+const CAMPAIGN_MESSAGE_COLUMNS: DataTableColumn<CampaignMessage>[] = [
+  { key: "childName", header: "Child", value: (m) => m.childName, sortable: true },
+  {
+    key: "mobile",
+    header: "Mobile",
+    value: (m) => m.mobile,
+    sortable: true,
+    render: (m) => <span className="font-mono">{m.mobile}</span>,
+  },
+  { key: "status", header: "Status", value: (m) => m.status, sortable: true },
+  {
+    key: "open",
+    header: "Open",
+    render: (m) =>
+      m.waMeUrl ? (
+        <a
+          href={m.waMeUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="font-semibold underline"
+        >
+          WhatsApp
+        </a>
+      ) : (
+        m.error || "—"
+      ),
+  },
+];
 
 export function AdmissionCampaignsPanel({
   admissions,
@@ -930,49 +961,17 @@ export function AdmissionCampaignsPanel({
               <div className="px-4 py-8 text-center text-sm text-[var(--muted)]">
                 Select a campaign, then Enqueue.
               </div>
-            ) : selectedMessages.length === 0 ? (
-              <div className="px-4 py-8 text-center text-sm text-[var(--muted)]">
-                No messages — click Enqueue on the campaign.
-              </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-left text-[12px]">
-                  <thead className="text-[10px] text-[var(--muted)]">
-                    <tr>
-                      <th className="px-3 py-2">Child</th>
-                      <th className="px-3 py-2">Mobile</th>
-                      <th className="px-3 py-2">Status</th>
-                      <th className="px-3 py-2">Open</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedMessages.map((m) => (
-                      <tr
-                        key={m.id}
-                        className="border-t border-[rgba(32,48,80,0.06)]"
-                      >
-                        <td className="px-3 py-2">{m.childName}</td>
-                        <td className="px-3 py-2 font-mono">{m.mobile}</td>
-                        <td className="px-3 py-2">{m.status}</td>
-                        <td className="px-3 py-2">
-                          {m.waMeUrl ? (
-                            <a
-                              href={m.waMeUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="font-semibold underline"
-                            >
-                              WhatsApp
-                            </a>
-                          ) : (
-                            m.error || "—"
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                columns={CAMPAIGN_MESSAGE_COLUMNS}
+                rows={selectedMessages}
+                rowKey={(m) => m.id}
+                emptyTitle="No messages yet"
+                emptyDescription="Click Enqueue on the campaign to build the send queue."
+                exportFileBaseName={`campaign-messages-${selectedCampaign.name}`}
+                exportTitle={`Messages · ${selectedCampaign.name}`}
+                minWidth="min-w-full"
+              />
             )}
           </MastersTableCard>
         </div>

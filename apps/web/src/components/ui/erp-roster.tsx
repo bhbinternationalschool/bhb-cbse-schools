@@ -1,23 +1,31 @@
 "use client";
 
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 export type ErpMetricTone = "green" | "rose" | "sky" | "violet" | "amber" | "navy";
 
+// "title" is the same accent blue across every tone — it equals --chart-1,
+// so route it through the token rather than a repeated literal. The icon
+// colors below are a genuine categorical tone system (unrelated to
+// danger/success semantics), so they're left as-is.
+const METRIC_TITLE_CLASS = "text-[var(--chart-1)]";
 const METRIC_TONES: Record<
   ErpMetricTone,
   { title: string; icon: string }
 > = {
-  green: { title: "text-[#2563eb]", icon: "bg-[#dcfce7] text-[#15803d]" },
-  rose: { title: "text-[#2563eb]", icon: "bg-[#fee2e2] text-[#b91c1c]" },
-  sky: { title: "text-[#2563eb]", icon: "bg-[#dbeafe] text-[#1d4ed8]" },
-  violet: { title: "text-[#2563eb]", icon: "bg-[#ede9fe] text-[#6d28d9]" },
-  amber: { title: "text-[#2563eb]", icon: "bg-[#fef3c7] text-[#b45309]" },
-  navy: { title: "text-[#2563eb]", icon: "bg-[rgba(32,48,80,0.1)] text-[var(--brand-deep)]" },
+  green: { title: METRIC_TITLE_CLASS, icon: "bg-[#dcfce7] text-[#15803d]" },
+  rose: { title: METRIC_TITLE_CLASS, icon: "bg-[#fee2e2] text-[#b91c1c]" },
+  sky: { title: METRIC_TITLE_CLASS, icon: "bg-[#dbeafe] text-[#1d4ed8]" },
+  violet: { title: METRIC_TITLE_CLASS, icon: "bg-[#ede9fe] text-[#6d28d9]" },
+  amber: { title: METRIC_TITLE_CLASS, icon: "bg-[#fef3c7] text-[#b45309]" },
+  navy: { title: METRIC_TITLE_CLASS, icon: "bg-[rgba(32,48,80,0.1)] text-[var(--brand-deep)]" },
 };
 
-/** KPI card with icon circle — staff roster style */
+/** KPI card with icon circle — staff roster style. Pass `href` to navigate
+ * (renders as a Link) or `onClick` for in-page behavior (e.g. a drill-down
+ * drawer); `href` takes priority when both are given. */
 export function ErpMetricCard({
   title,
   value,
@@ -25,6 +33,7 @@ export function ErpMetricCard({
   icon,
   hint,
   footer,
+  href,
   onClick,
   className,
 }: {
@@ -34,23 +43,22 @@ export function ErpMetricCard({
   icon?: ReactNode;
   hint?: string;
   footer?: ReactNode;
+  href?: string;
   onClick?: () => void;
   className?: string;
 }) {
   const t = METRIC_TONES[tone];
-  const Comp = onClick ? "button" : "div";
+  const interactive = !!href || !!onClick;
 
-  return (
-    <Comp
-      type={onClick ? "button" : undefined}
-      onClick={onClick}
-      className={cn(
-        "erp-metric-card flex w-full items-center justify-between gap-3 rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white px-5 py-4 text-left shadow-sm transition",
-        onClick &&
-          "hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-gold)] focus-visible:ring-offset-2",
-        className,
-      )}
-    >
+  const cardClassName = cn(
+    "erp-metric-card flex w-full items-center justify-between gap-3 rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white px-5 py-4 text-left shadow-sm transition",
+    interactive &&
+      "hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-gold)] focus-visible:ring-offset-2",
+    className,
+  );
+
+  const content = (
+    <>
       <div className="min-w-0">
         <div className={cn("text-sm font-semibold", t.title)}>{title}</div>
         <div className="mt-1 text-3xl font-bold tabular-nums text-[#0f172a]">
@@ -71,6 +79,21 @@ export function ErpMetricCard({
           {icon}
         </span>
       ) : null}
+    </>
+  );
+
+  if (href) {
+    return (
+      <Link href={href} className={cardClassName}>
+        {content}
+      </Link>
+    );
+  }
+
+  const Comp = onClick ? "button" : "div";
+  return (
+    <Comp type={onClick ? "button" : undefined} onClick={onClick} className={cardClassName}>
+      {content}
     </Comp>
   );
 }
@@ -111,7 +134,7 @@ export function ErpChartCard({
         className,
       )}
     >
-      <h2 className="text-base font-semibold text-[#2563eb]">{title}</h2>
+      <h2 className="text-base font-semibold text-[var(--chart-1)]">{title}</h2>
       <div className="mt-3">{children}</div>
     </div>
   );
@@ -195,14 +218,14 @@ export function ErpToolbarBtn({
   if (href) {
     return (
       <a href={href} className={cls}>
-        <span className="text-[#2563eb]">{icon}</span>
+        <span className="text-[var(--chart-1)]">{icon}</span>
         {label}
       </a>
     );
   }
   return (
     <button type="button" onClick={onClick} className={cls}>
-      <span className="text-[#2563eb]">{icon}</span>
+      <span className="text-[var(--chart-1)]">{icon}</span>
       {label}
     </button>
   );
@@ -288,7 +311,7 @@ export function ErpStatusBadge({
       className={cn(
         "rounded-md px-2 py-0.5 text-[10px] font-black uppercase",
         active
-          ? "bg-[rgba(21,128,61,0.12)] text-[#15803d]"
+          ? "bg-[rgba(21,128,61,0.12)] text-[var(--success)]"
           : "bg-[rgba(32,48,80,0.08)] text-muted-foreground",
       )}
     >
@@ -314,7 +337,7 @@ export function ErpModuleHeader({
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div>
         <h1 className="flex items-center gap-2 text-2xl font-semibold text-[var(--brand-deep)]">
-          {icon ? <span className="text-[#2563eb]">{icon}</span> : null}
+          {icon ? <span className="text-[var(--chart-1)]">{icon}</span> : null}
           {title}
         </h1>
         {subtitle ? (

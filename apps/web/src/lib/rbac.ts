@@ -923,7 +923,14 @@ function assignmentActive(a: UserRoleAssignment): boolean {
 }
 
 /**
- * Infer built-in role code from session.roleCode / designation when no assignment.
+ * Infer built-in role code from session.roleCode / designation when no
+ * assignment exists. "owner" is deliberately NOT inferable here — it used
+ * to match any roleCode/designation containing "trustee" or "director",
+ * so an ordinary "Director of Admissions" or "Sports Director" designation
+ * (routine HR data, not a security decision) silently granted full owner
+ * access. isProtectedSuperAdminEmail() is now the only inferred path to
+ * owner; anyone else must get it via an explicit assignment in Masters →
+ * Roles, where a human is actually deciding to grant it.
  */
 export function inferRoleCodes(
   session: SessionLike,
@@ -935,7 +942,6 @@ export function inferRoleCodes(
   const rc = (session.roleCode || "").toLowerCase();
   const matched: string[] = [];
 
-  if (/owner|super.?admin|trustee|director/.test(rc)) matched.push("owner");
   if (/principal|hm|head.?master|vice.?principal/.test(rc)) {
     matched.push("principal");
   }
@@ -955,7 +961,6 @@ export function inferRoleCodes(
     if (self) {
       const des = masters.designations.find((d) => d.id === self.designationId);
       const blob = `${des?.code || ""} ${des?.name || ""}`.toLowerCase();
-      if (/owner|trustee|director/.test(blob)) matched.push("owner");
       if (/prin|principal|hm|head.?master|vice.?principal/.test(blob)) {
         matched.push("principal");
       }
@@ -981,27 +986,56 @@ export function inferRoleCodes(
   return [...new Set(matched)];
 }
 
+/** A role as held by the current session, plus the scope it was granted
+ * under (null = held via inferred/fallback role, i.e. no per-staff
+ * assignment record exists — unrestricted, same as historical behavior). */
+export type ScopedRole = { role: RbacRole; scope: RoleScope | null };
+
+function activeAssignmentsFor(
+  rbac: RbacState,
+  self: { id: string } | null,
+): UserRoleAssignment[] {
+  if (!self) return [];
+  return rbac.assignments.filter(
+    (a) => a.staffId === self.id && assignmentActive(a),
+  );
+}
+
+/**
+ * Like resolveSessionRoles, but keeps each role's assignment-level scope
+ * attached instead of discarding it — the input hasScopedPermission needs
+ * to enforce campus/class/department restrictions.
+ */
+export function resolveSessionRoleScopes(
+  rbac: RbacState,
+  session: SessionLike,
+  masters?: MastersState | null,
+): ScopedRole[] {
+  const self = masters ? resolveStaffForRbac(session, masters) : null;
+  const fromAssign = activeAssignmentsFor(rbac, self);
+
+  if (fromAssign.length > 0) {
+    const scoped = fromAssign
+      .map((a): ScopedRole | null => {
+        const role = rbac.roles.find((r) => r.id === a.roleId);
+        return role && role.isActive ? { role, scope: a.scope } : null;
+      })
+      .filter((x): x is ScopedRole => !!x);
+    if (scoped.length) return scoped;
+  }
+
+  const codes = inferRoleCodes(session, masters);
+  return rbac.roles
+    .filter((r) => r.isActive && codes.includes(r.code))
+    .map((role) => ({ role, scope: null }));
+}
+
 export function resolveSessionRoles(
   rbac: RbacState,
   session: SessionLike,
   masters?: MastersState | null,
 ): RbacRole[] {
-  const self = masters ? resolveStaffForRbac(session, masters) : null;
-  const fromAssign = self
-    ? rbac.assignments.filter(
-        (a) => a.staffId === self.id && assignmentActive(a),
-      )
-    : [];
-
-  if (fromAssign.length > 0) {
-    const roles = fromAssign
-      .map((a) => rbac.roles.find((r) => r.id === a.roleId))
-      .filter((r): r is RbacRole => !!r && r.isActive);
-    if (roles.length) return roles;
-  }
-
-  const codes = inferRoleCodes(session, masters);
-  return rbac.roles.filter((r) => r.isActive && codes.includes(r.code));
+  return resolveSessionRoleScopes(rbac, session, masters).map((x) => x.role);
 }
 
 export function effectivePermissions(
@@ -1032,6 +1066,93 @@ export function hasPermission(
   const roles = resolveSessionRoles(state, session, masters);
   const eff = effectivePermissions(roles);
   return !!eff.get(module)?.has(action);
+}
+
+/** The record being accessed, for scope-aware checks. Omit a field (or the
+ * whole object) when the caller doesn't know it / it doesn't apply. */
+export type EntityScope = {
+  campusId?: string | null;
+  classId?: string | null;
+  departmentId?: string | null;
+};
+
+function scopeAllows(scope: RoleScope | null, entity?: EntityScope): boolean {
+  if (!scope || !entity) return true;
+  if (
+    scope.campusIds.length &&
+    entity.campusId &&
+    !scope.campusIds.includes(entity.campusId)
+  ) {
+    return false;
+  }
+  if (
+    scope.classIds.length &&
+    entity.classId &&
+    !scope.classIds.includes(entity.classId)
+  ) {
+    return false;
+  }
+  if (
+    scope.departmentIds.length &&
+    entity.departmentId &&
+    !scope.departmentIds.includes(entity.departmentId)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Scope-aware sibling of hasPermission. Without `entity` it is identical to
+ * hasPermission (an assignment's scope only narrows access to a *specific*
+ * record — a caller that isn't asking about one gets the same module-level
+ * answer as before). Pass `entity` to also enforce the assignment's
+ * campus/class/department restriction, e.g. a teacher assigned "teacher"
+ * scoped to classIds: ["cls_vi"] is denied for entity: { classId: "cls_ix" }
+ * even though the "teacher" role itself grants students.view.
+ */
+export function hasScopedPermission(
+  session: SessionLike,
+  masters: MastersState | null | undefined,
+  module: RbacModule,
+  action: RbacAction,
+  rbac?: RbacState,
+  entity?: EntityScope,
+): boolean {
+  const state = rbac ?? (typeof window !== "undefined" ? loadRbac() : defaultRbacState());
+  const scopedRoles = resolveSessionRoleScopes(state, session, masters);
+  for (const { role, scope } of scopedRoles) {
+    const grant = role.permissions.find((g) => g.module === module);
+    if (!grant?.actions.includes(action)) continue;
+    if (scopeAllows(scope, entity)) return true;
+  }
+  return false;
+}
+
+/**
+ * Class ids the session's assignments restrict it to, for read-side
+ * filtering (e.g. trimming a class picker to what a scoped teacher may
+ * touch). Returns null when unrestricted (no assignment scope, or any held
+ * assignment for `module` has an empty classIds — the widest grant wins).
+ */
+export function scopedClassIds(
+  session: SessionLike,
+  masters: MastersState | null | undefined,
+  module: RbacModule,
+  action: RbacAction,
+  rbac?: RbacState,
+): string[] | null {
+  const state = rbac ?? (typeof window !== "undefined" ? loadRbac() : defaultRbacState());
+  const scopedRoles = resolveSessionRoleScopes(state, session, masters);
+  const restricting: string[][] = [];
+  for (const { role, scope } of scopedRoles) {
+    const grant = role.permissions.find((g) => g.module === module);
+    if (!grant?.actions.includes(action)) continue;
+    if (!scope || scope.classIds.length === 0) return null;
+    restricting.push(scope.classIds);
+  }
+  if (restricting.length === 0) return null;
+  return [...new Set(restricting.flat())];
 }
 
 export function canAccessModule(

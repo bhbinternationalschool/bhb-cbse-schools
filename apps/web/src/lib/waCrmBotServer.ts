@@ -11,6 +11,7 @@ import {
 } from "@/lib/crmAdmissionBotEngine";
 import { TENANT } from "@/lib/types";
 import { sendWhatsAppText, waNormalizeLocal10 } from "@/lib/waSend";
+import { generateTutorText } from "@/lib/aiLlm.server";
 
 export type WaCrmBotChannel = "whatsapp";
 
@@ -208,6 +209,45 @@ export async function staffReplyWaCrmBot(opts: {
 }
 
 /**
+ * LLM fallback for admissions-enquiry messages the keyword matcher doesn't
+ * recognize — grounded ONLY in this contact's own enquiry record (if any)
+ * and the public registration link, never a specific fee/date/policy it
+ * wasn't given. Returns null on any failure — caller keeps the existing
+ * hardcoded fallback, this is a graceful upgrade, not a hard dependency.
+ */
+async function tryAiFallbackReply(
+  text: string,
+  lead: {
+    childName: string;
+    enquiryNo: string;
+    applicationNo: string;
+    stageLabel: string;
+  } | null,
+): Promise<string | null> {
+  const system = `You are a WhatsApp assistant for prospective-parent admissions enquiries at ${TENANT.nameDisplay}.
+You may ONLY discuss the enquiry record given below (child's name, enquiry number, stage/status, next steps) and share the public registration link.
+You do NOT know this school's fees, admission dates, seat availability, curriculum, medium of instruction, transport, uniform, or any other policy or factual detail — even if it seems like common knowledge for a school, do not state it, confirm it, or guess at it.
+For ANY question outside the enquiry record above, reply that you don't have that information and to reply *HUMAN* to talk to the admissions office — do not attempt to answer it a different way.
+Keep the reply under 300 characters, warm and simple, plain text (no markdown headers).`;
+
+  const userMessage = `Enquiry on file: ${
+    lead
+      ? `${lead.childName || "child"} · ${lead.enquiryNo}${lead.applicationNo ? ` · ${lead.applicationNo}` : ""} · stage: ${lead.stageLabel}`
+      : "none yet"
+  }
+Public registration link: ${publicRegisterUrl()}
+Parent's message: "${text}"`;
+
+  try {
+    const r = await generateTutorText({ system, userMessage });
+    if (!r.ok) return null;
+    return r.text.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Handle one inbound parent WhatsApp text for CRM admissions bot.
  */
 export async function handleWaCrmBotInbound(opts: {
@@ -322,6 +362,16 @@ export async function handleWaCrmBotInbound(opts: {
   }
   if (leadRow?.guardianName && !thread.parentName) {
     thread = { ...thread, parentName: leadRow.guardianName };
+  }
+  if (
+    intent === "unknown" &&
+    !isGreeting &&
+    !leadCreatedEnquiryNo &&
+    !opts.forceEscalate &&
+    text.trim().length > 3
+  ) {
+    const aiReply = await tryAiFallbackReply(text, leadCtx);
+    if (aiReply) replyText = aiReply;
   }
 
   const botMsg: WaCrmBotMsg = {

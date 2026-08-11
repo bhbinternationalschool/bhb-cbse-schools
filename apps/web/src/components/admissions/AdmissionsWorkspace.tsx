@@ -56,6 +56,8 @@ import {
   type TransportInterest,
 } from "@/lib/admissions";
 import { listSessionYearOptions, loadMasters, type MastersState } from "@/lib/masters";
+import { leadConversionLikelihood } from "@/lib/admissionsAi";
+import { pushToast } from "@/components/shell/Toast";
 import { STUDENT_CATEGORIES, loadSis, type SisState } from "@/lib/sis";
 import {
   closeSuspectedLeadNotMatch,
@@ -146,6 +148,17 @@ export function AdmissionsWorkspace() {
     ];
     if (raw && (allowed as string[]).includes(raw)) setTab(raw as AdmTab);
   }, []);
+
+  // Deep link from global search — open a specific lead by id.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const openLeadId = new URLSearchParams(window.location.search).get(
+      "openLead",
+    );
+    if (openLeadId) openLead(openLeadId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const [captureYearFilter, setCaptureYearFilter] = useState<string>("all");
   const [filter, setFilter] = useState<
     | AdmissionStage
@@ -158,6 +171,9 @@ export function AdmissionsWorkspace() {
     | "mine"
   >("open");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [leadDateFrom, setLeadDateFrom] = useState("");
+  const [leadDateTo, setLeadDateTo] = useState("");
+  const [localityQ, setLocalityQ] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [draft, setDraft] = useState(() =>
     emptyAdmissionLead({ source: "walk_in", leadDate: todayYmd() }),
@@ -341,6 +357,15 @@ export function AdmissionsWorkspace() {
       ) {
         return false;
       }
+      const leadDate = String(l.leadDate || l.createdAt || "").slice(0, 10);
+      if (leadDateFrom && leadDate && leadDate < leadDateFrom) return false;
+      if (leadDateTo && leadDate && leadDate > leadDateTo) return false;
+      if (
+        localityQ.trim() &&
+        !(l.locality || "").toLowerCase().includes(localityQ.trim().toLowerCase())
+      ) {
+        return false;
+      }
       if (filter === "all") return true;
       if (filter === "open") {
         return l.stage !== "enrolled" && l.stage !== "lost";
@@ -394,6 +419,9 @@ export function AdmissionsWorkspace() {
     captureYearFilter,
     canBrowseLeadLists,
     callerOnly,
+    leadDateFrom,
+    leadDateTo,
+    localityQ,
   ]);
 
   // Admission-year chips (derived from enquiry dates via the Oct→Sep rule)
@@ -568,6 +596,9 @@ export function AdmissionsWorkspace() {
     );
     setSelectedId(r.keeper.id);
     setFilter("all");
+    setLeadDateFrom("");
+    setLeadDateTo("");
+    setLocalityQ("");
     setShowWaCheck(true);
   }
 
@@ -600,8 +631,6 @@ export function AdmissionsWorkspace() {
             return;
           }
         }
-        setFilter("all");
-        setCaptureYearFilter("all");
         openLead(id);
       },
       onOpenStudent: (id: string) => setProfileStudentId(id),
@@ -631,6 +660,13 @@ export function AdmissionsWorkspace() {
       window.setTimeout(() => setNotice(null), 2800);
       return;
     }
+    // Clear list filters so the lead being opened isn't hidden by a stale
+    // date-range/locality/stage filter left active from a previous view.
+    setFilter("all");
+    setCaptureYearFilter("all");
+    setLeadDateFrom("");
+    setLeadDateTo("");
+    setLocalityQ("");
     setSelectedId(id);
     setTab("leads");
   }
@@ -1023,11 +1059,7 @@ export function AdmissionsWorkspace() {
           by={session.fullName}
           canEdit={canCreate}
           onCommit={commit}
-          onOpenCrm={(id) => {
-            setFilter("all");
-            setCaptureYearFilter("all");
-            openLead(id);
-          }}
+          onOpenCrm={(id) => openLead(id)}
           onOpenRegistration={() => setTab("registration")}
         />
       ) : null}
@@ -1076,13 +1108,30 @@ export function AdmissionsWorkspace() {
                     AY {captureYearFilter}
                   </span>
                 ) : null}
-                {filter !== "open" || captureYearFilter !== "all" ? (
+                {leadDateFrom || leadDateTo ? (
+                  <span className="rounded-full bg-[rgba(197,160,40,0.16)] px-2 py-0.5 text-[10px] font-semibold text-[var(--brand-deep)]">
+                    {leadDateFrom || "…"}–{leadDateTo || "…"}
+                  </span>
+                ) : null}
+                {localityQ.trim() ? (
+                  <span className="rounded-full bg-[rgba(197,160,40,0.16)] px-2 py-0.5 text-[10px] font-semibold text-[var(--brand-deep)]">
+                    Locality “{localityQ.trim()}”
+                  </span>
+                ) : null}
+                {filter !== "open" ||
+                captureYearFilter !== "all" ||
+                leadDateFrom ||
+                leadDateTo ||
+                localityQ.trim() ? (
                   <button
                     type="button"
                     className="text-[10px] font-semibold text-[#b42318] underline"
                     onClick={() => {
                       setFilter("open");
                       setCaptureYearFilter("all");
+                      setLeadDateFrom("");
+                      setLeadDateTo("");
+                      setLocalityQ("");
                     }}
                   >
                     Reset
@@ -1132,6 +1181,33 @@ export function AdmissionsWorkspace() {
                       {y}
                     </button>
                   ))}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="w-full text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                    Lead date
+                  </span>
+                  <input
+                    type="date"
+                    className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2 py-1 text-[11px]"
+                    value={leadDateFrom}
+                    onChange={(e) => setLeadDateFrom(e.target.value)}
+                    aria-label="Lead date from"
+                  />
+                  <span className="text-[11px] text-[var(--muted)]">–</span>
+                  <input
+                    type="date"
+                    className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2 py-1 text-[11px]"
+                    value={leadDateTo}
+                    onChange={(e) => setLeadDateTo(e.target.value)}
+                    aria-label="Lead date to"
+                  />
+                  <input
+                    className="min-w-[10rem] rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2 py-1 text-[11px]"
+                    placeholder="Locality…"
+                    value={localityQ}
+                    onChange={(e) => setLocalityQ(e.target.value)}
+                    aria-label="Filter by locality"
+                  />
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <span className="w-full text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
@@ -1487,10 +1563,7 @@ export function AdmissionsWorkspace() {
           by={session.fullName}
           canEdit={canCreate}
           onCommit={commit}
-          onOpenCrmLead={(id) => {
-            setFilter("all");
-            openLead(id);
-          }}
+          onOpenCrmLead={(id) => openLead(id)}
         />
       ) : null}
 
@@ -1902,6 +1975,9 @@ export function AdmissionsWorkspace() {
                 setTab("leads");
                 setFilter("all");
                 setCaptureYearFilter("all");
+                setLeadDateFrom("");
+                setLeadDateTo("");
+                setLocalityQ("");
               }}
             />
           )}
@@ -2019,6 +2095,75 @@ function LeadDetail({
   const hh = householdOf(state, lead.householdId);
   const siblings = siblingsOfHousehold(state, lead.householdId, lead.id);
   const bucket = leadFollowUpBucket(lead);
+  const likelihood = leadConversionLikelihood(lead);
+
+  const [aiSuggestion, setAiSuggestion] = useState<
+    { nextAction: string; outreachMessage: string } | null
+  >(null);
+  const [aiSuggestionLoading, setAiSuggestionLoading] = useState(false);
+  const [aiSuggestionError, setAiSuggestionError] = useState<string | null>(
+    null,
+  );
+
+  useEffect(() => {
+    setAiSuggestion(null);
+    setAiSuggestionError(null);
+  }, [lead.id]);
+
+  async function suggestNextAction() {
+    setAiSuggestionLoading(true);
+    setAiSuggestionError(null);
+    setAiSuggestion(null);
+    try {
+      const days = lead.leadDate
+        ? Math.max(
+            0,
+            Math.round(
+              (Date.now() - new Date(`${lead.leadDate}T00:00:00`).getTime()) /
+                86_400_000,
+            ),
+          )
+        : 0;
+      const followUpSummary = lead.followUps
+        .slice(-3)
+        .map(
+          (f) =>
+            `${followUpChannelLabel(f.channel)}: ${followUpOutcomeLabel(f.outcome)}${f.note ? ` (${f.note})` : ""}`,
+        )
+        .join("; ");
+      const res = await fetch("/api/ai/lead-next-action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          childName: lead.childName,
+          classSoughtLabel:
+            classes.find((c) => c.id === classId)?.name || "",
+          stageLabel: stageLabel(lead.stage),
+          sourceLabel: sourceLabel(lead.source),
+          daysSinceEnquiry: days,
+          followUpSummary,
+        }),
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        nextAction?: string;
+        outreachMessage?: string;
+      };
+      if (!json.ok || !json.nextAction || !json.outreachMessage) {
+        setAiSuggestionError(json.error || "Suggestion failed");
+        return;
+      }
+      setAiSuggestion({
+        nextAction: json.nextAction,
+        outreachMessage: json.outreachMessage,
+      });
+    } catch (e) {
+      setAiSuggestionError(e instanceof Error ? e.message : "Suggestion failed");
+    } finally {
+      setAiSuggestionLoading(false);
+    }
+  }
 
   const [sibName, setSibName] = useState("");
   const [sibDob, setSibDob] = useState("");
@@ -2074,6 +2219,18 @@ function LeadDetail({
                 className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${sourceTagClass(lead.source)}`}
               >
                 {sourceLabel(lead.source)}
+              </span>
+              <span
+                className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${
+                  likelihood.tone === "good"
+                    ? "bg-[rgba(21,128,61,0.1)] text-[#15803d]"
+                    : likelihood.tone === "warn"
+                      ? "bg-[rgba(180,131,0,0.12)] text-[#8a6400]"
+                      : "bg-[rgba(180,35,24,0.1)] text-[var(--danger)]"
+                }`}
+                title="Heuristic estimate from stage, payment, follow-up outcomes, and document completeness — not a guarantee"
+              >
+                {likelihood.label} · {likelihood.score}%
               </span>
             </div>
             <p className="mt-1 font-mono text-[11px] text-[var(--muted)]">
@@ -2374,6 +2531,88 @@ function LeadDetail({
                 </button>
               ) : null}
             </div>
+          </div>
+        ) : null}
+
+        {canEdit && !locked ? (
+          <div className="mt-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[10px] font-semibold uppercase text-[var(--muted)]">
+                AI suggestion
+              </p>
+              <button
+                type="button"
+                disabled={aiSuggestionLoading}
+                className="rounded-lg border border-[rgba(32,48,80,0.2)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)] disabled:opacity-50"
+                onClick={() => void suggestNextAction()}
+              >
+                {aiSuggestionLoading
+                  ? "Thinking…"
+                  : aiSuggestion
+                    ? "Re-suggest"
+                    : "Suggest next action"}
+              </button>
+            </div>
+            {aiSuggestionError ? (
+              <p className="mt-1 text-[11px] text-[var(--danger)]">
+                {aiSuggestionError}
+              </p>
+            ) : null}
+            {aiSuggestion ? (
+              <div className="mt-2 space-y-2">
+                <div className="rounded-lg bg-[var(--surface)] p-2.5">
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                    Next action
+                  </span>
+                  <p className="mt-1 text-[12px] font-medium text-[var(--brand-deep)]">
+                    {aiSuggestion.nextAction}
+                  </p>
+                </div>
+                <div className="rounded-lg bg-[var(--surface)] p-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                      Outreach message
+                    </span>
+                    <button
+                      type="button"
+                      className="text-[10px] font-semibold text-[var(--brand-deep)] underline"
+                      onClick={() =>
+                        void navigator.clipboard
+                          .writeText(aiSuggestion.outreachMessage)
+                          .then(
+                            () =>
+                              pushToast({
+                                kind: "success",
+                                message: "Outreach message copied",
+                              }),
+                            () =>
+                              pushToast({
+                                kind: "error",
+                                message: "Could not copy",
+                              }),
+                          )
+                      }
+                    >
+                      Copy
+                    </button>
+                  </div>
+                  <p className="mt-1 whitespace-pre-wrap text-[12px] text-[var(--ink)]">
+                    {aiSuggestion.outreachMessage}
+                  </p>
+                  {lead.mobile ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        openWaMe(lead.mobile, aiSuggestion.outreachMessage)
+                      }
+                      className="mt-2 rounded-lg border border-[rgba(32,48,80,0.2)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.05)]"
+                    >
+                      Open in WhatsApp
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : null}
 

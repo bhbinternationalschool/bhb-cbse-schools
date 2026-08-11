@@ -9,13 +9,22 @@ import {
   GraduationCap,
   IndianRupee,
   RefreshCw,
+  Sparkles,
   Users,
 } from "lucide-react";
 import { formatInr } from "@/lib/masters";
 import type { PrincipalSnapshot } from "@/lib/principalSnapshot.server";
 import { isProtectedSuperAdminEmail } from "@/lib/superAdmin";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { ErpMetricCard } from "@/components/ui/erp-roster";
+import {
+  dashboardToneToMetric,
+  kpiIconForTone,
+  type DashboardTone,
+} from "@/components/dashboard/ModuleDashboard";
 
+/** Thin wrapper over the shared ErpMetricCard so this cockpit's KPI tiles
+ * use the same tone→icon mapping as the model-driven module dashboards. */
 function KpiCard({
   label,
   value,
@@ -27,50 +36,18 @@ function KpiCard({
   value: string;
   hint?: string;
   href?: string;
-  tone?: "navy" | "teal" | "rose" | "gold";
+  tone?: DashboardTone;
 }) {
-  const tones = {
-    navy: "border-[rgba(32,48,80,0.12)]",
-    teal: "border-[rgba(15,118,110,0.25)]",
-    rose: "border-[rgba(180,35,24,0.2)]",
-    gold: "border-[rgba(197,160,40,0.35)]",
-  };
-  const inner = (
-    <div
-      className={`rounded-2xl border bg-white p-4 transition hover:shadow-md ${tones[tone]}`}
-    >
-      <p className="text-[10px] font-bold uppercase tracking-wide text-[var(--muted)]">
-        {label}
-      </p>
-      <p className="mt-1 font-display text-2xl font-semibold text-[var(--brand-deep)]">
-        {value}
-      </p>
-      {hint ? (
-        <p className="mt-1 text-xs text-[var(--muted)]">{hint}</p>
-      ) : null}
-      {href ? (
-        <span className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-[var(--brand-deep)]">
-          Open <ArrowRight className="h-3 w-3" />
-        </span>
-      ) : null}
-    </div>
+  return (
+    <ErpMetricCard
+      title={label}
+      value={value}
+      hint={hint}
+      href={href}
+      tone={dashboardToneToMetric(tone)}
+      icon={kpiIconForTone(tone)}
+    />
   );
-  if (href) {
-    return (
-      <Link
-        href={href}
-        className="block cursor-pointer"
-        onClick={() => {
-          if (typeof window !== "undefined") {
-            window.location.href = href;
-          }
-        }}
-      >
-        {inner}
-      </Link>
-    );
-  }
-  return inner;
 }
 
 export function PrincipalCockpit() {
@@ -78,6 +55,11 @@ export function PrincipalCockpit() {
   const [snap, setSnap] = useState<PrincipalSnapshot | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [digest, setDigest] = useState<
+    { headline: string; highlights: string[] } | null
+  >(null);
+  const [digestLoading, setDigestLoading] = useState(false);
+  const [digestError, setDigestError] = useState<string | null>(null);
 
   const fetchSnapshot = useCallback(async () => {
     setLoading(true);
@@ -106,6 +88,40 @@ export function PrincipalCockpit() {
       setLoading(false);
     }
   }, [session.academicYearCode]);
+
+  useEffect(() => {
+    setDigest(null);
+    setDigestError(null);
+  }, [snap]);
+
+  async function fetchDigest() {
+    if (!snap) return;
+    setDigestLoading(true);
+    setDigestError(null);
+    setDigest(null);
+    try {
+      const res = await fetch("/api/ai/leadership-digest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ snapshot: snap }),
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        headline?: string;
+        highlights?: string[];
+      };
+      if (!json.ok || !json.headline || !json.highlights) {
+        setDigestError(json.error || "Digest failed");
+        return;
+      }
+      setDigest({ headline: json.headline, highlights: json.highlights });
+    } catch (e) {
+      setDigestError(e instanceof Error ? e.message : "Digest failed");
+    } finally {
+      setDigestLoading(false);
+    }
+  }
 
   useEffect(() => {
     void fetchSnapshot();
@@ -218,6 +234,55 @@ export function PrincipalCockpit() {
           ))}
         </div>
       ) : null}
+
+      <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 text-sm font-semibold text-[var(--brand-deep)]">
+            <Sparkles className="h-4 w-4 text-[#C5A028]" />
+            AI daily digest
+          </div>
+          <button
+            type="button"
+            disabled={digestLoading || !snap}
+            onClick={() => void fetchDigest()}
+            className="rounded-lg border border-[rgba(32,48,80,0.2)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)] disabled:opacity-50"
+          >
+            {digestLoading
+              ? "Summarizing…"
+              : digest
+                ? "Re-summarize"
+                : "Summarize today"}
+          </button>
+        </div>
+        {digestError ? (
+          <p className="mt-2 text-[11px] text-[var(--danger)]">
+            {digestError}
+          </p>
+        ) : null}
+        {digest ? (
+          <div className="mt-2">
+            <p className="text-sm font-medium text-[var(--ink)]">
+              {digest.headline}
+            </p>
+            <ul className="mt-1.5 space-y-1">
+              {digest.highlights.map((h) => (
+                <li
+                  key={h}
+                  className="flex items-start gap-1.5 text-[12px] text-[var(--muted)]"
+                >
+                  <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-[var(--muted)]" />
+                  {h}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : !digestError ? (
+          <p className="mt-1.5 text-[11px] text-[var(--muted)]">
+            AI-synthesized from the numbers on this page — nothing here is
+            computed by the AI, only phrased and prioritized.
+          </p>
+        ) : null}
+      </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard

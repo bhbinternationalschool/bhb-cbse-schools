@@ -12,19 +12,25 @@ import {
 import { useRouter } from "next/navigation";
 import {
   BookOpen,
+  Bus,
   GraduationCap,
+  Receipt,
   Search,
   UserRound,
+  UserRoundSearch,
   X,
 } from "lucide-react";
-import { loadMasters } from "@/lib/masters";
+import { formatInr, loadMasters } from "@/lib/masters";
 import { canAccessHref, loadRbac } from "@/lib/rbac";
 import { loadSis } from "@/lib/sis";
+import { loadFees } from "@/lib/fees";
+import { loadTransport } from "@/lib/transport";
+import { loadAdmissions } from "@/lib/admissions";
 import { useDemoSession } from "@/components/shell/SessionContext";
 
 type SearchHit = {
   id: string;
-  kind: "module" | "student" | "staff";
+  kind: "module" | "student" | "staff" | "receipt" | "vehicle" | "lead";
   title: string;
   subtitle: string;
   href: string;
@@ -165,6 +171,69 @@ export function UniversalSearchBar() {
       }
     }
 
+    try {
+      const sis = loadSis();
+      const fees = loadFees();
+      for (const v of fees.vouchers) {
+        if (v.voidedAt) continue;
+        const hh = sis.households.find((h) => h.id === v.householdId);
+        const hay = `${v.receiptNo} ${v.schoolReceiptNo || ""} ${hh?.guardianName || ""} ${hh?.mobile || ""}`;
+        const s = scoreMatch(hay, q);
+        if (s > 0) {
+          out.push({
+            id: `rcpt-${v.id}`,
+            kind: "receipt",
+            title: v.schoolReceiptNo || v.receiptNo,
+            subtitle: `Receipt · ${formatInr(v.totalPaise)} · ${v.collectionDate}${hh?.guardianName ? ` · ${hh.guardianName}` : ""}`,
+            href: `/fees?tab=receipts&openReceipt=${encodeURIComponent(v.id)}`,
+            score: s,
+          });
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+
+    try {
+      const transport = loadTransport();
+      for (const veh of transport.vehicles) {
+        const hay = `${veh.registrationNo} ${veh.name} ${veh.driverName || ""}`;
+        const s = scoreMatch(hay, q);
+        if (s > 0) {
+          out.push({
+            id: `veh-${veh.id}`,
+            kind: "vehicle",
+            title: veh.registrationNo,
+            subtitle: `Vehicle · ${veh.name}${veh.driverName ? ` · ${veh.driverName}` : ""}`,
+            href: "/transport?tab=fleet",
+            score: s,
+          });
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+
+    try {
+      const admissions = loadAdmissions();
+      for (const lead of admissions.leads) {
+        const hay = `${lead.childName} ${lead.guardianName} ${lead.mobile} ${lead.enquiryNo} ${lead.applicationNo}`;
+        const s = scoreMatch(hay, q);
+        if (s > 0) {
+          out.push({
+            id: `lead-${lead.id}`,
+            kind: "lead",
+            title: lead.childName,
+            subtitle: `Lead · ${lead.enquiryNo || "No enquiry no"} · ${lead.guardianName || "—"}`,
+            href: `/admissions?tab=leads&openLead=${encodeURIComponent(lead.id)}`,
+            score: s,
+          });
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+
     return out
       .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title))
       .slice(0, 12)
@@ -229,6 +298,9 @@ export function UniversalSearchBar() {
   const kindIcon = (kind: SearchHit["kind"]) => {
     if (kind === "student") return <GraduationCap className="h-4 w-4" />;
     if (kind === "staff") return <UserRound className="h-4 w-4" />;
+    if (kind === "receipt") return <Receipt className="h-4 w-4" />;
+    if (kind === "vehicle") return <Bus className="h-4 w-4" />;
+    if (kind === "lead") return <UserRoundSearch className="h-4 w-4" />;
     return <BookOpen className="h-4 w-4" />;
   };
 
@@ -319,7 +391,13 @@ export function UniversalSearchBar() {
                         ? "bg-[rgba(32,48,80,0.1)] text-[var(--brand-deep)]"
                         : hit.kind === "student"
                           ? "bg-[rgba(2,132,199,0.12)] text-[#0369a1]"
-                          : "bg-[rgba(15,118,110,0.12)] text-[#0f766e]"
+                          : hit.kind === "receipt"
+                            ? "bg-[rgba(217,119,6,0.12)] text-[#b45309]"
+                            : hit.kind === "vehicle"
+                              ? "bg-[rgba(124,58,237,0.12)] text-[#7c3aed]"
+                              : hit.kind === "lead"
+                                ? "bg-[rgba(225,29,72,0.12)] text-[#e11d48]"
+                                : "bg-[rgba(15,118,110,0.12)] text-[#0f766e]"
                     }`}
                   >
                     {kindIcon(hit.kind)}
@@ -337,7 +415,8 @@ export function UniversalSearchBar() {
             })
           )}
           <p className="border-t border-[rgba(32,48,80,0.08)] px-3 py-2 text-[11px] text-[var(--muted)]">
-            ↑↓ navigate · Enter open · Esc close · modules · students · staff
+            ↑↓ navigate · Enter open · Esc close · modules · students · staff ·
+            receipts · vehicles · leads
           </p>
         </div>
       ) : null}

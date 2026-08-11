@@ -44,6 +44,7 @@ export type StudentAttReportDef = {
     | "student"
     | "status"
     | "gender"
+    | "percentBand"
   >;
 };
 
@@ -82,7 +83,7 @@ export const STUDENT_ATT_REPORTS: StudentAttReportDef[] = [
     id: "monthly_percentage",
     label: "Monthly Attendance Percentage Report",
     hint: "Attendance % from marked days in a month",
-    filters: ["month", "class", "section", "student", "gender"],
+    filters: ["month", "class", "section", "student", "gender", "percentBand"],
   },
   {
     id: "leave_excused",
@@ -103,6 +104,9 @@ export type StudentAttReportFilters = {
   studentId?: string;
   status?: "all" | AttendanceStatus;
   gender?: "" | "M" | "F" | "O";
+  /** monthly_percentage only — keep rows at or below this attendance %
+   * (e.g. 75 to find chronic-absentee candidates), 0-100. */
+  maxPercent?: number;
   masters?: MastersState;
   sis?: SisState;
   attendance?: AttendanceState;
@@ -480,30 +484,32 @@ function buildReport(
       const people = f.studentId
         ? students.filter((s) => s.id === f.studentId)
         : students;
-      const rows = people.map((s) => {
-        let presentish = 0;
-        let marked = 0;
-        for (const reg of monthRegs) {
-          const m = reg.marks.find((x) => x.studentId === s.id);
-          if (!m) continue;
-          marked += 1;
-          if (m.status === "P" || m.status === "L" || m.status === "HD") {
-            presentish += m.status === "HD" ? 0.5 : 1;
+      const rows = people
+        .map((s) => {
+          let presentish = 0;
+          let marked = 0;
+          for (const reg of monthRegs) {
+            const m = reg.marks.find((x) => x.studentId === s.id);
+            if (!m) continue;
+            marked += 1;
+            if (m.status === "P" || m.status === "L" || m.status === "HD") {
+              presentish += m.status === "HD" ? 0.5 : 1;
+            }
           }
-        }
-        const pct =
-          marked > 0 ? Math.round((presentish / marked) * 1000) / 10 : 0;
-        return {
-          admissionNo: s.admissionNo,
-          student: s.fullName,
-          rollNo: s.rollNo,
-          className: className(masters, s.classId),
-          section: sectionName(masters, s.sectionId),
-          marked,
-          presentDays: Math.round(presentish * 10) / 10,
-          percent: pct,
-        };
-      });
+          const pct =
+            marked > 0 ? Math.round((presentish / marked) * 1000) / 10 : 0;
+          return {
+            admissionNo: s.admissionNo,
+            student: s.fullName,
+            rollNo: s.rollNo,
+            className: className(masters, s.classId),
+            section: sectionName(masters, s.sectionId),
+            marked,
+            presentDays: Math.round(presentish * 10) / 10,
+            percent: pct,
+          };
+        })
+        .filter((r) => f.maxPercent == null || r.percent <= f.maxPercent);
       return {
         ok: true,
         built: {
@@ -609,6 +615,7 @@ export function runStudentAttReport(
       ? `Status ${filters.status}`
       : "",
     filters.gender ? `Gender ${filters.gender}` : "",
+    filters.maxPercent != null ? `≤ ${filters.maxPercent}% attendance` : "",
     `AY ${filters.academicYearCode}`,
   ]);
 

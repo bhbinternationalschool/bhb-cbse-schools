@@ -107,7 +107,7 @@ async function callLlmText(
     };
   }
 
-  let lastError = "LLM request failed";
+  const errors: string[] = [];
 
   for (const engine of engines) {
     if (engine === "openai") {
@@ -120,7 +120,7 @@ async function callLlmText(
         temperature: opts.temperature,
       });
       if (r.ok) return { ...r, engine: "openai" };
-      lastError = r.error;
+      errors.push(`openai: ${r.error}`);
       continue;
     }
 
@@ -141,10 +141,14 @@ async function callLlmText(
       const text = opts.jsonMode ? stripJsonFence(r.text) : r.text;
       return { ok: true, text, engine: "gemini" };
     }
-    lastError = r.error;
+    errors.push(`gemini: ${r.error}`);
   }
 
-  return { ok: false, error: lastError, engine: "none" };
+  return {
+    ok: false,
+    error: errors.join(" · ") || "LLM request failed",
+    engine: "none",
+  };
 }
 
 async function callLlmJson<T>(
@@ -163,7 +167,7 @@ async function callLlmJson<T>(
     };
   }
 
-  let lastError = "LLM request failed";
+  const errors: string[] = [];
 
   for (const engine of engines) {
     let text: string | null = null;
@@ -178,7 +182,7 @@ async function callLlmJson<T>(
         temperature: opts.temperature,
       });
       if (!r.ok) {
-        lastError = r.error;
+        errors.push(`openai: ${r.error}`);
         continue;
       }
       text = r.text;
@@ -194,7 +198,7 @@ async function callLlmJson<T>(
         temperature: opts.geminiTemperature ?? opts.temperature,
       });
       if (!r.ok) {
-        lastError = r.error;
+        errors.push(`gemini: ${r.error}`);
         continue;
       }
       text = stripJsonFence(r.text);
@@ -202,10 +206,14 @@ async function callLlmJson<T>(
 
     const parsed = parse(text);
     if (parsed) return { ok: true, data: parsed, engine };
-    lastError = "Invalid JSON from LLM";
+    errors.push(`${engine}: invalid JSON in response`);
   }
 
-  return { ok: false, error: lastError, engine: "none" };
+  return {
+    ok: false,
+    error: errors.join(" · ") || "LLM request failed",
+    engine: "none",
+  };
 }
 
 function stripJsonFence(text: string): string {
@@ -228,7 +236,10 @@ export async function generateTutorText(opts: {
     userMessage: opts.userMessage,
     maxTokens: 900,
     temperature: 0.45,
-    geminiMaxTokens: 900,
+    // Gemini 3.x spends part of maxOutputTokens on internal "thinking" before
+    // the visible reply — 900 was enough for OpenAI but truncated Gemini's
+    // actual answer, so Gemini gets a larger budget for the same reply length.
+    geminiMaxTokens: 1536,
   });
 }
 
@@ -275,7 +286,10 @@ Include 2-4 relevant variables in the body.`;
       userMessage,
       maxTokens: 600,
       temperature: 0.5,
-      geminiMaxTokens: 600,
+      // See generateTutorText — Gemini 3.x needs headroom for internal
+      // "thinking" tokens on top of the visible JSON reply, or the JSON
+      // comes back truncated/invalid.
+      geminiMaxTokens: 2048,
     },
     parseWaDraftJson,
   );
@@ -296,6 +310,208 @@ function parseWaDraftJson(
     const body = String(raw.body || "").trim();
     if (!body) return null;
     return { body, footer: String(raw.footer || "").trim() };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Draft a personalized fee-defaulter WhatsApp message + phone call script.
+ * A draft, not an auto-send — the office reviews/edits before sending, same
+ * as every other AI-drafted text in this app (agreements, certificates).
+ */
+export async function generateCollectionsDraftJson(opts: {
+  schoolName: string;
+  studentName: string;
+  classLabel: string;
+  amountLabel: string;
+  overdueDaysLabel: string;
+  stageLabel: string;
+  language: string;
+}): Promise<
+  | { ok: true; whatsappMessage: string; callScript: string; engine: LlmEngine }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const system = `You draft fee-collection outreach for an Indian CBSE school's accounts office.
+Write with a firm but respectful, non-threatening tone — the goal is to get the family to pay or come in to talk, not to shame them.
+Never invent a due date, policy, or threat that wasn't given to you.
+Respond with JSON only: {"whatsappMessage":"...","callScript":"..."}.
+whatsappMessage: under 500 characters, WhatsApp-formatted (*bold* with single asterisks), ends with a clear next step.
+callScript: 3-5 short spoken lines an office staff member can read out on a phone call — opening, the ask, and a polite close.`;
+
+  const userMessage = `School: ${opts.schoolName}
+Student: ${opts.studentName} (${opts.classLabel})
+Overdue amount: ${opts.amountLabel}
+Overdue: ${opts.overdueDaysLabel}
+Stage: ${opts.stageLabel}
+Language: ${opts.language === "hi" ? "Hindi (Devanagari)" : "English"}`;
+
+  const r = await callLlmJson(
+    {
+      system,
+      userMessage,
+      maxTokens: 500,
+      temperature: 0.5,
+      // See generateTutorText — Gemini 3.x's internal "thinking" tokens eat
+      // into a small budget before the visible JSON reply is produced.
+      geminiMaxTokens: 2048,
+    },
+    parseCollectionsDraftJson,
+  );
+
+  if (r.ok) return { ok: true, ...r.data, engine: r.engine };
+  return {
+    ok: false,
+    error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI collections drafts",
+    engine: r.engine,
+  };
+}
+
+function parseCollectionsDraftJson(
+  text: string,
+): { whatsappMessage: string; callScript: string } | null {
+  try {
+    const raw = JSON.parse(text) as {
+      whatsappMessage?: string;
+      callScript?: string;
+    };
+    const whatsappMessage = String(raw.whatsappMessage || "").trim();
+    const callScript = String(raw.callScript || "").trim();
+    if (!whatsappMessage || !callScript) return null;
+    return { whatsappMessage, callScript };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Suggest the next-best-action for an admissions lead + draft the outreach
+ * message for it. A suggestion, not an auto-send — the counsellor reviews.
+ */
+export async function generateLeadNextActionJson(opts: {
+  schoolName: string;
+  childName: string;
+  classSoughtLabel: string;
+  stageLabel: string;
+  sourceLabel: string;
+  daysSinceEnquiry: number;
+  followUpSummary: string;
+  language: string;
+}): Promise<
+  | { ok: true; nextAction: string; outreachMessage: string; engine: LlmEngine }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const system = `You advise a school admissions counsellor on the single next-best action for one enquiry lead, and draft the outreach message for it.
+Never invent facts (dates, fees, seat availability) not given to you.
+Respond with JSON only: {"nextAction":"...","outreachMessage":"..."}.
+nextAction: one short imperative sentence (under 120 characters), e.g. "Call today — no contact since enquiry" or "Send a campus-visit invite".
+outreachMessage: a warm, non-pushy WhatsApp message under 400 characters, WhatsApp-formatted (*bold* with single asterisks), ending with a clear next step.`;
+
+  const userMessage = `School: ${opts.schoolName}
+Child: ${opts.childName}
+Class sought: ${opts.classSoughtLabel}
+Stage: ${opts.stageLabel}
+Source: ${opts.sourceLabel}
+Days since enquiry: ${opts.daysSinceEnquiry}
+Follow-up history: ${opts.followUpSummary || "No follow-ups logged yet"}
+Language: ${opts.language === "hi" ? "Hindi (Devanagari)" : "English"}`;
+
+  const r = await callLlmJson(
+    {
+      system,
+      userMessage,
+      maxTokens: 500,
+      temperature: 0.5,
+      // See generateTutorText — Gemini 3.x's internal "thinking" tokens eat
+      // into a small budget before the visible JSON reply is produced.
+      geminiMaxTokens: 2048,
+    },
+    parseLeadNextActionJson,
+  );
+
+  if (r.ok) return { ok: true, ...r.data, engine: r.engine };
+  return {
+    ok: false,
+    error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI next-action suggestions",
+    engine: r.engine,
+  };
+}
+
+function parseLeadNextActionJson(
+  text: string,
+): { nextAction: string; outreachMessage: string } | null {
+  try {
+    const raw = JSON.parse(text) as {
+      nextAction?: string;
+      outreachMessage?: string;
+    };
+    const nextAction = String(raw.nextAction || "").trim();
+    const outreachMessage = String(raw.outreachMessage || "").trim();
+    if (!nextAction || !outreachMessage) return null;
+    return { nextAction, outreachMessage };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Synthesize the day's already-computed KPI numbers into a short narrative
+ * digest for a principal/leadership dashboard. The numbers themselves are
+ * ground truth supplied by the caller — this only prioritizes and phrases
+ * them, it never computes or invents a number of its own.
+ */
+export async function generateLeadershipDigestJson(opts: {
+  schoolName: string;
+  metricsSummary: string;
+}): Promise<
+  | { ok: true; headline: string; highlights: string[]; engine: LlmEngine }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const system = `You write a one-paragraph daily digest for a school principal from KPI numbers they give you.
+Use ONLY the numbers given — never invent, estimate, or restate a figure that wasn't provided.
+Respond with JSON only: {"headline":"...","highlights":["...","..."]}.
+headline: one sentence, under 140 characters, the single most important thing today.
+highlights: 2-4 short bullet points (each under 100 characters) — prioritize risks/anomalies (low attendance, high dues, overdue follow-ups, low stock) over routine-good numbers.`;
+
+  const userMessage = `School: ${opts.schoolName}
+Today's numbers:
+${opts.metricsSummary}`;
+
+  const r = await callLlmJson(
+    {
+      system,
+      userMessage,
+      maxTokens: 500,
+      temperature: 0.4,
+      // See generateTutorText — Gemini 3.x's internal "thinking" tokens eat
+      // into a small budget before the visible JSON reply is produced.
+      geminiMaxTokens: 2048,
+    },
+    parseLeadershipDigestJson,
+  );
+
+  if (r.ok) return { ok: true, ...r.data, engine: r.engine };
+  return {
+    ok: false,
+    error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for the AI digest",
+    engine: r.engine,
+  };
+}
+
+function parseLeadershipDigestJson(
+  text: string,
+): { headline: string; highlights: string[] } | null {
+  try {
+    const raw = JSON.parse(text) as {
+      headline?: string;
+      highlights?: unknown;
+    };
+    const headline = String(raw.headline || "").trim();
+    const highlights = Array.isArray(raw.highlights)
+      ? raw.highlights.map((h) => String(h || "").trim()).filter(Boolean)
+      : [];
+    if (!headline || highlights.length === 0) return null;
+    return { headline, highlights: highlights.slice(0, 4) };
   } catch {
     return null;
   }
@@ -383,7 +599,9 @@ Staff request: ${opts.hint}`;
       userMessage,
       maxTokens: 500,
       temperature: 0.4,
-      geminiMaxTokens: 500,
+      // See generateTutorText — Gemini 3.x's internal "thinking" tokens eat
+      // into a small budget before the visible JSON reply is produced.
+      geminiMaxTokens: 2048,
     },
     parseSetup,
   );
@@ -436,7 +654,9 @@ export async function generateSchoolDocumentText(opts: {
       userMessage: opts.userMessage,
       maxTokens: 2000,
       temperature: 0.45,
-      geminiMaxTokens: 2000,
+      // See generateTutorText — give Gemini 3.x headroom over its internal
+      // "thinking" tokens on top of a document-length JSON reply.
+      geminiMaxTokens: 3072,
     },
     parseSchoolDocumentJson,
   );

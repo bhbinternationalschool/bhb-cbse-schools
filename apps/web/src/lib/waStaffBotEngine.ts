@@ -9,6 +9,7 @@ import {
   composeLeadershipWhatsAppReport,
   composeStaffAttendanceWhatsAppSnapshot,
 } from "@/lib/waLeadershipReports.server";
+import { generateTutorText } from "@/lib/aiLlm.server";
 
 export type StaffBotQuickId =
   | "reports"
@@ -130,6 +131,55 @@ export function replyStaffBotIntent(
     default:
       return { escalate: false, text: staffBotMenuText(ctx) };
   }
+}
+
+/**
+ * LLM fallback for staff/leadership messages the keyword matcher doesn't
+ * recognize. Staff already have full ERP access, so this only points them
+ * to the right quick-command — it must never invent a live number, name, or
+ * date since staff may act on it operationally. Returns null on any
+ * failure — caller keeps the existing menu, this is a graceful upgrade.
+ */
+async function tryStaffAiFallback(
+  text: string,
+  ctx: { fullName: string; isOwner: boolean },
+): Promise<string | null> {
+  const system = `You are a WhatsApp assistant for school staff/leadership at ${TENANT.nameDisplay}.
+You do NOT have access to live school data (headcounts, amounts, names, dates) — you may only tell staff which existing quick-reply keyword to use: REPORTS, ADMISSIONS, STAFF, FEE, MEETING, TIMING, HUMAN, or MENU.
+Never invent or guess a number, name, or date yourself.
+If none of those keywords fit the question, tell them to reply *HUMAN* or open the ERP app.
+Keep the reply under 300 characters, plain text (no markdown headers).`;
+
+  const userMessage = `Staff member: ${ctx.fullName || "Team member"} (${ctx.isOwner ? "owner/leadership" : "staff"})
+Message: "${text}"`;
+
+  try {
+    const r = await generateTutorText({ system, userMessage });
+    if (!r.ok) return null;
+    return r.text.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Same as replyStaffBotIntent, but tries an LLM fallback for genuinely
+ * unrecognized free text instead of always showing the quick-command menu. */
+export async function replyStaffBotIntentWithAi(
+  intent: StaffBotQuickId | "unknown",
+  text: string,
+  ctx: { fullName: string; isOwner: boolean },
+): Promise<{ text: string; escalate: boolean }> {
+  const base = replyStaffBotIntent(intent, ctx);
+  const trimmed = text.trim();
+  if (
+    intent === "unknown" &&
+    trimmed.length > 3 &&
+    !/^(hi|hello|namaste|hey|start|menu|main)$/i.test(trimmed)
+  ) {
+    const aiReply = await tryStaffAiFallback(text, ctx);
+    if (aiReply) return { text: aiReply, escalate: false };
+  }
+  return base;
 }
 
 export function staffBotMenuText(ctx: {

@@ -1,7 +1,11 @@
 import { createHash, timingSafeEqual } from "crypto";
 import { getDemoSession, type DemoSession } from "@/lib/auth";
-import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { defaultMasters, type MastersState } from "@/lib/masters";
+import {
+  deskBundleToMastersState,
+  fetchMastersDeskFromDb,
+} from "@/lib/mastersNormalized.server";
+import { fetchStaffRemoteServer } from "@/lib/staffPersistence";
 import {
   defaultRbacState,
   hasPermission,
@@ -37,8 +41,45 @@ async function loadServerRbac(): Promise<RbacState> {
   return defaultRbacState();
 }
 
+/**
+ * Server-side Masters for RBAC resolution. Without the real staff roster,
+ * resolveSessionRoles can never match a per-staff role assignment and every
+ * request silently falls back to inferRoleCodes() regex matching — i.e. the
+ * assignments made in Masters → Roles were only ever enforced in the browser.
+ * Masters desk slices carry everything except staff/departments/designations,
+ * which live in the sis_* roster tables; merge both. Cached briefly because
+ * this runs on every authenticated API request (single-tenant per deploy —
+ * serverTenant resolves one TENANT.slug).
+ */
+const MASTERS_CACHE_TTL_MS = 30_000;
+let mastersCache: { state: MastersState; at: number } | null = null;
+
 async function loadServerMasters(): Promise<MastersState> {
-  return defaultMasters();
+  const now = Date.now();
+  if (mastersCache && now - mastersCache.at < MASTERS_CACHE_TTL_MS) {
+    return mastersCache.state;
+  }
+  try {
+    const [{ bundle }, staffBundle] = await Promise.all([
+      fetchMastersDeskFromDb(),
+      fetchStaffRemoteServer(),
+    ]);
+    const state = deskBundleToMastersState(bundle);
+    if (staffBundle) {
+      if (staffBundle.staff.length > 0) state.staff = staffBundle.staff;
+      if (staffBundle.departments.length > 0) {
+        state.departments = staffBundle.departments;
+      }
+      if (staffBundle.designations.length > 0) {
+        state.designations = staffBundle.designations;
+      }
+    }
+    mastersCache = { state, at: now };
+    return state;
+  } catch (e) {
+    console.warn("[apiAuth] server masters load failed", e);
+    return defaultMasters();
+  }
 }
 
 async function authFromApiKey(request: Request): Promise<ApiAuthContext | null> {

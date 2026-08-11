@@ -37,7 +37,7 @@ export function StaffBottomNav({ onOpenMenu }: { onOpenMenu: () => void }) {
 
   return (
     <nav
-      className="bhb-app-bottom-nav fixed bottom-0 left-0 right-0 z-50 border-t border-[rgba(32,48,80,0.1)] bg-[rgba(255,255,255,0.96)] backdrop-blur-lg lg:hidden"
+      className="bhb-app-bottom-nav fixed bottom-0 left-0 right-0 z-50 border-t border-[rgba(32,48,80,0.1)] bg-[rgba(255,255,255,0.96)] backdrop-blur-lg md:hidden"
       aria-label="Staff app navigation"
     >
       <div className="flex items-stretch justify-around px-1 pt-1">
