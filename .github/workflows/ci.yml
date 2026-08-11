@@ -135,6 +135,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:sis-memory-fallback
 
+      - name: Test — a projected lead never blanks the record it came from
+        working-directory: apps/web
+        run: npm run test:partial-lead
+
       - name: Test — a failing guard refuses the push, never falls back silently
         working-directory: apps/web
         run: npm run test:sis-guard-fallback

@@ -17,6 +17,7 @@
     "test:projection": "npx tsx src/lib/data/projection.selftest.ts",
     "test:read-client": "npx tsx src/lib/data/readClient.selftest.ts",
     "test:survey-photo": "npx tsx src/lib/surveyPhoto.selftest.ts",
+    "test:partial-lead": "npx tsx src/lib/partialLead.selftest.ts",
     "test:masters-write-guard": "npx tsx src/lib/mastersWriteGuard.selftest.ts",
     "test:hydrate-failure-safety": "npx tsx src/lib/hydrateFailureSafety.selftest.ts",
     "test:session-cookie": "npx tsx src/lib/sessionCookie.selftest.ts",

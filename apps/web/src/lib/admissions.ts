@@ -1302,6 +1302,49 @@ export function loadAdmissions(): AdmissionsState {
  * must never be persisted, so the check is here at the boundary rather than
  * trusting each caller to remember which mode it got back.
  */
+/**
+ * Refuse to overwrite a complete lead with a projected one.
+ *
+ * Stage 6 replaces the 2.37 MB whole-table read with a projection: only the
+ * ~20 promoted columns, not `lead_json`. rowToLead() already rebuilds a lead
+ * from those columns when lead_json is absent — but AdmissionLead has 79
+ * fields and 59 of them live ONLY in lead_json: dob, gender, address,
+ * motherName, email, the document checklist, the admission details.
+ *
+ * So a projected lead is a stub. Saving one back would blank 59 fields on a
+ * real child's record. That is the same shape as the failure that orphaned
+ * 711 students today — a partial value overwriting a complete one — and it is
+ * the reason the projection cannot simply be switched on.
+ *
+ * This lands BEFORE detail-on-demand, deliberately. Nothing produces partial
+ * leads yet, so today it changes nothing; it means the read-path work can
+ * proceed without the possibility of silently destroying records.
+ */
+export function isPartialLead(lead: unknown): boolean {
+  return !!(lead as { __partial?: boolean })?.__partial;
+}
+
+/**
+ * Merge a projected lead over the copy already held, keeping every field the
+ * projection did not carry. Returns the existing record untouched when the
+ * incoming one is a stub and nothing is known to be newer.
+ */
+export function mergeProjectedLead(
+  existing: AdmissionLead | undefined,
+  incoming: AdmissionLead,
+): AdmissionLead {
+  if (!existing) return incoming;
+  if (!isPartialLead(incoming)) return incoming;
+  // Projection wins only for the columns it actually carries; everything else
+  // is preserved from the full record.
+  const merged = { ...existing } as Record<string, unknown>;
+  for (const [k, v] of Object.entries(incoming)) {
+    if (k === "__partial") continue;
+    if (v !== undefined && v !== null && v !== "") merged[k] = v;
+  }
+  return merged as AdmissionLead;
+}
+
 export function sanitizeSurveyPhotoUrl(value?: string | null): string {
   const url = (value ?? "").trim();
   if (!url) return "";
