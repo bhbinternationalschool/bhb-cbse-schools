@@ -814,7 +814,28 @@ export function emptyAdmissionLead(
 export function normalizeAdmissionLead(
   raw: Partial<AdmissionLead> | null | undefined,
 ): AdmissionLead {
-  return emptyAdmissionLead(raw || undefined);
+  const lead = emptyAdmissionLead(raw || undefined);
+
+  // Carry the provenance marker through normalization.
+  //
+  // emptyAdmissionLead builds a fresh object literal field by field — it never
+  // spreads `...raw` — so every key it does not name is dropped. `__partial`
+  // is not a data field, so it was being silently discarded here, and that
+  // quietly disabled the entire projection safety net:
+  //
+  //   projected list  -> lead marked __partial
+  //   user saves      -> normalizeAdmissionsState strips the marker
+  //   push            -> server sees no stub, merges nothing
+  //   result          -> the stub overwrites the record, 59 fields blanked
+  //                      on every lead
+  //
+  // The marker has to survive exactly as far as the write path that reads it.
+  // Found before the flag was ever turned on, by walking the components rather
+  // than trusting that the guard would fire.
+  if ((raw as { __partial?: boolean } | null | undefined)?.__partial) {
+    (lead as { __partial?: boolean }).__partial = true;
+  }
+  return lead;
 }
 
 export function normalizeAdmissionHousehold(

@@ -20,7 +20,11 @@
  * Run: npx tsx src/lib/partialLead.selftest.ts
  */
 import assert from "node:assert/strict";
-import { isPartialLead, mergeProjectedLead } from "./admissions";
+import {
+  isPartialLead,
+  mergeProjectedLead,
+  normalizeAdmissionLead,
+} from "./admissions";
 import type { AdmissionLead } from "./admissions";
 
 const full = {
@@ -95,6 +99,47 @@ const projected = {
     projected,
     "with nothing to protect, a projected lead is simply taken — the list " +
       "must still show leads this browser has not opened",
+  );
+}
+
+
+// ── The marker must survive normalization ─────────────────────────────────
+// This is the link the whole projection depends on, and it was broken.
+//
+// emptyAdmissionLead builds a fresh object literal field by field and never
+// spreads its input, so every key it does not name is dropped. __partial is
+// not a data field, so normalizeAdmissionsState — which runs on every save —
+// silently removed it. The server would then see no stub, merge nothing, and
+// let the stub overwrite the record: 59 fields blanked on all 919 leads.
+//
+// The guard existed. The normalizer disabled it. Found by walking the
+// components before turning the flag on, not by watching it happen.
+{
+  const stub = {
+    id: "adm_1",
+    childName: "Aarav Sharma",
+    stage: "registered",
+    __partial: true,
+  } as unknown as AdmissionLead;
+
+  const normalized = normalizeAdmissionLead(stub);
+  assert.equal(
+    isPartialLead(normalized),
+    true,
+    "__partial must survive normalizeAdmissionLead — if it does not, every " +
+      "save from a projected list silently overwrites the full record",
+  );
+
+  // And a complete lead must NOT acquire the marker, or every save would be
+  // merged and a genuine field-clearing edit could never be written.
+  const full = normalizeAdmissionLead({
+    id: "adm_2",
+    childName: "Ishaan",
+  } as Partial<AdmissionLead>);
+  assert.equal(
+    isPartialLead(full),
+    false,
+    "a complete lead is never marked partial",
   );
 }
 
