@@ -3838,10 +3838,16 @@ export function searchFeeStudents(
   const q = query.trim().toLowerCase();
   const classId = filters?.classId ?? "";
   const sectionId = filters?.sectionId ?? "";
-  const className = (id: string) =>
-    m.classes.find((c) => c.id === id)?.name ?? "—";
-  const sectionName = (id: string) =>
-    m.sections.find((x) => x.id === id)?.name ?? "";
+  // Index once. These were linear finds called per student: householdOf over
+  // 193 households inside the filter for ~680 active students is ~131,000
+  // comparisons per search, and className/sectionName repeated it for every
+  // result. Debouncing hid the cost without removing it — the work still
+  // blocked the main thread, which is what made typing feel like it hung.
+  const classNameById = new Map(m.classes.map((c) => [c.id, c.name]));
+  const sectionNameById = new Map(m.sections.map((x) => [x.id, x.name]));
+  const householdById = new Map(s.households.map((h) => [h.id, h]));
+  const className = (id: string) => classNameById.get(id) ?? "—";
+  const sectionName = (id: string) => sectionNameById.get(id) ?? "";
 
   let list = filters?.includeInactive
     ? s.students.slice()
@@ -3866,7 +3872,7 @@ export function searchFeeStudents(
   }
   if (q) {
     list = list.filter((st) => {
-      const hh = householdOf(s, st.householdId);
+      const hh = householdById.get(st.householdId);
       return (
         st.fullName.toLowerCase().includes(q) ||
         st.admissionNo.toLowerCase().includes(q) ||
@@ -3888,7 +3894,7 @@ export function searchFeeStudents(
         (sum, d) => sum + d.balancePaise,
         0,
       );
-      const hh = householdOf(s, student.householdId) ?? null;
+      const hh = householdById.get(student.householdId) ?? null;
       return {
         student,
         household: hh,

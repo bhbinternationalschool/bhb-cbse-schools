@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import Link from "next/link";
 import { GraduationCap } from "lucide-react";
 import { recordAudit } from "@/lib/auditClient";
@@ -409,8 +415,41 @@ export function StudentsWorkspace() {
     return [...codes].sort((a, b) => b.localeCompare(a));
   }, [masters, state]);
 
+  /**
+   * Typing stays responsive; the 711-row filter catches up.
+   *
+   * The roster search had no debounce, so every keystroke re-ran the whole
+   * filter — and the filter did per-student work that should have been done
+   * once: householdOf() is a linear find over 193 households, called inside
+   * the callback for each of 711 students, and matchesClass did the same
+   * against 30 sections. That is ~137,000 comparisons and ~8,500 toLowerCase
+   * allocations PER CHARACTER, which is why the field appeared to freeze and
+   * then dump the letters at once.
+   *
+   * useDeferredValue lets React paint the keystroke first and run the filter
+   * at lower priority, so the input never waits for the list.
+   */
+  const deferredQuery = useDeferredValue(query);
+
+  /** Built once per state change, not once per student per keystroke. */
+  const householdById = useMemo(() => {
+    type Hh = NonNullable<typeof state>["households"][number];
+    const m = new Map<string, Hh>();
+    for (const h of state?.households ?? []) m.set(h.id, h);
+    return m;
+  }, [state]);
+
+  const sectionById = useMemo(() => {
+    const m = new Map<string, { id: string; classId: string }>();
+    for (const x of masters?.sections ?? []) m.set(x.id, x);
+    return m;
+  }, [masters]);
+
   const filtered = useMemo(() => {
     if (!state || !masters) return [];
+
+    // Hoisted: this was recomputed inside the callback for every student.
+    const q = deferredQuery.trim().toLowerCase();
 
     const inSession = (s: SisStudent) =>
       !effectiveSession ||
@@ -418,9 +457,8 @@ export function StudentsWorkspace() {
         normalizeSessionCode(effectiveSession);
 
     const matchesSearch = (s: SisStudent) => {
-      if (!query.trim()) return true;
-      const q = query.trim().toLowerCase();
-      const hh = householdOf(state, s.householdId);
+      if (!q) return true;
+      const hh = householdById.get(s.householdId);
       return (
         s.fullName.toLowerCase().includes(q) ||
         s.admissionNo.toLowerCase().includes(q) ||
@@ -443,7 +481,7 @@ export function StudentsWorkspace() {
     const matchesClass = (s: SisStudent) => {
       if (!classFilter) return true;
       if (s.classId === classFilter) return true;
-      const sec = masters.sections.find((x) => x.id === s.sectionId);
+      const sec = sectionById.get(s.sectionId);
       return sec?.classId === classFilter;
     };
 
