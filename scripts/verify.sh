@@ -77,6 +77,7 @@ SELFTESTS=(
   test:sis-revision
   test:sis-prune
   test:attendance-prune
+  test:prune-floor
   test:sis-delete
   test:sis-guard-fallback
   test:audit-redaction

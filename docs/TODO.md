@@ -39,6 +39,35 @@ the concrete items. Check things off in the PR that fixes them.
 
 ## Known debt (from the incident work)
 
+- [ ] **A partial payload still prunes. The floor only stops the empty case.**
+  Audited 2026-08-11: `deleteStale` is copy-pasted into 20 modules and called
+  from 91 places, 86 of them unguarded. Every call deleted whatever the client
+  was not holding, and an EMPTY payload therefore erased the whole table — the
+  emptiness check in attendance ran AFTER the delete, which is how the
+  2026-08-10 register was lost.
+
+  All 20 now refuse an empty keep-set (`test:prune-floor`, which fails if any
+  implementation loses the guard). That closes the catastrophic case
+  everywhere at once.
+
+  It does NOT make a partial payload safe: a client holding 3 of 900 rows
+  still prunes 897. Only two modules narrow correctly today —
+  `sis_students` (prune requires an explicit complete-snapshot flag, and no
+  caller passes it) and `attendance_desk_registers` (prunes only within the
+  dates the payload covers). The other 18 need the same treatment, and the
+  right scope differs per module: a date for registers, an academic year for
+  exams, an open/closed state for vouchers.
+
+  Reachable this way: `accounts_desk_bank_ledger`, `accounts_desk_cash_ledger`,
+  `payroll_desk_runs` and its audit trail, `fee_desk_cheques`,
+  `library_desk_issues`, `rte_desk_seats` (23 rows), and
+  `admission_desk_households` + `admission_desk_leads` (1,919 rows, live).
+  Most of the rest read 0 only because those modules are not in use yet.
+
+  The real fix is Stage 7-9: per-record writes with explicit deletes, so a
+  sync never expresses "these are the only rows that should exist".
+
+
 - [x] **A migration recorded as applied was not the code in the database.**
   Resolved 2026-08-10 (`20260810110000`), and the lesson outlives the fix.
   `20260808150000_sis_push_guarded_stable_versions` was recorded as applied —

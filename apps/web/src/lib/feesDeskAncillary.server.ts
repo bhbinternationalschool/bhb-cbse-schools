@@ -43,7 +43,27 @@ async function deleteStale(
   table: string,
   keepIds: Set<string>,
 ) {
-  const { data } = await sb.from(table).select("id").eq("tenant_id", tenantId);
+  // An empty keep-set means every stored row is "stale", which would delete
+  // the whole table. A client with nothing to say has lost its cache; it is
+  // not asking for the school's records to be erased. See the identical guard
+  // in the *Normalized.server.ts modules and docs/TODO.md.
+  if (keepIds.size === 0) {
+    console.warn(
+      `[${table}] refusing to prune: the payload holds no ids at all.`,
+    );
+    return;
+  }
+  const { data, error } = await sb
+    .from(table)
+    .select("id")
+    .eq("tenant_id", tenantId);
+  if (error) {
+    console.error(
+      `[${table}] prune skipped — could not read existing ids:`,
+      error.message,
+    );
+    return;
+  }
   const stale = (data ?? [])
     .map((r) => String((r as { id: string }).id))
     .filter((id) => !keepIds.has(id));

@@ -99,6 +99,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:attendance-prune
 
+      - name: Test — no sync deletes a table because a client turned up empty
+        working-directory: apps/web
+        run: npm run test:prune-floor
+
       - name: Test — a removed student is actually deleted
         working-directory: apps/web
         run: npm run test:sis-delete

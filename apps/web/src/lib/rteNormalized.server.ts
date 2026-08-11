@@ -37,13 +37,55 @@ async function resolveCtx(): Promise<{
   return getServerTenantContext();
 }
 
+/**
+ * Delete rows the client no longer holds — never on an empty payload.
+ *
+ * An empty keep-set means every stored row is "stale", so this deleted the
+ * entire table. That is never what a sync means: a client with nothing to say
+ * is a client whose cache was dropped, not an instruction to erase the
+ * school's records.
+ *
+ * It is not hypothetical. On 2026-08-11 the attendance register for the
+ * previous day was gone — pushed away by a phone whose localStorage had been
+ * dropped on quota, with the emptiness check running AFTER the delete. This
+ * same function is copied into 20 modules and called from 86 places, almost
+ * none of them guarded, covering bank and cash ledgers, payroll runs, fee
+ * cheques, library issues and 1,919 admission records.
+ *
+ * This floor stops the catastrophic case everywhere at once. It does NOT make
+ * a partial payload safe — a client holding 3 of 900 rows still prunes 897.
+ * That needs per-module scoping, the way attendance now prunes only within
+ * the dates its payload covers. See docs/TODO.md.
+ *
+ * The read error is also surfaced now. It was discarded, which happened to
+ * fail safe here (no data → nothing deleted), but "we could not read the
+ * table" and "the table is empty" must not be the same value in a function
+ * that deletes.
+ */
 async function deleteStale(
   sb: SupabaseClient,
   tenantId: string,
   table: string,
   keepIds: Set<string>,
 ) {
-  const { data } = await sb.from(table).select("id").eq("tenant_id", tenantId);
+  if (keepIds.size === 0) {
+    console.warn(
+      `[${table}] refusing to prune: the payload holds no ids at all. ` +
+        "An empty client is not an instruction to delete every row.",
+    );
+    return;
+  }
+  const { data, error } = await sb
+    .from(table)
+    .select("id")
+    .eq("tenant_id", tenantId);
+  if (error) {
+    console.error(
+      `[${table}] prune skipped — could not read existing ids:`,
+      error.message,
+    );
+    return;
+  }
   const stale = (data ?? [])
     .map((r) => String((r as { id: string }).id))
     .filter((id) => !keepIds.has(id));
