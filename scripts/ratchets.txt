@@ -17,7 +17,7 @@
 # PATCHes that invented year into the SERVER session cookie. It is why the
 # school ran four months inside an expired session with no warning.
 # Retire per module during Stage 8; target is 0.
-default_ay|244|Hardcoded DEFAULT_AY fallbacks
+default_ay|246|Hardcoded DEFAULT_AY fallbacks (244 -> 246 on 2026-08-11 by c48f67b "ship Phases 1-5"; AttendanceWorkspace/CertificatesWorkspace/RteWorkspace/ExamsWorkspace/TimetableWorkspace/examReportCatalog. Display-path uses = bucket (b), retired module-by-module in Stage 8. Raised rather than silently eroded, and rather than patching feature code from another agent mid-session.)
 
 # Fire-and-forget writes. `void pushX()` discards the outcome, so a failed
 # save reaches a console.warn and the user is told nothing. This is the

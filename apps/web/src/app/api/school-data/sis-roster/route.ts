@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { stripEmptyList } from "@/lib/wirePayload";
 import {
   authorizeSchoolDataDesk,
   SCHOOL_DATA_DESK_RBAC,
@@ -24,10 +25,19 @@ export async function GET(req: Request) {
       { status: 503 },
     );
   }
+  // Same lossless strip as admissions — normalizeStudent defaults absent
+  // fields to "" exactly as an empty value would. See lib/wirePayload.ts.
+  const lean = process.env.LEAN_WIRE_PAYLOAD?.trim().toLowerCase();
+  const leanOn = lean === "true" || lean === "1";
+
   return NextResponse.json({
     ok: true,
-    households: bundle.households,
-    students: bundle.students,
+    households: leanOn
+      ? stripEmptyList(bundle.households as unknown as Record<string, unknown>[])
+      : bundle.households,
+    students: leanOn
+      ? stripEmptyList(bundle.students as unknown as Record<string, unknown>[])
+      : bundle.students,
     householdCount: bundle.households.length,
     studentCount: bundle.students.length,
     updatedAt: meta?.updatedAt || new Date().toISOString(),

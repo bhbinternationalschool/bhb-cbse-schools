@@ -103,6 +103,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:prune-floor
 
+      - name: Test — stripping empties off the wire is reversible
+        working-directory: apps/web
+        run: npm run test:wire-payload
+
       - name: Test — a removed student is actually deleted
         working-directory: apps/web
         run: npm run test:sis-delete

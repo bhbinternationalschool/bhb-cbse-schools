@@ -18,6 +18,7 @@
 import { isoDateWeekday } from "@/lib/examTimetable";
 import type { MastersState } from "@/lib/masters";
 import { teacherLabel } from "@/lib/timetable";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 export type DutyType = "assembly" | "gate" | "lunch" | "bus_escort" | "event";
 
@@ -158,7 +159,7 @@ export function loadDutyRoster(): DutyRosterState {
 export function saveDutyRoster(state: DutyRosterState): DutyRosterState {
   const next = normalizeDutyRosterState(state);
   if (typeof window !== "undefined") {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
     window.dispatchEvent(new CustomEvent("bhb-duty-roster"));
   }
   return next;

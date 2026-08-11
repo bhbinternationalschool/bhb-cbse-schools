@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { stripEmptyList } from "@/lib/wirePayload";
 import {
   authorizeSchoolDataDesk,
   SCHOOL_DATA_DESK_RBAC,
@@ -16,6 +17,19 @@ import {
 export const runtime = "nodejs";
 
 /** GET — pull admissions desk from normalized tables */
+/**
+ * Ship records without their empty fields.
+ *
+ * OPT-IN via LEAN_WIRE_PAYLOAD; rollback is removing the variable. Three
+ * deploys in 70 seconds on 2026-08-11 restarted every container, every client
+ * re-hydrated ~4.8 MB at once, and the pile-up queued past the 8s statement
+ * timeout — 503s across four modules while the database sat idle.
+ */
+function leanWireEnabled(): boolean {
+  const flag = process.env.LEAN_WIRE_PAYLOAD?.trim().toLowerCase();
+  return flag === "true" || flag === "1";
+}
+
 export async function GET(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["admissions-desk"], "GET");
   if (!auth.ok) return auth.response
@@ -58,9 +72,23 @@ export async function GET(req: Request) {
       { status: 503 },
     );
   }
+  // Drop empty strings and nulls the client rebuilds anyway — 37.5% of this
+  // payload, measured on all 919 leads. Lossless: emptyAdmissionLead does
+  // `partial?.x || ""`, so absent and empty produce the same record. `false`
+  // and `0` are kept; see lib/wirePayload.ts.
+  const wireState = leanWireEnabled()
+    ? {
+        ...state,
+        leads: stripEmptyList(state.leads as unknown as Record<string, unknown>[]),
+        households: stripEmptyList(
+          state.households as unknown as Record<string, unknown>[],
+        ),
+      }
+    : state;
+
   return NextResponse.json({
     ok: true,
-    state,
+    state: wireState,
     leadCount: state.leads.length,
     householdCount: state.households.length,
     updatedAt: meta?.updatedAt || new Date().toISOString(),

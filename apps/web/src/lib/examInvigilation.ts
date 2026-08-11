@@ -26,6 +26,7 @@ import type { TimetableState } from "@/lib/timetable";
 import { teacherLabel, teachingPeriods } from "@/lib/timetable";
 import { isoDateWeekday } from "@/lib/examTimetable";
 import { absentTeachersForDate, type AbsentTeacher } from "@/lib/timetableSubstitution";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 export type InvigilationAssignment = {
   id: string;
@@ -98,7 +99,7 @@ export function loadInvigilation(): InvigilationState {
 export function saveInvigilation(state: InvigilationState): InvigilationState {
   const next = normalizeInvigilationState(state);
   if (typeof window !== "undefined") {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
     window.dispatchEvent(new CustomEvent("bhb-invigilation"));
   }
   return next;
