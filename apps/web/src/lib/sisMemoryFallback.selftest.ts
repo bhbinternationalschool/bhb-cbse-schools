@@ -26,6 +26,8 @@
  * Run: npx tsx src/lib/sisMemoryFallback.selftest.ts
  */
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 
 type State = { students: { id: string }[] };
 
@@ -118,6 +120,49 @@ function makeSis(store: ReturnType<typeof fullStore>) {
   sis.write({ students: [{ id: "stu_1" }, { id: "stu_2" }] });
   assert.ok(map.has("bhb_sis_v1"), "a cache that works is still written");
   assert.equal(sis.load().students.length, 2);
+}
+
+
+// ── EVERY large module must have this, not just the one that broke ────────
+// This is the assertion that would have prevented tonight. The pattern was
+// applied to SIS and not to admissions in the same change, so the blank
+// screen simply moved: SIS came back and admissions went to 0 leads while
+// the database held 919. A fix applied to one of two identical cases is not
+// a fix, it is a relocation.
+//
+// Source-level on purpose. Both modules read localStorage at import time, so
+// they cannot be imported here — and the failure being guarded against is
+// structural (a module that caches megabytes without a memory record), which
+// is exactly the shape a source check can see.
+{
+  // The only two modules large enough to exceed the ~5 MB origin cap:
+  // admissions 2.37 MB, SIS 1.80 MB. Add to this list as others grow.
+  const required = [
+    ["sis.ts", "memorySisState"],
+    ["admissions.ts", "memoryAdmissionsState"],
+  ] as const;
+
+  for (const [file, symbol] of required) {
+    const src = fs.readFileSync(path.join(__dirname, file), "utf8");
+    assert.ok(
+      src.includes(`let ${symbol}`),
+      `${file} caches megabytes and must declare ${symbol} — without it a ` +
+        "dropped cache reads as an empty module",
+    );
+    assert.ok(
+      new RegExp(`${symbol}\\s*=`).test(src),
+      `${file} must actually assign ${symbol} on write, not just declare it`,
+    );
+    assert.ok(
+      new RegExp(`(return|\\?\\?)\\s*${symbol}`).test(src),
+      `${file} must fall back to ${symbol} when the cache holds nothing — ` +
+        "declaring it without reading it leaves the blank screen in place",
+    );
+    assert.ok(
+      !/localStorage\.setItem\(STORAGE_KEY/.test(src),
+      `${file} must write through writeCacheOrInvalidate, never a bare setItem`,
+    );
+  }
 }
 
 console.log("sisMemoryFallback.selftest: all assertions passed");

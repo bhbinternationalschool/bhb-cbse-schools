@@ -1248,6 +1248,24 @@ function refreshLeadRegistrationPaymentStatus(
   });
 }
 
+/**
+ * Admissions, held in memory, independent of localStorage.
+ *
+ * The same rule SIS needed, and admissions needed it MORE: at 2.37 MB it is
+ * the largest module in the app. A browser caps an origin at roughly 5 MB, so
+ * the cache write can simply fail — and then loadAdmissions() read
+ * localStorage, found nothing, and returned zero leads while the database
+ * held 919 and the server was sending every one of them.
+ *
+ * This was fixed for SIS on 2026-08-10 and not for admissions in the same
+ * change, so the blank screen moved from one module to the other instead of
+ * going away. The two modules are the only large ones; both need it.
+ *
+ * Memory is the record for the session. localStorage is a best-effort copy
+ * for the next page load, and losing it must cost a reload, never the data.
+ */
+let memoryAdmissionsState: AdmissionsState | null = null;
+
 export function loadAdmissions(): AdmissionsState {
   if (typeof window === "undefined") {
     if (serverAdmissionsCache) return serverAdmissionsCache;
@@ -1261,12 +1279,13 @@ export function loadAdmissions(): AdmissionsState {
   }
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return defaultAdmissionsState();
+    // A cache too small to hold 2.37 MB must not read as "no leads".
+    if (!raw) return memoryAdmissionsState ?? defaultAdmissionsState();
     return normalizeAdmissionsState(
       JSON.parse(raw) as Partial<AdmissionsState>,
     );
   } catch {
-    return defaultAdmissionsState();
+    return memoryAdmissionsState ?? defaultAdmissionsState();
   }
 }
 
@@ -1335,6 +1354,9 @@ export function writeAdmissionsLocalRaw(state: AdmissionsState): void {
   // module re-reads from the database — which is the intended behaviour under
   // the no-offline decision anyway. It must not throw: this is called from
   // saveAdmissions, and an exception here used to abort the save.
+  // Memory first and unconditionally, so a cache that cannot hold this
+  // still leaves the leads readable for the rest of the session.
+  memoryAdmissionsState = normalized;
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(normalized));
 }
 
