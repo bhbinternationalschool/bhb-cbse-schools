@@ -11,23 +11,24 @@ substitutions:
   _NEXT_PUBLIC_APP_URL: https://bhbinternational.school
   _NEXT_PUBLIC_DEMO_AUTH: "true"
   # Server-only runtime (from apps/web/.env.local via deploy-online.sh)
-  _SUPABASE_SERVICE_ROLE_KEY: ""
-  _WHATSAPP_TOKEN: ""
+  #
+  # SUPABASE_SERVICE_ROLE_KEY, WHATSAPP_TOKEN, WHATSAPP_VERIFY_TOKEN,
+  # GOOGLE_MAPS_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY,
+  # GOOGLE_OAUTH_CLIENT_SECRET, CRON_SECRET, WA_DISPATCH_SECRET, and
+  # MIRROR_SYNC_SECRET moved to Secret Manager on 2026-08-12 (see the
+  # --set-secrets line in the deploy step) and are declared there directly —
+  # no longer substitution values, so they are NOT declared here. Cloud Build
+  # rejects any --substitutions key that isn't referenced somewhere in this
+  # file, so if deploy-online.sh is ever changed to pass one of these ten
+  # again, the build will fail with "not matched in the template" rather
+  # than silently reintroducing the plaintext-credential leak this replaced.
   _WHATSAPP_PHONE_ID: ""
-  _WHATSAPP_VERIFY_TOKEN: ""
   _WHATSAPP_WABA_ID: ""
   _WHATSAPP_DEFAULT_COUNTRY_CODE: "91"
   _WHATSAPP_GRAPH_VERSION: "v21.0"
-  _GOOGLE_MAPS_API_KEY: ""
-  _GEMINI_API_KEY: ""
-  _OPENAI_API_KEY: ""
   _AI_TUTOR_MODEL: "gpt-4o-mini"
   _AI_PREFERRED_ENGINE: "auto"
   _GOOGLE_OAUTH_CLIENT_ID: ""
-  _GOOGLE_OAUTH_CLIENT_SECRET: ""
-  _CRON_SECRET: ""
-  _WA_DISPATCH_SECRET: ""
-  _MIRROR_SYNC_SECRET: ""
   _PROTECTED_SUPER_ADMIN_EMAILS: "director@bhbinternational.school,ashishsingh80@gmail.com,ashu.dube21@gmail.com"
 
 steps:
@@ -75,7 +76,17 @@ steps:
       - --cpu=2
       - --min-instances=1
       - --max-instances=20
-      - --set-env-vars=^|^NEXT_PUBLIC_APP_URL=${_NEXT_PUBLIC_APP_URL}|NEXT_PUBLIC_DEMO_AUTH=${_NEXT_PUBLIC_DEMO_AUTH}|NEXT_PUBLIC_SUPABASE_URL=${_NEXT_PUBLIC_SUPABASE_URL}|NEXT_PUBLIC_SUPABASE_ANON_KEY=${_NEXT_PUBLIC_SUPABASE_ANON_KEY}|NEXT_PUBLIC_SCHOOL_NAME=BHB International School|NEXT_PUBLIC_TENANT_SLUG=bhb-international|NODE_ENV=production|SUPABASE_SERVICE_ROLE_KEY=${_SUPABASE_SERVICE_ROLE_KEY}|CRON_SECRET=${_CRON_SECRET}|WA_DISPATCH_SECRET=${_WA_DISPATCH_SECRET}|MIRROR_SYNC_SECRET=${_MIRROR_SYNC_SECRET}|WHATSAPP_TOKEN=${_WHATSAPP_TOKEN}|WHATSAPP_PHONE_ID=${_WHATSAPP_PHONE_ID}|WHATSAPP_VERIFY_TOKEN=${_WHATSAPP_VERIFY_TOKEN}|WHATSAPP_WABA_ID=${_WHATSAPP_WABA_ID}|WHATSAPP_DEFAULT_COUNTRY_CODE=${_WHATSAPP_DEFAULT_COUNTRY_CODE}|WHATSAPP_GRAPH_VERSION=${_WHATSAPP_GRAPH_VERSION}|GOOGLE_MAPS_API_KEY=${_GOOGLE_MAPS_API_KEY}|GEMINI_API_KEY=${_GEMINI_API_KEY}|OPENAI_API_KEY=${_OPENAI_API_KEY}|AI_TUTOR_MODEL=${_AI_TUTOR_MODEL}|AI_PREFERRED_ENGINE=${_AI_PREFERRED_ENGINE}|GOOGLE_OAUTH_CLIENT_ID=${_GOOGLE_OAUTH_CLIENT_ID}|GOOGLE_OAUTH_CLIENT_SECRET=${_GOOGLE_OAUTH_CLIENT_SECRET}|PROTECTED_SUPER_ADMIN_EMAILS=${_PROTECTED_SUPER_ADMIN_EMAILS}
+      # SUPABASE_SERVICE_ROLE_KEY, CRON_SECRET, WA_DISPATCH_SECRET,
+      # MIRROR_SYNC_SECRET, WHATSAPP_TOKEN, WHATSAPP_VERIFY_TOKEN,
+      # GOOGLE_MAPS_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY, and
+      # GOOGLE_OAUTH_CLIENT_SECRET moved to Secret Manager on 2026-08-12 (the
+      # plain value was readable via `gcloud run services describe`). This
+      # step used to push all ten back as literal strings on every deploy,
+      # which Cloud Run refuses once a var is secret-backed — "Cannot update
+      # environment variable [...] because it has already been set with a
+      # different type." They now go through --set-secrets below instead.
+      - --set-env-vars=^|^NEXT_PUBLIC_APP_URL=${_NEXT_PUBLIC_APP_URL}|NEXT_PUBLIC_DEMO_AUTH=${_NEXT_PUBLIC_DEMO_AUTH}|NEXT_PUBLIC_SUPABASE_URL=${_NEXT_PUBLIC_SUPABASE_URL}|NEXT_PUBLIC_SUPABASE_ANON_KEY=${_NEXT_PUBLIC_SUPABASE_ANON_KEY}|NEXT_PUBLIC_SCHOOL_NAME=BHB International School|NEXT_PUBLIC_TENANT_SLUG=bhb-international|NODE_ENV=production|WHATSAPP_PHONE_ID=${_WHATSAPP_PHONE_ID}|WHATSAPP_WABA_ID=${_WHATSAPP_WABA_ID}|WHATSAPP_DEFAULT_COUNTRY_CODE=${_WHATSAPP_DEFAULT_COUNTRY_CODE}|WHATSAPP_GRAPH_VERSION=${_WHATSAPP_GRAPH_VERSION}|AI_TUTOR_MODEL=${_AI_TUTOR_MODEL}|AI_PREFERRED_ENGINE=${_AI_PREFERRED_ENGINE}|GOOGLE_OAUTH_CLIENT_ID=${_GOOGLE_OAUTH_CLIENT_ID}|PROTECTED_SUPER_ADMIN_EMAILS=${_PROTECTED_SUPER_ADMIN_EMAILS}
+      - --set-secrets=^|^SUPABASE_SERVICE_ROLE_KEY=school-erp-supabase-service-role-key:latest|CRON_SECRET=school-erp-cron-secret:latest|WA_DISPATCH_SECRET=school-erp-wa-dispatch-secret:latest|MIRROR_SYNC_SECRET=school-erp-mirror-sync-secret:latest|WHATSAPP_TOKEN=school-erp-whatsapp-token:latest|WHATSAPP_VERIFY_TOKEN=school-erp-whatsapp-verify-token:latest|GOOGLE_MAPS_API_KEY=school-erp-google-maps-api-key:latest|GEMINI_API_KEY=school-erp-gemini-api-key:latest|OPENAI_API_KEY=school-erp-openai-api-key:latest|GOOGLE_OAUTH_CLIENT_SECRET=school-erp-google-oauth-client-secret:latest|DIRECT_URL=school-erp-direct-url:latest
 
 images:
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$BUILD_ID

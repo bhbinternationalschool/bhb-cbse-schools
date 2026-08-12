@@ -162,23 +162,21 @@ SUBSTITUTIONS+="@_NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON}"
 SUBSTITUTIONS+="@_NEXT_PUBLIC_APP_URL=${APP_URL}"
 SUBSTITUTIONS+="@_NEXT_PUBLIC_DEMO_AUTH=${DEMO_AUTH}"
 SUBSTITUTIONS+="@_REGION=${REGION}"
-SUBSTITUTIONS+="@_SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}"
-SUBSTITUTIONS+="@_WHATSAPP_TOKEN=${WHATSAPP_TOKEN}"
+# SUPABASE_SERVICE_ROLE_KEY, WHATSAPP_TOKEN, WHATSAPP_VERIFY_TOKEN,
+# GOOGLE_MAPS_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY,
+# GOOGLE_OAUTH_CLIENT_SECRET, CRON_SECRET, WA_DISPATCH_SECRET, and
+# MIRROR_SYNC_SECRET are deliberately NOT passed as substitutions — they
+# moved to Secret Manager and cloudbuild.yaml no longer declares these
+# substitution keys, so passing them here would fail the build with "key
+# ... not matched in the template" (Cloud Build rejects any --substitutions
+# value for a key the config doesn't reference).
 SUBSTITUTIONS+="@_WHATSAPP_PHONE_ID=${WHATSAPP_PHONE_ID}"
-SUBSTITUTIONS+="@_WHATSAPP_VERIFY_TOKEN=${WHATSAPP_VERIFY_TOKEN}"
 SUBSTITUTIONS+="@_WHATSAPP_WABA_ID=${WHATSAPP_WABA_ID}"
 SUBSTITUTIONS+="@_WHATSAPP_DEFAULT_COUNTRY_CODE=${WHATSAPP_DEFAULT_COUNTRY_CODE}"
 SUBSTITUTIONS+="@_WHATSAPP_GRAPH_VERSION=${WHATSAPP_GRAPH_VERSION}"
-SUBSTITUTIONS+="@_GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}"
-SUBSTITUTIONS+="@_GEMINI_API_KEY=${GEMINI_API_KEY}"
-SUBSTITUTIONS+="@_OPENAI_API_KEY=${OPENAI_API_KEY}"
 SUBSTITUTIONS+="@_AI_TUTOR_MODEL=${AI_TUTOR_MODEL:-gpt-4o-mini}"
 SUBSTITUTIONS+="@_AI_PREFERRED_ENGINE=${AI_PREFERRED_ENGINE:-auto}"
 SUBSTITUTIONS+="@_GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}"
-SUBSTITUTIONS+="@_GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET}"
-SUBSTITUTIONS+="@_CRON_SECRET=${CRON_SECRET}"
-SUBSTITUTIONS+="@_WA_DISPATCH_SECRET=${WA_DISPATCH_SECRET}"
-SUBSTITUTIONS+="@_MIRROR_SYNC_SECRET=${MIRROR_SYNC_SECRET}"
 
 gcloud builds submit "$ROOT" \
   --project="$PROJECT_ID" \
@@ -206,9 +204,11 @@ if [[ -n "${BIGQUERY_PROJECT_ID:-}" ]]; then
   BQ_LOCATION="${BIGQUERY_LOCATION:-asia-south1}"
   BQ_TENANT="${BIGQUERY_TENANT_SLUG:-bhb-international}"
   BQ_UPDATE="BIGQUERY_PROJECT_ID=${BIGQUERY_PROJECT_ID}|BIGQUERY_DATASET=${BQ_DATASET}|BIGQUERY_LOCATION=${BQ_LOCATION}|BIGQUERY_TENANT_SLUG=${BQ_TENANT}"
-  if [[ -n "${DIRECT_URL:-}" ]]; then
-    BQ_UPDATE="${BQ_UPDATE}|DIRECT_URL=${DIRECT_URL}"
-  fi
+  # DIRECT_URL is deliberately absent here — it moved to Secret Manager on
+  # 2026-08-12 and is already applied by cloudbuild.yaml's --set-secrets in
+  # the main deploy step above. Pushing it again as a plain value here hits
+  # the same "already been set with a different type" error that broke this
+  # whole script until this file was updated.
   gcloud run services update school-erp-web \
     --project="$PROJECT_ID" \
     --region="$REGION" \
