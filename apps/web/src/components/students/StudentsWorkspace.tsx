@@ -372,6 +372,53 @@ export function StudentsWorkspace() {
     }
   }
 
+  /**
+   * Number one section at a time, alphabetically by name — the standard
+   * convention — in a single commit. There was no bulk or auto path before
+   * this; office typed each roll number by hand, one student at a time.
+   *
+   * Scoped to exactly one class AND one section deliberately: the button is
+   * disabled unless both filters are set, so there is never a question of
+   * which students "assign roll numbers" means. It touches only active
+   * students in the current session filter, and only the rollNo field —
+   * every other field on every other student is untouched, and this is one
+   * commit(), not N raced writes.
+   */
+  function assignRollNumbers() {
+    if (!state || !masters) return;
+    if (!classFilter || !sectionFilter) return;
+    const cls = masters.classes.find((c) => c.id === classFilter);
+    const sec = masters.sections.find((s) => s.id === sectionFilter);
+    const label = cls && sec ? `${cls.name}-${sec.name}` : "this section";
+
+    const inSection = state.students.filter(
+      (s) =>
+        s.sectionId === sectionFilter &&
+        s.status === "active" &&
+        (!effectiveSession ||
+          normalizeSessionCode(s.academicYearCode || "") ===
+            normalizeSessionCode(effectiveSession)),
+    );
+    if (inSection.length === 0) return;
+
+    const ok = window.confirm(
+      `Assign roll numbers 1–${inSection.length} to every active student in ${label}, alphabetically by name?\n\nThis overwrites any roll numbers already set in this section.`,
+    );
+    if (!ok) return;
+
+    const ordered = [...inSection].sort((a, b) =>
+      a.fullName.localeCompare(b.fullName),
+    );
+    const rollById = new Map(ordered.map((s, i) => [s.id, String(i + 1)]));
+    const next: SisState = {
+      ...state,
+      students: state.students.map((s) =>
+        rollById.has(s.id) ? { ...s, rollNo: rollById.get(s.id)! } : s,
+      ),
+    };
+    commit(next, `Roll numbers assigned for ${label}`);
+  }
+
   const sectionsForFilter = useMemo(() => {
     if (!masters || !classFilter) return [];
     return masters.sections
@@ -1224,6 +1271,19 @@ export function StudentsWorkspace() {
               );
             })}
           </select>
+          <button
+            type="button"
+            className="field max-w-[11rem] text-xs font-semibold text-[var(--brand-mid)] disabled:opacity-40"
+            onClick={assignRollNumbers}
+            disabled={!classFilter || !sectionFilter}
+            title={
+              classFilter && sectionFilter
+                ? "Assign roll numbers 1..N alphabetically for this section"
+                : "Pick a class and section first"
+            }
+          >
+            Assign roll numbers
+          </button>
           <select
             className="field max-w-[9rem]"
             value={statusFilter}

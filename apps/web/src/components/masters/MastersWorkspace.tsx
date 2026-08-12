@@ -36,6 +36,7 @@ import {
 } from "@/lib/masters";
 import { EditControl } from "@/components/masters/EditControl";
 import { RemoveControl } from "@/components/masters/RemoveControl";
+import { SectionTeachersPanel } from "@/components/masters/SectionTeachersPanel";
 import {
   FeeGroupsPanel,
   InstallmentsPanel,
@@ -780,6 +781,9 @@ function ClassesPanel({
   );
   const [sectionName, setSectionName] = useState("");
   const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
+  const [teachersSectionId, setTeachersSectionId] = useState<string | null>(
+    null,
+  );
 
   const selected = useMemo(
     () => state.classes.find((c) => c.id === selectedClassId),
@@ -788,6 +792,13 @@ function ClassesPanel({
   const sectionsForClass = state.sections.filter(
     (s) => s.classId === selectedClassId,
   );
+  const teachersSection = useMemo(() => {
+    const sec = state.sections.find((s) => s.id === teachersSectionId);
+    if (!sec) return null;
+    const cls = state.classes.find((c) => c.id === sec.classId);
+    if (!cls) return null;
+    return { ...sec, className: cls.name };
+  }, [state.sections, state.classes, teachersSectionId]);
 
   function resetClassForm() {
     setEditingClassId(null);
@@ -1016,6 +1027,21 @@ function ClassesPanel({
                     ) : null}
                   </span>
                   <div className="flex shrink-0 flex-col items-end gap-1.5 sm:flex-row sm:items-center">
+                    <button
+                      type="button"
+                      className={`text-xs font-semibold ${
+                        teachersSectionId === s.id
+                          ? "text-[var(--brand-deep)]"
+                          : "text-[var(--brand-mid)]"
+                      }`}
+                      onClick={() =>
+                        setTeachersSectionId(
+                          teachersSectionId === s.id ? null : s.id,
+                        )
+                      }
+                    >
+                      Teachers
+                    </button>
                     <EditControl
                       active={editingSectionId === s.id}
                       onEdit={() => startEditSection(s)}
@@ -1050,6 +1076,8 @@ function ClassesPanel({
                           return;
                         }
                         if (editingSectionId === s.id) resetSectionForm();
+                        if (teachersSectionId === s.id)
+                          setTeachersSectionId(null);
                         commit(result.state, "Section removed");
                       }}
                     />
@@ -1131,6 +1159,21 @@ function ClassesPanel({
               </button>
             </form>
           </MastersWorkCard>
+
+          {teachersSection ? (
+            <MastersWorkCard
+              title={`Teachers · ${teachersSection.className}-${teachersSection.name}`}
+            >
+              <SectionTeachersPanel
+                state={state}
+                commit={commit}
+                classId={teachersSection.classId}
+                sectionId={teachersSection.id}
+                className={teachersSection.className}
+                sectionName={teachersSection.name}
+              />
+            </MastersWorkCard>
+          ) : null}
         </div>
       }
     />
