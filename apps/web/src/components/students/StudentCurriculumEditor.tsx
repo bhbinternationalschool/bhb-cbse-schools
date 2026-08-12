@@ -101,13 +101,13 @@ export function StudentCurriculumEditor({
   function toggleInCart(id: string) {
     if (disabled) return;
     const on = curriculum.chosenSubjectIds.includes(id);
-    let next = on
+    const next = on
       ? curriculum.chosenSubjectIds.filter((x) => x !== id)
       : [...curriculum.chosenSubjectIds, id];
 
-    if (choiceMode === "middle_options") {
-      if (!on && next.length > 2) next = [...next.slice(0, 1), id];
-    }
+    // Same rule as addSubject: full is full. Refuse a new pick rather than
+    // silently dropping one already chosen to make room for it.
+    if (choiceMode === "middle_options" && !on && next.length > 2) return;
     if (isCart && !on && progress.target && next.length > progress.target) {
       return;
     }
@@ -117,15 +117,21 @@ export function StudentCurriculumEditor({
   function addSubject(id: string) {
     if (!canEdit) return;
     if (curriculum.chosenSubjectIds.includes(id)) return;
-    let next = [...curriculum.chosenSubjectIds, id];
-    if (choiceMode === "middle_options" && next.length > 2) {
-      next = next.slice(-2);
-    }
-    if (isCart && progress.target && next.length > progress.target) {
-      next = [...next.slice(0, progress.target - 1), id];
-    }
+    const next = [...curriculum.chosenSubjectIds, id];
+    if (choiceMode === "middle_options" && next.length > 2) return;
+    // A full cart (7 for IX-X, 6 for XI-XII) refuses a new pick — it must
+    // never silently drop an already-chosen subject to make room. That
+    // silent swap was the bug: staff building a 7-subject cart from empty
+    // never hit this path (cart isn't full at 1-2 picks), but anyone
+    // topping up an existing cart would watch their last pick vanish with
+    // no explanation each time they added one more.
+    if (isCart && progress.target && next.length > progress.target) return;
     onChange({ ...curriculum, chosenSubjectIds: next });
-    setAddingTag(null);
+    // Deliberately does NOT close the "+ Add" picker — see its key prop:
+    // collapsing back to a button after every single pick meant adding the
+    // 3 required languages took 3 separate "+ Add" clicks with no visual
+    // cue that more could be added, which read as "only allows 1 / picking
+    // another replaces it."
   }
 
   function removeSubject(id: string) {
@@ -322,6 +328,11 @@ export function StudentCurriculumEditor({
                     {addingTag === tag.id ? (
                       <>
                         <select
+                          // Remounts on every pick, forcing the uncontrolled
+                          // select back to the "Add…" placeholder instead of
+                          // sticking on the subject just chosen — the visual
+                          // cue that another pick is still possible.
+                          key={inBucket.length}
                           className="field !py-1 text-xs"
                           defaultValue=""
                           onChange={(e) => {
@@ -487,6 +498,7 @@ function FixedStageAdd({
             </p>
             {addingTag === group.id ? (
               <select
+                key={enrolledIds.size}
                 className="field !py-1 text-xs"
                 defaultValue=""
                 onChange={(e) => {

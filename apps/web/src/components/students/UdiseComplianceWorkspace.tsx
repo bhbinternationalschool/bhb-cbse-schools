@@ -27,7 +27,6 @@ import {
   type UdiseUnregisteredRow,
 } from "@/lib/udiseCompliance";
 import { UdisePenApaarImportPanel } from "@/components/students/UdisePenApaarImportPanel";
-import { UdiseBridgePanel } from "@/components/students/UdiseBridgePanel";
 import {
   UdiseStudentListModal,
   type UdiseListRow,
@@ -874,16 +873,6 @@ export function UdiseComplianceWorkspace({
           </a>
         </p>
       </div>
-
-      <UdiseBridgePanel
-        academicYearCode={ay}
-        onApplied={(next, message) => {
-          saveSis(next);
-          setSis(next);
-          onChanged?.(next, message);
-          flash(message);
-        }}
-      />
 
       <UdisePenApaarImportPanel
         masters={masters}
