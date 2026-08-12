@@ -48,7 +48,7 @@ type HouseholdRow = {
   updated_at: string;
 };
 
-type StudentRow = {
+export type StudentRow = {
   id: string;
   admission_no: string | null;
   full_name: string | null;
@@ -142,7 +142,7 @@ function rowToHousehold(row: HouseholdRow): Household {
   });
 }
 
-function rowToStudent(row: StudentRow): SisStudent {
+export function rowToStudent(row: StudentRow): SisStudent {
   return normalizeStudent({
     // Optimistic-locking token: the version this record was read at.
     revisionAt: row.updated_at,

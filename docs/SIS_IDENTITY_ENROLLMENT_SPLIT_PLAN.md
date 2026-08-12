@@ -453,3 +453,85 @@ number, four simultaneously active rows — is now impossible to
 reintroduce through this function, and nothing yet calls it. Phase 5
 (per-module read-path cutover) and the promotion UI are both open,
 whenever you want either started.
+
+---
+
+## 11. Promotion UI — results (run 2026-08-12)
+
+Built on request, ahead of Phase 5. One real design fork resolved before
+writing code: `sis_promote_enrollment` only writes to the new tables, and
+Phase 5 (making the app read from them) hasn't happened — a UI that only
+called it would let staff click "Promote" and see nothing change on any
+real screen. Confirmed with the user: **dual-write**. Promoting a student
+now does two things, in a specific order:
+
+1. **`sis_promote_enrollment`** (Phase 4, already proven) — records the
+   move in the new tables. Runs first deliberately: it's atomic and
+   self-guarded, so if it fails, nothing has changed anywhere.
+2. **`pushSisToDb`** — the same guarded save path every other student
+   edit already uses — updates the live `sis_students` row: new
+   class/section/year, roll number reset. Visible on every real screen
+   immediately.
+
+If step 2 fails after step 1 succeeds, that's reported distinctly
+(`stage: "live-record"`) rather than as a plain failure — the promotion
+*is* recorded, only the visible side didn't catch up, and that needs a
+retry, not a re-promotion (which the year-uniqueness constraint would
+reject as a duplicate anyway).
+
+**Self-healing:** the identity/enrollment tables were backfilled once,
+from `sis_students` as it stood when Phase 2 ran. A student created or
+edited since has no matching identity/enrollment yet.
+`ensureIdentityAndCurrentEnrollment` creates one from the live row on
+first promotion, using the same `coalesce(..., '')` field mapping Phase
+2's backfill used — verified against a throwaway fixture simulating
+exactly that scenario (a fake student with no identity, matching the
+"created after backfill" case): auto-heal created a correct identity and
+enrollment from the live row, the already-proven promotion RPC then ran
+against it cleanly, producing the same correct before/after state Phase
+4 verified — old enrollment `'promoted'` with its original roll number
+intact, new one `'active'` with a reset roll number and the audit-trail
+link. All rows deleted afterward; real counts confirmed unchanged (719
+`sis_students`, 273 identities, 719 enrollments).
+
+**Where it lives:** a second section under Students → Upgrade, below the
+existing same-year class-change tool — same conceptual home ("change a
+student's class"), clearly distinguished ("different from the class
+change above — this moves a class/section into a new academic year").
+Pick a source class+section (defaults to every active student in the
+current session), pick a target year+class+section, select which
+students promote (all, by default), confirm, go. Reports success/failure
+per student — this can partially succeed, and staff need to know exactly
+which ones did.
+
+**Client cache handled explicitly:** the write happens server-side,
+bypassing the normal `commit()`/`saveSis()` flow the rest of the app
+uses, so the local cache would otherwise go stale the moment a promotion
+succeeds. After a successful batch, the panel pulls the fresh roster via
+`fetchSisDeskFromApi()` and persists it locally with `saveSis()` — same
+primitives the rest of the app already uses, not a new sync mechanism.
+
+**New files:**
+- `lib/sisPromotion.server.ts` — `promoteStudentToNextYear`, the dual-write
+  orchestration and self-heal logic.
+- `app/api/school-data/sis-promote/route.ts` — batch endpoint, one student
+  at a time (not parallel — each promotion is two sequential writes, and
+  concurrency would make a failure harder to attribute), capped at 200 per
+  request.
+- `components/students/StudentPromotionPanel.tsx` — the UI.
+- `rowToStudent`/`StudentRow` exported from `sisNormalized.server.ts`
+  rather than duplicated a third time.
+
+Verified: `tsc` clean, `eslint` clean on every changed file (same two
+pre-existing warnings elsewhere in `StudentsWorkspace.tsx`, confirmed
+unrelated), full `./scripts/verify.sh` — 36/36 including the production
+build. Not exercised in a running browser — no staging environment, and
+this session cannot log in to the live app (checked earlier: it requires
+real credentials).
+
+**What's still open:** class-to-class *mapping* (e.g., knowing "Nursery"
+promotes to "LKG") is not automated — staff pick the target class
+manually each time. Automating that is a real, separate feature, not
+folded in here. Same for handling a student held back a year — today
+that's simply "don't select them," using the existing single-student
+class-edit tools if their class needs to change without a year change.

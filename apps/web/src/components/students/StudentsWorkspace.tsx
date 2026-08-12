@@ -76,6 +76,7 @@ import { SisReportsPanel } from "@/components/students/SisReportsPanel";
 import { StudentTagsPanel } from "@/components/students/StudentTagsPanel";
 import { StudentSiblingsPanel } from "@/components/students/StudentSiblingsPanel";
 import { StudentUpgradePanel } from "@/components/students/StudentUpgradePanel";
+import { StudentPromotionPanel } from "@/components/students/StudentPromotionPanel";
 import { StudentUpdatePanel } from "@/components/students/StudentUpdatePanel";
 import { StudentDuplicatesPanel } from "@/components/students/StudentDuplicatesPanel";
 import { DocVerificationQueuePanel } from "@/components/students/DocVerificationQueuePanel";
@@ -1039,13 +1040,23 @@ export function StudentsWorkspace() {
       ) : null}
 
       {mainTab === "upgrade" ? (
-        <StudentUpgradePanel
-          tick={panelTick}
-          onChanged={(next) => {
-            setState(next);
-            setPanelTick((t) => t + 1);
-          }}
-        />
+        <div className="space-y-6">
+          <StudentUpgradePanel
+            tick={panelTick}
+            onChanged={(next) => {
+              setState(next);
+              setPanelTick((t) => t + 1);
+            }}
+          />
+          <hr className="border-[rgba(32,48,80,0.1)]" />
+          <StudentPromotionPanel
+            tick={panelTick}
+            onChanged={(next) => {
+              setState(next);
+              setPanelTick((t) => t + 1);
+            }}
+          />
+        </div>
       ) : null}
 
       {mainTab === "update" ? (
