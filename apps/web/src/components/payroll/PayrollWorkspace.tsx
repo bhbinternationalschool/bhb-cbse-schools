@@ -537,7 +537,7 @@ export function PayrollWorkspace() {
             tone: "coral",
           },
           { id: "holds", label: "June holds", tone: "coral" },
-          { id: "govt", label: "PF/ESIC govt", tone: "slate" },
+          { id: "govt", label: "EPF/ESIC Compliance", tone: "slate" },
           { id: "increment", label: "Increment", tone: "violet" },
           { id: "advances", label: "Advances", tone: "teal" },
           { id: "payslips", label: "Payslips", tone: "amber" },

@@ -9,6 +9,7 @@ import "../modules/homework_screen.dart";
 import "../modules/module_shell.dart";
 import "../modules/notices_screen.dart";
 import "../modules/ptm_screen.dart";
+import "student_id_screen.dart";
 
 class _Module {
   const _Module(this.label, this.icon, this.tone);
@@ -288,6 +289,14 @@ class _HomeScreenState extends State<HomeScreen> {
                   const SizedBox(height: 12),
                   Card(
                     child: ListTile(
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => StudentIdScreen(
+                            child: child,
+                            guardianName: summary.guardianName,
+                          ),
+                        ),
+                      ),
                       leading: Container(
                         width: 40,
                         height: 40,
@@ -296,7 +305,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Icon(
-                          Icons.badge_outlined,
+                          Icons.qr_code_2,
                           color: ModuleTone.blue.foreground,
                           size: 22,
                         ),
@@ -309,11 +318,15 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                       subtitle: Text(
-                        "Guardian: ${summary.guardianName}",
+                        "Guardian: ${summary.guardianName} · tap for ID QR",
                         style: const TextStyle(
                           fontSize: 11.5,
                           color: AppColors.muted,
                         ),
+                      ),
+                      trailing: const Icon(
+                        Icons.chevron_right,
+                        color: AppColors.muted,
                       ),
                     ),
                   ),
