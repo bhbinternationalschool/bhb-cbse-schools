@@ -149,7 +149,14 @@ export function StaffInternalChatButton() {
         /* ignore */
       }
     }
-    const id = window.setInterval(() => void tick(), 8000);
+    // Was 8000 — this button is mounted globally in AppShell, so every
+    // logged-in staff member's open tab was hitting /api/chat every 8s,
+    // all day. That was the largest identified driver of Supabase egress:
+    // GET /api/chat used to pull the full 4.13 MB school_mirror_state
+    // blob (now fixed separately — see erpChatActorLite.server.ts), but
+    // even with that fixed, an internal staff chat has no reason to poll
+    // this aggressively. 30s is still responsive for a workplace tool.
+    const id = window.setInterval(() => void tick(), 30_000);
     void tick();
     return () => {
       alive = false;

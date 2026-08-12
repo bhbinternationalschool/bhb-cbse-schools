@@ -30,6 +30,7 @@ import { DEFAULT_AY, type MastersState } from "@/lib/masters";
 // StaffInternalChatButton retried forever. Every other API route already
 // hydrates from Supabase; this one was the outlier.
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
+import { resolveChatActorLite } from "@/lib/erpChatActorLite.server";
 import type { SisState } from "@/lib/sis";
 
 export const runtime = "nodejs";
@@ -86,6 +87,22 @@ export async function GET() {
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  // Fast path: this runs every 8s per open tab (StaffInternalChatButton,
+  // mounted globally) — a targeted single-row lookup instead of the full
+  // 4.13 MB school_mirror_state blob. Falls back below for the rarer
+  // session shape (no staffId/householdId yet) rather than replicate every
+  // fuzzy-match rule resolveChatActor's full path already has correct.
+  const liteActor = await resolveChatActorLite(session);
+  if (liteActor) {
+    const state = await loadErpChatServer();
+    return NextResponse.json({
+      ok: true,
+      actor: liteActor,
+      state: filterStateForActor(state, liteActor.key),
+    });
+  }
+
   const { masters, sis } = await mirrorWithMasters();
   if (!masters) {
     return NextResponse.json({

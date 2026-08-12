@@ -71,6 +71,9 @@ export async function hydrateSchoolMirrorFromRemote(
       const { sisReadFromDbEnabled } = await import("@/lib/sisDbConfig");
       const { feesReadFromDbEnabled } = await import("@/lib/feesDbConfig");
       const { paymentsReadFromDbEnabled } = await import("@/lib/paymentsDbConfig");
+      const { admissionsReadFromDbEnabled } = await import(
+        "@/lib/admissionsDbConfig"
+      );
       let next: SchoolMirrorBundle = {
         version: 1,
         updatedAt: remoteBlob.updatedAt || cur.updatedAt || nowIso(),
@@ -84,7 +87,20 @@ export async function hydrateSchoolMirrorFromRemote(
           ? cur.payments
           : (remoteBlob.state?.payments ?? cur.payments),
         masters: remoteBlob.state?.masters ?? cur.masters,
-        admissions: remoteBlob.state?.admissions ?? cur.admissions,
+        // Was unconditional — the only slice with no freshness guard.
+        // admission_desk_leads has been the real admissions store for a
+        // while now (ADMISSIONS_READ_FROM_DB); this stops anything reading
+        // mirror.admissions (waCrmBotServer.ts's WhatsApp-name backfill is
+        // the one confirmed live consumer) from silently working off a
+        // stale blob copy once that flag is on. Matches the sis/fees/
+        // payments pattern exactly — it does not shrink what's fetched
+        // from Supabase, only which value gets used afterward. Shrinking
+        // the stored blob itself is a separate, larger change: it needs
+        // waCrmBotServer.ts's admissions dependency re-pointed at
+        // fetchAdmissionDeskFromDb first, not just this route.
+        admissions: admissionsReadFromDbEnabled()
+          ? cur.admissions
+          : (remoteBlob.state?.admissions ?? cur.admissions),
       };
 
       const { ensureSisHydratedServer } = await import("@/lib/sisPersistence");
