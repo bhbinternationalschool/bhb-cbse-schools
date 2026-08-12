@@ -373,3 +373,83 @@ the code exists, flag off. Ready for Phase 4 (the promotion rewrite that
 actually closes the gap Phase 0 found) whenever you want it started — that
 one writes, not just reads, so it's the first phase since 0 where I'd want
 you actively involved in the timing.
+
+---
+
+## 10. Phase 4 — results (run 2026-08-12)
+
+**"Rewrite the promotion flow" turned out to have nothing to rewrite.**
+Checked before writing anything: `upgradeStudentClass`
+(`lib/classUpgrade.ts`) mutates a row's class/section in place and carries
+`academic_year_code` forward *unchanged*; there is no year-rollover
+function anywhere in the app. The 226 duplicated admission numbers in
+production were created directly, almost certainly by a seed script,
+never through the app. So Phase 4 built new capability, not a rewrite of
+one that existed.
+
+**`sis_promote_enrollment`** (Postgres function,
+`supabase/migrations/20260812105831_sis_promote_enrollment.sql`) —
+inserts the new year's enrollment and marks the source `'promoted'`
+inside one transaction, `for update` locking the source row so two
+promotions can't race the same enrollment. Two separate Supabase calls
+from Node would leave a real gap if the second failed after the first
+succeeded — a child with a new active enrollment *and* an old one still
+marked active, recreating the exact bug this closes. Not `security
+definer`, matching `sis_push_guarded` — every table here is reached only
+through the `service_role` connection, which already has full access.
+
+**One correction folded into the same change:** `sis_enrollments.status`
+is free text at the DB level, so this introduces a new value —
+`'promoted'` — for an enrollment a child has moved on from. Phase 3's
+`identityEnrollmentToStudent()` was copied from `rowToStudent`'s rule
+(`status === "inactive" ? "inactive" : "active"`), which would have
+folded an unrecognized value like `'promoted'` into `"active"` — wrong,
+since a promoted-away enrollment is not current. Fixed by inverting the
+rule for enrollments specifically: only the literal `'active'` reads as
+active, everything else reads as `"inactive"`. `sis_students.status`
+genuinely is only ever active/inactive, so `rowToStudent`'s original rule
+is untouched and correct as-is. The 182 places across the app that check
+`SisStudent["status"]` needed no changes — that type stays a strict
+binary union regardless of what the DB tracks underneath.
+
+**Tested against a throwaway synthetic identity**, never real student
+data — same convention this repo already uses (`zzz_selftest_*`
+migrations). Promoted a fake enrollment from 2025-26 to 2026-27, verified
+directly:
+
+```
+source (2025-26): status='promoted', roll_no unchanged ('7')
+new    (2026-27): status='active', roll_no='' (fresh, not carried
+                   forward — matches the Students module's own bulk
+                   roll-number tool), promoted_from_enrollment_id
+                   correctly points at the source
+```
+
+Both guards checked explicitly:
+- Re-promoting the now-`'promoted'` source → rejected, `"status is
+  promoted"`.
+- Promoting into a year that already has an enrollment → rejected,
+  `"an enrollment already exists ... 2025-26"`, returns the existing id.
+
+Both failed attempts inserted nothing — confirmed by row count before
+cleanup. Fixture deleted afterward: `sis_student_identities` back to 273,
+`sis_enrollments` back to 719, `sis_students` still untouched at 719.
+
+**`lib/sisEnrollmentPromotion.server.ts`** — thin wrapper calling the RPC,
+matching how `pushSisGuarded` already calls `sis_push_guarded`. Exported,
+`tsc`/`eslint` clean, not called from anywhere yet.
+
+**What Phase 4 deliberately does not include:** a promotion *UI*. Nothing
+in the app calls `promoteSisEnrollment()` yet — there's no screen for
+picking a class and promoting its students to the next year. That's real,
+separate surface area (class-to-class mapping, students held back, bulk
+vs. one-at-a-time) and its own decision, not something to build silently
+inside a write-path fix.
+
+Full `./scripts/verify.sh` — 36/36 including the production build.
+
+**Phase 4 is complete.** The structural gap Phase 0 found — one admission
+number, four simultaneously active rows — is now impossible to
+reintroduce through this function, and nothing yet calls it. Phase 5
+(per-module read-path cutover) and the promotion UI are both open,
+whenever you want either started.

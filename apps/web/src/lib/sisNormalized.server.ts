@@ -490,7 +490,12 @@ function identityEnrollmentToStudent(row: EnrollmentRow): SisStudent {
     fullName: i.full_name ?? "",
     gender: (i.gender as SisStudent["gender"]) ?? "",
     dob: i.dob ?? "",
-    status: row.status === "inactive" ? "inactive" : "active",
+    // Inverted from rowToStudent's rule deliberately: sis_students.status
+    // is only ever "active"/"inactive", so defaulting to "active" is safe
+    // there. sis_enrollments.status also holds "promoted" (Phase 4, once
+    // a child's been moved to a later year's enrollment) — an unrecognized
+    // value must read as not-current, not as active by default.
+    status: row.status === "active" ? "active" : "inactive",
     campusId: row.campus_id ?? "",
     classId: row.class_id ?? "",
     sectionId: row.section_id ?? "",
