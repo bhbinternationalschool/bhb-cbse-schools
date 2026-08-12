@@ -249,6 +249,243 @@ class AttendanceRoster {
   final List<RosterStudent> students;
 }
 
+class FeeDue {
+  const FeeDue({
+    required this.label,
+    required this.kind,
+    required this.dueOn,
+    required this.balanceLabel,
+    required this.balancePaise,
+  });
+
+  factory FeeDue.fromJson(Map<String, dynamic> j) => FeeDue(
+        label: (j["label"] as String?) ?? "",
+        kind: (j["kind"] as String?) ?? "",
+        dueOn: (j["dueOn"] as String?) ?? "",
+        balanceLabel: (j["balanceLabel"] as String?) ?? "₹0",
+        balancePaise: (j["balancePaise"] as num?)?.toInt() ?? 0,
+      );
+
+  final String label;
+  final String kind;
+  final String dueOn;
+  final String balanceLabel;
+  final int balancePaise;
+}
+
+class FeeLedger {
+  const FeeLedger({
+    required this.studentName,
+    required this.openDues,
+    required this.openBalanceLabel,
+  });
+
+  factory FeeLedger.fromJson(Map<String, dynamic> j) => FeeLedger(
+        studentName: (j["studentName"] as String?) ?? "",
+        openDues: ((j["openDues"] as List?) ?? const [])
+            .map((d) => FeeDue.fromJson(d as Map<String, dynamic>))
+            .toList(),
+        openBalanceLabel: (j["openBalanceLabel"] as String?) ?? "₹0",
+      );
+
+  final String studentName;
+  final List<FeeDue> openDues;
+  final String openBalanceLabel;
+}
+
+class AttendanceHistory {
+  const AttendanceHistory({
+    required this.markedDays,
+    required this.presentDays,
+    required this.absentDays,
+    required this.lateDays,
+    required this.entries,
+  });
+
+  factory AttendanceHistory.fromJson(Map<String, dynamic> j) =>
+      AttendanceHistory(
+        markedDays: (j["markedDays"] as num?)?.toInt() ?? 0,
+        presentDays: (j["presentDays"] as num?)?.toInt() ?? 0,
+        absentDays: (j["absentDays"] as num?)?.toInt() ?? 0,
+        lateDays: (j["lateDays"] as num?)?.toInt() ?? 0,
+        entries: ((j["entries"] as List?) ?? const [])
+            .map((e) => (
+                  date: (e["date"] as String?) ?? "",
+                  status: (e["status"] as String?) ?? "",
+                ))
+            .toList(),
+      );
+
+  final int markedDays;
+  final int presentDays;
+  final int absentDays;
+  final int lateDays;
+  final List<({String date, String status})> entries;
+}
+
+class HomeworkItem {
+  const HomeworkItem({
+    required this.date,
+    required this.title,
+    required this.body,
+    required this.subjectName,
+    required this.teacherName,
+    required this.dueAt,
+    required this.isDiary,
+  });
+
+  final String date;
+  final String title;
+  final String body;
+  final String subjectName;
+  final String teacherName;
+  final String? dueAt;
+  final bool isDiary;
+}
+
+class SubjectRef {
+  const SubjectRef({required this.id, required this.name});
+
+  final String id;
+  final String name;
+}
+
+class HomeworkFeed {
+  const HomeworkFeed({required this.items, required this.subjects});
+
+  factory HomeworkFeed.fromJson(Map<String, dynamic> j) {
+    String bodyOf(Map<String, dynamic> m) {
+      final en = (m["bodyEn"] as String?) ?? "";
+      final hi = (m["bodyHi"] as String?) ?? "";
+      return en.isNotEmpty ? en : hi;
+    }
+
+    final items = <HomeworkItem>[
+      ...((j["posts"] as List?) ?? const []).map((raw) {
+        final p = raw as Map<String, dynamic>;
+        return HomeworkItem(
+          date: (p["date"] as String?) ?? "",
+          title: (p["title"] as String?) ?? "",
+          body: bodyOf(p),
+          subjectName: (p["subjectName"] as String?) ?? "",
+          teacherName: (p["teacherName"] as String?) ?? "",
+          dueAt: p["dueAt"] as String?,
+          isDiary: false,
+        );
+      }),
+      ...((j["diary"] as List?) ?? const []).map((raw) {
+        final d = raw as Map<String, dynamic>;
+        return HomeworkItem(
+          date: (d["date"] as String?) ?? "",
+          title: (d["title"] as String?) ?? "",
+          body: bodyOf(d),
+          subjectName: "Diary",
+          teacherName: (d["teacherName"] as String?) ?? "",
+          dueAt: null,
+          isDiary: true,
+        );
+      }),
+    ]..sort((a, b) => b.date.compareTo(a.date));
+
+    final subjects = ((j["subjects"] as List?) ?? const [])
+        .map((s) => SubjectRef(
+              id: s["id"] as String,
+              name: (s["name"] as String?) ?? "",
+            ))
+        .toList();
+
+    return HomeworkFeed(items: items, subjects: subjects);
+  }
+
+  final List<HomeworkItem> items;
+
+  /// Only present for staff sessions — the compose form's subject choices.
+  final List<SubjectRef> subjects;
+}
+
+class CommsItem {
+  const CommsItem({
+    required this.title,
+    required this.body,
+    required this.publishedAt,
+    required this.pinned,
+    required this.isNews,
+    required this.summary,
+  });
+
+  final String title;
+  final String body;
+  final String publishedAt;
+  final bool pinned;
+  final bool isNews;
+  final String summary;
+}
+
+class PtmSlotInfo {
+  const PtmSlotInfo({
+    required this.id,
+    required this.teacherName,
+    required this.startAt,
+    required this.endAt,
+    required this.roomOrLink,
+    required this.seatsLeft,
+  });
+
+  factory PtmSlotInfo.fromJson(Map<String, dynamic> j) => PtmSlotInfo(
+        id: j["id"] as String,
+        teacherName: (j["teacherName"] as String?) ?? "",
+        startAt: (j["startAt"] as String?) ?? "",
+        endAt: (j["endAt"] as String?) ?? "",
+        roomOrLink: (j["roomOrLink"] as String?) ?? "",
+        seatsLeft: (j["seatsLeft"] as num?)?.toInt() ?? 0,
+      );
+
+  final String id;
+  final String teacherName;
+  final String startAt;
+  final String endAt;
+  final String roomOrLink;
+  final int seatsLeft;
+}
+
+class PtmEventInfo {
+  const PtmEventInfo({
+    required this.id,
+    required this.name,
+    required this.date,
+    required this.modeLabel,
+    required this.note,
+    required this.myBookingId,
+    required this.myBookingSlotId,
+    required this.slots,
+  });
+
+  factory PtmEventInfo.fromJson(Map<String, dynamic> j) {
+    final booking = j["myBooking"] as Map<String, dynamic>?;
+    return PtmEventInfo(
+      id: j["id"] as String,
+      name: (j["name"] as String?) ?? "PTM",
+      date: (j["date"] as String?) ?? "",
+      modeLabel: (j["modeLabel"] as String?) ?? "",
+      note: (j["note"] as String?) ?? "",
+      myBookingId: booking?["id"] as String?,
+      myBookingSlotId: booking?["slotId"] as String?,
+      slots: ((j["slots"] as List?) ?? const [])
+          .map((s) => PtmSlotInfo.fromJson(s as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+
+  final String id;
+  final String name;
+  final String date;
+  final String modeLabel;
+  final String note;
+  final String? myBookingId;
+  final String? myBookingSlotId;
+  final List<PtmSlotInfo> slots;
+}
+
 class ApiClient {
   ApiClient(this.config);
 
@@ -430,6 +667,116 @@ class ApiClient {
     if (res.statusCode != 200) _throwFrom(res);
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     return AttendanceRoster.fromJson(body["data"] as Map<String, dynamic>);
+  }
+
+  Future<Map<String, dynamic>> _getData(String path) async {
+    final res = await http.get(_uri(path), headers: await _authHeaders());
+    if (res.statusCode != 200) _throwFrom(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    return body["data"] as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> _postData(
+    String path,
+    Map<String, dynamic> body,
+  ) async {
+    final res = await http.post(
+      _uri(path),
+      headers: await _authHeaders(),
+      body: jsonEncode(body),
+    );
+    if (res.statusCode != 200) _throwFrom(res);
+    final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+    return (decoded["data"] as Map<String, dynamic>?) ?? const {};
+  }
+
+  Future<FeeLedger> fetchFeeLedger(String studentId) async =>
+      FeeLedger.fromJson(await _getData("/api/v1/fees/ledger/$studentId"));
+
+  Future<AttendanceHistory> fetchAttendanceHistory(
+    String studentId, {
+    int days = 90,
+  }) async =>
+      AttendanceHistory.fromJson(await _getData(
+          "/api/v1/parent/attendance?studentId=$studentId&days=$days"));
+
+  /// Parent form: pass studentId. Staff form: pass classId+sectionId.
+  Future<HomeworkFeed> fetchHomeworkFeed({
+    String? studentId,
+    String? classId,
+    String? sectionId,
+  }) async {
+    final query = studentId != null
+        ? "studentId=$studentId"
+        : "classId=$classId&sectionId=$sectionId";
+    return HomeworkFeed.fromJson(await _getData("/api/v1/homework/feed?$query"));
+  }
+
+  Future<void> postHomework({
+    required String classId,
+    required String sectionId,
+    required String subjectId,
+    required String title,
+    required String bodyEn,
+  }) async {
+    await _postData("/api/v1/homework/post", {
+      "classId": classId,
+      "sectionId": sectionId,
+      "subjectId": subjectId,
+      "title": title,
+      "bodyEn": bodyEn,
+    });
+  }
+
+  Future<List<CommsItem>> fetchCommsFeed() async {
+    final data = await _getData("/api/v1/comms/feed");
+    return [
+      ...((data["notices"] as List?) ?? const []).map((raw) {
+        final n = raw as Map<String, dynamic>;
+        return CommsItem(
+          title: (n["title"] as String?) ?? "",
+          body: (n["body"] as String?) ?? "",
+          publishedAt: (n["publishedAt"] as String?) ?? "",
+          pinned: n["pinned"] == true,
+          isNews: false,
+          summary: "",
+        );
+      }),
+      ...((data["news"] as List?) ?? const []).map((raw) {
+        final n = raw as Map<String, dynamic>;
+        return CommsItem(
+          title: (n["title"] as String?) ?? "",
+          body: (n["body"] as String?) ?? "",
+          publishedAt: (n["publishedAt"] as String?) ?? "",
+          pinned: false,
+          isNews: true,
+          summary: (n["summary"] as String?) ?? "",
+        );
+      }),
+    ];
+  }
+
+  Future<List<PtmEventInfo>> fetchPtmOverview(String studentId) async {
+    final data = await _getData("/api/v1/ptm/overview?studentId=$studentId");
+    return ((data["events"] as List?) ?? const [])
+        .map((e) => PtmEventInfo.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<void> bookPtmSlot({
+    required String eventId,
+    required String slotId,
+    required String studentId,
+  }) async {
+    await _postData("/api/v1/ptm/book", {
+      "eventId": eventId,
+      "slotId": slotId,
+      "studentId": studentId,
+    });
+  }
+
+  Future<void> cancelPtmBooking(String bookingId) async {
+    await _postData("/api/v1/ptm/cancel", {"bookingId": bookingId});
   }
 
   Future<void> markAttendance({

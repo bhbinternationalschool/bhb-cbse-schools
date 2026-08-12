@@ -2,7 +2,11 @@ import "package:flutter/material.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
+import "../modules/homework_screen.dart";
+import "../modules/module_shell.dart";
+import "../modules/notices_screen.dart";
 import "attendance_screen.dart";
+import "students_screen.dart";
 
 String _greeting() {
   final h = DateTime.now().hour;
@@ -45,7 +49,7 @@ class TeacherHomeScreen extends StatefulWidget {
 }
 
 class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
-  int _tab = 0;
+  final int _tab = 0;
   StaffSummary? _summary;
   String? _error;
 
@@ -74,6 +78,28 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     if (mounted) widget.onLogout();
   }
 
+  /// Resolve a target section: the class-teacher link when present and
+  /// [preferOwnSection], else the class/section picker sheet.
+  Future<(String, String, String)?> _pickSection({
+    bool preferOwnSection = false,
+  }) async {
+    final summary = _summary;
+    if (summary == null) return null;
+    final ct = summary.classTeacherOf;
+    if (preferOwnSection && ct != null) {
+      return (ct.classId, ct.sectionId, "${ct.className} ${ct.sectionName}");
+    }
+    return showModalBottomSheet<(String, String, String)>(
+      context: context,
+      backgroundColor: Colors.white,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => _SectionPicker(classes: summary.classes),
+    );
+  }
+
   Future<void> _openAttendance({
     String? classId,
     String? sectionId,
@@ -82,39 +108,89 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     final summary = _summary;
     if (summary == null) return;
 
-    String? cls = classId;
-    String? sec = sectionId;
-    String title = label ?? "";
-
-    if (cls == null || sec == null) {
-      final picked = await showModalBottomSheet<(String, String, String)>(
-        context: context,
-        backgroundColor: Colors.white,
-        isScrollControlled: true,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        builder: (context) => _SectionPicker(classes: summary.classes),
-      );
-      if (picked == null) return;
-      cls = picked.$1;
-      sec = picked.$2;
-      title = picked.$3;
-    }
+    var target = classId != null && sectionId != null
+        ? (classId, sectionId, label ?? "")
+        : await _pickSection();
+    if (target == null) return;
 
     if (!mounted) return;
     final changed = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (_) => AttendanceScreen(
           api: widget.api,
-          classId: cls!,
-          sectionId: sec!,
+          classId: target.$1,
+          sectionId: target.$2,
           date: summary.date,
-          title: title,
+          title: target.$3,
         ),
       ),
     );
     if (changed == true) _load();
+  }
+
+  Future<void> _openModule(String label) async {
+    final summary = _summary;
+    if (summary == null) return;
+    switch (label) {
+      case "Attendance":
+        await _openAttendance();
+      case "Homework":
+        final target = await _pickSection();
+        if (target == null || !mounted) return;
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => HomeworkScreen(
+              api: widget.api,
+              subtitle: target.$3,
+              classId: target.$1,
+              sectionId: target.$2,
+              canPost: true,
+            ),
+          ),
+        );
+      case "Students":
+        final target = await _pickSection();
+        if (target == null || !mounted) return;
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => StudentsScreen(
+              api: widget.api,
+              classId: target.$1,
+              sectionId: target.$2,
+              date: summary.date,
+              title: target.$3,
+            ),
+          ),
+        );
+      case "Notices":
+        await Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => NoticesScreen(api: widget.api)),
+        );
+      case "Marks":
+        showComingSoon(
+          context,
+          "Marks entry",
+          "Opens once the exam desk publishes mark sheets for this term.",
+        );
+      case "My leave":
+        showComingSoon(
+          context,
+          "Leave",
+          "Leave requests go live once HR configures leave types in the ERP.",
+        );
+      case "Timetable":
+        showComingSoon(
+          context,
+          "Timetable",
+          "Your period schedule appears here once the school publishes the timetable.",
+        );
+      case "Payslips":
+        showComingSoon(
+          context,
+          "Payslips",
+          "Payslips appear here after the first payroll run in the ERP.",
+        );
+    }
   }
 
   @override
@@ -332,9 +408,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                       for (final m in _staffModules)
                         InkWell(
                           borderRadius: BorderRadius.circular(16),
-                          onTap: m.label == "Attendance"
-                              ? () => _openAttendance()
-                              : () {},
+                          onTap: () => _openModule(m.label),
                           child: Column(
                             children: [
                               Container(
@@ -373,7 +447,54 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
-        onDestinationSelected: (i) => setState(() => _tab = i),
+        onDestinationSelected: (i) {
+          switch (i) {
+            case 1:
+              _openModule("Students");
+            case 2:
+              showComingSoon(
+                context,
+                "Messages",
+                "Staff chat is on the roadmap.",
+              );
+            case 3:
+              showModalBottomSheet<void>(
+                context: context,
+                backgroundColor: Colors.white,
+                shape: const RoundedRectangleBorder(
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                ),
+                builder: (sheet) => SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          summary.fullName,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.ink,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        OutlinedButton.icon(
+                          onPressed: () {
+                            Navigator.pop(sheet);
+                            _signOut();
+                          },
+                          icon: const Icon(Icons.logout, size: 18),
+                          label: const Text("Sign out"),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+          }
+        },
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home_outlined), label: "Home"),
           NavigationDestination(
