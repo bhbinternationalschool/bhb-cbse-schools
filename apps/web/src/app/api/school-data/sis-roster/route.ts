@@ -9,7 +9,9 @@ import { sisDualWriteDbEnabled } from "@/lib/sisDbConfig";
 import {
   deleteSisRecordsInDb,
   fetchSisFromDb,
+  fetchSisFromDbViaIdentitySplit,
   pushSisToDb,
+  sisIdentitySplitEnabled,
 } from "@/lib/sisNormalized.server";
 
 export const runtime = "nodejs";
@@ -18,7 +20,9 @@ export const runtime = "nodejs";
 export async function GET(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["sis-roster"], "GET");
   if (!auth.ok) return auth.response
-  const { bundle, meta, ok } = await fetchSisFromDb();
+  const { bundle, meta, ok } = sisIdentitySplitEnabled()
+    ? await fetchSisFromDbViaIdentitySplit()
+    : await fetchSisFromDb();
   if (!ok) {
     return NextResponse.json(
       { ok: false, error: "SIS roster fetch failed — tenant/db unavailable" },

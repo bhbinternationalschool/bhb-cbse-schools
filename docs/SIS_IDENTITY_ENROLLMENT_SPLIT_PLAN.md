@@ -308,3 +308,68 @@ touched.
 **Phase 2 is complete.** `sis_students` remains the only table anything in
 the app reads. Ready for Phase 3 (read path behind a flag, diffed against
 the old shape before touching a real screen) whenever you want it started.
+
+---
+
+## 9. Phase 3 — results (run 2026-08-12)
+
+**The diagnostic ran first, in SQL, against the live database** — before
+any TypeScript was written. No staging environment exists, and a SQL
+comparison proves correctness immediately without needing a deploy or a
+login, so that's what "read-only diagnostic... before the flag touches any
+real screen" actually meant here.
+
+Split into what must match with zero tolerance, and what's allowed to
+differ:
+
+```
+Enrollment-scoped fields (class, section, roll no., fee group, student
+  type, status, joined_on) vs the exact original row for that year,
+  all 719 rows:                                    0 mismatches
+
+Identity-scoped fields (name, DOB, parents, household, Aadhaar, PEN,
+  APAAR, SRN, docs, …) vs each identity's SOURCE row — the most
+  recent-year row it was built from:                0 mismatches
+
+Sanity check on the diagnostic itself — older-year rows in the 21
+  drifted groups SHOULD differ (intentional: the identity reflects the
+  latest known truth, not every year's). If this were 0, the diagnostic
+  would be too loose to trust:                      48 (as expected)
+```
+
+Zero unexpected mismatches. The 48 are the exact rows Phase 0 already
+named and Phase 2 already explained — nothing new.
+
+**Then the repo layer**, in `lib/sisNormalized.server.ts`:
+
+- `fetchSisFromDbViaIdentitySplit()` — same `SisRemoteBundle` shape as the
+  existing `fetchSisFromDb()`, sourced from `sis_enrollments` joined to
+  `sis_student_identities` (PostgREST embedded select via the FK from
+  Phase 1) instead of `sis_students`.
+- `identityEnrollmentToStudent()` — composes the exact same `SisStudent`
+  shape `rowToStudent()` does, field for field, matching the mapping this
+  was checked against in SQL before being written.
+- One row per enrollment, not per identity — reproducing the same
+  multi-year-rows-per-student shape the app already relies on today. The
+  client still filters by `academicYearCode` itself; this phase doesn't
+  change that.
+- `id` is the enrollment's own id, not the original `sis_students.id` it
+  was backfilled from. Deliberately deferred: what "student id" should
+  mean once fees/attendance/exams start keying off identity vs enrollment
+  is a Phase 4 decision, not this one.
+- Wired into `GET /api/school-data/sis-roster` behind
+  `sisIdentitySplitEnabled()` — same `SIS_IDENTITY_SPLIT` flag pattern as
+  every other flag this project uses, **not referenced anywhere in the
+  deploy scripts or cloudbuild.yaml**, so it defaults to off with no
+  action needed.
+
+Verified: `tsc` clean, `eslint` clean on both changed files, full
+`./scripts/verify.sh` — 36/36 including the production build. Not
+exercised end-to-end in a running app — the flag is off, and turning it on
+requires a deploy, which is deliberately not happening yet.
+
+**Phase 3 is complete.** The join is proven correct at the data level and
+the code exists, flag off. Ready for Phase 4 (the promotion rewrite that
+actually closes the gap Phase 0 found) whenever you want it started — that
+one writes, not just reads, so it's the first phase since 0 where I'd want
+you actively involved in the timing.

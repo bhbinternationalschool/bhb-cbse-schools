@@ -399,6 +399,209 @@ export async function fetchSisFromDb(): Promise<{
   };
 }
 
+/**
+ * OPT-IN via SIS_IDENTITY_SPLIT, off by default. See
+ * docs/SIS_IDENTITY_ENROLLMENT_SPLIT_PLAN.md — Phase 3.
+ *
+ * Rollback is removing the variable. Phases 0-2 (snapshot, new tables,
+ * verified backfill) already ran; this only decides which table the GET
+ * route reads FROM. sis_students is untouched either way, and nothing
+ * writes to sis_student_identities / sis_enrollments outside the Phase 2
+ * migration yet — that's Phase 4.
+ */
+export function sisIdentitySplitEnabled(): boolean {
+  const flag = process.env.SIS_IDENTITY_SPLIT?.trim().toLowerCase();
+  return flag === "true" || flag === "1";
+}
+
+type IdentityRow = {
+  id: string;
+  admission_no: string | null;
+  full_name: string | null;
+  gender: string | null;
+  dob: string | null;
+  father_name: string | null;
+  mother_name: string | null;
+  father_mobile: string | null;
+  mother_mobile: string | null;
+  father_aadhaar_last4: string | null;
+  mother_aadhaar_last4: string | null;
+  father_pan: string | null;
+  mother_pan: string | null;
+  guardian_relation: string | null;
+  emergency_name: string | null;
+  emergency_mobile: string | null;
+  household_id: string | null;
+  blood_group: string | null;
+  religion: string | null;
+  category: string | null;
+  nationality: string | null;
+  mother_tongue: string | null;
+  place_of_birth: string | null;
+  aadhaar_last4: string | null;
+  pen: string | null;
+  pen_status: string | null;
+  apaar_id: string | null;
+  srn: string | null;
+  previous_school: string | null;
+  previous_tc_no: string | null;
+  previous_udise: string | null;
+  docs: unknown;
+  notes: string | null;
+  photo_url: string | null;
+};
+
+type EnrollmentRow = {
+  id: string;
+  academic_year_code: string | null;
+  class_id: string | null;
+  section_id: string | null;
+  campus_id: string | null;
+  roll_no: string | null;
+  fee_group_id: string | null;
+  student_type: string | null;
+  status: string | null;
+  joined_on: string | null;
+  updated_at: string;
+  sis_student_identities: IdentityRow;
+};
+
+/**
+ * Compose the same SisStudent shape rowToStudent produces, from an
+ * enrollment joined to its identity. One row per enrollment — same
+ * multi-year-rows-per-student shape the app already relies on (the client
+ * filters by academicYearCode itself; this does not change that). Field
+ * mapping matches rowToStudent exactly, verified against it with a
+ * field-by-field SQL diff across all 719 live rows before this was written
+ * (see the plan doc, Phase 3 results) — 0 unexpected mismatches.
+ *
+ * id is the enrollment's own id, not the original sis_students.id it was
+ * backfilled from — deliberately: what a student "id" should mean once
+ * other tables (fees, attendance, exams) start keying off identity vs
+ * enrollment is a Phase 4 decision, not this one. This function only
+ * proves the join reconstructs the data correctly.
+ */
+function identityEnrollmentToStudent(row: EnrollmentRow): SisStudent {
+  const i = row.sis_student_identities;
+  return normalizeStudent({
+    revisionAt: row.updated_at,
+    id: row.id,
+    admissionNo: i.admission_no ?? "",
+    fullName: i.full_name ?? "",
+    gender: (i.gender as SisStudent["gender"]) ?? "",
+    dob: i.dob ?? "",
+    status: row.status === "inactive" ? "inactive" : "active",
+    campusId: row.campus_id ?? "",
+    classId: row.class_id ?? "",
+    sectionId: row.section_id ?? "",
+    rollNo: row.roll_no ?? "",
+    academicYearCode: row.academic_year_code ?? "",
+    studentType: (row.student_type as SisStudent["studentType"]) ?? "NEW",
+    feeGroupId: row.fee_group_id,
+    joinedOn: row.joined_on ?? "",
+    fatherName: i.father_name ?? "",
+    motherName: i.mother_name ?? "",
+    fatherMobile: i.father_mobile ?? "",
+    motherMobile: i.mother_mobile ?? "",
+    fatherAadhaarLast4: i.father_aadhaar_last4 ?? "",
+    motherAadhaarLast4: i.mother_aadhaar_last4 ?? "",
+    fatherPan: i.father_pan ?? "",
+    motherPan: i.mother_pan ?? "",
+    guardianRelation: i.guardian_relation ?? "",
+    emergencyName: i.emergency_name ?? "",
+    emergencyMobile: i.emergency_mobile ?? "",
+    householdId: i.household_id ?? "",
+    bloodGroup: i.blood_group ?? "",
+    religion: i.religion ?? "",
+    category: (i.category as SisStudent["category"]) ?? "",
+    nationality: i.nationality ?? "Indian",
+    motherTongue: i.mother_tongue ?? "",
+    placeOfBirth: i.place_of_birth ?? "",
+    aadhaarLast4: i.aadhaar_last4 ?? "",
+    pen: i.pen ?? "",
+    penStatus: (i.pen_status as SisStudent["penStatus"]) ?? "",
+    apaarId: i.apaar_id ?? "",
+    srn: i.srn ?? "",
+    previousSchool: i.previous_school ?? "",
+    previousTcNo: i.previous_tc_no ?? "",
+    previousUdise: i.previous_udise ?? "",
+    docs: (i.docs as SisStudent["docs"]) ?? undefined,
+    notes: i.notes ?? "",
+    photoUrl: i.photo_url ?? "",
+    curriculum: null,
+  });
+}
+
+/**
+ * Same shape as fetchSisFromDb, sourced from sis_student_identities +
+ * sis_enrollments instead of sis_students. Phase 3 of the identity split —
+ * see docs/SIS_IDENTITY_ENROLLMENT_SPLIT_PLAN.md. Gated by
+ * sisIdentitySplitEnabled(); the caller decides whether to use this or the
+ * classic path.
+ */
+export async function fetchSisFromDbViaIdentitySplit(): Promise<{
+  bundle: SisRemoteBundle;
+  meta: SisSyncMeta | null;
+  ok: boolean;
+}> {
+  const ctx = await resolveCtx();
+  if (!ctx) {
+    return {
+      bundle: { households: [], students: [], householdUpdatedAt: {}, studentUpdatedAt: {} },
+      meta: null,
+      ok: false,
+    };
+  }
+  const { sb, tenantId } = ctx;
+
+  const [hhRes, enrRes, metaRes] = await Promise.all([
+    sb.from("sis_households").select("*").eq("tenant_id", tenantId),
+    sb
+      .from("sis_enrollments")
+      .select("*, sis_student_identities!inner(*)")
+      .eq("tenant_id", tenantId),
+    sb.from("sis_sync_meta").select("*").eq("tenant_id", tenantId).maybeSingle(),
+  ]);
+
+  if (hhRes.error || enrRes.error) {
+    console.warn(
+      "[sis-db] identity-split fetch failed",
+      hhRes.error?.message,
+      enrRes.error?.message,
+    );
+    return {
+      bundle: { households: [], students: [], householdUpdatedAt: {}, studentUpdatedAt: {} },
+      meta: null,
+      ok: false,
+    };
+  }
+
+  const householdUpdatedAt: Record<string, string> = {};
+  const studentUpdatedAt: Record<string, string> = {};
+  const households = ((hhRes.data ?? []) as HouseholdRow[]).map((row) => {
+    householdUpdatedAt[row.id] = row.updated_at;
+    return rowToHousehold(row);
+  });
+  const students = ((enrRes.data ?? []) as unknown as EnrollmentRow[]).map((row) => {
+    studentUpdatedAt[row.id] = row.updated_at;
+    return identityEnrollmentToStudent(row);
+  });
+
+  const metaRow = metaRes.data;
+  return {
+    bundle: { households, students, householdUpdatedAt, studentUpdatedAt },
+    meta: metaRow
+      ? {
+          householdCount: metaRow.household_count as number,
+          studentCount: metaRow.student_count as number,
+          activeStudentCount: metaRow.active_student_count as number,
+          updatedAt: String(metaRow.updated_at),
+        }
+      : null,
+    ok: true,
+  };
+}
+
 export type SisPushConflict = {
   table: string;
   id: string;
