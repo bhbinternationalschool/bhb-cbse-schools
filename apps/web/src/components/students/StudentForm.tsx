@@ -448,6 +448,12 @@ export function StudentForm({
     return masters.sections.filter((s) => s.classId === classId && s.isActive);
   }, [masters, classId]);
 
+  // Advisory only — see the save handler for why this no longer blocks.
+  const curCheck = useMemo(() => {
+    if (!masters) return { ok: true, errors: [], warnings: [] };
+    return validateCurriculum({ classId, academicYearCode }, curriculum, masters);
+  }, [masters, classId, academicYearCode, curriculum]);
+
   const feeGroupsForType = useMemo(() => {
     if (!masters) return [];
     const types: FeeStudentType[] =
@@ -831,16 +837,15 @@ export function StudentForm({
 
     const nextDocs = syncPhotoDoc(docs, photoUrl.trim());
 
-    const curCheck = validateCurriculum(
-      { classId, academicYearCode },
-      curriculum,
-      masters,
-    );
-    if (!curCheck.ok) {
-      flash(curCheck.errors[0] ?? "Fix subject choices");
-      setTab("subjects");
-      return;
-    }
+    // Subject-cart completeness (NCF: exact counts, language/vocational
+    // minimums) is surfaced on the Subjects tab, not enforced here. It used
+    // to block the whole save — so an office edit to an address or a phone
+    // number was refused because a IX–X student's subject cart wasn't yet a
+    // valid combination. Masters subject offerings/tags are still being
+    // populated for this school, which made that block near-permanent for
+    // most secondary students. Kept as advisory: staff can still see and fix
+    // an incomplete cart, but it never again stops an unrelated field from
+    // being saved.
 
     const payload = normalizeStudent({
       id: studentId ?? newSisId("stu"),
@@ -1156,7 +1161,7 @@ export function StudentForm({
                 <input
                   className="field"
                   value={admissionNo}
-                  onChange={(e) => setAdmissionNo(e.target.value)}
+                  onChange={(e) => setAdmissionNo(e.target.value.toUpperCase())}
                   required
                   readOnly={importedViaLegacyList && !systemAdmissionPending}
                 />
@@ -1203,7 +1208,7 @@ export function StudentForm({
                 <input
                   className="field"
                   value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
+                  onChange={(e) => setFullName(e.target.value.toUpperCase())}
                   required
                 />
               </Field>
@@ -1266,7 +1271,7 @@ export function StudentForm({
                 <input
                   className="field"
                   value={rollNo}
-                  onChange={(e) => setRollNo(e.target.value)}
+                  onChange={(e) => setRollNo(e.target.value.toUpperCase())}
                 />
               </Field>
             </div>
@@ -1348,7 +1353,7 @@ export function StudentForm({
               <input
                 className="field"
                 value={notes}
-                onChange={(e) => setNotes(e.target.value)}
+                onChange={(e) => setNotes(e.target.value.toUpperCase())}
               />
             </Field>
             <Field label="Tags (show before name)">
@@ -1395,6 +1400,18 @@ export function StudentForm({
 
         {tab === "subjects" && masters ? (
           <div>
+            {!curCheck.ok ? (
+              <div className="mb-4 rounded-xl border border-[rgba(196,149,58,0.35)] bg-[rgba(196,149,58,0.08)] p-3">
+                <p className="text-sm font-bold text-[var(--brand-deep)]">
+                  Subject cart incomplete — advisory only, saving is not blocked
+                </p>
+                <ul className="mt-1 list-disc pl-4 text-xs text-[var(--muted)]">
+                  {curCheck.errors.map((e, i) => (
+                    <li key={i}>{e}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             {pendingRequest ? (
               <div className="mb-4 rounded-xl border border-[rgba(196,149,58,0.35)] bg-[rgba(196,149,58,0.08)] p-3">
                 <p className="text-sm font-bold text-[var(--brand-deep)]">
@@ -1424,7 +1441,7 @@ export function StudentForm({
                   className="field mt-2 !py-1.5"
                   placeholder="Review note (optional)"
                   value={reviewNote}
-                  onChange={(e) => setReviewNote(e.target.value)}
+                  onChange={(e) => setReviewNote(e.target.value.toUpperCase())}
                 />
                 <div className="mt-2 flex flex-wrap gap-2">
                   <button
@@ -1556,35 +1573,35 @@ export function StudentForm({
                 <input
                   className="field"
                   value={religion}
-                  onChange={(e) => setReligion(e.target.value)}
+                  onChange={(e) => setReligion(e.target.value.toUpperCase())}
                 />
               </Field>
               <Field label="Nationality">
                 <input
                   className="field"
                   value={nationality}
-                  onChange={(e) => setNationality(e.target.value)}
+                  onChange={(e) => setNationality(e.target.value.toUpperCase())}
                 />
               </Field>
               <Field label="Mother tongue">
                 <input
                   className="field"
                   value={motherTongue}
-                  onChange={(e) => setMotherTongue(e.target.value)}
+                  onChange={(e) => setMotherTongue(e.target.value.toUpperCase())}
                 />
               </Field>
               <Field label="Place of birth">
                 <input
                   className="field"
                   value={placeOfBirth}
-                  onChange={(e) => setPlaceOfBirth(e.target.value)}
+                  onChange={(e) => setPlaceOfBirth(e.target.value.toUpperCase())}
                 />
               </Field>
               <Field label="Caste">
                 <input
                   className="field"
                   value={extra.caste}
-                  onChange={(e) => setEx("caste", e.target.value)}
+                  onChange={(e) => setEx("caste", e.target.value.toUpperCase())}
                   placeholder="e.g. Brahman, Ahir, Rajput"
                 />
               </Field>
@@ -1630,7 +1647,7 @@ export function StudentForm({
                 <input
                   className="field"
                   value={extra.medicalNotes}
-                  onChange={(e) => setEx("medicalNotes", e.target.value)}
+                  onChange={(e) => setEx("medicalNotes", e.target.value.toUpperCase())}
                   placeholder="Allergies, chronic condition (if any)"
                 />
               </Field>
@@ -1638,7 +1655,7 @@ export function StudentForm({
                 <input
                   className="field"
                   value={extra.secondLanguage}
-                  onChange={(e) => setEx("secondLanguage", e.target.value)}
+                  onChange={(e) => setEx("secondLanguage", e.target.value.toUpperCase())}
                   placeholder="e.g. Hindi"
                 />
               </Field>
@@ -1646,7 +1663,7 @@ export function StudentForm({
                 <input
                   className="field"
                   value={extra.thirdLanguage}
-                  onChange={(e) => setEx("thirdLanguage", e.target.value)}
+                  onChange={(e) => setEx("thirdLanguage", e.target.value.toUpperCase())}
                   placeholder="e.g. Sanskrit"
                 />
               </Field>
@@ -1654,7 +1671,7 @@ export function StudentForm({
                 <input
                   className="field"
                   value={extra.hobbies}
-                  onChange={(e) => setEx("hobbies", e.target.value)}
+                  onChange={(e) => setEx("hobbies", e.target.value.toUpperCase())}
                   placeholder="e.g. Drawing, Cricket"
                 />
               </Field>
@@ -1750,7 +1767,7 @@ export function StudentForm({
                 <input
                   className="field"
                   value={fatherName}
-                  onChange={(e) => setFatherName(e.target.value)}
+                  onChange={(e) => setFatherName(e.target.value.toUpperCase())}
                 />
               </Field>
               <Field label="Father mobile">
@@ -1829,21 +1846,21 @@ export function StudentForm({
                 <input
                   className="field"
                   value={extra.fatherOccupation}
-                  onChange={(e) => setEx("fatherOccupation", e.target.value)}
+                  onChange={(e) => setEx("fatherOccupation", e.target.value.toUpperCase())}
                 />
               </Field>
               <Field label="Father qualification">
                 <input
                   className="field"
                   value={extra.fatherQualification}
-                  onChange={(e) => setEx("fatherQualification", e.target.value)}
+                  onChange={(e) => setEx("fatherQualification", e.target.value.toUpperCase())}
                 />
               </Field>
               <Field label="Mother’s name">
                 <input
                   className="field"
                   value={motherName}
-                  onChange={(e) => setMotherName(e.target.value)}
+                  onChange={(e) => setMotherName(e.target.value.toUpperCase())}
                 />
               </Field>
               <Field label="Mother mobile">
@@ -1922,14 +1939,14 @@ export function StudentForm({
                 <input
                   className="field"
                   value={extra.motherOccupation}
-                  onChange={(e) => setEx("motherOccupation", e.target.value)}
+                  onChange={(e) => setEx("motherOccupation", e.target.value.toUpperCase())}
                 />
               </Field>
               <Field label="Mother qualification">
                 <input
                   className="field"
                   value={extra.motherQualification}
-                  onChange={(e) => setEx("motherQualification", e.target.value)}
+                  onChange={(e) => setEx("motherQualification", e.target.value.toUpperCase())}
                 />
               </Field>
               <Field label="Family income / year (₹)">
@@ -1952,7 +1969,7 @@ export function StudentForm({
                   <input
                     className="field"
                     value={extra.bankName}
-                    onChange={(e) => setEx("bankName", e.target.value)}
+                    onChange={(e) => setEx("bankName", e.target.value.toUpperCase())}
                   />
                 </Field>
                 <Field label="Account number">
@@ -2018,14 +2035,14 @@ export function StudentForm({
                   <input
                     className="field"
                     value={guardianName}
-                    onChange={(e) => setGuardianName(e.target.value)}
+                    onChange={(e) => setGuardianName(e.target.value.toUpperCase())}
                   />
                 </Field>
                 <Field label="Guardian relation">
                   <input
                     className="field"
                     value={guardianRelation}
-                    onChange={(e) => setGuardianRelation(e.target.value)}
+                    onChange={(e) => setGuardianRelation(e.target.value.toUpperCase())}
                     placeholder="Father / Mother / Other"
                   />
                 </Field>
@@ -2099,7 +2116,7 @@ export function StudentForm({
                   <input
                     className="field"
                     value={locality}
-                    onChange={(e) => setLocality(e.target.value)}
+                    onChange={(e) => setLocality(e.target.value.toUpperCase())}
                     placeholder="e.g. Lanka, BHU side"
                   />
                 </Field>
@@ -2107,7 +2124,7 @@ export function StudentForm({
                   <input
                     className="field"
                     value={landmark}
-                    onChange={(e) => setLandmark(e.target.value)}
+                    onChange={(e) => setLandmark(e.target.value.toUpperCase())}
                     placeholder="Near temple / crossing"
                   />
                 </Field>
@@ -2121,14 +2138,14 @@ export function StudentForm({
                   <input
                     className="field"
                     value={city}
-                    onChange={(e) => setCity(e.target.value)}
+                    onChange={(e) => setCity(e.target.value.toUpperCase())}
                   />
                 </Field>
                 <Field label="State">
                   <input
                     className="field"
                     value={stateName}
-                    onChange={(e) => setStateName(e.target.value)}
+                    onChange={(e) => setStateName(e.target.value.toUpperCase())}
                   />
                 </Field>
                 <Field label="PIN">
@@ -2153,7 +2170,7 @@ export function StudentForm({
                 <input
                   className="field"
                   value={extra.permanentAddress}
-                  onChange={(e) => setEx("permanentAddress", e.target.value)}
+                  onChange={(e) => setEx("permanentAddress", e.target.value.toUpperCase())}
                   placeholder="Leave blank if same as above"
                 />
               </Field>
@@ -2162,14 +2179,14 @@ export function StudentForm({
                   <input
                     className="field"
                     value={extra.permanentCity}
-                    onChange={(e) => setEx("permanentCity", e.target.value)}
+                    onChange={(e) => setEx("permanentCity", e.target.value.toUpperCase())}
                   />
                 </Field>
                 <Field label="Permanent state">
                   <input
                     className="field"
                     value={extra.permanentState}
-                    onChange={(e) => setEx("permanentState", e.target.value)}
+                    onChange={(e) => setEx("permanentState", e.target.value.toUpperCase())}
                   />
                 </Field>
                 <Field label="Permanent PIN">
@@ -2198,7 +2215,7 @@ export function StudentForm({
                   <input
                     className="field"
                     value={emergencyName}
-                    onChange={(e) => setEmergencyName(e.target.value)}
+                    onChange={(e) => setEmergencyName(e.target.value.toUpperCase())}
                   />
                 </Field>
                 <Field label="Mobile">
@@ -2327,7 +2344,7 @@ export function StudentForm({
                 <input
                   className="field"
                   value={apaarId}
-                  onChange={(e) => setApaarId(e.target.value)}
+                  onChange={(e) => setApaarId(e.target.value.toUpperCase())}
                   placeholder={
                     apaarId.trim()
                       ? undefined
@@ -2341,7 +2358,7 @@ export function StudentForm({
                 <input
                   className="field"
                   value={srn}
-                  onChange={(e) => setSrn(e.target.value)}
+                  onChange={(e) => setSrn(e.target.value.toUpperCase())}
                   placeholder="School registration no."
                 />
               </Field>
@@ -2355,7 +2372,7 @@ export function StudentForm({
                 <input
                   className="field"
                   value={previousSchool}
-                  onChange={(e) => setPreviousSchool(e.target.value)}
+                  onChange={(e) => setPreviousSchool(e.target.value.toUpperCase())}
                   placeholder={
                     pen.trim() ? "School that holds this PEN on UDISE+" : ""
                   }
@@ -2375,7 +2392,7 @@ export function StudentForm({
                 <input
                   className="field"
                   value={extra.previousSchoolYear}
-                  onChange={(e) => setEx("previousSchoolYear", e.target.value)}
+                  onChange={(e) => setEx("previousSchoolYear", e.target.value.toUpperCase())}
                   placeholder="e.g. 2024-25"
                 />
               </Field>
@@ -2383,7 +2400,7 @@ export function StudentForm({
                 <input
                   className="field"
                   value={previousTcNo}
-                  onChange={(e) => setPreviousTcNo(e.target.value)}
+                  onChange={(e) => setPreviousTcNo(e.target.value.toUpperCase())}
                 />
               </Field>
               <Field
@@ -2396,7 +2413,7 @@ export function StudentForm({
                 <input
                   className="field"
                   value={previousUdise}
-                  onChange={(e) => setPreviousUdise(e.target.value)}
+                  onChange={(e) => setPreviousUdise(e.target.value.toUpperCase())}
                   placeholder={
                     pen.trim() ? "e.g. 09674104900" : "UDISE code of previous school"
                   }
@@ -2422,7 +2439,7 @@ export function StudentForm({
                   <input
                     className="field"
                     value={extra.registrationNo}
-                    onChange={(e) => setEx("registrationNo", e.target.value)}
+                    onChange={(e) => setEx("registrationNo", e.target.value.toUpperCase())}
                     placeholder="e.g. 2025-2026/205"
                   />
                 </Field>
@@ -2430,28 +2447,28 @@ export function StudentForm({
                   <input
                     className="field"
                     value={extra.admissionFormNo}
-                    onChange={(e) => setEx("admissionFormNo", e.target.value)}
+                    onChange={(e) => setEx("admissionFormNo", e.target.value.toUpperCase())}
                   />
                 </Field>
                 <Field label="Admission class (at first admission)">
                   <input
                     className="field"
                     value={extra.admissionClass}
-                    onChange={(e) => setEx("admissionClass", e.target.value)}
+                    onChange={(e) => setEx("admissionClass", e.target.value.toUpperCase())}
                   />
                 </Field>
                 <Field label="TC number (issued on leaving)">
                   <input
                     className="field"
                     value={extra.tcNo}
-                    onChange={(e) => setEx("tcNo", e.target.value)}
+                    onChange={(e) => setEx("tcNo", e.target.value.toUpperCase())}
                   />
                 </Field>
                 <Field label="Transport route">
                   <input
                     className="field"
                     value={extra.transportRoute}
-                    onChange={(e) => setEx("transportRoute", e.target.value)}
+                    onChange={(e) => setEx("transportRoute", e.target.value.toUpperCase())}
                     placeholder="Bus route name (Transport module owns routing)"
                   />
                 </Field>
