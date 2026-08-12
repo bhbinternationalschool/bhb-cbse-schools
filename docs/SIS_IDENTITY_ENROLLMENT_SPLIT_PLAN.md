@@ -177,3 +177,52 @@ argument for why.
 2. **Timing** — Phase 0–2 are safe to run any time (additive, reversible).
    Phase 3's real-screen cutover is the one I'd want you actively watching
    for, the same way today's flag flips went.
+
+---
+
+## 6. Phase 0 — results (run 2026-08-12)
+
+**Snapshot:** all 27 tables that reference `sis_students` — `sis_students`
+itself plus every attendance/exam/fee/payment/PTM table with a `student_id`
+column — copied to `<table>_pre_identity_split_20260812` (one, whose name
+would have exceeded Postgres's 63-byte identifier limit, is
+`masters_special_fee_assign_pre_split_20260812` instead). Read-only,
+reversible, nothing in the app touches these.
+
+**Identity-conflict check:** of the 226 admission numbers shared by more
+than one row, **21 groups** disagree on name, DOB, or household. All 226
+agree on DOB and gender. Checked what the 21 disagreements actually are,
+rather than stopping at the count:
+
+- **14 groups** — same DOB, same household, name spelled differently
+  across years (`PRANJAL` / `PRAMJAL`, `VIVAAN GOSWAMI` / `VIVAN GOSWAMI`,
+  `ASHISH` / `ASHISH PATEL`, …). Same child, inconsistent data entry.
+- **6 groups** — identical name and DOB, but a *different* `household_id`
+  in one year. Checked each: same guardian name, same address, only the
+  phone number differs — the household record was re-created (new ID)
+  when the family's mobile number changed, instead of the existing
+  household row being updated. Same child, same family; the household
+  table has its own version of this exact duplication problem.
+- **0 groups** are a genuine identity conflict — no case anywhere of two
+  different children colliding on one admission number.
+
+**Notable side finding, not fixed here:** two of those six families
+(`BHB-2024-25-1100`, `BHB-2024-25-1104` — siblings, same household) show
+their 2025-26 household row with `mobile = '0000000000'` and a blank
+address, sitting between a correct 2024-25 row and a correct 2026-27 row
+that both point at the *original* household ID. A placeholder value sat
+in a real family's contact record for a full academic year before
+self-correcting — the same defect class as
+[[erp-unknown-must-not-become-fact]], one layer further out than where
+that pattern was first caught. Left as-is; flagging it rather than fixing
+it, since Phase 0 is read-only by design.
+
+**What this means for Phase 2:** the backfill's merge rule needs to be
+DOB + (matching `household_id` OR matching guardian name + address when
+the household id differs) — not a strict field-equality match — to fold
+all 226 duplicate chains into 273 identities cleanly, with zero manual
+review required. That refinement will be written into Phase 2 when we get
+there, not decided now.
+
+**Phase 0 is complete.** Ready for Phase 1 (new tables, additive-only)
+whenever you want it started.
