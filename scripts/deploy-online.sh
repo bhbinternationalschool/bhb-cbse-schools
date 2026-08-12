@@ -206,9 +206,8 @@ if [[ -n "${BIGQUERY_PROJECT_ID:-}" ]]; then
   BQ_LOCATION="${BIGQUERY_LOCATION:-asia-south1}"
   BQ_TENANT="${BIGQUERY_TENANT_SLUG:-bhb-international}"
   BQ_UPDATE="BIGQUERY_PROJECT_ID=${BIGQUERY_PROJECT_ID}|BIGQUERY_DATASET=${BQ_DATASET}|BIGQUERY_LOCATION=${BQ_LOCATION}|BIGQUERY_TENANT_SLUG=${BQ_TENANT}"
-  if [[ -n "${DIRECT_URL:-}" ]]; then
-    BQ_UPDATE="${BQ_UPDATE}|DIRECT_URL=${DIRECT_URL}"
-  fi
+  # DIRECT_URL is bound to Secret Manager on the service — passing it as a
+  # literal fails the update ("already been set with a different type").
   gcloud run services update school-erp-web \
     --project="$PROJECT_ID" \
     --region="$REGION" \
