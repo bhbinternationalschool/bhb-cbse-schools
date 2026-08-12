@@ -60,6 +60,7 @@
     "test:wa-webhook": "npx tsx scripts/test-wa-webhook.ts",
     "bootstrap:go-live": "npx tsx scripts/bootstrap-go-live.mts",
     "wa:subscribe": "npx tsx scripts/wa-waba-subscribe.mts",
+    "wa:portal-launch": "npx tsx scripts/wa-portal-launch-broadcast.mts",
     "smoke:supabase": "npx tsx scripts/smoke-sis-remote.mts",
     "audit:supabase": "npx tsx scripts/audit-supabase-schema.mts",
     "validate:desk-cutover": "npx tsx scripts/validate-desk-cutover.ts",
