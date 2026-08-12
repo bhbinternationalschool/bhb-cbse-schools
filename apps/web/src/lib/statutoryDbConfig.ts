@@ -1,20 +1,19 @@
 /**
- * Unlike payroll (whose desk tables already exist in production),
- * statutory_desk_* tables only exist once the paired migration below has been
- * applied. Defaulting dual-write to "on" before that would make every
- * payroll post fail against a table that doesn't exist yet — so both flags
- * default OFF here and must be explicitly opted into after the migration is
- * confirmed applied.
+ * statutory_desk_* tables + grants are applied (migrations 20260812204851 /
+ * 20260812204901). Both flags now default ON, same pattern as payroll's
+ * payrollDbConfig.ts — set the env var to "false"/"0" to opt back out.
  */
 export function statutoryDualWriteDbEnabled(): boolean {
-  return (
-    (process.env.STATUTORY_DUAL_WRITE_DB || "").trim().toLowerCase() === "true"
-  );
+  const flag = process.env.STATUTORY_DUAL_WRITE_DB?.trim().toLowerCase();
+  if (flag === "false" || flag === "0") return false;
+  return true;
 }
 
 export function statutoryReadFromDbEnabled(): boolean {
-  if (typeof window !== "undefined") {
-    return process.env.NEXT_PUBLIC_STATUTORY_READ_FROM_DB === "true";
-  }
-  return process.env.STATUTORY_READ_FROM_DB === "true";
+  const flag =
+    typeof window !== "undefined"
+      ? process.env.NEXT_PUBLIC_STATUTORY_READ_FROM_DB?.trim().toLowerCase()
+      : process.env.STATUTORY_READ_FROM_DB?.trim().toLowerCase();
+  if (flag === "false" || flag === "0") return false;
+  return true;
 }

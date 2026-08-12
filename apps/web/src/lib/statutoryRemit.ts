@@ -287,6 +287,18 @@ export function saveStatutoryRemit(state: StatutoryRemitState) {
   if (!assertModulePermission("payroll", "edit", "saveStatutoryRemit")) return;
   if (typeof window === "undefined") return;
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  void import("@/lib/statutoryNormalizedClient").then(
+    ({ scheduleStatutoryDeskSync }) => {
+      scheduleStatutoryDeskSync(state);
+    },
+  );
+}
+
+/** Permission-bypassing raw writer — hydration-only, mirrors payroll.ts's writePayrollLocalRaw.
+ * Does not re-trigger the sync scheduler (would otherwise push straight back what was just pulled). */
+export function writeStatutoryRemitLocalRaw(state: StatutoryRemitState) {
+  if (typeof window === "undefined") return;
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
 }
 
 /** Create / refresh remittance batch when payroll is published to accounts. */

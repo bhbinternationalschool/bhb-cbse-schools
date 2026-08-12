@@ -150,17 +150,20 @@ export function PayrollWorkspace() {
         { ensureStaffAttendanceHydrated },
         { ensureStaffHrHydrated },
         { ensureStaffAdvancesHydrated },
+        { ensureStatutoryHydrated },
       ] = await Promise.all([
         import("@/lib/payrollPersistence"),
         import("@/lib/staffAttendancePersistence"),
         import("@/lib/staffHrPersistence"),
         import("@/lib/staffAdvancesPersistence"),
+        import("@/lib/statutoryPersistence"),
       ]);
       await Promise.all([
         ensurePayrollHydrated(),
         ensureStaffAttendanceHydrated(),
         ensureStaffHrHydrated(),
         ensureStaffAdvancesHydrated(),
+        ensureStatutoryHydrated(),
       ]);
       setTick((t) => t + 1);
     })();

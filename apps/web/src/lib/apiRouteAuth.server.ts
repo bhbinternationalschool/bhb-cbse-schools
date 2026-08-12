@@ -195,6 +195,7 @@ export const SCHOOL_DATA_DESK_RBAC: Record<string, RbacModule> = {
   "school-comms-desk": "notices",
   "sis-roster": "students",
   "staff-attendance-registers": "attendance",
+  "statutory-desk": "payroll",
   "store-desk": "store",
   "student-leave-desk": "student_leave",
   "timetable-desk": "timetable",
