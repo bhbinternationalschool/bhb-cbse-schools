@@ -66,6 +66,7 @@ import { useRouter } from "next/navigation";
 import { EditControl } from "@/components/masters/EditControl";
 import { RemoveControl } from "@/components/masters/RemoveControl";
 import { SchoolTimingPanel } from "@/components/masters/SchoolTimingPanel";
+import { StatutoryConfigPanel } from "@/components/masters/StatutoryConfigPanel";
 import { LeaveApprovalSettingsPanel } from "@/components/masters/LeaveApprovalSettingsPanel";
 import { StaffAttendanceSettingsPanel } from "@/components/masters/StaffAttendanceSettingsPanel";
 import { StaffLeaveTypesPanel } from "@/components/masters/StaffLeaveTypesPanel";
@@ -521,6 +522,7 @@ export function SchoolProfilePanel({
       }
     />
     <SchoolTimingPanel state={state} commit={commit} />
+    <StatutoryConfigPanel state={state} commit={commit} />
     </div>
   );
 }

@@ -114,6 +114,7 @@ export function staffMobileMatchedAlt(
 function punchGeoFromInput(
   geo: PunchGeoInput,
   distanceM: number,
+  source: StaffPunchGeo["source"] = "wa_location",
 ): StaffPunchGeo {
   return {
     lat: geo.lat,
@@ -121,7 +122,7 @@ function punchGeoFromInput(
     accuracyM: geo.accuracyM,
     distanceM,
     at: new Date().toISOString(),
-    source: "wa_location",
+    source,
   };
 }
 
@@ -145,13 +146,22 @@ export async function applyWhatsAppStaffPunch(opts: {
   mobile10: string;
   kind: "in" | "out";
   geo: PunchGeoInput;
+  /** Punch channel: WhatsApp location share (default) or the mobile app's GPS. */
+  via?: "whatsapp" | "app";
 }): Promise<ApplyWaStaffPunchResult> {
+  const via = opts.via ?? "whatsapp";
   let state = await loadStaffAttendanceServer();
   const settings = normalizeAttendanceSettings(state.settings);
-  if (!settings.allowWhatsAppPunch) {
+  if (via === "whatsapp" && !settings.allowWhatsAppPunch) {
     return {
       ok: false,
       error: "WhatsApp attendance is disabled. Ask admin to enable it in Masters → Attendance settings.",
+    };
+  }
+  if (via === "app" && !settings.allowSelfPunch) {
+    return {
+      ok: false,
+      error: "Self punch is disabled. Ask admin to enable it in Masters → Attendance settings.",
     };
   }
 
@@ -166,8 +176,16 @@ export async function applyWhatsAppStaffPunch(opts: {
   const date = todayIst();
   const roster = masters.staff ?? [];
   const time = nowHhmmIst();
-  const altMobile = staffMobileMatchedAlt(opts.staff, opts.mobile10);
-  const geoAudit = punchGeoFromInput(opts.geo, check.distanceM);
+  const altMobile =
+    via === "whatsapp" && staffMobileMatchedAlt(opts.staff, opts.mobile10);
+  const geoAudit = punchGeoFromInput(
+    opts.geo,
+    check.distanceM,
+    via === "app" ? "app_gps" : "wa_location",
+  );
+  const channelLabel = via === "app" ? "App" : "WhatsApp";
+  const punchWay = via === "app" ? ("self" as const) : ("whatsapp" as const);
+  const markedBy = via === "app" ? "Mobile app attendance" : "WhatsApp attendance";
 
   const existingReg = findStaffRegister(state, date, ay);
   let marks = existingReg
@@ -203,7 +221,7 @@ export async function applyWhatsAppStaffPunch(opts: {
       };
     }
     const noteParts = [
-      "WhatsApp campus punch-in",
+      `${channelLabel} campus punch-in`,
       altMobile ? "alt mobile" : null,
       `~${formatDistanceLabel(check.distanceM)} from school`,
     ].filter(Boolean);
@@ -215,9 +233,9 @@ export async function applyWhatsAppStaffPunch(opts: {
       inTime: time,
       outTime: cur?.outTime || "",
       note: noteParts.join(" · "),
-      punchWay: "whatsapp",
+      punchWay,
       punchGeo: geoAudit,
-      markedBy: "WhatsApp attendance",
+      markedBy,
       roster,
     });
     state = merged.state;
@@ -251,7 +269,7 @@ export async function applyWhatsAppStaffPunch(opts: {
   }
 
   const noteParts = [
-    cur.note || "WhatsApp campus punch",
+    cur.note || `${channelLabel} campus punch`,
     `OUT ${time}`,
     altMobile ? "alt mobile" : null,
     `~${formatDistanceLabel(check.distanceM)} from school`,
@@ -264,9 +282,9 @@ export async function applyWhatsAppStaffPunch(opts: {
     inTime: cur.inTime,
     outTime: time,
     note: noteParts.join(" · "),
-    punchWay: "whatsapp",
+    punchWay,
     punchGeo: geoAudit,
-    markedBy: "WhatsApp attendance",
+    markedBy,
     roster,
   });
   state = merged.state;

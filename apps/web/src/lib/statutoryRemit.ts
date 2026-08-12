@@ -1,5 +1,11 @@
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { loadMasters } from "@/lib/masters";
+import { normalizeStatutoryConfig } from "@/lib/foundationMasters";
+import {
+  splitEmployerPfContribution,
+  type StatutoryDue,
+} from "@/lib/statutoryCompliance";
 /**
  * PF / ESIC remittance to Government.
  * When staff avails PF and/or ESIC, employee deduction + employer
@@ -15,24 +21,67 @@ export type StatutoryRemitLine = {
   pfEmployer: number;
   esicEmployee: number;
   esicEmployer: number;
+  /** EPF/EPS/EDLI wage-ceiling reporting split (money already withheld — see statutoryCompliance.ts) */
+  epfWages: number;
+  epsWages: number;
+  edliWages: number;
+  epsAmount: number;
+  edliAmount: number;
+  uanNumber: string;
+  esicIpNumber: string;
 };
 
 export type StatutoryRemitStatus = "pending_deposit" | "deposited";
+
+/** Filing/payment progress for one statutory scheme (EPF or ESIC) within a batch. */
+export type StatutoryFilingProgress = {
+  filedAt: string;
+  filedBy: string;
+  challanRefNo: string;
+  paidAt: string;
+  paidBy: string;
+  receiptFileUrl: string;
+};
+
+function emptyFilingProgress(): StatutoryFilingProgress {
+  return {
+    filedAt: "",
+    filedBy: "",
+    challanRefNo: "",
+    paidAt: "",
+    paidBy: "",
+    receiptFileUrl: "",
+  };
+}
 
 export type StatutoryRemitBatch = {
   id: string;
   month: string;
   academicYearCode: string;
   payrollRunId: string;
+  /** @deprecated kept for batches created before EPF/ESIC were tracked independently — read via epf/esic instead */
   status: StatutoryRemitStatus;
   lines: StatutoryRemitLine[];
   pfTotal: number;
   esicTotal: number;
   grandTotal: number;
   createdAt: string;
+  /** @deprecated */
   depositedAt: string;
+  /** @deprecated */
   depositedBy: string;
+  /** @deprecated free-text note — use epf.challanRefNo / esic.challanRefNo instead */
   challanNote: string;
+  totalMembers: number;
+  returnFileId: string;
+  contributionRatePct: number;
+  totalEpfContribution: number;
+  totalEpsContribution: number;
+  totalEpfEpsContribution: number;
+  totalEdliContribution: number;
+  totalIpContribution: number;
+  epf: StatutoryFilingProgress;
+  esic: StatutoryFilingProgress;
 };
 
 export type StatutoryRemitState = {
@@ -142,6 +191,81 @@ export function govtDepositFromComponents(
   };
 }
 
+/** Back-fills new fields on batches/lines saved before EPF/EPS/EDLI + independent EPF/ESIC filing existed. */
+function normalizeBatch(b: Partial<StatutoryRemitBatch>): StatutoryRemitBatch {
+  const lines: StatutoryRemitLine[] = (b.lines || []).map((l) => ({
+    staffId: l.staffId,
+    empCode: l.empCode,
+    fullName: l.fullName,
+    statutoryCover: l.statutoryCover,
+    pfEmployee: l.pfEmployee || 0,
+    pfEmployer: l.pfEmployer || 0,
+    esicEmployee: l.esicEmployee || 0,
+    esicEmployer: l.esicEmployer || 0,
+    epfWages: l.epfWages || 0,
+    epsWages: l.epsWages || 0,
+    edliWages: l.edliWages || 0,
+    epsAmount: l.epsAmount || 0,
+    edliAmount: l.edliAmount || 0,
+    uanNumber: l.uanNumber || "",
+    esicIpNumber: l.esicIpNumber || "",
+  }));
+  return {
+    id: b.id || nid("sr"),
+    month: b.month || "",
+    academicYearCode: b.academicYearCode || "",
+    payrollRunId: b.payrollRunId || "",
+    status: b.status || "pending_deposit",
+    lines,
+    pfTotal: b.pfTotal || 0,
+    esicTotal: b.esicTotal || 0,
+    grandTotal: b.grandTotal || 0,
+    createdAt: b.createdAt || new Date().toISOString(),
+    depositedAt: b.depositedAt || "",
+    depositedBy: b.depositedBy || "",
+    challanNote: b.challanNote || "",
+    totalMembers: b.totalMembers || lines.length,
+    returnFileId: b.returnFileId || "",
+    contributionRatePct: b.contributionRatePct || 12,
+    totalEpfContribution:
+      b.totalEpfContribution ??
+      lines.reduce((s, l) => s + l.pfEmployee + Math.max(0, l.pfEmployer - l.epsAmount), 0),
+    totalEpsContribution:
+      b.totalEpsContribution ?? lines.reduce((s, l) => s + l.epsAmount, 0),
+    totalEpfEpsContribution:
+      b.totalEpfEpsContribution ??
+      lines.reduce((s, l) => s + l.pfEmployee + l.pfEmployer, 0),
+    totalEdliContribution:
+      b.totalEdliContribution ?? lines.reduce((s, l) => s + l.edliAmount, 0),
+    totalIpContribution:
+      b.totalIpContribution ?? lines.reduce((s, l) => s + l.esicEmployee, 0),
+    epf:
+      b.epf ||
+      (b.status === "deposited"
+        ? {
+            ...emptyFilingProgress(),
+            filedAt: b.depositedAt || "",
+            filedBy: b.depositedBy || "",
+            paidAt: b.depositedAt || "",
+            paidBy: b.depositedBy || "",
+            challanRefNo: b.challanNote || "",
+          }
+        : emptyFilingProgress()),
+    esic:
+      b.esic ||
+      (b.status === "deposited"
+        ? {
+            ...emptyFilingProgress(),
+            filedAt: b.depositedAt || "",
+            filedBy: b.depositedBy || "",
+            paidAt: b.depositedAt || "",
+            paidBy: b.depositedBy || "",
+            challanRefNo: b.challanNote || "",
+          }
+        : emptyFilingProgress()),
+  };
+}
+
 export function loadStatutoryRemit(): StatutoryRemitState {
   if (typeof window === "undefined") return { version: 1, batches: [] };
   try {
@@ -150,7 +274,9 @@ export function loadStatutoryRemit(): StatutoryRemitState {
     const parsed = JSON.parse(raw) as Partial<StatutoryRemitState>;
     return {
       version: 1,
-      batches: Array.isArray(parsed.batches) ? parsed.batches : [],
+      batches: Array.isArray(parsed.batches)
+        ? parsed.batches.map(normalizeBatch)
+        : [],
     };
   } catch {
     return { version: 1, batches: [] };
@@ -159,6 +285,18 @@ export function loadStatutoryRemit(): StatutoryRemitState {
 
 export function saveStatutoryRemit(state: StatutoryRemitState) {
   if (!assertModulePermission("payroll", "edit", "saveStatutoryRemit")) return;
+  if (typeof window === "undefined") return;
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  void import("@/lib/statutoryNormalizedClient").then(
+    ({ scheduleStatutoryDeskSync }) => {
+      scheduleStatutoryDeskSync(state);
+    },
+  );
+}
+
+/** Permission-bypassing raw writer — hydration-only, mirrors payroll.ts's writePayrollLocalRaw.
+ * Does not re-trigger the sync scheduler (would otherwise push straight back what was just pulled). */
+export function writeStatutoryRemitLocalRaw(state: StatutoryRemitState) {
   if (typeof window === "undefined") return;
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
 }
@@ -177,10 +315,17 @@ export function syncRemitFromPayrollRun(input: {
   }[];
 }): StatutoryRemitState {
   const state = loadStatutoryRemit();
+  const masters = loadMasters();
+  const config = normalizeStatutoryConfig(masters.statutoryConfig);
+  const staffById = new Map(masters.staff.map((s) => [s.id, s]));
   const remitLines: StatutoryRemitLine[] = [];
   for (const line of input.lines) {
     const g = govtDepositFromComponents(line.components);
     if (g.govtTotal <= 0) continue;
+    const basic =
+      line.components.find((c) => c.headCode === "BASIC")?.amount || 0;
+    const split = splitEmployerPfContribution(basic, g.pfEmployer, config);
+    const staff = staffById.get(line.staffId);
     remitLines.push({
       staffId: line.staffId,
       empCode: line.empCode,
@@ -190,6 +335,13 @@ export function syncRemitFromPayrollRun(input: {
       pfEmployer: g.pfEmployer,
       esicEmployee: g.esicEmployee,
       esicEmployer: g.esicEmployer,
+      epfWages: split.epfWages,
+      epsWages: split.epsWages,
+      edliWages: split.edliWages,
+      epsAmount: split.epsAmount,
+      edliAmount: split.edliAmount,
+      uanNumber: staff?.uanNumber || "",
+      esicIpNumber: staff?.esicNumber || "",
     });
   }
 
@@ -217,28 +369,54 @@ export function syncRemitFromPayrollRun(input: {
     (s, l) => s + l.esicEmployee + l.esicEmployer,
     0,
   );
+  const totalEpfContribution = remitLines.reduce(
+    (s, l) => s + l.pfEmployee + Math.max(0, l.pfEmployer - l.epsAmount),
+    0,
+  );
+  const totalEpsContribution = remitLines.reduce(
+    (s, l) => s + l.epsAmount,
+    0,
+  );
+  const totalEdliContribution = remitLines.reduce(
+    (s, l) => s + l.edliAmount,
+    0,
+  );
+  const totalIpContribution = remitLines.reduce(
+    (s, l) => s + l.esicEmployee,
+    0,
+  );
 
   const existingIdx = state.batches.findIndex(
     (b) => b.payrollRunId === input.runId,
   );
   const existing = existingIdx >= 0 ? state.batches[existingIdx] : null;
-  // Don't overwrite already deposited batches
-  if (existing?.status === "deposited") return state;
+  // Don't overwrite a batch once both EPF and ESIC are fully paid — the money has already moved.
+  if (existing?.epf.paidAt && existing?.esic.paidAt) return state;
 
   const batch: StatutoryRemitBatch = {
     id: existing?.id || nid("sr"),
     month: input.month,
     academicYearCode: input.academicYearCode,
     payrollRunId: input.runId,
-    status: "pending_deposit",
+    status: existing?.status || "pending_deposit",
     lines: remitLines,
     pfTotal,
     esicTotal,
     grandTotal: pfTotal + esicTotal,
     createdAt: existing?.createdAt || new Date().toISOString(),
-    depositedAt: "",
-    depositedBy: "",
-    challanNote: "",
+    depositedAt: existing?.depositedAt || "",
+    depositedBy: existing?.depositedBy || "",
+    challanNote: existing?.challanNote || "",
+    totalMembers: existing?.totalMembers || remitLines.length,
+    returnFileId: existing?.returnFileId || "",
+    contributionRatePct: existing?.contributionRatePct || config.epfContributionRatePct,
+    totalEpfContribution,
+    totalEpsContribution,
+    totalEpfEpsContribution: totalEpfContribution + totalEpsContribution,
+    totalEdliContribution,
+    totalIpContribution,
+    epf: existing?.epf || emptyFilingProgress(),
+    esic: existing?.esic || emptyFilingProgress(),
   };
 
   const batches =
@@ -251,6 +429,86 @@ export function syncRemitFromPayrollRun(input: {
   return next;
 }
 
+function updateBatch(
+  batchId: string,
+  fn: (b: StatutoryRemitBatch) => StatutoryRemitBatch,
+): { ok: true } | { ok: false; error: string } {
+  const state = loadStatutoryRemit();
+  const batch = state.batches.find((b) => b.id === batchId);
+  if (!batch) return { ok: false, error: "Remittance batch not found" };
+  const updated = fn(batch);
+  const bothPaid = !!(updated.epf.paidAt && updated.esic.paidAt);
+  saveStatutoryRemit({
+    ...state,
+    batches: state.batches.map((b) =>
+      b.id === batchId
+        ? { ...updated, status: bothPaid ? "deposited" : "pending_deposit" }
+        : b,
+    ),
+  });
+  return { ok: true };
+}
+
+/** File the EPF return (ECR) for a batch — Return File ID + member count, before payment. */
+export function markEpfReturnFiled(input: {
+  batchId: string;
+  by: string;
+  returnFileId: string;
+  totalMembers?: number;
+}): { ok: true } | { ok: false; error: string } {
+  return updateBatch(input.batchId, (b) => ({
+    ...b,
+    returnFileId: input.returnFileId.trim() || b.returnFileId,
+    totalMembers: input.totalMembers || b.totalMembers,
+    epf: {
+      ...b.epf,
+      filedAt: new Date().toISOString(),
+      filedBy: input.by,
+    },
+  }));
+}
+
+/** Record the EPF challan payment + uploaded receipt. */
+export function markEpfChallanPaid(input: {
+  batchId: string;
+  by: string;
+  challanRefNo: string;
+  receiptFileUrl: string;
+}): { ok: true } | { ok: false; error: string } {
+  return updateBatch(input.batchId, (b) => ({
+    ...b,
+    epf: {
+      ...b.epf,
+      paidAt: new Date().toISOString(),
+      paidBy: input.by,
+      challanRefNo: input.challanRefNo.trim() || b.epf.challanRefNo,
+      receiptFileUrl: input.receiptFileUrl || b.epf.receiptFileUrl,
+    },
+  }));
+}
+
+/** Record the ESIC challan payment + uploaded receipt (ESIC has no separate "return file" step). */
+export function markEsicChallanPaid(input: {
+  batchId: string;
+  by: string;
+  challanRefNo: string;
+  receiptFileUrl: string;
+}): { ok: true } | { ok: false; error: string } {
+  return updateBatch(input.batchId, (b) => ({
+    ...b,
+    esic: {
+      ...b.esic,
+      filedAt: b.esic.filedAt || new Date().toISOString(),
+      filedBy: b.esic.filedBy || input.by,
+      paidAt: new Date().toISOString(),
+      paidBy: input.by,
+      challanRefNo: input.challanRefNo.trim() || b.esic.challanRefNo,
+      receiptFileUrl: input.receiptFileUrl || b.esic.receiptFileUrl,
+    },
+  }));
+}
+
+/** @deprecated use markEpfChallanPaid / markEsicChallanPaid — kept for any old call sites, marks both paid at once. */
 export function markRemitDeposited(input: {
   batchId: string;
   by: string;
@@ -259,24 +517,52 @@ export function markRemitDeposited(input: {
   const state = loadStatutoryRemit();
   const batch = state.batches.find((b) => b.id === input.batchId);
   if (!batch) return { ok: false, error: "Remittance batch not found" };
-  if (batch.status === "deposited") {
+  if (batch.epf.paidAt && batch.esic.paidAt) {
     return { ok: false, error: "Already marked deposited" };
   }
-  saveStatutoryRemit({
-    ...state,
-    batches: state.batches.map((b) =>
-      b.id === input.batchId
-        ? {
-            ...b,
-            status: "deposited",
-            depositedAt: new Date().toISOString(),
-            depositedBy: input.by,
-            challanNote: input.challanNote?.trim() || b.challanNote,
-          }
-        : b,
-    ),
+  return updateBatch(input.batchId, (b) => {
+    const now = new Date().toISOString();
+    const note = input.challanNote?.trim() || b.challanNote;
+    return {
+      ...b,
+      depositedAt: now,
+      depositedBy: input.by,
+      challanNote: note,
+      epf: { ...b.epf, filedAt: b.epf.filedAt || now, filedBy: b.epf.filedBy || input.by, paidAt: now, paidBy: input.by, challanRefNo: note || b.epf.challanRefNo },
+      esic: { ...b.esic, filedAt: b.esic.filedAt || now, filedBy: b.esic.filedBy || input.by, paidAt: now, paidBy: input.by, challanRefNo: note || b.esic.challanRefNo },
+    };
   });
-  return { ok: true };
+}
+
+/** Maps batches into the decoupled StatutoryDue shape statutoryCompliance.ts's alert logic consumes. */
+export function statutoryDuesFromBatches(
+  batches: StatutoryRemitBatch[],
+): StatutoryDue[] {
+  const dues: StatutoryDue[] = [];
+  for (const b of batches) {
+    const epfAmount = b.totalEpfEpsContribution + b.totalEdliContribution;
+    if (epfAmount > 0) {
+      dues.push({
+        batchId: b.id,
+        kind: "epf",
+        month: b.month,
+        href: "/payroll?tab=govt",
+        amountDue: epfAmount,
+        paidAt: b.epf.paidAt,
+      });
+    }
+    if (b.esicTotal > 0) {
+      dues.push({
+        batchId: b.id,
+        kind: "esic",
+        month: b.month,
+        href: "/payroll?tab=govt",
+        amountDue: b.esicTotal,
+        paidAt: b.esic.paidAt,
+      });
+    }
+  }
+  return dues;
 }
 
 export function remitStatusLabel(s: StatutoryRemitStatus): string {
@@ -289,11 +575,16 @@ export function statutoryRemitCsv(batch: StatutoryRemitBatch): string {
       "Month",
       "EmpCode",
       "Name",
+      "UAN",
       "Cover",
-      "PF Employee",
-      "PF Employer",
+      "Gross(EPF wages)",
+      "EPF EE",
+      "EPS",
+      "EPF ER",
+      "EDLI",
       "PF Total",
-      "ESIC Employee",
+      "ESIC IP No",
+      "IP Contribution",
       "ESIC Employer",
       "ESIC Total",
       "Govt Payable",
@@ -301,16 +592,22 @@ export function statutoryRemitCsv(batch: StatutoryRemitBatch): string {
     ],
   ];
   for (const l of batch.lines) {
+    const epfEr = Math.max(0, l.pfEmployer - l.epsAmount);
     const pf = l.pfEmployee + l.pfEmployer;
     const esic = l.esicEmployee + l.esicEmployer;
     rows.push([
       batch.month,
       l.empCode,
       l.fullName,
+      l.uanNumber,
       l.statutoryCover,
+      String(l.epfWages),
       String(l.pfEmployee),
-      String(l.pfEmployer),
+      String(l.epsAmount),
+      String(epfEr),
+      String(l.edliAmount),
       String(pf),
+      l.esicIpNumber,
       String(l.esicEmployee),
       String(l.esicEmployer),
       String(esic),
@@ -325,8 +622,13 @@ export function statutoryRemitCsv(batch: StatutoryRemitBatch): string {
     "",
     "",
     "",
+    "",
+    String(batch.totalEpsContribution),
+    "",
+    String(batch.totalEdliContribution),
     String(batch.pfTotal),
     "",
+    String(batch.totalIpContribution),
     "",
     String(batch.esicTotal),
     String(batch.grandTotal),

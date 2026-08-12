@@ -26,14 +26,31 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Mobile and OTP required" }, { status: 400 });
     }
 
-    const verified = await verifyParentOtp({ mobile, code });
-    if (!verified.ok) {
-      return NextResponse.json({ error: verified.reason }, { status: 401 });
+    // App-store review access: Play/App Store reviewers cannot receive a
+    // WhatsApp OTP, so a fixed mobile+code pair (env-configured, disabled
+    // unless all three vars are set) signs into one designated household.
+    const reviewMobile = process.env.REVIEW_LOGIN_MOBILE?.trim();
+    const reviewCode = process.env.REVIEW_LOGIN_CODE?.trim();
+    const reviewHousehold = process.env.REVIEW_LOGIN_HOUSEHOLD_ID?.trim();
+    const isReviewLogin =
+      !!reviewMobile &&
+      !!reviewCode &&
+      !!reviewHousehold &&
+      mobile === reviewMobile &&
+      code === reviewCode;
+
+    if (!isReviewLogin) {
+      const verified = await verifyParentOtp({ mobile, code });
+      if (!verified.ok) {
+        return NextResponse.json({ error: verified.reason }, { status: 401 });
+      }
     }
 
     await ensureSchoolMirrorHydrated();
     const sis = loadSis();
-    const hh = resolveParentHousehold(sis, { mobile });
+    const hh = isReviewLogin
+      ? sis.households.find((h) => h.id === reviewHousehold) || null
+      : resolveParentHousehold(sis, { mobile });
     if (!hh) {
       return NextResponse.json({ error: "Household not found" }, { status: 404 });
     }
@@ -65,7 +82,9 @@ export async function POST(request: Request) {
       action: "create",
       entityType: "parent_session",
       entityId: hh.id,
-      summary: `Parent OTP login ${mobile.slice(-4)}`,
+      summary: isReviewLogin
+        ? "Store-review parent login (fixed review credentials)"
+        : `Parent OTP login ${mobile.slice(-4)}`,
     });
 
     const signed = signSession(session);

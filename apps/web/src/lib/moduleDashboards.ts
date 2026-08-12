@@ -3,7 +3,11 @@
  * Demo data from localStorage loaders — client-only.
  */
 
-import type { ModuleDashboardModel } from "@/components/dashboard/ModuleDashboard";
+import type {
+  DashboardTableColumn,
+  DashboardTableRow,
+  ModuleDashboardModel,
+} from "@/components/dashboard/ModuleDashboard";
 import {
   chartPt,
   dualRing,
@@ -36,7 +40,17 @@ import { computeFeeKpis } from "@/lib/feeFinance";
 import { buildDayBook, formatInr, loadFees } from "@/lib/fees";
 import { loadOfflineQueue } from "@/lib/fieldSurvey";
 import { loadHomework } from "@/lib/homework";
-import { isStaffActive } from "@/lib/foundationMasters";
+import {
+  isStaffActive,
+  normalizeStatutoryConfig,
+  type StaffRecord,
+} from "@/lib/foundationMasters";
+import { loadStatutoryRemit } from "@/lib/statutoryRemit";
+import {
+  computeEstimatedPenalty,
+  statutoryDueDate,
+} from "@/lib/statutoryCompliance";
+import { formatInr as formatInrRupees } from "@/lib/payroll";
 import {
   currentAcademicYearCode,
   formatInrCompact,
@@ -509,13 +523,13 @@ function staffDash(academicYearCode?: string): ModuleDashboardModel {
   const hr = loadStaffHr();
   const staff = masters.staff ?? [];
   const active = staff.filter(isStaffActive);
-  const teaching = active.filter((s) => s.stream === "teaching").length;
-  const nonTeaching = active.filter((s) => s.stream === "non_teaching").length;
-  const leaveOpen = (hr.leaveRequests ?? []).filter(
+  const teachingStaff = active.filter((s) => s.stream === "teaching");
+  const nonTeachingStaff = active.filter((s) => s.stream === "non_teaching");
+  const openLeave = (hr.leaveRequests ?? []).filter(
     (r) =>
       inAcademicYear(r, academicYearCode) &&
       (r.status === "pending" || r.status === "pending_l2"),
-  ).length;
+  );
   const byDept = new Map<string, number>();
   for (const s of active) {
     const dep = masters.departments.find((d) => d.id === s.departmentId);
@@ -525,6 +539,51 @@ function staffDash(academicYearCode?: string): ModuleDashboardModel {
   const deptRows = [...byDept.entries()]
     .map(([name, count]) => ({ id: name, name, count }))
     .sort((a, b) => b.count - a.count);
+
+  function staffRoleLabel(s: StaffRecord): string {
+    return (
+      masters.designations.find((d) => d.id === s.designationId)?.name ?? "—"
+    );
+  }
+  function staffDeptLabel(s: StaffRecord): string {
+    return masters.departments.find((d) => d.id === s.departmentId)?.name ?? "—";
+  }
+  function staffListRows(list: StaffRecord[]) {
+    return list
+      .map((s) => ({
+        id: s.id,
+        empCode: s.empCode,
+        fullName: s.fullName,
+        designation: staffRoleLabel(s),
+        department: staffDeptLabel(s),
+        mobile: s.mobile || "—",
+      }))
+      .sort((a, b) => a.fullName.localeCompare(b.fullName));
+  }
+  const staffListColumns: DashboardTableColumn[] = [
+    { key: "empCode", label: "Code" },
+    { key: "fullName", label: "Name" },
+    { key: "designation", label: "Designation" },
+    { key: "department", label: "Department" },
+    { key: "mobile", label: "Mobile" },
+  ];
+  const leaveRows = openLeave
+    .map((r) => {
+      const s = staff.find((x) => x.id === r.staffId);
+      const type = hr.leaveTypes.find((t) => t.code === r.typeCode);
+      return {
+        id: r.id,
+        fullName: s?.fullName ?? "—",
+        empCode: s?.empCode ?? "—",
+        leaveType: type?.name ?? r.typeCode,
+        fromDate: r.fromDate,
+        toDate: r.toDate,
+        days: r.days,
+        status: r.status,
+      };
+    })
+    .sort((a, b) => a.fromDate.localeCompare(b.fromDate));
+
   return {
     title: "Staff",
     subtitle: `Session ${academicYearCode || "all"} · workforce strength, departments, and HR queues.`,
@@ -536,33 +595,47 @@ function staffDash(academicYearCode?: string): ModuleDashboardModel {
         hint: `${staff.length - active.length} inactive`,
         tone: "navy",
         tab: "roster",
-        detailTitle: "By department",
-        detailColumns: [
-          { key: "name", label: "Department" },
-          { key: "count", label: "Count", align: "right" },
-        ],
-        detailRows: deptRows,
+        detailTitle: "Active staff",
+        detailColumns: staffListColumns,
+        detailRows: staffListRows(active),
       },
       {
         id: "teaching",
         label: "Teaching",
-        value: String(teaching),
+        value: String(teachingStaff.length),
         tone: "teal",
         tab: "roster",
+        detailTitle: "Teaching staff",
+        detailColumns: staffListColumns,
+        detailRows: staffListRows(teachingStaff),
       },
       {
         id: "non",
         label: "Non-teaching",
-        value: String(nonTeaching),
+        value: String(nonTeachingStaff.length),
         tone: "sky",
         tab: "roster",
+        detailTitle: "Non-teaching staff",
+        detailColumns: staffListColumns,
+        detailRows: staffListRows(nonTeachingStaff),
       },
       {
         id: "leave",
         label: "Leave queue",
-        value: String(leaveOpen),
+        value: String(openLeave.length),
         tone: "coral",
         tab: "leave",
+        detailTitle: "Pending leave requests",
+        detailColumns: [
+          { key: "empCode", label: "Code" },
+          { key: "fullName", label: "Name" },
+          { key: "leaveType", label: "Leave type" },
+          { key: "fromDate", label: "From" },
+          { key: "toDate", label: "To" },
+          { key: "days", label: "Days", align: "right" },
+          { key: "status", label: "Status" },
+        ],
+        detailRows: leaveRows,
       },
     ],
     chartTitle: "Headcount by department",
@@ -577,8 +650,8 @@ function staffDash(academicYearCode?: string): ModuleDashboardModel {
       ),
       "Stream",
       [
-        chartPt("Teaching", teaching, "#0f766e"),
-        chartPt("Non-teaching", nonTeaching, "#0284c7"),
+        chartPt("Teaching", teachingStaff.length, "#0f766e"),
+        chartPt("Non-teaching", nonTeachingStaff.length, "#0284c7"),
       ],
       String(active.length),
       "staff",
@@ -1601,6 +1674,74 @@ function payrollDash(academicYearCode?: string): ModuleDashboardModel {
     label: r.month || r.id.slice(-6),
     value: Math.round(runNetPaise(r.lines) / 100),
   }));
+
+  const statutoryConfig = normalizeStatutoryConfig(loadMasters().statutoryConfig);
+  const statutoryBatches = loadStatutoryRemit().batches.filter((b) =>
+    inAcademicYear(b, academicYearCode),
+  );
+  const today = new Date();
+  let pendingDues = 0;
+  let overdueDues = 0;
+  let overdueEstimatedPenalty = 0;
+  const complianceRows: DashboardTableRow[] = [];
+  for (const b of statutoryBatches) {
+    const dues: {
+      kind: "EPF" | "ESIC";
+      amount: number;
+      progress: (typeof b)["epf"];
+      slabs: typeof statutoryConfig.penalty.damageSlabs;
+      interestRate: number;
+    }[] = [
+      {
+        kind: "EPF",
+        amount: b.totalEpfEpsContribution + b.totalEdliContribution,
+        progress: b.epf,
+        slabs: statutoryConfig.penalty.damageSlabs,
+        interestRate: statutoryConfig.penalty.interestRatePctPerAnnum,
+      },
+      {
+        kind: "ESIC",
+        amount: b.esicTotal,
+        progress: b.esic,
+        slabs: statutoryConfig.penalty.esicDamageSlabs,
+        interestRate: statutoryConfig.penalty.esicInterestRatePctPerAnnum,
+      },
+    ];
+    for (const due of dues) {
+      if (due.amount <= 0) continue;
+      const paidAt = due.progress.paidAt;
+      if (!paidAt) pendingDues += 1;
+      const penalty = paidAt
+        ? null
+        : computeEstimatedPenalty(
+            statutoryDueDate(b.month),
+            today,
+            due.amount,
+            due.slabs,
+            due.interestRate,
+          );
+      if (penalty && penalty.daysOverdue > 0) {
+        overdueDues += 1;
+        overdueEstimatedPenalty += penalty.estimatedTotal;
+      }
+      const status = paidAt
+        ? "Paid"
+        : due.progress.filedAt
+          ? "Filed, unpaid"
+          : "Not filed";
+      complianceRows.push({
+        id: `${b.id}_${due.kind.toLowerCase()}`,
+        month: b.month,
+        type: due.kind,
+        amount: formatInrRupees(due.amount),
+        status,
+        daysOverdue: penalty && penalty.daysOverdue > 0 ? penalty.daysOverdue : "—",
+        estPenalty: penalty && penalty.daysOverdue > 0 ? formatInrRupees(penalty.estimatedTotal) : "—",
+      });
+    }
+  }
+  complianceRows.sort((a, b) => String(b.month).localeCompare(String(a.month)));
+
   return {
     title: "Payroll",
     subtitle: `Session ${academicYearCode || "all"} · salary runs, approvals, and net payouts.`,
@@ -1632,6 +1773,29 @@ function payrollDash(academicYearCode?: string): ModuleDashboardModel {
         value: String(paid),
         tone: "green",
         tab: "runs",
+      },
+      {
+        id: "statutory",
+        label: "EPF/ESIC compliance",
+        value: String(pendingDues),
+        hint:
+          overdueDues > 0
+            ? `${overdueDues} overdue · est. penalty ${formatInrRupees(overdueEstimatedPenalty)}`
+            : pendingDues > 0
+              ? "None overdue"
+              : "All filed & paid",
+        tone: overdueDues > 0 ? "coral" : pendingDues > 0 ? "gold" : "green",
+        tab: "govt",
+        detailTitle: "EPF/ESIC dues",
+        detailColumns: [
+          { key: "month", label: "Month" },
+          { key: "type", label: "Type" },
+          { key: "amount", label: "Amount", align: "right" },
+          { key: "status", label: "Status" },
+          { key: "daysOverdue", label: "Days overdue", align: "right" },
+          { key: "estPenalty", label: "Est. penalty", align: "right" },
+        ],
+        detailRows: complianceRows,
       },
     ],
     chartTitle: "Net payout by run (₹)",

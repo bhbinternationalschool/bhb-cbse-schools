@@ -3,8 +3,6 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
-  AlertTriangle,
-  ArrowRight,
   BookOpen,
   GraduationCap,
   IndianRupee,
@@ -13,6 +11,7 @@ import {
   Users,
 } from "lucide-react";
 import { formatInr } from "@/lib/masters";
+import { AlertBannerList } from "@/components/dashboard/AlertBannerList";
 import type { PrincipalSnapshot } from "@/lib/principalSnapshot.server";
 import { isProtectedSuperAdminEmail } from "@/lib/superAdmin";
 import { useDemoSession } from "@/components/shell/SessionContext";
@@ -219,21 +218,7 @@ export function PrincipalCockpit() {
         </p>
       </section>
 
-      {alerts.length > 0 ? (
-        <div className="space-y-2">
-          {alerts.map((a) => (
-            <Link
-              key={a.text}
-              href={a.href}
-              className="flex items-center gap-2 rounded-xl border border-[rgba(180,35,24,0.2)] bg-[rgba(180,35,24,0.05)] px-4 py-3 text-sm font-medium text-[var(--brand-deep)]"
-            >
-              <AlertTriangle className="h-4 w-4 shrink-0 text-[#b42318]" />
-              {a.text}
-              <ArrowRight className="ml-auto h-4 w-4 opacity-50" />
-            </Link>
-          ))}
-        </div>
-      ) : null}
+      <AlertBannerList alerts={alerts} />
 
       <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3">
         <div className="flex items-center justify-between gap-2">

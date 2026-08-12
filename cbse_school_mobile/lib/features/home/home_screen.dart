@@ -3,6 +3,13 @@ import "package:flutter/material.dart";
 import "../../core/api/api_client.dart";
 import "../../core/config/app_config.dart";
 import "../../core/theme/app_theme.dart";
+import "../modules/attendance_history_screen.dart";
+import "../modules/fees_screen.dart";
+import "../modules/homework_screen.dart";
+import "../modules/module_shell.dart";
+import "../modules/notices_screen.dart";
+import "../modules/ptm_screen.dart";
+import "student_id_screen.dart";
 
 class _Module {
   const _Module(this.label, this.icon, this.tone);
@@ -47,7 +54,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  int _tab = 0;
+  final int _tab = 0;
   int _childIndex = 0;
   ParentSummary? _summary;
   String? _error;
@@ -79,6 +86,99 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _signOut() async {
     await widget.api.signOut();
     if (mounted) widget.onLogout();
+  }
+
+  void _openModule(String label, ParentChild child) {
+    final api = widget.api;
+    Widget? screen;
+    switch (label) {
+      case "Fees":
+        screen = FeesScreen(api: api, child: child);
+      case "Attendance":
+        screen = AttendanceHistoryScreen(api: api, child: child);
+      case "Homework":
+        screen = HomeworkScreen(
+          api: api,
+          subtitle: child.fullName,
+          studentId: child.id,
+        );
+      case "Notices":
+        screen = NoticesScreen(api: api);
+      case "PTM":
+        screen = PtmScreen(api: api, child: child);
+      case "Transport":
+        showComingSoon(
+          context,
+          "Transport",
+          "Bus routes and live tracking go live once the school publishes its transport routes.",
+        );
+      case "Exams":
+        showComingSoon(
+          context,
+          "Exams",
+          "Date sheets and report cards appear here once the school publishes them.",
+        );
+      case "Library":
+        showComingSoon(
+          context,
+          "Library",
+          "Issued books and due dates appear here once the library goes digital.",
+        );
+    }
+    if (screen != null) {
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen!));
+    }
+  }
+
+  void _showProfile(ParentSummary summary, ParentChild child) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                summary.guardianName,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.ink,
+                ),
+              ),
+              const SizedBox(height: 4),
+              for (final c in summary.children)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    "${c.fullName} — ${c.classLabel}\nAdmission no. ${c.admissionNo}",
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      color: AppColors.muted,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _signOut();
+                },
+                icon: const Icon(Icons.logout, size: 18),
+                label: const Text("Sign out"),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _pickChild() async {
@@ -185,10 +285,18 @@ class _HomeScreenState extends State<HomeScreen> {
                 children: [
                   const _SectionTitle("Quick access"),
                   const SizedBox(height: 10),
-                  const _ModuleGrid(),
+                  _ModuleGrid(onTap: (label) => _openModule(label, child)),
                   const SizedBox(height: 12),
                   Card(
                     child: ListTile(
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => StudentIdScreen(
+                            child: child,
+                            guardianName: summary.guardianName,
+                          ),
+                        ),
+                      ),
                       leading: Container(
                         width: 40,
                         height: 40,
@@ -197,7 +305,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Icon(
-                          Icons.badge_outlined,
+                          Icons.qr_code_2,
                           color: ModuleTone.blue.foreground,
                           size: 22,
                         ),
@@ -210,11 +318,15 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                       subtitle: Text(
-                        "Guardian: ${summary.guardianName}",
+                        "Guardian: ${summary.guardianName} · tap for ID QR",
                         style: const TextStyle(
                           fontSize: 11.5,
                           color: AppColors.muted,
                         ),
+                      ),
+                      trailing: const Icon(
+                        Icons.chevron_right,
+                        color: AppColors.muted,
                       ),
                     ),
                   ),
@@ -226,7 +338,21 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
-        onDestinationSelected: (i) => setState(() => _tab = i),
+        onDestinationSelected: (i) {
+          // Home stays the root; other tabs push their screen and snap back.
+          switch (i) {
+            case 1:
+              _openModule("Fees", child);
+            case 2:
+              showComingSoon(
+                context,
+                "Messages",
+                "Direct chat with the class teacher is on the roadmap.",
+              );
+            case 3:
+              _showProfile(summary, child);
+          }
+        },
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home_outlined), label: "Home"),
           NavigationDestination(
@@ -599,7 +725,9 @@ class _SectionTitle extends StatelessWidget {
 }
 
 class _ModuleGrid extends StatelessWidget {
-  const _ModuleGrid();
+  const _ModuleGrid({required this.onTap});
+
+  final void Function(String label) onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -614,7 +742,7 @@ class _ModuleGrid extends StatelessWidget {
         for (final m in _modules)
           InkWell(
             borderRadius: BorderRadius.circular(16),
-            onTap: () {},
+            onTap: () => onTap(m.label),
             child: Column(
               children: [
                 Container(
