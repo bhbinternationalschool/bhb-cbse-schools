@@ -69,13 +69,20 @@ export type StudentDocKey =
   | "casteCert"
   | "incomeCert";
 
-/** Per-doc vault entry — fileUrl is https or data: (demo) until Supabase Storage. */
+/**
+ * Per-doc vault entry. fileUrl is an app-internal proxy URL
+ * (/api/documents/{driveFileId}) once stored in Google Drive — see
+ * docs/GOOGLE_DRIVE_DOCUMENTS_PLAN.md. Older records may still hold a
+ * data: URL from before that cutover.
+ */
 export type StudentDocFile = {
   status: DocStatus;
   fileName: string;
   mimeType: string;
   size: number;
   fileUrl: string;
+  /** Set once the file is in Drive; empty for legacy/unmigrated records. */
+  driveFileId?: string;
   uploadedAt: string;
   /** Parent/guardian who submitted for verification */
   submittedBy?: string;
@@ -378,6 +385,7 @@ export function emptyDocFile(status: DocStatus = "missing"): StudentDocFile {
     mimeType: "",
     size: 0,
     fileUrl: "",
+    driveFileId: "",
     uploadedAt: "",
     submittedBy: "",
     submittedAt: "",
@@ -441,6 +449,7 @@ export function normalizeDocFile(raw: unknown): StudentDocFile {
     mimeType: typeof o.mimeType === "string" ? o.mimeType : "",
     size: typeof o.size === "number" ? o.size : 0,
     fileUrl,
+    driveFileId: typeof o.driveFileId === "string" ? o.driveFileId : "",
     uploadedAt: typeof o.uploadedAt === "string" ? o.uploadedAt : "",
     submittedBy: typeof o.submittedBy === "string" ? o.submittedBy : "",
     submittedAt: typeof o.submittedAt === "string" ? o.submittedAt : "",

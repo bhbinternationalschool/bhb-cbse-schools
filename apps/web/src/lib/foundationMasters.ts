@@ -523,6 +523,8 @@ export type StaffDocFile = {
   mimeType: string;
   size: number;
   fileUrl: string;
+  /** Set once the file is in Drive; empty for legacy/unmigrated records. */
+  driveFileId?: string;
   uploadedAt: string;
   submittedBy?: string;
   submittedAt?: string;
@@ -557,6 +559,7 @@ export function emptyStaffDocFile(
     mimeType: "",
     size: 0,
     fileUrl: "",
+    driveFileId: "",
     uploadedAt: "",
     submittedBy: "",
     submittedAt: "",
@@ -615,6 +618,7 @@ function normalizeStaffDocFile(raw: unknown): StaffDocFile {
     mimeType: str(o.mimeType),
     size: typeof o.size === "number" ? o.size : 0,
     fileUrl: typeof o.fileUrl === "string" ? o.fileUrl : "",
+    driveFileId: typeof o.driveFileId === "string" ? o.driveFileId : "",
     uploadedAt: str(o.uploadedAt),
     submittedBy: str(o.submittedBy),
     submittedAt: str(o.submittedAt),
