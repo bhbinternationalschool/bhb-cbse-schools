@@ -2481,8 +2481,10 @@ export function StudentForm({
           <div>
             <p className="mb-3 text-xs text-[var(--muted)]">
               Upload PDF or image for each document. Passport photo stays in sync
-              with Basic. Mark verified after office check. Demo stores files in
-              the browser; production uses Supabase Storage.
+              with Basic. Mark verified after office check.
+              {studentId
+                ? " Files are stored in Google Drive."
+                : " Save the student first — documents attach to a saved record."}
             </p>
             <ul className="divide-y divide-[rgba(32,48,80,0.08)] rounded-xl border border-[rgba(32,48,80,0.12)]">
               {DOC_LABELS.map((d) => (
@@ -2490,6 +2492,8 @@ export function StudentForm({
                   key={d.key}
                   label={d.label}
                   value={docs[d.key]}
+                  studentId={studentId}
+                  docKey={d.key}
                   isPhoto={d.key === "photo"}
                   onChange={(file) => setDocFile(d.key, file)}
                   onError={flash}

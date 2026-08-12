@@ -992,6 +992,8 @@ export function StaffProfileForm(props: Props) {
                   key={key}
                   label={label}
                   value={draft.docs[key]}
+                  staffId={props.mode === "edit" ? props.staffId : undefined}
+                  docKey={key}
                   onError={setError}
                   onChange={(next) => {
                     const docs = { ...draft.docs, [key]: next };

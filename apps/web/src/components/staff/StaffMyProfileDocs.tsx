@@ -3,15 +3,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   STAFF_DOC_LABELS,
-  emptyStaffDocFile,
   staffDocStatusLabel,
   type StaffDocFile,
   type StaffDocKey,
-  type StaffRecord,
 } from "@/lib/foundationMasters";
 import { loadMasters } from "@/lib/masters";
 import { submitStaffDocForVerification } from "@/lib/profileDocVerification";
-import { btn, btnOutline, field } from "@/components/ui/erp-ui";
+import { btn } from "@/components/ui/erp-ui";
+import { useDocLocalPreview } from "@/lib/useDocLocalPreview";
 
 function statusTone(status: StaffDocFile["status"]) {
   if (status === "verified") return "text-emerald-700";
@@ -42,32 +41,12 @@ export function StaffMyProfileDocs({
     setTick((n) => n + 1);
   }, [staffId]);
 
-  async function onPick(key: StaffDocKey, file: File | null, row: StaffRecord) {
-    if (!file) return;
-    setError(null);
-    const { uploadSchoolObject } = await import("@/lib/objectStorage");
-    const uploaded = await uploadSchoolObject({
-      path: `staff/docs/${row.id}_${key}_${Date.now()}_${file.name.replace(/[^\w.\-]+/g, "_")}`,
-      blob: file,
-      contentType: file.type,
-    });
-    if (!uploaded.ok) {
-      setError(uploaded.error);
-      return;
-    }
-    const next: StaffDocFile = {
-      ...emptyStaffDocFile("pending"),
-      fileName: file.name,
-      mimeType: file.type || "application/octet-stream",
-      size: file.size,
-      fileUrl: uploaded.url,
-      uploadedAt: new Date().toISOString(),
-    };
+  function onDocUploaded(key: StaffDocKey, next: StaffDocFile) {
     const r = submitStaffDocForVerification({
-      staffId: row.id,
+      staffId,
       docKey: key,
       file: next,
-      submittedBy: actorName || row.fullName,
+      submittedBy: actorName || staff?.fullName || "",
     });
     if (!r.ok) {
       setError(r.error);
@@ -120,8 +99,11 @@ export function StaffMyProfileDocs({
           <StaffDocSelfRow
             key={key}
             label={label}
+            docKey={key}
+            staffId={staffId}
             value={staff.docs[key]}
-            onPick={(f) => void onPick(key, f, staff)}
+            onUploaded={(next) => onDocUploaded(key, next)}
+            onError={setError}
           />
         ))}
       </div>
@@ -131,15 +113,79 @@ export function StaffMyProfileDocs({
 
 function StaffDocSelfRow({
   label,
+  docKey,
+  staffId,
   value,
-  onPick,
+  onUploaded,
+  onError,
 }: {
   label: string;
+  docKey: StaffDocKey;
+  staffId: string;
   value: StaffDocFile;
-  onPick: (file: File | null) => void;
+  onUploaded: (next: StaffDocFile) => void;
+  onError: (message: string) => void;
 }) {
   const ref = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
   const has = !!value.fileUrl;
+  const isImage =
+    value.mimeType.startsWith("image/") ||
+    value.fileUrl.startsWith("data:image/");
+  const preview = useDocLocalPreview(value.fileUrl, value.uploadedAt);
+
+  async function acceptFile(file: File | null) {
+    if (!file) return;
+    const okType =
+      file.type === "application/pdf" || file.type.startsWith("image/");
+    if (!okType) {
+      onError("Use PDF or image (JPG/PNG/WebP)");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const formData = new FormData();
+      formData.append("subject", "staff");
+      formData.append("subjectId", staffId);
+      formData.append("docKey", docKey);
+      formData.append("file", file);
+      const res = await fetch("/api/documents/upload", {
+        method: "POST",
+        credentials: "same-origin",
+        body: formData,
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        fileUrl?: string;
+        fileName?: string;
+        mimeType?: string;
+        size?: number;
+        driveFileId?: string;
+        uploadedAt?: string;
+      };
+      if (!res.ok || !body.ok || !body.fileUrl) {
+        onError(body.error || "Upload failed");
+        return;
+      }
+      const uploadedAt = body.uploadedAt || new Date().toISOString();
+      preview.setFromFile(file, `${body.fileUrl}|${uploadedAt}`);
+      onUploaded({
+        status: "pending",
+        fileName: body.fileName || file.name,
+        mimeType: body.mimeType || file.type || "application/octet-stream",
+        size: body.size ?? file.size,
+        fileUrl: body.fileUrl,
+        driveFileId: body.driveFileId || "",
+        uploadedAt,
+      });
+    } catch {
+      onError("Upload failed — check your connection and try again");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-3">
@@ -154,9 +200,32 @@ function StaffDocSelfRow({
               Remark: {value.reviewNote}
             </p>
           ) : null}
+          {has ? (
+            <a
+              href={preview.viewUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-0.5 inline-block text-[11px] font-semibold text-[var(--brand-deep)] underline"
+            >
+              View file
+            </a>
+          ) : null}
         </div>
-        <button type="button" className={btn} onClick={() => ref.current?.click()}>
-          {has ? "Replace" : "Upload"}
+        {has && isImage ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={preview.viewUrl}
+            alt=""
+            className="h-12 w-12 shrink-0 rounded-lg object-cover"
+          />
+        ) : null}
+        <button
+          type="button"
+          className={`${btn} disabled:opacity-50`}
+          disabled={busy}
+          onClick={() => ref.current?.click()}
+        >
+          {busy ? "Uploading…" : has ? "Replace" : "Upload"}
         </button>
         <input
           ref={ref}
@@ -164,7 +233,7 @@ function StaffDocSelfRow({
           accept="application/pdf,image/jpeg,image/png,image/webp"
           className="hidden"
           onChange={(e) => {
-            onPick(e.target.files?.[0] ?? null);
+            void acceptFile(e.target.files?.[0] ?? null);
             e.target.value = "";
           }}
         />

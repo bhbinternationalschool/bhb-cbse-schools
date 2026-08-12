@@ -11,16 +11,15 @@ import {
 import {
   DOC_ACCEPT,
   DOC_LABELS,
-  DOC_MAX_BYTES,
   docHasFile,
   docStatusLabel,
-  emptyDocFile,
   loadSis,
   type Household,
   type SisStudent,
   type StudentDocFile,
   type StudentDocKey,
 } from "@/lib/sis";
+import { useDocLocalPreview } from "@/lib/useDocLocalPreview";
 
 function statusTone(status: StudentDocFile["status"]) {
   if (status === "verified") return "text-emerald-700";
@@ -121,49 +120,21 @@ export function ParentProfileDocsPortal({
     reload();
   }
 
-  async function onPickDoc(key: StudentDocKey, file: File | null) {
-    if (!household || !child || !file) return;
-    const okType =
-      file.type === "application/pdf" || file.type.startsWith("image/");
-    if (!okType) {
-      setError("Use PDF or image (JPG/PNG/WebP)");
+  function onDocUploaded(key: StudentDocKey, next: StudentDocFile) {
+    if (!household || !child) return;
+    const r = submitStudentDocForVerification({
+      householdId: household.id,
+      studentId: child.id,
+      docKey: key,
+      file: next,
+      submittedBy: guardianDisplayName || household.guardianName,
+    });
+    if (!r.ok) {
+      setError(r.error);
       return;
     }
-    if (key === "photo" && !file.type.startsWith("image/")) {
-      setError("Passport photo must be an image");
-      return;
-    }
-    if (file.size > DOC_MAX_BYTES) {
-      setError(`File must be under ${Math.round(DOC_MAX_BYTES / 1000)} KB`);
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result !== "string") return;
-      const next: StudentDocFile = {
-        ...emptyDocFile("pending"),
-        fileName: file.name,
-        mimeType: file.type || "application/octet-stream",
-        size: file.size,
-        fileUrl: reader.result,
-        uploadedAt: new Date().toISOString(),
-      };
-      const r = submitStudentDocForVerification({
-        householdId: household.id,
-        studentId: child.id,
-        docKey: key,
-        file: next,
-        submittedBy: guardianDisplayName || household.guardianName,
-      });
-      if (!r.ok) {
-        setError(r.error);
-        return;
-      }
-      flash(`${DOC_LABELS.find((d) => d.key === key)?.label} sent for verification`);
-      reload();
-    };
-    reader.onerror = () => setError("Could not read file");
-    reader.readAsDataURL(file);
+    flash(`${DOC_LABELS.find((d) => d.key === key)?.label} sent for verification`);
+    reload();
   }
 
   if (!household) {
@@ -261,8 +232,10 @@ export function ParentProfileDocsPortal({
                 key={key}
                 label={label}
                 docKey={key}
+                studentId={child.id}
                 value={child.docs[key]}
-                onPick={(f) => void onPickDoc(key, f)}
+                onUploaded={(next) => onDocUploaded(key, next)}
+                onError={setError}
               />
             ))}
           </div>
@@ -277,19 +250,82 @@ export function ParentProfileDocsPortal({
 function DocRow({
   label,
   docKey,
+  studentId,
   value,
-  onPick,
+  onUploaded,
+  onError,
 }: {
   label: string;
   docKey: StudentDocKey;
+  studentId: string;
   value: StudentDocFile;
-  onPick: (file: File | null) => void;
+  onUploaded: (next: StudentDocFile) => void;
+  onError: (message: string) => void;
 }) {
   const ref = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
   const has = docHasFile(value);
   const isImage =
     value.mimeType.startsWith("image/") ||
     value.fileUrl.startsWith("data:image/");
+  const preview = useDocLocalPreview(value.fileUrl, value.uploadedAt);
+
+  async function acceptFile(file: File | null) {
+    if (!file) return;
+    const okType =
+      file.type === "application/pdf" || file.type.startsWith("image/");
+    if (!okType) {
+      onError("Use PDF or image (JPG/PNG/WebP)");
+      return;
+    }
+    if (docKey === "photo" && !file.type.startsWith("image/")) {
+      onError("Passport photo must be an image");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const formData = new FormData();
+      formData.append("subject", "student");
+      formData.append("subjectId", studentId);
+      formData.append("docKey", docKey);
+      formData.append("file", file);
+      const res = await fetch("/api/documents/upload", {
+        method: "POST",
+        credentials: "same-origin",
+        body: formData,
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        fileUrl?: string;
+        fileName?: string;
+        mimeType?: string;
+        size?: number;
+        driveFileId?: string;
+        uploadedAt?: string;
+      };
+      if (!res.ok || !body.ok || !body.fileUrl) {
+        onError(body.error || "Upload failed");
+        return;
+      }
+      const uploadedAt = body.uploadedAt || new Date().toISOString();
+      preview.setFromFile(file, `${body.fileUrl}|${uploadedAt}`);
+      onUploaded({
+        status: "pending",
+        fileName: body.fileName || file.name,
+        mimeType: body.mimeType || file.type || "application/octet-stream",
+        size: body.size ?? file.size,
+        fileUrl: body.fileUrl,
+        driveFileId: body.driveFileId || "",
+        uploadedAt,
+      });
+    } catch {
+      onError("Upload failed — check your connection and try again");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="rounded-lg border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.02)] p-2.5">
@@ -307,10 +343,11 @@ function DocRow({
         </div>
         <button
           type="button"
-          className="shrink-0 rounded-lg border border-[rgba(32,48,80,0.15)] px-2 py-1 text-[11px] font-semibold"
+          className="shrink-0 rounded-lg border border-[rgba(32,48,80,0.15)] px-2 py-1 text-[11px] font-semibold disabled:opacity-50"
+          disabled={busy}
           onClick={() => ref.current?.click()}
         >
-          {has ? "Replace & submit" : "Upload & submit"}
+          {busy ? "Uploading…" : has ? "Replace & submit" : "Upload & submit"}
         </button>
         <input
           ref={ref}
@@ -318,7 +355,7 @@ function DocRow({
           accept={docKey === "photo" ? "image/*" : DOC_ACCEPT}
           className="hidden"
           onChange={(e) => {
-            onPick(e.target.files?.[0] ?? null);
+            void acceptFile(e.target.files?.[0] ?? null);
             e.target.value = "";
           }}
         />
@@ -326,13 +363,13 @@ function DocRow({
       {has && isImage ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={value.fileUrl}
+          src={preview.viewUrl}
           alt=""
           className="mt-2 h-16 w-16 rounded-md object-cover"
         />
       ) : has ? (
         <a
-          href={value.fileUrl}
+          href={preview.viewUrl}
           target="_blank"
           rel="noreferrer"
           className="mt-1 inline-block text-[11px] font-semibold text-[var(--brand-deep)] underline"
