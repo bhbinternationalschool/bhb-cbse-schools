@@ -401,23 +401,30 @@ export async function handleWaCrmBotInbound(opts: {
   };
   await writeStore(store);
 
-  // Push WhatsApp profile name onto matching CRM leads for campaign {{guardianName}}
+  // Push WhatsApp profile name onto matching CRM leads for campaign
+  // {{guardianName}}.
+  //
+  // Used to read via getSchoolMirrorSync().admissions — a stale,
+  // multi-MB copy of the whole leads table (see the egress
+  // investigation) — and write back via setMirrorSlice(), which only
+  // patches the server's in-memory mirror. Admissions writes are already
+  // skip-gated from ever reaching school_mirror_state once
+  // ADMISSIONS_READ_FROM_DB is on, so that write never actually reached
+  // admission_desk_leads: this backfill has likely been a silent no-op
+  // for as long as that flag's been set. Talks to the real table
+  // directly now, both ways, and only touches the 0-2 leads whose mobile
+  // or whatsapp number matches this thread — never the whole table.
   if ((opts.profileName || "").trim()) {
     try {
-      const { getSchoolMirrorSync, setMirrorSlice } = await import(
-        "@/lib/schoolDataMirror"
-      );
-      const {
-        applyWhatsAppNamesToLeads,
-        normalizeAdmissionsState,
-      } = await import("@/lib/admissions");
-      const mirror = getSchoolMirrorSync();
-      if (mirror.admissions) {
-        const adm = normalizeAdmissionsState(
-          mirror.admissions as Parameters<typeof normalizeAdmissionsState>[0],
-        );
+      const { applyWhatsAppNamesToLeads, defaultAdmissionsState } =
+        await import("@/lib/admissions");
+      const { findAdmissionLeadCandidatesByMobile, pushAdmissionLeadToDb } =
+        await import("@/lib/admissionsNormalized.server");
+      const candidates = await findAdmissionLeadCandidatesByMobile(mobile10);
+      if (candidates.length > 0) {
+        const before = { ...defaultAdmissionsState(), leads: candidates };
         const applied = applyWhatsAppNamesToLeads(
-          adm,
+          before,
           [
             {
               mobile: mobile10,
@@ -428,11 +435,14 @@ export async function handleWaCrmBotInbound(opts: {
           { alsoUpdateGuardianName: false },
         );
         if (applied.updated > 0) {
-          setMirrorSlice("admissions", applied.state);
+          const changed = applied.state.leads.filter(
+            (l, i) => l !== before.leads[i],
+          );
+          await Promise.all(changed.map((l) => pushAdmissionLeadToDb(l)));
         }
       }
     } catch {
-      /* mirror optional on some hosts */
+      /* admissions push optional — never block the WA reply */
     }
   }
 

@@ -687,3 +687,36 @@ export async function pushAdmissionLeadToDb(
 
   return { ok: true };
 }
+
+/**
+ * Leads whose mobile or whatsapp number matches — a handful of rows at
+ * most, never the whole table. Built for waCrmBotServer.ts's WhatsApp
+ * profile-name backfill, which used to read the leads out of
+ * school_mirror_state (a stale, 2+ MB copy — see the egress
+ * investigation) via getSchoolMirrorSync() and write back through
+ * setMirrorSlice(), which only patches the server's in-memory copy:
+ * admissions writes are already skip-gated from ever reaching the blob
+ * once ADMISSIONS_READ_FROM_DB is on, so that write silently never
+ * reached admission_desk_leads at all. This talks to the real table
+ * directly, both ways.
+ */
+export async function findAdmissionLeadCandidatesByMobile(
+  mobile10: string,
+): Promise<AdmissionLead[]> {
+  const ctx = await resolveCtx();
+  if (!ctx) return [];
+  const { sb, tenantId } = ctx;
+
+  // whatsapp is not a promoted column on this table — only mobile is; it
+  // lives inside lead_json, hence the ->> extraction for the second half
+  // of the match. Caught by testing against a real lead before this
+  // shipped: the naive mobile.eq,whatsapp.eq filter 42703'd outright.
+  const { data, error } = await sb
+    .from("admission_desk_leads")
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .or(`mobile.eq.${mobile10},lead_json->>whatsapp.eq.${mobile10}`);
+  if (error || !data) return [];
+
+  return data.map((row) => rowToLead(row as Record<string, unknown>));
+}
