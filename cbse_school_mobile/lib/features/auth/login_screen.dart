@@ -81,9 +81,13 @@ class _LoginScreenState extends State<LoginScreen> {
       });
 
   Future<void> _devLogin() => _run(() async {
+        // Dev affordance: typing a roster id (stf_…) in the email field
+        // links the demo staff session to that staff record.
+        final email = _email.text.trim();
         await widget.api.devLogin(
           persona: _staffMode ? "staff" : "parent",
           householdId: _staffMode ? null : _mobile.text.trim(),
+          staffId: _staffMode && email.startsWith("stf_") ? email : null,
         );
         if (mounted) widget.onSignedIn();
       });

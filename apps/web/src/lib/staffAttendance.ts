@@ -55,7 +55,7 @@ export type StaffPunchGeo = {
   accuracyM?: number;
   distanceM?: number;
   at: string;
-  source: "wa_location";
+  source: "wa_location" | "app_gps";
 };
 
 export type StaffAttendanceMark = {
@@ -178,7 +178,7 @@ function normalizePunchGeo(
         ? g.distanceM
         : undefined,
     at: g.at || new Date().toISOString(),
-    source: "wa_location",
+    source: g.source === "app_gps" ? "app_gps" : "wa_location",
   };
 }
 

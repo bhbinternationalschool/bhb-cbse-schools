@@ -486,6 +486,76 @@ class PtmEventInfo {
   final List<PtmSlotInfo> slots;
 }
 
+class PunchToday {
+  const PunchToday({
+    required this.status,
+    required this.inTime,
+    required this.outTime,
+    required this.punchWayLabel,
+  });
+
+  final String status;
+  final String? inTime;
+  final String? outTime;
+  final String punchWayLabel;
+}
+
+class PunchState {
+  const PunchState({
+    required this.staffName,
+    required this.date,
+    required this.allowSelfPunch,
+    required this.fenceLat,
+    required this.fenceLng,
+    required this.fenceRadiusM,
+    required this.maxAccuracyM,
+    required this.today,
+  });
+
+  factory PunchState.fromJson(Map<String, dynamic> j) {
+    final fence = (j["fence"] as Map<String, dynamic>?) ?? const {};
+    final today = j["today"] as Map<String, dynamic>?;
+    return PunchState(
+      staffName: (j["staffName"] as String?) ?? "",
+      date: (j["date"] as String?) ?? "",
+      allowSelfPunch: j["allowSelfPunch"] == true,
+      fenceLat: (fence["lat"] as num?)?.toDouble() ?? 0,
+      fenceLng: (fence["lng"] as num?)?.toDouble() ?? 0,
+      fenceRadiusM: (fence["radiusM"] as num?)?.toDouble() ?? 150,
+      maxAccuracyM: (fence["maxAccuracyM"] as num?)?.toDouble() ?? 120,
+      today: today == null
+          ? null
+          : PunchToday(
+              status: (today["status"] as String?) ?? "",
+              inTime: today["inTime"] as String?,
+              outTime: today["outTime"] as String?,
+              punchWayLabel: (today["punchWayLabel"] as String?) ?? "",
+            ),
+    );
+  }
+
+  final String staffName;
+  final String date;
+  final bool allowSelfPunch;
+  final double fenceLat;
+  final double fenceLng;
+  final double fenceRadiusM;
+  final double maxAccuracyM;
+  final PunchToday? today;
+}
+
+class PunchResult {
+  const PunchResult({
+    required this.kind,
+    required this.time,
+    required this.distanceM,
+  });
+
+  final String kind;
+  final String time;
+  final int distanceM;
+}
+
 class ApiClient {
   ApiClient(this.config);
 
@@ -614,7 +684,11 @@ class ApiClient {
   /// Dev-only login against a server running with demo auth (never production).
   /// Lets the emulator sign in without real credentials or WhatsApp OTPs.
   /// Parent: pass a householdId. Staff: persona "staff".
-  Future<void> devLogin({String? householdId, String persona = "parent"}) async {
+  Future<void> devLogin({
+    String? householdId,
+    String persona = "parent",
+    String? staffId,
+  }) async {
     final res = await http.post(
       _uri("/api/auth/demo"),
       headers: {"Content-Type": "application/json"},
@@ -622,6 +696,7 @@ class ApiClient {
         "persona": persona,
         if (householdId != null && householdId.isNotEmpty)
           "householdId": householdId,
+        if (staffId != null && staffId.isNotEmpty) "staffId": staffId,
       }),
     );
     if (res.statusCode != 200) _throwFrom(res);
@@ -777,6 +852,28 @@ class ApiClient {
 
   Future<void> cancelPtmBooking(String bookingId) async {
     await _postData("/api/v1/ptm/cancel", {"bookingId": bookingId});
+  }
+
+  Future<PunchState> fetchPunchState() async =>
+      PunchState.fromJson(await _getData("/api/v1/staff/attendance/punch"));
+
+  Future<PunchResult> punchAttendance({
+    required String kind,
+    required double lat,
+    required double lng,
+    double? accuracyM,
+  }) async {
+    final data = await _postData("/api/v1/staff/attendance/punch", {
+      "kind": kind,
+      "lat": lat,
+      "lng": lng,
+      "accuracyM": ?accuracyM,
+    });
+    return PunchResult(
+      kind: (data["kind"] as String?) ?? kind,
+      time: (data["time"] as String?) ?? "",
+      distanceM: (data["distanceM"] as num?)?.toInt() ?? 0,
+    );
   }
 
   Future<void> markAttendance({

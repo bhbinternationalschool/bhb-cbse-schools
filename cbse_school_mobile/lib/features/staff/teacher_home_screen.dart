@@ -6,6 +6,7 @@ import "../modules/homework_screen.dart";
 import "../modules/module_shell.dart";
 import "../modules/notices_screen.dart";
 import "attendance_screen.dart";
+import "self_attendance_screen.dart";
 import "students_screen.dart";
 
 String _greeting() {
@@ -327,6 +328,45 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  Card(
+                    margin: const EdgeInsets.only(bottom: 16),
+                    child: ListTile(
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              SelfAttendanceScreen(api: widget.api),
+                        ),
+                      ),
+                      leading: Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: ModuleTone.teal.background,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          Icons.where_to_vote_outlined,
+                          color: ModuleTone.teal.foreground,
+                          size: 22,
+                        ),
+                      ),
+                      title: const Text(
+                        "My attendance",
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.ink,
+                        ),
+                      ),
+                      subtitle: const Text(
+                        "GPS punch in / out from campus",
+                        style:
+                            TextStyle(fontSize: 11.5, color: AppColors.muted),
+                      ),
+                      trailing: const Icon(Icons.chevron_right,
+                          color: AppColors.muted),
+                    ),
+                  ),
                   const Text(
                     "Today's periods",
                     style: TextStyle(
