@@ -226,3 +226,37 @@ there, not decided now.
 
 **Phase 0 is complete.** Ready for Phase 1 (new tables, additive-only)
 whenever you want it started.
+
+---
+
+## 7. Phase 1 — results (run 2026-08-12)
+
+Migration `supabase/migrations/20260812103712_sis_identity_enrollment_split.sql`
+applied. Two tables, both empty:
+
+- **`sis_student_identities`** (37 columns) — everything from `sis_students`
+  that doesn't vary by year: name, DOB, admission no., parents, Aadhaar,
+  PEN/APAAR/SRN, documents, notes, photo. `unique(tenant_id, admission_no)`
+  where the number is non-blank.
+- **`sis_enrollments`** (15 columns) — class, section, roll no., fee group,
+  student type, status, `identity_id` FK back to the identity, and
+  `promoted_from_enrollment_id` (self-referencing, nullable) so Phase 4's
+  promotion rewrite has an audit trail from day one.
+  `unique(identity_id, academic_year_code)` — the constraint that makes
+  Phase 0's finding (one admission number, four simultaneously-active rows)
+  structurally impossible to reintroduce once Phase 4 switches the write
+  path over.
+
+Both tables: RLS on, zero grants to `anon`/`authenticated` — same access
+shape as `sis_students` (checked first rather than assumed: it has no
+policies either, access is server-side only via `service_role`).
+
+Verified independently after applying: both tables at 0 rows, both unique
+indexes present, zero public grants on either, `sis_students` still at 719
+rows unchanged, and the Phase 0 spot-check admission number still resolves
+to its current row. `./scripts/verify.sh` — 36/36 — nothing in the app was
+touched, so this run is really confirming that creating these tables
+disturbed nothing else.
+
+**Phase 1 is complete.** Ready for Phase 2 (backfill, inside an
+asserted transaction) whenever you want it started.
