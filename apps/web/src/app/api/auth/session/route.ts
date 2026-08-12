@@ -83,6 +83,7 @@ export async function POST(request: Request) {
 
   let roleCode = DEMO_USERS[persona].roleCode;
   let staffId: string | undefined;
+  let householdId: string | undefined;
   let fullName = (profile.full_name as string) || DEMO_USERS[persona].fullName;
   const email =
     (profile.email as string | null) ||
@@ -115,6 +116,30 @@ export async function POST(request: Request) {
       if (hit) {
         staffId = hit.id as string;
         if (hit.full_name) fullName = hit.full_name as string;
+      }
+    }
+  }
+
+  // Same shape as the staff resolution above, by mobile instead of email —
+  // profiles has no household_id column, so this is how a parent's
+  // session gets scoped to their household. Previously missing entirely:
+  // a parent signing in via Supabase Auth got a session with no
+  // householdId, which every parent-portal screen needs.
+  if (persona === "parent" && admin && profile.tenant_id) {
+    const mobileKey = (profile.mobile as string | null)?.trim() || "";
+    if (mobileKey) {
+      const { data: hhRows } = await admin
+        .from("sis_households")
+        .select("id, guardian_name, mobile, whatsapp_mobile, alt_mobile")
+        .eq("tenant_id", profile.tenant_id)
+        .or(
+          `mobile.eq.${mobileKey},whatsapp_mobile.eq.${mobileKey},alt_mobile.eq.${mobileKey}`,
+        )
+        .limit(1)
+        .maybeSingle();
+      if (hhRows) {
+        householdId = hhRows.id as string;
+        if (hhRows.guardian_name) fullName = hhRows.guardian_name as string;
       }
     }
   }
@@ -152,6 +177,7 @@ export async function POST(request: Request) {
     roleCode,
     email: email || undefined,
     staffId,
+    householdId,
     tenantSlug: TENANT.slug,
     academicYearCode: resolvedAy,
   };
