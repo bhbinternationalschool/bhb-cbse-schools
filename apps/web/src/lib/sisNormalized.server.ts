@@ -7,6 +7,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   normalizeHousehold,
   normalizeStudent,
+  normalizeStudentDocs,
   emptyStudentDocs,
   type Household,
   type SisState,
@@ -397,6 +398,48 @@ export async function fetchSisFromDb(): Promise<{
       : null,
     ok: true,
   };
+}
+
+/**
+ * Single-student docs lookup — for the Drive document serve/upload routes
+ * (docs/GOOGLE_DRIVE_DOCUMENTS_PLAN.md §Phase 3), which need one record's
+ * docs, not the whole roster fetchSisFromDb pulls. Respects the same
+ * identity-split gate as the bulk fetchers: in split mode `studentId` is
+ * an enrollment id, and docs live on the joined identity row.
+ */
+export async function fetchSisStudentDocsById(
+  studentId: string,
+): Promise<StudentDocs | null> {
+  const ctx = await resolveCtx();
+  if (!ctx) return null;
+  const { sb, tenantId } = ctx;
+
+  if (sisIdentitySplitEnabled()) {
+    const { data, error } = await sb
+      .from("sis_enrollments")
+      .select("sis_student_identities!inner(docs)")
+      .eq("tenant_id", tenantId)
+      .eq("id", studentId)
+      .maybeSingle();
+    if (error || !data) return null;
+    const identity = (
+      data as unknown as { sis_student_identities: { docs: unknown } }
+    ).sis_student_identities;
+    return normalizeStudentDocs(
+      identity?.docs as Partial<Record<StudentDocKey, unknown>> | undefined,
+    );
+  }
+
+  const { data, error } = await sb
+    .from("sis_students")
+    .select("docs")
+    .eq("tenant_id", tenantId)
+    .eq("id", studentId)
+    .maybeSingle();
+  if (error || !data) return null;
+  return normalizeStudentDocs(
+    data.docs as Partial<Record<StudentDocKey, unknown>> | undefined,
+  );
 }
 
 /**

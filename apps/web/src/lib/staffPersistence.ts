@@ -7,6 +7,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import {
   normalizeStaffRecord,
+  normalizeStaffDocs,
   type Department,
   type Designation,
   type StaffDocKey,
@@ -216,6 +217,31 @@ export async function fetchStaffRemoteServer(): Promise<StaffRemoteBundle | null
     ),
     staff: ((stfRes.data ?? []) as StaffRow[]).map(rowToStaff),
   };
+}
+
+/**
+ * Single-staff docs lookup — for the Drive document serve/upload routes
+ * (docs/GOOGLE_DRIVE_DOCUMENTS_PLAN.md §Phase 3). docs lives inside the
+ * profile jsonb blob, not a dedicated column — see rowToStaff.
+ */
+export async function fetchStaffDocsById(
+  staffId: string,
+): Promise<StaffDocs | null> {
+  const { getServerTenantContext } = await import("@/lib/serverTenant");
+  const ctx = await getServerTenantContext();
+  if (!ctx) return null;
+  const { data, error } = await ctx.sb
+    .from("sis_staff")
+    .select("profile")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("id", staffId)
+    .maybeSingle();
+  if (error || !data) return null;
+  const profile =
+    data.profile && typeof data.profile === "object"
+      ? (data.profile as { docs?: unknown })
+      : {};
+  return normalizeStaffDocs(profile.docs);
 }
 
 /**
