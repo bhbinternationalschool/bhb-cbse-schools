@@ -260,3 +260,51 @@ disturbed nothing else.
 
 **Phase 1 is complete.** Ready for Phase 2 (backfill, inside an
 asserted transaction) whenever you want it started.
+
+---
+
+## 8. Phase 2 — results (run 2026-08-12)
+
+Migration `supabase/migrations/20260812104342_sis_identity_enrollment_backfill.sql`.
+
+Grouping key: `(tenant_id, admission_no)` alone — Phase 0 already proved
+this is safe across all 226 duplicated numbers, so no fuzzy household/name
+matching was needed for the grouping decision itself. Identity fields are
+sourced from each group's **most recent** `academic_year_code` row, so the
+21 drifted groups Phase 0 found resolve to whatever's currently believed
+true, with no manual per-case decision required.
+
+**Dry run first** (`begin` / `rollback`, nothing committed): caught a real
+issue before it could land — several `sis_students` columns hold `NULL`
+where the new schema expects `''` (`household_id` among others), which the
+new tables' `NOT NULL` constraints correctly rejected. Fixed with
+`coalesce(..., '')` on every optional field, re-ran the dry run, clean:
+273 identities, 719 enrollments, 0 orphans, 0 duplicate
+(identity, year) pairs — exact match to expected.
+
+Applied for real, then verified independently, not just trusted:
+
+```
+identities:                 273
+enrollments:                719
+sis_students (unchanged):   719
+identities with >=1
+  enrollment:                273   (none orphaned in either direction)
+orphaned enrollments:          0
+```
+
+**Spot-checked both a clean chain and a drifted one:**
+
+- `BHB-2023-24-1003` → one identity, four enrollments, classes progressing
+  correctly year over year (matches the raw data Phase 0 first showed).
+- `BHB-2023-24-1026` (one of the six household-drift cases) → identity's
+  `household_id` resolved to `hh_nl3bni2k`, the **2026-27** household —
+  confirming "most recent year wins" picked the current record, not a
+  stale one.
+
+Full `./scripts/verify.sh` — 36/36, unchanged from Phase 1. No app code
+touched.
+
+**Phase 2 is complete.** `sis_students` remains the only table anything in
+the app reads. Ready for Phase 3 (read path behind a flag, diffed against
+the old shape before touching a real screen) whenever you want it started.
