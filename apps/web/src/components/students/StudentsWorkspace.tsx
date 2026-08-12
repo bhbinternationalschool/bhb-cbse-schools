@@ -117,6 +117,9 @@ export function StudentsWorkspace() {
   const [sessionFilter, setSessionFilter] = useState("");
   const [classFilter, setClassFilter] = useState("");
   const [sectionFilter, setSectionFilter] = useState("");
+  const [rollSortMode, setRollSortMode] = useState<"name" | "admissionNo">(
+    "name",
+  );
   const [statusFilter, setStatusFilter] = useState<"all" | StudentStatus>(
     "active",
   );
@@ -373,9 +376,9 @@ export function StudentsWorkspace() {
   }
 
   /**
-   * Number one section at a time, alphabetically by name — the standard
-   * convention — in a single commit. There was no bulk or auto path before
-   * this; office typed each roll number by hand, one student at a time.
+   * Number one section at a time, in a single commit. There was no bulk or
+   * auto path before this; office typed each roll number by hand, one
+   * student at a time.
    *
    * Scoped to exactly one class AND one section deliberately: the button is
    * disabled unless both filters are set, so there is never a question of
@@ -384,7 +387,7 @@ export function StudentsWorkspace() {
    * every other field on every other student is untouched, and this is one
    * commit(), not N raced writes.
    */
-  function assignRollNumbers() {
+  function assignRollNumbers(sortBy: "name" | "admissionNo") {
     if (!state || !masters) return;
     if (!classFilter || !sectionFilter) return;
     const cls = masters.classes.find((c) => c.id === classFilter);
@@ -401,13 +404,20 @@ export function StudentsWorkspace() {
     );
     if (inSection.length === 0) return;
 
+    const byLabel =
+      sortBy === "admissionNo" ? "by admission number" : "alphabetically by name";
     const ok = window.confirm(
-      `Assign roll numbers 1–${inSection.length} to every active student in ${label}, alphabetically by name?\n\nThis overwrites any roll numbers already set in this section.`,
+      `Assign roll numbers 1–${inSection.length} to every active student in ${label}, ${byLabel}?\n\nThis overwrites any roll numbers already set in this section.`,
     );
     if (!ok) return;
 
     const ordered = [...inSection].sort((a, b) =>
-      a.fullName.localeCompare(b.fullName),
+      sortBy === "admissionNo"
+        ? a.admissionNo.localeCompare(b.admissionNo, undefined, {
+            numeric: true,
+            sensitivity: "base",
+          })
+        : a.fullName.localeCompare(b.fullName),
     );
     const rollById = new Map(ordered.map((s, i) => [s.id, String(i + 1)]));
     const next: SisState = {
@@ -1271,14 +1281,27 @@ export function StudentsWorkspace() {
               );
             })}
           </select>
+          <select
+            className="field max-w-[9rem] text-xs disabled:opacity-40"
+            value={rollSortMode}
+            onChange={(e) =>
+              setRollSortMode(e.target.value as "name" | "admissionNo")
+            }
+            disabled={!classFilter || !sectionFilter}
+            aria-label="Roll number order"
+            title="Order to assign roll numbers in"
+          >
+            <option value="name">By name (A–Z)</option>
+            <option value="admissionNo">By admission no.</option>
+          </select>
           <button
             type="button"
             className="field max-w-[11rem] text-xs font-semibold text-[var(--brand-mid)] disabled:opacity-40"
-            onClick={assignRollNumbers}
+            onClick={() => assignRollNumbers(rollSortMode)}
             disabled={!classFilter || !sectionFilter}
             title={
               classFilter && sectionFilter
-                ? "Assign roll numbers 1..N alphabetically for this section"
+                ? "Assign roll numbers 1..N in the order picked on the left"
                 : "Pick a class and section first"
             }
           >
