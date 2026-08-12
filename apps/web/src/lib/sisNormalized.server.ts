@@ -400,16 +400,19 @@ export async function fetchSisFromDb(): Promise<{
   };
 }
 
+export type StudentDocsLookup = { docs: StudentDocs; householdId: string };
+
 /**
  * Single-student docs lookup — for the Drive document serve/upload routes
- * (docs/GOOGLE_DRIVE_DOCUMENTS_PLAN.md §Phase 3), which need one record's
- * docs, not the whole roster fetchSisFromDb pulls. Respects the same
- * identity-split gate as the bulk fetchers: in split mode `studentId` is
- * an enrollment id, and docs live on the joined identity row.
+ * (docs/GOOGLE_DRIVE_DOCUMENTS_PLAN.md §Phase 3/4), which need one record's
+ * docs (and householdId, for parent-ownership checks), not the whole
+ * roster fetchSisFromDb pulls. Respects the same identity-split gate as
+ * the bulk fetchers: in split mode `studentId` is an enrollment id, and
+ * docs/household_id live on the joined identity row.
  */
 export async function fetchSisStudentDocsById(
   studentId: string,
-): Promise<StudentDocs | null> {
+): Promise<StudentDocsLookup | null> {
   const ctx = await resolveCtx();
   if (!ctx) return null;
   const { sb, tenantId } = ctx;
@@ -417,29 +420,37 @@ export async function fetchSisStudentDocsById(
   if (sisIdentitySplitEnabled()) {
     const { data, error } = await sb
       .from("sis_enrollments")
-      .select("sis_student_identities!inner(docs)")
+      .select("sis_student_identities!inner(docs,household_id)")
       .eq("tenant_id", tenantId)
       .eq("id", studentId)
       .maybeSingle();
     if (error || !data) return null;
     const identity = (
-      data as unknown as { sis_student_identities: { docs: unknown } }
+      data as unknown as {
+        sis_student_identities: { docs: unknown; household_id: string | null };
+      }
     ).sis_student_identities;
-    return normalizeStudentDocs(
-      identity?.docs as Partial<Record<StudentDocKey, unknown>> | undefined,
-    );
+    return {
+      docs: normalizeStudentDocs(
+        identity?.docs as Partial<Record<StudentDocKey, unknown>> | undefined,
+      ),
+      householdId: identity?.household_id ?? "",
+    };
   }
 
   const { data, error } = await sb
     .from("sis_students")
-    .select("docs")
+    .select("docs,household_id")
     .eq("tenant_id", tenantId)
     .eq("id", studentId)
     .maybeSingle();
   if (error || !data) return null;
-  return normalizeStudentDocs(
-    data.docs as Partial<Record<StudentDocKey, unknown>> | undefined,
-  );
+  return {
+    docs: normalizeStudentDocs(
+      data.docs as Partial<Record<StudentDocKey, unknown>> | undefined,
+    ),
+    householdId: data.household_id ?? "",
+  };
 }
 
 /**

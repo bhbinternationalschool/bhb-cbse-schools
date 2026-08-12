@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
-import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import { uploadFileToDrive } from "@/lib/googleDrive.server";
 import { fetchSisStudentDocsById } from "@/lib/sisNormalized.server";
 import { fetchStaffDocsById } from "@/lib/staffPersistence";
+import { authorizeDocumentAction } from "@/lib/documentsAuth.server";
 import {
   documentProxyUrl,
   isDocumentSubject,
   isValidDocKey,
-  subjectRbacModule,
 } from "@/lib/documentsRouting";
 
 export const runtime = "nodejs";
@@ -25,7 +24,11 @@ const ALLOWED_MIME: Record<string, string> = {
  * Does NOT write the sis_students/sis_staff row itself — returns the
  * fields the client merges into its own doc record and saves through the
  * existing desk-slice sync, same as every other field on that record.
- * See docs/GOOGLE_DRIVE_DOCUMENTS_PLAN.md §Phase 3.
+ * See docs/GOOGLE_DRIVE_DOCUMENTS_PLAN.md §Phase 3/4.
+ *
+ * Allowed callers: staff with edit permission on the subject's module,
+ * OR a parent uploading their own child's docs (household match), OR a
+ * staff member uploading their own HR docs (subjectId === their staffId).
  */
 export async function POST(request: Request) {
   const formData = await request.formData().catch(() => null);
@@ -54,12 +57,31 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Missing file" }, { status: 400 });
   }
 
-  const auth = await requireStaffPermission(
+  let recordExists = false;
+  let recordHouseholdId: string | undefined;
+  if (subject === "student") {
+    const record = await fetchSisStudentDocsById(subjectId);
+    recordExists = record !== null;
+    recordHouseholdId = record?.householdId;
+  } else {
+    recordExists = (await fetchStaffDocsById(subjectId)) !== null;
+  }
+
+  const auth = await authorizeDocumentAction(
     request,
-    subjectRbacModule(subject),
+    subject,
+    subjectId,
     "edit",
+    recordHouseholdId,
   );
   if (!auth.ok) return auth.response;
+
+  if (!recordExists) {
+    return NextResponse.json(
+      { error: `${subject === "student" ? "Student" : "Staff"} record not found` },
+      { status: 404 },
+    );
+  }
 
   const ext = ALLOWED_MIME[file.type];
   if (!ext) {
@@ -72,17 +94,6 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { error: `File exceeds ${MAX_UPLOAD_BYTES / (1024 * 1024)}MB limit` },
       { status: 413 },
-    );
-  }
-
-  const existing =
-    subject === "student"
-      ? await fetchSisStudentDocsById(subjectId)
-      : await fetchStaffDocsById(subjectId);
-  if (!existing) {
-    return NextResponse.json(
-      { error: `${subject === "student" ? "Student" : "Staff"} record not found` },
-      { status: 404 },
     );
   }
 

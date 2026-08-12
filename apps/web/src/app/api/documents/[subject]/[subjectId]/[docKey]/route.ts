@@ -1,15 +1,11 @@
 import { NextResponse } from "next/server";
-import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import { getDriveFileContent } from "@/lib/googleDrive.server";
 import { fetchSisStudentDocsById } from "@/lib/sisNormalized.server";
 import { fetchStaffDocsById } from "@/lib/staffPersistence";
-import type { StudentDocKey } from "@/lib/sis";
-import type { StaffDocKey } from "@/lib/foundationMasters";
-import {
-  isDocumentSubject,
-  isValidDocKey,
-  subjectRbacModule,
-} from "@/lib/documentsRouting";
+import { authorizeDocumentAction } from "@/lib/documentsAuth.server";
+import type { StudentDocFile, StudentDocKey } from "@/lib/sis";
+import type { StaffDocFile, StaffDocKey } from "@/lib/foundationMasters";
+import { isDocumentSubject, isValidDocKey } from "@/lib/documentsRouting";
 
 export const runtime = "nodejs";
 
@@ -22,12 +18,16 @@ function safeAsciiFilename(name: string): string {
 }
 
 /**
- * Serve a student/staff document. Never a direct Drive link — RBAC-checked
- * proxy fetch against the SAME rules already gating student/staff record
- * access, matching docs/GOOGLE_DRIVE_DOCUMENTS_PLAN.md §3. The driveFileId
- * itself never reaches the client; the URL only carries subject/subjectId/
- * docKey, and the server resolves those against the actual stored record
- * so a caller can't request an arbitrary Drive file id.
+ * Serve a student/staff document. Never a direct Drive link — RBAC/
+ * ownership-checked proxy fetch against the same rules gating student/
+ * staff record access, matching docs/GOOGLE_DRIVE_DOCUMENTS_PLAN.md §3/4.
+ * The driveFileId itself never reaches the client; the URL only carries
+ * subject/subjectId/docKey, and the server resolves those against the
+ * actual stored record so a caller can't request an arbitrary Drive file.
+ *
+ * Allowed callers: staff with view permission on the subject's module,
+ * OR a parent viewing their own child's docs (household match), OR a
+ * staff member viewing their own HR docs (subjectId === their staffId).
  */
 export async function GET(request: Request, ctx: RouteCtx) {
   const { subject, subjectId, docKey } = await ctx.params;
@@ -36,27 +36,31 @@ export async function GET(request: Request, ctx: RouteCtx) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const auth = await requireStaffPermission(
+  let file: StudentDocFile | StaffDocFile | undefined;
+  let householdId: string | undefined;
+  if (subject === "student") {
+    const record = await fetchSisStudentDocsById(subjectId);
+    file = record?.docs[docKey as StudentDocKey];
+    householdId = record?.householdId;
+  } else {
+    const docs = await fetchStaffDocsById(subjectId);
+    file = docs?.[docKey as StaffDocKey];
+  }
+
+  const auth = await authorizeDocumentAction(
     request,
-    subjectRbacModule(subject),
+    subject,
+    subjectId,
     "view",
+    householdId,
   );
   if (!auth.ok) return auth.response;
 
-  const file =
-    subject === "student"
-      ? (await fetchSisStudentDocsById(subjectId))?.[docKey as StudentDocKey]
-      : (await fetchStaffDocsById(subjectId))?.[docKey as StaffDocKey];
-  if (!file) {
+  if (!file || !file.driveFileId) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const driveFileId = file.driveFileId;
-  if (!driveFileId) {
-    return NextResponse.json({ error: "No file on record" }, { status: 404 });
-  }
-
-  const content = await getDriveFileContent(driveFileId);
+  const content = await getDriveFileContent(file.driveFileId);
   if (!content.ok) {
     return NextResponse.json({ error: content.error }, { status: 502 });
   }
