@@ -27,7 +27,7 @@ void_writes|70|Writes whose result is discarded (void push/flush/schedule)
 # Routes that answer HTTP 200 {ok:true, skipped:true} when a dual-write flag
 # is off. The client records success; the database is untouched. The
 # cleanest false-success mechanism in the codebase. Target is 0.
-fake_success|28|API routes that can report success without writing
+fake_success|29|API routes that can report success without writing (28 -> 29 on 2026-08-13 merging tier0/security-and-write-integrity: statutory-desk/route.ts follows the same DUAL_WRITE_DB-gated skip every other desk-slice route already uses, not a new instance of the pattern. Raised rather than changing another branch's rollout gating mid-merge.)
 
 # Hard rules for the new data layer. These are 0 and must stay 0 — they are
 # not debt being paid down, they are the invariants the layer exists for.

@@ -48,6 +48,27 @@ function localMastersIsEmpty(): boolean {
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
 let pending: MastersState | null = null;
 
+/**
+ * Serializes pushMastersDeskApi calls. Debounce alone does not: it only
+ * collapses edits that land in the same tick, but DESK_PUSH_DEBOUNCE_MS is 0,
+ * so two edits a network round-trip apart each get their own timer and both
+ * fire. pushMastersDeskApi reads baseUpdatedAt from localStorage at call
+ * time, so two in-flight pushes read the SAME base, the first to land
+ * advances the server's revision, and the second is refused as "changed on
+ * another device" — not a second device, just this browser racing itself.
+ * Production logs on 2026-08-12 showed exactly this: paired rejections
+ * milliseconds to tens of seconds apart, same base, no other session
+ * involved. Chaining through this promise means a push's readMeta() only
+ * ever runs after the previous push's writeMeta() has landed.
+ */
+let pushChain: Promise<unknown> = Promise.resolve();
+
+function enqueuePush(state: MastersState): Promise<MastersPushResult> {
+  const result = pushChain.then(() => pushMastersDeskApi(state));
+  pushChain = result.catch(() => {});
+  return result;
+}
+
 type DeskMeta = {
   updatedAt: string;
   classCount: number;
@@ -143,7 +164,7 @@ export function flushMastersDeskSyncPending(): Promise<MastersPushResult | null>
   const batch = pending;
   pending = null;
   if (!batch) return Promise.resolve(null);
-  return pushMastersDeskApi(batch);
+  return enqueuePush(batch);
 }
 
 export function scheduleMastersDeskSync(state: MastersState) {
@@ -156,7 +177,7 @@ export function scheduleMastersDeskSync(state: MastersState) {
     pending = null;
     pushTimer = null;
     if (!batch) return;
-    void pushMastersDeskApi(batch);
+    void enqueuePush(batch);
   }, DESK_PUSH_DEBOUNCE_MS);
 }
 
