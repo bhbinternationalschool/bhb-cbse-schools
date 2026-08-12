@@ -5,6 +5,7 @@
 
 import type {
   DashboardTableColumn,
+  DashboardTableRow,
   ModuleDashboardModel,
 } from "@/components/dashboard/ModuleDashboard";
 import {
@@ -39,7 +40,17 @@ import { computeFeeKpis } from "@/lib/feeFinance";
 import { buildDayBook, formatInr, loadFees } from "@/lib/fees";
 import { loadOfflineQueue } from "@/lib/fieldSurvey";
 import { loadHomework } from "@/lib/homework";
-import { isStaffActive, type StaffRecord } from "@/lib/foundationMasters";
+import {
+  isStaffActive,
+  normalizeStatutoryConfig,
+  type StaffRecord,
+} from "@/lib/foundationMasters";
+import { loadStatutoryRemit } from "@/lib/statutoryRemit";
+import {
+  computeEstimatedPenalty,
+  statutoryDueDate,
+} from "@/lib/statutoryCompliance";
+import { formatInr as formatInrRupees } from "@/lib/payroll";
 import {
   currentAcademicYearCode,
   formatInrCompact,
@@ -1663,6 +1674,74 @@ function payrollDash(academicYearCode?: string): ModuleDashboardModel {
     label: r.month || r.id.slice(-6),
     value: Math.round(runNetPaise(r.lines) / 100),
   }));
+
+  const statutoryConfig = normalizeStatutoryConfig(loadMasters().statutoryConfig);
+  const statutoryBatches = loadStatutoryRemit().batches.filter((b) =>
+    inAcademicYear(b, academicYearCode),
+  );
+  const today = new Date();
+  let pendingDues = 0;
+  let overdueDues = 0;
+  let overdueEstimatedPenalty = 0;
+  const complianceRows: DashboardTableRow[] = [];
+  for (const b of statutoryBatches) {
+    const dues: {
+      kind: "EPF" | "ESIC";
+      amount: number;
+      progress: (typeof b)["epf"];
+      slabs: typeof statutoryConfig.penalty.damageSlabs;
+      interestRate: number;
+    }[] = [
+      {
+        kind: "EPF",
+        amount: b.totalEpfEpsContribution + b.totalEdliContribution,
+        progress: b.epf,
+        slabs: statutoryConfig.penalty.damageSlabs,
+        interestRate: statutoryConfig.penalty.interestRatePctPerAnnum,
+      },
+      {
+        kind: "ESIC",
+        amount: b.esicTotal,
+        progress: b.esic,
+        slabs: statutoryConfig.penalty.esicDamageSlabs,
+        interestRate: statutoryConfig.penalty.esicInterestRatePctPerAnnum,
+      },
+    ];
+    for (const due of dues) {
+      if (due.amount <= 0) continue;
+      const paidAt = due.progress.paidAt;
+      if (!paidAt) pendingDues += 1;
+      const penalty = paidAt
+        ? null
+        : computeEstimatedPenalty(
+            statutoryDueDate(b.month),
+            today,
+            due.amount,
+            due.slabs,
+            due.interestRate,
+          );
+      if (penalty && penalty.daysOverdue > 0) {
+        overdueDues += 1;
+        overdueEstimatedPenalty += penalty.estimatedTotal;
+      }
+      const status = paidAt
+        ? "Paid"
+        : due.progress.filedAt
+          ? "Filed, unpaid"
+          : "Not filed";
+      complianceRows.push({
+        id: `${b.id}_${due.kind.toLowerCase()}`,
+        month: b.month,
+        type: due.kind,
+        amount: formatInrRupees(due.amount),
+        status,
+        daysOverdue: penalty && penalty.daysOverdue > 0 ? penalty.daysOverdue : "—",
+        estPenalty: penalty && penalty.daysOverdue > 0 ? formatInrRupees(penalty.estimatedTotal) : "—",
+      });
+    }
+  }
+  complianceRows.sort((a, b) => String(b.month).localeCompare(String(a.month)));
+
   return {
     title: "Payroll",
     subtitle: `Session ${academicYearCode || "all"} · salary runs, approvals, and net payouts.`,
@@ -1694,6 +1773,29 @@ function payrollDash(academicYearCode?: string): ModuleDashboardModel {
         value: String(paid),
         tone: "green",
         tab: "runs",
+      },
+      {
+        id: "statutory",
+        label: "EPF/ESIC compliance",
+        value: String(pendingDues),
+        hint:
+          overdueDues > 0
+            ? `${overdueDues} overdue · est. penalty ${formatInrRupees(overdueEstimatedPenalty)}`
+            : pendingDues > 0
+              ? "None overdue"
+              : "All filed & paid",
+        tone: overdueDues > 0 ? "coral" : pendingDues > 0 ? "gold" : "green",
+        tab: "govt",
+        detailTitle: "EPF/ESIC dues",
+        detailColumns: [
+          { key: "month", label: "Month" },
+          { key: "type", label: "Type" },
+          { key: "amount", label: "Amount", align: "right" },
+          { key: "status", label: "Status" },
+          { key: "daysOverdue", label: "Days overdue", align: "right" },
+          { key: "estPenalty", label: "Est. penalty", align: "right" },
+        ],
+        detailRows: complianceRows,
       },
     ],
     chartTitle: "Net payout by run (₹)",
