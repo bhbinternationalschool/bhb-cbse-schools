@@ -1,13 +1,19 @@
 /**
  * Run: npx tsx src/lib/store.selftest.ts
  *
- * Exercises only the pure logic — groupLowStockByLocation(). Only
- * `store.infraLevels` is actually read (via infraLevelLabel), so the fixture
- * store object below is intentionally minimal, not a full StoreState.
+ * Exercises only the pure logic — groupLowStockByLocation() and
+ * listOverAllocatedItems(). Only the fields each function actually reads are
+ * populated on the fixture store object below, not a full StoreState.
  */
 import assert from "node:assert/strict";
 
-import { groupLowStockByLocation, type StoreItem, type StoreState } from "./store";
+import {
+  groupLowStockByLocation,
+  listOverAllocatedItems,
+  type StoreInventoryAllocation,
+  type StoreItem,
+  type StoreState,
+} from "./store";
 
 console.log("store.selftest.ts");
 
@@ -90,6 +96,94 @@ const store = {
 // --- empty input -> empty output -------------------------------------------
 {
   assert.deepEqual(groupLowStockByLocation([], store), []);
+}
+
+function makeAlloc(overrides: Partial<StoreInventoryAllocation>): StoreInventoryAllocation {
+  return {
+    id: overrides.id || "alloc",
+    itemId: overrides.itemId || "item",
+    infraLevelId: overrides.infraLevelId || "",
+    qty: overrides.qty ?? 0,
+    note: "",
+    updatedAt: "2026-08-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+// --- listOverAllocatedItems: allocations across locations summing past ----
+// --- stockOnHand are flagged, with the correct overBy and per-location ----
+// --- breakdown ---------------------------------------------------------
+{
+  const beaker = makeItem({ id: "beaker", name: "Beaker", stockOnHand: 10 });
+  const overStore = {
+    infraLevels: store.infraLevels,
+    items: [beaker],
+    inventoryAllocations: [
+      makeAlloc({ id: "a1", itemId: "beaker", infraLevelId: "lab-physics", qty: 30 }),
+      makeAlloc({ id: "a2", itemId: "beaker", infraLevelId: "lab-chem", qty: 20 }),
+    ],
+  } as StoreState;
+
+  const flagged = listOverAllocatedItems(overStore);
+  assert.equal(flagged.length, 1);
+  assert.equal(flagged[0].itemId, "beaker");
+  assert.equal(flagged[0].totalAllocated, 50);
+  assert.equal(flagged[0].stockOnHand, 10);
+  assert.equal(flagged[0].overBy, 40);
+  assert.equal(flagged[0].allocations.length, 2);
+  assert.ok(
+    flagged[0].allocations.some((a) => a.infraLevelLabel === "Physics Lab" && a.qty === 30),
+    "must resolve real location names, not just echo the id",
+  );
+}
+
+// --- an item allocated at or under stockOnHand is excluded -----------------
+{
+  const flask = makeItem({ id: "flask", stockOnHand: 10 });
+  const okStore = {
+    infraLevels: store.infraLevels,
+    items: [flask],
+    inventoryAllocations: [makeAlloc({ id: "a1", itemId: "flask", qty: 10 })],
+  } as StoreState;
+  assert.deepEqual(listOverAllocatedItems(okStore), []);
+}
+
+// --- an over-allocated but inactive item is excluded (not actionable) -----
+{
+  const retired = makeItem({ id: "retired", stockOnHand: 0, isActive: false });
+  const inactiveStore = {
+    infraLevels: store.infraLevels,
+    items: [retired],
+    inventoryAllocations: [makeAlloc({ id: "a1", itemId: "retired", qty: 25 })],
+  } as StoreState;
+  assert.deepEqual(listOverAllocatedItems(inactiveStore), []);
+}
+
+// --- worst over-allocation (largest overBy) sorts first ---------------------
+{
+  const a = makeItem({ id: "a", stockOnHand: 10 });
+  const b = makeItem({ id: "b", stockOnHand: 10 });
+  const sortStore = {
+    infraLevels: store.infraLevels,
+    items: [a, b],
+    inventoryAllocations: [
+      makeAlloc({ id: "a1", itemId: "a", qty: 15 }), // overBy 5
+      makeAlloc({ id: "b1", itemId: "b", qty: 40 }), // overBy 30
+    ],
+  } as StoreState;
+  const flagged = listOverAllocatedItems(sortStore);
+  assert.equal(flagged[0].itemId, "b", "overBy 30 must sort before overBy 5");
+  assert.equal(flagged[1].itemId, "a");
+}
+
+// --- no allocations -> empty output, not a crash ----------------------------
+{
+  const emptyStore = {
+    infraLevels: store.infraLevels,
+    items: [] as StoreItem[],
+    inventoryAllocations: [] as StoreInventoryAllocation[],
+  } as StoreState;
+  assert.deepEqual(listOverAllocatedItems(emptyStore), []);
 }
 
 console.log("OK — store.selftest.ts");

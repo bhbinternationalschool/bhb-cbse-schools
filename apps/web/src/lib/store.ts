@@ -1446,6 +1446,53 @@ export function groupLowStockByLocation(
     .sort((a, b) => b.items.length - a.items.length);
 }
 
+export type OverAllocatedItem = {
+  itemId: string;
+  itemName: string;
+  stockOnHand: number;
+  totalAllocated: number;
+  overBy: number;
+  allocations: { infraLevelId: string; infraLevelLabel: string; qty: number }[];
+};
+
+/** Pure — flags items whose inventory allocations (StoreInventoryAllocation,
+ * one row per item x location) now add up to more than stockOnHand. Nothing
+ * today reconciles the two: stockOnHand moves independently via bumpStock()
+ * (item edits, adjustments, issue/void/exchange), so an item can be
+ * allocated 50 units across labs, have stock adjusted down to 10, and give
+ * no warning the allocations no longer add up. Read-only — never caps or
+ * blocks a save, since a school may deliberately over-allocate pending a
+ * purchase order. */
+export function listOverAllocatedItems(store?: StoreState): OverAllocatedItem[] {
+  const s = store ?? loadStore();
+  const byItem = new Map<string, StoreInventoryAllocation[]>();
+  for (const a of s.inventoryAllocations) {
+    const list = byItem.get(a.itemId) ?? [];
+    list.push(a);
+    byItem.set(a.itemId, list);
+  }
+  const out: OverAllocatedItem[] = [];
+  for (const [itemId, allocs] of byItem) {
+    const item = s.items.find((i) => i.id === itemId);
+    if (!item || !item.isActive) continue;
+    const totalAllocated = allocs.reduce((sum, a) => sum + a.qty, 0);
+    if (totalAllocated <= item.stockOnHand) continue;
+    out.push({
+      itemId,
+      itemName: item.name,
+      stockOnHand: item.stockOnHand,
+      totalAllocated,
+      overBy: totalAllocated - item.stockOnHand,
+      allocations: allocs.map((a) => ({
+        infraLevelId: a.infraLevelId,
+        infraLevelLabel: infraLevelLabel(a.infraLevelId, s),
+        qty: a.qty,
+      })),
+    });
+  }
+  return out.sort((a, b) => b.overBy - a.overBy);
+}
+
 export function nextStoreIssueNo(
   store?: StoreState,
   ayCode = DEFAULT_AY,
