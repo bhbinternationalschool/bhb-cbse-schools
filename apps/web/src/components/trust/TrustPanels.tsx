@@ -52,13 +52,13 @@ export type TrustPanelProps = {
 };
 
 const CARD =
-  "rounded-2xl border border-[rgba(32,48,80,0.12)] bg-white p-4";
+  "rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4";
 const FIELD =
-  "w-full rounded-xl border border-[rgba(32,48,80,0.18)] px-3 py-2 text-sm";
+  "w-full rounded-xl border border-[var(--border)] px-3 py-2 text-sm";
 const BTN =
   "rounded-xl bg-[#0f2744] px-4 py-2 text-sm font-medium text-white";
 const BTN_OUTLINE =
-  "rounded-xl border border-[rgba(32,48,80,0.2)] px-3 py-1.5 text-sm font-medium text-[var(--brand-deep)]";
+  "rounded-xl border border-[var(--border)] px-3 py-1.5 text-sm font-medium text-[var(--brand-deep)]";
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -183,7 +183,7 @@ export function ProjectsPanel({
           <div className="text-[11px] font-bold uppercase text-[var(--muted)]">
             Overdue allotments
           </div>
-          <div className="mt-1 text-2xl font-bold text-[#b45309]">
+          <div className="mt-1 text-2xl font-bold text-[var(--warning)]">
             {snap.overdueAllotments}
           </div>
         </div>
@@ -243,7 +243,7 @@ export function ProjectsPanel({
               return (
                 <tr
                   key={p.id}
-                  className={`cursor-pointer border-t border-[rgba(32,48,80,0.08)] ${selectedProjectId === p.id ? "bg-[rgba(197,160,40,0.08)]" : ""}`}
+                  className={`cursor-pointer border-t border-[var(--border)] ${selectedProjectId === p.id ? "bg-[rgba(197,160,40,0.08)]" : ""}`}
                   onClick={() => onSelectProject(p.id)}
                 >
                   <td className="py-2 font-mono text-xs">{p.code}</td>
@@ -353,7 +353,7 @@ export function WorksPanel({
           </thead>
           <tbody>
             {items.map((w) => (
-              <tr key={w.id} className="border-t border-[rgba(32,48,80,0.08)]">
+              <tr key={w.id} className="border-t border-[var(--border)]">
                 <td className="py-2">{w.name}</td>
                 <td className="py-2">{w.category}</td>
                 <td className="py-2 text-right">
@@ -437,7 +437,7 @@ export function MaterialsPanel({
           </thead>
           <tbody>
             {lines.map((m) => (
-              <tr key={m.id} className="border-t border-[rgba(32,48,80,0.08)]">
+              <tr key={m.id} className="border-t border-[var(--border)]">
                 <td className="py-2">{m.name}</td>
                 <td className="py-2 text-right">{m.requiredQty}</td>
                 <td className="py-2 text-right">{m.issuedQty}</td>
@@ -528,7 +528,7 @@ export function LabourPanel({
           </thead>
           <tbody>
             {entries.map((l) => (
-              <tr key={l.id} className="border-t border-[rgba(32,48,80,0.08)]">
+              <tr key={l.id} className="border-t border-[var(--border)]">
                 <td className="py-2">{l.labourType}</td>
                 <td className="py-2 text-right">{l.days}</td>
                 <td className="py-2 text-right">{formatInr(l.amountPaise)}</td>
@@ -594,7 +594,7 @@ export function AllotmentsPanel({
     <div className="mt-4 space-y-4">
       <ProjectPicker state={state} selectedProjectId={selectedProjectId} onSelectProject={onSelectProject} />
       {overdue.length > 0 ? (
-        <div className={`${CARD} text-sm text-[#b45309]`}>
+        <div className={`${CARD} text-sm text-[var(--warning)]`}>
           {overdue.length} overdue allotment(s)
         </div>
       ) : null}
@@ -633,7 +633,7 @@ export function AllotmentsPanel({
           </thead>
           <tbody>
             {allotments.map((a) => (
-              <tr key={a.id} className="border-t border-[rgba(32,48,80,0.08)]">
+              <tr key={a.id} className="border-t border-[var(--border)]">
                 <td className="py-2 font-mono text-xs">{a.code}</td>
                 <td className="py-2">{a.partyName}</td>
                 <td className="py-2">{a.targetEnd}</td>
@@ -833,7 +833,7 @@ export function BillsPanel({
           {state.raBills
             .filter((b) => !selectedProjectId || b.projectId === selectedProjectId)
             .map((b) => (
-              <div key={b.id} className="rounded-lg border border-[rgba(32,48,80,0.12)] px-3 py-2 text-xs">
+              <div key={b.id} className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs">
                 {b.billNo} · {formatInr(b.amountPaise)} · {b.status}
                 {b.status === "submitted" ? (
                   <button
@@ -900,7 +900,7 @@ export function BillsPanel({
           </thead>
           <tbody>
             {costLines.map((c) => (
-              <tr key={c.id} className="border-t border-[rgba(32,48,80,0.08)]">
+              <tr key={c.id} className="border-t border-[var(--border)]">
                 <td className="py-2">{c.date}</td>
                 <td className="py-2">{c.costType}</td>
                 <td className="py-2 text-right">{formatInr(c.amountPaise)}</td>
@@ -1000,7 +1000,7 @@ export function ReportsPanel({
             {(reportsByCategory[cat.id] ?? []).map((r) => (
               <li
                 key={r.id}
-                className="flex flex-wrap items-center justify-between gap-2 border-t border-[rgba(32,48,80,0.08)] pt-2 first:border-0 first:pt-0"
+                className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border)] pt-2 first:border-0 first:pt-0"
               >
                 <div>
                   <div className="font-medium text-[var(--brand-deep)]">{r.label}</div>

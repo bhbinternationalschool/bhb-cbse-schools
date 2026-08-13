@@ -107,13 +107,13 @@ export function ModulesWorkspace() {
                 return (
                   <li
                     key={m.id}
-                    className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-4"
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-4"
                   >
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold text-[var(--brand-deep)]">
                         {m.label}
                         {m.alwaysOn ? (
-                          <span className="ml-2 rounded bg-[rgba(32,48,80,0.08)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--muted)]">
+                          <span className="ml-2 rounded bg-[var(--surface-sunken)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--muted)]">
                             Always on
                           </span>
                         ) : null}
@@ -125,7 +125,7 @@ export function ModulesWorkspace() {
                           className={
                             on
                               ? "font-semibold text-[#0f7a4c]"
-                              : "font-semibold text-[#b45309]"
+                              : "font-semibold text-[var(--warning)]"
                           }
                         >
                           {on ? "ON" : "OFF"}

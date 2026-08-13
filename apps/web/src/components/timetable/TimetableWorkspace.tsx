@@ -556,7 +556,7 @@ export function TimetableWorkspace() {
           className={`rounded-lg px-3 py-1.5 text-[11px] font-semibold ${
             sessionPublishedGrids.length
               ? "bg-[rgba(15,122,76,0.12)] text-[var(--ok)]"
-              : "bg-[rgba(217,119,6,0.15)] text-[#b45309]"
+              : "bg-[rgba(217,119,6,0.15)] text-[var(--warning)]"
           }`}
         >
           {sessionPublishedGrids.length ? "Published" : "Draft"}
@@ -582,7 +582,7 @@ export function TimetableWorkspace() {
       />
 
       {masters && !canEdit ? (
-        <p className="mt-3 rounded-lg bg-[rgba(217,119,6,0.12)] px-3 py-2 text-[12px] text-[#b45309]">
+        <p className="mt-3 rounded-lg bg-[rgba(217,119,6,0.12)] px-3 py-2 text-[12px] text-[var(--warning)]">
           View only — your role has no timetable edit permission, so save /
           remove / auto-assign controls are hidden. Ask an admin to grant
           Timetable → Edit under Masters → Roles &amp; permissions.
@@ -590,12 +590,12 @@ export function TimetableWorkspace() {
       ) : null}
 
       {error ? (
-        <p className="mt-3 rounded-lg bg-[#dc2626]/10 px-3 py-2 text-sm text-[#dc2626]">
+        <p className="mt-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-sm text-[var(--danger)]">
           {error}
         </p>
       ) : null}
       {notice ? (
-        <p className="mt-3 rounded-lg bg-[rgba(32,48,80,0.06)] px-3 py-2 text-sm text-[var(--brand-deep)]">
+        <p className="mt-3 rounded-lg bg-[var(--surface-sunken)] px-3 py-2 text-sm text-[var(--brand-deep)]">
           {notice}
         </p>
       ) : null}
@@ -617,7 +617,7 @@ export function TimetableWorkspace() {
 
       {tab === "setup" ? (
         <div className="mt-5 space-y-4">
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <div className="flex flex-wrap items-end justify-between gap-2">
               <div>
                 <h2 className="text-sm font-bold text-[var(--brand-deep)]">
@@ -634,7 +634,7 @@ export function TimetableWorkspace() {
               {canEdit ? (
                 <button
                   type="button"
-                  className="rounded-lg border border-[rgba(32,48,80,0.18)] px-3 py-1.5 text-sm font-semibold"
+                  className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm font-semibold"
                   onClick={onPullTiming}
                 >
                   Pull from Masters timing
@@ -662,7 +662,7 @@ export function TimetableWorkspace() {
             </div>
           </div>
 
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-sm font-bold text-[var(--brand-deep)]">
                 Bell periods
@@ -671,7 +671,7 @@ export function TimetableWorkspace() {
                 <div className="flex gap-2">
                   <button
                     type="button"
-                    className="rounded-lg border border-[rgba(32,48,80,0.18)] px-3 py-1.5 text-sm font-semibold"
+                    className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm font-semibold"
                     onClick={() => setBellDraft(defaultBellTemplate())}
                   >
                     Reset default
@@ -690,7 +690,7 @@ export function TimetableWorkspace() {
               {bellDraft.map((p, idx) => (
                 <li
                   key={`${p.no}-${idx}`}
-                  className="grid gap-2 rounded-lg bg-[rgba(32,48,80,0.04)] p-2 sm:grid-cols-[4rem_1fr_6rem_6rem_7rem_auto]"
+                  className="grid gap-2 rounded-lg bg-[var(--surface-sunken)] p-2 sm:grid-cols-[4rem_1fr_6rem_6rem_7rem_auto]"
                 >
                   <input
                     className="field !py-1 text-sm"
@@ -759,7 +759,7 @@ export function TimetableWorkspace() {
                   {canEdit ? (
                     <button
                       type="button"
-                      className="text-sm text-[#dc2626]"
+                      className="text-sm text-[var(--danger)]"
                       onClick={() =>
                         setBellDraft((prev) => prev.filter((_, i) => i !== idx))
                       }
@@ -773,7 +773,7 @@ export function TimetableWorkspace() {
             {canEdit ? (
               <button
                 type="button"
-                className="mt-3 rounded-lg border border-[rgba(32,48,80,0.18)] px-3 py-1.5 text-sm font-semibold"
+                className="mt-3 rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm font-semibold"
                 onClick={() =>
                   setBellDraft((prev) => [
                     ...prev,
@@ -800,7 +800,7 @@ export function TimetableWorkspace() {
 
       {tab === "class" ? (
         <div className="mt-5 space-y-4">
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <div className="grid gap-3 sm:grid-cols-3">
               <label className="block text-sm">
                 <span className="mb-1 block text-[11px] text-[var(--muted)]">
@@ -851,14 +851,14 @@ export function TimetableWorkspace() {
                   </button>
                   <button
                     type="button"
-                    className="rounded-lg border border-[rgba(32,48,80,0.18)] px-3 py-2 text-sm font-semibold"
+                    className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-semibold"
                     onClick={onDiscardGridChanges}
                   >
                     Discard changes
                   </button>
                   <button
                     type="button"
-                    className="rounded-lg border border-[rgba(32,48,80,0.18)] px-3 py-2 text-sm font-semibold"
+                    className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-semibold"
                     disabled={!editSlots.length}
                     onClick={onClearGridDraft}
                   >
@@ -867,7 +867,7 @@ export function TimetableWorkspace() {
                   {savedGridExists ? (
                     <button
                       type="button"
-                      className="rounded-lg border border-[#dc2626]/40 px-3 py-2 text-sm font-semibold text-[#dc2626]"
+                      className="rounded-lg border border-[var(--danger)]/40 px-3 py-2 text-sm font-semibold text-[var(--danger)]"
                       onClick={onDeleteGrid}
                     >
                       Delete grid
@@ -893,7 +893,7 @@ export function TimetableWorkspace() {
                   </p>
                 ) : null}
 
-                <div className="mt-3 flex flex-wrap items-end gap-3 rounded-lg bg-[rgba(32,48,80,0.04)] p-3">
+                <div className="mt-3 flex flex-wrap items-end gap-3 rounded-lg bg-[var(--surface-sunken)] p-3">
                   <label className="block text-sm">
                     <span className="mb-1 block text-[11px] text-[var(--muted)]">
                       Effective schedule date
@@ -975,7 +975,7 @@ export function TimetableWorkspace() {
                   <table className="min-w-[640px] w-full border-collapse text-xs">
                     <thead>
                       <tr>
-                        <th className="border border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.04)] p-2 text-left">
+                        <th className="border border-[var(--border)] bg-[var(--surface-sunken)] p-2 text-left">
                           Period
                         </th>
                         {gridColumns.map((d) => {
@@ -986,12 +986,12 @@ export function TimetableWorkspace() {
                           return (
                             <th
                               key={d}
-                              className={`border border-[rgba(32,48,80,0.12)] p-2 ${
+                              className={`border border-[var(--border)] p-2 ${
                                 isFullOff
-                                  ? "bg-[#dc2626]/10 text-[#991b1b]"
+                                  ? "bg-[var(--danger-soft)] text-[#991b1b]"
                                   : badge?.tone === "half"
-                                    ? "bg-[rgba(217,119,6,0.15)] text-[#b45309]"
-                                    : "bg-[rgba(32,48,80,0.04)]"
+                                    ? "bg-[rgba(217,119,6,0.15)] text-[var(--warning)]"
+                                    : "bg-[var(--surface-sunken)]"
                               }`}
                             >
                               <div>{WEEKDAY_SHORT[d]}</div>
@@ -1009,7 +1009,7 @@ export function TimetableWorkspace() {
                     <tbody>
                       {teaching.map((p) => (
                         <tr key={p.no}>
-                          <td className="border border-[rgba(32,48,80,0.12)] p-2 font-semibold text-[var(--brand-deep)]">
+                          <td className="border border-[var(--border)] p-2 font-semibold text-[var(--brand-deep)]">
                             {p.label}
                             <div className="font-normal text-[10px] text-[var(--muted)]">
                               {p.startTime}–{p.endTime}
@@ -1030,8 +1030,8 @@ export function TimetableWorkspace() {
                             return (
                               <td
                                 key={`${d}-${p.no}`}
-                                className={`border border-[rgba(32,48,80,0.12)] p-0 ${
-                                  isFullOff ? "bg-[#dc2626]/05" : ""
+                                className={`border border-[var(--border)] p-0 ${
+                                  isFullOff ? "bg-[var(--danger-soft)]" : ""
                                 }`}
                               >
                                 {examBlock ? (
@@ -1060,8 +1060,8 @@ export function TimetableWorkspace() {
                                       }}
                                       className={`flex min-h-[3.25rem] w-full flex-col items-start px-1.5 py-1 text-left ${
                                         slot
-                                          ? "bg-[rgba(32,48,80,0.08)]"
-                                          : "hover:bg-[rgba(32,48,80,0.04)]"
+                                          ? "bg-[var(--surface-sunken)]"
+                                          : "hover:bg-[var(--surface-sunken)]"
                                       }`}
                                     >
                                       {slot ? (
@@ -1082,7 +1082,7 @@ export function TimetableWorkspace() {
                                         type="button"
                                         aria-label="Remove period"
                                         title="Remove period"
-                                        className="absolute right-0.5 top-0.5 rounded px-1 text-[11px] font-bold leading-none text-[#dc2626] hover:bg-[#dc2626]/10"
+                                        className="absolute right-0.5 top-0.5 rounded px-1 text-[11px] font-bold leading-none text-[var(--danger)] hover:bg-[var(--danger-soft)]"
                                         onClick={() => clearCell(d, p.no)}
                                       >
                                         ×
@@ -1110,7 +1110,7 @@ export function TimetableWorkspace() {
 
       {tab === "auto" ? (
         <div className="mt-5 space-y-4">
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-bold text-[var(--brand-deep)]">
               Auto-assign (AI)
             </h2>
@@ -1122,7 +1122,7 @@ export function TimetableWorkspace() {
               class. Hard rule: no teacher double-book.
             </p>
 
-            <div className="mt-3 max-h-56 space-y-1 overflow-y-auto rounded-lg border border-[rgba(32,48,80,0.1)] p-2">
+            <div className="mt-3 max-h-56 space-y-1 overflow-y-auto rounded-lg border border-[var(--border)] p-2">
               {assignable.length === 0 ? (
                 <p className="text-sm text-[var(--muted)]">
                   No active class–sections found. Add classes and sections in
@@ -1134,7 +1134,7 @@ export function TimetableWorkspace() {
                   return (
                     <label
                       key={key}
-                      className="flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-[rgba(32,48,80,0.04)]"
+                      className="flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-[var(--surface-sunken)]"
                     >
                       <input
                         type="checkbox"
@@ -1150,11 +1150,11 @@ export function TimetableWorkspace() {
                       />
                       <span>{a.label}</span>
                       {a.loadSource === "nep_fallback" ? (
-                        <span className="rounded-full bg-[rgba(180,83,9,0.1)] px-2 py-0.5 text-[10px] font-semibold text-[#b45309]">
+                        <span className="rounded-full bg-[rgba(180,83,9,0.1)] px-2 py-0.5 text-[10px] font-semibold text-[var(--warning)]">
                           NEP suggested load
                         </span>
                       ) : a.loadSource === "none" ? (
-                        <span className="rounded-full bg-[rgba(220,38,38,0.08)] px-2 py-0.5 text-[10px] font-semibold text-[#dc2626]">
+                        <span className="rounded-full bg-[rgba(220,38,38,0.08)] px-2 py-0.5 text-[10px] font-semibold text-[var(--danger)]">
                           No subject load
                         </span>
                       ) : null}
@@ -1175,14 +1175,14 @@ export function TimetableWorkspace() {
                 </button>
                 <button
                   type="button"
-                  className="rounded-lg border border-[rgba(32,48,80,0.18)] px-3 py-2 text-sm font-semibold"
+                  className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-semibold"
                   onClick={() => onAutoAssign(true)}
                 >
                   Run for all classes
                 </button>
                 <button
                   type="button"
-                  className="rounded-lg border border-[#dc2626]/40 px-3 py-2 text-sm font-semibold text-[#dc2626]"
+                  className="rounded-lg border border-[var(--danger)]/40 px-3 py-2 text-sm font-semibold text-[var(--danger)]"
                   onClick={onDeleteSelectedGrids}
                 >
                   Remove grids for selected
@@ -1196,7 +1196,7 @@ export function TimetableWorkspace() {
           </div>
 
           {lastResult ? (
-            <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
               <h3 className="text-sm font-bold text-[var(--brand-deep)]">
                 Last run
               </h3>
@@ -1211,9 +1211,9 @@ export function TimetableWorkspace() {
                     key={i}
                     className={
                       e.level === "error"
-                        ? "text-[#dc2626]"
+                        ? "text-[var(--danger)]"
                         : e.level === "warn"
-                          ? "text-[#b45309]"
+                          ? "text-[var(--warning)]"
                           : "text-[var(--muted)]"
                     }
                   >
@@ -1239,7 +1239,7 @@ export function TimetableWorkspace() {
       ) : null}
 
       {tab === "teacher" ? (
-        <div className="mt-5 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+        <div className="mt-5 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">
             By teacher
           </h2>
@@ -1290,13 +1290,13 @@ export function TimetableWorkspace() {
               <table className="min-w-[640px] w-full border-collapse text-xs">
                 <thead>
                   <tr>
-                    <th className="border border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.04)] p-2 text-left">
+                    <th className="border border-[var(--border)] bg-[var(--surface-sunken)] p-2 text-left">
                       Period
                     </th>
                     {(state?.workingWeekdays ?? weekdaysDraft).map((d) => (
                       <th
                         key={d}
-                        className="border border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.04)] p-2"
+                        className="border border-[var(--border)] bg-[var(--surface-sunken)] p-2"
                       >
                         {WEEKDAY_SHORT[d]}
                       </th>
@@ -1306,7 +1306,7 @@ export function TimetableWorkspace() {
                 <tbody>
                   {teaching.map((p) => (
                     <tr key={p.no}>
-                      <td className="border border-[rgba(32,48,80,0.12)] p-2 font-semibold">
+                      <td className="border border-[var(--border)] p-2 font-semibold">
                         {p.label}
                       </td>
                       {(state?.workingWeekdays ?? weekdaysDraft).map((d) => {
@@ -1341,7 +1341,7 @@ export function TimetableWorkspace() {
                         return (
                           <td
                             key={`${d}-${p.no}`}
-                            className="border border-[rgba(32,48,80,0.12)] p-1.5"
+                            className="border border-[var(--border)] p-1.5"
                           >
                             {subDuty && masters ? (
                               <div className="bg-[rgba(190,24,93,0.1)] p-1 text-[#9d174d]">
@@ -1361,7 +1361,7 @@ export function TimetableWorkspace() {
                                 </div>
                               </div>
                             ) : subCover && masters ? (
-                              <div className="bg-[rgba(32,48,80,0.06)] p-1 text-[var(--muted)]">
+                              <div className="bg-[var(--surface-sunken)] p-1 text-[var(--muted)]">
                                 <div className="font-bold line-through">
                                   {classSectionLabel(
                                     masters,
@@ -1408,7 +1408,7 @@ export function TimetableWorkspace() {
                                     type="button"
                                     aria-label="Remove period"
                                     title="Remove this period from the class grid"
-                                    className="absolute -top-0.5 right-0 rounded px-1 text-[11px] font-bold leading-none text-[#dc2626] hover:bg-[#dc2626]/10"
+                                    className="absolute -top-0.5 right-0 rounded px-1 text-[11px] font-bold leading-none text-[var(--danger)] hover:bg-[var(--danger-soft)]"
                                     onClick={() => onRemoveTeacherSlot(hit)}
                                   >
                                     ×
@@ -1447,7 +1447,7 @@ export function TimetableWorkspace() {
 
       {tab === "publish" ? (
         <div className="mt-5 space-y-4">
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-bold text-[var(--brand-deep)]">
               Publish
             </h2>
@@ -1466,7 +1466,7 @@ export function TimetableWorkspace() {
               </div>
               <div>
                 <dt className="text-[11px] text-[var(--muted)]">Clashes</dt>
-                <dd className="font-semibold text-[#dc2626]">
+                <dd className="font-semibold text-[var(--danger)]">
                   {conflicts.length}
                 </dd>
               </div>
@@ -1483,7 +1483,7 @@ export function TimetableWorkspace() {
               </div>
             </dl>
             {conflicts.length ? (
-              <ul className="mt-3 max-h-40 space-y-1 overflow-y-auto text-[12px] text-[#dc2626]">
+              <ul className="mt-3 max-h-40 space-y-1 overflow-y-auto text-[12px] text-[var(--danger)]">
                 {conflicts.slice(0, 20).map((c, i) => (
                   <li key={i}>
                     {WEEKDAY_SHORT[c.weekday]} P{c.periodNo}: {c.detail}
@@ -1507,7 +1507,7 @@ export function TimetableWorkspace() {
                 {sessionPublishedGrids.length ? (
                   <button
                     type="button"
-                    className="rounded-lg border border-[#dc2626]/40 px-4 py-2 text-sm font-semibold text-[#dc2626]"
+                    className="rounded-lg border border-[var(--danger)]/40 px-4 py-2 text-sm font-semibold text-[var(--danger)]"
                     onClick={onUnpublish}
                   >
                     Unpublish (back to draft)
@@ -1518,7 +1518,7 @@ export function TimetableWorkspace() {
           </div>
 
           {sessionPublishedGrids.length && masters ? (
-            <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
               <h3 className="text-sm font-bold text-[var(--brand-deep)]">
                 Published snapshot · {ay}
               </h3>

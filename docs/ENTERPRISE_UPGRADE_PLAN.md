@@ -226,18 +226,18 @@ migration, independent of the rest of the checklist):
 | Store | `store/{StoreWorkspace,StoreAccountsWorkspace,StockMasterWorkspace,StoreModuleNav,StoreInventoryAllocationPanel,StoreAssetAllocationPanel,StoreSellReturnPanel,StoreReportsPanel}.tsx` | Done (color/token sweep; its 9 raw `<table>`s are already token-correct colorwise, structural ErpTableShell conversion deferred — same call as Accounts) |
 | Purchase | `purchase/{PurchaseWorkspace,PurchaseReturnPanel}.tsx` | Done |
 | Comms | `comms/{CommsWorkspace,WaChatHubPanel,SocialCredentialsPanel,ClassChannelsPanel,SocialCrossPostPanel}.tsx` | Done |
-| Trust | `trust/TrustWorkspace.tsx` | Not started — wave 5 |
-| RTE | `rte/RteWorkspace.tsx` | Not started — wave 5 |
-| Vault | `vault/VaultWorkspace.tsx` | Not started — wave 5 |
-| Homework | `homework/HomeworkWorkspace.tsx` | Not started — wave 5 |
-| PTM | `ptm/PtmWorkspace.tsx` | Not started — wave 5 |
-| Student leave | `studentLeave/StudentLeaveWorkspace.tsx` | Not started — wave 5 |
-| Timetable | `timetable/TimetableWorkspace.tsx` | Not started — wave 5 |
-| Certificates | `certificates/CertificatesWorkspace.tsx` | Not started — wave 5 |
-| Documents | `documents/DocumentMakerWorkspace.tsx` | Not started — wave 5 |
-| UDISE compliance | `students/UdiseComplianceWorkspace.tsx` | Not started |
-| Reports Center | `reports/ReportsCenterWorkspace.tsx` | Not started |
-| Modules (hub) | `modules/ModulesWorkspace.tsx` | Not started |
+| Trust | `trust/{TrustWorkspace,TrustPanels}.tsx` | Done |
+| RTE | `rte/RteWorkspace.tsx` | Done |
+| Vault | `vault/VaultWorkspace.tsx` | Done |
+| Homework | `homework/{HomeworkWorkspace,ClassroomSyncPanel}.tsx` | Done |
+| PTM | `ptm/PtmWorkspace.tsx` | Done |
+| Student leave | `studentLeave/StudentLeaveWorkspace.tsx` | Done (was already clean — no hardcoded colors found) |
+| Timetable | `timetable/{TimetableWorkspace,SubstitutionPanel}.tsx` | Done |
+| Certificates | `certificates/CertificatesWorkspace.tsx` | Done (CertificateSheet.tsx untouched — print component) |
+| Documents | `documents/DocumentMakerWorkspace.tsx` | Done |
+| UDISE compliance | `students/UdiseComplianceWorkspace.tsx` | Done |
+| Reports Center | `reports/ReportsCenterWorkspace.tsx` | Done |
+| Modules (hub) | `modules/ModulesWorkspace.tsx` | Done |
 
 ### Phase 4 — AI as a working layer, not a chatbot *(weeks 8–16, overlaps 3)*
 

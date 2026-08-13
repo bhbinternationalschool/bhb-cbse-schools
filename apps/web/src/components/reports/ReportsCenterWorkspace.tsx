@@ -161,7 +161,7 @@ export function ReportsCenterWorkspace() {
       }
       icon={<FileBarChart2 className="size-6" aria-hidden />}
       actions={
-        <p className="rounded-lg bg-[rgba(32,48,80,0.06)] px-3 py-2 text-sm text-[var(--brand-deep)]">
+        <p className="rounded-lg bg-[var(--surface-sunken)] px-3 py-2 text-sm text-[var(--brand-deep)]">
           <span className="font-semibold">{filtered.length}</span> report
           {filtered.length === 1 ? "" : "s"}
           {moduleFilter !== "all" || query
@@ -216,9 +216,9 @@ export function ReportsCenterWorkspace() {
             </select>
           </div>
 
-          <div className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.1)] bg-white">
+          <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)]">
             <table className="w-full text-left text-sm">
-              <thead className="bg-[rgba(32,48,80,0.04)] text-xs uppercase tracking-wide text-[var(--muted)]">
+              <thead className="bg-[var(--surface-sunken)] text-xs uppercase tracking-wide text-[var(--muted)]">
                 <tr>
                   <th className="px-3 py-2 font-medium">Report</th>
                   <th className="px-3 py-2 font-medium">Module</th>
@@ -230,7 +230,7 @@ export function ReportsCenterWorkspace() {
                 {filtered.map((e) => (
                   <tr
                     key={e.key}
-                    className="border-t border-[rgba(32,48,80,0.06)]"
+                    className="border-t border-[var(--border)]"
                   >
                     <td className="px-3 py-2.5">
                       <p className="font-medium text-[var(--brand-deep)]">
@@ -250,7 +250,7 @@ export function ReportsCenterWorkspace() {
                       <div className="flex flex-wrap justify-end gap-1.5">
                         <button
                           type="button"
-                          className="rounded-lg border border-[rgba(32,48,80,0.15)] px-2.5 py-1 text-xs font-medium text-[var(--brand-deep)]"
+                          className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs font-medium text-[var(--brand-deep)]"
                           onClick={() => {
                             recordReportsCenterOpen(e);
                             setRecent(loadReportsCenterRecent());
@@ -261,7 +261,7 @@ export function ReportsCenterWorkspace() {
                         </button>
                         <Link
                           href={e.href}
-                          className="rounded-lg bg-[var(--brand-deep)] px-2.5 py-1 text-xs font-medium text-white"
+                          className="rounded-lg bg-[var(--primary)] px-2.5 py-1 text-xs font-medium text-[var(--primary-foreground)]"
                           onClick={(ev) => openEntry(e, ev)}
                         >
                           Open module
@@ -306,7 +306,7 @@ export function ReportsCenterWorkspace() {
             ) : null}
           </div>
           {recent.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-[rgba(32,48,80,0.15)] px-4 py-8 text-center text-sm text-[var(--muted)]">
+            <p className="rounded-xl border border-dashed border-[var(--border)] px-4 py-8 text-center text-sm text-[var(--muted)]">
               Nothing yet — pick a report from Catalog.
             </p>
           ) : (
@@ -318,7 +318,7 @@ export function ReportsCenterWorkspace() {
                 .map((r) => (
                   <li
                     key={`${r.key}_${r.at}`}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.08)] bg-white px-3 py-2"
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2"
                   >
                     <div>
                       <p className="text-sm font-medium text-[var(--brand-deep)]">
@@ -332,7 +332,7 @@ export function ReportsCenterWorkspace() {
                     <div className="flex gap-1.5">
                       <button
                         type="button"
-                        className="rounded-lg border border-[rgba(32,48,80,0.15)] px-2.5 py-1 text-xs font-medium"
+                        className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs font-medium"
                         onClick={() =>
                           setTab(r.moduleId as ReportsCenterModuleId)
                         }
@@ -341,7 +341,7 @@ export function ReportsCenterWorkspace() {
                       </button>
                       <Link
                         href={r.href}
-                        className="rounded-lg bg-[var(--brand-deep)] px-2.5 py-1 text-xs font-medium text-white"
+                        className="rounded-lg bg-[var(--primary)] px-2.5 py-1 text-xs font-medium text-[var(--primary-foreground)]"
                       >
                         Open
                       </Link>

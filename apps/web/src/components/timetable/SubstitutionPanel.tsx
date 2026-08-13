@@ -230,7 +230,7 @@ export function SubstitutionPanel(props: {
 
   return (
     <div className="mt-5 space-y-4">
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h2 className="text-sm font-bold text-[var(--brand-deep)]">
@@ -259,7 +259,7 @@ export function SubstitutionPanel(props: {
           </label>
         </div>
 
-        <div className="mt-4 rounded-lg bg-[rgba(32,48,80,0.04)] p-3">
+        <div className="mt-4 rounded-lg bg-[var(--surface-sunken)] p-3">
           <h3 className="text-[12px] font-bold text-[var(--brand-deep)]">
             Absent on {date}
             {weekday != null ? ` (${WEEKDAY_SHORT[weekday]})` : ""}
@@ -273,7 +273,7 @@ export function SubstitutionPanel(props: {
               {allAbsent.map((a) => (
                 <li
                   key={a.staffId}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-[#dc2626]/10 px-2.5 py-1 text-[11px] font-semibold text-[#991b1b]"
+                  className="inline-flex items-center gap-1.5 rounded-full bg-[var(--danger-soft)] px-2.5 py-1 text-[11px] font-semibold text-[#991b1b]"
                 >
                   {teacherLabel(masters, a.staffId)}
                   <span className="font-normal text-[10px]">· {a.reason}</span>
@@ -313,7 +313,7 @@ export function SubstitutionPanel(props: {
               </select>
               <button
                 type="button"
-                className="rounded-lg border border-[rgba(32,48,80,0.18)] px-3 py-1 text-sm font-semibold"
+                className="rounded-lg border border-[var(--border)] px-3 py-1 text-sm font-semibold"
                 disabled={!manualPick}
                 onClick={() => {
                   if (!manualPick) return;
@@ -338,7 +338,7 @@ export function SubstitutionPanel(props: {
             </button>
             <button
               type="button"
-              className="rounded-lg border border-[rgba(32,48,80,0.18)] px-3 py-2 text-sm font-semibold disabled:opacity-50"
+              className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-semibold disabled:opacity-50"
               disabled={!dirty}
               onClick={onSave}
             >
@@ -347,7 +347,7 @@ export function SubstitutionPanel(props: {
             {saved.length ? (
               <button
                 type="button"
-                className="rounded-lg border border-[#dc2626]/40 px-3 py-2 text-sm font-semibold text-[#dc2626]"
+                className="rounded-lg border border-[var(--danger)]/40 px-3 py-2 text-sm font-semibold text-[var(--danger)]"
                 onClick={onClearSaved}
               >
                 Clear saved
@@ -361,7 +361,7 @@ export function SubstitutionPanel(props: {
         )}
       </div>
 
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-bold text-[var(--brand-deep)]">
             Arrangement for {date}
@@ -369,10 +369,10 @@ export function SubstitutionPanel(props: {
           <span
             className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${
               dirty
-                ? "bg-[rgba(217,119,6,0.15)] text-[#b45309]"
+                ? "bg-[rgba(217,119,6,0.15)] text-[var(--warning)]"
                 : saved.length
                   ? "bg-[rgba(15,122,76,0.12)] text-[var(--ok)]"
-                  : "bg-[rgba(32,48,80,0.06)] text-[var(--muted)]"
+                  : "bg-[var(--surface-sunken)] text-[var(--muted)]"
             }`}
           >
             {dirty ? "Unsaved changes" : saved.length ? "Saved" : "Nothing saved"}
@@ -388,27 +388,27 @@ export function SubstitutionPanel(props: {
           <div className="mt-3 overflow-x-auto">
             <table className="min-w-[720px] w-full border-collapse text-xs">
               <thead>
-                <tr className="bg-[rgba(32,48,80,0.04)] text-left">
-                  <th className="border border-[rgba(32,48,80,0.12)] p-2">
+                <tr className="bg-[var(--surface-sunken)] text-left">
+                  <th className="border border-[var(--border)] p-2">
                     Period
                   </th>
-                  <th className="border border-[rgba(32,48,80,0.12)] p-2">
+                  <th className="border border-[var(--border)] p-2">
                     Class
                   </th>
-                  <th className="border border-[rgba(32,48,80,0.12)] p-2">
+                  <th className="border border-[var(--border)] p-2">
                     Subject
                   </th>
-                  <th className="border border-[rgba(32,48,80,0.12)] p-2">
+                  <th className="border border-[var(--border)] p-2">
                     Absent teacher
                   </th>
-                  <th className="border border-[rgba(32,48,80,0.12)] p-2">
+                  <th className="border border-[var(--border)] p-2">
                     Substitute
                   </th>
-                  <th className="border border-[rgba(32,48,80,0.12)] p-2">
+                  <th className="border border-[var(--border)] p-2">
                     Note
                   </th>
                   {canEdit ? (
-                    <th className="border border-[rgba(32,48,80,0.12)] p-2" />
+                    <th className="border border-[var(--border)] p-2" />
                   ) : null}
                 </tr>
               </thead>
@@ -418,22 +418,22 @@ export function SubstitutionPanel(props: {
                   const knownIds = new Set(candidates.map((c) => c.staff.id));
                   return (
                     <tr key={row.id}>
-                      <td className="border border-[rgba(32,48,80,0.12)] p-2 font-semibold">
+                      <td className="border border-[var(--border)] p-2 font-semibold">
                         P{row.periodNo}
                         <div className="text-[10px] font-normal text-[var(--muted)]">
                           {periodTime(row.periodNo)}
                         </div>
                       </td>
-                      <td className="border border-[rgba(32,48,80,0.12)] p-2">
+                      <td className="border border-[var(--border)] p-2">
                         {classSectionLabel(masters, row.classId, row.sectionId)}
                       </td>
-                      <td className="border border-[rgba(32,48,80,0.12)] p-2">
+                      <td className="border border-[var(--border)] p-2">
                         {subjectLabel(masters, row.subjectId)}
                       </td>
-                      <td className="border border-[rgba(32,48,80,0.12)] p-2 text-[#991b1b]">
+                      <td className="border border-[var(--border)] p-2 text-[#991b1b]">
                         {teacherLabel(masters, row.absentTeacherId)}
                       </td>
-                      <td className="border border-[rgba(32,48,80,0.12)] p-2">
+                      <td className="border border-[var(--border)] p-2">
                         {canEdit ? (
                           <select
                             className="field !w-full !py-1 text-xs"
@@ -467,20 +467,20 @@ export function SubstitutionPanel(props: {
                           <span className="text-[var(--muted)]">Free</span>
                         )}
                       </td>
-                      <td className="border border-[rgba(32,48,80,0.12)] p-2 text-[var(--muted)]">
+                      <td className="border border-[var(--border)] p-2 text-[var(--muted)]">
                         {row.note}
                         {row.source === "manual" ? (
-                          <span className="ml-1 rounded-full bg-[rgba(32,48,80,0.08)] px-1.5 py-0.5 text-[9px] font-semibold">
+                          <span className="ml-1 rounded-full bg-[var(--surface-sunken)] px-1.5 py-0.5 text-[9px] font-semibold">
                             manual
                           </span>
                         ) : null}
                       </td>
                       {canEdit ? (
-                        <td className="border border-[rgba(32,48,80,0.12)] p-2 text-center">
+                        <td className="border border-[var(--border)] p-2 text-center">
                           <button
                             type="button"
                             aria-label="Remove row"
-                            className="rounded px-1.5 text-sm font-bold text-[#dc2626] hover:bg-[#dc2626]/10"
+                            className="rounded px-1.5 text-sm font-bold text-[var(--danger)] hover:bg-[var(--danger-soft)]"
                             onClick={() => removeRow(row.id)}
                           >
                             ×

@@ -168,7 +168,7 @@ export function DocumentMakerWorkspace() {
       notice={notice}
     >
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-        <section className="space-y-4 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4 shadow-sm">
+        <section className="space-y-4 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm">
           <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
             Compose
           </h2>
@@ -231,7 +231,7 @@ export function DocumentMakerWorkspace() {
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              className="rounded-lg bg-[var(--brand-deep)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
               disabled={loading || !canCreate}
               onClick={() => void generate()}
             >
@@ -240,7 +240,7 @@ export function DocumentMakerWorkspace() {
             {generated && canExport ? (
               <button
                 type="button"
-                className="rounded-lg border border-[rgba(32,48,80,0.2)] px-4 py-2 text-sm font-semibold text-[var(--brand-deep)]"
+                className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm font-semibold text-[var(--brand-deep)]"
                 onClick={() => void printPdf()}
               >
                 Print PDF
@@ -283,7 +283,7 @@ function DocumentPreview({
 
   return (
     <div
-      className="relative min-h-[480px] overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-[#fafaf5] p-6 shadow-sm"
+      className="relative min-h-[480px] overflow-hidden rounded-xl border border-[var(--border)] bg-[#fafaf5] p-6 shadow-sm"
     >
       {profile?.pageBackgroundUrl ? (
         <div
@@ -323,7 +323,7 @@ function DocumentPreview({
       ) : null}
 
       <div className="relative z-10">
-        <header className="border-b border-[rgba(32,48,80,0.15)] pb-4 text-center">
+        <header className="border-b border-[var(--border)] pb-4 text-center">
           {profile?.logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -371,7 +371,7 @@ function DocumentPreview({
         )}
 
         {generated && profile ? (
-          <footer className="mt-10 flex justify-between gap-4 border-t border-[rgba(32,48,80,0.08)] pt-4">
+          <footer className="mt-10 flex justify-between gap-4 border-t border-[var(--border)] pt-4">
             {profile.directorSignatureUrl ? (
               <div className="text-center">
                 {/* eslint-disable-next-line @next/next/no-img-element */}

@@ -212,13 +212,13 @@ export function RteWorkspace({
       }
       toolbar={
         <div className="grid gap-3 sm:grid-cols-3">
-          <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3">
             <p className="text-[11px] text-[var(--muted)]">Mandated seats</p>
             <p className="text-xl font-semibold text-[var(--brand-deep)]">
               {fillSummary.total}
             </p>
           </div>
-          <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3">
             <p className="text-[11px] text-[var(--muted)]">Filled</p>
             <p className="text-xl font-semibold text-[var(--brand-deep)]">
               {fillSummary.filled}{" "}
@@ -227,7 +227,7 @@ export function RteWorkspace({
               </span>
             </p>
           </div>
-          <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3">
             <p className="text-[11px] text-[var(--muted)]">
               Assigned · not admitted
             </p>
@@ -253,7 +253,7 @@ export function RteWorkspace({
 
       {tab === "dashboard" ? (
         <section className="mt-4 space-y-4">
-          <div className="flex flex-wrap gap-2 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+          <div className="flex flex-wrap gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <label className="text-xs text-[var(--muted)]">
               Class
               <select
@@ -341,7 +341,7 @@ export function RteWorkspace({
               seatRows.map((row) => (
                 <li
                   key={row.id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3"
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3"
                 >
                   <div>
                     <p className="text-sm font-semibold text-[var(--brand-deep)]">
@@ -354,7 +354,7 @@ export function RteWorkspace({
                   </div>
                   <button
                     type="button"
-                    className="text-xs text-[#b42318] underline"
+                    className="text-xs text-[var(--danger)] underline"
                     onClick={() => {
                       const r = deleteQuotaSeat(row.id);
                       if (!r.ok) setError(r.error);
@@ -384,7 +384,7 @@ export function RteWorkspace({
 
       {tab === "applications" ? (
         <section className="mt-4 space-y-4">
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-[rgba(14,90,140,0.06)] px-4 py-3 text-sm text-[var(--brand-deep)]">
+          <div className="rounded-xl border border-[var(--border)] bg-[rgba(14,90,140,0.06)] px-4 py-3 text-sm text-[var(--brand-deep)]">
             <p className="font-semibold">Govt list ≠ admission</p>
             <p className="mt-1 text-[12px] text-[var(--muted)]">
               Import the official list assigned to this school. Status stays
@@ -394,7 +394,7 @@ export function RteWorkspace({
             </p>
           </div>
 
-          <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
               Import govt AllottedSeat list
             </h2>
@@ -531,7 +531,7 @@ export function RteWorkspace({
             </details>
           </div>
 
-          <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
               Add one (govt assigned)
             </h2>
@@ -663,7 +663,7 @@ export function RteWorkspace({
             </div>
           </div>
 
-          <div className="overflow-x-auto rounded-xl border border-[rgba(32,48,80,0.1)] bg-white">
+          <div className="overflow-x-auto rounded-xl border border-[var(--border)] bg-[var(--card)]">
             {apps.length === 0 ? (
               <p className="px-4 py-6 text-sm text-[var(--muted)]">
                 No govt-assigned candidates yet — import AllottedSeat.xls.
@@ -671,7 +671,7 @@ export function RteWorkspace({
             ) : (
               <table className="min-w-[1100px] w-full border-collapse text-left text-xs">
                 <thead>
-                  <tr className="border-b border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.04)] text-[11px] text-[var(--muted)]">
+                  <tr className="border-b border-[var(--border)] bg-[var(--surface-sunken)] text-[11px] text-[var(--muted)]">
                     <th className="whitespace-nowrap px-2 py-2 font-medium">
                       S.No.
                     </th>
@@ -755,7 +755,7 @@ export function RteWorkspace({
               enrolled.map((s) => (
                 <li
                   key={s.id}
-                  className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3 text-sm"
+                  className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm"
                 >
                   <span className="font-semibold text-[var(--brand-deep)]">
                     {s.fullName}
@@ -776,7 +776,7 @@ export function RteWorkspace({
       ) : null}
 
       {tab === "settings" ? (
-        <section className="mt-4 max-w-lg space-y-3 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+        <section className="mt-4 max-w-lg space-y-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <label className="block text-xs text-[var(--muted)]">
             Mandated quota %
             <input
@@ -810,7 +810,7 @@ export function RteWorkspace({
           >
             Save settings
           </button>
-          <hr className="border-[rgba(32,48,80,0.1)]" />
+          <hr className="border-[var(--border)]" />
           <p className="text-sm text-[var(--muted)]">
             Module enable / disable is controlled from Modules registry
             (default OFF).
@@ -848,7 +848,7 @@ export function RteWorkspace({
             {RTE_REPORTS.map((r) => (
               <li
                 key={r.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3"
+                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3"
               >
                 <div>
                   <p className="text-sm font-medium text-[var(--brand-deep)]">
@@ -970,7 +970,7 @@ function AppTableRow({
 
   return (
     <>
-      <tr className="border-b border-[rgba(32,48,80,0.08)] hover:bg-[rgba(32,48,80,0.02)]">
+      <tr className="border-b border-[var(--border)] hover:bg-[var(--surface-sunken)]">
         <td className={td}>{displaySerial}</td>
         <td className={td}>{app.lotteryNo || "—"}</td>
         <td className={`${td} font-medium`}>{app.govtApplicationNo || "—"}</td>
@@ -1009,7 +1009,7 @@ function AppTableRow({
                 </button>
                 <button
                   type="button"
-                  className="text-left text-[11px] text-[#b42318] underline"
+                  className="text-left text-[11px] text-[var(--danger)] underline"
                   onClick={() => setStatus("rejected")}
                 >
                   Reject
@@ -1049,7 +1049,7 @@ function AppTableRow({
             ) : null}
             <button
               type="button"
-              className="text-left text-[11px] text-[#b42318] underline"
+              className="text-left text-[11px] text-[var(--danger)] underline"
               onClick={() => {
                 const r = deleteQuotaApplication(app.id);
                 if (!r.ok) onError(r.error);
@@ -1065,7 +1065,7 @@ function AppTableRow({
         </td>
       </tr>
       {showAdmit && canAdmit ? (
-        <tr className="border-b border-[rgba(32,48,80,0.08)] bg-[rgba(32,48,80,0.03)]">
+        <tr className="border-b border-[var(--border)] bg-[var(--surface-sunken)]">
           <td colSpan={14} className="px-3 py-3">
             <p className="text-xs font-medium text-[var(--brand-deep)]">
               Confirm school admission for {app.childName} — registration fee?

@@ -175,7 +175,7 @@ export function ClassroomSyncPanel({
 
   return (
     <section className="mt-4 space-y-4">
-      <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
           Google Classroom → ERP (pull only)
         </h2>
@@ -229,7 +229,7 @@ export function ClassroomSyncPanel({
 
       {status.connected ? (
         <>
-          <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
               Course mapping
             </h3>
@@ -259,7 +259,7 @@ export function ClassroomSyncPanel({
             )}
           </div>
 
-          <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
               Sync assignments
             </h3>
@@ -299,7 +299,7 @@ export function ClassroomSyncPanel({
         <p className="text-sm text-[#047857]">{notice}</p>
       ) : null}
       {error ? (
-        <p className="text-sm text-[#b42318]">{error}</p>
+        <p className="text-sm text-[var(--danger)]">{error}</p>
       ) : null}
     </section>
   );
@@ -339,7 +339,7 @@ function CourseMappingRow({
       : null;
 
   return (
-    <li className="rounded-lg border border-[rgba(32,48,80,0.08)] p-3">
+    <li className="rounded-lg border border-[var(--border)] p-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <p className="text-sm font-medium text-[var(--brand-deep)]">

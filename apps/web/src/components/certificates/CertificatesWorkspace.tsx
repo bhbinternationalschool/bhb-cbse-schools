@@ -443,7 +443,7 @@ export function CertificatesWorkspace() {
       {tab === "desk" ? (
       <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
         <div className="space-y-4">
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-bold text-[var(--brand-deep)]">
               Issue certificate
             </h2>
@@ -526,7 +526,7 @@ export function CertificatesWorkspace() {
             {!selected && (query.trim() || classId || sectionId) ? (
               <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto">
                 {hits.length === 0 ? (
-                  <li className="rounded-lg bg-[rgba(32,48,80,0.04)] px-3 py-3 text-sm text-[var(--muted)]">
+                  <li className="rounded-lg bg-[var(--surface-sunken)] px-3 py-3 text-sm text-[var(--muted)]">
                     No students match.
                   </li>
                 ) : (
@@ -534,7 +534,7 @@ export function CertificatesWorkspace() {
                   <li key={h.student.id}>
                     <button
                       type="button"
-                      className="w-full rounded-lg border border-[rgba(32,48,80,0.12)] px-3 py-2 text-left hover:border-[rgba(197,160,40,0.45)] hover:bg-[rgba(197,160,40,0.08)]"
+                      className="w-full rounded-lg border border-[var(--border)] px-3 py-2 text-left hover:border-[rgba(197,160,40,0.45)] hover:bg-[rgba(197,160,40,0.08)]"
                       onClick={() => {
                         setSelected(h);
                         setQuery(h.student.fullName);
@@ -559,7 +559,7 @@ export function CertificatesWorkspace() {
             ) : null}
 
             {selected && student ? (
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[rgba(32,48,80,0.04)] px-3 py-2">
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[var(--surface-sunken)] px-3 py-2">
                 <div className="text-sm text-[var(--brand-deep)]">
                   <span className="font-semibold">{student.fullName}</span>
                   <span className="text-[var(--muted)]">
@@ -614,7 +614,7 @@ export function CertificatesWorkspace() {
               </label>
             </div>
             {student && (!pen || !apaarId) ? (
-              <p className="mt-1.5 text-[11px] text-[#b45309]">
+              <p className="mt-1.5 text-[11px] text-[var(--warning)]">
                 {!pen && !apaarId
                   ? "PEN and APAAR ID missing on SIS — enter before issue if available (required for UDISE+ / DigiLocker flows)."
                   : !pen
@@ -675,7 +675,7 @@ export function CertificatesWorkspace() {
             </div>
 
             {kind === "fees_paid" ? (
-              <div className="mt-3 space-y-3 rounded-lg border border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.02)] p-3">
+              <div className="mt-3 space-y-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] p-3">
                 <p className="text-[11px] font-semibold text-[var(--brand-deep)]">
                   Fees paid — reimbursement certificate
                 </p>
@@ -729,7 +729,7 @@ export function CertificatesWorkspace() {
                 </div>
                 {feesPaidPreview ? (
                   "error" in feesPaidPreview ? (
-                    <p className="text-[11px] font-semibold text-[#dc2626]">
+                    <p className="text-[11px] font-semibold text-[var(--danger)]">
                       {feesPaidPreview.error}
                     </p>
                   ) : (
@@ -747,7 +747,7 @@ export function CertificatesWorkspace() {
             ) : null}
 
             {kind === "tc" ? (
-              <div className="mt-3 space-y-3 rounded-lg border border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.02)] p-3">
+              <div className="mt-3 space-y-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] p-3">
                 <p className="text-[11px] font-semibold text-[var(--brand-deep)]">
                   CBSE Annexure-I fields
                 </p>
@@ -1046,7 +1046,7 @@ export function CertificatesWorkspace() {
               </div>
             ) : null}
 
-            <div className="mt-4 rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.02)] p-3">
+            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-3">
               <h3 className="text-xs font-bold text-[var(--brand-deep)]">
                 Draft with AI (CBSE + UP Basic Education)
               </h3>
@@ -1090,7 +1090,7 @@ export function CertificatesWorkspace() {
               </label>
               <button
                 type="button"
-                className="mt-2 rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)] disabled:opacity-50"
+                className="mt-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)] disabled:opacity-50"
                 disabled={aiLoading || !student}
                 onClick={() => void onGenerateCertificateAi()}
               >
@@ -1128,7 +1128,7 @@ export function CertificatesWorkspace() {
             </label>
 
             {eligibility ? (
-              <div className="mt-3 space-y-1.5 rounded-lg border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] px-3 py-2 text-[11px]">
+              <div className="mt-3 space-y-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2 text-[11px]">
                 <p className="text-[var(--brand-deep)]">
                   Open dues:{" "}
                   <span className="font-bold">
@@ -1138,19 +1138,19 @@ export function CertificatesWorkspace() {
                   {eligibility.openDueCount === 1 ? "" : "s"})
                 </p>
                 {eligibility.blockers.map((b) => (
-                  <p key={b} className="font-semibold text-[#dc2626]">
+                  <p key={b} className="font-semibold text-[var(--danger)]">
                     {b}
                   </p>
                 ))}
                 {eligibility.warnings.map((w) => (
-                  <p key={w} className="text-[#b45309]">
+                  <p key={w} className="text-[var(--warning)]">
                     {w}
                   </p>
                 ))}
                 {eligibility.requiresOverride ? (
                   <button
                     type="button"
-                    className="mt-1 rounded-md bg-white px-2 py-1 text-[11px] font-bold text-[var(--brand-deep)]"
+                    className="mt-1 rounded-md bg-[var(--card)] px-2 py-1 text-[11px] font-bold text-[var(--brand-deep)]"
                     onClick={() => setHoldDialog(true)}
                   >
                     Unlock with Principal PIN
@@ -1180,7 +1180,7 @@ export function CertificatesWorkspace() {
         </div>
 
         <div className="space-y-4">
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-bold text-[var(--brand-deep)]">
               Recent issues
             </h2>
@@ -1190,7 +1190,7 @@ export function CertificatesWorkspace() {
               </p>
             ) : (
               <ErpTableShell className="mt-2">
-                <ul className="max-h-72 divide-y divide-[rgba(32,48,80,0.08)] overflow-y-auto">
+                <ul className="max-h-72 divide-y divide-[var(--border)] overflow-y-auto">
                 {issues.slice(0, 25).map((iss) => {
                   const voided = !!iss.voidedAt;
                   return (
@@ -1255,7 +1255,7 @@ export function CertificatesWorkspace() {
           </div>
 
           {preview ? (
-            <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.03)] p-3">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-3">
               <div className="mb-2 flex items-center justify-between gap-2 print-hide">
                 <h2 className="text-sm font-bold text-[var(--brand-deep)]">
                   Preview

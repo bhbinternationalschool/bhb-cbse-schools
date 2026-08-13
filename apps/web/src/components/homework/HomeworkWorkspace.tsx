@@ -612,7 +612,7 @@ export function HomeworkWorkspace() {
               ) : null}
             </ul>
           ) : (
-            <p className="mt-2 text-xs text-[#b42318]">
+            <p className="mt-2 text-xs text-[var(--danger)]">
               No WhatsApp numbers on households for this section — set them in
               SIS.
             </p>
@@ -639,7 +639,7 @@ export function HomeworkWorkspace() {
             Homework · {date}
           </h2>
           {todayPosts.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-[rgba(32,48,80,0.15)] px-4 py-6 text-sm text-[var(--muted)]">
+            <p className="rounded-xl border border-dashed border-[var(--border)] px-4 py-6 text-sm text-[var(--muted)]">
               No homework for this class/date.{" "}
               <button
                 type="button"
@@ -657,14 +657,14 @@ export function HomeworkWorkspace() {
                 return (
                   <li
                     key={p.id}
-                    className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3"
+                    className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3"
                   >
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div>
                         <p className="text-sm font-semibold text-[var(--brand-deep)]">
                           {p.title}
                           {p.status === "withdrawn" ? (
-                            <span className="ml-2 text-xs font-normal text-[#b42318]">
+                            <span className="ml-2 text-xs font-normal text-[var(--danger)]">
                               (withdrawn)
                             </span>
                           ) : null}
@@ -701,7 +701,7 @@ export function HomeworkWorkspace() {
                         <img
                           src={p.attachments[0].url}
                           alt={p.attachments[0].label || "Attachment"}
-                          className="mt-2 max-h-40 rounded-lg border border-[rgba(32,48,80,0.1)]"
+                          className="mt-2 max-h-40 rounded-lg border border-[var(--border)]"
                         />
                       ) : (
                         <a
@@ -737,7 +737,7 @@ export function HomeworkWorkspace() {
                         {!readOnly ? (
                           <button
                             type="button"
-                            className="text-xs text-[#b42318] underline"
+                            className="text-xs text-[var(--danger)] underline"
                             onClick={() => {
                               withdrawHomeworkPost(p.id);
                               refresh();
@@ -789,7 +789,7 @@ export function HomeworkWorkspace() {
                         </button>
                         <button
                           type="button"
-                          className="text-xs text-[#b42318] underline"
+                          className="text-xs text-[var(--danger)] underline"
                           onClick={() => {
                             if (!window.confirm("Delete this diary entry?")) return;
                             const r = deleteDiaryEntry(d.id);
@@ -1009,7 +1009,7 @@ export function HomeworkWorkspace() {
             </button>
           ) : null}
           {todayDiary.length > 0 ? (
-            <div className="mt-6 space-y-2 border-t border-[rgba(32,48,80,0.1)] pt-4">
+            <div className="mt-6 space-y-2 border-t border-[var(--border)] pt-4">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
                 Entries for {date}
               </h3>
@@ -1017,7 +1017,7 @@ export function HomeworkWorkspace() {
                 {todayDiary.map((d) => (
                   <li
                     key={d.id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.1)] px-3 py-2"
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] px-3 py-2"
                   >
                     <span className="text-sm font-medium text-[var(--brand-deep)]">
                       {d.title}
@@ -1056,7 +1056,7 @@ export function HomeworkWorkspace() {
               {pendingSubs.map(({ submission: s, post, student }) => (
                 <li
                   key={s.id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3"
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3"
                 >
                   <div>
                     <p className="text-sm font-medium text-[var(--brand-deep)]">
@@ -1158,7 +1158,7 @@ export function HomeworkWorkspace() {
             {HOMEWORK_REPORTS.map((r) => (
               <li
                 key={r.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.08)] bg-white px-3 py-2"
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2"
               >
                 <div>
                   <p className="text-sm font-medium text-[var(--brand-deep)]">
@@ -1223,9 +1223,9 @@ function RosterSubmitTable({
     );
   }
   return (
-    <div className="overflow-x-auto rounded-xl border border-[rgba(32,48,80,0.1)]">
+    <div className="overflow-x-auto rounded-xl border border-[var(--border)]">
       <table className="w-full text-left text-sm">
-        <thead className="bg-[rgba(32,48,80,0.04)] text-xs text-[var(--muted)]">
+        <thead className="bg-[var(--surface-sunken)] text-xs text-[var(--muted)]">
           <tr>
             <th className="px-3 py-2">Student</th>
             {posts.map((p) => (
@@ -1237,7 +1237,7 @@ function RosterSubmitTable({
         </thead>
         <tbody>
           {roster.map((stu) => (
-            <tr key={stu.id} className="border-t border-[rgba(32,48,80,0.06)]">
+            <tr key={stu.id} className="border-t border-[var(--border)]">
               <td className="px-3 py-2 font-medium">{stu.fullName}</td>
               {posts.map((p) => {
                 const sub = submissionForStudent(state, p.id, stu.id);
@@ -1252,7 +1252,7 @@ function RosterSubmitTable({
                     ) : seen ? (
                       <span className="text-[var(--muted)]">Seen</span>
                     ) : (
-                      <span className="text-[#b42318]">Pending</span>
+                      <span className="text-[var(--danger)]">Pending</span>
                     )}
                   </td>
                 );

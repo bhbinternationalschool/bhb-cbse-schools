@@ -596,7 +596,7 @@ export function PtmWorkspace() {
                             {!readOnly && booked === 0 ? (
                               <button
                                 type="button"
-                                className="text-xs font-semibold text-[#b42318]"
+                                className="text-xs font-semibold text-[var(--danger)]"
                                 onClick={() => {
                                   if (!window.confirm("Delete this slot?")) return;
                                   const r = deletePtmSlot(s.id);
