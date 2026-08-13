@@ -32,6 +32,12 @@ import {
   type UdiseRowTone,
   type UdiseStudentRow,
 } from "@/lib/udiseStudentDetails";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
 
 type Props = {
   masters: MastersState;
@@ -1120,10 +1126,10 @@ export function UdisePenApaarImportPanel({
                 </div>
               </div>
 
-              <div className="max-h-[28rem] overflow-auto rounded-lg border border-[rgba(32,48,80,0.1)]">
-                <table className="min-w-[1100px] w-full border-collapse text-left text-[11px]">
-                  <thead>
-                    <tr className="sticky top-0 border-b border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.06)] text-[var(--muted)]">
+              <ErpTableShell className="max-h-[28rem] overflow-auto">
+                <ErpTable minWidth="min-w-[1100px]" className="border-collapse text-[11px]">
+                  <ErpTableHead sticky>
+                    <tr>
                       <th className="px-2 py-1.5 font-medium">Status</th>
                       <th className="px-2 py-1.5 font-medium">UDISE student</th>
                       <th className="px-2 py-1.5 font-medium">
@@ -1133,12 +1139,12 @@ export function UdisePenApaarImportPanel({
                       <th className="px-2 py-1.5 font-medium">Will fill / hint</th>
                       <th className="px-2 py-1.5 font-medium">Action</th>
                     </tr>
-                  </thead>
-                  <tbody>
+                  </ErpTableHead>
+                  <ErpTableBody>
                     {visible.slice(0, 250).map((p) => (
                       <tr
                         key={`${p.rowIndex}-${p.udise.pen}-${p.udise.fullName}`}
-                        className={`border-b border-[rgba(32,48,80,0.06)] align-top ${TONE_ROW[p.tone]}`}
+                        className={`align-top ${TONE_ROW[p.tone]}`}
                       >
                         <td className="px-2 py-2">
                           <span
@@ -1567,9 +1573,9 @@ export function UdisePenApaarImportPanel({
                         </td>
                       </tr>
                     ) : null}
-                  </tbody>
-                </table>
-              </div>
+                  </ErpTableBody>
+                </ErpTable>
+              </ErpTableShell>
               <p className="text-[10px] text-[var(--muted)]">
                 Student Aadhaar verified ≠ APAAR ready. APAAR on UDISE+ also needs
                 parent Aadhaar, then generation on the portal — re-upload /

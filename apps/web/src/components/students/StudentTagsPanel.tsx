@@ -11,6 +11,12 @@ import {
   updateStudentTag,
 } from "@/lib/studentTags";
 import { StudentNameLabel } from "@/components/students/StudentAvatar";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
 
 export function StudentTagsPanel({
   tick = 0,
@@ -235,16 +241,16 @@ export function StudentTagsPanel({
         </select>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.1)] bg-white">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-[rgba(32,48,80,0.04)] text-[11px] uppercase tracking-wide text-[var(--muted)]">
+      <ErpTableShell>
+        <ErpTable>
+          <ErpTableHead>
             <tr>
               <th className="px-3 py-2 font-semibold">Student</th>
               <th className="px-3 py-2 font-semibold">Class</th>
               <th className="px-3 py-2 font-semibold">Assign tags</th>
             </tr>
-          </thead>
-          <tbody className="divide-y divide-[rgba(32,48,80,0.06)]">
+          </ErpTableHead>
+          <ErpTableBody>
             {students.map((s) => {
               const cls =
                 masters.classes.find((c) => c.id === s.classId)?.name ?? "—";
@@ -286,14 +292,14 @@ export function StudentTagsPanel({
                 </tr>
               );
             })}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
         {!students.length ? (
           <p className="px-3 py-6 text-center text-sm text-[var(--muted)]">
             No students match.
           </p>
         ) : null}
-      </div>
+      </ErpTableShell>
     </div>
   );
 }

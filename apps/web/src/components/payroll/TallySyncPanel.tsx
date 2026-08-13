@@ -18,6 +18,12 @@ import {
 } from "@/lib/tallySync";
 import { monthLabel } from "@/components/payroll/PrintPayslipsPanel";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
 
 export function TallySyncPanel({
   academicYearCode,
@@ -266,21 +272,18 @@ export function TallySyncPanel({
           ) : null}
 
           <div className="mt-3 overflow-x-auto">
-            <table className="min-w-full text-left text-xs">
-              <thead>
-                <tr className="border-b border-[rgba(32,48,80,0.1)] text-[var(--muted)]">
+            <ErpTable className="text-xs">
+              <ErpTableHead>
+                <tr>
                   <th className="py-2 pr-2 font-semibold">Ledger</th>
                   <th className="py-2 pr-2 font-semibold text-right">Debit</th>
                   <th className="py-2 pr-2 font-semibold text-right">Credit</th>
                   <th className="py-2 font-semibold">Source</th>
                 </tr>
-              </thead>
-              <tbody>
+              </ErpTableHead>
+              <ErpTableBody>
                 {jv.lines.map((line) => (
-                  <tr
-                    key={`${line.ledger}-${line.debit}-${line.credit}`}
-                    className="border-b border-[rgba(32,48,80,0.06)]"
-                  >
+                  <tr key={`${line.ledger}-${line.debit}-${line.credit}`}>
                     <td className="py-2 pr-2 font-semibold text-[var(--brand-deep)]">
                       {line.ledger}
                     </td>
@@ -303,13 +306,13 @@ export function TallySyncPanel({
                     </td>
                   </tr>
                 ) : null}
-              </tbody>
-            </table>
+              </ErpTableBody>
+            </ErpTable>
           </div>
         </div>
       ) : null}
 
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <ErpTableShell className="p-4">
         <h3 className="font-display text-base font-bold text-[var(--brand-deep)]">
           Sync history
         </h3>
@@ -318,9 +321,9 @@ export function TallySyncPanel({
           Tally.
         </p>
         <div className="mt-3 overflow-x-auto">
-          <table className="min-w-full text-left text-xs">
-            <thead>
-              <tr className="border-b border-[rgba(32,48,80,0.1)] text-[var(--muted)]">
+          <ErpTable className="text-xs">
+            <ErpTableHead>
+              <tr>
                 <th className="py-2 pr-2 font-semibold">When</th>
                 <th className="py-2 pr-2 font-semibold">Month</th>
                 <th className="py-2 pr-2 font-semibold">Voucher</th>
@@ -328,13 +331,10 @@ export function TallySyncPanel({
                 <th className="py-2 pr-2 font-semibold">Dr / Cr</th>
                 <th className="py-2 font-semibold">By</th>
               </tr>
-            </thead>
-            <tbody>
+            </ErpTableHead>
+            <ErpTableBody>
               {history.map((r) => (
-                <tr
-                  key={r.id}
-                  className="border-b border-[rgba(32,48,80,0.06)]"
-                >
+                <tr key={r.id}>
                   <td className="py-2 pr-2 text-[var(--muted)]">
                     {new Date(r.exportedAt).toLocaleString()}
                   </td>
@@ -359,10 +359,10 @@ export function TallySyncPanel({
                   </td>
                 </tr>
               ) : null}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
         </div>
-      </div>
+      </ErpTableShell>
     </div>
   );
 }

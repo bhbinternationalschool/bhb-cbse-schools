@@ -21,6 +21,7 @@ import {
   upgradeStudentClass,
 } from "@/lib/classUpgrade";
 import { StudentNameLabel } from "@/components/students/StudentAvatar";
+import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 
 type UpgradeMode = "section" | "class" | "type";
 
@@ -638,7 +639,7 @@ export function StudentUpgradePanel({
         </section>
       </div>
 
-      <section className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+      <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h3 className="text-sm font-semibold text-[var(--brand-deep)]">
           Upgrade history
         </h3>
@@ -648,8 +649,8 @@ export function StudentUpgradePanel({
           </p>
         ) : (
           <div className="mt-3 overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="text-[11px] uppercase tracking-wide text-[var(--muted)]">
+            <ErpTable>
+              <ErpTableHead>
                 <tr>
                   <th className="px-2 py-1.5 font-semibold">When</th>
                   <th className="px-2 py-1.5 font-semibold">Student</th>
@@ -659,8 +660,8 @@ export function StudentUpgradePanel({
                   <th className="px-2 py-1.5 font-semibold">Fee</th>
                   <th className="px-2 py-1.5 font-semibold">Reason</th>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-[rgba(32,48,80,0.06)]">
+              </ErpTableHead>
+              <ErpTableBody>
                 {history.map((u) => {
                   const sectionOnly =
                     u.fromClassId === u.toClassId &&
@@ -738,8 +739,8 @@ export function StudentUpgradePanel({
                     </tr>
                   );
                 })}
-              </tbody>
-            </table>
+              </ErpTableBody>
+            </ErpTable>
           </div>
         )}
       </section>

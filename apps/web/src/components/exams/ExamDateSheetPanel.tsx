@@ -16,6 +16,7 @@ import {
 } from "@/lib/examTimetable";
 import { loadTimetable, teachingPeriods } from "@/lib/timetable";
 import type { MastersState } from "@/lib/masters";
+import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 
 type Props = {
   academicYearCode: string;
@@ -320,8 +321,8 @@ export function ExamDateSheetPanel({
           </p>
         ) : (
           <div className="mt-4 overflow-x-auto">
-            <table className="min-w-[760px] w-full border-collapse text-xs">
-              <thead>
+            <ErpTable minWidth="min-w-[760px]" className="border-collapse">
+              <ErpTableHead>
                 <tr>
                   {[
                     "Date",
@@ -340,8 +341,8 @@ export function ExamDateSheetPanel({
                     </th>
                   ))}
                 </tr>
-              </thead>
-              <tbody>
+              </ErpTableHead>
+              <ErpTableBody>
                 {rows.map((row) => {
                   const term = exams.terms.find(
                     (item) => item.id === row.examTermId,
@@ -403,8 +404,8 @@ export function ExamDateSheetPanel({
                     </tr>
                   );
                 })}
-              </tbody>
-            </table>
+              </ErpTableBody>
+            </ErpTable>
           </div>
         )}
       </section>

@@ -50,6 +50,12 @@ import { ClassroomSyncPanel } from "@/components/homework/ClassroomSyncPanel";
 import { TENANT } from "@/lib/types";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import { DeskListActions } from "@/components/ui/desk-list-actions";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
 
 type HwTab =
   | "dashboard"
@@ -1223,9 +1229,9 @@ function RosterSubmitTable({
     );
   }
   return (
-    <div className="overflow-x-auto rounded-xl border border-[var(--border)]">
-      <table className="w-full text-left text-sm">
-        <thead className="bg-[var(--surface-sunken)] text-xs text-[var(--muted)]">
+    <ErpTableShell className="overflow-x-auto">
+      <ErpTable>
+        <ErpTableHead>
           <tr>
             <th className="px-3 py-2">Student</th>
             {posts.map((p) => (
@@ -1234,10 +1240,10 @@ function RosterSubmitTable({
               </th>
             ))}
           </tr>
-        </thead>
-        <tbody>
+        </ErpTableHead>
+        <ErpTableBody>
           {roster.map((stu) => (
-            <tr key={stu.id} className="border-t border-[var(--border)]">
+            <tr key={stu.id}>
               <td className="px-3 py-2 font-medium">{stu.fullName}</td>
               {posts.map((p) => {
                 const sub = submissionForStudent(state, p.id, stu.id);
@@ -1259,8 +1265,8 @@ function RosterSubmitTable({
               })}
             </tr>
           ))}
-        </tbody>
-      </table>
-    </div>
+        </ErpTableBody>
+      </ErpTable>
+    </ErpTableShell>
   );
 }

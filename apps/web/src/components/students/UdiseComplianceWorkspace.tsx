@@ -35,6 +35,12 @@ import type { ReportColumn } from "@/lib/reportExport";
 import { runSisReport } from "@/lib/sisReportCatalog";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { currentAcademicYearCode } from "@/lib/masters";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
 
 type FilterGap = "all" | UdiseGapCode | "due" | "call" | "unregistered";
 type ViewMode = "worklist" | "call" | "unregistered";
@@ -955,10 +961,10 @@ export function UdiseComplianceWorkspace({
                 : "All active SIS students have a UDISE+ PEN — none pending registration."}
             </p>
           ) : (
-            <div className="overflow-x-auto rounded-xl border border-[var(--border)] bg-[var(--card)]">
-              <table className="min-w-[900px] w-full border-collapse text-left text-xs">
-                <thead>
-                  <tr className="border-b border-[var(--border)] bg-[rgba(138,90,16,0.08)] text-[var(--muted)]">
+            <ErpTableShell className="overflow-x-auto">
+              <ErpTable minWidth="min-w-[900px]" className="border-collapse">
+                <ErpTableHead>
+                  <tr>
                     <th className="px-2 py-2 font-medium">#</th>
                     <th className="px-2 py-2 font-medium">Student</th>
                     <th className="px-2 py-2 font-medium">Class</th>
@@ -967,13 +973,10 @@ export function UdiseComplianceWorkspace({
                     <th className="px-2 py-2 font-medium">Parents</th>
                     <th className="px-2 py-2 font-medium">Call</th>
                   </tr>
-                </thead>
-                <tbody>
+                </ErpTableHead>
+                <ErpTableBody hoverable>
                   {visibleUnregistered.map((row, i) => (
-                    <tr
-                      key={row.student.id}
-                      className="border-b border-[var(--border)] align-top hover:bg-[var(--surface-sunken)]"
-                    >
+                    <tr key={row.student.id} className="align-top">
                       <td className="px-2 py-2 text-[var(--muted)]">{i + 1}</td>
                       <td className="px-2 py-2">
                         <Link
@@ -1030,9 +1033,9 @@ export function UdiseComplianceWorkspace({
                       </td>
                     </tr>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </ErpTableBody>
+              </ErpTable>
+            </ErpTableShell>
           )}
         </div>
       ) : view === "call" ? (
@@ -1137,15 +1140,15 @@ export function UdiseComplianceWorkspace({
           )}
         </div>
       ) : (
-      <div className="overflow-x-auto rounded-xl border border-[var(--border)] bg-[var(--card)]">
+      <ErpTableShell className="overflow-x-auto">
         {visible.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-[var(--muted)]">
             No open UDISE+ gaps in this filter — good.
           </p>
         ) : (
-          <table className="min-w-[1000px] w-full border-collapse text-left text-xs">
-            <thead>
-              <tr className="border-b border-[var(--border)] bg-[var(--surface-sunken)] text-[var(--muted)]">
+          <ErpTable minWidth="min-w-[1000px]" className="border-collapse">
+            <ErpTableHead>
+              <tr>
                 <th className="px-2 py-2 font-medium">Priority</th>
                 <th className="px-2 py-2 font-medium">Student</th>
                 <th className="px-2 py-2 font-medium">Class / UDISE+</th>
@@ -1155,18 +1158,14 @@ export function UdiseComplianceWorkspace({
                 <th className="px-2 py-2 font-medium">PEN / APAAR</th>
                 <th className="px-2 py-2 font-medium">Call / Remind</th>
               </tr>
-            </thead>
-            <tbody>
+            </ErpTableHead>
+            <ErpTableBody hoverable>
               {visible.map((row) => {
                 const mbuAlert = row.missing.includes("mbu_age_below_class");
                 return (
                 <tr
                   key={row.student.id}
-                  className={`border-b border-[var(--border)] align-top ${
-                    mbuAlert
-                      ? "bg-[rgba(180,35,24,0.12)]"
-                      : "hover:bg-[var(--surface-sunken)]"
-                  }`}
+                  className={`align-top ${mbuAlert ? "bg-[rgba(180,35,24,0.12)]" : ""}`}
                 >
                   <td className="px-2 py-2">
                     <span
@@ -1298,10 +1297,10 @@ export function UdiseComplianceWorkspace({
                 </tr>
                 );
               })}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
         )}
-      </div>
+      </ErpTableShell>
       )}
 
       {kpiModal ? (

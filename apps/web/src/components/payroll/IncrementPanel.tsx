@@ -26,6 +26,7 @@ import {
 } from "@/lib/salaryIncrement";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import type { MastersState } from "@/lib/masters";
+import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 
 type Mode = "policy" | "ops" | "full";
 
@@ -759,9 +760,9 @@ export function IncrementPanel({ mode = "full" }: { mode?: Mode }) {
                   </div>
 
                   <div className="overflow-x-auto">
-                    <table className="min-w-full text-left text-xs">
-                      <thead>
-                        <tr className="border-b border-[rgba(32,48,80,0.1)] text-[var(--muted)]">
+                    <ErpTable className="text-xs">
+                      <ErpTableHead>
+                        <tr>
                           <th className="py-2 pr-2 font-semibold">Staff</th>
                           <th className="py-2 pr-2 font-semibold">Stream</th>
                           <th className="py-2 pr-2 font-semibold">Old basic</th>
@@ -770,13 +771,10 @@ export function IncrementPanel({ mode = "full" }: { mode?: Mode }) {
                           <th className="py-2 pr-2 font-semibold">New basic</th>
                           <th className="py-2 font-semibold">Status</th>
                         </tr>
-                      </thead>
-                      <tbody>
+                      </ErpTableHead>
+                      <ErpTableBody>
                         {visibleLines.map((l) => (
-                          <tr
-                            key={l.staffId}
-                            className="border-b border-[rgba(32,48,80,0.06)]"
-                          >
+                          <tr key={l.staffId}>
                             <td className="py-2 pr-2">
                               <span className="font-semibold text-[var(--brand-deep)]">
                                 {l.empCode}
@@ -851,8 +849,8 @@ export function IncrementPanel({ mode = "full" }: { mode?: Mode }) {
                             </td>
                           </tr>
                         ))}
-                      </tbody>
-                    </table>
+                      </ErpTableBody>
+                    </ErpTable>
                     {visibleLines.length === 0 ? (
                       <p className="py-4 text-sm text-[var(--muted)]">
                         No rows in this filter.

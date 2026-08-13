@@ -7,6 +7,7 @@ import {
   downloadPdfReport,
   type ReportColumn,
 } from "@/lib/reportExport";
+import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 
 export type UdiseListRow = Record<string, string | number | null | undefined> & {
   /** When present, the first column value links to the student's edit page. */
@@ -127,9 +128,9 @@ export function UdiseStudentListModal({
               No students in this list.
             </p>
           ) : (
-            <table className="w-full border-collapse text-left text-xs">
-              <thead>
-                <tr className="border-b border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.04)] text-[var(--muted)]">
+            <ErpTable className="border-collapse">
+              <ErpTableHead>
+                <tr>
                   <th className="px-2 py-2 font-medium">#</th>
                   {columns.map((c) => (
                     <th
@@ -145,13 +146,10 @@ export function UdiseStudentListModal({
                     <th className="px-2 py-2 font-medium">Copy</th>
                   ) : null}
                 </tr>
-              </thead>
-              <tbody>
+              </ErpTableHead>
+              <ErpTableBody hoverable>
                 {rows.map((row, i) => (
-                  <tr
-                    key={row._studentId ?? i}
-                    className="border-b border-[rgba(32,48,80,0.06)] align-top hover:bg-[rgba(32,48,80,0.02)]"
-                  >
+                  <tr key={row._studentId ?? i} className="align-top">
                     <td className="px-2 py-2 text-[var(--muted)]">{i + 1}</td>
                     {columns.map((c) => {
                       const value = row[c.key];
@@ -202,8 +200,8 @@ export function UdiseStudentListModal({
                     ) : null}
                   </tr>
                 ))}
-              </tbody>
-            </table>
+              </ErpTableBody>
+            </ErpTable>
           )}
         </div>
       </div>

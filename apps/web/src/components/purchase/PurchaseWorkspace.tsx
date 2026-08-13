@@ -6,6 +6,7 @@ import { ShoppingCart } from "lucide-react";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
+import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { DEFAULT_AY, formatInr, parseInrToPaise } from "@/lib/masters";
 import { useModuleTabQuery } from "@/lib/useModuleTabQuery";
@@ -1129,9 +1130,9 @@ export function PurchaseWorkspace({
                     </p>
                   </div>
                 ) : null}
-                <table className="w-full min-w-[720px] text-left text-sm">
-                  <thead>
-                    <tr className="border-b text-xs text-[var(--muted)]">
+                <ErpTable minWidth="min-w-[720px]">
+                  <ErpTableHead>
+                    <tr>
                       <th className="py-2 pr-2">Description</th>
                       <th className="py-2 pr-2">Purchase ledger</th>
                       <th className="py-2 pr-2 text-right">Ordered</th>
@@ -1139,17 +1140,14 @@ export function PurchaseWorkspace({
                       <th className="py-2 pr-2 text-right">Rate ₹</th>
                       <th className="py-2 pr-2 text-right">Amount ₹</th>
                     </tr>
-                  </thead>
-                  <tbody>
+                  </ErpTableHead>
+                  <ErpTableBody>
                     {selectedPo.lines.map((line, idx) => {
                       const row = computedGrnLines[idx]!;
                       const rateInr =
                         grnRateByLine[line.id] ?? inrInputFromPaise(line.ratePaise);
                       return (
-                        <tr
-                          key={line.id}
-                          className="border-b border-[var(--border)]"
-                        >
+                        <tr key={line.id}>
                           <td className="py-2 pr-2">
                             <input
                               className={`${field} w-72`}
@@ -1214,8 +1212,8 @@ export function PurchaseWorkspace({
                         </tr>
                       );
                     })}
-                  </tbody>
-                </table>
+                  </ErpTableBody>
+                </ErpTable>
 
                 <div className="mt-4 flex flex-wrap items-end gap-3 rounded-xl border border-[rgba(14,116,144,0.25)] bg-[rgba(14,116,144,0.06)] px-3 py-3">
                   <label className="text-xs text-[var(--muted)]">

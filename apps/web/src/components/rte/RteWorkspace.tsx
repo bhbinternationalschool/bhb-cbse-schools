@@ -13,6 +13,12 @@ import { loadSis, type SisState } from "@/lib/sis";
 import { useModuleTabQuery } from "@/lib/useModuleTabQuery";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
+import {
   applicationStatusLabel,
   assignLotteryNumbers,
   deleteQuotaApplication,
@@ -663,15 +669,15 @@ export function RteWorkspace({
             </div>
           </div>
 
-          <div className="overflow-x-auto rounded-xl border border-[var(--border)] bg-[var(--card)]">
+          <ErpTableShell className="overflow-x-auto">
             {apps.length === 0 ? (
               <p className="px-4 py-6 text-sm text-[var(--muted)]">
                 No govt-assigned candidates yet — import AllottedSeat.xls.
               </p>
             ) : (
-              <table className="min-w-[1100px] w-full border-collapse text-left text-xs">
-                <thead>
-                  <tr className="border-b border-[var(--border)] bg-[var(--surface-sunken)] text-[11px] text-[var(--muted)]">
+              <ErpTable minWidth="min-w-[1100px]" className="border-collapse text-xs">
+                <ErpTableHead>
+                  <tr>
                     <th className="whitespace-nowrap px-2 py-2 font-medium">
                       S.No.
                     </th>
@@ -715,8 +721,8 @@ export function RteWorkspace({
                       Take admission
                     </th>
                   </tr>
-                </thead>
-                <tbody>
+                </ErpTableHead>
+                <ErpTableBody>
                   {apps.map((a, i) => (
                     <AppTableRow
                       key={a.id}
@@ -733,10 +739,10 @@ export function RteWorkspace({
                       onError={setError}
                     />
                   ))}
-                </tbody>
-              </table>
+                </ErpTableBody>
+              </ErpTable>
             )}
-          </div>
+          </ErpTableShell>
         </section>
       ) : null}
 
@@ -970,7 +976,7 @@ function AppTableRow({
 
   return (
     <>
-      <tr className="border-b border-[var(--border)] hover:bg-[var(--surface-sunken)]">
+      <tr className="hover:bg-[var(--surface-sunken)]">
         <td className={td}>{displaySerial}</td>
         <td className={td}>{app.lotteryNo || "—"}</td>
         <td className={`${td} font-medium`}>{app.govtApplicationNo || "—"}</td>

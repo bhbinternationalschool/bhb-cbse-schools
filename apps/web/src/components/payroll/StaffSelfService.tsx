@@ -22,6 +22,12 @@ import {
   PrintablePayslip,
   printPayslipsBatch,
 } from "@/components/payroll/PrintPayslipsPanel";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
 
 /** Staff-facing payslips: month filter + print. */
 export function StaffMyPayslips({ staffId }: { staffId: string }) {
@@ -213,10 +219,10 @@ export function StaffMyAdvances({ staffId }: { staffId: string }) {
         </p>
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
-        <table className="min-w-full text-left text-xs">
-          <thead>
-            <tr className="border-b border-[rgba(32,48,80,0.1)] text-[var(--muted)]">
+      <ErpTableShell className="overflow-x-auto">
+        <ErpTable className="text-xs">
+          <ErpTableHead>
+            <tr>
               <th className="px-3 py-2 font-semibold">Given</th>
               <th className="px-3 py-2 font-semibold">Source</th>
               <th className="px-3 py-2 font-semibold">Amount</th>
@@ -224,15 +230,12 @@ export function StaffMyAdvances({ staffId }: { staffId: string }) {
               <th className="px-3 py-2 font-semibold">Balance</th>
               <th className="px-3 py-2 font-semibold">How recovered</th>
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {list.map((a) => {
               const bal = outstandingOf(a);
               return (
-                <tr
-                  key={a.id}
-                  className="border-b border-[rgba(32,48,80,0.06)] align-top"
-                >
+                <tr key={a.id} className="align-top">
                   <td className="px-3 py-2">
                     {a.givenDate}
                     {a.note ? (
@@ -287,9 +290,9 @@ export function StaffMyAdvances({ staffId }: { staffId: string }) {
                 </td>
               </tr>
             ) : null}
-          </tbody>
-        </table>
-      </div>
+          </ErpTableBody>
+        </ErpTable>
+      </ErpTableShell>
     </div>
   );
 }

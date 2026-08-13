@@ -48,6 +48,7 @@ import {
 } from "@/components/masters/MastersLayout";
 import { SisParentMatchBanner } from "@/components/admissions/SisParentMatchBanner";
 import { AdmissionSurveyTeamPanel } from "@/components/admissions/AdmissionSurveyTeamPanel";
+import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 
 const inp =
   "w-full rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm";
@@ -708,8 +709,8 @@ export function AdmissionFieldSurveyPanel({
               No attendance or captures today yet.
             </p>
           ) : (
-            <table className="min-w-full text-left text-[12px]">
-              <thead className="text-[10px] text-[var(--muted)]">
+            <ErpTable className="text-[12px]">
+              <ErpTableHead>
                 <tr>
                   <th className="py-1 pr-2">Agent</th>
                   <th className="py-1 pr-2">Captures</th>
@@ -717,13 +718,10 @@ export function AdmissionFieldSurveyPanel({
                   <th className="py-1 pr-2">Reg</th>
                   <th className="py-1">Status</th>
                 </tr>
-              </thead>
-              <tbody>
+              </ErpTableHead>
+              <ErpTableBody>
                 {productivity.map((p) => (
-                  <tr
-                    key={p.agentName}
-                    className="border-t border-[rgba(32,48,80,0.06)]"
-                  >
+                  <tr key={p.agentName}>
                     <td className="py-1.5 pr-2 font-medium">{p.agentName}</td>
                     <td className="py-1.5 pr-2">{p.captures}</td>
                     <td className="py-1.5 pr-2">{p.open}</td>
@@ -737,8 +735,8 @@ export function AdmissionFieldSurveyPanel({
                     </td>
                   </tr>
                 ))}
-              </tbody>
-            </table>
+              </ErpTableBody>
+            </ErpTable>
           )}
         </MastersWorkCard>
       </div>
@@ -1324,8 +1322,8 @@ export function AdmissionFieldSurveyPanel({
             No field survey leads in this beat yet.
           </div>
         ) : (
-          <table className="min-w-full text-left text-sm">
-            <thead className="text-[11px] text-[var(--muted)]">
+          <ErpTable>
+            <ErpTableHead>
               <tr>
                 {canEdit ? <th className="px-2 py-2"> </th> : null}
                 <th className="px-3 py-2">Lead</th>
@@ -1336,8 +1334,8 @@ export function AdmissionFieldSurveyPanel({
                 <th className="px-3 py-2">Photo</th>
                 <th className="px-3 py-2">Date</th>
               </tr>
-            </thead>
-            <tbody>
+            </ErpTableHead>
+            <ErpTableBody hoverable>
               {filtered.map((l) => {
                 const beatLabel =
                   state.surveyBeats.find((b) => b.id === l.surveyBeatId)
@@ -1346,10 +1344,7 @@ export function AdmissionFieldSurveyPanel({
                   (l.locality || "").trim() ||
                   "—";
                 return (
-                  <tr
-                    key={l.id}
-                    className="border-t border-[rgba(32,48,80,0.06)] hover:bg-[rgba(32,48,80,0.03)]"
-                  >
+                  <tr key={l.id}>
                     {canEdit ? (
                       <td className="px-2 py-2">
                         {l.stage === "enquiry" ? (
@@ -1416,8 +1411,8 @@ export function AdmissionFieldSurveyPanel({
                   </tr>
                 );
               })}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
         )}
       </MastersTableCard>
 

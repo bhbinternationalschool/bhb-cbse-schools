@@ -10,6 +10,12 @@ import {
   studentReportNeedsStudent,
   type StudentAttReportId,
 } from "@/lib/studentAttendanceReportCatalog";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -445,8 +451,8 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
         </div>
 
         {preview ? (
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white overflow-hidden">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[rgba(32,48,80,0.08)] px-4 py-3">
+          <ErpTableShell>
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] px-4 py-3">
               <h3 className="text-sm font-bold text-[var(--brand-deep)]">
                 {preview.title}
               </h3>
@@ -455,8 +461,8 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
               </span>
             </div>
             <div className="overflow-x-auto max-h-[min(55vh,520px)]">
-              <table className="min-w-full text-left text-sm">
-                <thead className="sticky top-0 bg-[rgba(32,48,80,0.04)] text-[11px] uppercase tracking-wide text-[var(--muted)]">
+              <ErpTable>
+                <ErpTableHead sticky>
                   <tr>
                     {preview.columns.map((c) => (
                       <th key={c.key} className="px-3 py-2 whitespace-nowrap">
@@ -464,13 +470,10 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
                       </th>
                     ))}
                   </tr>
-                </thead>
-                <tbody>
+                </ErpTableHead>
+                <ErpTableBody>
                   {preview.rows.map((row, i) => (
-                    <tr
-                      key={i}
-                      className="border-t border-[rgba(32,48,80,0.06)]"
-                    >
+                    <tr key={i}>
                       {preview.columns.map((c) => (
                         <td
                           key={c.key}
@@ -493,10 +496,10 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
                       </td>
                     </tr>
                   ) : null}
-                </tbody>
-              </table>
+                </ErpTableBody>
+              </ErpTable>
             </div>
-          </div>
+          </ErpTableShell>
         ) : (
           <p className="text-sm text-[var(--muted)]">
             Select filters and run the report to preview.

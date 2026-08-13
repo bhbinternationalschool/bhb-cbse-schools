@@ -21,6 +21,7 @@ import {
   loadSalarySetup,
   normalizeSalarySettings,
 } from "@/lib/salarySetup";
+import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 
 export function BankFileExportPanel({
   academicYearCode,
@@ -234,22 +235,19 @@ export function BankFileExportPanel({
                 <strong>{formatInr(preview.totalAmount)}</strong>
               </p>
               <div className="mt-3 overflow-x-auto">
-                <table className="min-w-full text-left text-xs">
-                  <thead>
-                    <tr className="border-b border-[rgba(32,48,80,0.1)] text-[var(--muted)]">
+                <ErpTable className="text-xs">
+                  <ErpTableHead>
+                    <tr>
                       <th className="py-2 pr-2 font-semibold">Staff</th>
                       <th className="py-2 pr-2 font-semibold">A/c</th>
                       <th className="py-2 pr-2 font-semibold">IFSC</th>
                       <th className="py-2 pr-2 font-semibold">Amount</th>
                       <th className="py-2 font-semibold">Status</th>
                     </tr>
-                  </thead>
-                  <tbody>
+                  </ErpTableHead>
+                  <ErpTableBody>
                     {preview.rows.map((r) => (
-                      <tr
-                        key={r.staffId}
-                        className="border-b border-[rgba(32,48,80,0.06)]"
-                      >
+                      <tr key={r.staffId}>
                         <td className="py-2 pr-2">
                           <span className="font-semibold text-[var(--brand-deep)]">
                             {r.empCode}
@@ -271,7 +269,7 @@ export function BankFileExportPanel({
                           {r.ok ? (
                             <span className="text-teal-700">Ready</span>
                           ) : (
-                            <span className="text-[#b42318]">
+                            <span className="text-[var(--danger)]">
                               {r.issues.join(" · ")}
                             </span>
                           )}
@@ -289,8 +287,8 @@ export function BankFileExportPanel({
                         </td>
                       </tr>
                     ) : null}
-                  </tbody>
-                </table>
+                  </ErpTableBody>
+                </ErpTable>
               </div>
             </>
           )}

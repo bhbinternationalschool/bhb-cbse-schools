@@ -13,6 +13,7 @@ import {
   loadTransport,
 } from "@/lib/transport";
 import { TransportBusBadge } from "@/components/transport/TransportBusBadge";
+import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 
 type Props = {
   studentId: string;
@@ -110,24 +111,22 @@ export function TransportFeeSchedulePanel({
 
       {scheduleRows.length > 0 ? (
         <div className="border-t border-[rgba(15,118,110,0.15)] bg-white/80 px-3 py-2">
-          <table className="w-full text-left text-xs">
-            <thead className="text-[var(--muted)]">
+          <ErpTable>
+            <ErpTableHead>
               <tr>
                 <th className="py-1 font-semibold">Month</th>
                 <th className="py-1 text-right font-semibold">Fee</th>
                 <th className="py-1 text-right font-semibold">Paid</th>
                 <th className="py-1 text-right font-semibold">Balance</th>
               </tr>
-            </thead>
-            <tbody>
+            </ErpTableHead>
+            <ErpTableBody>
               {scheduleRows
                 .filter((r) => !fromMonth || r.periodKey >= fromMonth)
                 .map((r) => (
                   <tr
                     key={r.periodKey}
-                    className={`border-t border-[rgba(32,48,80,0.06)] ${
-                      r.status === "paid" ? "text-[#15803d]" : ""
-                    }`}
+                    className={r.status === "paid" ? "text-[var(--success)]" : ""}
                   >
                     <td className="py-1.5 font-medium">{r.periodLabel}</td>
                     <td className="py-1.5 text-right tabular-nums">
@@ -141,8 +140,8 @@ export function TransportFeeSchedulePanel({
                     </td>
                   </tr>
                 ))}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
         </div>
       ) : null}
     </section>

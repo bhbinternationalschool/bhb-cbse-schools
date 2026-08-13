@@ -33,6 +33,12 @@ import {
   MastersWorkCard,
 } from "@/components/masters/MastersLayout";
 import { SisParentMatchBanner } from "@/components/admissions/SisParentMatchBanner";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
 
 function waUrl(mobile: string, message: string): string {
   const digits = mobile.replace(/\D/g, "");
@@ -779,8 +785,8 @@ export function AdmissionRegistrationPanel({
             No Registered / Verified leads — Register from Lead CRM or use New registration.
           </div>
         ) : (
-          <table className="min-w-full text-left text-sm">
-            <thead className="text-[11px] text-[var(--muted)]">
+          <ErpTable>
+            <ErpTableHead>
               <tr>
                 <th className="px-3 py-2">Lead no.</th>
                 <th className="px-3 py-2">Child</th>
@@ -789,8 +795,8 @@ export function AdmissionRegistrationPanel({
                 <th className="px-3 py-2">Payment</th>
                 <th className="px-3 py-2">House / siblings</th>
               </tr>
-            </thead>
-            <tbody>
+            </ErpTableHead>
+            <ErpTableBody hoverable>
               {queue.map((l) => {
                 const hh = householdOf(state, l.householdId);
                 const groups = l.householdId
@@ -800,10 +806,8 @@ export function AdmissionRegistrationPanel({
                 return (
                   <tr
                     key={l.id}
-                    className={`cursor-pointer border-t border-[rgba(32,48,80,0.06)] ${
-                      active
-                        ? "bg-[rgba(21,128,61,0.12)]"
-                        : "hover:bg-[rgba(32,48,80,0.03)]"
+                    className={`cursor-pointer ${
+                      active ? "bg-[rgba(21,128,61,0.12)]" : ""
                     }`}
                     onClick={() => {
                       setCollectFocusIds([]);
@@ -854,8 +858,8 @@ export function AdmissionRegistrationPanel({
                   </tr>
                 );
               })}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
         )}
       </MastersTableCard>
       ) : null}
@@ -1084,9 +1088,9 @@ export function AdmissionRegistrationPanel({
             ) : null}
 
             {leadPayments.length > 0 ? (
-              <div className="mt-3 overflow-x-auto rounded-lg border border-[rgba(32,48,80,0.1)]">
-                <table className="min-w-full text-left text-[11px]">
-                  <thead className="bg-[rgba(32,48,80,0.04)] text-[var(--muted)]">
+              <ErpTableShell className="mt-3 overflow-x-auto">
+                <ErpTable className="text-[11px]">
+                  <ErpTableHead>
                     <tr>
                       <th className="px-2 py-1.5 font-semibold">Code</th>
                       <th className="px-2 py-1.5 font-semibold">Amount</th>
@@ -1094,13 +1098,10 @@ export function AdmissionRegistrationPanel({
                       <th className="px-2 py-1.5 font-semibold">Status</th>
                       <th className="px-2 py-1.5 font-semibold">R receipt</th>
                     </tr>
-                  </thead>
-                  <tbody>
+                  </ErpTableHead>
+                  <ErpTableBody>
                     {leadPayments.map((p) => (
-                      <tr
-                        key={p.id}
-                        className="border-t border-[rgba(32,48,80,0.08)]"
-                      >
+                      <tr key={p.id}>
                         <td className="px-2 py-1.5 font-mono">{p.code}</td>
                         <td className="px-2 py-1.5">{formatInr(p.amountPaise)}</td>
                         <td className="px-2 py-1.5">
@@ -1116,9 +1117,9 @@ export function AdmissionRegistrationPanel({
                         </td>
                       </tr>
                     ))}
-                  </tbody>
-                </table>
-              </div>
+                  </ErpTableBody>
+                </ErpTable>
+              </ErpTableShell>
             ) : null}
 
             {openPayment ? (

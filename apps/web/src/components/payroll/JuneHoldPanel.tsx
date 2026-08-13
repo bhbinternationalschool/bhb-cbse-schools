@@ -18,6 +18,12 @@ import {
 import { loadMasters, type MastersState } from "@/lib/masters";
 import { formatInr, loadPayroll } from "@/lib/payroll";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
 
 export function JuneHoldPanel() {
   const session = useDemoSession();
@@ -276,26 +282,23 @@ export function JuneHoldPanel() {
         </button>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
-        <div className="border-b border-[rgba(32,48,80,0.08)] px-4 py-3 text-sm font-semibold text-[var(--brand-deep)]">
+      <ErpTableShell>
+        <div className="border-b border-[var(--border)] px-4 py-3 text-sm font-semibold text-[var(--brand-deep)]">
           Open June holds ({openHolds.length})
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-left text-sm">
-            <thead>
-              <tr className="border-b border-[rgba(32,48,80,0.1)] text-[11px] text-[var(--muted)]">
+          <ErpTable minWidth="min-w-[640px]">
+            <ErpTableHead>
+              <tr>
                 <th className="px-3 py-2 font-medium">Staff</th>
                 <th className="px-3 py-2 font-medium">Month</th>
                 <th className="px-3 py-2 font-medium">Amount</th>
                 <th className="px-3 py-2 font-medium">Status</th>
               </tr>
-            </thead>
-            <tbody>
+            </ErpTableHead>
+            <ErpTableBody>
               {openHolds.map((h) => (
-                <tr
-                  key={h.id}
-                  className="border-b border-[rgba(32,48,80,0.06)]"
-                >
+                <tr key={h.id}>
                   <td className="px-3 py-2">
                     <div className="font-semibold text-[var(--brand-deep)]">
                       {h.fullName}
@@ -322,10 +325,10 @@ export function JuneHoldPanel() {
                   </td>
                 </tr>
               ) : null}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
         </div>
-      </div>
+      </ErpTableShell>
 
       <div className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
         <div className="border-b border-[rgba(32,48,80,0.08)] px-4 py-3 text-sm font-semibold text-[var(--brand-deep)]">

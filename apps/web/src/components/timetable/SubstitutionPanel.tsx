@@ -21,6 +21,7 @@ import {
 } from "@/lib/timetableSubstitution";
 import { isoDateWeekday } from "@/lib/examTimetable";
 import type { MastersState } from "@/lib/masters";
+import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 
 export function SubstitutionPanel(props: {
   masters: MastersState;
@@ -386,9 +387,9 @@ export function SubstitutionPanel(props: {
           </p>
         ) : (
           <div className="mt-3 overflow-x-auto">
-            <table className="min-w-[720px] w-full border-collapse text-xs">
-              <thead>
-                <tr className="bg-[var(--surface-sunken)] text-left">
+            <ErpTable minWidth="min-w-[720px]" className="border-collapse">
+              <ErpTableHead>
+                <tr>
                   <th className="border border-[var(--border)] p-2">
                     Period
                   </th>
@@ -411,8 +412,8 @@ export function SubstitutionPanel(props: {
                     <th className="border border-[var(--border)] p-2" />
                   ) : null}
                 </tr>
-              </thead>
-              <tbody>
+              </ErpTableHead>
+              <ErpTableBody>
                 {rows.map((row) => {
                   const candidates = canEdit ? candidatesForRow(row) : [];
                   const knownIds = new Set(candidates.map((c) => c.staff.id));
@@ -490,8 +491,8 @@ export function SubstitutionPanel(props: {
                     </tr>
                   );
                 })}
-              </tbody>
-            </table>
+              </ErpTableBody>
+            </ErpTable>
           </div>
         )}
       </div>

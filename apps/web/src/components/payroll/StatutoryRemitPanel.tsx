@@ -18,6 +18,12 @@ import {
 import { loadMasters } from "@/lib/masters";
 import { normalizeStatutoryConfig } from "@/lib/foundationMasters";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
 
 const RECEIPT_ACCEPT = "application/pdf,image/jpeg,image/png";
 const RECEIPT_MAX_BYTES = 15 * 1024 * 1024;
@@ -212,10 +218,10 @@ export function StatutoryRemitPanel() {
 
                 {openId === b.id ? (
                   <div className="mt-3 space-y-3">
-                    <div className="overflow-x-auto rounded-lg border border-[rgba(32,48,80,0.1)]">
-                      <table className="w-full min-w-[720px] text-left text-[11px]">
-                        <thead>
-                          <tr className="border-b border-[rgba(32,48,80,0.08)] text-[var(--muted)]">
+                    <ErpTableShell className="overflow-x-auto">
+                      <ErpTable minWidth="min-w-[720px]" className="text-[11px]">
+                        <ErpTableHead>
+                          <tr>
                             <th className="px-2 py-1.5 font-medium">Staff</th>
                             <th className="px-2 py-1.5 font-medium">UAN</th>
                             <th className="px-2 py-1.5 font-medium">EPF wages</th>
@@ -224,10 +230,10 @@ export function StatutoryRemitPanel() {
                             <th className="px-2 py-1.5 font-medium">ER</th>
                             <th className="px-2 py-1.5 font-medium">EDLI</th>
                           </tr>
-                        </thead>
-                        <tbody>
+                        </ErpTableHead>
+                        <ErpTableBody>
                           {b.lines.map((l) => (
-                            <tr key={l.staffId} className="border-b border-[rgba(32,48,80,0.05)]">
+                            <tr key={l.staffId}>
                               <td className="px-2 py-1.5">
                                 {l.fullName}
                                 <div className="text-[var(--muted)]">{l.empCode}</div>
@@ -242,25 +248,25 @@ export function StatutoryRemitPanel() {
                               <td className="px-2 py-1.5">{formatInr(l.edliAmount)}</td>
                             </tr>
                           ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    <div className="overflow-x-auto rounded-lg border border-[rgba(32,48,80,0.1)]">
-                      <table className="w-full min-w-[520px] text-left text-[11px]">
-                        <thead>
-                          <tr className="border-b border-[rgba(32,48,80,0.08)] text-[var(--muted)]">
+                        </ErpTableBody>
+                      </ErpTable>
+                    </ErpTableShell>
+                    <ErpTableShell className="overflow-x-auto">
+                      <ErpTable minWidth="min-w-[520px]" className="text-[11px]">
+                        <ErpTableHead>
+                          <tr>
                             <th className="px-2 py-1.5 font-medium">Staff</th>
                             <th className="px-2 py-1.5 font-medium">IP number</th>
                             <th className="px-2 py-1.5 font-medium">IP contribution</th>
                             <th className="px-2 py-1.5 font-medium">Employer</th>
                             <th className="px-2 py-1.5 font-medium">Total</th>
                           </tr>
-                        </thead>
-                        <tbody>
+                        </ErpTableHead>
+                        <ErpTableBody>
                           {b.lines
                             .filter((l) => l.esicEmployee + l.esicEmployer > 0)
                             .map((l) => (
-                              <tr key={l.staffId} className="border-b border-[rgba(32,48,80,0.05)]">
+                              <tr key={l.staffId}>
                                 <td className="px-2 py-1.5">
                                   {l.fullName}
                                   <div className="text-[var(--muted)]">{l.empCode}</div>
@@ -273,9 +279,9 @@ export function StatutoryRemitPanel() {
                                 </td>
                               </tr>
                             ))}
-                        </tbody>
-                      </table>
-                    </div>
+                        </ErpTableBody>
+                      </ErpTable>
+                    </ErpTableShell>
                   </div>
                 ) : null}
 

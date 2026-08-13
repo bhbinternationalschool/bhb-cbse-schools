@@ -36,6 +36,12 @@ import {
   type AttendanceState,
   type AttendanceStatus,
 } from "@/lib/attendance";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
 
 type ProfileTab =
   | "profile"
@@ -453,9 +459,9 @@ export function StudentProfileModal({
               {feeSummary.lines.length === 0 ? (
                 <Empty text="No fee dues found for this student." />
               ) : (
-                <div className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)]">
-                  <table className="w-full text-sm">
-                    <thead className="bg-[rgba(32,48,80,0.04)] text-left text-[11px] uppercase tracking-wide text-[var(--muted)]">
+                <ErpTableShell>
+                  <ErpTable>
+                    <ErpTableHead>
                       <tr>
                         <th className="px-3 py-2">Head</th>
                         <th className="px-3 py-2">Due on</th>
@@ -463,8 +469,8 @@ export function StudentProfileModal({
                         <th className="px-3 py-2 text-right">Paid</th>
                         <th className="px-3 py-2 text-right">Balance</th>
                       </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[rgba(32,48,80,0.08)]">
+                    </ErpTableHead>
+                    <ErpTableBody>
                       {feeSummary.lines.map((l) => (
                         <tr key={l.dueKey}>
                           <td className="px-3 py-2 text-[var(--brand-deep)]">
@@ -490,9 +496,9 @@ export function StudentProfileModal({
                           </td>
                         </tr>
                       ))}
-                    </tbody>
-                  </table>
-                </div>
+                    </ErpTableBody>
+                  </ErpTable>
+                </ErpTableShell>
               )}
             </div>
           ) : null}
@@ -503,11 +509,8 @@ export function StudentProfileModal({
                 <Empty text="No exam marks recorded for this session yet." />
               ) : (
                 examCards.map((rc) => (
-                  <div
-                    key={rc.examTerm.id}
-                    className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)]"
-                  >
-                    <div className="flex items-center justify-between bg-[rgba(32,48,80,0.04)] px-3 py-2">
+                  <ErpTableShell key={rc.examTerm.id}>
+                    <div className="flex items-center justify-between bg-[var(--surface-sunken)] px-3 py-2">
                       <span className="text-sm font-semibold text-[var(--brand-deep)]">
                         {rc.examTerm.label}
                       </span>
@@ -516,8 +519,8 @@ export function StudentProfileModal({
                         {rc.overallGrade || "—"}
                       </span>
                     </div>
-                    <table className="w-full text-sm">
-                      <tbody className="divide-y divide-[rgba(32,48,80,0.08)]">
+                    <ErpTable>
+                      <ErpTableBody>
                         {rc.lines.map((l) => (
                           <tr key={l.subjectId}>
                             <td className="px-3 py-2 text-[var(--brand-deep)]">
@@ -533,9 +536,9 @@ export function StudentProfileModal({
                             </td>
                           </tr>
                         ))}
-                      </tbody>
-                    </table>
-                  </div>
+                      </ErpTableBody>
+                    </ErpTable>
+                  </ErpTableShell>
                 ))
               )}
             </div>

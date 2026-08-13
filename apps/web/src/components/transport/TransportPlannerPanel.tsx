@@ -26,6 +26,12 @@ import {
   countHouseholdsNeedingGeocode,
 } from "@/lib/householdGeo";
 import { TransportMapsApiHelp } from "@/components/transport/TransportMapsApiHelp";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -439,31 +445,28 @@ export function TransportPlannerPanel({
                     <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--muted)]">
                       Fee months (Fee Take)
                     </p>
-                    <div className="mt-1 overflow-x-auto rounded-lg border border-[var(--border)]">
-                      <table className="w-full min-w-[16rem] text-left text-xs">
-                        <thead className="bg-[var(--surface-sunken)] text-[var(--muted)]">
+                    <ErpTableShell className="mt-1 overflow-x-auto">
+                      <ErpTable minWidth="min-w-[16rem]" className="text-xs">
+                        <ErpTableHead>
                           <tr>
                             <th className="px-2 py-1.5 font-semibold">Month</th>
                             <th className="px-2 py-1.5 text-right font-semibold">
                               Fee
                             </th>
                           </tr>
-                        </thead>
-                        <tbody>
+                        </ErpTableHead>
+                        <ErpTableBody>
                           {monthPreview.map((m) => (
-                            <tr
-                              key={m.periodKey}
-                              className="border-t border-[var(--border)]"
-                            >
+                            <tr key={m.periodKey}>
                               <td className="px-2 py-1.5">{m.periodLabel}</td>
                               <td className="px-2 py-1.5 text-right font-semibold tabular-nums">
                                 {formatInr(m.amountPaise)}
                               </td>
                             </tr>
                           ))}
-                        </tbody>
-                      </table>
-                    </div>
+                        </ErpTableBody>
+                      </ErpTable>
+                    </ErpTableShell>
                   </div>
                 ) : null}
 

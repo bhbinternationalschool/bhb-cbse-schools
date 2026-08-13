@@ -37,6 +37,7 @@ import {
   TrendingUp,
   AlertTriangle,
 } from "lucide-react";
+import { ErpTable, ErpTableBody } from "@/components/ui/erp-roster";
 
 export type DashboardTone =
   | "navy"
@@ -739,7 +740,7 @@ function DashboardTable({
         </span>
       </div>
       <div className="max-h-[28rem] overflow-auto">
-        <table className="w-full min-w-[28rem] border-collapse text-left">
+        <ErpTable minWidth="min-w-[28rem]" className="border-collapse">
           <thead className="sticky top-0 z-[1] bg-[#f0efe6]">
             <tr>
               {columns.map((c) => {
@@ -780,7 +781,7 @@ function DashboardTable({
               })}
             </tr>
           </thead>
-          <tbody>
+          <ErpTableBody>
             {rows.length === 0 ? (
               <tr>
                 <td
@@ -795,7 +796,7 @@ function DashboardTable({
                 <tr
                   key={row.id}
                   onClick={() => onRowClick?.(row)}
-                  className={`border-t border-[var(--border)] transition hover:bg-[rgba(197,160,40,0.08)] ${
+                  className={`transition hover:bg-[rgba(197,160,40,0.08)] ${
                     idx % 2 === 0 ? "bg-[var(--card)]" : "bg-[var(--surface-sunken)]"
                   } ${onRowClick ? "cursor-pointer" : ""}`}
                 >
@@ -814,8 +815,8 @@ function DashboardTable({
                 </tr>
               ))
             )}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </div>
     </section>
   );

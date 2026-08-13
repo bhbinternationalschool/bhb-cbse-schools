@@ -43,6 +43,12 @@ import {
   autoRunSubstitutionForDate,
   notifySubstitutes,
 } from "@/lib/timetableSubstitutionAuto";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
 
 type AttTab =
   | "punch"
@@ -815,9 +821,9 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
             />
           </label>
 
-          <div className="overflow-hidden rounded-2xl border border-[rgba(32,48,80,0.12)] bg-white">
-            <table className="w-full min-w-[880px] text-left text-sm">
-              <thead className="border-b border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] text-[11px] uppercase text-[var(--muted)]">
+          <ErpTableShell>
+            <ErpTable minWidth="min-w-[880px]">
+              <ErpTableHead>
                 <tr>
                   <th className="px-3 py-2">Code</th>
                   <th className="px-3 py-2">Name</th>
@@ -827,8 +833,8 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
                   <th className="px-3 py-2">Way</th>
                   <th className="px-3 py-2">Mark</th>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-[rgba(32,48,80,0.08)]">
+              </ErpTableHead>
+              <ErpTableBody>
                 {filtered.map((s) => {
                   const mark = marks.find((m) => m.staffId === s.id);
                   const rule = ruleForStaff(rulesState, s.id);
@@ -909,9 +915,9 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
                     </td>
                   </tr>
                 ) : null}
-              </tbody>
-            </table>
-          </div>
+              </ErpTableBody>
+            </ErpTable>
+          </ErpTableShell>
         </>
       ) : null}
 

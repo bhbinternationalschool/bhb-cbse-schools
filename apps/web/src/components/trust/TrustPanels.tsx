@@ -40,6 +40,7 @@ import {
   type TrustReportFormat,
   type TrustReportId,
 } from "@/lib/trustReportCatalog";
+import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 
 export type TrustPanelProps = {
   state: TrustState;
@@ -227,23 +228,23 @@ export function ProjectsPanel({
 
       <section className={CARD}>
         <h3 className="text-sm font-bold text-[var(--brand-deep)]">All projects</h3>
-        <table className="mt-3 w-full text-sm">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
+        <ErpTable minWidth="min-w-full" className="mt-3">
+          <ErpTableHead>
+            <tr>
               <th className="pb-2">Code</th>
               <th className="pb-2">Name</th>
               <th className="pb-2">Status</th>
               <th className="pb-2 text-right">Budget</th>
               <th className="pb-2 text-right">Spent</th>
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {state.projects.map((p) => {
               const k = projectKpis(p.id, state);
               return (
                 <tr
                   key={p.id}
-                  className={`cursor-pointer border-t border-[var(--border)] ${selectedProjectId === p.id ? "bg-[rgba(197,160,40,0.08)]" : ""}`}
+                  className={`cursor-pointer ${selectedProjectId === p.id ? "bg-[rgba(197,160,40,0.08)]" : ""}`}
                   onClick={() => onSelectProject(p.id)}
                 >
                   <td className="py-2 font-mono text-xs">{p.code}</td>
@@ -254,8 +255,8 @@ export function ProjectsPanel({
                 </tr>
               );
             })}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </section>
 
       <div className={CARD}>
@@ -341,19 +342,19 @@ export function WorksPanel({
         </button>
       </section>
       <section className={CARD}>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
+        <ErpTable minWidth="min-w-full">
+          <ErpTableHead>
+            <tr>
               <th className="pb-2">Work</th>
               <th className="pb-2">Category</th>
               <th className="pb-2 text-right">Qty</th>
               <th className="pb-2 text-right">Amount</th>
               <th className="pb-2">Status</th>
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {items.map((w) => (
-              <tr key={w.id} className="border-t border-[var(--border)]">
+              <tr key={w.id}>
                 <td className="py-2">{w.name}</td>
                 <td className="py-2">{w.category}</td>
                 <td className="py-2 text-right">
@@ -363,8 +364,8 @@ export function WorksPanel({
                 <td className="py-2">{w.status}</td>
               </tr>
             ))}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </section>
     </div>
   );
@@ -426,26 +427,26 @@ export function MaterialsPanel({
         </button>
       </section>
       <section className={CARD}>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
+        <ErpTable minWidth="min-w-full">
+          <ErpTableHead>
+            <tr>
               <th className="pb-2">Material</th>
               <th className="pb-2 text-right">Required</th>
               <th className="pb-2 text-right">Issued</th>
               <th className="pb-2 text-right">Balance</th>
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {lines.map((m) => (
-              <tr key={m.id} className="border-t border-[var(--border)]">
+              <tr key={m.id}>
                 <td className="py-2">{m.name}</td>
                 <td className="py-2 text-right">{m.requiredQty}</td>
                 <td className="py-2 text-right">{m.issuedQty}</td>
                 <td className="py-2 text-right">{materialBalance(m)}</td>
               </tr>
             ))}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </section>
     </div>
   );
@@ -516,19 +517,19 @@ export function LabourPanel({
         </button>
       </section>
       <section className={CARD}>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
+        <ErpTable minWidth="min-w-full">
+          <ErpTableHead>
+            <tr>
               <th className="pb-2">Type</th>
               <th className="pb-2 text-right">Days</th>
               <th className="pb-2 text-right">Amount</th>
               <th className="pb-2">Status</th>
               <th className="pb-2" />
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {entries.map((l) => (
-              <tr key={l.id} className="border-t border-[var(--border)]">
+              <tr key={l.id}>
                 <td className="py-2">{l.labourType}</td>
                 <td className="py-2 text-right">{l.days}</td>
                 <td className="py-2 text-right">{formatInr(l.amountPaise)}</td>
@@ -542,8 +543,8 @@ export function LabourPanel({
                 </td>
               </tr>
             ))}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </section>
     </div>
   );
@@ -621,19 +622,19 @@ export function AllotmentsPanel({
         </button>
       </section>
       <section className={CARD}>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
+        <ErpTable minWidth="min-w-full">
+          <ErpTableHead>
+            <tr>
               <th className="pb-2">Code</th>
               <th className="pb-2">Assignee</th>
               <th className="pb-2">Due</th>
               <th className="pb-2 text-right">%</th>
               <th className="pb-2">Actions</th>
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {allotments.map((a) => (
-              <tr key={a.id} className="border-t border-[var(--border)]">
+              <tr key={a.id}>
                 <td className="py-2 font-mono text-xs">{a.code}</td>
                 <td className="py-2">{a.partyName}</td>
                 <td className="py-2">{a.targetEnd}</td>
@@ -672,8 +673,8 @@ export function AllotmentsPanel({
                 </td>
               </tr>
             ))}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </section>
     </div>
   );
@@ -888,19 +889,19 @@ export function BillsPanel({
             Capitalise project
           </button>
         </div>
-        <table className="mt-3 w-full text-sm">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
+        <ErpTable minWidth="min-w-full" className="mt-3">
+          <ErpTableHead>
+            <tr>
               <th className="pb-2">Date</th>
               <th className="pb-2">Type</th>
               <th className="pb-2 text-right">Amount</th>
               <th className="pb-2">Status</th>
               <th className="pb-2" />
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {costLines.map((c) => (
-              <tr key={c.id} className="border-t border-[var(--border)]">
+              <tr key={c.id}>
                 <td className="py-2">{c.date}</td>
                 <td className="py-2">{c.costType}</td>
                 <td className="py-2 text-right">{formatInr(c.amountPaise)}</td>
@@ -925,8 +926,8 @@ export function BillsPanel({
                 </td>
               </tr>
             ))}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </section>
     </div>
   );

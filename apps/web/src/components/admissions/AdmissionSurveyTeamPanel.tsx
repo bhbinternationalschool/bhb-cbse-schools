@@ -25,6 +25,7 @@ import {
   MastersTableCard,
   MastersWorkCard,
 } from "@/components/masters/MastersLayout";
+import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 
 const inp =
   "w-full rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm";
@@ -254,8 +255,8 @@ export function AdmissionSurveyTeamPanel({
             No survey team yet — add staff or outside workers above.
           </p>
         ) : (
-          <table className="min-w-full text-left text-sm">
-            <thead className="text-[11px] text-[var(--muted)]">
+          <ErpTable>
+            <ErpTableHead>
               <tr>
                 <th className="px-2 py-2">Name</th>
                 <th className="px-2 py-2">Type</th>
@@ -263,13 +264,10 @@ export function AdmissionSurveyTeamPanel({
                 <th className="px-2 py-2">App</th>
                 <th className="px-2 py-2">Actions</th>
               </tr>
-            </thead>
-            <tbody>
+            </ErpTableHead>
+            <ErpTableBody>
               {state.surveyTeam.map((m) => (
-                <tr
-                  key={m.id}
-                  className="border-t border-[rgba(32,48,80,0.06)]"
-                >
+                <tr key={m.id}>
                   <td className="px-2 py-2 text-[12px]">
                     <span className="font-medium text-[var(--brand-deep)]">
                       {m.fullName}
@@ -335,7 +333,7 @@ export function AdmissionSurveyTeamPanel({
                         ) : null}
                         <button
                           type="button"
-                          className="text-[#b42318] underline"
+                          className="text-[var(--danger)] underline"
                           onClick={() =>
                             onCommit(
                               removeSurveyTeamMember(state, m.id),
@@ -352,8 +350,8 @@ export function AdmissionSurveyTeamPanel({
                   </td>
                 </tr>
               ))}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
         )}
       </MastersWorkCard>
 
@@ -487,8 +485,8 @@ export function AdmissionSurveyTeamPanel({
             No survey sessions this day — agents can Start via WhatsApp (START CODE + location pin) or /field/survey.
           </div>
         ) : (
-          <table className="min-w-full text-left text-sm">
-            <thead className="text-[11px] text-[var(--muted)]">
+          <ErpTable>
+            <ErpTableHead>
               <tr>
                 <th className="px-2 py-2">Agent</th>
                 <th className="px-2 py-2">Status</th>
@@ -499,13 +497,10 @@ export function AdmissionSurveyTeamPanel({
                 <th className="px-2 py-2">Start GPS</th>
                 <th className="px-2 py-2">End GPS</th>
               </tr>
-            </thead>
-            <tbody>
+            </ErpTableHead>
+            <ErpTableBody>
               {dayAnalytics.byAgent.map((a) => (
-                <tr
-                  key={`${a.memberId}-${a.agentName}`}
-                  className="border-t border-[rgba(32,48,80,0.06)]"
-                >
+                <tr key={`${a.memberId}-${a.agentName}`}>
                   <td className="px-2 py-2 text-[12px] font-medium">
                     {a.agentName}
                   </td>
@@ -540,8 +535,8 @@ export function AdmissionSurveyTeamPanel({
                   </td>
                 </tr>
               ))}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
         )}
 
         {dayAnalytics.byBeat.length > 0 ? (

@@ -48,6 +48,7 @@ import { SubstitutionPanel } from "@/components/timetable/SubstitutionPanel";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
+import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { TimetableReportsRunner } from "@/components/reports/ModuleReportRunners";
 import { resolveSessionStaff } from "@/lib/staffResolve";
@@ -972,8 +973,8 @@ export function TimetableWorkspace() {
                 </div>
 
                 <div className="mt-3 overflow-x-auto">
-                  <table className="min-w-[640px] w-full border-collapse text-xs">
-                    <thead>
+                  <ErpTable minWidth="min-w-[640px]" className="border-collapse">
+                    <ErpTableHead>
                       <tr>
                         <th className="border border-[var(--border)] bg-[var(--surface-sunken)] p-2 text-left">
                           Period
@@ -1005,8 +1006,8 @@ export function TimetableWorkspace() {
                           );
                         })}
                       </tr>
-                    </thead>
-                    <tbody>
+                    </ErpTableHead>
+                    <ErpTableBody>
                       {teaching.map((p) => (
                         <tr key={p.no}>
                           <td className="border border-[var(--border)] p-2 font-semibold text-[var(--brand-deep)]">
@@ -1095,8 +1096,8 @@ export function TimetableWorkspace() {
                           })}
                         </tr>
                       ))}
-                    </tbody>
-                  </table>
+                    </ErpTableBody>
+                  </ErpTable>
                 </div>
               </>
             ) : (
@@ -1287,8 +1288,8 @@ export function TimetableWorkspace() {
             </p>
           ) : (
             <div className="mt-4 overflow-x-auto">
-              <table className="min-w-[640px] w-full border-collapse text-xs">
-                <thead>
+              <ErpTable minWidth="min-w-[640px]" className="border-collapse">
+                <ErpTableHead>
                   <tr>
                     <th className="border border-[var(--border)] bg-[var(--surface-sunken)] p-2 text-left">
                       Period
@@ -1302,8 +1303,8 @@ export function TimetableWorkspace() {
                       </th>
                     ))}
                   </tr>
-                </thead>
-                <tbody>
+                </ErpTableHead>
+                <ErpTableBody>
                   {teaching.map((p) => (
                     <tr key={p.no}>
                       <td className="border border-[var(--border)] p-2 font-semibold">
@@ -1423,8 +1424,8 @@ export function TimetableWorkspace() {
                       })}
                     </tr>
                   ))}
-                </tbody>
-              </table>
+                </ErpTableBody>
+              </ErpTable>
             </div>
           )}
         </div>

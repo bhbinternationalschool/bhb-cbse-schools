@@ -23,6 +23,12 @@ import {
   type StaffAdvance,
 } from "@/lib/staffAdvance";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
 
 export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
   const session = useDemoSession();
@@ -398,7 +404,7 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
         </div>
       </div>
 
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <ErpTableShell className="p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-bold text-[var(--brand-deep)]">
             Ledger
@@ -416,9 +422,9 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
           ) : null}
         </div>
         <div className="overflow-x-auto">
-          <table className="min-w-full text-left text-xs">
-            <thead>
-              <tr className="border-b border-[rgba(32,48,80,0.1)] text-[var(--muted)]">
+          <ErpTable className="text-xs">
+            <ErpTableHead>
+              <tr>
                 <th className="py-2 pr-2 font-semibold">Staff / advance</th>
                 <th className="py-2 pr-2 font-semibold">Given</th>
                 <th className="py-2 pr-2 font-semibold">Amount</th>
@@ -428,15 +434,12 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
                 </th>
                 <th className="py-2 font-semibold" />
               </tr>
-            </thead>
-            <tbody>
+            </ErpTableHead>
+            <ErpTableBody>
               {visible.map((a) => {
                 const bal = outstandingOf(a);
                 return (
-                  <tr
-                    key={a.id}
-                    className="border-b border-[rgba(32,48,80,0.06)] align-top"
-                  >
+                  <tr key={a.id} className="align-top">
                     <td className="py-2 pr-2">
                       <span className="font-semibold text-[var(--brand-deep)]">
                         {a.empCode}
@@ -497,7 +500,7 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
                       a.source !== "with_salary" ? (
                         <button
                           type="button"
-                          className="text-[11px] font-semibold text-[#b42318]"
+                          className="text-[11px] font-semibold text-[var(--danger)]"
                           onClick={() => onVoid(a.id)}
                         >
                           Delete
@@ -519,10 +522,10 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
                   </td>
                 </tr>
               ) : null}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
         </div>
-      </div>
+      </ErpTableShell>
     </div>
   );
 }

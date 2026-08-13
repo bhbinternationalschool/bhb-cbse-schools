@@ -50,6 +50,12 @@ import {
 } from "@/lib/reportsCenterCatalog";
 import { isModuleEnabled } from "@/lib/moduleRegistry";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
 
 type HubTab = "dashboard" | "catalog" | "recent" | ReportsCenterModuleId;
 
@@ -216,22 +222,19 @@ export function ReportsCenterWorkspace() {
             </select>
           </div>
 
-          <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)]">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-[var(--surface-sunken)] text-xs uppercase tracking-wide text-[var(--muted)]">
+          <ErpTableShell>
+            <ErpTable>
+              <ErpTableHead>
                 <tr>
                   <th className="px-3 py-2 font-medium">Report</th>
                   <th className="px-3 py-2 font-medium">Module</th>
                   <th className="px-3 py-2 font-medium">Category</th>
                   <th className="px-3 py-2 font-medium text-right">Actions</th>
                 </tr>
-              </thead>
-              <tbody>
+              </ErpTableHead>
+              <ErpTableBody>
                 {filtered.map((e) => (
-                  <tr
-                    key={e.key}
-                    className="border-t border-[var(--border)]"
-                  >
+                  <tr key={e.key}>
                     <td className="px-3 py-2.5">
                       <p className="font-medium text-[var(--brand-deep)]">
                         {e.label}
@@ -280,9 +283,9 @@ export function ReportsCenterWorkspace() {
                     </td>
                   </tr>
                 ) : null}
-              </tbody>
-            </table>
-          </div>
+              </ErpTableBody>
+            </ErpTable>
+          </ErpTableShell>
         </section>
       ) : null}
 

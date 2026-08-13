@@ -8,6 +8,7 @@ import {
   type SessionGapRow,
 } from "@/lib/studentImport";
 import type { SisState } from "@/lib/sis";
+import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 
 type Props = {
   masters: MastersState;
@@ -159,22 +160,19 @@ export function SessionImportGapDialog({
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto px-2 py-2 sm:px-4">
-          <table className="w-full text-left text-xs">
-            <thead className="sticky top-0 bg-white text-[10px] uppercase tracking-wide text-[var(--muted)]">
+          <ErpTable className="text-xs">
+            <ErpTableHead sticky>
               <tr>
                 <th className="px-2 py-2 font-semibold">Student</th>
                 <th className="px-2 py-2 font-semibold">Class</th>
                 <th className="px-2 py-2 font-semibold">Action</th>
               </tr>
-            </thead>
-            <tbody>
+            </ErpTableHead>
+            <ErpTableBody>
               {missing.map((row) => {
                 const action = choices[row.studentId] ?? "leave";
                 return (
-                  <tr
-                    key={row.studentId}
-                    className="border-t border-[rgba(32,48,80,0.06)]"
-                  >
+                  <tr key={row.studentId}>
                     <td className="px-2 py-2 align-top">
                       <div className="font-medium text-[var(--brand-deep)]">
                         {row.fullName}
@@ -218,8 +216,8 @@ export function SessionImportGapDialog({
                   </tr>
                 );
               })}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[rgba(32,48,80,0.08)] px-4 py-3">

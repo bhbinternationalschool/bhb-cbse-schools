@@ -13,6 +13,7 @@ import { loadTransport } from "@/lib/transport";
 import { FilterExportButtons } from "@/components/reports/FilterExportButtons";
 import { describeFilters } from "@/lib/reportExport";
 import { TENANT } from "@/lib/types";
+import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 
 function StatIcon({
   tone,
@@ -110,14 +111,14 @@ function BreakdownTable({
         {title}
       </div>
       <div className="max-h-72 overflow-auto">
-        <table className="w-full text-left text-[13px]">
-          <thead>
-            <tr className="border-b border-[var(--border)] text-[11px] uppercase tracking-wide text-[var(--muted)]">
+        <ErpTable className="text-[13px]">
+          <ErpTableHead>
+            <tr>
               <th className="px-3 py-2 font-semibold">{colA}</th>
               <th className="px-3 py-2 text-right font-semibold">{colB}</th>
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {rows.length === 0 ? (
               <tr>
                 <td colSpan={2} className="px-2 py-2">
@@ -135,11 +136,9 @@ function BreakdownTable({
                     onClick={
                       clickable ? () => onRowClick!(r.key, r.label) : undefined
                     }
-                    className={`border-b border-[var(--border)] text-[var(--foreground)] ${
-                      clickable
-                        ? "cursor-pointer hover:bg-[#f5f8fb]"
-                        : ""
-                    }`}
+                    className={
+                      clickable ? "cursor-pointer hover:bg-[#f5f8fb]" : ""
+                    }
                     title={clickable ? `View ${r.label}` : undefined}
                   >
                     <td className="px-3 py-1.5">
@@ -162,8 +161,8 @@ function BreakdownTable({
                 <td className="px-3 py-2 text-right tabular-nums">{total}</td>
               </tr>
             ) : null}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </div>
     </div>
   );
@@ -213,21 +212,18 @@ function StudentListDrawer({
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-auto">
-          <table className="w-full text-left text-[13px]">
-            <thead className="sticky top-0 bg-[var(--card)] text-[10px] uppercase tracking-wide text-[var(--muted)]">
-              <tr className="border-b border-[var(--border)]">
+          <ErpTable className="text-[13px]">
+            <ErpTableHead sticky>
+              <tr>
                 <th className="px-4 py-2 font-semibold">#</th>
                 <th className="px-4 py-2 font-semibold">Student</th>
                 <th className="px-4 py-2 font-semibold">Class</th>
                 <th className="px-4 py-2 font-semibold">Admission</th>
               </tr>
-            </thead>
-            <tbody>
+            </ErpTableHead>
+            <ErpTableBody>
               {students.map((s, i) => (
-                <tr
-                  key={s.id}
-                  className="border-b border-[var(--border)] text-[var(--foreground)]"
-                >
+                <tr key={s.id}>
                   <td className="px-4 py-2 tabular-nums text-[#90a4ae]">
                     {i + 1}
                   </td>
@@ -251,8 +247,8 @@ function StudentListDrawer({
                   <td className="px-4 py-2 text-[var(--muted)]">{s.admissionNo}</td>
                 </tr>
               ))}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
         </div>
       </div>
     </div>

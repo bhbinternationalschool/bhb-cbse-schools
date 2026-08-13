@@ -32,6 +32,12 @@ import {
   StudentNameLabel,
 } from "@/components/students/StudentAvatar";
 import { InlinePhotoCapture } from "@/components/students/InlinePhotoCapture";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
 
 type UpdateTool =
   | "details"
@@ -565,17 +571,17 @@ export function StudentUpdatePanel({
               No active students in this class / section.
             </p>
           ) : tool === "student_images" ? (
-            <div className="overflow-x-auto rounded-lg border border-[rgba(32,48,80,0.08)]">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-[rgba(32,48,80,0.04)] text-[11px] uppercase tracking-wide text-[var(--muted)]">
+            <ErpTableShell className="overflow-x-auto">
+              <ErpTable>
+                <ErpTableHead>
                   <tr>
                     <th className="px-3 py-2 font-semibold">#</th>
                     <th className="px-3 py-2 font-semibold">Student</th>
                     <th className="px-3 py-2 font-semibold">Class</th>
                     <th className="px-3 py-2 font-semibold">Photo</th>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-[rgba(32,48,80,0.06)]">
+                </ErpTableHead>
+                <ErpTableBody>
                   {photoRoster.map((s, i) => (
                     <tr key={s.id}>
                       <td className="px-3 py-2 text-xs text-[var(--muted)]">
@@ -602,21 +608,21 @@ export function StudentUpdatePanel({
                       </td>
                     </tr>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </ErpTableBody>
+              </ErpTable>
+            </ErpTableShell>
           ) : (
-            <div className="overflow-x-auto rounded-lg border border-[rgba(32,48,80,0.08)]">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-[rgba(32,48,80,0.04)] text-[11px] uppercase tracking-wide text-[var(--muted)]">
+            <ErpTableShell className="overflow-x-auto">
+              <ErpTable>
+                <ErpTableHead>
                   <tr>
                     <th className="px-3 py-2 font-semibold">Student</th>
                     <th className="px-3 py-2 font-semibold">Father</th>
                     <th className="px-3 py-2 font-semibold">Mother</th>
                     <th className="px-3 py-2 font-semibold">Guardian</th>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-[rgba(32,48,80,0.06)]">
+                </ErpTableHead>
+                <ErpTableBody>
                   {photoRoster.map((s) => {
                     const hh = householdOf(sis, s.householdId);
                     return (
@@ -667,9 +673,9 @@ export function StudentUpdatePanel({
                       </tr>
                     );
                   })}
-                </tbody>
-              </table>
-            </div>
+                </ErpTableBody>
+              </ErpTable>
+            </ErpTableShell>
           )}
 
           {photoClassId ? (
