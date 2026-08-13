@@ -39,7 +39,7 @@ export function reportLoadFailure(moduleLabel: string) {
   });
 }
 
-type LiveToast = ToastDetail & { id: number };
+type LiveToast = ToastDetail & { id: number; count: number };
 
 const KIND_STYLES: Record<ToastKind, string> = {
   error: "border-[var(--danger)]/30 bg-[var(--danger-soft)] text-[var(--danger)]",
@@ -55,14 +55,35 @@ export function ToastHost() {
     function onToast(e: Event) {
       const detail = (e as CustomEvent<ToastDetail>).detail;
       if (!detail?.message) return;
-      const id = ++seq;
-      setToasts((prev) => [...prev, { ...detail, id }]);
       const duration =
         detail.durationMs ?? (detail.kind === "error" ? 6000 : 3500);
-      if (duration > 0) {
-        const t = setTimeout(() => dismiss(id), duration);
-        timers.current.set(id, t);
-      }
+
+      // Same kind+message already showing (e.g. the same blocked-save
+      // error firing on every retry) — bump its count and refresh its
+      // timer instead of stacking a duplicate box. This is what actually
+      // stops a repeated failure from visibly piling up on screen.
+      setToasts((prev) => {
+        const existing = prev.find(
+          (t) => t.kind === detail.kind && t.message === detail.message,
+        );
+        if (existing) {
+          const oldTimer = timers.current.get(existing.id);
+          if (oldTimer) clearTimeout(oldTimer);
+          if (duration > 0) {
+            const t = setTimeout(() => dismiss(existing.id), duration);
+            timers.current.set(existing.id, t);
+          }
+          return prev.map((t) =>
+            t.id === existing.id ? { ...t, count: t.count + 1 } : t,
+          );
+        }
+        const id = ++seq;
+        if (duration > 0) {
+          const t = setTimeout(() => dismiss(id), duration);
+          timers.current.set(id, t);
+        }
+        return [...prev, { ...detail, id, count: 1 }];
+      });
     }
     window.addEventListener(EVENT, onToast);
     return () => window.removeEventListener(EVENT, onToast);
@@ -92,7 +113,12 @@ export function ToastHost() {
           role={t.kind === "error" ? "alert" : "status"}
           className={`pointer-events-auto flex w-full max-w-sm items-start gap-2 rounded-lg border px-3.5 py-2.5 text-sm shadow-lg ${KIND_STYLES[t.kind]}`}
         >
-          <span className="flex-1">{t.message}</span>
+          <span className="flex-1">
+            {t.message}
+            {t.count > 1 ? (
+              <span className="ml-1 opacity-70">(×{t.count})</span>
+            ) : null}
+          </span>
           <button
             type="button"
             onClick={() => dismiss(t.id)}
