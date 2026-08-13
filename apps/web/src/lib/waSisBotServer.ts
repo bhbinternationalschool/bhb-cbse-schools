@@ -46,6 +46,7 @@ import { loadSis, householdWhatsApp, type Household, type SisStudent } from "@/l
 import { TENANT } from "@/lib/types";
 import { sendWaWithFailover, sendWhatsAppText, waNormalizeLocal10 } from "@/lib/waSend";
 import { generateTutorText } from "@/lib/aiLlm.server";
+import { formatKbContext, retrieveRelevantKb } from "@/lib/schoolKb.server";
 
 export type WaSisBotMsg = {
   id: string;
@@ -205,15 +206,18 @@ async function tryAiFallbackReply(
         .join("; ")
     : "no open dues";
 
+  const kbMatches = await retrieveRelevantKb(text, { audiences: ["all", "parents"] });
+  const kbContext = formatKbContext(kbMatches);
+
   const system = `You are a WhatsApp assistant for parents of ${TENANT.nameDisplay}.
-You may ONLY discuss the household data given below (their children, dues) — you do NOT know this school's policies, dates, timings, curriculum, transport, uniform, or any other fact not given to you, even if it seems like common knowledge for a school. Do not state or confirm anything outside the data given.
-For ANY question the household data below doesn't answer, reply that you don't have that information and to reply *HUMAN* to talk to the school office — do not attempt to answer it a different way.
+You may discuss ONLY: (1) the household data given below (their children, dues), and (2) the school notices given below, if any are given — you do NOT know this school's policies, dates, timings, curriculum, transport, uniform, or any other fact beyond what's given here, even if it seems like common knowledge for a school. Do not state or confirm anything outside the data given.
+For ANY question neither the household data nor the notices below answer, reply that you don't have that information and to reply *HUMAN* to talk to the school office — do not attempt to answer it a different way.
 Keep the reply under 300 characters, warm and simple, plain text (no markdown headers).`;
 
   const userMessage = `Guardian: ${hh.guardianName || "Parent"}
 Children: ${kidsLine}
 Open dues: total ${formatInr(totalDuePaise)} — ${duesLine}
-Parent's message: "${text}"`;
+${kbContext ? `Relevant school notices:\n${kbContext}\n` : ""}Parent's message: "${text}"`;
 
   try {
     const r = await generateTutorText({ system, userMessage });

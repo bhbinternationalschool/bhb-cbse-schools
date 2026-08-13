@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Images, Megaphone } from "lucide-react";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
@@ -121,6 +121,57 @@ export function CommsWorkspace() {
   const [noticeMsg, setNoticeMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [listQuery, setListQuery] = useState("");
+  const [kbStats, setKbStats] = useState<{
+    chunkCount: number;
+    embeddingsConfigured: boolean;
+  } | null>(null);
+  const [kbSyncBusy, setKbSyncBusy] = useState(false);
+  const [kbSyncMsg, setKbSyncMsg] = useState<string | null>(null);
+
+  const refreshKbStats = useCallback(() => {
+    fetch("/api/ai/kb-sync")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json) => {
+        if (json?.ok) {
+          setKbStats({
+            chunkCount: json.chunkCount,
+            embeddingsConfigured: json.embeddingsConfigured,
+          });
+        }
+      })
+      .catch(() => null);
+  }, []);
+
+  useEffect(() => {
+    refreshKbStats();
+  }, [refreshKbStats]);
+
+  async function syncKb() {
+    setKbSyncBusy(true);
+    setKbSyncMsg(null);
+    try {
+      const res = await fetch("/api/ai/kb-sync", { method: "POST" });
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        indexed?: number;
+        skipped?: number;
+        removed?: number;
+      };
+      if (!res.ok || !json.ok) {
+        setKbSyncMsg(json.error || "Sync failed");
+        return;
+      }
+      setKbSyncMsg(
+        `Synced ${json.indexed} notice(s)${json.skipped ? `, ${json.skipped} skipped` : ""}${json.removed ? `, ${json.removed} removed` : ""}.`,
+      );
+      refreshKbStats();
+    } catch (e) {
+      setKbSyncMsg(e instanceof Error ? e.message : "Sync failed");
+    } finally {
+      setKbSyncBusy(false);
+    }
+  }
 
   // Notice form
   const [nTitle, setNTitle] = useState("");
@@ -677,6 +728,26 @@ export function CommsWorkspace() {
             </div>
           </section>
           <section className="space-y-2">
+            {!readOnly ? (
+              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-[11px] text-[var(--muted)]">
+                <span>
+                  AI knowledge base — {kbStats ? `${kbStats.chunkCount} notice(s) indexed` : "…"}
+                  {kbStats && !kbStats.embeddingsConfigured
+                    ? " (OPENAI_API_KEY not configured)"
+                    : ""}
+                  {" — grounds the parent WhatsApp bot & AI assistant on published notices."}
+                </span>
+                <button
+                  type="button"
+                  disabled={kbSyncBusy || (kbStats ? !kbStats.embeddingsConfigured : false)}
+                  className="rounded-lg border border-[var(--border)] px-2 py-1 font-semibold text-[var(--brand-deep)] disabled:opacity-50"
+                  onClick={() => void syncKb()}
+                >
+                  {kbSyncBusy ? "Syncing…" : "Sync published notices to AI"}
+                </button>
+                {kbSyncMsg ? <span>{kbSyncMsg}</span> : null}
+              </div>
+            ) : null}
             {noticesFiltered.length === 0 ? (
               <p className="text-sm text-[var(--muted)]">
                 {listQuery ? "No notices match your search." : "No notices yet."}

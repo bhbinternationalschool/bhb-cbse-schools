@@ -18,6 +18,7 @@ import { generateTutorText, llmConfigured, type LlmEngine } from "@/lib/aiLlm.se
 import { geminiConfigured } from "@/lib/erpAiGemini.server";
 import { loadMasters, type MastersState } from "@/lib/masters";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
+import { formatKbContext, retrieveRelevantKb } from "@/lib/schoolKb.server";
 
 function nid() {
   return `msg_${Math.random().toString(36).slice(2, 10)}`;
@@ -63,11 +64,27 @@ export async function replyErpAiChatServer(opts: {
     content: h.text,
   }));
 
-  const system = buildErpAiGeminiSystemPrompt({
+  const baseSystem = buildErpAiGeminiSystemPrompt({
     ctx,
     pathname: opts.pathname,
     tab: opts.tab,
   });
+
+  const audiences =
+    opts.session.persona === "staff"
+      ? undefined
+      : opts.session.persona === "parent"
+        ? (["all", "parents"] as const)
+        : opts.session.persona === "student"
+          ? (["all", "students"] as const)
+          : (["all"] as const);
+  const kbMatches = await retrieveRelevantKb(opts.message, {
+    audiences: audiences ? [...audiences] : undefined,
+  });
+  const kbContext = formatKbContext(kbMatches);
+  const system = kbContext
+    ? `${baseSystem}\n\nRELEVANT SCHOOL NOTICES (use these for date/policy/circular questions; never state a notice fact not shown here):\n${kbContext}`
+    : baseSystem;
 
   const llm = await generateTutorText({
     system,
