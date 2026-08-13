@@ -45,6 +45,7 @@ import {
 } from "@/lib/examTimetable";
 import { listSubstitutionsForDate } from "@/lib/timetableSubstitution";
 import { SubstitutionPanel } from "@/components/timetable/SubstitutionPanel";
+import { FreePeriodsPanel } from "@/components/timetable/FreePeriodsPanel";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
@@ -60,6 +61,7 @@ type TtTab =
   | "class"
   | "auto"
   | "teacher"
+  | "free_periods"
   | "subs"
   | "publish"
   | "reports";
@@ -143,6 +145,7 @@ export function TimetableWorkspace() {
       "class",
       "auto",
       "teacher",
+      "free_periods",
       "subs",
       "publish",
       "reports",
@@ -576,6 +579,7 @@ export function TimetableWorkspace() {
           { id: "class", label: "By class", tone: "navy" },
           { id: "auto", label: "Auto-assign (AI)", tone: "violet" },
           { id: "teacher", label: "By teacher", tone: "teal" },
+          { id: "free_periods", label: "Free periods", tone: "sky" },
           { id: "subs", label: "Substitutes", tone: "rose" },
           { id: "publish", label: "Publish", tone: "amber" },
           { id: "reports", label: "Reports", tone: "sky" },
@@ -1428,6 +1432,17 @@ export function TimetableWorkspace() {
               </ErpTable>
             </div>
           )}
+        </div>
+      ) : null}
+
+      {tab === "free_periods" && masters && state ? (
+        <div className="mt-5 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+          <h2 className="text-sm font-bold text-[var(--brand-deep)]">
+            Free periods
+          </h2>
+          <div className="mt-3">
+            <FreePeriodsPanel masters={masters} timetable={state} ay={ay} />
+          </div>
         </div>
       ) : null}
 

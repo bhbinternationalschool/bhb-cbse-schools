@@ -124,12 +124,28 @@ function runTeacherLoad(masters: MastersState, tt: TimetableState, ay: string) {
   };
 }
 
-function runFreePeriods(
+export type FreeTeacherSlot = {
+  weekday: number;
+  weekdayLabel: string;
+  periodNo: number;
+  periodLabel: string;
+  teacherId: string;
+  empCode: string;
+  teacherName: string;
+};
+
+/**
+ * Every (weekday, period, teacher) combination where that teacher has no
+ * timetable slot — the computation behind the "Free-period register"
+ * export AND the live on-screen lookup in TimetableWorkspace's "Free
+ * periods" tab. Kept here, not duplicated, so both stay in sync.
+ */
+export function computeFreeTeacherSlots(
   masters: MastersState,
   tt: TimetableState,
   ay: string,
   weekday?: number,
-) {
+): FreeTeacherSlot[] {
   const weekdays =
     weekday != null ? [weekday] : tt.workingWeekdays.length ? tt.workingWeekdays : [1, 2, 3, 4, 5, 6];
   const periods = teachingPeriods(tt.bellTemplate);
@@ -144,22 +160,33 @@ function runFreePeriods(
     }
   }
 
-  const rows: Record<string, string | number>[] = [];
+  const out: FreeTeacherSlot[] = [];
   for (const wd of weekdays) {
     for (const p of periods) {
       for (const s of staff) {
         if (busy.has(`${s.id}|${wd}|${p.no}`)) continue;
-        rows.push({
-          weekday: WEEKDAY_SHORT[wd] ?? String(wd),
-          period: p.no,
+        out.push({
+          weekday: wd,
+          weekdayLabel: WEEKDAY_SHORT[wd] ?? String(wd),
+          periodNo: p.no,
           periodLabel: p.label,
+          teacherId: s.id,
           empCode: s.empCode,
-          name: s.fullName,
+          teacherName: s.fullName,
         });
       }
     }
   }
+  return out;
+}
 
+function runFreePeriods(
+  masters: MastersState,
+  tt: TimetableState,
+  ay: string,
+  weekday?: number,
+) {
+  const slots = computeFreeTeacherSlots(masters, tt, ay, weekday);
   return {
     columns: [
       { key: "weekday", header: "Day", width: 0.6 },
@@ -168,7 +195,13 @@ function runFreePeriods(
       { key: "empCode", header: "Emp code", width: 0.8 },
       { key: "name", header: "Free teacher", width: 1.4 },
     ],
-    rows,
+    rows: slots.map((s) => ({
+      weekday: s.weekdayLabel,
+      period: s.periodNo,
+      periodLabel: s.periodLabel,
+      empCode: s.empCode,
+      name: s.teacherName,
+    })),
   };
 }
 
