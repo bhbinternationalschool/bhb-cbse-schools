@@ -944,9 +944,11 @@ function ClassesPanel({
                   </div>
                   <ul className="divide-y divide-[var(--border)]">
                     {rows.map((c) => {
-                      const count = state.sections.filter(
-                        (s) => s.classId === c.id && s.isActive,
-                      ).length;
+                      const classSections = state.sections.filter(
+                        (s) => s.classId === c.id,
+                      );
+                      const count = classSections.filter((s) => s.isActive).length;
+                      const inactiveCount = classSections.length - count;
                       const active = c.id === selectedClassId;
                       return (
                         <li
@@ -969,7 +971,10 @@ function ClassesPanel({
                               ) : null}
                             </span>
                             <span className="mt-0.5 block text-xs text-[var(--muted)]">
-                              {count} sections
+                              {count} section{count === 1 ? "" : "s"}
+                              {inactiveCount > 0
+                                ? ` (+${inactiveCount} inactive)`
+                                : ""}
                             </span>
                           </button>
                           <div className="flex shrink-0 flex-col items-end gap-1">

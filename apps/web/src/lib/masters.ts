@@ -2190,26 +2190,41 @@ export function checkClassRemoval(
 ): RemovalCheck {
   const name = state.classes.find((c) => c.id === classId)?.name ?? "this class";
   const blockers: string[] = [];
-  const sectionN = state.sections.filter((s) => s.classId === classId).length;
-  if (sectionN > 0) blockers.push(`${sectionN} section(s)`);
+  const sections = state.sections.filter((s) => s.classId === classId);
+  if (sections.length > 0) {
+    blockers.push(
+      `${sections.length} section(s) (${sections.map((s) => s.name).join(", ")})`,
+    );
+  }
   const studentN = (state.students ?? []).filter(
     (s) => s.classId === classId,
   ).length;
   if (studentN > 0) blockers.push(`${studentN} student(s)`);
-  const groupN = state.feeGroups.filter((g) =>
-    g.classIds.includes(classId),
-  ).length;
-  if (groupN > 0) blockers.push(`${groupN} fee group(s)`);
-  const assignN = (state.specialFeeAssignments ?? []).filter((a) =>
+  const groups = state.feeGroups.filter((g) => g.classIds.includes(classId));
+  if (groups.length > 0) {
+    blockers.push(
+      `${groups.length} fee group(s) (${groups.map((g) => g.name).join(", ")})`,
+    );
+  }
+  const assignments = (state.specialFeeAssignments ?? []).filter((a) =>
     a.classIds.includes(classId),
-  ).length;
-  if (assignN > 0) blockers.push(`${assignN} special-fee assignment(s)`);
+  );
+  if (assignments.length > 0) {
+    const names = assignments
+      .map(
+        (a) =>
+          state.specialFees?.find((f) => f.id === a.specialFeeId)?.name ??
+          "special fee",
+      )
+      .join(", ");
+    blockers.push(`${assignments.length} special-fee assignment(s) (${names})`);
+  }
 
   if (blockers.length > 0) {
     return {
       canRemove: false,
       blockers,
-      suggestion: `Linked data present (${blockers.join("; ")}). Remove sections / unlink fee groups & assignments first, or use Inactivate.`,
+      suggestion: `Linked data present — ${blockers.join("; ")}. Remove sections / unlink fee groups & assignments first, or use Inactivate.`,
       confirmMessage: `Remove class “${name}”?`,
     };
   }

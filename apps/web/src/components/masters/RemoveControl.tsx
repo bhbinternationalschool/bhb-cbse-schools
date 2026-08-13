@@ -20,7 +20,7 @@ export function RemoveControl({
 
   return (
     <div
-      className={`flex flex-col items-end gap-0.5 ${compact ? "" : "max-w-[11rem]"}`}
+      className={`flex flex-col items-end gap-0.5 ${compact ? "" : "max-w-[15rem]"}`}
     >
       <button
         type="button"
@@ -44,7 +44,7 @@ export function RemoveControl({
       {!check.canRemove ? (
         <span
           className={`text-right leading-snug text-[var(--muted)] ${
-            compact ? "max-w-[7rem] text-[9px]" : "text-[10px]"
+            compact ? "max-w-[9rem] text-[10px]" : "text-[11px]"
           }`}
         >
           {check.suggestion}
