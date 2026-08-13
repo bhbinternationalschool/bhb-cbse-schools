@@ -83,8 +83,8 @@ function statusTone(status: string): string {
   if (status === "approved" || status === "closed" || status === "issued") {
     return "text-[#0f7a4c]";
   }
-  if (status === "rejected" || status === "cancelled") return "text-[#b42318]";
-  if (status === "submitted" || status === "partial_grn") return "text-[#b45309]";
+  if (status === "rejected" || status === "cancelled") return "text-[var(--danger)]";
+  if (status === "submitted" || status === "partial_grn") return "text-[var(--warning)]";
   return "text-[var(--muted)]";
 }
 
@@ -119,7 +119,7 @@ function IndentRow({
   const [vendorName, setVendorName] = useState(vendors[0]?.name ?? "");
 
   return (
-    <li className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3">
+    <li className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <p className="text-sm font-semibold text-[var(--brand-deep)]">
@@ -195,7 +195,7 @@ function IndentRow({
         </div>
       </div>
       {indent.status === "approved" ? (
-        <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-[rgba(32,48,80,0.08)] pt-3">
+        <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-[var(--border)] pt-3">
           <label className="text-xs text-[var(--muted)]">
             Vendor
             <select
@@ -280,7 +280,7 @@ function OrderRow({
   }
 
   return (
-    <li className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3">
+    <li className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <p className="text-sm font-semibold text-[var(--brand-deep)]">
@@ -656,7 +656,7 @@ export function PurchaseWorkspace({
             {lines.length > 1 ? (
               <button
                 type="button"
-                className="text-xs text-[#b42318] underline"
+                className="text-xs text-[var(--danger)] underline"
                 onClick={() => onChange(lines.filter((_, i) => i !== idx))}
               >
                 Remove
@@ -708,7 +708,7 @@ export function PurchaseWorkspace({
         />
       ) : tab === "indents" ? (
         <div className="mt-4 space-y-6">
-          <section className="rounded-2xl border border-[rgba(32,48,80,0.1)] bg-[var(--surface)] p-4">
+          <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
             <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
               New indent
             </h2>
@@ -800,7 +800,7 @@ export function PurchaseWorkspace({
 
       {tab === "orders" ? (
         <div className="mt-4 space-y-6">
-          <section className="rounded-2xl border border-[rgba(32,48,80,0.1)] bg-[var(--surface)] p-4">
+          <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
             <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
               Direct purchase order
             </h2>
@@ -906,7 +906,7 @@ export function PurchaseWorkspace({
 
       {tab === "grn" ? (
         <div className="mt-4 space-y-4">
-          <section className="rounded-2xl border border-[rgba(32,48,80,0.1)] bg-[var(--surface)] p-4">
+          <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
             <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
               Goods received note
             </h2>
@@ -1028,7 +1028,7 @@ export function PurchaseWorkspace({
                   <img
                     src={grnBillImageUrl}
                     alt="Bill preview"
-                    className="mt-2 max-h-28 rounded-lg border border-[rgba(32,48,80,0.12)]"
+                    className="mt-2 max-h-28 rounded-lg border border-[var(--border)]"
                   />
                 ) : null}
               </p>
@@ -1148,7 +1148,7 @@ export function PurchaseWorkspace({
                       return (
                         <tr
                           key={line.id}
-                          className="border-b border-[rgba(32,48,80,0.06)]"
+                          className="border-b border-[var(--border)]"
                         >
                           <td className="py-2 pr-2">
                             <input
@@ -1333,7 +1333,7 @@ export function PurchaseWorkspace({
                 return (
                   <li
                     key={g.id}
-                    className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3 text-sm"
+                    className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm"
                   >
                     <span className="font-semibold text-[var(--brand-deep)]">
                       {g.grnNo}
@@ -1357,7 +1357,7 @@ export function PurchaseWorkspace({
       {tab === "returns" ? <PurchaseReturnPanel /> : null}
 
       {tab === "reports" ? (
-        <div className="mt-4 rounded-2xl border border-[rgba(32,48,80,0.1)] bg-[var(--surface)] p-4">
+        <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
           <div className="flex flex-wrap gap-3">
             <label className="text-xs text-[var(--muted)]">
               From
@@ -1395,7 +1395,7 @@ export function PurchaseWorkspace({
             {PURCHASE_REPORTS.map((r) => (
               <li
                 key={r.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[rgba(32,48,80,0.08)] bg-white px-4 py-3"
+                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3"
               >
                 <div>
                   <p className="text-sm font-medium text-[var(--brand-deep)]">

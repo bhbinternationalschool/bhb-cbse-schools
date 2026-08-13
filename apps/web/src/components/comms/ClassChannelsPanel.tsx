@@ -247,7 +247,7 @@ export function ClassChannelsPanel() {
 
   return (
     <div className="space-y-5">
-      <div className="rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+      <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
           Class WhatsApp channels
         </h2>
@@ -259,7 +259,7 @@ export function ClassChannelsPanel() {
         </p>
         <p className="mt-2 text-[11px] text-[var(--muted)]">
           Outbound API:{" "}
-          <span className={configured ? "text-[#15803d]" : "text-[#b42318]"}>
+          <span className={configured ? "text-[var(--success)]" : "text-[var(--danger)]"}>
             {configured ? "configured" : "stub / not configured"}
           </span>
           {help ? ` · ${help}` : ""}
@@ -274,7 +274,7 @@ export function ClassChannelsPanel() {
             Rebuild membership
           </button>
         </div>
-        <pre className="mt-3 overflow-x-auto rounded-lg bg-[rgba(32,48,80,0.05)] p-3 text-[11px] leading-relaxed text-[var(--brand-deep)]">
+        <pre className="mt-3 overflow-x-auto rounded-lg bg-[var(--surface-sunken)] p-3 text-[11px] leading-relaxed text-[var(--brand-deep)]">
 {`Teacher examples:
 HW 8A Maths: Ex 4.1 Q1-10 Due: 2026-07-21
 NOTICE 8A: Bring art kit tomorrow
@@ -286,12 +286,12 @@ Then reply: YES`}
       </div>
 
       {notice ? (
-        <p className="rounded-lg bg-[rgba(22,163,74,0.12)] px-3 py-2 text-sm text-[#15803d]">
+        <p className="rounded-lg bg-[rgba(22,163,74,0.12)] px-3 py-2 text-sm text-[var(--success)]">
           {notice}
         </p>
       ) : null}
       {error ? (
-        <p className="rounded-lg bg-[rgba(180,35,24,0.1)] px-3 py-2 text-sm text-[#b42318]">
+        <p className="rounded-lg bg-[rgba(180,35,24,0.1)] px-3 py-2 text-sm text-[var(--danger)]">
           {error}
         </p>
       ) : null}
@@ -319,8 +319,8 @@ Then reply: YES`}
                     onClick={() => setSelectedChannelId(c.id)}
                     className={`block w-full rounded-xl border px-3 py-2 text-left ${
                       selectedChannelId === c.id
-                        ? "border-[var(--brand-deep)] bg-[rgba(32,48,80,0.06)]"
-                        : "border-[rgba(32,48,80,0.1)] bg-white"
+                        ? "border-[var(--brand-deep)] bg-[var(--surface-sunken)]"
+                        : "border-[var(--border)] bg-[var(--card)]"
                     }`}
                   >
                     <p className="text-sm font-semibold text-[var(--brand-deep)]">
@@ -335,7 +335,7 @@ Then reply: YES`}
             )}
           </div>
           {selected ? (
-            <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-3">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
               <p className="text-xs font-bold text-[var(--brand-deep)]">
                 Members · {selected.label}
               </p>
@@ -409,7 +409,7 @@ Then reply: YES`}
             })
           )}
 
-          <div className="space-y-2 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-3">
+          <div className="space-y-2 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
             <p className="text-xs font-bold text-[var(--brand-deep)]">
               Office draft (optional)
             </p>
@@ -483,7 +483,7 @@ Then reply: YES`}
           {threads.slice(0, 6).map((t) => (
             <div
               key={t.id}
-              className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-3"
+              className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3"
             >
               <p className="text-sm font-semibold text-[var(--brand-deep)]">
                 {t.staffName} · {t.mobile}

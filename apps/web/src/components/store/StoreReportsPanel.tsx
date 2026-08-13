@@ -58,7 +58,7 @@ export function StoreReportsPanel({
 
   return (
     <div className="mt-4 space-y-4">
-      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3">
+      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3">
         <label className="text-sm">
           <span className="mb-1 block text-[11px] text-[var(--muted)]">
             Report date
@@ -114,18 +114,18 @@ export function StoreReportsPanel({
         {visibleCategories.map((cat) => (
           <section
             key={cat.id}
-            className="overflow-hidden rounded-md border border-[rgba(32,48,80,0.08)] bg-[#f3f4f6] shadow-sm"
+            className="overflow-hidden rounded-md border border-[var(--border)] bg-[#f3f4f6] shadow-sm"
           >
             <header className={`${cat.headerClass} px-4 py-3 text-white`}>
               <h3 className="text-lg font-semibold tracking-wide">
                 {cat.title}
               </h3>
             </header>
-            <ul className="divide-y divide-[rgba(32,48,80,0.06)]">
+            <ul className="divide-y divide-[var(--border)]">
               {(reportsByCat[cat.id] ?? []).map((r) => (
                 <li
                   key={r.id}
-                  className="flex items-start justify-between gap-2 bg-white px-3 py-2.5"
+                  className="flex items-start justify-between gap-2 bg-[var(--card)] px-3 py-2.5"
                 >
                   <div className="min-w-0">
                     <div className="text-sm font-medium text-[var(--brand-deep)]">
@@ -146,7 +146,7 @@ export function StoreReportsPanel({
                           type="button"
                           disabled={reportRunning === key}
                           onClick={() => onRunReport(r.id, fmt)}
-                          className="rounded bg-[var(--brand-deep)] px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-white disabled:opacity-50"
+                          className="rounded bg-[var(--primary)] px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-[var(--primary-foreground)] disabled:opacity-50"
                         >
                           {fmt}
                         </button>

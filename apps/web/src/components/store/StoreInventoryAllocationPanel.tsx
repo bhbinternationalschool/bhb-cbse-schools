@@ -14,7 +14,7 @@ import {
   type StoreItem,
 } from "@/lib/store";
 
-const card = "rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4";
+const card = "rounded-xl border border-[var(--border)] bg-[var(--card)] p-4";
 export function StoreInventoryAllocationPanel() {
   const [items, setItems] = useState<StoreItem[]>([]);
   const [infraLevels, setInfraLevels] = useState<StoreInfraLevel[]>([]);
@@ -108,12 +108,12 @@ export function StoreInventoryAllocationPanel() {
   return (
     <div className="mt-4 space-y-4">
       {error ? (
-        <p className="rounded-lg bg-[#dc2626]/10 px-3 py-2 text-sm text-[#dc2626]">
+        <p className="rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-sm text-[var(--danger)]">
           {error}
         </p>
       ) : null}
       {notice ? (
-        <p className="rounded-lg bg-[rgba(32,48,80,0.06)] px-3 py-2 text-sm text-[var(--brand-deep)]">
+        <p className="rounded-lg bg-[var(--surface-sunken)] px-3 py-2 text-sm text-[var(--brand-deep)]">
           {notice}
         </p>
       ) : null}
@@ -190,7 +190,7 @@ export function StoreInventoryAllocationPanel() {
           {editId ? (
             <button
               type="button"
-              className="rounded-lg border border-[rgba(32,48,80,0.2)] bg-white px-3 py-1.5 text-sm"
+              className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-sm"
               onClick={resetForm}
             >
               Cancel
@@ -224,7 +224,7 @@ export function StoreInventoryAllocationPanel() {
                 </tr>
               ) : (
                 rows.map((r) => (
-                  <tr key={r.id} className="border-b border-[rgba(32,48,80,0.06)]">
+                  <tr key={r.id} className="border-b border-[var(--border)]">
                     <td className="py-2 pr-3">
                       <div className="font-medium text-[var(--brand-deep)]">
                         {r.itemLabel?.name || r.itemId}
@@ -255,7 +255,7 @@ export function StoreInventoryAllocationPanel() {
                       </button>
                       <button
                         type="button"
-                        className="text-[11px] font-semibold text-[#dc2626]"
+                        className="text-[11px] font-semibold text-[var(--danger)]"
                         onClick={() => onDelete(r.id)}
                       >
                         Remove

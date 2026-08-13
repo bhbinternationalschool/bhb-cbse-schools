@@ -45,7 +45,7 @@ type HubStats = {
 };
 
 const inp =
-  "w-full rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm";
+  "w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm";
 
 export function WaChatHubPanel({
   by,
@@ -266,8 +266,8 @@ export function WaChatHubPanel({
             }}
             className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
               category === c.id
-                ? "bg-[var(--brand-deep)] text-white"
-                : "border border-[rgba(32,48,80,0.15)] bg-white"
+                ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                : "border border-[var(--border)] bg-[var(--card)]"
             }`}
           >
             {c.label}
@@ -283,12 +283,12 @@ export function WaChatHubPanel({
               No WhatsApp threads yet — parents/staff message +91 94519 38805.
             </div>
           ) : (
-            <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+            <ul className="divide-y divide-[var(--border)]">
               {threads.map((t) => (
                 <li key={`${t.category}-${t.id}`}>
                   <button
                     type="button"
-                    className={`flex w-full flex-col gap-0.5 px-3 py-2 text-left hover:bg-[rgba(32,48,80,0.03)] ${
+                    className={`flex w-full flex-col gap-0.5 px-3 py-2 text-left hover:bg-[var(--surface-sunken)] ${
                       selectedId === t.id ? "bg-[rgba(21,128,61,0.1)]" : ""
                     }`}
                     onClick={() => void openThread(t)}
@@ -343,7 +343,7 @@ export function WaChatHubPanel({
                   type="button"
                   disabled={summaryLoading}
                   onClick={() => void summarizeThread()}
-                  className="rounded-lg border border-[rgba(32,48,80,0.2)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)] disabled:opacity-50"
+                  className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)] disabled:opacity-50"
                 >
                   {summaryLoading
                     ? "Summarizing…"
@@ -360,16 +360,16 @@ export function WaChatHubPanel({
                   {summary}
                 </div>
               ) : null}
-              <div className="max-h-80 space-y-2 overflow-y-auto rounded-lg border border-[rgba(32,48,80,0.1)] bg-[rgba(248,248,240,0.6)] p-2">
+              <div className="max-h-80 space-y-2 overflow-y-auto rounded-lg border border-[var(--border)] bg-[rgba(248,248,240,0.6)] p-2">
                 {selected.messages.map((m) => (
                   <div
                     key={m.id}
                     className={`rounded-lg px-2 py-1.5 text-[12px] whitespace-pre-wrap ${
                       m.direction === "in"
-                        ? "bg-white border-l-2 border-[#0f766e]"
+                        ? "bg-[var(--card)] border-l-2 border-[#0f766e]"
                         : m.role === "staff"
                           ? "bg-[rgba(15,118,110,0.15)]"
-                          : "bg-[rgba(32,48,80,0.06)] border-l-2 border-[#64748b]"
+                          : "bg-[var(--surface-sunken)] border-l-2 border-[#64748b]"
                     }`}
                   >
                     <p className="text-[9px] font-semibold uppercase text-[var(--muted)]">
@@ -381,7 +381,7 @@ export function WaChatHubPanel({
                 ))}
               </div>
               {canEdit ? (
-                <div className="space-y-2 border-t border-[rgba(32,48,80,0.1)] pt-3">
+                <div className="space-y-2 border-t border-[var(--border)] pt-3">
                   <textarea
                     className={`${inp} min-h-[72px]`}
                     placeholder={`Reply on WhatsApp (${selected.categoryLabel})…`}
@@ -391,7 +391,7 @@ export function WaChatHubPanel({
                   <button
                     type="button"
                     disabled={busy || !reply.trim()}
-                    className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-[11px] font-semibold text-white disabled:opacity-60"
+                    className="rounded-lg bg-[var(--primary)] px-3 py-2 text-[11px] font-semibold text-[var(--primary-foreground)] disabled:opacity-60"
                     onClick={() => void sendReply()}
                   >
                     {busy ? "Sending…" : "Send free-text"}
@@ -421,7 +421,7 @@ export function WaChatHubPanel({
                     </p>
                   ) : null}
                   {selectedTemplate ? (
-                    <p className="whitespace-pre-wrap rounded-lg bg-[rgba(32,48,80,0.04)] p-2 text-[10px] text-[var(--muted)]">
+                    <p className="whitespace-pre-wrap rounded-lg bg-[var(--surface-sunken)] p-2 text-[10px] text-[var(--muted)]">
                       {selectedTemplate.localFallbackBody || selectedTemplate.body}
                     </p>
                   ) : null}

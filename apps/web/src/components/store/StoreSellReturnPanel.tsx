@@ -13,7 +13,7 @@ import {
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 
-const card = "rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4";
+const card = "rounded-xl border border-[var(--border)] bg-[var(--card)] p-4";
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -82,12 +82,12 @@ export function StoreSellReturnPanel() {
   return (
     <div className="mt-4 space-y-4">
       {error ? (
-        <p className="rounded-lg bg-[#dc2626]/10 px-3 py-2 text-sm text-[#dc2626]">
+        <p className="rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-sm text-[var(--danger)]">
           {error}
         </p>
       ) : null}
       {notice ? (
-        <p className="rounded-lg bg-[rgba(32,48,80,0.06)] px-3 py-2 text-sm text-[var(--brand-deep)]">
+        <p className="rounded-lg bg-[var(--surface-sunken)] px-3 py-2 text-sm text-[var(--brand-deep)]">
           {notice}
         </p>
       ) : null}

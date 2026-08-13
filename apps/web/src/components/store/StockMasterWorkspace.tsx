@@ -64,7 +64,7 @@ const STOCK_MASTER_MENU: { id: StockMasterScreen; label: string }[] = [
   { id: "import_item", label: "Import Item" },
 ];
 
-const card = "rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4";
+const card = "rounded-xl border border-[var(--border)] bg-[var(--card)] p-4";
 type CatalogDraft = {
   id: string;
   sku: string;
@@ -528,12 +528,12 @@ export function StockMasterWorkspace() {
   return (
     <div className="mt-4">
       {error ? (
-        <p className="mb-3 rounded-lg bg-[#dc2626]/10 px-3 py-2 text-sm text-[#dc2626]">
+        <p className="mb-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-sm text-[var(--danger)]">
           {error}
         </p>
       ) : null}
       {notice ? (
-        <p className="mb-3 rounded-lg bg-[rgba(32,48,80,0.06)] px-3 py-2 text-sm text-[var(--brand-deep)]">
+        <p className="mb-3 rounded-lg bg-[var(--surface-sunken)] px-3 py-2 text-sm text-[var(--brand-deep)]">
           {notice}
         </p>
       ) : null}
@@ -542,14 +542,14 @@ export function StockMasterWorkspace() {
         <div ref={menuRef} className="relative shrink-0 lg:w-56">
           <button
             type="button"
-            className="flex w-full items-center justify-between rounded-lg border-2 border-[var(--brand-deep)] bg-white px-3 py-2 text-sm font-bold text-[#1d4ed8]"
+            className="flex w-full items-center justify-between rounded-lg border-2 border-[var(--brand-deep)] bg-[var(--card)] px-3 py-2 text-sm font-bold text-[#1d4ed8]"
             onClick={() => setMenuOpen((o) => !o)}
           >
             Stock Master
             <span className="text-[10px]">{menuOpen ? "▲" : "▼"}</span>
           </button>
           {menuOpen ? (
-            <ul className="absolute z-20 mt-0 w-full border border-[rgba(32,48,80,0.2)] bg-white shadow-lg lg:static lg:mt-1 lg:shadow-none">
+            <ul className="absolute z-20 mt-0 w-full border border-[var(--border)] bg-[var(--card)] shadow-lg lg:static lg:mt-1 lg:shadow-none">
               {STOCK_MASTER_MENU.map((m, idx) => (
                 <li key={m.id}>
                   <button
@@ -557,8 +557,8 @@ export function StockMasterWorkspace() {
                     className={`block w-full px-3 py-2.5 text-left text-sm ${
                       screen === m.id
                         ? "bg-[rgba(29,78,216,0.08)] font-semibold text-[#1d4ed8]"
-                        : "text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.04)]"
-                    } ${idx > 0 ? "border-t border-[rgba(32,48,80,0.12)]" : ""}`}
+                        : "text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
+                    } ${idx > 0 ? "border-t border-[var(--border)]" : ""}`}
                     onClick={() => {
                       setScreen(m.id);
                       setMenuOpen(false);
@@ -588,7 +588,7 @@ export function StockMasterWorkspace() {
                 preferred vendors; sale groups and items sit under each group.
               </p>
 
-              <div className="mt-4 rounded-lg border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.02)] p-3">
+              <div className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] p-3">
                 <h3 className="text-[12px] font-bold text-[var(--brand-deep)]">
                   Add stock group
                 </h3>
@@ -608,7 +608,7 @@ export function StockMasterWorkspace() {
                     <span className="mb-1 block text-[11px] text-[var(--muted)]">
                       Preferred vendors / sources (optional)
                     </span>
-                    <div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto rounded-lg border border-[rgba(32,48,80,0.12)] bg-white p-2">
+                    <div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--card)] p-2">
                       {sources
                         .filter((s) => s.isActive)
                         .map((s) => (
@@ -653,9 +653,9 @@ export function StockMasterWorkspace() {
                 </button>
               </div>
 
-              <div className="mt-4 overflow-x-auto rounded-lg border border-[rgba(32,48,80,0.12)]">
+              <div className="mt-4 overflow-x-auto rounded-lg border border-[var(--border)]">
                 <table className="min-w-full text-sm">
-                  <thead className="bg-[rgba(32,48,80,0.04)] text-left text-[11px] text-[var(--muted)]">
+                  <thead className="bg-[var(--surface-sunken)] text-left text-[11px] text-[var(--muted)]">
                     <tr>
                       <th className="px-3 py-2 font-semibold">Name</th>
                       <th className="px-3 py-2 font-semibold">Items</th>
@@ -667,7 +667,7 @@ export function StockMasterWorkspace() {
                       </th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[rgba(32,48,80,0.08)]">
+                  <tbody className="divide-y divide-[var(--border)]">
                     {[...categories]
                       .sort(
                         (a, b) =>
@@ -782,7 +782,7 @@ export function StockMasterWorkspace() {
                       <span className="mb-1 block text-[11px] text-[var(--muted)]">
                         Preferred vendors / sources
                       </span>
-                      <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto rounded-lg border border-[rgba(32,48,80,0.12)] p-2">
+                      <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto rounded-lg border border-[var(--border)] p-2">
                         {sources
                           .filter((s) => s.isActive)
                           .map((s) => (
@@ -882,7 +882,7 @@ export function StockMasterWorkspace() {
                   <span className="mb-1 block text-[11px] text-[var(--muted)]">
                     Classes (optional)
                   </span>
-                  <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto rounded-lg border border-[rgba(32,48,80,0.12)] p-2">
+                  <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto rounded-lg border border-[var(--border)] p-2">
                     {classOptions.map((c) => (
                       <label
                         key={c.id}
@@ -945,7 +945,7 @@ export function StockMasterWorkspace() {
                               </option>
                             ))}
                         </select>
-                        <div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto rounded-lg border border-[rgba(32,48,80,0.12)] p-2">
+                        <div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto rounded-lg border border-[var(--border)] p-2">
                           {classOptions.map((c) => (
                             <label
                               key={c.id}
@@ -1352,7 +1352,7 @@ export function StockMasterWorkspace() {
                     {multiRows.map((row, idx) => (
                       <tr
                         key={idx}
-                        className="border-b border-[rgba(32,48,80,0.06)]"
+                        className="border-b border-[var(--border)]"
                       >
                         <td className="py-2 pr-2">
                           <input
@@ -1464,7 +1464,7 @@ export function StockMasterWorkspace() {
                   </thead>
                   <tbody>
                     {items.map((i) => (
-                      <tr key={i.id} className="border-b border-[rgba(32,48,80,0.06)]">
+                      <tr key={i.id} className="border-b border-[var(--border)]">
                         <td className="py-2">
                           {i.sku} · {i.name}
                         </td>
@@ -1533,7 +1533,7 @@ export function StockMasterWorkspace() {
                   </thead>
                   <tbody>
                     {items.map((i) => (
-                      <tr key={i.id} className="border-b border-[rgba(32,48,80,0.06)]">
+                      <tr key={i.id} className="border-b border-[var(--border)]">
                         <td className="py-2">
                           {i.sku} · {i.name}
                         </td>

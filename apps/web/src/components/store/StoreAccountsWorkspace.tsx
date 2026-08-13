@@ -53,7 +53,7 @@ type AcctSub =
   | "sell_return"
   | "exports";
 
-const card = "rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4";
+const card = "rounded-xl border border-[var(--border)] bg-[var(--card)] p-4";
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -333,12 +333,12 @@ export function StoreAccountsWorkspace() {
   return (
     <div className="mt-4 space-y-4">
       {error ? (
-        <p className="rounded-lg bg-[#dc2626]/10 px-3 py-2 text-sm text-[#dc2626]">
+        <p className="rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-sm text-[var(--danger)]">
           {error}
         </p>
       ) : null}
       {notice ? (
-        <p className="rounded-lg bg-[rgba(32,48,80,0.06)] px-3 py-2 text-sm text-[var(--brand-deep)]">
+        <p className="rounded-lg bg-[var(--surface-sunken)] px-3 py-2 text-sm text-[var(--brand-deep)]">
           {notice}
         </p>
       ) : null}
@@ -549,7 +549,7 @@ export function StoreAccountsWorkspace() {
                       return (
                         <tr
                           key={b.id}
-                          className="cursor-pointer border-b border-[rgba(32,48,80,0.06)] hover:bg-[rgba(32,48,80,0.03)]"
+                          className="cursor-pointer border-b border-[var(--border)] hover:bg-[var(--surface-sunken)]"
                           onClick={() => {
                             setPayBillId(b.id);
                             setPayAmount(
@@ -627,7 +627,7 @@ export function StoreAccountsWorkspace() {
                   ledgerRows.map(({ bill: b, grnNo, returnPaise, balance }) => (
                     <tr
                       key={b.id}
-                      className="border-b border-[rgba(32,48,80,0.06)]"
+                      className="border-b border-[var(--border)]"
                     >
                       <td className="py-2 pr-3">{b.billDate}</td>
                       <td className="py-2 pr-3">{grnNo}</td>
@@ -727,7 +727,7 @@ export function StoreAccountsWorkspace() {
                     unpaidDues.map((r) => (
                       <tr
                         key={r.issue.id}
-                        className="border-b border-[rgba(32,48,80,0.06)]"
+                        className="border-b border-[var(--border)]"
                       >
                         <td className="py-2 pr-3">{r.issue.issueNo}</td>
                         <td className="py-2 pr-3">{r.issue.issuedOn}</td>

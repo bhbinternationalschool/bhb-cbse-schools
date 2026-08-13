@@ -570,7 +570,7 @@ export function LibraryWorkspace() {
             ].map((c) => (
               <div
                 key={c.label}
-                className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4"
+                className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4"
               >
                 <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
                   <c.icon className="size-4" aria-hidden />
@@ -584,7 +584,7 @@ export function LibraryWorkspace() {
           </div>
           {overdue.length > 0 ? (
             <div className="rounded-xl border border-[rgba(180,35,24,0.2)] bg-[rgba(180,35,24,0.04)] p-4">
-              <p className="text-sm font-semibold text-[#b42318]">
+              <p className="text-sm font-semibold text-[var(--danger)]">
                 {overdue.length} overdue loan(s)
               </p>
               <button
@@ -643,7 +643,7 @@ export function LibraryWorkspace() {
           </div>
 
           {showTitleForm ? (
-            <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
               <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
                 {editingTitleId ? "Edit catalogue item" : "New catalogue item"}
               </h2>
@@ -814,7 +814,7 @@ export function LibraryWorkspace() {
                     </tr>
                   ) : (
                     filteredTitles.map((t) => (
-                      <tr key={t.id} className="hover:bg-[rgba(32,48,80,0.02)]">
+                      <tr key={t.id} className="hover:bg-[var(--surface-sunken)]">
                         <td className="px-4 py-2">
                           <p className="font-medium">{t.title}</p>
                           {t.isbn ? (
@@ -849,7 +849,7 @@ export function LibraryWorkspace() {
 
       {tab === "issue" ? (
         <div className="grid gap-4 lg:grid-cols-2">
-          <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
               Issue item
             </h2>
@@ -866,8 +866,8 @@ export function LibraryWorkspace() {
                   }}
                   className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
                     borrowerType === t
-                      ? "bg-[var(--brand-deep)] text-white"
-                      : "border border-[rgba(32,48,80,0.15)] text-[var(--brand-deep)]"
+                      ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                      : "border border-[var(--border)] text-[var(--brand-deep)]"
                   }`}
                 >
                   {t === "student" ? "Student" : "Staff"}
@@ -902,7 +902,7 @@ export function LibraryWorkspace() {
                           setBorrowerQuery(s.fullName);
                         }
                       }}
-                      className={`w-full px-3 py-2 text-left hover:bg-[rgba(32,48,80,0.04)] ${
+                      className={`w-full px-3 py-2 text-left hover:bg-[var(--surface-sunken)] ${
                         (borrowerType === "student"
                           ? selectedStudentId
                           : selectedStaffId) === s.id
@@ -930,7 +930,7 @@ export function LibraryWorkspace() {
                   onClick={() => setIssueMode(m)}
                   className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
                     issueMode === m
-                      ? "bg-[rgba(32,48,80,0.08)] text-[var(--brand-deep)]"
+                      ? "bg-[var(--surface-sunken)] text-[var(--brand-deep)]"
                       : "text-[var(--muted)]"
                   }`}
                 >
@@ -1031,12 +1031,12 @@ export function LibraryWorkspace() {
             ) : null}
           </div>
 
-          <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
               Open loans — return
             </h2>
             <ErpTableShell className="mt-3">
-              <ul className="divide-y divide-[rgba(32,48,80,0.08)] text-sm">
+              <ul className="divide-y divide-[var(--border)] text-sm">
                 {openLoans.length === 0 ? (
                   <li className="px-4 py-6 text-center text-[var(--muted)]">
                     No open loans
@@ -1082,7 +1082,7 @@ export function LibraryWorkspace() {
                         ) : null}
                       </div>
                       {returningIssueId === issue.id ? (
-                        <div className="mt-3 rounded-lg border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.02)] p-3">
+                        <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] p-3">
                           <div className="grid gap-3 sm:grid-cols-2">
                             <label className="block text-xs text-[var(--muted)]">
                               Return date
@@ -1143,7 +1143,7 @@ export function LibraryWorkspace() {
 
       {tab === "history" ? (
         <div className="space-y-4">
-          <div className="flex flex-wrap items-end gap-3 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+          <div className="flex flex-wrap items-end gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <label className="block text-xs text-[var(--muted)]">
               From
               <input
@@ -1249,7 +1249,7 @@ export function LibraryWorkspace() {
                     </tr>
                   ) : (
                     filteredHistory.map((issue) => (
-                      <tr key={issue.id} className="hover:bg-[rgba(32,48,80,0.02)]">
+                      <tr key={issue.id} className="hover:bg-[var(--surface-sunken)]">
                         <td className="px-4 py-2 font-medium">
                           {titleForIssue(issue)}
                         </td>
@@ -1300,11 +1300,11 @@ export function LibraryWorkspace() {
           </ErpTableShell>
 
           {overdue.length > 0 ? (
-            <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
               <h3 className="text-sm font-semibold text-[var(--brand-deep)]">
                 Overdue reminders
               </h3>
-              <ul className="mt-2 divide-y divide-[rgba(32,48,80,0.08)] text-sm">
+              <ul className="mt-2 divide-y divide-[var(--border)] text-sm">
                 {overdue.map((issue) => (
                   <li key={issue.id} className="py-2">
                     <span className="font-medium">{titleForIssue(issue)}</span>
@@ -1329,7 +1329,7 @@ export function LibraryWorkspace() {
 
       {tab === "procurement" ? (
         <div className="grid gap-4 lg:grid-cols-2">
-          <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="flex items-center gap-2 text-sm font-semibold text-[var(--brand-deep)]">
               <FileText className="size-4" aria-hidden />
               Upload bill / challan
@@ -1433,11 +1433,11 @@ export function LibraryWorkspace() {
             </div>
           </div>
 
-          <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
               Procurement records
             </h2>
-            <ul className="mt-3 divide-y divide-[rgba(32,48,80,0.08)] text-sm">
+            <ul className="mt-3 divide-y divide-[var(--border)] text-sm">
               {state.procurementDocs.length === 0 ? (
                 <li className="py-6 text-center text-[var(--muted)]">
                   No procurement documents yet
@@ -1453,7 +1453,7 @@ export function LibraryWorkspace() {
                         className="h-14 w-14 rounded-lg border object-cover"
                       />
                     ) : (
-                      <div className="flex h-14 w-14 items-center justify-center rounded-lg border bg-[rgba(32,48,80,0.04)] text-[10px] font-bold uppercase">
+                      <div className="flex h-14 w-14 items-center justify-center rounded-lg border bg-[var(--surface-sunken)] text-[10px] font-bold uppercase">
                         PDF
                       </div>
                     )}
@@ -1490,7 +1490,7 @@ export function LibraryWorkspace() {
       ) : null}
 
       {tab === "reports" ? (
-        <div className="max-w-lg space-y-4 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+        <div className="max-w-lg space-y-4 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-[var(--brand-deep)]">
             <BarChart3 className="size-4" aria-hidden />
             Export reports

@@ -608,7 +608,7 @@ export function CommsWorkspace() {
 
       {tab === "notices" ? (
         <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-          <section className="space-y-3 rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+          <section className="space-y-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
               {editNoticeId ? "Edit notice" : "New notice"}
             </h2>
@@ -683,7 +683,7 @@ export function CommsWorkspace() {
               </p>
             ) : (
               <ErpTableShell>
-                <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+                <ul className="divide-y divide-[var(--border)]">
                 {noticesFiltered.map((n) => (
                   <li key={n.id} className="p-3">
                 <article>
@@ -773,7 +773,7 @@ export function CommsWorkspace() {
 
       {tab === "news" ? (
         <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-          <section className="space-y-3 rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+          <section className="space-y-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
               {editNewsId ? "Edit news" : "New story"}
             </h2>
@@ -835,7 +835,7 @@ export function CommsWorkspace() {
               </p>
             ) : (
               <ErpTableShell>
-                <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+                <ul className="divide-y divide-[var(--border)]">
                 {newsFiltered.map((n) => (
                   <li key={n.id}>
                 <article
@@ -916,7 +916,7 @@ export function CommsWorkspace() {
 
       {tab === "gallery" ? (
         <div className="space-y-5">
-          <section className="flex flex-wrap items-end gap-3 rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+          <section className="flex flex-wrap items-end gap-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
             <p className="w-full text-sm font-semibold text-[var(--brand-deep)]">
               {editAlbumId ? "Edit album" : "New album"}
             </p>
@@ -975,15 +975,15 @@ export function CommsWorkspace() {
                 className={`overflow-hidden rounded-xl border text-left transition ${
                   activeAlbumId === a.id
                     ? "border-[var(--brand-deep)] ring-2 ring-[var(--brand-gold)]"
-                    : "border-[rgba(32,48,80,0.1)]"
-                } bg-white`}
+                    : "border-[var(--border)]"
+                } bg-[var(--card)]`}
               >
                 <button
                   type="button"
                   onClick={() => setActiveAlbumId(a.id)}
                   className="w-full text-left"
                 >
-                  <div className="flex h-28 items-center justify-center bg-[rgba(32,48,80,0.06)]">
+                  <div className="flex h-28 items-center justify-center bg-[var(--surface-sunken)]">
                     {a.coverUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={a.coverUrl} alt="" className="h-full w-full object-cover" />
@@ -1018,7 +1018,7 @@ export function CommsWorkspace() {
           </div>
 
           {activeAlbumId ? (
-            <section className="space-y-3 rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+            <section className="space-y-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
                   Album photos
@@ -1065,7 +1065,7 @@ export function CommsWorkspace() {
               ) : (
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
                   {albumPhotos.map((p) => (
-                    <figure key={p.id} className="relative overflow-hidden rounded-lg bg-[rgba(32,48,80,0.05)]">
+                    <figure key={p.id} className="relative overflow-hidden rounded-lg bg-[var(--surface-sunken)]">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={p.url} alt={p.caption} className="aspect-square w-full object-cover" />
                       {p.caption ? (
@@ -1076,7 +1076,7 @@ export function CommsWorkspace() {
                       {!readOnly ? (
                         <button
                           type="button"
-                          className="absolute right-1 top-1 rounded bg-white/90 px-1.5 py-0.5 text-[10px] font-semibold text-[#b42318]"
+                          className="absolute right-1 top-1 rounded bg-[var(--card)]/90 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--danger)]"
                           onClick={() => {
                             if (!window.confirm("Remove this photo?")) return;
                             const r = deleteGalleryPhoto(p.id);
@@ -1102,7 +1102,7 @@ export function CommsWorkspace() {
         <div className="space-y-5">
           <SocialCredentialsPanel onSaved={reloadSocialLogs} />
           <SocialCrossPostPrefsPanel />
-          <section className="rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+          <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
               Scheduled queue
             </h2>
@@ -1113,7 +1113,7 @@ export function CommsWorkspace() {
               <p className="mt-3 text-sm text-[var(--muted)]">No scheduled posts.</p>
             ) : (
               <ErpTableShell className="mt-3">
-                <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+                <ul className="divide-y divide-[var(--border)]">
                 {scheduledItems.map((item) => (
                   <li
                     key={`${item.kind}-${item.id}`}
@@ -1132,7 +1132,7 @@ export function CommsWorkspace() {
               </ErpTableShell>
             )}
           </section>
-          <section className="rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+          <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
             <div className="mb-3 flex items-center justify-between gap-2">
               <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
                 Recent cross-posts
@@ -1147,7 +1147,7 @@ export function CommsWorkspace() {
               </p>
             ) : (
               <ErpTableShell>
-                <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+                <ul className="divide-y divide-[var(--border)]">
                 {socialLogs.map((log) => (
                   <li
                     key={`${log.contentId}-${log.platform}-${log.postedAt}`}
@@ -1173,7 +1173,7 @@ export function CommsWorkspace() {
                       </a>
                     ) : null}
                     {log.error ? (
-                      <p className="mt-1 text-[11px] text-[#b42318]">{log.error}</p>
+                      <p className="mt-1 text-[11px] text-[var(--danger)]">{log.error}</p>
                     ) : null}
                   </li>
                 ))}
@@ -1235,7 +1235,7 @@ export function CommsWorkspace() {
                   className={`block w-full rounded-xl border px-3 py-2.5 text-left ${
                     unread
                       ? "border-[rgba(197,160,40,0.4)] bg-[rgba(197,160,40,0.08)]"
-                      : "border-[rgba(32,48,80,0.1)] bg-white"
+                      : "border-[var(--border)] bg-[var(--card)]"
                   }`}
                 >
                   <div className="flex justify-between gap-2">

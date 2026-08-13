@@ -222,10 +222,10 @@ migration, independent of the rest of the checklist):
 | Exams | `exams/{ExamsWorkspace,ExamPapersPanel,InvigilationPanel,ExamDateSheetPanel}.tsx` | Done (color/token sweep; print sheets — ClassResultSheet/ExamPaperPrintSheet/ReportCardSheet — deliberately untouched, same as Fees' receipt flow) |
 | Masters | `masters/MastersWorkspace.tsx` | Not started — wave 3 |
 | Transport | `transport/{TransportWorkspace,TransportFleetPanels,TransportOpsPanels,TransportPlannerPanel}.tsx` | Done (color/token sweep; TransportGoogleMap.tsx untouched — map styling is a different concern) |
-| Library | `library/LibraryWorkspace.tsx` | Not started — wave 4 |
-| Store | `store/{StoreWorkspace,StoreAccountsWorkspace,StockMasterWorkspace}.tsx` | Not started — wave 4 |
-| Purchase | `purchase/PurchaseWorkspace.tsx` | Not started — wave 4 |
-| Comms | `comms/CommsWorkspace.tsx` | Not started — wave 4 |
+| Library | `library/LibraryWorkspace.tsx` | Done |
+| Store | `store/{StoreWorkspace,StoreAccountsWorkspace,StockMasterWorkspace,StoreModuleNav,StoreInventoryAllocationPanel,StoreAssetAllocationPanel,StoreSellReturnPanel,StoreReportsPanel}.tsx` | Done (color/token sweep; its 9 raw `<table>`s are already token-correct colorwise, structural ErpTableShell conversion deferred — same call as Accounts) |
+| Purchase | `purchase/{PurchaseWorkspace,PurchaseReturnPanel}.tsx` | Done |
+| Comms | `comms/{CommsWorkspace,WaChatHubPanel,SocialCredentialsPanel,ClassChannelsPanel,SocialCrossPostPanel}.tsx` | Done |
 | Trust | `trust/TrustWorkspace.tsx` | Not started — wave 5 |
 | RTE | `rte/RteWorkspace.tsx` | Not started — wave 5 |
 | Vault | `vault/VaultWorkspace.tsx` | Not started — wave 5 |

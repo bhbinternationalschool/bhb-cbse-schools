@@ -705,7 +705,7 @@ export function StoreWorkspace() {
           {items.length === 0 ? (
             <button
               type="button"
-              className="rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-1.5 text-sm font-semibold text-[var(--brand-deep)]"
+              className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm font-semibold text-[var(--brand-deep)]"
               onClick={() => {
                 seedStoreIfEmpty();
                 refresh();
@@ -784,7 +784,7 @@ export function StoreWorkspace() {
           {issueSubTab === "sell" ? (
         <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
           <div className="space-y-4">
-            <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
               <h2 className="text-sm font-bold text-[var(--brand-deep)]">
                 Issue to student
               </h2>
@@ -802,8 +802,8 @@ export function StoreWorkspace() {
                 type="button"
                 className={`rounded-lg px-3 py-1.5 text-[12px] font-semibold ${
                   recipientKind === "student"
-                    ? "bg-[var(--brand-deep)] text-white"
-                    : "border border-[rgba(32,48,80,0.15)] text-[var(--muted)]"
+                    ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                    : "border border-[var(--border)] text-[var(--muted)]"
                 }`}
                 onClick={() => {
                   setRecipientKind("student");
@@ -817,8 +817,8 @@ export function StoreWorkspace() {
                 type="button"
                 className={`rounded-lg px-3 py-1.5 text-[12px] font-semibold ${
                   recipientKind === "staff"
-                    ? "bg-[var(--brand-deep)] text-white"
-                    : "border border-[rgba(32,48,80,0.15)] text-[var(--muted)]"
+                    ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                    : "border border-[var(--border)] text-[var(--muted)]"
                 }`}
                 onClick={() => {
                   setRecipientKind("staff");
@@ -913,7 +913,7 @@ export function StoreWorkspace() {
               {!selected && (query.trim() || classId || sectionId) ? (
                 <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto">
                   {hits.length === 0 ? (
-                    <li className="rounded-lg bg-[rgba(32,48,80,0.04)] px-3 py-3 text-sm text-[var(--muted)]">
+                    <li className="rounded-lg bg-[var(--surface-sunken)] px-3 py-3 text-sm text-[var(--muted)]">
                       No students match.
                     </li>
                   ) : (
@@ -921,7 +921,7 @@ export function StoreWorkspace() {
                       <li key={h.student.id}>
                         <button
                           type="button"
-                          className="w-full rounded-lg border border-[rgba(32,48,80,0.12)] px-3 py-2 text-left hover:border-[rgba(197,160,40,0.45)] hover:bg-[rgba(197,160,40,0.08)]"
+                          className="w-full rounded-lg border border-[var(--border)] px-3 py-2 text-left hover:border-[rgba(197,160,40,0.45)] hover:bg-[rgba(197,160,40,0.08)]"
                           onClick={() => {
                             setSelected(h);
                             setQuery(h.student.fullName);
@@ -942,7 +942,7 @@ export function StoreWorkspace() {
 
               {selected ? (
                 <div className="mt-3 space-y-2">
-                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[rgba(32,48,80,0.04)] px-3 py-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[var(--surface-sunken)] px-3 py-2">
                     <div className="text-sm text-[var(--brand-deep)]">
                       <span className="font-semibold">
                         {selected.student.fullName}
@@ -970,7 +970,7 @@ export function StoreWorkspace() {
                     />
                   ) : null}
                   {sessionSells.length > 0 ? (
-                    <div className="rounded-lg border border-[rgba(32,48,80,0.12)] bg-white px-3 py-2">
+                    <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2">
                       <div className="text-[11px] font-semibold text-[var(--brand-deep)]">
                         Earlier sells this session ({sessionSells.length})
                       </div>
@@ -1016,7 +1016,7 @@ export function StoreWorkspace() {
                       <li key={s.id}>
                         <button
                           type="button"
-                          className="w-full rounded-lg border border-[rgba(32,48,80,0.12)] px-3 py-2 text-left text-sm hover:bg-[rgba(197,160,40,0.08)]"
+                          className="w-full rounded-lg border border-[var(--border)] px-3 py-2 text-left text-sm hover:bg-[rgba(197,160,40,0.08)]"
                           onClick={() => {
                             setStaffId(s.id);
                             setStaffQuery(s.fullName);
@@ -1034,7 +1034,7 @@ export function StoreWorkspace() {
                     ))}
                   </ul>
                 ) : (
-                  <div className="flex items-center justify-between rounded-lg bg-[rgba(32,48,80,0.04)] px-3 py-2 text-sm">
+                  <div className="flex items-center justify-between rounded-lg bg-[var(--surface-sunken)] px-3 py-2 text-sm">
                     <span className="font-semibold text-[var(--brand-deep)]">
                       {selectedStaff?.fullName || staffId}
                       <span className="font-normal text-[var(--muted)]">
@@ -1321,7 +1321,7 @@ export function StoreWorkspace() {
                     {saleGroupId ? (
                       <button
                         type="button"
-                        className="shrink-0 rounded-lg border border-[rgba(32,48,80,0.2)] px-2 py-1 text-[11px] font-semibold text-[var(--brand-deep)]"
+                        className="shrink-0 rounded-lg border border-[var(--border)] px-2 py-1 text-[11px] font-semibold text-[var(--brand-deep)]"
                         onClick={() => loadSaleGroupKit(saleGroupId)}
                       >
                         Reload
@@ -1357,7 +1357,7 @@ export function StoreWorkspace() {
                 </label>
                 <button
                   type="button"
-                  className="rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-2 text-sm font-semibold text-[var(--brand-deep)]"
+                  className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-semibold text-[var(--brand-deep)]"
                   onClick={addToCart}
                 >
                   Add
@@ -1365,7 +1365,7 @@ export function StoreWorkspace() {
               </div>
 
               {cart.length > 0 ? (
-                <ul className="mt-3 divide-y divide-[rgba(32,48,80,0.08)] rounded-lg border border-[rgba(32,48,80,0.12)]">
+                <ul className="mt-3 divide-y divide-[var(--border)] rounded-lg border border-[var(--border)]">
                   {cart.map((row) => {
                     const item = items.find((i) => i.id === row.itemId);
                     if (!item) return null;
@@ -1419,7 +1419,7 @@ export function StoreWorkspace() {
                         </span>
                         <button
                           type="button"
-                          className="text-xs font-semibold text-[#dc2626]"
+                          className="text-xs font-semibold text-[var(--danger)]"
                           onClick={() =>
                             setCart((prev) =>
                               prev.filter((r) => r.itemId !== row.itemId),
@@ -1460,7 +1460,7 @@ export function StoreWorkspace() {
                 </div>
                 <button
                   type="button"
-                  className="rounded-lg bg-[var(--brand-deep)] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"
+                  className="rounded-lg bg-[var(--primary)] px-4 py-2.5 text-sm font-bold text-[var(--primary-foreground)] disabled:opacity-50"
                   disabled={
                     cart.length === 0 ||
                     (recipientKind === "student" ? !selected : !staffId)
@@ -1478,11 +1478,11 @@ export function StoreWorkspace() {
           </div>
 
           <div className="space-y-4">
-            <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
               <h2 className="text-sm font-bold text-[var(--brand-deep)]">
                 Active catalog
               </h2>
-              <ul className="mt-2 max-h-64 divide-y divide-[rgba(32,48,80,0.08)] overflow-y-auto text-sm">
+              <ul className="mt-2 max-h-64 divide-y divide-[var(--border)] overflow-y-auto text-sm">
                 {items.length === 0 ? (
                   <li className="py-3 text-[var(--muted)]">
                     No items — open Catalog tab or load sample.
@@ -1512,14 +1512,14 @@ export function StoreWorkspace() {
               </ul>
             </div>
 
-            <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
               <h2 className="text-sm font-bold text-[var(--brand-deep)]">
                 Recent issues
               </h2>
               {issues.length === 0 ? (
                 <p className="mt-2 text-sm text-[var(--muted)]">No issues yet.</p>
               ) : (
-                <ul className="mt-2 max-h-72 divide-y divide-[rgba(32,48,80,0.08)] overflow-y-auto">
+                <ul className="mt-2 max-h-72 divide-y divide-[var(--border)] overflow-y-auto">
                   {issues.slice(0, 12).map((iss) => {
                     const st = sis?.students.find((s) => s.id === iss.studentId);
                     const staff =
@@ -1545,7 +1545,7 @@ export function StoreWorkspace() {
                                 {iss.recipientKind === "staff" ? " · staff" : ""}
                               </span>
                               {voided ? (
-                                <span className="ml-1 text-[10px] uppercase text-[#dc2626]">
+                                <span className="ml-1 text-[10px] uppercase text-[var(--danger)]">
                                   Void
                                 </span>
                               ) : null}
@@ -1600,7 +1600,7 @@ export function StoreWorkspace() {
             </label>
           </div>
           <ErpTableShell className="mt-4">
-          <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+          <ul className="divide-y divide-[var(--border)]">
             {filteredHistory.length === 0 ? (
               <li className="py-4 text-sm text-[var(--muted)]">No issues.</li>
             ) : (
@@ -1646,7 +1646,7 @@ export function StoreWorkspace() {
                         {!voided ? (
                           <button
                             type="button"
-                            className="mt-1 text-[11px] font-semibold text-[#dc2626]"
+                            className="mt-1 text-[11px] font-semibold text-[var(--danger)]"
                             onClick={() => onVoid(iss)}
                           >
                             Void

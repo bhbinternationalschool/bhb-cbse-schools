@@ -108,22 +108,22 @@ function AllocationDropdown({
         ) : null}
         <span>{menu.label}</span>
         {active ? (
-          <span className="rounded-md bg-white/20 px-1.5 py-0.5 text-[10px] font-black">
+          <span className="rounded-md bg-[var(--card)]/20 px-1.5 py-0.5 text-[10px] font-black">
             {activeLabel}
           </span>
         ) : null}
         <span className="text-[10px]">{open ? "▲" : "▼"}</span>
       </button>
       {open && active ? (
-        <ul className="absolute left-0 top-full z-20 mt-1 min-w-[200px] overflow-hidden rounded-lg border border-[rgba(32,48,80,0.12)] bg-white py-1 shadow-lg">
+        <ul className="absolute left-0 top-full z-20 mt-1 min-w-[200px] overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--card)] py-1 shadow-lg">
           {menu.items.map((item) => (
             <li key={item.id}>
               <button
                 type="button"
                 className={`block w-full px-4 py-2 text-left text-sm ${
                   subScreen === item.id
-                    ? "bg-[rgba(32,48,80,0.08)] font-semibold text-[var(--brand-deep)]"
-                    : "text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.04)]"
+                    ? "bg-[var(--surface-sunken)] font-semibold text-[var(--brand-deep)]"
+                    : "text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
                 }`}
                 onClick={() => {
                   onSelect(menu.tab, item.id);
@@ -156,7 +156,7 @@ export function StoreModuleNav({
   return (
     <div className="mt-4 space-y-3">
       <div
-        className="module-tabs flex flex-wrap gap-2.5 rounded-2xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] p-3"
+        className="module-tabs flex flex-wrap gap-2.5 rounded-2xl border border-[var(--border)] bg-[var(--surface-sunken)] p-3"
         role="tablist"
         aria-label="Store"
       >
@@ -199,7 +199,7 @@ export function StoreModuleNav({
       </div>
 
       {activeMenu ? (
-        <div className="flex flex-wrap gap-2 rounded-xl border border-[rgba(32,48,80,0.08)] bg-white px-3 py-2">
+        <div className="flex flex-wrap gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2">
           <span className="self-center text-[11px] font-black uppercase tracking-wider text-[var(--muted)]">
             {activeMenu.label}
           </span>
