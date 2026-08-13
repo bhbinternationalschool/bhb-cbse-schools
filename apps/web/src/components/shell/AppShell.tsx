@@ -291,7 +291,7 @@ export function AppShell({
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
           <header
-            className={`sticky top-0 z-20 border-b border-[rgba(32,48,80,0.1)] bg-[rgba(248,248,240,0.92)] backdrop-blur-md ${
+            className={`sticky top-0 z-20 border-b border-[var(--border)] bg-[rgba(248,248,240,0.92)] backdrop-blur-md ${
               mobileApp ? "bhb-staff-app-header" : ""
             }`}
           >

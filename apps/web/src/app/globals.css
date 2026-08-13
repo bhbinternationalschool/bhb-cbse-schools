@@ -349,9 +349,9 @@ h3,
 
 .module-dash-panel {
   border-radius: 1rem;
-  border: 1px solid rgba(32, 48, 80, 0.1);
-  background: #fff;
-  box-shadow: 0 1px 3px rgba(32, 48, 80, 0.08);
+  border: 1px solid var(--border);
+  background: var(--card);
+  box-shadow: var(--shadow-1);
 }
 
 .module-dash-panel h3 {

@@ -74,7 +74,7 @@ export function ErpModuleGate({ children }: { children: React.ReactNode }) {
         </p>
         <Link
           href="/home"
-          className="mt-5 inline-flex rounded-xl bg-[var(--brand-deep)] px-4 py-2.5 text-sm font-semibold text-white"
+          className="mt-5 inline-flex rounded-xl bg-[var(--primary)] px-4 py-2.5 text-sm font-semibold text-[var(--primary-foreground)]"
         >
           Back to Home
         </Link>

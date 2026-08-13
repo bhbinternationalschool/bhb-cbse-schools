@@ -54,7 +54,7 @@ export function SessionSelector({ currentCode }: { currentCode: string }) {
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="rounded-lg border border-[rgba(11,61,74,0.15)] bg-white/90 px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[var(--ring)]"
+        className="rounded-lg border border-[rgba(11,61,74,0.15)] bg-[var(--card)]/90 px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[var(--ring)]"
         aria-label="Academic session"
       >
         {options.map((ay) => (

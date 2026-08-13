@@ -433,7 +433,7 @@ export function ErpAiChatbot() {
           <div className="erp-ai-hint-bubble mb-2 ml-auto flex max-w-[220px] flex-col items-end gap-1 text-right">
             <button
               type="button"
-              className="rounded-2xl rounded-br-sm border border-[rgba(197,160,40,0.45)] bg-white px-3 py-2 text-[11px] font-semibold leading-snug text-[var(--brand-deep)] shadow-lg"
+              className="rounded-2xl rounded-br-sm border border-[rgba(197,160,40,0.45)] bg-[var(--card)] px-3 py-2 text-[11px] font-semibold leading-snug text-[var(--brand-deep)] shadow-lg"
               onClick={() => openPanel(true)}
             >
               ✨ {proactiveHintLabel(proactiveGuide)}
@@ -529,7 +529,7 @@ export function ErpAiChatbot() {
         <div className="flex shrink-0 gap-0.5">
           <button
             type="button"
-            className="rounded-lg px-2 py-1 text-[10px] font-semibold text-white/85 hover:bg-white/10"
+            className="rounded-lg px-2 py-1 text-[10px] font-semibold text-white/85 hover:bg-[var(--card)]/10"
             onPointerDown={(e) => e.stopPropagation()}
             onClick={clearChat}
           >
@@ -537,7 +537,7 @@ export function ErpAiChatbot() {
           </button>
           <button
             type="button"
-            className="rounded-lg px-2 py-1 text-[11px] font-semibold hover:bg-white/10"
+            className="rounded-lg px-2 py-1 text-[11px] font-semibold hover:bg-[var(--card)]/10"
             onPointerDown={(e) => e.stopPropagation()}
             onClick={() => setMinimized((v) => !v)}
             aria-label={minimized ? "Expand" : "Minimize"}
@@ -546,7 +546,7 @@ export function ErpAiChatbot() {
           </button>
           <button
             type="button"
-            className="rounded-lg px-2 py-1 text-[11px] font-semibold hover:bg-white/10"
+            className="rounded-lg px-2 py-1 text-[11px] font-semibold hover:bg-[var(--card)]/10"
             onPointerDown={(e) => e.stopPropagation()}
             onClick={() => {
               setOpen(false);
@@ -560,7 +560,7 @@ export function ErpAiChatbot() {
       </header>
 
       {!minimized ? (
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-b-2xl border border-t-0 border-[rgba(32,48,80,0.14)] bg-[linear-gradient(180deg,#faf9f6_0%,#fff_35%)] shadow-[0_18px_50px_rgba(32,48,80,0.28)]">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-b-2xl border border-t-0 border-[var(--border)] bg-[var(--surface)] shadow-[0_18px_50px_rgba(32,48,80,0.28)]">
           <div className="flex-1 space-y-2.5 overflow-y-auto px-3 py-3">
             {messages.map((m) => (
               <div
@@ -575,7 +575,7 @@ export function ErpAiChatbot() {
                   }`}
                 >
                   {m.role === "assistant" ? (
-                    <div className="rounded-2xl rounded-bl-md border border-[rgba(32,48,80,0.1)] bg-white px-3 py-2.5 text-[12px] leading-relaxed text-[var(--brand-deep)] shadow-sm">
+                    <div className="rounded-2xl rounded-bl-md border border-[var(--border)] bg-[var(--card)] px-3 py-2.5 text-[12px] leading-relaxed text-[var(--brand-deep)] shadow-sm">
                       {m.guideId ? (
                         <p className="mb-1 text-[9px] font-bold uppercase tracking-wider text-[#1565c0]">
                           ✨ Page guide · {m.pageLabel}
@@ -587,7 +587,7 @@ export function ErpAiChatbot() {
                           {m.steps.map((step, idx) => (
                             <li
                               key={idx}
-                              className="flex gap-2 rounded-lg bg-[rgba(32,48,80,0.04)] px-2 py-1.5 text-[11px] leading-snug"
+                              className="flex gap-2 rounded-lg bg-[var(--surface-sunken)] px-2 py-1.5 text-[11px] leading-snug"
                             >
                               <span
                                 className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white"
@@ -634,7 +634,7 @@ export function ErpAiChatbot() {
             ))}
             {(typing || analyzing) && !messages.some((m) => m.guideId && analyzing) ? (
               <div className="flex justify-start">
-                <div className="rounded-2xl rounded-bl-md border border-[rgba(32,48,80,0.1)] bg-white px-3 py-2 text-[11px] text-[var(--muted)] shadow-sm">
+                <div className="rounded-2xl rounded-bl-md border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-[11px] text-[var(--muted)] shadow-sm">
                   {analyzing ? "Reading this screen" : "Thinking"}
                   <span className="ml-0.5 inline-flex gap-0.5">
                     <span className="erp-ai-dot" />
@@ -653,7 +653,7 @@ export function ErpAiChatbot() {
             <div ref={bottomRef} />
           </div>
 
-          <div className="border-t border-[rgba(32,48,80,0.08)] bg-white/95 px-2.5 py-2 backdrop-blur-sm">
+          <div className="border-t border-[var(--border)] bg-[var(--card)]/95 px-2.5 py-2 backdrop-blur-sm">
             {proactiveGuide && showHint ? (
               <button
                 type="button"
@@ -674,7 +674,7 @@ export function ErpAiChatbot() {
                   <button
                     key={q.id}
                     type="button"
-                    className="shrink-0 rounded-full border border-[rgba(32,48,80,0.14)] bg-[rgba(32,48,80,0.03)] px-2.5 py-1 text-[10px] font-semibold text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.08)]"
+                    className="shrink-0 rounded-full border border-[var(--border)] bg-[var(--surface-sunken)] px-2.5 py-1 text-[10px] font-semibold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
                     onClick={() => ask(q.prompt)}
                   >
                     {q.label}
@@ -712,7 +712,7 @@ export function ErpAiChatbot() {
                 className={`shrink-0 rounded-xl border px-2 py-2 text-[11px] ${
                   voiceReply
                     ? "border-[rgba(15,118,110,0.35)] bg-[rgba(15,118,110,0.1)]"
-                    : "border-[rgba(32,48,80,0.15)] bg-white opacity-60"
+                    : "border-[var(--border)] bg-[var(--card)] opacity-60"
                 }`}
                 onClick={() => setVoiceReply((v) => !v)}
               >

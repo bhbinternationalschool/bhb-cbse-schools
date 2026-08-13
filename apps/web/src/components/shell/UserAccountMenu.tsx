@@ -99,7 +99,7 @@ export function UserAccountMenu({
         aria-expanded={open}
         aria-haspopup="menu"
         onClick={onToggle}
-        className="flex items-center gap-2 rounded-lg px-1 py-0.5 text-left hover:bg-[rgba(32,48,80,0.06)]"
+        className="flex items-center gap-2 rounded-lg px-1 py-0.5 text-left hover:bg-[var(--surface-sunken)]"
       >
         <span
           className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold"
@@ -130,9 +130,9 @@ export function UserAccountMenu({
       {open ? (
         <div
           role="menu"
-          className="absolute right-0 z-40 mt-2 w-[min(16rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white shadow-[0_12px_40px_rgba(32,48,80,0.18)]"
+          className="absolute right-0 z-40 mt-2 w-[min(16rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-[0_12px_40px_rgba(32,48,80,0.18)]"
         >
-          <div className="border-b border-[rgba(32,48,80,0.08)] px-3 py-2.5 md:hidden">
+          <div className="border-b border-[var(--border)] px-3 py-2.5 md:hidden">
             <p className="text-sm font-semibold text-[var(--brand-deep)]">
               {session.fullName}
             </p>
@@ -153,7 +153,7 @@ export function UserAccountMenu({
                   roleLabels.map((label) => (
                     <li
                       key={label}
-                      className="rounded-md bg-[rgba(32,48,80,0.05)] px-2 py-1.5 text-xs font-medium text-[var(--brand-deep)]"
+                      className="rounded-md bg-[var(--surface-sunken)] px-2 py-1.5 text-xs font-medium text-[var(--brand-deep)]"
                     >
                       {label}
                     </li>
@@ -226,14 +226,14 @@ export function UserAccountMenu({
                 }
                 onClick={() => setShowRoles(true)}
               />
-              <div className="my-1 border-t border-[rgba(32,48,80,0.08)]" />
+              <div className="my-1 border-t border-[var(--border)]" />
               <div className="flex items-center justify-between px-3 py-2">
                 <span className="text-sm font-medium text-[var(--brand-deep)]">
                   Appearance
                 </span>
                 <ThemeToggle />
               </div>
-              <div className="my-1 border-t border-[rgba(32,48,80,0.08)]" />
+              <div className="my-1 border-t border-[var(--border)]" />
               <MenuButton
                 icon={<LogOut className="h-4 w-4" />}
                 label="Logout"
@@ -269,7 +269,7 @@ function MenuLink({
       href={href}
       role="menuitem"
       onClick={onNavigate}
-      className="flex w-full items-start gap-2.5 px-3 py-2 text-left hover:bg-[rgba(32,48,80,0.05)]"
+      className="flex w-full items-start gap-2.5 px-3 py-2 text-left hover:bg-[var(--surface-sunken)]"
     >
       <span className="mt-0.5 text-[var(--brand-deep)]">{icon}</span>
       <span className="min-w-0">
@@ -312,12 +312,12 @@ function MenuButton({
           ? "cursor-not-allowed opacity-50"
           : tone === "danger"
             ? "hover:bg-[rgba(180,35,24,0.06)]"
-            : "hover:bg-[rgba(32,48,80,0.05)]"
+            : "hover:bg-[var(--surface-sunken)]"
       }`}
     >
       <span
         className={`mt-0.5 ${
-          tone === "danger" ? "text-[#b42318]" : "text-[var(--brand-deep)]"
+          tone === "danger" ? "text-[var(--danger)]" : "text-[var(--brand-deep)]"
         }`}
       >
         {icon}
@@ -325,7 +325,7 @@ function MenuButton({
       <span className="min-w-0">
         <span
           className={`block text-sm font-medium ${
-            tone === "danger" ? "text-[#b42318]" : "text-[var(--brand-deep)]"
+            tone === "danger" ? "text-[var(--danger)]" : "text-[var(--brand-deep)]"
           }`}
         >
           {label}

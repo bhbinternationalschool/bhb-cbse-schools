@@ -104,19 +104,19 @@ export function NotificationBell({
         type="button"
         aria-label={unread ? `${unread} unread notifications` : "Notifications"}
         onClick={() => setOpen((o) => !o)}
-        className="relative flex h-8 w-8 items-center justify-center rounded-full text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.08)]"
+        className="relative flex h-8 w-8 items-center justify-center rounded-full text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
       >
         <Bell className="h-4 w-4" strokeWidth={2.25} />
         {unread > 0 ? (
-          <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#b42318] px-1 text-[9px] font-bold text-white">
+          <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--danger)] px-1 text-[9px] font-bold text-white">
             {unread > 9 ? "9+" : unread}
           </span>
         ) : null}
       </button>
 
       {open ? (
-        <div className="absolute right-0 z-40 mt-2 w-[min(22rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white shadow-[0_12px_40px_rgba(32,48,80,0.18)]">
-          <div className="flex items-center justify-between border-b border-[rgba(32,48,80,0.08)] px-3 py-2">
+        <div className="absolute right-0 z-40 mt-2 w-[min(22rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-[0_12px_40px_rgba(32,48,80,0.18)]">
+          <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-2">
             <p className="text-xs font-bold text-[var(--brand-deep)]">
               Notifications
             </p>
@@ -153,7 +153,7 @@ export function NotificationBell({
               items.map((n) => {
                 const isUnread = !n.readBy.includes(key);
                 return (
-                  <li key={n.id} className="border-b border-[rgba(32,48,80,0.06)] last:border-0">
+                  <li key={n.id} className="border-b border-[var(--border)] last:border-0">
                     <Link
                       href={
                         persona === "parent"
@@ -161,7 +161,7 @@ export function NotificationBell({
                           : n.href || "/comms"
                       }
                       onClick={() => onOpenItem(n)}
-                      className={`block px-3 py-2.5 hover:bg-[rgba(32,48,80,0.04)] ${
+                      className={`block px-3 py-2.5 hover:bg-[var(--surface-sunken)] ${
                         isUnread ? "bg-[rgba(197,160,40,0.08)]" : ""
                       }`}
                     >

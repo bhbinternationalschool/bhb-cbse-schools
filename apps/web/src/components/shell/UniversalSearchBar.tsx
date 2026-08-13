@@ -333,7 +333,7 @@ export function UniversalSearchBar() {
           }}
           onFocus={() => setOpen(true)}
           onKeyDown={onKeyDown}
-          className="h-11 w-full rounded-xl border border-[rgba(32,48,80,0.14)] bg-white pl-10 pr-20 text-[15px] text-[var(--brand-deep)] shadow-[0_2px_10px_rgba(32,48,80,0.04)] outline-none transition placeholder:text-[var(--muted)] focus:border-[var(--brand-gold)] focus:ring-2 focus:ring-[rgba(197,160,40,0.35)]"
+          className="h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] pl-10 pr-20 text-[15px] text-[var(--brand-deep)] shadow-[0_2px_10px_rgba(32,48,80,0.04)] outline-none transition placeholder:text-[var(--muted)] focus:border-[var(--brand-gold)] focus:ring-2 focus:ring-[rgba(197,160,40,0.35)]"
           autoComplete="off"
         />
         <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
@@ -344,13 +344,13 @@ export function UniversalSearchBar() {
                 setQuery("");
                 inputRef.current?.focus();
               }}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-[var(--muted)] hover:bg-[rgba(32,48,80,0.06)] hover:text-[var(--brand-deep)]"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-[var(--muted)] hover:bg-[var(--surface-sunken)] hover:text-[var(--brand-deep)]"
               aria-label="Clear search"
             >
               <X className="h-4 w-4" />
             </button>
           ) : (
-            <kbd className="hidden rounded-md border border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.04)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--muted)] sm:inline">
+            <kbd className="hidden rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--muted)] sm:inline">
               ⌘K
             </kbd>
           )}
@@ -361,7 +361,7 @@ export function UniversalSearchBar() {
         <div
           id={listId}
           role="listbox"
-          className="absolute left-0 right-0 top-[calc(100%+6px)] z-40 max-h-[min(70vh,28rem)] overflow-auto rounded-xl border border-[rgba(32,48,80,0.12)] bg-white py-1 shadow-[0_18px_40px_rgba(32,48,80,0.16)]"
+          className="absolute left-0 right-0 top-[calc(100%+6px)] z-40 max-h-[min(70vh,28rem)] overflow-auto rounded-xl border border-[var(--border)] bg-[var(--card)] py-1 shadow-[0_18px_40px_rgba(32,48,80,0.16)]"
         >
           {hits.length === 0 ? (
             <p className="px-4 py-6 text-center text-sm text-[var(--muted)]">
@@ -381,18 +381,18 @@ export function UniversalSearchBar() {
                   onClick={() => go(hit)}
                   className={`flex w-full items-center gap-3 px-3 py-2.5 text-left transition ${
                     selected
-                      ? "bg-[rgba(32,48,80,0.08)]"
-                      : "hover:bg-[rgba(32,48,80,0.04)]"
+                      ? "bg-[var(--surface-sunken)]"
+                      : "hover:bg-[var(--surface-sunken)]"
                   }`}
                 >
                   <span
                     className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
                       hit.kind === "module"
-                        ? "bg-[rgba(32,48,80,0.1)] text-[var(--brand-deep)]"
+                        ? "bg-[var(--surface-sunken)] text-[var(--brand-deep)]"
                         : hit.kind === "student"
                           ? "bg-[rgba(2,132,199,0.12)] text-[#0369a1]"
                           : hit.kind === "receipt"
-                            ? "bg-[rgba(217,119,6,0.12)] text-[#b45309]"
+                            ? "bg-[rgba(217,119,6,0.12)] text-[var(--warning)]"
                             : hit.kind === "vehicle"
                               ? "bg-[rgba(124,58,237,0.12)] text-[#7c3aed]"
                               : hit.kind === "lead"
@@ -414,7 +414,7 @@ export function UniversalSearchBar() {
               );
             })
           )}
-          <p className="border-t border-[rgba(32,48,80,0.08)] px-3 py-2 text-[11px] text-[var(--muted)]">
+          <p className="border-t border-[var(--border)] px-3 py-2 text-[11px] text-[var(--muted)]">
             ↑↓ navigate · Enter open · Esc close · modules · students · staff ·
             receipts · vehicles · leads
           </p>

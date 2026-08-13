@@ -198,7 +198,7 @@ const TONE_STYLES: Record<
   { chip: string; value: string; ring: string; bar: string }
 > = {
   navy: {
-    chip: "bg-[rgba(32,48,80,0.1)] text-[var(--brand-deep)]",
+    chip: "bg-[var(--surface-sunken)] text-[var(--brand-deep)]",
     value: "text-[var(--brand-deep)]",
     ring: "hover:ring-[var(--brand-deep)]/30 focus-visible:ring-[var(--brand-deep)]",
     bar: "#203050",
@@ -282,7 +282,7 @@ function ChartHoverTooltip({
   if (!point) return null;
   const modes = point.modeBreakup?.filter((m) => m.value > 0) ?? [];
   return (
-    <div className="pointer-events-none absolute left-1/2 top-2 z-10 w-max max-w-[min(18rem,90vw)] -translate-x-1/2 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-3 py-2.5 text-left shadow-lg">
+    <div className="pointer-events-none absolute left-1/2 top-2 z-10 w-max max-w-[min(18rem,90vw)] -translate-x-1/2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2.5 text-left shadow-lg">
       <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted)]">
         {point.date
           ? new Date(`${point.date}T12:00:00`).toLocaleDateString("en-IN", {
@@ -296,7 +296,7 @@ function ChartHoverTooltip({
         {formatRupees(point.value)}
       </p>
       {modes.length > 0 ? (
-        <ul className="mt-2 space-y-1 border-t border-[rgba(32,48,80,0.08)] pt-2 text-xs">
+        <ul className="mt-2 space-y-1 border-t border-[var(--border)] pt-2 text-xs">
           {modes.map((m) => (
             <li
               key={m.label}
@@ -339,7 +339,7 @@ function BarChartSvg({ series }: { series: DashboardChartPoint[] }) {
             dataKey="label"
             tick={{ fontSize: dense ? 9 : 10, fill: "var(--muted)" }}
             tickLine={false}
-            axisLine={{ stroke: "rgba(32,48,80,0.15)" }}
+            axisLine={{ stroke: "var(--border)" }}
             interval={0}
             angle={dense ? -28 : 0}
             textAnchor={dense ? "end" : "middle"}
@@ -449,7 +449,7 @@ function DonutChartSvg({
     <div className="flex flex-col items-center gap-4 lg:flex-row lg:items-start">
       <div className="relative mx-auto shrink-0" style={{ width: 240, height: 220 }}>
         {hoveredPoint ? (
-          <div className="pointer-events-none absolute left-1/2 top-0 z-10 w-max max-w-[min(16rem,90vw)] -translate-x-1/2 -translate-y-1 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-3 py-2 text-center shadow-lg">
+          <div className="pointer-events-none absolute left-1/2 top-0 z-10 w-max max-w-[min(16rem,90vw)] -translate-x-1/2 -translate-y-1 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-center shadow-lg">
             <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted)]">
               {coloredRings[hover!.ring]?.label || hoveredPoint.label}
             </p>
@@ -578,7 +578,7 @@ function TrendChartSvg({ series }: { series: DashboardChartPoint[] }) {
             dataKey="label"
             tick={{ fontSize: dense ? 9 : 10, fill: "var(--muted)" }}
             tickLine={false}
-            axisLine={{ stroke: "rgba(32,48,80,0.15)" }}
+            axisLine={{ stroke: "var(--border)" }}
             tickFormatter={(label: string) =>
               label.length > 8 ? `${label.slice(0, 7)}…` : label
             }
@@ -633,7 +633,7 @@ function ChartToggle({
   ];
   return (
     <div
-      className="inline-flex rounded-xl border border-[rgba(32,48,80,0.12)] bg-[rgba(248,248,240,0.9)] p-1"
+      className="inline-flex rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-1"
       role="group"
       aria-label="Chart type"
     >
@@ -647,8 +647,8 @@ function ChartToggle({
             aria-pressed={active}
             className={`inline-flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-sm font-semibold transition ${
               active
-                ? "bg-[var(--brand-deep)] text-white shadow-sm"
-                : "text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.08)]"
+                ? "bg-[var(--primary)] text-[var(--primary-foreground)] shadow-sm"
+                : "text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
             }`}
           >
             {o.icon}
@@ -729,12 +729,12 @@ function DashboardTable({
 
   return (
     <section className="module-dash-panel overflow-hidden">
-      <div className="flex items-center gap-2 border-b border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] px-4 py-3 sm:px-5">
+      <div className="flex items-center gap-2 border-b border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-3 sm:px-5">
         <Table2 className="h-5 w-5 text-[#2563eb]" aria-hidden />
         <h3 className="text-base font-semibold text-[#2563eb]">
           {title}
         </h3>
-        <span className="ml-auto rounded-full bg-white/80 px-3 py-1 text-sm font-bold tabular-nums text-[var(--brand-deep)]">
+        <span className="ml-auto rounded-full bg-[var(--card)]/80 px-3 py-1 text-sm font-bold tabular-nums text-[var(--brand-deep)]">
           {rows.length}
         </span>
       </div>
@@ -795,8 +795,8 @@ function DashboardTable({
                 <tr
                   key={row.id}
                   onClick={() => onRowClick?.(row)}
-                  className={`border-t border-[rgba(32,48,80,0.06)] transition hover:bg-[rgba(197,160,40,0.08)] ${
-                    idx % 2 === 0 ? "bg-white" : "bg-[rgba(248,248,240,0.65)]"
+                  className={`border-t border-[var(--border)] transition hover:bg-[rgba(197,160,40,0.08)] ${
+                    idx % 2 === 0 ? "bg-[var(--card)]" : "bg-[var(--surface-sunken)]"
                   } ${onRowClick ? "cursor-pointer" : ""}`}
                 >
                   {columns.map((c) => (
@@ -860,7 +860,7 @@ function KpiDetailDrawer({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-[rgba(32,48,80,0.45)] p-3 sm:items-center"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-[var(--overlay)] p-3 sm:items-center"
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
@@ -870,7 +870,7 @@ function KpiDetailDrawer({
         className="module-dash-drawer max-h-[88vh] w-full max-w-2xl overflow-auto rounded-2xl bg-[var(--brand-cream)] shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="sticky top-0 flex items-start gap-3 border-b border-[rgba(32,48,80,0.1)] bg-[var(--brand-cream)] px-5 py-4">
+        <div className="sticky top-0 flex items-start gap-3 border-b border-[var(--border)] bg-[var(--brand-cream)] px-5 py-4">
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">
               KPI detail
@@ -891,7 +891,7 @@ function KpiDetailDrawer({
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[rgba(32,48,80,0.15)] text-[var(--brand-deep)] hover:bg-white"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[var(--border)] text-[var(--brand-deep)] hover:bg-[var(--card)]"
             aria-label="Close"
           >
             <X className="h-5 w-5" />
@@ -904,7 +904,7 @@ function KpiDetailDrawer({
                 <button
                   type="button"
                   onClick={handlePrint}
-                  className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-[rgba(32,48,80,0.15)] bg-white px-3.5 text-sm font-semibold text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.04)]"
+                  className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3.5 text-sm font-semibold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
                 >
                   <Printer className="h-4 w-4" />
                   Print list
@@ -931,7 +931,7 @@ function KpiDetailDrawer({
               </div>
             </>
           ) : (
-            <p className="rounded-xl border border-dashed border-[rgba(32,48,80,0.2)] bg-white/70 px-4 py-8 text-center text-base text-[var(--muted)]">
+            <p className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--card)]/70 px-4 py-8 text-center text-base text-[var(--muted)]">
               Open the related workspace tab for full records.
             </p>
           )}
@@ -942,7 +942,7 @@ function KpiDetailDrawer({
                 onOpenTab(kpi.tab!);
                 onClose();
               }}
-              className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[var(--brand-deep)] px-4 text-base font-bold text-white hover:bg-[var(--brand-mid)]"
+              className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[var(--primary)] px-4 text-base font-bold text-[var(--primary-foreground)] hover:opacity-90"
             >
               Open {kpi.label}
               <ChevronRight className="h-5 w-5" />
@@ -954,7 +954,7 @@ function KpiDetailDrawer({
                 onOpenHref(kpi.href!);
                 onClose();
               }}
-              className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[var(--brand-deep)] px-4 text-base font-bold text-white hover:bg-[var(--brand-mid)]"
+              className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[var(--primary)] px-4 text-base font-bold text-[var(--primary-foreground)] hover:opacity-90"
             >
               Open {kpi.label}
               <ChevronRight className="h-5 w-5" />
@@ -1007,7 +1007,7 @@ function ChartPanel({
         <div className="flex flex-wrap items-center gap-2">
           {ranges && ranges.length > 1 ? (
             <div
-              className="inline-flex rounded-xl border border-[rgba(32,48,80,0.12)] bg-[rgba(248,248,240,0.9)] p-1"
+              className="inline-flex rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-1"
               role="group"
               aria-label="Chart range"
             >
@@ -1021,8 +1021,8 @@ function ChartPanel({
                     aria-pressed={active}
                     className={`min-h-10 rounded-lg px-3 text-sm font-semibold transition ${
                       active
-                        ? "bg-[var(--brand-deep)] text-white shadow-sm"
-                        : "text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.08)]"
+                        ? "bg-[var(--primary)] text-[var(--primary-foreground)] shadow-sm"
+                        : "text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
                     }`}
                   >
                     {r.label}
@@ -1034,7 +1034,7 @@ function ChartPanel({
           <ChartToggle value={chartView} onChange={setChartView} />
         </div>
       </div>
-      <div className="min-h-[220px] rounded-xl bg-[rgba(248,248,240,0.65)] p-2 sm:p-3">
+      <div className="min-h-[220px] rounded-xl bg-[var(--surface-sunken)] p-2 sm:p-3">
         {chartView === "bar" ? <BarChartSvg series={data} /> : null}
         {chartView === "pie" ? (
           <DonutChartSvg rings={pieRings} center={center} />
@@ -1138,7 +1138,7 @@ export function ModuleDashboardView({
                 const footer = (
                   <>
                     {kpi.breakdown && kpi.breakdown.length > 0 ? (
-                      <ul className="mt-2 space-y-0.5 border-t border-[rgba(32,48,80,0.08)] pt-2">
+                      <ul className="mt-2 space-y-0.5 border-t border-[var(--border)] pt-2">
                         {kpi.breakdown.map((b) => (
                           <li
                             key={b.label}
