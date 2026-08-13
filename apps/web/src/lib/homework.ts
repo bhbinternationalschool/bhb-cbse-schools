@@ -48,6 +48,8 @@ export type HomeworkPost = {
   dueAt: string;
   requiresSubmit: boolean;
   aiTutorHint: string;
+  /** Optional teacher-entered reference answer/rubric — grounds the AI grading assist on submitted photos; never shown to students/parents. */
+  referenceAnswer: string;
   status: HomeworkPostStatus;
   createdAt: string;
   /** When parents were last WhatsApp-notified for this post */
@@ -170,6 +172,7 @@ function normalizePost(p: Partial<HomeworkPost>): HomeworkPost {
     dueAt: p.dueAt || "",
     requiresSubmit: !!p.requiresSubmit,
     aiTutorHint: p.aiTutorHint || "",
+    referenceAnswer: p.referenceAnswer || "",
     status: p.status === "withdrawn" ? "withdrawn" : "published",
     createdAt: p.createdAt || nowIso(),
     whatsappNotifiedAt: p.whatsappNotifiedAt || "",
@@ -299,6 +302,7 @@ export function seedHomeworkIfEmpty(ay?: string): HomeworkState {
         dueAt: date,
         requiresSubmit: true,
         aiTutorHint: subject.code,
+        referenceAnswer: "",
         status: "published",
         createdAt: nowIso(),
         whatsappNotifiedAt: "",
@@ -339,6 +343,7 @@ export type CreatePostInput = {
   dueAt?: string;
   requiresSubmit?: boolean;
   aiTutorHint?: string;
+  referenceAnswer?: string;
   attachments?: HomeworkAttachment[];
 };
 

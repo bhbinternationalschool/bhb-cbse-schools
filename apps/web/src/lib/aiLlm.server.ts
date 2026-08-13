@@ -774,3 +774,82 @@ export async function generateStudentCertificateText(opts: {
     engine: r.engine,
   };
 }
+
+/**
+ * Homework OCR grading assist — reads OCR'd text from a photographed
+ * submission and drafts a completeness note + feedback comment for the
+ * teacher to review before acknowledging. A draft, not an auto-grade —
+ * homework has no numeric marks, so this never assigns a score.
+ */
+export async function generateHomeworkGradingAssistJson(opts: {
+  assignmentTitle: string;
+  subjectLabel?: string;
+  referenceAnswer?: string;
+  extractedText: string;
+  studentLabel: string;
+}): Promise<
+  | {
+      ok: true;
+      completeness: "complete" | "partial" | "unclear";
+      feedbackDraft: string;
+      engine: LlmEngine;
+    }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const system = `You help a teacher at an Indian CBSE school review a student's handwritten homework, already OCR-scanned from a photo.
+Only use the OCR text given — handwriting OCR is imperfect, so judge generously and note when text looks garbled/cut off rather than assuming the student got it wrong.
+${
+  opts.referenceAnswer
+    ? "A reference answer/rubric is given — compare the OCR text against it and judge completeness against those specific points, never against outside knowledge of the subject."
+    : "No reference answer was given — only assess whether the response looks complete and legible, do not judge correctness of content you have no rubric for."
+}
+Respond with JSON only: {"completeness":"complete"|"partial"|"unclear","feedbackDraft":"..."}.
+completeness: "unclear" if the OCR text is too garbled/short to judge, "partial" if it's readable but visibly incomplete or missing points from the rubric, "complete" otherwise.
+feedbackDraft: 1-2 short sentences a teacher could paste as a comment to the student — specific and encouraging, never invent an error not evidenced in the text.`;
+
+  const userMessage = `Assignment: ${opts.assignmentTitle}${opts.subjectLabel ? ` (${opts.subjectLabel})` : ""}
+Student: ${opts.studentLabel}
+${opts.referenceAnswer ? `Reference answer/rubric:\n${opts.referenceAnswer}\n` : ""}
+OCR text from the submitted photo:
+${opts.extractedText}`;
+
+  const r = await callLlmJson(
+    {
+      system,
+      userMessage,
+      maxTokens: 500,
+      temperature: 0.4,
+      // See generateTutorText — Gemini 3.x's internal "thinking" tokens eat
+      // into a small budget before the visible JSON reply is produced.
+      geminiMaxTokens: 2048,
+    },
+    parseHomeworkGradingAssistJson,
+  );
+
+  if (r.ok) return { ok: true, ...r.data, engine: r.engine };
+  return {
+    ok: false,
+    error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI grading assist",
+    engine: r.engine,
+  };
+}
+
+function parseHomeworkGradingAssistJson(
+  text: string,
+): { completeness: "complete" | "partial" | "unclear"; feedbackDraft: string } | null {
+  try {
+    const raw = JSON.parse(text) as {
+      completeness?: string;
+      feedbackDraft?: string;
+    };
+    const feedbackDraft = String(raw.feedbackDraft || "").trim();
+    if (!feedbackDraft) return null;
+    const completeness =
+      raw.completeness === "complete" || raw.completeness === "partial"
+        ? raw.completeness
+        : "unclear";
+    return { completeness, feedbackDraft };
+  } catch {
+    return null;
+  }
+}

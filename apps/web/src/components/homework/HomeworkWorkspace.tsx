@@ -50,6 +50,7 @@ import { ClassroomSyncPanel } from "@/components/homework/ClassroomSyncPanel";
 import { TENANT } from "@/lib/types";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import { DeskListActions } from "@/components/ui/desk-list-actions";
+import { VoiceMicButton } from "@/components/voice/VoiceMicButton";
 import {
   ErpTable,
   ErpTableBody,
@@ -106,6 +107,18 @@ export function HomeworkWorkspace() {
   const [dueAt, setDueAt] = useState(todayIso);
   const [requiresSubmit, setRequiresSubmit] = useState(false);
   const [aiHint, setAiHint] = useState("");
+  const [referenceAnswer, setReferenceAnswer] = useState("");
+  const [gradingAssist, setGradingAssist] = useState<
+    Record<
+      string,
+      {
+        loading?: boolean;
+        error?: string;
+        completeness?: "complete" | "partial" | "unclear";
+        feedbackDraft?: string;
+      }
+    >
+  >({});
   const [attachUrl, setAttachUrl] = useState("");
   const [attachLabel, setAttachLabel] = useState("");
   const [defaultsNote, setDefaultsNote] = useState<string | null>(null);
@@ -289,6 +302,7 @@ export function HomeworkWorkspace() {
     setAttachLabel("");
     setRequiresSubmit(false);
     setAiHint("");
+    setReferenceAnswer("");
   }
 
   function beginEditPost(p: HomeworkPost) {
@@ -300,6 +314,7 @@ export function HomeworkWorkspace() {
     setDueAt(p.dueAt || date);
     setRequiresSubmit(p.requiresSubmit);
     setAiHint(p.aiTutorHint || "");
+    setReferenceAnswer(p.referenceAnswer || "");
     const att = p.attachments[0];
     setAttachUrl(att?.url || "");
     setAttachLabel(att?.label || "");
@@ -321,6 +336,7 @@ export function HomeworkWorkspace() {
       dueAt,
       requiresSubmit,
       aiTutorHint: aiHint,
+      referenceAnswer,
       attachments: attachUrl.trim()
         ? [
             {
@@ -348,6 +364,58 @@ export function HomeworkWorkspace() {
       flash("Homework published — notify parents below");
     }
     setTab("today");
+  }
+
+  async function runGradingAssist(
+    submissionId: string,
+    imageBase64: string,
+    post: HomeworkPost,
+    studentLabel: string,
+  ) {
+    setGradingAssist((prev) => ({
+      ...prev,
+      [submissionId]: { loading: true },
+    }));
+    try {
+      const res = await fetch("/api/ai/homework-grading-assist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageBase64,
+          assignmentTitle: post.title,
+          subjectLabel: masters ? subjectLabel(masters, post.subjectId) : undefined,
+          referenceAnswer: post.referenceAnswer,
+          studentLabel,
+        }),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        completeness?: "complete" | "partial" | "unclear";
+        feedbackDraft?: string;
+      };
+      if (!res.ok || !json.ok) {
+        setGradingAssist((prev) => ({
+          ...prev,
+          [submissionId]: { error: json.error || "Grading assist failed" },
+        }));
+        return;
+      }
+      setGradingAssist((prev) => ({
+        ...prev,
+        [submissionId]: {
+          completeness: json.completeness,
+          feedbackDraft: json.feedbackDraft,
+        },
+      }));
+    } catch (e) {
+      setGradingAssist((prev) => ({
+        ...prev,
+        [submissionId]: {
+          error: e instanceof Error ? e.message : "Grading assist failed",
+        },
+      }));
+    }
   }
 
   function resetDiaryForm() {
@@ -872,12 +940,19 @@ export function HomeworkWorkspace() {
           </label>
           <label className="block text-xs text-[var(--muted)]">
             English
-            <textarea
-              className={`${field} mt-1 w-full`}
-              rows={3}
-              value={bodyEn}
-              onChange={(e) => setBodyEn(e.target.value)}
-            />
+            <span className="mt-1 flex items-start gap-1.5">
+              <textarea
+                className={`${field} w-full`}
+                rows={3}
+                value={bodyEn}
+                onChange={(e) => setBodyEn(e.target.value)}
+              />
+              <VoiceMicButton
+                onTranscript={(t) =>
+                  setBodyEn((prev) => (prev ? `${prev} ${t}` : t))
+                }
+              />
+            </span>
           </label>
           <label className="block text-xs text-[var(--muted)]">
             Hindi (optional)
@@ -961,6 +1036,16 @@ export function HomeworkWorkspace() {
               placeholder="e.g. MATH-FRAC-01"
             />
           </label>
+          <label className="block text-xs text-[var(--muted)]">
+            Reference answer / rubric (optional — grounds the AI grading assist on submitted photos, never shown to students)
+            <textarea
+              className={`${field} mt-1 w-full`}
+              rows={2}
+              value={referenceAnswer}
+              onChange={(e) => setReferenceAnswer(e.target.value)}
+              placeholder="e.g. Q1: 3/4 + 1/8 = 7/8. Q2: correctly identifies photosynthesis inputs..."
+            />
+          </label>
           <button type="button" className={btn} onClick={publishHw} disabled={readOnly}>
             {editingPostId ? "Save changes" : "Publish homework"}
           </button>
@@ -990,12 +1075,19 @@ export function HomeworkWorkspace() {
           </label>
           <label className="block text-xs text-[var(--muted)]">
             English
-            <textarea
-              className={`${field} mt-1 w-full`}
-              rows={3}
-              value={diaryEn}
-              onChange={(e) => setDiaryEn(e.target.value)}
-            />
+            <span className="mt-1 flex items-start gap-1.5">
+              <textarea
+                className={`${field} w-full`}
+                rows={3}
+                value={diaryEn}
+                onChange={(e) => setDiaryEn(e.target.value)}
+              />
+              <VoiceMicButton
+                onTranscript={(t) =>
+                  setDiaryEn((prev) => (prev ? `${prev} ${t}` : t))
+                }
+              />
+            </span>
           </label>
           <label className="block text-xs text-[var(--muted)]">
             Hindi (optional)
@@ -1059,52 +1151,100 @@ export function HomeworkWorkspace() {
             <p className="text-sm text-[var(--muted)]">No pending submissions.</p>
           ) : (
             <ul className="space-y-2">
-              {pendingSubs.map(({ submission: s, post, student }) => (
-                <li
-                  key={s.id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3"
-                >
-                  <div>
-                    <p className="text-sm font-medium text-[var(--brand-deep)]">
-                      {student?.fullName} · {post?.title}
-                    </p>
-                    <p className="text-xs text-[var(--muted)]">
-                      {s.submittedAt.slice(0, 16).replace("T", " ")}
-                      {s.note ? ` · ${s.note}` : ""}
-                    </p>
-                    {s.photoUrl ? (
-                      s.photoUrl.startsWith("data:image") ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={s.photoUrl}
-                          alt="Submission"
-                          className="mt-1 max-h-24 rounded border"
-                        />
-                      ) : (
-                        <a
-                          href={s.photoUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-xs text-[#1565c0] underline"
-                        >
-                          Photo / file
-                        </a>
-                      )
-                    ) : null}
-                  </div>
-                  <button
-                    type="button"
-                    className={btn}
-                    onClick={() => {
-                      acknowledgeSubmission(s.id, teacherName);
-                      refresh();
-                      flash("Acknowledged");
-                    }}
+              {pendingSubs.map(({ submission: s, post, student }) => {
+                const ga = gradingAssist[s.id];
+                const isPhoto = s.photoUrl.startsWith("data:image");
+                return (
+                  <li
+                    key={s.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3"
                   >
-                    Ack
-                  </button>
-                </li>
-              ))}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-[var(--brand-deep)]">
+                        {student?.fullName} · {post?.title}
+                      </p>
+                      <p className="text-xs text-[var(--muted)]">
+                        {s.submittedAt.slice(0, 16).replace("T", " ")}
+                        {s.note ? ` · ${s.note}` : ""}
+                      </p>
+                      {s.photoUrl ? (
+                        isPhoto ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={s.photoUrl}
+                            alt="Submission"
+                            className="mt-1 max-h-24 rounded border"
+                          />
+                        ) : (
+                          <a
+                            href={s.photoUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-xs text-[#1565c0] underline"
+                          >
+                            Photo / file
+                          </a>
+                        )
+                      ) : null}
+                      {isPhoto && post ? (
+                        <div className="mt-1.5">
+                          <button
+                            type="button"
+                            disabled={ga?.loading}
+                            className="rounded-lg border border-[var(--border)] px-2 py-1 text-[10px] font-semibold text-[var(--brand-deep)] disabled:opacity-50"
+                            onClick={() =>
+                              void runGradingAssist(
+                                s.id,
+                                s.photoUrl,
+                                post,
+                                student?.fullName || "Student",
+                              )
+                            }
+                          >
+                            {ga?.loading
+                              ? "Reading…"
+                              : ga?.feedbackDraft
+                                ? "Re-run AI grading assist"
+                                : "AI grading assist"}
+                          </button>
+                          {ga?.error ? (
+                            <p className="mt-1 text-[10px] text-[var(--danger)]">
+                              {ga.error}
+                            </p>
+                          ) : null}
+                          {ga?.feedbackDraft ? (
+                            <div
+                              className={`mt-1.5 max-w-sm rounded-lg border px-2 py-1.5 text-[11px] ${
+                                ga.completeness === "complete"
+                                  ? "border-[var(--success)]/30 bg-[var(--success-soft)] text-[var(--success)]"
+                                  : ga.completeness === "partial"
+                                    ? "border-[var(--warning)]/30 bg-[var(--warning-soft)] text-[var(--warning)]"
+                                    : "border-[var(--border)] bg-[var(--surface-sunken)] text-[var(--muted)]"
+                              }`}
+                            >
+                              <p className="font-semibold uppercase">
+                                {ga.completeness}
+                              </p>
+                              <p>{ga.feedbackDraft}</p>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      className={btn}
+                      onClick={() => {
+                        acknowledgeSubmission(s.id, teacherName);
+                        refresh();
+                        flash("Acknowledged");
+                      }}
+                    >
+                      Ack
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
 

@@ -38,6 +38,7 @@ import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ErpTableShell } from "@/components/ui/erp-roster";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { StaffAttendancePanel } from "@/components/attendance/StaffAttendancePanel";
+import { VoiceMicButton } from "@/components/voice/VoiceMicButton";
 import { AttendanceExceptionsPanel } from "@/components/attendance/AttendanceExceptionsPanel";
 import { StaffAttendanceReportsPanel } from "@/components/staff/StaffLeaveReportsPanel";
 import { StudentAttendanceReportsPanel } from "@/components/attendance/StudentAttendanceReportsPanel";
@@ -722,16 +723,25 @@ export function AttendanceWorkspace() {
                   <span className="mb-1 block text-[11px] text-[var(--muted)]">
                     Day remark (optional)
                   </span>
-                  <input
-                    className="field !py-1.5"
-                    value={remark}
-                    disabled={lockBlocksTeacher}
-                    onChange={(e) => {
-                      setRemark(e.target.value);
-                      setDirty(true);
-                    }}
-                    placeholder="e.g. Class test period 3"
-                  />
+                  <span className="flex items-center gap-1.5">
+                    <input
+                      className="field !py-1.5"
+                      value={remark}
+                      disabled={lockBlocksTeacher}
+                      onChange={(e) => {
+                        setRemark(e.target.value);
+                        setDirty(true);
+                      }}
+                      placeholder="e.g. Class test period 3"
+                    />
+                    <VoiceMicButton
+                      disabled={lockBlocksTeacher}
+                      onTranscript={(t) => {
+                        setRemark((prev) => (prev ? `${prev} ${t}` : t));
+                        setDirty(true);
+                      }}
+                    />
+                  </span>
                 </label>
 
                 {teacherLocked && canOverrideLock ? (
