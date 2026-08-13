@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
+import { Breadcrumbs, type BreadcrumbItem } from "@/components/ui/breadcrumbs";
+import { ErpSparkline, type ErpChartRow } from "@/components/ui/erp-chart-lazy";
 import { cn } from "@/lib/utils";
 
 export type ErpMetricTone = "green" | "rose" | "sky" | "violet" | "amber" | "navy";
@@ -23,15 +25,39 @@ const METRIC_TONES: Record<
   navy: { title: METRIC_TITLE_CLASS, icon: "bg-[rgba(32,48,80,0.1)] text-[var(--brand-deep)]" },
 };
 
+export type ErpMetricDelta = {
+  value: string;
+  direction: "up" | "down" | "flat";
+  /** Whether "up" is the good direction (default true — flip for e.g. "absent today"). */
+  positiveIsUp?: boolean;
+};
+
+const DELTA_ARROW: Record<ErpMetricDelta["direction"], string> = {
+  up: "▲",
+  down: "▼",
+  flat: "→",
+};
+
+function deltaTone(delta: ErpMetricDelta): "success" | "danger" | "muted" {
+  if (delta.direction === "flat") return "muted";
+  const positiveIsUp = delta.positiveIsUp ?? true;
+  const good = delta.direction === "up" ? positiveIsUp : !positiveIsUp;
+  return good ? "success" : "danger";
+}
+
 /** KPI card with icon circle — staff roster style. Pass `href` to navigate
  * (renders as a Link) or `onClick` for in-page behavior (e.g. a drill-down
- * drawer); `href` takes priority when both are given. */
+ * drawer); `href` takes priority when both are given. Optional `delta`
+ * (a small up/down/flat indicator) and `spark` (a lazy-loaded trend line,
+ * rendered under the value) are additive — omit both for the original look. */
 export function ErpMetricCard({
   title,
   value,
   tone = "sky",
   icon,
   hint,
+  delta,
+  spark,
   footer,
   href,
   onClick,
@@ -42,6 +68,8 @@ export function ErpMetricCard({
   tone?: ErpMetricTone;
   icon?: ReactNode;
   hint?: string;
+  delta?: ErpMetricDelta;
+  spark?: ErpChartRow[];
   footer?: ReactNode;
   href?: string;
   onClick?: () => void;
@@ -51,21 +79,41 @@ export function ErpMetricCard({
   const interactive = !!href || !!onClick;
 
   const cardClassName = cn(
-    "erp-metric-card flex w-full items-center justify-between gap-3 rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white px-5 py-4 text-left shadow-sm transition",
+    "erp-metric-card flex w-full items-center justify-between gap-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] px-5 py-4 text-left shadow-[var(--shadow-1)] transition-[transform,box-shadow] duration-[var(--motion-base)] ease-[var(--ease-out-soft)]",
     interactive &&
-      "hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-gold)] focus-visible:ring-offset-2",
+      "hover:-translate-y-0.5 hover:shadow-[var(--shadow-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] focus-visible:ring-offset-2",
     className,
   );
+
+  const deltaCls =
+    delta &&
+    {
+      success: "text-[var(--success)]",
+      danger: "text-[var(--danger)]",
+      muted: "text-[var(--muted)]",
+    }[deltaTone(delta)];
 
   const content = (
     <>
       <div className="min-w-0">
         <div className={cn("text-sm font-semibold", t.title)}>{title}</div>
-        <div className="mt-1 text-3xl font-bold tabular-nums text-[#0f172a]">
-          {value}
+        <div className="mt-1 flex items-baseline gap-2">
+          <span className="text-3xl font-bold tabular-nums text-[var(--foreground)]">
+            {value}
+          </span>
+          {delta ? (
+            <span className={cn("text-xs font-semibold tabular-nums", deltaCls)}>
+              {DELTA_ARROW[delta.direction]} {delta.value}
+            </span>
+          ) : null}
         </div>
         {hint ? (
           <p className="mt-1 text-xs text-muted-foreground">{hint}</p>
+        ) : null}
+        {spark && spark.length > 1 ? (
+          <div className="mt-1.5">
+            <ErpSparkline rows={spark} />
+          </div>
         ) : null}
         {footer}
       </div>
@@ -130,7 +178,7 @@ export function ErpChartCard({
   return (
     <div
       className={cn(
-        "erp-panel rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white p-4 shadow-sm",
+        "erp-panel rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[var(--shadow-1)]",
         className,
       )}
     >
@@ -180,7 +228,7 @@ export function ErpPanel({
     <div
       id={id}
       className={cn(
-        "erp-panel rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white p-4 shadow-sm sm:p-5",
+        "erp-panel rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[var(--shadow-1)] sm:p-5",
         className,
       )}
     >
@@ -212,7 +260,7 @@ export function ErpToolbarBtn({
   className?: string;
 }) {
   const cls = cn(
-    "inline-flex items-center gap-2 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-3.5 py-2 text-sm font-semibold text-[var(--brand-deep)] shadow-sm transition hover:border-[rgba(37,99,235,0.35)] hover:bg-[#eff6ff]",
+    "inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3.5 py-2 text-sm font-semibold text-[var(--brand-deep)] shadow-[var(--shadow-1)] transition-colors duration-[var(--motion-fast)] hover:border-[rgba(37,99,235,0.35)] hover:bg-[var(--surface-sunken)]",
     className,
   );
   if (href) {
@@ -245,20 +293,30 @@ export function ErpToolbar({
   );
 }
 
-/** Table shell — roster list style */
+/** Table shell — roster list style. `density` sets --erp-row-py for
+ * consumers that opt in via `py-[var(--erp-row-py)]` on their own cells;
+ * it has no effect otherwise, so existing tables are unaffected. */
 export function ErpTableShell({
   children,
+  density = "comfortable",
   className,
+  style,
 }: {
   children: ReactNode;
+  density?: "compact" | "comfortable";
   className?: string;
+  style?: CSSProperties;
 }) {
   return (
     <div
       className={cn(
-        "erp-table-shell overflow-hidden rounded-2xl border border-[rgba(32,48,80,0.12)] bg-white shadow-sm",
+        "erp-table-shell overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow-1)]",
         className,
       )}
+      style={{
+        ["--erp-row-py" as string]: density === "compact" ? "0.375rem" : "0.625rem",
+        ...style,
+      }}
     >
       {children}
     </div>
@@ -283,17 +341,50 @@ export function ErpTable({
   );
 }
 
-export function ErpTableHead({ children }: { children: ReactNode }) {
+export function ErpTableHead({
+  children,
+  sticky = false,
+}: {
+  children: ReactNode;
+  /** Pins the header while the table body scrolls; the table's own
+   * ancestor needs `overflow-y-auto` with a bounded height for this to
+   * take effect. Off by default — opt in per table. */
+  sticky?: boolean;
+}) {
   return (
-    <thead className="border-b border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] text-[11px] uppercase tracking-wide text-muted-foreground">
+    <thead
+      className={cn(
+        "border-b border-[var(--border)] bg-[var(--surface-sunken)] text-[11px] uppercase tracking-wide text-muted-foreground",
+        sticky && "sticky top-0 z-10",
+      )}
+    >
       {children}
     </thead>
   );
 }
 
-export function ErpTableBody({ children }: { children: ReactNode }) {
+export function ErpTableBody({
+  children,
+  zebra = false,
+  hoverable = false,
+}: {
+  children: ReactNode;
+  /** Stripes even rows with --surface-sunken. Off by default. */
+  zebra?: boolean;
+  /** Tints the row under the pointer. Off by default. */
+  hoverable?: boolean;
+}) {
   return (
-    <tbody className="divide-y divide-[rgba(32,48,80,0.08)]">{children}</tbody>
+    <tbody
+      className={cn(
+        "divide-y divide-[var(--border)]",
+        zebra && "[&>tr:nth-child(even)]:bg-[var(--surface-sunken)]",
+        hoverable &&
+          "[&>tr]:transition-colors [&>tr]:duration-[var(--motion-fast)] [&>tr:hover]:bg-[var(--surface-sunken)]",
+      )}
+    >
+      {children}
+    </tbody>
   );
 }
 
@@ -311,8 +402,8 @@ export function ErpStatusBadge({
       className={cn(
         "rounded-md px-2 py-0.5 text-[10px] font-black uppercase",
         active
-          ? "bg-[rgba(21,128,61,0.12)] text-[var(--success)]"
-          : "bg-[rgba(32,48,80,0.08)] text-muted-foreground",
+          ? "bg-[var(--success-soft)] text-[var(--success)]"
+          : "bg-[var(--surface-sunken)] text-muted-foreground",
       )}
     >
       {active ? activeLabel : inactiveLabel}
@@ -326,16 +417,21 @@ export function ErpModuleHeader({
   icon,
   actions,
   notice,
+  breadcrumbs,
 }: {
   title: ReactNode;
   subtitle?: ReactNode;
   icon?: ReactNode;
   actions?: ReactNode;
   notice?: ReactNode;
+  breadcrumbs?: BreadcrumbItem[];
 }) {
   return (
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div>
+        {breadcrumbs && breadcrumbs.length > 0 ? (
+          <Breadcrumbs items={breadcrumbs} className="mb-1.5" />
+        ) : null}
         <h1 className="flex items-center gap-2 text-2xl font-semibold text-[var(--brand-deep)]">
           {icon ? <span className="text-[var(--chart-1)]">{icon}</span> : null}
           {title}

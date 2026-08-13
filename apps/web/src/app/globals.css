@@ -240,11 +240,11 @@ h3,
   }
 
   .erp-surface {
-    @apply rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white p-4 shadow-sm;
+    @apply rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[var(--shadow-1)];
   }
 
   .erp-surface-sm {
-    @apply rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-3 shadow-sm;
+    @apply rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-[var(--shadow-1)];
   }
 
   .erp-section-title {
@@ -258,7 +258,7 @@ h3,
   }
 
   .erp-data-table-wrap {
-    @apply overflow-hidden rounded-2xl border border-[rgba(32,48,80,0.12)] bg-white shadow-sm;
+    @apply overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow-1)];
   }
 
   .erp-module-root .erp-data-table-wrap table,
@@ -268,17 +268,17 @@ h3,
 
   .erp-module-root .erp-data-table-wrap thead,
   .erp-module-root table.erp-data-table thead {
-    @apply border-b border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] text-[11px] uppercase tracking-wide text-muted-foreground;
+    @apply border-b border-[var(--border)] bg-[var(--surface-sunken)] text-[11px] uppercase tracking-wide text-muted-foreground;
   }
 
   .erp-module-root .erp-data-table-wrap tbody,
   .erp-module-root table.erp-data-table tbody {
-    @apply divide-y divide-[rgba(32,48,80,0.08)];
+    @apply divide-y divide-[var(--border)];
   }
 
   .erp-module-root .erp-data-table-wrap tbody tr:hover,
   .erp-module-root table.erp-data-table tbody tr:hover {
-    @apply bg-[rgba(32,48,80,0.02)];
+    @apply bg-[var(--surface-sunken)];
   }
 
   .erp-module-root .erp-data-table-wrap th,
@@ -294,7 +294,7 @@ h3,
   }
 
   .erp-module-root [data-slot="card"] {
-    @apply rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white shadow-sm ring-0;
+    @apply rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow-1)] ring-0;
   }
 
   .erp-module-root [data-slot="card-title"] {
@@ -420,6 +420,19 @@ h3,
   .erp-sidebar-shell {
     animation: none;
   }
+
+  .erp-animate-in {
+    animation: none;
+  }
+}
+
+/* Reusable entrance animation for new Phase 2+ surfaces — reuses the
+   home-hub-in keyframe (already used by 4 existing elements above) but on
+   the motion tokens instead of ad-hoc durations, so new call sites don't
+   invent a 5th one. Existing .home-hub-* / .module-dash-* rules are left
+   as-is rather than rewired, to keep this an additive, zero-risk change. */
+.erp-animate-in {
+  animation: home-hub-in var(--motion-slow) var(--ease-out-soft) both;
 }
 
 @keyframes kenburns {
@@ -565,15 +578,21 @@ h3,
     0 0 0 1px rgba(197, 160, 40, 0.12);
 }
 
+/* --primary/--primary-foreground, not --brand-deep: that token is read as
+   TEXT far more than background across the app (1500+ vs ~250 call sites),
+   so Phase 0 made it flip to a LIGHT color in dark mode — correct for the
+   text case, but this is a background usage, which needs the dedicated
+   pair that's built for that (navy in light, gold in dark, always paired
+   with a foreground that stays readable against it). */
 .btn-accent {
-  background: var(--brand-deep);
-  color: #fff;
+  background: var(--primary);
+  color: var(--primary-foreground);
   box-shadow: 0 0 0 1px rgba(197, 160, 40, 0.35);
   transition: background 160ms ease, box-shadow 160ms ease, transform 100ms ease;
 }
 
 .btn-accent:hover {
-  background: var(--brand-mid);
+  background: color-mix(in oklch, var(--primary), white 15%);
   box-shadow: 0 0 0 1px var(--brand-gold), 0 4px 14px rgba(197, 160, 40, 0.25);
 }
 

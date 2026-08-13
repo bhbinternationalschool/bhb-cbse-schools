@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { ErpModuleHeader, ErpNoticePill } from "@/components/ui/erp-roster";
 import { ErpAlerts } from "@/components/ui/erp-alerts";
+import type { BreadcrumbItem } from "@/components/ui/breadcrumbs";
 import { cn } from "@/lib/utils";
 
 /** Module header + alerts — page container lives on `(erp)/layout` `.erp-module-root` */
@@ -12,6 +13,7 @@ export function ErpWorkspaceShell({
   icon,
   actions,
   notice,
+  breadcrumbs,
   error,
   toolbar,
   children,
@@ -23,6 +25,7 @@ export function ErpWorkspaceShell({
   icon?: ReactNode;
   actions?: ReactNode;
   notice?: string | null;
+  breadcrumbs?: BreadcrumbItem[];
   error?: string | null;
   toolbar?: ReactNode;
   children: ReactNode;
@@ -37,6 +40,7 @@ export function ErpWorkspaceShell({
           subtitle={subtitle}
           icon={icon}
           actions={actions}
+          breadcrumbs={breadcrumbs}
           notice={notice ? <ErpNoticePill>{notice}</ErpNoticePill> : null}
         />
       ) : embedded && subtitle ? (

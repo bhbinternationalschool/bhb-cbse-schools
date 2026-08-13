@@ -71,4 +71,29 @@ function SkeletonChart({ height = 220 }: { height?: number }) {
   )
 }
 
-export { Skeleton, SkeletonKpiRow, SkeletonTable, SkeletonModulePage, SkeletonChart }
+/** Form-shaped placeholder — label + field bars, optionally two-column. */
+function SkeletonForm({ fields = 6, columns = 1 }: { fields?: number; columns?: 1 | 2 }) {
+  return (
+    <div
+      className={cn("gap-4 space-y-4", columns === 2 && "sm:grid sm:grid-cols-2 sm:space-y-0")}
+      role="status"
+      aria-label="Loading form"
+    >
+      {Array.from({ length: fields }).map((_, i) => (
+        <div key={i} className="space-y-1.5">
+          <Skeleton className="h-3 w-20" />
+          <Skeleton className="h-9 w-full" />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+export {
+  Skeleton,
+  SkeletonKpiRow,
+  SkeletonTable,
+  SkeletonModulePage,
+  SkeletonChart,
+  SkeletonForm,
+}
