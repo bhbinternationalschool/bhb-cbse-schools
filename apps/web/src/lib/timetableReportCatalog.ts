@@ -129,6 +129,8 @@ export type FreeTeacherSlot = {
   weekdayLabel: string;
   periodNo: number;
   periodLabel: string;
+  startTime: string;
+  endTime: string;
   teacherId: string;
   empCode: string;
   teacherName: string;
@@ -170,6 +172,8 @@ export function computeFreeTeacherSlots(
           weekdayLabel: WEEKDAY_SHORT[wd] ?? String(wd),
           periodNo: p.no,
           periodLabel: p.label,
+          startTime: p.startTime,
+          endTime: p.endTime,
           teacherId: s.id,
           empCode: s.empCode,
           teacherName: s.fullName,
@@ -198,7 +202,7 @@ function runFreePeriods(
     rows: slots.map((s) => ({
       weekday: s.weekdayLabel,
       period: s.periodNo,
-      periodLabel: s.periodLabel,
+      periodLabel: `${s.periodLabel} (${s.startTime}–${s.endTime})`,
       empCode: s.empCode,
       name: s.teacherName,
     })),

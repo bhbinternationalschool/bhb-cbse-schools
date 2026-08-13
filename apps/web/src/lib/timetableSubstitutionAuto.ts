@@ -15,6 +15,7 @@ import {
   autoArrangeSubstitutes,
   listSubstitutionsForDate,
   saveSubstitutionsForDate,
+  substitutionSlotKey,
 } from "@/lib/timetableSubstitution";
 import {
   classSectionLabel,
@@ -31,15 +32,6 @@ export type AutoSubstitutionOutcome = {
   reason?: "no-absentees" | "nothing-new";
 };
 
-function slotKey(s: {
-  weekday: number;
-  periodNo: number;
-  classId: string;
-  sectionId: string;
-}): string {
-  return `${s.weekday}|${s.periodNo}|${s.classId}|${s.sectionId}`;
-}
-
 export function autoRunSubstitutionForDate(
   masters: MastersState,
   academicYearCode: string,
@@ -51,7 +43,7 @@ export function autoRunSubstitutionForDate(
   }
 
   const already = listSubstitutionsForDate(academicYearCode, date);
-  const alreadyCovered = new Set(already.map(slotKey));
+  const alreadyCovered = new Set(already.map(substitutionSlotKey));
 
   const result = autoArrangeSubstitutes({
     masters,
@@ -61,7 +53,7 @@ export function autoRunSubstitutionForDate(
   });
 
   const fresh = result.substitutions.filter(
-    (s) => !alreadyCovered.has(slotKey(s)),
+    (s) => !alreadyCovered.has(substitutionSlotKey(s)),
   );
   if (!fresh.length) {
     return {

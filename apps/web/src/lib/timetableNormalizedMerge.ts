@@ -45,6 +45,10 @@ export function mergeDbDeskIntoTimetableState(
       : state.substitutions.length >= bundle.substitutions.length
         ? state.substitutions
         : bundle.substitutions,
+    // The DB bundle never carries this field (no migration for it — see
+    // TeacherTimeBlock's doc comment in lib/timetable.ts) — always keep
+    // the local value.
+    teacherTimeBlocks: state.teacherTimeBlocks,
     meta: bundle.meta?.status ? bundle.meta : state.meta,
   };
 

@@ -87,7 +87,7 @@ export function FreePeriodsPanel({
             <option value="all">All periods</option>
             {periods.map((p) => (
               <option key={p.no} value={p.no}>
-                {p.label}
+                {p.label} · {p.startTime}–{p.endTime}
               </option>
             ))}
           </select>
@@ -121,7 +121,7 @@ export function FreePeriodsPanel({
               {filtered.map((s) => (
                 <tr key={`${s.periodNo}-${s.teacherId}`}>
                   <td className="px-3 py-2 font-medium text-[var(--brand-deep)]">
-                    {s.periodLabel}
+                    {s.periodLabel} · {s.startTime}–{s.endTime}
                   </td>
                   <td className="px-3 py-2">{s.empCode}</td>
                   <td className="px-3 py-2">{s.teacherName}</td>

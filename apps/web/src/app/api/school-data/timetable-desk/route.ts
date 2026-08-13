@@ -57,6 +57,11 @@ export async function POST(req: Request) {
     grids: body.grids ?? [],
     publishedGrids: body.publishedGrids ?? [],
     substitutions: body.substitutions ?? [],
+    // Not persisted by this normalized desk-slice writer (stateToSlices
+    // doesn't touch it) — it rides the generic jsonb blob dual-write
+    // instead (see TeacherTimeBlock's doc comment in lib/timetable.ts).
+    // Included only to satisfy pushTimetableDeskToDb's TimetableState param.
+    teacherTimeBlocks: body.teacherTimeBlocks ?? [],
     meta: body.meta ?? {
       status: "draft",
       publishedAt: "",

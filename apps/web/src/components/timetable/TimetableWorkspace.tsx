@@ -1452,6 +1452,7 @@ export function TimetableWorkspace() {
           academicYearCode={ay}
           canEdit={canEdit}
           ayBounds={ayBounds}
+          createdBy={session.fullName || "staff"}
           onError={(msg) => {
             setError(msg);
             setNotice(null);

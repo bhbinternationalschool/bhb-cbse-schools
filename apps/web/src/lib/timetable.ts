@@ -77,8 +77,32 @@ export type TimetableSubstitution = {
   absentTeacherId: string;
   /** Empty = period left free (no substitute found / school choice) */
   substituteTeacherId: string;
-  source: "auto" | "manual";
+  /** "block" = generated from a TeacherTimeBlock, not a whole-day absence */
+  source: "auto" | "manual" | "block";
   note: string;
+  createdAt: string;
+};
+
+/**
+ * A teacher marked unavailable for PART of a day (school work/duty
+ * elsewhere), as opposed to a whole-day absence. Drives the substitution
+ * engine the same way an absence does, scoped to just the periods that
+ * fall inside [startTime, endTime). Distinct from lib/dutyRoster.ts's
+ * whole-day duty roster (assembly/gate/lunch/bus-escort/event) — that
+ * system is unconnected to the timetable on purpose; this one exists
+ * specifically to feed it.
+ */
+export type TeacherTimeBlock = {
+  id: string;
+  academicYearCode: string;
+  staffId: string;
+  /** YYYY-MM-DD */
+  date: string;
+  /** HH:MM, zero-padded */
+  startTime: string;
+  endTime: string;
+  reason: string;
+  createdBy: string;
   createdAt: string;
 };
 
@@ -89,6 +113,7 @@ export type TimetableState = {
   grids: TimetableGrid[];
   publishedGrids: TimetableGrid[];
   substitutions: TimetableSubstitution[];
+  teacherTimeBlocks: TeacherTimeBlock[];
   meta: TimetablePublishMeta;
 };
 
@@ -208,6 +233,7 @@ export function emptyTimetableState(): TimetableState {
     grids: [],
     publishedGrids: [],
     substitutions: [],
+    teacherTimeBlocks: [],
     meta: emptyTimetableMeta(),
   };
 }
@@ -230,9 +256,27 @@ export function normalizeSubstitution(
     subjectId: s.subjectId || "",
     absentTeacherId: s.absentTeacherId,
     substituteTeacherId: s.substituteTeacherId || "",
-    source: s.source === "manual" ? "manual" : "auto",
+    source:
+      s.source === "manual" ? "manual" : s.source === "block" ? "block" : "auto",
     note: s.note || "",
     createdAt: s.createdAt || nowIso(),
+  };
+}
+
+export function normalizeTeacherTimeBlock(
+  b: Partial<TeacherTimeBlock>,
+): TeacherTimeBlock | null {
+  if (!b.staffId || !b.date) return null;
+  return {
+    id: b.id || nid("ttb"),
+    academicYearCode: b.academicYearCode || DEFAULT_AY,
+    staffId: b.staffId,
+    date: b.date.slice(0, 10),
+    startTime: normalizeHhmm(b.startTime || "", "09:00"),
+    endTime: normalizeHhmm(b.endTime || "", "09:40"),
+    reason: (b.reason || "").trim(),
+    createdBy: b.createdBy || "",
+    createdAt: b.createdAt || nowIso(),
   };
 }
 
@@ -314,6 +358,11 @@ export function normalizeTimetableState(raw: unknown): TimetableState {
       ? p.substitutions
           .map(normalizeSubstitution)
           .filter((x): x is TimetableSubstitution => !!x)
+      : [],
+    teacherTimeBlocks: Array.isArray(p.teacherTimeBlocks)
+      ? p.teacherTimeBlocks
+          .map(normalizeTeacherTimeBlock)
+          .filter((x): x is TeacherTimeBlock => !!x)
       : [],
     meta: {
       status: p.meta?.status === "published" ? "published" : "draft",

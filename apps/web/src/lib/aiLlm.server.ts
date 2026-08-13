@@ -853,3 +853,82 @@ function parseHomeworkGradingAssistJson(
     return null;
   }
 }
+
+/**
+ * Plain-language summary of an already-decided, already-saved teacher
+ * time-block + substitution outcome — for the office/principal. Read-only:
+ * never suggests who could cover an uncovered period, never invents a
+ * teacher/subject/reason not present in the input. All labels (teacher,
+ * class, subject names) must already be resolved by the caller — this
+ * never receives raw ids.
+ */
+export async function generateSubstitutionSummaryJson(opts: {
+  teacherLabel: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  reason: string;
+  covered: { periodLabel: string; classSection: string; subject: string; substituteName: string }[];
+  uncovered: { periodLabel: string; classSection: string; subject: string }[];
+}): Promise<
+  | { ok: true; summary: string; engine: LlmEngine }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const system = `You write a short, plain-language note for a school office/principal, summarizing a substitute-teacher arrangement that has ALREADY been decided and saved by the system.
+Only use the facts given below — never invent a teacher, subject, class, or reason that isn't in the input, and never suggest who could cover an uncovered period (that decision is already made elsewhere).
+Respond with JSON only: {"summary":"..."}.
+summary: 2-4 short plain sentences. Mention the teacher, the reason, the time window, how many periods were covered and by whom (briefly), and call out any uncovered periods plainly if present.`;
+
+  const coveredLines = opts.covered.length
+    ? opts.covered
+        .map(
+          (c) =>
+            `- ${c.periodLabel} · ${c.classSection} · ${c.subject} → covered by ${c.substituteName}`,
+        )
+        .join("\n")
+    : "(none)";
+  const uncoveredLines = opts.uncovered.length
+    ? opts.uncovered
+        .map((c) => `- ${c.periodLabel} · ${c.classSection} · ${c.subject}`)
+        .join("\n")
+    : "(none)";
+
+  const userMessage = `Teacher: ${opts.teacherLabel}
+Date: ${opts.date}, ${opts.startTime}–${opts.endTime}
+Reason: ${opts.reason}
+
+Covered periods:
+${coveredLines}
+
+Uncovered periods:
+${uncoveredLines}`;
+
+  const r = await callLlmJson(
+    {
+      system,
+      userMessage,
+      maxTokens: 500,
+      temperature: 0.4,
+      geminiMaxTokens: 2048,
+    },
+    parseSubstitutionSummaryJson,
+  );
+
+  if (r.ok) return { ok: true, summary: r.data.summary, engine: r.engine };
+  return {
+    ok: false,
+    error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI summary",
+    engine: r.engine,
+  };
+}
+
+function parseSubstitutionSummaryJson(text: string): { summary: string } | null {
+  try {
+    const raw = JSON.parse(text) as { summary?: string };
+    const summary = String(raw.summary || "").trim();
+    if (!summary) return null;
+    return { summary };
+  } catch {
+    return null;
+  }
+}
