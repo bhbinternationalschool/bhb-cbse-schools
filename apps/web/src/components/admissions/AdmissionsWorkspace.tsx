@@ -982,7 +982,7 @@ export function AdmissionsWorkspace() {
                   setFilter(k);
                   setTab("leads");
                 }}
-                className="rounded-lg border border-[rgba(32,48,80,0.12)] bg-white px-2.5 py-1.5 font-medium text-[var(--brand-deep)]"
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-1.5 font-medium text-[var(--brand-deep)]"
               >
                 {stageLabel(k)}{" "}
                 <span className="text-[var(--muted)]">{n}</span>
@@ -1066,7 +1066,7 @@ export function AdmissionsWorkspace() {
 
       {tab === "leads" ? (
         <div className="space-y-4">
-          <div className="space-y-2 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-3 py-2.5">
+          <div className="space-y-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-2">
                 <button
@@ -1074,8 +1074,8 @@ export function AdmissionsWorkspace() {
                   onClick={() => setShowLeadFilters((v) => !v)}
                   className={`rounded-lg px-2.5 py-1.5 text-[11px] font-semibold ${
                     showLeadFilters
-                      ? "bg-[var(--brand-deep)] text-white"
-                      : "border border-[rgba(32,48,80,0.2)] bg-white text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.04)]"
+                      ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                      : "border border-[var(--border)] bg-[var(--card)] text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
                   }`}
                 >
                   Filters {showLeadFilters ? "▴" : "▾"}
@@ -1085,8 +1085,8 @@ export function AdmissionsWorkspace() {
                   onClick={() => setShowWaCheck((v) => !v)}
                   className={`rounded-lg px-2.5 py-1.5 text-[11px] font-semibold ${
                     showWaCheck
-                      ? "bg-[var(--brand-deep)] text-white"
-                      : "border border-[rgba(32,48,80,0.2)] bg-white text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.04)]"
+                      ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                      : "border border-[var(--border)] bg-[var(--card)] text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
                   }`}
                 >
                   Mobile / WhatsApp check {showWaCheck ? "▴" : "▾"}
@@ -1151,7 +1151,7 @@ export function AdmissionsWorkspace() {
             </div>
 
             {showLeadFilters ? (
-              <div className="space-y-2 border-t border-[rgba(32,48,80,0.08)] pt-2">
+              <div className="space-y-2 border-t border-[var(--border)] pt-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="w-full text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
                     Admission year
@@ -1161,8 +1161,8 @@ export function AdmissionsWorkspace() {
                     onClick={() => setCaptureYearFilter("all")}
                     className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
                       captureYearFilter === "all"
-                        ? "bg-[var(--brand-deep)] text-white"
-                        : "bg-[rgba(32,48,80,0.06)] text-[var(--muted)]"
+                        ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                        : "bg-[var(--surface-sunken)] text-[var(--muted)]"
                     }`}
                   >
                     All years
@@ -1174,8 +1174,8 @@ export function AdmissionsWorkspace() {
                       onClick={() => setCaptureYearFilter(y)}
                       className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
                         captureYearFilter === y
-                          ? "bg-[var(--brand-deep)] text-white"
-                          : "bg-[rgba(32,48,80,0.06)] text-[var(--muted)]"
+                          ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                          : "bg-[var(--surface-sunken)] text-[var(--muted)]"
                       }`}
                     >
                       {y}
@@ -1188,7 +1188,7 @@ export function AdmissionsWorkspace() {
                   </span>
                   <input
                     type="date"
-                    className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2 py-1 text-[11px]"
+                    className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-[11px]"
                     value={leadDateFrom}
                     onChange={(e) => setLeadDateFrom(e.target.value)}
                     aria-label="Lead date from"
@@ -1196,13 +1196,13 @@ export function AdmissionsWorkspace() {
                   <span className="text-[11px] text-[var(--muted)]">–</span>
                   <input
                     type="date"
-                    className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2 py-1 text-[11px]"
+                    className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-[11px]"
                     value={leadDateTo}
                     onChange={(e) => setLeadDateTo(e.target.value)}
                     aria-label="Lead date to"
                   />
                   <input
-                    className="min-w-[10rem] rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2 py-1 text-[11px]"
+                    className="min-w-[10rem] rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-[11px]"
                     placeholder="Locality…"
                     value={localityQ}
                     onChange={(e) => setLocalityQ(e.target.value)}
@@ -1227,12 +1227,12 @@ export function AdmissionsWorkspace() {
                       onClick={() => setFilter(id)}
                       className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
                         filter === id
-                          ? "bg-[var(--brand-deep)] text-white"
+                          ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
                           : id === "overdue"
                             ? "bg-[rgba(180,35,24,0.12)] text-[#b42318]"
                             : id === "due_today"
                               ? "bg-[rgba(180,83,9,0.14)] text-[#9a3412]"
-                              : "bg-[rgba(32,48,80,0.06)] text-[var(--muted)]"
+                              : "bg-[var(--surface-sunken)] text-[var(--muted)]"
                       }`}
                     >
                       {label}
@@ -1261,9 +1261,9 @@ export function AdmissionsWorkspace() {
                       onClick={() => setFilter(id as typeof filter)}
                       className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
                         filter === id
-                          ? "bg-[var(--brand-deep)] text-white"
+                          ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
                           : id === "open" || id === "all"
-                            ? "bg-[rgba(32,48,80,0.06)] text-[var(--muted)]"
+                            ? "bg-[var(--surface-sunken)] text-[var(--muted)]"
                             : stageTagClass(id as AdmissionStage)
                       }`}
                     >
@@ -1368,7 +1368,7 @@ export function AdmissionsWorkspace() {
                               ? "Registered / Verified — open only to Verify or Admit"
                               : "Open to work this lead"
                         }
-                        className={`border-t border-[rgba(32,48,80,0.06)] ${
+                        className={`border-t border-[var(--border)] ${
                           showOnly
                             ? `${rowGreen} cursor-default`
                             : greened
@@ -1376,7 +1376,7 @@ export function AdmissionsWorkspace() {
                               : `cursor-pointer ${
                                   active
                                     ? "bg-[rgba(197,160,40,0.12)]"
-                                    : "hover:bg-[rgba(32,48,80,0.03)]"
+                                    : "hover:bg-[var(--surface-sunken)]"
                                 }`
                         }`}
                         onClick={() => {
@@ -1523,7 +1523,7 @@ export function AdmissionsWorkspace() {
           </MastersTableCard>
 
           {!selected ? (
-            <p className="rounded-xl border border-dashed border-[rgba(32,48,80,0.2)] bg-white px-4 py-6 text-center text-sm text-[var(--muted)]">
+            <p className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--card)] px-4 py-6 text-center text-sm text-[var(--muted)]">
               Select an <strong>Open</strong> lead for counsellor work, or a
               green <strong>Registered / Verified</strong> lead to Verify /
               Admit. <strong>Admitted</strong> rows are display-only. Fee
@@ -1661,7 +1661,7 @@ export function AdmissionsWorkspace() {
                       </div>
                     </div>
                   ) : (
-                    <div className="sm:col-span-2 rounded-lg border border-dashed border-[rgba(32,48,80,0.2)] bg-white px-3 py-2 text-[11px] text-[var(--muted)]">
+                    <div className="sm:col-span-2 rounded-lg border border-dashed border-[var(--border)] bg-[var(--card)] px-3 py-2 text-[11px] text-[var(--muted)]">
                       New household will be created (code AHH-####) when you
                       save.
                     </div>
@@ -1746,7 +1746,7 @@ export function AdmissionsWorkspace() {
                     />
                   </Field>
                 </div>
-                <div className="mt-4 border-t border-[rgba(32,48,80,0.08)] pt-3">
+                <div className="mt-4 border-t border-[var(--border)] pt-3">
                   <p className="mb-2 text-[11px] font-semibold text-[var(--brand-deep)]">
                     Optional — another guardian on this household
                   </p>
@@ -1810,7 +1810,7 @@ export function AdmissionsWorkspace() {
                   {childrenRows.map((row, idx) => (
                     <div
                       key={row.key}
-                      className="rounded-lg border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.02)] p-3"
+                      className="rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] p-3"
                     >
                       <div className="mb-2 flex items-center justify-between gap-2">
                         <p className="text-[12px] font-semibold text-[var(--brand-deep)]">
@@ -1927,7 +1927,7 @@ export function AdmissionsWorkspace() {
                   ))}
                   <button
                     type="button"
-                    className="rounded-lg border border-dashed border-[rgba(32,48,80,0.35)] bg-white px-3 py-2 text-[12px] font-semibold text-[var(--brand-deep)] hover:border-[rgba(197,160,40,0.55)]"
+                    className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--card)] px-3 py-2 text-[12px] font-semibold text-[var(--brand-deep)] hover:border-[rgba(197,160,40,0.55)]"
                     onClick={() =>
                       setChildrenRows((rows) => [...rows, emptyChildRow()])
                     }
@@ -2013,7 +2013,7 @@ export function AdmissionsWorkspace() {
 }
 
 const inp =
-  "w-full rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm";
+  "w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm";
 
 function Field({
   label,
@@ -2203,7 +2203,7 @@ function LeadDetail({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-4 py-3">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
@@ -2289,7 +2289,7 @@ function LeadDetail({
           ) : null}
         </div>
 
-        <div className="mt-3 grid gap-2 border-t border-[rgba(32,48,80,0.08)] pt-3 sm:grid-cols-2 lg:grid-cols-5 text-[11px]">
+        <div className="mt-3 grid gap-2 border-t border-[var(--border)] pt-3 sm:grid-cols-2 lg:grid-cols-5 text-[11px]">
           <div>
             <div className="text-[var(--muted)]">Lead date / year</div>
             <div className="font-medium text-[var(--brand-deep)]">
@@ -2351,7 +2351,7 @@ function LeadDetail({
         />
 
         {canEdit && !locked ? (
-          <div className="mt-3 grid gap-2 border-t border-[rgba(32,48,80,0.08)] pt-3 sm:grid-cols-2">
+          <div className="mt-3 grid gap-2 border-t border-[var(--border)] pt-3 sm:grid-cols-2">
             <Field label="Lead / enquiry date">
               <input
                 type="date"
@@ -2372,7 +2372,7 @@ function LeadDetail({
         ) : null}
 
         {canEdit && !locked ? (
-          <div className="mt-3 border-t border-[rgba(32,48,80,0.08)] pt-3">
+          <div className="mt-3 border-t border-[var(--border)] pt-3">
             <p className="mb-1.5 text-[10px] font-semibold uppercase text-[var(--muted)]">
               Change source
             </p>
@@ -2421,7 +2421,7 @@ function LeadDetail({
               </button>
               <button
                 type="button"
-                className="rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-2 text-[11px] font-semibold text-[var(--brand-deep)]"
+                className="rounded-lg border border-[var(--border)] px-3 py-2 text-[11px] font-semibold text-[var(--brand-deep)]"
                 onClick={() => {
                   setAssignDraft(agentName);
                   onAssign(agentName);
@@ -2450,7 +2450,7 @@ function LeadDetail({
         </div>
 
         {canEdit && !locked ? (
-          <div className="rounded-lg border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] p-3">
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] p-3">
             <p className="mb-2 text-[11px] font-semibold text-[var(--brand-deep)]">
               Log follow-up attempt
             </p>
@@ -2512,7 +2512,7 @@ function LeadDetail({
               </button>
               <a
                 href={`tel:${lead.mobile}`}
-                className="rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-2 text-[11px] font-semibold text-[var(--brand-deep)]"
+                className="rounded-lg border border-[var(--border)] px-3 py-2 text-[11px] font-semibold text-[var(--brand-deep)]"
               >
                 Call {lead.mobile || "—"}
               </a>
@@ -2525,7 +2525,7 @@ function LeadDetail({
                       `Hello ${lead.guardianName || "Parent"}, regarding admission enquiry for ${lead.childName || "your child"} at BHB International School.`,
                     )
                   }
-                  className="rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-2 text-[11px] font-semibold text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.05)]"
+                  className="rounded-lg border border-[var(--border)] px-3 py-2 text-[11px] font-semibold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
                 >
                   WhatsApp Business
                 </button>
@@ -2543,7 +2543,7 @@ function LeadDetail({
               <button
                 type="button"
                 disabled={aiSuggestionLoading}
-                className="rounded-lg border border-[rgba(32,48,80,0.2)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)] disabled:opacity-50"
+                className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)] disabled:opacity-50"
                 onClick={() => void suggestNextAction()}
               >
                 {aiSuggestionLoading
@@ -2605,7 +2605,7 @@ function LeadDetail({
                       onClick={() =>
                         openWaMe(lead.mobile, aiSuggestion.outreachMessage)
                       }
-                      className="mt-2 rounded-lg border border-[rgba(32,48,80,0.2)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.05)]"
+                      className="mt-2 rounded-lg border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
                     >
                       Open in WhatsApp
                     </button>
@@ -2629,7 +2629,7 @@ function LeadDetail({
               {lead.followUps.map((f) => (
                 <li
                   key={f.id}
-                  className="rounded-lg border border-[rgba(32,48,80,0.08)] bg-white px-3 py-2 text-[12px]"
+                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-[12px]"
                 >
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <span className="font-semibold text-[var(--brand-deep)]">
@@ -2662,7 +2662,7 @@ function LeadDetail({
           hint="One family card — many guardians, many child enquiries. Enroll shares one SIS household."
         >
           <div className="mb-3 grid gap-2 sm:grid-cols-2">
-            <div className="rounded-lg bg-[rgba(32,48,80,0.04)] px-3 py-2 text-[12px]">
+            <div className="rounded-lg bg-[var(--surface-sunken)] px-3 py-2 text-[12px]">
               <div className="text-[10px] font-semibold uppercase text-[var(--muted)]">
                 Guardians
               </div>
@@ -2685,7 +2685,7 @@ function LeadDetail({
                 )}
               </ul>
             </div>
-            <div className="rounded-lg bg-[rgba(32,48,80,0.04)] px-3 py-2 text-[12px]">
+            <div className="rounded-lg bg-[var(--surface-sunken)] px-3 py-2 text-[12px]">
               <div className="text-[10px] font-semibold uppercase text-[var(--muted)]">
                 Children / enquiries
               </div>
@@ -2721,7 +2721,7 @@ function LeadDetail({
           </div>
 
           {canEdit ? (
-            <div className="grid gap-3 border-t border-[rgba(32,48,80,0.08)] pt-3 sm:grid-cols-2">
+            <div className="grid gap-3 border-t border-[var(--border)] pt-3 sm:grid-cols-2">
               <div>
                 <p className="mb-2 text-[11px] font-semibold text-[var(--brand-deep)]">
                   + Add sibling (same household)
@@ -2827,7 +2827,7 @@ function LeadDetail({
                   </label>
                   <button
                     type="button"
-                    className="rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-1.5 text-[11px] font-semibold text-[var(--brand-deep)]"
+                    className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-[11px] font-semibold text-[var(--brand-deep)]"
                     onClick={() => {
                       onAddGuardian({
                         fullName: gName,

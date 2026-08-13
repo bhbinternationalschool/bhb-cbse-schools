@@ -216,8 +216,8 @@ migration, independent of the rest of the checklist):
 | Fees (Fee Take) | `fees/FeeTakeWorkspace.tsx` | Partial — header/toolbar/search-card only, deliberately (live payment code, no staging); full sweep still pending |
 | Staff | `staff/StaffWorkspace.tsx` | Charts done (Phase 1); shell/token sweep not started |
 | Login | `login/LoginPanel.tsx` | Done (Phase 3) |
-| Payroll | `payroll/PayrollWorkspace.tsx` | Not started — wave 3, suggested first (hand-rolled tables) |
-| Admissions | `admissions/AdmissionsWorkspace.tsx` | Not started — wave 2 |
+| Payroll | `payroll/PayrollWorkspace.tsx` | Done |
+| Admissions | `admissions/AdmissionsWorkspace.tsx` | Done |
 | Accounts | `accounts/AccountsWorkspace.tsx` | Not started — wave 3 |
 | Exams | `exams/ExamsWorkspace.tsx` | Not started — wave 2 |
 | Masters | `masters/MastersWorkspace.tsx` | Not started — wave 3 |
