@@ -10,20 +10,24 @@ import {
 import {
   categoryLabel,
   deleteStoreAssetAllocation,
+  infraLevelLabel,
   loadStore,
   seedStoreIfEmpty,
   upsertStoreAssetAllocation,
   type StoreAssetAllocation,
+  type StoreInfraLevel,
   type StoreItem,
 } from "@/lib/store";
 
 const card = "rounded-xl border border-[var(--border)] bg-[var(--card)] p-4";
 export function StoreAssetAllocationPanel() {
   const [items, setItems] = useState<StoreItem[]>([]);
+  const [infraLevels, setInfraLevels] = useState<StoreInfraLevel[]>([]);
   const [allocations, setAllocations] = useState<StoreAssetAllocation[]>([]);
   const [itemId, setItemId] = useState("");
   const [assetTag, setAssetTag] = useState("");
   const [assignedTo, setAssignedTo] = useState("");
+  const [infraLevelId, setInfraLevelId] = useState("");
   const [location, setLocation] = useState("");
   const [qty, setQty] = useState("1");
   const [note, setNote] = useState("");
@@ -35,6 +39,7 @@ export function StoreAssetAllocationPanel() {
     seedStoreIfEmpty();
     const store = loadStore();
     setItems(store.items.filter((i) => i.isActive));
+    setInfraLevels(store.infraLevels.filter((l) => l.isActive));
     setAllocations(store.assetAllocations);
   }
 
@@ -48,19 +53,19 @@ export function StoreAssetAllocationPanel() {
     window.setTimeout(() => setNotice(null), 2800);
   }
 
-  const rows = useMemo(
-    () =>
-      [...allocations].sort((a, b) =>
-        a.assetTag.localeCompare(b.assetTag),
-      ),
-    [allocations],
-  );
+  const rows = useMemo(() => {
+    const store = loadStore();
+    return [...allocations]
+      .sort((a, b) => a.assetTag.localeCompare(b.assetTag))
+      .map((a) => ({ ...a, infraLabel: infraLevelLabel(a.infraLevelId, store) }));
+  }, [allocations]);
 
   function resetForm() {
     setEditId(null);
     setItemId("");
     setAssetTag("");
     setAssignedTo("");
+    setInfraLevelId("");
     setLocation("");
     setQty("1");
     setNote("");
@@ -72,6 +77,7 @@ export function StoreAssetAllocationPanel() {
       itemId,
       assetTag,
       assignedTo,
+      infraLevelId,
       location,
       qty: Math.floor(Number(qty) || 1),
       note,
@@ -90,6 +96,7 @@ export function StoreAssetAllocationPanel() {
     setItemId(row.itemId);
     setAssetTag(row.assetTag);
     setAssignedTo(row.assignedTo);
+    setInfraLevelId(row.infraLevelId);
     setLocation(row.location);
     setQty(String(row.qty));
     setNote(row.note);
@@ -170,13 +177,30 @@ export function StoreAssetAllocationPanel() {
           </label>
           <label className="text-sm">
             <span className="mb-1 block text-[11px] text-[var(--muted)]">
-              Location
+              Infra level
+            </span>
+            <select
+              className={`${field} min-w-[160px]`}
+              value={infraLevelId}
+              onChange={(e) => setInfraLevelId(e.target.value)}
+            >
+              <option value="">Pick level</option>
+              {infraLevels.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block text-[11px] text-[var(--muted)]">
+              Location detail
             </span>
             <input
               className={`${field} min-w-[140px]`}
               value={location}
               onChange={(e) => setLocation(e.target.value)}
-              placeholder="Room / block"
+              placeholder="Room / block (optional)"
             />
           </label>
           <label className="text-sm">
@@ -259,7 +283,13 @@ export function StoreAssetAllocationPanel() {
                         {item ? categoryLabel(item.categoryId) : "—"}
                       </td>
                       <td className="py-2 pr-3">{r.assignedTo || "—"}</td>
-                      <td className="py-2 pr-3">{r.location || "—"}</td>
+                      <td className="py-2 pr-3">
+                        {r.infraLabel !== "—" && r.location
+                          ? `${r.infraLabel} — ${r.location}`
+                          : r.infraLabel !== "—"
+                            ? r.infraLabel
+                            : r.location || "—"}
+                      </td>
                       <td className="py-2 pr-3 text-right">{r.qty}</td>
                       <td className="py-2 text-right">
                         <button

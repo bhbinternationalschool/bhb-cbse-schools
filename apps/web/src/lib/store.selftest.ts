@@ -1,15 +1,19 @@
 /**
  * Run: npx tsx src/lib/store.selftest.ts
  *
- * Exercises only the pure logic — groupLowStockByLocation() and
- * listOverAllocatedItems(). Only the fields each function actually reads are
- * populated on the fixture store object below, not a full StoreState.
+ * Exercises only the pure logic — groupLowStockByLocation(),
+ * listOverAllocatedItems(), and infraLevelLabel() as used to resolve a
+ * StoreAssetAllocation's linked infra level. Only the fields each function
+ * actually reads are populated on the fixture store object below, not a
+ * full StoreState.
  */
 import assert from "node:assert/strict";
 
 import {
   groupLowStockByLocation,
+  infraLevelLabel,
   listOverAllocatedItems,
+  type StoreAssetAllocation,
   type StoreInventoryAllocation,
   type StoreItem,
   type StoreState,
@@ -184,6 +188,37 @@ function makeAlloc(overrides: Partial<StoreInventoryAllocation>): StoreInventory
     inventoryAllocations: [] as StoreInventoryAllocation[],
   } as StoreState;
   assert.deepEqual(listOverAllocatedItems(emptyStore), []);
+}
+
+function makeAssetAlloc(overrides: Partial<StoreAssetAllocation>): StoreAssetAllocation {
+  return {
+    id: overrides.id || "asset",
+    itemId: overrides.itemId || "item",
+    assetTag: overrides.assetTag || "AST-1",
+    assignedTo: "",
+    infraLevelId: overrides.infraLevelId ?? "",
+    location: overrides.location ?? "",
+    qty: 1,
+    note: "",
+    updatedAt: "2026-08-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+// --- a StoreAssetAllocation linked to a real infra level resolves to its --
+// --- real name, matching how StoreInventoryAllocation already resolves it -
+{
+  const linked = makeAssetAlloc({ infraLevelId: "lab-physics" });
+  assert.equal(infraLevelLabel(linked.infraLevelId, store), "Physics Lab");
+}
+
+// --- a pre-migration asset allocation (no infraLevelId set) falls back to -
+// --- infraLevelLabel's own "—" default, so the panel can tell "linked" ---
+// --- from "free-text-location-only" and choose which to display -----------
+{
+  const legacy = makeAssetAlloc({ infraLevelId: "", location: "Room 12" });
+  assert.equal(infraLevelLabel(legacy.infraLevelId, store), "—");
+  assert.equal(legacy.location, "Room 12", "free-text detail must survive untouched");
 }
 
 console.log("OK — store.selftest.ts");
