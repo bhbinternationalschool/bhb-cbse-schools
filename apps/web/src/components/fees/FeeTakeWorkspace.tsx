@@ -1096,7 +1096,7 @@ export function FeeTakeWorkspace() {
           </ModuleTabButton>
           <Link
             href="/fees/defaulters"
-            className="inline-flex items-center rounded-lg bg-[rgba(180,35,24,0.12)] px-3 py-2 text-sm font-bold text-[#b42318] transition hover:bg-[rgba(180,35,24,0.2)]"
+            className="inline-flex items-center rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-sm font-bold text-[var(--danger)] transition hover:brightness-95"
           >
             Defaulters
           </Link>
@@ -1105,7 +1105,7 @@ export function FeeTakeWorkspace() {
     >
       {tab === "collect" ? (
         <div className="mt-6 space-y-5">
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <div className="grid gap-3 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,0.7fr)_minmax(0,0.7fr)]">
               <label className="block text-sm">
                 <span className="mb-1.5 block text-[var(--muted)]">
