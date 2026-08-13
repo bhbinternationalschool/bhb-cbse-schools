@@ -1208,7 +1208,7 @@ export function FeeTakeWorkspace() {
                   to open household
                 </p>
                 {hits.length === 0 ? (
-                  <p className="rounded-lg bg-[rgba(32,48,80,0.04)] px-3 py-3 text-sm text-[var(--muted)]">
+                  <p className="rounded-lg bg-[var(--surface-sunken)] px-3 py-3 text-sm text-[var(--muted)]">
                     No students match. Check fee group on SIS if balances look
                     empty.
                   </p>
@@ -1219,7 +1219,7 @@ export function FeeTakeWorkspace() {
                         <button
                           type="button"
                           onClick={() => pickStudent(h)}
-                          className="rounded-lg border border-[rgba(32,48,80,0.14)] bg-[rgba(32,48,80,0.03)] px-3 py-2 text-left hover:border-[rgba(197,160,40,0.45)] hover:bg-[rgba(197,160,40,0.1)]"
+                          className="rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2 text-left hover:border-[rgba(197,160,40,0.45)] hover:bg-[rgba(197,160,40,0.1)]"
                         >
                           <div className="text-sm font-semibold text-[var(--brand-deep)]">
                             <StudentNameLabel student={h.student} />
@@ -1236,7 +1236,7 @@ export function FeeTakeWorkspace() {
             ) : null}
 
             {selectedStudent ? (
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-[rgba(32,48,80,0.08)] pt-3">
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-[var(--border)] pt-3">
                 <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
                   <div className="text-sm text-[var(--brand-deep)]">
                     <span className="font-semibold">
@@ -1325,7 +1325,7 @@ export function FeeTakeWorkspace() {
           </div>
 
           {!selectedStudent ? (
-            <div className="rounded-xl border border-dashed border-[rgba(32,48,80,0.2)] bg-white px-6 py-16 text-center">
+            <div className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--card)] px-6 py-16 text-center">
               <p className="text-base font-semibold text-[var(--brand-deep)]">
                 Search to start Fee Take
               </p>
@@ -1846,7 +1846,7 @@ function CollectPanel({
 
   return (
     <div className="fee-collect-ui space-y-4">
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-3.5">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3.5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-base font-bold text-[var(--brand-deep)]">
@@ -1860,7 +1860,7 @@ function CollectPanel({
                   householdBundle.some((r) =>
                     openFeeDues(r.dues).some((d) => d.dueOn <= today),
                   )
-                    ? "text-[#dc2626]"
+                    ? "text-[var(--danger)]"
                     : "text-[var(--brand-deep)]"
                 }`}
               >
@@ -1870,7 +1870,7 @@ function CollectPanel({
               selected{" "}
               <span
                 className={`font-semibold ${
-                  collectTarget > 0 ? "text-[#16a34a]" : "text-[var(--muted)]"
+                  collectTarget > 0 ? "text-[var(--success)]" : "text-[var(--muted)]"
                 }`}
               >
                 {formatInr(collectTarget)}
@@ -1937,7 +1937,7 @@ function CollectPanel({
         </div>
 
         {canTransfer.length > 0 ? (
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[rgba(220,38,38,0.25)] bg-[rgba(220,38,38,0.06)] px-3 py-2 text-xs text-[var(--brand-deep)]">
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--danger)]/25 bg-[var(--danger-soft)] px-3 py-2 text-xs text-[var(--brand-deep)]">
             <div>
               <strong>Last session dues:</strong>{" "}
               {canTransfer.length === 1
@@ -1952,7 +1952,7 @@ function CollectPanel({
             </div>
             <button
               type="button"
-              className="rounded-lg border border-[rgba(220,38,38,0.35)] bg-white px-2.5 py-1 text-[11px] font-semibold text-[#b91c1c]"
+              className="rounded-lg border border-[var(--danger)]/35 bg-[var(--card)] px-2.5 py-1 text-[11px] font-semibold text-[var(--danger)]"
               onClick={onTransferLastSession}
             >
               Transfer to current session
@@ -1974,8 +1974,8 @@ function CollectPanel({
         <div className="space-y-4 min-w-0">
           {/* Dynamic Sibling Selector Bar */}
           {siblingCount > 1 ? (
-            <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-3 shadow-sm">
-              <div className="flex items-center justify-between border-b border-[rgba(32,48,80,0.08)] pb-2 mb-2.5">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-sm">
+              <div className="flex items-center justify-between border-b border-[var(--border)] pb-2 mb-2.5">
                 <span className="text-xs font-bold uppercase tracking-wider text-[var(--brand-deep)]">
                   Household Siblings ({siblingCount})
                 </span>
@@ -2003,7 +2003,7 @@ function CollectPanel({
                       className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-bold transition active:scale-95 ${
                         isCur
                           ? "bg-[var(--brand-deep)] text-white shadow-md ring-2 ring-[var(--brand-deep)]/30"
-                          : "border border-[rgba(32,48,80,0.15)] bg-white text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.04)]"
+                          : "border border-[var(--border)] bg-[var(--card)] text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
                       }`}
                     >
                       <span>{row.student.fullName}</span>
@@ -2012,10 +2012,10 @@ function CollectPanel({
                           isCur
                             ? "bg-white/20 text-white"
                             : rOver
-                              ? "bg-[#fee2e2] text-[#b91c1c]"
+                              ? "bg-[var(--danger-soft)] text-[var(--danger)]"
                               : rDue > 0
                                 ? "bg-[rgba(197,160,40,0.18)] text-[var(--brand-deep)]"
-                                : "bg-[#dcfce7] text-[#15803d]"
+                                : "bg-[var(--success-soft)] text-[var(--success)]"
                         }`}
                       >
                         {classLabel(row.student)} · {formatInr(rDue)}
@@ -2081,7 +2081,7 @@ function CollectPanel({
                     className={`flex min-h-0 flex-col rounded-xl border p-3 ${
                       isFocus
                         ? "border-[rgba(197,160,40,0.45)] bg-[rgba(197,160,40,0.06)]"
-                        : "border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.02)]"
+                        : "border-[var(--border)] bg-[var(--surface-sunken)]"
                     }`}
                   >
                     <div className="flex flex-wrap items-start justify-between gap-2">
@@ -2121,9 +2121,9 @@ function CollectPanel({
                         <div
                           className={`text-sm font-bold ${
                             hasOverdue
-                              ? "text-[#dc2626]"
+                              ? "text-[var(--danger)]"
                               : rowTotal === 0 && row.dues.length > 0
-                                ? "text-[#15803d]"
+                                ? "text-[var(--success)]"
                                 : "text-[var(--brand-deep)]"
                           }`}
                         >
@@ -2132,7 +2132,7 @@ function CollectPanel({
                         <div
                           className={`text-xs font-semibold ${
                             rowSelected > 0
-                              ? "text-[#16a34a]"
+                              ? "text-[var(--success)]"
                               : "text-[var(--muted)]"
                           }`}
                         >
@@ -2557,8 +2557,8 @@ function CollectPanel({
           </div>
 
           {/* Earlier receipts */}
-          <div className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
-            <div className="border-b border-[rgba(32,48,80,0.08)] px-4 py-3">
+          <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)]">
+            <div className="border-b border-[var(--border)] px-4 py-3">
               <h2 className="text-xs font-bold text-[var(--brand-deep)]">
                 Earlier receipts
               </h2>
@@ -2571,7 +2571,7 @@ function CollectPanel({
                 No earlier receipts for this household yet.
               </p>
             ) : (
-          <ul className="max-h-64 divide-y divide-[rgba(32,48,80,0.08)] overflow-y-auto">
+          <ul className="max-h-64 divide-y divide-[var(--border)] overflow-y-auto">
             {priorReceipts.map((v) => {
               const voided = !!v.voidedAt;
               const names = Array.from(
@@ -2622,7 +2622,7 @@ function CollectPanel({
                   </div>
                   <button
                     type="button"
-                    className="rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.04)]"
+                    className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
                     onClick={() => onOpenReceipt(v.id)}
                   >
                     Open
@@ -2664,7 +2664,7 @@ function CollectPanel({
             className={`min-h-12 shrink-0 rounded-xl px-5 text-sm font-extrabold uppercase tracking-wide transition active:scale-[0.99] disabled:cursor-not-allowed ${
               matched && !readOnly
                 ? "bg-[var(--ok)] text-white shadow-lg"
-                : "bg-[rgba(32,48,80,0.12)] text-[var(--muted)]"
+                : "bg-[var(--surface-sunken)] text-[var(--muted)]"
             }`}
           >
             {readOnly
@@ -2719,7 +2719,7 @@ function WhatsAppInline({
 
   if (!editing) {
     return (
-      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.03)] px-2 py-1">
+      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-2 py-1">
         <span className="text-[10px] font-bold uppercase tracking-wide text-[var(--muted)]">
           WhatsApp
         </span>
@@ -2942,7 +2942,7 @@ function ReceiptPreviewModal({
       aria-label="Receipt print preview"
     >
       <div className="my-4 w-full max-w-2xl print:my-0 print:max-w-none">
-        <div className="print-hide mb-3 space-y-3 rounded-xl bg-white px-4 py-3 shadow-lg">
+        <div className="print-hide mb-3 space-y-3 rounded-xl bg-[var(--card)] px-4 py-3 shadow-lg">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <p className="text-sm font-bold text-[var(--brand-deep)]">
@@ -2976,7 +2976,7 @@ function ReceiptPreviewModal({
               </button>
               <button
                 type="button"
-                className="rounded-lg border border-[rgba(32,48,80,0.2)] px-4 py-2 text-xs font-semibold text-[var(--brand-deep)]"
+                className="rounded-lg border border-[var(--border)] px-4 py-2 text-xs font-semibold text-[var(--brand-deep)]"
                 onClick={onClose}
               >
                 Close
@@ -2985,7 +2985,7 @@ function ReceiptPreviewModal({
           </div>
 
           {!voucher.voidedAt ? (
-            <div className="flex flex-wrap items-end gap-2 border-t border-[rgba(32,48,80,0.08)] pt-3">
+            <div className="flex flex-wrap items-end gap-2 border-t border-[var(--border)] pt-3">
               <label className="min-w-[11rem] flex-1 text-sm">
                 <span className="mb-1 block text-[11px] text-[var(--muted)]">
                   WhatsApp number
@@ -3009,7 +3009,7 @@ function ReceiptPreviewModal({
           ) : null}
 
           {waError ? (
-            <p className="text-xs font-semibold text-[#dc2626]">{waError}</p>
+            <p className="text-xs font-semibold text-[var(--danger)]">{waError}</p>
           ) : null}
           {waNotice ? (
             <p className="text-xs font-semibold text-[#128C7E]">{waNotice}</p>
@@ -3243,7 +3243,7 @@ function ReceiptsPanel({
               type="date"
               value={dateFrom}
               onChange={(e) => setDateFrom(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-[rgba(32,48,80,0.15)] px-2.5 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-[var(--border)] px-2.5 py-2 text-sm"
             />
           </label>
           <label className="block text-xs font-semibold text-[var(--muted)]">
@@ -3252,7 +3252,7 @@ function ReceiptsPanel({
               type="date"
               value={dateTo}
               onChange={(e) => setDateTo(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-[rgba(32,48,80,0.15)] px-2.5 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-[var(--border)] px-2.5 py-2 text-sm"
             />
           </label>
           <label className="block text-xs font-semibold text-[var(--muted)]">
@@ -3262,7 +3262,7 @@ function ReceiptsPanel({
               value={studentQ}
               onChange={(e) => setStudentQ(e.target.value)}
               placeholder="Name or adm no."
-              className="mt-1 w-full rounded-lg border border-[rgba(32,48,80,0.15)] px-2.5 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-[var(--border)] px-2.5 py-2 text-sm"
             />
           </label>
           <label className="block text-xs font-semibold text-[var(--muted)]">
@@ -3272,7 +3272,7 @@ function ReceiptsPanel({
               value={parentQ}
               onChange={(e) => setParentQ(e.target.value)}
               placeholder="Guardian or mobile"
-              className="mt-1 w-full rounded-lg border border-[rgba(32,48,80,0.15)] px-2.5 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-[var(--border)] px-2.5 py-2 text-sm"
             />
           </label>
           <label className="block text-xs font-semibold text-[var(--muted)]">
@@ -3283,7 +3283,7 @@ function ReceiptsPanel({
                 setClassId(e.target.value);
                 setSectionId("");
               }}
-              className="mt-1 w-full rounded-lg border border-[rgba(32,48,80,0.15)] px-2.5 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-[var(--border)] px-2.5 py-2 text-sm"
             >
               <option value="">All classes</option>
               {classOptions.map((c) => (
@@ -3299,7 +3299,7 @@ function ReceiptsPanel({
               value={sectionId}
               onChange={(e) => setSectionId(e.target.value)}
               disabled={!classId}
-              className="mt-1 w-full rounded-lg border border-[rgba(32,48,80,0.15)] px-2.5 py-2 text-sm disabled:opacity-50"
+              className="mt-1 w-full rounded-lg border border-[var(--border)] px-2.5 py-2 text-sm disabled:opacity-50"
             >
               <option value="">All sections</option>
               {sectionOptions.map((s) => (
@@ -3314,7 +3314,7 @@ function ReceiptsPanel({
             <select
               value={modeFilter}
               onChange={(e) => setModeFilter(e.target.value as "" | TenderMode)}
-              className="mt-1 w-full rounded-lg border border-[rgba(32,48,80,0.15)] px-2.5 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-[var(--border)] px-2.5 py-2 text-sm"
             >
               <option value="">All modes</option>
               {TENDER_MODES.map((m) => (
@@ -3331,7 +3331,7 @@ function ReceiptsPanel({
               onChange={(e) =>
                 setConcessionFilter(e.target.value as "" | "with" | "without")
               }
-              className="mt-1 w-full rounded-lg border border-[rgba(32,48,80,0.15)] px-2.5 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-[var(--border)] px-2.5 py-2 text-sm"
             >
               <option value="">All receipts</option>
               <option value="with">With concession</option>
@@ -3345,7 +3345,7 @@ function ReceiptsPanel({
               value={collectorQ}
               onChange={(e) => setCollectorQ(e.target.value)}
               placeholder="Cashier name"
-              className="mt-1 w-full rounded-lg border border-[rgba(32,48,80,0.15)] px-2.5 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-[var(--border)] px-2.5 py-2 text-sm"
             />
           </label>
         </div>
@@ -3372,7 +3372,7 @@ function ReceiptsPanel({
             No receipts match these filters.
           </p>
         ) : (
-          <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+          <ul className="divide-y divide-[var(--border)]">
             {filtered.map((v) => {
               const voided = !!v.voidedAt;
               const students = Array.from(
@@ -3429,7 +3429,7 @@ function ReceiptsPanel({
                     </div>
                   </button>
                   {!voided ? (
-                    <div className="flex justify-end gap-2 border-t border-[rgba(32,48,80,0.06)] px-4 py-2">
+                    <div className="flex justify-end gap-2 border-t border-[var(--border)] px-4 py-2">
                       <button
                         type="button"
                         className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
@@ -3466,7 +3466,7 @@ function MiniBtn({
   return (
     <button
       type="button"
-      className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-sm font-semibold text-[var(--brand-deep)] sm:text-base"
+      className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm font-semibold text-[var(--brand-deep)] sm:text-base"
       onClick={onClick}
     >
       {children}
