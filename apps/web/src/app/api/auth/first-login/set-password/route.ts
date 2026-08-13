@@ -36,7 +36,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "Invalid JSON" }, { status: 400 });
   }
 
-  const persona = body.persona === "staff" ? "staff" : "parent";
+  const persona =
+    body.persona === "staff" || body.persona === "field"
+      ? body.persona
+      : "parent";
   const mobile10 = normalizeMobile10(body.mobile || "");
   const code = (body.code || "").trim();
   const password = body.password || "";

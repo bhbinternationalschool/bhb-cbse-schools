@@ -9,6 +9,7 @@ import { fetchStaffRemoteServer } from "@/lib/staffPersistence";
 import {
   defaultRbacState,
   hasPermission,
+  normalizeRbacState,
   type RbacAction,
   type RbacModule,
   type RbacState,
@@ -37,7 +38,12 @@ async function loadServerRbac(): Promise<RbacState> {
     .eq("tenant_id", ctx.tenantId)
     .maybeSingle();
   const state = data?.state as RbacState | undefined;
-  if (state?.roles?.length) return state;
+  // normalizeRbacState merges any built-in module grant missing from a
+  // persisted role (e.g. a module added after this tenant's rbac_state row
+  // was last saved) onto that role — the same merge loadRbac() already does
+  // client-side. Skipping it here silently denies every module added after
+  // go-live until someone happens to re-save Settings → Roles.
+  if (state?.roles?.length) return normalizeRbacState(state);
   return defaultRbacState();
 }
 
@@ -54,7 +60,7 @@ async function loadServerRbac(): Promise<RbacState> {
 const MASTERS_CACHE_TTL_MS = 30_000;
 let mastersCache: { state: MastersState; at: number } | null = null;
 
-async function loadServerMasters(): Promise<MastersState> {
+export async function loadServerMasters(): Promise<MastersState> {
   const now = Date.now();
   if (mastersCache && now - mastersCache.at < MASTERS_CACHE_TTL_MS) {
     return mastersCache.state;

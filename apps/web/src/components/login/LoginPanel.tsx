@@ -40,10 +40,10 @@ const PERSONAS: {
   {
     id: "field",
     label: "Field",
-    headline: "Tap your role — big icons next",
-    button: "Unlock",
-    productionHint: "4-digit PIN from your school",
-    demoHint: "4-digit PIN",
+    headline: "Transport & field staff",
+    button: "Sign in",
+    productionHint: "Email or phone, and your password",
+    demoHint: "Any staff record works in demo mode",
   },
 ];
 
@@ -84,7 +84,9 @@ export function LoginPanel() {
   const active = PERSONAS.find((p) => p.id === persona)!;
   const demoAuth = isDemoAuth();
   const supabaseReady = isSupabaseConfigured();
-  const canFirstTime = !demoAuth && (persona === "staff" || persona === "parent");
+  const canFirstTime =
+    !demoAuth &&
+    (persona === "staff" || persona === "parent" || persona === "field");
 
   async function finishLogin() {
     await prepareWorkspaceAfterLogin();
@@ -134,19 +136,21 @@ export function LoginPanel() {
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    if (persona === "field" && secret && !/^\d{4}$/.test(secret)) {
-      setError("Enter your 4-digit PIN.");
-      return;
-    }
     startTransition(async () => {
       const { currentAcademicYearCode, loadMasters } = await import(
         "@/lib/masters"
       );
       const academicYearCode = currentAcademicYearCode();
 
-      // Production path for both staff and parent: real Supabase Auth,
-      // sign-in by whichever identifier they picked.
-      if (!demoAuth && (persona === "staff" || persona === "parent")) {
+      // Production path for staff, parent and field (drivers): real
+      // Supabase Auth, sign-in by whichever identifier they picked. Field
+      // staff are sis_staff rows same as office/teaching staff, so this is
+      // the identical staff path — the persona label is only what routes
+      // them to /field afterwards.
+      if (
+        !demoAuth &&
+        (persona === "staff" || persona === "parent" || persona === "field")
+      ) {
         const raw = identifier.trim();
         if (!raw || !secret) {
           setError(
@@ -390,16 +394,18 @@ export function LoginPanel() {
     });
   }
 
-  const staffHint = demoAuth
-    ? "Super-admin: director@bhbinternational.school (any password). Or Staff → Login credentials. Blank = demo principal."
-    : "Use the email/phone and password you set up, or verify with OTP below if this is your first time.";
+  const realAuthHint =
+    "Use the email/phone and password you set up, or verify with OTP below if this is your first time.";
+  const staffDemoHint =
+    "Super-admin: director@bhbinternational.school (any password). Or Staff → Login credentials. Blank = demo principal.";
 
-  const personaHint =
-    persona === "staff"
-      ? staffHint
-      : demoAuth && active.demoHint
-        ? active.demoHint
-        : active.productionHint;
+  const personaHint = demoAuth
+    ? persona === "staff"
+      ? staffDemoHint
+      : active.demoHint || active.productionHint
+    : persona === "staff" || persona === "field"
+      ? realAuthHint
+      : active.productionHint;
 
   if (mode === "first-time") {
     return (
@@ -577,102 +583,97 @@ export function LoginPanel() {
       />
 
       <form onSubmit={onSubmit} className="mt-5 space-y-3">
-        {persona !== "field" ? (
-          <>
-            {!demoAuth && (persona === "staff" || persona === "parent") ? (
-              <div className="flex gap-1.5 text-xs">
-                {(["email", "phone"] as const).map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => {
-                      setIdentifierType(t);
-                      setIdentifier("");
-                    }}
-                    className={`rounded-lg px-3 py-1 font-semibold ${
-                      identifierType === t
-                        ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
-                        : "border border-[var(--border)] text-[var(--brand-deep)]"
-                    }`}
-                  >
-                    {t === "email" ? "Email" : "Phone"}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-            <label className="block text-sm">
-              <span className="mb-1.5 block text-[var(--muted)]">
-                {!demoAuth && (persona === "staff" || persona === "parent")
-                  ? identifierType === "email"
-                    ? "Email"
-                    : "Mobile"
-                  : persona === "parent"
-                    ? "Mobile"
-                    : "Mobile / Email"}
-              </span>
-              <input
-                value={identifier}
-                onChange={(e) => setIdentifier(e.target.value)}
-                placeholder={
-                  !demoAuth && (persona === "staff" || persona === "parent")
+        {(() => {
+          // Field (drivers) went through this same real-auth form as staff
+          // once authProvisioning.server.ts learned the "field" persona —
+          // it's a sis_staff row like any other staff member, just routed
+          // to /field afterwards. The old field-only 4-digit PIN input was
+          // never wired to a backend (onSubmit had no persona==="field"
+          // branch to send it anywhere) — dead UI, removed rather than kept
+          // alongside a real path that now exists.
+          const isRealAuth =
+            !demoAuth &&
+            (persona === "staff" || persona === "parent" || persona === "field");
+          return (
+            <>
+              {isRealAuth ? (
+                <div className="flex gap-1.5 text-xs">
+                  {(["email", "phone"] as const).map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => {
+                        setIdentifierType(t);
+                        setIdentifier("");
+                      }}
+                      className={`rounded-lg px-3 py-1 font-semibold ${
+                        identifierType === t
+                          ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                          : "border border-[var(--border)] text-[var(--brand-deep)]"
+                      }`}
+                    >
+                      {t === "email" ? "Email" : "Phone"}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              <label className="block text-sm">
+                <span className="mb-1.5 block text-[var(--muted)]">
+                  {isRealAuth
                     ? identifierType === "email"
-                      ? "you@school.edu"
-                      : "98xxxxxxxx"
+                      ? "Email"
+                      : "Mobile"
                     : persona === "parent"
-                      ? "98xxxxxxxx"
-                      : "emp code / username / email"
-                }
-                inputMode={identifierType === "phone" ? "numeric" : undefined}
-                className="w-full rounded-xl border border-[rgba(11,61,74,0.18)] bg-white/80 px-3.5 py-2.5 outline-none ring-[var(--ring)] focus:ring-2"
-                style={{ color: "#203050" }}
-                autoComplete="username"
-                required={!demoAuth && (persona === "staff" || persona === "parent")}
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="mb-1.5 block text-[var(--muted)]">
-                {!demoAuth && (persona === "staff" || persona === "parent")
-                  ? "Password"
-                  : persona === "parent"
-                    ? "OTP"
-                    : "OTP / Password"}
-              </span>
-              <input
-                type={
-                  demoAuth && persona !== "staff" ? "text" : "password"
-                }
-                value={secret}
-                onChange={(e) => setSecret(e.target.value)}
-                placeholder="••••••••"
-                className="w-full rounded-xl border border-[rgba(11,61,74,0.18)] bg-white/80 px-3.5 py-2.5 outline-none ring-[var(--ring)] focus:ring-2"
-                style={{ color: "#203050" }}
-                autoComplete={
-                  !demoAuth && (persona === "staff" || persona === "parent")
-                    ? "current-password"
-                    : persona === "staff"
+                      ? "Mobile"
+                      : "Mobile / Email"}
+                </span>
+                <input
+                  value={identifier}
+                  onChange={(e) => setIdentifier(e.target.value)}
+                  placeholder={
+                    isRealAuth
+                      ? identifierType === "email"
+                        ? "you@school.edu"
+                        : "98xxxxxxxx"
+                      : persona === "parent"
+                        ? "98xxxxxxxx"
+                        : "emp code / username / email"
+                  }
+                  inputMode={identifierType === "phone" ? "numeric" : undefined}
+                  className="w-full rounded-xl border border-[rgba(11,61,74,0.18)] bg-white/80 px-3.5 py-2.5 outline-none ring-[var(--ring)] focus:ring-2"
+                  style={{ color: "#203050" }}
+                  autoComplete="username"
+                  required={isRealAuth}
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1.5 block text-[var(--muted)]">
+                  {isRealAuth
+                    ? "Password"
+                    : persona === "parent"
+                      ? "OTP"
+                      : "OTP / Password"}
+                </span>
+                <input
+                  type={demoAuth && persona !== "staff" ? "text" : "password"}
+                  value={secret}
+                  onChange={(e) => setSecret(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full rounded-xl border border-[rgba(11,61,74,0.18)] bg-white/80 px-3.5 py-2.5 outline-none ring-[var(--ring)] focus:ring-2"
+                  style={{ color: "#203050" }}
+                  autoComplete={
+                    isRealAuth
                       ? "current-password"
-                      : "one-time-code"
-                }
-                required={!demoAuth && (persona === "staff" || persona === "parent")}
-              />
-            </label>
-          </>
-        ) : (
-          <label className="block text-sm">
-            <span className="mb-1.5 block text-[var(--muted)]">PIN</span>
-            <input
-              inputMode="numeric"
-              pattern="\d{4}"
-              maxLength={4}
-              value={secret}
-              onChange={(e) => setSecret(e.target.value.replace(/\D/g, ""))}
-              placeholder="••••"
-              className="w-full rounded-xl border border-[rgba(11,61,74,0.18)] bg-white/80 px-3.5 py-2.5 tracking-[0.4em] outline-none ring-[var(--ring)] focus:ring-2"
-              style={{ color: "#203050" }}
-              autoComplete="one-time-code"
-            />
-          </label>
-        )}
+                      : persona === "staff"
+                        ? "current-password"
+                        : "one-time-code"
+                  }
+                  required={isRealAuth}
+                />
+              </label>
+            </>
+          );
+        })()}
 
         <p className="text-xs text-[var(--muted)]">{personaHint}</p>
 

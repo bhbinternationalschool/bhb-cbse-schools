@@ -3,6 +3,8 @@ import { createClient } from "@supabase/supabase-js";
 import { DEMO_USERS, demoSessionCookieName, type DemoSession } from "@/lib/auth";
 import { appSessionCookieOptions } from "@/lib/authCookies.server";
 import { signSession } from "@/lib/sessionCookie.server";
+import { loadServerMasters } from "@/lib/api/v1/auth";
+import { inferRoleCodes } from "@/lib/rbac";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { superAdminRoleCode } from "@/lib/superAdmin";
 import { TENANT, type Persona } from "@/lib/types";
@@ -144,13 +146,39 @@ export async function POST(request: Request) {
     }
   }
 
-  if (persona === "staff" && !staffId && !ownerRole) {
-    // Fall back to principal-ish role from profile email heuristics
-    const em = (email || "").toLowerCase();
-    if (em.includes("principal") || em.includes("owner")) {
-      roleCode = "principal";
-    } else if (em.includes("admin")) {
-      roleCode = "admin";
+  // Every real (non-demo) staff login used to keep roleCode at its
+  // DEMO_USERS default of "principal" once staffId WAS matched — the block
+  // below only ever ran for the unmatched case, so the one signal that
+  // actually knows who this person is (their sis_staff designation) was
+  // never consulted. Every teacher and driver signing in for real landed on
+  // roleCode "principal", which is what the mobile app's principal-vs-
+  // teacher-vs-driver home routing keys off. inferRoleCodes() already does
+  // this correctly (designation-aware, staffId-aware) and is the same
+  // function permission checks use — reuse it instead of a second, weaker
+  // heuristic. roleCode is passed in blank so the stale default above can't
+  // leak into its own regex-matching step; ownerRole (protected super-admin
+  // emails) is preserved untouched — inferRoleCodes never grants "owner"
+  // from a designation, by design (see its own comment).
+  if (persona === "staff" && !ownerRole) {
+    try {
+      const masters = await loadServerMasters();
+      const codes = inferRoleCodes(
+        { roleCode: "", email, fullName, persona, staffId },
+        masters,
+      );
+      const priority = [
+        "principal",
+        "admin",
+        "driver",
+        "accounts",
+        "office",
+        "transport",
+        "teacher",
+      ];
+      const picked = priority.find((c) => codes.includes(c));
+      if (picked) roleCode = picked;
+    } catch (e) {
+      console.warn("[session] roleCode inference failed, keeping default", e);
     }
   }
 
