@@ -39,6 +39,10 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
   const [scores, setScores] = useState<AppraisalScores>(defaultAppraisalScores);
   const [comment, setComment] = useState("");
 
+  const [draftText, setDraftText] = useState<string | null>(null);
+  const [draftLoading, setDraftLoading] = useState(false);
+  const [draftError, setDraftError] = useState<string | null>(null);
+
   function reload() {
     const m = loadMasters();
     setMasters(m);
@@ -84,7 +88,44 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
       setScores(defaultAppraisalScores());
       setComment("");
     }
+    setDraftText(null);
+    setDraftError(null);
   }, [staffId, hr, cycle]);
+
+  async function draftComment() {
+    if (!staffId) return;
+    setDraftLoading(true);
+    setDraftError(null);
+    setDraftText(null);
+    try {
+      const res = await fetch("/api/ai/appraisal-comment-draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          staffName: staffLabel(staffId),
+          cycleLabel: cycle?.label,
+          scores: APPRAISAL_CRITERIA.map((c) => ({
+            label: c.label,
+            value: scores[c.key],
+          })),
+        }),
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        draft?: string;
+      };
+      if (!json.ok || !json.draft) {
+        setDraftError(json.error || "Draft failed");
+        return;
+      }
+      setDraftText(json.draft);
+    } catch (e) {
+      setDraftError(e instanceof Error ? e.message : "Draft failed");
+    } finally {
+      setDraftLoading(false);
+    }
+  }
 
   function flash(msg: string, isError = false) {
     if (isError) {
@@ -318,9 +359,23 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
           </p>
 
           <label className="block text-sm">
-            <span className="mb-1 block text-[11px] text-[var(--muted)]">
-              Comment
-            </span>
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <span className="text-[11px] text-[var(--muted)]">Comment</span>
+              {cycle.status === "open" && staffId ? (
+                <button
+                  type="button"
+                  disabled={draftLoading}
+                  className="text-[11px] font-semibold text-[var(--brand-deep)] underline-offset-2 hover:underline disabled:opacity-50"
+                  onClick={() => void draftComment()}
+                >
+                  {draftLoading
+                    ? "Drafting…"
+                    : draftText
+                      ? "Redraft"
+                      : "Draft with AI"}
+                </button>
+              ) : null}
+            </div>
             <textarea
               className="field !py-1.5 min-h-[72px]"
               value={comment}
@@ -329,6 +384,29 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
               disabled={cycle.status === "closed"}
             />
           </label>
+
+          {draftError ? (
+            <p className="text-[11px] text-[var(--danger)]">{draftError}</p>
+          ) : null}
+          {draftText ? (
+            <div className="rounded-lg bg-[var(--surface-sunken)] p-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                  AI draft — review before using
+                </span>
+                <button
+                  type="button"
+                  className="text-[10px] font-semibold text-[var(--brand-deep)] underline"
+                  onClick={() => setComment(draftText)}
+                >
+                  Use this comment
+                </button>
+              </div>
+              <p className="mt-1 whitespace-pre-wrap text-[12px] text-[var(--ink)]">
+                {draftText}
+              </p>
+            </div>
+          ) : null}
 
           <button
             type="submit"

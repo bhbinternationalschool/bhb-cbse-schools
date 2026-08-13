@@ -8,6 +8,7 @@ import {
   ClipboardList,
   LayoutDashboard,
   MessageSquare,
+  Sparkles,
   Star,
   UsersRound,
 } from "lucide-react";
@@ -164,6 +165,10 @@ export function PtmWorkspace() {
   const [fbAreas, setFbAreas] = useState("");
   const [fbFollowUp, setFbFollowUp] = useState("");
 
+  const [fbDigest, setFbDigest] = useState<string | null>(null);
+  const [fbDigestLoading, setFbDigestLoading] = useState(false);
+  const [fbDigestError, setFbDigestError] = useState<string | null>(null);
+
   const actorName = session.fullName || "Staff";
 
   function flash(msg: string) {
@@ -210,6 +215,11 @@ export function PtmWorkspace() {
       setSlotTeacherId(staffOptions[0].id);
     }
   }, [slotTeacherId, staffOptions]);
+
+  useEffect(() => {
+    setFbDigest(null);
+    setFbDigestError(null);
+  }, [eventId]);
 
   const activeEvents = useMemo(() => {
     if (!state) return [];
@@ -349,6 +359,48 @@ export function PtmWorkspace() {
     setFbBookingId("");
     refresh();
     flash("Feedback saved");
+  }
+
+  const eventFeedback = useMemo(() => {
+    if (!state) return [];
+    const bookingIds = new Set(eventBookings.map((b) => b.id));
+    return state.feedback.filter((f) => bookingIds.has(f.bookingId));
+  }, [state, eventBookings]);
+
+  async function summarizeFeedback() {
+    if (eventFeedback.length === 0 || !masters || !sis) return;
+    setFbDigestLoading(true);
+    setFbDigestError(null);
+    setFbDigest(null);
+    try {
+      const res = await fetch("/api/ai/ptm-feedback-digest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          eventLabel: selectedEvent?.name,
+          entries: eventFeedback.map((f) => ({
+            studentName: studentLabel(masters, sis, f.studentId),
+            strengths: f.strengths,
+            areas: f.areas,
+            followUp: f.followUp,
+          })),
+        }),
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        digest?: string;
+      };
+      if (!json.ok || !json.digest) {
+        setFbDigestError(json.error || "Digest failed");
+        return;
+      }
+      setFbDigest(json.digest);
+    } catch (e) {
+      setFbDigestError(e instanceof Error ? e.message : "Digest failed");
+    } finally {
+      setFbDigestLoading(false);
+    }
   }
 
   if (!state || !masters || !sis) {
@@ -905,6 +957,51 @@ export function PtmWorkspace() {
               </Button>
             </CardFooter>
           </Card>
+
+          {eventId ? (
+            <Card size="sm" className="max-w-xl">
+              <CardHeader>
+                <div className="flex items-center justify-between gap-2">
+                  <CardTitle className="flex items-center gap-1.5 text-sm">
+                    <Sparkles className="h-4 w-4 text-[var(--brand-gold)]" />
+                    AI feedback digest
+                  </CardTitle>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={fbDigestLoading || eventFeedback.length === 0}
+                    onClick={() => void summarizeFeedback()}
+                  >
+                    {fbDigestLoading
+                      ? "Summarizing…"
+                      : fbDigest
+                        ? "Re-summarize"
+                        : "Summarize with AI"}
+                  </Button>
+                </div>
+                <CardDescription>
+                  {eventFeedback.length === 0
+                    ? "No feedback recorded for this event yet."
+                    : `${eventFeedback.length} feedback entr${eventFeedback.length === 1 ? "y" : "ies"} for ${selectedEvent?.name || "this event"}.`}
+                </CardDescription>
+              </CardHeader>
+              {fbDigestError ? (
+                <CardContent className="pt-0">
+                  <p className="text-[11px] text-[var(--danger)]">
+                    {fbDigestError}
+                  </p>
+                </CardContent>
+              ) : null}
+              {fbDigest ? (
+                <CardContent className="pt-0">
+                  <p className="whitespace-pre-wrap text-sm text-[var(--ink)]">
+                    {fbDigest}
+                  </p>
+                </CardContent>
+              ) : null}
+            </Card>
+          ) : null}
 
           {state.feedback.length > 0 ? (
             <div className="grid max-w-xl gap-2">
