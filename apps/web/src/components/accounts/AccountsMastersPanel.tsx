@@ -33,13 +33,13 @@ import type { AccountsPanelProps } from "@/components/accounts/AccountsPanels";
 import { RemoveControl } from "@/components/masters/RemoveControl";
 
 const CARD =
-  "rounded-2xl border border-[rgba(32,48,80,0.12)] bg-white p-4";
+  "rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4";
 const FIELD =
-  "w-full rounded-xl border border-[rgba(32,48,80,0.18)] px-3 py-2 text-sm";
+  "w-full rounded-xl border border-[var(--border)] px-3 py-2 text-sm";
 const BTN =
   "rounded-xl bg-[#0f2744] px-4 py-2 text-sm font-medium text-white disabled:opacity-50";
 const BTN_GHOST =
-  "rounded-xl border border-[rgba(32,48,80,0.2)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]";
+  "rounded-xl border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]";
 
 type MasterTab =
   | "accounts"
@@ -354,7 +354,7 @@ export function AccountsMastersPanel({
       );
     }
     return (
-      <div className="space-y-1 rounded-xl border border-[rgba(32,48,80,0.08)] p-2">
+      <div className="space-y-1 rounded-xl border border-[var(--border)] p-2">
         <p className="text-[11px] font-semibold text-[var(--muted)]">
           Linked vendors (optional)
         </p>
@@ -380,7 +380,7 @@ export function AccountsMastersPanel({
     return (
       <li
         key={a.id}
-        className={`flex items-start justify-between gap-2 border-b border-[rgba(32,48,80,0.06)] py-1.5 ${
+        className={`flex items-start justify-between gap-2 border-b border-[var(--border)] py-1.5 ${
           active ? "rounded-lg bg-[rgba(15,39,68,0.06)] px-2" : ""
         }`}
       >
@@ -418,8 +418,8 @@ export function AccountsMastersPanel({
             type="button"
             className={`rounded-lg px-3 py-1.5 text-xs font-bold ${
               tab === id
-                ? "bg-[var(--brand-deep)] text-white"
-                : "border border-[rgba(32,48,80,0.15)] bg-white text-[var(--brand-deep)]"
+                ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                : "border border-[var(--border)] bg-[var(--card)] text-[var(--brand-deep)]"
             }`}
             onClick={() => setTab(id)}
           >
@@ -532,7 +532,7 @@ export function AccountsMastersPanel({
                 return (
                   <li
                     key={c.id}
-                    className={`flex items-start justify-between gap-2 border-b border-[rgba(32,48,80,0.06)] py-1.5 ${
+                    className={`flex items-start justify-between gap-2 border-b border-[var(--border)] py-1.5 ${
                       active ? "rounded-lg bg-[rgba(15,39,68,0.06)] px-2" : ""
                     }`}
                   >
@@ -611,7 +611,7 @@ export function AccountsMastersPanel({
                 return (
                   <li
                     key={c.id}
-                    className={`flex items-start justify-between gap-2 border-b border-[rgba(32,48,80,0.06)] py-1.5 ${
+                    className={`flex items-start justify-between gap-2 border-b border-[var(--border)] py-1.5 ${
                       active ? "rounded-lg bg-[rgba(15,39,68,0.06)] px-2" : ""
                     }`}
                   >
@@ -696,7 +696,7 @@ export function AccountsMastersPanel({
                 return (
                   <li
                     key={v.id}
-                    className={`flex items-start justify-between gap-2 border-b border-[rgba(32,48,80,0.06)] py-1.5 ${
+                    className={`flex items-start justify-between gap-2 border-b border-[var(--border)] py-1.5 ${
                       active ? "rounded-lg bg-[rgba(15,39,68,0.06)] px-2" : ""
                     } ${v.isActive === false ? "opacity-60" : ""}`}
                   >

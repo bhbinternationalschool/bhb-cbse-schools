@@ -229,13 +229,13 @@ function printExpenseVoucher(v: ExpenseVoucher, state: AccountsState) {
 }
 
 const CARD =
-  "rounded-2xl border border-[rgba(32,48,80,0.12)] bg-white p-4";
+  "rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4";
 const FIELD =
-  "w-full rounded-xl border border-[rgba(32,48,80,0.18)] px-3 py-2 text-sm";
+  "w-full rounded-xl border border-[var(--border)] px-3 py-2 text-sm";
 const BTN =
-  "rounded-xl bg-[#0f2744] px-4 py-2 text-sm font-medium text-white disabled:opacity-50";
+  "rounded-xl bg-[var(--primary)] px-4 py-2 text-sm font-medium text-[var(--primary-foreground)] disabled:opacity-50";
 const BTN_OUTLINE =
-  "rounded-lg border border-[rgba(32,48,80,0.18)] px-3 py-1.5 text-xs font-bold text-[var(--brand-deep)]";
+  "rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-bold text-[var(--brand-deep)]";
 
 const PAYMENT_MODES: PaymentMode[] = [
   "cash",
@@ -320,7 +320,7 @@ export function DashboardPanel({ state, onRefresh }: AccountsPanelProps) {
             Day close pending approval
           </span>
         ) : (
-          <span className="rounded-lg bg-[#16a34a]/15 px-3 py-1.5 text-xs font-bold text-[#15803d]">
+          <span className="rounded-lg bg-[var(--success-soft)] px-3 py-1.5 text-xs font-bold text-[var(--success)]">
             Day close up to date
           </span>
         )}
@@ -447,7 +447,7 @@ export function DayBookPanel({ state }: AccountsPanelProps) {
           </thead>
           <tbody>
             {book.modeTotals.map((m) => (
-              <tr key={m.mode} className="border-t border-[rgba(32,48,80,0.08)]">
+              <tr key={m.mode} className="border-t border-[var(--border)]">
                 <td className="py-2">{tenderModeLabel(m.mode)}</td>
                 <td className="py-2">{m.tenderCount}</td>
                 <td className="py-2 text-right font-medium">{formatInr(m.paise)}</td>
@@ -482,7 +482,7 @@ export function DayBookPanel({ state }: AccountsPanelProps) {
           </thead>
           <tbody>
             {paidExpenses.map((v) => (
-              <tr key={v.id} className="border-t border-[rgba(32,48,80,0.08)]">
+              <tr key={v.id} className="border-t border-[var(--border)]">
                 <td className="py-2 align-top font-mono text-xs">
                   {v.voucherNo || v.id.slice(-8)}
                   <div className="mt-0.5 font-sans text-[10px] text-[var(--muted)]">
@@ -544,7 +544,7 @@ export function DayBookPanel({ state }: AccountsPanelProps) {
           </thead>
           <tbody>
             {unpaidExpenses.map((v) => (
-              <tr key={v.id} className="border-t border-[rgba(32,48,80,0.08)]">
+              <tr key={v.id} className="border-t border-[var(--border)]">
                 <td className="py-2">Expense (unpaid)</td>
                 <td className="py-2">
                   {v.voucherNo} ·{" "}
@@ -556,7 +556,7 @@ export function DayBookPanel({ state }: AccountsPanelProps) {
               </tr>
             ))}
             {cashMoves.map((e) => (
-              <tr key={e.id} className="border-t border-[rgba(32,48,80,0.08)]">
+              <tr key={e.id} className="border-t border-[var(--border)]">
                 <td className="py-2">
                   Cash {e.direction}
                   {e.sourceType === "expense_voucher" ? " · expense" : ""}
@@ -566,7 +566,7 @@ export function DayBookPanel({ state }: AccountsPanelProps) {
               </tr>
             ))}
             {bankMoves.map((e) => (
-              <tr key={e.id} className="border-t border-[rgba(32,48,80,0.08)]">
+              <tr key={e.id} className="border-t border-[var(--border)]">
                 <td className="py-2">
                   Bank {e.direction === "dr" ? "Dr" : "Cr"}
                   {e.sourceType === "expense_voucher" ? " · expense" : ""}
@@ -606,7 +606,7 @@ export function DayBookPanel({ state }: AccountsPanelProps) {
             {storeJournals.map((j) => {
               const amt = j.lines.reduce((n, l) => n + l.debitPaise, 0);
               return (
-                <tr key={j.id} className="border-t border-[rgba(32,48,80,0.08)]">
+                <tr key={j.id} className="border-t border-[var(--border)]">
                   <td className="py-2">{j.sourceType.replace(/_/g, " ")}</td>
                   <td className="py-2">{j.narration || j.voucherNo}</td>
                   <td className="py-2 text-right">{formatInr(amt)}</td>
@@ -783,7 +783,7 @@ export function CashBookPanel({
           <button type="button" className={BTN} onClick={deposit}>
             Record deposit
           </button>
-          <hr className="border-[rgba(32,48,80,0.08)]" />
+          <hr className="border-[var(--border)]" />
           <input
             className={FIELD}
             placeholder="Handover amount ₹"
@@ -835,7 +835,7 @@ export function CashBookPanel({
               </ErpTableHead>
               <ErpTableBody>
                 {ledger.map((e) => (
-                  <tr key={e.id} className="hover:bg-[rgba(32,48,80,0.02)]">
+                  <tr key={e.id} className="hover:bg-[var(--surface-sunken)]">
                     <td className="px-4 py-2">{e.date}</td>
                     <td className="px-4 py-2">
                       {state.cashPools.find((p) => p.id === e.poolId)?.name}
@@ -965,7 +965,7 @@ export function BanksPanel({
             <div className="flex items-start justify-between gap-2">
               <div className="font-semibold text-[var(--brand-deep)]">{b.name}</div>
               {b.isActive === false ? (
-                <span className="rounded bg-[rgba(32,48,80,0.08)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--muted)]">
+                <span className="rounded bg-[var(--surface-sunken)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--muted)]">
                   Inactive
                 </span>
               ) : null}
@@ -1063,7 +1063,7 @@ export function BanksPanel({
                   className={`rounded-xl border px-3 py-2 text-xs font-bold uppercase ${
                     on
                       ? "border-[#1565c0] bg-[#1565c0]/10 text-[#1565c0]"
-                      : "border-[rgba(32,48,80,0.15)] bg-white text-[var(--muted)]"
+                      : "border-[var(--border)] bg-[var(--card)] text-[var(--muted)]"
                   }`}
                   onClick={() => toggleMode(mode)}
                 >
@@ -1430,7 +1430,7 @@ export function ExpensesPanel({
         </div>
 
         {totals.paid > 0 ? (
-          <div className="space-y-2 rounded-lg border border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.03)] p-3">
+          <div className="space-y-2 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h4 className="text-xs font-bold text-[var(--brand-deep)]">
                 Payment modes (split cash + UPI / bank)
@@ -1455,7 +1455,7 @@ export function ExpensesPanel({
                   return (
                     <div
                       key={s.key}
-                      className="space-y-1 rounded-lg border border-[rgba(32,48,80,0.08)] bg-white p-2"
+                      className="space-y-1 rounded-lg border border-[var(--border)] bg-[var(--card)] p-2"
                     >
                       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
                         <div>
@@ -1586,7 +1586,7 @@ export function ExpensesPanel({
                     )
                   : [];
                 return (
-                  <tr key={l.id} className="border-t border-[rgba(32,48,80,0.08)]">
+                  <tr key={l.id} className="border-t border-[var(--border)]">
                     <td className="py-1 pr-2">
                       <select
                         className={FIELD}
@@ -1745,7 +1745,7 @@ export function ExpensesPanel({
               })}
             </tbody>
             <tfoot>
-              <tr className="border-t-2 border-[rgba(32,48,80,0.15)] font-bold">
+              <tr className="border-t-2 border-[var(--border)] font-bold">
                 <td colSpan={3} className="py-2 text-right text-[var(--muted)]">
                   Totals
                 </td>
@@ -1798,7 +1798,7 @@ export function ExpensesPanel({
                 {sessionTotals.map((row) => (
                   <tr
                     key={`${row.categoryId}:${row.subcategoryId}`}
-                    className="border-t border-[rgba(32,48,80,0.08)]"
+                    className="border-t border-[var(--border)]"
                   >
                     <td className="py-2">{row.categoryName}</td>
                     <td className="py-2">{row.subcategoryName}</td>
@@ -1870,7 +1870,7 @@ export function ExpensesPanel({
               </ErpTableHead>
               <ErpTableBody>
                 {openVouchers.slice(0, 30).map((v) => (
-                  <tr key={v.id} className="hover:bg-[rgba(32,48,80,0.02)]">
+                  <tr key={v.id} className="hover:bg-[var(--surface-sunken)]">
                     <td className="px-4 py-2">{v.date}</td>
                     <td className="px-4 py-2 font-mono text-xs">{v.voucherNo || v.id.slice(-8)}</td>
                     <td className="px-4 py-2 text-xs text-[var(--muted)]">
@@ -2243,7 +2243,7 @@ export function BillsPanel({
             </thead>
             <tbody>
               {billLines.map((l) => (
-                <tr key={l.id} className="border-t border-[rgba(32,48,80,0.08)]">
+                <tr key={l.id} className="border-t border-[var(--border)]">
                   <td className="py-1 pr-2">
                     <input
                       type="date"
@@ -2438,7 +2438,7 @@ export function BillsPanel({
             {payables.map((p) => {
               const bal = Math.max(0, p.amountPaise - p.paidPaise);
               return (
-                <tr key={p.id} className="border-t border-[rgba(32,48,80,0.08)]">
+                <tr key={p.id} className="border-t border-[var(--border)]">
                   <td className="py-2">{p.dueOn}</td>
                   <td className="py-2">{p.sourceType}</td>
                   <td className="py-2 text-right">{formatInr(bal)}</td>
@@ -2689,7 +2689,7 @@ export function OwnerLoansPanel({
           </thead>
           <tbody>
             {dueRows.map((r) => (
-              <tr key={r.id} className="border-t border-[rgba(32,48,80,0.08)]">
+              <tr key={r.id} className="border-t border-[var(--border)]">
                 <td className="py-2">{r.dueOn}</td>
                 <td className="py-2">{r.installmentNo}</td>
                 <td className="py-2 text-right">{formatInr(r.amountPaise)}</td>
@@ -2726,7 +2726,7 @@ export function OwnerLoansPanel({
           </thead>
           <tbody>
             {state.ownerLoans.map((l) => (
-              <tr key={l.id} className="border-t border-[rgba(32,48,80,0.08)]">
+              <tr key={l.id} className="border-t border-[var(--border)]">
                 <td className="py-2">
                   {state.trustees.find((t) => t.id === l.trusteeId)?.name}
                 </td>
@@ -2754,7 +2754,7 @@ export function OwnerLoansPanel({
           </thead>
           <tbody>
             {state.ownerCashHandovers.slice(0, 20).map((h) => (
-              <tr key={h.id} className="border-t border-[rgba(32,48,80,0.08)]">
+              <tr key={h.id} className="border-t border-[var(--border)]">
                 <td className="py-2">{h.date}</td>
                 <td className="py-2 text-right">{formatInr(h.amountPaise)}</td>
                 <td className="py-2">{h.receivedBy}</td>
@@ -2854,7 +2854,7 @@ export function BooksPanel({
             </thead>
             <tbody>
               {state.coaAccounts.map((c) => (
-                <tr key={c.id} className="border-t border-[rgba(32,48,80,0.08)]">
+                <tr key={c.id} className="border-t border-[var(--border)]">
                   <td className="py-2 font-mono">{c.code}</td>
                   <td className="py-2">{c.name}</td>
                   <td className="py-2">{c.group}</td>
@@ -2870,7 +2870,7 @@ export function BooksPanel({
               {state.fiscalYears.map((fy) => (
                 <div
                   key={fy.code}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[rgba(32,48,80,0.1)] px-3 py-2"
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--border)] px-3 py-2"
                 >
                   <div>
                     <div className="font-medium">
@@ -3014,7 +3014,7 @@ export function BooksPanel({
             </thead>
             <tbody>
               {tb.filter((r) => r.debitPaise || r.creditPaise).map((r) => (
-                <tr key={r.coaId} className="border-t border-[rgba(32,48,80,0.08)]">
+                <tr key={r.coaId} className="border-t border-[var(--border)]">
                   <td className="py-2">{r.code}</td>
                   <td className="py-2">{r.name}</td>
                   <td className="py-2 text-right">{formatInr(r.debitPaise)}</td>
@@ -3035,7 +3035,7 @@ export function BooksPanel({
           </div>
           <div className="mt-3 grid gap-4 sm:grid-cols-2">
             <div>
-              <h4 className="text-sm font-bold text-[#15803d]">Income</h4>
+              <h4 className="text-sm font-bold text-[var(--success)]">Income</h4>
               <ul className="mt-2 text-sm">
                 {pl.incomeLines.map((l) => (
                   <li key={l.coaId} className="flex justify-between">
@@ -3046,7 +3046,7 @@ export function BooksPanel({
               </ul>
             </div>
             <div>
-              <h4 className="text-sm font-bold text-[#dc2626]">Expense</h4>
+              <h4 className="text-sm font-bold text-[var(--danger)]">Expense</h4>
               <ul className="mt-2 text-sm">
                 {pl.expenseLines.map((l) => (
                   <li key={l.coaId} className="flex justify-between">
@@ -3245,12 +3245,12 @@ export function ReportsPanel({
         {ACCOUNTS_REPORT_CATEGORIES.map((category) => (
           <section
             key={category.id}
-            className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white"
+            className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)]"
           >
             <h2 className={`${category.headerClass} px-4 py-3 text-sm font-bold text-white`}>
               {category.title}
             </h2>
-            <ul className="divide-y divide-[rgba(32,48,80,0.08)] px-4">
+            <ul className="divide-y divide-[var(--border)] px-4">
               {ACCOUNTS_REPORTS.filter((r) => r.category === category.id).map(
                 (report) => (
                   <li

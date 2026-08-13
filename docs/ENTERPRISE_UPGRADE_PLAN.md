@@ -218,7 +218,7 @@ migration, independent of the rest of the checklist):
 | Login | `login/LoginPanel.tsx` | Done (Phase 3) |
 | Payroll | `payroll/PayrollWorkspace.tsx` | Done |
 | Admissions | `admissions/AdmissionsWorkspace.tsx` | Done |
-| Accounts | `accounts/AccountsWorkspace.tsx` | Not started — wave 3 |
+| Accounts | `accounts/{AccountsWorkspace,AccountsPanels,AccountsMastersPanel}.tsx` | Done (color/token sweep — the 14+ raw `<table>`s across AccountsPanels.tsx's sub-panels are deferred, matching the plan's "top-of-page only" scoping for this module) |
 | Exams | `exams/ExamsWorkspace.tsx` | Not started — wave 2 |
 | Masters | `masters/MastersWorkspace.tsx` | Not started — wave 3 |
 | Transport | `transport/TransportWorkspace.tsx` | Not started — wave 4 |

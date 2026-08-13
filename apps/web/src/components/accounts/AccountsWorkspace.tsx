@@ -19,6 +19,7 @@ import {
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
+import { SkeletonModulePage } from "@/components/ui/skeleton";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import {
   loadAccounts,
@@ -162,7 +163,9 @@ export function AccountsWorkspace() {
       />
 
       {!state ? (
-        <p className="mt-6 text-sm text-[var(--muted)]">Loading accounts…</p>
+        <div className="mt-6">
+          <SkeletonModulePage />
+        </div>
       ) : tab === "dashboard" ? (
         <ModuleDashboardHost
           moduleId="accounts"

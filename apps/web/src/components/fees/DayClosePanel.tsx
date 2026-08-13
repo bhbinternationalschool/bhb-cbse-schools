@@ -46,7 +46,7 @@ function statusClass(status: DayCloseSession["status"]) {
     case "rejected":
       return "bg-[#dc2626]/12 text-[#dc2626]";
     default:
-      return "bg-[rgba(32,48,80,0.08)] text-[var(--muted)]";
+      return "bg-[var(--surface-sunken)] text-[var(--muted)]";
   }
 }
 
@@ -189,7 +189,7 @@ export function DayClosePanel({
 
   return (
     <div className="mt-6 space-y-4">
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-base font-bold text-[var(--brand-deep)]">
@@ -235,7 +235,7 @@ export function DayClosePanel({
           </p>
         ) : null}
         {notice ? (
-          <p className="mt-3 rounded-lg bg-[rgba(32,48,80,0.06)] px-3 py-2 text-sm text-[var(--brand-deep)]">
+          <p className="mt-3 rounded-lg bg-[var(--surface-sunken)] px-3 py-2 text-sm text-[var(--brand-deep)]">
             {notice}
           </p>
         ) : null}
@@ -268,7 +268,7 @@ export function DayClosePanel({
         />
       </div>
 
-      <p className="rounded-lg border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] px-3 py-2 text-[11px] leading-snug text-[var(--muted)]">
+      <p className="rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2 text-[11px] leading-snug text-[var(--muted)]">
         <span className="font-semibold text-[var(--brand-deep)]">
           Why day total ≠ cash variance:
         </span>{" "}
@@ -304,7 +304,7 @@ export function DayClosePanel({
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <h3 className="text-sm font-bold text-[var(--brand-deep)]">
             Collection by type
           </h3>
@@ -320,7 +320,7 @@ export function DayClosePanel({
               {book.kindTotals.map((k) => (
                 <li
                   key={k.kind}
-                  className="flex items-center justify-between rounded-lg border border-[rgba(32,48,80,0.1)] px-3 py-2"
+                  className="flex items-center justify-between rounded-lg border border-[var(--border)] px-3 py-2"
                 >
                   <div>
                     <div className="text-sm font-semibold text-[var(--brand-deep)]">
@@ -345,7 +345,7 @@ export function DayClosePanel({
           )}
         </div>
 
-        <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <h3 className="text-sm font-bold text-[var(--brand-deep)]">
             Day book by mode
           </h3>
@@ -361,7 +361,7 @@ export function DayClosePanel({
               {book.modeTotals.map((m) => (
                 <li
                   key={m.mode}
-                  className="flex items-center justify-between rounded-lg border border-[rgba(32,48,80,0.1)] px-3 py-2"
+                  className="flex items-center justify-between rounded-lg border border-[var(--border)] px-3 py-2"
                 >
                   <div>
                     <div className="text-sm font-semibold text-[var(--brand-deep)]">
@@ -392,7 +392,7 @@ export function DayClosePanel({
         </div>
       </div>
 
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <h3 className="text-sm font-bold text-[var(--brand-deep)]">
@@ -415,7 +415,7 @@ export function DayClosePanel({
             Fee Take — both appear here.
           </p>
         ) : (
-          <ul className="mt-3 max-h-48 divide-y divide-[rgba(32,48,80,0.08)] overflow-y-auto">
+          <ul className="mt-3 max-h-48 divide-y divide-[var(--border)] overflow-y-auto">
             {book.storeIssues.map((iss) => (
               <li
                 key={iss.issueId}
@@ -446,7 +446,7 @@ export function DayClosePanel({
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-        <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <div className="flex flex-wrap items-end justify-between gap-2">
             <div>
               <h3 className="text-sm font-bold text-[var(--brand-deep)]">
@@ -513,14 +513,14 @@ export function DayClosePanel({
             <div className="mt-3 flex flex-wrap gap-2">
               <button
                 type="button"
-                className="rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-2 text-sm font-semibold text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.04)]"
+                className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-semibold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
                 onClick={onSaveDraft}
               >
                 Save draft
               </button>
               <button
                 type="button"
-                className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-sm font-semibold text-white hover:opacity-95"
+                className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--primary-foreground)] hover:opacity-95"
                 onClick={onSubmit}
               >
                 Submit handover
@@ -542,7 +542,7 @@ export function DayClosePanel({
           {session?.status === "submitted" ||
           session?.status === "approved" ||
           session?.status === "rejected" ? (
-            <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
               <h3 className="text-sm font-bold text-[var(--brand-deep)]">
                 Accounts receive
               </h3>
@@ -576,7 +576,7 @@ export function DayClosePanel({
                   </dd>
                 </div>
                 {session.cashierRemarks ? (
-                  <div className="rounded-lg bg-[rgba(32,48,80,0.04)] px-2.5 py-2 text-xs text-[var(--brand-deep)]">
+                  <div className="rounded-lg bg-[var(--surface-sunken)] px-2.5 py-2 text-xs text-[var(--brand-deep)]">
                     Cashier: {session.cashierRemarks}
                   </div>
                 ) : null}
@@ -637,14 +637,14 @@ export function DayClosePanel({
             </div>
           ) : null}
 
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h3 className="text-sm font-bold text-[var(--brand-deep)]">
               Receipts on this date
             </h3>
             {book.vouchers.length === 0 ? (
               <p className="mt-2 text-sm text-[var(--muted)]">None</p>
             ) : (
-              <ul className="mt-2 max-h-56 divide-y divide-[rgba(32,48,80,0.08)] overflow-y-auto">
+              <ul className="mt-2 max-h-56 divide-y divide-[var(--border)] overflow-y-auto">
                 {book.vouchers.map((v) => {
                   const feePaise = v.lines
                     .filter(
@@ -717,16 +717,16 @@ export function DayClosePanel({
       </div>
 
       {history.length > 0 ? (
-        <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <h3 className="text-sm font-bold text-[var(--brand-deep)]">
             Recent day-closes
           </h3>
-          <ul className="mt-2 divide-y divide-[rgba(32,48,80,0.08)]">
+          <ul className="mt-2 divide-y divide-[var(--border)]">
             {history.map((h) => (
               <li key={h.id}>
                 <button
                   type="button"
-                  className="flex w-full items-center justify-between gap-2 py-2 text-left hover:bg-[rgba(32,48,80,0.03)]"
+                  className="flex w-full items-center justify-between gap-2 py-2 text-left hover:bg-[var(--surface-sunken)]"
                   onClick={() => setCloseDate(h.closeDate)}
                 >
                   <div>
@@ -784,7 +784,7 @@ function Kpi({
             ? "text-[#16a34a]"
             : "text-[var(--brand-deep)]";
   return (
-    <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-4 py-3">
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3">
       <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--muted)]">
         {label}
       </div>
@@ -814,7 +814,7 @@ function DenomTable({
       <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-[var(--muted)]">
         {title}
       </div>
-      <ul className="overflow-hidden rounded-lg border border-[rgba(32,48,80,0.12)]">
+      <ul className="overflow-hidden rounded-lg border border-[var(--border)]">
         {rows.map((meta) => {
           const line = denoms.find((d) => d.denomPaise === meta.denomPaise);
           const qty = line?.qty ?? 0;
@@ -822,7 +822,7 @@ function DenomTable({
           return (
             <li
               key={meta.denomPaise}
-              className="flex items-center gap-2 border-b border-[rgba(32,48,80,0.08)] px-2.5 py-1.5 last:border-b-0"
+              className="flex items-center gap-2 border-b border-[var(--border)] px-2.5 py-1.5 last:border-b-0"
             >
               <span className="w-12 text-xs font-semibold text-[var(--brand-deep)]">
                 {meta.label}
