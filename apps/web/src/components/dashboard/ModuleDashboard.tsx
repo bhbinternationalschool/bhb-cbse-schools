@@ -3,6 +3,18 @@
 import { useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  Cell,
+  LabelList,
+  Pie,
+  PieChart as RechartsPieChart,
+  ResponsiveContainer,
+  XAxis,
+} from "recharts";
+import {
   ErpMetricCard,
   ErpMetricGrid,
   ErpToolbar,
@@ -313,100 +325,55 @@ function withColors(series: DashboardChartPoint[]): DashboardChartPoint[] {
 
 function BarChartSvg({ series }: { series: DashboardChartPoint[] }) {
   const data = withColors(series).slice(0, 31);
-  const max = Math.max(1, ...data.map((d) => d.value));
   const [hovered, setHovered] = useState<number | null>(null);
-  const w = 560;
-  const h = 220;
-  const padL = 36;
-  const padB = 48;
-  const padT = 16;
-  const padR = 12;
-  const innerW = w - padL - padR;
-  const innerH = h - padT - padB;
-  const gap = data.length > 14 ? 4 : 8;
-  const barW = data.length ? (innerW - gap * (data.length - 1)) / data.length : 0;
+  const dense = data.length > 14;
 
   return (
     <div className="relative">
       <ChartHoverTooltip
         point={hovered != null ? data[hovered] ?? null : null}
       />
-      <svg viewBox={`0 0 ${w} ${h}`} className="h-auto w-full" role="img" aria-label="Bar chart">
-      <line
-        x1={padL}
-        y1={padT}
-        x2={padL}
-        y2={h - padB}
-        stroke="rgba(32,48,80,0.15)"
-        strokeWidth={1}
-      />
-      <line
-        x1={padL}
-        y1={h - padB}
-        x2={w - padR}
-        y2={h - padB}
-        stroke="rgba(32,48,80,0.15)"
-        strokeWidth={1}
-      />
-      {data.map((d, i) => {
-        const bh = (d.value / max) * innerH;
-        const x = padL + i * (barW + gap);
-        const y = padT + innerH - bh;
-        const active = hovered === i;
-        return (
-          <g
-            key={`${d.label}-${i}`}
-            onMouseEnter={() => setHovered(i)}
-            onMouseLeave={() => setHovered(null)}
-            className="cursor-pointer"
-          >
-            <rect
-              x={x}
-              y={y}
-              width={Math.max(barW, 4)}
-              height={Math.max(bh, 2)}
-              rx={6}
-              fill={d.color}
-              opacity={active ? 1 : hovered == null ? 1 : 0.45}
-              className="module-dash-bar"
-            />
-            {active && bh > 0 ? (
-              <rect
-                x={x - 1}
-                y={y - 1}
-                width={Math.max(barW, 4) + 2}
-                height={Math.max(bh, 2) + 2}
-                rx={7}
-                fill="none"
-                stroke="#c5a028"
-                strokeWidth={2}
-              />
-            ) : null}
-            {data.length <= 14 ? (
-              <text
-                x={x + barW / 2}
-                y={y - 6}
-                textAnchor="middle"
-                className="fill-[var(--brand-deep)]"
+      <ResponsiveContainer width="100%" height={220}>
+        <BarChart data={data} margin={{ top: 20, right: 12, left: 0, bottom: dense ? 8 : 0 }}>
+          <XAxis
+            dataKey="label"
+            tick={{ fontSize: dense ? 9 : 10, fill: "var(--muted)" }}
+            tickLine={false}
+            axisLine={{ stroke: "rgba(32,48,80,0.15)" }}
+            interval={0}
+            angle={dense ? -28 : 0}
+            textAnchor={dense ? "end" : "middle"}
+            height={dense ? 40 : 20}
+            tickFormatter={(label: string) =>
+              label.length > 10 ? `${label.slice(0, 9)}…` : label
+            }
+          />
+          <Bar dataKey="value" radius={[6, 6, 0, 0]} isAnimationActive={false}>
+            {!dense ? (
+              <LabelList
+                dataKey="value"
+                position="top"
+                formatter={(label) => formatCompact(Number(label))}
+                fill="var(--brand-deep)"
                 fontSize={10}
                 fontWeight={700}
-              >
-                {formatCompact(d.value)}
-              </text>
+              />
             ) : null}
-            <text
-              x={x + barW / 2}
-              y={h - padB + 16}
-              textAnchor="middle"
-              className="fill-[var(--muted)]"
-              fontSize={data.length > 14 ? 9 : 10}
-            >
-              {d.label.length > 10 ? `${d.label.slice(0, 9)}…` : d.label}
-            </text>
-          </g>
-        );
-      })}
-    </svg>
+            {data.map((d, i) => (
+              <Cell
+                key={`${d.label}-${i}`}
+                fill={d.color}
+                opacity={hovered == null || hovered === i ? 1 : 0.45}
+                stroke={hovered === i ? "#c5a028" : "none"}
+                strokeWidth={hovered === i ? 2 : 0}
+                className="cursor-pointer"
+                onMouseEnter={() => setHovered(i)}
+                onMouseLeave={() => setHovered(null)}
+              />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
     </div>
   );
 }
@@ -420,51 +387,16 @@ const MULTI_RING_LAYOUT: RingGeom[] = [
 
 const SINGLE_RING_LAYOUT: RingGeom = { outerR: 88, innerR: 52 };
 
-type DonutSlice = DashboardChartPoint & {
-  path: string;
-  pct: number;
-  ringIndex: number;
-  sliceIndex: number;
-  strokeW: number;
-};
-
 function ringGeom(ringCount: number, ringIndex: number): RingGeom {
   if (ringCount <= 1) return SINGLE_RING_LAYOUT;
   return MULTI_RING_LAYOUT[ringIndex] ?? MULTI_RING_LAYOUT[MULTI_RING_LAYOUT.length - 1]!;
 }
 
-function buildDonutSlices(
-  series: DashboardChartPoint[],
-  geom: RingGeom,
-  ringIndex: number,
-  cx = 120,
-  cy = 110,
-): DonutSlice[] {
-  const data = withColors(series).filter((d) => d.value > 0).slice(0, 6);
-  const total = data.reduce((s, d) => s + d.value, 0) || 1;
-  const midR = (geom.outerR + geom.innerR) / 2;
-  const strokeW = geom.outerR - geom.innerR;
-  const gap = data.length > 1 ? 0.06 : 0;
-  let angle = -Math.PI / 2;
-
-  return data.map((d, sliceIndex) => {
-    const sweep = (d.value / total) * Math.PI * 2;
-    const start = angle + gap / 2;
-    const end = angle + sweep - gap / 2;
-    angle += sweep;
-    const pct = Math.round((d.value / total) * 100);
-    const large = end - start > Math.PI ? 1 : 0;
-    const x1 = cx + midR * Math.cos(start);
-    const y1 = cy + midR * Math.sin(start);
-    const x2 = cx + midR * Math.cos(end);
-    const y2 = cy + midR * Math.sin(end);
-    const path =
-      sweep >= Math.PI * 2 - 0.02
-        ? `M ${cx} ${cy - midR} A ${midR} ${midR} 0 1 1 ${cx - 0.01} ${cy - midR}`
-        : `M ${x1} ${y1} A ${midR} ${midR} 0 ${large} 1 ${x2} ${y2}`;
-    return { ...d, path, pct, ringIndex, sliceIndex, strokeW };
-  });
-}
+type DonutRingData = {
+  id: string;
+  label: string;
+  series: DashboardChartPoint[];
+};
 
 function DonutChartSvg({
   rings,
@@ -474,128 +406,109 @@ function DonutChartSvg({
   center?: DashboardChartCenter;
 }) {
   const activeRings = rings.filter((r) => r.series.some((p) => p.value > 0));
-  const displayRings =
+  const displayRings: DonutRingData[] =
     activeRings.length > 0
       ? activeRings
       : [{ id: "empty", label: "", series: [{ label: "—", value: 0 }] }];
   const ringCount = displayRings.length;
-  const [hover, setHover] = useState<{
-    ring: number;
-    index: number;
-  } | null>(null);
+  const [hover, setHover] = useState<{ ring: number; index: number } | null>(null);
 
-  const allSlices = displayRings.flatMap((ring, ringIndex) =>
-    buildDonutSlices(ring.series, ringGeom(ringCount, ringIndex), ringIndex),
-  );
+  const coloredRings = displayRings.map((ring) => ({
+    ...ring,
+    series: withColors(ring.series).filter((p) => p.value > 0).slice(0, 6),
+  }));
 
   const outerTotal =
     displayRings[0]?.series.reduce((s, p) => s + (p.value > 0 ? p.value : 0), 0) ||
     1;
   const centerValue = center?.value ?? formatCompact(outerTotal);
   const centerLabel = center?.label ?? "total";
-  const holeR =
-    ringCount > 1
-      ? (MULTI_RING_LAYOUT[MULTI_RING_LAYOUT.length - 1]?.innerR ?? 26) - 2
-      : SINGLE_RING_LAYOUT.innerR - 2;
 
-  function sliceOpacity(slice: DonutSlice): number {
+  function sliceOpacity(ringIndex: number, index: number): number {
     if (!hover) return 1;
-    if (hover.ring === slice.ringIndex && hover.index === slice.sliceIndex) {
-      return 1;
-    }
-    if (hover.ring === 0 && slice.ringIndex === 1) {
-      const outerSlice = displayRings[0]?.series[hover.index];
+    if (hover.ring === ringIndex && hover.index === index) return 1;
+    if (hover.ring === 0 && ringIndex === 1) {
+      const outerPoint = coloredRings[0]?.series[hover.index];
       const linked =
-        outerSlice?.modeBreakup
-          ?.filter((m) => m.value > 0)
-          .map((m) => m.label) ?? [];
+        outerPoint?.modeBreakup?.filter((m) => m.value > 0).map((m) => m.label) ?? [];
       if (linked.length > 0) {
-        return linked.includes(slice.label) ? 1 : 0.18;
+        const thisLabel = coloredRings[ringIndex]?.series[index]?.label;
+        return thisLabel != null && linked.includes(thisLabel) ? 1 : 0.18;
       }
     }
-    if (hover.ring !== slice.ringIndex) return 0.32;
+    if (hover.ring !== ringIndex) return 0.32;
     return 0.32;
   }
 
-  const hoveredSlice =
-    hover != null
-      ? allSlices.find(
-          (s) => s.ringIndex === hover.ring && s.sliceIndex === hover.index,
-        ) ?? null
-      : null;
+  const hoveredPoint = hover ? coloredRings[hover.ring]?.series[hover.index] : null;
+  const hoveredRingTotal = hover
+    ? coloredRings[hover.ring]?.series.reduce((s, p) => s + p.value, 0) || 1
+    : 1;
 
   return (
     <div className="flex flex-col items-center gap-4 lg:flex-row lg:items-start">
-      <div className="relative shrink-0">
-        {hoveredSlice ? (
+      <div className="relative mx-auto shrink-0" style={{ width: 240, height: 220 }}>
+        {hoveredPoint ? (
           <div className="pointer-events-none absolute left-1/2 top-0 z-10 w-max max-w-[min(16rem,90vw)] -translate-x-1/2 -translate-y-1 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-3 py-2 text-center shadow-lg">
             <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted)]">
-              {displayRings[hoveredSlice.ringIndex]?.label || hoveredSlice.label}
+              {coloredRings[hover!.ring]?.label || hoveredPoint.label}
             </p>
             <p className="font-display text-base font-bold text-[var(--brand-deep)]">
-              {hoveredSlice.label}
+              {hoveredPoint.label}
             </p>
             <p className="tabular-nums text-sm font-semibold text-[var(--ink)]">
-              {formatCompact(hoveredSlice.value)} · {hoveredSlice.pct}%
+              {formatCompact(hoveredPoint.value)} ·{" "}
+              {Math.round((hoveredPoint.value / hoveredRingTotal) * 100)}%
             </p>
           </div>
         ) : null}
-        <svg
-          viewBox="0 0 240 220"
-          className="h-auto w-full max-w-[280px]"
-          role="img"
-          aria-label="Multi-ring donut chart"
-        >
-          {allSlices.map((s, i) => (
-            <path
-              key={`${s.ringIndex}-${s.label}-${i}`}
-              d={s.path}
-              fill="none"
-              stroke={s.color}
-              strokeWidth={s.strokeW}
-              strokeLinecap="round"
-              opacity={sliceOpacity(s)}
-              className="module-dash-slice transition-opacity duration-150"
-              onMouseEnter={() =>
-                setHover({ ring: s.ringIndex, index: s.sliceIndex })
-              }
-              onMouseLeave={() => setHover(null)}
-            >
-              <title>{`${s.label}: ${s.value} (${s.pct}%)`}</title>
-            </path>
-          ))}
-          <circle
-            cx={120}
-            cy={110}
-            r={holeR}
-            fill="var(--brand-cream)"
-            className="drop-shadow-sm"
-          />
-          <text
-            x={120}
-            y={106}
-            textAnchor="middle"
-            className="fill-[var(--brand-deep)]"
-            fontSize={ringCount > 1 ? 15 : 18}
-            fontWeight={800}
+        <ResponsiveContainer width="100%" height="100%">
+          <RechartsPieChart>
+            {coloredRings.map((ring, ringIndex) => {
+              const geom = ringGeom(ringCount, ringIndex);
+              return (
+                <Pie
+                  key={ring.id}
+                  data={ring.series}
+                  dataKey="value"
+                  nameKey="label"
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={geom.innerR}
+                  outerRadius={geom.outerR}
+                  paddingAngle={ring.series.length > 1 ? 2 : 0}
+                  stroke="none"
+                  isAnimationActive={false}
+                >
+                  {ring.series.map((p, i) => (
+                    <Cell
+                      key={`${ring.id}-${p.label}-${i}`}
+                      fill={p.color}
+                      opacity={sliceOpacity(ringIndex, i)}
+                      className="cursor-pointer transition-opacity duration-150"
+                      onMouseEnter={() => setHover({ ring: ringIndex, index: i })}
+                      onMouseLeave={() => setHover(null)}
+                    />
+                  ))}
+                </Pie>
+              );
+            })}
+          </RechartsPieChart>
+        </ResponsiveContainer>
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+          <span
+            className="font-display font-extrabold text-[var(--brand-deep)]"
+            style={{ fontSize: ringCount > 1 ? 15 : 18 }}
           >
             {centerValue}
-          </text>
-          <text
-            x={120}
-            y={124}
-            textAnchor="middle"
-            className="fill-[var(--muted)]"
-            fontSize={10}
-          >
-            {centerLabel}
-          </text>
-        </svg>
+          </span>
+          <span className="text-[10px] text-[var(--muted)]">{centerLabel}</span>
+        </div>
       </div>
       <div className="w-full space-y-4">
-        {displayRings.map((ring, ringIndex) => {
-          const ringSlices = allSlices.filter((s) => s.ringIndex === ringIndex);
-          if (!ringSlices.length) return null;
+        {coloredRings.map((ring, ringIndex) => {
+          if (!ring.series.length) return null;
+          const ringTotal = ring.series.reduce((s, p) => s + p.value, 0) || 1;
           return (
             <div key={ring.id}>
               {ring.label ? (
@@ -604,28 +517,26 @@ function DonutChartSvg({
                 </p>
               ) : null}
               <ul className="space-y-2 text-sm">
-                {ringSlices.map((s, i) => (
+                {ring.series.map((p, i) => (
                   <li
-                    key={`${ring.id}-${s.label}-${i}`}
+                    key={`${ring.id}-${p.label}-${i}`}
                     className="flex cursor-default items-center gap-2"
-                    onMouseEnter={() =>
-                      setHover({ ring: ringIndex, index: s.sliceIndex })
-                    }
+                    onMouseEnter={() => setHover({ ring: ringIndex, index: i })}
                     onMouseLeave={() => setHover(null)}
                   >
                     <span
                       className="h-3 w-3 shrink-0 rounded-full"
-                      style={{ background: s.color }}
+                      style={{ background: p.color }}
                       aria-hidden
                     />
                     <span className="min-w-0 flex-1 truncate font-medium text-[var(--ink)]">
-                      {s.label}
+                      {p.label}
                     </span>
                     <span className="tabular-nums text-[15px] font-bold text-[var(--brand-deep)]">
-                      {formatCompact(s.value)}
+                      {formatCompact(p.value)}
                     </span>
                     <span className="w-10 text-right tabular-nums text-[var(--muted)]">
-                      {s.pct}%
+                      {Math.round((p.value / ringTotal) * 100)}%
                     </span>
                   </li>
                 ))}
@@ -646,93 +557,64 @@ function PieChartSvg({ series }: { series: DashboardChartPoint[] }) {
 
 function TrendChartSvg({ series }: { series: DashboardChartPoint[] }) {
   const data = withColors(series).slice(0, 31);
-  const max = Math.max(1, ...data.map((d) => d.value));
-  const min = Math.min(0, ...data.map((d) => d.value));
-  const span = Math.max(1, max - min);
   const [hovered, setHovered] = useState<number | null>(null);
-  const w = 560;
-  const h = 220;
-  const padL = 36;
-  const padB = 48;
-  const padT = 20;
-  const padR = 16;
-  const innerW = w - padL - padR;
-  const innerH = h - padT - padB;
-
-  const points = data.map((d, i) => {
-    const x =
-      data.length === 1
-        ? padL + innerW / 2
-        : padL + (i / (data.length - 1)) * innerW;
-    const y = padT + innerH - ((d.value - min) / span) * innerH;
-    return { ...d, x, y };
-  });
-
-  const line = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
-  const area =
-    points.length > 0
-      ? `${line} L ${points[points.length - 1].x} ${h - padB} L ${points[0].x} ${h - padB} Z`
-      : "";
+  const gradientId = useId();
+  const dense = data.length > 14;
 
   return (
     <div className="relative">
       <ChartHoverTooltip
         point={hovered != null ? data[hovered] ?? null : null}
       />
-      <svg viewBox={`0 0 ${w} ${h}`} className="h-auto w-full" role="img" aria-label="Trend chart">
-      <defs>
-        <linearGradient id="moduleDashTrendFill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#203050" stopOpacity={0.28} />
-          <stop offset="100%" stopColor="#203050" stopOpacity={0.02} />
-        </linearGradient>
-      </defs>
-      <line
-        x1={padL}
-        y1={h - padB}
-        x2={w - padR}
-        y2={h - padB}
-        stroke="rgba(32,48,80,0.15)"
-      />
-      {area ? <path d={area} fill="url(#moduleDashTrendFill)" /> : null}
-      {line ? (
-        <path
-          d={line}
-          fill="none"
-          stroke="#203050"
-          strokeWidth={3}
-          strokeLinejoin="round"
-          strokeLinecap="round"
-          className="module-dash-trend"
-        />
-      ) : null}
-      {points.map((p, i) => (
-        <g
-          key={`${p.label}-${i}`}
-          onMouseEnter={() => setHovered(i)}
-          onMouseLeave={() => setHovered(null)}
-          className="cursor-pointer"
-        >
-          <circle
-            cx={p.x}
-            cy={p.y}
-            r={hovered === i ? 7 : 5}
-            fill="#c5a028"
-            stroke="#203050"
-            strokeWidth={2}
-            opacity={hovered == null || hovered === i ? 1 : 0.45}
+      <ResponsiveContainer width="100%" height={220}>
+        <AreaChart data={data} margin={{ top: 20, right: 16, left: 0, bottom: 0 }}>
+          <defs>
+            <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#203050" stopOpacity={0.28} />
+              <stop offset="100%" stopColor="#203050" stopOpacity={0.02} />
+            </linearGradient>
+          </defs>
+          <XAxis
+            dataKey="label"
+            tick={{ fontSize: dense ? 9 : 10, fill: "var(--muted)" }}
+            tickLine={false}
+            axisLine={{ stroke: "rgba(32,48,80,0.15)" }}
+            tickFormatter={(label: string) =>
+              label.length > 8 ? `${label.slice(0, 7)}…` : label
+            }
           />
-          <text
-            x={p.x}
-            y={h - padB + 16}
-            textAnchor="middle"
-            className="fill-[var(--muted)]"
-            fontSize={data.length > 14 ? 9 : 10}
-          >
-            {p.label.length > 8 ? `${p.label.slice(0, 7)}…` : p.label}
-          </text>
-        </g>
-      ))}
-    </svg>
+          <Area
+            type="linear"
+            dataKey="value"
+            stroke="#203050"
+            strokeWidth={3}
+            fill={`url(#${gradientId})`}
+            isAnimationActive={false}
+            dot={(props: { cx?: number; cy?: number; index?: number }) => {
+              const { cx, cy, index } = props;
+              if (cx == null || cy == null || index == null) {
+                return <g key={`dot-${index}`} />;
+              }
+              const active = hovered === index;
+              return (
+                <circle
+                  key={`dot-${index}`}
+                  cx={cx}
+                  cy={cy}
+                  r={active ? 7 : 5}
+                  fill="#c5a028"
+                  stroke="#203050"
+                  strokeWidth={2}
+                  opacity={hovered == null || active ? 1 : 0.45}
+                  className="cursor-pointer"
+                  onMouseEnter={() => setHovered(index)}
+                  onMouseLeave={() => setHovered(null)}
+                />
+              );
+            }}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
     </div>
   );
 }
