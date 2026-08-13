@@ -32,8 +32,15 @@ SUPABASE_URL="$(get_env NEXT_PUBLIC_SUPABASE_URL)"
 SUPABASE_ANON="$(get_env NEXT_PUBLIC_SUPABASE_ANON_KEY)"
 # Production deploy URL — never read localhost from .env.local
 APP_URL="${NEXT_PUBLIC_APP_URL_OVERRIDE:-https://bhbinternational.school}"
-DEMO_AUTH="${NEXT_PUBLIC_DEMO_AUTH_OVERRIDE:-$(get_env NEXT_PUBLIC_DEMO_AUTH)}"
-DEMO_AUTH="${DEMO_AUTH:-false}"
+# Demo auth mints parent/staff sessions with NO credential check — it must
+# NEVER be on in production. This used to default from .env.local (which is
+# 'true' for local dev), so any deploy that forgot the override silently
+# reopened the hole (it did, twice, on 2026-08-13). Production now defaults
+# OFF; enabling demo requires an explicit NEXT_PUBLIC_DEMO_AUTH_OVERRIDE=true.
+DEMO_AUTH="${NEXT_PUBLIC_DEMO_AUTH_OVERRIDE:-false}"
+if [[ "$DEMO_AUTH" != "false" ]]; then
+  echo "WARNING: deploying with demo auth ENABLED (NEXT_PUBLIC_DEMO_AUTH=$DEMO_AUTH) — anyone can sign in without credentials."
+fi
 
 # Optional server runtime secrets (WhatsApp, Supabase admin, job guards)
 SUPABASE_SERVICE_ROLE_KEY="$(get_env SUPABASE_SERVICE_ROLE_KEY)"

@@ -54,6 +54,24 @@ export function parseMetaStatusUpdates(body: unknown): WaDeliveryStatusEvent[] {
   return out;
 }
 
+/** Count failed deliveries in the trailing `hours` window. Throws (does not
+ * return 0) on any lookup failure — a caller surfacing this as an anomaly
+ * count must never confuse "couldn't check" with "genuinely zero failures". */
+export async function countRecentWaFailures(hours = 24): Promise<number> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) throw new Error("[waDeliveryLog] no server tenant context");
+  const { sb, tenantId } = ctx;
+  const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+  const { count, error } = await sb
+    .from("wa_message_delivery")
+    .select("id", { count: "exact", head: true })
+    .eq("tenant_id", tenantId)
+    .eq("status", "failed")
+    .gte("event_at", cutoff);
+  if (error) throw new Error(`[waDeliveryLog] countRecentWaFailures: ${error.message}`);
+  return count ?? 0;
+}
+
 /** Append delivery-status events. Best-effort — a logging failure must never
  * break webhook processing for the caller's other work (inbound routing etc). */
 export async function recordDeliveryStatuses(

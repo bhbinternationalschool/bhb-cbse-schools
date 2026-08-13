@@ -6,6 +6,8 @@ import "../core/config/app_config.dart";
 import "../core/theme/app_theme.dart";
 import "../features/auth/login_screen.dart";
 import "../features/home/home_screen.dart";
+import "../features/staff/driver_home_screen.dart";
+import "../features/staff/principal_home_screen.dart";
 import "../features/staff/teacher_home_screen.dart";
 
 class CbseSchoolApp extends StatefulWidget {
@@ -46,13 +48,33 @@ class _CbseSchoolAppState extends State<CbseSchoolApp> {
           onLogout: () => context.go("/login"),
         ),
       ),
+      GoRoute(
+        path: "/principal",
+        builder: (context, state) => PrincipalHomeScreen(
+          api: _api,
+          onLogout: () => context.go("/login"),
+        ),
+      ),
+      GoRoute(
+        path: "/driver",
+        builder: (context, state) => DriverHomeScreen(
+          api: _api,
+          onLogout: () => context.go("/login"),
+        ),
+      ),
     ],
   );
 
   Future<void> _goHomeForPersona() async {
     final persona = await _api.persona();
     if (!mounted) return;
-    _router.go(persona == "staff" ? "/staff" : "/home");
+    if (persona == "field") {
+      _router.go("/driver");
+    } else if (persona == "staff") {
+      _router.go(await _api.isPrincipalLike() ? "/principal" : "/staff");
+    } else {
+      _router.go("/home");
+    }
   }
 
   @override

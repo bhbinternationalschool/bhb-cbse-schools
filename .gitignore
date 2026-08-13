@@ -45,3 +45,6 @@ cbse_school_mobile/android/.gradle/
 cbse_school_mobile/android/local.properties
 cbse_school_mobile/**/*.iml
 cbse_school_mobile/.idea/
+
+# Play Store build artifacts (regenerable) and assets
+cbse_school_mobile/play-store-assets/app-release.aab

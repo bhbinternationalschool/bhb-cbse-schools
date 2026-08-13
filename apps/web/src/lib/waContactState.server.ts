@@ -12,8 +12,10 @@
 import { getServerTenantContext } from "@/lib/serverTenant";
 
 /** Local copy of waSend.ts's normalizer — kept independent so waSend.ts can
- * import from this module (opt-out/window checks) without a circular import. */
-function toE164India(mobile: string): string {
+ * import from this module (opt-out/window checks) without a circular import.
+ * Exported so callers needing to match numbers against listOptedOutSet's
+ * keys can normalize identically. */
+export function toE164India(mobile: string): string {
   const d = (mobile || "").replace(/\D/g, "");
   if (d.length === 10) return `91${d}`;
   if (d.startsWith("91") && d.length === 12) return d;
@@ -107,6 +109,38 @@ export async function isOptedOut(mobile: string): Promise<boolean> {
   } catch (e) {
     console.warn("[waContactState] isOptedOut lookup failed", e);
     return false;
+  }
+}
+
+/** Batch form of isOptedOut — one query for many numbers instead of one
+ * round trip per number (a broadcast to hundreds of households must not
+ * serialize hundreds of sequential DB calls). Fails open: a query error
+ * returns an empty set (nobody excluded) rather than blocking the caller. */
+export async function listOptedOutSet(mobiles: string[]): Promise<Set<string>> {
+  const e164s = Array.from(
+    new Set(mobiles.map(toE164India).filter((m): m is string => !!m)),
+  );
+  if (e164s.length === 0) return new Set();
+  try {
+    const ctx = await getServerTenantContext();
+    if (!ctx) return new Set();
+    const { sb, tenantId } = ctx;
+    const { data, error } = await sb
+      .from("wa_contact_state")
+      .select("mobile_e164")
+      .eq("tenant_id", tenantId)
+      .not("opted_out_at", "is", null)
+      .in("mobile_e164", e164s);
+    if (error) {
+      console.warn("[waContactState] listOptedOutSet query failed", error.message);
+      return new Set();
+    }
+    return new Set(
+      (data as { mobile_e164: string }[]).map((r) => r.mobile_e164),
+    );
+  } catch (e) {
+    console.warn("[waContactState] listOptedOutSet lookup failed", e);
+    return new Set();
   }
 }
 
