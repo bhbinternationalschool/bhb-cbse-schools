@@ -213,7 +213,7 @@ migration, independent of the rest of the checklist):
 | Home | `dashboard/{PrincipalCockpit,TeacherHome,SchoolHomeDashboard}.tsx` | Done (Phase 3) |
 | Students | `students/StudentsWorkspace.tsx` | Done (Phase 3) |
 | Attendance | `attendance/AttendanceWorkspace.tsx` | Done (Phase 3) |
-| Fees (Fee Take) | `fees/FeeTakeWorkspace.tsx` | Partial — header/toolbar/search-card only, deliberately (live payment code, no staging); full sweep still pending |
+| Fees (Fee Take) | `fees/FeeTakeWorkspace.tsx` | Done — full color/token sweep, verified against live data in both themes. Deliberately fixed-literal: the always-navy "Counter collection" hero (inputs/buttons only read correctly against that background), the 5-tone categorical StatTile system (same class as erp-roster.tsx's METRIC_TONES), WhatsApp-brand teal badges/button, and the PDF-branded download button. FeeReceiptSheet.tsx untouched — confirmed pixel-identical across themes. |
 | Staff | `staff/StaffWorkspace.tsx` (+11 sub-panels) | Done (Charts Phase 1; full color/token sweep + all 5 raw `<table>`s converted to ErpTableShell kit; StaffProfileForm.tsx's printable ID-card sheet and its embedded QR deliberately left on fixed literals — same call as Fees' receipt flow) |
 | Login | `login/LoginPanel.tsx` | Done (Phase 3) |
 | Payroll | `payroll/PayrollWorkspace.tsx` | Done |
