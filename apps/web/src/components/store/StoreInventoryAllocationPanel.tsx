@@ -11,6 +11,7 @@ import {
   categoryLabel,
   deleteStoreInventoryAllocation,
   infraLevelLabel,
+  listOverAllocatedItems,
   loadStore,
   seedStoreIfEmpty,
   upsertStoreInventoryAllocation,
@@ -64,6 +65,12 @@ export function StoreInventoryAllocationPanel() {
       infraLabel: infraLevelLabel(a.infraLevelId, store),
     }));
   }, [allocations, items]);
+
+  const overAllocated = useMemo(
+    () => listOverAllocatedItems(loadStore()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allocations, items],
+  );
 
   function resetForm() {
     setEditId(null);
@@ -203,6 +210,20 @@ export function StoreInventoryAllocationPanel() {
           ) : null}
         </div>
       </div>
+
+      {overAllocated.length > 0 ? (
+        <p className="rounded-lg border border-[rgba(180,83,9,0.25)] bg-[rgba(180,83,9,0.08)] px-3 py-2 text-[12px] text-[#9a3412]">
+          Over-allocated:{" "}
+          {overAllocated
+            .slice(0, 4)
+            .map(
+              (o) =>
+                `${o.itemName} (${o.totalAllocated} allocated, ${o.stockOnHand} in stock, over by ${o.overBy})`,
+            )
+            .join(" · ")}
+          {overAllocated.length > 4 ? ` +${overAllocated.length - 4} more` : ""}
+        </p>
+      ) : null}
 
       <div className={card}>
         <h3 className="text-sm font-bold text-[var(--brand-deep)]">
