@@ -253,6 +253,11 @@ export type StoreAssetAllocation = {
   itemId: string;
   assetTag: string;
   assignedTo: string;
+  /** Linked StoreInfraLevel — the primary location. */
+  infraLevelId: string;
+  /** Free-text sub-detail within the infra level, e.g. "Room 12". Kept
+   * alongside infraLevelId rather than replaced by it, so pre-existing
+   * free-text-only rows stay fully readable. */
   location: string;
   qty: number;
   note: string;
@@ -758,6 +763,7 @@ function normalizeAssetAllocation(
     itemId: a.itemId ?? "",
     assetTag: a.assetTag ?? "",
     assignedTo: a.assignedTo ?? "",
+    infraLevelId: a.infraLevelId ?? "",
     location: a.location ?? "",
     qty: Math.max(1, Math.floor(Number(a.qty) || 1)),
     note: a.note ?? "",
@@ -2716,6 +2722,7 @@ export function upsertStoreAssetAllocation(input: {
   itemId: string;
   assetTag: string;
   assignedTo: string;
+  infraLevelId?: string;
   location?: string;
   qty?: number;
   note?: string;
@@ -2730,6 +2737,7 @@ export function upsertStoreAssetAllocation(input: {
     itemId: input.itemId,
     assetTag: input.assetTag.trim(),
     assignedTo: input.assignedTo.trim(),
+    infraLevelId: input.infraLevelId ?? "",
     location: input.location?.trim() ?? "",
     qty: input.qty ?? 1,
     note: input.note ?? "",
