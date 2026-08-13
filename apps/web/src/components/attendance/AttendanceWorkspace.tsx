@@ -418,14 +418,14 @@ export function AttendanceWorkspace() {
         </p>
       ) : null}
       {notice ? (
-        <p className="mt-3 rounded-lg bg-[rgba(32,48,80,0.06)] px-3 py-2 text-sm text-[var(--brand-deep)]">
+        <p className="mt-3 rounded-lg bg-[var(--surface-sunken)] px-3 py-2 text-sm text-[var(--brand-deep)]">
           {notice}
         </p>
       ) : null}
 
       <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,0.65fr)]">
         <div className="space-y-4">
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4 pb-24 sm:pb-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 pb-24 sm:pb-4">
             <div className="flex flex-wrap items-end justify-between gap-3">
               <h2 className="text-sm font-bold text-[var(--brand-deep)]">
                 Mark register
@@ -454,8 +454,8 @@ export function AttendanceWorkspace() {
                         }}
                         className={`min-h-11 rounded-xl px-3.5 py-2 text-sm font-bold ${
                           active
-                            ? "bg-[var(--brand-deep)] text-white shadow-sm"
-                            : "border border-[rgba(32,48,80,0.15)] bg-[rgba(32,48,80,0.04)] text-[var(--brand-deep)]"
+                            ? "bg-[var(--primary)] text-[var(--primary-foreground)] shadow-sm"
+                            : "border border-[var(--border)] bg-[var(--surface-sunken)] text-[var(--brand-deep)]"
                         }`}
                       >
                         {c.label}
@@ -581,7 +581,7 @@ export function AttendanceWorkspace() {
                   </button>
                   <button
                     type="button"
-                    className="min-h-11 rounded-xl border border-[rgba(32,48,80,0.18)] px-3 py-2.5 text-sm font-semibold text-[var(--brand-deep)] disabled:opacity-40"
+                    className="min-h-11 rounded-xl border border-[var(--border)] px-3 py-2.5 text-sm font-semibold text-[var(--brand-deep)] disabled:opacity-40"
                     disabled={holidayBlocks || lockBlocksTeacher}
                     onClick={() => {
                       setMarks(defaultMarksForRoster(roster, existing));
@@ -661,7 +661,7 @@ export function AttendanceWorkspace() {
                   </p>
                 ) : (
                   <ErpTableShell className="mt-3">
-                    <ul className="max-h-[28rem] divide-y divide-[rgba(32,48,80,0.08)] overflow-y-auto">
+                    <ul className="max-h-[28rem] divide-y divide-[var(--border)] overflow-y-auto">
                     {roster.map((st) => {
                       const mark =
                         marks.find((m) => m.studentId === st.id) ?? {
@@ -699,10 +699,10 @@ export function AttendanceWorkspace() {
                                   title={s.label}
                                   aria-pressed={active}
                                   disabled={lockBlocksTeacher}
-                                  className={`min-h-10 min-w-[2.75rem] rounded-lg px-2 py-2 text-xs font-bold disabled:opacity-40 ${
+                                  className={`min-h-11 min-w-[2.75rem] rounded-lg px-2 py-2 text-xs font-bold disabled:opacity-40 ${
                                     active
                                       ? `${tone.bg} ${tone.text}`
-                                      : "bg-[rgba(32,48,80,0.06)] text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.1)]"
+                                      : "bg-[var(--surface-sunken)] text-[var(--brand-deep)] hover:bg-[var(--border)]"
                                   }`}
                                   onClick={() => setStatus(st.id, s.code)}
                                 >
@@ -763,7 +763,7 @@ export function AttendanceWorkspace() {
                 </button>
 
                 {/* Sticky phone/tablet action bar */}
-                <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[rgba(32,48,80,0.12)] bg-[rgba(248,248,240,0.96)] p-3 backdrop-blur-md sm:hidden">
+                <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[var(--border)] bg-[var(--card)]/95 p-3 backdrop-blur-md sm:hidden">
                   <div className="mx-auto flex max-w-lg gap-2">
                     <button
                       type="button"
@@ -812,7 +812,7 @@ export function AttendanceWorkspace() {
         </div>
 
         <div className="space-y-4">
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-bold text-[var(--brand-deep)]">
               Status key
             </h2>
@@ -833,7 +833,7 @@ export function AttendanceWorkspace() {
             </ul>
           </div>
 
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-bold text-[var(--brand-deep)]">
               Recent registers
             </h2>
@@ -842,14 +842,14 @@ export function AttendanceWorkspace() {
                 No registers saved yet.
               </p>
             ) : (
-              <ul className="mt-2 max-h-80 divide-y divide-[rgba(32,48,80,0.08)] overflow-y-auto">
+              <ul className="mt-2 max-h-80 divide-y divide-[var(--border)] overflow-y-auto">
                 {recent.map((r) => {
                   const s = summarizeMarks(r.marks);
                   return (
                     <li key={r.id} className="flex items-center gap-2">
                       <button
                         type="button"
-                        className="min-w-0 flex-1 py-2 text-left hover:bg-[rgba(32,48,80,0.03)]"
+                        className="min-w-0 flex-1 py-2 text-left hover:bg-[var(--surface-sunken)]"
                         onClick={() => {
                           setClassId(r.classId);
                           setSectionId(r.sectionId);
