@@ -462,7 +462,7 @@ function Overview({
             key={c.label}
             type="button"
             onClick={() => onGo(c.tab)}
-            className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-4 py-4 text-left transition hover:border-[rgba(197,160,40,0.45)]"
+            className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-4 text-left transition hover:border-[rgba(197,160,40,0.45)]"
           >
             <div className="text-2xl font-semibold text-[var(--brand-deep)]">
               {c.value}
@@ -475,14 +475,14 @@ function Overview({
         <button
           type="button"
           onClick={() => onGo("school")}
-          className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm font-medium text-[var(--brand-deep)]"
+          className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-medium text-[var(--brand-deep)]"
         >
           School profile →
         </button>
         <button
           type="button"
           onClick={() => onGo("fee-structure")}
-          className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm font-medium text-[var(--brand-deep)]"
+          className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-medium text-[var(--brand-deep)]"
         >
           Edit fee structure →
         </button>
@@ -495,7 +495,7 @@ function Overview({
         <button
           type="button"
           onClick={() => onGo("holidays")}
-          className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm font-medium text-[var(--brand-deep)]"
+          className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-medium text-[var(--brand-deep)]"
         >
           Holidays →
         </button>
@@ -508,21 +508,21 @@ function Overview({
         <button
           type="button"
           onClick={() => onGo("staff")}
-          className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm font-medium text-[var(--brand-deep)]"
+          className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-medium text-[var(--brand-deep)]"
         >
           Staff setup →
         </button>
         <button
           type="button"
           onClick={() => onGo("roles")}
-          className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm font-medium text-[var(--brand-deep)]"
+          className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-medium text-[var(--brand-deep)]"
         >
           Roles &amp; permissions →
         </button>
         <button
           type="button"
           onClick={() => onGo("leave")}
-          className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm font-medium text-[var(--brand-deep)]"
+          className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-medium text-[var(--brand-deep)]"
         >
           Leave setup →
         </button>
@@ -633,7 +633,7 @@ function CampusesPanel({
       tables={
         <MastersTablesRow cols={1}>
           <MastersTableCard title="Campuses">
-            <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+            <ul className="divide-y divide-[var(--border)]">
               {state.campuses.map((c) => (
                 <li
                   key={c.id}
@@ -747,7 +747,7 @@ function CampusesPanel({
               {editingId ? (
                 <button
                   type="button"
-                  className="rounded-xl border border-[rgba(32,48,80,0.2)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)]"
+                  className="rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)]"
                   onClick={resetForm}
                 >
                   Cancel
@@ -933,7 +933,7 @@ function ClassesPanel({
               const rows = classesInGroup(state.classes, g.code);
               return (
                 <div key={g.code}>
-                  <div className="sticky top-0 z-[1] border-b border-[rgba(32,48,80,0.08)] bg-[rgba(32,48,80,0.05)] px-4 py-2">
+                  <div className="sticky top-0 z-[1] border-b border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-2">
                     <div className="text-xs font-bold text-[var(--brand-deep)]">
                       {g.label}{" "}
                       <span className="font-semibold text-[var(--muted)]">
@@ -942,7 +942,7 @@ function ClassesPanel({
                     </div>
                     <p className="text-[10px] text-[var(--muted)]">{g.nepHint}</p>
                   </div>
-                  <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+                  <ul className="divide-y divide-[var(--border)]">
                     {rows.map((c) => {
                       const count = state.sections.filter(
                         (s) => s.classId === c.id && s.isActive,
@@ -952,7 +952,7 @@ function ClassesPanel({
                         <li
                           key={c.id}
                           className={`flex items-start justify-between gap-2 px-4 py-2.5 ${
-                            active ? "bg-[rgba(32,48,80,0.06)]" : ""
+                            active ? "bg-[var(--surface-sunken)]" : ""
                           }`}
                         >
                           <button
@@ -1012,7 +1012,7 @@ function ClassesPanel({
           </MastersTableCard>
 
           <MastersTableCard title={`Sections · ${selected?.name ?? "—"}`}>
-            <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+            <ul className="divide-y divide-[var(--border)]">
               {sectionsForClass.map((s) => (
                 <li
                   key={s.id}
@@ -1110,7 +1110,7 @@ function ClassesPanel({
               {editingClassId ? (
                 <button
                   type="button"
-                  className="rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-2 text-xs font-semibold text-[var(--brand-deep)]"
+                  className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-semibold text-[var(--brand-deep)]"
                   onClick={resetClassForm}
                 >
                   Cancel
@@ -1144,7 +1144,7 @@ function ClassesPanel({
               {editingSectionId ? (
                 <button
                   type="button"
-                  className="rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-2 text-xs font-semibold text-[var(--brand-deep)]"
+                  className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-semibold text-[var(--brand-deep)]"
                   onClick={resetSectionForm}
                 >
                   Cancel
@@ -1353,7 +1353,7 @@ function FeeHeadsPanel({
       tables={
         <MastersTablesRow cols={2}>
           <MastersTableCard title="Fee head categories">
-            <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+            <ul className="divide-y divide-[var(--border)]">
               {categories.map((c) => {
                 const used = state.feeHeads.filter(
                   (h) => h.category === c.code,
@@ -1422,7 +1422,7 @@ function FeeHeadsPanel({
             </ul>
           </MastersTableCard>
           <MastersTableCard title="Fee heads">
-            <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+            <ul className="divide-y divide-[var(--border)]">
               {state.feeHeads
                 .slice()
                 .sort((a, b) => a.sortOrder - b.sortOrder)
@@ -1523,7 +1523,7 @@ function FeeHeadsPanel({
                 {catEditingId ? (
                   <button
                     type="button"
-                    className="rounded-xl border border-[rgba(32,48,80,0.2)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)]"
+                    className="rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)]"
                     onClick={resetCatForm}
                   >
                     Cancel
@@ -1625,7 +1625,7 @@ function FeeHeadsPanel({
                 {editingId ? (
                   <button
                     type="button"
-                    className="rounded-xl border border-[rgba(32,48,80,0.2)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)]"
+                    className="rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)]"
                     onClick={resetForm}
                   >
                     Cancel

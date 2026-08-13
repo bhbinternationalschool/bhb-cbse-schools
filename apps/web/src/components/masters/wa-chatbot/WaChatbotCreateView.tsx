@@ -68,7 +68,7 @@ export function WaChatbotCreateView({
             className={`rounded-xl border p-4 text-left ${
               !templateId
                 ? "border-[#0f766e] bg-[rgba(15,118,110,0.06)]"
-                : "border-[rgba(32,48,80,0.12)] bg-white"
+                : "border-[var(--border)] bg-[var(--card)]"
             }`}
             onClick={() => setTemplateId("")}
           >
@@ -84,7 +84,7 @@ export function WaChatbotCreateView({
               className={`rounded-xl border p-4 text-left ${
                 templateId === b.id
                   ? "border-[#0f766e] bg-[rgba(15,118,110,0.06)]"
-                  : "border-[rgba(32,48,80,0.12)] bg-white"
+                  : "border-[var(--border)] bg-[var(--card)]"
               }`}
               onClick={() => {
                 setTemplateId(b.id);
@@ -127,7 +127,7 @@ export function WaChatbotCreateView({
           Change template
         </button>
       </div>
-      <div className="max-w-lg space-y-3 rounded-xl border bg-white p-4">
+      <div className="max-w-lg space-y-3 rounded-xl border bg-[var(--card)] p-4">
         <label className="block text-[11px] font-semibold text-[var(--muted)]">
           Name
           <input

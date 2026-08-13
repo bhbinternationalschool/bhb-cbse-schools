@@ -102,7 +102,7 @@ function SlabEditor({
             <span className="text-[11px] text-[var(--muted)]">% p.a.</span>
             <button
               type="button"
-              className="ml-auto text-[11px] font-medium text-[#b42318]"
+              className="ml-auto text-[11px] font-medium text-[var(--danger)]"
               onClick={() => onChange(slabs.filter((_, j) => j !== i))}
             >
               Remove
@@ -143,7 +143,7 @@ export function StatutoryConfigPanel({
     <div className="space-y-6">
       <MastersTablesRow>
         <MastersTableCard title="EPF">
-          <dl className="divide-y divide-[rgba(32,48,80,0.08)] text-sm">
+          <dl className="divide-y divide-[var(--border)] text-sm">
             {(
               [
                 ["Establishment ID", draft.epfEstablishmentId || "—"],
@@ -160,7 +160,7 @@ export function StatutoryConfigPanel({
           </dl>
         </MastersTableCard>
         <MastersTableCard title="ESIC">
-          <dl className="divide-y divide-[rgba(32,48,80,0.08)] text-sm">
+          <dl className="divide-y divide-[var(--border)] text-sm">
             {(
               [
                 ["Employer code", draft.esicEmployerCode || "—"],
@@ -263,7 +263,7 @@ export function StatutoryConfigPanel({
 
           <button
             type="button"
-            className="rounded-lg bg-[var(--brand-deep)] px-4 py-2 text-sm font-semibold text-white"
+            className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-[var(--primary-foreground)]"
             onClick={() =>
               commit(
                 { ...state, statutoryConfig: normalizeStatutoryConfig(draft) },

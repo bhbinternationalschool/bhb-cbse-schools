@@ -26,10 +26,10 @@ function qualityTone(rating: string | null): "good" | "warn" | "danger" | "muted
 }
 
 const TONE_CLASS: Record<string, string> = {
-  good: "bg-[rgba(21,128,61,0.1)] text-[#15803d]",
+  good: "bg-[rgba(21,128,61,0.1)] text-[var(--success)]",
   warn: "bg-[rgba(180,131,0,0.12)] text-[#8a6400]",
   danger: "bg-[rgba(180,35,24,0.1)] text-[var(--danger)]",
-  muted: "bg-[rgba(32,48,80,0.06)] text-[var(--muted)]",
+  muted: "bg-[var(--surface-sunken)] text-[var(--muted)]",
 };
 
 /** Live WhatsApp Business account status — quality rating, verification,
@@ -65,7 +65,7 @@ export function WaAccountHealthCard() {
   const tone = qualityTone(report?.phoneHealth.qualityRating ?? null);
 
   return (
-    <div className="mb-4 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+    <div className="mb-4 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-bold text-[var(--brand-deep)]">
           WhatsApp account health
@@ -112,7 +112,7 @@ export function WaAccountHealthCard() {
           </div>
 
           {report.issues.length > 0 ? (
-            <ul className="mt-3 space-y-1.5 border-t border-[rgba(32,48,80,0.08)] pt-3">
+            <ul className="mt-3 space-y-1.5 border-t border-[var(--border)] pt-3">
               {report.issues.map((issue, i) => (
                 <li key={issue} className="text-[11px]">
                   <span className="font-semibold text-[var(--danger)]">
@@ -125,7 +125,7 @@ export function WaAccountHealthCard() {
               ))}
             </ul>
           ) : (
-            <p className="mt-2 text-[11px] text-[#15803d]">
+            <p className="mt-2 text-[11px] text-[var(--success)]">
               No setup issues detected.
             </p>
           )}

@@ -93,7 +93,7 @@ export function SalarySetupPanel() {
 
   return (
     <div className="space-y-4">
-      <p className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] px-4 py-3 text-sm text-[var(--muted)]">
+      <p className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-3 text-sm text-[var(--muted)]">
         Salary heads, structure templates, pay cycle, and staff assignment.
         Completeness:{" "}
         <span className="font-semibold text-[var(--brand-deep)]">
@@ -254,7 +254,7 @@ function PayCyclePanel({
       <div className="mt-3 flex flex-wrap gap-2">
         <button
           type="button"
-          className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
+          className="rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-[var(--primary-foreground)]"
           onClick={() =>
             commit(
               {
@@ -269,7 +269,7 @@ function PayCyclePanel({
         </button>
         <button
           type="button"
-          className="rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
+          className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
           onClick={() =>
             setForm((f) =>
               normalizeSalarySettings({
@@ -323,7 +323,7 @@ function HeadsPanel({
     <>
       <MastersTablesRow>
         <MastersTableCard title={`Salary heads (${heads.filter((h) => h.isActive).length})`}>
-          <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+          <ul className="divide-y divide-[var(--border)]">
             {heads.map((h) => (
               <li
                 key={h.id}
@@ -395,7 +395,7 @@ function HeadsPanel({
         </div>
         <button
           type="button"
-          className="mt-3 rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
+          className="mt-3 rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-[var(--primary-foreground)]"
           onClick={add}
         >
           Add head
@@ -558,7 +558,7 @@ function StructuresPanel({
 
   return (
     <>
-      <p className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] px-4 py-3 text-sm text-[var(--muted)]">
+      <p className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-3 text-sm text-[var(--muted)]">
         Create as many structures as the school needs (e.g. PRT ₹18k, TGT ₹25k,
         PGT ₹32k, Clerk ₹12k) — each with its own amounts. Assign staff under{" "}
         <span className="font-semibold text-[var(--brand-deep)]">
@@ -571,7 +571,7 @@ function StructuresPanel({
         <MastersTableCard
           title={`Structures (${state.structures.length})`}
         >
-          <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+          <ul className="divide-y divide-[var(--border)]">
             {state.structures.map((s) => {
               const amounts = computeStructureAmounts(state, s, 0);
               const selected = s.id === editId;
@@ -579,7 +579,7 @@ function StructuresPanel({
                 <li
                   key={s.id}
                   className={`flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 ${
-                    selected ? "bg-[rgba(32,48,80,0.04)]" : ""
+                    selected ? "bg-[var(--surface-sunken)]" : ""
                   }`}
                 >
                   <button
@@ -682,7 +682,7 @@ function StructuresPanel({
               {preview.deductions.map((e) => (
                 <div
                   key={e.head.id}
-                  className="flex justify-between text-[#b42318]"
+                  className="flex justify-between text-[var(--danger)]"
                 >
                   <span>{e.head.name}</span>
                   <span>−₹{e.amount.toLocaleString("en-IN")}</span>
@@ -787,7 +787,7 @@ function StructuresPanel({
         <div className="mt-3 flex flex-wrap items-end gap-2">
           <button
             type="button"
-            className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
+            className="rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-[var(--primary-foreground)]"
             onClick={addStructure}
           >
             Create structure
@@ -818,7 +818,7 @@ function StructuresPanel({
               </label>
               <button
                 type="button"
-                className="rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
+                className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
                 onClick={cloneStructure}
               >
                 Clone with new code/name
@@ -845,7 +845,7 @@ function StructuresPanel({
             />
           </div>
 
-          <ul className="mb-3 divide-y divide-[rgba(32,48,80,0.08)] rounded-lg border border-[rgba(32,48,80,0.1)]">
+          <ul className="mb-3 divide-y divide-[var(--border)] rounded-lg border border-[var(--border)]">
             {editing.lines.map((l) => {
               const h = state.heads.find((x) => x.id === l.headId);
               return (
@@ -887,7 +887,7 @@ function StructuresPanel({
                   />
                   <button
                     type="button"
-                    className="text-[11px] font-semibold text-[#b42318]"
+                    className="text-[11px] font-semibold text-[var(--danger)]"
                     onClick={() =>
                       updateEditing({
                         lines: editing.lines.filter(
@@ -911,7 +911,7 @@ function StructuresPanel({
           <div className="mb-3 flex flex-wrap gap-2">
             <button
               type="button"
-              className="rounded-lg border border-[rgba(32,48,80,0.18)] px-2.5 py-1.5 text-[11px] font-semibold"
+              className="rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-[11px] font-semibold"
               onClick={applyPackToEditing}
             >
               Replace with pack amounts above
@@ -950,7 +950,7 @@ function StructuresPanel({
           </div>
           <button
             type="button"
-            className="mt-3 rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
+            className="mt-3 rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-[var(--primary-foreground)]"
             onClick={addLine}
           >
             Add / update head line
@@ -1065,7 +1065,7 @@ function AssignPanel({
 
   return (
     <MastersTableCard title="Staff → structure & PF / ESIC">
-      <p className="border-b border-[rgba(32,48,80,0.08)] px-4 py-2 text-[11px] text-[var(--muted)]">
+      <p className="border-b border-[var(--border)] px-4 py-2 text-[11px] text-[var(--muted)]">
         Changes are{" "}
         <strong className="text-[var(--brand-deep)]">not saved</strong> until
         you click{" "}
@@ -1074,7 +1074,7 @@ function AssignPanel({
         <strong className="text-[var(--brand-deep)]">Cancel</strong> to
         revert. PF / ESIC: both, PF only, ESIC only, or neither.
         {dirtyCount > 0 ? (
-          <span className="ml-1 font-semibold text-[#b45309]">
+          <span className="ml-1 font-semibold text-[var(--warning)]">
             · {dirtyCount} unsaved row{dirtyCount > 1 ? "s" : ""}
           </span>
         ) : null}
@@ -1082,7 +1082,7 @@ function AssignPanel({
       <div className="overflow-x-auto">
         <table className="w-full min-w-[860px] text-left text-sm">
           <thead>
-            <tr className="border-b border-[rgba(32,48,80,0.1)] text-[11px] text-[var(--muted)]">
+            <tr className="border-b border-[var(--border)] text-[11px] text-[var(--muted)]">
               <th className="px-3 py-2 font-medium">Staff</th>
               <th className="px-3 py-2 font-medium">Saved</th>
               <th className="px-3 py-2 font-medium">Structure</th>
@@ -1116,7 +1116,7 @@ function AssignPanel({
               return (
                 <tr
                   key={s.id}
-                  className={`border-b border-[rgba(32,48,80,0.06)] ${
+                  className={`border-b border-[var(--border)] ${
                     dirty ? "bg-[rgba(197,160,40,0.08)]" : ""
                   }`}
                 >
@@ -1200,7 +1200,7 @@ function AssignPanel({
                       <button
                         type="button"
                         disabled={!dirty}
-                        className="rounded-lg bg-[var(--brand-deep)] px-2.5 py-1 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+                        className="rounded-lg bg-[var(--primary)] px-2.5 py-1 text-[11px] font-semibold text-[var(--primary-foreground)] disabled:cursor-not-allowed disabled:opacity-40"
                         onClick={() => assignStaff(s.id)}
                       >
                         Assign
@@ -1208,7 +1208,7 @@ function AssignPanel({
                       <button
                         type="button"
                         disabled={!dirty}
-                        className="rounded-lg border border-[rgba(32,48,80,0.18)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)] disabled:cursor-not-allowed disabled:opacity-40"
+                        className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)] disabled:cursor-not-allowed disabled:opacity-40"
                         onClick={() => cancelDraft(s.id)}
                       >
                         Cancel

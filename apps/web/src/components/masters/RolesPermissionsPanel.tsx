@@ -295,7 +295,7 @@ export function RolesPermissionsPanel() {
 
   return (
     <div className="space-y-4">
-      <p className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] px-4 py-3 text-sm text-[var(--muted)]">
+      <p className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-3 text-sm text-[var(--muted)]">
         {isSuperAdminSession(session) ? (
           <>
             <strong>Super admin</strong> — assign roles to staff (Principal,
@@ -338,7 +338,7 @@ export function RolesPermissionsPanel() {
                 Role
               </span>
               <select
-                className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm"
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
                 value={roleId}
                 onChange={(e) => setRoleId(e.target.value)}
               >
@@ -358,15 +358,15 @@ export function RolesPermissionsPanel() {
             ) : null}
           </div>
           {selected ? (
-            <div className="overflow-x-auto rounded-lg border border-[rgba(32,48,80,0.1)]">
+            <div className="overflow-x-auto rounded-lg border border-[var(--border)]">
               {RBAC_MODULE_GROUPS.map((grp) => {
                 const modules = RBAC_MODULES.filter(
                   (m) => (m.group || "core") === grp.id,
                 );
                 if (modules.length === 0) return null;
                 return (
-                  <div key={grp.id} className="border-b border-[rgba(32,48,80,0.06)] last:border-0">
-                    <p className="bg-[rgba(32,48,80,0.04)] px-2 py-1.5 text-[10px] font-bold uppercase tracking-wide text-[var(--muted)]">
+                  <div key={grp.id} className="border-b border-[var(--border)] last:border-0">
+                    <p className="bg-[var(--surface-sunken)] px-2 py-1.5 text-[10px] font-bold uppercase tracking-wide text-[var(--muted)]">
                       {grp.label}
                     </p>
                     <table className="min-w-full text-left text-[11px]">
@@ -388,7 +388,7 @@ export function RolesPermissionsPanel() {
                         {modules.map((m) => (
                           <tr
                             key={m.id}
-                            className="border-t border-[rgba(32,48,80,0.06)]"
+                            className="border-t border-[var(--border)]"
                           >
                             <td className="px-2 py-1.5 font-medium text-[var(--brand-deep)]">
                               {m.label}
@@ -428,7 +428,7 @@ export function RolesPermissionsPanel() {
           >
             <div className="flex flex-wrap gap-2">
               <select
-                className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm"
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
                 value={roleId}
                 onChange={(e) => setRoleId(e.target.value)}
               >
@@ -439,27 +439,27 @@ export function RolesPermissionsPanel() {
                 ))}
               </select>
               <input
-                className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-2 text-sm"
+                className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm"
                 placeholder="new_code"
                 value={cloneCode}
                 onChange={(e) => setCloneCode(e.target.value)}
               />
               <input
-                className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-2 text-sm"
+                className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm"
                 placeholder="Display name"
                 value={cloneName}
                 onChange={(e) => setCloneName(e.target.value)}
               />
               <button
                 type="button"
-                className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-sm font-semibold text-white"
+                className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--primary-foreground)]"
                 onClick={runClone}
               >
                 Clone
               </button>
               <button
                 type="button"
-                className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-2 text-sm"
+                className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm"
                 onClick={resetBuiltIns}
               >
                 Reset built-ins
@@ -481,7 +481,7 @@ export function RolesPermissionsPanel() {
                 {state.roles.map((r) => (
                   <tr
                     key={r.id}
-                    className="border-t border-[rgba(32,48,80,0.06)]"
+                    className="border-t border-[var(--border)]"
                   >
                     <td className="px-3 py-2 font-mono text-[12px]">{r.code}</td>
                     <td className="px-3 py-2">{r.name}</td>
@@ -524,7 +524,7 @@ export function RolesPermissionsPanel() {
           >
             <div className="flex flex-wrap gap-2">
               <select
-                className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm"
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
                 value={assignStaffId}
                 onChange={(e) => setAssignStaffId(e.target.value)}
               >
@@ -536,7 +536,7 @@ export function RolesPermissionsPanel() {
                 ))}
               </select>
               <select
-                className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm"
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
                 value={assignRoleId}
                 onChange={(e) => setAssignRoleId(e.target.value)}
               >
@@ -550,20 +550,20 @@ export function RolesPermissionsPanel() {
               </select>
               <input
                 type="date"
-                className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-2 text-sm"
+                className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm"
                 value={assignExpires}
                 onChange={(e) => setAssignExpires(e.target.value)}
                 title="Expires on"
               />
               <input
-                className="min-w-[10rem] flex-1 rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-2 text-sm"
+                className="min-w-[10rem] flex-1 rounded-lg border border-[var(--border)] px-3 py-2 text-sm"
                 placeholder="Note (e.g. substitute XI-A)"
                 value={assignNote}
                 onChange={(e) => setAssignNote(e.target.value)}
               />
               <button
                 type="button"
-                className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-sm font-semibold text-white"
+                className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--primary-foreground)]"
                 onClick={addAssignment}
               >
                 Assign
@@ -580,7 +580,7 @@ export function RolesPermissionsPanel() {
                   Copy from
                 </span>
                 <select
-                  className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm"
+                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
                   value={copyFromStaffId}
                   onChange={(e) => setCopyFromStaffId(e.target.value)}
                 >
@@ -597,7 +597,7 @@ export function RolesPermissionsPanel() {
                   Copy to
                 </span>
                 <select
-                  className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm"
+                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
                   value={copyToStaffId}
                   onChange={(e) => setCopyToStaffId(e.target.value)}
                 >
@@ -619,7 +619,7 @@ export function RolesPermissionsPanel() {
               </label>
               <button
                 type="button"
-                className="self-end rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-sm font-semibold text-white"
+                className="self-end rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--primary-foreground)]"
                 onClick={runCopyStaffAccess}
                 disabled={!copyFromStaffId || !copyToStaffId}
               >
@@ -650,7 +650,7 @@ export function RolesPermissionsPanel() {
                     return (
                       <tr
                         key={a.id}
-                        className="border-t border-[rgba(32,48,80,0.06)]"
+                        className="border-t border-[var(--border)]"
                       >
                         <td className="px-3 py-2">
                           {staff?.fullName || a.staffId}
@@ -698,7 +698,7 @@ export function RolesPermissionsPanel() {
                 {summary.map((row) => (
                   <tr
                     key={row.capability}
-                    className="border-t border-[rgba(32,48,80,0.06)]"
+                    className="border-t border-[var(--border)]"
                   >
                     <td className="px-3 py-2">{row.capability}</td>
                     <td className="px-3 py-2 text-[12px] text-[var(--muted)]">
@@ -728,12 +728,12 @@ export function RolesPermissionsPanel() {
                   {staffRows.map((r) => (
                     <tr
                       key={r.staffId}
-                      className="border-t border-[rgba(32,48,80,0.06)]"
+                      className="border-t border-[var(--border)]"
                     >
                       <td className="px-3 py-2">
                         {r.staffName}
                         {r.expiresSoon ? (
-                          <span className="ml-2 text-[10px] font-semibold text-[#b42318]">
+                          <span className="ml-2 text-[10px] font-semibold text-[var(--danger)]">
                             expires soon
                           </span>
                         ) : null}
@@ -770,7 +770,7 @@ export function RolesPermissionsPanel() {
                 {state.audit.map((e) => (
                   <tr
                     key={e.id}
-                    className="border-t border-[rgba(32,48,80,0.06)]"
+                    className="border-t border-[var(--border)]"
                   >
                     <td className="px-3 py-2 text-[11px] text-[var(--muted)]">
                       {e.at.slice(0, 19).replace("T", " ")}

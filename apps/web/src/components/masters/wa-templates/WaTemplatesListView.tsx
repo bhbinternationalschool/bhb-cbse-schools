@@ -117,13 +117,13 @@ export function WaTemplatesListView({
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 border-b border-[rgba(32,48,80,0.1)] pb-2">
+      <div className="flex flex-wrap gap-2 border-b border-[var(--border)] pb-2">
         <button
           type="button"
           className={`rounded-lg px-4 py-2 text-[12px] font-semibold ${
             tab === "approved"
-              ? "bg-[var(--brand-deep)] text-white"
-              : "bg-[rgba(32,48,80,0.06)] text-[var(--brand-deep)]"
+              ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+              : "bg-[var(--surface-sunken)] text-[var(--brand-deep)]"
           }`}
           onClick={() => setTab("approved")}
         >
@@ -133,8 +133,8 @@ export function WaTemplatesListView({
           type="button"
           className={`rounded-lg px-4 py-2 text-[12px] font-semibold ${
             tab === "drafts"
-              ? "bg-[var(--brand-deep)] text-white"
-              : "bg-[rgba(32,48,80,0.06)] text-[var(--brand-deep)]"
+              ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+              : "bg-[var(--surface-sunken)] text-[var(--brand-deep)]"
           }`}
           onClick={() => setTab("drafts")}
         >
@@ -199,12 +199,12 @@ export function WaTemplatesListView({
               : "No drafts or pending templates."}
           </div>
         ) : (
-          <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+          <ul className="divide-y divide-[var(--border)]">
             {filtered.map((t) => (
               <li key={t.id}>
                 <button
                   type="button"
-                  className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left hover:bg-[rgba(32,48,80,0.04)]"
+                  className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left hover:bg-[var(--surface-sunken)]"
                   onClick={() => onEdit(t.id)}
                 >
                   <div className="min-w-0 flex-1">

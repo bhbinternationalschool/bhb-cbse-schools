@@ -104,7 +104,7 @@ export function AutomationSchedulePicker({
     ];
 
   return (
-    <div className="space-y-3 rounded-lg border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.02)] p-3">
+    <div className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] p-3">
       <div>
         <p className="text-[12px] font-semibold text-[var(--brand-deep)]">
           When should this run?
@@ -123,7 +123,7 @@ export function AutomationSchedulePicker({
             className={`rounded-lg border px-3 py-2 text-left text-[11px] disabled:opacity-50 ${
               triggerType === opt.id
                 ? "border-[#0f766e] bg-[rgba(15,118,110,0.08)] font-semibold text-[var(--brand-deep)]"
-                : "border-[rgba(32,48,80,0.15)] bg-white text-[var(--muted)]"
+                : "border-[var(--border)] bg-[var(--card)] text-[var(--muted)]"
             }`}
             onClick={() => onTriggerTypeChange?.(opt.id)}
           >

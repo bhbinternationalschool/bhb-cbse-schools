@@ -66,7 +66,7 @@ export function WaTemplateContentHelper({
   }
 
   return (
-    <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.02)] p-3 space-y-3">
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-3 space-y-3">
       <div>
         <p className="text-[12px] font-semibold text-[var(--brand-deep)]">
           Write with helper
@@ -83,7 +83,7 @@ export function WaTemplateContentHelper({
             key={s.id}
             type="button"
             disabled={readOnly}
-            className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2.5 py-1 text-[10px] font-semibold text-[var(--brand-deep)] hover:border-[#0f766e] disabled:opacity-50"
+            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-1 text-[10px] font-semibold text-[var(--brand-deep)] hover:border-[#0f766e] disabled:opacity-50"
             onClick={() => onApply(s.body, s.footer)}
           >
             {s.label}

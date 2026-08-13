@@ -357,7 +357,7 @@ export function FeeStructurePanel({
   return (
     <div className="space-y-4">
       <CopyFeeSetupBanner state={state} commit={commit} ay={ay} />
-      <p className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] px-3 py-2 text-[11px] leading-snug text-[var(--muted)]">
+      <p className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2 text-[11px] leading-snug text-[var(--muted)]">
         <strong className="text-[var(--brand-deep)]">
           Session {ay} · New vs old assignment:
         </strong>{" "}
@@ -396,10 +396,10 @@ export function FeeStructurePanel({
               No groups for this tab
             </div>
           ) : (
-            <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+            <ul className="divide-y divide-[var(--border)]">
               {bandSections.map((section) => (
                 <li key={section.key}>
-                  <div className="sticky top-0 z-[1] border-b border-[rgba(32,48,80,0.08)] bg-[#eef2f8] px-4 py-2.5">
+                  <div className="sticky top-0 z-[1] border-b border-[var(--border)] bg-[#eef2f8] px-4 py-2.5">
                     <div className="text-xs font-bold uppercase tracking-wide text-[var(--brand-deep)]">
                       {section.label}
                       <span className="ml-1.5 font-semibold text-[var(--brand-mid)]">
@@ -412,7 +412,7 @@ export function FeeStructurePanel({
                       No group in this band
                     </p>
                   ) : (
-                    <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+                    <ul className="divide-y divide-[var(--border)]">
                       {section.groups.map((g) => {
                         const on = g.id === groupId;
                         const classLabel =
@@ -428,8 +428,8 @@ export function FeeStructurePanel({
                               onClick={() => setGroupId(g.id)}
                               className={`w-full px-4 py-3 text-left transition ${
                                 on
-                                  ? "bg-[rgba(32,48,80,0.08)]"
-                                  : "hover:bg-[rgba(32,48,80,0.04)]"
+                                  ? "bg-[var(--surface-sunken)]"
+                                  : "hover:bg-[var(--surface-sunken)]"
                               }`}
                             >
                               <div className="flex items-center gap-1.5">
@@ -444,7 +444,7 @@ export function FeeStructurePanel({
                                 </span>
                                 {g.structurePublishedAt ? (
                                   <span
-                                    className="rounded bg-[rgba(21,128,61,0.12)] px-1 py-0.5 text-[9px] font-semibold text-[#15803d]"
+                                    className="rounded bg-[rgba(21,128,61,0.12)] px-1 py-0.5 text-[9px] font-semibold text-[var(--success)]"
                                     title="Published"
                                   >
                                     Live
@@ -496,7 +496,7 @@ export function FeeStructurePanel({
           </div>
 
           {group ? (
-            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-3 py-2.5">
+            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2.5">
               <label className="flex items-center gap-2 text-xs text-[var(--brand-deep)]">
                 <span className="text-[var(--muted)]">Class scope</span>
                 <select
@@ -551,7 +551,7 @@ export function FeeStructurePanel({
                 {impact.unassignedMatching > 0 ? (
                   <button
                     type="button"
-                    className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2.5 py-1 text-[11px] font-semibold"
+                    className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-1 text-[11px] font-semibold"
                     onClick={onAssignStudents}
                   >
                     Assign to matching students
@@ -559,14 +559,14 @@ export function FeeStructurePanel({
                 ) : null}
                 <button
                   type="button"
-                  className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2.5 py-1 text-[11px] font-semibold"
+                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-1 text-[11px] font-semibold"
                   onClick={onSyncGroup}
                 >
                   Sync this group
                 </button>
                 <button
                   type="button"
-                  className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2.5 py-1 text-[11px] font-semibold"
+                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-1 text-[11px] font-semibold"
                   onClick={onSyncAllByType}
                 >
                   Sync all by type + class
@@ -580,7 +580,7 @@ export function FeeStructurePanel({
                 </button>
                 <Link
                   href="/fees"
-                  className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)]"
+                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)]"
                 >
                   Open Fee Take →
                 </Link>
@@ -594,7 +594,7 @@ export function FeeStructurePanel({
           ) : null}
 
           {!groupId ? (
-            <p className="rounded-xl border border-dashed border-[rgba(32,48,80,0.2)] bg-white px-4 py-10 text-center text-sm text-[var(--muted)]">
+            <p className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--card)] px-4 py-10 text-center text-sm text-[var(--muted)]">
               No {STUDENT_TYPES.find((t) => t.value === tab)?.label ?? tab}{" "}
               groups yet — create one under Fee groups.
             </p>
@@ -720,13 +720,13 @@ function MonthCard({
 
   return (
     <div
-      className={`flex flex-col rounded-xl border bg-white ${
+      className={`flex flex-col rounded-xl border bg-[var(--card)] ${
         isFirst
           ? "border-[rgba(197,160,40,0.55)] shadow-[0_0_0_1px_rgba(197,160,40,0.12)]"
-          : "border-[rgba(32,48,80,0.12)]"
+          : "border-[var(--border)]"
       }`}
     >
-      <div className="flex items-start justify-between gap-2 border-b border-[rgba(32,48,80,0.08)] px-3 py-2.5">
+      <div className="flex items-start justify-between gap-2 border-b border-[var(--border)] px-3 py-2.5">
         <div>
           <div className="text-sm font-bold text-[var(--brand-deep)]">
             {code}
@@ -736,7 +736,7 @@ function MonthCard({
               </span>
             ) : null}
             {classScopeLabel ? (
-              <span className="ml-1.5 rounded bg-[rgba(32,48,80,0.08)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--brand-mid)]">
+              <span className="ml-1.5 rounded bg-[var(--surface-sunken)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--brand-mid)]">
                 {classScopeLabel}
               </span>
             ) : null}
@@ -750,7 +750,7 @@ function MonthCard({
         </div>
       </div>
 
-      <ul className="min-h-[72px] flex-1 divide-y divide-[rgba(32,48,80,0.06)]">
+      <ul className="min-h-[72px] flex-1 divide-y divide-[var(--border)]">
         {lines.map((l) => {
           const freq = resolveFrequency(l.feeHeadId);
           const copyLabel = feeFrequencyScheduleLabel(freq);
@@ -807,7 +807,7 @@ function MonthCard({
         ) : null}
       </ul>
 
-      <div className="border-t border-[rgba(32,48,80,0.08)] p-2">
+      <div className="border-t border-[var(--border)] p-2">
         {open ? (
           <form onSubmit={submit} className="space-y-2">
             <select
@@ -862,7 +862,7 @@ function MonthCard({
           <button
             type="button"
             onClick={() => setOpen(true)}
-            className="w-full rounded-lg border border-dashed border-[rgba(32,48,80,0.25)] py-1.5 text-xs font-medium text-[var(--brand-mid)] hover:border-[var(--brand-gold)]"
+            className="w-full rounded-lg border border-dashed border-[var(--border)] py-1.5 text-xs font-medium text-[var(--brand-mid)] hover:border-[var(--brand-gold)]"
           >
             + Add fee head
             {classScopeLabel ? ` (${classScopeLabel})` : ""}

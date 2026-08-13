@@ -208,7 +208,7 @@ function TemplateEditor({
         </div>
 
         {needsMediaHeader ? (
-          <div className="rounded-lg border border-[rgba(32,48,80,0.1)] p-2">
+          <div className="rounded-lg border border-[var(--border)] p-2">
             <p className="text-[11px] font-semibold text-[var(--brand-deep)]">
               Header media upload
             </p>
@@ -295,7 +295,7 @@ function TemplateEditor({
         </label>
 
         {carousel.length > 0 ? (
-          <div className="rounded-lg border border-[rgba(32,48,80,0.1)] p-2">
+          <div className="rounded-lg border border-[var(--border)] p-2">
             <p className="mb-2 text-[11px] font-semibold text-[var(--brand-deep)]">
               Carousel cards ({carousel.length})
             </p>
@@ -303,7 +303,7 @@ function TemplateEditor({
               {carousel.map((c, idx) => (
                 <li
                   key={c.id}
-                  className="rounded-lg border border-[rgba(32,48,80,0.08)] bg-white p-2"
+                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-2"
                 >
                   <p className="text-[10px] font-bold text-[var(--muted)]">
                     Card {idx + 1}

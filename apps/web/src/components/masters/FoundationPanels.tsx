@@ -166,7 +166,7 @@ export function CompletenessDashboard({
   }
 
   return (
-    <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">
@@ -182,7 +182,7 @@ export function CompletenessDashboard({
               type="button"
               disabled={busy}
               onClick={runComplete}
-              className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-[11px] font-semibold text-white disabled:opacity-50"
+              className="rounded-lg bg-[var(--primary)] px-3 py-2 text-[11px] font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
             >
               {busy ? "Completing…" : "Complete masters setup"}
             </button>
@@ -198,7 +198,7 @@ export function CompletenessDashboard({
             <div className="text-2xl font-semibold text-[var(--brand-deep)]">
               {percent}%
             </div>
-            <div className="h-1.5 w-28 overflow-hidden rounded-full bg-[rgba(32,48,80,0.08)]">
+            <div className="h-1.5 w-28 overflow-hidden rounded-full bg-[var(--surface-sunken)]">
               <div
                 className="h-full rounded-full bg-[var(--brand-gold)]"
                 style={{ width: `${percent}%` }}
@@ -208,7 +208,7 @@ export function CompletenessDashboard({
         </div>
       </div>
       {lastActions && lastActions.length > 0 ? (
-        <div className="mt-3 rounded-lg border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] px-3 py-2">
+        <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2">
           <p className="text-[11px] font-semibold text-[var(--brand-deep)]">
             Last complete run
           </p>
@@ -229,7 +229,7 @@ export function CompletenessDashboard({
           )}
         </div>
       ) : null}
-      <ul className="mt-4 divide-y divide-[rgba(32,48,80,0.08)]">
+      <ul className="mt-4 divide-y divide-[var(--border)]">
         {items.map((item) => (
           <li
             key={item.id}
@@ -239,7 +239,7 @@ export function CompletenessDashboard({
               <div className="flex items-center gap-2">
                 <span
                   className={`inline-block h-2 w-2 rounded-full ${
-                    item.ok ? "bg-[var(--ok)]" : "bg-[#dc2626]"
+                    item.ok ? "bg-[var(--ok)]" : "bg-[var(--danger)]"
                   }`}
                 />
                 <span className="text-sm font-medium text-[var(--brand-deep)]">
@@ -316,7 +316,7 @@ export function SchoolProfilePanel({
       tables={
         <MastersTablesRow>
           <MastersTableCard title="Identity & address">
-            <dl className="divide-y divide-[rgba(32,48,80,0.08)] text-sm">
+            <dl className="divide-y divide-[var(--border)] text-sm">
               {(
                 [
                   ["Legal name", draft.legalName],
@@ -340,7 +340,7 @@ export function SchoolProfilePanel({
             </dl>
           </MastersTableCard>
           <MastersTableCard title="Contact & social">
-            <dl className="divide-y divide-[rgba(32,48,80,0.08)] text-sm">
+            <dl className="divide-y divide-[var(--border)] text-sm">
               {(
                 [
                   ["Office phone", draft.phone || "—"],
@@ -507,7 +507,7 @@ export function SchoolProfilePanel({
 
             <button
               type="button"
-              className="rounded-lg bg-[var(--brand-deep)] px-4 py-2 text-sm font-semibold text-white"
+              className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-[var(--primary-foreground)]"
               onClick={() =>
                 commit(
                   { ...state, schoolProfile: draft },
@@ -632,7 +632,7 @@ export function AcademicPanel({
       tables={
         <MastersTablesRow>
           <MastersTableCard title="Academic years">
-            <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+            <ul className="divide-y divide-[var(--border)]">
               {state.academicYears.map((y) => (
                 <li
                   key={y.id}
@@ -667,7 +667,7 @@ export function AcademicPanel({
             </ul>
           </MastersTableCard>
           <MastersTableCard title="Terms">
-            <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+            <ul className="divide-y divide-[var(--border)]">
               {state.academicTerms
                 .slice()
                 .sort((a, b) => a.sortOrder - b.sortOrder)
@@ -731,7 +731,7 @@ export function AcademicPanel({
             </div>
             <button
               type="button"
-              className="mt-3 rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
+              className="mt-3 rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-[var(--primary-foreground)]"
               onClick={addYear}
             >
               Add academic year
@@ -777,7 +777,7 @@ export function AcademicPanel({
             </div>
             <button
               type="button"
-              className="mt-3 rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
+              className="mt-3 rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-[var(--primary-foreground)]"
               onClick={addTerm}
             >
               Add term
@@ -1161,7 +1161,7 @@ export function SubjectsPanel({
       intro="Pick a class group to open only that stage’s subject configuration (NEP pack, map, linking). Other groups stay closed."
       tables={
         <>
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
                 <h2 className="text-sm font-bold text-[var(--brand-deep)]">
@@ -1198,8 +1198,8 @@ export function SubjectsPanel({
                     onClick={() => openClassGroup(g.code)}
                     className={`rounded-xl border px-3 py-3 text-left transition ${
                       on
-                        ? "border-[var(--brand-deep)] bg-[var(--brand-deep)] text-white shadow-md ring-2 ring-[var(--brand-gold)] ring-offset-2"
-                        : "border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.03)] text-[var(--brand-deep)] hover:border-[rgba(197,160,40,0.5)]"
+                        ? "border-[var(--brand-deep)] bg-[var(--primary)] text-[var(--primary-foreground)] shadow-md ring-2 ring-[var(--brand-gold)] ring-offset-2"
+                        : "border-[var(--border)] bg-[var(--surface-sunken)] text-[var(--brand-deep)] hover:border-[rgba(197,160,40,0.5)]"
                     }`}
                   >
                     <div className="text-sm font-bold">{g.label}</div>
@@ -1218,7 +1218,7 @@ export function SubjectsPanel({
                       {g.nepHint}
                     </div>
                     {on ? (
-                      <span className="mt-2 inline-block rounded bg-white/20 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide">
+                      <span className="mt-2 inline-block rounded bg-[var(--card)]/20 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide">
                         Open
                       </span>
                     ) : null}
@@ -1229,7 +1229,7 @@ export function SubjectsPanel({
           </div>
 
           {!classGroup ? (
-            <p className="rounded-xl border border-dashed border-[rgba(32,48,80,0.2)] bg-white px-4 py-8 text-center text-sm text-[var(--muted)]">
+            <p className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--card)] px-4 py-8 text-center text-sm text-[var(--muted)]">
               Select a class group above to open its NEP suggestions, class–subject
               map, and linking form.
             </p>
@@ -1251,7 +1251,7 @@ export function SubjectsPanel({
                 {(classGroup === "SECONDARY" || classGroup === "SENIOR") && (
                   <button
                     type="button"
-                    className="rounded-lg border border-[#0f766e] bg-white px-3 py-2 text-xs font-bold text-[#0f766e]"
+                    className="rounded-lg border border-[#0f766e] bg-[var(--card)] px-3 py-2 text-xs font-bold text-[#0f766e]"
                     onClick={seedCartOfferings}
                   >
                     {ncfCartOfferingsReady(state)
@@ -1273,7 +1273,7 @@ export function SubjectsPanel({
             </div>
 
             <div className="mt-3 grid gap-3 lg:grid-cols-[1.1fr_0.9fr]">
-              <div className="rounded-lg bg-white/80 p-3">
+              <div className="rounded-lg bg-[var(--card)]/80 p-3">
                 <p className="text-xs font-semibold text-[var(--brand-deep)]">
                   {nepPack.label} · ages {nepPack.ages}
                 </p>
@@ -1298,7 +1298,7 @@ export function SubjectsPanel({
                   {groupClasses.map((c) => c.name).join(" · ") || "—"}
                 </p>
               </div>
-              <div className="rounded-lg bg-white/80 p-3">
+              <div className="rounded-lg bg-[var(--card)]/80 p-3">
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <p className="text-xs font-semibold text-[var(--brand-deep)]">
                     Checklist · periods / week
@@ -1337,7 +1337,7 @@ export function SubjectsPanel({
                           <span
                             className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${
                               status === "present"
-                                ? "bg-[rgba(22,163,74,0.15)] text-[#15803d]"
+                                ? "bg-[rgba(22,163,74,0.15)] text-[var(--success)]"
                                 : "bg-[rgba(220,38,38,0.1)] text-[#b91c1c]"
                             }`}
                           >
@@ -1358,7 +1358,7 @@ export function SubjectsPanel({
           </div>
 
           {classGroup === "SENIOR" ? (
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h2 className="text-sm font-bold text-[var(--brand-deep)]">
@@ -1375,7 +1375,7 @@ export function SubjectsPanel({
               </div>
               <button
                 type="button"
-                className="shrink-0 rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-xs font-bold text-white"
+                className="shrink-0 rounded-lg bg-[var(--primary)] px-3 py-2 text-xs font-bold text-[var(--primary-foreground)]"
                 onClick={applyStreams}
               >
                 Sync streams + XI–XII subjects
@@ -1388,15 +1388,15 @@ export function SubjectsPanel({
                   key={st.id}
                   className={`rounded-xl border px-3 py-3 ${
                     st.isActive
-                      ? "border-[rgba(32,48,80,0.18)] bg-white"
-                      : "border-[rgba(32,48,80,0.08)] bg-[rgba(32,48,80,0.02)] opacity-70"
+                      ? "border-[var(--border)] bg-[var(--card)]"
+                      : "border-[var(--border)] bg-[var(--surface-sunken)] opacity-70"
                   }`}
                 >
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm font-bold text-[var(--brand-deep)]">
                       {st.nameEn}
                     </span>
-                    <span className="rounded bg-[rgba(32,48,80,0.08)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--muted)]">
+                    <span className="rounded bg-[var(--surface-sunken)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--muted)]">
                       {st.traditionalLabel}
                     </span>
                     {st.code === "MULTI" ? (
@@ -1476,7 +1476,7 @@ export function SubjectsPanel({
           <MastersTableCard
             title={`CBSE groups · ${activeGroupDef?.shortLabel ?? ""}`}
           >
-            <p className="border-b border-[rgba(32,48,80,0.08)] px-4 py-2 text-[11px] leading-snug text-[var(--muted)]">
+            <p className="border-b border-[var(--border)] px-4 py-2 text-[11px] leading-snug text-[var(--muted)]">
               Same CBSE / NCF groups for every class. Nur–VIII use this as the
               common curriculum (no student choice). IX–XII optional picks use
               the same groups. Change a subject’s group anytime.
@@ -1489,13 +1489,13 @@ export function SubjectsPanel({
             ) : null}
             {subjectsByCbse.map(({ group, subjects }) => (
               <div key={group.id}>
-                <div className="sticky top-0 z-[1] border-b border-[rgba(32,48,80,0.08)] bg-[rgba(32,48,80,0.05)] px-4 py-2">
+                <div className="sticky top-0 z-[1] border-b border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-2">
                   <div className="text-xs font-bold text-[var(--brand-deep)]">
                     {group.label}
                   </div>
                   <p className="text-[10px] text-[var(--muted)]">{group.hint}</p>
                 </div>
-                <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+                <ul className="divide-y divide-[var(--border)]">
                   {subjects.map((s) => {
                     const isChild = !!s.parentId;
                     const isGroup = isSubjectGroup(state.subjects, s.id);
@@ -1506,7 +1506,7 @@ export function SubjectsPanel({
                       <li
                         key={s.id}
                         className={`flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 ${
-                          isChild ? "bg-[rgba(32,48,80,0.02)]" : ""
+                          isChild ? "bg-[var(--surface-sunken)]" : ""
                         }`}
                       >
                         <div className={isChild ? "pl-5" : ""}>
@@ -1521,7 +1521,7 @@ export function SubjectsPanel({
                             </span>
                           ) : null}
                           {isChild ? (
-                            <span className="ml-2 rounded bg-[rgba(32,48,80,0.08)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--muted)]">
+                            <span className="ml-2 rounded bg-[var(--surface-sunken)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--muted)]">
                               Component
                             </span>
                           ) : null}
@@ -1531,7 +1531,7 @@ export function SubjectsPanel({
                             </span>
                           ) : null}
                           {linked ? (
-                            <span className="ml-2 rounded bg-[rgba(32,48,80,0.1)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--brand-mid)]">
+                            <span className="ml-2 rounded bg-[var(--surface-sunken)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--brand-mid)]">
                               Linked
                             </span>
                           ) : null}
@@ -1596,10 +1596,10 @@ export function SubjectsPanel({
             ) : null}
             {linksByCbse.map(({ group, rows }) => (
               <div key={group.id}>
-                <div className="sticky top-0 z-[1] border-b border-[rgba(32,48,80,0.08)] bg-[rgba(32,48,80,0.05)] px-4 py-2 text-xs font-bold text-[var(--brand-deep)]">
+                <div className="sticky top-0 z-[1] border-b border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-2 text-xs font-bold text-[var(--brand-deep)]">
                   {group.shortLabel}
                 </div>
-                <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+                <ul className="divide-y divide-[var(--border)]">
                   {rows.map(({ link: l, subject: sub }) => {
                     const cls = state.classes.find((c) => c.id === l.classId);
                     const parent = sub.parentId
@@ -1758,7 +1758,7 @@ export function SubjectsPanel({
             </div>
             <button
               type="button"
-              className="mt-3 rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
+              className="mt-3 rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-[var(--primary-foreground)]"
               onClick={addSubject}
             >
               {parentId ? "Add component" : "Add subject"}
@@ -1805,7 +1805,7 @@ export function SubjectsPanel({
                     </button>
                   </span>
                 </div>
-                <div className="flex max-h-48 flex-wrap gap-1.5 overflow-y-auto rounded-xl border border-[rgba(32,48,80,0.12)] p-2">
+                <div className="flex max-h-48 flex-wrap gap-1.5 overflow-y-auto rounded-xl border border-[var(--border)] p-2">
                   {groupRelatedSubjects
                     .filter((s) => s.isActive)
                     .map((s) => {
@@ -1830,9 +1830,9 @@ export function SubjectsPanel({
                             s.parentId ? "ml-2" : ""
                           } ${
                             on
-                              ? "bg-[var(--brand-deep)] text-white"
+                              ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
                               : already
-                                ? "bg-[rgba(32,48,80,0.06)] text-[var(--muted)] ring-1 ring-[rgba(32,48,80,0.12)]"
+                                ? "bg-[var(--surface-sunken)] text-[var(--muted)] ring-1 ring-[var(--border)]"
                                 : isGroup
                                   ? "bg-[rgba(15,118,110,0.12)] text-[#0f766e]"
                                   : "bg-[var(--surface)] text-[var(--brand-deep)]"
@@ -1884,7 +1884,7 @@ export function SubjectsPanel({
                 </label>
                 <button
                   type="button"
-                  className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"
+                  className="rounded-lg bg-[var(--primary)] px-3 py-2 text-xs font-semibold text-[var(--primary-foreground)] disabled:opacity-40"
                   disabled={!mapClassId || mapSubjectIds.length === 0}
                   onClick={addMap}
                 >
@@ -1978,7 +1978,7 @@ export function NumberSeriesPanel({
       tables={
         <MastersTablesRow cols={1}>
           <MastersTableCard title="Numbering series">
-            <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+            <ul className="divide-y divide-[var(--border)]">
               {state.numberSeries.map((s) => (
                 <li
                   key={s.id}
@@ -1998,7 +1998,7 @@ export function NumberSeriesPanel({
                         </span>
                       ) : null}
                       {s.includeSessionInPrefix ? (
-                        <span className="rounded-full bg-[rgba(32,48,80,0.08)] px-2 py-0.5 text-[10px] font-semibold text-[var(--muted)]">
+                        <span className="rounded-full bg-[var(--surface-sunken)] px-2 py-0.5 text-[10px] font-semibold text-[var(--muted)]">
                           session in prefix
                         </span>
                       ) : null}
@@ -2095,7 +2095,7 @@ export function NumberSeriesPanel({
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
+                  className="rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-[var(--primary-foreground)]"
                   onClick={saveEdit}
                 >
                   Save
@@ -2367,7 +2367,7 @@ export function HolidaysPanel({
         <>
           <MastersTablesRow>
             <MastersTableCard title={`Published (${published.length})`}>
-              <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+              <ul className="divide-y divide-[var(--border)]">
                 {published.map((h) => (
                   <HolidayRuleRow
                     key={h.id}
@@ -2391,7 +2391,7 @@ export function HolidaysPanel({
               </ul>
             </MastersTableCard>
             <MastersTableCard title={`Drafts (${drafts.length})`}>
-              <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+              <ul className="divide-y divide-[var(--border)]">
                 {drafts.map((h) => (
                   <HolidayRuleRow
                     key={h.id}
@@ -2400,7 +2400,7 @@ export function HolidaysPanel({
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          className="rounded-lg bg-[var(--brand-deep)] px-2.5 py-1 text-[11px] font-semibold text-white"
+                          className="rounded-lg bg-[var(--primary)] px-2.5 py-1 text-[11px] font-semibold text-[var(--primary-foreground)]"
                           onClick={() => publish(h.id)}
                         >
                           Publish
@@ -2451,7 +2451,7 @@ export function HolidaysPanel({
                       return null;
                     }
                     return (
-                      <tr key={g.code} className="border-t border-[rgba(32,48,80,0.06)]">
+                      <tr key={g.code} className="border-t border-[var(--border)]">
                         <td className="py-1.5 pr-2 font-semibold text-[var(--brand-deep)]">
                           {g.label}
                         </td>
@@ -2467,7 +2467,7 @@ export function HolidaysPanel({
                 </tbody>
               </table>
             </div>
-            <p className="border-t border-[rgba(32,48,80,0.06)] px-3 py-2 text-[10px] text-[var(--muted)]">
+            <p className="border-t border-[var(--border)] px-3 py-2 text-[10px] text-[var(--muted)]">
               Filter preview by group when building weekly rules. Student attendance
               resolves per class → group; staff uses school-wide rules only.
             </p>
@@ -2678,7 +2678,7 @@ export function HolidaysPanel({
             </select>
             <button
               type="button"
-              className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
+              className="rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-[var(--primary-foreground)]"
               onClick={add}
             >
               Add draft rule
@@ -2745,7 +2745,7 @@ export function StaffMastersPanel({
       tables={
         <MastersTablesRow cols={2}>
           <MastersTableCard title="Departments">
-            <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+            <ul className="divide-y divide-[var(--border)]">
               {activeDepts.map((d) => (
                 <li key={d.id} className="px-4 py-2.5 text-sm">
                   <span className="font-semibold text-[var(--brand-deep)]">
@@ -2762,7 +2762,7 @@ export function StaffMastersPanel({
             </ul>
           </MastersTableCard>
           <MastersTableCard title="Designations">
-            <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+            <ul className="divide-y divide-[var(--border)]">
               {activeDes.map((d) => {
                 const dep = state.departments.find(
                   (x) => x.id === d.departmentId,
@@ -2789,7 +2789,7 @@ export function StaffMastersPanel({
       }
       work={
         <div className="space-y-4">
-          <p className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] px-4 py-3 text-sm text-[var(--muted)]">
+          <p className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-3 text-sm text-[var(--muted)]">
             Departments and designations. School day hours are under{" "}
             <span className="font-semibold text-[var(--brand-deep)]">
               School
@@ -2824,7 +2824,7 @@ export function StaffMastersPanel({
                 />
                 <button
                   type="button"
-                  className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
+                  className="rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-[var(--primary-foreground)]"
                   onClick={addDept}
                 >
                   Add
@@ -2859,7 +2859,7 @@ export function StaffMastersPanel({
                 </select>
                 <button
                   type="button"
-                  className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
+                  className="rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-[var(--primary-foreground)]"
                   onClick={addDes}
                 >
                   Add
@@ -2877,7 +2877,7 @@ export function StaffMastersPanel({
 export function LeaveMastersPanel() {
   return (
     <div className="space-y-4">
-      <p className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] px-4 py-3 text-sm text-[var(--muted)]">
+      <p className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-3 text-sm text-[var(--muted)]">
         Leave types / caps, leave rules (auto-approve, 2-level, late minutes),
         attendance settings / rules, and sync leave → attendance. School clock
         times stay in{" "}

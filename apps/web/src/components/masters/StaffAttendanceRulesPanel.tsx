@@ -176,7 +176,7 @@ export function StaffAttendanceRulesPanel() {
         </p>
       ) : null}
 
-      <p className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] px-4 py-3 text-sm text-[var(--muted)]">
+      <p className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-3 text-sm text-[var(--muted)]">
         School day hours are set in{" "}
         <strong className="text-[var(--brand-deep)]">Masters → School</strong>
         . Late threshold (minutes) comes from{" "}
@@ -188,16 +188,16 @@ export function StaffAttendanceRulesPanel() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <MastersTableCard title="Attendance rules" maxHeight="max-h-[min(60vh,520px)]">
-          <div className="border-b border-[rgba(32,48,80,0.08)] px-3 py-2">
+          <div className="border-b border-[var(--border)] px-3 py-2">
             <button
               type="button"
-              className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
+              className="rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-[var(--primary-foreground)]"
               onClick={startCreate}
             >
               + New rule
             </button>
           </div>
-          <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+          <ul className="divide-y divide-[var(--border)]">
             {state.rules.map((r) => (
               <li
                 key={r.id}
@@ -324,7 +324,7 @@ export function StaffAttendanceRulesPanel() {
                   return (
                     <div
                       key={def.kind}
-                      className="rounded-lg border border-[rgba(32,48,80,0.1)] p-2.5"
+                      className="rounded-lg border border-[var(--border)] p-2.5"
                     >
                       <label className="flex items-start gap-2 text-sm font-semibold text-[var(--brand-deep)]">
                         <input
@@ -428,14 +428,14 @@ export function StaffAttendanceRulesPanel() {
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
+                  className="rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-[var(--primary-foreground)]"
                   onClick={onSaveRule}
                 >
                   {editing ? "Save rule" : "Create rule"}
                 </button>
                 <button
                   type="button"
-                  className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
+                  className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
                   onClick={() => setDraft(null)}
                 >
                   Cancel
@@ -468,30 +468,30 @@ export function StaffAttendanceRulesPanel() {
           </label>
           <button
             type="button"
-            className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
+            className="rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-[var(--primary-foreground)]"
             onClick={onAssign}
           >
             Assign to selected ({selectedStaff.size})
           </button>
           <button
             type="button"
-            className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
+            className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
             onClick={onClearSelected}
           >
             Clear selected
           </button>
           <button
             type="button"
-            className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
+            className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
             onClick={() => toggleAllStaff(selectedStaff.size !== roster.length)}
           >
             {selectedStaff.size === roster.length ? "Unselect all" : "Select all"}
           </button>
         </div>
 
-        <div className="max-h-[min(48vh,380px)] overflow-auto rounded-lg border border-[rgba(32,48,80,0.1)]">
+        <div className="max-h-[min(48vh,380px)] overflow-auto rounded-lg border border-[var(--border)]">
           <table className="min-w-full text-left text-sm">
-            <thead className="sticky top-0 bg-[rgba(32,48,80,0.04)] text-[11px] uppercase tracking-wide text-[var(--muted)]">
+            <thead className="sticky top-0 bg-[var(--surface-sunken)] text-[11px] uppercase tracking-wide text-[var(--muted)]">
               <tr>
                 <th className="px-3 py-2 w-10" />
                 <th className="px-3 py-2">Staff</th>
@@ -504,7 +504,7 @@ export function StaffAttendanceRulesPanel() {
                 return (
                   <tr
                     key={s.id}
-                    className="border-t border-[rgba(32,48,80,0.06)] hover:bg-[rgba(32,48,80,0.02)]"
+                    className="border-t border-[var(--border)] hover:bg-[var(--surface-sunken)]"
                   >
                     <td className="px-3 py-2">
                       <input

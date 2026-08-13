@@ -126,7 +126,7 @@ export function AutomationListView({
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 border-b border-[rgba(32,48,80,0.1)] pb-2">
+      <div className="flex flex-wrap gap-2 border-b border-[var(--border)] pb-2">
         {(
           [
             { id: "active" as ListTab, label: `Active (${activeCount})` },
@@ -143,8 +143,8 @@ export function AutomationListView({
             type="button"
             className={`rounded-lg px-4 py-2 text-[12px] font-semibold ${
               tab === t.id
-                ? "bg-[var(--brand-deep)] text-white"
-                : "bg-[rgba(32,48,80,0.06)] text-[var(--brand-deep)]"
+                ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                : "bg-[var(--surface-sunken)] text-[var(--brand-deep)]"
             }`}
             onClick={() => setTab(t.id)}
           >
@@ -198,12 +198,12 @@ export function AutomationListView({
                   : "No paused rules."}
               </div>
             ) : (
-              <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+              <ul className="divide-y divide-[var(--border)]">
                 {filteredRules.map((r) => (
                   <li key={r.id}>
                     <button
                       type="button"
-                      className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left hover:bg-[rgba(32,48,80,0.04)]"
+                      className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left hover:bg-[var(--surface-sunken)]"
                       onClick={() => onEdit(r.id)}
                     >
                       <div className="min-w-0 flex-1">
@@ -246,7 +246,7 @@ export function AutomationListView({
               label="No pending approvals. Run evaluation on enabled rules."
             />
           ) : (
-            <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+            <ul className="divide-y divide-[var(--border)]">
               {pending.map((a) => (
                 <li key={a.id} className="space-y-2 px-3 py-3">
                   <div>
@@ -259,7 +259,7 @@ export function AutomationListView({
                       {new Date(a.createdAt).toLocaleString()}
                     </p>
                   </div>
-                  <pre className="whitespace-pre-wrap rounded-lg bg-[rgba(32,48,80,0.04)] p-2 text-[11px]">
+                  <pre className="whitespace-pre-wrap rounded-lg bg-[var(--surface-sunken)] p-2 text-[11px]">
                     {a.previewBody}
                   </pre>
                   <p className="text-[10px] text-[var(--muted)]">
@@ -302,7 +302,7 @@ export function AutomationListView({
           {state.runs.length === 0 ? (
             <MastersEmptyRow label="No runs yet." />
           ) : (
-            <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+            <ul className="divide-y divide-[var(--border)]">
               {state.runs.slice(0, 40).map((r) => {
                 const rule = state.rules.find((x) => x.id === r.ruleId);
                 return (

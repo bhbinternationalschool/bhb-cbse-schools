@@ -73,7 +73,7 @@ export function WaChatbotEditView({
       ) : null}
 
       {!isBuiltIn ? (
-        <div className="grid gap-2 sm:grid-cols-2 rounded-xl border bg-white p-3">
+        <div className="grid gap-2 sm:grid-cols-2 rounded-xl border bg-[var(--card)] p-3">
           <label className="block text-[11px] font-semibold text-[var(--muted)]">
             Name
             <input

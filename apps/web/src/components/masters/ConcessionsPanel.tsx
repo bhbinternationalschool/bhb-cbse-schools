@@ -316,14 +316,14 @@ export function ConcessionsPanel({
       <div className="grid gap-4 lg:grid-cols-[minmax(280px,0.85fr)_minmax(0,1.25fr)] lg:items-start">
         {/* LEFT — policies + collapsible add/edit */}
         <div className="space-y-3">
-          <div className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
-            <div className="flex items-center justify-between gap-2 border-b border-[rgba(32,48,80,0.08)] px-3 py-2.5">
+          <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)]">
+            <div className="flex items-center justify-between gap-2 border-b border-[var(--border)] px-3 py-2.5">
               <div className="text-sm font-semibold text-[var(--brand-deep)]">
                 Policies · all sessions
               </div>
               <button
                 type="button"
-                className="rounded-lg bg-[var(--brand-deep)] px-2.5 py-1 text-[11px] font-semibold text-white"
+                className="rounded-lg bg-[var(--primary)] px-2.5 py-1 text-[11px] font-semibold text-[var(--primary-foreground)]"
                 onClick={() => {
                   if (formOpen && !editingId) setFormOpen(false);
                   else openAddForm();
@@ -332,7 +332,7 @@ export function ConcessionsPanel({
                 {formOpen && !editingId ? "Close form" : "+ Add"}
               </button>
             </div>
-            <ul className="max-h-[min(52vh,420px)] divide-y divide-[rgba(32,48,80,0.08)] overflow-y-auto">
+            <ul className="max-h-[min(52vh,420px)] divide-y divide-[var(--border)] overflow-y-auto">
               {concessions.map((c) => {
                 const on = c.id === selectedId;
                 const grantN = grantsForConcessionPolicy(state, c).length;
@@ -340,7 +340,7 @@ export function ConcessionsPanel({
                   <li
                     key={c.id}
                     className={`flex items-start gap-2 px-3 py-2.5 ${
-                      on ? "bg-[rgba(32,48,80,0.06)]" : ""
+                      on ? "bg-[var(--surface-sunken)]" : ""
                     }`}
                   >
                     <button
@@ -369,7 +369,7 @@ export function ConcessionsPanel({
                         type="button"
                         title={`Print student list · ${c.code}`}
                         aria-label={`Print student list for ${c.name}`}
-                        className="inline-flex items-center gap-1 rounded-md border border-[rgba(32,48,80,0.14)] bg-white px-1.5 py-0.5 text-[10px] font-semibold text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.04)]"
+                        className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--card)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
                         onClick={(e) => {
                           e.stopPropagation();
                           setSelectedId(c.id);
@@ -436,7 +436,7 @@ export function ConcessionsPanel({
             </ul>
           </div>
 
-          <div className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
+          <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)]">
             <button
               type="button"
               className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left"
@@ -451,7 +451,7 @@ export function ConcessionsPanel({
               </span>
             </button>
             {formOpen ? (
-              <div className="border-t border-[rgba(32,48,80,0.08)] px-3 pb-3">
+              <div className="border-t border-[var(--border)] px-3 pb-3">
 <form
           onSubmit={saveRule}
           className="pt-1"
@@ -542,7 +542,7 @@ export function ConcessionsPanel({
           </div>
 
           {kind === "sibling" ? (
-            <div className="mt-3 rounded-lg border border-[rgba(32,48,80,0.1)] bg-[var(--surface)] p-3">
+            <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <div className="text-xs font-semibold text-[var(--brand-deep)]">
@@ -678,7 +678,7 @@ export function ConcessionsPanel({
                       </label>
                       <button
                         type="button"
-                        className="mb-0.5 text-[11px] font-semibold text-[#dc2626] disabled:opacity-40"
+                        className="mb-0.5 text-[11px] font-semibold text-[var(--danger)] disabled:opacity-40"
                         disabled={siblingTiers.length <= 1}
                         onClick={() =>
                           setSiblingTiers((prev) =>
@@ -699,7 +699,7 @@ export function ConcessionsPanel({
             <div className="mb-1.5 text-sm text-[var(--muted)]">
               Fee heads (empty = all)
             </div>
-            <div className="flex max-h-36 flex-wrap gap-1.5 overflow-y-auto rounded-xl border border-[rgba(32,48,80,0.12)] p-2">
+            <div className="flex max-h-36 flex-wrap gap-1.5 overflow-y-auto rounded-xl border border-[var(--border)] p-2">
               {activeHeads.map((h) => {
                 const on = feeHeadIds.includes(h.id);
                 return (
@@ -709,7 +709,7 @@ export function ConcessionsPanel({
                     onClick={() => toggleHead(h.id)}
                     className={`rounded-lg px-2 py-1 text-xs font-medium ${
                       on
-                        ? "bg-[var(--brand-deep)] text-white"
+                        ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
                         : "bg-[var(--surface)] text-[var(--brand-deep)]"
                     }`}
                   >
@@ -777,7 +777,7 @@ export function ConcessionsPanel({
             {editingId ? (
               <button
                 type="button"
-                className="rounded-xl border border-[rgba(32,48,80,0.2)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)]"
+                className="rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)]"
                 onClick={() => { resetForm(); setFormOpen(false); }}
               >
                 Cancel
@@ -798,14 +798,14 @@ export function ConcessionsPanel({
         </form>
               </div>
             ) : (
-              <p className="border-t border-[rgba(32,48,80,0.08)] px-3 py-2 text-[11px] text-[var(--muted)]">
+              <p className="border-t border-[var(--border)] px-3 py-2 text-[11px] text-[var(--muted)]">
                 Expand to create or edit a policy. Pick a policy above to grant
                 students on the right.
               </p>
             )}
           </div>
 
-          <div className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
+          <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)]">
             <button
               type="button"
               className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left"
@@ -820,7 +820,7 @@ export function ConcessionsPanel({
               </span>
             </button>
             {kindsOpen ? (
-              <div className="border-t border-[rgba(32,48,80,0.08)] px-3 pb-3">
+              <div className="border-t border-[var(--border)] px-3 pb-3">
                 <div className="flex justify-end pt-2">
                   <button
                     type="button"
@@ -878,7 +878,7 @@ export function ConcessionsPanel({
                 {showKindForm ? (
                   <form
                     onSubmit={addKind}
-                    className="mt-3 flex flex-wrap items-end gap-2 border-t border-[rgba(32,48,80,0.08)] pt-3"
+                    className="mt-3 flex flex-wrap items-end gap-2 border-t border-[var(--border)] pt-3"
                   >
                     <label className="block text-sm">
                       <span className="mb-1 block text-[var(--muted)]">
@@ -927,7 +927,7 @@ export function ConcessionsPanel({
               grants={grantsForSelected}
             />
           ) : (
-            <div className="rounded-xl border border-dashed border-[rgba(32,48,80,0.2)] bg-white px-4 py-16 text-center text-sm text-[var(--muted)]">
+            <div className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--card)] px-4 py-16 text-center text-sm text-[var(--muted)]">
               Select a concession policy on the left to grant students.
             </div>
           )}
@@ -1240,7 +1240,7 @@ function GrantStudentsCard({
             : null;
 
   return (
-    <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h3 className="text-sm font-semibold text-[var(--brand-deep)]">
@@ -1252,7 +1252,7 @@ function GrantStudentsCard({
           </p>
         </div>
         <div
-          className="flex rounded-lg border border-[rgba(32,48,80,0.12)] bg-[var(--surface)] p-0.5 text-[11px] font-semibold"
+          className="flex rounded-lg border border-[var(--border)] bg-[var(--surface)] p-0.5 text-[11px] font-semibold"
           role="group"
           aria-label="Selection mode"
         >
@@ -1260,7 +1260,7 @@ function GrantStudentsCard({
             type="button"
             className={`rounded-md px-2.5 py-1 ${
               selectMode === "single"
-                ? "bg-white text-[var(--brand-deep)] shadow-sm"
+                ? "bg-[var(--card)] text-[var(--brand-deep)] shadow-sm"
                 : "text-[var(--muted)]"
             }`}
             onClick={() => {
@@ -1274,7 +1274,7 @@ function GrantStudentsCard({
             type="button"
             className={`rounded-md px-2.5 py-1 ${
               selectMode === "multiple"
-                ? "bg-white text-[var(--brand-deep)] shadow-sm"
+                ? "bg-[var(--card)] text-[var(--brand-deep)] shadow-sm"
                 : "text-[var(--muted)]"
             }`}
             onClick={() => setSelectMode("multiple")}
@@ -1285,7 +1285,7 @@ function GrantStudentsCard({
       </div>
 
       {showSuggest ? (
-        <div className="mt-3 rounded-lg border border-[rgba(32,48,80,0.1)] bg-[var(--surface)] px-3 py-2.5">
+        <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
               Suggested for {kindLabel}
@@ -1301,15 +1301,15 @@ function GrantStudentsCard({
             ) : null}
           </div>
           {suggestions.length > 0 ? (
-            <ul className="mt-2 max-h-48 divide-y divide-[rgba(32,48,80,0.06)] overflow-y-auto">
+            <ul className="mt-2 max-h-48 divide-y divide-[var(--border)] overflow-y-auto">
               {suggestions.map(({ student: s, hint, siblingChildNo }) => {
                 const on = isSelected(s.id);
                 return (
                   <li key={s.id}>
                     <button
                       type="button"
-                      className={`flex w-full items-start gap-2 px-1 py-2 text-left text-xs hover:bg-white ${
-                        on ? "bg-white" : ""
+                      className={`flex w-full items-start gap-2 px-1 py-2 text-left text-xs hover:bg-[var(--card)] ${
+                        on ? "bg-[var(--card)]" : ""
                       }`}
                       onClick={() =>
                         toggleStudent(s, hint, siblingChildNo)
@@ -1319,8 +1319,8 @@ function GrantStudentsCard({
                         <span
                           className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px] ${
                             on
-                              ? "border-[var(--brand-deep)] bg-[var(--brand-deep)] text-white"
-                              : "border-[rgba(32,48,80,0.25)]"
+                              ? "border-[var(--brand-deep)] bg-[var(--primary)] text-[var(--primary-foreground)]"
+                              : "border-[var(--border)]"
                           }`}
                           aria-hidden
                         >
@@ -1373,7 +1373,7 @@ function GrantStudentsCard({
             return (
               <span
                 key={s.id}
-                className="inline-flex items-center gap-1 rounded-full border border-[rgba(32,48,80,0.15)] bg-[var(--surface)] pl-2 text-[11px] text-[var(--brand-deep)]"
+                className="inline-flex items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--surface)] pl-2 text-[11px] text-[var(--brand-deep)]"
               >
                 {s.fullName}
                 {concession.kind === "sibling" ? (
@@ -1409,7 +1409,7 @@ function GrantStudentsCard({
                 ) : null}
                 <button
                   type="button"
-                  className="rounded-full px-1.5 py-0.5 hover:bg-white"
+                  className="rounded-full px-1.5 py-0.5 hover:bg-[var(--card)]"
                   onClick={() => toggleStudent(s)}
                   title="Remove"
                 >
@@ -1530,15 +1530,15 @@ function GrantStudentsCard({
           />
           {matches.length > 0 &&
           !(selectMode === "single" && selectedIds.length === 1 && query) ? (
-            <ul className="mt-1 max-h-40 overflow-y-auto rounded-lg border border-[rgba(32,48,80,0.12)] bg-[var(--surface)]">
+            <ul className="mt-1 max-h-40 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface)]">
               {matches.map((s) => {
                 const on = isSelected(s.id);
                 return (
                   <li key={s.id}>
                     <button
                       type="button"
-                      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-white ${
-                        on ? "bg-white" : ""
+                      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-[var(--card)] ${
+                        on ? "bg-[var(--card)]" : ""
                       }`}
                       onClick={() => toggleStudent(s)}
                     >
@@ -1546,8 +1546,8 @@ function GrantStudentsCard({
                         <span
                           className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px] ${
                             on
-                              ? "border-[var(--brand-deep)] bg-[var(--brand-deep)] text-white"
-                              : "border-[rgba(32,48,80,0.25)]"
+                              ? "border-[var(--brand-deep)] bg-[var(--primary)] text-[var(--primary-foreground)]"
+                              : "border-[var(--border)]"
                           }`}
                           aria-hidden
                         >
@@ -1610,7 +1610,7 @@ function GrantStudentsCard({
         </div>
       </form>
 
-      <ul className="mt-4 divide-y divide-[rgba(32,48,80,0.08)]">
+      <ul className="mt-4 divide-y divide-[var(--border)]">
         {grants.map((g) => {
           const st = sis.students.find((s) => s.id === g.studentId);
           return (
@@ -1638,7 +1638,7 @@ function GrantStudentsCard({
                 {g.status !== "approved" ? (
                   <button
                     type="button"
-                    className="text-[11px] font-semibold text-[#15803d]"
+                    className="text-[11px] font-semibold text-[var(--success)]"
                     onClick={() => setStatus(g.id, "approved")}
                   >
                     Approve
@@ -1647,7 +1647,7 @@ function GrantStudentsCard({
                 {g.status === "pending" ? (
                   <button
                     type="button"
-                    className="text-[11px] font-semibold text-[#b45309]"
+                    className="text-[11px] font-semibold text-[var(--warning)]"
                     onClick={() => setStatus(g.id, "rejected")}
                   >
                     Reject
@@ -1655,7 +1655,7 @@ function GrantStudentsCard({
                 ) : null}
                 <button
                   type="button"
-                  className="text-[11px] font-semibold text-[#dc2626]"
+                  className="text-[11px] font-semibold text-[var(--danger)]"
                   onClick={() => removeGrant(g.id)}
                 >
                   Remove
@@ -1728,7 +1728,7 @@ function ConcessionStudentListDrawer({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-[rgba(32,48,80,0.45)] p-3 sm:items-center"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-[var(--overlay)] p-3 sm:items-center"
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
@@ -1738,7 +1738,7 @@ function ConcessionStudentListDrawer({
         className="max-h-[88vh] w-full max-w-3xl overflow-auto rounded-2xl bg-[var(--brand-cream)] shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="sticky top-0 z-10 flex items-start gap-3 border-b border-[rgba(32,48,80,0.1)] bg-[var(--brand-cream)] px-5 py-4">
+        <div className="sticky top-0 z-10 flex items-start gap-3 border-b border-[var(--border)] bg-[var(--brand-cream)] px-5 py-4">
           <div className="min-w-0 flex-1">
             <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">
               Discount students
@@ -1760,7 +1760,7 @@ function ConcessionStudentListDrawer({
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[rgba(32,48,80,0.15)] text-[var(--brand-deep)] hover:bg-white"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--border)] text-[var(--brand-deep)] hover:bg-[var(--card)]"
             aria-label="Close"
           >
             <X className="h-5 w-5" />
@@ -1773,7 +1773,7 @@ function ConcessionStudentListDrawer({
               type="button"
               onClick={handlePrint}
               disabled={rows.length === 0}
-              className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-[rgba(32,48,80,0.15)] bg-white px-3.5 text-sm font-semibold text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.04)] disabled:opacity-50"
+              className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3.5 text-sm font-semibold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)] disabled:opacity-50"
             >
               <Printer className="h-4 w-4" />
               Print / PDF
@@ -1803,17 +1803,17 @@ function ConcessionStudentPrintTable({
 }) {
   if (rows.length === 0) {
     return (
-      <p className="rounded-xl border border-dashed border-[rgba(32,48,80,0.2)] bg-white/70 px-4 py-10 text-center text-sm text-[var(--muted)]">
+      <p className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--card)]/70 px-4 py-10 text-center text-sm text-[var(--muted)]">
         No students assigned to this discount yet.
       </p>
     );
   }
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
+    <div className="overflow-x-auto rounded-xl border border-[var(--border)] bg-[var(--card)]">
       <table className="w-full min-w-[640px] border-collapse text-sm">
         <thead>
-          <tr className="bg-[rgba(32,48,80,0.04)] text-left text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+          <tr className="bg-[var(--surface-sunken)] text-left text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
             <th className="px-3 py-2.5">#</th>
             <th className="px-3 py-2.5">Admission no.</th>
             <th className="px-3 py-2.5">Student</th>
@@ -1827,7 +1827,7 @@ function ConcessionStudentPrintTable({
           {rows.map((row, idx) => (
             <tr
               key={row.id}
-              className="border-t border-[rgba(32,48,80,0.06)] text-[var(--brand-deep)]"
+              className="border-t border-[var(--border)] text-[var(--brand-deep)]"
             >
               <td className="num px-3 py-2 tabular-nums text-[var(--muted)]">
                 {idx + 1}

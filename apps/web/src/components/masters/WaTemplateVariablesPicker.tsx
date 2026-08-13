@@ -8,7 +8,7 @@ import {
 } from "@/lib/waTemplates";
 
 const chip =
-  "rounded-md border border-[rgba(32,48,80,0.14)] bg-white px-2 py-0.5 font-mono text-[10px] text-[var(--brand-deep)] hover:border-[rgba(15,118,110,0.45)] hover:bg-[rgba(15,118,110,0.06)]";
+  "rounded-md border border-[var(--border)] bg-[var(--card)] px-2 py-0.5 font-mono text-[10px] text-[var(--brand-deep)] hover:border-[rgba(15,118,110,0.45)] hover:bg-[rgba(15,118,110,0.06)]";
 
 export function WaTemplateVariablesPicker({
   onInsert,
@@ -49,7 +49,7 @@ export function WaTemplateVariablesPicker({
 
   return (
     <div
-      className={`rounded-lg border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.02)] ${
+      className={`rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] ${
         compact ? "p-2" : "p-3"
       }`}
     >
@@ -58,7 +58,7 @@ export function WaTemplateVariablesPicker({
           Template variables
         </p>
         <input
-          className="min-w-[10rem] flex-1 rounded-md border border-[rgba(32,48,80,0.15)] bg-white px-2 py-1 text-[11px]"
+          className="min-w-[10rem] flex-1 rounded-md border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-[11px]"
           placeholder="Search variables…"
           value={q}
           onChange={(e) => setQ(e.target.value)}

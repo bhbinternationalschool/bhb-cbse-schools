@@ -130,7 +130,7 @@ export function AutomationEditView({
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="space-y-3 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4 text-[12px]">
+        <div className="space-y-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 text-[12px]">
           <label className="block text-[11px] font-semibold text-[var(--muted)]">
             Name
             <input
@@ -318,7 +318,7 @@ export function AutomationEditView({
 
         <div className="lg:sticky lg:top-4 lg:self-start space-y-3">
           {linkedTemplate ? (
-            <div className="rounded-lg border border-[rgba(32,48,80,0.1)] bg-white p-3">
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
               <p className="text-[11px] font-semibold text-[var(--brand-deep)]">
                 Linked template: {linkedTemplate.name} ({linkedTemplate.metaName})
               </p>

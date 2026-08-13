@@ -198,7 +198,7 @@ export function WaTemplatesCreateView({
             <button
               key={opt.id}
               type="button"
-              className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4 text-left transition hover:border-[#0f766e] hover:shadow-sm"
+              className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 text-left transition hover:border-[#0f766e] hover:shadow-sm"
               onClick={() => pickLayout(opt.id)}
             >
               <p className="text-[14px] font-semibold text-[var(--brand-deep)]">
@@ -247,7 +247,7 @@ export function WaTemplatesCreateView({
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="space-y-3 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+        <div className="space-y-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <div className="grid gap-2 sm:grid-cols-2">
             <label className="block text-[11px] font-semibold text-[var(--muted)]">
               Display name
@@ -303,7 +303,7 @@ export function WaTemplatesCreateView({
           </div>
 
           {needsHeaderMedia ? (
-            <div className="rounded-lg border border-[rgba(32,48,80,0.1)] p-3">
+            <div className="rounded-lg border border-[var(--border)] p-3">
               <p className="text-[11px] font-semibold text-[var(--brand-deep)]">
                 Header {layoutKind} upload
               </p>
@@ -344,7 +344,7 @@ export function WaTemplatesCreateView({
               {carousel.map((c, idx) => (
                 <div
                   key={idx}
-                  className="rounded-lg border border-[rgba(32,48,80,0.08)] p-2"
+                  className="rounded-lg border border-[var(--border)] p-2"
                 >
                   <p className="text-[10px] font-bold text-[var(--muted)]">
                     Card {idx + 1}

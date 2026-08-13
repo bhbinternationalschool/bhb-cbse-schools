@@ -153,7 +153,7 @@ export function SchoolBrandAssetsPanel({
 
             <button
               type="button"
-              className="rounded-lg bg-[var(--brand-deep)] px-4 py-2 text-sm font-semibold text-white"
+              className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-[var(--primary-foreground)]"
               onClick={() => {
                 setError(null);
                 commit(

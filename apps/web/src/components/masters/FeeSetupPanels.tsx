@@ -307,7 +307,7 @@ export function FeeGroupsPanel({
                 No fee groups yet
               </div>
             ) : (
-              <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+              <ul className="divide-y divide-[var(--border)]">
                 {bandSections.map((section) => {
                   const bandClasses =
                     section.key === "ALL"
@@ -318,7 +318,7 @@ export function FeeGroupsPanel({
                         );
                   return (
                     <li key={section.key}>
-                      <div className="sticky top-0 z-[1] border-b border-[rgba(32,48,80,0.08)] bg-[#eef2f8] px-4 py-2.5">
+                      <div className="sticky top-0 z-[1] border-b border-[var(--border)] bg-[#eef2f8] px-4 py-2.5">
                         <div className="text-xs font-bold uppercase tracking-wide text-[var(--brand-deep)]">
                           {section.label}
                           <span className="ml-1.5 font-semibold text-[var(--brand-mid)]">
@@ -336,7 +336,7 @@ export function FeeGroupsPanel({
                           No fee group for this band yet
                         </p>
                       ) : (
-                        <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+                        <ul className="divide-y divide-[var(--border)]">
                           {section.groups.map((g) => {
                             const total = annualTotalForGroup(state, g.id);
                             const orderedIds = sortClassIdsByClassBand(
@@ -486,7 +486,7 @@ export function FeeGroupsPanel({
                 <div className="mb-1.5 text-sm text-[var(--muted)]">
                   Classes by band (leave empty = all)
                 </div>
-                <div className="max-h-[min(40vh,320px)] space-y-3 overflow-y-auto rounded-xl border border-[rgba(32,48,80,0.12)] p-2">
+                <div className="max-h-[min(40vh,320px)] space-y-3 overflow-y-auto rounded-xl border border-[var(--border)] p-2">
                   {CLASS_GROUPS.map((band) => {
                     const classes = classesInGroup(state.classes, band.code);
                     if (!classes.length) return null;
@@ -527,7 +527,7 @@ export function FeeGroupsPanel({
                                 onClick={() => toggleClass(c.id)}
                                 className={`rounded-lg px-2 py-1 text-xs font-medium ${
                                   on
-                                    ? "bg-[var(--brand-deep)] text-white"
+                                    ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
                                     : "bg-[var(--surface)] text-[var(--brand-deep)]"
                                 }`}
                               >
@@ -545,7 +545,7 @@ export function FeeGroupsPanel({
                 {editingId ? (
                   <button
                     type="button"
-                    className="rounded-xl border border-[rgba(32,48,80,0.2)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)]"
+                    className="rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)]"
                     onClick={resetForm}
                   >
                     Cancel
@@ -666,8 +666,8 @@ export function InstallmentsPanel({
                       onClick={() => toggleMonth(m.code)}
                       className={`rounded-xl px-2 py-3 text-center transition ${
                         on
-                          ? "bg-[var(--brand-deep)] text-white shadow-sm"
-                          : "bg-[var(--surface)] text-[var(--muted)] ring-1 ring-[rgba(32,48,80,0.1)]"
+                          ? "bg-[var(--primary)] text-[var(--primary-foreground)] shadow-sm"
+                          : "bg-[var(--surface)] text-[var(--muted)] ring-1 ring-[var(--border)]"
                       }`}
                     >
                       <div className="text-xs font-bold tracking-wide">
@@ -686,7 +686,7 @@ export function InstallmentsPanel({
             </div>
           </MastersTableCard>
           <MastersTableCard title="Due dates (edit individually)">
-            <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+            <ul className="divide-y divide-[var(--border)]">
               {list.map((i) => (
                 <li
                   key={i.id}
@@ -726,21 +726,21 @@ export function InstallmentsPanel({
             </button>
             <button
               type="button"
-              className="rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-2 text-xs font-semibold text-[var(--brand-deep)]"
+              className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-semibold text-[var(--brand-deep)]"
               onClick={() => applyPattern("quarterly")}
             >
               Quarterly (4)
             </button>
             <button
               type="button"
-              className="rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-2 text-xs font-semibold text-[var(--brand-deep)]"
+              className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-semibold text-[var(--brand-deep)]"
               onClick={() => applyPattern("half_yearly")}
             >
               Half-yearly (2)
             </button>
             <button
               type="button"
-              className="rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-2 text-xs font-medium text-[var(--brand-mid)]"
+              className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-medium text-[var(--brand-mid)]"
               onClick={ensureCalendar}
             >
               Sync Apr–Mar rows
@@ -855,7 +855,7 @@ function LateFeePanelInner({
     .map((h) => h.nameEn);
 
   return (
-    <div className="max-w-lg rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-5">
+    <div className="max-w-lg rounded-xl border border-[var(--border)] bg-[var(--card)] p-5">
       <h3 className="text-sm font-semibold text-[var(--brand-deep)]">
         Late-fee policy · {ay}
       </h3>
@@ -884,7 +884,7 @@ function LateFeePanelInner({
               </button>
             </span>
           </div>
-          <div className="flex flex-wrap gap-1.5 rounded-xl border border-[rgba(32,48,80,0.12)] p-2">
+          <div className="flex flex-wrap gap-1.5 rounded-xl border border-[var(--border)] p-2">
             {activeHeads.map((h) => {
               const on = feeHeadIds.includes(h.id);
               return (
@@ -894,7 +894,7 @@ function LateFeePanelInner({
                   onClick={() => toggleHead(h.id)}
                   className={`rounded-lg px-2.5 py-1.5 text-xs font-medium ${
                     on
-                      ? "bg-[var(--brand-deep)] text-white"
+                      ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
                       : "bg-[var(--surface)] text-[var(--brand-deep)]"
                   }`}
                 >
@@ -988,8 +988,8 @@ function ListCard({
   children: React.ReactNode;
 }) {
   return (
-    <div className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
-      <div className="border-b border-[rgba(32,48,80,0.08)] px-4 py-3 text-sm font-semibold text-[var(--brand-deep)]">
+    <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)]">
+      <div className="border-b border-[var(--border)] px-4 py-3 text-sm font-semibold text-[var(--brand-deep)]">
         {title}
       </div>
       {children}
@@ -1091,7 +1091,7 @@ export function MidYearFeePolicyPanel({
             {rows.map((row) => (
               <li
                 key={row.key}
-                className="flex items-start justify-between gap-3 rounded-xl border border-[rgba(32,48,80,0.1)] px-3 py-2.5"
+                className="flex items-start justify-between gap-3 rounded-xl border border-[var(--border)] px-3 py-2.5"
               >
                 <div className="min-w-0">
                   <div className="text-sm font-semibold text-[var(--brand-deep)]">
@@ -1113,14 +1113,14 @@ export function MidYearFeePolicyPanel({
               </li>
             ))}
           </ul>
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[rgba(32,48,80,0.08)] pt-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border)] pt-3">
             <p className="text-[11px] text-[var(--muted)]">
               Example (defaults on, join Sep): April tuition billed · May–Aug
               skipped · Sep–Mar full (incl. transport).
             </p>
             <button
               type="button"
-              className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-1.5 text-[11px] font-semibold"
+              className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-[11px] font-semibold"
               onClick={resetDefaults}
             >
               Reset to recommended

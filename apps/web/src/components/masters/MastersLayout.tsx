@@ -20,7 +20,7 @@ export function MastersTableCard({
 }) {
   return (
     <ErpTableShell className={className}>
-      <div className="border-b border-[rgba(32,48,80,0.08)] px-4 py-3 text-sm font-semibold text-[#2563eb]">
+      <div className="border-b border-[var(--border)] px-4 py-3 text-sm font-semibold text-[#2563eb]">
         {title}
       </div>
       <div className={`${maxHeight} overflow-auto`}>{children}</div>

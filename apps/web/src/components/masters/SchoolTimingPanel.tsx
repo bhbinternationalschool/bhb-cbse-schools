@@ -65,8 +65,8 @@ function TimingFields({
                   type="button"
                   className={`rounded-md px-2 py-1 text-[10px] font-bold ${
                     on
-                      ? "bg-[var(--brand-deep)] text-white"
-                      : "bg-[rgba(32,48,80,0.08)] text-[var(--muted)]"
+                      ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                      : "bg-[var(--surface-sunken)] text-[var(--muted)]"
                   }`}
                   onClick={() => {
                     const set = new Set(value.workingWeekdays);
@@ -85,7 +85,7 @@ function TimingFields({
           </div>
         </div>
       </div>
-      <div className="flex flex-wrap items-end gap-3 border-t border-[rgba(32,48,80,0.08)] pt-3">
+      <div className="flex flex-wrap items-end gap-3 border-t border-[var(--border)] pt-3">
         <label className="flex items-center gap-2 text-xs font-semibold text-[var(--brand-deep)]">
           <input
             type="checkbox"
@@ -238,7 +238,7 @@ export function SchoolTimingPanel({
 
   return (
     <div className="space-y-4">
-      <p className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] px-4 py-3 text-sm text-[var(--muted)]">
+      <p className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-3 text-sm text-[var(--muted)]">
         School day hours for <strong>students and staff</strong>. Resolution:
         class override → class-group override → school default. Staff attendance
         rules use the school default (or Sunday exceptional flags on the rule).
@@ -246,7 +246,7 @@ export function SchoolTimingPanel({
 
       <MastersTablesRow cols={1}>
         <MastersTableCard title="Effective timings" maxHeight="max-h-[min(40vh,320px)]">
-          <ul className="divide-y divide-[rgba(32,48,80,0.08)] text-sm">
+          <ul className="divide-y divide-[var(--border)] text-sm">
             <li className="px-4 py-2.5">
               <span className="font-semibold text-[var(--brand-deep)]">
                 School default
@@ -316,7 +316,7 @@ export function SchoolTimingPanel({
         <TimingFields value={defaultDraft} onChange={setDefaultDraft} />
         <button
           type="button"
-          className="mt-3 rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
+          className="mt-3 rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-[var(--primary-foreground)]"
           onClick={saveDefault}
         >
           Save school default
@@ -351,7 +351,7 @@ export function SchoolTimingPanel({
           <TimingFields value={groupTiming} onChange={setGroupTiming} />
           <button
             type="button"
-            className="mt-3 rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
+            className="mt-3 rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-[var(--primary-foreground)]"
             onClick={addGroupOverride}
           >
             Save group override
@@ -391,7 +391,7 @@ export function SchoolTimingPanel({
           <TimingFields value={classTiming} onChange={setClassTiming} />
           <button
             type="button"
-            className="mt-3 rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
+            className="mt-3 rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-[var(--primary-foreground)]"
             disabled={!classId}
             onClick={addClassOverride}
           >
