@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, LogOut, Pencil, Shield, UserRound } from "lucide-react";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
+import { SessionSelector } from "@/components/shell/SessionSelector";
 import type { DemoSession } from "@/lib/auth";
 import { loadMasters } from "@/lib/masters";
 import {
@@ -227,6 +228,12 @@ export function UserAccountMenu({
                 onClick={() => setShowRoles(true)}
               />
               <div className="my-1 border-t border-[var(--border)]" />
+              <div className="flex items-center justify-between px-3 py-2">
+                <span className="text-sm font-medium text-[var(--brand-deep)]">
+                  Session
+                </span>
+                <SessionSelector currentCode={session.academicYearCode} />
+              </div>
               <div className="flex items-center justify-between px-3 py-2">
                 <span className="text-sm font-medium text-[var(--brand-deep)]">
                   Appearance
