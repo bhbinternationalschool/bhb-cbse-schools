@@ -12,6 +12,7 @@ import { ClassChannelsPanel } from "@/components/comms/ClassChannelsPanel";
 import { SocialCredentialsPanel } from "@/components/comms/SocialCredentialsPanel";
 import { SocialCrossPostPrefsPanel } from "@/components/comms/SocialCrossPostPanel";
 import { WaChatHubPanel } from "@/components/comms/WaChatHubPanel";
+import { HouseholdMessageLogPanel } from "@/components/comms/HouseholdMessageLogPanel";
 import {
   addGalleryPhoto,
   audienceLabel,
@@ -70,6 +71,7 @@ type CommsTab =
   | "inbox"
   | "channels"
   | "wa_hub"
+  | "household_log"
   | "reports";
 
 const TABS: ModuleTabItem[] = [
@@ -80,6 +82,7 @@ const TABS: ModuleTabItem[] = [
   { id: "social", label: "Social", tone: "rose" },
   { id: "channels", label: "Class WA", tone: "violet" },
   { id: "wa_hub", label: "WhatsApp hub", tone: "teal" },
+  { id: "household_log", label: "Household log", tone: "slate" },
   { id: "inbox", label: "Inbox", tone: "slate" },
   { id: "reports", label: "Reports", tone: "coral" },
 ];
@@ -97,6 +100,7 @@ function tabFromSearch(raw: string | null, path: string): CommsTab {
     raw === "notices" ||
     raw === "channels" ||
     raw === "wa_hub" ||
+    raw === "household_log" ||
     raw === "reports"
   ) {
     return raw;
@@ -1260,6 +1264,8 @@ export function CommsWorkspace() {
       {tab === "wa_hub" ? (
         <WaChatHubPanel by={session.fullName} canEdit={!readOnly} />
       ) : null}
+
+      {tab === "household_log" ? <HouseholdMessageLogPanel /> : null}
 
       {tab === "inbox" ? (
         <section className="space-y-3">

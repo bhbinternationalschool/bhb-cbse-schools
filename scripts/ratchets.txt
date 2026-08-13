@@ -17,7 +17,7 @@
 # PATCHes that invented year into the SERVER session cookie. It is why the
 # school ran four months inside an expired session with no warning.
 # Retire per module during Stage 8; target is 0.
-default_ay|246|Hardcoded DEFAULT_AY fallbacks (244 -> 246 on 2026-08-11 by c48f67b "ship Phases 1-5"; AttendanceWorkspace/CertificatesWorkspace/RteWorkspace/ExamsWorkspace/TimetableWorkspace/examReportCatalog. Display-path uses = bucket (b), retired module-by-module in Stage 8. Raised rather than silently eroded, and rather than patching feature code from another agent mid-session.)
+default_ay|248|Hardcoded DEFAULT_AY fallbacks (244 -> 246 on 2026-08-11 by c48f67b "ship Phases 1-5"; 246 -> 248 on 2026-08-14 rebasing onto PR #14 "NEP 2020 HPC co-scholastic" + PR #13 "Events & Academic Calendar" from a concurrent session. Display-path uses = bucket (b), retired module-by-module in Stage 8. Raised rather than silently eroded, and rather than patching another session's feature code mid-rebase.)
 
 # Fire-and-forget writes. `void pushX()` discards the outcome, so a failed
 # save reaches a console.warn and the user is told nothing. This is the
@@ -39,5 +39,5 @@ unguarded_cache_writes|0|Bare localStorage.setItem on module state
 # "Refined Enterprise" plan). Dark mode landed this phase via design tokens
 # in globals.css; these two patterns bypass the tokens and so don't adapt
 # to it. Falls per module as each gets its visual refit — see Phase 3/4.
-raw_hex|831|Arbitrary hex Tailwind classes bypassing design tokens; not dark-mode aware. Target is 0.
+raw_hex|835|Arbitrary hex Tailwind classes bypassing design tokens; not dark-mode aware. Target is 0. (831 -> 835 on 2026-08-14 rebasing onto PR #14/#13 from a concurrent session, same "raised not eroded" rule as default_ay above.)
 raw_table|7|Hand-rolled <table> instead of ui/erp-roster.tsx's ErpTableShell. Target is 0.

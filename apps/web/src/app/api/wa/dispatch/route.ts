@@ -23,6 +23,7 @@ import {
   waOutboundConfigured,
   type WaTemplateComponent,
 } from "@/lib/waSend";
+import { logHouseholdWaSend } from "@/lib/householdMessageLog.server";
 
 export const runtime = "nodejs";
 
@@ -140,6 +141,8 @@ export async function POST(req: Request) {
     usedFallback?: boolean;
   }[] = [];
 
+  const purpose = body?.module || "admissions";
+
   for (const item of messages) {
     const mobile = (item.mobile || "").replace(/\D/g, "");
     const fallbackMobile = (item.fallbackMobile || "").replace(/\D/g, "") || undefined;
@@ -194,6 +197,16 @@ export async function POST(req: Request) {
         via: "template",
         usedFallback: r.usedFallback,
       });
+      await logHouseholdWaSend({
+        mobile,
+        purpose,
+        via: "template",
+        templateName: item.template.name,
+        preview: `Template: ${item.template.name}`,
+        status: r.ok ? "sent" : "failed",
+        error: r.error,
+        waMessageId: r.providerId,
+      });
       continue;
     }
 
@@ -222,6 +235,15 @@ export async function POST(req: Request) {
       mode: r.mode,
       via: "text",
       usedFallback: r.usedFallback,
+    });
+    await logHouseholdWaSend({
+      mobile,
+      purpose,
+      via: "text",
+      preview: text,
+      status: r.ok ? "sent" : "failed",
+      error: r.error,
+      waMessageId: r.providerId,
     });
   }
 
