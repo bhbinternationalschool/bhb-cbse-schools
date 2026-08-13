@@ -1415,6 +1415,37 @@ export function listLowStockItems(store?: StoreState): StoreItem[] {
     .sort((a, b) => a.stockOnHand - b.stockOnHand);
 }
 
+export type LowStockLocationGroup = {
+  infraLevelId: string;
+  infraLevelLabel: string;
+  items: StoreItem[];
+};
+
+/** Pure — groups already-low-stock items by their infra/location level
+ * (item.infraLevelId, e.g. "Physics Lab" vs "Chemistry Lab"), worst-affected
+ * location first. A school running low in two different labs previously had
+ * no way to tell which was which from a flat low-stock list. */
+export function groupLowStockByLocation(
+  items: StoreItem[],
+  store?: StoreState,
+): LowStockLocationGroup[] {
+  const s = store ?? loadStore();
+  const byLocation = new Map<string, StoreItem[]>();
+  for (const item of items) {
+    const key = item.infraLevelId || "";
+    const list = byLocation.get(key) ?? [];
+    list.push(item);
+    byLocation.set(key, list);
+  }
+  return Array.from(byLocation.entries())
+    .map(([infraLevelId, groupItems]) => ({
+      infraLevelId,
+      infraLevelLabel: infraLevelLabel(infraLevelId, s),
+      items: groupItems,
+    }))
+    .sort((a, b) => b.items.length - a.items.length);
+}
+
 export function nextStoreIssueNo(
   store?: StoreState,
   ayCode = DEFAULT_AY,

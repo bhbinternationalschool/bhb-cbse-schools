@@ -3,7 +3,9 @@ import {
   authorizeSchoolDataDesk,
   SCHOOL_DATA_DESK_RBAC,
 } from "@/lib/apiRouteAuth.server";
-import type { ExamsState } from "@/lib/exams";
+import { requestMeta } from "@/lib/api/v1/auth";
+import { auditArrayDiff } from "@/lib/auditDeskDiff.server";
+import { flattenExamMarks, type ExamsState } from "@/lib/exams";
 import { examsDualWriteDbEnabled } from "@/lib/examsDbConfig";
 import {
   fetchExamDeskFromDb,
@@ -55,6 +57,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
+  const { bundle: priorBundle } = await fetchExamDeskFromDb();
+  const beforeMarks = flattenExamMarks(priorBundle.sheets);
+
   const result = await pushExamDeskToDb({
     version: 1,
     terms: Array.isArray(body.terms) ? body.terms : [],
@@ -70,6 +75,20 @@ export async function POST(req: Request) {
       { status: 502 },
     );
   }
+
+  const afterMarks = flattenExamMarks(
+    Array.isArray(body.sheets) ? body.sheets : [],
+  );
+  const { ip, userAgent } = requestMeta(req);
+  await auditArrayDiff({
+    session: auth.ctx.session,
+    module: "exams",
+    entityType: "student_subject_mark",
+    before: beforeMarks,
+    after: afterMarks,
+    ip,
+    userAgent,
+  });
 
   return NextResponse.json({
     ok: true,

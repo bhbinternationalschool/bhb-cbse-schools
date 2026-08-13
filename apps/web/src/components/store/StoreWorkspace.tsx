@@ -30,6 +30,7 @@ import {
   storeIssueBalanceDuePaise,
   type StoreCategoryDef,
   itemAppliesToRecipient,
+  groupLowStockByLocation,
   listActiveStoreItems,
   listLowStockItems,
   loadStore,
@@ -244,6 +245,10 @@ export function StoreWorkspace() {
   }, []);
 
   const lowStock = useMemo(() => listLowStockItems(loadStore()), [tick]);
+  const lowStockByLocation = useMemo(
+    () => groupLowStockByLocation(lowStock, loadStore()),
+    [lowStock],
+  );
 
   const classOptions = useMemo(() => {
     if (!masters) return [];
@@ -727,11 +732,21 @@ export function StoreWorkspace() {
         lowStock.length > 0 ? (
           <p className="rounded-lg border border-[rgba(180,83,9,0.25)] bg-[rgba(180,83,9,0.08)] px-3 py-2 text-[12px] text-[#9a3412]">
             Low stock:{" "}
-            {lowStock
-              .slice(0, 4)
-              .map((i) => `${i.sku} (${i.stockOnHand})`)
+            {lowStockByLocation
+              .slice(0, 3)
+              .map((g) => {
+                const shown = g.items
+                  .slice(0, 3)
+                  .map((i) => `${i.sku} (${i.stockOnHand})`)
+                  .join(", ");
+                const extra =
+                  g.items.length > 3 ? ` +${g.items.length - 3}` : "";
+                return `${g.infraLevelLabel}: ${shown}${extra}`;
+              })
               .join(" · ")}
-            {lowStock.length > 4 ? ` · +${lowStock.length - 4} more` : ""}
+            {lowStockByLocation.length > 3
+              ? ` · +${lowStockByLocation.length - 3} more location(s)`
+              : ""}
           </p>
         ) : null
       }

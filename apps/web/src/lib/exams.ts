@@ -141,6 +141,40 @@ export type MarkSheet = {
   updatedAt: string;
 };
 
+export type FlatExamMark = {
+  id: string;
+  sheetId: string;
+  studentId: string;
+  subjectId: string;
+  marksObtained: number | null;
+  grade: string;
+  remark: string;
+};
+
+/** Pure — flattens every sheet's `marks[]` into one addressable record per
+ * student-subject, keyed the same way exam_desk_marks already is at the DB
+ * layer (`${sheetId}:${studentId}:${subjectId}`). StudentSubjectMark has no
+ * `id` of its own, so this is what makes per-mark audit diffing possible —
+ * diffing `sheets[]` directly would only prove a marksheet was touched
+ * somewhere, not which student's mark changed or from what value. */
+export function flattenExamMarks(sheets: MarkSheet[]): FlatExamMark[] {
+  const out: FlatExamMark[] = [];
+  for (const sheet of sheets) {
+    for (const mark of sheet.marks) {
+      out.push({
+        id: `${sheet.id}:${mark.studentId}:${mark.subjectId}`,
+        sheetId: sheet.id,
+        studentId: mark.studentId,
+        subjectId: mark.subjectId,
+        marksObtained: mark.marksObtained,
+        grade: mark.grade,
+        remark: mark.remark,
+      });
+    }
+  }
+  return out;
+}
+
 export type PromotionDecision =
   | "pending"
   | "promoted"
