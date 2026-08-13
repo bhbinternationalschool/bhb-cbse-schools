@@ -439,6 +439,7 @@ export function LoginPanel() {
                 placeholder="98xxxxxxxx"
                 inputMode="numeric"
                 className="w-full rounded-xl border border-[rgba(11,61,74,0.18)] bg-white/80 px-3.5 py-2.5 outline-none ring-[var(--ring)] focus:ring-2"
+                style={{ color: "#203050" }}
                 autoComplete="tel"
               />
             </label>
@@ -473,6 +474,7 @@ export function LoginPanel() {
                 inputMode="numeric"
                 maxLength={6}
                 className="w-full rounded-xl border border-[rgba(11,61,74,0.18)] bg-white/80 px-3.5 py-2.5 tracking-[0.3em] outline-none ring-[var(--ring)] focus:ring-2"
+                style={{ color: "#203050" }}
                 autoComplete="one-time-code"
               />
             </label>
@@ -486,6 +488,7 @@ export function LoginPanel() {
                 onChange={(e) => setFtPassword(e.target.value)}
                 placeholder="••••••••"
                 className="w-full rounded-xl border border-[rgba(11,61,74,0.18)] bg-white/80 px-3.5 py-2.5 outline-none ring-[var(--ring)] focus:ring-2"
+                style={{ color: "#203050" }}
                 autoComplete="new-password"
               />
             </label>
@@ -499,6 +502,7 @@ export function LoginPanel() {
                 onChange={(e) => setFtConfirmPassword(e.target.value)}
                 placeholder="••••••••"
                 className="w-full rounded-xl border border-[rgba(11,61,74,0.18)] bg-white/80 px-3.5 py-2.5 outline-none ring-[var(--ring)] focus:ring-2"
+                style={{ color: "#203050" }}
                 autoComplete="new-password"
               />
             </label>
@@ -620,6 +624,7 @@ export function LoginPanel() {
                 }
                 inputMode={identifierType === "phone" ? "numeric" : undefined}
                 className="w-full rounded-xl border border-[rgba(11,61,74,0.18)] bg-white/80 px-3.5 py-2.5 outline-none ring-[var(--ring)] focus:ring-2"
+                style={{ color: "#203050" }}
                 autoComplete="username"
                 required={!demoAuth && (persona === "staff" || persona === "parent")}
               />
@@ -640,6 +645,7 @@ export function LoginPanel() {
                 onChange={(e) => setSecret(e.target.value)}
                 placeholder="••••••••"
                 className="w-full rounded-xl border border-[rgba(11,61,74,0.18)] bg-white/80 px-3.5 py-2.5 outline-none ring-[var(--ring)] focus:ring-2"
+                style={{ color: "#203050" }}
                 autoComplete={
                   !demoAuth && (persona === "staff" || persona === "parent")
                     ? "current-password"
@@ -662,6 +668,7 @@ export function LoginPanel() {
               onChange={(e) => setSecret(e.target.value.replace(/\D/g, ""))}
               placeholder="••••"
               className="w-full rounded-xl border border-[rgba(11,61,74,0.18)] bg-white/80 px-3.5 py-2.5 tracking-[0.4em] outline-none ring-[var(--ring)] focus:ring-2"
+              style={{ color: "#203050" }}
               autoComplete="one-time-code"
             />
           </label>

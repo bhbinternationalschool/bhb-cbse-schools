@@ -67,6 +67,24 @@
      captions / status pills, not a general escape hatch. */
   --text-micro: 0.6875rem; /* 11px — intentional, not a default */
   --radius: 0.625rem;
+  /* Elevation — navy-tinted shadows, replaces ad-hoc shadow-sm/md mixes.
+     Consume as shadow-[var(--shadow-2)] etc. */
+  --shadow-1: 0 1px 2px rgba(32, 48, 80, 0.06);
+  --shadow-2: 0 2px 8px rgba(32, 48, 80, 0.08), 0 1px 2px rgba(32, 48, 80, 0.05);
+  --shadow-3: 0 8px 24px rgba(32, 48, 80, 0.1), 0 2px 6px rgba(32, 48, 80, 0.06);
+  --shadow-4: 0 16px 48px rgba(32, 48, 80, 0.16); /* modals/popovers */
+  /* Motion — shared durations/easing for entrance + hover transitions. */
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+  --motion-slow: 320ms;
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  /* Surfaces beyond --surface (page) / --card (raised): a floating panel
+     above --surface, and a recessed well below it (zebra rows, input
+     wells). Distinct from --card so dark mode can keep them apart. */
+  --surface-raised: #ffffff;
+  --surface-sunken: #efeee7;
+  --overlay: rgba(18, 26, 46, 0.45);
+  color-scheme: light;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
@@ -1084,36 +1102,88 @@ h3,
   }
 }
 
+/*
+ * Brand-aware dark mode — navy-tinted, not the shadcn grayscale default
+ * this replaced. Overrides EVERY custom property :root defines, not just
+ * the shadcn subset, because most of this app reads --brand-deep/--ink/
+ * --muted directly as arbitrary Tailwind values (text-[var(--brand-deep)]
+ * etc.), not through the shadcn color utilities alone.
+ *
+ * One deliberate tradeoff, on the record: --brand-deep/--brand-mid/--ink
+ * are used as running TEXT color far more than as backgrounds (1543 vs
+ * 255 sites for --brand-deep alone, measured 2026-08-13) — headings,
+ * labels, nearly every heading in the app. They're redefined to a light
+ * color here so that dominant case reads correctly in dark mode. The
+ * minority of call sites using them as a navy BACKGROUND (e.g. the active
+ * sidebar nav pill, `bg-[var(--brand-deep)] text-white`) will look wrong
+ * in dark mode until those specific spots move to a dedicated non-text
+ * token during the Phase 2/3 component-kit work and hex sweep — not
+ * fixed here, since Phase 0 is tokens only and this file doesn't touch
+ * call sites. Flagging plainly rather than leaving it a silent surprise.
+ */
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --brand-deep: #e4eaf7;
+  --brand-mid: #aab8d8;
+  --brand-accent: #d4b84a;
+  --brand-accent-soft: #a8863a;
+  --brand-gold: #d4b84a;
+  --brand-gold-soft: #a8863a;
+  --brand-cream: #f8f8f0;
+  --surface: #0e1526;
+  --panel: rgba(24, 34, 56, 0.92);
+  --ink: #e4eaf7;
+  --muted: #96a0ba;
+  --muted-surface: #141d33;
+  --danger: #f97066;
+  --danger-soft: rgba(249, 112, 102, 0.16);
+  --ok: #3dd68c;
+  --success: #3dd68c;
+  --success-soft: rgba(61, 214, 140, 0.16);
+  --warning: #f0a94e;
+  --warning-soft: rgba(240, 169, 78, 0.16);
+  --info: #6d9bff;
+  --info-soft: rgba(109, 155, 255, 0.16);
+  --ring: #d4b84a;
+  --background: #0e1526;
+  --foreground: #e4eaf7;
+  --card: #182238;
+  --card-foreground: #e4eaf7;
+  --popover: #182238;
+  --popover-foreground: #e4eaf7;
+  /* Primary flips to gold in dark — confirmed direction: a distinctive
+     brand statement, and navy-on-navy would be invisible anyway. */
+  --primary: #c5a028;
+  --primary-foreground: #16233d;
+  --secondary: #141d33;
+  --secondary-foreground: #e4eaf7;
+  --muted-foreground: #96a0ba;
+  --accent: rgba(197, 160, 40, 0.16);
+  --accent-foreground: #e4eaf7;
+  --destructive: #f97066;
+  --border: rgba(200, 214, 245, 0.14);
+  --input: rgba(200, 214, 245, 0.2);
+  --chart-1: #5b8def;
+  --chart-2: #f87171;
+  --chart-3: #fb923c;
+  --chart-4: #4ade80;
+  --chart-5: #a78bfa;
+  --chart-6: #22d3ee;
+  --chart-7: #fb7185;
+  --chart-8: #eab308;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-3: 0 8px 24px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.35);
+  --shadow-4: 0 16px 48px rgba(0, 0, 0, 0.6);
+  --surface-raised: #182238;
+  --surface-sunken: #0a0f1c;
+  --overlay: rgba(2, 5, 12, 0.6);
+  color-scheme: dark;
+  --sidebar: #0e1526;
+  --sidebar-foreground: #e4eaf7;
+  --sidebar-primary: #c5a028;
+  --sidebar-primary-foreground: #16233d;
+  --sidebar-accent: #182238;
+  --sidebar-accent-foreground: #e4eaf7;
+  --sidebar-border: rgba(200, 214, 245, 0.12);
+  --sidebar-ring: #d4b84a;
 }

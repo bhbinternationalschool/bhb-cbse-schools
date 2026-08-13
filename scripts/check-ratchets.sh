@@ -48,6 +48,18 @@ count_metric() {
     data_layer_whole_state)
       # `body.state` / `{ state }` is the whole-module payload shape.
       code_grep 'body\.state|\{ state \}' "$SRC/lib/data" "$SRC/app/api/data" ;;
+    raw_hex)
+      # Arbitrary hex Tailwind values instead of the design tokens in
+      # globals.css — the "six different danger reds" problem. Falls per
+      # module as the visual refit (docs/plans/woolly-riding-quail.md)
+      # sweeps each screen; the design-token themselves are dark-mode
+      # aware, arbitrary hex is not.
+      code_grep '(bg|text|border|ring|from|to|via)-\[#[0-9a-fA-F]{3,8}\]' "$SRC" ;;
+    raw_table)
+      # Hand-rolled <table> instead of ui/erp-roster.tsx's ErpTableShell —
+      # no shared sticky header, zebra, density, or empty/skeleton states.
+      grep -rl '<table' "$SRC" 2>/dev/null \
+        | grep -vE 'ui/(erp-roster|data-table)\.tsx' | wc -l ;;
     *)
       echo "-1" ;;
   esac

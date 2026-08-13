@@ -34,3 +34,10 @@ fake_success|29|API routes that can report success without writing (28 -> 29 on 
 data_layer_localstorage|0|localStorage anywhere under lib/data
 data_layer_whole_state|0|Whole-module state bodies in the data layer
 unguarded_cache_writes|0|Bare localStorage.setItem on module state
+
+# Visual-upgrade ratchets (2026-08-13, docs/plans/woolly-riding-quail.md
+# "Refined Enterprise" plan). Dark mode landed this phase via design tokens
+# in globals.css; these two patterns bypass the tokens and so don't adapt
+# to it. Falls per module as each gets its visual refit — see Phase 3/4.
+raw_hex|1027|Arbitrary hex Tailwind classes bypassing design tokens; not dark-mode aware. Target is 0.
+raw_table|53|Hand-rolled <table> instead of ui/erp-roster.tsx's ErpTableShell. Target is 0.

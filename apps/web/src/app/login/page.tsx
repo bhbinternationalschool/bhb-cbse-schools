@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import { LoginPanel } from "@/components/login/LoginPanel";
 import { LoginPwaInstall } from "@/components/pwa/LoginPwaInstall";
+import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { TENANT } from "@/lib/types";
 
 export const metadata: Metadata = {
@@ -43,8 +44,22 @@ export default function LoginPage() {
         }}
       />
 
+      {/* Toggle mounted here per Phase 0; the atmosphere gradient above is
+          still hardcoded light-only cream/gold and doesn't yet respond to
+          dark mode — full login dark support is Phase 3, not this one. */}
+      <div className="absolute top-4 right-4 z-30">
+        <ThemeToggle />
+      </div>
+
       <div className="relative z-10 flex min-h-0 flex-1 items-stretch p-2.5">
-        <div className="flex w-full flex-col justify-between px-6 py-10 lg:w-[48%] lg:px-12">
+        {/* Pinned to light-mode token values — the atmosphere gradient behind
+            this panel is fixed light (see comment above), so --brand-deep/
+            --muted must not follow the dark-mode flip or the text disappears
+            against it. Full dark-aware version is Phase 3. */}
+        <div
+          className="flex w-full flex-col justify-between px-6 py-10 lg:w-[48%] lg:px-12"
+          style={{ "--brand-deep": "#203050", "--muted": "#5c6478" } as React.CSSProperties}
+        >
           <div>
             <div className="flex flex-col items-start gap-5 text-[var(--brand-deep)]">
               <Image

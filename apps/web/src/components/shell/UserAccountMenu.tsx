@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, LogOut, Pencil, Shield, UserRound } from "lucide-react";
+import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import type { DemoSession } from "@/lib/auth";
 import { loadMasters } from "@/lib/masters";
 import {
@@ -225,6 +226,13 @@ export function UserAccountMenu({
                 }
                 onClick={() => setShowRoles(true)}
               />
+              <div className="my-1 border-t border-[rgba(32,48,80,0.08)]" />
+              <div className="flex items-center justify-between px-3 py-2">
+                <span className="text-sm font-medium text-[var(--brand-deep)]">
+                  Appearance
+                </span>
+                <ThemeToggle />
+              </div>
               <div className="my-1 border-t border-[rgba(32,48,80,0.08)]" />
               <MenuButton
                 icon={<LogOut className="h-4 w-4" />}
