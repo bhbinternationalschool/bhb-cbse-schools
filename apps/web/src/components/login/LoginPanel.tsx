@@ -451,7 +451,7 @@ export function LoginPanel() {
             <button
               type="submit"
               disabled={pending}
-              className="mt-1 w-full rounded-xl bg-[var(--brand-deep)] px-4 py-3 text-sm font-semibold text-white btn-accent disabled:opacity-70"
+              className="mt-1 w-full rounded-xl px-4 py-3 text-sm font-semibold btn-accent disabled:opacity-70"
             >
               {pending ? "Sending…" : "Send OTP on WhatsApp"}
             </button>
@@ -514,7 +514,7 @@ export function LoginPanel() {
             <button
               type="submit"
               disabled={pending}
-              className="mt-1 w-full rounded-xl bg-[var(--brand-deep)] px-4 py-3 text-sm font-semibold text-white btn-accent disabled:opacity-70"
+              className="mt-1 w-full rounded-xl px-4 py-3 text-sm font-semibold btn-accent disabled:opacity-70"
             >
               {pending ? "Verifying…" : "Verify & set password"}
             </button>
@@ -591,8 +591,8 @@ export function LoginPanel() {
                     }}
                     className={`rounded-lg px-3 py-1 font-semibold ${
                       identifierType === t
-                        ? "bg-[var(--brand-deep)] text-white"
-                        : "border border-[rgba(32,48,80,0.15)] text-[var(--brand-deep)]"
+                        ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                        : "border border-[var(--border)] text-[var(--brand-deep)]"
                     }`}
                   >
                     {t === "email" ? "Email" : "Phone"}
@@ -685,7 +685,7 @@ export function LoginPanel() {
         <button
           type="submit"
           disabled={pending}
-          className="mt-1 w-full rounded-xl bg-[var(--brand-deep)] px-4 py-3 text-sm font-semibold text-white btn-accent disabled:opacity-70"
+          className="mt-1 w-full rounded-xl px-4 py-3 text-sm font-semibold btn-accent disabled:opacity-70"
         >
           {pending ? "Signing in…" : active.button}
         </button>
