@@ -2,6 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { loadMasters, type MastersState } from "@/lib/masters";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+} from "@/components/ui/erp-roster";
 import { loadStaffAttendance } from "@/lib/staffAttendance";
 import { loadStaffHr, type LeaveStatus } from "@/lib/staffHr";
 import {
@@ -174,8 +179,8 @@ export function StaffLeaveReportsPanel({
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(240px,280px)_minmax(0,1fr)]">
-      <aside className="rounded-xl border border-[rgba(32,48,80,0.14)] bg-white overflow-hidden">
-        <div className="border-b border-[rgba(32,48,80,0.08)] px-3 py-2.5">
+      <aside className="rounded-xl border border-[var(--border)] bg-[var(--card)] overflow-hidden">
+        <div className="border-b border-[var(--border)] px-3 py-2.5">
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">
             {panelTitle}
           </h2>
@@ -192,8 +197,8 @@ export function StaffLeaveReportsPanel({
                     onClick={() => setReportId(r.id)}
                     className={`block w-full px-4 py-2 text-left text-sm ${
                       active
-                        ? "bg-[rgba(32,48,80,0.08)] font-semibold text-[var(--brand-deep)]"
-                        : "text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.04)]"
+                        ? "bg-[var(--surface-sunken)] font-semibold text-[var(--brand-deep)]"
+                        : "text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
                     }`}
                   >
                     {r.label}
@@ -206,7 +211,7 @@ export function StaffLeaveReportsPanel({
       </aside>
 
       <div className="space-y-4 min-w-0">
-        <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <h2 className="text-base font-bold text-[var(--brand-deep)]">
             {def.label}
           </h2>
@@ -215,7 +220,7 @@ export function StaffLeaveReportsPanel({
           ) : null}
 
           {error ? (
-            <p className="mt-3 rounded-lg bg-[#fee2e2] px-3 py-2 text-sm font-medium text-[#b91c1c]">
+            <p className="mt-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-sm font-medium text-[var(--danger)]">
               {error}
             </p>
           ) : null}
@@ -391,14 +396,14 @@ export function StaffLeaveReportsPanel({
             </button>
             <button
               type="button"
-              className="rounded-lg border border-[rgba(32,48,80,0.2)] px-4 py-2 text-xs font-bold text-[var(--brand-deep)]"
+              className="rounded-lg border border-[var(--border)] px-4 py-2 text-xs font-bold text-[var(--brand-deep)]"
               onClick={() => onExport("excel")}
             >
               Excel
             </button>
             <button
               type="button"
-              className="rounded-lg border border-[rgba(32,48,80,0.2)] px-4 py-2 text-xs font-bold text-[var(--brand-deep)]"
+              className="rounded-lg border border-[var(--border)] px-4 py-2 text-xs font-bold text-[var(--brand-deep)]"
               onClick={() => onExport("pdf")}
             >
               PDF
@@ -407,8 +412,8 @@ export function StaffLeaveReportsPanel({
         </div>
 
         {preview ? (
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white overflow-hidden">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[rgba(32,48,80,0.08)] px-4 py-3">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] overflow-hidden">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] px-4 py-3">
               <h3 className="text-sm font-bold text-[var(--brand-deep)]">
                 {preview.title}
               </h3>
@@ -417,8 +422,8 @@ export function StaffLeaveReportsPanel({
               </span>
             </div>
             <div className="overflow-x-auto max-h-[min(55vh,520px)]">
-              <table className="min-w-full text-left text-sm">
-                <thead className="sticky top-0 bg-[rgba(32,48,80,0.04)] text-[11px] uppercase tracking-wide text-[var(--muted)]">
+              <ErpTable>
+                <ErpTableHead sticky>
                   <tr>
                     {preview.columns.map((c) => (
                       <th key={c.key} className="px-3 py-2 whitespace-nowrap">
@@ -426,13 +431,10 @@ export function StaffLeaveReportsPanel({
                       </th>
                     ))}
                   </tr>
-                </thead>
-                <tbody>
+                </ErpTableHead>
+                <ErpTableBody>
                   {preview.rows.map((row, i) => (
-                    <tr
-                      key={i}
-                      className="border-t border-[rgba(32,48,80,0.06)]"
-                    >
+                    <tr key={i}>
                       {preview.columns.map((c) => (
                         <td
                           key={c.key}
@@ -455,8 +457,8 @@ export function StaffLeaveReportsPanel({
                       </td>
                     </tr>
                   ) : null}
-                </tbody>
-              </table>
+                </ErpTableBody>
+              </ErpTable>
             </div>
           </div>
         ) : (

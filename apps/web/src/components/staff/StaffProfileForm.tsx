@@ -311,7 +311,7 @@ export function StaffProfileForm(props: Props) {
             <>
               <button
                 type="button"
-                className="rounded-xl border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-xs font-semibold text-[var(--brand-deep)]"
+                className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs font-semibold text-[var(--brand-deep)]"
                 onClick={() =>
                   setActiveStatus(
                     draft.status === "active" ? "inactive" : "active",
@@ -328,7 +328,7 @@ export function StaffProfileForm(props: Props) {
           ) : null}
           <Link
             href="/staff"
-            className="rounded-xl border border-[rgba(32,48,80,0.15)] bg-white px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)]"
+            className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)]"
           >
             Back to roster
           </Link>
@@ -343,7 +343,7 @@ export function StaffProfileForm(props: Props) {
       </div>
 
       {error ? (
-        <p className="mt-3 rounded-lg bg-[#fee2e2] px-3 py-2 text-sm font-medium text-[#b91c1c]">
+        <p className="mt-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-sm font-medium text-[var(--danger)]">
           {error}
         </p>
       ) : null}
@@ -355,7 +355,7 @@ export function StaffProfileForm(props: Props) {
         items={TABS}
       />
 
-      <div className="mt-5 space-y-4 rounded-2xl border border-[rgba(32,48,80,0.12)] bg-white p-5 shadow-sm">
+      <div className="mt-5 space-y-4 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-sm">
         {tab === "basic" ? (
           <>
             <div className="grid gap-6 lg:grid-cols-2">
@@ -404,7 +404,7 @@ export function StaffProfileForm(props: Props) {
                   disabled={props.mode === "edit"}
                 />
                 {fieldErrors.empCode ? (
-                  <span className="mt-1 block text-[11px] text-[#b91c1c]">
+                  <span className="mt-1 block text-[11px] text-[var(--danger)]">
                     {fieldErrors.empCode}
                   </span>
                 ) : null}
@@ -417,7 +417,7 @@ export function StaffProfileForm(props: Props) {
                   onChange={(e) => patch({ fullName: e.target.value })}
                 />
                 {fieldErrors.fullName ? (
-                  <span className="mt-1 block text-[11px] text-[#b91c1c]">
+                  <span className="mt-1 block text-[11px] text-[var(--danger)]">
                     {fieldErrors.fullName}
                   </span>
                 ) : null}
@@ -543,7 +543,7 @@ export function StaffProfileForm(props: Props) {
                   onChange={(e) => patch({ mobile: e.target.value })}
                 />
                 {fieldErrors.mobile ? (
-                  <span className="mt-1 block text-[11px] text-[#b91c1c]">
+                  <span className="mt-1 block text-[11px] text-[var(--danger)]">
                     {fieldErrors.mobile}
                   </span>
                 ) : null}
@@ -565,7 +565,7 @@ export function StaffProfileForm(props: Props) {
                   onChange={(e) => patch({ email: e.target.value })}
                 />
                 {fieldErrors.email ? (
-                  <span className="mt-1 block text-[11px] text-[#b91c1c]">
+                  <span className="mt-1 block text-[11px] text-[var(--danger)]">
                     {fieldErrors.email}
                   </span>
                 ) : null}
@@ -921,7 +921,7 @@ export function StaffProfileForm(props: Props) {
             </label>
           </div>
           {props.mode === "edit" ? (
-            <div className="mt-6 border-t border-[rgba(32,48,80,0.08)] pt-6">
+            <div className="mt-6 border-t border-[var(--border)] pt-6">
               <h3 className="mb-3 text-sm font-bold text-[var(--brand-deep)]">
                 Employment agreements
               </h3>
@@ -942,7 +942,7 @@ export function StaffProfileForm(props: Props) {
                 maxLength={12}
               />
               {fieldErrors.aadhaarNo ? (
-                <span className="mt-1 block text-[11px] text-[#b91c1c]">
+                <span className="mt-1 block text-[11px] text-[var(--danger)]">
                   {fieldErrors.aadhaarNo}
                 </span>
               ) : null}
@@ -956,7 +956,7 @@ export function StaffProfileForm(props: Props) {
                 maxLength={10}
               />
               {fieldErrors.panNo ? (
-                <span className="mt-1 block text-[11px] text-[#b91c1c]">
+                <span className="mt-1 block text-[11px] text-[var(--danger)]">
                   {fieldErrors.panNo}
                 </span>
               ) : null}
@@ -1037,7 +1037,7 @@ export function StaffProfileForm(props: Props) {
                 autoComplete="off"
               />
               {fieldErrors.loginUsername ? (
-                <span className="mt-1 block text-[11px] text-[#b91c1c]">
+                <span className="mt-1 block text-[11px] text-[var(--danger)]">
                   {fieldErrors.loginUsername}
                 </span>
               ) : null}
@@ -1105,7 +1105,7 @@ export function StaffProfileForm(props: Props) {
                 maxLength={11}
               />
               {fieldErrors.bankIfsc ? (
-                <span className="mt-1 block text-[11px] text-[#b91c1c]">
+                <span className="mt-1 block text-[11px] text-[var(--danger)]">
                   {fieldErrors.bankIfsc}
                 </span>
               ) : null}
@@ -1243,7 +1243,7 @@ export function StaffProfileForm(props: Props) {
                 </div>
               </div>
 
-              <div className="flex flex-col items-center justify-center rounded-2xl border border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.02)] p-5">
+              <div className="flex flex-col items-center justify-center rounded-2xl border border-[var(--border)] bg-[var(--surface-sunken)] p-5">
                 <h3 className="text-sm font-bold text-[var(--brand-deep)]">
                   Staff QR code
                 </h3>
@@ -1255,10 +1255,10 @@ export function StaffProfileForm(props: Props) {
                   <img
                     src={qrDataUrl}
                     alt="Staff QR"
-                    className="mt-3 h-44 w-44 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-2"
+                    className="mt-3 h-44 w-44 rounded-xl border border-[var(--border)] bg-[var(--card)] p-2"
                   />
                 ) : (
-                  <div className="mt-3 h-44 w-44 animate-pulse rounded-xl bg-[rgba(32,48,80,0.08)]" />
+                  <div className="mt-3 h-44 w-44 animate-pulse rounded-xl bg-[var(--surface-sunken)]" />
                 )}
                 <p className="mt-2 font-mono text-xs text-[var(--muted)]">
                   {draft.empCode || "—"}
@@ -1285,7 +1285,7 @@ export function StaffProfileForm(props: Props) {
       <div className="mt-4 flex flex-wrap justify-between gap-2">
         <button
           type="button"
-          className="rounded-xl border border-[rgba(32,48,80,0.15)] bg-white px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)] disabled:opacity-40"
+          className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)] disabled:opacity-40"
           disabled={tab === "basic"}
           onClick={() => {
             const i = TABS.findIndex((t) => t.id === tab);
@@ -1304,7 +1304,7 @@ export function StaffProfileForm(props: Props) {
           </button>
           <button
             type="button"
-            className="rounded-xl border border-[rgba(32,48,80,0.15)] bg-white px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)] disabled:opacity-40"
+            className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)] disabled:opacity-40"
             disabled={tab === "idcard"}
             onClick={() => {
               const i = TABS.findIndex((t) => t.id === tab);

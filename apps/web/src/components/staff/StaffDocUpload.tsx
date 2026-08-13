@@ -109,7 +109,7 @@ export function StaffDocUpload({
   }
 
   return (
-    <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.02)] p-3">
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <div className="text-sm font-semibold text-[var(--brand-deep)]">

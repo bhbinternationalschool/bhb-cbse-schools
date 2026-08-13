@@ -53,9 +53,9 @@ export function StaffDutiesPanel({ draft, masters, onChange }: Props) {
 
   return (
     <div className="space-y-8">
-      <div className="rounded-xl border border-[rgba(37,99,235,0.2)] bg-[#eff6ff] px-4 py-3">
-        <p className="text-sm font-semibold text-[#1d4ed8]">{caps.label}</p>
-        <p className="mt-0.5 text-[11px] text-[#1e3a8a]/80]">
+      <div className="rounded-xl border border-[var(--info)]/20 bg-[var(--info-soft)] px-4 py-3">
+        <p className="text-sm font-semibold text-[var(--info)]">{caps.label}</p>
+        <p className="mt-0.5 text-[11px] text-[var(--info)]/80">
           Based on stream
           {draft.stream === "teaching" ? " (teaching)" : " (non-teaching)"}
           {des ? ` · ${des.name}` : ""}
@@ -225,7 +225,7 @@ function ClassTeacherSection({
           </button>
         </div>
       ) : null}
-      <ul className="mt-3 divide-y divide-[rgba(32,48,80,0.08)] rounded-xl border border-[rgba(32,48,80,0.1)]">
+      <ul className="mt-3 divide-y divide-[var(--border)] rounded-xl border border-[var(--border)]">
         {draft.classTeacherLinks.length === 0 ? (
           <li className="px-3 py-3 text-sm text-[var(--muted)]">
             No class-teacher links yet
@@ -401,7 +401,7 @@ function SubjectTeachingSection({
           </button>
         </div>
       ) : null}
-      <ul className="mt-3 divide-y divide-[rgba(32,48,80,0.08)] rounded-xl border border-[rgba(32,48,80,0.1)]">
+      <ul className="mt-3 divide-y divide-[var(--border)] rounded-xl border border-[var(--border)]">
         {draft.subjectTeachingLinks.length === 0 ? (
           <li className="px-3 py-3 text-sm text-[var(--muted)]">
             No subject teaching links yet
@@ -570,7 +570,7 @@ function VehicleSection({
           here.
         </p>
       ) : null}
-      <ul className="mt-3 divide-y divide-[rgba(32,48,80,0.08)] rounded-xl border border-[rgba(32,48,80,0.1)]">
+      <ul className="mt-3 divide-y divide-[var(--border)] rounded-xl border border-[var(--border)]">
         {draft.vehicleLinks.length === 0 ? (
           <li className="px-3 py-3 text-sm text-[var(--muted)]">
             No vehicle links yet
@@ -706,7 +706,7 @@ function OtherDutiesSection({
           </button>
         </div>
       ) : null}
-      <ul className="mt-3 divide-y divide-[rgba(32,48,80,0.08)] rounded-xl border border-[rgba(32,48,80,0.1)]">
+      <ul className="mt-3 divide-y divide-[var(--border)] rounded-xl border border-[var(--border)]">
         {draft.dutyLinks.length === 0 ? (
           <li className="px-3 py-3 text-sm text-[var(--muted)]">
             No extra duties yet

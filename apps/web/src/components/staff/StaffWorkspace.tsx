@@ -363,7 +363,7 @@ export function StaffWorkspace() {
       {tab === "my_docs" ? (
         <ErpPanel>
           <StaffAgreementSelfPanel />
-          <div className="mt-6 border-t border-[rgba(32,48,80,0.08)] pt-6">
+          <div className="mt-6 border-t border-[var(--border)] pt-6">
             <StaffMyProfileDocs
               staffId={
                 state ? resolveSessionStaff(session, state)?.id || "" : ""
@@ -574,7 +574,7 @@ export function StaffWorkspace() {
                   (d) => d.id === s.designationId,
                 );
                 return (
-                  <tr key={s.id} className="hover:bg-[rgba(32,48,80,0.02)]">
+                  <tr key={s.id} className="hover:bg-[var(--surface-sunken)]">
                     <td className="px-4 py-2">
                       {s.photoUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
@@ -584,7 +584,7 @@ export function StaffWorkspace() {
                           className="h-9 w-9 rounded-full object-cover"
                         />
                       ) : (
-                        <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[rgba(32,48,80,0.08)] text-[10px] font-bold text-[var(--muted)]">
+                        <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[var(--surface-sunken)] text-[10px] font-bold text-[var(--muted)]">
                           {s.fullName
                             .split(/\s+/)
                             .slice(0, 2)
@@ -829,11 +829,11 @@ function StaffImportPanel({
       </label>
 
       {localError ? (
-        <p className="text-sm font-medium text-[#b42318]">{localError}</p>
+        <p className="text-sm font-medium text-[var(--danger)]">{localError}</p>
       ) : null}
 
       {preview ? (
-        <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.02)] p-3 text-sm">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-3 text-sm">
           <p>
             {replaceAll ? (
               <>
@@ -852,7 +852,7 @@ function StaffImportPanel({
             ) : null}
           </p>
           {preview.errors.length > 0 ? (
-            <ul className="mt-2 max-h-40 space-y-1 overflow-auto text-[11px] text-[#b42318]">
+            <ul className="mt-2 max-h-40 space-y-1 overflow-auto text-[11px] text-[var(--danger)]">
               {preview.errors.slice(0, 20).map((e) => (
                 <li key={e}>{e}</li>
               ))}

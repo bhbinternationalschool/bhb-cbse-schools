@@ -435,7 +435,7 @@ export function StaffAgreementPanel({
         <p className="text-sm font-medium text-emerald-700">{notice}</p>
       ) : null}
       {error ? (
-        <p className="text-sm font-medium text-[#b42318]">{error}</p>
+        <p className="text-sm font-medium text-[var(--danger)]">{error}</p>
       ) : null}
 
       {effectiveMode === "self" && pendingSelf ? (
@@ -444,7 +444,7 @@ export function StaffAgreementPanel({
           description="Read the terms, accept consent, and sign below."
         >
           <div className="space-y-4">
-            <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.02)] p-4">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-4">
               <h3 className="text-sm font-bold text-[var(--brand-deep)]">
                 {pendingSelf.title}
               </h3>
@@ -696,7 +696,7 @@ export function StaffAgreementPanel({
           </ErpTableHead>
           <ErpTableBody>
             {visible.map((row) => (
-              <tr key={row.id} className="hover:bg-[rgba(32,48,80,0.02)]">
+              <tr key={row.id} className="hover:bg-[var(--surface-sunken)]">
                 <td className="px-4 py-3 font-mono text-xs font-semibold text-[var(--brand-deep)]">
                   {row.agreementNo || "—"}
                 </td>
@@ -859,10 +859,10 @@ export function StaffAgreementPanel({
           onClick={() => closeEditor()}
         >
           <div
-            className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl"
+            className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-[var(--card)] shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-start justify-between gap-3 border-b border-[rgba(32,48,80,0.1)] px-5 py-4">
+            <div className="flex items-start justify-between gap-3 border-b border-[var(--border)] px-5 py-4">
               <div>
                 <h2
                   id="agreement-editor-title"
@@ -882,7 +882,7 @@ export function StaffAgreementPanel({
               </div>
               <button
                 type="button"
-                className="rounded-lg p-1 text-[var(--muted)] hover:bg-[rgba(32,48,80,0.06)]"
+                className="rounded-lg p-1 text-[var(--muted)] hover:bg-[var(--surface-sunken)]"
                 aria-label="Close editor"
                 onClick={() => closeEditor()}
               >
@@ -922,7 +922,7 @@ export function StaffAgreementPanel({
                 />
               </label>
 
-              <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.02)] p-3">
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-3">
                 <p className="text-xs font-semibold text-[var(--brand-deep)]">
                   AI assist (CBSE alignment)
                 </p>
@@ -963,7 +963,7 @@ export function StaffAgreementPanel({
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-2 border-t border-[rgba(32,48,80,0.1)] px-5 py-4">
+            <div className="flex flex-wrap gap-2 border-t border-[var(--border)] px-5 py-4">
               <button type="button" className={btn} onClick={onSaveDraft}>
                 Save draft
               </button>

@@ -114,8 +114,8 @@ export function StaffImageField({
 
   const box =
     aspect === "wide"
-      ? "h-20 w-44 rounded-lg border border-dashed border-[rgba(32,48,80,0.25)] bg-[rgba(32,48,80,0.03)]"
-      : "h-24 w-24 rounded-xl border border-dashed border-[rgba(32,48,80,0.25)] bg-[rgba(32,48,80,0.03)]";
+      ? "h-20 w-44 rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface-sunken)]"
+      : "h-24 w-24 rounded-xl border border-dashed border-[var(--border)] bg-[var(--surface-sunken)]";
 
   return (
     <div className="flex flex-wrap items-start gap-3">
@@ -143,7 +143,7 @@ export function StaffImageField({
           </button>
           <button
             type="button"
-            className="rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-2 text-xs font-semibold text-[var(--brand-deep)]"
+            className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-semibold text-[var(--brand-deep)]"
             onClick={() => fileRef.current?.click()}
           >
             Upload
@@ -184,13 +184,13 @@ export function StaffImageField({
 
       {camOpen ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(32,48,80,0.72)] p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--overlay)] p-4"
           role="dialog"
           aria-modal="true"
           aria-label={`Capture ${label}`}
         >
-          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-lg">
-            <div className="border-b border-[rgba(32,48,80,0.08)] px-4 py-3 text-sm font-semibold text-[var(--brand-deep)]">
+          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-[var(--card)] shadow-lg">
+            <div className="border-b border-[var(--border)] px-4 py-3 text-sm font-semibold text-[var(--brand-deep)]">
               Camera · {label}
             </div>
             <div className="bg-[var(--brand-deep)]">

@@ -59,7 +59,7 @@ export function StaffMyProfileDocs({
 
   if (!staffId) {
     return (
-      <p className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3 text-sm text-[var(--muted)]">
+      <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm text-[var(--muted)]">
         Sign in with a staff login linked to your employee record to update
         documents.
       </p>
@@ -67,7 +67,7 @@ export function StaffMyProfileDocs({
   }
   if (!staff) {
     return (
-      <p className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3 text-sm text-[var(--muted)]">
+      <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm text-[var(--muted)]">
         Staff profile not found.
       </p>
     );
@@ -188,7 +188,7 @@ function StaffDocSelfRow({
   }
 
   return (
-    <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-3">
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
       <div className="flex items-start justify-between gap-2">
         <div>
           <p className="text-sm font-semibold text-[var(--brand-deep)]">{label}</p>

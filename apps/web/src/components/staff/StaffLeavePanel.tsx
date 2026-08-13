@@ -3,6 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+} from "@/components/ui/erp-roster";
 import { listSessionYearOptions, loadMasters, type MastersState } from "@/lib/masters";
 import {
   adjustHalfDayLeave,
@@ -390,7 +395,7 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
   return (
     <div className="space-y-5">
       {error ? (
-        <p className="rounded-lg bg-[#fee2e2] px-3 py-2 text-sm font-medium text-[#b91c1c]">
+        <p className="rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-sm font-medium text-[var(--danger)]">
           {error}
         </p>
       ) : null}
@@ -400,7 +405,7 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
         </p>
       ) : null}
 
-      <p className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] px-4 py-2.5 text-sm text-[var(--muted)]">
+      <p className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-2.5 text-sm text-[var(--muted)]">
         {isManager ? (
           <>
             Signed in as <strong className="text-[var(--brand-deep)]">{session.fullName}</strong>{" "}
@@ -421,11 +426,11 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
       </p>
 
       {settings.autoApproveLeaves ? (
-        <p className="rounded-xl border border-[rgba(21,128,61,0.25)] bg-[rgba(21,128,61,0.08)] px-4 py-2.5 text-sm text-[#15803d]">
+        <p className="rounded-xl border border-[rgba(21,128,61,0.25)] bg-[rgba(21,128,61,0.08)] px-4 py-2.5 text-sm text-[var(--success)]">
           Auto-approve is on — new leave requests are approved immediately.
         </p>
       ) : settings.twoLevelApproval ? (
-        <p className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.03)] px-4 py-2.5 text-sm text-[var(--muted)]">
+        <p className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-2.5 text-sm text-[var(--muted)]">
           Two-level approval is on — Level 1 then Level 2.
         </p>
       ) : null}
@@ -543,7 +548,7 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
               showLevel1
             />
           ) : (
-            <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4 text-sm text-[var(--muted)]">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 text-sm text-[var(--muted)]">
               Approve or reject staff leave requests here. Use Direct leave to
               grant leave without a request, or Adjust to change dates / type.
             </div>
@@ -553,7 +558,7 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
 
       {tab === "adjust" && isManager ? (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-bold text-[var(--brand-deep)]">
               Select leave to adjust
             </h2>
@@ -567,8 +572,8 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
                       type="button"
                       className={`w-full rounded-lg border px-3 py-2 text-left text-sm ${
                         adjustId === r.id
-                          ? "border-[var(--brand-deep)] bg-[rgba(32,48,80,0.06)]"
-                          : "border-[rgba(32,48,80,0.1)]"
+                          ? "border-[var(--brand-deep)] bg-[var(--surface-sunken)]"
+                          : "border-[var(--border)]"
                       }`}
                       onClick={() => loadAdjust(r.id)}
                     >
@@ -621,7 +626,7 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
       ) : null}
 
       {tab === "halfday" && isManager ? (
-        <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4 space-y-4 max-w-xl">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 space-y-4 max-w-xl">
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">
             Adjust half-day leave
           </h2>
@@ -670,8 +675,8 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
         </div>
       ) : null}
 
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white overflow-hidden">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[rgba(32,48,80,0.08)] px-4 py-3">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] px-4 py-3">
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">
             Leave balances · {ay}
             {!isManager && selfStaff ? " (yours)" : ""}
@@ -680,7 +685,7 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
+                className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
                 onClick={() => {
                   const years = listSessionYearOptions(masters ?? undefined);
                   const idx = years.findIndex((y) => y.code === ay);
@@ -713,8 +718,8 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
           ) : null}
         </div>
         <div className="overflow-x-auto">
-          <table className="min-w-full text-left text-sm">
-            <thead className="bg-[rgba(32,48,80,0.04)] text-[11px] uppercase tracking-wide text-[var(--muted)]">
+          <ErpTable>
+            <ErpTableHead>
               <tr>
                 <th className="px-4 py-2">Staff</th>
                 {hr.leaveTypes.map((t) => (
@@ -723,13 +728,10 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
                   </th>
                 ))}
               </tr>
-            </thead>
-            <tbody>
+            </ErpTableHead>
+            <ErpTableBody>
               {balances.map(({ staff, byType }) => (
-                <tr
-                  key={staff.id}
-                  className="border-t border-[rgba(32,48,80,0.06)]"
-                >
+                <tr key={staff.id}>
                   <td className="px-4 py-2 font-medium text-[var(--brand-deep)]">
                     {staff.empCode} · {staff.fullName}
                   </td>
@@ -793,13 +795,13 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
                   </td>
                 </tr>
               ) : null}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
         </div>
       </div>
 
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white overflow-hidden">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[rgba(32,48,80,0.08)] px-4 py-3">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] px-4 py-3">
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">
             Request history
             {!isManager ? " (yours)" : ""}
@@ -819,8 +821,8 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
           </select>
         </div>
         <div className="overflow-x-auto">
-          <table className="min-w-full text-left text-sm">
-            <thead className="bg-[rgba(32,48,80,0.04)] text-[11px] uppercase tracking-wide text-[var(--muted)]">
+          <ErpTable>
+            <ErpTableHead>
               <tr>
                 <th className="px-4 py-2">Staff</th>
                 <th className="px-3 py-2">Type</th>
@@ -830,13 +832,10 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
                 <th className="px-3 py-2">Origin</th>
                 <th className="px-3 py-2">By</th>
               </tr>
-            </thead>
-            <tbody>
+            </ErpTableHead>
+            <ErpTableBody>
               {history.map((r) => (
-                <tr
-                  key={r.id}
-                  className="border-t border-[rgba(32,48,80,0.06)]"
-                >
+                <tr key={r.id}>
                   <td className="px-4 py-2">{staffLabel(r.staffId)}</td>
                   <td className="px-3 py-2">{r.typeCode}</td>
                   <td className="px-3 py-2 text-xs text-[var(--muted)]">
@@ -869,8 +868,8 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
                   </td>
                 </tr>
               ) : null}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
         </div>
       </div>
     </div>
@@ -927,7 +926,7 @@ function LeaveForm({
   return (
     <form
       onSubmit={onSubmit}
-      className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4 space-y-3 max-w-xl"
+      className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 space-y-3 max-w-xl"
     >
       <h2 className="text-sm font-bold text-[var(--brand-deep)]">{title}</h2>
       {hint ? (
@@ -1045,7 +1044,7 @@ function ApprovalQueue({
   showLevel1?: boolean;
 }) {
   return (
-    <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
       <h2 className="text-sm font-bold text-[var(--brand-deep)]">{title}</h2>
       {rows.length === 0 ? (
         <p className="mt-3 text-sm text-[var(--muted)]">{empty}</p>
@@ -1054,7 +1053,7 @@ function ApprovalQueue({
           {rows.map((r) => (
             <li
               key={r.id}
-              className="rounded-lg border border-[rgba(32,48,80,0.1)] px-3 py-2"
+              className="rounded-lg border border-[var(--border)] px-3 py-2"
             >
               <div className="text-sm font-semibold text-[var(--brand-deep)]">
                 {staffLabel(r.staffId)}
@@ -1076,14 +1075,14 @@ function ApprovalQueue({
               <div className="mt-2 flex gap-2">
                 <button
                   type="button"
-                  className="rounded-lg bg-[rgba(21,128,61,0.12)] px-3 py-1 text-xs font-bold text-[#15803d]"
+                  className="rounded-lg bg-[rgba(21,128,61,0.12)] px-3 py-1 text-xs font-bold text-[var(--success)]"
                   onClick={() => onDecide(r.id, "approved")}
                 >
                   {approveLabel}
                 </button>
                 <button
                   type="button"
-                  className="rounded-lg bg-[#fee2e2] px-3 py-1 text-xs font-bold text-[#b91c1c]"
+                  className="rounded-lg bg-[var(--danger-soft)] px-3 py-1 text-xs font-bold text-[var(--danger)]"
                   onClick={() => onDecide(r.id, "rejected")}
                 >
                   Reject
@@ -1106,12 +1105,12 @@ function StatusPill({ status }: { status: LeaveStatus }) {
         : status;
   const cls =
     status === "approved"
-      ? "bg-[rgba(21,128,61,0.12)] text-[#15803d]"
+      ? "bg-[rgba(21,128,61,0.12)] text-[var(--success)]"
       : status === "rejected"
-        ? "bg-[#fee2e2] text-[#b91c1c]"
+        ? "bg-[var(--danger-soft)] text-[var(--danger)]"
         : status === "pending_l2"
           ? "bg-[rgba(197,160,40,0.2)] text-[var(--brand-deep)]"
-          : "bg-[rgba(32,48,80,0.08)] text-[var(--muted)]";
+          : "bg-[var(--surface-sunken)] text-[var(--muted)]";
   return (
     <span
       className={`rounded-md px-2 py-0.5 text-[10px] font-black uppercase ${cls}`}

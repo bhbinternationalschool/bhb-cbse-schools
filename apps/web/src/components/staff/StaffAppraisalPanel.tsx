@@ -4,6 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { loadMasters, type MastersState } from "@/lib/masters";
 import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
+import {
   APPRAISAL_CRITERIA,
   appraisalAverage,
   closeAppraisalCycle,
@@ -168,7 +174,7 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
   return (
     <div className="space-y-5">
       {error ? (
-        <p className="rounded-lg bg-[#fee2e2] px-3 py-2 text-sm font-medium text-[#b91c1c]">
+        <p className="rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-sm font-medium text-[var(--danger)]">
           {error}
         </p>
       ) : null}
@@ -178,7 +184,7 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
         </p>
       ) : null}
 
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-4 py-3 flex flex-wrap items-center justify-between gap-2">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">
             {cycle.label}
@@ -189,19 +195,19 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded-lg bg-[rgba(32,48,80,0.06)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]">
+          <span className="rounded-lg bg-[var(--surface-sunken)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]">
             {cycleAppraisals.length} rated
           </span>
           <button
             type="button"
-            className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-xs font-semibold"
+            className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold"
             onClick={() => exportCycle("excel")}
           >
             Export Excel
           </button>
           <button
             type="button"
-            className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-xs font-semibold"
+            className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold"
             onClick={() => exportCycle("pdf")}
           >
             Export PDF
@@ -229,7 +235,7 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
           ) : (
             <button
               type="button"
-              className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-xs font-semibold"
+              className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold"
               onClick={() => {
                 const res = reopenAppraisalCycle(cycle.id);
                 if (!res.ok) {
@@ -253,7 +259,7 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <form
           onSubmit={onSave}
-          className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4 space-y-3"
+          className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 space-y-3"
         >
           <h3 className="text-sm font-bold text-[var(--brand-deep)]">
             Rate staff
@@ -333,26 +339,26 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
           </button>
         </form>
 
-        <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white overflow-hidden">
-          <div className="border-b border-[rgba(32,48,80,0.08)] px-4 py-3">
+        <ErpTableShell>
+          <div className="border-b border-[var(--border)] px-4 py-3">
             <h3 className="text-sm font-bold text-[var(--brand-deep)]">
               Cycle ratings
             </h3>
           </div>
           <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
-              <thead className="bg-[rgba(32,48,80,0.04)] text-[11px] uppercase tracking-wide text-[var(--muted)]">
+            <ErpTable>
+              <ErpTableHead>
                 <tr>
                   <th className="px-4 py-2">Staff</th>
                   <th className="px-3 py-2">Avg</th>
                   <th className="px-3 py-2">Rated by</th>
                 </tr>
-              </thead>
-              <tbody>
+              </ErpTableHead>
+              <ErpTableBody hoverable>
                 {cycleAppraisals.map((a) => (
                   <tr
                     key={a.id}
-                    className="border-t border-[rgba(32,48,80,0.06)] hover:bg-[rgba(32,48,80,0.02)] cursor-pointer"
+                    className="cursor-pointer"
                     onClick={() => setStaffId(a.staffId)}
                   >
                     <td className="px-4 py-2 font-medium text-[var(--brand-deep)]">
@@ -376,10 +382,10 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
                     </td>
                   </tr>
                 ) : null}
-              </tbody>
-            </table>
+              </ErpTableBody>
+            </ErpTable>
           </div>
-        </div>
+        </ErpTableShell>
       </div>
     </div>
   );

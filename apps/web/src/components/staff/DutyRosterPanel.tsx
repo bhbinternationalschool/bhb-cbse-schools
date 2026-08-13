@@ -18,6 +18,12 @@ import {
 } from "@/lib/dutyRoster";
 import { WEEKDAY_SHORT } from "@/lib/timetable";
 import type { MastersState } from "@/lib/masters";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
 import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 import { DeskListActions } from "@/components/ui/desk-list-actions";
 import { ErpAlerts } from "@/components/ui/erp-alerts";
@@ -171,7 +177,7 @@ export function DutyRosterPanel({ masters }: Props) {
 
   return (
     <div className="mt-6 space-y-4">
-      <p className="rounded-lg border border-[rgba(32,48,80,0.12)] bg-[rgba(248,248,240,0.8)] px-3 py-2 text-[11px] text-[var(--muted)]">
+      <p className="rounded-lg border border-[var(--border)] bg-[rgba(248,248,240,0.8)] px-3 py-2 text-[11px] text-[var(--muted)]">
         Rotation templates auto-fill recurring duties (assembly, gate, lunch,
         bus escort) across the week, spreading load fairly. You can also
         assign or remove any single day manually. This roster is stored on
@@ -183,7 +189,7 @@ export function DutyRosterPanel({ masters }: Props) {
         <button
           type="button"
           onClick={() => setWeekStart(addDays(weekStart, -7))}
-          className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-[11px] font-semibold"
+          className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-[11px] font-semibold"
         >
           ← Prev week
         </button>
@@ -193,14 +199,14 @@ export function DutyRosterPanel({ masters }: Props) {
         <button
           type="button"
           onClick={() => setWeekStart(addDays(weekStart, 7))}
-          className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-[11px] font-semibold"
+          className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-[11px] font-semibold"
         >
           Next week →
         </button>
         <button
           type="button"
           onClick={() => setWeekStart(mondayOf(todayIso()))}
-          className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-[11px] font-semibold"
+          className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-[11px] font-semibold"
         >
           This week
         </button>
@@ -215,14 +221,14 @@ export function DutyRosterPanel({ masters }: Props) {
           <button
             type="button"
             onClick={() => void onNotifyToday()}
-            className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-[11px] font-semibold"
+            className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-[11px] font-semibold"
           >
             Notify today&apos;s duty staff
           </button>
           <button
             type="button"
             onClick={() => setShowTemplates((v) => !v)}
-            className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-[11px] font-semibold"
+            className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-[11px] font-semibold"
           >
             {showTemplates ? "Hide" : "Manage"} rotation templates
           </button>
@@ -236,7 +242,7 @@ export function DutyRosterPanel({ masters }: Props) {
               {state.templates.map((t) => (
                 <li
                   key={t.id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.1)] px-3 py-1.5 text-sm"
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm"
                 >
                   <span>
                     <span className="font-semibold text-[var(--brand-deep)]">
@@ -262,12 +268,12 @@ export function DutyRosterPanel({ masters }: Props) {
             </p>
           )}
 
-          <div className="space-y-2 border-t border-[rgba(32,48,80,0.08)] pt-3">
+          <div className="space-y-2 border-t border-[var(--border)] pt-3">
             <div className="grid gap-2 sm:grid-cols-2">
               <label className="block text-[11px] font-semibold text-[var(--muted)]">
                 Duty type
                 <select
-                  className="mt-1 w-full rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
                   value={tplDutyType}
                   onChange={(e) => setTplDutyType(e.target.value as DutyType)}
                 >
@@ -281,7 +287,7 @@ export function DutyRosterPanel({ masters }: Props) {
               <label className="block text-[11px] font-semibold text-[var(--muted)]">
                 Label
                 <input
-                  className="mt-1 w-full rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
                   placeholder={dutyTypeLabel(tplDutyType)}
                   value={tplLabel}
                   onChange={(e) => setTplLabel(e.target.value)}
@@ -302,7 +308,7 @@ export function DutyRosterPanel({ masters }: Props) {
                     className={`rounded-md px-2.5 py-1 text-[11px] font-semibold ${
                       tplWeekdays.includes(n)
                         ? "bg-[var(--brand-deep)] text-white"
-                        : "border border-[rgba(32,48,80,0.15)] text-[var(--muted)]"
+                        : "border border-[var(--border)] text-[var(--muted)]"
                     }`}
                   >
                     {label}
@@ -316,7 +322,7 @@ export function DutyRosterPanel({ masters }: Props) {
               <input
                 type="number"
                 min={1}
-                className="mt-1 w-24 rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm"
+                className="mt-1 w-24 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
                 value={tplSlots}
                 onChange={(e) => setTplSlots(Math.max(1, Number(e.target.value) || 1))}
               />
@@ -326,11 +332,11 @@ export function DutyRosterPanel({ masters }: Props) {
               <span className="block text-[11px] font-semibold text-[var(--muted)]">
                 Rotation pool ({tplStaff.length} selected)
               </span>
-              <div className="mt-1 max-h-40 overflow-y-auto rounded-lg border border-[rgba(32,48,80,0.15)] p-2">
+              <div className="mt-1 max-h-40 overflow-y-auto rounded-lg border border-[var(--border)] p-2">
                 {activeStaff.map((s) => (
                   <label
                     key={s.id}
-                    className="flex items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-[rgba(32,48,80,0.04)]"
+                    className="flex items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-[var(--surface-sunken)]"
                   >
                     <input
                       type="checkbox"
@@ -354,10 +360,10 @@ export function DutyRosterPanel({ masters }: Props) {
         </div>
       ) : null}
 
-      <div className="erp-table-shell overflow-x-auto rounded-2xl border border-[rgba(32,48,80,0.12)] bg-white shadow-sm">
-        <table className="w-full min-w-[760px] border-collapse text-sm">
-          <thead>
-            <tr className="border-b border-[rgba(32,48,80,0.08)] text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+      <ErpTableShell className="overflow-x-auto shadow-sm">
+        <ErpTable minWidth="min-w-[760px]" className="border-collapse">
+          <ErpTableHead>
+            <tr>
               <th className="px-3 py-2 text-left">Duty</th>
               {weekDates.map((d) => (
                 <th key={d} className="px-3 py-2 text-left">
@@ -366,10 +372,10 @@ export function DutyRosterPanel({ masters }: Props) {
                 </th>
               ))}
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {DUTY_TYPES.map((dt) => (
-              <tr key={dt.value} className="border-b border-[rgba(32,48,80,0.06)] align-top">
+              <tr key={dt.value} className="align-top">
                 <td className="px-3 py-2 font-semibold text-[var(--brand-deep)]">
                   {dt.label}
                 </td>
@@ -383,7 +389,7 @@ export function DutyRosterPanel({ masters }: Props) {
                         {cellAssignments.map((a) => (
                           <li
                             key={a.id}
-                            className="flex items-center justify-between gap-1 rounded-md bg-[rgba(32,48,80,0.05)] px-1.5 py-1 text-[11px]"
+                            className="flex items-center justify-between gap-1 rounded-md bg-[var(--surface-sunken)] px-1.5 py-1 text-[11px]"
                           >
                             <span>{dutyStaffLabel(masters, a.staffId)}</span>
                             <button
@@ -398,7 +404,7 @@ export function DutyRosterPanel({ masters }: Props) {
                         ))}
                       </ul>
                       <select
-                        className="mt-1 w-full rounded-md border border-[rgba(32,48,80,0.15)] bg-white px-1.5 py-1 text-[11px]"
+                        className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--card)] px-1.5 py-1 text-[11px]"
                         value=""
                         onChange={(e) => assignManually(date, dt.value, e.target.value)}
                       >
@@ -414,9 +420,9 @@ export function DutyRosterPanel({ masters }: Props) {
                 })}
               </tr>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </ErpTableBody>
+        </ErpTable>
+      </ErpTableShell>
       {dialog}
     </div>
   );
