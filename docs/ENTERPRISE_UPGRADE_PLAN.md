@@ -218,12 +218,12 @@ migration, independent of the rest of the checklist):
 | Login | `login/LoginPanel.tsx` | Done (Phase 3) |
 | Payroll | `payroll/PayrollWorkspace.tsx` | Done |
 | Admissions | `admissions/AdmissionsWorkspace.tsx` | Done |
-| Accounts | `accounts/{AccountsWorkspace,AccountsPanels,AccountsMastersPanel}.tsx` | Done (color/token sweep — the 14+ raw `<table>`s across AccountsPanels.tsx's sub-panels are deferred, matching the plan's "top-of-page only" scoping for this module) |
+| Accounts | `accounts/{AccountsWorkspace,AccountsPanels,AccountsMastersPanel}.tsx` | Done (color/token sweep + all 13 raw JSX `<table>`s in AccountsPanels.tsx converted to ErpTableShell kit; 2 print-window HTML-string tables deliberately left untouched, same as Fees' receipt flow) |
 | Exams | `exams/{ExamsWorkspace,ExamPapersPanel,InvigilationPanel,ExamDateSheetPanel}.tsx` | Done (color/token sweep; print sheets — ClassResultSheet/ExamPaperPrintSheet/ReportCardSheet — deliberately untouched, same as Fees' receipt flow) |
-| Masters | `masters/` (35 files, ~18k lines — the largest module) | Done (color/token sweep; raw `<table>`s in RolesPermissionsPanel/StaffAttendanceRulesPanel/FoundationPanels/ConcessionsPanel/SalarySetupPanel color-swept but not structurally converted — same call as Accounts/Store) |
+| Masters | `masters/` (35 files, ~18k lines — the largest module) | Done (color/token sweep + raw `<table>`s in RolesPermissionsPanel/StaffAttendanceRulesPanel/FoundationPanels/ConcessionsPanel/SalarySetupPanel converted to ErpTableShell kit) |
 | Transport | `transport/{TransportWorkspace,TransportFleetPanels,TransportOpsPanels,TransportPlannerPanel}.tsx` | Done (color/token sweep; TransportGoogleMap.tsx untouched — map styling is a different concern) |
 | Library | `library/LibraryWorkspace.tsx` | Done |
-| Store | `store/{StoreWorkspace,StoreAccountsWorkspace,StockMasterWorkspace,StoreModuleNav,StoreInventoryAllocationPanel,StoreAssetAllocationPanel,StoreSellReturnPanel,StoreReportsPanel}.tsx` | Done (color/token sweep; its 9 raw `<table>`s are already token-correct colorwise, structural ErpTableShell conversion deferred — same call as Accounts) |
+| Store | `store/{StoreWorkspace,StoreAccountsWorkspace,StockMasterWorkspace,StoreModuleNav,StoreInventoryAllocationPanel,StoreAssetAllocationPanel,StoreSellReturnPanel,StoreReportsPanel}.tsx` | Done (color/token sweep + raw `<table>`s in StockMasterWorkspace/StoreAccountsWorkspace/StoreInventoryAllocationPanel/StoreAssetAllocationPanel converted to ErpTableShell kit) |
 | Purchase | `purchase/{PurchaseWorkspace,PurchaseReturnPanel}.tsx` | Done |
 | Comms | `comms/{CommsWorkspace,WaChatHubPanel,SocialCredentialsPanel,ClassChannelsPanel,SocialCrossPostPanel}.tsx` | Done |
 | Trust | `trust/{TrustWorkspace,TrustPanels}.tsx` | Done |
