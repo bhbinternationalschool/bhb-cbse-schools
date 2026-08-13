@@ -7,7 +7,6 @@ import {
 } from "@/lib/waChatCategories";
 import { loadWaTemplates, type WaTemplate } from "@/lib/waTemplates";
 import {
-  MastersEmptyRow,
   MastersTableCard,
   MastersWorkCard,
 } from "@/components/masters/MastersLayout";
@@ -44,6 +43,61 @@ type HubStats = {
   >;
 };
 
+type DocVerificationField = {
+  field: string;
+  status: "match" | "mismatch" | "missing_ocr" | "missing_record" | "skipped";
+  detail?: string;
+};
+
+type DocVerificationOcrResult = {
+  verdict: "likely_match" | "review" | "likely_mismatch" | "unreadable";
+  fields: DocVerificationField[];
+  ocrTextPreview?: string;
+};
+
+type InboundMediaItem = {
+  id: string;
+  waMessageId: string | null;
+  mobileE164: string;
+  contactName: string | null;
+  mediaId: string;
+  mediaType: "image" | "document" | "video" | "audio";
+  mimeType: string | null;
+  filename: string | null;
+  caption: string | null;
+  householdId: string | null;
+  receivedAt: string;
+  reviewedAt: string | null;
+  reviewedBy: string | null;
+  ocrResult: DocVerificationOcrResult | null;
+  householdChildren: { id: string; name: string }[];
+};
+
+const STUDENT_DOC_KEYS: { value: string; label: string }[] = [
+  { value: "birthCert", label: "Birth certificate" },
+  { value: "photo", label: "Photo" },
+  { value: "aadhaar", label: "Aadhaar" },
+  { value: "addressProof", label: "Address proof" },
+  { value: "tc", label: "Transfer certificate" },
+  { value: "casteCert", label: "Caste certificate" },
+  { value: "incomeCert", label: "Income certificate" },
+];
+
+const STAFF_DOC_KEYS: { value: string; label: string }[] = [
+  { value: "photo", label: "Photo" },
+  { value: "aadhaar", label: "Aadhaar" },
+  { value: "pan", label: "PAN" },
+  { value: "addressProof", label: "Address proof" },
+  { value: "educationCert", label: "Education certificate" },
+  { value: "experienceCert", label: "Experience certificate" },
+  { value: "medicalCert", label: "Medical certificate" },
+  { value: "policeVerification", label: "Police verification" },
+  { value: "joiningLetter", label: "Joining letter" },
+  { value: "contract", label: "Contract" },
+  { value: "drivingLicense", label: "Driving license" },
+  { value: "other", label: "Other" },
+];
+
 const inp =
   "w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm";
 
@@ -66,6 +120,40 @@ export function WaChatHubPanel({
   const [summary, setSummary] = useState<string | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
+
+  const [mediaItems, setMediaItems] = useState<InboundMediaItem[]>([]);
+  const [mediaShowAll, setMediaShowAll] = useState(false);
+  const [mediaVisionOn, setMediaVisionOn] = useState(false);
+  const [mediaUi, setMediaUi] = useState<
+    Record<
+      string,
+      {
+        previewDataUrl?: string;
+        previewMime?: string;
+        previewLoading?: boolean;
+        previewError?: string;
+        subject: "student" | "staff";
+        subjectId: string;
+        docKey: string;
+        ocrLoading?: boolean;
+        ocrError?: string;
+        busy?: boolean;
+      }
+    >
+  >({});
+
+  function mediaState(id: string) {
+    return (
+      mediaUi[id] || {
+        subject: "student" as const,
+        subjectId: "",
+        docKey: STUDENT_DOC_KEYS[0].value,
+      }
+    );
+  }
+  function patchMediaUi(id: string, patch: Partial<ReturnType<typeof mediaState>>) {
+    setMediaUi((prev) => ({ ...prev, [id]: { ...mediaState(id), ...patch } }));
+  }
 
   useEffect(() => {
     const tpl = loadWaTemplates();
@@ -98,6 +186,115 @@ export function WaChatHubPanel({
     const t = window.setInterval(() => void refresh(), 15_000);
     return () => window.clearInterval(t);
   }, [refresh]);
+
+  const refreshMedia = useCallback(async () => {
+    try {
+      const q = mediaShowAll ? "" : "?pending=1";
+      const res = await fetch(`/api/wa/inbound-media${q}`);
+      if (!res.ok) return;
+      const json = (await res.json()) as {
+        items?: InboundMediaItem[];
+        visionConfigured?: boolean;
+      };
+      setMediaItems(Array.isArray(json.items) ? json.items : []);
+      setMediaVisionOn(!!json.visionConfigured);
+    } catch {
+      /* offline */
+    }
+  }, [mediaShowAll]);
+
+  useEffect(() => {
+    void refreshMedia();
+    const t = window.setInterval(() => void refreshMedia(), 30_000);
+    return () => window.clearInterval(t);
+  }, [refreshMedia]);
+
+  async function viewMedia(item: InboundMediaItem) {
+    patchMediaUi(item.id, { previewLoading: true, previewError: undefined });
+    try {
+      const res = await fetch("/api/wa/inbound-media", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "view", id: item.id }),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        dataUrl?: string;
+        mimeType?: string;
+        error?: string;
+      };
+      if (!res.ok || !json.dataUrl) {
+        patchMediaUi(item.id, {
+          previewLoading: false,
+          previewError: json.error || "Could not fetch media",
+        });
+        return;
+      }
+      patchMediaUi(item.id, {
+        previewLoading: false,
+        previewDataUrl: json.dataUrl,
+        previewMime: json.mimeType,
+      });
+    } catch (e) {
+      patchMediaUi(item.id, {
+        previewLoading: false,
+        previewError: e instanceof Error ? e.message : "Could not fetch media",
+      });
+    }
+  }
+
+  async function markMediaReviewed(item: InboundMediaItem) {
+    patchMediaUi(item.id, { busy: true });
+    try {
+      await fetch("/api/wa/inbound-media", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "markReviewed", id: item.id, by }),
+      }).catch(() => null);
+      await refreshMedia();
+    } finally {
+      patchMediaUi(item.id, { busy: false });
+    }
+  }
+
+  async function runMediaOcr(item: InboundMediaItem) {
+    const st = mediaState(item.id);
+    if (!st.subjectId) {
+      patchMediaUi(item.id, { ocrError: "Pick who this document belongs to" });
+      return;
+    }
+    patchMediaUi(item.id, { ocrLoading: true, ocrError: undefined });
+    try {
+      const res = await fetch("/api/wa/inbound-media", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "runOcr",
+          id: item.id,
+          subject: st.subject,
+          subjectId: st.subjectId,
+          docKey: st.docKey,
+        }),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+      };
+      if (!res.ok || !json.ok) {
+        patchMediaUi(item.id, {
+          ocrLoading: false,
+          ocrError: json.error || "OCR check failed",
+        });
+        return;
+      }
+      patchMediaUi(item.id, { ocrLoading: false });
+      await refreshMedia();
+    } catch (e) {
+      patchMediaUi(item.id, {
+        ocrLoading: false,
+        ocrError: e instanceof Error ? e.message : "OCR check failed",
+      });
+    }
+  }
 
   const selected = threads.find((t) => t.id === selectedId) || null;
 
@@ -443,6 +640,200 @@ export function WaChatHubPanel({
           )}
         </MastersWorkCard>
       </div>
+
+      <MastersTableCard title="Documents received">
+        <div className="flex items-center justify-end gap-2 border-b border-[var(--border)] px-3 py-2">
+          {!mediaVisionOn ? (
+            <span className="text-[10px] text-amber-800">
+              Vision OCR not configured
+            </span>
+          ) : null}
+          <label className="flex items-center gap-1 text-[10px] font-semibold text-[var(--muted)]">
+            <input
+              type="checkbox"
+              checked={mediaShowAll}
+              onChange={(e) => setMediaShowAll(e.target.checked)}
+            />
+            Show reviewed too
+          </label>
+        </div>
+        {mediaItems.length === 0 ? (
+          <div className="px-4 py-10 text-center text-sm text-[var(--muted)]">
+            No {mediaShowAll ? "" : "pending "}photos/PDFs from parents or staff yet
+            — Aadhaar, birth certificate, payment proof etc. sent on WhatsApp
+            land here.
+          </div>
+        ) : (
+          <ul className="divide-y divide-[var(--border)]">
+            {mediaItems.map((item) => {
+              const ui = mediaState(item.id);
+              const docKeys =
+                ui.subject === "student" ? STUDENT_DOC_KEYS : STAFF_DOC_KEYS;
+              return (
+                <li key={item.id} className="space-y-2 px-3 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-[13px] font-semibold text-[var(--brand-deep)]">
+                        {item.contactName || item.mobileE164} · {item.mobileE164}
+                      </p>
+                      <p className="text-[11px] text-[var(--muted)]">
+                        {item.mediaType} · {item.filename || item.mimeType || "file"}
+                        {" · "}
+                        {item.receivedAt.slice(0, 16).replace("T", " ")}
+                        {item.reviewedAt ? ` · reviewed by ${item.reviewedBy}` : ""}
+                      </p>
+                      {item.caption ? (
+                        <p className="text-[11px] text-[var(--muted)]">
+                          &ldquo;{item.caption}&rdquo;
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="flex gap-1.5">
+                      <button
+                        type="button"
+                        disabled={ui.previewLoading}
+                        onClick={() => void viewMedia(item)}
+                        className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)] disabled:opacity-50"
+                      >
+                        {ui.previewLoading ? "Loading…" : "View"}
+                      </button>
+                      {canEdit && !item.reviewedAt ? (
+                        <button
+                          type="button"
+                          disabled={ui.busy}
+                          onClick={() => void markMediaReviewed(item)}
+                          className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold text-[var(--muted)] disabled:opacity-50"
+                        >
+                          Mark reviewed
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  {ui.previewError ? (
+                    <p className="text-[11px] text-[var(--danger)]">{ui.previewError}</p>
+                  ) : null}
+                  {ui.previewDataUrl ? (
+                    ui.previewMime?.startsWith("image/") ? (
+                      <img
+                        src={ui.previewDataUrl}
+                        alt="Inbound document"
+                        className="max-h-64 rounded-lg border border-[var(--border)]"
+                      />
+                    ) : (
+                      <a
+                        href={ui.previewDataUrl}
+                        download={item.filename || "document"}
+                        className="text-[11px] font-semibold text-[var(--brand-deep)] underline"
+                      >
+                        Download {item.filename || "document"}
+                      </a>
+                    )
+                  ) : null}
+
+                  {canEdit && mediaVisionOn ? (
+                    <div className="flex flex-wrap items-center gap-1.5 border-t border-[var(--border)] pt-2">
+                      <select
+                        className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-[11px]"
+                        value={ui.subject}
+                        onChange={(e) =>
+                          patchMediaUi(item.id, {
+                            subject: e.target.value as "student" | "staff",
+                            subjectId: "",
+                            docKey:
+                              e.target.value === "student"
+                                ? STUDENT_DOC_KEYS[0].value
+                                : STAFF_DOC_KEYS[0].value,
+                          })
+                        }
+                      >
+                        <option value="student">Student</option>
+                        <option value="staff">Staff</option>
+                      </select>
+                      {ui.subject === "student" ? (
+                        <select
+                          className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-[11px]"
+                          value={ui.subjectId}
+                          onChange={(e) =>
+                            patchMediaUi(item.id, { subjectId: e.target.value })
+                          }
+                        >
+                          <option value="">
+                            {item.householdChildren.length
+                              ? "Select child"
+                              : "No linked household found"}
+                          </option>
+                          {item.householdChildren.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-[11px]"
+                          placeholder="Staff ID"
+                          value={ui.subjectId}
+                          onChange={(e) =>
+                            patchMediaUi(item.id, { subjectId: e.target.value })
+                          }
+                        />
+                      )}
+                      <select
+                        className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-[11px]"
+                        value={ui.docKey}
+                        onChange={(e) =>
+                          patchMediaUi(item.id, { docKey: e.target.value })
+                        }
+                      >
+                        {docKeys.map((d) => (
+                          <option key={d.value} value={d.value}>
+                            {d.label}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        disabled={ui.ocrLoading}
+                        onClick={() => void runMediaOcr(item)}
+                        className="rounded-lg bg-[var(--primary)] px-2.5 py-1 text-[11px] font-semibold text-[var(--primary-foreground)] disabled:opacity-60"
+                      >
+                        {ui.ocrLoading ? "Checking…" : "Run OCR check"}
+                      </button>
+                    </div>
+                  ) : null}
+                  {ui.ocrError ? (
+                    <p className="text-[11px] text-[var(--danger)]">{ui.ocrError}</p>
+                  ) : null}
+                  {item.ocrResult ? (
+                    <div
+                      className={`rounded-lg border px-2.5 py-1.5 text-[11px] ${
+                        item.ocrResult.verdict === "likely_match"
+                          ? "border-[var(--success)]/30 bg-[var(--success-soft)] text-[var(--success)]"
+                          : item.ocrResult.verdict === "likely_mismatch"
+                            ? "border-[var(--danger)]/30 bg-[var(--danger-soft)] text-[var(--danger)]"
+                            : "border-[var(--warning)]/30 bg-[var(--warning-soft)] text-[var(--warning)]"
+                      }`}
+                    >
+                      <p className="font-semibold uppercase">
+                        {item.ocrResult.verdict.replace("_", " ")}
+                      </p>
+                      <ul className="mt-1 space-y-0.5">
+                        {item.ocrResult.fields.map((f) => (
+                          <li key={f.field}>
+                            {f.field}: {f.status.replace("_", " ")}
+                            {f.detail ? ` — ${f.detail}` : ""}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </MastersTableCard>
     </div>
   );
 }

@@ -18,7 +18,7 @@ export function waNormalizeLocal10(from: string): string {
   return d.slice(-10);
 }
 
-function metaAccessToken(): string {
+export function metaAccessToken(): string {
   return (
     process.env.WA_META_ACCESS_TOKEN ||
     process.env.WHATSAPP_TOKEN ||
@@ -26,7 +26,7 @@ function metaAccessToken(): string {
   );
 }
 
-function metaPhoneNumberId(): string {
+export function metaPhoneNumberId(): string {
   return (
     process.env.WA_PHONE_NUMBER_ID ||
     process.env.WHATSAPP_PHONE_ID ||
@@ -34,7 +34,7 @@ function metaPhoneNumberId(): string {
   );
 }
 
-function metaGraphVersion(): string {
+export function metaGraphVersion(): string {
   return (
     process.env.WA_GRAPH_API_VERSION ||
     process.env.WHATSAPP_GRAPH_VERSION ||

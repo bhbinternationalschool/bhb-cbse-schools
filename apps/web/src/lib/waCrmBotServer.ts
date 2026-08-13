@@ -461,6 +461,13 @@ export async function handleWaCrmBotInbound(opts: {
   };
 }
 
+export type WaInboundMediaRef = {
+  mediaId: string;
+  mediaType: "image" | "document" | "video" | "audio";
+  mimeType?: string;
+  filename?: string;
+};
+
 /** Parse Meta Cloud API webhook payload → inbound texts / locations */
 export function parseMetaWebhookInbound(body: unknown): {
   fromWaId: string;
@@ -469,6 +476,7 @@ export function parseMetaWebhookInbound(body: unknown): {
   profileName?: string;
   location?: { lat: number; lng: number; name?: string; address?: string };
   mediaNote?: string;
+  media?: WaInboundMediaRef;
 }[] {
   const out: {
     fromWaId: string;
@@ -477,6 +485,7 @@ export function parseMetaWebhookInbound(body: unknown): {
     profileName?: string;
     location?: { lat: number; lng: number; name?: string; address?: string };
     mediaNote?: string;
+    media?: WaInboundMediaRef;
   }[] = [];
   const root = body as {
     entry?: {
@@ -523,6 +532,7 @@ export function parseMetaWebhookInbound(body: unknown): {
       for (const msg of value.messages) {
         let text = "";
         let mediaNote: string | undefined;
+        let media: WaInboundMediaRef | undefined;
         let location:
           | { lat: number; lng: number; name?: string; address?: string }
           | undefined;
@@ -539,18 +549,47 @@ export function parseMetaWebhookInbound(body: unknown): {
         } else if (msg.type === "image") {
           text = msg.image?.caption || "";
           mediaNote = `image${msg.image?.mime_type ? ` (${msg.image.mime_type})` : ""}`;
+          if (msg.image?.id) {
+            media = {
+              mediaId: msg.image.id,
+              mediaType: "image",
+              mimeType: msg.image.mime_type,
+            };
+          }
         } else if (msg.type === "document") {
           text =
             msg.document?.caption ||
             msg.document?.filename ||
             "Document";
           mediaNote = `document:${msg.document?.filename || msg.document?.id || ""}`;
+          if (msg.document?.id) {
+            media = {
+              mediaId: msg.document.id,
+              mediaType: "document",
+              mimeType: msg.document.mime_type,
+              filename: msg.document.filename,
+            };
+          }
         } else if (msg.type === "video") {
           text = msg.video?.caption || "";
           mediaNote = "video";
+          if (msg.video?.id) {
+            media = {
+              mediaId: msg.video.id,
+              mediaType: "video",
+              mimeType: msg.video.mime_type,
+            };
+          }
         } else if (msg.type === "audio") {
           text = "";
           mediaNote = "audio";
+          if (msg.audio?.id) {
+            media = {
+              mediaId: msg.audio.id,
+              mediaType: "audio",
+              mimeType: msg.audio.mime_type,
+            };
+          }
         } else if (msg.type === "location" && msg.location) {
           const lat = Number(msg.location.latitude);
           const lng = Number(msg.location.longitude);
@@ -573,6 +612,7 @@ export function parseMetaWebhookInbound(body: unknown): {
           profileName: name,
           location,
           mediaNote,
+          media,
         });
       }
     }

@@ -24,6 +24,9 @@ import {
   parseMetaStatusUpdates,
   recordDeliveryStatuses,
 } from "@/lib/waDeliveryLog.server";
+import { recordInboundMedia } from "@/lib/waInboundMedia.server";
+import { findHouseholdByWaMobile } from "@/lib/waSisBotServer";
+import { waNormalizeLocal10 } from "@/lib/waSend";
 
 export const runtime = "nodejs";
 
@@ -121,6 +124,23 @@ export async function POST(req: Request) {
   const results = [];
   for (const msg of inbound) {
     await recordInboundMessage(msg.fromWaId, msg.text);
+    if (msg.media) {
+      try {
+        const household = findHouseholdByWaMobile(
+          waNormalizeLocal10(msg.fromWaId),
+        );
+        await recordInboundMedia({
+          fromMobile: msg.fromWaId,
+          waMessageId: msg.waMessageId,
+          contactName: msg.profileName,
+          caption: msg.text,
+          householdId: household?.id ?? null,
+          media: msg.media,
+        });
+      } catch (e) {
+        console.warn("[wa/webhook] recordInboundMedia failed", e);
+      }
+    }
     const r = await handleWaUnifiedInbound({
       fromWaId: msg.fromWaId,
       text: msg.text,
