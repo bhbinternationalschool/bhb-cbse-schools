@@ -36,6 +36,7 @@ import {
   type StoreInfraLevel,
   type StoreIssuePolicy,
   type StoreItem,
+  type StoreItemType,
   type StoreSaleGroup,
   type StoreSource,
   type StoreUom,
@@ -75,6 +76,7 @@ type CatalogDraft = {
   id: string;
   sku: string;
   name: string;
+  itemType: StoreItemType;
   categoryId: string;
   saleGroupId: string;
   uomId: string;
@@ -107,6 +109,7 @@ function emptyCatalogDraft(categoryId = ""): CatalogDraft {
     id: "",
     sku: "",
     name: "",
+    itemType: "consumable",
     categoryId,
     saleGroupId: "",
     uomId: "",
@@ -436,6 +439,7 @@ export function StockMasterWorkspace() {
       id: catalogDraft.id || undefined,
       sku: catalogDraft.sku,
       name: catalogDraft.name,
+      itemType: catalogDraft.itemType,
       categoryId: catalogDraft.categoryId,
       saleGroupId: catalogDraft.saleGroupId || undefined,
       uomId: catalogDraft.uomId || undefined,
@@ -1074,6 +1078,24 @@ export function StockMasterWorkspace() {
                   </label>
                   <label className="text-sm">
                     <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                      Item type
+                    </span>
+                    <select
+                      className={`${field} w-full`}
+                      value={catalogDraft.itemType}
+                      onChange={(e) =>
+                        setCatalogDraft((d) => ({
+                          ...d,
+                          itemType: e.target.value as StoreItemType,
+                        }))
+                      }
+                    >
+                      <option value="consumable">Consumable</option>
+                      <option value="durable">Durable / fixed asset</option>
+                    </select>
+                  </label>
+                  <label className="text-sm">
+                    <span className="mb-1 block text-[11px] text-[var(--muted)]">
                       Sale group
                     </span>
                     <select
@@ -1295,6 +1317,7 @@ export function StockMasterWorkspace() {
                             id: i.id,
                             sku: i.sku,
                             name: i.name,
+                            itemType: i.itemType,
                             categoryId: i.categoryId,
                             saleGroupId: i.saleGroupId,
                             uomId: i.uomId,

@@ -26,6 +26,7 @@ function makeItem(overrides: Partial<StoreItem>): StoreItem {
     id: overrides.id || "item",
     sku: overrides.sku || "SKU",
     name: overrides.name || "Item",
+    itemType: "consumable",
     categoryId: "",
     saleGroupId: "",
     uomId: "",

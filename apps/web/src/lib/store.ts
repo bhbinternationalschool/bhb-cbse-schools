@@ -111,10 +111,16 @@ export type StoreSource = {
   accountsVendorId: string;
 };
 
+export type StoreItemType = "consumable" | "durable";
+
 export type StoreItem = {
   id: string;
   sku: string;
   name: string;
+  /** Consumed on issue (books, uniforms, stationery) vs a fixed asset
+   * tracked by tag/assignee (furniture, IT equipment, lab gear). Purely
+   * classification today — doesn't restrict either allocation panel. */
+  itemType: StoreItemType;
   /** Custom / editable category id (Stock Group). */
   categoryId: string;
   /** Optional Sale Group id. */
@@ -599,6 +605,7 @@ function normalizeItem(
     id: i.id ?? nid("si"),
     sku: (i.sku ?? "").trim().toUpperCase() || "SKU",
     name: (i.name ?? "Item").trim() || "Item",
+    itemType: i.itemType === "durable" ? "durable" : "consumable",
     categoryId,
     saleGroupId: (i.saleGroupId ?? "").trim(),
     uomId: (i.uomId ?? "").trim(),
