@@ -57,13 +57,13 @@ function StatRow({ cell, bordered }: { cell: StatCell; bordered?: boolean }) {
       onClick={clickable ? cell.onClick : undefined}
       disabled={!clickable}
       className={`flex w-full items-center gap-3 px-3 py-3 text-left transition ${
-        bordered ? "border-b border-[#eceff1]" : ""
+        bordered ? "border-b border-[var(--border)]" : ""
       } ${clickable ? "cursor-pointer hover:bg-[#f5f8fb]" : "cursor-default"}`}
       title={clickable ? `View ${cell.label}` : undefined}
     >
       <StatIcon tone={cell.tone}>{cell.icon}</StatIcon>
       <div className="min-w-0 flex-1">
-        <div className="text-[12px] text-[#607d8b]">{cell.label}</div>
+        <div className="text-[12px] text-[var(--muted)]">{cell.label}</div>
         <div className="text-lg font-semibold tabular-nums text-[#263238]">
           {cell.value}
         </div>
@@ -79,7 +79,7 @@ function StatRow({ cell, bordered }: { cell: StatCell; bordered?: boolean }) {
 
 function PairCard({ left, right }: { left: StatCell; right: StatCell }) {
   return (
-    <div className="overflow-hidden rounded-md border border-[#cfd8dc] bg-white shadow-sm">
+    <div className="overflow-hidden rounded-md border border-[var(--border)] bg-[var(--card)] shadow-sm">
       <StatRow cell={left} bordered />
       <StatRow cell={right} />
     </div>
@@ -105,14 +105,14 @@ function BreakdownTable({
 }) {
   const total = rows.reduce((s, r) => s + r.count, 0);
   return (
-    <div className="overflow-hidden rounded-md border border-[#cfd8dc] bg-white shadow-sm">
+    <div className="overflow-hidden rounded-md border border-[var(--border)] bg-[var(--card)] shadow-sm">
       <div className="border-b border-[#90caf9] bg-[#e3f2fd] px-3 py-2 text-sm font-semibold text-[#1565c0]">
         {title}
       </div>
       <div className="max-h-72 overflow-auto">
         <table className="w-full text-left text-[13px]">
           <thead>
-            <tr className="border-b border-[#eceff1] text-[11px] uppercase tracking-wide text-[#78909c]">
+            <tr className="border-b border-[var(--border)] text-[11px] uppercase tracking-wide text-[var(--muted)]">
               <th className="px-3 py-2 font-semibold">{colA}</th>
               <th className="px-3 py-2 text-right font-semibold">{colB}</th>
             </tr>
@@ -135,7 +135,7 @@ function BreakdownTable({
                     onClick={
                       clickable ? () => onRowClick!(r.key, r.label) : undefined
                     }
-                    className={`border-b border-[#f5f5f5] text-[#37474f] ${
+                    className={`border-b border-[var(--border)] text-[var(--foreground)] ${
                       clickable
                         ? "cursor-pointer hover:bg-[#f5f8fb]"
                         : ""
@@ -157,7 +157,7 @@ function BreakdownTable({
               })
             )}
             {showTotal && rows.length > 0 ? (
-              <tr className="bg-[#fffde7] font-semibold text-[#37474f]">
+              <tr className="bg-[var(--accent)] font-semibold text-[var(--foreground)]">
                 <td className="px-3 py-2">Total</td>
                 <td className="px-3 py-2 text-right tabular-nums">{total}</td>
               </tr>
@@ -187,35 +187,35 @@ function StudentListDrawer({
   };
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-[rgba(32,48,80,0.45)] p-3 sm:items-center"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-[var(--overlay)] p-3 sm:items-center"
       role="dialog"
       aria-modal="true"
       aria-label={title}
       onClick={onClose}
     >
       <div
-        className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-[#cfd8dc] bg-white shadow-lg"
+        className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-lg"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between gap-2 border-b border-[#eceff1] px-4 py-3">
+        <div className="flex items-center justify-between gap-2 border-b border-[var(--border)] px-4 py-3">
           <div className="text-sm font-semibold text-[var(--brand-deep)]">
             {title}
-            <span className="ml-2 text-xs font-normal text-[#78909c]">
+            <span className="ml-2 text-xs font-normal text-[var(--muted)]">
               {students.length} student{students.length === 1 ? "" : "s"}
             </span>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md px-2 py-1 text-xs font-semibold text-[#607d8b] hover:bg-[#eceff1]"
+            className="rounded-md px-2 py-1 text-xs font-semibold text-[var(--muted)] hover:bg-[var(--surface-sunken)]"
           >
             Close
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-auto">
           <table className="w-full text-left text-[13px]">
-            <thead className="sticky top-0 bg-white text-[10px] uppercase tracking-wide text-[#78909c]">
-              <tr className="border-b border-[#eceff1]">
+            <thead className="sticky top-0 bg-[var(--card)] text-[10px] uppercase tracking-wide text-[var(--muted)]">
+              <tr className="border-b border-[var(--border)]">
                 <th className="px-4 py-2 font-semibold">#</th>
                 <th className="px-4 py-2 font-semibold">Student</th>
                 <th className="px-4 py-2 font-semibold">Class</th>
@@ -226,7 +226,7 @@ function StudentListDrawer({
               {students.map((s, i) => (
                 <tr
                   key={s.id}
-                  className="border-b border-[#f5f5f5] text-[#37474f]"
+                  className="border-b border-[var(--border)] text-[var(--foreground)]"
                 >
                   <td className="px-4 py-2 tabular-nums text-[#90a4ae]">
                     {i + 1}
@@ -244,11 +244,11 @@ function StudentListDrawer({
                       </span>
                     ) : null}
                   </td>
-                  <td className="px-4 py-2 text-[#607d8b]">
+                  <td className="px-4 py-2 text-[var(--muted)]">
                     {classSec(s)}
                     {s.rollNo ? ` · ${s.rollNo}` : ""}
                   </td>
-                  <td className="px-4 py-2 text-[#607d8b]">{s.admissionNo}</td>
+                  <td className="px-4 py-2 text-[var(--muted)]">{s.admissionNo}</td>
                 </tr>
               ))}
             </tbody>
@@ -296,7 +296,7 @@ function ComplianceCard({
     readyPct >= 90 ? "#2e7d32" : readyPct >= 50 ? "#f9a825" : "#c62828";
 
   return (
-    <div className="overflow-hidden rounded-md border border-[#cfd8dc] bg-white shadow-sm">
+    <div className="overflow-hidden rounded-md border border-[var(--border)] bg-[var(--card)] shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#ffcc80] bg-[#fff8e1] px-3 py-2">
         <span className="text-sm font-semibold text-[#e65100]">
           Compliance &amp; data quality · {sessionAy}
@@ -308,7 +308,7 @@ function ComplianceCard({
 
       <div className="grid gap-4 px-3 py-3 md:grid-cols-[minmax(0,18rem)_1fr]">
         <div>
-          <div className="text-[12px] text-[#607d8b]">UDISE+ ready</div>
+          <div className="text-[12px] text-[var(--muted)]">UDISE+ ready</div>
           <div className="mt-0.5 flex items-baseline gap-2">
             <span
               className="text-2xl font-semibold tabular-nums"
@@ -316,12 +316,12 @@ function ComplianceCard({
             >
               {udiseReady}
             </span>
-            <span className="text-sm text-[#607d8b]">
+            <span className="text-sm text-[var(--muted)]">
               of {activeCount} students
             </span>
           </div>
           <div
-            className="mt-2 h-2 w-full overflow-hidden rounded-full bg-[#eceff1]"
+            className="mt-2 h-2 w-full overflow-hidden rounded-full bg-[var(--surface-sunken)]"
             role="progressbar"
             aria-valuenow={readyPct}
             aria-valuemin={0}
@@ -333,7 +333,7 @@ function ComplianceCard({
               style={{ width: `${readyPct}%`, background: tone }}
             />
           </div>
-          <div className="mt-1.5 text-[11px] text-[#607d8b]">
+          <div className="mt-1.5 text-[11px] text-[var(--muted)]">
             {readyPct}% filing-ready · {qualityPct}% of all tracked fields present
           </div>
         </div>
@@ -362,7 +362,7 @@ function ComplianceCard({
                 >
                   {g.count}
                 </div>
-                <div className="text-[11px] leading-tight text-[#546e7a]">
+                <div className="text-[11px] leading-tight text-[var(--muted)]">
                   missing {g.label}
                 </div>
               </Link>
@@ -587,8 +587,8 @@ export function StudentStatsDashboard({
 
   return (
     <div className="mt-4 space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[#cfd8dc] bg-white px-3 py-2 text-sm">
-        <span className="font-medium text-[#546e7a]">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm">
+        <span className="font-medium text-[var(--muted)]">
           Student overview · {stats.sessionAy} only (not combined years)
         </span>
         <div className="flex flex-wrap items-center gap-2">

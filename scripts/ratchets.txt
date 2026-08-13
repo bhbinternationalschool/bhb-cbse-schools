@@ -39,5 +39,5 @@ unguarded_cache_writes|0|Bare localStorage.setItem on module state
 # "Refined Enterprise" plan). Dark mode landed this phase via design tokens
 # in globals.css; these two patterns bypass the tokens and so don't adapt
 # to it. Falls per module as each gets its visual refit — see Phase 3/4.
-raw_hex|1019|Arbitrary hex Tailwind classes bypassing design tokens; not dark-mode aware. Target is 0.
+raw_hex|995|Arbitrary hex Tailwind classes bypassing design tokens; not dark-mode aware. Target is 0.
 raw_table|53|Hand-rolled <table> instead of ui/erp-roster.tsx's ErpTableShell. Target is 0.

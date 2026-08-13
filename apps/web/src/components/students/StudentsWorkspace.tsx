@@ -83,6 +83,8 @@ import { DocVerificationQueuePanel } from "@/components/students/DocVerification
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ErpTableShell } from "@/components/ui/erp-roster";
+import { EmptyState } from "@/components/ui/empty-state";
+import { SkeletonModulePage } from "@/components/ui/skeleton";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { listImportSessions, normalizeSessionCode } from "@/lib/studentImport";
@@ -780,7 +782,7 @@ export function StudentsWorkspace() {
   );
 
   if (!state || !masters) {
-    return <p className="text-sm text-[var(--muted)]">Loading students…</p>;
+    return <SkeletonModulePage />;
   }
 
   const m = masters;
@@ -892,6 +894,8 @@ export function StudentsWorkspace() {
     });
   }
 
+  const anyFilterActive = Boolean(classFilter || sectionFilter || hasExtraFilters);
+
   const emptyMsg =
     classFilter || sectionFilter
       ? `No students in ${[
@@ -903,6 +907,23 @@ export function StudentsWorkspace() {
           .filter(Boolean)
           .join("-") || "this selection"} yet.`
       : "No students match filters";
+
+  const emptyStateAction = anyFilterActive ? (
+    <button
+      type="button"
+      onClick={clearFilters}
+      className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
+    >
+      Clear filters
+    </button>
+  ) : (
+    <Link
+      href="/students/new"
+      className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
+    >
+      Add student
+    </Link>
+  );
 
   return (
     <ErpWorkspaceShell
@@ -920,7 +941,7 @@ export function StudentsWorkspace() {
         <>
           {mainTab === "register" ? (
             <div
-              className="flex rounded-lg border border-[rgba(32,48,80,0.15)] bg-white p-0.5"
+              className="flex rounded-lg border border-[var(--border)] bg-[var(--card)] p-0.5"
               role="group"
               aria-label="View mode"
             >
@@ -1115,8 +1136,8 @@ export function StudentsWorkspace() {
               <button
                 type="button"
                 onClick={() => applySavedView(v)}
-                className={`rounded-l-lg border border-[rgba(32,48,80,0.14)] px-2.5 py-1 text-[11px] font-medium hover:bg-[rgba(32,48,80,0.06)] ${
-                  v.builtIn ? "bg-white" : "bg-[rgba(197,160,40,0.12)]"
+                className={`rounded-l-lg border border-[rgba(32,48,80,0.14)] px-2.5 py-1 text-[11px] font-medium hover:bg-[var(--surface-sunken)] ${
+                  v.builtIn ? "bg-[var(--card)]" : "bg-[rgba(197,160,40,0.12)]"
                 } ${v.builtIn ? "rounded-r-lg" : ""}`}
                 title={v.builtIn ? "Built-in view" : "Saved view"}
               >
@@ -1168,7 +1189,7 @@ export function StudentsWorkspace() {
 
         <div className="flex flex-wrap items-center gap-2">
           <div
-            className="inline-flex rounded-lg border border-[rgba(32,48,80,0.12)] bg-white p-0.5"
+            className="inline-flex rounded-lg border border-[var(--border)] bg-[var(--card)] p-0.5"
             role="group"
             aria-label="Filter match mode"
           >
@@ -1349,7 +1370,7 @@ export function StudentsWorkspace() {
             </select>
             <button
               type="button"
-              className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2 py-2 text-xs font-bold text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.04)]"
+              className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-2 text-xs font-bold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
               onClick={() => setSortOrder((o) => (o === "asc" ? "desc" : "asc"))}
               title={`Sorting ${sortOrder === "asc" ? "Ascending (A-Z / 1-9)" : "Descending (Z-A / 9-1)"}`}
             >
@@ -1514,7 +1535,7 @@ export function StudentsWorkspace() {
           {hasExtraFilters ? (
             <button
               type="button"
-              className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-[11px] font-semibold text-[var(--muted)]"
+              className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-[11px] font-semibold text-[var(--muted)]"
               onClick={clearFilters}
             >
               Clear filters
@@ -1534,7 +1555,7 @@ export function StudentsWorkspace() {
               className={`rounded-lg px-3 py-2 text-xs font-bold ${
                 showCurriculumOffice
                   ? "bg-[#0f766e] text-white"
-                  : "border border-[#0f766e] bg-white text-[#0f766e]"
+                  : "border border-[#0f766e] bg-[var(--card)] text-[#0f766e]"
               }`}
               onClick={() => setShowCurriculumOffice((v) => !v)}
             >
@@ -1655,14 +1676,13 @@ export function StudentsWorkspace() {
                   );
                 })}
                 {filtered.length === 0 ? (
-                  <li className="px-4 py-10 text-center text-sm text-[var(--muted)]">
-                    {emptyMsg}{" "}
-                    <Link
-                      href="/students/new"
-                      className="font-medium text-[var(--brand-mid)]"
-                    >
-                      Add student
-                    </Link>
+                  <li>
+                    <EmptyState
+                      icon={GraduationCap}
+                      title={emptyMsg}
+                      variant="table"
+                      action={emptyStateAction}
+                    />
                   </li>
                 ) : null}
               </ul>
@@ -1677,7 +1697,7 @@ export function StudentsWorkspace() {
                 return (
                   <div
                     key={s.id}
-                    className={`rounded-xl border bg-white p-4 transition ${
+                    className={`rounded-xl border bg-[var(--card)] p-4 transition ${
                       focused
                         ? "border-[rgba(197,160,40,0.55)] shadow-[0_0_0_1px_rgba(197,160,40,0.12)]"
                         : on
@@ -1739,14 +1759,12 @@ export function StudentsWorkspace() {
                 );
               })}
               {filtered.length === 0 ? (
-                <div className="col-span-full rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-4 py-10 text-center text-sm text-[var(--muted)]">
-                  {emptyMsg}{" "}
-                  <Link
-                    href="/students/new"
-                    className="font-medium text-[var(--brand-mid)]"
-                  >
-                    Add student
-                  </Link>
+                <div className="col-span-full">
+                  <EmptyState
+                    icon={GraduationCap}
+                    title={emptyMsg}
+                    action={emptyStateAction}
+                  />
                 </div>
               ) : null}
             </div>
@@ -1775,7 +1793,7 @@ export function StudentsWorkspace() {
               ))}
             </div>
           ) : (
-            <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-4 py-10 text-center text-sm text-[var(--muted)]">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-10 text-center text-sm text-[var(--muted)]">
               Select a student to see the snapshot
             </div>
           )}
@@ -1903,7 +1921,7 @@ function StudentDetail({
 
   return (
     <div
-      className={`rounded-xl border bg-white p-4 ${
+      className={`rounded-xl border bg-[var(--card)] p-4 ${
         highlight
           ? "border-[rgba(197,160,40,0.55)] shadow-[0_0_0_1px_rgba(197,160,40,0.12)]"
           : "border-[rgba(32,48,80,0.12)]"
