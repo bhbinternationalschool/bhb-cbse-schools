@@ -119,7 +119,7 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
 
   return (
     <div className="teacher-home mx-auto max-w-lg space-y-5 pb-2 sm:max-w-2xl">
-      <section className="relative overflow-hidden rounded-2xl border border-[rgba(32,48,80,0.1)] bg-[var(--brand-deep)] px-5 py-6 text-white">
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--primary)] px-5 py-6 text-[var(--primary-foreground)]">
         <div
           className="pointer-events-none absolute inset-0 opacity-40"
           style={{
@@ -128,14 +128,19 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
           }}
           aria-hidden
         />
-        <p className="relative text-[11px] font-bold uppercase tracking-[0.12em] text-white/70">
+        <p className="relative text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--primary-foreground)]/70">
           {TENANT.shortName} · Teacher
         </p>
         <h1 className="relative mt-1 font-display text-2xl font-semibold tracking-tight">
           Hello, {firstName}
         </h1>
-        <p className="relative mt-1 text-sm text-white/80">{istWeekdayLine()}</p>
-        <p className="relative mt-0.5 text-[11px] text-white/55" suppressHydrationWarning>
+        <p className="relative mt-1 text-sm text-[var(--primary-foreground)]/80">
+          {istWeekdayLine()}
+        </p>
+        <p
+          className="relative mt-0.5 text-[11px] text-[var(--primary-foreground)]/55"
+          suppressHydrationWarning
+        >
           {formatIst()}
         </p>
       </section>
@@ -143,9 +148,9 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
       {pendingAttendance.length > 0 ? (
         <Link
           href="/attendance?tab=students"
-          className="flex items-start gap-3 rounded-xl border border-[rgba(180,35,24,0.25)] bg-[rgba(180,35,24,0.06)] px-4 py-3 transition hover:border-[rgba(180,35,24,0.4)]"
+          className="flex items-start gap-3 rounded-xl border border-[var(--danger)]/25 bg-[var(--danger-soft)] px-4 py-3 transition hover:border-[var(--danger)]/40"
         >
-          <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-[#b42318]" />
+          <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-[var(--danger)]" />
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold text-[var(--brand-deep)]">
               Attendance not marked today
@@ -157,8 +162,8 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
           <ArrowRight className="mt-1 h-4 w-4 shrink-0 text-[var(--muted)]" />
         </Link>
       ) : mySections.length > 0 ? (
-        <div className="rounded-xl border border-[rgba(15,118,110,0.2)] bg-[rgba(15,118,110,0.06)] px-4 py-3">
-          <p className="text-sm font-semibold text-[#0f766e]">
+        <div className="rounded-xl border border-[var(--success)]/20 bg-[var(--success-soft)] px-4 py-3">
+          <p className="text-sm font-semibold text-[var(--success)]">
             Today&apos;s attendance is done
           </p>
           <p className="mt-0.5 text-xs text-[var(--muted)]">
@@ -177,7 +182,7 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
               <Link
                 key={`${s.classId}-${s.sectionId}`}
                 href="/attendance?tab=students"
-                className="rounded-full border border-[rgba(32,48,80,0.12)] bg-white px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)] shadow-sm"
+                className="rounded-full border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)] shadow-[var(--shadow-1)]"
               >
                 {s.label}
               </Link>
@@ -198,7 +203,7 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
               <Link
                 key={action.href}
                 href={action.href}
-                className="teacher-home-tile flex min-h-[6.5rem] flex-col rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white p-3.5 transition active:scale-[0.98] hover:border-[rgba(197,160,40,0.45)] hover:shadow-md"
+                className="teacher-home-tile flex min-h-[6.5rem] flex-col rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3.5 transition active:scale-[0.98] hover:border-[rgba(197,160,40,0.45)] hover:shadow-md"
               >
                 <span
                   className={`inline-flex h-9 w-9 items-center justify-center rounded-xl ${tone.icon}`}
@@ -217,7 +222,7 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
         </div>
       </section>
 
-      <section className="rounded-xl border border-dashed border-[rgba(32,48,80,0.15)] bg-[rgba(32,48,80,0.03)] px-4 py-3">
+      <section className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-3">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <LayoutGrid className="h-4 w-4 text-[var(--muted)]" />

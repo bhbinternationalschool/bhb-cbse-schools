@@ -15,7 +15,8 @@ import { AlertBannerList } from "@/components/dashboard/AlertBannerList";
 import type { PrincipalSnapshot } from "@/lib/principalSnapshot.server";
 import { isProtectedSuperAdminEmail } from "@/lib/superAdmin";
 import { useDemoSession } from "@/components/shell/SessionContext";
-import { ErpMetricCard } from "@/components/ui/erp-roster";
+import { ErpChartCard, ErpMetricCard } from "@/components/ui/erp-roster";
+import { ErpDonut } from "@/components/ui/erp-chart-lazy";
 import {
   dashboardToneToMetric,
   kpiIconForTone,
@@ -153,7 +154,7 @@ export function PrincipalCockpit() {
   if (err) {
     return (
       <div className="p-4">
-        <p className="text-sm text-[#b42318]">{err}</p>
+        <p className="text-sm text-[var(--danger)]">{err}</p>
         <button
           onClick={() => void fetchSnapshot()}
           className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--brand-deep)] underline"
@@ -195,16 +196,16 @@ export function PrincipalCockpit() {
 
   return (
     <div className="principal-cockpit mx-auto max-w-5xl space-y-5 pb-4">
-      <section className="relative rounded-2xl border border-[rgba(32,48,80,0.1)] bg-[var(--brand-deep)] px-5 py-6 text-white">
+      <section className="relative rounded-2xl border border-[var(--border)] bg-[var(--primary)] px-5 py-6 text-[var(--primary-foreground)]">
         <div className="flex items-center justify-between">
-          <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-white/70">
+          <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--primary-foreground)]/70">
             Principal desk · {displaySnap.academicYearCode}
           </p>
           <button
             onClick={() => void fetchSnapshot()}
             disabled={loading}
             title="Refresh Dashboard Data"
-            className="flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-1 text-xs font-medium text-white hover:bg-white/20 disabled:opacity-50 transition"
+            className="flex items-center gap-1.5 rounded-lg bg-[var(--primary-foreground)]/10 px-3 py-1 text-xs font-medium text-[var(--primary-foreground)] transition hover:bg-[var(--primary-foreground)]/20 disabled:opacity-50"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
             {loading ? "Refreshing..." : "Refresh"}
@@ -213,24 +214,24 @@ export function PrincipalCockpit() {
         <h1 className="mt-1 font-display text-2xl font-semibold">
           Good day, {session.fullName.split(/\s+/)[0]}
         </h1>
-        <p className="mt-1 text-sm text-white/75">
+        <p className="mt-1 text-sm text-[var(--primary-foreground)]/75">
           School pulse for {displaySnap.attendance.date}
         </p>
       </section>
 
       <AlertBannerList alerts={alerts} />
 
-      <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5 text-sm font-semibold text-[var(--brand-deep)]">
-            <Sparkles className="h-4 w-4 text-[#C5A028]" />
+            <Sparkles className="h-4 w-4 text-[var(--brand-gold)]" />
             AI daily digest
           </div>
           <button
             type="button"
             disabled={digestLoading || !snap}
             onClick={() => void fetchDigest()}
-            className="rounded-lg border border-[rgba(32,48,80,0.2)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)] disabled:opacity-50"
+            className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)] disabled:opacity-50"
           >
             {digestLoading
               ? "Summarizing…"
@@ -319,6 +320,39 @@ export function PrincipalCockpit() {
         />
       </div>
 
+      {displaySnap.attendance.studentPresent +
+        displaySnap.attendance.studentAbsent +
+        displaySnap.attendance.studentLeave >
+      0 ? (
+        <ErpChartCard title="Today's attendance breakdown">
+          <ErpDonut
+            rows={[
+              {
+                key: "present",
+                label: "Present",
+                value: displaySnap.attendance.studentPresent,
+                color: "var(--chart-4)",
+              },
+              {
+                key: "absent",
+                label: "Absent",
+                value: displaySnap.attendance.studentAbsent,
+                color: "var(--chart-2)",
+              },
+              {
+                key: "leave",
+                label: "Leave",
+                value: displaySnap.attendance.studentLeave,
+                color: "var(--chart-3)",
+              },
+            ]}
+            centerValue={`${displaySnap.attendance.studentMarkedPct}%`}
+            centerLabel="marked"
+            height={180}
+          />
+        </ErpChartCard>
+      ) : null}
+
       <section className="grid gap-2 sm:grid-cols-4">
         {[
           { href: "/students", label: "Students", icon: GraduationCap },
@@ -336,7 +370,7 @@ export function PrincipalCockpit() {
                   window.location.href = item.href;
                 }
               }}
-              className="flex items-center gap-2 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-3 py-3 text-sm font-semibold text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.05)] cursor-pointer"
+              className="flex cursor-pointer items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-3 text-sm font-semibold text-[var(--brand-deep)] transition-colors duration-[var(--motion-fast)] hover:bg-[var(--surface-sunken)]"
             >
               <Icon className="h-4 w-4 opacity-70" />
               {item.label}
