@@ -475,6 +475,20 @@ export async function handleWaUnifiedInbound(opts: {
   await ensureSchoolMirrorHydrated();
   const mobile10 = waNormalizeLocal10(opts.fromWaId);
   const rawText = (opts.text || "").trim();
+
+  // Event RSVP button taps are self-describing and must be handled here,
+  // before any per-contact flow routing — a contact with an active
+  // "parent" flow (the common case) never has flows re-selected per
+  // message, so a naive 7th-flow implementation would have this tap
+  // silently swallowed by whatever bot the contact is already talking to.
+  if (rawText.startsWith("evt_rsvp_")) {
+    const { handleInboundEventRsvp } = await import("@/lib/waEventsRsvp.server");
+    const handled = await handleInboundEventRsvp(opts.fromWaId, rawText);
+    if (handled) {
+      return { replied: true, escalate: false, audience: "event_rsvp", stub: false };
+    }
+  }
+
   const mapped = interactiveIdToText(rawText);
   const text = mapped || rawText;
   const inboundLog = {

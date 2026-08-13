@@ -64,6 +64,11 @@ import {
 } from "@/lib/moduleRegistry";
 import { loadPayroll } from "@/lib/payroll";
 import { loadPtm } from "@/lib/ptm";
+import {
+  eventKindLabel,
+  getEventsClientCache,
+  getRsvpsClientCache,
+} from "@/lib/events";
 import { loadPurchase } from "@/lib/purchase";
 import { loadReportsCenterRecent } from "@/lib/reportsCenter";
 import { audienceLabel, loadSchoolComms } from "@/lib/schoolComms";
@@ -100,6 +105,7 @@ export type DashboardModuleId =
   | "attendance"
   | "homework"
   | "ptm"
+  | "events"
   | "vault"
   | "modules"
   | "payroll"
@@ -1486,6 +1492,76 @@ function ptmDash(academicYearCode?: string): ModuleDashboardModel {
   };
 }
 
+function eventsDash(academicYearCode?: string): ModuleDashboardModel {
+  // Events/RSVPs are server-authoritative (Supabase, no localStorage store)
+  // — this reads whatever the Events workspace last fetched this session,
+  // not a live query, matching lib/events.ts's client-cache convention.
+  const allEvents = getEventsClientCache().filter(
+    (e) => !academicYearCode || e.academicYearCode === academicYearCode,
+  );
+  const rsvps = getRsvpsClientCache();
+  const today = todayIso();
+  const upcoming = allEvents.filter((e) => e.isActive && e.endsOn >= today);
+  const in30 = new Date(`${today}T12:00:00`);
+  in30.setDate(in30.getDate() + 30);
+  const in30Iso = in30.toISOString().slice(0, 10);
+  const thisMonth = upcoming.filter((e) => e.startsOn <= in30Iso);
+  const upcomingIds = new Set(upcoming.map((e) => e.id));
+  const pendingRsvps = rsvps.filter(
+    (r) => upcomingIds.has(r.eventId) && !r.choice,
+  ).length;
+  const chart = upcoming.slice(0, 10).map((e) => ({
+    label: e.title,
+    value: rsvps.filter((r) => r.eventId === e.id && r.choice === "yes").length,
+  }));
+  return {
+    title: "Events & calendar",
+    subtitle: `Session ${academicYearCode || "all"} · school events and WhatsApp RSVP.`,
+    kpis: [
+      {
+        id: "upcoming",
+        label: "Upcoming events",
+        value: String(upcoming.length),
+        tone: "navy",
+        tab: "calendar",
+      },
+      {
+        id: "this_month",
+        label: "This month",
+        value: String(thisMonth.length),
+        tone: "gold",
+        tab: "calendar",
+      },
+      {
+        id: "pending_rsvp",
+        label: "Pending RSVPs",
+        value: String(pendingRsvps),
+        tone: "coral",
+        tab: "rsvps",
+      },
+    ],
+    chartTitle: "RSVPs (yes) by event",
+    chartSeries: chart.length ? chart : [{ label: "—", value: 0 }],
+    tableTitle: "Upcoming events",
+    tableColumns: [
+      { key: "title", label: "Event" },
+      { key: "date", label: "Date" },
+      { key: "kind", label: "Kind" },
+    ],
+    tableRows: upcoming.slice(0, 30).map((e) => ({
+      id: e.id,
+      title: e.title,
+      date: e.startsOn,
+      kind: eventKindLabel(e.kind),
+    })),
+    quickLinks: [
+      { label: "Calendar", tab: "calendar" },
+      { label: "Events", tab: "events" },
+      { label: "RSVPs", tab: "rsvps" },
+    ],
+  };
+}
+
 function vaultDash(): ModuleDashboardModel {
   const vault = loadVault();
   const docs = vault.documents ?? [];
@@ -2635,6 +2711,8 @@ export function buildModuleDashboard(
         return homeworkDash(opts?.academicYearCode);
       case "ptm":
         return ptmDash(opts?.academicYearCode);
+      case "events":
+        return eventsDash(opts?.academicYearCode);
       case "vault":
         return vaultDash();
       case "modules":

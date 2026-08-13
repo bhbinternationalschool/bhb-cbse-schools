@@ -26,6 +26,7 @@ export type RbacModule =
   | "homework"
   | "timetable"
   | "ptm"
+  | "events"
   | "student_leave"
   | "vault"
   | "rte"
@@ -137,6 +138,7 @@ export const RBAC_MODULES: {
   { id: "homework", label: "Homework & Diary", href: "/homework" },
   { id: "timetable", label: "Timetable", href: "/timetable" },
   { id: "ptm", label: "PTM", href: "/ptm" },
+  { id: "events", label: "Events & calendar", href: "/events" },
   { id: "student_leave", label: "Student leave", href: "/attendance?tab=leave" },
   { id: "vault", label: "Document vault", href: "/vault" },
   { id: "rte", label: "RTE / EWS", href: "/admissions?tab=rte" },
@@ -311,6 +313,7 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("homework", ops),
         grant("timetable", ops),
         grant("ptm", ops),
+        grant("events", ops),
         grant("student_leave", ops),
         grant("vault", ops),
         grant("rte", ops),
@@ -349,6 +352,7 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("homework", ["view", "export"]),
         grant("timetable", ["view", "create", "edit", "approve", "export"]),
         grant("ptm", ["view", "create", "edit", "export"]),
+        grant("events", ["view", "create", "edit", "delete", "export"]),
         grant("student_leave", ["view", "create", "edit", "approve", "export"]),
         grant("vault", ["view", "export"]),
         grant("rte", ["view", "create", "edit", "export"]),
@@ -435,6 +439,7 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("homework", [...teachOps, "export"]),
         grant("timetable", ["view"]),
         grant("ptm", [...teachOps, "export"]),
+        grant("events", ["view"]),
         grant("student_leave", [...teachOps, "approve", "export"]),
         grant("vault", ["view"]),
         grant("purchase", ["view", "create"]),
@@ -891,6 +896,7 @@ export function moduleForHref(href: string): RbacModule | null {
   if (path.startsWith("/homework")) return "homework";
   if (path.startsWith("/timetable")) return "timetable";
   if (path.startsWith("/ptm")) return "ptm";
+  if (path.startsWith("/events")) return "events";
   if (path.startsWith("/student-leave")) return "student_leave";
   if (path.startsWith("/vault")) return "vault";
   if (path.startsWith("/rte")) return "rte";
