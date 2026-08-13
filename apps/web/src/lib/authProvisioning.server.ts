@@ -12,7 +12,9 @@
  * accounts today are created outside the app entirely (checked
  * scripts/bootstrap-go-live.mts — it only links an existing auth user to
  * the tenant, never creates one). This is the first in-app account
- * creation path for either persona.
+ * creation path for any persona. "field" (drivers, and any other
+ * non-desk staff) resolves against the same sis_staff roster as "staff" —
+ * it's a login-persona label for routing, not a separate roster.
  *
  * Once a password is set, sign-in works with either the phone or the
  * email attached to the account — both are set on the Supabase Auth user
@@ -46,13 +48,17 @@ export type ResolvedPerson = {
  * receiving a WhatsApp code.
  */
 export async function resolvePersonByMobile(
-  persona: "staff" | "parent",
+  persona: "staff" | "parent" | "field",
   mobile10: string,
 ): Promise<ResolvedPerson | null> {
   const sb = createServiceSupabase();
   if (!sb) return null;
 
-  if (persona === "staff") {
+  // Drivers (and any other field staff) are sis_staff rows same as
+  // teaching/office staff — "field" is a login-persona label, not a
+  // different roster. Same query as "staff"; the caller decides which
+  // persona to stamp on the resulting profiles row.
+  if (persona === "staff" || persona === "field") {
     const { data } = await sb
       .from("sis_staff")
       .select("id, tenant_id, full_name, email, mobile, status")
@@ -179,7 +185,7 @@ export async function findOrCreateAuthUser(opts: {
  * Supabase never sees the phone number as a sign-in credential.
  */
 export async function resolveEmailForMobile(
-  persona: "staff" | "parent",
+  persona: "staff" | "parent" | "field",
   mobile10: string,
 ): Promise<string | null> {
   const sb = createServiceSupabase();
@@ -208,7 +214,7 @@ export async function resolveEmailForMobile(
 export async function upsertProfile(input: {
   authUserId: string;
   tenantId: string;
-  persona: "staff" | "parent";
+  persona: "staff" | "parent" | "field";
   fullName: string;
   email: string;
   mobile10: string;

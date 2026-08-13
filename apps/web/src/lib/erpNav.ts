@@ -4,6 +4,7 @@ import {
   BookOpen,
   Bus,
   CalendarClock,
+  CalendarHeart,
   ClipboardCheck,
   FileBarChart2,
   GraduationCap,
@@ -245,6 +246,14 @@ export const HUB_GROUPS: HubGroup[] = [
         detail: "Assessment entry, result sheets and class promotion.",
         icon: GraduationCap,
         tone: "violet",
+      },
+      {
+        href: "/events",
+        title: "Events & calendar",
+        blurb: "Calendar · RSVP",
+        detail: "Unified this-week/this-month view across events, holidays, exams, PTM and fee dues, with WhatsApp RSVP.",
+        icon: CalendarHeart,
+        tone: "gold",
       },
       {
         href: "/certificates",

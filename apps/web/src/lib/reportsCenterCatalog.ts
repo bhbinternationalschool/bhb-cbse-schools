@@ -38,6 +38,7 @@ export type ReportsCenterModuleId =
   | "attendance"
   | "homework"
   | "ptm"
+  | "events"
   | "student_leave"
   | "vault"
   | "rte"
@@ -133,6 +134,14 @@ export const REPORTS_CENTER_MODULES: ReportsCenterModuleDef[] = [
     rbacModule: "ptm",
     href: "/ptm?tab=reports",
     embeddable: true,
+  },
+  {
+    id: "events",
+    label: "Events & calendar",
+    blurb: "Upcoming events · RSVP tallies",
+    rbacModule: "events",
+    href: "/events?tab=rsvps",
+    embeddable: false,
   },
   {
     id: "student_leave",

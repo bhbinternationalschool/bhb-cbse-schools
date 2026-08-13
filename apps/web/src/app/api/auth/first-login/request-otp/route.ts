@@ -23,7 +23,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "Invalid JSON" }, { status: 400 });
   }
 
-  const persona = body.persona === "staff" ? "staff" : "parent";
+  const persona =
+    body.persona === "staff" || body.persona === "field"
+      ? body.persona
+      : "parent";
   const mobile10 = normalizeMobile10(body.mobile || "");
   if (!mobile10) {
     return NextResponse.json(
@@ -38,7 +41,7 @@ export async function POST(req: Request) {
       {
         ok: false,
         error:
-          persona === "staff"
+          persona === "staff" || persona === "field"
             ? "No active staff record found for this number — check with the school office"
             : "No student record found for this number — check with the school office",
       },

@@ -28,6 +28,7 @@ export type RegistryModuleId =
   | "homework"
   | "timetable"
   | "ptm"
+  | "events"
   | "student_leave"
   | "vault"
   | "modules"
@@ -195,6 +196,14 @@ export const REGISTRY_MODULES: RegistryModuleDef[] = [
     label: "Exams",
     blurb: "Marks entry, results and promotion",
     href: "/exams",
+    group: "academics",
+    defaultEnabled: true,
+  },
+  {
+    id: "events",
+    label: "Events & calendar",
+    blurb: "School events, WhatsApp RSVP and the unified academic calendar",
+    href: "/events",
     group: "academics",
     defaultEnabled: true,
   },
@@ -472,6 +481,7 @@ export function registryModuleForHref(href: string): RegistryModuleId | null {
   if (path === "/homework" || path.startsWith("/homework/")) return "homework";
   if (path === "/timetable" || path.startsWith("/timetable/")) return "timetable";
   if (path === "/ptm" || path.startsWith("/ptm/")) return "ptm";
+  if (path === "/events" || path.startsWith("/events/")) return "events";
   if (path === "/exams" || path.startsWith("/exams/")) return "exams";
   if (path === "/certificates" || path.startsWith("/certificates/"))
     return "certificates";
