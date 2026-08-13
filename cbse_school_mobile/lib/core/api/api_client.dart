@@ -10,6 +10,7 @@ const _cookieName = "bhb_demo_session";
 const _cookieKey = "bhb_session_cookie";
 const _guardianKey = "bhb_guardian_name";
 const _personaKey = "bhb_persona";
+const _roleKey = "bhb_role_code";
 
 class ApiException implements Exception {
   ApiException(this.message, [this.statusCode]);
@@ -556,6 +557,155 @@ class PunchResult {
   final int distanceM;
 }
 
+class PrincipalSnapshot {
+  const PrincipalSnapshot({
+    required this.academicYearCode,
+    required this.todayCollectionPaise,
+    required this.mtdCollectionPaise,
+    required this.openDuesPaise,
+    required this.defaulterHouseholds,
+    required this.attendanceDate,
+    required this.studentPresent,
+    required this.studentAbsent,
+    required this.studentLeave,
+    required this.studentMarkedPct,
+    required this.sectionsMarked,
+    required this.staffActive,
+    required this.staffPresent,
+    required this.staffAbsent,
+    required this.admissionsPipeline,
+    required this.admissionsEnrolled,
+    required this.followUpsDue,
+    required this.vaultExpiring30d,
+    required this.lowStockSkus,
+    required this.registersPending,
+  });
+
+  factory PrincipalSnapshot.fromJson(Map<String, dynamic> j) {
+    final fees = (j["fees"] as Map<String, dynamic>?) ?? const {};
+    final att = (j["attendance"] as Map<String, dynamic>?) ?? const {};
+    final staff = (j["staff"] as Map<String, dynamic>?) ?? const {};
+    final adm = (j["admissions"] as Map<String, dynamic>?) ?? const {};
+    final alerts = (j["alerts"] as Map<String, dynamic>?) ?? const {};
+    int n(Map<String, dynamic> m, String k) => (m[k] as num?)?.toInt() ?? 0;
+    return PrincipalSnapshot(
+      academicYearCode: (j["academicYearCode"] as String?) ?? "",
+      todayCollectionPaise: n(fees, "todayCollectionPaise"),
+      mtdCollectionPaise: n(fees, "mtdCollectionPaise"),
+      openDuesPaise: n(fees, "openDuesPaise"),
+      defaulterHouseholds: n(fees, "defaulterHouseholds"),
+      attendanceDate: (att["date"] as String?) ?? "",
+      studentPresent: n(att, "studentPresent"),
+      studentAbsent: n(att, "studentAbsent"),
+      studentLeave: n(att, "studentLeave"),
+      studentMarkedPct: n(att, "studentMarkedPct"),
+      sectionsMarked: n(att, "sectionsMarked"),
+      staffActive: n(staff, "activeCount"),
+      staffPresent: n(staff, "presentToday"),
+      staffAbsent: n(staff, "absentToday"),
+      admissionsPipeline: n(adm, "pipeline"),
+      admissionsEnrolled: n(adm, "enrolled"),
+      followUpsDue: n(adm, "followUpsDue"),
+      vaultExpiring30d: n(alerts, "vaultExpiring30d"),
+      lowStockSkus: n(alerts, "lowStockSkus"),
+      registersPending: n(alerts, "attendanceRegistersPending"),
+    );
+  }
+
+  final String academicYearCode;
+  final int todayCollectionPaise;
+  final int mtdCollectionPaise;
+  final int openDuesPaise;
+  final int defaulterHouseholds;
+  final String attendanceDate;
+  final int studentPresent;
+  final int studentAbsent;
+  final int studentLeave;
+  final int studentMarkedPct;
+  final int sectionsMarked;
+  final int staffActive;
+  final int staffPresent;
+  final int staffAbsent;
+  final int admissionsPipeline;
+  final int admissionsEnrolled;
+  final int followUpsDue;
+  final int vaultExpiring30d;
+  final int lowStockSkus;
+  final int registersPending;
+}
+
+String formatInrPaise(int paise) {
+  final rupees = paise ~/ 100;
+  final s = rupees.abs().toString();
+  // Indian digit grouping: 12,34,567
+  String grouped;
+  if (s.length <= 3) {
+    grouped = s;
+  } else {
+    final last3 = s.substring(s.length - 3);
+    var rest = s.substring(0, s.length - 3);
+    final parts = <String>[];
+    while (rest.length > 2) {
+      parts.insert(0, rest.substring(rest.length - 2));
+      rest = rest.substring(0, rest.length - 2);
+    }
+    if (rest.isNotEmpty) parts.insert(0, rest);
+    grouped = "${parts.join(",")},$last3";
+  }
+  return "${rupees < 0 ? "-" : ""}₹$grouped";
+}
+
+class TransportStopInfo {
+  const TransportStopInfo({
+    required this.name,
+    required this.sequence,
+    required this.distanceKm,
+  });
+
+  final String name;
+  final int sequence;
+  final double distanceKm;
+}
+
+class TransportRouteInfo {
+  const TransportRouteInfo({
+    required this.code,
+    required this.name,
+    required this.stops,
+    required this.vehicleName,
+    required this.vehicleReg,
+    required this.seatCapacity,
+    required this.driverName,
+  });
+
+  factory TransportRouteInfo.fromJson(Map<String, dynamic> j) {
+    final v = j["vehicle"] as Map<String, dynamic>?;
+    return TransportRouteInfo(
+      code: (j["code"] as String?) ?? "",
+      name: (j["name"] as String?) ?? "",
+      stops: ((j["stops"] as List?) ?? const [])
+          .map((s) => TransportStopInfo(
+                name: (s["name"] as String?) ?? "",
+                sequence: (s["sequence"] as num?)?.toInt() ?? 0,
+                distanceKm: (s["distanceKm"] as num?)?.toDouble() ?? 0,
+              ))
+          .toList(),
+      vehicleName: (v?["name"] as String?) ?? "",
+      vehicleReg: (v?["registrationNo"] as String?) ?? "",
+      seatCapacity: (v?["seatCapacity"] as num?)?.toInt(),
+      driverName: v?["driverName"] as String?,
+    );
+  }
+
+  final String code;
+  final String name;
+  final List<TransportStopInfo> stops;
+  final String vehicleName;
+  final String vehicleReg;
+  final int? seatCapacity;
+  final String? driverName;
+}
+
 class ApiClient {
   ApiClient(this.config);
 
@@ -573,10 +723,22 @@ class ApiClient {
 
   Future<String?> persona() => _storage.read(key: _personaKey);
 
+  Future<String?> roleCode() => _storage.read(key: _roleKey);
+
+  /// principal / owner / admin / director style roles get the school-wide
+  /// snapshot home instead of the teacher home (mirror of the server's
+  /// isPrincipalLikeRole).
+  Future<bool> isPrincipalLike() async {
+    final rc = (await roleCode())?.toLowerCase() ?? "";
+    return RegExp(r"principal|owner|admin|director|hm|head.?master")
+        .hasMatch(rc);
+  }
+
   Future<void> signOut() async {
     await _storage.delete(key: _cookieKey);
     await _storage.delete(key: _guardianKey);
     await _storage.delete(key: _personaKey);
+    await _storage.delete(key: _roleKey);
   }
 
   Future<void> _storeSession(Map<String, dynamic>? session) async {
@@ -584,6 +746,8 @@ class ApiClient {
     if (name != null) await _storage.write(key: _guardianKey, value: name);
     final persona = session?["persona"] as String?;
     if (persona != null) await _storage.write(key: _personaKey, value: persona);
+    final role = session?["roleCode"] as String?;
+    if (role != null) await _storage.write(key: _roleKey, value: role);
   }
 
   Future<Map<String, String>> _authHeaders() async {
@@ -688,6 +852,7 @@ class ApiClient {
     String? householdId,
     String persona = "parent",
     String? staffId,
+    String? roleCode,
   }) async {
     final res = await http.post(
       _uri("/api/auth/demo"),
@@ -697,6 +862,7 @@ class ApiClient {
         if (householdId != null && householdId.isNotEmpty)
           "householdId": householdId,
         if (staffId != null && staffId.isNotEmpty) "staffId": staffId,
+        if (roleCode != null && roleCode.isNotEmpty) "roleCode": roleCode,
       }),
     );
     if (res.statusCode != 200) _throwFrom(res);
@@ -852,6 +1018,16 @@ class ApiClient {
 
   Future<void> cancelPtmBooking(String bookingId) async {
     await _postData("/api/v1/ptm/cancel", {"bookingId": bookingId});
+  }
+
+  Future<PrincipalSnapshot> fetchPrincipalSnapshot() async =>
+      PrincipalSnapshot.fromJson(await _getData("/api/v1/principal/snapshot"));
+
+  Future<List<TransportRouteInfo>> fetchTransportRoutes() async {
+    final data = await _getData("/api/v1/transport/routes");
+    return ((data["routes"] as List?) ?? const [])
+        .map((r) => TransportRouteInfo.fromJson(r as Map<String, dynamic>))
+        .toList();
   }
 
   Future<PunchState> fetchPunchState() async =>

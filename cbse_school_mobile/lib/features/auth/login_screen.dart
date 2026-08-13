@@ -81,13 +81,21 @@ class _LoginScreenState extends State<LoginScreen> {
       });
 
   Future<void> _devLogin() => _run(() async {
-        // Dev affordance: typing a roster id (stf_…) in the email field
-        // links the demo staff session to that staff record.
-        final email = _email.text.trim();
+        // Dev affordances via the email field: a roster id (stf_…) links the
+        // demo session to that staff record as a teacher; "driver" signs in
+        // as the field/driver persona; empty stays the principal demo.
+        final email = _email.text.trim().toLowerCase();
+        final isDriver = _staffMode && (email == "driver" || email == "field");
+        final isTeacher = _staffMode && email.startsWith("stf_");
         await widget.api.devLogin(
-          persona: _staffMode ? "staff" : "parent",
+          persona: isDriver
+              ? "field"
+              : _staffMode
+                  ? "staff"
+                  : "parent",
           householdId: _staffMode ? null : _mobile.text.trim(),
-          staffId: _staffMode && email.startsWith("stf_") ? email : null,
+          staffId: isTeacher ? _email.text.trim() : null,
+          roleCode: isTeacher ? "teacher" : null,
         );
         if (mounted) widget.onSignedIn();
       });
