@@ -4,7 +4,7 @@
 
 import { applyPaymentLink } from "@/lib/payments";
 import { ensureSchoolMirrorLoaded } from "@/lib/schoolDataMirror.server";
-import { householdWhatsApp, loadSis } from "@/lib/sis";
+import { householdWhatsApp, loadSis, normalizeMobile } from "@/lib/sis";
 import { sendSisFeeReceiptOnWhatsApp } from "@/lib/waSisBotServer";
 
 export async function settlePaymentLinkWithWhatsApp(opts: {
@@ -37,9 +37,11 @@ export async function settlePaymentLinkWithWhatsApp(opts: {
     const sis = loadSis();
     const hh = sis.households.find((h) => h.id === result.link.householdId);
     const mobile = hh ? householdWhatsApp(hh) || hh.mobile || "" : "";
+    const fallbackMobile = hh ? normalizeMobile(hh.altMobile || "") : "";
     if (mobile) {
       whatsappReceipt = await sendSisFeeReceiptOnWhatsApp({
         mobile,
+        fallbackMobile: fallbackMobile || undefined,
         voucherId: result.voucherId,
       });
     }

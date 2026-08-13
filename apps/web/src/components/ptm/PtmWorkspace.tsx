@@ -53,7 +53,7 @@ import {
   markPtmWhatsApp,
   modeLabel,
   PTM_REPORTS,
-  ptmBookingMobile,
+  ptmBookingContact,
   runPtmReport,
   savePtmFeedback,
   seedPtmIfEmpty,
@@ -685,7 +685,7 @@ export function PtmWorkspace() {
                 let n = 0;
                 for (const b of booked) {
                   const slot = state.slots.find((s) => s.id === b.slotId);
-                  const mobile = ptmBookingMobile(b, sis);
+                  const { mobile, fallbackMobile } = ptmBookingContact(b, sis);
                   if (!slot || mobile.replace(/\D/g, "").length < 10) continue;
                   const stu = sis.students.find((s) => s.id === b.studentId);
                   const msg = composeWhatsAppPtmReminder({
@@ -696,7 +696,7 @@ export function PtmWorkspace() {
                     teacherName: slot.teacherName,
                     roomOrLink: slot.roomOrLink,
                   });
-                  window.setTimeout(() => openWaMe(mobile, msg), n * 500);
+                  window.setTimeout(() => openWaMe(mobile, msg, fallbackMobile), n * 500);
                   markPtmWhatsApp(b.id, "reminded");
                   n += 1;
                 }
@@ -741,7 +741,7 @@ export function PtmWorkspace() {
                         size="sm"
                         onClick={() => {
                           if (!selectedEvent || !sis || !slot) return;
-                          const mobile = ptmBookingMobile(b, sis);
+                          const { mobile, fallbackMobile } = ptmBookingContact(b, sis);
                           if (mobile.replace(/\D/g, "").length < 10) {
                             setError("No WhatsApp mobile on household");
                             return;
@@ -757,7 +757,7 @@ export function PtmWorkspace() {
                             teacherName: slot.teacherName,
                             roomOrLink: slot.roomOrLink,
                           });
-                          openWaMe(mobile, msg);
+                          openWaMe(mobile, msg, fallbackMobile);
                           markPtmWhatsApp(b.id, "confirmed");
                           refresh();
                           flash("WhatsApp confirm opened");
@@ -771,7 +771,7 @@ export function PtmWorkspace() {
                         size="sm"
                         onClick={() => {
                           if (!selectedEvent || !sis || !slot) return;
-                          const mobile = ptmBookingMobile(b, sis);
+                          const { mobile, fallbackMobile } = ptmBookingContact(b, sis);
                           if (mobile.replace(/\D/g, "").length < 10) {
                             setError("No WhatsApp mobile on household");
                             return;
@@ -787,7 +787,7 @@ export function PtmWorkspace() {
                             teacherName: slot.teacherName,
                             roomOrLink: slot.roomOrLink,
                           });
-                          openWaMe(mobile, msg);
+                          openWaMe(mobile, msg, fallbackMobile);
                           markPtmWhatsApp(b.id, "reminded");
                           refresh();
                           flash("WhatsApp reminder opened");

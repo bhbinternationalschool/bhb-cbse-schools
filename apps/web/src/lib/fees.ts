@@ -3473,11 +3473,12 @@ export async function deliverWhatsAppFeeReceipt(input: {
           }
         : undefined;
 
+      const fallbackMobile = normalizeMobile(hh?.altMobile ?? "") || undefined;
       const res = await fetch("/api/wa/dispatch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: [{ mobile, body: message, template }],
+          messages: [{ mobile, fallbackMobile, body: message, template }],
         }),
       });
       const dispatch = (await res.json()) as {

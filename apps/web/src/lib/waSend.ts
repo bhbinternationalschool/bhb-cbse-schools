@@ -311,6 +311,85 @@ export async function sendWhatsAppTemplate(opts: {
   };
 }
 
+/**
+ * Pure — whether a failed primary send is worth retrying against a fallback
+ * number. Only synchronous, number-specific failures qualify: a `"stub"`
+ * failure means the provider isn't configured at all, and a different
+ * number can't fix that. Opt-out/24h-window/Meta-rejection failures ARE
+ * worth retrying — that state is per-number, so a fallback may be in a
+ * completely different state than the primary.
+ */
+export function shouldRetryWithFallback(opts: {
+  primaryResult: { ok: boolean; mode: string };
+  primaryMobile: string;
+  fallbackMobile?: string;
+}): boolean {
+  if (opts.primaryResult.ok) return false;
+  if (opts.primaryResult.mode === "stub") return false;
+  const fallback = waDigitsToE164India(opts.fallbackMobile || "");
+  if (!fallback || fallback.length < 10) return false;
+  const primary = waDigitsToE164India(opts.primaryMobile);
+  if (fallback === primary) return false;
+  return true;
+}
+
+/**
+ * Send to `primaryMobile`; on a qualifying synchronous failure (see
+ * `shouldRetryWithFallback`), retry the same message against
+ * `fallbackMobile` — e.g. a household's `altMobile` when the primary
+ * WhatsApp number is opted out, outside the 24h session window, invalid,
+ * or rejected by Meta. Covers synchronous failures only — a message Meta
+ * accepts but later fails to deliver (reported async via the delivery
+ * webhook) is not retried here.
+ */
+export async function sendWaWithFailover(opts: {
+  primaryMobile: string;
+  fallbackMobile?: string;
+  body?: string;
+  template?: {
+    name: string;
+    language: string;
+    components?: WaTemplateComponent[];
+  };
+  clientMessageId?: string;
+}): Promise<{
+  ok: boolean;
+  providerId?: string;
+  error?: string;
+  mode: string;
+  usedFallback: boolean;
+  primaryError?: string;
+}> {
+  const send = (toMobile: string) =>
+    opts.template
+      ? sendWhatsAppTemplate({
+          toMobile,
+          name: opts.template.name,
+          language: opts.template.language,
+          components: opts.template.components,
+          clientMessageId: opts.clientMessageId,
+        })
+      : sendWhatsAppText({
+          toMobile,
+          body: opts.body || "",
+          clientMessageId: opts.clientMessageId,
+        });
+
+  const primaryResult = await send(opts.primaryMobile);
+  if (
+    !shouldRetryWithFallback({
+      primaryResult,
+      primaryMobile: opts.primaryMobile,
+      fallbackMobile: opts.fallbackMobile,
+    })
+  ) {
+    return { ...primaryResult, usedFallback: false };
+  }
+
+  const fallbackResult = await send(opts.fallbackMobile!);
+  return { ...fallbackResult, usedFallback: true, primaryError: primaryResult.error };
+}
+
 /** Build Meta body component from named vars + ordered variable keys. */
 export function buildWaTemplateBodyComponent(
   variableKeys: string[],
