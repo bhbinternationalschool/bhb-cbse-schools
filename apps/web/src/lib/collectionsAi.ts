@@ -59,3 +59,14 @@ export function paymentLikelihood(row: {
   }
   return { score, label: "High risk — escalate", tone: "danger" };
 }
+
+/** Count of defaulters whose payment likelihood is "danger" tone — the
+ * dashboard anomaly count, kept alongside the scoring logic it depends on. */
+export function countAtRiskDefaulters(
+  rows: { overdueDays: number; overdueAmountPaise: number; planCode?: string | null }[],
+): number {
+  return rows.reduce(
+    (n, row) => n + (paymentLikelihood(row).tone === "danger" ? 1 : 0),
+    0,
+  );
+}
