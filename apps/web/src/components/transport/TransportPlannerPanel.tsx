@@ -194,7 +194,7 @@ export function TransportPlannerPanel({
 
   return (
     <div className="mt-4 space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <div>
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">
             Route planner
@@ -219,7 +219,7 @@ export function TransportPlannerPanel({
           ) : null}
           <button
             type="button"
-            className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
+            className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
             onClick={onAlignVehicles}
           >
             Align vehicles ↔ routes
@@ -228,8 +228,8 @@ export function TransportPlannerPanel({
             type="button"
             className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
               view === "unassigned"
-                ? "bg-[var(--brand-deep)] text-white"
-                : "border border-[rgba(32,48,80,0.15)] text-[var(--brand-deep)]"
+                ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                : "border border-[var(--border)] text-[var(--brand-deep)]"
             }`}
             onClick={() => setView("unassigned")}
           >
@@ -239,8 +239,8 @@ export function TransportPlannerPanel({
             type="button"
             className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
               view === "routes"
-                ? "bg-[var(--brand-deep)] text-white"
-                : "border border-[rgba(32,48,80,0.15)] text-[var(--brand-deep)]"
+                ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                : "border border-[var(--border)] text-[var(--brand-deep)]"
             }`}
             onClick={() => setView("routes")}
           >
@@ -256,7 +256,7 @@ export function TransportPlannerPanel({
           {clusters.map((c) => (
             <section
               key={c.routeId}
-              className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4"
+              className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4"
             >
               <div className="flex items-start justify-between gap-2">
                 <div>
@@ -273,7 +273,7 @@ export function TransportPlannerPanel({
                   className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
                     c.riderCount >= c.seatCapacity
                       ? "bg-[#c2410c]/15 text-[#c2410c]"
-                      : "bg-[#15803d]/12 text-[#15803d]"
+                      : "bg-[var(--success-soft)] text-[var(--success)]"
                   }`}
                 >
                   {c.riderCount >= c.seatCapacity ? "Full" : "Seats open"}
@@ -287,7 +287,7 @@ export function TransportPlannerPanel({
                   {c.unassignedNearby.map((p) => (
                     <li
                       key={p.studentId}
-                      className="flex items-center justify-between gap-2 rounded-lg bg-[rgba(32,48,80,0.04)] px-2.5 py-2 text-sm"
+                      className="flex items-center justify-between gap-2 rounded-lg bg-[var(--surface-sunken)] px-2.5 py-2 text-sm"
                     >
                       <span className="min-w-0 truncate font-medium text-[var(--ink)]">
                         {p.fullName}
@@ -315,7 +315,7 @@ export function TransportPlannerPanel({
         </div>
       ) : (
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(22rem,0.9fr)]">
-          <section className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h3 className="text-sm font-bold text-[var(--brand-deep)]">
               Students without transport
             </h3>
@@ -324,7 +324,7 @@ export function TransportPlannerPanel({
             </p>
             <ul className="mt-3 max-h-[28rem] space-y-1 overflow-y-auto">
               {unassigned.length === 0 ? (
-                <li className="rounded-lg bg-[rgba(32,48,80,0.04)] px-3 py-4 text-sm text-[var(--muted)]">
+                <li className="rounded-lg bg-[var(--surface-sunken)] px-3 py-4 text-sm text-[var(--muted)]">
                   All active students have a route for this session.
                 </li>
               ) : (
@@ -335,7 +335,7 @@ export function TransportPlannerPanel({
                       className={`w-full rounded-lg border px-3 py-2.5 text-left transition ${
                         selectedId === p.studentId
                           ? "border-[var(--brand-deep)] bg-[rgba(197,160,40,0.1)]"
-                          : "border-[rgba(32,48,80,0.1)] hover:bg-[rgba(32,48,80,0.03)]"
+                          : "border-[var(--border)] hover:bg-[var(--surface-sunken)]"
                       }`}
                       onClick={() => setSelectedId(p.studentId)}
                     >
@@ -354,7 +354,7 @@ export function TransportPlannerPanel({
             </ul>
           </section>
 
-          <section className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             {!selected ? (
               <p className="text-sm text-[var(--muted)]">
                 Select a student to see route suggestions and fee months.
@@ -403,7 +403,7 @@ export function TransportPlannerPanel({
                           className={`w-full rounded-lg border p-3 text-left ${
                             pick?.stopId === s.stopId && pick?.routeId === s.routeId
                               ? "border-[var(--brand-deep)] bg-[rgba(197,160,40,0.08)]"
-                              : "border-[rgba(32,48,80,0.12)]"
+                              : "border-[var(--border)]"
                           }`}
                           onClick={() => setPick(s)}
                         >
@@ -419,7 +419,7 @@ export function TransportPlannerPanel({
                                 {formatInr(s.monthlyFeePaise)}/mo
                               </p>
                             </div>
-                            <span className="rounded-full bg-[rgba(32,48,80,0.08)] px-2 py-0.5 text-[10px] font-bold text-[var(--brand-deep)]">
+                            <span className="rounded-full bg-[var(--surface-sunken)] px-2 py-0.5 text-[10px] font-bold text-[var(--brand-deep)]">
                               {s.matchScore}% match
                             </span>
                           </div>
@@ -439,9 +439,9 @@ export function TransportPlannerPanel({
                     <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--muted)]">
                       Fee months (Fee Take)
                     </p>
-                    <div className="mt-1 overflow-x-auto rounded-lg border border-[rgba(32,48,80,0.1)]">
+                    <div className="mt-1 overflow-x-auto rounded-lg border border-[var(--border)]">
                       <table className="w-full min-w-[16rem] text-left text-xs">
-                        <thead className="bg-[rgba(32,48,80,0.04)] text-[var(--muted)]">
+                        <thead className="bg-[var(--surface-sunken)] text-[var(--muted)]">
                           <tr>
                             <th className="px-2 py-1.5 font-semibold">Month</th>
                             <th className="px-2 py-1.5 text-right font-semibold">
@@ -453,7 +453,7 @@ export function TransportPlannerPanel({
                           {monthPreview.map((m) => (
                             <tr
                               key={m.periodKey}
-                              className="border-t border-[rgba(32,48,80,0.06)]"
+                              className="border-t border-[var(--border)]"
                             >
                               <td className="px-2 py-1.5">{m.periodLabel}</td>
                               <td className="px-2 py-1.5 text-right font-semibold tabular-nums">

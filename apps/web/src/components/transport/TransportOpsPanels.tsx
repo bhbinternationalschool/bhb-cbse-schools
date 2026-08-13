@@ -119,7 +119,7 @@ export function RoutesPanel({
   return (
     <div className="mt-4 grid gap-4 lg:grid-cols-2">
       <div className="space-y-4">
-        <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">
             {editId ? "Edit route" : "Add route"}
           </h2>
@@ -208,7 +208,7 @@ export function RoutesPanel({
           <div className="mt-3 flex flex-wrap gap-2">
             <button
               type="button"
-              className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-sm font-bold text-white"
+              className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-bold text-[var(--primary-foreground)]"
               onClick={save}
             >
               {editId ? "Save route" : "Add route"}
@@ -225,7 +225,7 @@ export function RoutesPanel({
           </div>
         </div>
 
-        <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">
             Fee policy (AY)
           </h2>
@@ -255,7 +255,7 @@ export function RoutesPanel({
             </label>
 
             {policy.rateMode === "flat_route" ? (
-              <p className="sm:col-span-2 rounded-lg bg-[rgba(32,48,80,0.04)] px-3 py-2 text-[12px] text-[var(--brand-deep)]">
+              <p className="sm:col-span-2 rounded-lg bg-[var(--surface-sunken)] px-3 py-2 text-[12px] text-[var(--brand-deep)]">
                 Each route’s <strong>Flat fee ₹/mo</strong> is billed. Stop
                 distances are not used for pricing in this mode.
               </p>
@@ -391,7 +391,7 @@ export function RoutesPanel({
                         </label>
                         <button
                           type="button"
-                          className="self-end pb-2 text-[11px] font-semibold text-[#dc2626]"
+                          className="self-end pb-2 text-[11px] font-semibold text-[var(--danger)]"
                           onClick={() =>
                             setPolicy((p) => ({
                               ...p,
@@ -484,7 +484,7 @@ export function RoutesPanel({
         </div>
       </div>
 
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">
             All routes
@@ -556,7 +556,7 @@ export function RoutesPanel({
                   {r.isActive ? (
                     <button
                       type="button"
-                      className="text-[11px] font-semibold text-[#dc2626]"
+                      className="text-[11px] font-semibold text-[var(--danger)]"
                       onClick={() => {
                         deactivateTransportRoute(r.id);
                         onRefresh();
@@ -633,7 +633,7 @@ export function FleetPanel({
 
   return (
     <div className="mt-4 grid gap-4 lg:grid-cols-2">
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-bold text-[var(--brand-deep)]">
           {editId ? "Edit vehicle" : "Add vehicle"}
         </h2>
@@ -719,7 +719,7 @@ export function FleetPanel({
         </div>
         <button
           type="button"
-          className="mt-3 rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-sm font-bold text-white"
+          className="mt-3 rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-bold text-[var(--primary-foreground)]"
           onClick={save}
         >
           Save vehicle
@@ -764,7 +764,7 @@ export function FleetPanel({
           ))}
         </ul>
       </div>
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-bold text-[var(--brand-deep)]">
           Vehicle 360
         </h2>
@@ -802,7 +802,7 @@ function Vehicle360({
 
   return (
     <div className="mt-2 space-y-3 text-sm">
-      <div className="rounded-lg bg-[rgba(32,48,80,0.04)] px-3 py-2">
+      <div className="rounded-lg bg-[var(--surface-sunken)] px-3 py-2">
         <div className="font-bold text-[var(--brand-deep)]">
           {vehicle.registrationNo} · {vehicle.name}
         </div>
@@ -887,7 +887,7 @@ export function FuelPanel({
 
   return (
     <div className="mt-4 grid gap-4 lg:grid-cols-2">
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-bold text-[var(--brand-deep)]">
           Log refill
         </h2>
@@ -965,7 +965,7 @@ export function FuelPanel({
           />
           <button
             type="button"
-            className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-sm font-bold text-white"
+            className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-bold text-[var(--primary-foreground)]"
             onClick={() => {
               const r = recordFuelRefill({
                 vehicleId,
@@ -1007,7 +1007,7 @@ export function FuelPanel({
           ))}
         </ul>
       </div>
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-bold text-[var(--brand-deep)]">
           Depot purchase (Mode A)
         </h2>

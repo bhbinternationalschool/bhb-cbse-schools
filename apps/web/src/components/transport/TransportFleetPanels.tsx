@@ -68,7 +68,7 @@ export function DealersPanel({
 
   return (
     <div className="mt-4 grid gap-4 lg:grid-cols-2">
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-bold text-[var(--brand-deep)]">Add dealer</h2>
         <div className="mt-3 grid gap-2">
           <input
@@ -100,7 +100,7 @@ export function DealersPanel({
           </select>
           <button
             type="button"
-            className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-sm font-bold text-white"
+            className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-bold text-[var(--primary-foreground)]"
             onClick={() => {
               const r = upsertDealer({ name, type });
               if (!r.ok) {
@@ -129,7 +129,7 @@ export function DealersPanel({
           ))}
         </ul>
       </div>
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-bold text-[var(--brand-deep)]">
           Open payables
         </h2>
@@ -198,7 +198,7 @@ export function FinancePanel({
   return (
     <div className="mt-4 grid gap-4 lg:grid-cols-2">
       <div className="space-y-4">
-        <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">
             New vehicle loan / EMI
           </h2>
@@ -249,7 +249,7 @@ export function FinancePanel({
             />
             <button
               type="button"
-              className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-sm font-bold text-white"
+              className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-bold text-[var(--primary-foreground)]"
               onClick={() => {
                 const r = createVehicleLoan({
                   vehicleId,
@@ -274,7 +274,7 @@ export function FinancePanel({
             </button>
           </div>
         </div>
-        <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">
             Certificate renewal
           </h2>
@@ -349,7 +349,7 @@ export function FinancePanel({
             </button>
           </div>
         </div>
-        <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">
             Insurance policy
           </h2>
@@ -381,7 +381,7 @@ export function FinancePanel({
           </button>
         </div>
       </div>
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-bold text-[var(--brand-deep)]">EMI due</h2>
         <ul className="mt-2 max-h-[28rem] divide-y overflow-y-auto text-sm">
           {dueEmis.length === 0 ? (
@@ -449,7 +449,7 @@ export function ServicePanel({
 
   return (
     <div className="mt-4 grid gap-4 lg:grid-cols-2">
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-bold text-[var(--brand-deep)]">
           Open service / repair job
         </h2>
@@ -473,7 +473,7 @@ export function ServicePanel({
           />
           <button
             type="button"
-            className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-sm font-bold text-white"
+            className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-bold text-[var(--primary-foreground)]"
             onClick={() => {
               const r = openServiceJob({
                 vehicleId,
@@ -538,7 +538,7 @@ export function ServicePanel({
           Submit request
         </button>
       </div>
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-bold text-[var(--brand-deep)]">
           Open jobs & requests
         </h2>
@@ -657,7 +657,7 @@ export function BoardingPanel({
 
   return (
     <div className="mt-4 space-y-4">
-      <div className="flex flex-wrap gap-3 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="flex flex-wrap gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <label className="text-sm">
           <span className="mb-1 block text-[11px] text-[var(--muted)]">Date</span>
           <input
@@ -700,7 +700,7 @@ export function BoardingPanel({
         <p className="text-sm text-[var(--muted)]">Pick a route to mark boarding.</p>
       ) : (
         <div className="grid gap-4 lg:grid-cols-2">
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-bold text-[var(--brand-deep)]">
               Authorized riders
             </h2>
@@ -762,7 +762,7 @@ export function BoardingPanel({
               })}
             </ul>
           </div>
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-bold text-[var(--brand-deep)]">
               Report unauthorized
             </h2>
@@ -827,7 +827,7 @@ export function CompliancePanel({
   }, [state]);
 
   return (
-    <div className="mt-4 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+    <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-bold text-[var(--brand-deep)]">
           Fee & boarding compliance
@@ -865,7 +865,7 @@ export function CompliancePanel({
                 {a.assignmentId ? (
                   <button
                     type="button"
-                    className="text-[11px] font-semibold text-[#dc2626]"
+                    className="text-[11px] font-semibold text-[var(--danger)]"
                     onClick={() => {
                       setBoardingSuspended(a.assignmentId, true);
                       onRefresh();
@@ -941,7 +941,7 @@ export function LiveMapPanel({
 
   return (
     <div className="mt-4 space-y-4">
-      <section className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-sm font-bold text-[var(--brand-deep)]">
@@ -974,7 +974,7 @@ export function LiveMapPanel({
       </section>
 
     <div className="grid gap-4 lg:grid-cols-2">
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-bold text-[var(--brand-deep)]">
           Record GPS ping
         </h2>
@@ -1008,7 +1008,7 @@ export function LiveMapPanel({
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-sm font-bold text-white"
+              className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-bold text-[var(--primary-foreground)]"
               onClick={() => {
                 const r = recordGpsPing({
                   vehicleId,
