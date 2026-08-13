@@ -214,7 +214,7 @@ migration, independent of the rest of the checklist):
 | Students | `students/StudentsWorkspace.tsx` | Done (Phase 3) |
 | Attendance | `attendance/AttendanceWorkspace.tsx` | Done (Phase 3) |
 | Fees (Fee Take) | `fees/FeeTakeWorkspace.tsx` | Partial — header/toolbar/search-card only, deliberately (live payment code, no staging); full sweep still pending |
-| Staff | `staff/StaffWorkspace.tsx` | Charts done (Phase 1); shell/token sweep not started |
+| Staff | `staff/StaffWorkspace.tsx` (+11 sub-panels) | Done (Charts Phase 1; full color/token sweep + all 5 raw `<table>`s converted to ErpTableShell kit; StaffProfileForm.tsx's printable ID-card sheet and its embedded QR deliberately left on fixed literals — same call as Fees' receipt flow) |
 | Login | `login/LoginPanel.tsx` | Done (Phase 3) |
 | Payroll | `payroll/PayrollWorkspace.tsx` | Done |
 | Admissions | `admissions/AdmissionsWorkspace.tsx` | Done |
