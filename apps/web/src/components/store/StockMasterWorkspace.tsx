@@ -6,6 +6,12 @@ import { seedAccountsIfEmpty } from "@/lib/accountsStore";
 import { RemoveControl } from "@/components/masters/RemoveControl";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
+import {
   adjustStock,
   bulkSetOpeningStock,
   bulkSetSalePrice,
@@ -653,9 +659,9 @@ export function StockMasterWorkspace() {
                 </button>
               </div>
 
-              <div className="mt-4 overflow-x-auto rounded-lg border border-[var(--border)]">
-                <table className="min-w-full text-sm">
-                  <thead className="bg-[var(--surface-sunken)] text-left text-[11px] text-[var(--muted)]">
+              <ErpTableShell className="mt-4 overflow-x-auto">
+                <ErpTable minWidth="min-w-full">
+                  <ErpTableHead>
                     <tr>
                       <th className="px-3 py-2 font-semibold">Name</th>
                       <th className="px-3 py-2 font-semibold">Items</th>
@@ -666,8 +672,8 @@ export function StockMasterWorkspace() {
                         Actions
                       </th>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[var(--border)]">
+                  </ErpTableHead>
+                  <ErpTableBody>
                     {[...categories]
                       .sort(
                         (a, b) =>
@@ -748,9 +754,9 @@ export function StockMasterWorkspace() {
                         </td>
                       </tr>
                     ) : null}
-                  </tbody>
-                </table>
-              </div>
+                  </ErpTableBody>
+                </ErpTable>
+              </ErpTableShell>
 
               {catEditId ? (
                 <div className={`${card} mt-4 border-[var(--brand-deep)]/20`}>
@@ -1337,9 +1343,9 @@ export function StockMasterWorkspace() {
                 </button>
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[640px] text-left text-sm">
-                  <thead>
-                    <tr className="border-b text-xs text-[var(--muted)]">
+                <ErpTable minWidth="min-w-[640px]">
+                  <ErpTableHead>
+                    <tr>
                       <th className="py-2 pr-2">SKU</th>
                       <th className="py-2 pr-2">Description</th>
                       <th className="py-2 pr-2">Stock group</th>
@@ -1347,13 +1353,10 @@ export function StockMasterWorkspace() {
                       <th className="py-2 pr-2 text-right">Sale ₹</th>
                       <th className="py-2 pr-2 text-right">Opening qty</th>
                     </tr>
-                  </thead>
-                  <tbody>
+                  </ErpTableHead>
+                  <ErpTableBody>
                     {multiRows.map((row, idx) => (
-                      <tr
-                        key={idx}
-                        className="border-b border-[var(--border)]"
-                      >
+                      <tr key={idx}>
                         <td className="py-2 pr-2">
                           <input
                             className={`${field} w-28`}
@@ -1439,8 +1442,8 @@ export function StockMasterWorkspace() {
                         </td>
                       </tr>
                     ))}
-                  </tbody>
-                </table>
+                  </ErpTableBody>
+                </ErpTable>
               </div>
               <button type="button" className={`${btn} mt-3`} onClick={saveMultiItems}>
                 Save all items
@@ -1454,17 +1457,17 @@ export function StockMasterWorkspace() {
                 Set opening quantity for each item (updates on-hand stock).
               </p>
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[480px] text-sm">
-                  <thead>
-                    <tr className="border-b text-xs text-[var(--muted)]">
+                <ErpTable minWidth="min-w-[480px]">
+                  <ErpTableHead>
+                    <tr>
                       <th className="py-2 text-left">Item</th>
                       <th className="py-2 text-right">Current</th>
                       <th className="py-2 text-right">Opening qty</th>
                     </tr>
-                  </thead>
-                  <tbody>
+                  </ErpTableHead>
+                  <ErpTableBody>
                     {items.map((i) => (
-                      <tr key={i.id} className="border-b border-[var(--border)]">
+                      <tr key={i.id}>
                         <td className="py-2">
                           {i.sku} · {i.name}
                         </td>
@@ -1488,8 +1491,8 @@ export function StockMasterWorkspace() {
                         </td>
                       </tr>
                     ))}
-                  </tbody>
-                </table>
+                  </ErpTableBody>
+                </ErpTable>
               </div>
               <button
                 type="button"
@@ -1523,17 +1526,17 @@ export function StockMasterWorkspace() {
                 Bulk update sale / list price for all items.
               </p>
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[480px] text-sm">
-                  <thead>
-                    <tr className="border-b text-xs text-[var(--muted)]">
+                <ErpTable minWidth="min-w-[480px]">
+                  <ErpTableHead>
+                    <tr>
                       <th className="py-2 text-left">Item</th>
                       <th className="py-2 text-right">Current sale ₹</th>
                       <th className="py-2 text-right">New sale ₹</th>
                     </tr>
-                  </thead>
-                  <tbody>
+                  </ErpTableHead>
+                  <ErpTableBody>
                     {items.map((i) => (
-                      <tr key={i.id} className="border-b border-[var(--border)]">
+                      <tr key={i.id}>
                         <td className="py-2">
                           {i.sku} · {i.name}
                         </td>
@@ -1557,8 +1560,8 @@ export function StockMasterWorkspace() {
                         </td>
                       </tr>
                     ))}
-                  </tbody>
-                </table>
+                  </ErpTableBody>
+                </ErpTable>
               </div>
               <button
                 type="button"

@@ -28,6 +28,11 @@ import { useDemoSession } from "@/components/shell/SessionContext";
 import { isSuperAdminSession } from "@/lib/superAdmin";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+} from "@/components/ui/erp-roster";
+import {
   MastersEmptyRow,
   MastersTableCard,
   MastersTablesRow,
@@ -369,8 +374,8 @@ export function RolesPermissionsPanel() {
                     <p className="bg-[var(--surface-sunken)] px-2 py-1.5 text-[10px] font-bold uppercase tracking-wide text-[var(--muted)]">
                       {grp.label}
                     </p>
-                    <table className="min-w-full text-left text-[11px]">
-                      <thead className="text-[var(--muted)]">
+                    <ErpTable minWidth="min-w-full" className="text-[11px]">
+                      <ErpTableHead>
                         <tr>
                           <th className="px-2 py-2 font-semibold">Module</th>
                           {RBAC_ACTIONS.map((a) => (
@@ -383,13 +388,10 @@ export function RolesPermissionsPanel() {
                             </th>
                           ))}
                         </tr>
-                      </thead>
-                      <tbody>
+                      </ErpTableHead>
+                      <ErpTableBody>
                         {modules.map((m) => (
-                          <tr
-                            key={m.id}
-                            className="border-t border-[var(--border)]"
-                          >
+                          <tr key={m.id}>
                             <td className="px-2 py-1.5 font-medium text-[var(--brand-deep)]">
                               {m.label}
                             </td>
@@ -410,8 +412,8 @@ export function RolesPermissionsPanel() {
                             })}
                           </tr>
                         ))}
-                      </tbody>
-                    </table>
+                      </ErpTableBody>
+                    </ErpTable>
                   </div>
                 );
               })}
@@ -467,8 +469,8 @@ export function RolesPermissionsPanel() {
             </div>
           </MastersWorkCard>
           <MastersTableCard title="Roles">
-            <table className="min-w-full text-left text-sm">
-              <thead className="text-[11px] text-[var(--muted)]">
+            <ErpTable>
+              <ErpTableHead>
                 <tr>
                   <th className="px-3 py-2">Code</th>
                   <th className="px-3 py-2">Name</th>
@@ -476,13 +478,10 @@ export function RolesPermissionsPanel() {
                   <th className="px-3 py-2">Active</th>
                   <th className="px-3 py-2" />
                 </tr>
-              </thead>
-              <tbody>
+              </ErpTableHead>
+              <ErpTableBody>
                 {state.roles.map((r) => (
-                  <tr
-                    key={r.id}
-                    className="border-t border-[var(--border)]"
-                  >
+                  <tr key={r.id}>
                     <td className="px-3 py-2 font-mono text-[12px]">{r.code}</td>
                     <td className="px-3 py-2">{r.name}</td>
                     <td className="px-3 py-2 text-[11px] text-[var(--muted)]">
@@ -510,8 +509,8 @@ export function RolesPermissionsPanel() {
                     </td>
                   </tr>
                 ))}
-              </tbody>
-            </table>
+              </ErpTableBody>
+            </ErpTable>
           </MastersTableCard>
         </div>
       ) : null}
@@ -633,8 +632,8 @@ export function RolesPermissionsPanel() {
                 No explicit assignments — roles inferred from designation / login.
               </div>
             ) : (
-              <table className="min-w-full text-left text-sm">
-                <thead className="text-[11px] text-[var(--muted)]">
+              <ErpTable>
+                <ErpTableHead>
                   <tr>
                     <th className="px-3 py-2">Staff</th>
                     <th className="px-3 py-2">Role</th>
@@ -642,16 +641,13 @@ export function RolesPermissionsPanel() {
                     <th className="px-3 py-2">Note</th>
                     <th className="px-3 py-2" />
                   </tr>
-                </thead>
-                <tbody>
+                </ErpTableHead>
+                <ErpTableBody>
                   {state.assignments.map((a) => {
                     const staff = masters.staff?.find((s) => s.id === a.staffId);
                     const role = state.roles.find((r) => r.id === a.roleId);
                     return (
-                      <tr
-                        key={a.id}
-                        className="border-t border-[var(--border)]"
-                      >
+                      <tr key={a.id}>
                         <td className="px-3 py-2">
                           {staff?.fullName || a.staffId}
                           <span className="ml-1 text-[11px] text-[var(--muted)]">
@@ -677,8 +673,8 @@ export function RolesPermissionsPanel() {
                       </tr>
                     );
                   })}
-                </tbody>
-              </table>
+                </ErpTableBody>
+              </ErpTable>
             )}
           </MastersTableCard>
         </div>
@@ -687,19 +683,16 @@ export function RolesPermissionsPanel() {
       {tab === "summary" ? (
         <MastersTablesRow>
           <MastersTableCard title="Principal access summary">
-            <table className="min-w-full text-left text-sm">
-              <thead className="text-[11px] text-[var(--muted)]">
+            <ErpTable>
+              <ErpTableHead>
                 <tr>
                   <th className="px-3 py-2">Capability</th>
                   <th className="px-3 py-2">Roles with access</th>
                 </tr>
-              </thead>
-              <tbody>
+              </ErpTableHead>
+              <ErpTableBody>
                 {summary.map((row) => (
-                  <tr
-                    key={row.capability}
-                    className="border-t border-[var(--border)]"
-                  >
+                  <tr key={row.capability}>
                     <td className="px-3 py-2">{row.capability}</td>
                     <td className="px-3 py-2 text-[12px] text-[var(--muted)]">
                       {row.roleNames.length
@@ -708,8 +701,8 @@ export function RolesPermissionsPanel() {
                     </td>
                   </tr>
                 ))}
-              </tbody>
-            </table>
+              </ErpTableBody>
+            </ErpTable>
           </MastersTableCard>
           <MastersTableCard title="Staff with explicit roles">
             {staffRows.length === 0 ? (
@@ -717,19 +710,16 @@ export function RolesPermissionsPanel() {
                 No assignment overrides yet.
               </div>
             ) : (
-              <table className="min-w-full text-left text-sm">
-                <thead className="text-[11px] text-[var(--muted)]">
+              <ErpTable>
+                <ErpTableHead>
                   <tr>
                     <th className="px-3 py-2">Staff</th>
                     <th className="px-3 py-2">Roles</th>
                   </tr>
-                </thead>
-                <tbody>
+                </ErpTableHead>
+                <ErpTableBody>
                   {staffRows.map((r) => (
-                    <tr
-                      key={r.staffId}
-                      className="border-t border-[var(--border)]"
-                    >
+                    <tr key={r.staffId}>
                       <td className="px-3 py-2">
                         {r.staffName}
                         {r.expiresSoon ? (
@@ -743,8 +733,8 @@ export function RolesPermissionsPanel() {
                       </td>
                     </tr>
                   ))}
-                </tbody>
-              </table>
+                </ErpTableBody>
+              </ErpTable>
             )}
           </MastersTableCard>
         </MastersTablesRow>
@@ -757,21 +747,18 @@ export function RolesPermissionsPanel() {
               No RBAC changes logged yet.
             </div>
           ) : (
-            <table className="min-w-full text-left text-sm">
-              <thead className="text-[11px] text-[var(--muted)]">
+            <ErpTable>
+              <ErpTableHead>
                 <tr>
                   <th className="px-3 py-2">When</th>
                   <th className="px-3 py-2">Who</th>
                   <th className="px-3 py-2">Action</th>
                   <th className="px-3 py-2">Detail</th>
                 </tr>
-              </thead>
-              <tbody>
+              </ErpTableHead>
+              <ErpTableBody>
                 {state.audit.map((e) => (
-                  <tr
-                    key={e.id}
-                    className="border-t border-[var(--border)]"
-                  >
+                  <tr key={e.id}>
                     <td className="px-3 py-2 text-[11px] text-[var(--muted)]">
                       {e.at.slice(0, 19).replace("T", " ")}
                     </td>
@@ -784,8 +771,8 @@ export function RolesPermissionsPanel() {
                     </td>
                   </tr>
                 ))}
-              </tbody>
-            </table>
+              </ErpTableBody>
+            </ErpTable>
           )}
         </MastersTableCard>
       ) : null}

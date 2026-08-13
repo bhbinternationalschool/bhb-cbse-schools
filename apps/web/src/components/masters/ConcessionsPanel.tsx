@@ -3,6 +3,12 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Printer, X } from "lucide-react";
 import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
+import {
   CONCESSION_ALL_SESSIONS,
   currentAcademicYearCode,
   checkConcessionKindRemoval,
@@ -1810,10 +1816,10 @@ function ConcessionStudentPrintTable({
   }
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-[var(--border)] bg-[var(--card)]">
-      <table className="w-full min-w-[640px] border-collapse text-sm">
-        <thead>
-          <tr className="bg-[var(--surface-sunken)] text-left text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+    <ErpTableShell className="overflow-x-auto">
+      <ErpTable minWidth="min-w-[640px]">
+        <ErpTableHead>
+          <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
             <th className="px-3 py-2.5">#</th>
             <th className="px-3 py-2.5">Admission no.</th>
             <th className="px-3 py-2.5">Student</th>
@@ -1822,13 +1828,10 @@ function ConcessionStudentPrintTable({
             <th className="px-3 py-2.5">From</th>
             <th className="px-3 py-2.5">Reason</th>
           </tr>
-        </thead>
-        <tbody>
+        </ErpTableHead>
+        <ErpTableBody>
           {rows.map((row, idx) => (
-            <tr
-              key={row.id}
-              className="border-t border-[var(--border)] text-[var(--brand-deep)]"
-            >
+            <tr key={row.id} className="text-[var(--brand-deep)]">
               <td className="num px-3 py-2 tabular-nums text-[var(--muted)]">
                 {idx + 1}
               </td>
@@ -1840,8 +1843,8 @@ function ConcessionStudentPrintTable({
               <td className="px-3 py-2 text-[var(--muted)]">{row.reason}</td>
             </tr>
           ))}
-        </tbody>
-      </table>
-    </div>
+        </ErpTableBody>
+      </ErpTable>
+    </ErpTableShell>
   );
 }

@@ -7,6 +7,12 @@ import {
   MastersTableCard,
   MastersWorkCard,
 } from "@/components/masters/MastersLayout";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
 import { loadMasters } from "@/lib/masters";
 import {
   RULE_STEP_DEFS,
@@ -489,23 +495,20 @@ export function StaffAttendanceRulesPanel() {
           </button>
         </div>
 
-        <div className="max-h-[min(48vh,380px)] overflow-auto rounded-lg border border-[var(--border)]">
-          <table className="min-w-full text-left text-sm">
-            <thead className="sticky top-0 bg-[var(--surface-sunken)] text-[11px] uppercase tracking-wide text-[var(--muted)]">
+        <ErpTableShell className="max-h-[min(48vh,380px)] overflow-auto">
+          <ErpTable minWidth="min-w-full">
+            <ErpTableHead sticky>
               <tr>
                 <th className="px-3 py-2 w-10" />
                 <th className="px-3 py-2">Staff</th>
                 <th className="px-3 py-2">Assigned rule</th>
               </tr>
-            </thead>
-            <tbody>
+            </ErpTableHead>
+            <ErpTableBody hoverable>
               {roster.map((s) => {
                 const asg = state.assignments.find((a) => a.staffId === s.id);
                 return (
-                  <tr
-                    key={s.id}
-                    className="border-t border-[var(--border)] hover:bg-[var(--surface-sunken)]"
-                  >
+                  <tr key={s.id}>
                     <td className="px-3 py-2">
                       <input
                         type="checkbox"
@@ -532,9 +535,9 @@ export function StaffAttendanceRulesPanel() {
                   </td>
                 </tr>
               ) : null}
-            </tbody>
-          </table>
-        </div>
+            </ErpTableBody>
+          </ErpTable>
+        </ErpTableShell>
       </MastersWorkCard>
     </div>
   );

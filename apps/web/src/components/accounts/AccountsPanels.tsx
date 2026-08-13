@@ -437,17 +437,17 @@ export function DayBookPanel({ state }: AccountsPanelProps) {
         <h3 className="text-sm font-bold text-[var(--brand-deep)]">
           Fee collections by mode
         </h3>
-        <table className="mt-3 w-full text-sm">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
+        <ErpTable minWidth="min-w-full" className="mt-3">
+          <ErpTableHead>
+            <tr>
               <th className="pb-2">Mode</th>
               <th className="pb-2">Tenders</th>
               <th className="pb-2 text-right">Amount</th>
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {book.modeTotals.map((m) => (
-              <tr key={m.mode} className="border-t border-[var(--border)]">
+              <tr key={m.mode}>
                 <td className="py-2">{tenderModeLabel(m.mode)}</td>
                 <td className="py-2">{m.tenderCount}</td>
                 <td className="py-2 text-right font-medium">{formatInr(m.paise)}</td>
@@ -460,8 +460,8 @@ export function DayBookPanel({ state }: AccountsPanelProps) {
                 </td>
               </tr>
             ) : null}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </section>
 
       <section className={CARD}>
@@ -471,18 +471,18 @@ export function DayBookPanel({ state }: AccountsPanelProps) {
         <p className="mt-0.5 text-[11px] text-[var(--muted)]">
           Paid vouchers on this date — cash / UPI / bank breakdown.
         </p>
-        <table className="mt-3 w-full text-sm">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
+        <ErpTable minWidth="min-w-full" className="mt-3">
+          <ErpTableHead>
+            <tr>
               <th className="pb-2">Voucher</th>
               <th className="pb-2">Category lines</th>
               <th className="pb-2">Payment splits</th>
               <th className="pb-2 text-right">Paid</th>
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {paidExpenses.map((v) => (
-              <tr key={v.id} className="border-t border-[var(--border)]">
+              <tr key={v.id}>
                 <td className="py-2 align-top font-mono text-xs">
                   {v.voucherNo || v.id.slice(-8)}
                   <div className="mt-0.5 font-sans text-[10px] text-[var(--muted)]">
@@ -526,25 +526,25 @@ export function DayBookPanel({ state }: AccountsPanelProps) {
                 </td>
               </tr>
             ) : null}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </section>
 
       <section className={CARD}>
         <h3 className="text-sm font-bold text-[var(--brand-deep)]">
           Expenses · cash/bank ledger
         </h3>
-        <table className="mt-3 w-full text-sm">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
+        <ErpTable minWidth="min-w-full" className="mt-3">
+          <ErpTableHead>
+            <tr>
               <th className="pb-2">Type</th>
               <th className="pb-2">Detail</th>
               <th className="pb-2 text-right">Amount</th>
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {unpaidExpenses.map((v) => (
-              <tr key={v.id} className="border-t border-[var(--border)]">
+              <tr key={v.id}>
                 <td className="py-2">Expense (unpaid)</td>
                 <td className="py-2">
                   {v.voucherNo} ·{" "}
@@ -556,7 +556,7 @@ export function DayBookPanel({ state }: AccountsPanelProps) {
               </tr>
             ))}
             {cashMoves.map((e) => (
-              <tr key={e.id} className="border-t border-[var(--border)]">
+              <tr key={e.id}>
                 <td className="py-2">
                   Cash {e.direction}
                   {e.sourceType === "expense_voucher" ? " · expense" : ""}
@@ -566,7 +566,7 @@ export function DayBookPanel({ state }: AccountsPanelProps) {
               </tr>
             ))}
             {bankMoves.map((e) => (
-              <tr key={e.id} className="border-t border-[var(--border)]">
+              <tr key={e.id}>
                 <td className="py-2">
                   Bank {e.direction === "dr" ? "Dr" : "Cr"}
                   {e.sourceType === "expense_voucher" ? " · expense" : ""}
@@ -582,8 +582,8 @@ export function DayBookPanel({ state }: AccountsPanelProps) {
                 </td>
               </tr>
             ) : null}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </section>
 
       <section className={CARD}>
@@ -594,19 +594,19 @@ export function DayBookPanel({ state }: AccountsPanelProps) {
           Sales, returns, vendor bills &amp; AP — feeds trial balance, P&amp;L
           and balance sheet.
         </p>
-        <table className="mt-3 w-full text-sm">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
+        <ErpTable minWidth="min-w-full" className="mt-3">
+          <ErpTableHead>
+            <tr>
               <th className="pb-2">Source</th>
               <th className="pb-2">Narration</th>
               <th className="pb-2 text-right">Amount</th>
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {storeJournals.map((j) => {
               const amt = j.lines.reduce((n, l) => n + l.debitPaise, 0);
               return (
-                <tr key={j.id} className="border-t border-[var(--border)]">
+                <tr key={j.id}>
                   <td className="py-2">{j.sourceType.replace(/_/g, " ")}</td>
                   <td className="py-2">{j.narration || j.voucherNo}</td>
                   <td className="py-2 text-right">{formatInr(amt)}</td>
@@ -620,8 +620,8 @@ export function DayBookPanel({ state }: AccountsPanelProps) {
                 </td>
               </tr>
             ) : null}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </section>
     </div>
   );
@@ -1558,9 +1558,9 @@ export function ExpensesPanel({
         ) : null}
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[900px] text-xs">
-            <thead>
-              <tr className="text-left text-[var(--muted)]">
+          <ErpTable minWidth="min-w-[900px]" className="text-xs">
+            <ErpTableHead>
+              <tr>
                 <th className="pb-2 pr-2">Category</th>
                 <th className="pb-2 pr-2">Sub-category</th>
                 <th className="pb-2 pr-2">Vendor</th>
@@ -1572,8 +1572,8 @@ export function ExpensesPanel({
                 <th className="pb-2 pr-2 text-right">Due ₹</th>
                 <th className="pb-2" />
               </tr>
-            </thead>
-            <tbody>
+            </ErpTableHead>
+            <ErpTableBody>
               {lines.map((l) => {
                 const subs = l.categoryId
                   ? listExpenseSubcategories(l.categoryId, state)
@@ -1586,7 +1586,7 @@ export function ExpensesPanel({
                     )
                   : [];
                 return (
-                  <tr key={l.id} className="border-t border-[var(--border)]">
+                  <tr key={l.id}>
                     <td className="py-1 pr-2">
                       <select
                         className={FIELD}
@@ -1743,7 +1743,7 @@ export function ExpensesPanel({
                   </tr>
                 );
               })}
-            </tbody>
+            </ErpTableBody>
             <tfoot>
               <tr className="border-t-2 border-[var(--border)] font-bold">
                 <td colSpan={3} className="py-2 text-right text-[var(--muted)]">
@@ -1757,7 +1757,7 @@ export function ExpensesPanel({
                 <td />
               </tr>
             </tfoot>
-          </table>
+          </ErpTable>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -1786,20 +1786,17 @@ export function ExpensesPanel({
             Paid vouchers on this date (category & sub-category totals).
           </p>
           <div className="mt-3 overflow-x-auto">
-            <table className="w-full min-w-[480px] text-sm">
-              <thead>
-                <tr className="text-left text-[var(--muted)]">
+            <ErpTable minWidth="min-w-[480px]">
+              <ErpTableHead>
+                <tr>
                   <th className="pb-2">Category</th>
                   <th className="pb-2">Sub-category</th>
                   <th className="pb-2 text-right">Amount</th>
                 </tr>
-              </thead>
-              <tbody>
+              </ErpTableHead>
+              <ErpTableBody>
                 {sessionTotals.map((row) => (
-                  <tr
-                    key={`${row.categoryId}:${row.subcategoryId}`}
-                    className="border-t border-[var(--border)]"
-                  >
+                  <tr key={`${row.categoryId}:${row.subcategoryId}`}>
                     <td className="py-2">{row.categoryName}</td>
                     <td className="py-2">{row.subcategoryName}</td>
                     <td className="py-2 text-right font-medium">
@@ -1807,7 +1804,7 @@ export function ExpensesPanel({
                     </td>
                   </tr>
                 ))}
-              </tbody>
+              </ErpTableBody>
               <tfoot>
                 <tr className="border-t-2 font-bold">
                   <td colSpan={2} className="py-2 text-right">
@@ -1820,7 +1817,7 @@ export function ExpensesPanel({
                   </td>
                 </tr>
               </tfoot>
-            </table>
+            </ErpTable>
           </div>
         </section>
       ) : null}
@@ -2226,9 +2223,9 @@ export function BillsPanel({
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1100px] text-xs">
-            <thead>
-              <tr className="text-left text-[var(--muted)]">
+          <ErpTable minWidth="min-w-[1100px]" className="text-xs">
+            <ErpTableHead>
+              <tr>
                 <th className="pb-2 pr-2">Date</th>
                 <th className="pb-2 pr-2">Item</th>
                 <th className="pb-2 pr-2 text-right">Qty</th>
@@ -2240,10 +2237,10 @@ export function BillsPanel({
                 <th className="pb-2 pr-2 text-right">Line total</th>
                 <th className="pb-2" />
               </tr>
-            </thead>
-            <tbody>
+            </ErpTableHead>
+            <ErpTableBody>
               {billLines.map((l) => (
-                <tr key={l.id} className="border-t border-[var(--border)]">
+                <tr key={l.id}>
                   <td className="py-1 pr-2">
                     <input
                       type="date"
@@ -2345,8 +2342,8 @@ export function BillsPanel({
                   </td>
                 </tr>
               ))}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
         </div>
 
         <div className="flex flex-wrap items-end gap-3">
@@ -2424,21 +2421,21 @@ export function BillsPanel({
             </select>
           ) : null}
         </div>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
+        <ErpTable minWidth="min-w-full">
+          <ErpTableHead>
+            <tr>
               <th className="pb-2">Due</th>
               <th className="pb-2">Source</th>
               <th className="pb-2 text-right">Balance</th>
               <th className="pb-2">Note</th>
               <th className="pb-2" />
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {payables.map((p) => {
               const bal = Math.max(0, p.amountPaise - p.paidPaise);
               return (
-                <tr key={p.id} className="border-t border-[var(--border)]">
+                <tr key={p.id}>
                   <td className="py-2">{p.dueOn}</td>
                   <td className="py-2">{p.sourceType}</td>
                   <td className="py-2 text-right">{formatInr(bal)}</td>
@@ -2471,8 +2468,8 @@ export function BillsPanel({
                 </td>
               </tr>
             ) : null}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </section>
     </div>
   );
@@ -2678,18 +2675,18 @@ export function OwnerLoansPanel({
             </select>
           ) : null}
         </div>
-        <table className="mt-3 w-full text-sm">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
+        <ErpTable minWidth="min-w-full" className="mt-3">
+          <ErpTableHead>
+            <tr>
               <th className="pb-2">Due</th>
               <th className="pb-2">#</th>
               <th className="pb-2 text-right">Amount</th>
               <th className="pb-2">Actions</th>
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {dueRows.map((r) => (
-              <tr key={r.id} className="border-t border-[var(--border)]">
+              <tr key={r.id}>
                 <td className="py-2">{r.dueOn}</td>
                 <td className="py-2">{r.installmentNo}</td>
                 <td className="py-2 text-right">{formatInr(r.amountPaise)}</td>
@@ -2707,26 +2704,26 @@ export function OwnerLoansPanel({
                 </td>
               </tr>
             ) : null}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </section>
 
       <section className={CARD}>
         <h3 className="text-sm font-bold text-[var(--brand-deep)]">
           Loans & schedule
         </h3>
-        <table className="mt-3 w-full text-sm">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
+        <ErpTable minWidth="min-w-full" className="mt-3">
+          <ErpTableHead>
+            <tr>
               <th className="pb-2">Trustee</th>
               <th className="pb-2">Type</th>
               <th className="pb-2 text-right">Principal</th>
               <th className="pb-2">Status</th>
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {state.ownerLoans.map((l) => (
-              <tr key={l.id} className="border-t border-[var(--border)]">
+              <tr key={l.id}>
                 <td className="py-2">
                   {state.trustees.find((t) => t.id === l.trusteeId)?.name}
                 </td>
@@ -2735,34 +2732,34 @@ export function OwnerLoansPanel({
                 <td className="py-2">{l.status}</td>
               </tr>
             ))}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </section>
 
       <section className={CARD}>
         <h3 className="text-sm font-bold text-[var(--brand-deep)]">
           Cash handovers to owner
         </h3>
-        <table className="mt-3 w-full text-sm">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
+        <ErpTable minWidth="min-w-full" className="mt-3">
+          <ErpTableHead>
+            <tr>
               <th className="pb-2">Date</th>
               <th className="pb-2 text-right">Amount</th>
               <th className="pb-2">Received by</th>
               <th className="pb-2">Purpose</th>
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {state.ownerCashHandovers.slice(0, 20).map((h) => (
-              <tr key={h.id} className="border-t border-[var(--border)]">
+              <tr key={h.id}>
                 <td className="py-2">{h.date}</td>
                 <td className="py-2 text-right">{formatInr(h.amountPaise)}</td>
                 <td className="py-2">{h.receivedBy}</td>
                 <td className="py-2 text-[var(--muted)]">{h.purpose}</td>
               </tr>
             ))}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </section>
     </div>
   );
@@ -2844,24 +2841,24 @@ export function BooksPanel({
           <h3 className="text-sm font-bold text-[var(--brand-deep)]">
             Chart of accounts
           </h3>
-          <table className="mt-3 w-full text-sm">
-            <thead>
-              <tr className="text-left text-[var(--muted)]">
+          <ErpTable minWidth="min-w-full" className="mt-3">
+            <ErpTableHead>
+              <tr>
                 <th className="pb-2">Code</th>
                 <th className="pb-2">Name</th>
                 <th className="pb-2">Group</th>
               </tr>
-            </thead>
-            <tbody>
+            </ErpTableHead>
+            <ErpTableBody>
               {state.coaAccounts.map((c) => (
-                <tr key={c.id} className="border-t border-[var(--border)]">
+                <tr key={c.id}>
                   <td className="py-2 font-mono">{c.code}</td>
                   <td className="py-2">{c.name}</td>
                   <td className="py-2">{c.group}</td>
                 </tr>
               ))}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
           {state.fiscalYears.length > 0 ? (
             <div className="mt-4 space-y-2 text-sm">
               <div className="font-semibold text-[var(--brand-deep)]">
@@ -3002,19 +2999,19 @@ export function BooksPanel({
             <span className="mb-1 block text-[11px] text-[var(--muted)]">As of</span>
             <input type="date" className={FIELD} value={tbAsOf} onChange={(e) => setTbAsOf(e.target.value)} />
           </label>
-          <table className="mt-3 w-full text-sm">
-            <thead>
-              <tr className="text-left text-[var(--muted)]">
+          <ErpTable minWidth="min-w-full" className="mt-3">
+            <ErpTableHead>
+              <tr>
                 <th className="pb-2">Code</th>
                 <th className="pb-2">Account</th>
                 <th className="pb-2 text-right">Debit</th>
                 <th className="pb-2 text-right">Credit</th>
                 <th className="pb-2 text-right">Balance</th>
               </tr>
-            </thead>
-            <tbody>
+            </ErpTableHead>
+            <ErpTableBody>
               {tb.filter((r) => r.debitPaise || r.creditPaise).map((r) => (
-                <tr key={r.coaId} className="border-t border-[var(--border)]">
+                <tr key={r.coaId}>
                   <td className="py-2">{r.code}</td>
                   <td className="py-2">{r.name}</td>
                   <td className="py-2 text-right">{formatInr(r.debitPaise)}</td>
@@ -3022,8 +3019,8 @@ export function BooksPanel({
                   <td className="py-2 text-right">{formatInr(Math.abs(r.balancePaise))}</td>
                 </tr>
               ))}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
         </section>
       ) : null}
 

@@ -3,6 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+} from "@/components/ui/erp-roster";
+import {
   categoryLabel,
   deleteStoreInventoryAllocation,
   infraLevelLabel,
@@ -204,9 +209,9 @@ export function StoreInventoryAllocationPanel() {
           Current allocations
         </h3>
         <div className="mt-3 overflow-x-auto">
-          <table className="w-full min-w-[640px] text-left text-sm">
-            <thead>
-              <tr className="border-b text-[11px] uppercase tracking-wide text-[var(--muted)]">
+          <ErpTable minWidth="min-w-[640px]">
+            <ErpTableHead>
+              <tr className="text-[11px] uppercase tracking-wide text-[var(--muted)]">
                 <th className="py-2 pr-3">Item</th>
                 <th className="py-2 pr-3">Category</th>
                 <th className="py-2 pr-3">Infra level</th>
@@ -214,8 +219,8 @@ export function StoreInventoryAllocationPanel() {
                 <th className="py-2 pr-3">Note</th>
                 <th className="py-2" />
               </tr>
-            </thead>
-            <tbody>
+            </ErpTableHead>
+            <ErpTableBody>
               {rows.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-6 text-[var(--muted)]">
@@ -224,7 +229,7 @@ export function StoreInventoryAllocationPanel() {
                 </tr>
               ) : (
                 rows.map((r) => (
-                  <tr key={r.id} className="border-b border-[var(--border)]">
+                  <tr key={r.id}>
                     <td className="py-2 pr-3">
                       <div className="font-medium text-[var(--brand-deep)]">
                         {r.itemLabel?.name || r.itemId}
@@ -264,8 +269,8 @@ export function StoreInventoryAllocationPanel() {
                   </tr>
                 ))
               )}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
         </div>
       </div>
     </div>

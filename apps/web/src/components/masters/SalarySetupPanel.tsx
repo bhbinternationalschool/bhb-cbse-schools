@@ -34,6 +34,11 @@ import { canManagePayroll } from "@/lib/staffResolve";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+} from "@/components/ui/erp-roster";
+import {
   MastersEmptyRow,
   MastersTableCard,
   MastersTablesRow,
@@ -1080,9 +1085,9 @@ function AssignPanel({
         ) : null}
       </p>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[860px] text-left text-sm">
-          <thead>
-            <tr className="border-b border-[var(--border)] text-[11px] text-[var(--muted)]">
+        <ErpTable minWidth="min-w-[860px]">
+          <ErpTableHead>
+            <tr className="text-[11px] text-[var(--muted)]">
               <th className="px-3 py-2 font-medium">Staff</th>
               <th className="px-3 py-2 font-medium">Saved</th>
               <th className="px-3 py-2 font-medium">Structure</th>
@@ -1090,8 +1095,8 @@ function AssignPanel({
               <th className="px-3 py-2 font-medium">PF / ESIC</th>
               <th className="px-3 py-2 font-medium">Action</th>
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {roster.map((s) => {
               const link = state.staffLinks.find((l) => l.staffId === s.id);
               const draft = currentDraft(s.id);
@@ -1116,9 +1121,7 @@ function AssignPanel({
               return (
                 <tr
                   key={s.id}
-                  className={`border-b border-[var(--border)] ${
-                    dirty ? "bg-[rgba(197,160,40,0.08)]" : ""
-                  }`}
+                  className={dirty ? "bg-[rgba(197,160,40,0.08)]" : ""}
                 >
                   <td className="px-3 py-2">
                     <div className="font-semibold text-[var(--brand-deep)]">
@@ -1218,8 +1221,8 @@ function AssignPanel({
                 </tr>
               );
             })}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </div>
     </MastersTableCard>
   );

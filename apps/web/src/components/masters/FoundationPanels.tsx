@@ -80,6 +80,11 @@ import {
   MastersWorkCard,
 } from "@/components/masters/MastersLayout";
 import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+} from "@/components/ui/erp-roster";
+import {
   NEP_STAGE_PACKS,
   analyseNepPack,
   applyNepSuggestions,
@@ -2431,14 +2436,14 @@ export function HolidaysPanel({
             className="mt-3"
           >
             <div className="overflow-x-auto px-3 py-2">
-              <table className="w-full min-w-[480px] text-left text-[10px]">
-                <thead>
+              <ErpTable minWidth="min-w-[480px]" className="text-[10px]">
+                <ErpTableHead>
                   <tr className="text-[var(--muted)]">
                     <th className="py-1 pr-2 font-medium">Group</th>
                     <th className="py-1 font-medium">Off days this month (published)</th>
                   </tr>
-                </thead>
-                <tbody>
+                </ErpTableHead>
+                <ErpTableBody>
                   {matrixGroups.map((g) => {
                     const offs = matrixMonth.days.filter((d) => {
                       const c = classifyHolidayDay(state, d, sessionAy, {
@@ -2451,7 +2456,7 @@ export function HolidaysPanel({
                       return null;
                     }
                     return (
-                      <tr key={g.code} className="border-t border-[var(--border)]">
+                      <tr key={g.code}>
                         <td className="py-1.5 pr-2 font-semibold text-[var(--brand-deep)]">
                           {g.label}
                         </td>
@@ -2464,8 +2469,8 @@ export function HolidaysPanel({
                       </tr>
                     );
                   })}
-                </tbody>
-              </table>
+                </ErpTableBody>
+              </ErpTable>
             </div>
             <p className="border-t border-[var(--border)] px-3 py-2 text-[10px] text-[var(--muted)]">
               Filter preview by group when building weekly rules. Student attendance

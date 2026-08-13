@@ -1,6 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+} from "@/components/ui/erp-roster";
 import { payUnifiedPayable } from "@/lib/accountsPayables";
 import {
   loadAccounts,
@@ -525,9 +530,9 @@ export function StoreAccountsWorkspace() {
               Open purchase payables
             </h3>
             <div className="mt-3 overflow-x-auto">
-              <table className="w-full min-w-[640px] text-left text-sm">
-                <thead>
-                  <tr className="border-b text-[11px] uppercase text-[var(--muted)]">
+              <ErpTable minWidth="min-w-[640px]">
+                <ErpTableHead>
+                  <tr className="text-[11px] uppercase text-[var(--muted)]">
                     <th className="py-2 pr-3">Vendor</th>
                     <th className="py-2 pr-3">Receipt / invoice</th>
                     <th className="py-2 pr-3">Due</th>
@@ -535,8 +540,8 @@ export function StoreAccountsWorkspace() {
                     <th className="py-2 pr-3 text-right">Paid</th>
                     <th className="py-2 text-right">Balance</th>
                   </tr>
-                </thead>
-                <tbody>
+                </ErpTableHead>
+                <ErpTableBody hoverable>
                   {openBills.length === 0 ? (
                     <tr>
                       <td colSpan={6} className="py-6 text-[var(--muted)]">
@@ -549,7 +554,7 @@ export function StoreAccountsWorkspace() {
                       return (
                         <tr
                           key={b.id}
-                          className="cursor-pointer border-b border-[var(--border)] hover:bg-[var(--surface-sunken)]"
+                          className="cursor-pointer"
                           onClick={() => {
                             setPayBillId(b.id);
                             setPayAmount(
@@ -575,8 +580,8 @@ export function StoreAccountsWorkspace() {
                       );
                     })
                   )}
-                </tbody>
-              </table>
+                </ErpTableBody>
+              </ErpTable>
             </div>
           </div>
         </div>
@@ -603,9 +608,9 @@ export function StoreAccountsWorkspace() {
             </label>
           </div>
           <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-[700px] text-left text-sm">
-              <thead>
-                <tr className="border-b text-[11px] uppercase text-[var(--muted)]">
+            <ErpTable minWidth="min-w-[700px]">
+              <ErpTableHead>
+                <tr className="text-[11px] uppercase text-[var(--muted)]">
                   <th className="py-2 pr-3">Date</th>
                   <th className="py-2 pr-3">GRN</th>
                   <th className="py-2 pr-3">Invoice</th>
@@ -615,8 +620,8 @@ export function StoreAccountsWorkspace() {
                   <th className="py-2 pr-3 text-right">Paid</th>
                   <th className="py-2 text-right">Balance</th>
                 </tr>
-              </thead>
-              <tbody>
+              </ErpTableHead>
+              <ErpTableBody>
                 {ledgerRows.length === 0 ? (
                   <tr>
                     <td colSpan={8} className="py-6 text-[var(--muted)]">
@@ -625,10 +630,7 @@ export function StoreAccountsWorkspace() {
                   </tr>
                 ) : (
                   ledgerRows.map(({ bill: b, grnNo, returnPaise, balance }) => (
-                    <tr
-                      key={b.id}
-                      className="border-b border-[var(--border)]"
-                    >
+                    <tr key={b.id}>
                       <td className="py-2 pr-3">{b.billDate}</td>
                       <td className="py-2 pr-3">{grnNo}</td>
                       <td className="py-2 pr-3">
@@ -655,8 +657,8 @@ export function StoreAccountsWorkspace() {
                     </tr>
                   ))
                 )}
-              </tbody>
-            </table>
+              </ErpTableBody>
+            </ErpTable>
           </div>
         </div>
       ) : null}
@@ -706,17 +708,17 @@ export function StoreAccountsWorkspace() {
               Unpaid credit dues (after returns)
             </h3>
             <div className="mt-3 overflow-x-auto">
-              <table className="w-full min-w-[640px] text-left text-sm">
-                <thead>
-                  <tr className="border-b text-[11px] uppercase text-[var(--muted)]">
+              <ErpTable minWidth="min-w-[640px]">
+                <ErpTableHead>
+                  <tr className="text-[11px] uppercase text-[var(--muted)]">
                     <th className="py-2 pr-3">Issue</th>
                     <th className="py-2 pr-3">Date</th>
                     <th className="py-2 pr-3 text-right">Billed</th>
                     <th className="py-2 pr-3 text-right">Paid</th>
                     <th className="py-2 text-right">Balance</th>
                   </tr>
-                </thead>
-                <tbody>
+                </ErpTableHead>
+                <ErpTableBody>
                   {unpaidDues.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="py-6 text-[var(--muted)]">
@@ -725,10 +727,7 @@ export function StoreAccountsWorkspace() {
                     </tr>
                   ) : (
                     unpaidDues.map((r) => (
-                      <tr
-                        key={r.issue.id}
-                        className="border-b border-[var(--border)]"
-                      >
+                      <tr key={r.issue.id}>
                         <td className="py-2 pr-3">{r.issue.issueNo}</td>
                         <td className="py-2 pr-3">{r.issue.issuedOn}</td>
                         <td className="py-2 pr-3 text-right">
@@ -748,8 +747,8 @@ export function StoreAccountsWorkspace() {
                       </tr>
                     ))
                   )}
-                </tbody>
-              </table>
+                </ErpTableBody>
+              </ErpTable>
             </div>
           </div>
         </div>
