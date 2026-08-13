@@ -93,6 +93,10 @@ export type ExamPolicy = {
   defaultRequiresSeparateMarksheet: boolean;
   /** Fail promotion if any subject is below pass % */
   requireAllSubjectsPassForPromotion: boolean;
+  /** NEP 2020 HPC — show socio-emotional/psychomotor co-scholastic domain
+   * ratings on the marks-entry grid and printed report card. Opt-in
+   * (defaults false) so it never appears on a report unannounced. */
+  enableCoScholastic: boolean;
 };
 
 export type ExamSubject = {
@@ -129,6 +133,50 @@ export type StudentSubjectMark = {
   remark: string;
 };
 
+/** NEP 2020 Holistic Progress Card — co-scholastic domains rated by whoever
+ * enters marks for the class (same permission, no separate class-teacher
+ * gate — see the co-scholastic rounds's plan for why). */
+export type CoScholasticDomain = "socioEmotional" | "psychomotor";
+
+/** CBSE-style 3-band letter rating, deliberately distinct from the 8-point
+ * A1-E academic scale so the two are never confused on a printed report. */
+export type CoScholasticRating = "A" | "B" | "C";
+
+export type StudentCoScholasticEntry = {
+  studentId: string;
+  domain: CoScholasticDomain;
+  /** null = not yet rated */
+  rating: CoScholasticRating | null;
+};
+
+const CO_SCHOLASTIC_RATING_LABELS: Record<CoScholasticRating, string> = {
+  A: "Outstanding",
+  B: "Good",
+  C: "Needs Improvement",
+};
+
+/** Pure — human label for a co-scholastic rating letter. */
+export function coScholasticRatingLabel(
+  rating: CoScholasticRating | null,
+): string {
+  return rating ? CO_SCHOLASTIC_RATING_LABELS[rating] : "Not rated";
+}
+
+const CO_SCHOLASTIC_DOMAIN_LABELS: Record<CoScholasticDomain, string> = {
+  socioEmotional: "Socio-Emotional Skills",
+  psychomotor: "Psychomotor Skills",
+};
+
+/** Pure — human label for a co-scholastic domain. */
+export function coScholasticDomainLabel(domain: CoScholasticDomain): string {
+  return CO_SCHOLASTIC_DOMAIN_LABELS[domain];
+}
+
+export const CO_SCHOLASTIC_DOMAINS: CoScholasticDomain[] = [
+  "socioEmotional",
+  "psychomotor",
+];
+
 export type MarkSheet = {
   id: string;
   academicYearCode: string;
@@ -136,6 +184,10 @@ export type MarkSheet = {
   classId: string;
   sectionId: string;
   marks: StudentSubjectMark[];
+  /** NEP 2020 HPC co-scholastic domain ratings — per student, not per
+   * subject, so this sits alongside `marks`, not nested inside it. Empty on
+   * sheets saved before this field existed. */
+  coScholastic: StudentCoScholasticEntry[];
   lockedAt: string | null;
   enteredBy: string;
   updatedAt: string;
@@ -169,6 +221,35 @@ export function flattenExamMarks(sheets: MarkSheet[]): FlatExamMark[] {
         marksObtained: mark.marksObtained,
         grade: mark.grade,
         remark: mark.remark,
+      });
+    }
+  }
+  return out;
+}
+
+export type FlatCoScholasticRating = {
+  id: string;
+  sheetId: string;
+  studentId: string;
+  domain: CoScholasticDomain;
+  rating: CoScholasticRating | null;
+};
+
+/** Pure — same reasoning and key scheme as flattenExamMarks(), for
+ * co-scholastic ratings: `${sheetId}:${studentId}:${domain}`, matching
+ * exam_desk_coscholastic's synthetic id at the DB layer. */
+export function flattenCoScholastic(
+  sheets: MarkSheet[],
+): FlatCoScholasticRating[] {
+  const out: FlatCoScholasticRating[] = [];
+  for (const sheet of sheets) {
+    for (const entry of sheet.coScholastic) {
+      out.push({
+        id: `${sheet.id}:${entry.studentId}:${entry.domain}`,
+        sheetId: sheet.id,
+        studentId: entry.studentId,
+        domain: entry.domain,
+        rating: entry.rating,
       });
     }
   }
@@ -242,6 +323,7 @@ export function defaultExamPolicy(): ExamPolicy {
     defaultRequiredOnMarksheet: true,
     defaultRequiresSeparateMarksheet: true,
     requireAllSubjectsPassForPromotion: true,
+    enableCoScholastic: false,
   };
 }
 
@@ -291,6 +373,7 @@ export function normalizeExamPolicy(
       p.defaultRequiresSeparateMarksheet !== false,
     requireAllSubjectsPassForPromotion:
       p.requireAllSubjectsPassForPromotion !== false,
+    enableCoScholastic: !!p.enableCoScholastic,
   };
 }
 
@@ -622,6 +705,18 @@ function normalizeMark(m: Partial<StudentSubjectMark>): StudentSubjectMark {
   };
 }
 
+function normalizeCoScholasticEntry(
+  e: Partial<StudentCoScholasticEntry>,
+): StudentCoScholasticEntry {
+  const rating = e.rating === "A" || e.rating === "B" || e.rating === "C" ? e.rating : null;
+  const domain = e.domain === "psychomotor" ? "psychomotor" : "socioEmotional";
+  return {
+    studentId: e.studentId ?? "",
+    domain,
+    rating,
+  };
+}
+
 function normalizeSheet(s: Partial<MarkSheet>): MarkSheet {
   return {
     id: s.id ?? id("ms"),
@@ -630,6 +725,9 @@ function normalizeSheet(s: Partial<MarkSheet>): MarkSheet {
     classId: s.classId ?? "",
     sectionId: s.sectionId ?? "",
     marks: Array.isArray(s.marks) ? s.marks.map(normalizeMark) : [],
+    coScholastic: Array.isArray(s.coScholastic)
+      ? s.coScholastic.map(normalizeCoScholasticEntry)
+      : [],
     lockedAt: s.lockedAt ?? null,
     enteredBy: s.enteredBy ?? "",
     updatedAt: s.updatedAt ?? new Date().toISOString(),
@@ -1461,12 +1559,39 @@ export function buildEmptyMarksGrid(
   return out;
 }
 
+/** Pure — mirrors buildEmptyMarksGrid(): one entry per (student x domain)
+ * pair, carrying forward any existing rating from `existing`, defaulting to
+ * unrated (null) otherwise. */
+export function buildEmptyCoScholasticGrid(
+  students: SisStudent[],
+  existing?: MarkSheet,
+): StudentCoScholasticEntry[] {
+  const map = new Map<string, StudentCoScholasticEntry>();
+  for (const e of existing?.coScholastic ?? []) {
+    map.set(`${e.studentId}:${e.domain}`, e);
+  }
+  const out: StudentCoScholasticEntry[] = [];
+  for (const st of students) {
+    for (const domain of CO_SCHOLASTIC_DOMAINS) {
+      const key = `${st.id}:${domain}`;
+      const prev = map.get(key);
+      out.push({
+        studentId: st.id,
+        domain,
+        rating: prev?.rating ?? null,
+      });
+    }
+  }
+  return out;
+}
+
 export function saveMarkSheet(input: {
   academicYearCode: string;
   examTermId: string;
   classId: string;
   sectionId: string;
   marks: StudentSubjectMark[];
+  coScholastic?: StudentCoScholasticEntry[];
   enteredBy: string;
   lock?: boolean;
 }):
@@ -1542,6 +1667,7 @@ export function saveMarkSheet(input: {
     classId: input.classId,
     sectionId: input.sectionId,
     marks: normalizedMarks,
+    coScholastic: input.coScholastic ?? existing?.coScholastic ?? [],
     lockedAt: input.lock ? now : existing?.lockedAt ?? null,
     enteredBy: input.enteredBy,
     updatedAt: now,
@@ -1598,6 +1724,16 @@ export type ReportCard = {
   curriculumSource: "confirmed_cart" | "class_map";
   /** Soft note when enrollment is provisional */
   curriculumNote: string;
+  /** NEP 2020 HPC co-scholastic domain ratings for THIS exam term's own
+   * sheet — never aggregated across HY/Final component exams, since letter
+   * grades don't average meaningfully. Empty when the policy has this
+   * feature off or nothing was rated yet. */
+  coScholastic: {
+    domain: CoScholasticDomain;
+    domainLabel: string;
+    rating: CoScholasticRating | null;
+    ratingLabel: string;
+  }[];
 };
 
 function attendanceSummaryForStudent(
@@ -1626,6 +1762,29 @@ function attendanceSummaryForStudent(
     workingDays: working,
     percent: Math.round((present / working) * 1000) / 10,
   };
+}
+
+/** Resolve one student's co-scholastic ratings from THIS exam term's own
+ * sheet (never from aggregate-contributor sheets — see ReportCard.coScholastic). */
+function coScholasticForReportCard(
+  ay: string,
+  examTermId: string,
+  sectionId: string,
+  studentId: string,
+  state: ExamsState,
+  policy: ExamPolicy,
+): ReportCard["coScholastic"] {
+  if (!policy.enableCoScholastic) return [];
+  const sheet = findMarkSheet(ay, examTermId, sectionId, state);
+  if (!sheet) return [];
+  return sheet.coScholastic
+    .filter((e) => e.studentId === studentId)
+    .map((e) => ({
+      domain: e.domain,
+      domainLabel: coScholasticDomainLabel(e.domain),
+      rating: e.rating,
+      ratingLabel: coScholasticRatingLabel(e.rating),
+    }));
 }
 
 function contributorsForAggregate(
@@ -1894,6 +2053,14 @@ export function buildReportCard(input: {
       holdMessage: hold.allowed ? "" : hold.message,
       curriculumSource,
       curriculumNote,
+      coScholastic: coScholasticForReportCard(
+        ay,
+        term.id,
+        input.student.sectionId,
+        input.student.id,
+        state,
+        policy,
+      ),
     };
   }
 
@@ -1970,6 +2137,14 @@ export function buildReportCard(input: {
     holdMessage: hold.allowed ? "" : hold.message,
     curriculumSource,
     curriculumNote,
+    coScholastic: coScholasticForReportCard(
+      ay,
+      term.id,
+      input.student.sectionId,
+      input.student.id,
+      state,
+      policy,
+    ),
   };
 }
 

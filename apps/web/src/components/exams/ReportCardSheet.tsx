@@ -213,6 +213,27 @@ export function ReportCardSheet({ card }: { card: ReportCard }) {
           ) : null}
         </div>
 
+        {card.coScholastic.length > 0 ? (
+          <div className="mt-5">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+              Holistic Progress (Co-Scholastic Areas)
+            </p>
+            <div className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-sm">
+              {card.coScholastic.map((c) => (
+                <div key={c.domain}>
+                  <span className="text-[var(--muted)]">
+                    {c.domainLabel}{" "}
+                  </span>
+                  <span className="font-semibold text-[var(--brand-deep)]">
+                    {c.rating ?? "—"}
+                    {c.rating ? ` — ${c.ratingLabel}` : ""}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         <div className="mt-10 grid grid-cols-3 gap-4 text-center text-[11px] text-[var(--muted)]">
           <div className="border-t border-[rgba(32,48,80,0.25)] pt-2">
             Class teacher

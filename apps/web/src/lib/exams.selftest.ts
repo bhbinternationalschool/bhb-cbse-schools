@@ -1,15 +1,24 @@
 /**
  * Run: npx tsx src/lib/exams.selftest.ts
  *
- * Exercises only the pure logic — flattenExamMarks(), the helper that
- * makes per-student-mark audit diffing possible (StudentSubjectMark has no
- * id of its own; this gives it one, matching the exam_desk_marks DB key
- * scheme). Saving/pushing needs a live Supabase service-role client, so
- * that's verified live against the real exams-desk route instead.
+ * Exercises only the pure logic:
+ * - flattenExamMarks() / flattenCoScholastic() — give StudentSubjectMark /
+ *   StudentCoScholasticEntry (neither has its own id) an addressable id so
+ *   per-record audit diffing is possible.
+ * - buildEmptyCoScholasticGrid() — the co-scholastic analog of
+ *   buildEmptyMarksGrid().
+ * Saving/pushing needs a live Supabase service-role client, so that's
+ * verified live against the real exams-desk route instead.
  */
 import assert from "node:assert/strict";
 
-import { flattenExamMarks, type MarkSheet } from "./exams";
+import {
+  buildEmptyCoScholasticGrid,
+  flattenCoScholastic,
+  flattenExamMarks,
+  type MarkSheet,
+} from "./exams";
+import type { SisStudent } from "./sis";
 
 console.log("exams.selftest.ts");
 
@@ -22,6 +31,10 @@ const sheetA: MarkSheet = {
   marks: [
     { studentId: "stu-1", subjectId: "sub-math", marksObtained: 88, grade: "A1", remark: "" },
     { studentId: "stu-2", subjectId: "sub-math", marksObtained: 72, grade: "B1", remark: "" },
+  ],
+  coScholastic: [
+    { studentId: "stu-1", domain: "socioEmotional", rating: "A" },
+    { studentId: "stu-1", domain: "psychomotor", rating: "B" },
   ],
   lockedAt: null,
   enteredBy: "teacher-1",
@@ -37,6 +50,7 @@ const sheetB: MarkSheet = {
   marks: [
     { studentId: "stu-3", subjectId: "sub-eng", marksObtained: 91, grade: "A1", remark: "" },
   ],
+  coScholastic: [],
   lockedAt: null,
   enteredBy: "teacher-2",
   updatedAt: "2026-08-10T00:00:00.000Z",
@@ -83,6 +97,50 @@ const sheetB: MarkSheet = {
   assert.equal(flat.length, 1);
   assert.equal(flat[0].marksObtained, null);
   assert.equal(flat[0].remark, "Absent");
+}
+
+// --- flattenCoScholastic: same id scheme, domain-keyed not subject-keyed --
+{
+  const flat = flattenCoScholastic([sheetA, sheetB]);
+  assert.equal(flat.length, 2, "only sheetA has co-scholastic entries");
+  assert.deepEqual(
+    flat.map((r) => r.id).sort(),
+    ["sheet-a:stu-1:psychomotor", "sheet-a:stu-1:socioEmotional"],
+    "id must be exactly `${sheetId}:${studentId}:${domain}`, matching exam_desk_coscholastic's DB key scheme",
+  );
+  const social = flat.find((r) => r.domain === "socioEmotional");
+  assert.ok(social);
+  assert.equal(social.rating, "A");
+  assert.equal(social.sheetId, "sheet-a");
+  assert.equal(social.studentId, "stu-1");
+}
+
+// --- flattenCoScholastic: a sheet with zero ratings -> zero records --------
+{
+  assert.deepEqual(flattenCoScholastic([sheetB]), []);
+  assert.deepEqual(flattenCoScholastic([]), []);
+}
+
+// --- buildEmptyCoScholasticGrid: one entry per student x domain, carries --
+// --- forward an existing rating, defaults an unrated pair to null ---------
+{
+  const students = [{ id: "stu-1" }, { id: "stu-2" }] as SisStudent[];
+  const grid = buildEmptyCoScholasticGrid(students, sheetA);
+  assert.equal(grid.length, 4, "2 students x 2 domains");
+  const stu1Social = grid.find((e) => e.studentId === "stu-1" && e.domain === "socioEmotional");
+  assert.ok(stu1Social);
+  assert.equal(stu1Social.rating, "A", "carries forward sheetA's existing rating");
+  const stu2Social = grid.find((e) => e.studentId === "stu-2" && e.domain === "socioEmotional");
+  assert.ok(stu2Social);
+  assert.equal(stu2Social.rating, null, "stu-2 was never rated on sheetA -> defaults to null, not fabricated");
+}
+
+// --- buildEmptyCoScholasticGrid: no existing sheet -> every rating is null
+{
+  const students = [{ id: "stu-9" }] as SisStudent[];
+  const grid = buildEmptyCoScholasticGrid(students);
+  assert.equal(grid.length, 2);
+  assert.ok(grid.every((e) => e.rating === null));
 }
 
 console.log("OK — exams.selftest.ts");

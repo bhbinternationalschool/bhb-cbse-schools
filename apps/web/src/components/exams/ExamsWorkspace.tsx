@@ -5,9 +5,12 @@ import { ClipboardList } from "lucide-react";
 import {
   applyPromotionsToSis,
   buildClassResultSheet,
+  buildEmptyCoScholasticGrid,
   buildEmptyMarksGrid,
   buildReportCard,
   canPrintReportCard,
+  CO_SCHOLASTIC_DOMAINS,
+  coScholasticDomainLabel,
   createExamTerm,
   deactivateExamTerm,
   deleteExamTerm,
@@ -26,10 +29,12 @@ import {
   suggestPromotionsForSection,
   updateExamTerm,
   type ClassResultRow,
+  type CoScholasticRating,
   type ExamPolicy,
   type ExamTerm,
   type PromotionDecision,
   type ReportCard,
+  type StudentCoScholasticEntry,
   type StudentSubjectMark,
 } from "@/lib/exams";
 import { rosterForSection } from "@/lib/attendance";
@@ -92,6 +97,7 @@ export function ExamsWorkspace() {
   const [sectionId, setSectionId] = useState("");
   const [examTermId, setExamTermId] = useState("");
   const [grid, setGrid] = useState<StudentSubjectMark[]>([]);
+  const [coScholasticGrid, setCoScholasticGrid] = useState<StudentCoScholasticEntry[]>([]);
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -218,6 +224,7 @@ export function ExamsWorkspace() {
         policy.passPercent,
       ),
     );
+    setCoScholasticGrid(buildEmptyCoScholasticGrid(roster, existing));
     setDirty(false);
   }, [ay, term?.id, sectionId, classId, roster, subjects, policy.passPercent]);
 
@@ -254,6 +261,23 @@ export function ExamsWorkspace() {
     setDirty(true);
   }
 
+  function setCoScholasticRating(
+    studentId: string,
+    domain: StudentCoScholasticEntry["domain"],
+    value: string,
+  ) {
+    const rating: CoScholasticRating | null =
+      value === "A" || value === "B" || value === "C" ? value : null;
+    setCoScholasticGrid((prev) =>
+      prev.map((e) =>
+        e.studentId === studentId && e.domain === domain
+          ? { ...e, rating }
+          : e,
+      ),
+    );
+    setDirty(true);
+  }
+
   function onSave(lock = false) {
     if (!term || !classId || !sectionId) {
       setError("Select exam, class and section");
@@ -274,6 +298,7 @@ export function ExamsWorkspace() {
       classId,
       sectionId,
       marks,
+      coScholastic: policy.enableCoScholastic ? coScholasticGrid : undefined,
       enteredBy: session.fullName,
       lock,
     });
@@ -1273,6 +1298,20 @@ export function ExamsWorkspace() {
                 <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
                   <input
                     type="checkbox"
+                    checked={policyDraft.enableCoScholastic}
+                    onChange={(e) =>
+                      setPolicyDraft({
+                        ...policyDraft,
+                        enableCoScholastic: e.target.checked,
+                      })
+                    }
+                  />
+                  Enable NEP 2020 co-scholastic domains (socio-emotional,
+                  psychomotor) on marks entry and report cards
+                </label>
+                <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
+                  <input
+                    type="checkbox"
                     checked={policyDraft.requireAllSubjectsForReport}
                     onChange={(e) =>
                       setPolicyDraft({
@@ -1498,6 +1537,16 @@ export function ExamsWorkspace() {
                           </div>
                         </th>
                       ))}
+                      {policy.enableCoScholastic
+                        ? CO_SCHOLASTIC_DOMAINS.map((domain) => (
+                            <th
+                              key={domain}
+                              className="px-4 py-2.5 text-center font-bold text-[var(--brand-deep)]"
+                            >
+                              {coScholasticDomainLabel(domain)}
+                            </th>
+                          ))
+                        : null}
                     </tr>
                   </ErpTableHead>
                   <ErpTableBody>
@@ -1558,6 +1607,39 @@ export function ExamsWorkspace() {
                             </td>
                           );
                         })}
+                        {policy.enableCoScholastic
+                          ? CO_SCHOLASTIC_DOMAINS.map((domain) => {
+                              const entry = coScholasticGrid.find(
+                                (e) =>
+                                  e.studentId === st.id && e.domain === domain,
+                              );
+                              return (
+                                <td
+                                  key={`${st.id}:${domain}`}
+                                  className="px-1 py-1"
+                                >
+                                  <select
+                                    className="field !w-16 !px-1 !py-1 text-center"
+                                    disabled={!!sheetMeta?.lockedAt}
+                                    value={entry?.rating ?? ""}
+                                    onChange={(e) =>
+                                      setCoScholasticRating(
+                                        st.id,
+                                        domain,
+                                        e.target.value,
+                                      )
+                                    }
+                                    aria-label={`${st.fullName} ${coScholasticDomainLabel(domain)}`}
+                                  >
+                                    <option value="">—</option>
+                                    <option value="A">A</option>
+                                    <option value="B">B</option>
+                                    <option value="C">C</option>
+                                  </select>
+                                </td>
+                              );
+                            })
+                          : null}
                       </tr>
                     ))}
                   </ErpTableBody>
