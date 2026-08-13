@@ -612,7 +612,7 @@ export function PayrollWorkspace() {
       }
     >
       {!allowed && !advancesDesk ? (
-        <p className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3 text-sm text-[var(--muted)]">
+        <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm text-[var(--muted)]">
           Staff self-service — payslips and advances for{" "}
           <strong className="text-[var(--brand-deep)]">
             {selfStaff?.fullName || "your linked staff profile"}
@@ -637,7 +637,7 @@ export function PayrollWorkspace() {
 
       {tab === "runs" && allowed ? (
         <div className="space-y-4">
-          <div className="space-y-3 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <div className="space-y-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <p className="text-xs text-[var(--muted)]">
             Process salary as <strong>draft</strong> (bulk or individual). Edit
             freely until you <strong>publish to salary account</strong> — draft
@@ -647,7 +647,7 @@ export function PayrollWorkspace() {
           {(() => {
             const committed = monthHasCommittedRun(month, ay);
             return committed ? (
-              <p className="mt-2 rounded-lg bg-[rgba(180,35,24,0.08)] px-2.5 py-1.5 text-[11px] font-medium text-[#b42318]">
+              <p className="mt-2 rounded-lg bg-[var(--danger-soft)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--danger)]">
                 {month} is already {payrollStatusLabel(committed.status)} —
                 recall that run before creating a new draft.
               </p>
@@ -665,13 +665,13 @@ export function PayrollWorkspace() {
               </label>
               <button
                 type="button"
-                className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-xs font-semibold text-white"
+                className="rounded-lg bg-[var(--primary)] px-3 py-2 text-xs font-semibold text-[var(--primary-foreground)]"
                 onClick={() => processBulk(false)}
               >
                 Process bulk draft
               </button>
             </div>
-            <div className="flex flex-wrap items-end gap-3 border-t border-[rgba(32,48,80,0.08)] pt-3">
+            <div className="flex flex-wrap items-end gap-3 border-t border-[var(--border)] pt-3">
               <label className="text-xs font-semibold text-[var(--muted)]">
                 Individual staff
                 <select
@@ -689,17 +689,17 @@ export function PayrollWorkspace() {
               </label>
               <button
                 type="button"
-                className="rounded-lg border border-[rgba(32,48,80,0.2)] bg-white px-3 py-2 text-xs font-semibold text-[var(--brand-deep)]"
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs font-semibold text-[var(--brand-deep)]"
                 onClick={processIndividual}
               >
                 Process individual draft
               </button>
             </div>
           </div>
-          <div className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-[rgba(32,48,80,0.1)] text-[11px] text-[var(--muted)]">
+          <ErpTableShell>
+            <ErpTable>
+              <ErpTableHead>
+                <tr className="text-[11px] text-[var(--muted)]">
                   <th className="px-4 py-2.5 font-medium">Month</th>
                   <th className="px-4 py-2.5 font-medium">Kind</th>
                   <th className="px-4 py-2.5 font-medium">Status</th>
@@ -707,17 +707,14 @@ export function PayrollWorkspace() {
                   <th className="px-4 py-2.5 font-medium">Net total</th>
                   <th className="px-4 py-2.5 font-medium" />
                 </tr>
-              </thead>
-              <tbody>
+              </ErpTableHead>
+              <ErpTableBody>
                 {runs
                   .filter((r) => r.academicYearCode === ay)
                   .map((r) => {
                     const net = r.lines.reduce((s, l) => s + l.netPay, 0);
                     return (
-                      <tr
-                        key={r.id}
-                        className="border-b border-[rgba(32,48,80,0.06)]"
-                      >
+                      <tr key={r.id}>
                         <td className="px-4 py-2.5 font-semibold text-[var(--brand-deep)]">
                           {r.month}
                         </td>
@@ -755,9 +752,9 @@ export function PayrollWorkspace() {
                     </td>
                   </tr>
                 ) : null}
-              </tbody>
-            </table>
-          </div>
+              </ErpTableBody>
+            </ErpTable>
+          </ErpTableShell>
         </div>
       ) : null}
 
@@ -918,7 +915,7 @@ function RunDetail({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <div>
           <h2 className="text-lg font-bold text-[var(--brand-deep)]">
             {run.month} · {payrollStatusLabel(run.status)}
@@ -945,19 +942,19 @@ function RunDetail({
               : ""}
           </p>
           {run.rejectionNote ? (
-            <p className="mt-2 rounded-lg bg-[rgba(180,35,24,0.1)] px-2.5 py-1.5 text-[11px] font-medium text-[#b42318]">
+            <p className="mt-2 rounded-lg bg-[var(--danger-soft)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--danger)]">
               Last rejection
               {run.rejectedBy ? ` by ${run.rejectedBy}` : ""}:{" "}
               {run.rejectionNote}
             </p>
           ) : null}
           {run.submissionNote && run.status === "pending_approval" ? (
-            <p className="mt-2 rounded-lg bg-[rgba(32,48,80,0.06)] px-2.5 py-1.5 text-[11px] text-[var(--brand-deep)]">
+            <p className="mt-2 rounded-lg bg-[var(--surface-sunken)] px-2.5 py-1.5 text-[11px] text-[var(--brand-deep)]">
               Submission note: {run.submissionNote}
             </p>
           ) : null}
           {isPayrollLocked(run) ? (
-            <p className="mt-2 rounded-lg bg-[rgba(32,48,80,0.06)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--brand-deep)]">
+            <p className="mt-2 rounded-lg bg-[var(--surface-sunken)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--brand-deep)]">
               Locked — line amounts cannot change. Recall to draft to edit
               (posted runs void account entries).
             </p>
@@ -995,14 +992,14 @@ function RunDetail({
             <>
               <button
                 type="button"
-                className="rounded-lg border border-[rgba(32,48,80,0.18)] px-2.5 py-1.5 text-[11px] font-semibold"
+                className="rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-[11px] font-semibold"
                 onClick={onRebuild}
               >
                 Rebuild
               </button>
               <button
                 type="button"
-                className="rounded-lg bg-[var(--brand-deep)] px-2.5 py-1.5 text-[11px] font-semibold text-white"
+                className="rounded-lg bg-[var(--primary)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--primary-foreground)]"
                 onClick={() => onSubmit(workflowNote)}
               >
                 Submit for approval
@@ -1031,7 +1028,7 @@ function RunDetail({
                   </button>
                   <button
                     type="button"
-                    className="rounded-lg border border-[#b42318]/40] px-2.5 py-1.5 text-[11px] font-semibold text-[#b42318]"
+                    className="rounded-lg border border-[var(--danger)]/40 px-2.5 py-1.5 text-[11px] font-semibold text-[var(--danger)]"
                     onClick={() => {
                       if (!workflowNote.trim()) {
                         window.alert("Enter a rejection reason in the note box");
@@ -1050,7 +1047,7 @@ function RunDetail({
               )}
               <button
                 type="button"
-                className="rounded-lg border border-[rgba(32,48,80,0.18)] px-2.5 py-1.5 text-[11px] font-semibold"
+                className="rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-[11px] font-semibold"
                 onClick={onRecall}
               >
                 Withdraw to draft
@@ -1061,7 +1058,7 @@ function RunDetail({
             <>
               <button
                 type="button"
-                className="rounded-lg bg-[var(--brand-deep)] px-2.5 py-1.5 text-[11px] font-semibold text-white disabled:opacity-50"
+                className="rounded-lg bg-[var(--primary)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
                 disabled={readOnly}
                 onClick={onPublish}
               >
@@ -1069,7 +1066,7 @@ function RunDetail({
               </button>
               <button
                 type="button"
-                className="rounded-lg border border-[rgba(32,48,80,0.18)] px-2.5 py-1.5 text-[11px] font-semibold"
+                className="rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-[11px] font-semibold"
                 onClick={onRecall}
               >
                 Recall to draft
@@ -1080,14 +1077,14 @@ function RunDetail({
             <>
               <button
                 type="button"
-                className="rounded-lg bg-[var(--brand-deep)] px-2.5 py-1.5 text-[11px] font-semibold text-white"
+                className="rounded-lg bg-[var(--primary)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--primary-foreground)]"
                 onClick={onPaid}
               >
                 Mark paid
               </button>
               <button
                 type="button"
-                className="rounded-lg border border-[rgba(32,48,80,0.18)] px-2.5 py-1.5 text-[11px] font-semibold"
+                className="rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-[11px] font-semibold"
                 onClick={onRecall}
               >
                 Recall (void account)
@@ -1096,7 +1093,7 @@ function RunDetail({
           ) : null}
           <button
             type="button"
-            className="rounded-lg border border-[rgba(32,48,80,0.18)] px-2.5 py-1.5 text-[11px] font-semibold"
+            className="rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-[11px] font-semibold"
             onClick={onExport}
           >
             Preview CSV
@@ -1104,7 +1101,7 @@ function RunDetail({
           {inAccounts ? (
             <button
               type="button"
-              className="rounded-lg border border-[rgba(32,48,80,0.18)] px-2.5 py-1.5 text-[11px] font-semibold"
+              className="rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-[11px] font-semibold"
               onClick={onExportAccount}
             >
               Account ledger CSV
@@ -1113,7 +1110,7 @@ function RunDetail({
           {run.status === "draft" || run.status === "pending_approval" ? (
             <button
               type="button"
-              className="rounded-lg px-2.5 py-1.5 text-[11px] font-semibold text-[#b42318]"
+              className="rounded-lg px-2.5 py-1.5 text-[11px] font-semibold text-[var(--danger)]"
               onClick={onDelete}
             >
               Delete
@@ -1144,7 +1141,7 @@ function RunDetail({
                 : l.advanceTaken || 0;
               return (
                 <Fragment key={l.staffId}>
-                  <tr className="border-b border-[rgba(32,48,80,0.06)]">
+                  <tr className="border-b border-[var(--border)]">
                     <td className="px-3 py-2">
                       <div className="font-semibold text-[var(--brand-deep)]">
                         {l.fullName}
@@ -1226,7 +1223,7 @@ function RunDetail({
                       {editable ? (
                         <button
                           type="button"
-                          className="ml-2 text-[11px] font-semibold text-[#b42318]"
+                          className="ml-2 text-[11px] font-semibold text-[var(--danger)]"
                           onClick={() => onRemoveLine(l.staffId)}
                         >
                           Remove
@@ -1235,7 +1232,7 @@ function RunDetail({
                     </td>
                   </tr>
                   {open ? (
-                    <tr className="border-b border-[rgba(32,48,80,0.06)] bg-[rgba(32,48,80,0.02)]">
+                    <tr className="border-b border-[var(--border)] bg-[var(--surface-sunken)]">
                       <td colSpan={8} className="px-3 py-3">
                         <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                           <label className="text-[10px] font-semibold text-[var(--muted)]">
@@ -1300,7 +1297,7 @@ function RunDetail({
                           </label>
                           <label className="text-[10px] font-semibold text-[var(--muted)]">
                             Advance outstanding (locked)
-                            <span className="mt-0.5 block rounded border border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.04)] px-2 py-1.5 text-xs font-semibold text-[var(--brand-deep)]">
+                            <span className="mt-0.5 block rounded border border-[var(--border)] bg-[var(--surface-sunken)] px-2 py-1.5 text-xs font-semibold text-[var(--brand-deep)]">
                               {formatInr(lockedDue)}
                             </span>
                             <span className="mt-0.5 block text-[10px] font-normal">
@@ -1536,7 +1533,7 @@ function PayslipCard({
   line: PayrollStaffLine;
 }) {
   return (
-    <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h3 className="font-bold text-[var(--brand-deep)]">
@@ -1579,7 +1576,7 @@ function PayslipCard({
               .map((c) => (
                 <li
                   key={c.headCode}
-                  className="flex justify-between text-[#b42318]"
+                  className="flex justify-between text-[var(--danger)]"
                 >
                   <span>{c.headName}</span>
                   <span>−{formatInr(c.amount)}</span>
@@ -1632,7 +1629,7 @@ function PayrollAuditPanel() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <div>
           <h2 className="font-display text-lg font-bold text-[var(--brand-deep)]">
             Payroll audit log
@@ -1644,29 +1641,26 @@ function PayrollAuditPanel() {
         </div>
         <button
           type="button"
-          className="rounded-lg border border-[rgba(32,48,80,0.18)] px-3 py-1.5 text-xs font-semibold"
+          className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold"
           onClick={() => setTick((n) => n + 1)}
         >
           Refresh
         </button>
       </div>
-      <div className="overflow-x-auto rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
-        <table className="min-w-full text-left text-xs">
-          <thead>
-            <tr className="border-b border-[rgba(32,48,80,0.1)] text-[var(--muted)]">
+      <ErpTableShell className="overflow-x-auto">
+        <ErpTable minWidth="min-w-full" className="text-xs">
+          <ErpTableHead>
+            <tr className="text-[var(--muted)]">
               <th className="px-3 py-2 font-semibold">When</th>
               <th className="px-3 py-2 font-semibold">Who</th>
               <th className="px-3 py-2 font-semibold">Action</th>
               <th className="px-3 py-2 font-semibold">Month</th>
               <th className="px-3 py-2 font-semibold">Detail</th>
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {rows.map((e) => (
-              <tr
-                key={e.id}
-                className="border-b border-[rgba(32,48,80,0.06)]"
-              >
+              <tr key={e.id}>
                 <td className="px-3 py-2 whitespace-nowrap">
                   {e.at.replace("T", " ").slice(0, 19)}
                 </td>
@@ -1688,9 +1682,9 @@ function PayrollAuditPanel() {
                 </td>
               </tr>
             ) : null}
-          </tbody>
-        </table>
-      </div>
+          </ErpTableBody>
+        </ErpTable>
+      </ErpTableShell>
     </div>
   );
 }
