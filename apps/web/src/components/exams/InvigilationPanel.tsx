@@ -125,7 +125,7 @@ export function InvigilationPanel({ academicYearCode, masters, terms }: Props) {
 
   return (
     <div className="mt-6 space-y-4">
-      <p className="rounded-lg border border-[rgba(32,48,80,0.12)] bg-[rgba(248,248,240,0.8)] px-3 py-2 text-[11px] text-[var(--muted)]">
+      <p className="rounded-lg border border-[var(--border)] bg-[rgba(248,248,240,0.8)] px-3 py-2 text-[11px] text-[var(--muted)]">
         Assign a teacher (and room) to each exam sitting. Candidates already
         teaching a class or marked absent at that time are flagged — you can
         still assign them if there is no one else free.
@@ -133,8 +133,8 @@ export function InvigilationPanel({ academicYearCode, masters, terms }: Props) {
       <ErpAlerts error={error} notice={notice} />
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
-        <div className="erp-table-shell overflow-hidden rounded-2xl border border-[rgba(32,48,80,0.12)] bg-white shadow-sm">
-          <div className="border-b border-[rgba(32,48,80,0.08)] px-4 py-2.5 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+        <div className="erp-table-shell overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-sm">
+          <div className="border-b border-[var(--border)] px-4 py-2.5 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
             Exam sittings
           </div>
           {rows.length === 0 ? (
@@ -144,7 +144,7 @@ export function InvigilationPanel({ academicYearCode, masters, terms }: Props) {
               className="border-0 shadow-none"
             />
           ) : (
-            <ul className="max-h-[28rem] divide-y divide-[rgba(32,48,80,0.06)] overflow-y-auto">
+            <ul className="max-h-[28rem] divide-y divide-[var(--border)] overflow-y-auto">
               {rows.map((r) => {
                 const count = assignmentsForEntry(invig, r.id).length;
                 const active = r.id === selectedEntryId;
@@ -160,8 +160,8 @@ export function InvigilationPanel({ academicYearCode, masters, terms }: Props) {
                       }}
                       className={`flex w-full flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-left text-sm transition ${
                         active
-                          ? "bg-[rgba(32,48,80,0.06)]"
-                          : "hover:bg-[rgba(32,48,80,0.03)]"
+                          ? "bg-[var(--surface-sunken)]"
+                          : "hover:bg-[var(--surface-sunken)]"
                       }`}
                     >
                       <span>
@@ -177,7 +177,7 @@ export function InvigilationPanel({ academicYearCode, masters, terms }: Props) {
                         className={`rounded-md px-2 py-0.5 text-[10px] font-bold uppercase ${
                           count > 0
                             ? "bg-[var(--success-soft)] text-[var(--success)]"
-                            : "bg-[rgba(32,48,80,0.08)] text-muted-foreground"
+                            : "bg-[var(--surface-sunken)] text-muted-foreground"
                         }`}
                       >
                         {count} assigned
@@ -213,7 +213,7 @@ export function InvigilationPanel({ academicYearCode, masters, terms }: Props) {
                   {selectedAssignments.map((a) => (
                     <li
                       key={a.id}
-                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.1)] px-3 py-1.5 text-sm"
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm"
                     >
                       <span>
                         <span className="font-semibold text-[var(--brand-deep)]">
@@ -236,11 +236,11 @@ export function InvigilationPanel({ academicYearCode, masters, terms }: Props) {
                 <p className="text-xs text-muted-foreground">No one assigned yet.</p>
               )}
 
-              <div className="space-y-2 border-t border-[rgba(32,48,80,0.08)] pt-3">
+              <div className="space-y-2 border-t border-[var(--border)] pt-3">
                 <label className="block text-[11px] font-semibold text-[var(--muted)]">
                   Assign teacher
                   <select
-                    className="mt-1 w-full rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm"
+                    className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
                     value={teacherInput}
                     onChange={(e) => setTeacherInput(e.target.value)}
                   >
@@ -262,7 +262,7 @@ export function InvigilationPanel({ academicYearCode, masters, terms }: Props) {
                 <label className="block text-[11px] font-semibold text-[var(--muted)]">
                   Room
                   <input
-                    className="mt-1 w-full rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm"
+                    className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
                     placeholder="e.g. Room 12 / Hall A"
                     value={roomInput}
                     onChange={(e) => setRoomInput(e.target.value)}
@@ -271,7 +271,7 @@ export function InvigilationPanel({ academicYearCode, masters, terms }: Props) {
                 <button
                   type="button"
                   onClick={onAssign}
-                  className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-[11px] font-semibold text-white"
+                  className="rounded-lg bg-[var(--primary)] px-3 py-2 text-[11px] font-semibold text-[var(--primary-foreground)]"
                 >
                   Assign duty
                 </button>

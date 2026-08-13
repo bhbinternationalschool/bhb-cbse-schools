@@ -147,7 +147,7 @@ export function ExamDateSheetPanel({
 
   return (
     <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(300px,0.8fr)_minmax(520px,1.4fr)]">
-      <section className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-5">
+      <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5">
         <h2 className="text-sm font-bold text-[var(--brand-deep)]">
           {editingId ? "Edit exam sitting" : "Add exam sitting"}
         </h2>
@@ -157,7 +157,7 @@ export function ExamDateSheetPanel({
         </p>
 
         {error ? (
-          <p className="mt-3 rounded-lg bg-[#dc2626]/10 px-3 py-2 text-xs text-[#dc2626]">
+          <p className="mt-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-xs text-[var(--danger)]">
             {error}
           </p>
         ) : null}
@@ -295,7 +295,7 @@ export function ExamDateSheetPanel({
           {editingId ? (
             <button
               type="button"
-              className="rounded-lg border border-[rgba(32,48,80,0.18)] px-3 py-2 text-sm font-semibold"
+              className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-semibold"
               onClick={resetDraft}
             >
               Cancel
@@ -304,7 +304,7 @@ export function ExamDateSheetPanel({
         </div>
       </section>
 
-      <section className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-5">
+      <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5">
         <h2 className="text-sm font-bold text-[var(--brand-deep)]">
           Exam date-sheet
         </h2>
@@ -334,7 +334,7 @@ export function ExamDateSheetPanel({
                   ].map((label) => (
                     <th
                       key={label}
-                      className="border border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.04)] p-2 text-left"
+                      className="border border-[var(--border)] bg-[var(--surface-sunken)] p-2 text-left"
                     >
                       {label}
                     </th>
@@ -357,32 +357,32 @@ export function ExamDateSheetPanel({
                     .map((period) => period.label);
                   return (
                     <tr key={row.id}>
-                      <td className="border border-[rgba(32,48,80,0.12)] p-2 font-semibold">
+                      <td className="border border-[var(--border)] p-2 font-semibold">
                         {row.date}
                       </td>
-                      <td className="border border-[rgba(32,48,80,0.12)] p-2">
+                      <td className="border border-[var(--border)] p-2">
                         {term?.code ?? "—"}
                       </td>
-                      <td className="border border-[rgba(32,48,80,0.12)] p-2">
+                      <td className="border border-[var(--border)] p-2">
                         {classRow?.name ?? "—"}
                       </td>
-                      <td className="border border-[rgba(32,48,80,0.12)] p-2">
+                      <td className="border border-[var(--border)] p-2">
                         {subject?.name ?? "—"}
                       </td>
-                      <td className="border border-[rgba(32,48,80,0.12)] p-2">
+                      <td className="border border-[var(--border)] p-2">
                         {row.startTime}–{examEntryEndTime(row)}
                         <div className="text-[10px] text-[var(--muted)]">
                           {row.durationMinutes} min
                         </div>
                       </td>
-                      <td className="border border-[rgba(32,48,80,0.12)] p-2">
+                      <td className="border border-[var(--border)] p-2">
                         {blocked.join(", ") || (
-                          <span className="font-semibold text-[#b45309]">
+                          <span className="font-semibold text-[var(--warning)]">
                             Outside bell periods
                           </span>
                         )}
                       </td>
-                      <td className="border border-[rgba(32,48,80,0.12)] p-2">
+                      <td className="border border-[var(--border)] p-2">
                         <div className="flex gap-2">
                           <button
                             type="button"
@@ -393,7 +393,7 @@ export function ExamDateSheetPanel({
                           </button>
                           <button
                             type="button"
-                            className="font-semibold text-[#dc2626]"
+                            className="font-semibold text-[var(--danger)]"
                             onClick={() => remove(row)}
                           >
                             Remove

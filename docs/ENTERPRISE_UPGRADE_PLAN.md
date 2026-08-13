@@ -219,7 +219,7 @@ migration, independent of the rest of the checklist):
 | Payroll | `payroll/PayrollWorkspace.tsx` | Done |
 | Admissions | `admissions/AdmissionsWorkspace.tsx` | Done |
 | Accounts | `accounts/{AccountsWorkspace,AccountsPanels,AccountsMastersPanel}.tsx` | Done (color/token sweep — the 14+ raw `<table>`s across AccountsPanels.tsx's sub-panels are deferred, matching the plan's "top-of-page only" scoping for this module) |
-| Exams | `exams/ExamsWorkspace.tsx` | Not started — wave 2 |
+| Exams | `exams/{ExamsWorkspace,ExamPapersPanel,InvigilationPanel,ExamDateSheetPanel}.tsx` | Done (color/token sweep; print sheets — ClassResultSheet/ExamPaperPrintSheet/ReportCardSheet — deliberately untouched, same as Fees' receipt flow) |
 | Masters | `masters/MastersWorkspace.tsx` | Not started — wave 3 |
 | Transport | `transport/TransportWorkspace.tsx` | Not started — wave 4 |
 | Library | `library/LibraryWorkspace.tsx` | Not started — wave 4 |

@@ -734,7 +734,7 @@ export function ExamsWorkspace() {
 
       {tab === "setup" ? (
         <div className="mt-6 grid gap-6 lg:grid-cols-2">
-          <section className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-5">
+          <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5">
             <h2 className="text-sm font-bold text-[var(--brand-deep)]">
               Create exam
             </h2>
@@ -890,7 +890,7 @@ export function ExamsWorkspace() {
             <div className="mt-3 flex flex-wrap gap-2">
               <button
                 type="button"
-                className="rounded-lg border border-[rgba(32,48,80,0.15)] px-2.5 py-1 text-[11px] font-semibold"
+                className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold"
                 onClick={() => {
                   setNewCode("UT3");
                   setNewLabel("Unit Test 3");
@@ -907,7 +907,7 @@ export function ExamsWorkspace() {
               </button>
               <button
                 type="button"
-                className="rounded-lg border border-[rgba(32,48,80,0.15)] px-2.5 py-1 text-[11px] font-semibold"
+                className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold"
                 onClick={() => {
                   setNewCode("PREBOARD");
                   setNewLabel("Pre-board");
@@ -934,7 +934,7 @@ export function ExamsWorkspace() {
             <h3 className="mt-6 text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
               Session exams
             </h3>
-            <ul className="mt-2 divide-y divide-[rgba(32,48,80,0.08)]">
+            <ul className="mt-2 divide-y divide-[var(--border)]">
               {allTerms.map((t) => {
                 const hasData = examHasPersistedStudentData(t.id);
                 const isEditing = editingId === t.id;
@@ -993,7 +993,7 @@ export function ExamsWorkspace() {
                             placeholder="Note"
                           />
                         </div>
-                        <div className="space-y-2 border-t border-[rgba(32,48,80,0.08)] pt-2">
+                        <div className="space-y-2 border-t border-[var(--border)] pt-2">
                           <label className="flex items-center gap-2 text-xs text-[var(--brand-deep)]">
                             <input
                               type="checkbox"
@@ -1073,7 +1073,7 @@ export function ExamsWorkspace() {
                           </button>
                           <button
                             type="button"
-                            className="rounded-md border border-[rgba(32,48,80,0.15)] px-2.5 py-1 text-[11px] font-semibold"
+                            className="rounded-md border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold"
                             onClick={cancelEdit}
                           >
                             Cancel
@@ -1132,7 +1132,7 @@ export function ExamsWorkspace() {
                           {!hasData ? (
                             <button
                               type="button"
-                              className="text-[11px] font-semibold text-[#dc2626]"
+                              className="text-[11px] font-semibold text-[var(--danger)]"
                               onClick={() => onDeleteExam(t)}
                             >
                               Delete
@@ -1154,7 +1154,7 @@ export function ExamsWorkspace() {
             </ul>
           </section>
 
-          <section className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-5">
+          <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5">
             <h2 className="text-sm font-bold text-[var(--brand-deep)]">
               Exam policy
             </h2>
@@ -1296,7 +1296,7 @@ export function ExamsWorkspace() {
                   />
                   Fail promotion if any subject is below pass %
                 </label>
-                <div className="rounded-lg border border-[rgba(32,48,80,0.1)] bg-[var(--surface)] p-3 space-y-2">
+                <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 space-y-2">
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
                     HY / Final aggregates
                   </p>
@@ -1439,12 +1439,12 @@ export function ExamsWorkspace() {
       {tab === "marks" ? (
         <div className="mt-6">
           {!classId || !sectionId || !term ? (
-            <p className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-4 py-10 text-center text-sm text-[var(--muted)]">
+            <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-10 text-center text-sm text-[var(--muted)]">
               Select exam, class and section to enter marks. Create new exams
               under <strong>Exams &amp; policy</strong>.
             </p>
           ) : roster.length === 0 ? (
-            <p className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-4 py-10 text-center text-sm text-[var(--muted)]">
+            <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-10 text-center text-sm text-[var(--muted)]">
               No active students in this section.
             </p>
           ) : (
@@ -1471,7 +1471,7 @@ export function ExamsWorkspace() {
                   </button>
                   <button
                     type="button"
-                    className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
+                    className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
                     disabled={!!sheetMeta?.lockedAt}
                     onClick={() => onSave(true)}
                   >
@@ -1484,7 +1484,7 @@ export function ExamsWorkspace() {
                 <ErpTable minWidth="min-w-full" className="text-xs sm:text-sm">
                   <ErpTableHead>
                     <tr>
-                      <th className="sticky left-0 z-10 bg-[rgba(32,48,80,0.03)] px-4 py-2.5 font-bold text-[var(--brand-deep)]">
+                      <th className="sticky left-0 z-10 bg-[var(--surface-sunken)] px-4 py-2.5 font-bold text-[var(--brand-deep)]">
                         Student
                       </th>
                       {subjects.map((sub) => (
@@ -1504,9 +1504,9 @@ export function ExamsWorkspace() {
                     {roster.map((st) => (
                       <tr
                         key={st.id}
-                        className="border-b border-[rgba(32,48,80,0.06)]"
+                        className="border-b border-[var(--border)]"
                       >
-                        <td className="sticky left-0 z-10 bg-white px-3 py-1.5">
+                        <td className="sticky left-0 z-10 bg-[var(--card)] px-3 py-1.5">
                           <div className="flex items-center gap-2">
                             <StudentAvatar student={st} size={28} />
                             <div className="min-w-0">
@@ -1579,16 +1579,16 @@ export function ExamsWorkspace() {
                 Select class and section above.
               </p>
             ) : (
-              <ul className="mt-3 divide-y divide-[rgba(32,48,80,0.1)] overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
+              <ul className="mt-3 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)]">
                 {roster.map((st) => {
                   const hold = checkHold(st.id, "HOLD_REPORT_CARD");
                   return (
                     <li key={st.id}>
                       <button
                         type="button"
-                        className={`flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-[rgba(32,48,80,0.03)] ${
+                        className={`flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-[var(--surface-sunken)] ${
                           reportStudentId === st.id
-                            ? "bg-[rgba(32,48,80,0.06)]"
+                            ? "bg-[var(--surface-sunken)]"
                             : ""
                         }`}
                         onClick={() => openReport(st.id)}
@@ -1662,7 +1662,7 @@ export function ExamsWorkspace() {
                 <ReportCardSheet card={preview} />
               </div>
             ) : (
-              <p className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-4 py-10 text-center text-sm text-[var(--muted)]">
+              <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-10 text-center text-sm text-[var(--muted)]">
                 Select a student to preview their report card for the chosen
                 exam.
               </p>
@@ -1674,12 +1674,12 @@ export function ExamsWorkspace() {
       {tab === "results" ? (
         <div className="mt-6 space-y-4">
           {!classId || !sectionId || !examTermId ? (
-            <p className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-4 py-10 text-center text-sm text-[var(--muted)]">
+            <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-10 text-center text-sm text-[var(--muted)]">
               Select exam, class and section. Use Annual / Half-yearly for
               promotion decisions (aggregates apply when enabled in policy).
             </p>
           ) : classResult && "error" in classResult ? (
-            <p className="rounded-lg bg-[#dc2626]/10 px-3 py-2 text-sm text-[#dc2626]">
+            <p className="rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-sm text-[var(--danger)]">
               {classResult.error}
             </p>
           ) : classResult && "sheet" in classResult ? (
@@ -1699,14 +1699,14 @@ export function ExamsWorkspace() {
                 <div className="flex flex-wrap gap-2 print-hide">
                   <button
                     type="button"
-                    className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-xs font-semibold"
+                    className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold"
                     onClick={onSuggestPromotions}
                   >
                     Auto suggest
                   </button>
                   <button
                     type="button"
-                    className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-xs font-semibold"
+                    className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold"
                     onClick={onApplyPromotions}
                   >
                     Apply promotions to SIS
@@ -1750,7 +1750,7 @@ export function ExamsWorkspace() {
                       return (
                         <tr
                           key={row.student.id}
-                          className="border-b border-[rgba(32,48,80,0.06)]"
+                          className="border-b border-[var(--border)]"
                         >
                           <td className="px-3 py-2">
                             <div className="flex items-center gap-2">
@@ -1762,7 +1762,7 @@ export function ExamsWorkspace() {
                                 <div className="text-[10px] text-[var(--muted)]">
                                   {row.student.admissionNo}
                                   {row.error ? (
-                                    <span className="ml-1 text-[#b45309]">
+                                    <span className="ml-1 text-[var(--warning)]">
                                       · {row.error}
                                     </span>
                                   ) : null}
@@ -1785,11 +1785,11 @@ export function ExamsWorkspace() {
                             {!row.card ? (
                               <span className="text-[var(--muted)]">—</span>
                             ) : row.passed ? (
-                              <span className="font-semibold text-[#15803d]">
+                              <span className="font-semibold text-[var(--success)]">
                                 Pass
                               </span>
                             ) : (
-                              <span className="font-semibold text-[#b45309]">
+                              <span className="font-semibold text-[var(--warning)]">
                                 Fail
                               </span>
                             )}

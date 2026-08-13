@@ -426,7 +426,7 @@ export function ExamPapersPanel({
                 </button>
                 <button
                   type="button"
-                  className="rounded-lg border border-[rgba(32,48,80,0.18)] px-3 py-1.5 text-sm font-semibold"
+                  className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm font-semibold"
                   onClick={() => {
                     updateDraft({
                       status: draft.status === "ready" ? "draft" : "ready",
@@ -437,7 +437,7 @@ export function ExamPapersPanel({
                 </button>
                 <button
                   type="button"
-                  className="rounded-lg border border-[#dc2626]/40 px-3 py-1.5 text-sm font-semibold text-[#dc2626]"
+                  className="rounded-lg border border-[var(--danger)]/40 px-3 py-1.5 text-sm font-semibold text-[var(--danger)]"
                   onClick={onDelete}
                 >
                   Delete
@@ -446,14 +446,14 @@ export function ExamPapersPanel({
             ) : null}
             <button
               type="button"
-              className="rounded-lg border border-[rgba(32,48,80,0.18)] px-3 py-1.5 text-sm font-semibold"
+              className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm font-semibold"
               onClick={() => setShowPreview((v) => !v)}
             >
               {showPreview ? "Hide preview" : "Preview"}
             </button>
             <button
               type="button"
-              className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-sm font-bold text-white"
+              className="rounded-lg bg-[var(--primary)] px-3 py-1.5 text-sm font-bold text-[var(--primary-foreground)]"
               onClick={onPrint}
             >
               Print
@@ -461,7 +461,7 @@ export function ExamPapersPanel({
           </div>
         </div>
 
-        <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
               <h2 className="text-sm font-bold text-[var(--brand-deep)]">
@@ -569,7 +569,7 @@ export function ExamPapersPanel({
               <span className="mb-1 block text-[11px] text-[var(--muted)]">
                 Class / Subject / Exam
               </span>
-              <p className="rounded-lg bg-[rgba(32,48,80,0.04)] px-3 py-2 font-semibold">
+              <p className="rounded-lg bg-[var(--surface-sunken)] px-3 py-2 font-semibold">
                 {labelClass(draft.classId)} · {labelSubject(draft.subjectId)} ·{" "}
                 {labelExam(draft.examTermId)}
               </p>
@@ -592,7 +592,7 @@ export function ExamPapersPanel({
         </div>
 
         {/* Sets + AI */}
-        <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <h3 className="text-sm font-bold text-[var(--brand-deep)]">
@@ -611,8 +611,8 @@ export function ExamPapersPanel({
                   type="button"
                   className={`rounded-lg px-3 py-1.5 text-sm font-bold ${
                     s.setCode === draft.activeSetCode
-                      ? "bg-[var(--brand-deep)] text-white"
-                      : "border border-[rgba(32,48,80,0.18)]"
+                      ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                      : "border border-[var(--border)]"
                   }`}
                   onClick={() => updateDraft({ activeSetCode: s.setCode })}
                 >
@@ -622,7 +622,7 @@ export function ExamPapersPanel({
               {canEdit ? (
                 <button
                   type="button"
-                  className="rounded-lg border border-[rgba(32,48,80,0.18)] px-3 py-1.5 text-sm font-semibold"
+                  className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm font-semibold"
                   onClick={onAddSet}
                 >
                   + Clone set
@@ -712,7 +712,7 @@ export function ExamPapersPanel({
         {canEdit ? (
           <button
             type="button"
-            className="rounded-lg border border-dashed border-[rgba(32,48,80,0.25)] px-4 py-3 text-sm font-semibold"
+            className="rounded-lg border border-dashed border-[var(--border)] px-4 py-3 text-sm font-semibold"
             onClick={() =>
               mutateActiveSet((st) => ({
                 ...st,
@@ -745,7 +745,7 @@ export function ExamPapersPanel({
         ) : null}
 
         {draft.printLog.length ? (
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h3 className="text-sm font-bold text-[var(--brand-deep)]">
               Print history
             </h3>
@@ -766,7 +766,7 @@ export function ExamPapersPanel({
   // List view
   return (
     <div className="mt-5 space-y-4">
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-bold text-[var(--brand-deep)]">
           Question papers · {ay}
         </h2>
@@ -875,7 +875,7 @@ export function ExamPapersPanel({
       </div>
 
       {papers.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-[rgba(32,48,80,0.2)] p-6 text-sm text-[var(--muted)]">
+        <p className="rounded-xl border border-dashed border-[var(--border)] p-6 text-sm text-[var(--muted)]">
           No papers yet for this session. Create one, then use{" "}
           <strong>AI draft this set</strong> or add sections manually.
         </p>
@@ -886,7 +886,7 @@ export function ExamPapersPanel({
             return (
               <li
                 key={p.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-4 py-3"
+                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3"
               >
                 <div>
                   <p className="font-semibold text-[var(--brand-deep)]">
@@ -906,7 +906,7 @@ export function ExamPapersPanel({
                 </div>
                 <button
                   type="button"
-                  className="rounded-lg border border-[rgba(32,48,80,0.18)] px-3 py-1.5 text-sm font-semibold"
+                  className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm font-semibold"
                   onClick={() => openEdit(p.id)}
                 >
                   Open
@@ -942,7 +942,7 @@ function SectionEditor(props: {
   }
 
   return (
-    <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 flex-1 space-y-2">
           <input
@@ -976,7 +976,7 @@ function SectionEditor(props: {
               </button>
               <button
                 type="button"
-                className="rounded border border-[#dc2626]/30 px-2 py-0.5 text-[11px] font-semibold text-[#dc2626]"
+                className="rounded border border-[var(--danger)]/30 px-2 py-0.5 text-[11px] font-semibold text-[var(--danger)]"
                 onClick={props.onRemove}
               >
                 Remove section
@@ -1008,7 +1008,7 @@ function SectionEditor(props: {
       {canEdit ? (
         <button
           type="button"
-          className="mt-3 rounded-lg border border-[rgba(32,48,80,0.18)] px-3 py-1.5 text-sm font-semibold"
+          className="mt-3 rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm font-semibold"
           onClick={props.onAddQuestion}
         >
           + Add question
@@ -1031,7 +1031,7 @@ function QuestionEditor(props: {
   const [showFormulas, setShowFormulas] = useState(false);
 
   return (
-    <li className="rounded-lg border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.02)] p-3">
+    <li className="rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] p-3">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[11px] font-bold text-[var(--muted)]">
           Q{props.index + 1}
@@ -1086,7 +1086,7 @@ function QuestionEditor(props: {
         {canEdit ? (
           <button
             type="button"
-            className="ml-auto text-sm font-bold text-[#dc2626]"
+            className="ml-auto text-sm font-bold text-[var(--danger)]"
             onClick={props.onRemove}
           >
             ×
@@ -1129,7 +1129,7 @@ function QuestionEditor(props: {
               {canEdit ? (
                 <button
                   type="button"
-                  className="text-[#dc2626]"
+                  className="text-[var(--danger)]"
                   onClick={() =>
                     props.onChange({
                       formulas: q.formulas.filter((_, j) => j !== i),
@@ -1178,7 +1178,7 @@ function QuestionEditor(props: {
               {canEdit ? (
                 <button
                   type="button"
-                  className="absolute right-0 top-0 rounded bg-white/90 px-1 text-xs font-bold text-[#dc2626]"
+                  className="absolute right-0 top-0 rounded bg-[var(--card)]/90 px-1 text-xs font-bold text-[var(--danger)]"
                   onClick={() =>
                     props.onChange({
                       images: q.images.filter((x) => x.id !== img.id),
@@ -1197,19 +1197,19 @@ function QuestionEditor(props: {
         <div className="mt-2 flex flex-wrap gap-2">
           <button
             type="button"
-            className="rounded border border-[rgba(32,48,80,0.15)] px-2 py-0.5 text-[11px] font-semibold"
+            className="rounded border border-[var(--border)] px-2 py-0.5 text-[11px] font-semibold"
             onClick={() => setShowFormulas((v) => !v)}
           >
             Formulas / symbols
           </button>
           <button
             type="button"
-            className="rounded border border-[rgba(32,48,80,0.15)] px-2 py-0.5 text-[11px] font-semibold"
+            className="rounded border border-[var(--border)] px-2 py-0.5 text-[11px] font-semibold"
             onClick={() => setShowIcons((v) => !v)}
           >
             Icons list
           </button>
-          <label className="cursor-pointer rounded border border-[rgba(32,48,80,0.15)] px-2 py-0.5 text-[11px] font-semibold">
+          <label className="cursor-pointer rounded border border-[var(--border)] px-2 py-0.5 text-[11px] font-semibold">
             Upload picture
             <input
               type="file"
@@ -1244,7 +1244,7 @@ function QuestionEditor(props: {
       ) : null}
 
       {showFormulas && canEdit ? (
-        <div className="mt-2 space-y-2 rounded-lg bg-white p-2">
+        <div className="mt-2 space-y-2 rounded-lg bg-[var(--card)] p-2">
           <p className="text-[10px] text-[var(--muted)]">
             Tap to insert into question text or as a formula line.
           </p>
@@ -1254,7 +1254,7 @@ function QuestionEditor(props: {
                 key={f.label + f.insert}
                 type="button"
                 title={f.group}
-                className="rounded border border-[rgba(32,48,80,0.12)] px-1.5 py-0.5 font-mono text-[11px] hover:bg-[rgba(32,48,80,0.06)]"
+                className="rounded border border-[var(--border)] px-1.5 py-0.5 font-mono text-[11px] hover:bg-[var(--surface-sunken)]"
                 onClick={() => {
                   props.onChange({
                     text: q.text ? `${q.text} ${f.insert}` : f.insert,
@@ -1283,7 +1283,7 @@ function QuestionEditor(props: {
       ) : null}
 
       {showIcons && canEdit ? (
-        <div className="mt-2 rounded-lg bg-white p-2">
+        <div className="mt-2 rounded-lg bg-[var(--card)] p-2">
           <p className="mb-1 text-[10px] text-[var(--muted)]">
             Primary classes — tap icons to attach (multiple allowed).
           </p>
@@ -1293,7 +1293,7 @@ function QuestionEditor(props: {
                 key={item.icon}
                 type="button"
                 title={item.label}
-                className="rounded border border-[rgba(32,48,80,0.1)] px-1.5 py-0.5 text-xl hover:bg-[rgba(32,48,80,0.06)]"
+                className="rounded border border-[var(--border)] px-1.5 py-0.5 text-xl hover:bg-[var(--surface-sunken)]"
                 onClick={() =>
                   props.onChange({ icons: [...q.icons, item.icon] })
                 }
