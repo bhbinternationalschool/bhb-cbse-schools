@@ -168,6 +168,77 @@ KPI examples to seed each module (finalized with users during its wave):
 - **Admissions:** open leads, conversions this week, follow-ups due today, source performance
 - **Accounts:** cash in hand, bank balance, payables due 7 days, expense vs budget
 
+### Phase 3a — Visual refit checklist *(rails for the module-by-module work above)*
+
+The separate visual-upgrade track (`docs/plans/woolly-riding-quail.md`) built
+the foundation this phase needs: design tokens + dark mode (Phase 0), a
+Recharts chart kit (Phase 1), component kit v2 evolved in place — every
+`ErpMetricCard`/`ErpTableShell`/`ErpPanel`/`.erp-surface`/`.erp-data-table-wrap`
+consumer already renders on tokens for free (Phase 2), and five full screen
+refits: Home, Students, Fees (top-of-page only — see note below), Attendance,
+Login (Phase 3). That work is done and merged.
+
+What's left is mechanical, module by module. Per module, before marking it
+done:
+
+1. `ErpWorkspaceShell` + `ErpModuleHeader` + `breadcrumbs` prop (the shell
+   itself is free once adopted; breadcrumbs are opt-in via `ui/breadcrumbs.tsx`).
+2. Raw `<table>` → `ErpTableShell`/`ErpTable`/`ErpTableHead`/`ErpTableBody`
+   (lowers the `raw_table` ratchet — `scripts/check-ratchets.sh`).
+3. Hex sweep: replace `bg-[#…]`/`rgba(32,48,80,…)`/hardcoded `bg-white` with
+   the tokens in `globals.css` (lowers `raw_hex`). Watch specifically for
+   `bg-[var(--brand-deep)]` — that token is a text token, not a background
+   one, and using it as a background is the single most common bug found
+   during Phase 3 (fix: `--primary`/`--primary-foreground`).
+4. `Skeleton`/`SkeletonTable`/`SkeletonKpiRow`/`SkeletonChart`/`SkeletonForm`
+   per async-loading region (`ui/skeleton.tsx`).
+5. `EmptyState` (`ui/empty-state.tsx`, `variant="panel"|"table"|"page"`) per
+   zero-result state — and if the emptiness can be caused by an active
+   filter, the action should read "Clear filters", not just "Add record".
+6. Any inline SVG chart → `ui/erp-chart-lazy.tsx`'s `ErpBar`/`ErpDonut`/
+   `ErpArea`/`ErpSparkline`. Always pass `isAnimationActive={false}` (see
+   that file's own comment — a real, reproduced bug, not just a preference).
+7. Dark + mobile QA in the browser: toggle theme, check the marking/data-entry
+   grids specifically for tap-target size (44px minimum — Attendance's
+   marking grid was 40px until Phase 3 fixed it).
+8. Lower both ratchet budgets in `scripts/ratchets.txt` in the *same* commit
+   as the fixes that earned the improvement — `check-ratchets.sh` prints the
+   new count when a budget can tighten.
+
+Status by module (updated as each is converted; "Charts" = Phase 1's Recharts
+migration, independent of the rest of the checklist):
+
+| Module | Workspace file | Status |
+|---|---|---|
+| Home | `dashboard/{PrincipalCockpit,TeacherHome,SchoolHomeDashboard}.tsx` | Done (Phase 3) |
+| Students | `students/StudentsWorkspace.tsx` | Done (Phase 3) |
+| Attendance | `attendance/AttendanceWorkspace.tsx` | Done (Phase 3) |
+| Fees (Fee Take) | `fees/FeeTakeWorkspace.tsx` | Partial — header/toolbar/search-card only, deliberately (live payment code, no staging); full sweep still pending |
+| Staff | `staff/StaffWorkspace.tsx` | Charts done (Phase 1); shell/token sweep not started |
+| Login | `login/LoginPanel.tsx` | Done (Phase 3) |
+| Payroll | `payroll/PayrollWorkspace.tsx` | Not started — wave 3, suggested first (hand-rolled tables) |
+| Admissions | `admissions/AdmissionsWorkspace.tsx` | Not started — wave 2 |
+| Accounts | `accounts/AccountsWorkspace.tsx` | Not started — wave 3 |
+| Exams | `exams/ExamsWorkspace.tsx` | Not started — wave 2 |
+| Masters | `masters/MastersWorkspace.tsx` | Not started — wave 3 |
+| Transport | `transport/TransportWorkspace.tsx` | Not started — wave 4 |
+| Library | `library/LibraryWorkspace.tsx` | Not started — wave 4 |
+| Store | `store/{StoreWorkspace,StoreAccountsWorkspace,StockMasterWorkspace}.tsx` | Not started — wave 4 |
+| Purchase | `purchase/PurchaseWorkspace.tsx` | Not started — wave 4 |
+| Comms | `comms/CommsWorkspace.tsx` | Not started — wave 4 |
+| Trust | `trust/TrustWorkspace.tsx` | Not started — wave 5 |
+| RTE | `rte/RteWorkspace.tsx` | Not started — wave 5 |
+| Vault | `vault/VaultWorkspace.tsx` | Not started — wave 5 |
+| Homework | `homework/HomeworkWorkspace.tsx` | Not started — wave 5 |
+| PTM | `ptm/PtmWorkspace.tsx` | Not started — wave 5 |
+| Student leave | `studentLeave/StudentLeaveWorkspace.tsx` | Not started — wave 5 |
+| Timetable | `timetable/TimetableWorkspace.tsx` | Not started — wave 5 |
+| Certificates | `certificates/CertificatesWorkspace.tsx` | Not started — wave 5 |
+| Documents | `documents/DocumentMakerWorkspace.tsx` | Not started — wave 5 |
+| UDISE compliance | `students/UdiseComplianceWorkspace.tsx` | Not started |
+| Reports Center | `reports/ReportsCenterWorkspace.tsx` | Not started |
+| Modules (hub) | `modules/ModulesWorkspace.tsx` | Not started |
+
 ### Phase 4 — AI as a working layer, not a chatbot *(weeks 8–16, overlaps 3)*
 
 Build on the existing Gemini/OpenAI plumbing and `erpAiContext.server`:
