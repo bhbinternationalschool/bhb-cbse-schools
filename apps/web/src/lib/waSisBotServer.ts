@@ -44,7 +44,7 @@ import {
 import { attachRazorpayToPaymentLink } from "@/lib/razorpay.server";
 import { loadSis, householdWhatsApp, type Household, type SisStudent } from "@/lib/sis";
 import { TENANT } from "@/lib/types";
-import { sendWhatsAppText, waNormalizeLocal10 } from "@/lib/waSend";
+import { sendWaWithFailover, sendWhatsAppText, waNormalizeLocal10 } from "@/lib/waSend";
 import { generateTutorText } from "@/lib/aiLlm.server";
 
 export type WaSisBotMsg = {
@@ -601,21 +601,26 @@ export async function handleWaSisBotInbound(opts: {
   };
 }
 
-/** After pay-link confirm — send receipt on WhatsApp Business API. */
+/** After pay-link confirm — send receipt on WhatsApp Business API. Retries
+ * `fallbackMobile` (e.g. the household's altMobile) if the primary number's
+ * send fails synchronously — a parent just paid, the receipt should reach
+ * them. */
 export async function sendSisFeeReceiptOnWhatsApp(opts: {
   mobile: string;
+  fallbackMobile?: string;
   voucherId: string;
-}): Promise<{ ok: boolean; error?: string }> {
+}): Promise<{ ok: boolean; error?: string; usedFallback?: boolean }> {
   await ensureSchoolMirrorHydrated();
   const voucher = loadFees().vouchers.find((v) => v.id === opts.voucherId);
   if (!voucher) return { ok: false, error: "Voucher not found" };
   const text = composeWhatsAppFeeReceipt(voucher, loadSis(), loadMasters());
-  const send = await sendWhatsAppText({
-    toMobile: opts.mobile,
+  const send = await sendWaWithFailover({
+    primaryMobile: opts.mobile,
+    fallbackMobile: opts.fallbackMobile,
     body: text,
   });
   if (send.ok) {
     markWhatsAppReceiptSent(voucher.id);
   }
-  return { ok: send.ok, error: send.error };
+  return { ok: send.ok, error: send.error, usedFallback: send.usedFallback };
 }

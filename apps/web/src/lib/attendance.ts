@@ -13,6 +13,7 @@ import {
   householdOf,
   householdWhatsApp,
   loadSis,
+  normalizeMobile,
   type SisStudent,
 } from "@/lib/sis";
 import { TENANT } from "@/lib/types";
@@ -513,6 +514,7 @@ export type AbsentNudgeDraft = {
   studentId: string;
   studentName: string;
   mobile: string;
+  fallbackMobile?: string;
   message: string;
   waUrl: string;
 };
@@ -541,6 +543,7 @@ export function buildAbsentNudgeDrafts(input: {
     const hh = householdOf(sis, st.householdId);
     const mobile = householdWhatsApp(hh);
     if (!mobile || mobile.length < 10) continue;
+    const fallbackMobile = normalizeMobile(hh?.altMobile || "") || undefined;
     const message = composeAbsentNudgeMessage({
       studentName: st.fullName,
       date: input.register.date,
@@ -550,6 +553,7 @@ export function buildAbsentNudgeDrafts(input: {
       studentId: st.id,
       studentName: st.fullName,
       mobile,
+      fallbackMobile,
       message,
       waUrl: waMeUrl(mobile, message),
     });
@@ -566,7 +570,7 @@ export function openAbsentNudges(
   let opened = 0;
   for (const d of drafts) {
     if (opened >= cap) break;
-    openWaMe(d.mobile, d.message);
+    openWaMe(d.mobile, d.message, d.fallbackMobile);
     opened += 1;
   }
   return opened;

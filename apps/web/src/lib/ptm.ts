@@ -5,7 +5,12 @@
 
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
-import { householdWhatsApp, loadSis, type SisStudent } from "@/lib/sis";
+import {
+  householdWhatsApp,
+  loadSis,
+  normalizeMobile,
+  type SisStudent,
+} from "@/lib/sis";
 import { TENANT } from "@/lib/types";
 import {
   describeFilters,
@@ -542,6 +547,20 @@ export function ptmBookingMobile(
   const state = sis ?? loadSis();
   const hh = state.households.find((h) => h.id === booking.householdId);
   return householdWhatsApp(hh) || "";
+}
+
+/** Same lookup as `ptmBookingMobile`, plus the household's altMobile as a
+ * failover target for `openWaMe`. */
+export function ptmBookingContact(
+  booking: PtmBooking,
+  sis?: ReturnType<typeof loadSis>,
+): { mobile: string; fallbackMobile?: string } {
+  const state = sis ?? loadSis();
+  const hh = state.households.find((h) => h.id === booking.householdId);
+  return {
+    mobile: householdWhatsApp(hh) || "",
+    fallbackMobile: normalizeMobile(hh?.altMobile || "") || undefined,
+  };
 }
 
 export function markPtmWhatsApp(

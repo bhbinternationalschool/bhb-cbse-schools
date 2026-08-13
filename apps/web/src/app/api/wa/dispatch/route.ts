@@ -19,8 +19,7 @@ import type { RbacModule } from "@/lib/rbac";
 import {
   buildWaTemplateBodyComponent,
   buildWaTemplateMediaHeader,
-  sendWhatsAppTemplate,
-  sendWhatsAppText,
+  sendWaWithFailover,
   waOutboundConfigured,
   type WaTemplateComponent,
 } from "@/lib/waSend";
@@ -43,6 +42,11 @@ type DispatchTemplate = {
 type DispatchItem = {
   messageId?: string;
   mobile: string;
+  /** Retried automatically if the primary `mobile` send fails synchronously
+   * (invalid, opted out, outside 24h window, Meta rejection) — e.g. a
+   * household's altMobile. Not retried when the provider isn't configured
+   * at all, since a different number can't fix that. */
+  fallbackMobile?: string;
   body?: string;
   template?: DispatchTemplate;
 };
@@ -133,10 +137,12 @@ export async function POST(req: Request) {
     providerId?: string;
     mode?: string;
     via?: string;
+    usedFallback?: boolean;
   }[] = [];
 
   for (const item of messages) {
     const mobile = (item.mobile || "").replace(/\D/g, "");
+    const fallbackMobile = (item.fallbackMobile || "").replace(/\D/g, "") || undefined;
     if (mobile.length < 10) {
       results.push({
         messageId: item.messageId,
@@ -168,11 +174,14 @@ export async function POST(req: Request) {
           buildWaTemplateBodyComponent(keys, item.template.variables),
         );
       }
-      const r = await sendWhatsAppTemplate({
-        toMobile: mobile,
-        name: item.template.name,
-        language: item.template.language || "en",
-        components,
+      const r = await sendWaWithFailover({
+        primaryMobile: mobile,
+        fallbackMobile,
+        template: {
+          name: item.template.name,
+          language: item.template.language || "en",
+          components,
+        },
         clientMessageId: item.messageId,
       });
       results.push({
@@ -183,6 +192,7 @@ export async function POST(req: Request) {
         providerId: r.providerId,
         mode: r.mode,
         via: "template",
+        usedFallback: r.usedFallback,
       });
       continue;
     }
@@ -197,8 +207,9 @@ export async function POST(req: Request) {
       });
       continue;
     }
-    const r = await sendWhatsAppText({
-      toMobile: mobile,
+    const r = await sendWaWithFailover({
+      primaryMobile: mobile,
+      fallbackMobile,
       body: text,
       clientMessageId: item.messageId,
     });
@@ -210,6 +221,7 @@ export async function POST(req: Request) {
       providerId: r.providerId,
       mode: r.mode,
       via: "text",
+      usedFallback: r.usedFallback,
     });
   }
 
