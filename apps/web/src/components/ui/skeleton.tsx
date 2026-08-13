@@ -55,4 +55,20 @@ function SkeletonModulePage() {
   )
 }
 
-export { Skeleton, SkeletonKpiRow, SkeletonTable, SkeletonModulePage }
+/** Chart-shaped placeholder — reserves the plot area while Recharts' async chunk loads. */
+function SkeletonChart({ height = 220 }: { height?: number }) {
+  return (
+    <div
+      className="flex items-end gap-2 rounded-xl bg-[var(--surface-sunken)] p-4"
+      style={{ height }}
+      role="status"
+      aria-label="Loading chart"
+    >
+      {[40, 65, 45, 80, 55, 70, 50].map((h, i) => (
+        <Skeleton key={i} className="flex-1 rounded-t-md rounded-b-none" style={{ height: `${h}%` }} />
+      ))}
+    </div>
+  )
+}
+
+export { Skeleton, SkeletonKpiRow, SkeletonTable, SkeletonModulePage, SkeletonChart }

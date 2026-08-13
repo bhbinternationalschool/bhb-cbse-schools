@@ -35,10 +35,10 @@ import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import { useModuleFilters } from "@/lib/moduleFilters";
 import { FilterBar } from "@/components/ui/filter-bar";
 import {
-  ErpBarChart,
-  ErpPieChart,
+  ErpBar,
+  ErpDonut,
   type ErpChartRow,
-} from "@/components/ui/erp-charts";
+} from "@/components/ui/erp-chart-lazy";
 import {
   ErpChartCard,
   ErpChartGrid,
@@ -194,8 +194,8 @@ export function StaffWorkspace() {
       const dep = state.departments.find((d) => d.id === s.departmentId);
       const label = dep?.name ?? "Unassigned";
       const key = dep?.id ?? "none";
-      const cur = deptMap.get(key) ?? { key, label, count: 0 };
-      cur.count += 1;
+      const cur = deptMap.get(key) ?? { key, label, value: 0 };
+      cur.value += 1;
       deptMap.set(key, cur);
     }
     const departmentRows = [...deptMap.values()].sort((a, b) =>
@@ -209,14 +209,14 @@ export function StaffWorkspace() {
     }
     const religionRows = [...religionMap.entries()]
       .sort((a, b) => b[1] - a[1])
-      .map(([label, count]) => ({ key: label, label, count }));
+      .map(([label, value]) => ({ key: label, label, value }));
 
     const teaching = staff.filter((s) => s.stream === "teaching").length;
     const nonTeaching = staff.filter((s) => s.stream === "non_teaching").length;
     const streamRows: NamedCount[] = [
-      { key: "teaching", label: "Teaching", count: teaching },
-      { key: "non_teaching", label: "Non-teaching", count: nonTeaching },
-    ].filter((r) => r.count > 0);
+      { key: "teaching", label: "Teaching", value: teaching },
+      { key: "non_teaching", label: "Non-teaching", value: nonTeaching },
+    ].filter((r) => r.value > 0);
 
     const casteMap = new Map<string, number>();
     for (const s of staff) {
@@ -225,15 +225,15 @@ export function StaffWorkspace() {
     }
     const casteRows = [...casteMap.entries()]
       .sort((a, b) => b[1] - a[1])
-      .map(([label, count]) => ({ key: label, label, count }));
+      .map(([label, value]) => ({ key: label, label, value }));
 
     const desMap = new Map<string, NamedCount>();
     for (const s of staff) {
       const des = state.designations.find((d) => d.id === s.designationId);
       const label = des?.name ?? "Unassigned";
       const key = des?.id ?? "none";
-      const cur = desMap.get(key) ?? { key, label, count: 0 };
-      cur.count += 1;
+      const cur = desMap.get(key) ?? { key, label, value: 0 };
+      cur.value += 1;
       desMap.set(key, cur);
     }
     const designationRows = [...desMap.values()].sort((a, b) =>
@@ -450,35 +450,25 @@ export function StaffWorkspace() {
 
       <ErpChartGrid cols={3}>
         <ErpChartCard title="Department-wise Analysis">
-          <ErpBarChart
-            rows={stats.departmentRows}
-            yLabel="No. Of Staffs"
-            xLabel="Department"
-            barColor="#f97316"
-          />
+          <ErpBar rows={stats.departmentRows} color="var(--chart-3)" />
         </ErpChartCard>
         <ErpChartCard title="Religion-wise Analysis">
-          <ErpPieChart rows={stats.religionRows} />
+          <ErpDonut rows={stats.religionRows} />
         </ErpChartCard>
         <ErpChartCard title="Teaching vs Non-teaching">
-          <ErpPieChart
+          <ErpDonut
             rows={stats.streamRows}
-            colors={["#2563eb", "#f97316"]}
+            colors={["var(--chart-1)", "var(--chart-3)"]}
           />
         </ErpChartCard>
       </ErpChartGrid>
 
       <ErpChartGrid cols={2}>
         <ErpChartCard title="Caste-wise Analysis">
-          <ErpPieChart rows={stats.casteRows} />
+          <ErpDonut rows={stats.casteRows} />
         </ErpChartCard>
         <ErpChartCard title="Designation-wise Analysis">
-          <ErpBarChart
-            rows={stats.designationRows}
-            yLabel="No. Of Staffs"
-            xLabel="Designation"
-            barColor="#fb7185"
-          />
+          <ErpBar rows={stats.designationRows} color="#fb7185" />
         </ErpChartCard>
       </ErpChartGrid>
 
