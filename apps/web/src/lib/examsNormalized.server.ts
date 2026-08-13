@@ -14,6 +14,7 @@ import {
   type MarkSheet,
   type PromotionDecision,
   type PromotionRecord,
+  type StudentCoScholasticEntry,
   type StudentSubjectMark,
 } from "@/lib/exams";
 import { examsDualWriteDbEnabled } from "@/lib/examsDbConfig";
@@ -222,6 +223,7 @@ function sheetToRows(
 ): {
   header: Record<string, unknown>;
   marks: Record<string, unknown>[];
+  coScholastic: Record<string, unknown>[];
 } {
   const header = {
     id: s.id,
@@ -244,12 +246,21 @@ function sheetToRows(
     grade: m.grade || "—",
     remark: m.remark || "",
   }));
-  return { header, marks };
+  const coScholastic = (s.coScholastic || []).map((e) => ({
+    id: `${s.id}:${e.studentId}:${e.domain}`,
+    mark_sheet_id: s.id,
+    tenant_id: tenantId,
+    student_id: e.studentId,
+    domain: e.domain,
+    rating: e.rating || "",
+  }));
+  return { header, marks, coScholastic };
 }
 
 function rowToSheet(
   header: Record<string, unknown>,
   markRows: Record<string, unknown>[],
+  coScholasticRows: Record<string, unknown>[] = [],
 ): MarkSheet {
   return {
     id: String(header.id),
@@ -272,6 +283,15 @@ function rowToSheet(
         remark: String(m.remark || ""),
       }),
     ),
+    coScholastic: coScholasticRows.map((r): StudentCoScholasticEntry => {
+      const rating = r.rating === "A" || r.rating === "B" || r.rating === "C" ? r.rating : null;
+      const domain = r.domain === "psychomotor" ? "psychomotor" : "socioEmotional";
+      return {
+        studentId: String(r.student_id),
+        domain,
+        rating,
+      };
+    }),
   };
 }
 
@@ -423,12 +443,14 @@ export async function pushExamDeskToDb(
 
   const sheetHeaders: Record<string, unknown>[] = [];
   const allMarks: Record<string, unknown>[] = [];
+  const allCoScholastic: Record<string, unknown>[] = [];
   let lastSheetAt: string | null = null;
 
   for (const sheet of sheets) {
-    const { header, marks } = sheetToRows(tenantId, sheet);
+    const { header, marks, coScholastic } = sheetToRows(tenantId, sheet);
     sheetHeaders.push(header);
     allMarks.push(...marks);
+    allCoScholastic.push(...coScholastic);
     const updated = String(header.updated_at);
     if (!lastSheetAt || updated > lastSheetAt) lastSheetAt = updated;
   }
@@ -449,6 +471,20 @@ export async function pushExamDeskToDb(
   }
 
   r = await upsertChunks(sb, "exam_desk_marks", allMarks, 500);
+  if (!r.ok) return r;
+
+  const { data: existingCoScholastic } = await sb
+    .from("exam_desk_coscholastic")
+    .select("id, mark_sheet_id")
+    .eq("tenant_id", tenantId);
+  const staleCoScholasticIds = (existingCoScholastic ?? [])
+    .filter((e) => sheetIds.has(String(e.mark_sheet_id)))
+    .map((e) => String(e.id));
+  if (staleCoScholasticIds.length) {
+    await sb.from("exam_desk_coscholastic").delete().in("id", staleCoScholasticIds);
+  }
+
+  r = await upsertChunks(sb, "exam_desk_coscholastic", allCoScholastic, 500);
   if (!r.ok) return r;
 
   r = await upsertChunks(
@@ -554,10 +590,29 @@ export async function fetchExamDeskFromDb(): Promise<{
     marksBySheet.set(sid, list);
   }
 
+  let coScholasticRows: Record<string, unknown>[] = [];
+  if (sheetIds.length) {
+    const { data } = await sb
+      .from("exam_desk_coscholastic")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .in("mark_sheet_id", sheetIds);
+    coScholasticRows = (data ?? []) as Record<string, unknown>[];
+  }
+
+  const coScholasticBySheet = new Map<string, Record<string, unknown>[]>();
+  for (const e of coScholasticRows) {
+    const sid = String(e.mark_sheet_id);
+    const list = coScholasticBySheet.get(sid) ?? [];
+    list.push(e);
+    coScholasticBySheet.set(sid, list);
+  }
+
   const sheets = (sheetHeaders ?? []).map((h) =>
     rowToSheet(
       h as Record<string, unknown>,
       marksBySheet.get(String(h.id)) ?? [],
+      coScholasticBySheet.get(String(h.id)) ?? [],
     ),
   );
 

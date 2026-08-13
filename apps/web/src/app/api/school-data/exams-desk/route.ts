@@ -5,7 +5,7 @@ import {
 } from "@/lib/apiRouteAuth.server";
 import { requestMeta } from "@/lib/api/v1/auth";
 import { auditArrayDiff } from "@/lib/auditDeskDiff.server";
-import { flattenExamMarks, type ExamsState } from "@/lib/exams";
+import { flattenCoScholastic, flattenExamMarks, type ExamsState } from "@/lib/exams";
 import { examsDualWriteDbEnabled } from "@/lib/examsDbConfig";
 import {
   fetchExamDeskFromDb,
@@ -59,6 +59,7 @@ export async function POST(req: Request) {
 
   const { bundle: priorBundle } = await fetchExamDeskFromDb();
   const beforeMarks = flattenExamMarks(priorBundle.sheets);
+  const beforeCoScholastic = flattenCoScholastic(priorBundle.sheets);
 
   const result = await pushExamDeskToDb({
     version: 1,
@@ -76,9 +77,9 @@ export async function POST(req: Request) {
     );
   }
 
-  const afterMarks = flattenExamMarks(
-    Array.isArray(body.sheets) ? body.sheets : [],
-  );
+  const pushedSheets = Array.isArray(body.sheets) ? body.sheets : [];
+  const afterMarks = flattenExamMarks(pushedSheets);
+  const afterCoScholastic = flattenCoScholastic(pushedSheets);
   const { ip, userAgent } = requestMeta(req);
   await auditArrayDiff({
     session: auth.ctx.session,
@@ -86,6 +87,15 @@ export async function POST(req: Request) {
     entityType: "student_subject_mark",
     before: beforeMarks,
     after: afterMarks,
+    ip,
+    userAgent,
+  });
+  await auditArrayDiff({
+    session: auth.ctx.session,
+    module: "exams",
+    entityType: "co_scholastic_rating",
+    before: beforeCoScholastic,
+    after: afterCoScholastic,
     ip,
     userAgent,
   });
