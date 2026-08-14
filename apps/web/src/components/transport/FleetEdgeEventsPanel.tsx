@@ -55,7 +55,8 @@ function summarize(event: FleetEdgeEvent): string {
     const warningCount = Array.isArray(fault.warning) ? fault.warning.length : 0;
     bits.push(`fault codes: ${criticalCount} critical, ${warningCount} warning`);
   }
-  if (typeof eff.fuelConsumed === "number") bits.push(`fuel used ${eff.fuelConsumed}`);
+  const fuelUsed = typeof eff.fuelUsed === "number" ? eff.fuelUsed : eff.fuelConsumed;
+  if (typeof fuelUsed === "number") bits.push(`fuel used ${fuelUsed}`);
   if (typeof eff.averageSpeed === "number") bits.push(`avg speed ${eff.averageSpeed}`);
   return bits.join(" · ") || "—";
 }

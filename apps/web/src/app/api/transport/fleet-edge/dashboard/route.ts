@@ -141,7 +141,10 @@ export async function GET(req: Request) {
       }
 
       const eff = isObj(p.vehicleEfficiency) ? p.vehicleEfficiency : {};
-      m.fuelConsumed += num(eff.fuelConsumed);
+      // Real Fleet Edge traffic sends "fuelUsed", not the "fuelConsumed" the
+      // spec PDF documents — confirmed against live production payloads.
+      // Accept either so a future push matching the documented name still works.
+      m.fuelConsumed += typeof eff.fuelUsed === "number" ? eff.fuelUsed : num(eff.fuelConsumed);
       if (typeof eff.averageSpeed === "number") m.averageSpeedSamples.push(eff.averageSpeed);
       m.idlingSeconds += sumDurations(eff.idlings);
       m.stoppageSeconds += sumDurations(eff.stoppages);
