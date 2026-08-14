@@ -6,7 +6,7 @@ import { ErpMetricCard } from "@/components/ui/erp-roster";
 import { dashboardToneToMetric, kpiIconForTone, type DashboardTone } from "@/components/dashboard/ModuleDashboard";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { field } from "@/components/ui/erp-ui";
-import { averageEngineLoad, type FleetBucket, type VehicleDashboardRow } from "@/lib/fleetEdgeAnalytics";
+import { averageEngineLoad, type FleetBucket, type OfflinePeriod, type VehicleDashboardRow } from "@/lib/fleetEdgeAnalytics";
 
 type Tab = "live" | "vehicleWise" | "directorReport" | "scorecard" | "health";
 
@@ -29,8 +29,21 @@ type DashboardResponse = {
   kpis: Record<FleetBucket, number>;
   total: number;
   vehicles: VehicleRow[];
+  offlineHistory: OfflinePeriod[];
   error?: string;
 };
+
+/** ms → "2h 15m" / "3d 4h", dropping the smaller unit once the larger one
+ * is already double digits so a 9-day gap doesn't read as "9d 14h 32m". */
+function formatDuration(ms: number): string {
+  const totalMinutes = Math.round(ms / 60000);
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
 
 /** Fleet Edge never sends model/year — prefer what staff have recorded
  * (Vehicle wise tab) over a bare VIN, which is genuinely ambiguous when two
@@ -354,6 +367,43 @@ export function FleetDashboard() {
                   </li>
                 ))}
               </ul>
+            ) : null}
+
+            {tab === "live" ? (
+              <div className="mt-4">
+                <p className="mb-2 text-sm font-bold">Offline history (last 30 days)</p>
+                {(data?.offlineHistory || []).length === 0 ? (
+                  <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-4 text-center text-sm text-[var(--muted)]">
+                    No offline periods in the last 30 days.
+                  </p>
+                ) : (
+                  <ul className="space-y-2">
+                    {(data?.offlineHistory || []).map((p, i) => {
+                      const v = rows.find((row) => row.vehicleRef === p.vehicleRef);
+                      return (
+                        <li
+                          key={`${p.vehicleRef}-${p.from}-${i}`}
+                          className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="font-semibold">{v ? vehicleLabel(v) : p.registrationNumber || p.vehicleRef}</span>
+                            {p.to === null ? (
+                              <span className="rounded-full bg-[var(--danger-soft)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--danger)]">
+                                Ongoing
+                              </span>
+                            ) : null}
+                          </div>
+                          <p className="mt-1 text-sm text-[var(--muted)]">
+                            Went offline {new Date(p.from).toLocaleString()}
+                            {p.to ? ` · back online ${new Date(p.to).toLocaleString()}` : ""} ·
+                            {" "}offline for {formatDuration(p.durationMs)}
+                          </p>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
             ) : null}
 
             {tab === "vehicleWise" ? (

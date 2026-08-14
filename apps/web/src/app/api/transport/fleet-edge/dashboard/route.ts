@@ -11,9 +11,11 @@ import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import {
   buildFleetDashboard,
+  computeOfflinePeriods,
   emptyVehicleMetrics,
   FLEET_LOOKBACK_MS,
   NON_FLEET_VEHICLE_REFS,
+  type OfflinePeriod,
   type VehicleFleetMetrics,
 } from "@/lib/fleetEdgeAnalytics";
 
@@ -78,6 +80,10 @@ export async function GET(req: Request) {
 
   const events = (data || []) as RawEvent[];
   const byVehicle = new Map<string, VehicleFleetMetrics>();
+  // Every receipt timestamp per vehicle, unbounded by [from,to] like
+  // lastSeenAt — offline periods are a connectivity fact, not a
+  // performance-window one. Used to derive offlineHistory below.
+  const timestampsByVehicle = new Map<string, string[]>();
   const fromMs = Date.parse(from);
   const toMs = Date.parse(to);
 
@@ -93,6 +99,8 @@ export async function GET(req: Request) {
     // lastSeenAt — unbounded by [from,to], this is the live/current status.
     if (!m.lastSeenAt || ev.received_at > m.lastSeenAt) m.lastSeenAt = ev.received_at;
     if (ev.registration_number && !m.registrationNumber) m.registrationNumber = ev.registration_number;
+    if (!timestampsByVehicle.has(key)) timestampsByVehicle.set(key, []);
+    timestampsByVehicle.get(key)!.push(ev.received_at);
 
     if (ev.event_type === "telemetry") {
       const p = ev.payload;
@@ -207,6 +215,14 @@ export async function GET(req: Request) {
     identity: identityByVin.get(r.vehicleRef) || null,
   }));
 
+  const nowMs = Date.now();
+  const offlineHistory: OfflinePeriod[] = [];
+  for (const m of byVehicle.values()) {
+    const timestamps = timestampsByVehicle.get(m.vehicleRef) || [];
+    offlineHistory.push(...computeOfflinePeriods(m.vehicleRef, m.registrationNumber, timestamps, nowMs));
+  }
+  offlineHistory.sort((a, b) => Date.parse(b.from) - Date.parse(a.from));
+
   return NextResponse.json({
     ok: true,
     from,
@@ -214,5 +230,6 @@ export async function GET(req: Request) {
     kpis,
     total: vehicles.length,
     vehicles,
+    offlineHistory,
   });
 }

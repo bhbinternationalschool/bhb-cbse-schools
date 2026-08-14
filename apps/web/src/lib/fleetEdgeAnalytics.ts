@@ -192,6 +192,61 @@ export function isVehicleOffline(lastSeenAt: string | null, asOfMs: number): boo
   return asOfMs - t > OFFLINE_THRESHOLD_MS;
 }
 
+export type OfflinePeriod = {
+  vehicleRef: string;
+  registrationNumber: string | null;
+  from: string;
+  /** null = still ongoing (vehicle is offline right now). */
+  to: string | null;
+  durationMs: number;
+};
+
+/** Fleet Edge sends no "offline log" of its own — this derives offline
+ * periods from gaps in what we've actually received: any gap between two
+ * consecutive events longer than OFFLINE_THRESHOLD_MS is a period the
+ * vehicle was silent. A trailing gap up to `asOfMs` is an ongoing period
+ * (to: null) exactly when isVehicleOffline would say so right now — the two
+ * are kept consistent on purpose. */
+export function computeOfflinePeriods(
+  vehicleRef: string,
+  registrationNumber: string | null,
+  eventTimestamps: readonly string[],
+  asOfMs: number = Date.now(),
+): OfflinePeriod[] {
+  const sorted = eventTimestamps
+    .map((t) => Date.parse(t))
+    .filter((t) => Number.isFinite(t))
+    .sort((a, b) => a - b);
+
+  const periods: OfflinePeriod[] = [];
+  for (let i = 1; i < sorted.length; i++) {
+    const gap = sorted[i] - sorted[i - 1];
+    if (gap > OFFLINE_THRESHOLD_MS) {
+      periods.push({
+        vehicleRef,
+        registrationNumber,
+        from: new Date(sorted[i - 1]).toISOString(),
+        to: new Date(sorted[i]).toISOString(),
+        durationMs: gap,
+      });
+    }
+  }
+  if (sorted.length > 0) {
+    const last = sorted[sorted.length - 1];
+    const trailingGap = asOfMs - last;
+    if (trailingGap > OFFLINE_THRESHOLD_MS) {
+      periods.push({
+        vehicleRef,
+        registrationNumber,
+        from: new Date(last).toISOString(),
+        to: null,
+        durationMs: trailingGap,
+      });
+    }
+  }
+  return periods;
+}
+
 /** Percentile rank of `score` among `allScores` (0-100). Ties split the
  * difference (standard "mean rank" percentile), so identical scores land
  * in the same bucket rather than arbitrarily ordering by array position. */
