@@ -14,8 +14,16 @@ export const runtime = "nodejs";
 export async function GET(request: Request) {
   try {
     const ctx = await resolveApiAuth(request);
-    if (ctx.session.persona !== "staff" && ctx.session.persona !== "field") {
-      throw new ApiError("forbidden", "Staff session required", 403);
+    // Route/stop/vehicle info carries no per-student assignment (that data
+    // doesn't exist yet either — transport_assignments is empty), so it's
+    // safe for parents to see the same list drivers do: which buses exist,
+    // what they cost, and where they stop.
+    if (
+      ctx.session.persona !== "staff" &&
+      ctx.session.persona !== "field" &&
+      ctx.session.persona !== "parent"
+    ) {
+      throw new ApiError("forbidden", "Sign in required", 403);
     }
 
     const { bundle, ok } = await fetchTransportDeskFromDb();

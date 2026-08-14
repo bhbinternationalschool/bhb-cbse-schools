@@ -9,6 +9,7 @@ import "../modules/homework_screen.dart";
 import "../modules/module_shell.dart";
 import "../modules/notices_screen.dart";
 import "../modules/ptm_screen.dart";
+import "../modules/transport_screen.dart";
 import "student_id_screen.dart";
 
 class _Module {
@@ -107,11 +108,7 @@ class _HomeScreenState extends State<HomeScreen> {
       case "PTM":
         screen = PtmScreen(api: api, child: child);
       case "Transport":
-        showComingSoon(
-          context,
-          "Transport",
-          "Bus routes and live tracking go live once the school publishes its transport routes.",
-        );
+        screen = TransportScreen(api: api);
       case "Exams":
         showComingSoon(
           context,
