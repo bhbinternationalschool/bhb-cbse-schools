@@ -15,6 +15,7 @@ import {
   LiveMapPanel,
   ServicePanel,
 } from "@/components/transport/TransportFleetPanels";
+import { FleetEdgeEventsPanel } from "@/components/transport/FleetEdgeEventsPanel";
 import {
   FleetPanel,
   FuelPanel,
@@ -435,13 +436,16 @@ export function TransportWorkspace() {
             />
           ) : null}
           {tab === "live" ? (
-            <LiveMapPanel
-              state={state}
-              sis={sis}
-              masters={masters}
-              academicYearCode={session.academicYearCode}
-              {...commonPanelProps}
-            />
+            <>
+              <LiveMapPanel
+                state={state}
+                sis={sis}
+                masters={masters}
+                academicYearCode={session.academicYearCode}
+                {...commonPanelProps}
+              />
+              <FleetEdgeEventsPanel />
+            </>
           ) : null}
           {tab === "reports" ? (
             <ReportsPanel
