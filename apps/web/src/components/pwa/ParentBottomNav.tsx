@@ -7,6 +7,7 @@ import {
   GraduationCap,
   IndianRupee,
   Megaphone,
+  MessageSquareWarning,
   MoreHorizontal,
   Newspaper,
   Images,
@@ -24,7 +25,8 @@ export type ParentNavTab =
   | "subjects"
   | "news"
   | "gallery"
-  | "profile";
+  | "profile"
+  | "complaints";
 
 type PrimaryId = "fees" | "homework" | "notices" | "ptm" | "more";
 
@@ -48,6 +50,7 @@ const MORE_ITEMS: { tab: ParentNavTab; label: string; icon: typeof Newspaper }[]
     { tab: "gallery", label: "Gallery", icon: Images },
     { tab: "leave", label: "Leave", icon: Calendar },
     { tab: "subjects", label: "Subjects", icon: GraduationCap },
+    { tab: "complaints", label: "Complaints", icon: MessageSquareWarning },
   ];
 
 export function ParentBottomNav({

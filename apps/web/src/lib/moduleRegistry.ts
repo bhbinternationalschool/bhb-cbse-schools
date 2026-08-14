@@ -42,7 +42,8 @@ export type RegistryModuleId =
   | "id_cards"
   | "discipline"
   | "health"
-  | "visitors";
+  | "visitors"
+  | "complaints";
 
 export type RegistryModuleGroup =
   | "setup"
@@ -257,6 +258,14 @@ export const REGISTRY_MODULES: RegistryModuleDef[] = [
     blurb: "Front-gate visitor register, QR passes, early-pickup gate passes",
     href: "/visitors",
     group: "campus",
+    defaultEnabled: true,
+  },
+  {
+    id: "complaints",
+    label: "Complaints / grievance",
+    blurb: "Parent-portal complaint intake, staff triage and resolution",
+    href: "/complaints",
+    group: "academics",
     defaultEnabled: true,
   },
   {
@@ -526,6 +535,7 @@ export function registryModuleForHref(href: string): RegistryModuleId | null {
   if (path === "/discipline" || path.startsWith("/discipline/")) return "discipline";
   if (path === "/health" || path.startsWith("/health/")) return "health";
   if (path === "/visitors" || path.startsWith("/visitors/")) return "visitors";
+  if (path === "/complaints" || path.startsWith("/complaints/")) return "complaints";
   if (
     path === "/comms" ||
     path.startsWith("/comms/") ||

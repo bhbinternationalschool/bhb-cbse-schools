@@ -48,7 +48,8 @@ export type RbacModule =
   | "id_cards"
   | "discipline"
   | "health"
-  | "visitors";
+  | "visitors"
+  | "complaints";
 
 export type RbacAction =
   | "view"
@@ -205,6 +206,11 @@ export const RBAC_MODULES: {
     label: "Visitor / gate management",
     href: "/visitors",
   },
+  {
+    id: "complaints",
+    label: "Complaints / grievance",
+    href: "/complaints",
+  },
   { id: "settings", label: "Settings / RBAC", group: "admin" },
   { id: "policies", label: "Policies (leave / holiday)", group: "admin" },
 ];
@@ -349,6 +355,7 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("discipline", [...ops, "approve"]),
         grant("health", ops),
         grant("visitors", ops),
+        grant("complaints", [...ops, "approve"]),
         grant("compliance", ["view", "edit", "export"]),
         grant("notices", ops),
         grant("news", ops),
@@ -398,6 +405,7 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("discipline", ["view", "create", "edit", "export"]),
         grant("health", ["view", "create", "edit", "export"]),
         grant("visitors", ["view", "create", "edit", "export"]),
+        grant("complaints", [...ops, "approve"]),
         grant("notices", ops),
         grant("news", ops),
         grant("gallery", ops),
@@ -481,6 +489,7 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("certificates", ["view"]),
         grant("discipline", ["view", "create"]),
         grant("health", ["view", "create"]),
+        grant("complaints", ["view", "edit"]),
         grant("notices", ["view"]),
         grant("news", ["view"]),
         grant("gallery", ["view"]),
@@ -495,7 +504,18 @@ export function defaultBuiltInRoles(): RbacRole[] {
       isActive: true,
       makerChecker: false,
       note: "Self-service portal only",
-      permissions: [grant("home", ["view"])],
+      permissions: [
+        grant("home", ["view"]),
+        // "edit" is this codebase's storage-layer write gate for every
+        // module's save*() helper (create/update/delete all funnel through
+        // it — see assertModulePermission callers) — parents need it to
+        // raise a complaint ticket via createComplaintTicket. The UI only
+        // exposes ticket creation for their own resolved household; it
+        // never exposes assign/resolve, matching the same UI-level (not
+        // server-enforced per-record) scoping already accepted for
+        // role_teacher's complaints grant.
+        grant("complaints", ["view", "edit"]),
+      ],
     },
     {
       id: "role_driver",
@@ -949,6 +969,7 @@ export function moduleForHref(href: string): RbacModule | null {
   if (path.startsWith("/discipline")) return "discipline";
   if (path.startsWith("/health")) return "health";
   if (path.startsWith("/visitors")) return "visitors";
+  if (path.startsWith("/complaints")) return "complaints";
   if (path.startsWith("/comms") || path.startsWith("/notices") || path.startsWith("/news") || path.startsWith("/gallery")) {
     const tab = params.get("tab");
     if (tab === "news" || path.startsWith("/news")) return "news";

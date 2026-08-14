@@ -6,6 +6,7 @@ import { ParentFeesPortal } from "@/components/parent/ParentFeesPortal";
 import { ParentHomeworkPortal } from "@/components/parent/ParentHomeworkPortal";
 import { ParentPtmPortal } from "@/components/parent/ParentPtmPortal";
 import { ParentStudentLeavePortal } from "@/components/parent/ParentStudentLeavePortal";
+import { ParentComplaintsPortal } from "@/components/parent/ParentComplaintsPortal";
 import { ParentSubjectsPortal } from "@/components/parent/ParentSubjectsPortal";
 import { ParentCommsPortal } from "@/components/parent/ParentCommsPortal";
 import { ParentProfileDocsPortal } from "@/components/parent/ParentProfileDocsPortal";
@@ -27,7 +28,8 @@ type PortalTab =
   | "notices"
   | "news"
   | "gallery"
-  | "profile";
+  | "profile"
+  | "complaints";
 
 export function ParentPortalClient({
   guardianName,
@@ -53,7 +55,8 @@ export function ParentPortalClient({
         raw === "leave" ||
         raw === "subjects" ||
         raw === "fees" ||
-        raw === "profile"
+        raw === "profile" ||
+        raw === "complaints"
       ) {
         setPortalTab(raw);
       }
@@ -99,6 +102,7 @@ export function ParentPortalClient({
     ["ptm", "PTM"],
     ["leave", "Leave"],
     ["subjects", "Subjects"],
+    ["complaints", "Complaints"],
   ] as const;
 
   const title =
@@ -108,7 +112,9 @@ export function ParentPortalClient({
         ? "PTM"
         : portalTab === "leave"
           ? "Leave"
-          : portalTab === "notices"
+          : portalTab === "complaints"
+            ? "Complaints"
+            : portalTab === "notices"
             ? "Notices"
             : portalTab === "news"
               ? "News"
@@ -210,6 +216,9 @@ export function ParentPortalClient({
           ) : null}
           {portalTab === "leave" ? (
             <ParentStudentLeavePortal guardianDisplayName={guardianName} />
+          ) : null}
+          {portalTab === "complaints" ? (
+            <ParentComplaintsPortal guardianDisplayName={guardianName} />
           ) : null}
           {portalTab === "profile" ? (
             <ParentProfileDocsPortal

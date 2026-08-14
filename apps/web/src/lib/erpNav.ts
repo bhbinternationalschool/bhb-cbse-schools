@@ -15,6 +15,7 @@ import {
   MapPinned,
   Images,
   Megaphone,
+  MessageSquareWarning,
   MessagesSquare,
   Newspaper,
   NotebookPen,
@@ -233,6 +234,14 @@ export const HUB_GROUPS: HubGroup[] = [
         detail: "Log incidents, track merit/demerit points and notify parents.",
         icon: ShieldAlert,
         tone: "rose",
+      },
+      {
+        href: "/complaints",
+        title: "Complaints",
+        blurb: "Grievance triage",
+        detail: "Parent-portal complaint intake, staff assignment and resolution.",
+        icon: MessageSquareWarning,
+        tone: "violet",
       },
       {
         href: "/homework",
