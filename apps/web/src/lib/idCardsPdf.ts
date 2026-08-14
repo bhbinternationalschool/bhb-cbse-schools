@@ -68,7 +68,7 @@ export function buildStudentIdCardDoc(
       dob: student.dob || undefined,
       father_name: student.fatherName || undefined,
       mother_name: student.motherName || undefined,
-      validity: `Valid: AY ${ay}`,
+      validity: `AY ${ay}`,
     },
     photos: {
       student_photo: student.photoUrl || null,
@@ -93,7 +93,7 @@ export function buildStaffIdCardDoc(staff: StaffRecord, masters: MastersState): 
       designation: designation || "Staff",
       emp_code: staff.empCode || "—",
       department: department || undefined,
-      validity: `Valid: AY ${currentAcademicYearCode(masters)}`,
+      validity: `AY ${currentAcademicYearCode(masters)}`,
     },
     // father/mother/guardian keys deliberately never set — the data-layer
     // backstop alongside the field catalog's appliesTo filter (see
@@ -169,8 +169,28 @@ function drawPhotoOrPlaceholder(
   drawPlaceholderPhoto(doc, x, y, w, h, dashedFallback);
 }
 
-function valueFor(card: IdCardDoc, f: IdCardTextFieldId): string {
-  return card.values[f] || "—";
+/** Short on-card labels — deliberately terser than the settings-tab
+ * checkbox labels in lib/idCardTemplate.ts (e.g. "Class & section" there
+ * vs "Class" here), since card space is only a few mm wide. `name` has no
+ * entry on purpose — it's the prominent unlabeled headline line. */
+const ON_CARD_LABELS: Partial<Record<IdCardTextFieldId, string>> = {
+  class_section: "Class",
+  roll_no: "Roll",
+  admission_no: "Adm No",
+  designation: "Desig",
+  emp_code: "Emp",
+  department: "Dept",
+  blood_group: "Blood",
+  dob: "DOB",
+  father_name: "Father",
+  mother_name: "Mother",
+  validity: "Valid",
+};
+
+function lineTextFor(card: IdCardDoc, f: IdCardTextFieldId): string {
+  const value = card.values[f] || "—";
+  const label = ON_CARD_LABELS[f];
+  return label ? `${label}: ${value}` : value;
 }
 
 function secondaryLabel(id: IdCardPhotoFieldId): string {
@@ -246,9 +266,9 @@ function drawIdCardFace(
     const textW = cardW - pad * 2;
     textFields.forEach((f, i) => {
       doc.setFont("helvetica", i === 0 ? "bold" : "normal");
-      doc.setFontSize(i === 0 ? 7.5 : 6.2);
+      doc.setFontSize(i === 0 ? 7.5 : 5.8);
       doc.setTextColor(i === 0 ? 32 : 70, i === 0 ? 48 : 70, i === 0 ? 80 : 70);
-      doc.text(valueFor(card, f), x + cardW / 2, textTop + (i + 1) * lineH, {
+      doc.text(lineTextFor(card, f), x + cardW / 2, textTop + (i + 1) * lineH, {
         align: "center",
         maxWidth: textW,
       });
@@ -288,9 +308,9 @@ function drawIdCardFace(
     const lineH = textFields.length ? Math.min(4.4, textAvailH / textFields.length) : 0;
     textFields.forEach((f, i) => {
       doc.setFont("helvetica", i === 0 ? "bold" : "normal");
-      doc.setFontSize(i === 0 ? 8 : 6.5);
+      doc.setFontSize(i === 0 ? 8 : 6);
       doc.setTextColor(i === 0 ? 32 : 70, i === 0 ? 48 : 70, i === 0 ? 80 : 70);
-      doc.text(valueFor(card, f), textX, y + pad + (i + 1) * lineH, { maxWidth: textW });
+      doc.text(lineTextFor(card, f), textX, y + pad + (i + 1) * lineH, { maxWidth: textW });
     });
 
     if (secondaryIds.length) {
