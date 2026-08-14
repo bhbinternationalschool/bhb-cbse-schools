@@ -12,14 +12,33 @@ import {
   buildStaffIdCardDoc,
   buildStudentIdCardDoc,
   downloadIdCardsPdf,
+  idCardTemplateIsHeavy,
 } from "@/lib/idCardsPdf";
+import {
+  ID_CARD_FIELD_CATALOG,
+  ID_CARD_PRESETS,
+  emptyIdCardTemplateState,
+  loadIdCardTemplateState,
+  saveIdCardTemplateState,
+  type IdCardFieldId,
+  type IdCardKind,
+  type IdCardTemplate,
+  type IdCardTemplateState,
+} from "@/lib/idCardTemplate";
 
-type Tab = "student" | "staff";
+type Tab = "student" | "staff" | "design";
 
 const TABS: ModuleTabItem[] = [
   { id: "student", label: "Student ID cards", tone: "navy" },
   { id: "staff", label: "Staff ID cards", tone: "teal" },
+  { id: "design", label: "Card design", tone: "amber" },
 ];
+
+function templateSummary(t: IdCardTemplate): string {
+  const orientation = t.orientation === "portrait" ? "Portrait" : "Landscape";
+  const sides = t.sides === "front_back" ? "Front & back" : "Front only";
+  return `${orientation} · ${sides}`;
+}
 
 export function IdCardsWorkspace() {
   const session = useDemoSession();
@@ -40,9 +59,15 @@ export function IdCardsWorkspace() {
   const [designationId, setDesignationId] = useState("");
   const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([]);
 
+  const [templateState, setTemplateState] = useState<IdCardTemplateState>(() =>
+    emptyIdCardTemplateState(),
+  );
+  const [designKind, setDesignKind] = useState<IdCardKind>("student");
+
   useEffect(() => {
     setMasters(loadMasters());
     setSis(loadSis());
+    setTemplateState(loadIdCardTemplateState());
     void (async () => {
       const { ensureMastersHydrated } = await import("@/lib/mastersPersistence");
       const { ensureSisHydrated } = await import("@/lib/sisPersistence");
@@ -116,8 +141,14 @@ export function IdCardsWorkspace() {
     );
   }
 
+  function flash(msg: string) {
+    setNotice(msg);
+    setError(null);
+    window.setTimeout(() => setNotice(null), 4000);
+  }
+
   async function onGenerateStudentCards() {
-    if (!masters) return;
+    if (!masters || !sis) return;
     const picked = students.filter((s) => selectedStudentIds.includes(s.id));
     if (!picked.length) {
       setError("Select at least one student.");
@@ -127,9 +158,10 @@ export function IdCardsWorkspace() {
     setError(null);
     setNotice(null);
     try {
-      const docs = picked.map((s) => buildStudentIdCardDoc(s, masters));
-      await downloadIdCardsPdf(docs, { fileBaseName: "student_id_cards" });
-      setNotice(`${docs.length} student ID card(s) generated.`);
+      const template = loadIdCardTemplateState().student;
+      const docs = picked.map((s) => buildStudentIdCardDoc(s, sis, masters));
+      await downloadIdCardsPdf(docs, template, { fileBaseName: "student_id_cards" });
+      flash(`${docs.length} student ID card(s) generated.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -148,14 +180,60 @@ export function IdCardsWorkspace() {
     setError(null);
     setNotice(null);
     try {
+      const template = loadIdCardTemplateState().staff;
       const docs = picked.map((s) => buildStaffIdCardDoc(s, masters));
-      await downloadIdCardsPdf(docs, { fileBaseName: "staff_id_cards" });
-      setNotice(`${docs.length} staff ID card(s) generated.`);
+      await downloadIdCardsPdf(docs, template, { fileBaseName: "staff_id_cards" });
+      flash(`${docs.length} staff ID card(s) generated.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
+  }
+
+  const draftTemplate = templateState[designKind];
+
+  function updateDraft(patch: Partial<IdCardTemplate>) {
+    setTemplateState((prev) => ({ ...prev, [designKind]: { ...prev[designKind], ...patch } }));
+  }
+
+  function toggleDraftField(side: "front" | "back", fieldId: IdCardFieldId) {
+    const key = side === "front" ? "frontFields" : "backFields";
+    const list = draftTemplate[key];
+    updateDraft({
+      [key]: list.includes(fieldId) ? list.filter((f) => f !== fieldId) : [...list, fieldId],
+    } as Partial<IdCardTemplate>);
+  }
+
+  function onSaveTemplate() {
+    const saved = saveIdCardTemplateState(templateState);
+    setTemplateState(saved);
+    flash("Card design saved.");
+  }
+
+  function fieldGroup(side: "front" | "back", kind: "photo" | "qr" | "text", label: string) {
+    const ids = (Object.keys(ID_CARD_FIELD_CATALOG) as IdCardFieldId[]).filter(
+      (id) => ID_CARD_FIELD_CATALOG[id].kind === kind && ID_CARD_FIELD_CATALOG[id].appliesTo.includes(designKind),
+    );
+    if (!ids.length) return null;
+    const list = side === "front" ? draftTemplate.frontFields : draftTemplate.backFields;
+    return (
+      <div key={`${side}-${kind}`}>
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">{label}</p>
+        <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1.5">
+          {ids.map((id) => (
+            <label key={id} className="flex items-center gap-1.5 text-xs">
+              <input
+                type="checkbox"
+                checked={list.includes(id)}
+                onChange={() => toggleDraftField(side, id)}
+              />
+              {ID_CARD_FIELD_CATALOG[id].label}
+            </label>
+          ))}
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -242,14 +320,29 @@ export function IdCardsWorkspace() {
             )}
           </div>
 
-          <button
-            type="button"
-            className="btn-accent rounded-lg px-4 py-2 text-sm font-bold disabled:opacity-50"
-            disabled={readOnly || busy || !selectedStudentIds.length}
-            onClick={onGenerateStudentCards}
-          >
-            {busy ? "Generating…" : `Print ${selectedStudentIds.length} card(s)`}
-          </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              className="btn-accent rounded-lg px-4 py-2 text-sm font-bold disabled:opacity-50"
+              disabled={readOnly || busy || !selectedStudentIds.length}
+              onClick={onGenerateStudentCards}
+            >
+              {busy ? "Generating…" : `Print ${selectedStudentIds.length} card(s)`}
+            </button>
+            <span className="text-[11px] text-[var(--muted)]">
+              Using: {templateSummary(templateState.student)} —{" "}
+              <button
+                type="button"
+                className="font-semibold text-[var(--brand-deep)] underline"
+                onClick={() => {
+                  setDesignKind("student");
+                  setTab("design");
+                }}
+              >
+                change
+              </button>
+            </span>
+          </div>
         </div>
       ) : null}
 
@@ -326,13 +419,152 @@ export function IdCardsWorkspace() {
             )}
           </div>
 
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              className="btn-accent rounded-lg px-4 py-2 text-sm font-bold disabled:opacity-50"
+              disabled={readOnly || busy || !selectedStaffIds.length}
+              onClick={onGenerateStaffCards}
+            >
+              {busy ? "Generating…" : `Print ${selectedStaffIds.length} card(s)`}
+            </button>
+            <span className="text-[11px] text-[var(--muted)]">
+              Using: {templateSummary(templateState.staff)} —{" "}
+              <button
+                type="button"
+                className="font-semibold text-[var(--brand-deep)] underline"
+                onClick={() => {
+                  setDesignKind("staff");
+                  setTab("design");
+                }}
+              >
+                change
+              </button>
+            </span>
+          </div>
+        </div>
+      ) : null}
+
+      {tab === "design" ? (
+        <div className="mt-5 max-w-2xl space-y-5">
+          <div className="flex gap-2">
+            <button
+              type="button"
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
+                designKind === "student"
+                  ? "btn-accent"
+                  : "border border-[var(--border)]"
+              }`}
+              onClick={() => setDesignKind("student")}
+            >
+              Student cards
+            </button>
+            <button
+              type="button"
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
+                designKind === "staff" ? "btn-accent" : "border border-[var(--border)]"
+              }`}
+              onClick={() => setDesignKind("staff")}
+            >
+              Staff cards
+            </button>
+          </div>
+
+          <div>
+            <p className="mb-1.5 text-[11px] text-[var(--muted)]">Presets</p>
+            <div className="flex flex-wrap gap-2">
+              {ID_CARD_PRESETS.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold"
+                  onClick={() => updateDraft(p.build(designKind))}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <p className="mb-1.5 text-[11px] font-semibold text-[var(--muted)]">Orientation</p>
+              <div className="flex gap-4 text-xs">
+                <label className="flex items-center gap-1.5">
+                  <input
+                    type="radio"
+                    checked={draftTemplate.orientation === "landscape"}
+                    onChange={() => updateDraft({ orientation: "landscape" })}
+                  />
+                  Landscape
+                </label>
+                <label className="flex items-center gap-1.5">
+                  <input
+                    type="radio"
+                    checked={draftTemplate.orientation === "portrait"}
+                    onChange={() => updateDraft({ orientation: "portrait" })}
+                  />
+                  Portrait
+                </label>
+              </div>
+            </div>
+            <div>
+              <p className="mb-1.5 text-[11px] font-semibold text-[var(--muted)]">Sides</p>
+              <div className="flex gap-4 text-xs">
+                <label className="flex items-center gap-1.5">
+                  <input
+                    type="radio"
+                    checked={draftTemplate.sides === "front_only"}
+                    onChange={() => updateDraft({ sides: "front_only" })}
+                  />
+                  Front only
+                </label>
+                <label className="flex items-center gap-1.5">
+                  <input
+                    type="radio"
+                    checked={draftTemplate.sides === "front_back"}
+                    onChange={() => updateDraft({ sides: "front_back" })}
+                  />
+                  Front &amp; back
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+            <h3 className="text-xs font-bold text-[var(--brand-deep)]">Front</h3>
+            <div className="mt-2 space-y-2">
+              {fieldGroup("front", "photo", "Photos")}
+              {fieldGroup("front", "qr", "QR")}
+              {fieldGroup("front", "text", "Details")}
+            </div>
+          </div>
+
+          {draftTemplate.sides === "front_back" ? (
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+              <h3 className="text-xs font-bold text-[var(--brand-deep)]">Back</h3>
+              <div className="mt-2 space-y-2">
+                {fieldGroup("back", "photo", "Photos")}
+                {fieldGroup("back", "qr", "QR")}
+                {fieldGroup("back", "text", "Details")}
+              </div>
+            </div>
+          ) : null}
+
+          {idCardTemplateIsHeavy(draftTemplate) ? (
+            <p className="rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-xs text-[var(--warning)]">
+              Large batches with parent photos on front &amp; back may take a while to generate —
+              consider printing in smaller runs.
+            </p>
+          ) : null}
+
           <button
             type="button"
             className="btn-accent rounded-lg px-4 py-2 text-sm font-bold disabled:opacity-50"
-            disabled={readOnly || busy || !selectedStaffIds.length}
-            onClick={onGenerateStaffCards}
+            disabled={readOnly}
+            onClick={onSaveTemplate}
           >
-            {busy ? "Generating…" : `Print ${selectedStaffIds.length} card(s)`}
+            Save card design
           </button>
         </div>
       ) : null}
