@@ -44,7 +44,9 @@ export type RbacModule =
   | "wa_templates"
   | "wa_automation"
   | "wa_chatbot"
-  | "documents";
+  | "documents"
+  | "id_cards"
+  | "discipline";
 
 export type RbacAction =
   | "view"
@@ -179,6 +181,17 @@ export const RBAC_MODULES: {
     label: "Document maker",
     href: "/documents",
     group: "optional",
+  },
+  {
+    id: "id_cards",
+    label: "ID cards",
+    href: "/id-cards",
+    group: "optional",
+  },
+  {
+    id: "discipline",
+    label: "Discipline / behavior",
+    href: "/discipline",
   },
   { id: "settings", label: "Settings / RBAC", group: "admin" },
   { id: "policies", label: "Policies (leave / holiday)", group: "admin" },
@@ -320,6 +333,8 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("exams", ops),
         grant("certificates", ops),
         grant("documents", ["view", "create", "export"]),
+        grant("id_cards", ops),
+        grant("discipline", [...ops, "approve"]),
         grant("compliance", ["view", "edit", "export"]),
         grant("notices", ops),
         grant("news", ops),
@@ -365,6 +380,8 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("staff_advances", ["view", "create", "edit", "delete", "export"]),
         grant("certificates", ops),
         grant("documents", ["view", "create", "export"]),
+        grant("id_cards", ["view", "create", "export"]),
+        grant("discipline", ["view", "create", "edit", "export"]),
         grant("notices", ops),
         grant("news", ops),
         grant("gallery", ops),
@@ -445,6 +462,7 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("purchase", ["view", "create"]),
         grant("exams", teachOps),
         grant("certificates", ["view"]),
+        grant("discipline", ["view", "create"]),
         grant("notices", ["view"]),
         grant("news", ["view"]),
         grant("gallery", ["view"]),
@@ -909,6 +927,8 @@ export function moduleForHref(href: string): RbacModule | null {
   if (path.startsWith("/exams")) return "exams";
   if (path.startsWith("/certificates")) return "certificates";
   if (path.startsWith("/documents")) return "documents";
+  if (path.startsWith("/id-cards")) return "id_cards";
+  if (path.startsWith("/discipline")) return "discipline";
   if (path.startsWith("/comms") || path.startsWith("/notices") || path.startsWith("/news") || path.startsWith("/gallery")) {
     const tab = params.get("tab");
     if (tab === "news" || path.startsWith("/news")) return "news";

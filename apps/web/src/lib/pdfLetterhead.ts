@@ -72,7 +72,7 @@ async function loadImageAsDataUrl(url: string): Promise<string | null> {
   }
 }
 
-function imageFormatFromDataUrl(dataUrl: string): "PNG" | "JPEG" | "WEBP" {
+export function imageFormatFromDataUrl(dataUrl: string): "PNG" | "JPEG" | "WEBP" {
   if (dataUrl.includes("image/jpeg") || dataUrl.includes("image/jpg")) return "JPEG";
   if (dataUrl.includes("image/webp")) return "WEBP";
   return "PNG";

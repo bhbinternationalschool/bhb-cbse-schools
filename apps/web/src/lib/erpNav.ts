@@ -21,6 +21,7 @@ import {
   ScrollText,
   Settings2,
   Shield,
+  ShieldAlert,
   ToggleLeft,
   UserPlus,
   Users,
@@ -191,6 +192,14 @@ export const HUB_GROUPS: HubGroup[] = [
         icon: IdCard,
         tone: "slate",
       },
+      {
+        href: "/id-cards",
+        title: "ID cards",
+        blurb: "Batch print",
+        detail: "Student & staff photo ID cards with QR, printed as A4 sheets.",
+        icon: IdCard,
+        tone: "sky",
+      },
     ],
   },
   {
@@ -214,6 +223,14 @@ export const HUB_GROUPS: HubGroup[] = [
         detail: "Approve leave, holiday policy and parent portal requests.",
         icon: IdCard,
         tone: "green",
+      },
+      {
+        href: "/discipline",
+        title: "Discipline",
+        blurb: "Incident log",
+        detail: "Log incidents, track merit/demerit points and notify parents.",
+        icon: ShieldAlert,
+        tone: "rose",
       },
       {
         href: "/homework",

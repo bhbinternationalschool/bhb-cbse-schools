@@ -70,6 +70,7 @@ import {
 import { ExamDateSheetPanel } from "@/components/exams/ExamDateSheetPanel";
 import { InvigilationPanel } from "@/components/exams/InvigilationPanel";
 import { ExamPapersPanel } from "@/components/exams/ExamPapersPanel";
+import { AdmitCardsPanel } from "@/components/exams/AdmitCardsPanel";
 import { ExamReportsRunner } from "@/components/reports/ModuleReportRunners";
 import { hasPermission } from "@/lib/rbac";
 
@@ -79,6 +80,7 @@ type Tab =
   | "datesheet"
   | "invigilation"
   | "papers"
+  | "admitcards"
   | "reports"
   | "results"
   | "result_reports"
@@ -652,6 +654,7 @@ export function ExamsWorkspace() {
           { id: "datesheet", label: "Date-sheet", tone: "violet" },
           { id: "invigilation", label: "Invigilation", tone: "coral" },
           { id: "papers", label: "Question papers", tone: "rose" },
+          { id: "admitcards", label: "Admit cards", tone: "sky" },
           { id: "reports", label: "Report cards", tone: "amber" },
           { id: "results", label: "Results", tone: "green" },
           { id: "result_reports", label: "Result reports", tone: "teal" },
@@ -663,7 +666,8 @@ export function ExamsWorkspace() {
       tab !== "dashboard" &&
       tab !== "datesheet" &&
       tab !== "invigilation" &&
-      tab !== "papers" ? (
+      tab !== "papers" &&
+      tab !== "admitcards" ? (
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
           <label className="block text-sm">
             <span className="mb-1 block text-[11px] text-[var(--muted)]">
@@ -739,6 +743,10 @@ export function ExamsWorkspace() {
 
       {tab === "invigilation" && masters ? (
         <InvigilationPanel academicYearCode={ay} masters={masters} terms={terms} />
+      ) : null}
+
+      {tab === "admitcards" && masters ? (
+        <AdmitCardsPanel academicYearCode={ay} masters={masters} terms={terms} />
       ) : null}
 
       {tab === "papers" && masters ? (

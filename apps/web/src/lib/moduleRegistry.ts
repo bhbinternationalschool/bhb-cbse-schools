@@ -38,7 +38,9 @@ export type RegistryModuleId =
   | "comms"
   | "reports"
   | "rte_ews"
-  | "documents";
+  | "documents"
+  | "id_cards"
+  | "discipline";
 
 export type RegistryModuleGroup =
   | "setup"
@@ -222,6 +224,22 @@ export const REGISTRY_MODULES: RegistryModuleDef[] = [
     href: "/documents",
     group: "optional",
     defaultEnabled: true,
+  },
+  {
+    id: "id_cards",
+    label: "ID cards",
+    blurb: "Student & staff ID card batch printing with QR",
+    href: "/id-cards",
+    group: "optional",
+    defaultEnabled: true,
+  },
+  {
+    id: "discipline",
+    label: "Discipline / behavior",
+    blurb: "Incident log, escalation ladder, parent WhatsApp notify",
+    href: "/discipline",
+    group: "academics",
+    defaultEnabled: false,
   },
   {
     id: "library",
@@ -486,6 +504,8 @@ export function registryModuleForHref(href: string): RegistryModuleId | null {
   if (path === "/certificates" || path.startsWith("/certificates/"))
     return "certificates";
   if (path === "/documents" || path.startsWith("/documents/")) return "documents";
+  if (path === "/id-cards" || path.startsWith("/id-cards/")) return "id_cards";
+  if (path === "/discipline" || path.startsWith("/discipline/")) return "discipline";
   if (
     path === "/comms" ||
     path.startsWith("/comms/") ||

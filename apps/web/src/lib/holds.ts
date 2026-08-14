@@ -55,6 +55,7 @@ export const ENFORCED_HOLDS: HoldCode[] = [
   "HOLD_TRANSPORT",
   "HOLD_CERT",
   "HOLD_TC",
+  "HOLD_ADMIT_CARD",
 ];
 
 export type HoldOverride = {
