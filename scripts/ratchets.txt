@@ -22,7 +22,7 @@ default_ay|257|Hardcoded DEFAULT_AY fallbacks (244 -> 246 on 2026-08-11 by c48f6
 # Fire-and-forget writes. `void pushX()` discards the outcome, so a failed
 # save reaches a console.warn and the user is told nothing. This is the
 # mechanism behind "it said saved and it wasn't". Target is 0.
-void_writes|70|Writes whose result is discarded (void push/flush/schedule)
+void_writes|68|Writes whose result is discarded (void push/flush/schedule) (70 -> 68 on 2026-08-14 rebasing onto PR #19 "background push retry + sync-status indicator for attendance" — that feature's own retry/status work removed 2 void writes, tightened rather than left slack.)
 
 # Routes that answer HTTP 200 {ok:true, skipped:true} when a dual-write flag
 # is off. The client records success; the database is untouched. The
@@ -39,5 +39,5 @@ unguarded_cache_writes|0|Bare localStorage.setItem on module state
 # "Refined Enterprise" plan). Dark mode landed this phase via design tokens
 # in globals.css; these two patterns bypass the tokens and so don't adapt
 # to it. Falls per module as each gets its visual refit — see Phase 3/4.
-raw_hex|836|Arbitrary hex Tailwind classes bypassing design tokens; not dark-mode aware. Target is 0. (831 -> 835 on 2026-08-14 rebasing onto PR #14/#13; 835 -> 836 rebasing onto PR #15 "flag allocations that exceed stockOnHand", same day, same concurrent session — same "raised not eroded" rule as default_ay above.)
+raw_hex|837|Arbitrary hex Tailwind classes bypassing design tokens; not dark-mode aware. Target is 0. (831 -> 835 on 2026-08-14 rebasing onto PR #14/#13; 835 -> 836 rebasing onto PR #15 "flag allocations that exceed stockOnHand", same day, same concurrent session — same "raised not eroded" rule as default_ay above; 836 -> 837 same day rebasing onto PR #19 "background push retry + sync-status indicator for attendance" — that feature's own sync-status UI, not this session's code.)
 raw_table|7|Hand-rolled <table> instead of ui/erp-roster.tsx's ErpTableShell. Target is 0.
