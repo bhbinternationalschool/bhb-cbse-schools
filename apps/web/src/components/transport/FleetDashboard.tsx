@@ -6,7 +6,7 @@ import { ErpMetricCard } from "@/components/ui/erp-roster";
 import { dashboardToneToMetric, kpiIconForTone, type DashboardTone } from "@/components/dashboard/ModuleDashboard";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { field } from "@/components/ui/erp-ui";
-import type { FleetBucket, VehicleDashboardRow } from "@/lib/fleetEdgeAnalytics";
+import { averageEngineLoad, type FleetBucket, type VehicleDashboardRow } from "@/lib/fleetEdgeAnalytics";
 
 type Tab = "live" | "vehicleWise" | "directorReport" | "scorecard" | "health";
 
@@ -304,27 +304,40 @@ export function FleetDashboard() {
 
             {tab === "vehicleWise" ? (
               <ul className="mt-4 space-y-2">
-                {rows.map((v) => (
-                  <li key={v.vehicleRef} className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="font-semibold">{vehicleLabel(v)}</span>
-                      <span className="text-sm font-bold">
-                        {v.score != null ? `Score ${v.score}` : "—"}
-                        <span className="ml-2 rounded-full bg-[var(--surface-sunken)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--muted)]">
-                          {bucketLabel(v.bucket)}
+                {rows.map((v) => {
+                  const load = averageEngineLoad(v);
+                  const economy = v.fuelConsumed > 0 ? v.distanceTravelledKm / v.fuelConsumed : null;
+                  return (
+                    <li key={v.vehicleRef} className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-semibold">{vehicleLabel(v)}</span>
+                        <span className="text-sm font-bold">
+                          {v.score != null ? `Score ${v.score}` : "—"}
+                          <span className="ml-2 rounded-full bg-[var(--surface-sunken)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--muted)]">
+                            {bucketLabel(v.bucket)}
+                          </span>
                         </span>
-                      </span>
-                    </div>
-                    <p className="mt-1 text-sm text-[var(--muted)]">
-                      {v.distanceTravelledKm.toFixed(0)} km · fuel used {v.fuelConsumed.toFixed(1)} ·
-                      {" "}avg speed {(() => {
-                        const s = v.averageSpeedSamples;
-                        return s.length ? (s.reduce((a, b) => a + b, 0) / s.length).toFixed(0) : "—";
-                      })()} km/h ·
-                      {" "}idling {(v.idlingSeconds / 60).toFixed(0)} min
-                    </p>
-                  </li>
-                ))}
+                      </div>
+                      <p className="mt-1 text-sm text-[var(--muted)]">
+                        {v.distanceTravelledKm.toFixed(0)} km · fuel used {v.fuelConsumed.toFixed(1)} L
+                        {economy != null ? ` (${economy.toFixed(1)} km/L)` : ""} ·
+                        {" "}avg speed {(() => {
+                          const s = v.averageSpeedSamples;
+                          return s.length ? (s.reduce((a, b) => a + b, 0) / s.length).toFixed(0) : "—";
+                        })()} km/h ·
+                        {" "}idling {(v.idlingSeconds / 60).toFixed(0)} min · coasting {(v.coastingSeconds / 60).toFixed(0)} min
+                      </p>
+                      <p className="mt-1 text-sm text-[var(--muted)]">
+                        {load
+                          ? `Engine load — heavy ${load.heavy.toFixed(0)}% · medium ${load.medium.toFixed(0)}% · light ${load.light.toFixed(0)}%`
+                          : "Engine load — no data yet"}
+                        {v.refuelCount > 0 ? ` · refuelled ${v.refuelCount}×` : ""}
+                        {v.fuelDrainedLiters > 0 ? ` · drained ${v.fuelDrainedLiters.toFixed(1)} L` : ""}
+                        {v.geofenceVisits.length > 0 ? ` · ${v.geofenceVisits.length} geofence visits` : ""}
+                      </p>
+                    </li>
+                  );
+                })}
               </ul>
             ) : null}
 
@@ -393,16 +406,44 @@ export function FleetDashboard() {
                     <li key={v.vehicleRef} className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <span className="font-semibold">{vehicleLabel(v)}</span>
-                        {v.faultCritical > 0 ? (
-                          <span className="rounded-full bg-[var(--danger-soft)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--danger)]">
-                            {v.faultCritical} critical
-                          </span>
-                        ) : null}
+                        <div className="flex flex-wrap gap-1.5">
+                          {v.faultCritical > 0 ? (
+                            <span className="rounded-full bg-[var(--danger-soft)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--danger)]">
+                              {v.faultCritical} critical
+                            </span>
+                          ) : null}
+                          {v.lowFuelAlertCount > 0 ? (
+                            <span className="rounded-full bg-[var(--warning-soft)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--warning)]">
+                              Low fuel ×{v.lowFuelAlertCount}
+                            </span>
+                          ) : null}
+                          {v.lowDefAlertCount > 0 ? (
+                            <span className="rounded-full bg-[var(--warning-soft)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--warning)]">
+                              Low DEF ×{v.lowDefAlertCount}
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
                       <p className="mt-1 text-sm text-[var(--muted)]">
                         {v.faultCritical} critical · {v.faultWarning} warning fault codes · {v.incidents} incidents
                         {v.serviceDue ? ` · service: ${v.serviceDue}` : ""}
                       </p>
+                      {v.faultCriticalDetails.length || v.faultWarningDetails.length ? (
+                        <ul className="mt-2 space-y-1 border-t border-[var(--border)] pt-2 text-sm">
+                          {v.faultCriticalDetails.map((f, i) => (
+                            <li key={`c${i}`} className="text-[var(--danger)]">
+                              {f.description}
+                              {f.suggestedAction ? ` — ${f.suggestedAction}` : ""}
+                            </li>
+                          ))}
+                          {v.faultWarningDetails.map((f, i) => (
+                            <li key={`w${i}`} className="text-[var(--warning)]">
+                              {f.description}
+                              {f.suggestedAction ? ` — ${f.suggestedAction}` : ""}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
                     </li>
                   ))}
               </ul>

@@ -113,9 +113,13 @@ export async function GET(req: Request) {
     if (!Number.isFinite(evMs) || evMs < fromMs || evMs > toMs) continue;
 
     if (ev.event_type === "alert") {
+      const eventDetails = isObj(ev.payload.eventDetails) ? ev.payload.eventDetails : {};
       if (ev.alert_name === "OverSpeedEvent") m.overSpeedCount += 1;
       else if (ev.alert_name === "DriverSOSAlert") m.sosCount += 1;
-      else if (ev.alert_name === "FuelDrainAlert") m.fuelDrainCount += 1;
+      else if (ev.alert_name === "FuelDrainAlert") {
+        m.fuelDrainCount += 1;
+        m.fuelDrainedLiters += num(eventDetails.fuelDifference);
+      } else if (ev.alert_name === "RefuelAlert") m.refuelCount += 1;
       else if (ev.alert_name === "GeoFenceEntered" || ev.alert_name === "GeoFenceExited") m.geofenceEventCount += 1;
     } else if (ev.event_type === "details") {
       const p = ev.payload;
@@ -124,22 +128,58 @@ export async function GET(req: Request) {
       m.hbCount += num(safety.harshBrakeCount);
       m.rtCount += num(safety.rashTurningCount);
       m.nightDrivingSeconds += num(safety.nightTimeDrivingDuration);
+      m.coastingSeconds += sumDurations(safety.coasting);
 
       const perf = isObj(p.vehiclePerformance) ? p.vehiclePerformance : {};
       m.distanceTravelledKm += num(perf.distanceTravelled);
       if (typeof perf.serviceDue === "string" && perf.serviceDue.trim()) m.serviceDue = perf.serviceDue;
+      const engineLoad = isObj(perf.engineLoadUtilisation) ? perf.engineLoadUtilisation : null;
+      if (engineLoad) {
+        m.engineLoadHeavySamples.push(num(engineLoad.heavy));
+        m.engineLoadMediumSamples.push(num(engineLoad.medium));
+        m.engineLoadLightSamples.push(num(engineLoad.light));
+      }
 
       const eff = isObj(p.vehicleEfficiency) ? p.vehicleEfficiency : {};
       m.fuelConsumed += num(eff.fuelConsumed);
       if (typeof eff.averageSpeed === "number") m.averageSpeedSamples.push(eff.averageSpeed);
       m.idlingSeconds += sumDurations(eff.idlings);
       m.stoppageSeconds += sumDurations(eff.stoppages);
+      if (Array.isArray(eff.geofence)) {
+        for (const g of eff.geofence) {
+          if (!isObj(g)) continue;
+          m.geofenceVisits.push({
+            geofenceName: typeof g.geofenceName === "string" ? g.geofenceName : "Unnamed",
+            durationInSeconds: num(g.durationInSeconds),
+            inDateTime: typeof g.inDateTime === "string" ? g.inDateTime : null,
+            outDateTime: typeof g.outDateTime === "string" ? g.outDateTime : null,
+          });
+        }
+      }
 
       const health = isObj(p.vehicleHealth) ? p.vehicleHealth : {};
       const fault = isObj(health.faultCodes) ? health.faultCodes : {};
-      m.faultCritical += Array.isArray(fault.critical) ? fault.critical.length : 0;
-      m.faultWarning += Array.isArray(fault.warning) ? fault.warning.length : 0;
+      const critical = Array.isArray(fault.critical) ? fault.critical : [];
+      const warning = Array.isArray(fault.warning) ? fault.warning : [];
+      m.faultCritical += critical.length;
+      m.faultWarning += warning.length;
+      for (const f of critical) {
+        if (!isObj(f)) continue;
+        m.faultCriticalDetails.push({
+          description: typeof f.description === "string" ? f.description : "Unknown fault",
+          suggestedAction: typeof f.suggestedAction === "string" ? f.suggestedAction : "",
+        });
+      }
+      for (const f of warning) {
+        if (!isObj(f)) continue;
+        m.faultWarningDetails.push({
+          description: typeof f.description === "string" ? f.description : "Unknown fault",
+          suggestedAction: typeof f.suggestedAction === "string" ? f.suggestedAction : "",
+        });
+      }
       m.incidents += Array.isArray(health.incidents) ? health.incidents.length : 0;
+      if (isObj(health.lowFuel) && typeof health.lowFuel.eventDateTime === "string") m.lowFuelAlertCount += 1;
+      if (isObj(health.defLevelLow) && typeof health.defLevelLow.eventDateTime === "string") m.lowDefAlertCount += 1;
     }
   }
 

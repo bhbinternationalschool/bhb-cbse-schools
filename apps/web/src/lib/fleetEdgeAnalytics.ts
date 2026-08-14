@@ -28,6 +28,15 @@ export const OFFLINE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
  * dashboard universe entirely, rather than sitting in "Offline" forever. */
 export const FLEET_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
 
+export type FaultDetail = { description: string; suggestedAction: string };
+
+export type GeofenceVisit = {
+  geofenceName: string;
+  durationInSeconds: number;
+  inDateTime: string | null;
+  outDateTime: string | null;
+};
+
 export type VehicleFleetMetrics = {
   vehicleRef: string;
   registrationNumber: string | null;
@@ -37,9 +46,12 @@ export type VehicleFleetMetrics = {
   hbCount: number;
   rtCount: number;
   nightDrivingSeconds: number;
+  coastingSeconds: number;
   overSpeedCount: number;
   sosCount: number;
   fuelDrainCount: number;
+  fuelDrainedLiters: number;
+  refuelCount: number;
   geofenceEventCount: number;
   // Efficiency
   distanceTravelledKm: number;
@@ -47,9 +59,17 @@ export type VehicleFleetMetrics = {
   averageSpeedSamples: number[];
   idlingSeconds: number;
   stoppageSeconds: number;
+  engineLoadHeavySamples: number[];
+  engineLoadLightSamples: number[];
+  engineLoadMediumSamples: number[];
+  geofenceVisits: GeofenceVisit[];
   // Health
   faultCritical: number;
   faultWarning: number;
+  faultCriticalDetails: FaultDetail[];
+  faultWarningDetails: FaultDetail[];
+  lowFuelAlertCount: number;
+  lowDefAlertCount: number;
   incidents: number;
   serviceDue: string | null;
   // Latest live telemetry snapshot (not bounded by the selected range)
@@ -73,17 +93,28 @@ export function emptyVehicleMetrics(vehicleRef: string, registrationNumber: stri
     hbCount: 0,
     rtCount: 0,
     nightDrivingSeconds: 0,
+    coastingSeconds: 0,
     overSpeedCount: 0,
     sosCount: 0,
     fuelDrainCount: 0,
+    fuelDrainedLiters: 0,
+    refuelCount: 0,
     geofenceEventCount: 0,
     distanceTravelledKm: 0,
     fuelConsumed: 0,
     averageSpeedSamples: [],
     idlingSeconds: 0,
     stoppageSeconds: 0,
+    engineLoadHeavySamples: [],
+    engineLoadLightSamples: [],
+    engineLoadMediumSamples: [],
+    geofenceVisits: [],
     faultCritical: 0,
     faultWarning: 0,
+    faultCriticalDetails: [],
+    faultWarningDetails: [],
+    lowFuelAlertCount: 0,
+    lowDefAlertCount: 0,
     incidents: 0,
     serviceDue: null,
     lastTelemetry: null,
@@ -94,6 +125,18 @@ export function averageSpeed(m: VehicleFleetMetrics): number | null {
   if (m.averageSpeedSamples.length === 0) return null;
   const sum = m.averageSpeedSamples.reduce((a, b) => a + b, 0);
   return sum / m.averageSpeedSamples.length;
+}
+
+/** Average engine-load mix (heavy/medium/light %) across the periodic
+ * summaries in range — null when no details payload has carried it yet. */
+export function averageEngineLoad(m: VehicleFleetMetrics): { heavy: number; medium: number; light: number } | null {
+  if (m.engineLoadHeavySamples.length === 0) return null;
+  const avg = (arr: number[]) => arr.reduce((a, b) => a + b, 0) / arr.length;
+  return {
+    heavy: avg(m.engineLoadHeavySamples),
+    medium: avg(m.engineLoadMediumSamples),
+    light: avg(m.engineLoadLightSamples),
+  };
 }
 
 function clampContribution(value: number, min: number): number {
