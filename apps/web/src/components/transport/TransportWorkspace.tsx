@@ -16,6 +16,7 @@ import {
   ServicePanel,
 } from "@/components/transport/TransportFleetPanels";
 import { FleetEdgeEventsPanel } from "@/components/transport/FleetEdgeEventsPanel";
+import { FleetDashboard } from "@/components/transport/FleetDashboard";
 import {
   FleetPanel,
   FuelPanel,
@@ -63,6 +64,7 @@ type TransportTab =
   | "board"
   | "compliance"
   | "live"
+  | "fleetDashboard"
   | "reports";
 
 const TABS: ModuleTabItem[] = [
@@ -78,6 +80,7 @@ const TABS: ModuleTabItem[] = [
   { id: "board", label: "Boarding", tone: "sky" },
   { id: "compliance", label: "Compliance", tone: "rose" },
   { id: "live", label: "Live", tone: "teal" },
+  { id: "fleetDashboard", label: "Fleet Dashboard", tone: "amber" },
   { id: "reports", label: "Reports", tone: "navy" },
 ];
 
@@ -105,6 +108,7 @@ export function TransportWorkspace() {
       "board",
       "compliance",
       "live",
+      "fleetDashboard",
       "reports",
     ];
     if (raw && (allowed as string[]).includes(raw)) setTab(raw as TransportTab);
@@ -447,6 +451,7 @@ export function TransportWorkspace() {
               <FleetEdgeEventsPanel />
             </>
           ) : null}
+          {tab === "fleetDashboard" ? <FleetDashboard /> : null}
           {tab === "reports" ? (
             <ReportsPanel
               state={state}
