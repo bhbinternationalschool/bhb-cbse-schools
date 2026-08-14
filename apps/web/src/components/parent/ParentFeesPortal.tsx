@@ -212,7 +212,7 @@ export function ParentFeesPortal({
 
   if (!household) {
     return (
-      <div className="mx-auto max-w-lg px-4 py-12 text-center">
+      <div className="mx-auto max-w-lg px-4 py-12 text-center md:max-w-2xl lg:max-w-3xl">
         <p className="text-sm text-[var(--muted)]">
           No household linked for this parent demo. Open staff portal and check
           SIS households.
@@ -225,7 +225,7 @@ export function ParentFeesPortal({
   }
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-lg flex-col pb-28">
+    <div className="mx-auto flex min-h-screen max-w-lg flex-col pb-28 md:max-w-2xl lg:max-w-3xl">
       <header className="sticky top-0 z-20 border-b border-[rgba(32,48,80,0.1)] bg-[rgba(246,245,239,0.92)] px-4 py-3 backdrop-blur-md">
         <div className="flex items-start gap-3">
           <Image
@@ -541,7 +541,7 @@ export function ParentFeesPortal({
 
       {tab === "dues" ? (
         <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[rgba(32,48,80,0.12)] bg-[rgba(246,245,239,0.96)] px-4 py-3 backdrop-blur-md">
-          <div className="mx-auto flex max-w-lg items-center gap-3">
+          <div className="mx-auto flex max-w-lg items-center gap-3 md:max-w-2xl lg:max-w-3xl">
             <div className="min-w-0 flex-1">
               <div className="text-[10px] uppercase tracking-wide text-[var(--muted)]">
                 Selected
