@@ -40,6 +40,10 @@ export type SchoolEvent = {
   location: string;
   classIds: string[];
   rsvpEnabled: boolean;
+  /** Linked Gallery album (GalleryAlbum.id) — empty = unlinked. Gallery is a
+   * separate, local-first module; this is a lookup-only reference, not an
+   * enforced foreign key (same pattern Accounts uses for sourceType/sourceId). */
+  albumId: string;
   isActive: boolean;
   createdBy: string;
   createdAt: string;

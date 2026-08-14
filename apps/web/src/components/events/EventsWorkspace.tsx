@@ -6,6 +6,7 @@ import {
   BarChart3,
   CalendarDays,
   CalendarHeart,
+  Images,
   LayoutDashboard,
   ListChecks,
   Send,
@@ -43,6 +44,7 @@ import { loadSis, type SisState } from "@/lib/sis";
 import { loadFees, type FeesState } from "@/lib/fees";
 import { loadExams, type ExamsState } from "@/lib/exams";
 import { loadPtm, type PtmState } from "@/lib/ptm";
+import { loadSchoolComms, type GalleryAlbum } from "@/lib/schoolComms";
 import { useModuleTabQuery } from "@/lib/useModuleTabQuery";
 import {
   EVENT_KINDS,
@@ -104,6 +106,7 @@ export function EventsWorkspace() {
   const [fees, setFees] = useState<FeesState | null>(null);
   const [examsState, setExamsState] = useState<ExamsState | null>(null);
   const [ptmState, setPtmState] = useState<PtmState | null>(null);
+  const [albums, setAlbums] = useState<GalleryAlbum[]>([]);
   const [events, setEvents] = useState<SchoolEvent[]>([]);
   const [rsvps, setRsvps] = useState<EventRsvp[]>([]);
   const [loading, setLoading] = useState(true);
@@ -122,6 +125,7 @@ export function EventsWorkspace() {
   const [location, setLocation] = useState("");
   const [classIds, setClassIds] = useState<string[]>([]);
   const [rsvpEnabled, setRsvpEnabled] = useState(false);
+  const [albumId, setAlbumId] = useState("");
 
   function flash(msg: string) {
     setNotice(msg);
@@ -135,6 +139,7 @@ export function EventsWorkspace() {
     setFees(loadFees());
     setExamsState(loadExams());
     setPtmState(loadPtm());
+    setAlbums(loadSchoolComms().albums);
   }, []);
 
   const fetchEvents = useCallback(async () => {
@@ -195,6 +200,7 @@ export function EventsWorkspace() {
     setLocation("");
     setClassIds([]);
     setRsvpEnabled(false);
+    setAlbumId("");
   }
 
   function beginEdit(e: SchoolEvent) {
@@ -208,6 +214,7 @@ export function EventsWorkspace() {
     setLocation(e.location);
     setClassIds(e.classIds);
     setRsvpEnabled(e.rsvpEnabled);
+    setAlbumId(e.albumId);
   }
 
   async function saveEvent() {
@@ -231,6 +238,7 @@ export function EventsWorkspace() {
           location,
           classIds,
           rsvpEnabled,
+          albumId,
           isActive: true,
         }),
       });
@@ -462,6 +470,15 @@ export function EventsWorkspace() {
                         Send RSVP
                       </Button>
                     ) : null}
+                    {e.albumId ? (
+                      <Link
+                        href={`/comms?tab=gallery&album=${encodeURIComponent(e.albumId)}`}
+                        className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+                      >
+                        <Images className="size-3.5" />
+                        View photos
+                      </Link>
+                    ) : null}
                     <DeskListActions
                       readOnly={readOnly}
                       onEdit={() => beginEdit(e)}
@@ -564,6 +581,27 @@ export function EventsWorkspace() {
                     </label>
                   ))}
                 </div>
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="evt-album">Link photo album</Label>
+                <Select value={albumId} onValueChange={(v) => setAlbumId(v ?? "")}>
+                  <SelectTrigger id="evt-album" className="w-full">
+                    <SelectValue placeholder="— none —">
+                      {(v: string) => {
+                        const a = albums.find((x) => x.id === v);
+                        return a ? a.title : "— none —";
+                      }}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">— none —</SelectItem>
+                    {albums.map((a) => (
+                      <SelectItem key={a.id} value={a.id}>
+                        {a.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="grid gap-1.5">
                 <Label htmlFor="evt-desc">Description</Label>

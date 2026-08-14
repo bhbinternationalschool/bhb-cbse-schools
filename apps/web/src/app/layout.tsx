@@ -25,8 +25,8 @@ export const metadata: Metadata = {
   description:
     "School ERP for BHB International School — fees, SIS, attendance, accounts.",
   icons: {
-    icon: [{ url: "/logo.png", type: "image/png" }],
-    apple: "/logo.png",
+    icon: [{ url: "/icon-192.png", type: "image/png" }],
+    apple: "/apple-touch-icon.png",
   },
   other: {
     "theme-color": "#203050",

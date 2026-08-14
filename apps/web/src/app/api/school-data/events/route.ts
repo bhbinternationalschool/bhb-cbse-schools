@@ -32,6 +32,7 @@ type EventRow = {
   location: string;
   class_ids: string[];
   rsvp_enabled: boolean;
+  album_id: string;
   is_active: boolean;
   created_by: string;
   created_at: string;
@@ -51,6 +52,7 @@ function rowToEvent(r: EventRow): SchoolEvent {
     location: r.location,
     classIds: Array.isArray(r.class_ids) ? r.class_ids : [],
     rsvpEnabled: r.rsvp_enabled,
+    albumId: r.album_id || "",
     isActive: r.is_active,
     createdBy: r.created_by,
     createdAt: r.created_at,
@@ -129,6 +131,7 @@ type EventPostBody = {
   location?: string;
   classIds?: string[];
   rsvpEnabled?: boolean;
+  albumId?: string;
   isActive?: boolean;
 };
 
@@ -176,6 +179,7 @@ export async function POST(req: Request) {
     location: body.location || "",
     class_ids: Array.isArray(body.classIds) ? body.classIds : [],
     rsvp_enabled: !!body.rsvpEnabled,
+    album_id: body.albumId || "",
     is_active: body.isActive !== false,
     created_by: auth.ctx.session.fullName || "Staff",
     updated_at: now,
