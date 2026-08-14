@@ -28,6 +28,15 @@ export const OFFLINE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
  * dashboard universe entirely, rather than sitting in "Offline" forever. */
 export const FLEET_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
 
+/** Vehicle refs known NOT to belong to this school's real fleet — excluded
+ * from the dashboard/KPIs/reports (raw event viewer still shows them, for
+ * debugging). "MATXXXXXXXX" is Tata's own demo/sandbox VIN, confirmed by
+ * its real telemetry reporting GPS coordinates in Haryana while every real
+ * vehicle in the Subscribed Vehicles Report is based at the school in
+ * Varanasi — it's not a masked real vehicle, it never appears in that
+ * report at all. */
+export const NON_FLEET_VEHICLE_REFS = new Set<string>(["MATXXXXXXXX"]);
+
 export type FaultDetail = { description: string; suggestedAction: string };
 
 export type GeofenceVisit = {

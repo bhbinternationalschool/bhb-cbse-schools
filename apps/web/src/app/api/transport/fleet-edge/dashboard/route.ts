@@ -13,6 +13,7 @@ import {
   buildFleetDashboard,
   emptyVehicleMetrics,
   FLEET_LOOKBACK_MS,
+  NON_FLEET_VEHICLE_REFS,
   type VehicleFleetMetrics,
 } from "@/lib/fleetEdgeAnalytics";
 
@@ -83,6 +84,7 @@ export async function GET(req: Request) {
   for (const ev of events) {
     const key = ev.vehicle_ref || ev.registration_number;
     if (!key) continue;
+    if (ev.vehicle_ref && NON_FLEET_VEHICLE_REFS.has(ev.vehicle_ref)) continue;
     if (!byVehicle.has(key)) {
       byVehicle.set(key, emptyVehicleMetrics(ev.vehicle_ref || key, ev.registration_number));
     }
