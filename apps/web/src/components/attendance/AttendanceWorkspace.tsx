@@ -22,6 +22,8 @@ import {
   type AttendanceStatus,
 } from "@/lib/attendance";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
+import { useSyncStatus } from "@/lib/useSyncStatus";
+import { retryNow } from "@/lib/syncRetryStatus";
 import { classifyClassHolidayDay } from "@/lib/holidayPolicy";
 import { loadSis, type SisState } from "@/lib/sis";
 import {
@@ -91,6 +93,7 @@ export function AttendanceWorkspace() {
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const syncStatus = useSyncStatus(["blob:attendance_state", "attendanceDesk"]);
   const [tick, setTick] = useState(0);
   const [myClassAutoDone, setMyClassAutoDone] = useState(false);
   const [overrideNote, setOverrideNote] = useState("");
@@ -371,6 +374,27 @@ export function AttendanceWorkspace() {
           { id: "staff-reports", label: "Staff reports", tone: "violet" },
         ]}
       />
+
+      {syncStatus.status === "failed" ? (
+        <p className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-[rgba(180,83,9,0.25)] bg-[rgba(180,83,9,0.08)] px-3 py-2 text-[12px] text-[#9a3412]">
+          <span>
+            ⚠ Not yet synced to server — retrying automatically
+            {syncStatus.error ? ` (${syncStatus.error})` : ""}
+          </span>
+          <button
+            type="button"
+            className="rounded-md border border-[rgba(180,83,9,0.35)] px-2 py-0.5 font-semibold hover:bg-[rgba(180,83,9,0.15)]"
+            onClick={() => {
+              retryNow("blob:attendance_state");
+              retryNow("attendanceDesk");
+            }}
+          >
+            Retry now
+          </button>
+        </p>
+      ) : syncStatus.status === "pending" || syncStatus.status === "retrying" ? (
+        <p className="mt-3 text-[12px] text-[var(--muted)]">Syncing…</p>
+      ) : null}
 
       {tab === "dashboard" ? (
         <div className="mt-5">

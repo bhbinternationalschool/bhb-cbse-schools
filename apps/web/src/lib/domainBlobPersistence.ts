@@ -7,6 +7,7 @@
 
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
+import { scheduleRetryingPush } from "@/lib/syncRetryStatus";
 
 export type DomainBlobTable =
   | "fees_state"
@@ -170,7 +171,7 @@ export function createDomainBlobPersistence<T>(opts: {
       pendingPush = null;
       pushTimer = null;
       if (!payload) return;
-      void pushState(payload);
+      scheduleRetryingPush(`blob:${opts.table}`, () => pushState(payload));
     }, DESK_PUSH_DEBOUNCE_MS);
   }
 

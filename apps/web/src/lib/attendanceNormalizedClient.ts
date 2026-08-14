@@ -6,6 +6,7 @@ import type { AttendanceState } from "@/lib/attendance";
 import type { AttendanceDeskAncillary } from "@/lib/attendanceDeskAncillary.server";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
+import { scheduleRetryingPush } from "@/lib/syncRetryStatus";
 
 const META_KEY = "bhb_attendance_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -59,11 +60,13 @@ export function scheduleAttendanceDeskSync(state: AttendanceState) {
     pending = null;
     pushTimer = null;
     if (!batch) return;
-    void pushAttendanceDeskApi(batch);
+    scheduleRetryingPush("attendanceDesk", () => pushAttendanceDeskApi(batch));
   }, DESK_PUSH_DEBOUNCE_MS);
 }
 
-async function pushAttendanceDeskApi(state: AttendanceState) {
+async function pushAttendanceDeskApi(
+  state: AttendanceState,
+): Promise<{ ok: boolean; error?: string }> {
   try {
     const res = await fetch("/api/school-data/attendance-registers", {
       method: "POST",
@@ -87,11 +90,14 @@ async function pushAttendanceDeskApi(state: AttendanceState) {
         registerCount: body.count ?? state.registers.length,
         ancillaryUpdatedAt: body.updatedAt,
       });
-    } else if (!res.ok) {
-      console.warn("[attendance-db] desk push failed", body?.error || res.status);
+      return { ok: true };
     }
+    const error = body?.error || `HTTP ${res.status}`;
+    console.warn("[attendance-db] desk push failed", error);
+    return { ok: false, error };
   } catch (e) {
     console.warn("[attendance-db] desk push error", e);
+    return { ok: false, error: String(e) };
   }
 }
 
