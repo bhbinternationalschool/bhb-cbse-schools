@@ -6,7 +6,15 @@ import { ErpMetricCard } from "@/components/ui/erp-roster";
 import { dashboardToneToMetric, kpiIconForTone, type DashboardTone } from "@/components/dashboard/ModuleDashboard";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { field } from "@/components/ui/erp-ui";
-import { averageEngineLoad, type FleetBucket, type OfflinePeriod, type VehicleDashboardRow } from "@/lib/fleetEdgeAnalytics";
+import {
+  averageEngineLoad,
+  averageEngineRpm,
+  averageGearUtilisation,
+  averageGsa,
+  type FleetBucket,
+  type OfflinePeriod,
+  type VehicleDashboardRow,
+} from "@/lib/fleetEdgeAnalytics";
 
 type Tab = "live" | "vehicleWise" | "directorReport" | "scorecard" | "health";
 
@@ -17,6 +25,11 @@ const TABS: ModuleTabItem[] = [
   { id: "scorecard", label: "Driving Scorecard", tone: "rose" },
   { id: "health", label: "Vehicle Health", tone: "violet" },
 ];
+
+const GEAR_LABELS: Record<string, string> = {
+  gear1: "1st", gear2: "2nd", gear3: "3rd", gear4: "4th", gear5: "5th",
+  gear6: "6th", gear7: "7th", gear8: "8th", gear9: "9th", gearN: "N", gearR: "R",
+};
 
 type VehicleIdentity = { model: string | null; year: number | null; name: string | null } | null;
 
@@ -348,16 +361,38 @@ export function FleetDashboard() {
                       </span>
                     </div>
                     {v.lastTelemetry ? (
+                      <>
+                        <p className="mt-1 text-sm text-[var(--muted)]">
+                          {v.lastTelemetry.lat != null && v.lastTelemetry.lng != null
+                            ? `${v.lastTelemetry.lat.toFixed(4)}, ${v.lastTelemetry.lng.toFixed(4)} · `
+                            : ""}
+                          {v.lastTelemetry.speed != null ? `${v.lastTelemetry.speed} km/h · ` : ""}
+                          {v.lastTelemetry.ignitionOn != null
+                            ? v.lastTelemetry.ignitionOn ? "ignition on · " : "ignition off · "
+                            : ""}
+                          {v.lastTelemetry.fuelLevelPercent != null ? `fuel ${v.lastTelemetry.fuelLevelPercent}% · ` : ""}
+                          last seen {v.lastTelemetry.at ? new Date(v.lastTelemetry.at).toLocaleString() : "—"}
+                        </p>
+                        <p className="mt-1 text-sm text-[var(--muted)]">
+                          {v.lastTelemetry.currentGear != null ? `gear ${v.lastTelemetry.currentGear} · ` : ""}
+                          {v.lastTelemetry.engineRunHour != null ? `engine ${v.lastTelemetry.engineRunHour.toFixed(1)}h · ` : ""}
+                          {v.lastTelemetry.vehicleStatus != null ? `${v.lastTelemetry.vehicleStatus} · ` : ""}
+                          {v.lastTelemetry.gpsSignalQuality != null ? `GPS ${v.lastTelemetry.gpsSignalQuality}` : ""}
+                          {v.lastTelemetry.noOfSatForFix != null ? ` (${v.lastTelemetry.noOfSatForFix} sats)` : ""}
+                          {v.lastTelemetry.primaryFuelTankCapacity != null
+                            ? ` · tank 1 cap ${v.lastTelemetry.primaryFuelTankCapacity}L`
+                            : ""}
+                          {v.lastTelemetry.secondaryFuelLevel1 != null
+                            ? ` · tank 2 ${v.lastTelemetry.secondaryFuelLevel1}%`
+                            : ""}
+                          {v.lastTelemetry.imei != null ? ` · IMEI ${v.lastTelemetry.imei}` : ""}
+                        </p>
+                      </>
+                    ) : v.lastOfflinePosition ? (
                       <p className="mt-1 text-sm text-[var(--muted)]">
-                        {v.lastTelemetry.lat != null && v.lastTelemetry.lng != null
-                          ? `${v.lastTelemetry.lat.toFixed(4)}, ${v.lastTelemetry.lng.toFixed(4)} · `
-                          : ""}
-                        {v.lastTelemetry.speed != null ? `${v.lastTelemetry.speed} km/h · ` : ""}
-                        {v.lastTelemetry.ignitionOn != null
-                          ? v.lastTelemetry.ignitionOn ? "ignition on · " : "ignition off · "
-                          : ""}
-                        {v.lastTelemetry.fuelLevelPercent != null ? `fuel ${v.lastTelemetry.fuelLevelPercent}% · ` : ""}
-                        last seen {v.lastTelemetry.at ? new Date(v.lastTelemetry.at).toLocaleString() : "—"}
+                        No live telemetry — last known parked position:{" "}
+                        {v.lastOfflinePosition.location || `${v.lastOfflinePosition.lat}, ${v.lastOfflinePosition.lng}`}
+                        {v.lastOfflinePosition.at ? ` (as of ${new Date(v.lastOfflinePosition.at).toLocaleDateString()})` : ""}
                       </p>
                     ) : (
                       <p className="mt-1 text-sm text-[var(--muted)]">
@@ -411,6 +446,17 @@ export function FleetDashboard() {
                 {rows.map((v) => {
                   const load = averageEngineLoad(v);
                   const economy = v.fuelConsumed > 0 ? v.distanceTravelledKm / v.fuelConsumed : null;
+                  const gsa = averageGsa(v);
+                  const rpm = averageEngineRpm(v);
+                  const gears = averageGearUtilisation(v);
+                  const topGears = gears
+                    ? (Object.entries(gears) as [string, number][])
+                        .filter(([, pct]) => pct > 0)
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 3)
+                        .map(([k, pct]) => `${GEAR_LABELS[k] || k} ${pct.toFixed(0)}%`)
+                        .join(" · ")
+                    : "";
                   return (
                     <li key={v.vehicleRef} className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -439,6 +485,13 @@ export function FleetDashboard() {
                         {v.fuelDrainedLiters > 0 ? ` · drained ${v.fuelDrainedLiters.toFixed(1)} L` : ""}
                         {v.geofenceVisits.length > 0 ? ` · ${v.geofenceVisits.length} geofence visits` : ""}
                       </p>
+                      {gsa != null || rpm != null || topGears ? (
+                        <p className="mt-1 text-sm text-[var(--muted)]">
+                          {gsa != null ? `Gear shift advisor ${gsa.toFixed(1)} · ` : ""}
+                          {rpm != null ? `avg engine RPM ${rpm.toFixed(0)} · ` : ""}
+                          {topGears ? `top gears — ${topGears}` : ""}
+                        </p>
+                      ) : null}
                       <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-[var(--border)] pt-2">
                         <input
                           type="text"
@@ -536,6 +589,20 @@ export function FleetDashboard() {
                         Harsh accel/brake/turn: {v.haCount}/{v.hbCount}/{v.rtCount} · overspeed {v.overSpeedCount} ·
                         {" "}SOS {v.sosCount} · night driving {(v.nightDrivingSeconds / 60).toFixed(0)} min
                       </p>
+                      {v.alertEvents.length > 0 ? (
+                        <ul className="mt-2 space-y-1 border-t border-[var(--border)] pt-2 text-sm text-[var(--muted)]">
+                          {v.alertEvents.map((a, i) => (
+                            <li key={i}>
+                              <span className="font-semibold">{a.alertName}</span>
+                              {a.eventDateTime ? ` — ${new Date(a.eventDateTime).toLocaleString()}` : ""}
+                              {a.maxSpeed != null ? ` · ${a.maxSpeed} km/h` : ""}
+                              {a.duration != null ? ` · ${a.duration}s` : ""}
+                              {a.fuelTank ? ` · ${a.fuelTank} tank` : ""}
+                              {a.location ? ` · ${a.location}` : ""}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
                     </li>
                   ))}
               </ul>
@@ -566,13 +633,18 @@ export function FleetDashboard() {
                               Low DEF ×{v.lowDefAlertCount}
                             </span>
                           ) : null}
+                          {v.lowEngineOilPressureEvents.length > 0 ? (
+                            <span className="rounded-full bg-[var(--danger-soft)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--danger)]">
+                              Low oil pressure ×{v.lowEngineOilPressureEvents.length}
+                            </span>
+                          ) : null}
                         </div>
                       </div>
                       <p className="mt-1 text-sm text-[var(--muted)]">
                         {v.faultCritical} critical · {v.faultWarning} warning fault codes · {v.incidents} incidents
                         {v.serviceDue ? ` · service: ${v.serviceDue}` : ""}
                       </p>
-                      {v.faultCriticalDetails.length || v.faultWarningDetails.length ? (
+                      {v.faultCriticalDetails.length || v.faultWarningDetails.length || v.lowEngineOilPressureEvents.length ? (
                         <ul className="mt-2 space-y-1 border-t border-[var(--border)] pt-2 text-sm">
                           {v.faultCriticalDetails.map((f, i) => (
                             <li key={`c${i}`} className="text-[var(--danger)]">
@@ -584,6 +656,12 @@ export function FleetDashboard() {
                             <li key={`w${i}`} className="text-[var(--warning)]">
                               {f.description}
                               {f.suggestedAction ? ` — ${f.suggestedAction}` : ""}
+                            </li>
+                          ))}
+                          {v.lowEngineOilPressureEvents.map((o, i) => (
+                            <li key={`o${i}`} className="text-[var(--danger)]">
+                              {o.description || "Low engine oil pressure"}
+                              {o.eventDateTime ? ` — ${new Date(o.eventDateTime).toLocaleString()}` : ""}
                             </li>
                           ))}
                         </ul>

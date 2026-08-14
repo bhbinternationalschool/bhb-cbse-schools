@@ -46,6 +46,28 @@ export type GeofenceVisit = {
   outDateTime: string | null;
 };
 
+/** One occurrence of any TimeBound Push alert, with the eventDetails context
+ * the spec attaches — which fields are populated depends on alertName (e.g.
+ * only OverSpeedEvent carries maxSpeed/duration). Kept as a list, not just a
+ * count, because "where" and "how bad" matter for SOS/overspeed/fuel-drain
+ * in a way a bare count can't show. */
+export type AlertEvent = {
+  alertName: string;
+  eventDateTime: string | null;
+  maxSpeed: number | null;
+  duration: number | null;
+  fuelTank: string | null;
+  lat: number | null;
+  lng: number | null;
+  location: string | null;
+};
+
+export type GearUtilisation = {
+  gear1: number; gear2: number; gear3: number; gear4: number; gear5: number;
+  gear6: number; gear7: number; gear8: number; gear9: number;
+  gearN: number; gearR: number;
+};
+
 export type VehicleFleetMetrics = {
   vehicleRef: string;
   registrationNumber: string | null;
@@ -62,6 +84,7 @@ export type VehicleFleetMetrics = {
   fuelDrainedLiters: number;
   refuelCount: number;
   geofenceEventCount: number;
+  alertEvents: AlertEvent[];
   // Efficiency
   distanceTravelledKm: number;
   fuelConsumed: number;
@@ -72,6 +95,9 @@ export type VehicleFleetMetrics = {
   engineLoadLightSamples: number[];
   engineLoadMediumSamples: number[];
   geofenceVisits: GeofenceVisit[];
+  gsaSamples: number[];
+  averageEngineRpmSamples: number[];
+  gearUtilisationSamples: GearUtilisation[];
   // Health
   faultCritical: number;
   faultWarning: number;
@@ -79,8 +105,12 @@ export type VehicleFleetMetrics = {
   faultWarningDetails: FaultDetail[];
   lowFuelAlertCount: number;
   lowDefAlertCount: number;
+  lowEngineOilPressureEvents: { description: string | null; eventDateTime: string | null }[];
   incidents: number;
   serviceDue: string | null;
+  // Last known position while parked/offline — not bounded by the selected
+  // range, same reasoning as lastTelemetry: it's a current-status fact.
+  lastOfflinePosition: { lat: number | null; lng: number | null; location: string | null; at: string | null } | null;
   // Latest live telemetry snapshot (not bounded by the selected range)
   lastTelemetry: {
     lat: number | null;
@@ -90,6 +120,26 @@ export type VehicleFleetMetrics = {
     fuelLevelPercent: number | null;
     odometer: number | null;
     at: string | null;
+    accelX: number | null;
+    accelY: number | null;
+    accelZ: number | null;
+    gyroX: number | null;
+    gyroY: number | null;
+    gyroZ: number | null;
+    crankOn: boolean | null;
+    currentGear: string | null;
+    engineRunHour: number | null;
+    gpsAltitude: number | null;
+    gpsCourseInDegrees: number | null;
+    gpsFix: boolean | null;
+    gpsSignalQuality: string | null;
+    imei: string | null;
+    noOfFuelTanks: number | null;
+    noOfSatForFix: number | null;
+    primaryFuelTankCapacity: number | null;
+    secondaryFuelLevel1: number | null;
+    secondaryFuelTankCapacity1: number | null;
+    vehicleStatus: string | null;
   } | null;
 };
 
@@ -109,6 +159,7 @@ export function emptyVehicleMetrics(vehicleRef: string, registrationNumber: stri
     fuelDrainedLiters: 0,
     refuelCount: 0,
     geofenceEventCount: 0,
+    alertEvents: [],
     distanceTravelledKm: 0,
     fuelConsumed: 0,
     averageSpeedSamples: [],
@@ -118,14 +169,19 @@ export function emptyVehicleMetrics(vehicleRef: string, registrationNumber: stri
     engineLoadLightSamples: [],
     engineLoadMediumSamples: [],
     geofenceVisits: [],
+    gsaSamples: [],
+    averageEngineRpmSamples: [],
+    gearUtilisationSamples: [],
     faultCritical: 0,
     faultWarning: 0,
     faultCriticalDetails: [],
     faultWarningDetails: [],
     lowFuelAlertCount: 0,
     lowDefAlertCount: 0,
+    lowEngineOilPressureEvents: [],
     incidents: 0,
     serviceDue: null,
+    lastOfflinePosition: null,
     lastTelemetry: null,
   };
 }
@@ -146,6 +202,35 @@ export function averageEngineLoad(m: VehicleFleetMetrics): { heavy: number; medi
     medium: avg(m.engineLoadMediumSamples),
     light: avg(m.engineLoadLightSamples),
   };
+}
+
+function avgOf(arr: number[]): number | null {
+  return arr.length === 0 ? null : arr.reduce((a, b) => a + b, 0) / arr.length;
+}
+
+/** Average Gear Shift Advisor score across the periodic summaries in range. */
+export function averageGsa(m: VehicleFleetMetrics): number | null {
+  return avgOf(m.gsaSamples);
+}
+
+export function averageEngineRpm(m: VehicleFleetMetrics): number | null {
+  return avgOf(m.averageEngineRpmSamples);
+}
+
+/** Average per-gear utilisation % across the periodic summaries in range. */
+export function averageGearUtilisation(m: VehicleFleetMetrics): GearUtilisation | null {
+  if (m.gearUtilisationSamples.length === 0) return null;
+  const n = m.gearUtilisationSamples.length;
+  const sum: GearUtilisation = {
+    gear1: 0, gear2: 0, gear3: 0, gear4: 0, gear5: 0,
+    gear6: 0, gear7: 0, gear8: 0, gear9: 0, gearN: 0, gearR: 0,
+  };
+  for (const g of m.gearUtilisationSamples) {
+    for (const k of Object.keys(sum) as (keyof GearUtilisation)[]) sum[k] += g[k];
+  }
+  const avg = {} as GearUtilisation;
+  for (const k of Object.keys(sum) as (keyof GearUtilisation)[]) avg[k] = sum[k] / n;
+  return avg;
 }
 
 function clampContribution(value: number, min: number): number {

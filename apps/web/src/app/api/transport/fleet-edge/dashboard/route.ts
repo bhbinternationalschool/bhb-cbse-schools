@@ -114,7 +114,45 @@ export async function GET(req: Request) {
           fuelLevelPercent: typeof p.fuelLevelPercent === "number" ? p.fuelLevelPercent : null,
           odometer: typeof p.odometer === "number" ? p.odometer : null,
           at: ev.received_at,
+          accelX: typeof p.accelX === "number" ? p.accelX : null,
+          accelY: typeof p.accelY === "number" ? p.accelY : null,
+          accelZ: typeof p.accelZ === "number" ? p.accelZ : null,
+          gyroX: typeof p.gyroX === "number" ? p.gyroX : null,
+          gyroY: typeof p.gyroY === "number" ? p.gyroY : null,
+          gyroZ: typeof p.gyroZ === "number" ? p.gyroZ : null,
+          crankOn: typeof p.crankOn === "boolean" ? p.crankOn : null,
+          currentGear: typeof p.currentGear === "string" ? p.currentGear : null,
+          engineRunHour: typeof p.engineRunHour === "number" ? p.engineRunHour : null,
+          gpsAltitude: typeof p.gpsAltitude === "number" ? p.gpsAltitude : null,
+          gpsCourseInDegrees: typeof p.gpsCourseInDegrees === "number" ? p.gpsCourseInDegrees : null,
+          gpsFix: typeof p.gpsFix === "boolean" ? p.gpsFix : null,
+          gpsSignalQuality: typeof p.gpsSignalQuality === "string" ? p.gpsSignalQuality : null,
+          imei: typeof p.imei === "string" ? p.imei : null,
+          noOfFuelTanks: typeof p.noOfFuelTanks === "number" ? p.noOfFuelTanks : null,
+          noOfSatForFix: typeof p.noOfSatForFix === "number" ? p.noOfSatForFix : null,
+          primaryFuelTankCapacity: typeof p.primaryFuelTankCapacity === "number" ? p.primaryFuelTankCapacity : null,
+          secondaryFuelLevel1: typeof p.secondaryFuelLevel1 === "number" ? p.secondaryFuelLevel1 : null,
+          secondaryFuelTankCapacity1:
+            typeof p.secondaryFuelTankCapacity1 === "number" ? p.secondaryFuelTankCapacity1 : null,
+          vehicleStatus: typeof p.vehicleStatus === "string" ? p.vehicleStatus : null,
         };
+      }
+    } else if (ev.event_type === "details") {
+      // Last-known parked position — a current-status fact like
+      // lastTelemetry, so unbounded by [from,to] too.
+      const offline = isObj(ev.payload.vehicleEfficiency) && isObj(ev.payload.vehicleEfficiency.offline)
+        ? ev.payload.vehicleEfficiency.offline
+        : null;
+      if (offline) {
+        const offlineAt = typeof offline.timestamp === "string" ? offline.timestamp : null;
+        if (!m.lastOfflinePosition || (offlineAt && (!m.lastOfflinePosition.at || offlineAt > m.lastOfflinePosition.at))) {
+          m.lastOfflinePosition = {
+            lat: typeof offline.latitude === "number" ? offline.latitude : null,
+            lng: typeof offline.longitude === "number" ? offline.longitude : null,
+            location: typeof offline.location === "string" ? offline.location : null,
+            at: offlineAt,
+          };
+        }
       }
     }
 
@@ -131,6 +169,19 @@ export async function GET(req: Request) {
         m.fuelDrainedLiters += num(eventDetails.fuelDifference);
       } else if (ev.alert_name === "RefuelAlert") m.refuelCount += 1;
       else if (ev.alert_name === "GeoFenceEntered" || ev.alert_name === "GeoFenceExited") m.geofenceEventCount += 1;
+
+      if (ev.alert_name) {
+        m.alertEvents.push({
+          alertName: ev.alert_name,
+          eventDateTime: typeof ev.payload.eventDateTime === "string" ? ev.payload.eventDateTime : null,
+          maxSpeed: typeof eventDetails.maxSpeed === "number" ? eventDetails.maxSpeed : null,
+          duration: typeof eventDetails.duration === "number" ? eventDetails.duration : null,
+          fuelTank: typeof eventDetails.fuelTank === "string" ? eventDetails.fuelTank : null,
+          lat: typeof eventDetails.latitude === "number" ? eventDetails.latitude : null,
+          lng: typeof eventDetails.longitude === "number" ? eventDetails.longitude : null,
+          location: typeof eventDetails.location === "string" ? eventDetails.location : null,
+        });
+      }
     } else if (ev.event_type === "details") {
       const p = ev.payload;
       const safety = isObj(p.vehicleSafety) ? p.vehicleSafety : {};
@@ -148,6 +199,24 @@ export async function GET(req: Request) {
         m.engineLoadHeavySamples.push(num(engineLoad.heavy));
         m.engineLoadMediumSamples.push(num(engineLoad.medium));
         m.engineLoadLightSamples.push(num(engineLoad.light));
+      }
+      if (typeof perf.gsa === "number") m.gsaSamples.push(perf.gsa);
+      if (typeof perf.averageEngineRPM === "number") m.averageEngineRpmSamples.push(perf.averageEngineRPM);
+      const gearUtil = isObj(perf.gearUtilisation) ? perf.gearUtilisation : null;
+      if (gearUtil) {
+        m.gearUtilisationSamples.push({
+          gear1: num(gearUtil.gearUtilisation1),
+          gear2: num(gearUtil.gearUtilisation2),
+          gear3: num(gearUtil.gearUtilisation3),
+          gear4: num(gearUtil.gearUtilisation4),
+          gear5: num(gearUtil.gearUtilisation5),
+          gear6: num(gearUtil.gearUtilisation6),
+          gear7: num(gearUtil.gearUtilisation7),
+          gear8: num(gearUtil.gearUtilisation8),
+          gear9: num(gearUtil.gearUtilisation9),
+          gearN: num(gearUtil.gearUtilisationN),
+          gearR: num(gearUtil.gearUtilisationR),
+        });
       }
 
       const eff = isObj(p.vehicleEfficiency) ? p.vehicleEfficiency : {};
@@ -193,6 +262,12 @@ export async function GET(req: Request) {
       m.incidents += Array.isArray(health.incidents) ? health.incidents.length : 0;
       if (isObj(health.lowFuel) && typeof health.lowFuel.eventDateTime === "string") m.lowFuelAlertCount += 1;
       if (isObj(health.defLevelLow) && typeof health.defLevelLow.eventDateTime === "string") m.lowDefAlertCount += 1;
+      if (isObj(health.lowEngineOilPressure) && health.lowEngineOilPressure.value === true) {
+        m.lowEngineOilPressureEvents.push({
+          description: typeof health.lowEngineOilPressure.description === "string" ? health.lowEngineOilPressure.description : null,
+          eventDateTime: typeof health.lowEngineOilPressure.eventDateTime === "string" ? health.lowEngineOilPressure.eventDateTime : null,
+        });
+      }
     }
   }
 
