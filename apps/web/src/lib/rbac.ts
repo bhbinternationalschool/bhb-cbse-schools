@@ -49,7 +49,15 @@ export type RbacModule =
   | "discipline"
   | "health"
   | "visitors"
-  | "complaints";
+  | "complaints"
+  | "hostel"
+  | "canteen"
+  | "alumni"
+  | "sports"
+  | "opex_budget"
+  | "scholarships"
+  | "question_bank"
+  | "cbse_loc";
 
 export type RbacAction =
   | "view"
@@ -211,6 +219,39 @@ export const RBAC_MODULES: {
     label: "Complaints / grievance",
     href: "/complaints",
   },
+  { id: "hostel", label: "Hostel", href: "/hostel", group: "optional" },
+  { id: "canteen", label: "Canteen / POS", href: "/canteen", group: "optional" },
+  { id: "alumni", label: "Alumni", href: "/alumni", group: "optional" },
+  {
+    id: "sports",
+    label: "Sports / houses / co-curricular",
+    href: "/sports",
+    group: "optional",
+  },
+  {
+    id: "opex_budget",
+    label: "Operating budget",
+    href: "/budget",
+    group: "optional",
+  },
+  {
+    id: "scholarships",
+    label: "Scholarship disbursement",
+    href: "/scholarships",
+    group: "optional",
+  },
+  {
+    id: "question_bank",
+    label: "Question bank",
+    href: "/question-bank",
+    group: "optional",
+  },
+  {
+    id: "cbse_loc",
+    label: "CBSE LOC / registration",
+    href: "/cbse-loc",
+    group: "optional",
+  },
   { id: "settings", label: "Settings / RBAC", group: "admin" },
   { id: "policies", label: "Policies (leave / holiday)", group: "admin" },
 ];
@@ -356,6 +397,14 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("health", ops),
         grant("visitors", ops),
         grant("complaints", [...ops, "approve"]),
+        grant("hostel", ["view"]),
+        grant("canteen", ["view"]),
+        grant("alumni", ["view"]),
+        grant("sports", ["view"]),
+        grant("opex_budget", ["view"]),
+        grant("scholarships", ["view"]),
+        grant("question_bank", ["view"]),
+        grant("cbse_loc", ["view"]),
         grant("compliance", ["view", "edit", "export"]),
         grant("notices", ops),
         grant("news", ops),
@@ -970,6 +1019,14 @@ export function moduleForHref(href: string): RbacModule | null {
   if (path.startsWith("/health")) return "health";
   if (path.startsWith("/visitors")) return "visitors";
   if (path.startsWith("/complaints")) return "complaints";
+  if (path.startsWith("/hostel")) return "hostel";
+  if (path.startsWith("/canteen")) return "canteen";
+  if (path.startsWith("/alumni")) return "alumni";
+  if (path.startsWith("/sports")) return "sports";
+  if (path.startsWith("/budget")) return "opex_budget";
+  if (path.startsWith("/scholarships")) return "scholarships";
+  if (path.startsWith("/question-bank")) return "question_bank";
+  if (path.startsWith("/cbse-loc")) return "cbse_loc";
   if (path.startsWith("/comms") || path.startsWith("/notices") || path.startsWith("/news") || path.startsWith("/gallery")) {
     const tab = params.get("tab");
     if (tab === "news" || path.startsWith("/news")) return "news";

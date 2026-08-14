@@ -43,7 +43,15 @@ export type RegistryModuleId =
   | "discipline"
   | "health"
   | "visitors"
-  | "complaints";
+  | "complaints"
+  | "hostel"
+  | "canteen"
+  | "alumni"
+  | "sports"
+  | "opex_budget"
+  | "scholarships"
+  | "question_bank"
+  | "cbse_loc";
 
 export type RegistryModuleGroup =
   | "setup"
@@ -267,6 +275,70 @@ export const REGISTRY_MODULES: RegistryModuleDef[] = [
     href: "/complaints",
     group: "academics",
     defaultEnabled: true,
+  },
+  {
+    id: "hostel",
+    label: "Hostel",
+    blurb: "On the roadmap — boarding, room allocation, mess",
+    href: "/hostel",
+    group: "optional",
+    defaultEnabled: false,
+  },
+  {
+    id: "canteen",
+    label: "Canteen / POS",
+    blurb: "On the roadmap — cashless canteen point of sale",
+    href: "/canteen",
+    group: "optional",
+    defaultEnabled: false,
+  },
+  {
+    id: "alumni",
+    label: "Alumni",
+    blurb: "On the roadmap — alumni directory and engagement",
+    href: "/alumni",
+    group: "optional",
+    defaultEnabled: false,
+  },
+  {
+    id: "sports",
+    label: "Sports / houses / co-curricular",
+    blurb: "On the roadmap — house points, teams, co-curricular records",
+    href: "/sports",
+    group: "optional",
+    defaultEnabled: false,
+  },
+  {
+    id: "opex_budget",
+    label: "Operating budget",
+    blurb: "On the roadmap — annual budget planning vs. actuals",
+    href: "/budget",
+    group: "optional",
+    defaultEnabled: false,
+  },
+  {
+    id: "scholarships",
+    label: "Scholarship disbursement",
+    blurb: "On the roadmap — scholarship awards and disbursement tracking",
+    href: "/scholarships",
+    group: "optional",
+    defaultEnabled: false,
+  },
+  {
+    id: "question_bank",
+    label: "Question bank",
+    blurb: "On the roadmap — reusable exam question repository",
+    href: "/question-bank",
+    group: "optional",
+    defaultEnabled: false,
+  },
+  {
+    id: "cbse_loc",
+    label: "CBSE LOC / registration",
+    blurb: "On the roadmap — CBSE List of Candidates and board registration",
+    href: "/cbse-loc",
+    group: "optional",
+    defaultEnabled: false,
   },
   {
     id: "library",
@@ -536,6 +608,14 @@ export function registryModuleForHref(href: string): RegistryModuleId | null {
   if (path === "/health" || path.startsWith("/health/")) return "health";
   if (path === "/visitors" || path.startsWith("/visitors/")) return "visitors";
   if (path === "/complaints" || path.startsWith("/complaints/")) return "complaints";
+  if (path === "/hostel" || path.startsWith("/hostel/")) return "hostel";
+  if (path === "/canteen" || path.startsWith("/canteen/")) return "canteen";
+  if (path === "/alumni" || path.startsWith("/alumni/")) return "alumni";
+  if (path === "/sports" || path.startsWith("/sports/")) return "sports";
+  if (path === "/budget" || path.startsWith("/budget/")) return "opex_budget";
+  if (path === "/scholarships" || path.startsWith("/scholarships/")) return "scholarships";
+  if (path === "/question-bank" || path.startsWith("/question-bank/")) return "question_bank";
+  if (path === "/cbse-loc" || path.startsWith("/cbse-loc/")) return "cbse_loc";
   if (
     path === "/comms" ||
     path.startsWith("/comms/") ||
