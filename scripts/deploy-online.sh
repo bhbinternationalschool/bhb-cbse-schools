@@ -60,6 +60,7 @@ AI_TUTOR_MODEL="$(get_env AI_TUTOR_MODEL)"
 AI_PREFERRED_ENGINE="$(get_env AI_PREFERRED_ENGINE)"
 GOOGLE_OAUTH_CLIENT_ID="$(get_env GOOGLE_OAUTH_CLIENT_ID)"
 GOOGLE_OAUTH_CLIENT_SECRET="$(get_env GOOGLE_OAUTH_CLIENT_SECRET)"
+NEXT_PUBLIC_VAPID_PUBLIC_KEY="$(get_env NEXT_PUBLIC_VAPID_PUBLIC_KEY)"
 
 WHATSAPP_DEFAULT_COUNTRY_CODE="${WHATSAPP_DEFAULT_COUNTRY_CODE:-91}"
 WHATSAPP_GRAPH_VERSION="${WHATSAPP_GRAPH_VERSION:-v21.0}"
@@ -111,6 +112,11 @@ if [[ -n "$GOOGLE_OAUTH_CLIENT_ID" && -n "$GOOGLE_OAUTH_CLIENT_SECRET" ]]; then
   echo "Google OAuth: configured (Classroom homework sync on deploy)"
 else
   echo "Google OAuth: not configured — Classroom tab will show setup instructions"
+fi
+if [[ -n "$NEXT_PUBLIC_VAPID_PUBLIC_KEY" ]]; then
+  echo "Web Push: VAPID public key present (private key must be in Secret Manager as school-erp-vapid-private-key)"
+else
+  echo "Web Push: not configured — push notifications will stay off"
 fi
 if [[ -n "$CRON_SECRET" ]]; then
   echo "Cron guard: CRON_SECRET present (scheduled comms + automation)"
@@ -184,6 +190,7 @@ SUBSTITUTIONS+="@_WHATSAPP_GRAPH_VERSION=${WHATSAPP_GRAPH_VERSION}"
 SUBSTITUTIONS+="@_AI_TUTOR_MODEL=${AI_TUTOR_MODEL:-gpt-4o-mini}"
 SUBSTITUTIONS+="@_AI_PREFERRED_ENGINE=${AI_PREFERRED_ENGINE:-auto}"
 SUBSTITUTIONS+="@_GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}"
+SUBSTITUTIONS+="@_NEXT_PUBLIC_VAPID_PUBLIC_KEY=${NEXT_PUBLIC_VAPID_PUBLIC_KEY}"
 
 gcloud builds submit "$ROOT" \
   --project="$PROJECT_ID" \
