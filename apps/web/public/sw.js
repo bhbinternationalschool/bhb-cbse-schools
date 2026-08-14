@@ -1,6 +1,6 @@
 /* BHB School PWAs — parent, staff ERP, field (offline shell). */
 
-const CACHE = "bhb-school-pwa-v3";
+const CACHE = "bhb-school-pwa-v4";
 const SHELL = [
   "/login",
   "/parent",
@@ -71,5 +71,35 @@ self.addEventListener("fetch", (event) => {
           return caches.match("/home") || caches.match("/login");
         }),
       ),
+  );
+});
+
+self.addEventListener("push", (event) => {
+  let payload = { title: "BHB International School", body: "" };
+  try {
+    if (event.data) payload = { ...payload, ...event.data.json() };
+  } catch {
+    /* ignore malformed payload */
+  }
+  event.waitUntil(
+    self.registration.showNotification(payload.title, {
+      body: payload.body,
+      icon: "/icon-192.png",
+      badge: "/icon-192.png",
+      data: { url: payload.url || "/parent" },
+    }),
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = event.notification.data?.url || "/parent";
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      for (const client of list) {
+        if (client.url.includes(url) && "focus" in client) return client.focus();
+      }
+      return self.clients.openWindow(url);
+    }),
   );
 });

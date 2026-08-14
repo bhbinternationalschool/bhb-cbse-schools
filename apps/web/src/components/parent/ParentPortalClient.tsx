@@ -134,7 +134,7 @@ export function ParentPortalClient({
         />
         <div className="px-4 pt-2">
           {mobileApp ? (
-            <div className="mx-auto flex max-w-lg items-center justify-between gap-3 pb-2">
+            <div className="mx-auto flex max-w-lg items-center justify-between gap-3 pb-2 md:max-w-2xl lg:max-w-3xl">
               <div className="min-w-0">
                 <p className="text-[10px] font-bold uppercase tracking-wide text-[var(--muted)]">
                   BHB Parent
@@ -150,11 +150,11 @@ export function ParentPortalClient({
             </div>
           ) : (
             <>
-              <div className="mx-auto flex max-w-lg items-center justify-end gap-2 pb-1">
+              <div className="mx-auto flex max-w-lg items-center justify-end gap-2 pb-1 md:max-w-2xl lg:max-w-3xl">
                 <ErpChatButton />
                 <NotificationBell persona="parent" parentName={guardianName} />
               </div>
-              <div className="mx-auto flex max-w-lg gap-1 overflow-x-auto rounded-lg bg-[rgba(32,48,80,0.06)] p-1">
+              <div className="mx-auto flex max-w-lg gap-1 overflow-x-auto rounded-lg bg-[rgba(32,48,80,0.06)] p-1 md:max-w-2xl lg:max-w-3xl">
                 {tabs.map(([id, label]) => (
                   <button
                     key={id}
@@ -190,7 +190,7 @@ export function ParentPortalClient({
         </div>
       ) : (
         <div
-          className={`mx-auto min-h-screen max-w-lg ${
+          className={`mx-auto min-h-screen max-w-lg md:max-w-2xl lg:max-w-3xl ${
             mobileApp ? "bhb-parent-app-content pb-4" : "pb-16"
           }`}
         >

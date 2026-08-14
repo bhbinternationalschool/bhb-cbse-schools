@@ -3358,6 +3358,24 @@ export function markWhatsAppReceiptSent(voucherId: string): boolean {
 }
 
 /**
+ * Best-effort push notification alongside a fee receipt — never blocks or
+ * affects the WhatsApp flow, which stays the primary channel (Round 14).
+ */
+function notifyFeeReceiptPush(householdId: string, voucher: CollectionVoucher) {
+  if (typeof window === "undefined") return;
+  void fetch("/api/push/notify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      householdId,
+      title: "Fee receipt",
+      body: `Receipt ${voucher.receiptNo} — ${formatInr(voucher.totalPaise)} received. Thank you.`,
+      url: "/parent?tab=fees",
+    }),
+  }).catch(() => undefined);
+}
+
+/**
  * Deliver fee receipt on WhatsApp: PDF attachment (when share supported) +
  * full receipt text + digital receipt link. Demo without Business API.
  */
@@ -3490,6 +3508,7 @@ export async function deliverWhatsAppFeeReceipt(input: {
         if (input.markSent !== false) {
           markWhatsAppReceiptSent(input.voucher.id);
         }
+        notifyFeeReceiptPush(input.voucher.householdId, input.voucher);
         return {
           ok: true,
           mobile,
@@ -3526,6 +3545,7 @@ export async function deliverWhatsAppFeeReceipt(input: {
       if (input.markSent !== false) {
         markWhatsAppReceiptSent(input.voucher.id);
       }
+      notifyFeeReceiptPush(input.voucher.householdId, input.voucher);
       return {
         ok: true,
         mobile,
@@ -3549,6 +3569,7 @@ export async function deliverWhatsAppFeeReceipt(input: {
   if (input.markSent !== false) {
     markWhatsAppReceiptSent(input.voucher.id);
   }
+  notifyFeeReceiptPush(input.voucher.householdId, input.voucher);
   return {
     ok: true,
     mobile,

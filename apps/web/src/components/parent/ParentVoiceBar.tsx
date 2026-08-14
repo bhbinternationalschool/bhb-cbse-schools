@@ -71,7 +71,7 @@ export function ParentVoiceBar({
   }
 
   return (
-    <div className="mx-auto max-w-lg px-4 pb-2">
+    <div className="mx-auto max-w-lg px-4 pb-2 md:max-w-2xl lg:max-w-3xl">
       <div className="flex items-center gap-2 rounded-xl border border-[rgba(15,118,110,0.25)] bg-[rgba(15,118,110,0.06)] px-3 py-2">
         <VoiceMicButton
           lang={lang}

@@ -20,6 +20,12 @@ import {
   type StudentDocKey,
 } from "@/lib/sis";
 import { useDocLocalPreview } from "@/lib/useDocLocalPreview";
+import {
+  getExistingPushSubscription,
+  pushSupported,
+  subscribeToPush,
+  unsubscribeFromPush,
+} from "@/lib/pushSubscribe";
 
 function statusTone(status: StudentDocFile["status"]) {
   if (status === "verified") return "text-emerald-700";
@@ -40,6 +46,9 @@ export function ParentProfileDocsPortal({
   const [activeId, setActiveId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pushState, setPushState] = useState<
+    "unknown" | "unsupported" | "off" | "on" | "busy"
+  >("unknown");
   const [hhDraft, setHhDraft] = useState({
     guardianName: "",
     altMobile: "",
@@ -101,6 +110,34 @@ export function ParentProfileDocsPortal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [guardianDisplayName, householdId]);
 
+  useEffect(() => {
+    if (!pushSupported()) {
+      setPushState("unsupported");
+      return;
+    }
+    getExistingPushSubscription().then((sub) => {
+      setPushState(sub ? "on" : "off");
+    });
+  }, []);
+
+  async function togglePush() {
+    setPushState("busy");
+    if (pushState === "on") {
+      await unsubscribeFromPush();
+      setPushState("off");
+      flash("Notifications turned off on this device");
+      return;
+    }
+    const r = await subscribeToPush();
+    if (!r.ok) {
+      setError(r.error || "Could not enable notifications");
+      setPushState("off");
+      return;
+    }
+    setPushState("on");
+    flash("Notifications enabled on this device");
+  }
+
   const child = useMemo(
     () => children.find((c) => c.id === activeId) ?? null,
     [children, activeId],
@@ -156,6 +193,29 @@ export function ParentProfileDocsPortal({
         <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-800">
           {error}
         </p>
+      ) : null}
+
+      {pushState !== "unsupported" ? (
+        <section className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-3">
+          <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
+            Notifications
+          </h2>
+          <p className="mt-0.5 text-[11px] text-[var(--muted)]">
+            Get a device notification for fee receipts, in addition to WhatsApp.
+          </p>
+          <button
+            type="button"
+            className={`${pushState === "on" ? btnOutline : btn} mt-3`}
+            disabled={pushState === "busy" || pushState === "unknown"}
+            onClick={() => void togglePush()}
+          >
+            {pushState === "on"
+              ? "Notifications on — turn off"
+              : pushState === "busy"
+                ? "Working…"
+                : "Enable notifications"}
+          </button>
+        </section>
       ) : null}
 
       <section className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-3">
