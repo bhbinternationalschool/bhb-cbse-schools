@@ -4,6 +4,7 @@ import "../../core/api/api_client.dart";
 import "../../core/config/app_config.dart";
 import "../../core/theme/app_theme.dart";
 import "../modules/attendance_history_screen.dart";
+import "../modules/chat_thread_screen.dart";
 import "../modules/fees_screen.dart";
 import "../modules/homework_screen.dart";
 import "../modules/module_shell.dart";
@@ -341,10 +342,14 @@ class _HomeScreenState extends State<HomeScreen> {
             case 1:
               _openModule("Fees", child);
             case 2:
-              showComingSoon(
-                context,
-                "Messages",
-                "Direct chat with the class teacher is on the roadmap.",
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => ChatThreadScreen(
+                    api: widget.api,
+                    studentId: child.id,
+                    studentName: child.fullName,
+                  ),
+                ),
               );
             case 3:
               _showProfile(summary, child);

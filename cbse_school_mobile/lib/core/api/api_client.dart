@@ -706,6 +706,80 @@ class TransportRouteInfo {
   final String? driverName;
 }
 
+class ChatThreadInfo {
+  const ChatThreadInfo({
+    required this.studentId,
+    required this.studentName,
+    required this.lastMessage,
+    required this.lastMessageAt,
+    required this.unreadCount,
+  });
+
+  factory ChatThreadInfo.fromJson(Map<String, dynamic> j) => ChatThreadInfo(
+        studentId: (j["studentId"] as String?) ?? "",
+        studentName: (j["studentName"] as String?) ?? "",
+        lastMessage: j["lastMessage"] as String?,
+        lastMessageAt: j["lastMessageAt"] as String?,
+        unreadCount: (j["unreadCount"] as num?)?.toInt() ?? 0,
+      );
+
+  final String studentId;
+  final String studentName;
+  final String? lastMessage;
+  final String? lastMessageAt;
+  final int unreadCount;
+}
+
+class ChatMessage {
+  const ChatMessage({
+    required this.id,
+    required this.senderPersona,
+    required this.senderName,
+    required this.body,
+    required this.createdAt,
+    required this.mine,
+  });
+
+  factory ChatMessage.fromJson(Map<String, dynamic> j) => ChatMessage(
+        id: (j["id"] as String?) ?? "",
+        senderPersona: (j["senderPersona"] as String?) ?? "",
+        senderName: (j["senderName"] as String?) ?? "",
+        body: (j["body"] as String?) ?? "",
+        createdAt: (j["createdAt"] as String?) ?? "",
+        mine: (j["mine"] as bool?) ?? false,
+      );
+
+  final String id;
+  final String senderPersona;
+  final String senderName;
+  final String body;
+  final String createdAt;
+  final bool mine;
+}
+
+class ChatThread {
+  const ChatThread({
+    required this.studentId,
+    required this.studentName,
+    required this.teacherName,
+    required this.messages,
+  });
+
+  factory ChatThread.fromJson(Map<String, dynamic> j) => ChatThread(
+        studentId: (j["studentId"] as String?) ?? "",
+        studentName: (j["studentName"] as String?) ?? "",
+        teacherName: j["teacherName"] as String?,
+        messages: ((j["messages"] as List?) ?? const [])
+            .map((m) => ChatMessage.fromJson(m as Map<String, dynamic>))
+            .toList(),
+      );
+
+  final String studentId;
+  final String studentName;
+  final String? teacherName;
+  final List<ChatMessage> messages;
+}
+
 class ApiClient {
   ApiClient(this.config);
 
@@ -1028,6 +1102,26 @@ class ApiClient {
     return ((data["routes"] as List?) ?? const [])
         .map((r) => TransportRouteInfo.fromJson(r as Map<String, dynamic>))
         .toList();
+  }
+
+  /// Staff (class teacher) inbox: one thread per student in their section.
+  Future<List<ChatThreadInfo>> fetchChatThreads() async {
+    final data = await _getData("/api/v1/chat/threads");
+    return ((data["threads"] as List?) ?? const [])
+        .map((t) => ChatThreadInfo.fromJson(t as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<ChatThread> fetchChatThread(String studentId) async =>
+      ChatThread.fromJson(
+        await _getData("/api/v1/chat/thread?studentId=$studentId"),
+      );
+
+  Future<void> sendChatMessage({
+    required String studentId,
+    required String body,
+  }) async {
+    await _postData("/api/v1/chat/send", {"studentId": studentId, "body": body});
   }
 
   Future<PunchState> fetchPunchState() async =>

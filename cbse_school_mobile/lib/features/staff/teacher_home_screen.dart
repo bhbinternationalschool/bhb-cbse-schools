@@ -2,6 +2,7 @@ import "package:flutter/material.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
+import "../modules/chat_inbox_screen.dart";
 import "../modules/homework_screen.dart";
 import "../modules/module_shell.dart";
 import "../modules/notices_screen.dart";
@@ -492,10 +493,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
             case 1:
               _openModule("Students");
             case 2:
-              showComingSoon(
-                context,
-                "Messages",
-                "Staff chat is on the roadmap.",
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => ChatInboxScreen(api: widget.api)),
               );
             case 3:
               showModalBottomSheet<void>(
