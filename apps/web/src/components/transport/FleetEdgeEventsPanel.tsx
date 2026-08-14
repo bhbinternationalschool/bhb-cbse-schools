@@ -47,11 +47,13 @@ function summarize(event: FleetEdgeEvent): string {
     return bits.join(" · ") || "—";
   }
   const health = (p.vehicleHealth as Record<string, unknown>) || {};
-  const fault = (health.faultCode as Record<string, unknown>) || {};
+  const fault = (health.faultCodes as Record<string, unknown>) || {};
   const eff = (p.vehicleEfficiency as Record<string, unknown>) || {};
   const bits: string[] = [];
-  if (typeof fault.critical === "number" || typeof fault.warning === "number") {
-    bits.push(`fault codes: ${fault.critical ?? 0} critical, ${fault.warning ?? 0} warning`);
+  if (Array.isArray(fault.critical) || Array.isArray(fault.warning)) {
+    const criticalCount = Array.isArray(fault.critical) ? fault.critical.length : 0;
+    const warningCount = Array.isArray(fault.warning) ? fault.warning.length : 0;
+    bits.push(`fault codes: ${criticalCount} critical, ${warningCount} warning`);
   }
   if (typeof eff.fuelConsumed === "number") bits.push(`fuel used ${eff.fuelConsumed}`);
   if (typeof eff.averageSpeed === "number") bits.push(`avg speed ${eff.averageSpeed}`);

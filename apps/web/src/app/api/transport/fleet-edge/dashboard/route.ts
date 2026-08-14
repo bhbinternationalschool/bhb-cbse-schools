@@ -120,9 +120,9 @@ export async function GET(req: Request) {
     } else if (ev.event_type === "details") {
       const p = ev.payload;
       const safety = isObj(p.vehicleSafety) ? p.vehicleSafety : {};
-      m.haCount += num(safety.haCount);
-      m.hbCount += num(safety.hbCount);
-      m.rtCount += num(safety.rtCount);
+      m.haCount += num(safety.harshAccelerationCount);
+      m.hbCount += num(safety.harshBrakeCount);
+      m.rtCount += num(safety.rashTurningCount);
       m.nightDrivingSeconds += num(safety.nightTimeDrivingDuration);
 
       const perf = isObj(p.vehiclePerformance) ? p.vehiclePerformance : {};
@@ -136,10 +136,10 @@ export async function GET(req: Request) {
       m.stoppageSeconds += sumDurations(eff.stoppages);
 
       const health = isObj(p.vehicleHealth) ? p.vehicleHealth : {};
-      const fault = isObj(health.faultCode) ? health.faultCode : {};
-      m.faultCritical += num(fault.critical);
-      m.faultWarning += num(fault.warning);
-      m.incidents += num(health.incidents);
+      const fault = isObj(health.faultCodes) ? health.faultCodes : {};
+      m.faultCritical += Array.isArray(fault.critical) ? fault.critical.length : 0;
+      m.faultWarning += Array.isArray(fault.warning) ? fault.warning.length : 0;
+      m.incidents += Array.isArray(health.incidents) ? health.incidents.length : 0;
     }
   }
 
