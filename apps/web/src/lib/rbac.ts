@@ -46,7 +46,8 @@ export type RbacModule =
   | "wa_chatbot"
   | "documents"
   | "id_cards"
-  | "discipline";
+  | "discipline"
+  | "health";
 
 export type RbacAction =
   | "view"
@@ -193,6 +194,11 @@ export const RBAC_MODULES: {
     label: "Discipline / behavior",
     href: "/discipline",
   },
+  {
+    id: "health",
+    label: "Health / infirmary",
+    href: "/health",
+  },
   { id: "settings", label: "Settings / RBAC", group: "admin" },
   { id: "policies", label: "Policies (leave / holiday)", group: "admin" },
 ];
@@ -335,6 +341,7 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("documents", ["view", "create", "export"]),
         grant("id_cards", ops),
         grant("discipline", [...ops, "approve"]),
+        grant("health", ops),
         grant("compliance", ["view", "edit", "export"]),
         grant("notices", ops),
         grant("news", ops),
@@ -382,6 +389,7 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("documents", ["view", "create", "export"]),
         grant("id_cards", ["view", "create", "export"]),
         grant("discipline", ["view", "create", "edit", "export"]),
+        grant("health", ["view", "create", "edit", "export"]),
         grant("notices", ops),
         grant("news", ops),
         grant("gallery", ops),
@@ -463,6 +471,7 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("exams", teachOps),
         grant("certificates", ["view"]),
         grant("discipline", ["view", "create"]),
+        grant("health", ["view", "create"]),
         grant("notices", ["view"]),
         grant("news", ["view"]),
         grant("gallery", ["view"]),
@@ -929,6 +938,7 @@ export function moduleForHref(href: string): RbacModule | null {
   if (path.startsWith("/documents")) return "documents";
   if (path.startsWith("/id-cards")) return "id_cards";
   if (path.startsWith("/discipline")) return "discipline";
+  if (path.startsWith("/health")) return "health";
   if (path.startsWith("/comms") || path.startsWith("/notices") || path.startsWith("/news") || path.startsWith("/gallery")) {
     const tab = params.get("tab");
     if (tab === "news" || path.startsWith("/news")) return "news";

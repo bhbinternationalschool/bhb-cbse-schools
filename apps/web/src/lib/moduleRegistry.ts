@@ -40,7 +40,8 @@ export type RegistryModuleId =
   | "rte_ews"
   | "documents"
   | "id_cards"
-  | "discipline";
+  | "discipline"
+  | "health";
 
 export type RegistryModuleGroup =
   | "setup"
@@ -240,6 +241,14 @@ export const REGISTRY_MODULES: RegistryModuleDef[] = [
     href: "/discipline",
     group: "academics",
     defaultEnabled: false,
+  },
+  {
+    id: "health",
+    label: "Health / infirmary",
+    blurb: "Visit log, medication & vaccination records, emergency contacts",
+    href: "/health",
+    group: "campus",
+    defaultEnabled: true,
   },
   {
     id: "library",
@@ -506,6 +515,7 @@ export function registryModuleForHref(href: string): RegistryModuleId | null {
   if (path === "/documents" || path.startsWith("/documents/")) return "documents";
   if (path === "/id-cards" || path.startsWith("/id-cards/")) return "id_cards";
   if (path === "/discipline" || path.startsWith("/discipline/")) return "discipline";
+  if (path === "/health" || path.startsWith("/health/")) return "health";
   if (
     path === "/comms" ||
     path.startsWith("/comms/") ||

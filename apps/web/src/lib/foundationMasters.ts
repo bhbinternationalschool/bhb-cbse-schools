@@ -709,6 +709,7 @@ export type StaffDutyRole =
   | "exam_incharge"
   | "sports_incharge"
   | "discipline_incharge"
+  | "nurse_incharge"
   | "other";
 
 export type StaffDutyLink = {
@@ -736,6 +737,7 @@ export const STAFF_DUTY_ROLES: { value: StaffDutyRole; label: string }[] = [
   { value: "exam_incharge", label: "Exam in-charge" },
   { value: "sports_incharge", label: "Sports in-charge" },
   { value: "discipline_incharge", label: "Discipline in-charge" },
+  { value: "nurse_incharge", label: "Nurse / medical in-charge" },
   { value: "other", label: "Other duty" },
 ];
 
