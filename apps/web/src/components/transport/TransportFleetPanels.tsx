@@ -33,6 +33,7 @@ import {
   listOpenPayables,
   markPayablePaid,
   openServiceJob,
+  recordBoardingGeoEvent,
   recordCertificateRenewal,
   recordEmiPayment,
   recordGpsPing,
@@ -655,6 +656,41 @@ export function BoardingPanel({
       ? searchFeeStudents(unauthQ, sis, masters).slice(0, 8)
       : [];
 
+  function captureAndRecord(studentId: string, kind: "boarded" | "offboarded") {
+    if (!navigator.geolocation) {
+      onError("Geolocation unavailable on this device");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const r = recordBoardingGeoEvent({
+          date,
+          routeId,
+          trip,
+          studentId,
+          kind,
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracyM: pos.coords.accuracy,
+        });
+        if (!r.ok) {
+          onError(r.error);
+          return;
+        }
+        onRefresh();
+        if (r.flag) {
+          onFlash(
+            `${kind === "boarded" ? "Boarded" : "Offboarded"} ~${r.flag.actualKm.toFixed(1)} km from school — ` +
+              `registered stop is ${r.flag.registeredKm.toFixed(1)} km, review this student's stop`,
+          );
+        } else {
+          onFlash(`${kind === "boarded" ? "Boarded" : "Offboarded"} recorded`);
+        }
+      },
+      () => onError("Location permission denied"),
+    );
+  }
+
   return (
     <div className="mt-4 space-y-4">
       <div className="flex flex-wrap gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
@@ -718,28 +754,36 @@ export function BoardingPanel({
                         {st?.fullName ?? a.studentId}
                       </div>
                       <div className="text-[10px] text-[var(--muted)]">
-                        {a.stopName}
+                        {a.stopName} · registered {a.route?.stops.find((s) => s.id === a.stopId)?.distanceKm ?? "?"} km
                         {a.boardingSuspended ? " · SUSPENDED" : ""}
                         {ev ? ` · ${ev.status}` : ""}
                       </div>
+                      {ev?.boardedLocation ? (
+                        <div className="text-[10px] text-[var(--muted)]">
+                          Boarded {ev.boardedLocation.distanceFromSchoolKm.toFixed(1)} km from school
+                          {ev.offboardedLocation
+                            ? ` · offboarded ${ev.offboardedLocation.distanceFromSchoolKm.toFixed(1)} km from school`
+                            : ""}
+                        </div>
+                      ) : null}
                     </div>
                     <div className="flex gap-1">
                       <button
                         type="button"
                         className="rounded border px-2 py-0.5 text-[10px] font-bold"
-                        onClick={() => {
-                          upsertBoardingEvent({
-                            date,
-                            routeId,
-                            trip,
-                            studentId: a.studentId,
-                            status: "boarded",
-                          });
-                          onRefresh();
-                        }}
+                        onClick={() => captureAndRecord(a.studentId, "boarded")}
                       >
                         Board
                       </button>
+                      {ev?.status === "boarded" ? (
+                        <button
+                          type="button"
+                          className="rounded border px-2 py-0.5 text-[10px] font-bold"
+                          onClick={() => captureAndRecord(a.studentId, "offboarded")}
+                        >
+                          Offboard
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         className="rounded border px-2 py-0.5 text-[10px] font-bold"

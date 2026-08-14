@@ -12,6 +12,7 @@ import {
 } from "@/lib/masters";
 import { checkHold } from "@/lib/holds";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { TENANT } from "@/lib/types";
 
 /* ─── Core ops ─────────────────────────────────────────────── */
 
@@ -313,6 +314,18 @@ export type RepairRequest = {
 export type BoardingTrip = "AM" | "PM";
 export type BoardingStatus = "boarded" | "absent" | "unauthorized";
 
+/** GPS captured from the attendant's own phone at the moment they mark
+ * boarding/offboarding — not from Fleet Edge vehicle telemetry, which is
+ * only continuous for 1 of 5 vehicles today and far too coarse (30-minute
+ * windows) on the rest to pin down a specific stop. */
+export type BoardingGeoCapture = {
+  lat: number;
+  lng: number;
+  accuracyM: number | null;
+  at: string;
+  distanceFromSchoolKm: number;
+};
+
 export type BoardingEvent = {
   id: string;
   date: string;
@@ -322,6 +335,9 @@ export type BoardingEvent = {
   status: BoardingStatus;
   note: string;
   createdAt: string;
+  /** Optional: old records predate location capture. */
+  boardedLocation?: BoardingGeoCapture | null;
+  offboardedLocation?: BoardingGeoCapture | null;
 };
 
 export type GpsPing = {
@@ -1930,12 +1946,122 @@ export function upsertBoardingEvent(input: {
     status: input.status,
     note: input.note ?? "",
     createdAt: existing?.createdAt ?? new Date().toISOString(),
+    boardedLocation: existing?.boardedLocation ?? null,
+    offboardedLocation: existing?.offboardedLocation ?? null,
   };
   const boardingEvents = existing
     ? state.boardingEvents.map((e) => (e.id === event.id ? event : e))
     : [event, ...state.boardingEvents];
   saveTransport({ ...state, boardingEvents });
   return { ok: true, event };
+}
+
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const r = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return r * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+export type BoardingDistanceFlag = {
+  registeredKm: number;
+  actualKm: number;
+  deltaKm: number;
+};
+
+/** Delta above which a boarding location is flagged as differing from the
+ * student's registered stop. 1.5 km is a judgment call, not a confirmed
+ * school policy — loose enough to absorb ordinary GPS drift (the school
+ * itself already shows ~20-30m of scatter across vehicles at rest), tight
+ * enough to catch "boarded from a different stop entirely". Tune once real
+ * capture data shows what normal variance actually looks like. */
+const BOARDING_DISTANCE_FLAG_THRESHOLD_KM = 1.5;
+
+function boardingDistanceFlag(
+  state: TransportState,
+  studentId: string,
+  routeId: string,
+  actualKm: number,
+): BoardingDistanceFlag | null {
+  const assignment = state.assignments.find(
+    (a) => a.studentId === studentId && a.routeId === routeId && a.effectiveTo == null,
+  );
+  const route = state.routes.find((r) => r.id === routeId);
+  const stop = route?.stops.find((s) => s.id === assignment?.stopId);
+  if (!stop) return null;
+  const deltaKm = Math.abs(actualKm - stop.distanceKm);
+  if (deltaKm < BOARDING_DISTANCE_FLAG_THRESHOLD_KM) return null;
+  return { registeredKm: stop.distanceKm, actualKm, deltaKm };
+}
+
+/**
+ * Records where a student actually boarded/offboarded, from the marking
+ * staff member's own phone GPS — not Fleet Edge vehicle telemetry (see
+ * BoardingGeoCapture's doc comment for why). Boarding sets status
+ * "boarded" as a side effect; offboarding requires the student to already
+ * be marked boarded for this trip (you can't get off a bus you never got
+ * on) and does not change status.
+ */
+export function recordBoardingGeoEvent(input: {
+  date: string;
+  routeId: string;
+  trip: BoardingTrip;
+  studentId: string;
+  kind: "boarded" | "offboarded";
+  lat: number;
+  lng: number;
+  accuracyM?: number;
+}):
+  | { ok: true; event: BoardingEvent; flag: BoardingDistanceFlag | null }
+  | { ok: false; error: string } {
+  if (!input.studentId) return { ok: false, error: "Student required" };
+  if (!input.routeId) return { ok: false, error: "Route required" };
+  if (!Number.isFinite(input.lat) || !Number.isFinite(input.lng)) {
+    return { ok: false, error: "Invalid GPS coordinates" };
+  }
+  const state = loadTransport();
+  const existing = state.boardingEvents.find(
+    (e) =>
+      e.date === input.date &&
+      e.routeId === input.routeId &&
+      e.trip === input.trip &&
+      e.studentId === input.studentId,
+  );
+  if (input.kind === "offboarded" && existing?.status !== "boarded") {
+    return { ok: false, error: "Mark boarded before recording where they got off" };
+  }
+
+  const distanceFromSchoolKm = haversineKm(input.lat, input.lng, TENANT.schoolLat, TENANT.schoolLng);
+  const capture: BoardingGeoCapture = {
+    lat: input.lat,
+    lng: input.lng,
+    accuracyM: typeof input.accuracyM === "number" ? input.accuracyM : null,
+    at: new Date().toISOString(),
+    distanceFromSchoolKm,
+  };
+
+  const event: BoardingEvent = {
+    id: existing?.id ?? id("brd"),
+    date: input.date,
+    routeId: input.routeId,
+    trip: input.trip,
+    studentId: input.studentId,
+    status: input.kind === "boarded" ? "boarded" : (existing?.status ?? "boarded"),
+    note: existing?.note ?? "",
+    createdAt: existing?.createdAt ?? new Date().toISOString(),
+    boardedLocation: input.kind === "boarded" ? capture : (existing?.boardedLocation ?? null),
+    offboardedLocation: input.kind === "offboarded" ? capture : (existing?.offboardedLocation ?? null),
+  };
+  const boardingEvents = existing
+    ? state.boardingEvents.map((e) => (e.id === event.id ? event : e))
+    : [event, ...state.boardingEvents];
+  saveTransport({ ...state, boardingEvents });
+
+  const flag = boardingDistanceFlag(state, input.studentId, input.routeId, distanceFromSchoolKm);
+  return { ok: true, event, flag };
 }
 
 export function listBoardingForTrip(
