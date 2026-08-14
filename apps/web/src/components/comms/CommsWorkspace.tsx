@@ -267,8 +267,15 @@ export function CommsWorkspace() {
       cancelled = true;
       window.removeEventListener("bhb-notifications", onNf);
     };
-     
+
   }, []);
+
+  // Deep-link from Events "View photos" — auto-select the album named in
+  // ?album= instead of leaving the parent to hunt through the album list.
+  useEffect(() => {
+    const albumParam = searchParams.get("album");
+    if (albumParam) setActiveAlbumId(albumParam);
+  }, [searchParams]);
 
   function setTab(next: CommsTab) {
     const url = new URL(window.location.href);
