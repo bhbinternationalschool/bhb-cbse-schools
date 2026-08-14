@@ -190,12 +190,29 @@ export async function GET(req: Request) {
 
   const { rows, kpis } = buildFleetDashboard(Array.from(byVehicle.values()));
 
+  // Model/year is never in Fleet Edge's own payloads (checked against the
+  // full spec and every field name seen in real traffic) — joined here from
+  // what staff record themselves, keyed by VIN, so two vehicles of the same
+  // model don't get confused for each other.
+  const { data: identityRows } = await sb
+    .from("fleet_edge_vehicle_identity")
+    .select("vin, model, year, name")
+    .eq("tenant_id", tenantId);
+  const identityByVin = new Map(
+    (identityRows || []).map((r) => [r.vin as string, { model: r.model as string | null, year: r.year as number | null, name: r.name as string | null }]),
+  );
+
+  const vehicles = rows.map((r) => ({
+    ...r,
+    identity: identityByVin.get(r.vehicleRef) || null,
+  }));
+
   return NextResponse.json({
     ok: true,
     from,
     to,
     kpis,
-    total: rows.length,
-    vehicles: rows,
+    total: vehicles.length,
+    vehicles,
   });
 }

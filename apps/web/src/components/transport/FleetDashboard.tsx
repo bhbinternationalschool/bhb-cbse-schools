@@ -18,18 +18,29 @@ const TABS: ModuleTabItem[] = [
   { id: "health", label: "Vehicle Health", tone: "violet" },
 ];
 
+type VehicleIdentity = { model: string | null; year: number | null; name: string | null } | null;
+
+type VehicleRow = VehicleDashboardRow & { identity: VehicleIdentity };
+
 type DashboardResponse = {
   ok: boolean;
   from: string;
   to: string;
   kpis: Record<FleetBucket, number>;
   total: number;
-  vehicles: VehicleDashboardRow[];
+  vehicles: VehicleRow[];
   error?: string;
 };
 
-function vehicleLabel(v: { registrationNumber: string | null; vehicleRef: string }): string {
-  return v.registrationNumber || v.vehicleRef;
+/** Fleet Edge never sends model/year — prefer what staff have recorded
+ * (Vehicle wise tab) over a bare VIN, which is genuinely ambiguous when two
+ * buses share a model. */
+function vehicleLabel(v: { registrationNumber: string | null; vehicleRef: string; identity?: VehicleIdentity }): string {
+  const base = v.registrationNumber || v.vehicleRef;
+  const idy = v.identity;
+  if (idy?.name) return `${idy.name} (${base})`;
+  if (idy?.model) return `${idy.model}${idy.year ? ` ${idy.year}` : ""} — ${base}`;
+  return base;
 }
 
 function bucketLabel(b: FleetBucket): string {
@@ -77,6 +88,49 @@ export function FleetDashboard() {
   const [report, setReport] = useState<{ headline: string; highlights: string[] } | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
+
+  const [identityDrafts, setIdentityDrafts] = useState<Record<string, { model: string; year: string }>>({});
+  const [identitySaving, setIdentitySaving] = useState<string | null>(null);
+
+  async function saveIdentity(v: VehicleRow) {
+    const draft = identityDrafts[v.vehicleRef];
+    const model = (draft?.model ?? v.identity?.model ?? "").trim();
+    const yearStr = draft?.year ?? (v.identity?.year != null ? String(v.identity.year) : "");
+    const year = yearStr.trim() ? Number(yearStr.trim()) : null;
+    setIdentitySaving(v.vehicleRef);
+    try {
+      const res = await fetch("/api/transport/fleet-edge/vehicle-identity", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          vin: v.vehicleRef,
+          registrationNumber: v.registrationNumber,
+          model: model || null,
+          year,
+        }),
+      });
+      if (!res.ok) return;
+      setData((prev) =>
+        prev
+          ? {
+              ...prev,
+              vehicles: prev.vehicles.map((row) =>
+                row.vehicleRef === v.vehicleRef
+                  ? { ...row, identity: { model: model || null, year, name: row.identity?.name ?? null } }
+                  : row,
+              ),
+            }
+          : prev,
+      );
+      setIdentityDrafts((prev) => {
+        const next = { ...prev };
+        delete next[v.vehicleRef];
+        return next;
+      });
+    } finally {
+      setIdentitySaving(null);
+    }
+  }
 
   function applyMonth(value: string) {
     setMonth(value);
@@ -335,6 +389,46 @@ export function FleetDashboard() {
                         {v.fuelDrainedLiters > 0 ? ` · drained ${v.fuelDrainedLiters.toFixed(1)} L` : ""}
                         {v.geofenceVisits.length > 0 ? ` · ${v.geofenceVisits.length} geofence visits` : ""}
                       </p>
+                      <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-[var(--border)] pt-2">
+                        <input
+                          type="text"
+                          placeholder="Model (e.g. Tata LP 909)"
+                          className={`${field} !py-1 !text-sm w-48`}
+                          value={identityDrafts[v.vehicleRef]?.model ?? v.identity?.model ?? ""}
+                          onChange={(e) =>
+                            setIdentityDrafts((prev) => ({
+                              ...prev,
+                              [v.vehicleRef]: {
+                                model: e.target.value,
+                                year: prev[v.vehicleRef]?.year ?? (v.identity?.year != null ? String(v.identity.year) : ""),
+                              },
+                            }))
+                          }
+                        />
+                        <input
+                          type="number"
+                          placeholder="Year"
+                          className={`${field} !py-1 !text-sm w-24`}
+                          value={identityDrafts[v.vehicleRef]?.year ?? (v.identity?.year != null ? String(v.identity.year) : "")}
+                          onChange={(e) =>
+                            setIdentityDrafts((prev) => ({
+                              ...prev,
+                              [v.vehicleRef]: {
+                                model: prev[v.vehicleRef]?.model ?? (v.identity?.model || ""),
+                                year: e.target.value,
+                              },
+                            }))
+                          }
+                        />
+                        <button
+                          type="button"
+                          className="rounded-lg border border-[var(--border)] px-3 py-1 text-xs font-semibold disabled:opacity-50"
+                          disabled={identitySaving === v.vehicleRef}
+                          onClick={() => void saveIdentity(v)}
+                        >
+                          {identitySaving === v.vehicleRef ? "Saving…" : "Save"}
+                        </button>
+                      </div>
                     </li>
                   );
                 })}
