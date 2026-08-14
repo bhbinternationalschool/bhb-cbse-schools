@@ -47,7 +47,8 @@ export type RbacModule =
   | "documents"
   | "id_cards"
   | "discipline"
-  | "health";
+  | "health"
+  | "visitors";
 
 export type RbacAction =
   | "view"
@@ -199,6 +200,11 @@ export const RBAC_MODULES: {
     label: "Health / infirmary",
     href: "/health",
   },
+  {
+    id: "visitors",
+    label: "Visitor / gate management",
+    href: "/visitors",
+  },
   { id: "settings", label: "Settings / RBAC", group: "admin" },
   { id: "policies", label: "Policies (leave / holiday)", group: "admin" },
 ];
@@ -342,6 +348,7 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("id_cards", ops),
         grant("discipline", [...ops, "approve"]),
         grant("health", ops),
+        grant("visitors", ops),
         grant("compliance", ["view", "edit", "export"]),
         grant("notices", ops),
         grant("news", ops),
@@ -390,6 +397,7 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("id_cards", ["view", "create", "export"]),
         grant("discipline", ["view", "create", "edit", "export"]),
         grant("health", ["view", "create", "edit", "export"]),
+        grant("visitors", ["view", "create", "edit", "export"]),
         grant("notices", ops),
         grant("news", ops),
         grant("gallery", ops),
@@ -444,6 +452,7 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("trust", ["view"]),
         grant("students", ["view"]),
         grant("staff", ["view"]),
+        grant("visitors", ["view"]),
         grant("notices", ["view"]),
         grant("notifications", ["view"]),
       ],
@@ -939,6 +948,7 @@ export function moduleForHref(href: string): RbacModule | null {
   if (path.startsWith("/id-cards")) return "id_cards";
   if (path.startsWith("/discipline")) return "discipline";
   if (path.startsWith("/health")) return "health";
+  if (path.startsWith("/visitors")) return "visitors";
   if (path.startsWith("/comms") || path.startsWith("/notices") || path.startsWith("/news") || path.startsWith("/gallery")) {
     const tab = params.get("tab");
     if (tab === "news" || path.startsWith("/news")) return "news";

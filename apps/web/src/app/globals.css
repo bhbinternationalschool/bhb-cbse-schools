@@ -977,6 +977,38 @@ h3,
     color: rgba(180, 35, 24, 0.18) !important;
   }
 
+  /* Visitor pass — print only the selected sheet */
+  body.printing-visitor-pass {
+    background: white !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body.printing-visitor-pass * {
+    visibility: hidden !important;
+  }
+
+  body.printing-visitor-pass .visitor-pass-sheet.print-target,
+  body.printing-visitor-pass .visitor-pass-sheet.print-target * {
+    visibility: visible !important;
+  }
+
+  body.printing-visitor-pass .visitor-pass-sheet.print-target {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: 100mm !important;
+    margin: 0 auto !important;
+    padding: 12px !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: white !important;
+    opacity: 1 !important;
+    overflow: visible !important;
+  }
+
   /* Exam question papers */
   body.printing-exam-paper {
     background: white !important;

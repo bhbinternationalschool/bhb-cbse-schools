@@ -41,7 +41,8 @@ export type RegistryModuleId =
   | "documents"
   | "id_cards"
   | "discipline"
-  | "health";
+  | "health"
+  | "visitors";
 
 export type RegistryModuleGroup =
   | "setup"
@@ -247,6 +248,14 @@ export const REGISTRY_MODULES: RegistryModuleDef[] = [
     label: "Health / infirmary",
     blurb: "Visit log, medication & vaccination records, emergency contacts",
     href: "/health",
+    group: "campus",
+    defaultEnabled: true,
+  },
+  {
+    id: "visitors",
+    label: "Visitor / gate management",
+    blurb: "Front-gate visitor register, QR passes, early-pickup gate passes",
+    href: "/visitors",
     group: "campus",
     defaultEnabled: true,
   },
@@ -516,6 +525,7 @@ export function registryModuleForHref(href: string): RegistryModuleId | null {
   if (path === "/id-cards" || path.startsWith("/id-cards/")) return "id_cards";
   if (path === "/discipline" || path.startsWith("/discipline/")) return "discipline";
   if (path === "/health" || path.startsWith("/health/")) return "health";
+  if (path === "/visitors" || path.startsWith("/visitors/")) return "visitors";
   if (
     path === "/comms" ||
     path.startsWith("/comms/") ||
