@@ -8,7 +8,16 @@ export const metadata: Metadata = {
     "Install the BHB International School app — for parents, teachers, principal/office staff and transport drivers.",
 };
 
-const APK_PATH = "/downloads/bhb-school-app.apk";
+// Served from a dedicated public GCS bucket, not the app's own public/
+// directory — Cloud Run's front end refuses to buffer a response over
+// roughly 32MB ("Response size was too large"), and this APK is 54MB.
+// A same-origin /downloads/... route 500'd in production even though it
+// worked in local dev, where that ceiling doesn't exist. GCS has no such
+// limit. The bucket (school-erp-prod-493619-public-downloads) is
+// dedicated to this — not the shared "assets" bucket — so granting public
+// read here doesn't expose anything else.
+const APK_URL =
+  "https://storage.googleapis.com/school-erp-prod-493619-public-downloads/bhb-school-app.apk";
 
 /**
  * Public test-distribution page — pre-store-launch. Linked directly (not
@@ -44,8 +53,7 @@ export default function DownloadPage() {
           <span className="text-xs text-slate-400">Ready to install</span>
         </div>
         <a
-          href={APK_PATH}
-          download
+          href={APK_URL}
           className="block w-full rounded-xl bg-[#203050] px-4 py-3.5 text-center text-sm font-semibold text-white hover:opacity-90"
         >
           Download for Android
