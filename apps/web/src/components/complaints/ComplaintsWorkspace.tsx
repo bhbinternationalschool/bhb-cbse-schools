@@ -17,7 +17,9 @@ import {
   deleteTicket,
   emptyComplaintState,
   loadComplaints,
+  mergeIncomingTickets,
   resolveTicket,
+  saveComplaints,
   setTicketStatus,
   COMPLAINT_CATEGORIES,
   COMPLAINT_STATUSES,
@@ -153,6 +155,21 @@ export function ComplaintsWorkspace() {
       await Promise.all([ensureMastersHydrated(), ensureSisHydrated()]);
       setMasters(loadMasters());
       setSis(loadSis());
+    })();
+    void (async () => {
+      try {
+        const res = await fetch("/api/wa/complaints", { credentials: "same-origin" });
+        if (!res.ok) return;
+        const body = (await res.json()) as { ok?: boolean; tickets?: ComplaintTicket[] };
+        if (!body.ok || !Array.isArray(body.tickets) || body.tickets.length === 0) return;
+        setState((cur) => {
+          const merged = mergeIncomingTickets(cur, body.tickets!);
+          if (merged !== cur) saveComplaints(merged);
+          return merged;
+        });
+      } catch {
+        /* WhatsApp-submitted tickets just won't show until next load */
+      }
     })();
   }, []);
 

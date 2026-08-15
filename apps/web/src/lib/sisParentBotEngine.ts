@@ -12,7 +12,8 @@ export type SisBotQuickId =
   | "pay"
   | "receipts"
   | "info"
-  | "human";
+  | "human"
+  | "complaint";
 
 export const SIS_BOT_QUICK_PROMPTS: {
   id: SisBotQuickId;
@@ -25,6 +26,7 @@ export const SIS_BOT_QUICK_PROMPTS: {
   { id: "receipts", label: "Recent receipts", waKeyword: "RECEIPTS" },
   { id: "info", label: "School info", waKeyword: "INFO" },
   { id: "human", label: "Talk to office", waKeyword: "HUMAN" },
+  { id: "complaint", label: "Raise a complaint", waKeyword: "COMPLAINT" },
 ];
 
 export function sisBotWelcomeText(multiChild = false): string {
@@ -57,6 +59,7 @@ export function detectSisBotIntent(text: string): SisBotQuickId | "unknown" {
   if (SIS_BOT_QUICK_PROMPTS.some((q) => q.id === asId)) return asId;
 
   const low = t.toLowerCase();
+  if (/complain|complaint|grievance|shikayat/.test(low)) return "complaint";
   if (/^pay\b|upi|payment link|clear due/.test(low)) return "pay";
   if (/due|outstanding|balance|arrear|fee/.test(low)) return "dues";
   if (/receipt|paid|voucher/.test(low)) return "receipts";

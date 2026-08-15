@@ -166,6 +166,102 @@ export async function sendWhatsAppText(opts: {
   };
 }
 
+/** Send a WhatsApp Flow (interactive multi-step in-chat form). Meta-only —
+ * Flows are a Cloud API feature, no generic-BSP fallback makes sense here. */
+export async function sendWaFlowMessage(opts: {
+  toMobile: string;
+  flowId: string;
+  flowToken: string;
+  headerText: string;
+  bodyText: string;
+  footerText?: string;
+  ctaText: string;
+  screenId: string;
+}): Promise<{ ok: boolean; providerId?: string; error?: string; mode: string }> {
+  const to = waDigitsToE164India(opts.toMobile);
+  if (!to || to.length < 10) {
+    return { ok: false, error: "Invalid destination", mode: "none" };
+  }
+  if (!opts.flowId) {
+    return { ok: false, error: "Missing flowId — flow not published yet", mode: "none" };
+  }
+  if (await isOptedOut(to)) {
+    return { ok: false, error: "Contact has opted out (STOP)", mode: "none" };
+  }
+  if (!(await isWithin24HourWindow(to))) {
+    return {
+      ok: false,
+      error: "Outside Meta's 24h session window",
+      mode: "none",
+    };
+  }
+
+  const phoneNumberId = metaPhoneNumberId();
+  const metaToken = metaAccessToken();
+  if (!phoneNumberId || !metaToken) {
+    return {
+      ok: false,
+      mode: "stub",
+      error: "Configure WHATSAPP_TOKEN + WHATSAPP_PHONE_ID",
+    };
+  }
+  const version = metaGraphVersion();
+  const url = `https://graph.facebook.com/${version}/${phoneNumberId}/messages`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${metaToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to,
+        type: "interactive",
+        interactive: {
+          type: "flow",
+          header: { type: "text", text: opts.headerText },
+          body: { text: opts.bodyText },
+          footer: opts.footerText ? { text: opts.footerText } : undefined,
+          action: {
+            name: "flow",
+            parameters: {
+              flow_message_version: "3",
+              flow_token: opts.flowToken,
+              flow_id: opts.flowId,
+              flow_cta: opts.ctaText,
+              flow_action: "navigate",
+              flow_action_payload: { screen: opts.screenId },
+            },
+          },
+        },
+      }),
+    });
+    const json = (await res.json().catch(() => ({}))) as {
+      messages?: { id?: string }[];
+      error?: { message?: string };
+    };
+    if (!res.ok) {
+      return {
+        ok: false,
+        mode: "meta",
+        error: json.error?.message || `Meta HTTP ${res.status}`,
+      };
+    }
+    return {
+      ok: true,
+      mode: "meta",
+      providerId: json.messages?.[0]?.id || "ok",
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      mode: "meta",
+      error: e instanceof Error ? e.message : "Meta flow send failed",
+    };
+  }
+}
+
 export type WaTemplateComponent = {
   type: "header" | "body" | "button" | "carousel";
   sub_type?: string;

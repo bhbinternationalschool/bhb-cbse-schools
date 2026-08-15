@@ -28,7 +28,13 @@ import {
 } from "@/lib/waDeliveryLog.server";
 import { recordInboundMedia } from "@/lib/waInboundMedia.server";
 import { findHouseholdByWaMobile } from "@/lib/waSisBotServer";
-import { waNormalizeLocal10 } from "@/lib/waSend";
+import { sendWhatsAppText, waNormalizeLocal10 } from "@/lib/waSend";
+import {
+  parseComplaintFlowResponse,
+  parseComplaintFlowToken,
+} from "@/lib/waComplaintsFlow";
+import { appendServerComplaintTicket } from "@/lib/complaintsServer";
+import { loadSis } from "@/lib/sis";
 
 export const runtime = "nodejs";
 
@@ -132,6 +138,42 @@ export async function POST(req: Request) {
   const results = [];
   for (const msg of inbound) {
     await recordInboundMessage(msg.fromWaId, msg.text);
+
+    if (msg.flowResponse) {
+      const householdId = parseComplaintFlowToken(msg.flowResponse.flowToken);
+      const parsed = parseComplaintFlowResponse(msg.flowResponse.responseJson);
+      const mobile10 = waNormalizeLocal10(msg.fromWaId);
+      let replyText: string;
+      if (!householdId || !parsed) {
+        replyText =
+          "Sorry, that complaint form couldn't be read. Please try again or message HUMAN to reach the office.";
+      } else {
+        const sis = loadSis();
+        const household = sis.households.find((h) => h.id === householdId);
+        const ticket = await appendServerComplaintTicket({
+          householdId,
+          raisedByName: household?.guardianName || msg.profileName || "",
+          raisedByMobile: mobile10,
+          category: parsed.category,
+          subject: parsed.subject,
+          description: parsed.description,
+        });
+        replyText = ticket.ok
+          ? `Complaint logged (ref: ${ticket.ticket.id.slice(-6).toUpperCase()}). The office will follow up soon.`
+          : `Sorry, that couldn't be logged (${ticket.error}). Please message HUMAN to reach the office directly.`;
+      }
+      const send = await sendWhatsAppText({ toMobile: mobile10, body: replyText });
+      results.push({
+        audience: "complaint_flow",
+        from: msg.fromWaId,
+        escalate: false,
+        replied: true,
+        stub: !send.ok,
+        error: send.ok ? undefined : send.error,
+      });
+      continue;
+    }
+
     if (msg.media) {
       try {
         const household = findHouseholdByWaMobile(

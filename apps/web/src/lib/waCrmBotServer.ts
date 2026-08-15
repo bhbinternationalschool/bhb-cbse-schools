@@ -468,6 +468,12 @@ export type WaInboundMediaRef = {
   filename?: string;
 };
 
+/** A completed WhatsApp Flow submission (interactive.type "nfm_reply"). */
+export type WaInboundFlowResponse = {
+  flowToken: string;
+  responseJson: string;
+};
+
 /** Parse Meta Cloud API webhook payload → inbound texts / locations */
 export function parseMetaWebhookInbound(body: unknown): {
   fromWaId: string;
@@ -477,6 +483,7 @@ export function parseMetaWebhookInbound(body: unknown): {
   location?: { lat: number; lng: number; name?: string; address?: string };
   mediaNote?: string;
   media?: WaInboundMediaRef;
+  flowResponse?: WaInboundFlowResponse;
 }[] {
   const out: {
     fromWaId: string;
@@ -486,6 +493,7 @@ export function parseMetaWebhookInbound(body: unknown): {
     location?: { lat: number; lng: number; name?: string; address?: string };
     mediaNote?: string;
     media?: WaInboundMediaRef;
+    flowResponse?: WaInboundFlowResponse;
   }[] = [];
   const root = body as {
     entry?: {
@@ -517,6 +525,7 @@ export function parseMetaWebhookInbound(body: unknown): {
               type?: string;
               button_reply?: { id?: string; title?: string };
               list_reply?: { id?: string; title?: string };
+              nfm_reply?: { response_json?: string; body?: string; name?: string };
             };
           }[];
         };
@@ -536,16 +545,29 @@ export function parseMetaWebhookInbound(body: unknown): {
         let location:
           | { lat: number; lng: number; name?: string; address?: string }
           | undefined;
+        let flowResponse: WaInboundFlowResponse | undefined;
         if (msg.type === "text") text = msg.text?.body || "";
         else if (msg.type === "button")
           text = msg.button?.payload || msg.button?.text || "";
         else if (msg.type === "interactive") {
-          text =
-            msg.interactive?.button_reply?.id ||
-            msg.interactive?.button_reply?.title ||
-            msg.interactive?.list_reply?.id ||
-            msg.interactive?.list_reply?.title ||
-            "";
+          const responseJson = msg.interactive?.nfm_reply?.response_json;
+          if (msg.interactive?.type === "nfm_reply" && responseJson) {
+            let flowToken = "";
+            try {
+              const parsed = JSON.parse(responseJson) as { flow_token?: string };
+              flowToken = String(parsed.flow_token || "");
+            } catch {
+              /* leave flowToken empty — caller treats an empty token as unresolvable */
+            }
+            flowResponse = { flowToken, responseJson };
+          } else {
+            text =
+              msg.interactive?.button_reply?.id ||
+              msg.interactive?.button_reply?.title ||
+              msg.interactive?.list_reply?.id ||
+              msg.interactive?.list_reply?.title ||
+              "";
+          }
         } else if (msg.type === "image") {
           text = msg.image?.caption || "";
           mediaNote = `image${msg.image?.mime_type ? ` (${msg.image.mime_type})` : ""}`;
@@ -604,13 +626,14 @@ export function parseMetaWebhookInbound(body: unknown): {
           } else continue;
         } else continue;
         if (!msg.from) continue;
-        if (!text && !mediaNote && !location) continue;
+        if (!text && !mediaNote && !location && !flowResponse) continue;
         out.push({
           fromWaId: msg.from,
           text: text || (mediaNote ? `MEDIA ${mediaNote}` : ""),
           waMessageId: msg.id,
           profileName: name,
           location,
+          flowResponse,
           mediaNote,
           media,
         });

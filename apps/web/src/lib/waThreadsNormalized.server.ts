@@ -9,7 +9,14 @@ import { getServerTenantContext } from "@/lib/serverTenant";
 
 export type WaBotSliceKey = keyof Pick<
   WaBotPersistBundle,
-  "crm" | "sis" | "survey" | "classChannel" | "unified" | "hub" | "staffAtt"
+  | "crm"
+  | "sis"
+  | "survey"
+  | "classChannel"
+  | "unified"
+  | "hub"
+  | "staffAtt"
+  | "complaints"
 >;
 
 export const WA_BOT_SLICE_KEYS: WaBotSliceKey[] = [
@@ -20,6 +27,7 @@ export const WA_BOT_SLICE_KEYS: WaBotSliceKey[] = [
   "unified",
   "hub",
   "staffAtt",
+  "complaints",
 ];
 
 export type WaThreadsDeskSyncMeta = {
@@ -55,6 +63,7 @@ function emptyBundle(): WaBotPersistBundle {
     unified: null,
     hub: null,
     staffAtt: null,
+    complaints: null,
   };
 }
 

@@ -44,9 +44,21 @@ import {
 import { attachRazorpayToPaymentLink } from "@/lib/razorpay.server";
 import { loadSis, householdWhatsApp, type Household, type SisStudent } from "@/lib/sis";
 import { TENANT } from "@/lib/types";
-import { sendWaWithFailover, sendWhatsAppText, waNormalizeLocal10 } from "@/lib/waSend";
+import {
+  sendWaFlowMessage,
+  sendWaWithFailover,
+  sendWhatsAppText,
+  waNormalizeLocal10,
+} from "@/lib/waSend";
 import { generateTutorText } from "@/lib/aiLlm.server";
 import { formatKbContext, retrieveRelevantKb } from "@/lib/schoolKb.server";
+import {
+  buildComplaintFlowJson,
+  buildComplaintFlowToken,
+  COMPLAINT_FLOW_NAME,
+  COMPLAINT_FLOW_SCREEN_ID,
+} from "@/lib/waComplaintsFlow";
+import { ensureMetaFlowPublished } from "@/lib/waFlowsMeta.server";
 
 export type WaSisBotMsg = {
   id: string;
@@ -499,6 +511,8 @@ async function buildBotReply(
       return { escalate: false, text: composeSisInfoReply() };
     case "human":
       return { escalate: true, text: composeSisHumanReply() };
+    case "complaint":
+      return { escalate: false, text: "Opening the complaint form…" };
     default:
       return {
         escalate: false,
@@ -588,6 +602,45 @@ export async function handleWaSisBotInbound(opts: {
     threads: store.threads.map((t) => (t.id === thread.id ? thread : t)),
   };
   await writeStore(store);
+
+  if (intent === "complaint") {
+    const ensured = await ensureMetaFlowPublished({
+      name: COMPLAINT_FLOW_NAME,
+      categories: ["OTHER"],
+      flowJson: buildComplaintFlowJson(),
+    });
+    if (!ensured.ok) {
+      const fallback = await sendWhatsAppText({
+        toMobile: mobile10,
+        body: "Sorry, the complaint form is temporarily unavailable. Reply HUMAN to reach the office directly.",
+      });
+      return {
+        matched: true,
+        replied: fallback.ok,
+        escalate: false,
+        replyText,
+        stub: !fallback.ok,
+        error: ensured.error,
+      };
+    }
+    const flowSend = await sendWaFlowMessage({
+      toMobile: mobile10,
+      flowId: ensured.flowId,
+      flowToken: buildComplaintFlowToken(hh.id),
+      headerText: "Raise a complaint",
+      bodyText: "Tell us what happened and the office will follow up.",
+      ctaText: "Start",
+      screenId: COMPLAINT_FLOW_SCREEN_ID,
+    });
+    return {
+      matched: true,
+      replied: flowSend.ok,
+      escalate: false,
+      replyText,
+      stub: !flowSend.ok,
+      error: flowSend.ok ? undefined : flowSend.error,
+    };
+  }
 
   const send = await sendWhatsAppText({
     toMobile: mobile10,

@@ -241,6 +241,20 @@ export function deleteTicket(state: ComplaintState, id: string): ComplaintState 
   return next;
 }
 
+/** Merge WhatsApp-Flow-submitted tickets (fetched from /api/wa/complaints,
+ * server-side only — see complaintsServer.ts) into local state. Add-only:
+ * WhatsApp tickets are never created locally with a colliding id, so no
+ * conflict resolution is needed, just skip ids already present. */
+export function mergeIncomingTickets(
+  state: ComplaintState,
+  incoming: ComplaintTicket[],
+): ComplaintState {
+  const known = new Set(state.tickets.map((t) => t.id));
+  const fresh = incoming.filter((t) => !known.has(t.id));
+  if (fresh.length === 0) return state;
+  return { ...state, tickets: [...fresh, ...state.tickets] };
+}
+
 export function listTicketsForHousehold(state: ComplaintState, householdId: string): ComplaintTicket[] {
   return state.tickets
     .filter((t) => t.householdId === householdId)
