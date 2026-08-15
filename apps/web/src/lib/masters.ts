@@ -24,6 +24,7 @@ import {
 } from "@/lib/schoolDataMirror";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { resolveAcademicYear, fallbackAcademicYear } from "@/lib/academicYearResolve";
 
 export type Campus = {
   id: string;
@@ -527,7 +528,19 @@ const LEGACY_KEYS = [
   "bhb_masters_v2",
   "bhb_masters_v1",
 ];
-export const DEFAULT_AY = "2025-26";
+
+/** Absolute last resort when Masters defines no academic years at all —
+ * computed from today's date (April-anchored Indian school year), never
+ * hardcoded. A stale hardcoded year is what ran the school four months
+ * into a closed session on 2026-08-10 (see academicYearResolve.ts, which
+ * currentAcademicYearCode below now defers to for the real answer). */
+function computeDefaultAy(now: Date = new Date()): string {
+  const month = now.getMonth() + 1;
+  const startYear = month >= 4 ? now.getFullYear() : now.getFullYear() - 1;
+  const endYY = String((startYear + 1) % 100).padStart(2, "0");
+  return `${startYear}-${endYY}`;
+}
+export const DEFAULT_AY = computeDefaultAy();
 
 export type SessionYearOption = {
   code: string;
@@ -536,8 +549,14 @@ export type SessionYearOption = {
 };
 
 /**
- * Active “current” academic year from Masters (Academics tab).
- * Falls back to DEFAULT_AY when masters are unavailable (SSR / empty).
+ * Active academic year from Masters (Academics tab), decided from the
+ * calendar via resolveAcademicYear — the same logic already used
+ * server-side to stamp login session cookies (workspaceSession.server.ts).
+ * A `status: "current"` flag someone forgot to move when a session ended
+ * is exactly the class of bug that ran the school four months into a
+ * closed year on 2026-08-10; date comparison catches that, a bare status
+ * check (this function's old behaviour) does not.
+ * Falls back to DEFAULT_AY only when masters are unavailable (SSR / empty).
  */
 export function currentAcademicYearCode(
   state?: MastersState | null,
@@ -546,10 +565,9 @@ export function currentAcademicYearCode(
     state ??
     (typeof window !== "undefined" ? loadMasters() : null);
   if (!m?.academicYears?.length) return DEFAULT_AY;
-  const cur = m.academicYears.find(
-    (y) => y.status === "current" && y.isActive !== false,
-  );
-  return cur?.code ?? DEFAULT_AY;
+  const resolved = resolveAcademicYear(m.academicYears, new Date().toISOString());
+  if (resolved.code) return resolved.code;
+  return fallbackAcademicYear(m.academicYears) ?? DEFAULT_AY;
 }
 
 /** Years for header Session selector and import pickers — from Masters. */
