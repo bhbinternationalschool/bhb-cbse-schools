@@ -40,6 +40,7 @@ import {
   listActiveRiders,
   listActiveRoutes,
   loadTransport,
+  migrateDemoFleetToReal,
   seedTransportIfEmpty,
   upsertFleetVehicle,
   type TransportState,
@@ -143,6 +144,7 @@ export function TransportWorkspace() {
 
   function refresh() {
     try {
+      migrateDemoFleetToReal();
       const transport = seedTransportIfEmpty();
       setState(transport);
       setMasters(loadMasters());

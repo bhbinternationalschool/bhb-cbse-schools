@@ -31,7 +31,7 @@ import {
   runTransportReport,
   type TransportReportFormat,
 } from "@/lib/transportReportCatalog";
-import { loadTransport, seedTransportIfEmpty } from "@/lib/transport";
+import { loadTransport, migrateDemoFleetToReal, seedTransportIfEmpty } from "@/lib/transport";
 import {
   TRUST_REPORTS,
   runTrustReport,
@@ -304,6 +304,7 @@ export function TransportReportsRunner() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    migrateDemoFleetToReal();
     seedTransportIfEmpty();
   }, []);
 

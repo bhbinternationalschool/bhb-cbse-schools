@@ -2382,59 +2382,56 @@ export function exportTransportRoutesCsv(state?: TransportState): void {
   URL.revokeObjectURL(url);
 }
 
-/** Seed demo fleet + routes when empty. */
+/** The school's real fleet, per Tata Fleet Edge's official Subscribed
+ * Vehicles Report (2026-08-15) — VIN and registration number (where
+ * allotted) are the only confirmed facts. Everything else about these
+ * vehicles (fuel type, tank capacity, odometer, mileage, routes, driver)
+ * is NOT known here and is deliberately left for staff to fill in via the
+ * Fleet tab, rather than invented. */
+const REAL_FLEET: readonly { registrationNo: string; vin: string }[] = [
+  { registrationNo: "UP65QT4657", vin: "MAT805022SFB02913" },
+  { registrationNo: "UP65MT0849", vin: "MAT557029PUA00368" },
+  { registrationNo: "UP65PT3540", vin: "MAT558017RVE22810" },
+  { registrationNo: "", vin: "MAT558053TVE29204" },
+  { registrationNo: "", vin: "MAT558053TVG40149" },
+];
+
+function buildRealFleetVehicles(): FleetVehicle[] {
+  return REAL_FLEET.map((v) =>
+    normalizeVehicle({
+      registrationNo: v.registrationNo || v.vin,
+      name: v.registrationNo || `Bus — registration pending (VIN ${v.vin})`,
+    }),
+  );
+}
+
+/** Seed the real fleet when the registry is genuinely empty — no
+ * fictional route, dealer, or fuel stock; none of that is known either. */
 export function seedTransportIfEmpty(): TransportState {
   const state = loadTransport();
   if (state.routes.length > 0 || state.vehicles.length > 0) return state;
-  const veh = normalizeVehicle({
-    registrationNo: "UP32 BT 4512",
-    name: "Bus 3",
-    type: "bus",
-    fuelType: "diesel",
-    tankCapacity: 120,
-    odometerKm: 45200,
-    avgMileage: 6.5,
-  });
-  const stops = [
-    normalizeStop({ name: "Lanka Gate", distanceKm: 2 }, 0),
-    normalizeStop({ name: "BHU Gate", distanceKm: 4 }, 1),
-    normalizeStop({ name: "Sigra", distanceKm: 6 }, 2),
-    normalizeStop({ name: "Cantonment", distanceKm: 8 }, 3),
-  ];
-  const route = normalizeRoute({
-    code: "R-12",
-    name: "Lanka – Cantonment",
-    busNo: "Bus 3",
-    vehicleReg: veh.registrationNo,
-    vehicleId: veh.id,
-    monthlyFeePaise: 120000,
-    stops,
-  });
-  veh.primaryRouteId = route.id;
-  const dealer: FleetDealer = {
-    id: id("dlr"),
-    name: "IOCL Sigra Pump",
-    type: "fuel_dealer",
-    phone: "",
-    gstin: "",
-    paymentTermsDays: 15,
-    isActive: true,
-  };
+  const next: TransportState = { ...state, vehicles: buildRealFleetVehicles() };
+  saveTransport(next);
+  return next;
+}
+
+/** One-time cleanup for browsers that already seeded the OLD placeholder
+ * demo bus (UP32 BT 4512 / "Lanka – Cantonment") before the real fleet
+ * was known. Narrow, exact-match check — only touches state that still
+ * looks untouched, so it never overwrites anything staff has since
+ * entered themselves. */
+export function migrateDemoFleetToReal(): TransportState {
+  const state = loadTransport();
+  const onlyDemoVehicle =
+    state.vehicles.length === 1 && state.vehicles[0].registrationNo === "UP32 BT 4512";
+  if (!onlyDemoVehicle) return state;
+  const demoVehicleId = state.vehicles[0].id;
   const next: TransportState = {
     ...state,
-    vehicles: [veh],
-    routes: [route],
-    dealers: [dealer],
-    fuelStockLocations: [
-      {
-        id: id("fsl"),
-        name: "Campus diesel depot",
-        fuelType: "diesel",
-        qtyOnHand: 200,
-        minAlert: 40,
-        maxCapacity: 500,
-      },
-    ],
+    vehicles: buildRealFleetVehicles(),
+    routes: state.routes.filter((r) => r.vehicleId !== demoVehicleId),
+    dealers: state.dealers.filter((d) => d.name !== "IOCL Sigra Pump"),
+    fuelStockLocations: state.fuelStockLocations.filter((f) => f.name !== "Campus diesel depot"),
   };
   saveTransport(next);
   return next;
