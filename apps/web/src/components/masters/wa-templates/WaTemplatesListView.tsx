@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import {
   moduleLabel,
+  qualityTone,
   statusTone,
   type WaTemplate,
   type WaTemplateLanguage,
@@ -220,6 +221,14 @@ export function WaTemplatesListView({
                       <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-slate-600">
                         {t.language}
                       </span>
+                      {t.quality !== "UNKNOWN" ? (
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${qualityTone(t.quality)}`}
+                          title={`Meta quality rating: ${t.quality}`}
+                        >
+                          {t.quality} quality
+                        </span>
+                      ) : null}
                       {t.carousel.length > 0 ? (
                         <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-800">
                           carousel×{t.carousel.length}

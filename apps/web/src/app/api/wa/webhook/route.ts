@@ -14,7 +14,9 @@ import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { waOutboundConfigured } from "@/lib/waSend";
 import {
   appendTemplateStatusEvents,
+  appendTemplateQualityEvents,
   parseMetaTemplateStatusUpdates,
+  parseMetaTemplateQualityUpdates,
 } from "@/lib/waTemplatesMeta.server";
 import { ensureWabaWebhookSubscription } from "@/lib/waMeta.server";
 import { handleWaUnifiedInbound } from "@/lib/waUnifiedBotServer";
@@ -102,6 +104,11 @@ export async function POST(req: Request) {
     await appendTemplateStatusEvents(templateStatusEvents);
   }
 
+  const templateQualityEvents = parseMetaTemplateQualityUpdates(body);
+  if (templateQualityEvents.length > 0) {
+    await appendTemplateQualityEvents(templateQualityEvents);
+  }
+
   const deliveryStatusEvents = parseMetaStatusUpdates(body);
   if (deliveryStatusEvents.length > 0) {
     await recordDeliveryStatuses(deliveryStatusEvents);
@@ -117,6 +124,7 @@ export async function POST(req: Request) {
       ok: true,
       handled: 0,
       templateStatusUpdates: templateStatusEvents.length,
+      templateQualityUpdates: templateQualityEvents.length,
       deliveryStatusUpdates: deliveryStatusEvents.length,
     });
   }
@@ -162,6 +170,8 @@ export async function POST(req: Request) {
     ok: true,
     handled: results.length,
     outboundConfigured: waOutboundConfigured(),
+    templateStatusUpdates: templateStatusEvents.length,
+    templateQualityUpdates: templateQualityEvents.length,
     deliveryStatusUpdates: deliveryStatusEvents.length,
     results,
   });

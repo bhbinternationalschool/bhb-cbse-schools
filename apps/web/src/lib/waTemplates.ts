@@ -13,6 +13,9 @@ export type WaTemplateStatus =
   | "rejected"
   | "paused";
 
+/** Meta's delivery-quality rating for an approved template (message_template_quality_update). */
+export type WaTemplateQuality = "GREEN" | "YELLOW" | "RED" | "UNKNOWN";
+
 export type WaTemplateCategory =
   | "UTILITY"
   | "MARKETING"
@@ -76,6 +79,8 @@ export type WaTemplate = {
   metaLanguage: string;
   metaTemplateId: string;
   rejectionReason: string;
+  quality: WaTemplateQuality;
+  qualityUpdatedAt: string;
   syncedAt: string;
   headerFormat: WaHeaderFormat;
   headerText: string;
@@ -611,6 +616,8 @@ function buildSeedTemplate(
     metaLanguage: language === "hi" ? "hi" : "en",
     metaTemplateId: "",
     rejectionReason: "",
+    quality: "UNKNOWN",
+    qualityUpdatedAt: "",
     syncedAt: "",
     headerFormat: def.headerFormat || "NONE",
     headerText,
@@ -677,6 +684,12 @@ function normalizeTemplate(raw: Partial<WaTemplate> | null): WaTemplate | null {
     metaLanguage: String(raw.metaLanguage || language),
     metaTemplateId: String(raw.metaTemplateId || ""),
     rejectionReason: String(raw.rejectionReason || ""),
+    quality: (
+      ["GREEN", "YELLOW", "RED", "UNKNOWN"] as const
+    ).includes(raw.quality as WaTemplateQuality)
+      ? (raw.quality as WaTemplateQuality)
+      : "UNKNOWN",
+    qualityUpdatedAt: String(raw.qualityUpdatedAt || ""),
     syncedAt: String(raw.syncedAt || ""),
     headerFormat: (raw.headerFormat as WaHeaderFormat) || "NONE",
     headerText: String(raw.headerText || ""),
@@ -1192,6 +1205,8 @@ export function createDraftWaTemplate(
     metaLanguage: opts.language,
     metaTemplateId: "",
     rejectionReason: "",
+    quality: "UNKNOWN",
+    qualityUpdatedAt: "",
     syncedAt: "",
     headerFormat,
     headerText: opts.headerText || "",
@@ -1330,6 +1345,8 @@ export function applyMetaTemplateSync(
         metaLanguage: row.language || lang,
         metaTemplateId: row.id || "",
         rejectionReason: row.rejected_reason || "",
+        quality: "UNKNOWN",
+        qualityUpdatedAt: "",
         syncedAt: now,
         headerFormat: "NONE",
         headerText: "",
@@ -1396,6 +1413,38 @@ export function applyMetaTemplateStatusUpdate(
   };
 }
 
+/** Apply a message_template_quality_update webhook event (does not touch status). */
+export function applyMetaTemplateQualityUpdate(
+  state: WaTemplatesState,
+  evt: {
+    message_template_name?: string;
+    message_template_language?: string;
+    new_quality_score?: string;
+  },
+): WaTemplatesState {
+  const name = evt.message_template_name || "";
+  const lang = evt.message_template_language || "";
+  if (!name) return state;
+  const score = (evt.new_quality_score || "").toUpperCase();
+  const quality: WaTemplateQuality = (
+    ["GREEN", "YELLOW", "RED"] as const
+  ).includes(score as "GREEN" | "YELLOW" | "RED")
+    ? (score as WaTemplateQuality)
+    : "UNKNOWN";
+  const now = nowIso();
+  let touched = false;
+  const templates: WaTemplate[] = state.templates.map((t) => {
+    if (t.metaName !== name) return t;
+    if (lang && t.metaLanguage !== lang && t.language !== lang.slice(0, 2)) {
+      return t;
+    }
+    touched = true;
+    return { ...t, quality, qualityUpdatedAt: now, updatedAt: now };
+  });
+  if (!touched) return state;
+  return { ...state, templates };
+}
+
 /** Map named {{vars}} to Meta positional body parameters in declaration order. */
 export function buildTemplateBodyParameters(
   template: WaTemplate,
@@ -1417,6 +1466,19 @@ export function statusTone(status: WaTemplateStatus): string {
       return "bg-rose-100 text-rose-800";
     case "paused":
       return "bg-slate-200 text-slate-700";
+    default:
+      return "bg-slate-100 text-slate-700";
+  }
+}
+
+export function qualityTone(quality: WaTemplateQuality): string {
+  switch (quality) {
+    case "GREEN":
+      return "bg-emerald-100 text-emerald-800";
+    case "YELLOW":
+      return "bg-amber-100 text-amber-900";
+    case "RED":
+      return "bg-rose-100 text-rose-800";
     default:
       return "bg-slate-100 text-slate-700";
   }

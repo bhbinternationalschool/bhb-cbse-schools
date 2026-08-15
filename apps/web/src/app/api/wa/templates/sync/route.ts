@@ -6,6 +6,7 @@
 
 import { NextResponse } from "next/server";
 import {
+  applyMetaTemplateQualityUpdate,
   applyMetaTemplateStatusUpdate,
   applyMetaTemplateSync,
   emptyWaTemplates,
@@ -13,8 +14,10 @@ import {
   type WaTemplatesState,
 } from "@/lib/waTemplates";
 import {
+  clearPendingTemplateQualityEvents,
   clearPendingTemplateStatusEvents,
   fetchMetaMessageTemplates,
+  readPendingTemplateQualityEvents,
   readPendingTemplateStatusEvents,
   waTemplatesMetaConfigured,
 } from "@/lib/waTemplatesMeta.server";
@@ -44,15 +47,22 @@ export async function POST(req: Request) {
     state = applyMetaTemplateStatusUpdate(state, evt);
   }
 
+  const pendingQuality = await readPendingTemplateQualityEvents();
+  for (const evt of pendingQuality) {
+    state = applyMetaTemplateQualityUpdate(state, evt);
+  }
+
   const meta = await fetchMetaMessageTemplates();
   if (meta.ok) {
     state = applyMetaTemplateSync(state, meta.rows, "meta_sync");
     if (pending.length) await clearPendingTemplateStatusEvents();
+    if (pendingQuality.length) await clearPendingTemplateQualityEvents();
     return NextResponse.json({
       ok: true,
       mode: meta.mode,
       synced: meta.rows.length,
       statusEventsApplied: pending.length,
+      qualityEventsApplied: pendingQuality.length,
       state,
     });
   }
@@ -68,11 +78,13 @@ export async function POST(req: Request) {
   };
 
   if (pending.length) await clearPendingTemplateStatusEvents();
+  if (pendingQuality.length) await clearPendingTemplateQualityEvents();
   return NextResponse.json({
     ok: true,
     mode: meta.mode || "local_demo",
     synced: state.templates.length,
     statusEventsApplied: pending.length,
+    qualityEventsApplied: pendingQuality.length,
     state,
     note: "Approved local templates in demo mode",
   });

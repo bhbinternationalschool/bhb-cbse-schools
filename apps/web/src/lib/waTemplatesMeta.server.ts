@@ -65,6 +65,62 @@ export async function clearPendingTemplateStatusEvents(): Promise<void> {
   }
 }
 
+const QUALITY_EVENTS_PATH = path.join(
+  process.cwd(),
+  ".data",
+  "wa_template_quality_events.json",
+);
+
+export type MetaTemplateQualityEvent = {
+  message_template_id?: string;
+  message_template_name?: string;
+  message_template_language?: string;
+  previous_quality_score?: string;
+  new_quality_score?: string;
+};
+
+export async function readPendingTemplateQualityEvents(): Promise<
+  MetaTemplateQualityEvent[]
+> {
+  try {
+    const raw = await readFile(QUALITY_EVENTS_PATH, "utf8");
+    const parsed = JSON.parse(raw) as { events?: MetaTemplateQualityEvent[] };
+    return Array.isArray(parsed.events) ? parsed.events : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function appendTemplateQualityEvents(
+  events: MetaTemplateQualityEvent[],
+): Promise<void> {
+  if (!events.length) return;
+  const existing = await readPendingTemplateQualityEvents();
+  await mkdir(path.dirname(QUALITY_EVENTS_PATH), { recursive: true });
+  await writeFile(
+    QUALITY_EVENTS_PATH,
+    JSON.stringify(
+      { events: [...existing, ...events].slice(-500) },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+}
+
+export async function clearPendingTemplateQualityEvents(): Promise<void> {
+  try {
+    await mkdir(path.dirname(QUALITY_EVENTS_PATH), { recursive: true });
+    await writeFile(
+      QUALITY_EVENTS_PATH,
+      JSON.stringify({ events: [] }, null, 2),
+      "utf8",
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
 function metaAccessToken(): string {
   return (
     process.env.WA_META_ACCESS_TOKEN ||
@@ -256,6 +312,35 @@ export function parseMetaTemplateStatusUpdates(body: unknown): {
         message_template_language: v.message_template_language,
         event: v.event,
         reason: v.reason,
+      });
+    }
+  }
+  return out;
+}
+
+export function parseMetaTemplateQualityUpdates(
+  body: unknown,
+): MetaTemplateQualityEvent[] {
+  const out: MetaTemplateQualityEvent[] = [];
+  if (!body || typeof body !== "object") return out;
+  const root = body as {
+    entry?: {
+      changes?: {
+        field?: string;
+        value?: MetaTemplateQualityEvent;
+      }[];
+    }[];
+  };
+  for (const entry of root.entry || []) {
+    for (const change of entry.changes || []) {
+      if (change.field !== "message_template_quality_update") continue;
+      const v = change.value || {};
+      out.push({
+        message_template_id: v.message_template_id,
+        message_template_name: v.message_template_name,
+        message_template_language: v.message_template_language,
+        previous_quality_score: v.previous_quality_score,
+        new_quality_score: v.new_quality_score,
       });
     }
   }
