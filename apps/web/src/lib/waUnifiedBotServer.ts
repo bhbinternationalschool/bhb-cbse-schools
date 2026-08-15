@@ -15,10 +15,10 @@ import {
 } from "@/lib/waUnifiedBotEngine";
 import {
   pickRoleByInput,
-  resolveWaIdentity,
   type WaResolvedIdentity,
   type WaRoleKind,
 } from "@/lib/waRoleResolver";
+import { resolveWaIdentityServer } from "@/lib/waRoleResolver.server";
 import {
   detectStaffBotIntent,
   replyStaffBotIntentWithAi,
@@ -506,7 +506,7 @@ export async function handleWaUnifiedInbound(opts: {
     };
   }
 
-  const identity = resolveWaIdentity(opts.fromWaId);
+  const identity = await resolveWaIdentityServer(opts.fromWaId);
   if (opts.profileName?.trim() && !identity.displayName) {
     identity.displayName = opts.profileName.trim();
   }
@@ -715,6 +715,20 @@ export async function handleWaUnifiedInbound(opts: {
       identity,
       session,
     );
+  }
+
+  // Reached when the stored session still describes a visitor but the
+  // sender resolves as known — the state every staff member was left in
+  // while the roster lookup was failing. Greeting them without rewriting
+  // the session would replay this same branch on every message and never
+  // let them into a role flow, so rebuild it here.
+  if (identity.isKnown) {
+    session = sessionFor(mobile10, identity, opts.profileName);
+    store = {
+      ...store,
+      sessions: { ...store.sessions, [mobile10]: session },
+    };
+    await writeStore(store);
   }
 
   const pack = menuKnownUserGreeting(identity);

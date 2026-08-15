@@ -5,7 +5,7 @@
 import { loadAccounts } from "@/lib/accountsStore";
 import { findAdmissionLeadByMobile, loadAdmissions } from "@/lib/admissions";
 import { findSurveyMemberForSession } from "@/lib/fieldSurvey";
-import type { StaffRecord } from "@/lib/foundationMasters";
+import type { Designation, StaffRecord } from "@/lib/foundationMasters";
 import { loadMasters, type MastersState } from "@/lib/masters";
 import { isProtectedSuperAdminEmail } from "@/lib/superAdmin";
 import { loadSis, type Household } from "@/lib/sis";
@@ -79,17 +79,63 @@ function isTeachingStaff(staff: StaffRecord): boolean {
   );
 }
 
-function inferStaffIsOwner(staff: StaffRecord, masters: MastersState): boolean {
+function inferStaffIsOwner(
+  staff: StaffRecord,
+  designations: Designation[],
+): boolean {
   if (isProtectedSuperAdminEmail(staff.email)) return true;
-  const des = masters.designations.find((d) => d.id === staff.designationId);
+  const des = designations.find((d) => d.id === staff.designationId);
   const blob = `${des?.code || ""} ${des?.name || ""} ${staff.fullName}`.toLowerCase();
   return /owner|trustee|director|principal|founder|chairman/.test(blob);
 }
 
-function inferStaffIsOffice(staff: StaffRecord, masters: MastersState): boolean {
-  const des = masters.designations.find((d) => d.id === staff.designationId);
+function inferStaffIsOffice(
+  staff: StaffRecord,
+  designations: Designation[],
+): boolean {
+  const des = designations.find((d) => d.id === staff.designationId);
   const blob = `${des?.code || ""} ${des?.name || ""}`.toLowerCase();
   return /admin|office|registrar|clerk|accounts|hr|coordinator/.test(blob);
+}
+
+/**
+ * Roles a staff record earns, given the designations that name them.
+ *
+ * Split out of resolveWaIdentity so the server-side DB fallback
+ * (waRoleResolver.server.ts) grades a staff row read straight from
+ * sis_staff exactly the same way as one that came through the mirror —
+ * two graders would drift, and the WhatsApp menu a person sees depends
+ * on this.
+ */
+export function staffRolesFor(
+  staff: StaffRecord,
+  designations: Designation[],
+): WaResolvedRole[] {
+  const roles: WaResolvedRole[] = [];
+  if (inferStaffIsOwner(staff, designations)) {
+    roles.push({
+      kind: "owner",
+      label: "Director / Leadership",
+      pickKeyword: "DIRECTOR",
+      staff,
+    });
+  } else if (inferStaffIsOffice(staff, designations) || !isTeachingStaff(staff)) {
+    roles.push({
+      kind: "staff",
+      label: "Staff / Office",
+      pickKeyword: "STAFF",
+      staff,
+    });
+  }
+  if (isTeachingStaff(staff)) {
+    roles.push({
+      kind: "teacher",
+      label: "Class teacher",
+      pickKeyword: "TEACHER",
+      staff,
+    });
+  }
+  return roles;
 }
 
 /** Build role list for a WhatsApp mobile (10-digit). */
@@ -110,29 +156,7 @@ export function resolveWaIdentity(fromWaId: string): WaResolvedIdentity {
   const staff = findStaffByMobile(masters, mobile10);
   if (staff) {
     displayName = staff.fullName;
-    if (inferStaffIsOwner(staff, masters)) {
-      roles.push({
-        kind: "owner",
-        label: "Director / Leadership",
-        pickKeyword: "DIRECTOR",
-        staff,
-      });
-    } else if (inferStaffIsOffice(staff, masters) || !isTeachingStaff(staff)) {
-      roles.push({
-        kind: "staff",
-        label: "Staff / Office",
-        pickKeyword: "STAFF",
-        staff,
-      });
-    }
-    if (isTeachingStaff(staff)) {
-      roles.push({
-        kind: "teacher",
-        label: "Class teacher",
-        pickKeyword: "TEACHER",
-        staff,
-      });
-    }
+    roles.push(...staffRolesFor(staff, masters.designations ?? []));
   }
 
   const hh = findHouseholdByWaMobile(mobile10);
