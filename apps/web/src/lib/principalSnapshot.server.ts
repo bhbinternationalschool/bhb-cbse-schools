@@ -14,6 +14,7 @@ import { loadAttendance, summarizeMarks, todayIso } from "@/lib/attendance";
 import { computeFeeKpis } from "@/lib/feeFinance";
 import { loadFees } from "@/lib/fees";
 import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
+import { classifyClassHolidayDay } from "@/lib/holidayPolicy";
 import { loadStaffAttendance, summarizeStaffMarks } from "@/lib/staffAttendance";
 import { loadVault } from "@/lib/vault";
 import { listLowStockItems, loadStore } from "@/lib/store";
@@ -94,8 +95,18 @@ export async function buildPrincipalSnapshot(
     stuLeave += s.leave;
   }
   const stuMarked = stuPresent + stuAbsent + stuLeave;
-  const activeSections = masters.sections.filter((s) => s.isActive).length;
-  const attendanceRegistersPending = Math.max(0, activeSections - todayRegs.length);
+  const activeSections = masters.sections.filter((s) => s.isActive);
+  const markedSectionIds = new Set(todayRegs.map((r) => r.sectionId));
+  // Per section, not a single school-wide check: holidays can be scoped to
+  // one class group ("Pre-Primary Saturday off" while the rest of the
+  // school has class), so a section on its own day off must not count as
+  // a pending register, but the other sections still do. Half-holidays
+  // still expect a register (students do attend, just for less of the day).
+  const attendanceRegistersPending = activeSections.filter((s) => {
+    if (markedSectionIds.has(s.id)) return false;
+    const classification = classifyClassHolidayDay(masters, today, ay, s.classId);
+    return classification.status !== "holiday";
+  }).length;
 
   const staffAtt = loadStaffAttendance();
   const staffToday = (staffAtt.registers ?? []).find(

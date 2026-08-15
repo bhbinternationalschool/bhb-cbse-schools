@@ -16,6 +16,7 @@ import { formatIst } from "@bhb/time";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { findRegister, todayIso } from "@/lib/attendance";
 import { isTeacherOnly } from "@/lib/erpChatAccess";
+import { classifyClassHolidayDay } from "@/lib/holidayPolicy";
 import { TONE } from "@/lib/erpNav";
 import { loadMasters } from "@/lib/masters";
 import { inferRoleCodes } from "@/lib/rbac";
@@ -104,9 +105,15 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
 
   const pendingAttendance = useMemo(() => {
     if (!ready) return [];
-    return mySections.filter(
-      (s) => !findRegister(ay, s.sectionId, today),
-    );
+    // Per section, not one blanket check — holidays can be scoped to a
+    // single class group, so a section on its own day off must not read
+    // as an unmarked register, while the teacher's other sections still do.
+    const masters = loadMasters();
+    return mySections.filter((s) => {
+      if (findRegister(ay, s.sectionId, today)) return false;
+      const classification = classifyClassHolidayDay(masters, today, ay, s.classId);
+      return classification.status !== "holiday";
+    });
   }, [ready, mySections, ay, today, tick]);
 
   const firstName = session.fullName.split(/\s+/)[0] || session.fullName;
