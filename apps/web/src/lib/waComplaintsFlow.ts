@@ -18,7 +18,7 @@ export const COMPLAINT_FLOW_SCREEN_ID = "COMPLAINT_FORM";
 
 export function buildComplaintFlowJson(): string {
   return JSON.stringify({
-    version: "5.0",
+    version: "7.2",
     screens: [
       {
         id: COMPLAINT_FLOW_SCREEN_ID,
