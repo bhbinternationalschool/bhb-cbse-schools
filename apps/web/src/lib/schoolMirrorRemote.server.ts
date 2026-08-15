@@ -42,7 +42,17 @@ function mirrorLooksEmpty(bundle: SchoolMirrorBundle): boolean {
     !!sis &&
     ((sis.households?.length ?? 0) > 0 || (sis.students?.length ?? 0) > 0);
   const hasStaff = (masters?.staff?.length ?? 0) > 0;
+  const hasClasses = (masters?.classes?.length ?? 0) > 0;
   const hasLeads = admissionsLeadCount(admissions) > 0;
+  // Staff can merge in successfully on a cold instance's first hydrate
+  // while the desk-tables classes/sections read lags behind (e.g. a
+  // transient timing hiccup) — hasStaff alone then reads "not empty" and
+  // the 45s TTL guard skips retrying, so every request in that window
+  // (attendance, homework, class WA channels, ...) works off zero classes.
+  // Classes are load-bearing everywhere, so treat their absence as "looks
+  // empty" regardless of what else came through, forcing a retry on the
+  // very next call instead of caching the broken state for 45 seconds.
+  if (!hasClasses) return true;
   return !hasSis && !hasStaff && !hasLeads;
 }
 
