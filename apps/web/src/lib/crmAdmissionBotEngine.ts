@@ -75,7 +75,99 @@ export type CrmBotLeadContext = {
   applicationNo?: string;
   stageLabel?: string;
   feeAmountLabel?: string;
+  /** ISO date the family first enquired. */
+  enquiryDate?: string;
+  /** How the enquiry reached the school, in words a parent recognises. */
+  sourceLabel?: string;
+  /** Every child on file for this family, for a multi-sibling enquiry. */
+  siblingNames?: string[];
 } | null;
+
+/** AdmissionSource → words a parent recognises. */
+export const ADMISSION_SOURCE_LABELS: Record<string, string> = {
+  walk_in: "Walk-in at school",
+  website: "School website",
+  referral: "Referral",
+  field_survey: "Field survey team",
+  social: "WhatsApp / social",
+  google: "Google",
+  phone: "Phone call",
+  whatsapp: "WhatsApp",
+  other: "Other",
+};
+
+/** "12 Aug 2026" — parents read dates, not ISO strings. */
+export function formatEnquiryDate(iso: string): string {
+  const d = (iso || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return "";
+  const parsed = new Date(`${d}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/**
+ * What the school already has on file for this enquiry, offered back to
+ * the parent with the one question that moves it forward.
+ *
+ * Sent only to a family whose children are not yet on the SIS register —
+ * telling an enrolled parent to "register for admission" would be both
+ * wrong and alarming, and the caller checks that before composing this.
+ */
+export function composeAdmissionOffer(
+  lead: NonNullable<CrmBotLeadContext>,
+  registerUrl: string,
+): string {
+  const when = formatEnquiryDate(lead.enquiryDate || "");
+  const kids =
+    lead.siblingNames && lead.siblingNames.length > 1
+      ? lead.siblingNames.join(", ")
+      : lead.childName || "";
+
+  return [
+    `*${TENANT.nameDisplay} — Admissions*`,
+    "",
+    "We have your enquiry on file:",
+    kids ? `• Child: *${kids}*` : null,
+    lead.enquiryNo ? `• Enquiry no.: ${lead.enquiryNo}` : null,
+    when ? `• Enquired on: ${when}` : null,
+    lead.sourceLabel ? `• Came in via: ${lead.sourceLabel}` : null,
+    lead.stageLabel ? `• Status: *${lead.stageLabel}*` : null,
+    "",
+    "Would you like to go ahead with admission?",
+    "",
+    `Reply *YES* to register and pay the registration fee, or *NO* if you have decided against it.`,
+    `You can also open the form directly: ${registerUrl}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** Sent when the parent says yes — the tokenised link plus what happens next. */
+export function composeAdmissionRegisterStep(
+  registerUrl: string,
+  feeAmountLabel?: string,
+): string {
+  return [
+    "*Registration — next step*",
+    "",
+    "Your details are already filled in. Check them, add any sibling, and pay the registration fee by UPI on the same page.",
+    feeAmountLabel ? `Registration fee: ${feeAmountLabel}` : null,
+    "",
+    `Open: ${registerUrl}`,
+    "",
+    "This link is personal to your enquiry — please do not forward it.",
+    "After payment the school verifies documents and confirms admission.",
+    "",
+    "Reply *HUMAN* if you would rather the admissions office called you.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
 
 export function replyCrmBotIntent(
   intent: CrmBotQuickId | "unknown",
@@ -137,13 +229,18 @@ export function replyCrmBotIntent(
         return {
           escalate: false,
           text: [
-            `*Your CRM lead*`,
+            `*Your enquiry*`,
             lead.childName ? `Child: *${lead.childName}*` : null,
-            lead.enquiryNo ? `Lead no.: ${lead.enquiryNo}` : null,
+            lead.enquiryNo ? `Enquiry no.: ${lead.enquiryNo}` : null,
+            lead.enquiryDate
+              ? `Enquired on: ${formatEnquiryDate(lead.enquiryDate)}`
+              : null,
+            lead.sourceLabel ? `Came in via: ${lead.sourceLabel}` : null,
             lead.stageLabel ? `Status: *${lead.stageLabel}*` : null,
             lead.applicationNo ? `Application: ${lead.applicationNo}` : null,
             "",
-            "School will call / WhatsApp for next steps.",
+            `To go ahead with admission, register & pay here: ${registerUrl}`,
+            "Reply *HUMAN* to talk to the admissions office.",
           ]
             .filter(Boolean)
             .join("\n"),

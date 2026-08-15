@@ -6,9 +6,13 @@
 import { promises as fs } from "fs";
 import path from "path";
 import {
+  ADMISSION_SOURCE_LABELS,
+  composeAdmissionOffer,
+  composeAdmissionRegisterStep,
   detectCrmBotIntent,
   replyCrmBotIntent,
 } from "@/lib/crmAdmissionBotEngine";
+import { signAdmissionLinkToken } from "@/lib/admissionLinkToken.server";
 import { TENANT } from "@/lib/types";
 import { sendWhatsAppText, waNormalizeLocal10 } from "@/lib/waSend";
 import { generateTutorText } from "@/lib/aiLlm.server";
@@ -60,6 +64,23 @@ function publicRegisterUrl(): string {
     "",
   );
   return `https://${host.replace(/\/$/, "")}/register?src=wa_bot`;
+}
+
+/**
+ * The same form, but carrying a signed token for this family — so the
+ * submit converts their existing enquiry instead of filing a second lead
+ * for a child the school already has on file. Falls back to the plain
+ * link if the token cannot be signed (no secret configured), because a
+ * parent who cannot register at all is worse than a possible duplicate.
+ */
+function personalRegisterUrl(householdId: string, mobile10: string): string {
+  const token = signAdmissionLinkToken({ householdId, mobile10 });
+  if (!token) return publicRegisterUrl();
+  const host = (TENANT.publicPortal || "bhbinternational.school").replace(
+    /^https?:\/\//,
+    "",
+  );
+  return `https://${host.replace(/\/$/, "")}/register?src=wa_bot&lead=${encodeURIComponent(token)}`;
 }
 
 async function readStore(): Promise<WaCrmBotStore> {
@@ -324,24 +345,85 @@ export async function handleWaCrmBotInbound(opts: {
       if (ingested.created) leadCreatedEnquiryNo = ingested.enquiryNo;
     }
   }
+  // Not yet on the school register: no confirmed SIS match and not
+  // enrolled. Only these families are offered admission — a parent whose
+  // child is already a student must never be told to register again.
+  const awaitingAdmission =
+    !!leadRow && leadRow.stage !== "enrolled" && leadRow.sisMatch !== "admitted";
+
+  const registerUrl =
+    awaitingAdmission && leadRow?.householdId
+      ? personalRegisterUrl(leadRow.householdId, mobile10)
+      : publicRegisterUrl();
+
+  // Every lead this family has on file. The offer quotes the family's
+  // FIRST enquiry date, which is also what the registration form shows —
+  // quoting the matched lead's own date instead had the bot and the form
+  // naming two different days for the same enquiry.
+  const familyLeads = leadRow
+    ? admissionsState.leads
+        .filter((l) => l.householdId === leadRow.householdId && l.stage !== "lost")
+        .sort((a, b) => (a.leadDate || "").localeCompare(b.leadDate || ""))
+    : [];
+
   const leadCtx = leadRow
     ? {
         childName: leadRow.childName,
         enquiryNo: leadRow.enquiryNo,
         applicationNo: leadRow.applicationNo,
         stageLabel: stageLabel(leadRow.stage),
+        enquiryDate: familyLeads[0]?.leadDate || leadRow.leadDate,
+        sourceLabel: ADMISSION_SOURCE_LABELS[leadRow.source] || "Enquiry",
+        feeAmountLabel:
+          leadRow.registrationFeeAmountPaise > 0
+            ? `₹${(leadRow.registrationFeeAmountPaise / 100).toLocaleString("en-IN")}`
+            : undefined,
+        siblingNames: familyLeads
+          .filter((l) => l.childName.trim())
+          .map((l) => l.childName),
       }
     : null;
   const bot = replyCrmBotIntent(intent, {
-    registerUrl: publicRegisterUrl(),
+    registerUrl,
     lead: leadCtx,
   });
   let replyText = bot.text;
-  if (opts.fromUnified && intent === "unknown" && !opts.forceEscalate) {
+
+  // "YES" / "NO" only mean admission right after we asked — otherwise
+  // they are just words in a sentence and the normal matcher handles them.
+  const answer = /^(yes|y|haan|haa|ha|ok|okay|sure)\b/i.test(text)
+    ? "yes"
+    : /^(no|nahi|nahin|not now|later)\b/i.test(text)
+      ? "no"
+      : null;
+  // Set once the admission offer (or its answer) has composed the reply,
+  // so the generic menu lines below don't overwrite it.
+  let handledAdmissionOffer = false;
+  if (answer && awaitingAdmission && leadCtx && intent === "unknown") {
+    replyText =
+      answer === "yes"
+        ? composeAdmissionRegisterStep(registerUrl, leadCtx.feeAmountLabel)
+        : [
+            "Understood — we have noted that for now.",
+            "",
+            "If you change your mind, reply *REGISTER* any time.",
+            "Reply *HUMAN* to talk to the admissions office.",
+          ].join("\n");
+    handledAdmissionOffer = true;
+  } else if (isGreeting && awaitingAdmission && leadCtx && !opts.forceEscalate) {
+    replyText = composeAdmissionOffer(leadCtx, registerUrl);
+    handledAdmissionOffer = true;
+  }
+  if (
+    opts.fromUnified &&
+    intent === "unknown" &&
+    !opts.forceEscalate &&
+    !handledAdmissionOffer
+  ) {
     replyText =
       "Reply *FEE* · *REGISTER* · *DOCS* · *STATUS* · *VISIT* · *HUMAN* — or *MENU* for the main school menu.";
   }
-  if (isGreeting && leadRow && !opts.fromUnified) {
+  if (isGreeting && leadRow && !opts.fromUnified && !handledAdmissionOffer) {
     replyText = [
       `Namaste${opts.profileName ? ` ${opts.profileName}` : ""} — *${TENANT.nameDisplay} Admissions*.`,
       leadRow.childName
@@ -351,7 +433,13 @@ export async function handleWaCrmBotInbound(opts: {
       "Reply: FEE · REGISTER · DOCS · STATUS · VISIT · HUMAN",
     ].join("\n");
   }
-  if (leadCreatedEnquiryNo && intent === "unknown" && !opts.forceEscalate && !isGreeting) {
+  if (
+    leadCreatedEnquiryNo &&
+    intent === "unknown" &&
+    !opts.forceEscalate &&
+    !isGreeting &&
+    !handledAdmissionOffer
+  ) {
     replyText = [
       `Thank you for contacting *${TENANT.nameDisplay} Admissions*.`,
       `We created enquiry *${leadCreatedEnquiryNo}* for this WhatsApp number.`,
@@ -368,6 +456,7 @@ export async function handleWaCrmBotInbound(opts: {
     !isGreeting &&
     !leadCreatedEnquiryNo &&
     !opts.forceEscalate &&
+    !handledAdmissionOffer &&
     text.trim().length > 3
   ) {
     const aiReply = await tryAiFallbackReply(text, leadCtx);

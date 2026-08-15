@@ -3187,8 +3187,40 @@ export function createRegistrationFromDesk(
   );
   if (!created.ok) return created;
 
-  let next = created.state;
-  let lead = created.lead;
+  return applyRegistrationToLead(created.state, created.lead.id, draft);
+}
+
+/**
+ * Promote an existing lead to a registration: checklist, fee head and
+ * amount, application number, stage.
+ *
+ * Split out of createRegistrationFromDesk so a lead that already exists —
+ * a WhatsApp enquiry the parent is now converting through the registration
+ * link — travels the identical path instead of being filed a second time
+ * under a new id. Registering twice is not a harmless duplicate: each copy
+ * carries its own registration fee, so the family shows a second amount
+ * due and the desk queue lists the same child twice.
+ */
+export function applyRegistrationToLead(
+  state: AdmissionsState,
+  leadId: string,
+  draft: Partial<AdmissionLead> & {
+    feeHeadId: string;
+    feeHeadName: string;
+    feeAmountPaise: number;
+  },
+):
+  | { ok: true; state: AdmissionsState; lead: AdmissionLead }
+  | { ok: false; reason: string } {
+  let next = state;
+  let lead = next.leads.find((l) => l.id === leadId) || null;
+  if (!lead) return { ok: false, reason: "Lead not found" };
+  if (lead.stage === "enrolled") {
+    return {
+      ok: false,
+      reason: "This child is already enrolled — contact the school office",
+    };
+  }
 
   // Soft-complete checklist for desk registration if provided
   next = updateLead(next, lead.id, {
@@ -3196,10 +3228,12 @@ export function createRegistrationFromDesk(
     docsBirthCert: draft.docsBirthCert ?? true,
     docsPhoto: draft.docsPhoto ?? true,
     motherName: draft.motherName || lead.motherName || "—",
+    classSoughtId: draft.classSoughtId || lead.classSoughtId,
     registrationFeeHeadId: draft.feeHeadId,
     registrationFeeAmountPaise: draft.feeAmountPaise,
     parentGroupKey: normalizeMobile(draft.mobile || lead.mobile),
   });
+  lead = next.leads.find((l) => l.id === leadId)!;
 
   const promo = promoteToRegistration(next, lead.id);
   if (!promo.ok) {
@@ -3234,8 +3268,133 @@ export function createRegistrationFromDesk(
     });
   }
 
-  lead = next.leads.find((l) => l.id === lead.id)!;
-  return { ok: true, state: next, lead };
+  const registered = next.leads.find((l) => l.id === leadId);
+  if (!registered) return { ok: false, reason: "Lead lost during registration" };
+  return { ok: true, state: next, lead: registered };
+}
+
+/**
+ * Register a family that already has enquiries on file — the path behind
+ * the registration link the WhatsApp bot sends an existing lead.
+ *
+ * Each submitted child is matched to an existing lead in this household
+ * by name and converted in place; only a genuinely new sibling creates a
+ * new lead. Nothing here files a second record for a child the school
+ * already knows about, which is the whole point of sending a tokenised
+ * link rather than a bare /register URL.
+ */
+export function registerExistingFamily(
+  state: AdmissionsState,
+  input: {
+    householdId: string;
+    guardianName: string;
+    motherName?: string;
+    mobile: string;
+    children: FamilyRegistrationChildDraft[];
+    feeHeadName?: string;
+    campaignNote?: string;
+  },
+  by: string,
+):
+  | { ok: true; state: AdmissionsState; leads: AdmissionLead[] }
+  | { ok: false; reason: string } {
+  const household = householdOf(state, input.householdId);
+  if (!household) return { ok: false, reason: "Family record not found" };
+
+  const guardianName = (input.guardianName || "").trim();
+  if (!guardianName) {
+    return { ok: false, reason: "Parent / guardian name is required" };
+  }
+  const mobile = normalizeMobile(input.mobile || "");
+  if (mobile.length !== 10) {
+    return { ok: false, reason: "Parent mobile must be 10 digits" };
+  }
+
+  const children = (input.children || [])
+    .map((c) => ({
+      ...c,
+      childName: (c.childName || "").trim(),
+      classSoughtId: c.classSoughtId || "",
+      feeHeadId: c.feeHeadId || "",
+      feeAmountPaise: Math.max(0, Math.round(Number(c.feeAmountPaise) || 0)),
+    }))
+    .filter((c) => c.childName);
+  if (children.length === 0) return { ok: false, reason: "Add at least one child" };
+
+  const names = children.map((c) => c.childName.toLowerCase());
+  if (new Set(names).size !== names.length) {
+    return { ok: false, reason: "Sibling names must be unique in this family" };
+  }
+  for (const c of children) {
+    if (!c.classSoughtId) {
+      return { ok: false, reason: `Class required for ${c.childName}` };
+    }
+    if (!c.feeHeadId) {
+      return { ok: false, reason: `Fee head required for ${c.childName}` };
+    }
+  }
+
+  const feeHeadName = input.feeHeadName || "Registration fee";
+  const note = input.campaignNote || "Parent self-register · WhatsApp link";
+  let next = state;
+  const out: AdmissionLead[] = [];
+  // A lead already claimed by one submitted child must not be matched
+  // again by the next one.
+  const claimed = new Set<string>();
+
+  for (const child of children) {
+    const existing = next.leads.find(
+      (l) =>
+        l.householdId === input.householdId &&
+        !claimed.has(l.id) &&
+        l.stage !== "lost" &&
+        l.childName.trim().toLowerCase() === child.childName.toLowerCase(),
+    );
+
+    let leadId: string;
+    if (existing) {
+      leadId = existing.id;
+    } else {
+      const sib = addSiblingEnquiry(
+        next,
+        input.householdId,
+        {
+          childName: child.childName,
+          classSoughtId: child.classSoughtId,
+          dob: child.dob,
+          gender: child.gender,
+          campaignNote: note,
+        },
+        by,
+      );
+      if (!sib.ok) return sib;
+      next = sib.state;
+      leadId = sib.lead.id;
+    }
+    claimed.add(leadId);
+
+    const applied = applyRegistrationToLead(next, leadId, {
+      guardianName,
+      motherName: input.motherName,
+      mobile,
+      classSoughtId: child.classSoughtId,
+      dob: child.dob,
+      gender: child.gender,
+      feeHeadId: child.feeHeadId,
+      feeHeadName,
+      feeAmountPaise: child.feeAmountPaise,
+    });
+    if (!applied.ok) return applied;
+    next = applied.state;
+    next = updateLead(next, leadId, {
+      campaignNote: [applied.lead.campaignNote, note]
+        .filter(Boolean)
+        .join(" · "),
+    });
+    out.push(next.leads.find((l) => l.id === leadId)!);
+  }
+
+  return { ok: true, state: next, leads: out };
 }
 
 export type FamilyRegistrationChildDraft = {

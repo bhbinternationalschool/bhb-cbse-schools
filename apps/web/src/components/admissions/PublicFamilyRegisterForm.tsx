@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import QRCode from "qrcode";
 import {
@@ -38,11 +38,25 @@ function emptyChild(fee: string): ChildRow {
   };
 }
 
+type ServerPaymentStep = {
+  leadId: string;
+  childName: string;
+  paymentId: string;
+  paymentCode: string;
+  amountPaise: number;
+};
+
 export function PublicFamilyRegisterForm({
   initialSrc,
+  linkToken,
   config,
 }: {
   initialSrc?: string | null;
+  /** Signed token from the WhatsApp registration link, when the parent
+   *  arrived through one. Its presence switches this form from "file a
+   *  new enquiry in this browser" to "convert the enquiry the school
+   *  already has", which only the server can do. */
+  linkToken?: string | null;
   config: PublicRegistrationConfig;
 }) {
   // Classes / fee head / UPI are resolved from the DB on the server and passed
@@ -70,6 +84,95 @@ export function PublicFamilyRegisterForm({
   const [paymentId, setPaymentId] = useState("");
   const [paymentCode, setPaymentCode] = useState("");
   const [utr, setUtr] = useState("");
+  // Token mode only: the payment step the server handed back, since this
+  // browser's admissions cache holds none of these leads.
+  const [serverStep, setServerStep] = useState<ServerPaymentStep | null>(null);
+  const [linkNote, setLinkNote] = useState<string | null>(null);
+  const linked = !!linkToken;
+
+  useEffect(() => {
+    if (!linkToken) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/public/admission-registration?token=${encodeURIComponent(linkToken)}`,
+          { cache: "no-store" },
+        );
+        const body = (await res.json()) as {
+          ok?: boolean;
+          prefill?: {
+            guardianName: string;
+            motherName: string;
+            mobile: string;
+            enquiryDate: string;
+            sourceLabel: string;
+            children: { childName: string; classSoughtId: string }[];
+          };
+        };
+        if (cancelled || !body.ok || !body.prefill) return;
+        const p = body.prefill;
+        setGuardianName(p.guardianName);
+        setMotherName(p.motherName);
+        setMobile(p.mobile);
+        if (p.children.length > 0) {
+          setChildren(
+            p.children.map((c, i) => ({
+              key: `linked-${i}`,
+              childName: c.childName,
+              classSoughtId: c.classSoughtId,
+              feeInr: defaultFee,
+            })),
+          );
+        }
+        setLinkNote(
+          p.enquiryDate
+            ? `Your enquiry of ${p.enquiryDate} · ${p.sourceLabel}`
+            : null,
+        );
+      } catch {
+        /* an unreachable prefill just leaves an ordinary blank form */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [linkToken, defaultFee]);
+
+  async function renderUpiQr(amountPaise: number, note: string) {
+    const uri = buildSchoolUpiPayUri({
+      vpa,
+      payeeName,
+      amountPaise,
+      note,
+    });
+    setUpiQr(
+      await QRCode.toDataURL(uri, {
+        width: 200,
+        margin: 1,
+        color: { dark: "#203050", light: "#ffffff" },
+      }),
+    );
+  }
+
+  /** Token mode: the server converted the enquiry and told us what to collect. */
+  function applyServerStep(step: ServerPaymentStep | null) {
+    if (!step) {
+      setServerStep(null);
+      setStep("done");
+      return;
+    }
+    setServerStep(step);
+    setPaymentId(step.paymentId);
+    setPaymentCode(step.paymentCode);
+    setActiveLeadId(step.leadId);
+    setUtr("");
+    setStep("pay");
+    void renderUpiQr(
+      step.amountPaise,
+      `${step.paymentCode} ${step.childName}`.trim(),
+    );
+  }
 
   const totalPaise = useMemo(
     () =>
@@ -143,6 +246,39 @@ export function PublicFamilyRegisterForm({
       setError("Please pick a class for every student.");
       return;
     }
+    if (linked) {
+      const res = await fetch("/api/public/admission-registration", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "register",
+          token: linkToken,
+          guardianName,
+          motherName,
+          feeHeadId,
+          feeHeadName: feeHead?.name || "Registration fee",
+          children: children.map((c) => ({
+            childName: c.childName,
+            classSoughtId: c.classSoughtId,
+            feeAmountPaise: Math.max(0, Math.round(Number(c.feeInr) * 100) || 0),
+          })),
+        }),
+      });
+      const body = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        leadIds?: string[];
+        step?: ServerPaymentStep | null;
+      };
+      if (!res.ok || !body.ok) {
+        setError(body.error || "Could not submit registration");
+        return;
+      }
+      setLeadIds(body.leadIds ?? []);
+      applyServerStep(body.step ?? null);
+      return;
+    }
+
     const state = loadAdmissions();
     const r = createFamilyRegistrationsFromPublic(
       state,
@@ -178,8 +314,33 @@ export function PublicFamilyRegisterForm({
     await preparePayForLead(first);
   }
 
-  function onConfirmPaid() {
+  async function onConfirmPaid() {
     if (!paymentId) return;
+    if (linked) {
+      const res = await fetch("/api/public/admission-registration", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "confirm",
+          token: linkToken,
+          paymentId,
+          upiRef: utr.trim() || `PARENT-${paymentCode}`,
+          leadIds,
+          feeHeadName: feeHead?.name || "Registration fee",
+        }),
+      });
+      const body = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        step?: ServerPaymentStep | null;
+      };
+      if (!res.ok || !body.ok) {
+        setError(body.error || "Could not confirm payment");
+        return;
+      }
+      applyServerStep(body.step ?? null);
+      return;
+    }
     const state = loadAdmissions();
     const r = captureRegistrationPayment(
       state,
@@ -274,9 +435,11 @@ export function PublicFamilyRegisterForm({
   }
 
   if (step === "pay") {
-    const bal = activeLead
-      ? registrationBalancePaise(loadAdmissions(), activeLead)
-      : 0;
+    const bal = serverStep
+      ? serverStep.amountPaise
+      : activeLead
+        ? registrationBalancePaise(loadAdmissions(), activeLead)
+        : 0;
     return (
       <main className="mx-auto max-w-lg space-y-4 px-4 py-10">
         <Image
@@ -291,10 +454,11 @@ export function PublicFamilyRegisterForm({
           Pay registration fee
         </h1>
         <p className="text-[13px] text-[var(--muted)]">
-          {activeLead?.childName || "Student"} · {paymentCode} ·{" "}
+          {serverStep?.childName || activeLead?.childName || "Student"} ·{" "}
+          {paymentCode} ·{" "}
           {formatInr(bal || activeLead?.registrationFeeAmountPaise || 0)}
         </p>
-        {leadIds.length > 1 ? (
+        {leadIds.length > 1 && !linked ? (
           <div className="flex flex-wrap gap-1.5">
             {leadIds.map((id) => {
               const st = loadAdmissions();
@@ -375,7 +539,12 @@ export function PublicFamilyRegisterForm({
         Register one or more children · fee calculated per student · pay to
         confirm registration (school verifies before admission).
       </p>
-      {initialSrc ? (
+      {linkNote ? (
+        <p className="mt-3 rounded-xl bg-[rgba(32,48,80,0.06)] px-3 py-2 text-[12px] text-[var(--brand-deep)]">
+          {linkNote} — details below are already filled in from your enquiry.
+          Add a sibling if you need to.
+        </p>
+      ) : initialSrc ? (
         <p className="mt-2 text-[11px] text-[var(--muted)]">
           Via campaign: {initialSrc}
         </p>
@@ -402,6 +571,7 @@ export function PublicFamilyRegisterForm({
           maxLength={10}
           placeholder="WhatsApp mobile *"
           value={mobile}
+          readOnly={linked}
           onChange={(e) =>
             setMobile(e.target.value.replace(/\D/g, "").slice(0, 10))
           }
