@@ -404,16 +404,27 @@ export function buildWaTemplateBodyComponent(
   };
 }
 
-/** Build the mandatory OTP copy-code button component for an AUTHENTICATION
- * template send — required whenever the template was created with the OTP
- * COPY_CODE button (Meta rejects the send otherwise: "template has buttons
- * but request doesn't include them"). */
+/** Build the mandatory OTP button component for an AUTHENTICATION template
+ * send — required whenever the template was created with an OTP button
+ * (Meta rejects the send otherwise: "template has buttons but request
+ * doesn't include them").
+ *
+ * Meta offers two different OTP button implementations, and they take
+ * different parameter shapes:
+ *   - sub_type "copy_code" — a quick-action button, parameter type
+ *     "coupon_code"
+ *   - sub_type "url" — a URL button whose target has a {{1}} placeholder
+ *     (Meta's own "https://www.whatsapp.com/otp/code/?...&code={{1}}"
+ *     pattern), parameter type "text"
+ * bhb_parent_login_otp (confirmed directly against Meta's template API,
+ * 2026-08-15) uses the second — sending "copy_code" against it fails with
+ * Meta error #132018 "issue with parameters in your template". */
 export function buildWaOtpCopyCodeButtonComponent(code: string): WaTemplateComponent {
   return {
     type: "button",
-    sub_type: "copy_code",
+    sub_type: "url",
     index: 0,
-    parameters: [{ type: "coupon_code", coupon_code: code.slice(0, 15) }],
+    parameters: [{ type: "text", text: code.slice(0, 15) }],
   };
 }
 
