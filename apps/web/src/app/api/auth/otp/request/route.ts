@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
-import { resolveParentHousehold } from "@/lib/parentPortal";
 import { issueParentOtp } from "@/lib/parentOtp.server";
+import { resolveHouseholdByMobileServer } from "@/lib/parentHousehold.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
-import { loadSis } from "@/lib/sis";
 
 export const runtime = "nodejs";
 
@@ -16,9 +15,12 @@ export async function POST(request: Request) {
     }
 
     await ensureSchoolMirrorHydrated();
-    const sis = loadSis();
-    const hh = resolveParentHousehold(sis, { mobile });
-    if (!hh) {
+    // Must be the household this number actually belongs to. The old
+    // resolveParentHousehold() call could not return null — an unknown
+    // number fell through to "the household with the most active
+    // children", and the OTP it then received unlocked that family.
+    const found = await resolveHouseholdByMobileServer(mobile);
+    if (!found) {
       return NextResponse.json(
         { error: "No parent record found for this mobile. Contact school office." },
         { status: 404 },
@@ -27,7 +29,7 @@ export async function POST(request: Request) {
 
     const result = await issueParentOtp({
       mobile,
-      householdId: hh.id,
+      householdId: found.household.id,
     });
     if (!result.ok) {
       return NextResponse.json({ error: result.reason }, { status: 502 });

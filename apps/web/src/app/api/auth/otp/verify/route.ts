@@ -3,7 +3,7 @@ import { demoSessionCookieName, type DemoSession } from "@/lib/auth";
 import { appSessionCookieOptions } from "@/lib/authCookies.server";
 import { signSession } from "@/lib/sessionCookie.server";
 import { resolveLoginAcademicYearCode } from "@/lib/workspaceSession.server";
-import { resolveParentHousehold } from "@/lib/parentPortal";
+import { resolveHouseholdByMobileServer } from "@/lib/parentHousehold.server";
 import { verifyParentOtp } from "@/lib/parentOtp.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { loadSis } from "@/lib/sis";
@@ -47,12 +47,18 @@ export async function POST(request: Request) {
     }
 
     await ensureSchoolMirrorHydrated();
-    const sis = loadSis();
+    // The session minted below is this household's whole record, so the
+    // mobile must resolve to it exactly. resolveParentHousehold() used to
+    // sit here and never returned null, which meant a verified code from
+    // any number signed in to an unrelated family.
     const hh = isReviewLogin
-      ? sis.households.find((h) => h.id === reviewHousehold) || null
-      : resolveParentHousehold(sis, { mobile });
+      ? loadSis().households.find((h) => h.id === reviewHousehold) || null
+      : (await resolveHouseholdByMobileServer(mobile))?.household || null;
     if (!hh) {
-      return NextResponse.json({ error: "Household not found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "No parent record found for this mobile. Contact school office." },
+        { status: 404 },
+      );
     }
 
     // Resolved server-side, exactly as the staff login routes do. This line

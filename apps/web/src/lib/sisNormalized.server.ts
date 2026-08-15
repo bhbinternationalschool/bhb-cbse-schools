@@ -329,6 +329,93 @@ async function deleteStale(
   return { deleted: stale.length };
 }
 
+/**
+ * The one household a mobile number belongs to, read straight from the
+ * desk tables — plus that household's students.
+ *
+ * For callers that must not mistake "my cached copy doesn't have it" for
+ * "this number is not a parent" (the WhatsApp bot). Matches the same
+ * fields findHouseholdByWaMobile checks against the mirror: the
+ * household's own three numbers, then either parent's number on a
+ * student row. Returns null only when the roster genuinely has no match;
+ * a failed read returns null too but logs, so the caller can stay silent
+ * rather than assert.
+ */
+export async function fetchSisHouseholdByMobileFromDb(
+  mobile10: string,
+): Promise<{ household: Household; students: SisStudent[] } | null> {
+  const ctx = await resolveCtx();
+  if (!ctx) {
+    console.warn("[sis-db] no tenant context — cannot verify household");
+    return null;
+  }
+  const { sb, tenantId } = ctx;
+  // Numbers are stored bare-10 today, but a stray country code should not
+  // decide whether a parent is recognised.
+  const variants = [mobile10, `91${mobile10}`, `0${mobile10}`];
+  const orFilter = (fields: string[]) =>
+    fields.flatMap((f) => variants.map((v) => `${f}.eq.${v}`)).join(",");
+
+  const hhRes = await sb
+    .from("sis_households")
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .or(orFilter(["mobile", "whatsapp_mobile", "alt_mobile"]))
+    .limit(1);
+  if (hhRes.error) {
+    console.warn("[sis-db] household lookup failed", hhRes.error.message);
+    return null;
+  }
+
+  let householdRow = (hhRes.data ?? [])[0] as HouseholdRow | undefined;
+
+  if (!householdRow) {
+    const stuRes = await sb
+      .from("sis_students")
+      .select("household_id")
+      .eq("tenant_id", tenantId)
+      .eq("status", "active")
+      .or(orFilter(["father_mobile", "mother_mobile"]))
+      .limit(1);
+    if (stuRes.error) {
+      console.warn("[sis-db] student lookup failed", stuRes.error.message);
+      return null;
+    }
+    const householdId = (stuRes.data ?? [])[0]?.household_id as
+      | string
+      | undefined;
+    if (!householdId) return null;
+
+    const byIdRes = await sb
+      .from("sis_households")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .eq("id", householdId)
+      .limit(1);
+    if (byIdRes.error) {
+      console.warn("[sis-db] household by id failed", byIdRes.error.message);
+      return null;
+    }
+    householdRow = (byIdRes.data ?? [])[0] as HouseholdRow | undefined;
+    if (!householdRow) return null;
+  }
+
+  const kidsRes = await sb
+    .from("sis_students")
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .eq("household_id", householdRow.id);
+  if (kidsRes.error) {
+    console.warn("[sis-db] household students failed", kidsRes.error.message);
+    return null;
+  }
+
+  return {
+    household: rowToHousehold(householdRow),
+    students: ((kidsRes.data ?? []) as StudentRow[]).map(rowToStudent),
+  };
+}
+
 export async function fetchSisFromDb(): Promise<{
   bundle: SisRemoteBundle;
   meta: SisSyncMeta | null;
