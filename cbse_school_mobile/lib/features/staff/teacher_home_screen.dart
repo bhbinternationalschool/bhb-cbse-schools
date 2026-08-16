@@ -5,6 +5,8 @@ import "../../core/theme/app_theme.dart";
 import "../modules/homework_screen.dart";
 import "../modules/module_shell.dart";
 import "../modules/notices_screen.dart";
+import "../modules/syllabus_scan_screen.dart";
+import "../modules/teaching_screen.dart";
 import "attendance_screen.dart";
 import "self_attendance_screen.dart";
 import "students_screen.dart";
@@ -26,6 +28,8 @@ class _StaffModule {
 
 const _staffModules = [
   _StaffModule("Attendance", Icons.fact_check_outlined, ModuleTone.teal),
+  _StaffModule("Period log", Icons.bookmark_added_outlined, ModuleTone.green),
+  _StaffModule("Scan syllabus", Icons.document_scanner_outlined, ModuleTone.blue),
   _StaffModule("Homework", Icons.menu_book_outlined, ModuleTone.purple),
   _StaffModule("Marks", Icons.grading_outlined, ModuleTone.amber),
   _StaffModule("My leave", Icons.event_outlined, ModuleTone.coral),
@@ -135,6 +139,16 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     switch (label) {
       case "Attendance":
         await _openAttendance();
+      case "Period log":
+        await Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => TeachingScreen(api: widget.api)),
+        );
+      case "Scan syllabus":
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => SyllabusScanScreen(api: widget.api),
+          ),
+        );
       case "Homework":
         final target = await _pickSection();
         if (target == null || !mounted) return;

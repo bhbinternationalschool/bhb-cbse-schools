@@ -25,6 +25,7 @@ export type RbacModule =
   | "attendance"
   | "homework"
   | "timetable"
+  | "teaching"
   | "ptm"
   | "events"
   | "student_leave"
@@ -150,6 +151,7 @@ export const RBAC_MODULES: {
   { id: "attendance", label: "Attendance", href: "/attendance" },
   { id: "homework", label: "Homework & Diary", href: "/homework" },
   { id: "timetable", label: "Timetable", href: "/timetable" },
+  { id: "teaching", label: "Teaching & syllabus", href: "/teaching" },
   { id: "ptm", label: "PTM", href: "/ptm" },
   { id: "events", label: "Events & calendar", href: "/events" },
   { id: "student_leave", label: "Student leave", href: "/attendance?tab=leave" },
@@ -384,6 +386,7 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("attendance", ops),
         grant("homework", ops),
         grant("timetable", ops),
+        grant("teaching", [...ops, "approve"]),
         grant("ptm", ops),
         grant("events", ops),
         grant("student_leave", ops),
@@ -436,6 +439,7 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("attendance", ["view", "edit", "approve", "export"]),
         grant("homework", ["view", "export"]),
         grant("timetable", ["view", "create", "edit", "approve", "export"]),
+        grant("teaching", ["view", "create", "edit", "export"]),
         grant("ptm", ["view", "create", "edit", "export"]),
         grant("events", ["view", "create", "edit", "delete", "export"]),
         grant("student_leave", ["view", "create", "edit", "approve", "export"]),
@@ -529,6 +533,10 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("attendance", teachOps),
         grant("homework", [...teachOps, "export"]),
         grant("timetable", ["view"]),
+        // Teachers log their own periods and read their own coverage;
+        // they cannot delete a log once written (audit trail) or edit
+        // the syllabus plan the school set.
+        grant("teaching", teachOps),
         grant("ptm", [...teachOps, "export"]),
         grant("events", ["view"]),
         grant("student_leave", [...teachOps, "approve", "export"]),
@@ -945,6 +953,7 @@ export const REPORTS_CENTER_RBAC_MODULES: RbacModule[] = [
   "attendance",
   "homework",
   "timetable",
+  "teaching",
   "ptm",
   "student_leave",
   "vault",
@@ -1000,6 +1009,7 @@ export function moduleForHref(href: string): RbacModule | null {
   if (path.startsWith("/attendance")) return "attendance";
   if (path.startsWith("/homework")) return "homework";
   if (path.startsWith("/timetable")) return "timetable";
+  if (path.startsWith("/teaching")) return "teaching";
   if (path.startsWith("/ptm")) return "ptm";
   if (path.startsWith("/events")) return "events";
   if (path.startsWith("/student-leave")) return "student_leave";

@@ -28,6 +28,7 @@ export type DomainBlobTable =
   | "transport_state"
   | "homework_state"
   | "timetable_state"
+  | "teaching_state"
   | "exam_papers_state"
   | "ptm_state"
   | "student_leave_state"

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
+  BookMarked,
   BookOpen,
   CalendarClock,
   ClipboardCheck,
@@ -20,7 +21,13 @@ import { classifyClassHolidayDay } from "@/lib/holidayPolicy";
 import { TONE } from "@/lib/erpNav";
 import { loadMasters } from "@/lib/masters";
 import { inferRoleCodes } from "@/lib/rbac";
-import { listSessionClassTeacherSections } from "@/lib/staffResolve";
+import { listSessionClassTeacherSections, resolveSessionStaff } from "@/lib/staffResolve";
+import {
+  computeDelivery,
+  loadTeaching,
+  resolveExpectedPeriods,
+} from "@/lib/teaching";
+import { loadTimetable } from "@/lib/timetable";
 import { TENANT } from "@/lib/types";
 
 const ACTIONS = [
@@ -44,6 +51,13 @@ const ACTIONS = [
     blurb: "Today's periods",
     icon: CalendarClock,
     tone: "violet" as const,
+  },
+  {
+    href: "/teaching",
+    title: "Period log",
+    blurb: "What you taught",
+    icon: BookMarked,
+    tone: "teal" as const,
   },
   {
     href: "/ptm",
@@ -92,6 +106,18 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
       const changed = await ensureAttendanceHydrated();
       if (changed) setTick((n) => n + 1);
     })();
+    void (async () => {
+      const [{ ensureTimetableHydrated }, { ensureTeachingHydrated }] =
+        await Promise.all([
+          import("@/lib/timetablePersistence"),
+          import("@/lib/teachingPersistence"),
+        ]);
+      const [tt, tg] = await Promise.all([
+        ensureTimetableHydrated(),
+        ensureTeachingHydrated(),
+      ]);
+      if (tt || tg) setTick((n) => n + 1);
+    })();
   }, []);
 
   const ay = session.academicYearCode;
@@ -115,6 +141,35 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
       return classification.status !== "holiday";
     });
   }, [ready, mySections, ay, today, tick]);
+
+  /**
+   * Periods that are past their grace window with no log yet. This is a
+   * prompt to record what happened — deliberately NOT a claim that the
+   * class was missed, which only the teacher can say.
+   */
+  const unloggedPeriods = useMemo(() => {
+    if (!ready) return [];
+    const masters = loadMasters();
+    const me = resolveSessionStaff(session, masters);
+    if (!me) return [];
+    const teaching = loadTeaching();
+    const expected = resolveExpectedPeriods({
+      timetable: loadTimetable(),
+      masters,
+      academicYearCode: ay,
+      date: today,
+      staffId: me.id,
+    });
+    // A day whose schedule cannot be resolved raises nothing — an
+    // unpublished timetable is not the teacher's problem to chase.
+    if (!expected.ok) return [];
+    return computeDelivery({
+      expected: expected.periods,
+      logs: teaching.logs,
+      academicYearCode: ay,
+      policy: teaching.policy,
+    }).filter((r) => r.status === "unlogged");
+  }, [ready, session, ay, today, tick]);
 
   const firstName = session.fullName.split(/\s+/)[0] || session.fullName;
 
@@ -177,6 +232,27 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
             {mySections.map((s) => s.label).join(" · ")}
           </p>
         </div>
+      ) : null}
+
+      {unloggedPeriods.length > 0 ? (
+        <Link
+          href="/teaching"
+          className="flex items-start gap-3 rounded-xl border border-[var(--warning)]/25 bg-[var(--warning-soft)] px-4 py-3 transition hover:border-[var(--warning)]/40"
+        >
+          <NotebookPen className="mt-0.5 h-5 w-5 shrink-0 text-[var(--warning)]" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-[var(--brand-deep)]">
+              {unloggedPeriods.length} period
+              {unloggedPeriods.length === 1 ? "" : "s"} not logged yet
+            </p>
+            <p className="mt-0.5 text-xs text-[var(--muted)]">
+              {unloggedPeriods
+                .map((p) => p.expected.bellLabel)
+                .join(" · ")}
+            </p>
+          </div>
+          <ArrowRight className="mt-1 h-4 w-4 shrink-0 text-[var(--muted)]" />
+        </Link>
       ) : null}
 
       {mySections.length > 0 ? (

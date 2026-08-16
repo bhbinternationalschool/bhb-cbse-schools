@@ -67,6 +67,14 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Your location is used only while punching attendance, to confirm you are on the school campus.</string>
+	<string>Your location is used only while punching attendance or recording that you taught a period, to confirm you are on the school campus.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>The camera is used to photograph a textbook contents page so chapters can be added to the syllabus plan.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Your photo library is used to pick a picture of a textbook contents page for the syllabus plan.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>The microphone is used only while you dictate lesson plan notes.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Speech recognition turns your dictated lesson plan notes into text.</string>
 </dict>
 </plist>

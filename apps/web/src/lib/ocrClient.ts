@@ -7,6 +7,7 @@ import type {
   AdmissionDocOcrSuggestion,
   BillOcrSuggestion,
 } from "@/lib/ocrParse";
+import type { SyllabusOcrChapter, syllabusOcrQuality } from "@/lib/syllabusOcr";
 
 export function readFileAsDataUrlForOcr(
   file: File,
@@ -217,4 +218,38 @@ export async function runProfileDocOcrApi(opts: {
     result: json.result,
     visionConfigured: json.visionConfigured,
   };
+}
+
+export type SyllabusOcrApiResult = {
+  ok: boolean;
+  chapters?: SyllabusOcrChapter[];
+  ignored?: string[];
+  quality?: ReturnType<typeof syllabusOcrQuality>;
+  rawText?: string;
+  error?: string;
+  visionConfigured?: boolean;
+};
+
+/** Read a textbook contents page into chapter/topic candidates. */
+export async function runSyllabusOcrApi(opts: {
+  dataUrl: string;
+  mimeType?: string;
+}): Promise<SyllabusOcrApiResult> {
+  const res = await fetch("/api/ocr/syllabus", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      imageBase64: base64FromDataUrl(opts.dataUrl),
+      mimeType: opts.mimeType,
+    }),
+  });
+  const json = (await res.json().catch(() => ({}))) as SyllabusOcrApiResult;
+  if (!res.ok) {
+    return {
+      ok: false,
+      error: json.error || "Could not read that page",
+      visionConfigured: json.visionConfigured,
+    };
+  }
+  return json;
 }

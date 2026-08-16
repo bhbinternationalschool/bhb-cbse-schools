@@ -1,0 +1,530 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import { CheckCircle2, ChevronDown, ChevronRight } from "lucide-react";
+import {
+  addResourceLink,
+  listLessonPlans,
+  removeLessonPlan,
+  removeResourceLink,
+  upsertLessonPlan,
+  type LessonPlan,
+  type ResourceKind,
+  type SyllabusUnit,
+  type TeachingState,
+} from "@/lib/teaching";
+import { AddResourceForm, ResourceList } from "@/components/teaching/ResourceLinks";
+import { VoiceDictateButton } from "@/components/teaching/VoiceDictateButton";
+
+type Draft = {
+  id: string;
+  title: string;
+  unitIds: string[];
+  plannedDate: string;
+  plannedPeriods: string;
+  objectives: string;
+  teachingAids: string;
+  activities: string;
+  assessment: string;
+  homework: string;
+};
+
+function emptyDraft(): Draft {
+  return {
+    id: "",
+    title: "",
+    unitIds: [],
+    plannedDate: "",
+    plannedPeriods: "1",
+    objectives: "",
+    teachingAids: "",
+    activities: "",
+    assessment: "",
+    homework: "",
+  };
+}
+
+function draftFrom(plan: LessonPlan): Draft {
+  return {
+    id: plan.id,
+    title: plan.title,
+    unitIds: [...plan.unitIds],
+    plannedDate: plan.plannedDate,
+    plannedPeriods: String(plan.plannedPeriods),
+    objectives: plan.objectives,
+    teachingAids: plan.teachingAids,
+    activities: plan.activities,
+    assessment: plan.assessment,
+    homework: plan.homework,
+  };
+}
+
+export function LessonPlansPanel(props: {
+  state: TeachingState;
+  onChange: (next: TeachingState) => void;
+  academicYearCode: string;
+  classId: string;
+  subjectId: string;
+  canEdit: boolean;
+  createdBy: string;
+  onError: (msg: string | null) => void;
+  onNotice: (msg: string | null) => void;
+}) {
+  const {
+    state,
+    onChange,
+    academicYearCode: ay,
+    classId,
+    subjectId,
+    canEdit,
+  } = props;
+
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const plans = useMemo(
+    () =>
+      classId && subjectId
+        ? listLessonPlans(state, {
+            academicYearCode: ay,
+            classId,
+            subjectId,
+          })
+        : [],
+    [state, ay, classId, subjectId],
+  );
+
+  /** Chapters with their topics, for the "what does this lesson cover" picker. */
+  const unitOptions = useMemo(() => {
+    const mine = state.units.filter(
+      (u) =>
+        u.isActive &&
+        u.academicYearCode === ay &&
+        u.classId === classId &&
+        u.subjectId === subjectId,
+    );
+    const chapters = mine
+      .filter((u) => u.level === "chapter")
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+    return chapters.map((c) => ({
+      chapter: c,
+      topics: mine
+        .filter((u) => u.parentId === c.id)
+        .sort((a, b) => a.sortOrder - b.sortOrder),
+    }));
+  }, [state.units, ay, classId, subjectId]);
+
+  const unitById = useMemo(() => {
+    const map = new Map<string, SyllabusUnit>();
+    for (const u of state.units) map.set(u.id, u);
+    return map;
+  }, [state.units]);
+
+  /** Period logs that recorded this plan as the lesson actually delivered. */
+  const deliveredCount = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const log of state.logs) {
+      if (!log.lessonPlanId) continue;
+      if (log.status !== "delivered" && log.status !== "substituted") continue;
+      counts.set(log.lessonPlanId, (counts.get(log.lessonPlanId) ?? 0) + 1);
+    }
+    return counts;
+  }, [state.logs]);
+
+  function toggle(id: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function save() {
+    if (!draft) return;
+    props.onError(null);
+    const result = upsertLessonPlan(state, {
+      id: draft.id || undefined,
+      academicYearCode: ay,
+      classId,
+      subjectId,
+      title: draft.title,
+      unitIds: draft.unitIds,
+      plannedDate: draft.plannedDate,
+      plannedPeriods: Number(draft.plannedPeriods) || 1,
+      objectives: draft.objectives,
+      teachingAids: draft.teachingAids,
+      activities: draft.activities,
+      assessment: draft.assessment,
+      homework: draft.homework,
+      createdBy: props.createdBy,
+    });
+    if (!result.ok) return props.onError(result.error);
+    onChange(result.value.state);
+    setDraft(null);
+    props.onNotice("Lesson plan saved");
+  }
+
+  function drop(planId: string) {
+    onChange(removeLessonPlan(state, planId));
+    props.onNotice("Lesson plan removed");
+  }
+
+  function attach(
+    planId: string,
+    input: { kind: ResourceKind; title: string; url: string; locator: string },
+  ) {
+    props.onError(null);
+    const result = addResourceLink(
+      state,
+      { kind: "lessonPlan", id: planId },
+      input,
+      props.createdBy,
+    );
+    if (!result.ok) return props.onError(result.error);
+    onChange(result.value.state);
+    props.onNotice("Link added");
+  }
+
+  if (!classId || !subjectId) {
+    return (
+      <p className="text-sm text-[var(--muted)]">
+        Pick a class and subject to see its lesson plans.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {canEdit ? (
+        <button
+          type="button"
+          onClick={() => setDraft(draft ? null : emptyDraft())}
+          className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--primary-foreground)]"
+        >
+          {draft ? "Close editor" : "New lesson plan"}
+        </button>
+      ) : null}
+
+      {draft ? (
+        <LessonPlanEditor
+          draft={draft}
+          setDraft={setDraft}
+          unitOptions={unitOptions}
+          onSave={save}
+          onCancel={() => setDraft(null)}
+        />
+      ) : null}
+
+      {plans.length === 0 ? (
+        <p className="text-sm text-[var(--muted)]">
+          No lesson plans for this subject yet.
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {plans.map((plan) => {
+            const open = expanded.has(plan.id);
+            const delivered = deliveredCount.get(plan.id) ?? 0;
+            return (
+              <li
+                key={plan.id}
+                className="rounded-xl border border-[var(--border)] bg-[var(--card)]"
+              >
+                <div className="flex items-start gap-2 px-3 py-2.5">
+                  <button
+                    type="button"
+                    onClick={() => toggle(plan.id)}
+                    aria-label={open ? "Collapse plan" : "Expand plan"}
+                    className="mt-0.5 shrink-0 text-[var(--muted)]"
+                  >
+                    {open ? (
+                      <ChevronDown className="h-4 w-4" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4" />
+                    )}
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold text-[var(--brand-deep)]">
+                        {plan.title}
+                      </span>
+                      {delivered > 0 ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-[var(--success-soft)] px-2 py-0.5 text-[11px] font-semibold text-[var(--success)]">
+                          <CheckCircle2 className="h-3 w-3" />
+                          delivered {delivered}×
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="mt-0.5 text-xs text-[var(--muted)]">
+                      {plan.plannedDate || "unscheduled"} ·{" "}
+                      {plan.plannedPeriods} period
+                      {plan.plannedPeriods === 1 ? "" : "s"}
+                      {plan.unitIds.length > 0
+                        ? ` · ${plan.unitIds
+                            .map((id) => unitById.get(id)?.title)
+                            .filter(Boolean)
+                            .join(", ")}`
+                        : " · no chapter linked"}
+                    </p>
+                  </div>
+                  {canEdit ? (
+                    <div className="flex shrink-0 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setDraft(draftFrom(plan))}
+                        className="text-xs font-semibold text-[var(--brand-deep)] underline"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => drop(plan.id)}
+                        className="text-xs font-semibold text-[var(--danger)] underline"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+
+                {open ? (
+                  <div className="space-y-2 border-t border-[var(--border)] px-3 py-3 pl-9 text-sm">
+                    <Field label="Objectives" value={plan.objectives} />
+                    <Field label="Teaching aids" value={plan.teachingAids} />
+                    <Field label="Activities" value={plan.activities} />
+                    <Field label="Assessment" value={plan.assessment} />
+                    <Field label="Homework" value={plan.homework} />
+                    <div>
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--muted)]">
+                        Content links
+                      </p>
+                      <ResourceList
+                        resources={plan.resources}
+                        onRemove={
+                          canEdit
+                            ? (rid) =>
+                                onChange(
+                                  removeResourceLink(
+                                    state,
+                                    { kind: "lessonPlan", id: plan.id },
+                                    rid,
+                                  ),
+                                )
+                            : undefined
+                        }
+                      />
+                      {canEdit ? (
+                        <AddResourceForm
+                          compact
+                          onAdd={(input) => attach(plan.id, input)}
+                        />
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function Field({ label, value }: { label: string; value: string }) {
+  if (!value.trim()) return null;
+  return (
+    <div>
+      <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--muted)]">
+        {label}
+      </p>
+      <p className="whitespace-pre-wrap text-sm text-[var(--brand-deep)]">
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function LessonPlanEditor({
+  draft,
+  setDraft,
+  unitOptions,
+  onSave,
+  onCancel,
+}: {
+  draft: Draft;
+  setDraft: (d: Draft) => void;
+  unitOptions: { chapter: SyllabusUnit; topics: SyllabusUnit[] }[];
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  function toggleUnit(id: string) {
+    setDraft({
+      ...draft,
+      unitIds: draft.unitIds.includes(id)
+        ? draft.unitIds.filter((u) => u !== id)
+        : [...draft.unitIds, id],
+    });
+  }
+
+  return (
+    <div className="space-y-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="text-xs font-semibold text-[var(--muted)]">
+          Lesson title
+          <input
+            value={draft.title}
+            onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+            className="mt-1 block w-72 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+          />
+        </label>
+        <label className="text-xs font-semibold text-[var(--muted)]">
+          Planned date
+          <input
+            type="date"
+            value={draft.plannedDate}
+            onChange={(e) =>
+              setDraft({ ...draft, plannedDate: e.target.value })
+            }
+            className="mt-1 block rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+          />
+        </label>
+        <label className="text-xs font-semibold text-[var(--muted)]">
+          Periods
+          <input
+            type="number"
+            min={1}
+            value={draft.plannedPeriods}
+            onChange={(e) =>
+              setDraft({ ...draft, plannedPeriods: e.target.value })
+            }
+            className="mt-1 block w-20 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+          />
+        </label>
+      </div>
+
+      <div>
+        <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--muted)]">
+          Covers
+        </p>
+        {unitOptions.length === 0 ? (
+          <p className="mt-1 text-xs text-[var(--muted)]">
+            No chapters in this subject&apos;s plan yet — add them on the
+            Syllabus tab first.
+          </p>
+        ) : (
+          <div className="mt-1 max-h-44 space-y-1 overflow-y-auto rounded-lg border border-[var(--border)] p-2">
+            {unitOptions.map(({ chapter, topics }) => (
+              <div key={chapter.id}>
+                <label className="flex items-center gap-2 text-sm font-medium">
+                  <input
+                    type="checkbox"
+                    checked={draft.unitIds.includes(chapter.id)}
+                    onChange={() => toggleUnit(chapter.id)}
+                  />
+                  {chapter.code ? `${chapter.code} · ` : ""}
+                  {chapter.title}
+                </label>
+                {topics.map((t) => (
+                  <label
+                    key={t.id}
+                    className="ml-6 flex items-center gap-2 text-xs text-[var(--muted)]"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={draft.unitIds.includes(t.id)}
+                      onChange={() => toggleUnit(t.id)}
+                    />
+                    {t.title}
+                  </label>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <TextArea
+        label="Objectives"
+        value={draft.objectives}
+        onChange={(v) => setDraft({ ...draft, objectives: v })}
+        placeholder="By the end of this lesson, learners can…"
+      />
+      <TextArea
+        label="Teaching aids"
+        value={draft.teachingAids}
+        onChange={(v) => setDraft({ ...draft, teachingAids: v })}
+        placeholder="Smart board, number-line chart, lab kit…"
+      />
+      <TextArea
+        label="Activities"
+        value={draft.activities}
+        onChange={(v) => setDraft({ ...draft, activities: v })}
+        placeholder="Recap 5 min · demo 15 min · group work 15 min…"
+      />
+      <TextArea
+        label="Assessment"
+        value={draft.assessment}
+        onChange={(v) => setDraft({ ...draft, assessment: v })}
+        placeholder="Oral check, exit ticket, worksheet…"
+      />
+      <TextArea
+        label="Homework"
+        value={draft.homework}
+        onChange={(v) => setDraft({ ...draft, homework: v })}
+      />
+
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={onSave}
+          className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-[var(--primary-foreground)]"
+        >
+          Save lesson plan
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm font-semibold text-[var(--muted)]"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function TextArea({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <div className="block text-xs font-semibold text-[var(--muted)]">
+      <div className="flex items-center gap-2">
+        <span>{label}</span>
+        <VoiceDictateButton
+          title={`Dictate ${label.toLowerCase()}`}
+          onText={(text) =>
+            // Append, never replace — dictating a second sentence must not
+            // wipe what the teacher already wrote.
+            onChange(value.trim() ? `${value.trim()} ${text}` : text)
+          }
+        />
+      </div>
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        rows={2}
+        className="mt-1 block w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+      />
+    </div>
+  );
+}

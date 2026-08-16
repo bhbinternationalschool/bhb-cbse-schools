@@ -27,6 +27,7 @@ export const DOMAIN_BLOB_RBAC: Record<DomainBlobTable, RbacModule> = {
   transport_state: "transport",
   homework_state: "homework",
   timetable_state: "timetable",
+  teaching_state: "teaching",
   exam_papers_state: "exams",
   ptm_state: "ptm",
   student_leave_state: "student_leave",

@@ -557,6 +557,24 @@ class PunchResult {
   final int distanceM;
 }
 
+/// Outcome of filing one period log.
+///
+/// [locationCheck] is "on_campus", "off_campus" or "unknown". "unknown" is
+/// the ordinary case — no GPS fix was available, or none was accurate
+/// enough to place the teacher against the campus fence — and is never
+/// shown to the teacher as a problem.
+class TeachingLogResult {
+  const TeachingLogResult({
+    required this.status,
+    required this.locationCheck,
+    this.distanceM,
+  });
+
+  final String status;
+  final String locationCheck;
+  final int? distanceM;
+}
+
 class PrincipalSnapshot {
   const PrincipalSnapshot({
     required this.academicYearCode,
@@ -665,6 +683,340 @@ class TransportStopInfo {
   final String name;
   final int sequence;
   final double distanceKm;
+}
+
+class PlanTargetSubject {
+  const PlanTargetSubject({required this.id, required this.name});
+  final String id;
+  final String name;
+}
+
+/// A class and the subjects that can carry a syllabus plan.
+class PlanTargetClass {
+  const PlanTargetClass({
+    required this.id,
+    required this.name,
+    required this.subjects,
+  });
+
+  factory PlanTargetClass.fromJson(Map<String, dynamic> j) => PlanTargetClass(
+        id: (j["id"] as String?) ?? "",
+        name: (j["name"] as String?) ?? "",
+        subjects: ((j["subjects"] as List?) ?? const [])
+            .map((e) => PlanTargetSubject(
+                  id: ((e as Map)["id"] as String?) ?? "",
+                  name: (e["name"] as String?) ?? "",
+                ))
+            .toList(),
+      );
+
+  final String id;
+  final String name;
+  final List<PlanTargetSubject> subjects;
+}
+
+/// A chapter detected on a photographed contents page.
+class ScannedChapter {
+  ScannedChapter({
+    required this.code,
+    required this.title,
+    required this.confidence,
+    required this.topics,
+    this.include = true,
+  });
+
+  factory ScannedChapter.fromJson(Map<String, dynamic> j) => ScannedChapter(
+        code: (j["code"] as String?) ?? "",
+        title: (j["title"] as String?) ?? "",
+        confidence: (j["confidence"] as String?) ?? "high",
+        topics: ((j["topics"] as List?) ?? const [])
+            .map((e) => ScannedTopic(
+                  code: ((e as Map)["code"] as String?) ?? "",
+                  title: (e["title"] as String?) ?? "",
+                ))
+            .toList(),
+      );
+
+  String code;
+  String title;
+  final String confidence;
+  final List<ScannedTopic> topics;
+
+  /// Ticked in the review list; nothing is saved unticked.
+  bool include;
+
+  Map<String, dynamic> toImportJson() => {
+        "code": code,
+        "title": title,
+        "topics": [
+          for (final t in topics.where((t) => t.include))
+            {"code": t.code, "title": t.title},
+        ],
+      };
+}
+
+class ScannedTopic {
+  ScannedTopic({required this.code, required this.title, this.include = true});
+
+  String code;
+  String title;
+  bool include;
+}
+
+/// Result of reading a contents page. [verdict] is good | partial | poor.
+class SyllabusScan {
+  const SyllabusScan({
+    required this.chapters,
+    required this.ignored,
+    required this.verdict,
+    required this.rawText,
+  });
+
+  factory SyllabusScan.fromJson(Map<String, dynamic> j) => SyllabusScan(
+        chapters: ((j["chapters"] as List?) ?? const [])
+            .map((e) => ScannedChapter.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        ignored: ((j["ignored"] as List?) ?? const [])
+            .map((e) => e.toString())
+            .toList(),
+        verdict:
+            ((j["quality"] as Map?)?["verdict"] as String?) ?? "poor",
+        rawText: (j["rawText"] as String?) ?? "",
+      );
+
+  final List<ScannedChapter> chapters;
+  final List<String> ignored;
+  final String verdict;
+  final String rawText;
+}
+
+class SyllabusImportSummary {
+  const SyllabusImportSummary({
+    required this.chaptersAdded,
+    required this.topicsAdded,
+    required this.skipped,
+  });
+
+  final int chaptersAdded;
+  final int topicsAdded;
+  final List<String> skipped;
+}
+
+/// A link to teaching content — an e-book chapter, a PDF, a video.
+class TeachingResource {
+  const TeachingResource({
+    required this.id,
+    required this.kind,
+    required this.title,
+    required this.url,
+    required this.locator,
+  });
+
+  factory TeachingResource.fromJson(Map<String, dynamic> j) => TeachingResource(
+        id: (j["id"] as String?) ?? "",
+        kind: (j["kind"] as String?) ?? "link",
+        title: (j["title"] as String?) ?? "",
+        url: (j["url"] as String?) ?? "",
+        locator: (j["locator"] as String?) ?? "",
+      );
+
+  final String id;
+
+  /// ebook | pdf | video | link
+  final String kind;
+  final String title;
+  final String url;
+  final String locator;
+}
+
+/// One chapter or topic a period can be tagged with.
+class TeachingUnit {
+  const TeachingUnit({
+    required this.id,
+    required this.code,
+    required this.title,
+    this.topics = const [],
+    this.resources = const [],
+  });
+
+  factory TeachingUnit.fromJson(Map<String, dynamic> j) => TeachingUnit(
+        id: (j["id"] as String?) ?? "",
+        code: (j["code"] as String?) ?? "",
+        title: (j["title"] as String?) ?? "",
+        topics: ((j["topics"] as List?) ?? const [])
+            .map((e) => TeachingUnit.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        resources: ((j["resources"] as List?) ?? const [])
+            .map((e) => TeachingResource.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+
+  final String id;
+  final String code;
+  final String title;
+
+  /// Topics inside this chapter; empty when this is itself a topic.
+  final List<TeachingUnit> topics;
+  final List<TeachingResource> resources;
+
+  String get label => code.isEmpty ? title : "$code · $title";
+}
+
+/// A teacher's plan for one lesson.
+class TeachingLessonPlan {
+  const TeachingLessonPlan({
+    required this.id,
+    required this.title,
+    required this.plannedDate,
+    required this.objectives,
+    required this.teachingAids,
+    required this.activities,
+    required this.assessment,
+    required this.homework,
+    required this.unitIds,
+    required this.resources,
+  });
+
+  factory TeachingLessonPlan.fromJson(Map<String, dynamic> j) =>
+      TeachingLessonPlan(
+        id: (j["id"] as String?) ?? "",
+        title: (j["title"] as String?) ?? "",
+        plannedDate: (j["plannedDate"] as String?) ?? "",
+        objectives: (j["objectives"] as String?) ?? "",
+        teachingAids: (j["teachingAids"] as String?) ?? "",
+        activities: (j["activities"] as String?) ?? "",
+        assessment: (j["assessment"] as String?) ?? "",
+        homework: (j["homework"] as String?) ?? "",
+        unitIds: ((j["unitIds"] as List?) ?? const [])
+            .map((e) => e.toString())
+            .toList(),
+        resources: ((j["resources"] as List?) ?? const [])
+            .map((e) => TeachingResource.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+
+  final String id;
+  final String title;
+  final String plannedDate;
+  final String objectives;
+  final String teachingAids;
+  final String activities;
+  final String assessment;
+  final String homework;
+  final List<String> unitIds;
+  final List<TeachingResource> resources;
+}
+
+/// One scheduled period, with whatever the teacher has logged so far.
+class TeachingPeriod {
+  const TeachingPeriod({
+    required this.periodNo,
+    required this.label,
+    required this.startTime,
+    required this.endTime,
+    required this.classId,
+    required this.sectionId,
+    required this.subjectId,
+    required this.className,
+    required this.sectionName,
+    required this.subjectName,
+    required this.isSubstituted,
+    required this.status,
+    required this.unitIds,
+    required this.lessonPlanId,
+    required this.chapters,
+    required this.lessonPlans,
+    required this.resources,
+  });
+
+  factory TeachingPeriod.fromJson(Map<String, dynamic> j) => TeachingPeriod(
+        periodNo: (j["periodNo"] as num?)?.toInt() ?? 0,
+        label: (j["label"] as String?) ?? "",
+        startTime: (j["startTime"] as String?) ?? "",
+        endTime: (j["endTime"] as String?) ?? "",
+        classId: (j["classId"] as String?) ?? "",
+        sectionId: (j["sectionId"] as String?) ?? "",
+        subjectId: (j["subjectId"] as String?) ?? "",
+        className: (j["className"] as String?) ?? "",
+        sectionName: (j["sectionName"] as String?) ?? "",
+        subjectName: (j["subjectName"] as String?) ?? "",
+        isSubstituted: (j["isSubstituted"] as bool?) ?? false,
+        status: (j["status"] as String?) ?? "pending",
+        unitIds: ((j["unitIds"] as List?) ?? const [])
+            .map((e) => e.toString())
+            .toList(),
+        lessonPlanId: (j["lessonPlanId"] as String?) ?? "",
+        chapters: ((j["chapters"] as List?) ?? const [])
+            .map((e) => TeachingUnit.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        lessonPlans: ((j["lessonPlans"] as List?) ?? const [])
+            .map((e) => TeachingLessonPlan.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        resources: ((j["resources"] as List?) ?? const [])
+            .map((e) => TeachingResource.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+
+  final int periodNo;
+  final String label;
+  final String startTime;
+  final String endTime;
+  final String classId;
+  final String sectionId;
+  final String subjectId;
+  final String className;
+  final String sectionName;
+  final String subjectName;
+  final bool isSubstituted;
+
+  /// delivered | not_delivered | substituted | unlogged | pending
+  final String status;
+  final List<String> unitIds;
+  final String lessonPlanId;
+
+  /// Chapters, each carrying its topics.
+  final List<TeachingUnit> chapters;
+  final List<TeachingLessonPlan> lessonPlans;
+
+  /// Content links already attached to whatever this period is tagged with.
+  final List<TeachingResource> resources;
+
+  bool get isLogged =>
+      status == "delivered" ||
+      status == "not_delivered" ||
+      status == "substituted";
+
+  String get classLabel => "$className-$sectionName";
+}
+
+/// A teacher's day. When [scheduleAvailable] is false the day could not be
+/// resolved at all — [reason]/[detail] say why. This is deliberately NOT
+/// the same as a day with zero periods, and must never be shown as
+/// "no classes today".
+class TeachingDay {
+  const TeachingDay({
+    required this.date,
+    required this.scheduleAvailable,
+    required this.reason,
+    required this.detail,
+    required this.periods,
+  });
+
+  factory TeachingDay.fromJson(Map<String, dynamic> j) => TeachingDay(
+        date: (j["date"] as String?) ?? "",
+        scheduleAvailable: (j["scheduleAvailable"] as bool?) ?? false,
+        reason: (j["reason"] as String?) ?? "",
+        detail: (j["detail"] as String?) ?? "",
+        periods: ((j["periods"] as List?) ?? const [])
+            .map((e) => TeachingPeriod.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+
+  final String date;
+  final bool scheduleAvailable;
+  final String reason;
+  final String detail;
+  final List<TeachingPeriod> periods;
 }
 
 class TransportRouteInfo {
@@ -1049,6 +1401,120 @@ class ApiClient {
       kind: (data["kind"] as String?) ?? kind,
       time: (data["time"] as String?) ?? "",
       distanceM: (data["distanceM"] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  /// Create or update a lesson plan. Returns its id.
+  Future<String> saveLessonPlan({
+    String? id,
+    required String classId,
+    required String subjectId,
+    required String title,
+    List<String> unitIds = const [],
+    String plannedDate = "",
+    int plannedPeriods = 1,
+    String objectives = "",
+    String teachingAids = "",
+    String activities = "",
+    String assessment = "",
+    String homework = "",
+  }) async {
+    final data = await _postData("/api/v1/teaching/lesson-plan", {
+      "id": ?id,
+      "classId": classId,
+      "subjectId": subjectId,
+      "title": title,
+      "unitIds": unitIds,
+      "plannedDate": plannedDate,
+      "plannedPeriods": plannedPeriods,
+      "objectives": objectives,
+      "teachingAids": teachingAids,
+      "activities": activities,
+      "assessment": assessment,
+      "homework": homework,
+    });
+    return (data["id"] as String?) ?? "";
+  }
+
+  /// Classes with their linked subjects — the "which plan?" picker.
+  Future<List<PlanTargetClass>> fetchTeachingSubjects() async {
+    final data = await _getData("/api/v1/teaching/subjects");
+    return ((data["classes"] as List?) ?? const [])
+        .map((e) => PlanTargetClass.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// OCR a photographed contents page into chapter candidates.
+  /// Read-only — nothing is saved until [importSyllabus] is called.
+  Future<SyllabusScan> scanSyllabusPage({
+    required String imageBase64,
+    String mimeType = "image/jpeg",
+  }) async {
+    final data = await _postData("/api/v1/teaching/syllabus-scan", {
+      "imageBase64": imageBase64,
+      "mimeType": mimeType,
+    });
+    return SyllabusScan.fromJson(data);
+  }
+
+  /// Save the chapters the teacher confirmed after a scan.
+  Future<SyllabusImportSummary> importSyllabus({
+    required String classId,
+    required String subjectId,
+    required List<Map<String, dynamic>> chapters,
+  }) async {
+    final data = await _postData("/api/v1/teaching/syllabus-import", {
+      "classId": classId,
+      "subjectId": subjectId,
+      "chapters": chapters,
+    });
+    return SyllabusImportSummary(
+      chaptersAdded: (data["chaptersAdded"] as num?)?.toInt() ?? 0,
+      topicsAdded: (data["topicsAdded"] as num?)?.toInt() ?? 0,
+      skipped: ((data["skipped"] as List?) ?? const [])
+          .map((e) => e.toString())
+          .toList(),
+    );
+  }
+
+  Future<TeachingDay> fetchTeachingDay({String? date}) async {
+    final query = date == null ? "" : "?date=$date";
+    return TeachingDay.fromJson(await _getData("/api/v1/teaching/today$query"));
+  }
+
+  /// Record one period. [lat]/[lng] are optional on purpose: the log is
+  /// what matters, and a teacher whose GPS is off or slow must still be
+  /// able to file one. The server records "unknown" rather than guessing.
+  Future<TeachingLogResult> logTeachingPeriod({
+    required String date,
+    required int periodNo,
+    required String classId,
+    required String sectionId,
+    required String status,
+    List<String> unitIds = const [],
+    String lessonPlanId = "",
+    String note = "",
+    double? lat,
+    double? lng,
+    double? accuracyM,
+  }) async {
+    final data = await _postData("/api/v1/teaching/log", {
+      "date": date,
+      "periodNo": periodNo,
+      "classId": classId,
+      "sectionId": sectionId,
+      "status": status,
+      "unitIds": unitIds,
+      "lessonPlanId": lessonPlanId,
+      "note": note,
+      "lat": ?lat,
+      "lng": ?lng,
+      "accuracyM": ?accuracyM,
+    });
+    return TeachingLogResult(
+      status: (data["status"] as String?) ?? status,
+      locationCheck: (data["locationCheck"] as String?) ?? "unknown",
+      distanceM: (data["locationDistanceM"] as num?)?.toInt(),
     );
   }
 

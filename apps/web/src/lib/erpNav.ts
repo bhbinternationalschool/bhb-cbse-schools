@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import {
   AlertTriangle,
+  BookMarked,
   BookOpen,
   Bus,
   CalendarClock,
@@ -258,6 +259,14 @@ export const HUB_GROUPS: HubGroup[] = [
         detail: "Bell periods, weekly grids, and auto-assign from subject loads + teacher duties.",
         icon: CalendarClock,
         tone: "violet",
+      },
+      {
+        href: "/teaching",
+        title: "Teaching",
+        blurb: "Syllabus & coverage",
+        detail: "Period delivery logs, syllabus pacing against plan, and per-teacher coverage reports.",
+        icon: BookMarked,
+        tone: "teal",
       },
       {
         href: "/ptm",
