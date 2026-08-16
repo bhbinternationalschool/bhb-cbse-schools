@@ -51,7 +51,7 @@ export default function LoginPage() {
         <ThemeToggle />
       </div>
 
-      <div className="relative z-10 flex min-h-0 flex-1 items-stretch p-2.5">
+      <div className="relative z-10 flex min-h-0 flex-1 flex-col items-stretch p-2.5 lg:flex-row">
         {/* Pinned to light-mode token values — the atmosphere gradient behind
             this panel is fixed light (see comment above), so --brand-deep/
             --muted must not follow the dark-mode flip or the text disappears

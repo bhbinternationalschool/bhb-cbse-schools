@@ -697,9 +697,15 @@ export function AttendanceWorkspace() {
                       return (
                         <li
                           key={st.id}
-                          className="flex flex-wrap items-center gap-2 px-3 py-2.5 sm:flex-nowrap"
+                          className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center sm:gap-2"
                         >
-                          <div className="flex min-w-0 flex-1 items-center gap-2">
+                          {/* min-w-0 + flex-1 lets this shrink instead of the
+                              row ever wrapping, so on narrow screens it was
+                              being crushed to near-zero width — invisible
+                              behind the status buttons — rather than the row
+                              stacking. Explicit flex-col below sm: forces a
+                              real stack instead of relying on flex-wrap. */}
+                          <div className="flex min-w-0 items-center gap-2 sm:flex-1">
                             <span className="w-7 shrink-0 text-center text-[11px] font-bold tabular-nums text-[var(--muted)]">
                               {st.rollNo || "—"}
                             </span>
