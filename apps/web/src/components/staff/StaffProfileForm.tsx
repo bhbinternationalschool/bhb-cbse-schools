@@ -26,6 +26,7 @@ import { StaffImageField } from "@/components/staff/StaffImageField";
 import { StaffDocUpload } from "@/components/staff/StaffDocUpload";
 import { StaffDutiesPanel } from "@/components/staff/StaffDutiesPanel";
 import { StaffAgreementPanel } from "@/components/staff/StaffAgreementPanel";
+import { StaffMessageTimelinePanel } from "@/components/staff/StaffMessageTimelinePanel";
 import { RemoveControl } from "@/components/masters/RemoveControl";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import {
@@ -59,6 +60,7 @@ type Tab =
   | "identity"
   | "documents"
   | "duties"
+  | "messages"
   | "login"
   | "bank"
   | "statutory"
@@ -83,6 +85,7 @@ const TABS: {
   { id: "identity", label: "IDs", tone: "sky" },
   { id: "documents", label: "Documents", tone: "violet" },
   { id: "duties", label: "Duties", tone: "coral" },
+  { id: "messages", label: "Messages", tone: "sky" },
   { id: "login", label: "Login", tone: "slate" },
   { id: "bank", label: "Bank", tone: "green" },
   { id: "statutory", label: "PF & ESIC", tone: "amber" },
@@ -1015,6 +1018,16 @@ export function StaffProfileForm(props: Props) {
             masters={masters}
             onChange={patch}
           />
+        ) : null}
+
+        {tab === "messages" ? (
+          props.mode === "edit" ? (
+            <StaffMessageTimelinePanel staffId={draft.id} mobile={draft.mobile} />
+          ) : (
+            <p className="text-sm text-[var(--muted)]">
+              Save this staff member first to see their message history.
+            </p>
+          )
         ) : null}
 
         {tab === "login" ? (
