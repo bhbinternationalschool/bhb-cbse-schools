@@ -33,6 +33,24 @@ import {
   loadMasters,
   type MastersState,
 } from "./masters";
+import { isSupabaseConfigured } from "./supabase/client";
+
+// ── Precondition, checked before anything else ────────────────────────────
+// Without Supabase env vars the guards below are inactive by design and the
+// demo path legitimately seeds a roster. That used to surface as the
+// 2026-08-10 assertion failing, which reads as "the guard is broken" when
+// the truth is "this run never engaged the guard" — a false alarm that has
+// already cost one investigation. Fail loudly and specifically instead.
+if (!isSupabaseConfigured()) {
+  console.error(
+    "mastersColdClient.selftest: SKIPPED-AS-FAILURE — no Supabase env.\n" +
+      "  This file only tests anything when isSupabaseConfigured() is true.\n" +
+      "  Run it as:  npm run test:masters-cold-client\n" +
+      "  (running `tsx src/lib/mastersColdClient.selftest.ts` bare exercises\n" +
+      "   the demo seed path, which is allowed to create a roster.)",
+  );
+  process.exit(1);
+}
 
 // ── A cold load must not conjure a roster ─────────────────────────────────
 // loadMasters() on the server with no mirror is the cold path; in the browser
