@@ -57,6 +57,7 @@ import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { field, btn } from "@/components/ui/erp-ui";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { StaffLeavePanel } from "@/components/staff/StaffLeavePanel";
+import { StaffRequestsPanel } from "@/components/staff/StaffRequestsPanel";
 import { StaffLeaveReportsPanel } from "@/components/staff/StaffLeaveReportsPanel";
 import { StaffAppraisalPanel } from "@/components/staff/StaffAppraisalPanel";
 import { StaffPayslipsPanel } from "@/components/staff/StaffPayslipsPanel";
@@ -95,6 +96,7 @@ type StaffMainTab =
   | "duty_roster"
   | "assignments"
   | "leave"
+  | "requests"
   | "appraisal"
   | "reports"
   | "payslips"
@@ -117,6 +119,7 @@ export function StaffWorkspace() {
       "duty_roster",
       "assignments",
       "leave",
+      "requests",
       "appraisal",
       "reports",
       "payslips",
@@ -345,6 +348,7 @@ export function StaffWorkspace() {
           { id: "agreements", label: "Agreements", tone: "teal" },
           { id: "doc_verify", label: "Doc verify", tone: "amber" },
           { id: "leave", label: "Leave", tone: "teal" },
+          { id: "requests", label: "Requests", tone: "coral" },
           { id: "appraisal", label: "Appraisal", tone: "violet" },
           { id: "payslips", label: "Payslips", tone: "green" },
           { id: "reports", label: "Reports", tone: "amber" },
@@ -400,6 +404,7 @@ export function StaffWorkspace() {
       ) : null}
 
       {tab === "leave" ? <StaffLeavePanel ay={ay} /> : null}
+      {tab === "requests" ? <StaffRequestsPanel /> : null}
       {tab === "reports" ? (
         <StaffLeaveReportsPanel ay={ay} scope="leave" />
       ) : null}

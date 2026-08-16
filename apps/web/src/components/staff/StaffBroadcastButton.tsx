@@ -12,8 +12,11 @@ import { loadSis } from "@/lib/sis";
 import {
   applyLeave,
   computeLeaveDays,
+  createStaffRequestTicket,
   loadStaffHr,
+  STAFF_REQUEST_TYPE_LABELS,
   type LeaveTypeCode,
+  type StaffRequestType,
 } from "@/lib/staffHr";
 import { ensureWaTemplatesHydrated } from "@/lib/waTemplatesPersistence";
 import {
@@ -24,7 +27,7 @@ import {
 } from "@/lib/waTemplates";
 
 type Audience = "class_parents" | "leadership";
-type Mode = "message" | "leave";
+type Mode = "message" | "leave" | "request";
 
 type TemplateSend = {
   name: string;
@@ -99,6 +102,12 @@ export function StaffBroadcastButton() {
   const [reason, setReason] = useState("");
   const [leaveDone, setLeaveDone] = useState<string | null>(null);
 
+  // Request-ticket fields
+  const [requestType, setRequestType] = useState<StaffRequestType>("supplies");
+  const [requestSubject, setRequestSubject] = useState("");
+  const [requestDescription, setRequestDescription] = useState("");
+  const [requestDone, setRequestDone] = useState<string | null>(null);
+
   useEffect(() => {
     if (!open) return;
     setMasters(loadMasters());
@@ -153,6 +162,10 @@ export function StaffBroadcastButton() {
     setBusy(false);
     setReason("");
     setLeaveDone(null);
+    setRequestType("supplies");
+    setRequestSubject("");
+    setRequestDescription("");
+    setRequestDone(null);
   }
 
   function buildPayload(): {
@@ -237,6 +250,45 @@ export function StaffBroadcastButton() {
       setReason("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not file leave request");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitRequest() {
+    if (!actor?.staffId || !session) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = createStaffRequestTicket({
+        staffId: actor.staffId,
+        raisedByName: session.fullName,
+        type: requestType,
+        subject: requestSubject.trim(),
+        description: requestDescription.trim(),
+      });
+      if (!r.ok) {
+        setError(r.error);
+        return;
+      }
+      // Real ticket is already filed — this is just an FYI ping, so no
+      // preview/confirm dance for a handful of leadership numbers.
+      await postStaffBroadcast(
+        {
+          audience: "leadership",
+          body: `${STAFF_REQUEST_TYPE_LABELS[requestType]} request from ${session.fullName}: ${requestSubject.trim()}.${
+            requestDescription.trim() ? ` ${requestDescription.trim()}` : ""
+          } Check Staff → Requests to triage.`,
+        },
+        false,
+      ).catch(() => null);
+      setRequestDone(
+        "Request filed — visible in Staff → Requests for triage.",
+      );
+      setRequestSubject("");
+      setRequestDescription("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not file request");
     } finally {
       setBusy(false);
     }
@@ -385,6 +437,17 @@ export function StaffBroadcastButton() {
                   >
                     Apply for leave
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setMode("request")}
+                    className={`rounded-md px-2.5 py-1 font-medium ${
+                      mode === "request"
+                        ? "bg-[var(--brand-deep)] text-white"
+                        : "text-[var(--muted)]"
+                    }`}
+                  >
+                    Raise a request
+                  </button>
                 </div>
               )}
 
@@ -484,6 +547,72 @@ export function StaffBroadcastButton() {
                     <p className="text-[10px] text-[var(--muted)]">
                       Files a real tracked request in Staff → Leave and pings
                       leadership on WhatsApp — not just a chat message.
+                    </p>
+                  </div>
+                )
+              ) : audience === "leadership" && mode === "request" ? (
+                requestDone ? (
+                  <div className="space-y-2 text-sm">
+                    <p className="rounded-lg border border-[var(--success)]/25 bg-[var(--success-soft)] p-2.5 text-[var(--success)]">
+                      {requestDone}
+                    </p>
+                    <button
+                      type="button"
+                      className="w-full rounded-lg bg-[var(--primary)] py-2 text-xs font-semibold text-[var(--primary-foreground)]"
+                      onClick={reset}
+                    >
+                      Done
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <label className="block text-xs">
+                      <span className="mb-1 block font-medium text-[var(--brand-deep)]">
+                        Type
+                      </span>
+                      <select
+                        className="w-full rounded-lg border border-[var(--border)] p-2 text-sm"
+                        value={requestType}
+                        onChange={(e) =>
+                          setRequestType(e.target.value as StaffRequestType)
+                        }
+                      >
+                        {Object.entries(STAFF_REQUEST_TYPE_LABELS).map(
+                          ([code, label]) => (
+                            <option key={code} value={code}>
+                              {label}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                    </label>
+                    <input
+                      className="w-full rounded-lg border border-[var(--border)] p-2 text-sm"
+                      placeholder="Subject (short)"
+                      value={requestSubject}
+                      onChange={(e) => setRequestSubject(e.target.value)}
+                    />
+                    <textarea
+                      value={requestDescription}
+                      onChange={(e) => setRequestDescription(e.target.value)}
+                      placeholder="Details…"
+                      rows={2}
+                      className="w-full rounded-lg border border-[var(--border)] p-2 text-sm"
+                    />
+                    {error ? (
+                      <p className="text-xs text-[var(--danger)]">{error}</p>
+                    ) : null}
+                    <button
+                      type="button"
+                      disabled={busy || !requestSubject.trim()}
+                      className="w-full rounded-lg bg-[var(--primary)] py-2 text-xs font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
+                      onClick={() => void submitRequest()}
+                    >
+                      {busy ? "Filing…" : "Submit request"}
+                    </button>
+                    <p className="text-[10px] text-[var(--muted)]">
+                      Files a real tracked ticket in Staff → Requests and
+                      pings leadership on WhatsApp — not just a chat message.
                     </p>
                   </div>
                 )

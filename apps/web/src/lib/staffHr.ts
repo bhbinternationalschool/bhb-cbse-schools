@@ -2,7 +2,10 @@
  * Staff leave & appraisal — localStorage HR slice (separate from Masters roster).
  */
 
-import { assertModulePermission } from "@/lib/rbacGuard";
+import {
+  assertModulePermission,
+  assertSelfOrModulePermission,
+} from "@/lib/rbacGuard";
 import { DEFAULT_AY } from "@/lib/masters";
 import type { StaffRecord } from "@/lib/foundationMasters";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
@@ -115,6 +118,39 @@ export type AppraisalRecord = {
   ratedAt: string;
 };
 
+export type StaffRequestType =
+  | "supplies"
+  | "maintenance"
+  | "vehicle"
+  | "classroom_issue"
+  | "other";
+
+export type StaffRequestStatus = "open" | "in_progress" | "resolved" | "closed";
+
+export const STAFF_REQUEST_TYPE_LABELS: Record<StaffRequestType, string> = {
+  supplies: "Stationery / supplies",
+  maintenance: "Repair / maintenance",
+  vehicle: "Vehicle / driver issue",
+  classroom_issue: "Classroom issue",
+  other: "Other",
+};
+
+export type StaffRequestTicket = {
+  id: string;
+  staffId: string;
+  raisedByName: string;
+  type: StaffRequestType;
+  subject: string;
+  description: string;
+  date: string;
+  assignedToStaffId: string;
+  status: StaffRequestStatus;
+  resolutionNote: string;
+  resolvedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type StaffHrState = {
   version: 1;
   leaveSettings: LeaveSettings;
@@ -124,6 +160,7 @@ export type StaffHrState = {
   leaveEncashments: LeaveEncashment[];
   appraisalCycles: AppraisalCycle[];
   appraisals: AppraisalRecord[];
+  staffRequests: StaffRequestTicket[];
 };
 
 const STORAGE_KEY = "bhb_staff_hr_v1";
@@ -301,6 +338,48 @@ function normalizeEncashment(
   };
 }
 
+const STAFF_REQUEST_TYPES: StaffRequestType[] = [
+  "supplies",
+  "maintenance",
+  "vehicle",
+  "classroom_issue",
+  "other",
+];
+const STAFF_REQUEST_STATUSES: StaffRequestStatus[] = [
+  "open",
+  "in_progress",
+  "resolved",
+  "closed",
+];
+
+function normalizeStaffRequestTicket(
+  t: Partial<StaffRequestTicket>,
+): StaffRequestTicket | null {
+  if (!t.staffId || !t.subject) return null;
+  const type = STAFF_REQUEST_TYPES.includes(t.type as StaffRequestType)
+    ? (t.type as StaffRequestType)
+    : "other";
+  const status = STAFF_REQUEST_STATUSES.includes(t.status as StaffRequestStatus)
+    ? (t.status as StaffRequestStatus)
+    : "open";
+  const now = new Date().toISOString();
+  return {
+    id: t.id || nid("req"),
+    staffId: t.staffId,
+    raisedByName: (t.raisedByName || "").trim(),
+    type,
+    subject: (t.subject || "").trim(),
+    description: (t.description || "").trim(),
+    date: t.date || now.slice(0, 10),
+    assignedToStaffId: t.assignedToStaffId || "",
+    status,
+    resolutionNote: (t.resolutionNote || "").trim(),
+    resolvedAt: t.resolvedAt || null,
+    createdAt: t.createdAt || now,
+    updatedAt: t.updatedAt || now,
+  };
+}
+
 function normalizeScores(raw: unknown): AppraisalScores {
   const base = emptyScores();
   if (!raw || typeof raw !== "object") return base;
@@ -377,6 +456,7 @@ export function emptyStaffHrState(): StaffHrState {
     leaveEncashments: [],
     appraisalCycles: [],
     appraisals: [],
+    staffRequests: [],
   };
 }
 
@@ -420,6 +500,11 @@ function normalizeState(raw: Partial<StaffHrState>): StaffHrState {
           .map(normalizeAppraisal)
           .filter((a): a is AppraisalRecord => !!a)
       : [],
+    staffRequests: Array.isArray(raw.staffRequests)
+      ? raw.staffRequests
+          .map(normalizeStaffRequestTicket)
+          .filter((t): t is StaffRequestTicket => !!t)
+      : [],
   };
 }
 
@@ -436,14 +521,17 @@ export function loadStaffHr(): StaffHrState {
   }
 }
 
-export function saveStaffHr(state: StaffHrState) {
-  if (!assertModulePermission("staff", "edit", "saveStaffHr")) return;
-
+function persistStaffHr(state: StaffHrState) {
   if (typeof window === "undefined") return;
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(normalizeState(state)));
   void import("@/lib/staffHrPersistence").then(({ scheduleStaffHrSync }) => {
     scheduleStaffHrSync(state);
   });
+}
+
+export function saveStaffHr(state: StaffHrState) {
+  if (!assertModulePermission("staff", "edit", "saveStaffHr")) return;
+  persistStaffHr(state);
 }
 
 export function writeStaffHrLocalRaw(state: StaffHrState) {
@@ -809,7 +897,12 @@ export function applyLeave(input: {
     if (balAfter) state = syncBalanceUsed(state, balAfter.id);
   }
 
-  saveStaffHr(state);
+  if (
+    !assertSelfOrModulePermission("staff", "edit", input.staffId, "applyLeave")
+  ) {
+    return { ok: false, error: "You don't have permission to do this" };
+  }
+  persistStaffHr(state);
   return { ok: true, state, request };
 }
 
@@ -817,6 +910,105 @@ export function directLeave(
   input: Omit<Parameters<typeof applyLeave>[0], "direct">,
 ): ReturnType<typeof applyLeave> {
   return applyLeave({ ...input, direct: true });
+}
+
+/**
+ * Any staff member files a real, tracked operational request against
+ * their own staffId — stationery/supplies, a repair/maintenance need, a
+ * vehicle/driver issue, a classroom problem, or something uncategorized.
+ * Self-scoped: assertSelfOrModulePermission lets the actor create only
+ * for their own staffId without needing the broader "staff:edit" grant,
+ * mirroring applyLeave's self-service fix above.
+ */
+export function createStaffRequestTicket(input: {
+  staffId: string;
+  raisedByName: string;
+  type: StaffRequestType;
+  subject: string;
+  description: string;
+}): { ok: true; state: StaffHrState; ticket: StaffRequestTicket } | { ok: false; error: string } {
+  if (!input.staffId) return { ok: false, error: "Could not resolve your staff record" };
+  if (!input.subject.trim()) return { ok: false, error: "Subject is required" };
+
+  if (
+    !assertSelfOrModulePermission(
+      "staff",
+      "edit",
+      input.staffId,
+      "createStaffRequestTicket",
+    )
+  ) {
+    return { ok: false, error: "You don't have permission to do this" };
+  }
+
+  const now = new Date().toISOString();
+  const ticket: StaffRequestTicket = {
+    id: nid("req"),
+    staffId: input.staffId,
+    raisedByName: input.raisedByName.trim(),
+    type: input.type,
+    subject: input.subject.trim(),
+    description: input.description.trim(),
+    date: now.slice(0, 10),
+    assignedToStaffId: "",
+    status: "open",
+    resolutionNote: "",
+    resolvedAt: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const state = loadStaffHr();
+  const next: StaffHrState = {
+    ...state,
+    staffRequests: [ticket, ...state.staffRequests],
+  };
+  persistStaffHr(next);
+  return { ok: true, state: next, ticket };
+}
+
+/** Admin/office triage — assign, change status, or resolve a ticket. */
+export function updateStaffRequestTicket(
+  ticketId: string,
+  patch: {
+    assignedToStaffId?: string;
+    status?: StaffRequestStatus;
+    resolutionNote?: string;
+  },
+): { ok: true; state: StaffHrState } | { ok: false; error: string } {
+  const state = loadStaffHr();
+  const idx = state.staffRequests.findIndex((t) => t.id === ticketId);
+  if (idx < 0) return { ok: false, error: "Request not found" };
+  const now = new Date().toISOString();
+  const before = state.staffRequests[idx]!;
+  const status = patch.status ?? before.status;
+  const ticket: StaffRequestTicket = {
+    ...before,
+    assignedToStaffId: patch.assignedToStaffId ?? before.assignedToStaffId,
+    status,
+    resolutionNote: patch.resolutionNote ?? before.resolutionNote,
+    resolvedAt:
+      status === "resolved" || status === "closed"
+        ? before.resolvedAt || now
+        : status !== before.status
+          ? null
+          : before.resolvedAt,
+    updatedAt: now,
+  };
+  const staffRequests = [...state.staffRequests];
+  staffRequests[idx] = ticket;
+  const next: StaffHrState = { ...state, staffRequests };
+  saveStaffHr(next);
+  return { ok: true, state: next };
+}
+
+export function listStaffRequestsForStaff(
+  state: StaffHrState,
+  staffId: string,
+): StaffRequestTicket[] {
+  return state.staffRequests
+    .filter((t) => t.staffId === staffId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 export function decideLeave(input: {

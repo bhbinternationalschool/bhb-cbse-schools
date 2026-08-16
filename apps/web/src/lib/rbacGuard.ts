@@ -52,6 +52,47 @@ export function assertModulePermission(
   return true;
 }
 
+/**
+ * Like assertModulePermission, but also allows a staff actor to act on
+ * their OWN record (selfStaffId) regardless of the module grant — for
+ * self-service actions (apply for own leave, raise own request ticket)
+ * that share a save path with admin-only edits on the same module. A
+ * teacher who only has "staff:view" must still be able to file their own
+ * leave/request; someone editing another staff member's record still
+ * needs the real module grant.
+ */
+export function assertSelfOrModulePermission(
+  module: RbacModule,
+  action: RbacAction,
+  selfStaffId: string,
+  label = "save",
+): boolean {
+  if (!assertSessionWritable(label)) return false;
+  const session = getSessionActor();
+  if (!session) return true;
+  if (
+    session.persona === "staff" &&
+    session.staffId &&
+    selfStaffId &&
+    session.staffId === selfStaffId
+  ) {
+    return true;
+  }
+  if (typeof window === "undefined") return true;
+  const masters = loadMastersSafe();
+  if (!hasPermission(session, masters, module, action)) {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("bhb-rbac-denied", {
+          detail: { module, action, label },
+        }),
+      );
+    }
+    return false;
+  }
+  return true;
+}
+
 export function assertCanConfigureRbac(label = "saveRbac"): boolean {
   if (!assertSessionWritable(label)) return false;
   const session = getSessionActor();
