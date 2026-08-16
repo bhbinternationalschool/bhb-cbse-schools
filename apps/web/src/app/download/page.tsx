@@ -54,7 +54,7 @@ export default function DownloadPage() {
         </div>
         <a
           href={APK_URL}
-          className="block w-full rounded-xl bg-[#203050] px-4 py-3.5 text-center text-sm font-semibold text-white hover:opacity-90"
+          className="block w-full rounded-xl bg-[var(--brand-deep)] px-4 py-3.5 text-center text-sm font-semibold text-white hover:opacity-90"
         >
           Download for Android
         </a>
