@@ -22,12 +22,30 @@ export function clearWorkspaceSessionAlignFlag(): void {
   sessionStorage.removeItem(WORKSPACE_AY_ALIGNED_KEY);
 }
 
+// Multiple hydration-completion events (bhb-masters-updated,
+// bhb-desk-hydrated, ...) can each fire within milliseconds of one another
+// on a single navigation, and every listener that calls this function has
+// no way to know another call is already in flight. Without de-duping,
+// concurrent calls each independently GET /api/session/ay and, if either
+// server round trip is answered from a momentarily inconsistent read, can
+// each independently PATCH — a race that only widens the window for the
+// header selector and page data to disagree, exactly the symptom this
+// module's fix history (see the file header) has chased twice already.
+let inFlight: Promise<boolean> | null = null;
+
 /** Sync the session cookie when it differs from the server-resolved year. */
 export async function alignWorkspaceSessionFromMasters(
   cookieAy: string,
 ): Promise<boolean> {
   if (typeof window === "undefined") return false;
+  if (inFlight) return inFlight;
+  inFlight = runAlign(cookieAy).finally(() => {
+    inFlight = null;
+  });
+  return inFlight;
+}
 
+async function runAlign(cookieAy: string): Promise<boolean> {
   let resolved: string | null = null;
   let matches = false;
   try {

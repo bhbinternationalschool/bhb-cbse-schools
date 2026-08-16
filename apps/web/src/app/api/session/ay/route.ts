@@ -25,12 +25,22 @@ export async function GET() {
   }
 
   const resolved = await resolveLoginAcademicYearCode();
+  const matches = !!resolved && resolved === session.academicYearCode;
+  // Traced because this exact "selector shows one year, page data shows
+  // another" symptom has recurred more than once with no server-side record
+  // of what GET actually answered at the time — only logged on a mismatch,
+  // so this stays quiet in the normal case.
+  if (!matches) {
+    console.warn(
+      `[session/ay] mismatch: cookie=${session.academicYearCode} resolved=${resolved ?? "null"}`,
+    );
+  }
   return NextResponse.json({
     // null means Masters defines no usable year — a setup task, not a value
     // to substitute something plausible for.
     resolved,
     session: session.academicYearCode,
-    matches: !!resolved && resolved === session.academicYearCode,
+    matches,
   });
 }
 
@@ -70,6 +80,12 @@ export async function PATCH(request: Request) {
     return NextResponse.json(
       { error: `Unknown academic year: ${academicYearCode}` },
       { status: 422 },
+    );
+  }
+
+  if (academicYearCode !== session.academicYearCode) {
+    console.warn(
+      `[session/ay] switching session ${session.academicYearCode} -> ${academicYearCode}`,
     );
   }
 

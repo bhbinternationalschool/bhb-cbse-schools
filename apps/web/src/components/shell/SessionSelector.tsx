@@ -39,14 +39,27 @@ export function SessionSelector({ currentCode }: { currentCode: string }) {
     router.refresh();
   }
 
-  const options =
+  const baseOptions =
     years.length > 0
       ? years
       : [{ code: currentCode, label: currentCode, status: "current" as const }];
 
-  const value = options.some((y) => y.code === currentCode)
-    ? currentCode
-    : (options.find((y) => y.status === "current")?.code ?? options[0]!.code);
+  // currentCode is the server-aligned, authoritative session year — always
+  // trust and display it. `years` is a separate, client-side cache
+  // (listSessionYearOptions() reading local Masters) that can briefly lag
+  // behind the session cookie; falling back to "whichever year that cache
+  // happens to have marked current" when currentCode isn't in it is what
+  // made the selector flash a DIFFERENT year while every year-scoped query
+  // on the page kept correctly using currentCode. If the cache doesn't
+  // have it yet, show it anyway rather than swap to something else.
+  const options = baseOptions.some((y) => y.code === currentCode)
+    ? baseOptions
+    : [
+        { code: currentCode, label: currentCode, status: "current" as const },
+        ...baseOptions,
+      ];
+
+  const value = currentCode;
 
   return (
     <label className="flex items-center gap-2 text-sm">
