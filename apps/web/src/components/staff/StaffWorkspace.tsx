@@ -58,6 +58,7 @@ import { field, btn } from "@/components/ui/erp-ui";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { StaffLeavePanel } from "@/components/staff/StaffLeavePanel";
 import { StaffRequestsPanel } from "@/components/staff/StaffRequestsPanel";
+import { StaffOutdoorDutyPanel } from "@/components/staff/StaffOutdoorDutyPanel";
 import { StaffLeaveReportsPanel } from "@/components/staff/StaffLeaveReportsPanel";
 import { StaffAppraisalPanel } from "@/components/staff/StaffAppraisalPanel";
 import { StaffPayslipsPanel } from "@/components/staff/StaffPayslipsPanel";
@@ -97,6 +98,7 @@ type StaffMainTab =
   | "assignments"
   | "leave"
   | "requests"
+  | "outdoor_duty"
   | "appraisal"
   | "reports"
   | "payslips"
@@ -120,6 +122,7 @@ export function StaffWorkspace() {
       "assignments",
       "leave",
       "requests",
+      "outdoor_duty",
       "appraisal",
       "reports",
       "payslips",
@@ -349,6 +352,7 @@ export function StaffWorkspace() {
           { id: "doc_verify", label: "Doc verify", tone: "amber" },
           { id: "leave", label: "Leave", tone: "teal" },
           { id: "requests", label: "Requests", tone: "coral" },
+          { id: "outdoor_duty", label: "Outdoor duty", tone: "sky" },
           { id: "appraisal", label: "Appraisal", tone: "violet" },
           { id: "payslips", label: "Payslips", tone: "green" },
           { id: "reports", label: "Reports", tone: "amber" },
@@ -405,6 +409,7 @@ export function StaffWorkspace() {
 
       {tab === "leave" ? <StaffLeavePanel ay={ay} /> : null}
       {tab === "requests" ? <StaffRequestsPanel /> : null}
+      {tab === "outdoor_duty" ? <StaffOutdoorDutyPanel /> : null}
       {tab === "reports" ? (
         <StaffLeaveReportsPanel ay={ay} scope="leave" />
       ) : null}

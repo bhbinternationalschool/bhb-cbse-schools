@@ -18,6 +18,16 @@ import {
   type LeaveTypeCode,
   type StaffRequestType,
 } from "@/lib/staffHr";
+import {
+  activeOutdoorDutyForStaff,
+  endOutdoorDuty,
+  loadStaffAttendance,
+  OUTDOOR_DUTY_PURPOSE_LABELS,
+  startOutdoorDuty,
+  type OutdoorDutyPurpose,
+  type OutdoorDutySession,
+} from "@/lib/staffAttendance";
+import { captureSurveyGeo } from "@/lib/fieldSurvey";
 import { ensureWaTemplatesHydrated } from "@/lib/waTemplatesPersistence";
 import {
   loadWaTemplates,
@@ -27,7 +37,7 @@ import {
 } from "@/lib/waTemplates";
 
 type Audience = "class_parents" | "leadership";
-type Mode = "message" | "leave" | "request";
+type Mode = "message" | "leave" | "request" | "outdoor";
 
 type TemplateSend = {
   name: string;
@@ -108,6 +118,13 @@ export function StaffBroadcastButton() {
   const [requestDescription, setRequestDescription] = useState("");
   const [requestDone, setRequestDone] = useState<string | null>(null);
 
+  // Outdoor-duty fields
+  const [odActive, setOdActive] = useState<OutdoorDutySession | null>(null);
+  const [odPurpose, setOdPurpose] = useState<OutdoorDutyPurpose>("official_errand");
+  const [odDestination, setOdDestination] = useState("");
+  const [odNote, setOdNote] = useState("");
+  const [odDone, setOdDone] = useState<string | null>(null);
+
   useEffect(() => {
     if (!open) return;
     setMasters(loadMasters());
@@ -124,6 +141,11 @@ export function StaffBroadcastButton() {
     if (!masters || !session) return null;
     return chatSelfFromSession(session, masters, loadSis());
   }, [masters, session]);
+
+  useEffect(() => {
+    if (!open || !actor?.staffId) return;
+    setOdActive(activeOutdoorDutyForStaff(loadStaffAttendance(), actor.staffId));
+  }, [open, actor]);
 
   const sections = useMemo((): ChatSectionRef[] => {
     if (!masters || !actor || actor.kind !== "staff" || !session) return [];
@@ -166,6 +188,10 @@ export function StaffBroadcastButton() {
     setRequestSubject("");
     setRequestDescription("");
     setRequestDone(null);
+    setOdPurpose("official_errand");
+    setOdDestination("");
+    setOdNote("");
+    setOdDone(null);
   }
 
   function buildPayload(): {
@@ -289,6 +315,82 @@ export function StaffBroadcastButton() {
       setRequestDescription("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not file request");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitOutdoorStart() {
+    if (!actor?.staffId || !session || !masters) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const geo = await captureSurveyGeo().catch(() => null);
+      const r = startOutdoorDuty({
+        academicYearCode: session.academicYearCode,
+        staffId: actor.staffId,
+        purpose: odPurpose,
+        destination: odDestination.trim(),
+        note: odNote.trim(),
+        startGeo: geo,
+        createdBy: session.fullName,
+        roster: masters.staff ?? [],
+      });
+      if (!r.ok) {
+        setError(r.error);
+        return;
+      }
+      setOdActive(r.session);
+      // Real check-out is already filed — this is just an FYI ping, so no
+      // preview/confirm dance for a handful of leadership numbers.
+      await postStaffBroadcast(
+        {
+          audience: "leadership",
+          body: `${session.fullName} checked out for outdoor duty — ${OUTDOOR_DUTY_PURPOSE_LABELS[odPurpose]} · ${odDestination.trim()}.${
+            odNote.trim() ? ` ${odNote.trim()}` : ""
+          }${geo ? " (GPS captured)" : ""}`,
+        },
+        false,
+      ).catch(() => null);
+      setOdDone(
+        `Checked out for ${OUTDOOR_DUTY_PURPOSE_LABELS[odPurpose]} at ${odDestination.trim()}${geo ? " — location recorded" : " — location unavailable"}.`,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not check out");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitOutdoorEnd() {
+    if (!actor?.staffId || !session || !masters || !odActive) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const geo = await captureSurveyGeo().catch(() => null);
+      const r = endOutdoorDuty({
+        academicYearCode: session.academicYearCode,
+        sessionId: odActive.id,
+        staffId: actor.staffId,
+        endGeo: geo,
+        markedBy: session.fullName,
+        roster: masters.staff ?? [],
+      });
+      if (!r.ok) {
+        setError(r.error);
+        return;
+      }
+      setOdActive(null);
+      await postStaffBroadcast(
+        {
+          audience: "leadership",
+          body: `${session.fullName} checked back in from outdoor duty (${OUTDOOR_DUTY_PURPOSE_LABELS[odActive.purpose]} · ${odActive.destination}).`,
+        },
+        false,
+      ).catch(() => null);
+      setOdDone("Checked in — outdoor duty closed.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not check in");
     } finally {
       setBusy(false);
     }
@@ -447,6 +549,17 @@ export function StaffBroadcastButton() {
                     }`}
                   >
                     Raise a request
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMode("outdoor")}
+                    className={`rounded-md px-2.5 py-1 font-medium ${
+                      mode === "outdoor"
+                        ? "bg-[var(--brand-deep)] text-white"
+                        : "text-[var(--muted)]"
+                    }`}
+                  >
+                    {odActive ? "Outdoor duty (active)" : "Check out for outdoor duty"}
                   </button>
                 </div>
               )}
@@ -613,6 +726,101 @@ export function StaffBroadcastButton() {
                     <p className="text-[10px] text-[var(--muted)]">
                       Files a real tracked ticket in Staff → Requests and
                       pings leadership on WhatsApp — not just a chat message.
+                    </p>
+                  </div>
+                )
+              ) : audience === "leadership" && mode === "outdoor" ? (
+                odDone ? (
+                  <div className="space-y-2 text-sm">
+                    <p className="rounded-lg border border-[var(--success)]/25 bg-[var(--success-soft)] p-2.5 text-[var(--success)]">
+                      {odDone}
+                    </p>
+                    <button
+                      type="button"
+                      className="w-full rounded-lg bg-[var(--primary)] py-2 text-xs font-semibold text-[var(--primary-foreground)]"
+                      onClick={reset}
+                    >
+                      Done
+                    </button>
+                  </div>
+                ) : odActive ? (
+                  <div className="space-y-2">
+                    <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] p-2.5 text-xs">
+                      <p className="font-semibold text-[var(--brand-deep)]">
+                        Out since {new Date(odActive.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      </p>
+                      <p className="mt-0.5 text-[var(--muted)]">
+                        {OUTDOOR_DUTY_PURPOSE_LABELS[odActive.purpose]} ·{" "}
+                        {odActive.destination}
+                        {odActive.note ? ` — ${odActive.note}` : ""}
+                      </p>
+                    </div>
+                    {error ? (
+                      <p className="text-xs text-[var(--danger)]">{error}</p>
+                    ) : null}
+                    <button
+                      type="button"
+                      disabled={busy}
+                      className="w-full rounded-lg bg-[var(--primary)] py-2 text-xs font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
+                      onClick={() => void submitOutdoorEnd()}
+                    >
+                      {busy ? "Checking in…" : "Check in — I'm back"}
+                    </button>
+                    <p className="text-[10px] text-[var(--muted)]">
+                      Closes the outdoor duty session and records your
+                      return time (and location, if available).
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <label className="block text-xs">
+                      <span className="mb-1 block font-medium text-[var(--brand-deep)]">
+                        Purpose
+                      </span>
+                      <select
+                        className="w-full rounded-lg border border-[var(--border)] p-2 text-sm"
+                        value={odPurpose}
+                        onChange={(e) =>
+                          setOdPurpose(e.target.value as OutdoorDutyPurpose)
+                        }
+                      >
+                        {Object.entries(OUTDOOR_DUTY_PURPOSE_LABELS).map(
+                          ([code, label]) => (
+                            <option key={code} value={code}>
+                              {label}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                    </label>
+                    <input
+                      className="w-full rounded-lg border border-[var(--border)] p-2 text-sm"
+                      placeholder="Destination (e.g. SBI branch, Cantt)"
+                      value={odDestination}
+                      onChange={(e) => setOdDestination(e.target.value)}
+                    />
+                    <textarea
+                      value={odNote}
+                      onChange={(e) => setOdNote(e.target.value)}
+                      placeholder="Note (optional)…"
+                      rows={2}
+                      className="w-full rounded-lg border border-[var(--border)] p-2 text-sm"
+                    />
+                    {error ? (
+                      <p className="text-xs text-[var(--danger)]">{error}</p>
+                    ) : null}
+                    <button
+                      type="button"
+                      disabled={busy || !odDestination.trim()}
+                      className="w-full rounded-lg bg-[var(--primary)] py-2 text-xs font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
+                      onClick={() => void submitOutdoorStart()}
+                    >
+                      {busy ? "Checking out…" : "Check out"}
+                    </button>
+                    <p className="text-[10px] text-[var(--muted)]">
+                      Marks today Present · Outdoor duty, captures your
+                      location if you allow it, and pings leadership — visible
+                      in Staff → Outdoor duty.
                     </p>
                   </div>
                 )
