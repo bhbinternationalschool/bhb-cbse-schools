@@ -18,9 +18,17 @@ import { POST as dispatchPost } from "@/app/api/wa/dispatch/route";
 
 export const runtime = "nodejs";
 
+type BroadcastTemplate = {
+  name: string;
+  language: string;
+  variableKeys?: string[];
+  variables?: Record<string, string>;
+};
+
 type BroadcastBody = {
   audience?: "parents" | "staff";
   body?: string;
+  template?: BroadcastTemplate;
   dryRun?: boolean;
 };
 
@@ -39,6 +47,7 @@ export async function POST(req: Request) {
 
   const audience = body?.audience;
   const text = (body?.body || "").trim();
+  const template = body?.template?.name ? body.template : null;
   // Default to dry-run unless the caller explicitly opts out — a
   // school-wide send must never happen because a flag was merely omitted.
   const dryRun = body?.dryRun !== false;
@@ -49,9 +58,9 @@ export async function POST(req: Request) {
       { status: 400 },
     );
   }
-  if (!text) {
+  if (!text && !template) {
     return NextResponse.json(
-      { error: "Message body is required" },
+      { error: "Message body or template is required" },
       { status: 400 },
     );
   }
@@ -103,7 +112,9 @@ export async function POST(req: Request) {
       body: JSON.stringify({
         module: "notifications",
         dryRun,
-        messages: chunk.map((mobile) => ({ mobile, body: text })),
+        messages: chunk.map((mobile) =>
+          template ? { mobile, template } : { mobile, body: text },
+        ),
       }),
     });
     const res = await dispatchPost(chunkReq);

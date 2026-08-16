@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -11,8 +11,22 @@ import {
   DialogPopup,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ensureWaTemplatesHydrated } from "@/lib/waTemplatesPersistence";
+import {
+  loadWaTemplates,
+  listApprovedTemplates,
+  WA_TEMPLATE_VARIABLES,
+  type WaTemplate,
+} from "@/lib/waTemplates";
 
 type Audience = "parents" | "staff";
+
+type TemplateSend = {
+  name: string;
+  language: string;
+  variableKeys?: string[];
+  variables?: Record<string, string>;
+};
 
 type BroadcastResult = {
   ok?: boolean;
@@ -26,17 +40,21 @@ type BroadcastResult = {
 
 async function postBroadcast(
   audience: Audience,
-  body: string,
+  payload: { body?: string; template?: TemplateSend },
   dryRun: boolean,
 ): Promise<BroadcastResult> {
   const res = await fetch("/api/v1/owner/broadcast", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ audience, body, dryRun }),
+    body: JSON.stringify({ audience, ...payload, dryRun }),
   });
   const json = (await res.json()) as BroadcastResult;
   if (!res.ok) throw new Error(json.error || "Broadcast request failed");
   return json;
+}
+
+function variableLabel(key: string): string {
+  return WA_TEMPLATE_VARIABLES.find((v) => v.key === key)?.label || key;
 }
 
 /** Owner-only school-wide WhatsApp broadcast: compose → dry-run preview →
@@ -51,25 +69,57 @@ export function BroadcastModal({
 }) {
   const [audience, setAudience] = useState<Audience>("parents");
   const [message, setMessage] = useState("");
+  const [templates, setTemplates] = useState<WaTemplate[]>([]);
+  const [templateId, setTemplateId] = useState("");
+  const [templateVars, setTemplateVars] = useState<Record<string, string>>({});
   const [preview, setPreview] = useState<BroadcastResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sentResult, setSentResult] = useState<BroadcastResult | null>(null);
 
+  useEffect(() => {
+    if (!open) return;
+    setTemplates(listApprovedTemplates(loadWaTemplates()));
+    void ensureWaTemplatesHydrated().then(() => {
+      setTemplates(listApprovedTemplates(loadWaTemplates()));
+    });
+  }, [open]);
+
+  const selectedTemplate = useMemo(
+    () => templates.find((t) => t.id === templateId) || null,
+    [templates, templateId],
+  );
+
   function reset() {
     setAudience("parents");
     setMessage("");
+    setTemplateId("");
+    setTemplateVars({});
     setPreview(null);
     setError(null);
     setSentResult(null);
     setBusy(false);
   }
 
+  function buildPayload(): { body?: string; template?: TemplateSend } {
+    if (selectedTemplate) {
+      return {
+        template: {
+          name: selectedTemplate.metaName,
+          language: selectedTemplate.metaLanguage,
+          variableKeys: selectedTemplate.variables,
+          variables: templateVars,
+        },
+      };
+    }
+    return { body: message.trim() };
+  }
+
   async function runPreview() {
     setError(null);
     setBusy(true);
     try {
-      const result = await postBroadcast(audience, message.trim(), true);
+      const result = await postBroadcast(audience, buildPayload(), true);
       setPreview(result);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not preview broadcast");
@@ -82,7 +132,7 @@ export function BroadcastModal({
     setBusy(true);
     setError(null);
     try {
-      const result = await postBroadcast(audience, message.trim(), false);
+      const result = await postBroadcast(audience, buildPayload(), false);
       setSentResult(result);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Broadcast failed");
@@ -90,6 +140,10 @@ export function BroadcastModal({
       setBusy(false);
     }
   }
+
+  const canSend = selectedTemplate
+    ? selectedTemplate.variables.every((k) => (templateVars[k] || "").trim())
+    : !!message.trim();
 
   return (
     <Dialog
@@ -148,24 +202,78 @@ export function BroadcastModal({
               </div>
             </div>
 
-            <textarea
-              value={message}
-              onChange={(e) => {
-                setMessage(e.target.value);
-                setPreview(null);
-              }}
-              placeholder="Message text…"
-              rows={4}
-              className="w-full rounded-lg border border-[var(--border)] p-2.5 text-sm"
-            />
+            <label className="block text-sm">
+              <span className="mb-1 block text-xs font-medium text-[var(--brand-deep)]">
+                Approved template (optional)
+              </span>
+              <select
+                className="w-full rounded-lg border border-[var(--border)] p-2 text-sm"
+                value={templateId}
+                onChange={(e) => {
+                  setTemplateId(e.target.value);
+                  setTemplateVars({});
+                  setPreview(null);
+                }}
+              >
+                <option value="">Free text instead</option>
+                {templates.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name} ({t.language})
+                  </option>
+                ))}
+              </select>
+            </label>
 
-            <p className="text-xs text-[var(--muted)]">
-              Free text only reaches recipients who have messaged the
-              school&apos;s WhatsApp number in the last 24 hours — Meta blocks
-              free text
-              outside that window. For a true broadcast to everyone, use an
-              approved template instead (not yet wired into this bar).
-            </p>
+            {selectedTemplate ? (
+              <div className="space-y-2 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] p-2.5">
+                <p className="whitespace-pre-wrap text-sm text-[var(--brand-deep)]">
+                  {selectedTemplate.body}
+                </p>
+                {selectedTemplate.variables.length > 0 ? (
+                  <div className="space-y-1.5">
+                    <p className="text-xs text-[var(--muted)]">
+                      Same value is used for every recipient — this send has
+                      no per-person data to fill placeholders with.
+                    </p>
+                    {selectedTemplate.variables.map((key) => (
+                      <input
+                        key={key}
+                        className="w-full rounded-lg border border-[var(--border)] p-2 text-sm"
+                        placeholder={variableLabel(key)}
+                        value={templateVars[key] || ""}
+                        onChange={(e) => {
+                          setTemplateVars((v) => ({ ...v, [key]: e.target.value }));
+                          setPreview(null);
+                        }}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+                <p className="text-xs text-[var(--muted)]">
+                  Templates reach every recipient regardless of the 24-hour
+                  window.
+                </p>
+              </div>
+            ) : (
+              <>
+                <textarea
+                  value={message}
+                  onChange={(e) => {
+                    setMessage(e.target.value);
+                    setPreview(null);
+                  }}
+                  placeholder="Message text…"
+                  rows={4}
+                  className="w-full rounded-lg border border-[var(--border)] p-2.5 text-sm"
+                />
+                <p className="text-xs text-[var(--muted)]">
+                  Free text only reaches recipients who have messaged the
+                  school&apos;s WhatsApp number in the last 24 hours — Meta
+                  blocks free text outside that window. Pick an approved
+                  template above to reach everyone.
+                </p>
+              </>
+            )}
 
             {error ? (
               <p className="text-sm text-[var(--danger)]">{error}</p>
@@ -203,7 +311,7 @@ export function BroadcastModal({
               ) : (
                 <Button
                   type="button"
-                  disabled={busy || !message.trim()}
+                  disabled={busy || !canSend}
                   onClick={runPreview}
                 >
                   {busy ? "Checking…" : "Preview recipients"}
