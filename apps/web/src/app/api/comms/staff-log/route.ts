@@ -5,7 +5,7 @@ import { getStaffMessageTimeline } from "@/lib/staffMessageLog.server";
 
 export const runtime = "nodejs";
 
-/** GET ?staffId=&mobile= — WA + in-app timeline for one staff member. */
+/** GET ?staffId=&mobile=&limit= — WA + in-app timeline for one staff member. */
 export async function GET(req: Request) {
   const auth = await requireStaffPermission(req, "staff", "view");
   if (!auth.ok) return auth.response;
@@ -20,7 +20,11 @@ export async function GET(req: Request) {
       { status: 400 },
     );
   }
+  const limitRaw = Number(url.searchParams.get("limit"));
+  const limit = Number.isFinite(limitRaw) && limitRaw > 0
+    ? Math.min(limitRaw, 500)
+    : undefined;
 
-  const { entries } = await getStaffMessageTimeline({ staffId, mobile });
+  const { entries } = await getStaffMessageTimeline({ staffId, mobile, limit });
   return NextResponse.json({ ok: true, entries });
 }
