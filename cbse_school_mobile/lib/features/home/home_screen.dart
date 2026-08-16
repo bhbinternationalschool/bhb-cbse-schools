@@ -4,11 +4,13 @@ import "../../core/api/api_client.dart";
 import "../../core/config/app_config.dart";
 import "../../core/theme/app_theme.dart";
 import "../modules/attendance_history_screen.dart";
+import "../modules/chat_thread_screen.dart";
 import "../modules/fees_screen.dart";
 import "../modules/homework_screen.dart";
 import "../modules/module_shell.dart";
 import "../modules/notices_screen.dart";
 import "../modules/ptm_screen.dart";
+import "../modules/transport_screen.dart";
 import "student_id_screen.dart";
 
 class _Module {
@@ -107,11 +109,7 @@ class _HomeScreenState extends State<HomeScreen> {
       case "PTM":
         screen = PtmScreen(api: api, child: child);
       case "Transport":
-        showComingSoon(
-          context,
-          "Transport",
-          "Bus routes and live tracking go live once the school publishes its transport routes.",
-        );
+        screen = TransportScreen(api: api);
       case "Exams":
         showComingSoon(
           context,
@@ -344,10 +342,14 @@ class _HomeScreenState extends State<HomeScreen> {
             case 1:
               _openModule("Fees", child);
             case 2:
-              showComingSoon(
-                context,
-                "Messages",
-                "Direct chat with the class teacher is on the roadmap.",
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => ChatThreadScreen(
+                    api: widget.api,
+                    studentId: child.id,
+                    studentName: child.fullName,
+                  ),
+                ),
               );
             case 3:
               _showProfile(summary, child);
