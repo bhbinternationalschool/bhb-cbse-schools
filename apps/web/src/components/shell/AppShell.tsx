@@ -9,6 +9,7 @@ import { SessionSelector } from "./SessionSelector";
 import { UniversalSearchBar } from "./UniversalSearchBar";
 import { NotificationBell } from "./NotificationBell";
 import { StaffInternalChatButton } from "./StaffInternalChatButton";
+import { StaffBroadcastButton } from "@/components/staff/StaffBroadcastButton";
 import { CommsRunningStrip } from "./CommsRunningStrip";
 import { ErpAiChatbot } from "./ErpAiChatbot";
 import { ErpSidebar, ErpSidebarMenuButton } from "./ErpSidebar";
@@ -328,6 +329,7 @@ export function AppShell({
                 <SessionSelector currentCode={session.academicYearCode} />
               ) : null}
               <StaffInternalChatButton />
+              <StaffBroadcastButton />
               <NotificationBell persona="staff" />
               {readOnly ? (
                 <span className="hidden rounded-md bg-[rgba(197,160,40,0.18)] px-2 py-1 text-[11px] font-medium text-[var(--brand-deep)] lg:inline">

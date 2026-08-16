@@ -79,7 +79,7 @@ function isTeachingStaff(staff: StaffRecord): boolean {
   );
 }
 
-function inferStaffIsOwner(
+export function inferStaffIsOwner(
   staff: StaffRecord,
   designations: Designation[],
 ): boolean {
