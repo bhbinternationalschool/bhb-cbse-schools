@@ -27,6 +27,8 @@ import { loadSis, type SisState } from "@/lib/sis";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { PaymentReportImportPanel } from "@/components/fees/PaymentReportImportPanel";
 import { PreviousDuesImportPanel } from "@/components/fees/PreviousDuesImportPanel";
+import { ManualPreviousDuePanel } from "@/components/fees/ManualPreviousDuePanel";
+import { BulkPreviousDueByClassPanel } from "@/components/fees/BulkPreviousDueByClassPanel";
 
 export function FeeAdjustmentsPanel({
   onChanged,
@@ -187,6 +189,8 @@ export function FeeAdjustmentsPanel({
   return (
     <div className="mt-6 space-y-4">
       <PaymentReportImportPanel onImported={refresh} />
+      <ManualPreviousDuePanel onChanged={refresh} />
+      <BulkPreviousDueByClassPanel onChanged={refresh} />
       <PreviousDuesImportPanel onImported={refresh} />
 
       {notice ? (
