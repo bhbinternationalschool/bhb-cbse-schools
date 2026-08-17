@@ -30,10 +30,12 @@ export function ParentCommsPortal({
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const { ensureSchoolCommsHydrated } = await import(
-        "@/lib/schoolCommsPersistence"
-      );
-      await ensureSchoolCommsHydrated();
+      const [{ ensureSchoolCommsHydrated }, { withHydrationSlot }] =
+        await Promise.all([
+          import("@/lib/schoolCommsPersistence"),
+          import("@/lib/deskHydrateGuard"),
+        ]);
+      await withHydrationSlot(() => ensureSchoolCommsHydrated());
       if (cancelled) return;
       setComms(loadSchoolComms());
     })();

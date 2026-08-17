@@ -302,14 +302,18 @@ export function CommsWorkspace() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const [{ ensureSchoolCommsHydrated }, { ensureNotificationsHydrated }] =
-        await Promise.all([
-          import("@/lib/schoolCommsPersistence"),
-          import("@/lib/notificationsPersistence"),
-        ]);
+      const [
+        { ensureSchoolCommsHydrated },
+        { ensureNotificationsHydrated },
+        { withHydrationSlot },
+      ] = await Promise.all([
+        import("@/lib/schoolCommsPersistence"),
+        import("@/lib/notificationsPersistence"),
+        import("@/lib/deskHydrateGuard"),
+      ]);
       await Promise.all([
-        ensureSchoolCommsHydrated(),
-        ensureNotificationsHydrated(),
+        withHydrationSlot(() => ensureSchoolCommsHydrated()),
+        withHydrationSlot(() => ensureNotificationsHydrated()),
       ]);
       if (!cancelled) reload();
     })();

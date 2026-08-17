@@ -44,12 +44,13 @@ export function NotificationBell({
   useEffect(() => {
     let cancelled = false;
     setReady(true);
-    void import("@/lib/notificationsPersistence").then(
-      async ({ ensureNotificationsHydrated }) => {
-        await ensureNotificationsHydrated();
-        if (!cancelled) setTick((n) => n + 1);
-      },
-    );
+    void Promise.all([
+      import("@/lib/notificationsPersistence"),
+      import("@/lib/deskHydrateGuard"),
+    ]).then(async ([{ ensureNotificationsHydrated }, { withHydrationSlot }]) => {
+      await withHydrationSlot(() => ensureNotificationsHydrated());
+      if (!cancelled) setTick((n) => n + 1);
+    });
     function onNf() {
       setTick((n) => n + 1);
     }

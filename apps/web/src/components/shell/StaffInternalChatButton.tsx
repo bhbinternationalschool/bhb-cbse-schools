@@ -90,13 +90,14 @@ export function StaffInternalChatButton() {
     setMasters(loadMasters());
     setPrefs(loadChatAlertPrefs());
     refresh();
-    void import("@/lib/erpChatPersistence").then(
-      ({ ensureErpChatHydrated }) => {
-        void ensureErpChatHydrated().then((changed) => {
-          if (changed) refresh();
-        });
-      },
-    );
+    void Promise.all([
+      import("@/lib/erpChatPersistence"),
+      import("@/lib/deskHydrateGuard"),
+    ]).then(([{ ensureErpChatHydrated }, { withHydrationSlot }]) => {
+      void withHydrationSlot(() => ensureErpChatHydrated()).then((changed) => {
+        if (changed) refresh();
+      });
+    });
     function onChat() {
       refresh();
     }
