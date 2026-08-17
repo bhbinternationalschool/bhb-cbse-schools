@@ -45,10 +45,15 @@ class TeacherHomeScreen extends StatefulWidget {
     super.key,
     required this.api,
     required this.onLogout,
+    this.openRoute,
   });
 
   final ApiClient api;
   final VoidCallback onLogout;
+
+  /// Deep link from a notification tap ("/chat?studentId=…", "/notices",
+  /// "/homework"). Opened once the staff summary has loaded.
+  final String? openRoute;
 
   @override
   State<TeacherHomeScreen> createState() => _TeacherHomeScreenState();
@@ -58,11 +63,42 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
   final int _tab = 0;
   StaffSummary? _summary;
   String? _error;
+  String? _pendingRoute;
 
   @override
   void initState() {
     super.initState();
+    _pendingRoute = widget.openRoute;
     _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant TeacherHomeScreen old) {
+    super.didUpdateWidget(old);
+    if (widget.openRoute != null && widget.openRoute != old.openRoute) {
+      _pendingRoute = widget.openRoute;
+      if (_summary != null) _consumePendingRoute();
+    }
+  }
+
+  void _consumePendingRoute() {
+    final raw = _pendingRoute;
+    _pendingRoute = null;
+    if (raw == null || _summary == null) return;
+    final uri = Uri.tryParse(raw);
+    if (uri == null) return;
+    switch (uri.path) {
+      case "/chat":
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => ChatInboxScreen(api: widget.api)),
+        );
+      case "/notices":
+        _openModule("Notices");
+      case "/homework":
+        _openModule("Homework");
+      case "/attendance":
+        _openModule("Attendance");
+    }
   }
 
   Future<void> _load() async {
@@ -70,6 +106,11 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     try {
       final summary = await widget.api.fetchStaffSummary();
       if (mounted) setState(() => _summary = summary);
+      if (_pendingRoute != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _consumePendingRoute();
+        });
+      }
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {

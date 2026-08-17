@@ -2,6 +2,7 @@ import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
 import { authorizeChatThread } from "@/lib/chatAuth.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { sendPushToSubject, sendPushToSubjects } from "@/lib/webPush.server";
 
 export const runtime = "nodejs";
 
@@ -40,6 +41,25 @@ export async function POST(request: Request) {
       .select("id, created_at")
       .single();
     if (error) throw new ApiError("server_error", error.message, 500);
+
+    // Best-effort push to the other side of the thread (never blocks the send).
+    const preview = body.length > 120 ? `${body.slice(0, 117)}…` : body;
+    const url = `/chat?studentId=${encodeURIComponent(auth.student.id)}`;
+    if (ctx.session.persona === "parent") {
+      await sendPushToSubjects("staff", auth.teacherStaffIds, {
+        title: `${auth.senderName} · ${auth.student.fullName}`,
+        body: preview,
+        url,
+        data: { kind: "chat", studentId: auth.student.id },
+      });
+    } else {
+      await sendPushToSubject("parent", auth.student.householdId, {
+        title: `${auth.senderName} (class teacher)`,
+        body: preview,
+        url,
+        data: { kind: "chat", studentId: auth.student.id },
+      });
+    }
 
     return apiOk({ id: data.id as string, createdAt: data.created_at as string });
   } catch (e) {

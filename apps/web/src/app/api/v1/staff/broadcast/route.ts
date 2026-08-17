@@ -29,6 +29,7 @@ import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { loadSis } from "@/lib/sis";
 import { listOptedOutSet, toE164India } from "@/lib/waContactState.server";
 import { POST as dispatchPost } from "@/app/api/wa/dispatch/route";
+import { sendPushToSubjects } from "@/lib/webPush.server";
 
 export const runtime = "nodejs";
 
@@ -105,6 +106,9 @@ export async function POST(req: Request) {
   const selfStaff = ctx.masters.staff?.find((s) => s.id === actor.staffId);
 
   let numbers: string[] = [];
+  /** Push subjects mirroring the WA audience (staff ids / household ids). */
+  let pushSubjectType: "staff" | "parent" = "staff";
+  let pushSubjectIds: string[] = [];
 
   if (audience === "leadership") {
     const seen = new Set<string>();
@@ -114,6 +118,7 @@ export async function POST(req: Request) {
       if (!inferStaffIsOwner(s, ctx.masters.designations ?? [])) continue;
       const mobile = (s.mobile || "").trim();
       if (mobile) seen.add(mobile);
+      pushSubjectIds.push(s.id);
     }
     numbers = Array.from(seen);
   } else {
@@ -142,6 +147,20 @@ export async function POST(req: Request) {
       loadSis(),
     );
     numbers = Array.from(new Set(contacts.map((c) => c.mobile).filter(Boolean)));
+    pushSubjectType = "parent";
+    pushSubjectIds = contacts.map((c) => c.householdId).filter(Boolean);
+  }
+
+  // Native/PWA push alongside the WhatsApp send — live, free-text only
+  // (template sends carry no readable body to mirror). Best-effort.
+  let push = { sent: 0, expired: 0, failed: 0 };
+  if (!dryRun && text && pushSubjectIds.length) {
+    push = await sendPushToSubjects(pushSubjectType, pushSubjectIds, {
+      title: `${ctx.session.fullName}${pushSubjectType === "parent" ? " (class teacher)" : ""}`,
+      body: text.length > 200 ? `${text.slice(0, 197)}…` : text,
+      url: "/notices",
+      data: { kind: "broadcast" },
+    }).catch(() => ({ sent: 0, expired: 0, failed: 0 }));
   }
 
   let skippedOptOut = 0;
@@ -207,6 +226,7 @@ export async function POST(req: Request) {
     skippedOptOut,
     sent,
     failed,
+    push,
     results: allResults,
   });
 }

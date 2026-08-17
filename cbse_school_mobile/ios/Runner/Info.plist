@@ -76,5 +76,9 @@
 	<string>The microphone is used only while you dictate lesson plan notes.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Speech recognition turns your dictated lesson plan notes into text.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 </dict>
 </plist>

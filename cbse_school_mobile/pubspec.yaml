@@ -1,7 +1,7 @@
 name: cbse_school_mobile
 description: BHB International School ERP — staff & parent mobile app.
 publish_to: "none"
-version: 1.0.0+1
+version: 1.0.1+2
 
 environment:
   sdk: ^3.12.2
@@ -19,6 +19,10 @@ dependencies:
   url_launcher: ^6.3.0
   image_picker: ^1.1.2
   speech_to_text: ^7.0.0
+  firebase_core: ^4.0.0
+  firebase_messaging: ^16.0.0
+  flutter_local_notifications: ^19.0.0
+  package_info_plus: ^9.0.0
 
 dev_dependencies:
   flutter_test:

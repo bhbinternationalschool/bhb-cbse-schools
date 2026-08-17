@@ -7,6 +7,7 @@
 
 import webpush from "web-push";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { sendFcmToSubject } from "@/lib/fcm.server";
 
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || "";
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || "";
@@ -37,6 +38,8 @@ export type PushPayload = {
   title: string;
   body: string;
   url?: string;
+  /** Extra string data for the native app (FCM only). */
+  data?: Record<string, string>;
 };
 
 function rowToRecord(row: {
@@ -101,22 +104,24 @@ async function listSubscriptionsForSubject(
   return data.map(rowToRecord);
 }
 
-/**
- * Send one payload to every device subscribed for a subject. Best-effort —
- * expired (404/410) subscriptions are deleted; any other failure is logged
- * and skipped. Never throws.
- */
-export async function sendPushToSubject(
+export type PushSendResult = { sent: number; expired: number; failed: number };
+
+async function sendWebPushToSubject(
   subjectType: string,
   subjectId: string,
   payload: PushPayload,
-): Promise<{ sent: number; expired: number; failed: number }> {
+): Promise<PushSendResult> {
   if (!webPushConfigured()) return { sent: 0, expired: 0, failed: 0 };
   ensureVapidConfigured();
   const subs = await listSubscriptionsForSubject(subjectType, subjectId);
   let sent = 0;
   let expired = 0;
   let failed = 0;
+  const wire = JSON.stringify({
+    title: payload.title,
+    body: payload.body,
+    url: payload.url,
+  });
   for (const sub of subs) {
     try {
       await webpush.sendNotification(
@@ -124,7 +129,7 @@ export async function sendPushToSubject(
           endpoint: sub.endpoint,
           keys: { p256dh: sub.p256dh, auth: sub.auth },
         },
-        JSON.stringify(payload),
+        wire,
       );
       sent += 1;
     } catch (e) {
@@ -139,4 +144,52 @@ export async function sendPushToSubject(
     }
   }
   return { sent, expired, failed };
+}
+
+/**
+ * Send one payload to every device registered for a subject — browsers
+ * (Web Push) *and* app installs (FCM). Best-effort — expired subscriptions/
+ * tokens are deleted; any other failure is logged and skipped. Never throws.
+ */
+export async function sendPushToSubject(
+  subjectType: string,
+  subjectId: string,
+  payload: PushPayload,
+): Promise<PushSendResult> {
+  if (!subjectId) return { sent: 0, expired: 0, failed: 0 };
+  const [web, fcm] = await Promise.all([
+    sendWebPushToSubject(subjectType, subjectId, payload).catch(
+      (): PushSendResult => ({ sent: 0, expired: 0, failed: 0 }),
+    ),
+    sendFcmToSubject(subjectType, subjectId, payload).catch(
+      (): PushSendResult => ({ sent: 0, expired: 0, failed: 0 }),
+    ),
+  ]);
+  return {
+    sent: web.sent + fcm.sent,
+    expired: web.expired + fcm.expired,
+    failed: web.failed + fcm.failed,
+  };
+}
+
+/** Same payload to many subjects of one type (e.g. every household in a section). */
+export async function sendPushToSubjects(
+  subjectType: string,
+  subjectIds: string[],
+  payload: PushPayload,
+): Promise<PushSendResult> {
+  const out: PushSendResult = { sent: 0, expired: 0, failed: 0 };
+  const ids = [...new Set(subjectIds.filter(Boolean))];
+  const BATCH = 8;
+  for (let i = 0; i < ids.length; i += BATCH) {
+    const results = await Promise.all(
+      ids.slice(i, i + BATCH).map((id) => sendPushToSubject(subjectType, id, payload)),
+    );
+    for (const r of results) {
+      out.sent += r.sent;
+      out.expired += r.expired;
+      out.failed += r.failed;
+    }
+  }
+  return out;
 }

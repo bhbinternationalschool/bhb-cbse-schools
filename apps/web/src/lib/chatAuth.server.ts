@@ -7,6 +7,8 @@ import { resolveClassTeachers } from "@/lib/staffResolve";
 export type ChatAuthorization = {
   student: SisStudent;
   teacherName: string;
+  /** Roster ids of the student's class teachers — the staff-side push subjects. */
+  teacherStaffIds: string[];
   senderId: string;
   senderName: string;
 };
@@ -43,6 +45,7 @@ export async function authorizeChatThread(
     return {
       student,
       teacherName,
+      teacherStaffIds: teachers.map((t) => t.id),
       senderId: ctx.session.householdId || "",
       senderName: household?.guardianName || "Parent",
     };
@@ -61,6 +64,7 @@ export async function authorizeChatThread(
     return {
       student,
       teacherName,
+      teacherStaffIds: teachers.map((t) => t.id),
       senderId: staffId,
       senderName: ctx.session.fullName,
     };

@@ -24,8 +24,11 @@ Privacy policy URL (already live): **https://bhbinternational.school/privacy**
    (director@bhbinternational.school is fine).
 2. Choose **Organization** account (not personal) — a personal account created
    now would force a 14-day / 12-tester closed test before you can go public;
-   organization skips that. You'll verify with the school's details.
-3. Pay the **one-time $25**. Identity/organization verification can take 1–3 days.
+   organization skips that. Organization accounts need a **D-U-N-S number**
+   for the school (free from Dun & Bradstreet India, dnb.co.in — can take up to
+   30 days, so start this first; if the school/trust already has one, use it).
+3. Pay the **one-time US$25** (international card). Identity/organization
+   verification can take 1–3 days after documents are submitted.
 
 ---
 
@@ -63,6 +66,7 @@ Parents stay on top of school life without a single phone call to the office:
 • Notices & news — school circulars and announcements as they're published.
 • Parent–teacher meetings — see scheduled PTMs and book your slot in a tap.
 • Digital student ID — a QR code of your child's admission number, ready at the school gate, library or fee counter. No more forgotten ID cards.
+• Push notifications — homework, absence alerts, fee receipts, notices and messages from the class teacher reach your phone the moment they're posted.
 
 Teachers get their daily tools in their pocket:
 
@@ -102,6 +106,9 @@ Data collected:
   **Optional** (only when a staff member chooses to punch). Not for ads.
 - **Financial info → Other financial info** (fee dues/receipts, no payment
   card data) — Collected, NOT shared. Purpose: **App functionality**. Required.
+- **Device or other IDs** — Collected, NOT shared. Purpose: **App
+  functionality** (the Firebase Cloud Messaging push token that lets the school
+  send notifications to this phone; deleted on sign-out). Required.
 
 **Is all data encrypted in transit?** → **Yes**
 **Do you provide a way to request data deletion?** → **Yes** — via the school
@@ -147,8 +154,9 @@ The reviewer can't receive a WhatsApp OTP, so give them the review login:
    keystore in this repo is your *upload* key). Keep the upload keystore backed
    up — see below.
 3. Upload **app-release.aab**.
-4. Release name: `1.0.0 (1)`. Release notes: "First release — fees,
-   attendance, homework, notices, PTM, digital student ID, staff attendance."
+4. Release name: `1.0.1 (2)`. Release notes: "First release — fees,
+   attendance, homework, notices, PTM, digital student ID, staff attendance,
+   push notifications."
 5. Review summary → **Start rollout to Production.** Review is usually 1–7 days.
 
 **Tip:** consider **Testing → Internal testing** first — same AAB, a private

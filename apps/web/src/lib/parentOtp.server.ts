@@ -86,6 +86,12 @@ export function normalizeMobile10(raw: string): string | null {
 export async function issueParentOtp(opts: {
   mobile: string;
   householdId?: string;
+  /** Free-text fallback message label — "Parent" (default) or "Staff".
+   * The AUTHENTICATION template send above is unaffected: Meta approved
+   * OTP_TEMPLATE_FAMILY under the "Parent" name specifically, so a
+   * cold-start (outside-24h-window) message still reads "Parent Login"
+   * until a dedicated staff template is approved. */
+  loginLabel?: string;
 }): Promise<{ ok: true; expiresInSec: number } | { ok: false; reason: string }> {
   const mobile = normalizeMobile10(opts.mobile);
   if (!mobile) return { ok: false, reason: "Enter a valid 10-digit mobile number" };
@@ -114,8 +120,9 @@ export async function issueParentOtp(opts: {
 
   const sentViaTemplate = await tryOtpLoginTemplateSend(mobile, code);
   if (!sentViaTemplate) {
+    const label = opts.loginLabel || "Parent";
     const body =
-      `*${TENANT.shortName} Parent Login*\n\n` +
+      `*${TENANT.shortName} ${label} Login*\n\n` +
       `Your OTP is *${code}*. Valid for 10 minutes.\n\n` +
       `Do not share this code with anyone.`;
 

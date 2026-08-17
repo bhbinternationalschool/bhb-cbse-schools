@@ -8,10 +8,16 @@ import {
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureHomeworkHydratedServer } from "@/lib/homeworkPersistence";
 import {
+  classLabel,
   createHomeworkPost,
   loadHomework,
+  rosterForSection,
+  subjectLabel,
   writeHomeworkLocalRaw,
 } from "@/lib/homework";
+import { ensureSisHydratedServer } from "@/lib/sisPersistence";
+import { loadSis } from "@/lib/sis";
+import { sendPushToSubjects } from "@/lib/webPush.server";
 
 export const runtime = "nodejs";
 
@@ -85,6 +91,27 @@ export async function POST(request: Request) {
       console.warn("[homework-v1] db push failed", dbPush.error);
     }
 
+    // Push to every household with an active child in the section
+    // (best-effort; app installs + PWA subscriptions).
+    let push = { sent: 0, expired: 0, failed: 0 };
+    try {
+      await ensureSisHydratedServer();
+      const households = rosterForSection(
+        loadSis(),
+        result.post.sectionId,
+        result.post.academicYearCode,
+      ).map((stu) => stu.householdId);
+      const subject = subjectLabel(ctx.masters, result.post.subjectId);
+      push = await sendPushToSubjects("parent", households, {
+        title: `Homework · ${classLabel(ctx.masters, result.post.classId, result.post.sectionId)}`,
+        body: `${subject ? `${subject}: ` : ""}${result.post.title}`,
+        url: "/homework",
+        data: { kind: "homework", postId: result.post.id },
+      });
+    } catch (e) {
+      console.warn("[homework-v1] push failed", (e as Error)?.message);
+    }
+
     const meta = requestMeta(request);
     await writeAudit({
       session: ctx.session,
@@ -102,6 +129,7 @@ export async function POST(request: Request) {
       postId: result.post.id,
       date: result.post.date,
       title: result.post.title,
+      push,
     });
   } catch (e) {
     return apiErr(e);

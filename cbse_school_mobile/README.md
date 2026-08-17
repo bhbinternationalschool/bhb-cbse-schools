@@ -41,6 +41,23 @@ lib/
 3. Reuse desk API routes under `/api/school-data/*`
 4. Add secure token storage via `flutter_secure_storage`
 
+## Push notifications (FCM)
+
+- Firebase project = the GCP project `school-erp-prod-493619` (apps registered for
+  Android `school.bhbinternational.cbse_school_mobile` and iOS
+  `school.bhbinternational.cbseSchoolMobile`; config files are committed at
+  `android/app/google-services.json` and `ios/Runner/GoogleService-Info.plist`).
+- `lib/core/push/push_service.dart` initialises Firebase, asks permission after
+  sign-in, uploads the token to `POST /api/v1/push/register` (unregisters on
+  sign-out), renders foreground messages on Android via
+  `flutter_local_notifications`, and turns a tap into an in-app deep link
+  (`data.url`, e.g. `/homework`, `/chat?studentId=…`) consumed by the home screens.
+- Server side: `apps/web/src/lib/fcm.server.ts` (FCM HTTP v1 via ADC) fanned into
+  `sendPushToSubject()` next to Web Push, so every trigger reaches PWA + app.
+- iOS still needs an APNs key uploaded in Firebase console → Cloud Messaging and
+  the `aps-environment` entitlement flipped to `production` for TestFlight/App
+  Store builds.
+
 ## Bundle id
 
 - Android/iOS: `school.bhbinternational.cbse_school_mobile`

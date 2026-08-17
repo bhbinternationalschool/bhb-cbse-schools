@@ -1160,7 +1160,14 @@ class ApiClient {
         .hasMatch(rc);
   }
 
+  /// Runs just before the session is cleared on sign-out (push token
+  /// unregister needs the cookie to still be present). Set by the app shell.
+  Future<void> Function()? beforeSignOut;
+
   Future<void> signOut() async {
+    try {
+      await beforeSignOut?.call();
+    } catch (_) {/* best-effort */}
     await _storage.delete(key: _cookieKey);
     await _storage.delete(key: _guardianKey);
     await _storage.delete(key: _personaKey);
@@ -1222,6 +1229,31 @@ class ApiClient {
   Future<void> verifyOtp(String mobile, String code) async {
     final res = await http.post(
       _uri("/api/auth/otp/verify"),
+      headers: {"Content-Type": "application/json"},
+      body: jsonEncode({"mobile": mobile, "code": code}),
+    );
+    if (res.statusCode != 200) _throwFrom(res);
+    _captureCookie(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    await _storeSession(body["session"] as Map<String, dynamic>?);
+  }
+
+  /// Step 1 — send the WhatsApp OTP to a registered staff mobile.
+  Future<String> requestStaffOtp(String mobile) async {
+    final res = await http.post(
+      _uri("/api/auth/staff-otp/request"),
+      headers: {"Content-Type": "application/json"},
+      body: jsonEncode({"mobile": mobile}),
+    );
+    if (res.statusCode != 200) _throwFrom(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    return (body["maskedMobile"] as String?) ?? "your WhatsApp";
+  }
+
+  /// Step 2 — verify the staff OTP; the ERP mints the session cookie.
+  Future<void> verifyStaffOtp(String mobile, String code) async {
+    final res = await http.post(
+      _uri("/api/auth/staff-otp/verify"),
       headers: {"Content-Type": "application/json"},
       body: jsonEncode({"mobile": mobile, "code": code}),
     );
@@ -1355,6 +1387,28 @@ class ApiClient {
     if (res.statusCode != 200) _throwFrom(res);
     final decoded = jsonDecode(res.body) as Map<String, dynamic>;
     return (decoded["data"] as Map<String, dynamic>?) ?? const {};
+  }
+
+  /// FCM device token → signed-in subject (parent household / staff).
+  Future<void> registerPushToken({
+    required String token,
+    required String platform,
+    String appVersion = "",
+  }) async {
+    await _postData("/api/v1/push/register", {
+      "token": token,
+      "platform": platform,
+      "appVersion": appVersion,
+    });
+  }
+
+  Future<void> unregisterPushToken(String token) async {
+    final res = await http.delete(
+      _uri("/api/v1/push/register"),
+      headers: await _authHeaders(),
+      body: jsonEncode({"token": token}),
+    );
+    if (res.statusCode != 200) _throwFrom(res);
   }
 
   Future<FeeLedger> fetchFeeLedger(String studentId) async =>
