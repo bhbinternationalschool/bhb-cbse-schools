@@ -232,7 +232,7 @@ export function BulkPreviousDueByClassPanel({
         <>
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <input
-              className="field w-32"
+              className="field !w-32"
               type="number"
               min="0"
               step="1"
@@ -271,7 +271,7 @@ export function BulkPreviousDueByClassPanel({
                     </div>
                   </div>
                   <input
-                    className="field w-28 shrink-0"
+                    className="field !w-28 shrink-0"
                     type="number"
                     min="0"
                     step="1"
