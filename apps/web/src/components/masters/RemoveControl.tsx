@@ -48,6 +48,11 @@ export function RemoveControl({
           }`}
         >
           {check.suggestion}
+          {/* What would also go, so the blocked case shows the full
+              consequence rather than only what is stopping it. */}
+          {check.cascades?.length
+            ? ` Also attached: ${check.cascades.join(", ")}.`
+            : ""}
         </span>
       ) : null}
     </div>

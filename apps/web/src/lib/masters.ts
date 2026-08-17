@@ -2092,6 +2092,12 @@ export type RemovalCheck = {
   /** Shown under disabled Remove, and in confirm when allowed */
   suggestion: string;
   confirmMessage: string;
+  /**
+   * Rows that will be deleted along with the entity — not blockers, but
+   * the user is told before confirming. Silently orphaning these is the
+   * defect this field exists to prevent.
+   */
+  cascades?: string[];
 };
 
 function lateRuleUsesHead(rule: LateFeeRule, feeHeadId: string): boolean {
@@ -2238,18 +2244,43 @@ export function checkClassRemoval(
     blockers.push(`${assignments.length} special-fee assignment(s) (${names})`);
   }
 
+  // Things that are cleaned up with the class rather than blocking it.
+  // They are still announced: a class carrying 25 subject links should
+  // not disappear without the user knowing those go too.
+  const cascades: string[] = [];
+  const subjectLinks = (state.classSubjects ?? []).filter(
+    (l) => l.classId === classId,
+  );
+  if (subjectLinks.length > 0) {
+    cascades.push(`${subjectLinks.length} subject link(s)`);
+  }
+  const staffLinks = (state.staff ?? []).reduce(
+    (n, s) =>
+      n +
+      (s.classTeacherLinks ?? []).filter((l) => l.classId === classId).length +
+      (s.subjectTeachingLinks ?? []).filter((l) => l.classId === classId)
+        .length,
+    0,
+  );
+  if (staffLinks > 0) cascades.push(`${staffLinks} teacher assignment(s)`);
+
   if (blockers.length > 0) {
     return {
       canRemove: false,
       blockers,
-      suggestion: `Linked data present — ${blockers.join("; ")}. Remove sections / unlink fee groups & assignments first, or use Inactivate.`,
+      cascades,
+      suggestion: `Linked data present — ${blockers.join("; ")}. Unlink these in Masters → Fees (fee groups & special fees) and remove sections first, or use Inactivate to hide the class everywhere while keeping its history.`,
       confirmMessage: `Remove class “${name}”?`,
     };
   }
   return {
     canRemove: true,
     blockers: [],
-    suggestion: "Prefer Inactivate if the class may return. Removal cannot be undone.",
+    cascades,
+    suggestion:
+      cascades.length > 0
+        ? `Also deletes ${cascades.join(" and ")}. Prefer Inactivate if the class may return — removal cannot be undone.`
+        : "Prefer Inactivate if the class may return. Removal cannot be undone.",
     confirmMessage: `Remove class “${name}”?`,
   };
 }
@@ -2526,11 +2557,37 @@ export function removeClass(
   if (!check.canRemove) {
     return { ok: false, reason: check.suggestion };
   }
+  // Cascade rather than orphan. Dropping only the class row leaves its
+  // subject links and teacher assignments pointing at an id that no
+  // longer exists — rows nothing renders, nothing can clean up, and that
+  // quietly inflate every "what is unassigned" count.
   return {
     ok: true,
     state: {
       ...state,
       classes: state.classes.filter((c) => c.id !== classId),
+      classSubjects: (state.classSubjects ?? []).filter(
+        (l) => l.classId !== classId,
+      ),
+      staff: (state.staff ?? []).map((s) => {
+        const classLinks = (s.classTeacherLinks ?? []).filter(
+          (l) => l.classId !== classId,
+        );
+        const subjectLinks = (s.subjectTeachingLinks ?? []).filter(
+          (l) => l.classId !== classId,
+        );
+        if (
+          classLinks.length === (s.classTeacherLinks ?? []).length &&
+          subjectLinks.length === (s.subjectTeachingLinks ?? []).length
+        ) {
+          return s;
+        }
+        return {
+          ...s,
+          classTeacherLinks: classLinks,
+          subjectTeachingLinks: subjectLinks,
+        };
+      }),
     },
   };
 }
@@ -2543,11 +2600,32 @@ export function removeSection(
   if (!check.canRemove) {
     return { ok: false, reason: check.suggestion };
   }
+  // Same cascade rule as removeClass: a teacher assignment pointing at a
+  // deleted section is invisible to every screen but still counted.
   return {
     ok: true,
     state: {
       ...state,
       sections: state.sections.filter((s) => s.id !== sectionId),
+      staff: (state.staff ?? []).map((s) => {
+        const classLinks = (s.classTeacherLinks ?? []).filter(
+          (l) => l.sectionId !== sectionId,
+        );
+        const subjectLinks = (s.subjectTeachingLinks ?? []).filter(
+          (l) => l.sectionId !== sectionId,
+        );
+        if (
+          classLinks.length === (s.classTeacherLinks ?? []).length &&
+          subjectLinks.length === (s.subjectTeachingLinks ?? []).length
+        ) {
+          return s;
+        }
+        return {
+          ...s,
+          classTeacherLinks: classLinks,
+          subjectTeachingLinks: subjectLinks,
+        };
+      }),
     },
   };
 }

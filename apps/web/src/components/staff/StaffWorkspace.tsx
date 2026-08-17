@@ -66,6 +66,7 @@ import { StaffMyProfileDocs } from "@/components/staff/StaffMyProfileDocs";
 import { StaffAgreementPanel, StaffAgreementSelfPanel } from "@/components/staff/StaffAgreementPanel";
 import { DutyRosterPanel } from "@/components/staff/DutyRosterPanel";
 import { TeacherAssignmentsPanel } from "@/components/staff/TeacherAssignmentsPanel";
+import { TeachingAllocationPanel } from "@/components/staff/TeachingAllocationPanel";
 import { DocVerificationQueuePanel } from "@/components/students/DocVerificationQueuePanel";
 import { useDemoSession } from "@/components/shell/SessionContext";
 
@@ -95,6 +96,7 @@ type StaffMainTab =
   | "dashboard"
   | "roster"
   | "duty_roster"
+  | "allocate"
   | "assignments"
   | "leave"
   | "requests"
@@ -119,6 +121,7 @@ export function StaffWorkspace() {
       "dashboard",
       "roster",
       "duty_roster",
+      "allocate",
       "assignments",
       "leave",
       "requests",
@@ -346,6 +349,7 @@ export function StaffWorkspace() {
           { id: "dashboard", label: "Dashboard", tone: "navy" },
           { id: "roster", label: "Roster", tone: "navy" },
           { id: "duty_roster", label: "Duty roster", tone: "coral" },
+          { id: "allocate", label: "Allocate teaching", tone: "violet" },
           { id: "assignments", label: "Who teaches what", tone: "sky" },
           { id: "my_docs", label: "My docs", tone: "sky" },
           { id: "agreements", label: "Agreements", tone: "teal" },
@@ -364,6 +368,15 @@ export function StaffWorkspace() {
           moduleId="staff"
           onNavigateTab={(t) => setTab(t as StaffMainTab)}
         />
+      ) : null}
+
+      {tab === "allocate" ? (
+        <ErpPanel
+          title="Allocate teaching"
+          description="Pick a teacher, then give them a class-teacher section and the subjects they teach."
+        >
+          <TeachingAllocationPanel masters={state} ay={ay} onCommit={commit} />
+        </ErpPanel>
       ) : null}
 
       {tab === "assignments" ? (
