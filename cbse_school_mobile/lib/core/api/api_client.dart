@@ -1160,7 +1160,14 @@ class ApiClient {
         .hasMatch(rc);
   }
 
+  /// Runs just before the session is cleared on sign-out (push token
+  /// unregister needs the cookie to still be present). Set by the app shell.
+  Future<void> Function()? beforeSignOut;
+
   Future<void> signOut() async {
+    try {
+      await beforeSignOut?.call();
+    } catch (_) {/* best-effort */}
     await _storage.delete(key: _cookieKey);
     await _storage.delete(key: _guardianKey);
     await _storage.delete(key: _personaKey);
@@ -1380,6 +1387,28 @@ class ApiClient {
     if (res.statusCode != 200) _throwFrom(res);
     final decoded = jsonDecode(res.body) as Map<String, dynamic>;
     return (decoded["data"] as Map<String, dynamic>?) ?? const {};
+  }
+
+  /// FCM device token → signed-in subject (parent household / staff).
+  Future<void> registerPushToken({
+    required String token,
+    required String platform,
+    String appVersion = "",
+  }) async {
+    await _postData("/api/v1/push/register", {
+      "token": token,
+      "platform": platform,
+      "appVersion": appVersion,
+    });
+  }
+
+  Future<void> unregisterPushToken(String token) async {
+    final res = await http.delete(
+      _uri("/api/v1/push/register"),
+      headers: await _authHeaders(),
+      body: jsonEncode({"token": token}),
+    );
+    if (res.statusCode != 200) _throwFrom(res);
   }
 
   Future<FeeLedger> fetchFeeLedger(String studentId) async =>

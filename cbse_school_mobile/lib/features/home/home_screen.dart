@@ -45,11 +45,17 @@ class HomeScreen extends StatefulWidget {
     required this.config,
     required this.api,
     required this.onLogout,
+    this.openRoute,
   });
 
   final AppConfig config;
   final ApiClient api;
   final VoidCallback onLogout;
+
+  /// Deep link from a notification tap, e.g. "/homework",
+  /// "/chat?studentId=…", "/attendance?studentId=…". Opened once the
+  /// summary has loaded (we need the child record to open a module).
+  final String? openRoute;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -60,11 +66,66 @@ class _HomeScreenState extends State<HomeScreen> {
   int _childIndex = 0;
   ParentSummary? _summary;
   String? _error;
+  String? _pendingRoute;
 
   @override
   void initState() {
     super.initState();
+    _pendingRoute = widget.openRoute;
     _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant HomeScreen old) {
+    super.didUpdateWidget(old);
+    if (widget.openRoute != null && widget.openRoute != old.openRoute) {
+      _pendingRoute = widget.openRoute;
+      if (_summary != null) _consumePendingRoute();
+    }
+  }
+
+  /// Turn a notification deep link into the same navigation a tap on the
+  /// module grid would do. Unknown routes just land on Home.
+  void _consumePendingRoute() {
+    final raw = _pendingRoute;
+    _pendingRoute = null;
+    final summary = _summary;
+    if (raw == null || summary == null || summary.children.isEmpty) return;
+    final uri = Uri.tryParse(raw);
+    if (uri == null) return;
+    final studentId = uri.queryParameters["studentId"];
+    var child = summary.children[_childIndex];
+    if (studentId != null) {
+      final idx = summary.children.indexWhere((c) => c.id == studentId);
+      if (idx >= 0) {
+        child = summary.children[idx];
+        setState(() => _childIndex = idx);
+      }
+    }
+    switch (uri.path) {
+      case "/homework":
+        _openModule("Homework", child);
+      case "/attendance":
+        _openModule("Attendance", child);
+      case "/fees":
+        _openModule("Fees", child);
+      case "/notices":
+        _openModule("Notices", child);
+      case "/ptm":
+        _openModule("PTM", child);
+      case "/transport":
+        _openModule("Transport", child);
+      case "/chat":
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => ChatThreadScreen(
+              api: widget.api,
+              studentId: child.id,
+              studentName: child.fullName,
+            ),
+          ),
+        );
+    }
   }
 
   Future<void> _load() async {
@@ -76,6 +137,11 @@ class _HomeScreenState extends State<HomeScreen> {
         _summary = summary;
         if (_childIndex >= summary.children.length) _childIndex = 0;
       });
+      if (_pendingRoute != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _consumePendingRoute();
+        });
+      }
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {

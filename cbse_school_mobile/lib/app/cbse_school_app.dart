@@ -1,8 +1,11 @@
+import "dart:async";
+
 import "package:flutter/material.dart";
 import "package:go_router/go_router.dart";
 
 import "../core/api/api_client.dart";
 import "../core/config/app_config.dart";
+import "../core/push/push_service.dart";
 import "../core/theme/app_theme.dart";
 import "../features/auth/login_screen.dart";
 import "../features/home/home_screen.dart";
@@ -21,6 +24,7 @@ class CbseSchoolApp extends StatefulWidget {
 
 class _CbseSchoolAppState extends State<CbseSchoolApp> {
   late final ApiClient _api = ApiClient(widget.config);
+  late final PushService _push = PushService(_api);
 
   late final GoRouter _router = GoRouter(
     initialLocation: "/login",
@@ -39,6 +43,7 @@ class _CbseSchoolAppState extends State<CbseSchoolApp> {
           config: widget.config,
           api: _api,
           onLogout: () => context.go("/login"),
+          openRoute: state.uri.queryParameters["open"],
         ),
       ),
       GoRoute(
@@ -46,6 +51,7 @@ class _CbseSchoolAppState extends State<CbseSchoolApp> {
         builder: (context, state) => TeacherHomeScreen(
           api: _api,
           onLogout: () => context.go("/login"),
+          openRoute: state.uri.queryParameters["open"],
         ),
       ),
       GoRoute(
@@ -65,25 +71,50 @@ class _CbseSchoolAppState extends State<CbseSchoolApp> {
     ],
   );
 
-  Future<void> _goHomeForPersona() async {
+  Future<String> _homePathForPersona() async {
     final persona = await _api.persona();
-    if (!mounted) return;
-    if (persona == "field") {
-      _router.go("/driver");
-    } else if (persona == "staff") {
-      _router.go(await _api.isPrincipalLike() ? "/principal" : "/staff");
-    } else {
-      _router.go("/home");
+    if (persona == "field") return "/driver";
+    if (persona == "staff") {
+      return await _api.isPrincipalLike() ? "/principal" : "/staff";
     }
+    return "/home";
+  }
+
+  Future<void> _goHomeForPersona() async {
+    final path = await _homePathForPersona();
+    if (!mounted) return;
+    _router.go(path);
+    // Every sign-in / resume re-registers this device's push token against
+    // the current subject (idempotent; also asks for permission first time).
+    unawaited(_push.registerWithServer());
+  }
+
+  /// A notification tap → the persona's home with an `open` deep link the
+  /// home screen consumes once its data has loaded.
+  Future<void> _openFromNotification(String route) async {
+    if (!await _api.hasSession()) return;
+    final path = await _homePathForPersona();
+    if (!mounted) return;
+    _router.go("$path?open=${Uri.encodeQueryComponent(route)}");
   }
 
   @override
   void initState() {
     super.initState();
+    _api.beforeSignOut = _push.unregister;
+    _push.init().then((_) {
+      _push.onOpenRoute.listen(_openFromNotification);
+    });
     // Resume a stored session straight into the right dashboard.
     _api.hasSession().then((has) {
       if (has && mounted) _goHomeForPersona();
     });
+  }
+
+  @override
+  void dispose() {
+    _push.dispose();
+    super.dispose();
   }
 
   @override

@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <!-- Dictating lesson plan notes (speech_to_text). -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <!-- FCM push (Android 13+ runtime prompt, asked after sign-in). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- Photographing a textbook contents page (image_picker). The camera
          is optional so the app still installs on camera-less devices. -->
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
@@ -33,6 +35,15 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- FCM: channel + icon used when a notification arrives while the
+             app is backgrounded (the OS renders it, not Flutter). The channel
+             itself is created by PushService on first run. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="bhb_default" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@mipmap/ic_launcher" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
