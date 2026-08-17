@@ -9,6 +9,7 @@
 
 import { saveSis, type SisState, type SisStudent } from "@/lib/sis";
 import { normalizeSessionCode } from "@/lib/studentImport";
+import { recordSisDeletion } from "@/lib/sisNormalizedClient";
 
 export type DuplicateReason =
   | "admissionNo"
@@ -333,11 +334,26 @@ export function mergeStudents(
   );
   const survivors = nextStudents.filter((s) => !dropSet.has(s.id));
   const usedHouseholds = new Set(survivors.map((s) => s.householdId));
+  const nextHouseholds = state.households.filter((h) => usedHouseholds.has(h.id));
   const next: SisState = {
     ...state,
     students: survivors,
-    households: state.households.filter((h) => usedHouseholds.has(h.id)),
+    households: nextHouseholds,
   };
+
+  // State the deletion before saving. The push upserts whatever's in the
+  // payload — dropping ids from the local array doesn't tell the server
+  // to delete those rows, so without this the merged-away duplicates
+  // stay in the database and come back on the next hydrate (see the
+  // identical gotcha documented at StudentsWorkspace.tsx's onRemove).
+  const removedHouseholdIds = state.households
+    .filter((h) => !nextHouseholds.some((x) => x.id === h.id))
+    .map((h) => h.id);
+  recordSisDeletion({
+    studentIds: [...dropSet],
+    householdIds: removedHouseholdIds,
+  });
+
   saveSis(next);
   void import("@/lib/sisPersistence").then(({ pushSisState, flushSisSync }) => {
     pushSisState(next).then(() => flushSisSync()).catch(console.error);
@@ -356,11 +372,21 @@ export function removeDuplicateStudents(
   const dropSet = new Set(ids);
   const survivors = state.students.filter((s) => !dropSet.has(s.id));
   const usedHouseholds = new Set(survivors.map((s) => s.householdId));
+  const nextHouseholds = state.households.filter((h) => usedHouseholds.has(h.id));
   const next: SisState = {
     ...state,
     students: survivors,
-    households: state.households.filter((h) => usedHouseholds.has(h.id)),
+    households: nextHouseholds,
   };
+
+  const removedHouseholdIds = state.households
+    .filter((h) => !nextHouseholds.some((x) => x.id === h.id))
+    .map((h) => h.id);
+  recordSisDeletion({
+    studentIds: [...dropSet],
+    householdIds: removedHouseholdIds,
+  });
+
   saveSis(next);
   void import("@/lib/sisPersistence").then(({ pushSisState, flushSisSync }) => {
     pushSisState(next).then(() => flushSisSync()).catch(console.error);
