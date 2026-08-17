@@ -98,6 +98,67 @@ function cfId() {
   return `cf_${Math.random().toString(36).slice(2, 10)}`;
 }
 
+/**
+ * Create-or-update a CarriedForwardDue, matched by (studentId, fromAy, toAy)
+ * — shared by the bulk Excel importer and the single-student manual form so
+ * both paths dedupe identically and can't drift into different behavior.
+ */
+function upsertCarriedForwardDue(
+  carried: CarriedForwardDue[],
+  input: {
+    studentId: string;
+    fromAy: string;
+    toAy: string;
+    amountPaise: number;
+    label: string;
+    dueOn: string;
+    sourceBreakdown: { dueKey: string; label: string; amountPaise: number }[];
+    by: string;
+  },
+): { carried: CarriedForwardDue[]; created: boolean; updated: boolean } {
+  const now = new Date().toISOString();
+  const idx = carried.findIndex(
+    (cf) =>
+      !cf.voidedAt &&
+      cf.studentId === input.studentId &&
+      cf.fromAcademicYearCode === input.fromAy &&
+      cf.toAcademicYearCode === input.toAy,
+  );
+
+  if (idx >= 0) {
+    const prev = carried[idx]!;
+    if (prev.amountPaise === input.amountPaise && prev.label === input.label) {
+      return { carried, created: false, updated: false };
+    }
+    const next = [...carried];
+    next[idx] = {
+      ...prev,
+      amountPaise: input.amountPaise,
+      label: input.label,
+      sourceBreakdown: input.sourceBreakdown,
+      transferredAt: now,
+      transferredBy: input.by,
+    };
+    return { carried: next, created: false, updated: true };
+  }
+
+  const cf: CarriedForwardDue = {
+    id: cfId(),
+    studentId: input.studentId,
+    fromAcademicYearCode: input.fromAy,
+    toAcademicYearCode: input.toAy,
+    amountPaise: input.amountPaise,
+    dueOn: input.dueOn,
+    label: input.label,
+    sourceDueKeys: [],
+    sourceBreakdown: input.sourceBreakdown,
+    transferredAt: now,
+    transferredBy: input.by,
+    voidedAt: null,
+  };
+  return { carried: [...carried, cf], created: true, updated: false };
+}
+
 export function applyPreviousDuesImport(input: {
   fees: FeesState;
   sis: SisState;
@@ -120,9 +181,8 @@ export function applyPreviousDuesImport(input: {
   const fromAy = input.fromAy || inferFromAcademicYear(sourceLabel);
   const importedBy = input.importedBy || "Excel import";
   const dueOn = `${toAy.slice(0, 4)}-04-01`;
-  const now = new Date().toISOString();
 
-  const carried = [...(input.fees.carriedForwardDues ?? [])];
+  let carried = [...(input.fees.carriedForwardDues ?? [])];
   let created = 0;
   let updated = 0;
   const cleared = 0;
@@ -153,55 +213,26 @@ export function applyPreviousDuesImport(input: {
       ? sourceLabel
       : `Previous Due · ${fromAy}`;
 
-    const idx = carried.findIndex(
-      (cf) =>
-        !cf.voidedAt &&
-        cf.studentId === student.id &&
-        cf.fromAcademicYearCode === fromAy &&
-        cf.toAcademicYearCode === toAy,
-    );
-
-    const breakdown = [
-      {
-        dueKey: `excel:${normAdmissionNo(row.admissionNo)}`,
-        label,
-        amountPaise: pendingPaise,
-      },
-    ];
-
-    if (idx >= 0) {
-      const prev = carried[idx]!;
-      if (prev.amountPaise === pendingPaise && prev.label === label) {
-        skipped += 1;
-      } else {
-        carried[idx] = {
-          ...prev,
-          amountPaise: pendingPaise,
+    const result = upsertCarriedForwardDue(carried, {
+      studentId: student.id,
+      fromAy,
+      toAy,
+      amountPaise: pendingPaise,
+      label,
+      dueOn,
+      sourceBreakdown: [
+        {
+          dueKey: `excel:${normAdmissionNo(row.admissionNo)}`,
           label,
-          sourceBreakdown: breakdown,
-          transferredAt: now,
-          transferredBy: importedBy,
-        };
-        updated += 1;
-      }
-    } else {
-      const cf: CarriedForwardDue = {
-        id: cfId(),
-        studentId: student.id,
-        fromAcademicYearCode: fromAy,
-        toAcademicYearCode: toAy,
-        amountPaise: pendingPaise,
-        dueOn,
-        label,
-        sourceDueKeys: [],
-        sourceBreakdown: breakdown,
-        transferredAt: now,
-        transferredBy: importedBy,
-        voidedAt: null,
-      };
-      carried.push(cf);
-      created += 1;
-    }
+          amountPaise: pendingPaise,
+        },
+      ],
+      by: importedBy,
+    });
+    carried = result.carried;
+    if (result.created) created += 1;
+    else if (result.updated) updated += 1;
+    else skipped += 1;
 
     matched.push({
       admissionNo: row.admissionNo,
@@ -218,6 +249,124 @@ export function applyPreviousDuesImport(input: {
     skipped,
     errors,
     matched,
+  };
+}
+
+/**
+ * Add (or update) one student's previous-year due directly — the
+ * single-student counterpart to applyPreviousDuesImport's bulk Excel path,
+ * for when there's no spreadsheet to prepare, just one student and one
+ * amount to record.
+ */
+export function addManualPreviousDue(input: {
+  fees: FeesState;
+  studentId: string;
+  fromAy: string;
+  toAy?: string;
+  amountPaise: number;
+  label?: string;
+  enteredBy?: string;
+}): { fees: FeesState; created: boolean; updated: boolean } {
+  const toAy = input.toAy || DEFAULT_AY;
+  const label = input.label?.trim() || `Previous Due · ${input.fromAy}`;
+  const dueOn = `${toAy.slice(0, 4)}-04-01`;
+  const by = input.enteredBy || "Manual entry";
+
+  const result = upsertCarriedForwardDue(input.fees.carriedForwardDues ?? [], {
+    studentId: input.studentId,
+    fromAy: input.fromAy,
+    toAy,
+    amountPaise: input.amountPaise,
+    label,
+    dueOn,
+    sourceBreakdown: [
+      { dueKey: `manual:${input.studentId}:${input.fromAy}`, label, amountPaise: input.amountPaise },
+    ],
+    by,
+  });
+
+  return {
+    fees: { ...input.fees, carriedForwardDues: result.carried },
+    created: result.created,
+    updated: result.updated,
+  };
+}
+
+/**
+ * Save a whole class/section's previous-year dues in one go — the grid
+ * counterpart to addManualPreviousDue(). Rows with amountPaise <= 0 are
+ * skipped, never treated as "clear this student's entry" (voiding a
+ * specific student's due stays addManualPreviousDue's/the panel's own Void
+ * action, not an implicit side effect of leaving a row blank here).
+ */
+export function applyBulkPreviousDues(input: {
+  fees: FeesState;
+  rows: { studentId: string; amountPaise: number }[];
+  fromAy: string;
+  toAy?: string;
+  label?: string;
+  enteredBy?: string;
+}): { fees: FeesState; created: number; updated: number; skipped: number } {
+  const toAy = input.toAy || DEFAULT_AY;
+  const label = input.label?.trim() || `Previous Due · ${input.fromAy}`;
+  const dueOn = `${toAy.slice(0, 4)}-04-01`;
+  const by = input.enteredBy || "Manual entry";
+
+  let carried = [...(input.fees.carriedForwardDues ?? [])];
+  let created = 0;
+  let updated = 0;
+  let skipped = 0;
+
+  for (const row of input.rows) {
+    if (row.amountPaise <= 0) {
+      skipped += 1;
+      continue;
+    }
+    const result = upsertCarriedForwardDue(carried, {
+      studentId: row.studentId,
+      fromAy: input.fromAy,
+      toAy,
+      amountPaise: row.amountPaise,
+      label,
+      dueOn,
+      sourceBreakdown: [
+        {
+          dueKey: `manual:${row.studentId}:${input.fromAy}`,
+          label,
+          amountPaise: row.amountPaise,
+        },
+      ],
+      by,
+    });
+    carried = result.carried;
+    if (result.created) created += 1;
+    else if (result.updated) updated += 1;
+    else skipped += 1;
+  }
+
+  return {
+    fees: { ...input.fees, carriedForwardDues: carried },
+    created,
+    updated,
+    skipped,
+  };
+}
+
+/** Void a previous-year due entered in error — the entry point this module
+ * never had before: once created, a CarriedForwardDue could not be undone. */
+export function voidCarriedForwardDue(
+  fees: FeesState,
+  id: string,
+  by: string,
+): FeesState {
+  const now = new Date().toISOString();
+  return {
+    ...fees,
+    carriedForwardDues: (fees.carriedForwardDues ?? []).map((cf) =>
+      cf.id === id && !cf.voidedAt
+        ? { ...cf, voidedAt: now, transferredBy: `${cf.transferredBy} · voided by ${by}` }
+        : cf,
+    ),
   };
 }
 
