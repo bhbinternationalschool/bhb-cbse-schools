@@ -131,8 +131,11 @@ export function AppShell({
           const { pushFullSchoolMirrorToServer } = await import(
             "@/lib/schoolDataMirror"
           );
+          const { withHydrationSlot } = await import("@/lib/deskHydrateGuard");
 
-          const mirrorChanged = await ensureClientSchoolMirrorHydrated();
+          const mirrorChanged = await withHydrationSlot(() =>
+            ensureClientSchoolMirrorHydrated(),
+          );
           if (mirrorChanged) {
             window.dispatchEvent(new CustomEvent("bhb-desk-hydrated"));
           }

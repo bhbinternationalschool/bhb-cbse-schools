@@ -59,8 +59,12 @@ export function DocumentMakerWorkspace() {
   useEffect(() => {
     setMasters(loadMasters());
     void (async () => {
-      const { ensureMastersHydrated } = await import("@/lib/mastersPersistence");
-      await ensureMastersHydrated();
+      const [{ ensureMastersHydrated }, { withHydrationSlot }] =
+        await Promise.all([
+          import("@/lib/mastersPersistence"),
+          import("@/lib/deskHydrateGuard"),
+        ]);
+      await withHydrationSlot(() => ensureMastersHydrated());
       setMasters(loadMasters());
     })();
   }, []);

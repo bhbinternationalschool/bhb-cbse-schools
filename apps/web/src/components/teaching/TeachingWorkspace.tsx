@@ -90,14 +90,15 @@ export function TeachingWorkspace() {
   useEffect(() => {
     refresh();
     void (async () => {
-      const [{ ensureTimetableHydrated }, { ensureTeachingHydrated }] =
+      const [{ ensureTimetableHydrated }, { ensureTeachingHydrated }, { withHydrationSlot }] =
         await Promise.all([
           import("@/lib/timetablePersistence"),
           import("@/lib/teachingPersistence"),
+          import("@/lib/deskHydrateGuard"),
         ]);
       const [ttChanged, tChanged] = await Promise.all([
-        ensureTimetableHydrated(),
-        ensureTeachingHydrated(),
+        withHydrationSlot(() => ensureTimetableHydrated()),
+        withHydrationSlot(() => ensureTeachingHydrated()),
       ]);
       if (ttChanged || tChanged) refresh();
     })();

@@ -137,8 +137,11 @@ export function RteWorkspace({
   useEffect(() => {
     if (typeof window === "undefined") return;
     void (async () => {
-      const { ensureRteHydrated } = await import("@/lib/rtePersistence");
-      await ensureRteHydrated();
+      const [{ ensureRteHydrated }, { withHydrationSlot }] = await Promise.all([
+        import("@/lib/rtePersistence"),
+        import("@/lib/deskHydrateGuard"),
+      ]);
+      await withHydrationSlot(() => ensureRteHydrated());
       refresh();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps

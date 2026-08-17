@@ -48,8 +48,11 @@ export function AdmitCardsPanel({ academicYearCode, masters, terms }: Props) {
 
   useEffect(() => {
     void (async () => {
-      const { ensureSisHydrated } = await import("@/lib/sisPersistence");
-      await ensureSisHydrated();
+      const [{ ensureSisHydrated }, { withHydrationSlot }] = await Promise.all([
+        import("@/lib/sisPersistence"),
+        import("@/lib/deskHydrateGuard"),
+      ]);
+      await withHydrationSlot(() => ensureSisHydrated());
       setTick((x) => x + 1);
     })();
   }, []);

@@ -129,10 +129,12 @@ export function CertificatesWorkspace() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     void (async () => {
-      const { ensureCertificatesHydrated } = await import(
-        "@/lib/certificatesPersistence"
-      );
-      await ensureCertificatesHydrated();
+      const [{ ensureCertificatesHydrated }, { withHydrationSlot }] =
+        await Promise.all([
+          import("@/lib/certificatesPersistence"),
+          import("@/lib/deskHydrateGuard"),
+        ]);
+      await withHydrationSlot(() => ensureCertificatesHydrated());
       refresh();
     })();
   }, []);

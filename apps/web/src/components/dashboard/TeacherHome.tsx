@@ -100,21 +100,27 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
     setReady(true);
     setTick((n) => n + 1);
     void (async () => {
-      const { ensureAttendanceHydrated } = await import(
-        "@/lib/attendancePersistence"
-      );
-      const changed = await ensureAttendanceHydrated();
+      const [{ ensureAttendanceHydrated }, { withHydrationSlot }] =
+        await Promise.all([
+          import("@/lib/attendancePersistence"),
+          import("@/lib/deskHydrateGuard"),
+        ]);
+      const changed = await withHydrationSlot(() => ensureAttendanceHydrated());
       if (changed) setTick((n) => n + 1);
     })();
     void (async () => {
-      const [{ ensureTimetableHydrated }, { ensureTeachingHydrated }] =
-        await Promise.all([
-          import("@/lib/timetablePersistence"),
-          import("@/lib/teachingPersistence"),
-        ]);
+      const [
+        { ensureTimetableHydrated },
+        { ensureTeachingHydrated },
+        { withHydrationSlot },
+      ] = await Promise.all([
+        import("@/lib/timetablePersistence"),
+        import("@/lib/teachingPersistence"),
+        import("@/lib/deskHydrateGuard"),
+      ]);
       const [tt, tg] = await Promise.all([
-        ensureTimetableHydrated(),
-        ensureTeachingHydrated(),
+        withHydrationSlot(() => ensureTimetableHydrated()),
+        withHydrationSlot(() => ensureTeachingHydrated()),
       ]);
       if (tt || tg) setTick((n) => n + 1);
     })();

@@ -43,11 +43,15 @@ export function StaffRequestsPanel() {
   useEffect(() => {
     reload();
     void (async () => {
-      const { ensureStaffHydrated } = await import("@/lib/staffPersistence");
-      const { ensureStaffHrHydrated } = await import("@/lib/staffHrPersistence");
+      const [{ ensureStaffHydrated }, { ensureStaffHrHydrated }, { withHydrationSlot }] =
+        await Promise.all([
+          import("@/lib/staffPersistence"),
+          import("@/lib/staffHrPersistence"),
+          import("@/lib/deskHydrateGuard"),
+        ]);
       const [didStaff, didHr] = await Promise.all([
-        ensureStaffHydrated(),
-        ensureStaffHrHydrated(),
+        withHydrationSlot(() => ensureStaffHydrated()),
+        withHydrationSlot(() => ensureStaffHrHydrated()),
       ]);
       if (didStaff || didHr) reload();
     })();

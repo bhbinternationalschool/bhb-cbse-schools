@@ -116,10 +116,12 @@ export function TimetableWorkspace() {
   useEffect(() => {
     refresh();
     void (async () => {
-      const { ensureTimetableHydrated } = await import(
-        "@/lib/timetablePersistence"
-      );
-      const changed = await ensureTimetableHydrated();
+      const [{ ensureTimetableHydrated }, { withHydrationSlot }] =
+        await Promise.all([
+          import("@/lib/timetablePersistence"),
+          import("@/lib/deskHydrateGuard"),
+        ]);
+      const changed = await withHydrationSlot(() => ensureTimetableHydrated());
       if (changed) refresh();
     })();
   }, []);

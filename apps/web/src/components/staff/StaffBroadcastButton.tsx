@@ -29,6 +29,7 @@ import {
 } from "@/lib/staffAttendance";
 import { captureSurveyGeo } from "@/lib/fieldSurvey";
 import { ensureWaTemplatesHydrated } from "@/lib/waTemplatesPersistence";
+import { withHydrationSlot } from "@/lib/deskHydrateGuard";
 import {
   loadWaTemplates,
   listApprovedTemplates,
@@ -129,7 +130,7 @@ export function StaffBroadcastButton() {
     if (!open) return;
     setMasters(loadMasters());
     setTemplates(listApprovedTemplates(loadWaTemplates()));
-    void ensureWaTemplatesHydrated().then(() => {
+    void withHydrationSlot(() => ensureWaTemplatesHydrated()).then(() => {
       setTemplates(listApprovedTemplates(loadWaTemplates()));
     });
     const freshHr = loadStaffHr();

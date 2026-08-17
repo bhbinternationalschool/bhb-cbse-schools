@@ -216,13 +216,21 @@ export function MastersWorkspace() {
   useEffect(() => {
     setState(loadMasters());
     void (async () => {
-      const { ensureMastersHydrated } = await import("@/lib/mastersPersistence");
-      const { ensureStaffHydrated } = await import("@/lib/staffPersistence");
-      const { ensureRbacHydrated } = await import("@/lib/rbacPersistence");
+      const [
+        { ensureMastersHydrated },
+        { ensureStaffHydrated },
+        { ensureRbacHydrated },
+        { withHydrationSlot },
+      ] = await Promise.all([
+        import("@/lib/mastersPersistence"),
+        import("@/lib/staffPersistence"),
+        import("@/lib/rbacPersistence"),
+        import("@/lib/deskHydrateGuard"),
+      ]);
       await Promise.all([
-        ensureMastersHydrated(),
-        ensureStaffHydrated(),
-        ensureRbacHydrated(),
+        withHydrationSlot(() => ensureMastersHydrated()),
+        withHydrationSlot(() => ensureStaffHydrated()),
+        withHydrationSlot(() => ensureRbacHydrated()),
       ]);
       setState(loadMasters());
       setRbac(loadRbac());

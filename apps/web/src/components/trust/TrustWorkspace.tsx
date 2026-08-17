@@ -94,8 +94,11 @@ export function TrustWorkspace() {
   useEffect(() => {
     refresh();
     void (async () => {
-      const { ensureTrustHydrated } = await import("@/lib/trustPersistence");
-      await ensureTrustHydrated();
+      const [{ ensureTrustHydrated }, { withHydrationSlot }] = await Promise.all([
+        import("@/lib/trustPersistence"),
+        import("@/lib/deskHydrateGuard"),
+      ]);
+      await withHydrationSlot(() => ensureTrustHydrated());
       refresh();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps

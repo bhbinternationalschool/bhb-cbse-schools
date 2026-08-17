@@ -234,12 +234,16 @@ export function StoreWorkspace() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     void (async () => {
-      const [{ ensureStoreHydrated }, { ensurePurchaseHydrated }] =
+      const [{ ensureStoreHydrated }, { ensurePurchaseHydrated }, { withHydrationSlot }] =
         await Promise.all([
           import("@/lib/storePersistence"),
           import("@/lib/purchasePersistence"),
+          import("@/lib/deskHydrateGuard"),
         ]);
-      await Promise.all([ensureStoreHydrated(), ensurePurchaseHydrated()]);
+      await Promise.all([
+        withHydrationSlot(() => ensureStoreHydrated()),
+        withHydrationSlot(() => ensurePurchaseHydrated()),
+      ]);
       refresh();
     })();
   }, []);

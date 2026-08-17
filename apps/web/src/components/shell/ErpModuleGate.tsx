@@ -29,8 +29,12 @@ export function ErpModuleGate({ children }: { children: React.ReactNode }) {
     void (async () => {
       const masters = loadMasters();
       try {
-        const { ensureRbacHydrated } = await import("@/lib/rbacPersistence");
-        await ensureRbacHydrated();
+        const [{ ensureRbacHydrated }, { withHydrationSlot }] =
+          await Promise.all([
+            import("@/lib/rbacPersistence"),
+            import("@/lib/deskHydrateGuard"),
+          ]);
+        await withHydrationSlot(() => ensureRbacHydrated());
       } catch {
         /* ignore */
       }

@@ -55,8 +55,11 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
   useEffect(() => {
     reload();
     void (async () => {
-      const { ensureStaffHydrated } = await import("@/lib/staffPersistence");
-      const did = await ensureStaffHydrated();
+      const [{ ensureStaffHydrated }, { withHydrationSlot }] = await Promise.all([
+        import("@/lib/staffPersistence"),
+        import("@/lib/deskHydrateGuard"),
+      ]);
+      const did = await withHydrationSlot(() => ensureStaffHydrated());
       if (did) reload();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps

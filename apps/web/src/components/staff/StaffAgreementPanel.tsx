@@ -101,10 +101,12 @@ export function StaffAgreementPanel({
   useEffect(() => {
     if (typeof window === "undefined") return;
     void (async () => {
-      const { ensureStaffAgreementsHydrated } = await import(
-        "@/lib/staffAgreementPersistence"
-      );
-      await ensureStaffAgreementsHydrated();
+      const [{ ensureStaffAgreementsHydrated }, { withHydrationSlot }] =
+        await Promise.all([
+          import("@/lib/staffAgreementPersistence"),
+          import("@/lib/deskHydrateGuard"),
+        ]);
+      await withHydrationSlot(() => ensureStaffAgreementsHydrated());
       setTick((t) => t + 1);
     })();
   }, []);

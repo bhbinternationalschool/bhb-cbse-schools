@@ -138,8 +138,11 @@ export function StaffProfileForm(props: Props) {
     }
 
     void (async () => {
-      const { ensureStaffHydrated } = await import("@/lib/staffPersistence");
-      const did = await ensureStaffHydrated();
+      const [{ ensureStaffHydrated }, { withHydrationSlot }] = await Promise.all([
+        import("@/lib/staffPersistence"),
+        import("@/lib/deskHydrateGuard"),
+      ]);
+      const did = await withHydrationSlot(() => ensureStaffHydrated());
       if (!did) return;
       const next = loadMasters();
       setMasters(next);

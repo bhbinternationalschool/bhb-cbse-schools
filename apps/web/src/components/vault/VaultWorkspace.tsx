@@ -148,8 +148,11 @@ export function VaultWorkspace() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     void (async () => {
-      const { ensureVaultHydrated } = await import("@/lib/vaultPersistence");
-      await ensureVaultHydrated();
+      const [{ ensureVaultHydrated }, { withHydrationSlot }] = await Promise.all([
+        import("@/lib/vaultPersistence"),
+        import("@/lib/deskHydrateGuard"),
+      ]);
+      await withHydrationSlot(() => ensureVaultHydrated());
       refresh();
     })();
   }, []);
