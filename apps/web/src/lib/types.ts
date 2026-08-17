@@ -13,7 +13,7 @@ export const TENANT = {
   nameDisplay: "BHB INTERNATIONAL SCHOOL",
   shortName: "BHB International",
   tagline: "Tradition of excellence",
-  domain: "erp.bhbinternational.school",
+  domain: "bhbinternational.school",
   /** Public school portal (enquiry / apply links & QR — not ERP subdomain) */
   publicPortal: "bhbinternational.school",
   city: "Varanasi",
