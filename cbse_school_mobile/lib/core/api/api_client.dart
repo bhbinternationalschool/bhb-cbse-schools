@@ -1329,6 +1329,60 @@ class FollowUpLead {
   final int overdueDays;
 }
 
+class WaTemplateVar {
+  const WaTemplateVar({required this.key, required this.label});
+  factory WaTemplateVar.fromJson(Map<String, dynamic> j) => WaTemplateVar(
+        key: j["key"] as String? ?? "",
+        label: j["label"] as String? ?? (j["key"] as String? ?? ""),
+      );
+  final String key;
+  final String label;
+}
+
+/// An approved WhatsApp template the owner broadcast can send. Templates
+/// reach every recipient; free text only reaches parents inside Meta's
+/// 24-hour session window.
+class WaBroadcastTemplate {
+  const WaBroadcastTemplate({
+    required this.id,
+    required this.name,
+    required this.language,
+    required this.metaName,
+    required this.metaLanguage,
+    required this.body,
+    required this.variables,
+  });
+  factory WaBroadcastTemplate.fromJson(Map<String, dynamic> j) =>
+      WaBroadcastTemplate(
+        id: j["id"] as String? ?? "",
+        name: j["name"] as String? ?? "",
+        language: j["language"] as String? ?? "",
+        metaName: j["metaName"] as String? ?? "",
+        metaLanguage: j["metaLanguage"] as String? ?? "",
+        body: j["body"] as String? ?? "",
+        variables: ((j["variables"] as List?) ?? const [])
+            .map((v) => WaTemplateVar.fromJson(v as Map<String, dynamic>))
+            .toList(),
+      );
+  final String id;
+  final String name;
+  final String language;
+  final String metaName;
+  final String metaLanguage;
+  final String body;
+  final List<WaTemplateVar> variables;
+
+  /// Body with {{tokens}} filled for on-screen preview.
+  String preview(Map<String, String> values) {
+    var out = body;
+    for (final v in variables) {
+      final val = (values[v.key] ?? "").trim();
+      out = out.replaceAll("{{${v.key}}}", val.isEmpty ? "[${v.label}]" : val);
+    }
+    return out;
+  }
+}
+
 class BroadcastResult {
   const BroadcastResult({
     required this.mode,
@@ -1655,17 +1709,38 @@ class ApiClient {
         .toList();
   }
 
+  Future<List<WaBroadcastTemplate>> fetchBroadcastTemplates() async {
+    final d = await _getData("/api/v1/owner/templates");
+    return ((d["templates"] as List?) ?? const [])
+        .map((t) => WaBroadcastTemplate.fromJson(t as Map<String, dynamic>))
+        .toList();
+  }
+
   /// School-wide WhatsApp (+push) broadcast. Server defaults to dry-run;
   /// pass [dryRun]=false only after the user has confirmed the count.
+  /// Either [body] (free text, 24h-window only) or [template] (+[variables]).
   Future<BroadcastResult> ownerBroadcast({
     required String audience, // "parents" | "staff"
-    required String body,
+    String body = "",
+    WaBroadcastTemplate? template,
+    Map<String, String> variables = const {},
     bool dryRun = true,
   }) async {
     final res = await http.post(
       _uri("/api/v1/owner/broadcast"),
       headers: await _authHeaders(),
-      body: jsonEncode({"audience": audience, "body": body, "dryRun": dryRun}),
+      body: jsonEncode({
+        "audience": audience,
+        "dryRun": dryRun,
+        if (template == null) "body": body,
+        if (template != null)
+          "template": {
+            "name": template.metaName,
+            "language": template.metaLanguage,
+            "variableKeys": template.variables.map((v) => v.key).toList(),
+            "variables": variables,
+          },
+      }),
     );
     if (res.statusCode != 200) _throwFrom(res);
     return BroadcastResult.fromJson(
