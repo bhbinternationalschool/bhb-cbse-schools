@@ -1132,6 +1132,231 @@ class ChatThread {
   final List<ChatMessage> messages;
 }
 
+/* ─── Principal drill-downs (/api/v1/principal/lists) ─────────────────── */
+
+class DefaulterChild {
+  const DefaulterChild({
+    required this.studentId,
+    required this.fullName,
+    required this.classLabel,
+    required this.openPaise,
+  });
+  factory DefaulterChild.fromJson(Map<String, dynamic> j) => DefaulterChild(
+        studentId: j["studentId"] as String? ?? "",
+        fullName: j["fullName"] as String? ?? "",
+        classLabel: j["classLabel"] as String? ?? "",
+        openPaise: (j["openPaise"] as num?)?.toInt() ?? 0,
+      );
+  final String studentId;
+  final String fullName;
+  final String classLabel;
+  final int openPaise;
+}
+
+class DefaulterHousehold {
+  const DefaulterHousehold({
+    required this.householdId,
+    required this.guardianName,
+    required this.mobile,
+    required this.openPaise,
+    required this.children,
+  });
+  factory DefaulterHousehold.fromJson(Map<String, dynamic> j) =>
+      DefaulterHousehold(
+        householdId: j["householdId"] as String? ?? "",
+        guardianName: j["guardianName"] as String? ?? "",
+        mobile: j["mobile"] as String? ?? "",
+        openPaise: (j["openPaise"] as num?)?.toInt() ?? 0,
+        children: ((j["children"] as List?) ?? const [])
+            .map((c) => DefaulterChild.fromJson(c as Map<String, dynamic>))
+            .toList(),
+      );
+  final String householdId;
+  final String guardianName;
+  final String mobile;
+  final int openPaise;
+  final List<DefaulterChild> children;
+}
+
+class DefaultersList {
+  const DefaultersList({
+    required this.asOf,
+    required this.totalOpenPaise,
+    required this.households,
+  });
+  factory DefaultersList.fromJson(Map<String, dynamic> j) => DefaultersList(
+        asOf: j["asOf"] as String? ?? "",
+        totalOpenPaise: (j["totalOpenPaise"] as num?)?.toInt() ?? 0,
+        households: ((j["households"] as List?) ?? const [])
+            .map((h) => DefaulterHousehold.fromJson(h as Map<String, dynamic>))
+            .toList(),
+      );
+  final String asOf;
+  final int totalOpenPaise;
+  final List<DefaulterHousehold> households;
+}
+
+class SectionRegisterStatus {
+  const SectionRegisterStatus({
+    required this.sectionId,
+    required this.classId,
+    required this.label,
+    required this.marked,
+    required this.holiday,
+    required this.present,
+    required this.absent,
+    required this.leave,
+    required this.markedBy,
+  });
+  factory SectionRegisterStatus.fromJson(Map<String, dynamic> j) =>
+      SectionRegisterStatus(
+        sectionId: j["sectionId"] as String? ?? "",
+        classId: j["classId"] as String? ?? "",
+        label: j["label"] as String? ?? "",
+        marked: j["marked"] == true,
+        holiday: j["holiday"] == true,
+        present: (j["present"] as num?)?.toInt() ?? 0,
+        absent: (j["absent"] as num?)?.toInt() ?? 0,
+        leave: (j["leave"] as num?)?.toInt() ?? 0,
+        markedBy: j["markedBy"] as String? ?? "",
+      );
+  final String sectionId;
+  final String classId;
+  final String label;
+  final bool marked;
+  final bool holiday;
+  final int present;
+  final int absent;
+  final int leave;
+  final String markedBy;
+}
+
+class RegistersList {
+  const RegistersList({required this.date, required this.sections});
+  factory RegistersList.fromJson(Map<String, dynamic> j) => RegistersList(
+        date: j["date"] as String? ?? "",
+        sections: ((j["sections"] as List?) ?? const [])
+            .map((s) => SectionRegisterStatus.fromJson(s as Map<String, dynamic>))
+            .toList(),
+      );
+  final String date;
+  final List<SectionRegisterStatus> sections;
+}
+
+class StaffAttendanceRow {
+  const StaffAttendanceRow({
+    required this.staffId,
+    required this.fullName,
+    required this.designation,
+    required this.mobile,
+    required this.status,
+    required this.inTime,
+    required this.outTime,
+    required this.punchWay,
+  });
+  factory StaffAttendanceRow.fromJson(Map<String, dynamic> j) =>
+      StaffAttendanceRow(
+        staffId: j["staffId"] as String? ?? "",
+        fullName: j["fullName"] as String? ?? "",
+        designation: j["designation"] as String? ?? "",
+        mobile: j["mobile"] as String? ?? "",
+        status: j["status"] as String? ?? "",
+        inTime: j["inTime"] as String? ?? "",
+        outTime: j["outTime"] as String? ?? "",
+        punchWay: j["punchWay"] as String? ?? "",
+      );
+  final String staffId;
+  final String fullName;
+  final String designation;
+  final String mobile;
+  /// "" (not marked) | P | A | L | HD | LE
+  final String status;
+  final String inTime;
+  final String outTime;
+  final String punchWay;
+}
+
+class StaffAttendanceToday {
+  const StaffAttendanceToday({
+    required this.date,
+    required this.marked,
+    required this.staff,
+  });
+  factory StaffAttendanceToday.fromJson(Map<String, dynamic> j) =>
+      StaffAttendanceToday(
+        date: j["date"] as String? ?? "",
+        marked: j["marked"] == true,
+        staff: ((j["staff"] as List?) ?? const [])
+            .map((s) => StaffAttendanceRow.fromJson(s as Map<String, dynamic>))
+            .toList(),
+      );
+  final String date;
+  final bool marked;
+  final List<StaffAttendanceRow> staff;
+}
+
+class FollowUpLead {
+  const FollowUpLead({
+    required this.id,
+    required this.enquiryNo,
+    required this.childName,
+    required this.guardianName,
+    required this.mobile,
+    required this.stage,
+    required this.classSought,
+    required this.nextFollowUpAt,
+    required this.overdueDays,
+  });
+  factory FollowUpLead.fromJson(Map<String, dynamic> j) => FollowUpLead(
+        id: j["id"] as String? ?? "",
+        enquiryNo: j["enquiryNo"] as String? ?? "",
+        childName: j["childName"] as String? ?? "",
+        guardianName: j["guardianName"] as String? ?? "",
+        mobile: j["mobile"] as String? ?? "",
+        stage: j["stage"] as String? ?? "",
+        classSought: j["classSought"] as String? ?? "",
+        nextFollowUpAt: j["nextFollowUpAt"] as String? ?? "",
+        overdueDays: (j["overdueDays"] as num?)?.toInt() ?? 0,
+      );
+  final String id;
+  final String enquiryNo;
+  final String childName;
+  final String guardianName;
+  final String mobile;
+  final String stage;
+  final String classSought;
+  final String nextFollowUpAt;
+  final int overdueDays;
+}
+
+class BroadcastResult {
+  const BroadcastResult({
+    required this.mode,
+    required this.recipientCount,
+    required this.skippedOptOut,
+    required this.sent,
+    required this.failed,
+    required this.pushSent,
+  });
+  factory BroadcastResult.fromJson(Map<String, dynamic> j) => BroadcastResult(
+        mode: j["mode"] as String? ?? "",
+        recipientCount: (j["recipientCount"] as num?)?.toInt() ?? 0,
+        skippedOptOut: (j["skippedOptOut"] as num?)?.toInt() ?? 0,
+        sent: (j["sent"] as num?)?.toInt() ?? 0,
+        failed: (j["failed"] as num?)?.toInt() ?? 0,
+        pushSent:
+            ((j["push"] as Map<String, dynamic>?)?["sent"] as num?)?.toInt() ??
+                0,
+      );
+  final String mode;
+  final int recipientCount;
+  final int skippedOptOut;
+  final int sent;
+  final int failed;
+  final int pushSent;
+  bool get isDryRun => mode == "dry_run";
+}
+
 class ApiClient {
   ApiClient(this.config);
 
@@ -1409,6 +1634,42 @@ class ApiClient {
       body: jsonEncode({"token": token}),
     );
     if (res.statusCode != 200) _throwFrom(res);
+  }
+
+  /* ─── Principal / owner ─────────────────────────────────────────── */
+
+  Future<DefaultersList> fetchDefaulters() async => DefaultersList.fromJson(
+      await _getData("/api/v1/principal/lists?kind=defaulters"));
+
+  Future<RegistersList> fetchRegistersToday() async => RegistersList.fromJson(
+      await _getData("/api/v1/principal/lists?kind=registers"));
+
+  Future<StaffAttendanceToday> fetchStaffAttendanceToday() async =>
+      StaffAttendanceToday.fromJson(
+          await _getData("/api/v1/principal/lists?kind=staff_attendance"));
+
+  Future<List<FollowUpLead>> fetchFollowUpsDue() async {
+    final d = await _getData("/api/v1/principal/lists?kind=followups");
+    return ((d["leads"] as List?) ?? const [])
+        .map((l) => FollowUpLead.fromJson(l as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// School-wide WhatsApp (+push) broadcast. Server defaults to dry-run;
+  /// pass [dryRun]=false only after the user has confirmed the count.
+  Future<BroadcastResult> ownerBroadcast({
+    required String audience, // "parents" | "staff"
+    required String body,
+    bool dryRun = true,
+  }) async {
+    final res = await http.post(
+      _uri("/api/v1/owner/broadcast"),
+      headers: await _authHeaders(),
+      body: jsonEncode({"audience": audience, "body": body, "dryRun": dryRun}),
+    );
+    if (res.statusCode != 200) _throwFrom(res);
+    return BroadcastResult.fromJson(
+        jsonDecode(res.body) as Map<String, dynamic>);
   }
 
   Future<FeeLedger> fetchFeeLedger(String studentId) async =>

@@ -14,6 +14,9 @@ import {
   listAllStaffMobiles,
 } from "@/lib/bulkRecipients";
 import { listOptedOutSet, toE164India } from "@/lib/waContactState.server";
+import { loadSis } from "@/lib/sis";
+import { loadMasters } from "@/lib/masters";
+import { sendPushToSubjects } from "@/lib/webPush.server";
 import { POST as dispatchPost } from "@/app/api/wa/dispatch/route";
 
 export const runtime = "nodejs";
@@ -128,6 +131,24 @@ export async function POST(req: Request) {
     failed += json.failed ?? 0;
   }
 
+  // Mirror a live free-text broadcast to app/PWA push (template sends carry
+  // no readable body). Best-effort — never affects the WA result above.
+  let push = { sent: 0, expired: 0, failed: 0 };
+  if (!dryRun && text) {
+    const subjectIds =
+      audience === "parents"
+        ? loadSis().households.map((h) => h.id)
+        : (loadMasters().staff ?? [])
+            .filter((s) => s.status === "active")
+            .map((s) => s.id);
+    push = await sendPushToSubjects(audience === "parents" ? "parent" : "staff", subjectIds, {
+      title: `${auth.ctx.session.fullName} · BHB International School`,
+      body: text.length > 200 ? `${text.slice(0, 197)}…` : text,
+      url: "/notices",
+      data: { kind: "broadcast" },
+    }).catch(() => ({ sent: 0, expired: 0, failed: 0 }));
+  }
+
   return NextResponse.json({
     ok: true,
     mode: dryRun ? "dry_run" : "live",
@@ -135,6 +156,7 @@ export async function POST(req: Request) {
     skippedOptOut,
     sent,
     failed,
+    push,
     results: allResults,
   });
 }
