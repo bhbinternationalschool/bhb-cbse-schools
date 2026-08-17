@@ -28,10 +28,13 @@ export function ModuleDashboardHost({
   const [mastersTick, setMastersTick] = useState(0);
 
   useEffect(() => {
-    const onMastersUpdated = () => setMastersTick((t) => t + 1);
-    window.addEventListener("bhb-masters-updated", onMastersUpdated);
-    return () =>
-      window.removeEventListener("bhb-masters-updated", onMastersUpdated);
+    const onDataUpdated = () => setMastersTick((t) => t + 1);
+    window.addEventListener("bhb-masters-updated", onDataUpdated);
+    window.addEventListener("bhb-sis-updated", onDataUpdated);
+    return () => {
+      window.removeEventListener("bhb-masters-updated", onDataUpdated);
+      window.removeEventListener("bhb-sis-updated", onDataUpdated);
+    };
   }, []);
 
   useEffect(() => {

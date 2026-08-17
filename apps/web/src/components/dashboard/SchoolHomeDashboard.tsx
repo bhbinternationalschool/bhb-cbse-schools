@@ -55,9 +55,11 @@ export function SchoolHomeDashboard() {
       setTick((n) => n + 1);
     }
     window.addEventListener("bhb-module-registry", refresh);
+    window.addEventListener("bhb-sis-updated", refresh);
     window.addEventListener("storage", refresh);
     return () => {
       window.removeEventListener("bhb-module-registry", refresh);
+      window.removeEventListener("bhb-sis-updated", refresh);
       window.removeEventListener("storage", refresh);
     };
   }, []);

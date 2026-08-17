@@ -1000,6 +1000,7 @@ export function StudentsWorkspace() {
       {mainTab === "dashboard" ? (
         <ModuleDashboardHost
           moduleId="students"
+          refreshKey={panelTick}
           onNavigateTab={(t) => setMainTabPersist(t as MainTab)}
         />
       ) : null}
