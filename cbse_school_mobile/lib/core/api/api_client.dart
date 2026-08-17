@@ -1231,6 +1231,31 @@ class ApiClient {
     await _storeSession(body["session"] as Map<String, dynamic>?);
   }
 
+  /// Step 1 — send the WhatsApp OTP to a registered staff mobile.
+  Future<String> requestStaffOtp(String mobile) async {
+    final res = await http.post(
+      _uri("/api/auth/staff-otp/request"),
+      headers: {"Content-Type": "application/json"},
+      body: jsonEncode({"mobile": mobile}),
+    );
+    if (res.statusCode != 200) _throwFrom(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    return (body["maskedMobile"] as String?) ?? "your WhatsApp";
+  }
+
+  /// Step 2 — verify the staff OTP; the ERP mints the session cookie.
+  Future<void> verifyStaffOtp(String mobile, String code) async {
+    final res = await http.post(
+      _uri("/api/auth/staff-otp/verify"),
+      headers: {"Content-Type": "application/json"},
+      body: jsonEncode({"mobile": mobile, "code": code}),
+    );
+    if (res.statusCode != 200) _throwFrom(res);
+    _captureCookie(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    await _storeSession(body["session"] as Map<String, dynamic>?);
+  }
+
   /// Staff sign-in: Supabase email+password → ERP session cookie.
   Future<void> staffLogin(String email, String password) async {
     if (!config.supabaseConfigured) {

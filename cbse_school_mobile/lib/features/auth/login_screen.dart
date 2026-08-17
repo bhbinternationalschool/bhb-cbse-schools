@@ -26,6 +26,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _email = TextEditingController();
   final _password = TextEditingController();
   bool _staffMode = false;
+  bool _staffUseOtp = false;
   bool _busy = false;
   bool _otpSent = false;
   String? _maskedMobile;
@@ -61,7 +62,9 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _sendOtp() => _run(() async {
-        final masked = await widget.api.requestOtp(_mobile.text.trim());
+        final masked = _staffMode
+            ? await widget.api.requestStaffOtp(_mobile.text.trim())
+            : await widget.api.requestOtp(_mobile.text.trim());
         if (!mounted) return;
         setState(() {
           _otpSent = true;
@@ -71,7 +74,11 @@ class _LoginScreenState extends State<LoginScreen> {
       });
 
   Future<void> _verifyOtp() => _run(() async {
-        await widget.api.verifyOtp(_mobile.text.trim(), _otp.text.trim());
+        if (_staffMode) {
+          await widget.api.verifyStaffOtp(_mobile.text.trim(), _otp.text.trim());
+        } else {
+          await widget.api.verifyOtp(_mobile.text.trim(), _otp.text.trim());
+        }
         if (mounted) widget.onSignedIn();
       });
 
@@ -145,12 +152,37 @@ class _LoginScreenState extends State<LoginScreen> {
                         ? null
                         : (s) => setState(() {
                               _staffMode = s.first;
+                              _staffUseOtp = false;
+                              _otpSent = false;
+                              _otp.clear();
                               _error = null;
                               _info = null;
                             }),
                   ),
-                  const SizedBox(height: 20),
-                  if (!_staffMode) ...[
+                  if (_staffMode) ...[
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: _busy
+                            ? null
+                            : () => setState(() {
+                                  _staffUseOtp = !_staffUseOtp;
+                                  _otpSent = false;
+                                  _otp.clear();
+                                  _error = null;
+                                  _info = null;
+                                }),
+                        child: Text(
+                          _staffUseOtp
+                              ? "Sign in with password instead"
+                              : "Sign in with OTP instead",
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  if (!_staffMode || _staffUseOtp) ...[
                     TextField(
                       controller: _mobile,
                       enabled: !_otpSent,
@@ -213,7 +245,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   FilledButton(
                     onPressed: _busy
                         ? null
-                        : _staffMode
+                        : _staffMode && !_staffUseOtp
                             ? _staffSignIn
                             : _otpSent
                                 ? _verifyOtp
@@ -225,14 +257,14 @@ class _LoginScreenState extends State<LoginScreen> {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : Text(
-                            _staffMode
+                            _staffMode && !_staffUseOtp
                                 ? "Sign in"
                                 : _otpSent
                                     ? "Verify & sign in"
                                     : "Send OTP",
                           ),
                   ),
-                  if (!_staffMode && _otpSent) ...[
+                  if ((!_staffMode || _staffUseOtp) && _otpSent) ...[
                     const SizedBox(height: 8),
                     TextButton(
                       onPressed: _busy
