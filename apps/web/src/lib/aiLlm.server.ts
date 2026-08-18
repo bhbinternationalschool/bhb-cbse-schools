@@ -2,12 +2,20 @@
  * Route LLM calls — preferred engine first, fallback on API error or bad JSON.
  */
 
-import { generateGeminiText, geminiConfigured } from "@/lib/erpAiGemini.server";
+import {
+  generateGeminiText,
+  geminiConfigured,
+  geminiModel,
+  type LlmUsage,
+} from "@/lib/erpAiGemini.server";
 import {
   generateOpenAiText,
   openAiConfigured,
+  openAiModel,
   type OpenAiChatTurn,
 } from "@/lib/openAi.server";
+import { getDemoSession } from "@/lib/auth";
+import { recordAiGeneration, type AiTier } from "@/lib/aiGenerations.server";
 import {
   buildRemarkSystemPrompt,
   buildRemarkUserPrompt,
@@ -96,6 +104,19 @@ export function llmStatus(): {
   };
 }
 
+/**
+ * Who/what is asking — recorded on every attempt in ai_generations.
+ * `route` is the generator name (usually the /api/ai/<route> path);
+ * `promptVersion` bumps whenever the prompt text for that route changes so
+ * quality regressions can be tied to a prompt edit; `tier` picks the model
+ * class ("pro" only where reasoning matters — see geminiModel()).
+ */
+export type AiCallMeta = {
+  route: string;
+  promptVersion: string;
+  tier?: AiTier;
+};
+
 type LlmTextOpts = {
   system: string;
   history?: OpenAiChatTurn[];
@@ -105,12 +126,90 @@ type LlmTextOpts = {
   temperature?: number;
   geminiMaxTokens?: number;
   geminiTemperature?: number;
+  meta: AiCallMeta;
 };
+
+/**
+ * Best-effort requester for the audit row: the staff session when the call
+ * comes from a route handler, "system" from webhooks / cron / anywhere
+ * without a request cookie store (cookies() throws there — swallowed).
+ */
+async function resolveRequester(): Promise<string> {
+  try {
+    const s = await getDemoSession();
+    return s ? s.email || s.fullName || s.persona : "system";
+  } catch {
+    return "system";
+  }
+}
+
+type AttemptResult =
+  | { ok: true; text: string; model: string; usage: LlmUsage }
+  | { ok: false; error: string; model: string };
+
+/** One provider attempt, timed and recorded. */
+async function attemptEngine(
+  engine: "openai" | "gemini",
+  opts: LlmTextOpts,
+  requester: string,
+): Promise<{ r: AttemptResult; generationId: string }> {
+  const tier: AiTier = opts.meta.tier ?? "flash";
+  const t0 = Date.now();
+  let r: AttemptResult;
+  if (engine === "openai") {
+    r = await generateOpenAiText({
+      system: opts.system,
+      history: opts.history,
+      userMessage: opts.userMessage,
+      jsonMode: opts.jsonMode,
+      maxTokens: opts.maxTokens,
+      temperature: opts.temperature,
+      model: openAiModel(tier),
+    });
+  } else {
+    const geminiSystem = opts.jsonMode
+      ? `${opts.system}\n\nRespond with valid JSON only — no markdown fences.`
+      : opts.system;
+    const g = await generateGeminiText({
+      system: geminiSystem,
+      history: (opts.history || []).map((h) => ({
+        role: h.role === "assistant" ? "model" : "user",
+        text: h.content,
+      })),
+      userMessage: opts.userMessage,
+      maxTokens: opts.geminiMaxTokens ?? opts.maxTokens,
+      temperature: opts.geminiTemperature ?? opts.temperature,
+      model: geminiModel(tier),
+    });
+    r = g.ok
+      ? { ...g, text: opts.jsonMode ? stripJsonFence(g.text) : g.text }
+      : g;
+  }
+  const latencyMs = Date.now() - t0;
+  const generationId = await recordAiGeneration({
+    route: opts.meta.route,
+    promptVersion: opts.meta.promptVersion,
+    tier,
+    engine,
+    model: r.model,
+    status: r.ok ? "ok" : "error",
+    error: r.ok ? "" : r.error,
+    inputText: `${opts.system}\n---\n${(opts.history || [])
+      .map((h) => `${h.role}: ${h.content}`)
+      .join("\n")}\n---\n${opts.userMessage}`,
+    outputText: r.ok ? r.text : "",
+    promptTokens: r.ok ? r.usage.promptTokens : null,
+    completionTokens: r.ok ? r.usage.completionTokens : null,
+    latencyMs,
+    requester,
+  });
+  return { r, generationId };
+}
 
 async function callLlmText(
   opts: LlmTextOpts,
 ): Promise<
-  | { ok: true; text: string; engine: LlmEngine }
+  | { ok: true; text: string; engine: LlmEngine; generationId: string }
   | { ok: false; error: string; engine: LlmEngine }
 > {
   const engines = resolveEngineOrder();
@@ -121,42 +220,13 @@ async function callLlmText(
       engine: "none",
     };
   }
-
+  const requester = await resolveRequester();
   const errors: string[] = [];
 
   for (const engine of engines) {
-    if (engine === "openai") {
-      const r = await generateOpenAiText({
-        system: opts.system,
-        history: opts.history,
-        userMessage: opts.userMessage,
-        jsonMode: opts.jsonMode,
-        maxTokens: opts.maxTokens,
-        temperature: opts.temperature,
-      });
-      if (r.ok) return { ...r, engine: "openai" };
-      errors.push(`openai: ${r.error}`);
-      continue;
-    }
-
-    const geminiSystem = opts.jsonMode
-      ? `${opts.system}\n\nRespond with valid JSON only — no markdown fences.`
-      : opts.system;
-    const r = await generateGeminiText({
-      system: geminiSystem,
-      history: (opts.history || []).map((h) => ({
-        role: h.role === "assistant" ? "model" : "user",
-        text: h.content,
-      })),
-      userMessage: opts.userMessage,
-      maxTokens: opts.geminiMaxTokens ?? opts.maxTokens,
-      temperature: opts.geminiTemperature ?? opts.temperature,
-    });
-    if (r.ok) {
-      const text = opts.jsonMode ? stripJsonFence(r.text) : r.text;
-      return { ok: true, text, engine: "gemini" };
-    }
-    errors.push(`gemini: ${r.error}`);
+    const { r, generationId } = await attemptEngine(engine, opts, requester);
+    if (r.ok) return { ok: true, text: r.text, engine, generationId };
+    errors.push(`${engine}: ${r.error}`);
   }
 
   return {
@@ -170,7 +240,7 @@ async function callLlmJson<T>(
   opts: LlmTextOpts,
   parse: (text: string) => T | null,
 ): Promise<
-  | { ok: true; data: T; engine: LlmEngine }
+  | { ok: true; data: T; engine: LlmEngine; generationId: string }
   | { ok: false; error: string; engine: LlmEngine }
 > {
   const engines = resolveEngineOrder();
@@ -181,46 +251,21 @@ async function callLlmJson<T>(
       engine: "none",
     };
   }
-
+  const requester = await resolveRequester();
   const errors: string[] = [];
 
   for (const engine of engines) {
-    let text: string | null = null;
-
-    if (engine === "openai") {
-      const r = await generateOpenAiText({
-        system: opts.system,
-        history: opts.history,
-        userMessage: opts.userMessage,
-        jsonMode: true,
-        maxTokens: opts.maxTokens,
-        temperature: opts.temperature,
-      });
-      if (!r.ok) {
-        errors.push(`openai: ${r.error}`);
-        continue;
-      }
-      text = r.text;
-    } else {
-      const r = await generateGeminiText({
-        system: `${opts.system}\n\nRespond with valid JSON only — no markdown fences.`,
-        history: (opts.history || []).map((h) => ({
-          role: h.role === "assistant" ? "model" : "user",
-          text: h.content,
-        })),
-        userMessage: opts.userMessage,
-        maxTokens: opts.geminiMaxTokens ?? opts.maxTokens,
-        temperature: opts.geminiTemperature ?? opts.temperature,
-      });
-      if (!r.ok) {
-        errors.push(`gemini: ${r.error}`);
-        continue;
-      }
-      text = stripJsonFence(r.text);
+    const { r, generationId } = await attemptEngine(
+      engine,
+      { ...opts, jsonMode: true },
+      requester,
+    );
+    if (!r.ok) {
+      errors.push(`${engine}: ${r.error}`);
+      continue;
     }
-
-    const parsed = parse(text);
-    if (parsed) return { ok: true, data: parsed, engine };
+    const parsed = parse(r.text);
+    if (parsed) return { ok: true, data: parsed, engine, generationId };
     errors.push(`${engine}: invalid JSON in response`);
   }
 
@@ -255,6 +300,7 @@ export async function generateTutorText(opts: {
     // the visible reply — 900 was enough for OpenAI but truncated Gemini's
     // actual answer, so Gemini gets a larger budget for the same reply length.
     geminiMaxTokens: 1536,
+    meta: { route: "tutor", promptVersion: "v1" },
   });
 }
 
@@ -272,6 +318,7 @@ export async function generateExamPaperJson(opts: {
     maxTokens: 4096,
     temperature: 0.55,
     geminiMaxTokens: 4096,
+    meta: { route: "exam-paper", promptVersion: "v1" },
   });
 }
 
@@ -305,6 +352,7 @@ Include 2-4 relevant variables in the body.`;
       // "thinking" tokens on top of the visible JSON reply, or the JSON
       // comes back truncated/invalid.
       geminiMaxTokens: 2048,
+      meta: { route: "wa-template-draft", promptVersion: "v1" },
     },
     parseWaDraftJson,
   );
@@ -370,6 +418,7 @@ Language: ${opts.language === "hi" ? "Hindi (Devanagari)" : "English"}`;
       // See generateTutorText — Gemini 3.x's internal "thinking" tokens eat
       // into a small budget before the visible JSON reply is produced.
       geminiMaxTokens: 2048,
+      meta: { route: "collections-draft", promptVersion: "v1" },
     },
     parseCollectionsDraftJson,
   );
@@ -440,6 +489,7 @@ Language: ${opts.language === "hi" ? "Hindi (Devanagari)" : "English"}`;
       // See generateTutorText — Gemini 3.x's internal "thinking" tokens eat
       // into a small budget before the visible JSON reply is produced.
       geminiMaxTokens: 2048,
+      meta: { route: "lead-next-action", promptVersion: "v1" },
     },
     parseLeadNextActionJson,
   );
@@ -501,6 +551,7 @@ ${opts.metricsSummary}`;
       // See generateTutorText — Gemini 3.x's internal "thinking" tokens eat
       // into a small budget before the visible JSON reply is produced.
       geminiMaxTokens: 2048,
+      meta: { route: "leadership-digest", promptVersion: "v1" },
     },
     parseLeadershipDigestJson,
   );
@@ -617,6 +668,7 @@ Staff request: ${opts.hint}`;
       // See generateTutorText — Gemini 3.x's internal "thinking" tokens eat
       // into a small budget before the visible JSON reply is produced.
       geminiMaxTokens: 2048,
+      meta: { route: "automation-setup", promptVersion: "v1" },
     },
     parseSetup,
   );
@@ -672,6 +724,7 @@ export async function generateSchoolDocumentText(opts: {
       // See generateTutorText — give Gemini 3.x headroom over its internal
       // "thinking" tokens on top of a document-length JSON reply.
       geminiMaxTokens: 3072,
+      meta: { route: "school-document", promptVersion: "v1" },
     },
     parseSchoolDocumentJson,
   );
@@ -730,6 +783,7 @@ export async function generateStaffAgreementText(opts: {
       maxTokens: 8000,
       temperature: 0.4,
       geminiMaxTokens: 8000,
+      meta: { route: "staff-agreement", promptVersion: "v1" },
     },
     parseStaffAgreementAiJson,
   );
@@ -778,6 +832,7 @@ export async function generateStudentCertificateText(opts: {
       maxTokens: 6000,
       temperature: 0.4,
       geminiMaxTokens: 6000,
+      meta: { route: "student-certificate", promptVersion: "v1" },
     },
     parseStudentCertificateAiJson,
   );
@@ -837,6 +892,7 @@ ${opts.extractedText}`;
       // See generateTutorText — Gemini 3.x's internal "thinking" tokens eat
       // into a small budget before the visible JSON reply is produced.
       geminiMaxTokens: 2048,
+      meta: { route: "homework-grading-assist", promptVersion: "v1" },
     },
     parseHomeworkGradingAssistJson,
   );
@@ -925,6 +981,7 @@ ${uncoveredLines}`;
       maxTokens: 500,
       temperature: 0.4,
       geminiMaxTokens: 2048,
+      meta: { route: "substitution-summary", promptVersion: "v1" },
     },
     parseSubstitutionSummaryJson,
   );
@@ -961,7 +1018,7 @@ export async function generateReportRemarksJson(opts: {
   includeSubjectRemarks: boolean;
   schoolName: string;
 }): Promise<
-  | { ok: true; drafts: StudentRemarkDraft[]; engine: LlmEngine }
+  | { ok: true; drafts: StudentRemarkDraft[]; engine: LlmEngine; generationId: string }
   | { ok: false; error: string; engine: LlmEngine }
 > {
   const ids = opts.students.map((s) => s.studentId);
@@ -978,10 +1035,13 @@ export async function generateReportRemarksJson(opts: {
       temperature: 0.6,
       // Gemini 3.x thinking tokens share the budget with the visible reply.
       geminiMaxTokens: Math.min(8192, 2048 + opts.students.length * 400),
+      meta: { route: "report-remarks", promptVersion: "v1" },
     },
     (text) => parseRemarkDraftsJson(text, ids),
   );
-  if (r.ok) return { ok: true, drafts: r.data, engine: r.engine };
+  if (r.ok) {
+    return { ok: true, drafts: r.data, engine: r.engine, generationId: r.generationId };
+  }
   return {
     ok: false,
     error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI remarks",
@@ -1010,6 +1070,7 @@ Respond with JSON only: {"items":[{"id":"...","text":"..."}]} — every id given
       maxTokens: Math.min(4000, 300 + opts.items.length * 200),
       temperature: 0.2,
       geminiMaxTokens: Math.min(8192, 2048 + opts.items.length * 300),
+      meta: { route: "report-remarks-hi", promptVersion: "v1" },
     },
     (text) => {
       try {
@@ -1037,7 +1098,7 @@ export async function generateLessonPlanJson(opts: {
   input: LessonPlanAiInput;
   schoolName: string;
 }): Promise<
-  | { ok: true; draft: LessonPlanDraft; engine: LlmEngine }
+  | { ok: true; draft: LessonPlanDraft; engine: LlmEngine; generationId: string }
   | { ok: false; error: string; engine: LlmEngine }
 > {
   const r = await callLlmJson(
@@ -1054,10 +1115,13 @@ export async function generateLessonPlanJson(opts: {
       ),
       temperature: 0.5,
       geminiMaxTokens: Math.min(8192, 3000 + opts.input.periods * 400),
+      meta: { route: "lesson-plan", promptVersion: "v1" },
     },
     parseLessonPlanJson,
   );
-  if (r.ok) return { ok: true, draft: r.data, engine: r.engine };
+  if (r.ok) {
+    return { ok: true, draft: r.data, engine: r.engine, generationId: r.generationId };
+  }
   return {
     ok: false,
     error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI lesson plans",

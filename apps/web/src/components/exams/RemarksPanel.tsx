@@ -42,6 +42,7 @@ import {
   ErpTableHead,
   ErpTableShell,
 } from "@/components/ui/erp-roster";
+import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 
 type RowState = {
   studentId: string;
@@ -107,6 +108,8 @@ export function RemarksPanel(props: {
   const [dirty, setDirty] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [engineNote, setEngineNote] = useState<string>("");
+  /** ai_generations ids behind the drafts currently on screen (unsaved) */
+  const [pendingGenerationIds, setPendingGenerationIds] = useState<string[]>([]);
 
   const sheet = useMemo(
     () => (term && sectionId ? findMarkSheet(ay, term.id, sectionId) : undefined),
@@ -260,11 +263,15 @@ export function RemarksPanel(props: {
         hindiEngine?: string;
         model?: string;
         generatedAt?: string;
+        generationIds?: string[];
         warnings?: string[];
       };
       if (!res.ok || !data.ok || !data.drafts) {
         props.onError(data.error || "AI remarks failed");
         return;
+      }
+      if (Array.isArray(data.generationIds)) {
+        setPendingGenerationIds((prev) => [...prev, ...data.generationIds!]);
       }
       const byId = new Map(data.drafts.map((d) => [d.studentId, d]));
       const generatedAt = data.generatedAt || new Date().toISOString();
@@ -386,6 +393,20 @@ export function RemarksPanel(props: {
       return;
     }
     setDirty(false);
+    if (pendingGenerationIds.length) {
+      // One outcome per generation batch: "edited" if any AI text was touched.
+      const anyEdited = rows.some(
+        (r) =>
+          r.source === "ai_edited" || r.subjects.some((s) => s.source === "ai_edited"),
+      );
+      reportAiOutcome({
+        ids: pendingGenerationIds,
+        outcome: anyEdited ? "edited" : "accepted",
+        targetType: "exam_desk_sheet",
+        targetId: `${term.id}:${sectionId}`,
+      });
+      setPendingGenerationIds([]);
+    }
     props.onSaved();
     props.onFlash(`Remarks saved · ${overallRemarks.length} student${overallRemarks.length === 1 ? "" : "s"}`);
   }

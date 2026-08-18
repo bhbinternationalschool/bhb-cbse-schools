@@ -84,6 +84,8 @@ export async function POST(req: Request) {
     model:
       r.engine === "gemini" ? geminiModel() : r.engine === "openai" ? openAiModel() : "",
     generatedAt: new Date().toISOString(),
+    /** ai_generations row — the editor reports accepted/edited/rejected against it */
+    generationId: r.generationId,
     draft: r.draft,
   });
 }

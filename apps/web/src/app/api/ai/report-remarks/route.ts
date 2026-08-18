@@ -160,6 +160,7 @@ export async function POST(req: Request) {
   // 1. English drafts, batched.
   const drafts: StudentRemarkDraft[] = [];
   const errors: string[] = [];
+  const generationIds: string[] = [];
   let engine = "none";
   for (const batch of chunkStudents(students)) {
     const r = await generateReportRemarksJson({
@@ -173,6 +174,7 @@ export async function POST(req: Request) {
       continue;
     }
     engine = r.engine;
+    generationIds.push(r.generationId);
     drafts.push(...r.drafts);
   }
   if (drafts.length === 0) {
@@ -225,6 +227,8 @@ export async function POST(req: Request) {
     model:
       engine === "gemini" ? geminiModel() : engine === "openai" ? openAiModel() : "",
     generatedAt,
+    /** ai_generations rows (one per batch) — the Remarks tab reports outcomes against them */
+    generationIds,
     drafts,
     missing,
     warnings: errors,

@@ -15,6 +15,7 @@ import {
   type TeachingState,
 } from "@/lib/teaching";
 import type { LessonPlanDraft, LessonPlanLanguage } from "@/lib/lessonPlanAi";
+import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import { AddResourceForm, ResourceList } from "@/components/teaching/ResourceLinks";
 import { VoiceDictateButton } from "@/components/teaching/VoiceDictateButton";
 
@@ -32,6 +33,8 @@ type Draft = {
   /** Provenance of the text fields as they stand in the editor */
   source: LessonPlanSource;
   aiModel: string;
+  /** ai_generations id of the draft on screen; "" when typed or already reported */
+  generationId: string;
 };
 
 /** The fields the AI drafts; a change to any of them after an AI draft flips ai → ai_edited. */
@@ -57,6 +60,7 @@ function emptyDraft(): Draft {
     homework: "",
     source: "manual",
     aiModel: "",
+    generationId: "",
   };
 }
 
@@ -74,6 +78,7 @@ function draftFrom(plan: LessonPlan): Draft {
     homework: plan.homework,
     source: plan.source,
     aiModel: plan.aiModel,
+    generationId: "",
   };
 }
 
@@ -197,8 +202,24 @@ export function LessonPlansPanel(props: {
     });
     if (!result.ok) return props.onError(result.error);
     onChange(result.value.state);
+    if (draft.generationId) {
+      reportAiOutcome({
+        ids: [draft.generationId],
+        outcome: draft.source === "ai_edited" ? "edited" : "accepted",
+        targetType: "lesson_plan",
+        targetId: result.value.plan.id,
+      });
+    }
     setDraft(null);
     props.onNotice("Lesson plan saved");
+  }
+
+  /** Editor closed with an unsaved AI draft on screen → rejected. */
+  function discardDraft() {
+    if (draft?.generationId) {
+      reportAiOutcome({ ids: [draft.generationId], outcome: "rejected", targetType: "lesson_plan" });
+    }
+    setDraft(null);
   }
 
   const [aiBusy, setAiBusy] = useState(false);
@@ -248,6 +269,7 @@ export function LessonPlansPanel(props: {
         error?: string;
         draft?: LessonPlanDraft;
         model?: string;
+        generationId?: string;
       };
       if (!res.ok || !body.draft) {
         props.onError(body.error || `AI draft failed (${res.status})`);
@@ -264,7 +286,12 @@ export function LessonPlansPanel(props: {
         homework: d.homework,
         source: "ai",
         aiModel: body.model || "",
+        generationId: body.generationId || "",
       });
+      // Re-drafting over an unsaved draft: the earlier one was rejected.
+      if (draft.generationId && draft.generationId !== body.generationId) {
+        reportAiOutcome({ ids: [draft.generationId], outcome: "rejected", targetType: "lesson_plan" });
+      }
       props.onNotice(
         `Draft ready${body.model ? ` · ${body.model}` : ""} — review, edit, then save`,
       );
@@ -309,7 +336,7 @@ export function LessonPlansPanel(props: {
       {canEdit ? (
         <button
           type="button"
-          onClick={() => setDraft(draft ? null : emptyDraft())}
+          onClick={() => (draft ? discardDraft() : setDraft(emptyDraft()))}
           className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--primary-foreground)]"
         >
           {draft ? "Close editor" : "New lesson plan"}
@@ -322,7 +349,7 @@ export function LessonPlansPanel(props: {
           setDraft={setDraft}
           unitOptions={unitOptions}
           onSave={save}
-          onCancel={() => setDraft(null)}
+          onCancel={discardDraft}
           ai={{
             busy: aiBusy,
             language: aiLanguage,

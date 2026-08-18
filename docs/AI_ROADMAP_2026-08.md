@@ -141,13 +141,13 @@ Model: **Gemini Flash multimodal** — one call does OCR + structuring (cheaper 
 | Foundation | Status | Required |
 |---|---|---|
 | Centralised server-side AI layer, no frontend API calls | ✅ | — |
-| Failover between providers | ✅ | Add per-use-case model selection (`{ tier: "flash"\|"pro" }`) so §1b/1c can request Pro without changing the global default |
+| Failover between providers | ✅ | Per-call `meta.tier: "flash"\|"pro"` (2026-08-18) — `geminiModel(tier)` / `openAiModel(tier)`, pro models via `GEMINI_PRO_MODEL` (default `gemini-2.5-pro`) / `OPENAI_PRO_MODEL` (default `gpt-4o`). No route requests pro yet; §1b will |
 | Human-in-the-loop | 🟡 | All staff-facing generators land in an editor before save/print ✅. **Exception: WA bot LLM fallback auto-replies to parents** — add a confidence gate + "escalate to staff" default for anything not grounded by RAG |
 | Language preference per family | ❌ | `Household.preferredLanguage` (see §2) |
-| AI audit trail | 🟡 | `aiDrafted` on certificates/agreements, `source` on questions. **Required:** one `ai_generations` table (tenant, route, model, prompt version, input hash, output hash, tokens, latency, requester, accepted/edited/rejected, target record) written by the router — makes every generator auditable in one place; report-card remarks and parent messages must reference it |
+| AI audit trail | ✅ (2026-08-18) | `ai_generations` (migration `20260818150000`) written by the router for **every** attempt on every route: route, prompt_version, tier, engine/model, status/error, input+output sha256 (no text), tokens, latency, requester (session email or `system`). `POST /api/ai/generations/outcome` closes the loop — Remarks tab and Lesson plans editor report accepted / edited / rejected + target record. Other generators record attempts but don't yet report outcomes |
 | Rate limiting / quotas | ❌ | Per-user + per-tenant daily token budget in the router (reuse `mapsRateLimit.ts` pattern) |
 | Caching | ❌ | Hash(prompt) → response for deterministic drafts (certificates, lesson plans); skip for personalised outputs |
-| Prompt versioning | ❌ | Move prompts from inline literals to `lib/prompts/<route>.vN.ts`, record version in `ai_generations` |
+| Prompt versioning | 🟡 | Every router call carries `meta.promptVersion` (all "v1" today), recorded in `ai_generations`; bump it when a route's prompt changes. Prompts themselves still inline in `aiLlm.server.ts` / `lib/*Ai.ts` — moving them to `lib/prompts/` is cosmetic now that the version is tracked |
 | Data quality for §1/§3 | ❌ | Item-level scores; competency codes on syllabus units and questions |
 | Sarvam adapter | ❌ | `lib/sarvam.server.ts` (translate, STT, TTS) + `SARVAM_API_KEY` in Secret Manager; router gets a `translate()` and `speech` capability separate from `generateText` |
 
@@ -177,7 +177,7 @@ Why Gemini as default: cheapest at this volume, same GCP project/billing/IAM as 
 
 1. ~~**Report-card remark generator** (§1a)~~ — shipped 2026-08-18 (`914b421`).
 2. ~~**AI lesson plans** (§3.1)~~ — shipped 2026-08-18.
-3. **`ai_generations` audit table + prompt versioning + per-route model tier** (§6) — 1–2 days, do before 1 goes to parents.
+3. ~~**`ai_generations` audit table + prompt versioning + per-route model tier** (§6)~~ — shipped 2026-08-18.
 4. **Household language preference + Sarvam translate adapter** (§2.1) — 1–2 days, unlocks regional comms everywhere.
 5. **PTM per-student brief** (§2.2) — 1 day.
 6. **Competency question types + LO codes on syllabus** (§1b) — 3–4 days.
