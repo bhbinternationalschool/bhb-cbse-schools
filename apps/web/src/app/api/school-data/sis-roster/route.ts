@@ -44,7 +44,8 @@ export async function GET(req: Request) {
       : bundle.students,
     householdCount: bundle.households.length,
     studentCount: bundle.students.length,
-    updatedAt: meta?.updatedAt || new Date().toISOString(),
+    // Unknown meta is reported as "", not as "now" (see desk-slice route).
+    updatedAt: meta?.updatedAt || "",
     meta,
   });
 }

@@ -29,12 +29,22 @@ export async function GET(req: Request, ctx: RouteCtx) {
   const auth = await requireStaffPermission(req, rbacModule, "view");
   if (!auth.ok) return auth.response;
 
-  const { bundle, meta } = await fetchDeskSliceFromDb(id);
+  const { bundle, meta, ok, error } = await fetchDeskSliceFromDb(id);
+  if (!ok) {
+    // Unknown, not empty. Returning ok:true with an empty bundle stamped
+    // "now" made every client take the empty desk as newer than its cache.
+    return NextResponse.json(
+      { ok: false, error: error || "Desk read failed" },
+      { status: 503 },
+    );
+  }
   return NextResponse.json({
     ok: true,
     ...bundle,
     rowCount: meta?.rowCount ?? 0,
-    updatedAt: meta?.updatedAt || new Date().toISOString(),
+    // No sync meta yet = never written; report an empty stamp so the client
+    // decides on row counts, not on a timestamp we invented.
+    updatedAt: meta?.updatedAt || "",
     meta,
   });
 }
@@ -81,6 +91,8 @@ export async function POST(req: Request, ctx: RouteCtx) {
   return NextResponse.json({
     ok: true,
     rowCount: meta?.rowCount ?? 0,
-    updatedAt: new Date().toISOString(),
+    // The revision the desk actually recorded, not a fresh client-facing
+    // clock reading that would differ from the stored one.
+    updatedAt: meta?.updatedAt || new Date().toISOString(),
   });
 }

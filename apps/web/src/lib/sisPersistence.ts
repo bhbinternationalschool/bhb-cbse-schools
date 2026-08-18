@@ -171,12 +171,9 @@ export async function ensureSisHydrated(): Promise<boolean> {
   if (!sisRemoteEnabled()) return false;
   if (isDeskHydrated(MODULE)) return false;
 
-  const {
-    hydrateSisDeskFromDb,
-    scheduleSisDeskSync,
-    sisNormalizedSyncEnabled,
-    sisSyncRecentlyPushed,
-  } = await import("@/lib/sisNormalizedClient");
+  const { hydrateSisDeskFromDb, sisSyncRecentlyPushed } = await import(
+    "@/lib/sisNormalizedClient"
+  );
 
   if (typeof window !== "undefined" && sisSyncRecentlyPushed()) {
     markDeskHydrated(MODULE);

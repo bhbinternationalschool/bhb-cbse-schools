@@ -512,7 +512,11 @@ export async function rebuildFeeOpenDuesCache(
   const { data, error } = await sb.rpc("fee_desk_replace_open_dues", {
     p_tenant_id: tenantId,
     p_academic_year_code: ay,
-    p_rows: rows.map(({ tenant_id: _t, academic_year_code: _a, updated_at: _u, ...r }) => r),
+    p_rows: rows.map((r) => {
+      const { tenant_id, academic_year_code, updated_at, ...rest } = r;
+      void tenant_id; void academic_year_code; void updated_at;
+      return rest;
+    }),
   });
   if (error) {
     console.warn("[fees] open-dues rebuild failed", error.message);

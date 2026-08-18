@@ -1,5 +1,13 @@
 /**
  * Automated desk cutover — backfill desk from blobs, seed empty defaults, reconcile.
+ *
+ * Backfill is strictly first-time migration: it runs only when the desk has
+ * ZERO rows and the legacy blob has some. Until 2026-08-18 the primary
+ * modules backfilled whenever blobRows > deskRows, and the blobs have been
+ * frozen since 2026-08-05/07 (desk-as-truth skips blob push) — so the first
+ * deletion of a lead / exam term after that date would have reverted the
+ * whole module to the frozen snapshot and pruned everything newer, on the
+ * next login of any browser. Admissions sat at 919 = 919 and exams at 4 = 4.
  */
 
 import type { AdmissionsState } from "@/lib/admissions";
@@ -36,9 +44,8 @@ import {
   fetchHomeworkDeskFromDb,
   pushHomeworkDeskToDb,
 } from "@/lib/homeworkNormalized.server";
-import type { MastersState } from "@/lib/masters";
 import { defaultRbacState } from "@/lib/rbac";
-import { defaultMasters, emptyMastersShell } from "@/lib/masters";
+import { emptyMastersShell } from "@/lib/masters";
 import {
   fetchMastersDeskFromDb,
   pushMastersDeskToDb,
@@ -121,8 +128,10 @@ export type EnsureDeskResult = {
 
 type BlobState = { version?: number } & Record<string, unknown>;
 
+/** -1 = the desk could not be read; callers must not treat that as empty. */
 async function deskSliceRows(id: DeskModuleId): Promise<number> {
-  const { bundle } = await fetchDeskSliceFromDb(id);
+  const { bundle, ok } = await fetchDeskSliceFromDb(id);
+  if (!ok) return -1;
   return countDeskSliceStateRows(id, bundle);
 }
 
@@ -174,7 +183,7 @@ async function ensurePrimaryModule(id: DeskModuleId): Promise<EnsureDeskAction> 
   if (deskSliceDef(id)) {
     const deskRows = await deskSliceRows(id);
     const blobRows = await blobSliceRows(id, mod.blobTable);
-    if (blobRows > deskRows) {
+    if (deskRows === 0 && blobRows > 0) {
       const ok = await backfillSliceModule(id);
       return {
         module: id,
@@ -201,7 +210,7 @@ async function ensurePrimaryModule(id: DeskModuleId): Promise<EnsureDeskAction> 
       const deskRows = state.leads.length;
       const blob = await fetchServerBlob<AdmissionsState>("admissions_state");
       const blobRows = blob.state?.leads?.length ?? 0;
-      if (blobRows > deskRows && blob.state) {
+      if (deskRows === 0 && blobRows > 0 && blob.state) {
         const ok = (await pushAdmissionDeskToDb(blob.state)).ok;
         return {
           module: id,
@@ -216,7 +225,7 @@ async function ensurePrimaryModule(id: DeskModuleId): Promise<EnsureDeskAction> 
       const deskRows = desk.vouchers.length;
       const blob = await fetchServerBlob<FeesState>("fees_state");
       const blobRows = blob.state?.vouchers?.length ?? 0;
-      if (blobRows > deskRows && blob.state) {
+      if (deskRows === 0 && blobRows > 0 && blob.state) {
         const ok = (await pushFeeDeskToDb(blob.state)).ok;
         return {
           module: id,
@@ -227,7 +236,12 @@ async function ensurePrimaryModule(id: DeskModuleId): Promise<EnsureDeskAction> 
       break;
     }
     case "masters": {
-      const { meta } = await fetchMastersDeskFromDb();
+      const { meta, readFailed } = await fetchMastersDeskFromDb();
+      // A failed read is unknown, not "no masters" — seeding an empty shell
+      // over a timed-out read is the exact 2026-08-10 orphaning path.
+      if (readFailed) {
+        return { module: id, action: "skip", detail: "desk read failed" };
+      }
       const deskRows = meta?.sliceCount ?? 0;
       if (deskRows === 0) {
         const ok = (await pushMastersDeskToDb(emptyMastersShell())).ok;
@@ -237,26 +251,16 @@ async function ensurePrimaryModule(id: DeskModuleId): Promise<EnsureDeskAction> 
           detail: "empty masters shell",
         };
       }
-      const blob = await fetchServerBlob<{ masters?: MastersState }>(
-        "school_mirror_state",
-      );
-      const blobRows = blob.state?.masters?.classes?.length ?? 0;
-      if (blobRows > deskRows && deskRows > 0) {
-        const state = blob.state?.masters ?? emptyMastersShell();
-        const ok = (await pushMastersDeskToDb(state)).ok;
-        return {
-          module: id,
-          action: ok ? "backfill" : "skip",
-          detail: `masters mirror → desk`,
-        };
-      }
+      // Desk exists → it is the truth. The school_mirror_state masters blob
+      // is a frozen legacy copy and is never written back over the desk.
       break;
     }
     case "payments": {
       const desk = await fetchPaymentDeskFromDb();
       const blob = await fetchServerBlob<PaymentsState>("payments_state");
       if (
-        (blob.state?.links?.length ?? 0) > desk.links.length &&
+        desk.links.length === 0 &&
+        (blob.state?.links?.length ?? 0) > 0 &&
         blob.state
       ) {
         const ok = (await pushPaymentDeskToDb(blob.state)).ok;
@@ -269,7 +273,7 @@ async function ensurePrimaryModule(id: DeskModuleId): Promise<EnsureDeskAction> 
       const blob = await fetchServerBlob<AttendanceState>("attendance_state");
       const dr = desk.registers.length;
       const br = blob.state?.registers?.length ?? 0;
-      if (br > dr && blob.state) {
+      if (dr === 0 && br > 0 && blob.state) {
         const ok = (await pushAttendanceDeskToDb(blob.state)).ok;
         return { module: id, action: ok ? "backfill" : "skip", detail: "registers" };
       }
@@ -280,7 +284,7 @@ async function ensurePrimaryModule(id: DeskModuleId): Promise<EnsureDeskAction> 
       const blob = await fetchServerBlob<ExamsState>("exams_state");
       const dr = bundle.terms.length;
       const br = blob.state?.terms?.length ?? 0;
-      if (br > dr && blob.state) {
+      if (dr === 0 && br > 0 && blob.state) {
         const ok = (await pushExamDeskToDb(blob.state)).ok;
         return { module: id, action: ok ? "backfill" : "skip", detail: "terms" };
       }
@@ -291,7 +295,7 @@ async function ensurePrimaryModule(id: DeskModuleId): Promise<EnsureDeskAction> 
       const blob = await fetchServerBlob<HomeworkState>("homework_state");
       const dr = bundle.posts.length;
       const br = blob.state?.posts?.length ?? 0;
-      if (br > dr && blob.state) {
+      if (dr === 0 && br > 0 && blob.state) {
         const ok = (await pushHomeworkDeskToDb(blob.state)).ok;
         return { module: id, action: ok ? "backfill" : "skip", detail: "posts" };
       }
@@ -302,7 +306,7 @@ async function ensurePrimaryModule(id: DeskModuleId): Promise<EnsureDeskAction> 
       const blob = await fetchServerBlob<PtmState>("ptm_state");
       const dr = bundle.events.length;
       const br = blob.state?.events?.length ?? 0;
-      if (br > dr && blob.state) {
+      if (dr === 0 && br > 0 && blob.state) {
         const ok = (await pushPtmDeskToDb(blob.state)).ok;
         return { module: id, action: ok ? "backfill" : "skip", detail: "events" };
       }
@@ -313,7 +317,7 @@ async function ensurePrimaryModule(id: DeskModuleId): Promise<EnsureDeskAction> 
       const blob = await fetchServerBlob<TransportState>("transport_state");
       const dr = bundle.routes.length;
       const br = blob.state?.routes?.length ?? 0;
-      if (br > dr && blob.state) {
+      if (dr === 0 && br > 0 && blob.state) {
         const ok = (await pushTransportDeskToDb(blob.state)).ok;
         return { module: id, action: ok ? "backfill" : "skip", detail: "routes" };
       }
@@ -324,7 +328,7 @@ async function ensurePrimaryModule(id: DeskModuleId): Promise<EnsureDeskAction> 
       const blob = await fetchServerBlob<TrustState>("trust_state");
       const dr = bundle.projects.length;
       const br = blob.state?.projects?.length ?? 0;
-      if (br > dr && blob.state) {
+      if (dr === 0 && br > 0 && blob.state) {
         const ok = (await pushTrustDeskToDb(blob.state)).ok;
         return { module: id, action: ok ? "backfill" : "skip", detail: "projects" };
       }
@@ -335,7 +339,7 @@ async function ensurePrimaryModule(id: DeskModuleId): Promise<EnsureDeskAction> 
       const blob = await fetchServerBlob<VaultState>("vault_state");
       const dr = bundle.documents.length;
       const br = blob.state?.documents?.length ?? 0;
-      if (br > dr && blob.state) {
+      if (dr === 0 && br > 0 && blob.state) {
         const ok = (await pushVaultDeskToDb(blob.state)).ok;
         return { module: id, action: ok ? "backfill" : "skip", detail: "documents" };
       }
@@ -346,7 +350,7 @@ async function ensurePrimaryModule(id: DeskModuleId): Promise<EnsureDeskAction> 
       const blob = await fetchServerBlob<RteState>("rte_state");
       const dr = bundle.seats.length;
       const br = blob.state?.seats?.length ?? 0;
-      if (br > dr && blob.state) {
+      if (dr === 0 && br > 0 && blob.state) {
         const ok = (await pushRteDeskToDb(blob.state)).ok;
         return { module: id, action: ok ? "backfill" : "skip", detail: "seats" };
       }
@@ -357,7 +361,7 @@ async function ensurePrimaryModule(id: DeskModuleId): Promise<EnsureDeskAction> 
       const blob = await fetchServerBlob<TimetableState>("timetable_state");
       const dr = bundle.grids.length;
       const br = blob.state?.grids?.length ?? 0;
-      if (br > dr && blob.state) {
+      if (dr === 0 && br > 0 && blob.state) {
         const ok = (await pushTimetableDeskToDb(blob.state)).ok;
         return { module: id, action: ok ? "backfill" : "skip", detail: "grids" };
       }
@@ -369,7 +373,7 @@ async function ensurePrimaryModule(id: DeskModuleId): Promise<EnsureDeskAction> 
       const dr = bundle.notices.length + bundle.news.length;
       const br =
         (blob.state?.notices?.length ?? 0) + (blob.state?.news?.length ?? 0);
-      if (br > dr && blob.state) {
+      if (dr === 0 && br > 0 && blob.state) {
         const ok = (await pushSchoolCommsDeskToDb(blob.state)).ok;
         return { module: id, action: ok ? "backfill" : "skip", detail: "comms" };
       }
@@ -380,7 +384,7 @@ async function ensurePrimaryModule(id: DeskModuleId): Promise<EnsureDeskAction> 
       const blob = await fetchServerBlob<NotificationsState>("notifications_state");
       const dr = bundle.items.length;
       const br = blob.state?.items?.length ?? 0;
-      if (br > dr && blob.state) {
+      if (dr === 0 && br > 0 && blob.state) {
         const ok = (await pushNotificationsDeskToDb(blob.state)).ok;
         return { module: id, action: ok ? "backfill" : "skip", detail: "items" };
       }
@@ -391,7 +395,7 @@ async function ensurePrimaryModule(id: DeskModuleId): Promise<EnsureDeskAction> 
       const blob = await fetchServerBlob<StudentLeaveState>("student_leave_state");
       const dr = bundle.requests.length;
       const br = blob.state?.requests?.length ?? 0;
-      if (br > dr && blob.state) {
+      if (dr === 0 && br > 0 && blob.state) {
         const ok = (await pushStudentLeaveDeskToDb(blob.state)).ok;
         return { module: id, action: ok ? "backfill" : "skip", detail: "requests" };
       }
@@ -402,7 +406,7 @@ async function ensurePrimaryModule(id: DeskModuleId): Promise<EnsureDeskAction> 
       const blob = await fetchServerBlob<WaBotPersistBundle>("wa_bot_threads_state");
       const dr = Object.keys(bundle).length;
       const br = blob.state ? Object.keys(blob.state).length : 0;
-      if (br > dr && blob.state) {
+      if (dr === 0 && br > 0 && blob.state) {
         const ok = (await pushWaThreadsDeskToDb(blob.state)).ok;
         return { module: id, action: ok ? "backfill" : "skip", detail: "slices" };
       }
@@ -431,7 +435,7 @@ export async function ensureDeskCutoverServer(): Promise<EnsureDeskResult> {
     if (actions.some((a) => a.module === def.id)) continue;
     const deskRows = await deskSliceRows(def.id);
     const blobRows = await blobSliceRows(def.id, def.blobTable);
-    if (blobRows > deskRows) {
+    if (deskRows === 0 && blobRows > 0) {
       const ok = await backfillSliceModule(def.id);
       actions.push({
         module: def.id,
