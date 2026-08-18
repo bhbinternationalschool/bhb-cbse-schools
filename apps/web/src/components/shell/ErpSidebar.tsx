@@ -73,7 +73,7 @@ function SidebarPanel({
 
   return (
     <aside
-      className="erp-sidebar flex h-full w-[min(18rem,88vw)] flex-col border-r border-[var(--border)] bg-[rgba(255,255,255,0.98)] backdrop-blur-md lg:w-[17.5rem]"
+      className="erp-sidebar flex h-full w-[min(18rem,88vw)] flex-col border-r border-[var(--border)] bg-[var(--shell-sidebar-bg)] backdrop-blur-md lg:w-[17.5rem]"
       aria-label="Module navigation"
     >
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--border)] px-3 py-3">

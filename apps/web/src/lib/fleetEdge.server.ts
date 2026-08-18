@@ -183,7 +183,7 @@ export function parseFleetEdgeTelemetry(raw: unknown): FleetEdgeTelemetryPayload
     crankOn: bool(raw.crankOn),
     speed: num(raw.speed),
     odometer: num(raw.odometer),
-    fuelLevelPercent: num(raw.fuelLevelPercent),
+    fuelLevelPercent: num(raw.fuelLevelPercent ?? raw.primaryFuelLevel),
     vehicleStatus: str(raw.vehicleStatus),
     engineRunHour: num(raw.engineRunHour),
     currentGear: num(raw.currentGear),

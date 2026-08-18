@@ -286,6 +286,13 @@ export function FleetEdgeReport({ canEdit }: { canEdit: boolean }) {
     if (failedNotif.length > 0) {
       items.push({ kind: "warning", text: `${failedNotif.length} escalation message${failedNotif.length === 1 ? "" : "s"} failed to send in the last 7 days`, tab: "notifications" });
     }
+    if (data.totals.vehicles > 0 && data.totals.telemetryVehicles === 0) {
+      items.push({
+        kind: "info",
+        text: "Odometer, live GPS and fuel level are not available yet: Tata Fleet Edge has not enabled the Basic Push (telemetry) feed for these vehicles — only the 30-minute summaries and alerts are arriving. Ask Fleet Edge support to subscribe the fleet's Basic Push webhook to /api/transport/fleet-edge/live.",
+        tab: "vehicles",
+      });
+    }
     if (data.notifyMobiles.length === 0) {
       items.push({ kind: "info", text: "No SOS escalation number is configured (FLEET_EDGE_SOS_NOTIFY_MOBILE) — SOS alerts are recorded but nobody is messaged", tab: "notifications" });
     }
@@ -428,7 +435,7 @@ export function FleetEdgeReport({ canEdit }: { canEdit: boolean }) {
 
   function exportSummary() {
     if (!data) return;
-    const headers = ["Vehicle", "VIN", "Model", "Status", "Score", "Distance km", "Fuel L", "km/L", "Avg speed", "Harsh accel", "Harsh brake", "Rash turn", "Over-speed", "SOS", "Critical faults", "Warnings", "Service due", "Last seen"];
+    const headers = ["Vehicle", "VIN", "Model", "Status", "Score", "Distance km", "Fuel L", "km/L", "Avg speed", "Harsh accel", "Harsh brake", "Rash turn", "Over-speed", "SOS", "Critical faults", "Warnings", "Service due", "Odometer", "Last seen"];
     downloadExcelCsv({
       title: `Fleet Edge report ${fromDate} to ${toDate}`,
       fileBaseName: `fleet-edge-report-${fromDate}-${toDate}`,
@@ -440,7 +447,7 @@ export function FleetEdgeReport({ canEdit }: { canEdit: boolean }) {
           Math.round(v.distanceTravelledKm * 10) / 10, Math.round(v.fuelConsumed * 10) / 10,
           v.fuelConsumed > 0 ? Math.round((v.distanceTravelledKm / v.fuelConsumed) * 10) / 10 : "",
           spd != null ? Math.round(spd * 10) / 10 : "",
-          v.haCount, v.hbCount, v.rtCount, v.overSpeedCount, v.sosCount, v.faultCritical, v.faultWarning, v.serviceDue || "", fmtDateTime(v.lastSeenAt),
+          v.haCount, v.hbCount, v.rtCount, v.overSpeedCount, v.sosCount, v.faultCritical, v.faultWarning, v.serviceDue || "", v.lastTelemetry?.odometer ?? "", fmtDateTime(v.lastSeenAt),
         ];
         return Object.fromEntries(headers.map((h, i) => [h, cells[i]]));
       }),
@@ -455,11 +462,11 @@ export function FleetEdgeReport({ canEdit }: { canEdit: boolean }) {
         <div className="text-[11px] text-[var(--muted)]">{v.vehicleRef}</div>
       </div>
     ) },
-    { key: "model", header: "Model / year", render: (v) => canEdit ? (
-      <div className="flex items-center gap-1">
-        <input className={`${field} h-8 w-28`} placeholder="Model" value={identityDrafts[v.vehicleRef]?.model ?? v.identity?.model ?? ""} onChange={(e) => setIdentityDrafts((p) => ({ ...p, [v.vehicleRef]: { model: e.target.value, year: p[v.vehicleRef]?.year ?? (v.identity?.year != null ? String(v.identity.year) : "") } }))} />
-        <input className={`${field} h-8 w-16`} placeholder="Year" inputMode="numeric" value={identityDrafts[v.vehicleRef]?.year ?? (v.identity?.year != null ? String(v.identity.year) : "")} onChange={(e) => setIdentityDrafts((p) => ({ ...p, [v.vehicleRef]: { model: p[v.vehicleRef]?.model ?? v.identity?.model ?? "", year: e.target.value } }))} />
-        {identityDrafts[v.vehicleRef] ? <Button size="sm" variant="outline" disabled={identitySaving === v.vehicleRef} onClick={() => void saveIdentity(v)}>{identitySaving === v.vehicleRef ? "…" : "Save"}</Button> : null}
+    { key: "model", header: "Model / year", className: "min-w-[420px]", render: (v) => canEdit ? (
+      <div className="flex items-center gap-2">
+        <input className={`${field} h-9 w-52 min-w-[13rem] text-sm`} placeholder="Model (e.g. Starbus 32)" title="Vehicle model" value={identityDrafts[v.vehicleRef]?.model ?? v.identity?.model ?? ""} onChange={(e) => setIdentityDrafts((p) => ({ ...p, [v.vehicleRef]: { model: e.target.value, year: p[v.vehicleRef]?.year ?? (v.identity?.year != null ? String(v.identity.year) : "") } }))} />
+        <input className={`${field} h-9 w-24 min-w-[6rem] text-sm tabular-nums`} placeholder="Year" title="Year of manufacture" inputMode="numeric" maxLength={4} value={identityDrafts[v.vehicleRef]?.year ?? (v.identity?.year != null ? String(v.identity.year) : "")} onChange={(e) => setIdentityDrafts((p) => ({ ...p, [v.vehicleRef]: { model: p[v.vehicleRef]?.model ?? v.identity?.model ?? "", year: e.target.value } }))} />
+        <Button size="sm" variant={identityDrafts[v.vehicleRef] ? "default" : "outline"} disabled={identitySaving === v.vehicleRef || !identityDrafts[v.vehicleRef]} onClick={() => void saveIdentity(v)}>{identitySaving === v.vehicleRef ? "Saving…" : "Save"}</Button>
       </div>
     ) : <span>{v.identity?.model || "—"}{v.identity?.year ? ` (${v.identity.year})` : ""}</span>, value: (v) => v.identity?.model || "" },
     { key: "status", header: "Status", sortable: true, value: (v) => v.bucket, render: (v) => chip(v.bucket === "offline" ? "muted" : v.bucket === "low" ? "critical" : v.bucket === "average" ? "warning" : "ok", bucketLabel(v.bucket)) },
@@ -472,6 +479,7 @@ export function FleetEdgeReport({ canEdit }: { canEdit: boolean }) {
     { key: "sos", header: "SOS", align: "right", sortable: true, value: (v) => v.sosCount, render: (v) => v.sosCount > 0 ? chip("critical", String(v.sosCount)) : <span className="text-[var(--muted)]">0</span> },
     { key: "faults", header: "Faults", align: "right", sortable: true, value: (v) => v.faultCritical * 100 + v.faultWarning, render: (v) => <span className="tabular-nums">{v.faultCritical > 0 ? chip("critical", `${v.faultCritical} crit`) : null} {v.faultWarning > 0 ? chip("warning", `${v.faultWarning} warn`) : null}{v.faultCritical + v.faultWarning === 0 ? <span className="text-[var(--muted)]">—</span> : null}</span> },
     { key: "service", header: "Service", sortable: true, value: (v) => v.serviceDue || "", render: (v) => isServiceDue(v.serviceDue) ? chip("warning", v.serviceDue || "Due") : v.serviceDue && v.serviceDue.toLowerCase() === "not due" ? chip("ok", "Not due") : <span className="text-[var(--muted)]">—</span> },
+    { key: "odo", header: "Odometer", align: "right", sortable: true, value: (v) => v.lastTelemetry?.odometer ?? null, render: (v) => v.lastTelemetry?.odometer != null ? <span className="tabular-nums">{Math.round(v.lastTelemetry.odometer).toLocaleString("en-IN")} km</span> : <span className="text-[var(--muted)]" title="Odometer comes only in Fleet Edge's Basic Push (telemetry) feed, which this vehicle has not sent yet">—</span> },
     { key: "seen", header: "Last seen", sortable: true, value: (v) => v.lastSeenAt || "", render: (v) => (
       <div className="text-xs">
         <div>{fmtDateTime(v.lastSeenAt)}</div>
@@ -623,7 +631,7 @@ export function FleetEdgeReport({ canEdit }: { canEdit: boolean }) {
 
       {tab === "vehicles" ? (
         <ErpPanel title="Vehicle summary" description="One row per vehicle for the selected range. Sort any column; export as CSV.">
-          <DataTable columns={vehicleCols} rows={vehicles} rowKey={(v) => v.vehicleRef} loading={loading} minWidth="min-w-[1180px]" exportFileBaseName={`fleet-vehicles-${fromDate}-${toDate}`} exportTitle="Fleet Edge vehicles" emptyTitle="No vehicles" />
+          <DataTable columns={vehicleCols} rows={vehicles} rowKey={(v) => v.vehicleRef} loading={loading} minWidth="min-w-[1400px]" exportFileBaseName={`fleet-vehicles-${fromDate}-${toDate}`} exportTitle="Fleet Edge vehicles" emptyTitle="No vehicles" />
         </ErpPanel>
       ) : null}
 

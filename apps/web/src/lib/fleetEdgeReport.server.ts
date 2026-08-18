@@ -182,7 +182,15 @@ export async function buildFleetEdgeReport(
 
     // lastSeenAt — unbounded by [from,to], this is the live/current status.
     if (!m.lastSeenAt || ev.received_at > m.lastSeenAt) m.lastSeenAt = ev.received_at;
-    if (ev.registration_number && !m.registrationNumber) m.registrationNumber = ev.registration_number;
+    // Latest real registration wins. Fleet Edge reports "NA" until the
+    // vehicle is registered in their portal, then the real plate; keeping
+    // the FIRST value froze MAT558053TVE29204 on "NA" after it had become
+    // UP65RT9825 (2026-08-18). Events arrive ascending, so overwrite.
+    if (ev.registration_number && ev.registration_number !== "NA") {
+      m.registrationNumber = ev.registration_number;
+    } else if (ev.registration_number && !m.registrationNumber) {
+      m.registrationNumber = ev.registration_number;
+    }
     if (!timestampsByVehicle.has(key)) timestampsByVehicle.set(key, []);
     timestampsByVehicle.get(key)!.push(ev.received_at);
 
@@ -195,7 +203,14 @@ export async function buildFleetEdgeReport(
           lng: typeof p.gpsLongitude === "number" ? p.gpsLongitude : null,
           speed: typeof p.speed === "number" ? p.speed : null,
           ignitionOn: typeof p.ignitionOn === "boolean" ? p.ignitionOn : null,
-          fuelLevelPercent: typeof p.fuelLevelPercent === "number" ? p.fuelLevelPercent : null,
+          // Real telemetry sends primaryFuelLevel; the spec PDF says
+          // fuelLevelPercent. Accept either.
+          fuelLevelPercent:
+            typeof p.primaryFuelLevel === "number"
+              ? p.primaryFuelLevel
+              : typeof p.fuelLevelPercent === "number"
+                ? p.fuelLevelPercent
+                : null,
           odometer: typeof p.odometer === "number" ? p.odometer : null,
           at: ev.received_at,
           accelX: typeof p.accelX === "number" ? p.accelX : null,
@@ -434,6 +449,7 @@ export async function buildFleetEdgeReport(
     overSpeed: 0, sos: 0, fuelDrain: 0, refuel: 0, geofence: 0, alerts: alerts.length,
     faultCritical: 0, faultWarning: 0, serviceDue: 0, nightDrivingHours: 0, idlingHours: 0,
     eventsInRange, eventsTotal: totalRes.count ?? 0,
+    telemetryVehicles: vehicles.filter((v) => v.lastTelemetry != null).length,
   };
   let speedSum = 0; let speedN = 0;
   for (const v of vehicles) {

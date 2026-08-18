@@ -64,6 +64,8 @@ export type FleetTotals = {
   idlingHours: number;
   eventsInRange: number;
   eventsTotal: number;
+  /** Fleet vehicles that have ever sent Basic Push telemetry — the only feed carrying odometer / live GPS / fuel level. */
+  telemetryVehicles: number;
 };
 
 export type FleetNotificationRow = {
