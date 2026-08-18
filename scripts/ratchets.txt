@@ -41,3 +41,10 @@ unguarded_cache_writes|0|Bare localStorage.setItem on module state
 # to it. Falls per module as each gets its visual refit — see Phase 3/4.
 raw_hex|837|Arbitrary hex Tailwind classes bypassing design tokens; not dark-mode aware. Target is 0. (831 -> 835 on 2026-08-14 rebasing onto PR #14/#13; 835 -> 836 rebasing onto PR #15 "flag allocations that exceed stockOnHand", same day, same concurrent session — same "raised not eroded" rule as default_ay above; 836 -> 837 same day rebasing onto PR #19 "background push retry + sync-status indicator for attendance" — that feature's own sync-status UI, not this session's code; 837 -> 836 on 2026-08-16 replacing the header chat button's hardcoded WhatsApp glyph/green with a lucide icon + the --primary token; 836 -> 837 same day adding StaffBroadcastButton.tsx's trigger — this button sends REAL WhatsApp messages (unlike the de-branded internal chat), so it deliberately keeps WhatsApp's own brand green `bg-[#25D366]` rather than the school's --primary token, mirroring BroadcastModal's/the header button's pre-rebrand intent for genuine-WhatsApp affordances.)
 raw_table|7|Hand-rolled <table> instead of ui/erp-roster.tsx's ErpTableShell. Target is 0.
+
+
+# Dynamic `process.env[...]` reads of NEXT_PUBLIC keys. Next.js only inlines
+# literal `process.env.NEXT_PUBLIC_X`; the dynamic form is undefined in the
+# browser, so the flag it guards silently takes its default. Found 2026-08-18
+# with every desk cutover client flag affected. Target is 0 and stays 0.
+dynamic_public_env|0|Dynamic process.env[...NEXT_PUBLIC...] reads (always undefined in the browser)

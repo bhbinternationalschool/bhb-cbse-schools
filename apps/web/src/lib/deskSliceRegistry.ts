@@ -4,6 +4,7 @@
 
 import type { DomainBlobTable } from "@/lib/domainBlobPersistence";
 import type { DeskModuleId } from "@/lib/deskCutover";
+import { deskPublicEnv } from "@/lib/deskPublicEnv";
 
 export type DeskSliceModuleDef = {
   id: DeskModuleId;
@@ -154,11 +155,15 @@ export function deskSliceDef(id: DeskModuleId): DeskSliceModuleDef | undefined {
 }
 
 export function deskSliceEnvDualWrite(prefix: string): boolean {
-  const flag =
-    (typeof window !== "undefined"
-      ? process.env[`NEXT_PUBLIC_${prefix}_DUAL_WRITE_DB`]
-      : process.env[`${prefix}_DUAL_WRITE_DB`])?.trim().toLowerCase() ||
-    process.env[`${prefix}_DUAL_WRITE_DB`]?.trim().toLowerCase();
+  // Browser: static NEXT_PUBLIC map (deskPublicEnv.ts) — a dynamic
+  // process.env[...] read here was always undefined in the client.
+  const flag = (
+    typeof window !== "undefined"
+      ? deskPublicEnv(`NEXT_PUBLIC_${prefix}_DUAL_WRITE_DB`)
+      : process.env[`${prefix}_DUAL_WRITE_DB`]
+  )
+    ?.trim()
+    .toLowerCase();
   if (flag === "false" || flag === "0") return false;
   return true;
 }
@@ -166,9 +171,11 @@ export function deskSliceEnvDualWrite(prefix: string): boolean {
 export function deskSliceEnvReadFromDb(prefix: string): boolean {
   const flag = (
     typeof window !== "undefined"
-      ? process.env[`NEXT_PUBLIC_${prefix}_READ_FROM_DB`]
+      ? deskPublicEnv(`NEXT_PUBLIC_${prefix}_READ_FROM_DB`)
       : process.env[`${prefix}_READ_FROM_DB`]
-  )?.trim().toLowerCase();
+  )
+    ?.trim()
+    .toLowerCase();
   if (flag === "false" || flag === "0") return false;
   return true;
 }

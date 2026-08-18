@@ -91,6 +91,7 @@ import {
   deskSliceEnvDualWrite,
   deskSliceEnvReadFromDb,
 } from "@/lib/deskSliceRegistry";
+import { deskPublicEnv } from "@/lib/deskPublicEnv";
 
 export type DeskModuleId =
   | "fees"
@@ -144,7 +145,9 @@ export type DeskCutoverModule = {
 };
 
 function publicEnvFlag(name: string): boolean {
-  return process.env[name] === "true";
+  // Literal-key read via the static map — see deskPublicEnv.ts for why a
+  // dynamic process.env[name] here was always undefined in the browser.
+  return deskPublicEnv(name) === "true";
 }
 
 export const DESK_CUTOVER_MODULES: DeskCutoverModule[] = [
