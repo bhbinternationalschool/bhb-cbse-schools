@@ -24,6 +24,7 @@ import {
 } from "@/lib/schoolDataMirror";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { guardMastersOverwrite } from "@/lib/mastersWriteGuard";
 import { resolveAcademicYear, fallbackAcademicYear } from "@/lib/academicYearResolve";
 
 export type Campus = {
@@ -1932,7 +1933,12 @@ export function loadMasters(): MastersState {
       writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(merged));
       return merged;
     }
-    const seed = shouldSeedEmptyMastersShell() ? emptyMastersShell() : defaultMasters();
+    // Cold browser on a real tenant: return the empty shell WITHOUT storing
+    // it. Persisting it made "no cache" indistinguishable from "a tenant with
+    // no classes" for every writer that ran before hydration finished
+    // (2026-08-18). Hydration writes the real masters; demo mode still seeds.
+    if (shouldSeedEmptyMastersShell()) return emptyMastersShell();
+    const seed = defaultMasters();
     writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(seed));
     return seed;
   } catch {
@@ -1992,6 +1998,35 @@ async function persistMastersClient(
       scheduleStaffSync(state);
     });
     return { ok: true };
+  }
+  // Same protection as writeMastersLocalRaw: a save that would leave the
+  // browser with no classes (or a foreign id generation) keeps the stored
+  // classes. The server refuses such a push anyway; this keeps the browser
+  // from displaying — and re-pushing — the empty copy in the meantime.
+  {
+    const rawPrev = localStorage.getItem(STORAGE_KEY);
+    if (rawPrev) {
+      try {
+        const stored = JSON.parse(rawPrev) as Partial<MastersState>;
+        const storedIds = (stored.classes ?? []).map((c) => c.id);
+        const incomingIds = (state.classes ?? []).map((c) => c.id);
+        if (storedIds.length > 0) {
+          const verdict = guardMastersOverwrite(storedIds, incomingIds);
+          if (!verdict.allow) {
+            console.warn(`[masters] save kept stored classes — ${verdict.message}`);
+            state = {
+              ...state,
+              classes: stored.classes ?? [],
+              sections: stored.sections ?? state.sections,
+              classSubjects: stored.classSubjects ?? state.classSubjects,
+              subjects: stored.subjects ?? state.subjects,
+            };
+          }
+        }
+      } catch {
+        /* unreadable cache — proceed with the incoming state */
+      }
+    }
   }
   const serialized = JSON.stringify({ ...state, version: 2 });
   const prev = localStorage.getItem(STORAGE_KEY);
