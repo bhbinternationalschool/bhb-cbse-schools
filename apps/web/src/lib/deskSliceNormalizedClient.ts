@@ -15,6 +15,9 @@ const pending = new Map<
   DeskModuleId,
   { version: number } & Record<string, unknown>
 >();
+// Per-module push generation: a retry of an older payload must never land
+// after a newer one (audit 2026-08-18).
+const generations = new Map<DeskModuleId, number>();
 
 function readMeta(id: DeskModuleId): DeskMeta {
   if (typeof window === "undefined") return { updatedAt: "", rowCount: 0 };
@@ -42,6 +45,8 @@ export function scheduleDeskSliceSync(
 ) {
   if (!isSupabaseConfigured() || typeof window === "undefined") return;
   pending.set(id, state);
+  const gen = (generations.get(id) ?? 0) + 1;
+  generations.set(id, gen);
   const existing = timers.get(id);
   if (existing) clearTimeout(existing);
   timers.set(
@@ -51,8 +56,15 @@ export function scheduleDeskSliceSync(
       pending.delete(id);
       timers.delete(id);
       if (!batch) return;
-      void pushDeskSliceApi(id, batch);
+      void pushDeskSliceApi(id, batch, 1, gen);
     }, DESK_PUSH_DEBOUNCE_MS),
+  );
+}
+
+function reportDeskPushFailure(id: DeskModuleId, error: string) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent("bhb-sync-error", { detail: { id, error } }),
   );
 }
 
@@ -60,7 +72,9 @@ async function pushDeskSliceApi(
   id: DeskModuleId,
   state: { version: number } & Record<string, unknown>,
   attempt = 1,
+  generation = generations.get(id) ?? 0,
 ) {
+  if (generation !== (generations.get(id) ?? 0)) return; // superseded
   try {
     const res = await fetch(`/api/school-data/desk-slice/${id}`, {
       method: "POST",
@@ -85,25 +99,23 @@ async function pushDeskSliceApi(
       }
     } else if (attempt < 3) {
       setTimeout(
-        () => void pushDeskSliceApi(id, state, attempt + 1),
+        () => void pushDeskSliceApi(id, state, attempt + 1, generation),
         1500 * attempt,
       );
     } else {
-      console.warn(`[${id}-db] desk push failed after 3 attempts`, body?.error || res.status);
+      const reason = body?.error || `HTTP ${res.status}`;
+      console.warn(`[${id}-db] desk push failed after 3 attempts`, reason);
+      reportDeskPushFailure(id, reason);
     }
   } catch (e) {
     if (attempt < 3) {
       setTimeout(
-        () => void pushDeskSliceApi(id, state, attempt + 1),
+        () => void pushDeskSliceApi(id, state, attempt + 1, generation),
         1500 * attempt,
       );
     } else {
       console.warn(`[${id}-db] desk push error after 3 attempts`, e);
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(
-          new CustomEvent("bhb-sync-error", { detail: { id, error: String(e) } }),
-        );
-      }
+      reportDeskPushFailure(id, String(e));
     }
   }
 }

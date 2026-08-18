@@ -68,10 +68,52 @@ export function sisReadFromDbClientEnabled(): boolean {
  * explicitly, and they stay queued until the server confirms, so a failed
  * push cannot quietly drop them.
  */
-const pendingDeletes = {
-  studentIds: new Set<string>(),
-  householdIds: new Set<string>(),
-};
+const PENDING_DELETES_KEY = "bhb_sis_pending_deletes_v1";
+
+function loadPendingDeletes(): {
+  studentIds: Set<string>;
+  householdIds: Set<string>;
+} {
+  if (typeof window === "undefined") {
+    return { studentIds: new Set(), householdIds: new Set() };
+  }
+  try {
+    const raw = localStorage.getItem(PENDING_DELETES_KEY);
+    if (!raw) return { studentIds: new Set(), householdIds: new Set() };
+    const p = JSON.parse(raw) as { studentIds?: string[]; householdIds?: string[] };
+    return {
+      studentIds: new Set((p.studentIds ?? []).filter(Boolean)),
+      householdIds: new Set((p.householdIds ?? []).filter(Boolean)),
+    };
+  } catch {
+    return { studentIds: new Set(), householdIds: new Set() };
+  }
+}
+
+// Persisted, not just in memory: a deletion whose push failed three times
+// and was then followed by a reload / idle logout used to be forgotten, and
+// the "removed" student came back on the next hydrate — the exact symptom
+// this queue exists to prevent (audit 2026-08-18).
+const pendingDeletes = loadPendingDeletes();
+
+function persistPendingDeletes() {
+  if (typeof window === "undefined") return;
+  try {
+    if (pendingDeletes.studentIds.size === 0 && pendingDeletes.householdIds.size === 0) {
+      localStorage.removeItem(PENDING_DELETES_KEY);
+    } else {
+      localStorage.setItem(
+        PENDING_DELETES_KEY,
+        JSON.stringify({
+          studentIds: [...pendingDeletes.studentIds],
+          householdIds: [...pendingDeletes.householdIds],
+        }),
+      );
+    }
+  } catch {
+    /* storage full — in-memory copy still carries them for this tab */
+  }
+}
 
 export function recordSisDeletion(input: {
   studentIds?: string[];
@@ -83,6 +125,7 @@ export function recordSisDeletion(input: {
   for (const id of input.householdIds ?? []) {
     if (id) pendingDeletes.householdIds.add(id);
   }
+  persistPendingDeletes();
 }
 
 /** Test seam — lets the selftest observe what would go on the wire. */
@@ -96,9 +139,15 @@ export function peekPendingSisDeletions(): {
   };
 }
 
+// Monotonic push generation. A retry of an older payload must not land
+// after a newer one and overwrite it; each attempt checks it is still the
+// latest before sending.
+let pushGeneration = 0;
+
 export function scheduleSisDeskSync(state: Pick<SisState, "households" | "students">) {
   if (!sisNormalizedSyncEnabled()) return;
   if (typeof window === "undefined") return;
+  pushGeneration += 1;
   pending = state;
   if (pushTimer) clearTimeout(pushTimer);
   pushTimer = setTimeout(() => {
@@ -112,13 +161,15 @@ export async function flushSisDeskSync(): Promise<void> {
   pending = null;
   pushTimer = null;
   if (!batch) return;
-  await pushSisDeskApi(batch);
+  await pushSisDeskApi(batch, 1, pushGeneration);
 }
 
 async function pushSisDeskApi(
   state: Pick<SisState, "households" | "students">,
   attempt = 1,
+  generation = pushGeneration,
 ) {
+  if (generation !== pushGeneration) return; // superseded by a newer save
   try {
     const res = await fetch("/api/school-data/sis-roster", {
       method: "POST",
@@ -148,6 +199,7 @@ async function pushSisDeskApi(
       // deletion on any failed or retried push.
       pendingDeletes.studentIds.clear();
       pendingDeletes.householdIds.clear();
+      persistPendingDeletes();
 
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
@@ -206,22 +258,35 @@ async function pushSisDeskApi(
       }
     } else if (attempt < 3) {
       setTimeout(
-        () => void pushSisDeskApi(state, attempt + 1),
+        () => void pushSisDeskApi(state, attempt + 1, generation),
         1500 * attempt,
       );
     } else {
-      console.warn("[sis-db] roster push failed after 3 attempts", body?.error || res.status);
+      const reason = body?.error || `HTTP ${res.status}`;
+      console.warn("[sis-db] roster push failed after 3 attempts", reason);
+      reportSisPushFailure(reason);
     }
   } catch (e) {
     if (attempt < 3) {
       setTimeout(
-        () => void pushSisDeskApi(state, attempt + 1),
+        () => void pushSisDeskApi(state, attempt + 1, generation),
         1500 * attempt,
       );
     } else {
       console.warn("[sis-db] roster push error after 3 attempts", e);
+      reportSisPushFailure(String(e));
     }
   }
+}
+
+/** A failed save must be visible, not a console line — see shell listener. */
+function reportSisPushFailure(error: string) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent("bhb-sync-error", {
+      detail: { id: "sis", label: "student records", error },
+    }),
+  );
 }
 
 export async function fetchSisDeskFromApi(): Promise<{

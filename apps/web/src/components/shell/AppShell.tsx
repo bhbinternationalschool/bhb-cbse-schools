@@ -89,6 +89,57 @@ export function AppShell({
     return () => window.removeEventListener("unhandledrejection", onUnhandled);
   }, []);
 
+  // A push that gave up must be visible. Until 2026-08-18 "bhb-sync-error"
+  // had no listener anywhere and the retry ladder's terminal "failed" state
+  // was rendered only inside the Attendance workspace; every other module's
+  // failed save ended in a console.warn while the screen said nothing.
+  useEffect(() => {
+    const labels: Record<string, string> = {
+      sis: "student records",
+      rbac: "roles & permissions",
+      module_registry: "module settings",
+      wa_templates: "WhatsApp templates",
+      automation: "automation rules",
+      staff_hr: "staff HR",
+      staff_advances: "staff advances",
+      staff_agreements: "staff agreements",
+      certificates: "certificates",
+      exam_papers: "exam papers",
+      fee_recovery_tasks: "fee recovery tasks",
+      erp_chat: "chat",
+      staff_chat: "staff chat",
+    };
+    function onSyncError(e: Event) {
+      const d = (e as CustomEvent<{ id?: string; label?: string; error?: string }>).detail;
+      const what = d?.label || labels[d?.id ?? ""] || d?.id || "this module";
+      void import("@/components/shell/Toast").then(({ pushToast }) => {
+        pushToast({
+          kind: "error",
+          message: `Your change to ${what} was NOT saved to the server (${d?.error || "sync failed"}). It is still on this computer — keep the page open and try saving again, or it will be lost on logout.`,
+          durationMs: 0,
+        });
+      });
+    }
+    function onSyncStatus(e: Event) {
+      const d = (e as CustomEvent<{ key: string; state: { status: string; error?: string } }>).detail;
+      if (d?.state?.status !== "failed") return;
+      const key = d.key.replace(/^blob:/, "").replace(/_state$/, "").replace(/_/g, " ");
+      void import("@/components/shell/Toast").then(({ pushToast }) => {
+        pushToast({
+          kind: "error",
+          message: `Saving ${key} to the server failed after several retries (${d.state.error || "sync failed"}). Your change is still on this computer — try again before logging out.`,
+          durationMs: 0,
+        });
+      });
+    }
+    window.addEventListener("bhb-sync-error", onSyncError);
+    window.addEventListener("bhb:sync-status", onSyncStatus);
+    return () => {
+      window.removeEventListener("bhb-sync-error", onSyncError);
+      window.removeEventListener("bhb:sync-status", onSyncStatus);
+    };
+  }, []);
+
   useEffect(() => {
     function flushDeskSync() {
       void flushAllDeskSyncPending();
