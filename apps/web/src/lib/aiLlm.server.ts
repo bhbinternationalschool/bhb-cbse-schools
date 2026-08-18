@@ -31,6 +31,14 @@ import {
   type LessonPlanAiInput,
   type LessonPlanDraft,
 } from "@/lib/lessonPlanAi";
+import {
+  buildPtmBriefSystemPrompt,
+  buildPtmBriefUserPrompt,
+  parsePtmBriefJson,
+  type PtmBriefDraft,
+  type PtmBriefFacts,
+  type PtmBriefLanguage,
+} from "@/lib/ptmBriefAi";
 
 export type LlmEngine = "openai" | "gemini" | "none";
 export type PreferredEngine = "auto" | "openai" | "gemini";
@@ -1125,6 +1133,39 @@ export async function generateLessonPlanJson(opts: {
   return {
     ok: false,
     error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI lesson plans",
+    engine: r.engine,
+  };
+}
+
+/** Three-paragraph PTM brief for one student. Draft only — nothing saved. */
+export async function generatePtmBriefJson(opts: {
+  facts: PtmBriefFacts;
+  language: PtmBriefLanguage;
+  schoolName: string;
+}): Promise<
+  | { ok: true; draft: PtmBriefDraft; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const r = await callLlmJson(
+    {
+      system: buildPtmBriefSystemPrompt({
+        language: opts.language,
+        schoolName: opts.schoolName,
+      }),
+      userMessage: buildPtmBriefUserPrompt(opts.facts),
+      maxTokens: opts.language === "hi" ? 1600 : 1000,
+      temperature: 0.5,
+      geminiMaxTokens: 4096,
+      meta: { route: "ptm-student-brief", promptVersion: "v1" },
+    },
+    parsePtmBriefJson,
+  );
+  if (r.ok) {
+    return { ok: true, draft: r.data, engine: r.engine, generationId: r.generationId };
+  }
+  return {
+    ok: false,
+    error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI PTM briefs",
     engine: r.engine,
   };
 }

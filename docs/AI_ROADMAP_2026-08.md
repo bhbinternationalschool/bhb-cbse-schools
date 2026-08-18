@@ -69,14 +69,14 @@ Legend: ✅ exists and works · 🟡 partial / foundations exist · ❌ missing
 | Attendance / performance / PTM invites | 🟡 | Templates + automation exist; drafts are template-based, not per-student personalised |
 | **Per-family language preference** | ✅ (2026-08-18) | `Household.preferredLanguage` / `channelPreference` / `quietHoursStart|End` (Students → Family), `sis_households` columns + `sis_push_guarded` coalesced; helpers in `lib/householdPrefs.ts` (`householdLanguage`, `waTemplateLanguageFor`, `sarvamTargetFor`, `isInQuietHours`). "" = not asked, never defaulted silently |
 | Regional languages beyond Hindi | 🟡 | en/hi/bho/mai/ur/bn selectable per family. Collections drafts render regional via Sarvam (`sarvamTargetFor`); WA *templates* still en/hi (Meta approval), regional collapses to Hindi template. Bhojpuri has no Sarvam target → Hindi |
-| PTM per-student progress summary | 🟡 | `ptm-feedback-digest` summarises an **event** across students; nothing generates the 3-paragraph per-student brief *before* the meeting |
+| PTM per-student progress summary | ✅ (2026-08-18) | PTM → Feedback → "Meeting brief": `POST /api/ai/ptm-student-brief` — last 2 exam terms, attendance %, homework submitted/due, conduct log, earlier PTM notes → observations / concerns / suggestions in the family's language (regional via Sarvam); "Use as feedback starter" copies into the fields. `lib/ptmBriefAi.ts` + `lib/ptmBriefFacts.ts` |
 | Admissions inquiry responder | ✅ | WhatsApp CRM bot (keyword flows + LLM fallback + RAG). **Grounding is thin** — KB only holds notices; fee structure / admission process / documents list aren't indexed |
 | Parent chat thread summary | ✅ | `thread-summary` |
 | Email channel | ❌ | Blocked on provider signup (§5.2 item 6 of the roadmap) |
 
 Build:
 1. ~~`Household.preferredLanguage` + `channelPreference` + quiet hours~~ **Done 2026-08-18.** Reads it: `collections-draft` (DefaultersPlaybook), fee-receipt WA template pick (`fees.ts`). Still to wire: automation sends (`isInQuietHours` gate), WA parent bot reply language, PTM brief (§2.2). Backfill: per-student form only — a bulk "ask every family" WA flow is a follow-up.
-2. `POST /api/ai/ptm-student-brief` — inputs: last 2 terms marks + attendance + homework completion + discipline + prior PTM feedback → 3 paragraphs (observations / concerns / suggestions) in preferred language, teacher edits (1 day).
+2. ~~`POST /api/ai/ptm-student-brief`~~ **Done 2026-08-18.** Absent sources are passed as "not available" and the prompt forbids commenting on them.
 3. Extend `schoolKb` sources: fee structure (from `feeStructures`), admission process + document checklist (from admissions masters), holiday calendar, transport routes (1–2 days).
 
 Model:
@@ -179,7 +179,7 @@ Why Gemini as default: cheapest at this volume, same GCP project/billing/IAM as 
 2. ~~**AI lesson plans** (§3.1)~~ — shipped 2026-08-18.
 3. ~~**`ai_generations` audit table + prompt versioning + per-route model tier** (§6)~~ — shipped 2026-08-18.
 4. ~~**Household language preference + Sarvam translate adapter** (§2.1)~~ — shipped 2026-08-18 (quiet-hours gate on automation sends and bot reply language still to wire).
-5. **PTM per-student brief** (§2.2) — 1 day.
+5. ~~**PTM per-student brief** (§2.2)~~ — shipped 2026-08-18.
 6. **Competency question types + LO codes on syllabus** (§1b) — 3–4 days.
 7. **Item-level scores** → academic at-risk → pedagogy suggestions (§1 prereq, §3.2–3.3) — 5+ days.
 8. **Blueprint + question bank** (§1c) — 5 days.
