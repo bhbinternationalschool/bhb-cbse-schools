@@ -17,7 +17,9 @@ export function geminiModel(): string {
   return (
     process.env.GEMINI_MODEL ||
     process.env.GOOGLE_GEMINI_MODEL ||
-    "gemini-2.0-flash"
+    // gemini-2.0/2.5-flash were retired for new users (404 as of 2026-08-18);
+    // Google names 3.6-flash as the replacement.
+    "gemini-3.6-flash"
   ).trim();
 }
 
