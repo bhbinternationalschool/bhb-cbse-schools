@@ -11,7 +11,21 @@
  *   { input, source_language_code, target_language_code, model }
  */
 
-export type SarvamLang = "en-IN" | "hi-IN";
+/** Sarvam translate language codes we route to (household prefs map here). */
+export type SarvamLang =
+  | "en-IN"
+  | "hi-IN"
+  | "bn-IN"
+  | "ur-IN"
+  | "mai-IN"
+  | "ta-IN"
+  | "te-IN"
+  | "mr-IN"
+  | "gu-IN"
+  | "kn-IN"
+  | "ml-IN"
+  | "pa-IN"
+  | "od-IN";
 
 export function sarvamApiKey(): string {
   return (process.env.SARVAM_API_KEY || "").trim();

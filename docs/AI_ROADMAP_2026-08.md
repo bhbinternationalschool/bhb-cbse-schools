@@ -67,15 +67,15 @@ Legend: ✅ exists and works · 🟡 partial / foundations exist · ❌ missing
 | AI-drafted fee reminders / defaulter messages + call scripts | ✅ | `collections-draft` + payment-likelihood scoring (`lib/collectionsAi.ts`) |
 | AI-drafted WA templates (Meta-compliant) | ✅ | `wa-template-draft`, EN + HI seeds |
 | Attendance / performance / PTM invites | 🟡 | Templates + automation exist; drafts are template-based, not per-student personalised |
-| **Per-family language preference** | ❌ | `SisStudent` only has `secondLanguage`/`thirdLanguage` (electives). No `household.preferredLanguage`. Every send picks language manually |
-| Regional languages beyond Hindi | ❌ | Only `en`/`hi` anywhere |
+| **Per-family language preference** | ✅ (2026-08-18) | `Household.preferredLanguage` / `channelPreference` / `quietHoursStart|End` (Students → Family), `sis_households` columns + `sis_push_guarded` coalesced; helpers in `lib/householdPrefs.ts` (`householdLanguage`, `waTemplateLanguageFor`, `sarvamTargetFor`, `isInQuietHours`). "" = not asked, never defaulted silently |
+| Regional languages beyond Hindi | 🟡 | en/hi/bho/mai/ur/bn selectable per family. Collections drafts render regional via Sarvam (`sarvamTargetFor`); WA *templates* still en/hi (Meta approval), regional collapses to Hindi template. Bhojpuri has no Sarvam target → Hindi |
 | PTM per-student progress summary | 🟡 | `ptm-feedback-digest` summarises an **event** across students; nothing generates the 3-paragraph per-student brief *before* the meeting |
 | Admissions inquiry responder | ✅ | WhatsApp CRM bot (keyword flows + LLM fallback + RAG). **Grounding is thin** — KB only holds notices; fee structure / admission process / documents list aren't indexed |
 | Parent chat thread summary | ✅ | `thread-summary` |
 | Email channel | ❌ | Blocked on provider signup (§5.2 item 6 of the roadmap) |
 
 Build:
-1. `Household.preferredLanguage: "en"\|"hi"\|"<regional>"` + `channelPreference` + quiet hours; every AI draft route reads it (½ day + backfill UI).
+1. ~~`Household.preferredLanguage` + `channelPreference` + quiet hours~~ **Done 2026-08-18.** Reads it: `collections-draft` (DefaultersPlaybook), fee-receipt WA template pick (`fees.ts`). Still to wire: automation sends (`isInQuietHours` gate), WA parent bot reply language, PTM brief (§2.2). Backfill: per-student form only — a bulk "ask every family" WA flow is a follow-up.
 2. `POST /api/ai/ptm-student-brief` — inputs: last 2 terms marks + attendance + homework completion + discipline + prior PTM feedback → 3 paragraphs (observations / concerns / suggestions) in preferred language, teacher edits (1 day).
 3. Extend `schoolKb` sources: fee structure (from `feeStructures`), admission process + document checklist (from admissions masters), holiday calendar, transport routes (1–2 days).
 
@@ -143,13 +143,13 @@ Model: **Gemini Flash multimodal** — one call does OCR + structuring (cheaper 
 | Centralised server-side AI layer, no frontend API calls | ✅ | — |
 | Failover between providers | ✅ | Per-call `meta.tier: "flash"\|"pro"` (2026-08-18) — `geminiModel(tier)` / `openAiModel(tier)`, pro models via `GEMINI_PRO_MODEL` (default `gemini-2.5-pro`) / `OPENAI_PRO_MODEL` (default `gpt-4o`). No route requests pro yet; §1b will |
 | Human-in-the-loop | 🟡 | All staff-facing generators land in an editor before save/print ✅. **Exception: WA bot LLM fallback auto-replies to parents** — add a confidence gate + "escalate to staff" default for anything not grounded by RAG |
-| Language preference per family | ❌ | `Household.preferredLanguage` (see §2) |
+| Language preference per family | ✅ | `Household.preferredLanguage` (see §2) |
 | AI audit trail | ✅ (2026-08-18) | `ai_generations` (migration `20260818150000`) written by the router for **every** attempt on every route: route, prompt_version, tier, engine/model, status/error, input+output sha256 (no text), tokens, latency, requester (session email or `system`). `POST /api/ai/generations/outcome` closes the loop — Remarks tab and Lesson plans editor report accepted / edited / rejected + target record. Other generators record attempts but don't yet report outcomes |
 | Rate limiting / quotas | ❌ | Per-user + per-tenant daily token budget in the router (reuse `mapsRateLimit.ts` pattern) |
 | Caching | ❌ | Hash(prompt) → response for deterministic drafts (certificates, lesson plans); skip for personalised outputs |
 | Prompt versioning | 🟡 | Every router call carries `meta.promptVersion` (all "v1" today), recorded in `ai_generations`; bump it when a route's prompt changes. Prompts themselves still inline in `aiLlm.server.ts` / `lib/*Ai.ts` — moving them to `lib/prompts/` is cosmetic now that the version is tracked |
 | Data quality for §1/§3 | ❌ | Item-level scores; competency codes on syllabus units and questions |
-| Sarvam adapter | ❌ | `lib/sarvam.server.ts` (translate, STT, TTS) + `SARVAM_API_KEY` in Secret Manager; router gets a `translate()` and `speech` capability separate from `generateText` |
+| Sarvam adapter | 🟡 | `lib/sarvam.server.ts` translate (en/hi/bn/ur/mai/ta/te/mr/gu/kn/ml/pa/od) ✅; STT/TTS ❌; `SARVAM_API_KEY` in Secret Manager **pending** |
 
 ---
 
@@ -178,7 +178,7 @@ Why Gemini as default: cheapest at this volume, same GCP project/billing/IAM as 
 1. ~~**Report-card remark generator** (§1a)~~ — shipped 2026-08-18 (`914b421`).
 2. ~~**AI lesson plans** (§3.1)~~ — shipped 2026-08-18.
 3. ~~**`ai_generations` audit table + prompt versioning + per-route model tier** (§6)~~ — shipped 2026-08-18.
-4. **Household language preference + Sarvam translate adapter** (§2.1) — 1–2 days, unlocks regional comms everywhere.
+4. ~~**Household language preference + Sarvam translate adapter** (§2.1)~~ — shipped 2026-08-18 (quiet-hours gate on automation sends and bot reply language still to wire).
 5. **PTM per-student brief** (§2.2) — 1 day.
 6. **Competency question types + LO codes on syllabus** (§1b) — 3–4 days.
 7. **Item-level scores** → academic at-risk → pedagogy suggestions (§1 prereq, §3.2–3.3) — 5+ days.

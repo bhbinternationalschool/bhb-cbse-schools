@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { HOUSEHOLD_CHANNELS, languageLabel, quietHoursLabel } from "@/lib/householdPrefs";
 import Link from "next/link";
 import {
   DOC_LABELS,
@@ -375,6 +376,18 @@ export function StudentProfileModal({
                   value={hh?.whatsappMobile || hh?.mobile || "—"}
                 />
                 <Field label="Email" value={hh?.email || "—"} />
+                <Field
+                  label="Preferred language"
+                  value={hh?.preferredLanguage ? languageLabel(hh.preferredLanguage) : "Not asked"}
+                />
+                <Field
+                  label="Preferred channel"
+                  value={
+                    HOUSEHOLD_CHANNELS.find((c) => c.id === hh?.channelPreference)?.label ||
+                    "Not asked"
+                  }
+                />
+                <Field label="Quiet hours" value={quietHoursLabel(hh) || "None"} />
               </Section>
 
               <Section title="Address">

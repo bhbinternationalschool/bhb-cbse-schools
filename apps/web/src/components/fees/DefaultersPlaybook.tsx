@@ -197,6 +197,8 @@ export function DefaultersPlaybook() {
                 ? "due today"
                 : `${row.overdueDays} day(s) overdue`,
           stageLabel: row.stageLabel,
+          // Household's preferred language (Students → Family); "" = not asked → English.
+          language: sis ? householdOf(sis, row.householdId)?.preferredLanguage ?? "" : "",
         }),
       });
       const json = (await res.json()) as {
@@ -204,6 +206,8 @@ export function DefaultersPlaybook() {
         error?: string;
         whatsappMessage?: string;
         callScript?: string;
+        language?: string;
+        warnings?: string[];
       };
       if (!json.ok || !json.whatsappMessage || !json.callScript) {
         setAiDraftError(json.error || "Draft failed");
