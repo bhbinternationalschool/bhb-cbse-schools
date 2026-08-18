@@ -82,7 +82,24 @@ export type FleetNotificationRow = {
   body: string | null;
 };
 
-export type FleetVehicleIdentity = { model: string | null; year: number | null; name: string | null };
+export type FleetFuelType = "diesel" | "petrol" | "cng" | "petrol_cng" | "diesel_cng" | "electric";
+export type FleetVehicleIdentity = {
+  model: string | null;
+  year: number | null;
+  name: string | null;
+  fuelType: FleetFuelType | null;
+};
+export const FUEL_TYPE_LABEL: Record<FleetFuelType, string> = {
+  diesel: "Diesel",
+  petrol: "Petrol",
+  cng: "CNG",
+  petrol_cng: "Petrol + CNG",
+  diesel_cng: "Diesel + CNG",
+  electric: "Electric",
+};
+export function usesCng(t: FleetFuelType | null | undefined): boolean {
+  return t === "cng" || t === "petrol_cng" || t === "diesel_cng";
+}
 
 export type FleetEdgeReport = {
   ok: true;
