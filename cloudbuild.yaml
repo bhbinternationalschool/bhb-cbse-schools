@@ -27,7 +27,10 @@ substitutions:
   _WHATSAPP_DEFAULT_COUNTRY_CODE: "91"
   _WHATSAPP_GRAPH_VERSION: "v21.0"
   _AI_TUTOR_MODEL: "gpt-4o-mini"
-  _AI_PREFERRED_ENGINE: "auto"
+  # Gemini primary since 2026-08-18 (cheaper, same GCP project, better Indic
+  # text); OpenAI stays as automatic fallback. Every deploy re-applies this
+  # value, so changing it on the service alone is undone by the next build.
+  _AI_PREFERRED_ENGINE: "gemini"
   _GOOGLE_OAUTH_CLIENT_ID: ""
   _PROTECTED_SUPER_ADMIN_EMAILS: "director@bhbinternational.school,ashishsingh80@gmail.com,ashu.dube21@gmail.com"
   # VAPID public key — not secret (it's meant to ship in the client bundle),
