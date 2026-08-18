@@ -27,6 +27,7 @@ import {
   type HealthState,
   type HealthVisitReason,
 } from "@/lib/health";
+import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 
 type Tab = "log" | "visits" | "medications" | "vaccinations" | "student";
 
@@ -122,6 +123,8 @@ export function HealthWorkspace() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Re-read when the server copy of this module lands (login/refresh hydration).
+  useModuleStateHydration("health", () => { setState(loadHealth()); });
   useEffect(() => {
     setMasters(loadMasters());
     setSis(loadSis());

@@ -19,6 +19,7 @@ import {
   MastersTableCard,
   MastersWorkCard,
 } from "@/components/masters/MastersLayout";
+import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 
 const inp =
   "w-full rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm";
@@ -52,6 +53,8 @@ export function AdmissionCrmChatInbox({
   const [state, setState] = useState<CrmParentChatState>(() =>
     loadCrmParentChat(),
   );
+  // Re-read when the server copy of this module lands (login/refresh hydration).
+  useModuleStateHydration("crm_parent_chat", () => { setState(loadCrmParentChat()); });
   const [waThreads, setWaThreads] = useState<WaThread[]>([]);
   const [waConfigured, setWaConfigured] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);

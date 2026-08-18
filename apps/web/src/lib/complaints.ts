@@ -155,10 +155,22 @@ export function saveComplaints(state: ComplaintState): void {
   if (typeof window === "undefined") return;
   try {
     writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(normalizeComplaintState(state)));
+    void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("complaints", normalizeComplaintState(state)));
     window.dispatchEvent(new CustomEvent("bhb-complaints"));
   } catch (e) {
     console.warn("[complaints] localStorage quota exceeded", e);
   }
+}
+
+/** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */
+export function writeComplaintsLocalRaw(state: ComplaintState): void {
+  if (typeof window === "undefined") return;
+  try {
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    /* quota — the server copy is the truth anyway */
+  }
+  window.dispatchEvent(new CustomEvent("bhb-complaints"));
 }
 
 /** Parent-portal entry point — mirrors createStudentLeaveRequest's

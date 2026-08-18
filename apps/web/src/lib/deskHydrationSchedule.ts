@@ -28,7 +28,8 @@ export type DeskHydrateId =
   | "automation"
   | "erpChat"
   | "staffChat"
-  | "salarySetup";
+  | "salarySetup"
+  | "moduleStates";
 
 type DeskHydrateTask = {
   id: DeskHydrateId;
@@ -57,6 +58,29 @@ const ROUTE_IDS: Record<string, DeskHydrateId[]> = {
   comms: ["waTemplates", "erpChat", "staffChat", "automation"],
   payroll: ["staff", "staffHr", "staffAdvances", "salarySetup"],
   reports: ["fees", "payments", "attendance", "exams"],
+};
+
+/**
+ * module_local_state modules by route — hydrated in the priority tier when the
+ * user is on that route (each is one small GET). Everything else picks them
+ * up in the idle sweep below.
+ */
+const ROUTE_MODULE_STATES: Record<string, import("@/lib/moduleStateRegistry").ModuleStateKey[]> = {
+  fees: ["fee_holds", "fee_adjustments"],
+  payroll: ["salary_increment", "salary_hold", "salary_account", "tally_sync"],
+  staff: ["duty_roster", "staff_attendance_rules"],
+  attendance: ["staff_attendance_rules"],
+  exams: ["exam_invigilation"],
+  complaints: ["complaints"],
+  discipline: ["discipline"],
+  health: ["health"],
+  visitors: ["visitors"],
+  students: ["udise_compliance", "fee_holds"],
+  admissions: ["wa_campaigns", "crm_parent_chat"],
+  masters: ["wa_chatbot_flows"],
+  "id-cards": ["id_card_template"],
+  certificates: ["fee_holds"],
+  accounts: ["tally_sync"],
 };
 
 const IDLE_BATCH_SIZE = 4;
@@ -205,6 +229,15 @@ function allDeskHydrateTasks(): DeskHydrateTask[] {
           m.ensureSalarySetupHydrated(),
         ),
     },
+    {
+      // All module_local_state modules — idle sweep so every desk has the
+      // server copy shortly after login even off its own route.
+      id: "moduleStates",
+      run: () =>
+        import("@/lib/localModulesPersistence").then((m) =>
+          m.ensureAllModuleStatesHydrated(),
+        ),
+    },
   ];
 }
 
@@ -262,7 +295,15 @@ export async function ensureDeskHydratedPriority(
 
   const priorityIds = priorityDeskHydrateIds(pathname);
   const tasks = allDeskHydrateTasks().filter((t) => priorityIds.has(t.id));
-  await runDeskTasks(tasks);
+  const routeStates = ROUTE_MODULE_STATES[deskHydrateRouteKey(pathname)] ?? [];
+  await Promise.allSettled([
+    runDeskTasks(tasks),
+    routeStates.length > 0
+      ? import("@/lib/localModulesPersistence").then((m) =>
+          m.ensureModuleStatesHydrated(routeStates),
+        )
+      : Promise.resolve(),
+  ]);
 }
 
 async function runBackgroundHydration(initialPathname: string): Promise<void> {

@@ -27,6 +27,7 @@ import {
 import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 import { DeskListActions } from "@/components/ui/desk-list-actions";
 import { ErpAlerts } from "@/components/ui/erp-alerts";
+import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 
 type Props = {
   masters: MastersState;
@@ -52,6 +53,8 @@ function todayIso(): string {
 
 export function DutyRosterPanel({ masters }: Props) {
   const [tick, setTick] = useState(0);
+  // Re-read when the server copy of this module lands (login/refresh hydration).
+  useModuleStateHydration("duty_roster", () => setTick((t) => t + 1));
   const [weekStart, setWeekStart] = useState(() => mondayOf(todayIso()));
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);

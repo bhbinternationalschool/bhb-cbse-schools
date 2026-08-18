@@ -179,9 +179,21 @@ export function saveVisitors(state: VisitorState): VisitorState {
   const next = normalizeVisitorState(state);
   if (typeof window !== "undefined") {
     writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
+    void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("visitors", next));
     window.dispatchEvent(new CustomEvent("bhb-visitors"));
   }
   return next;
+}
+
+/** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */
+export function writeVisitorsLocalRaw(state: VisitorState): void {
+  if (typeof window === "undefined") return;
+  try {
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    /* quota — the server copy is the truth anyway */
+  }
+  window.dispatchEvent(new CustomEvent("bhb-visitors"));
 }
 
 export function checkInVisitor(

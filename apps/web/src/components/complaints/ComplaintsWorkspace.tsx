@@ -28,6 +28,7 @@ import {
   type ComplaintStatus,
   type ComplaintTicket,
 } from "@/lib/complaints";
+import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 
 type Tab = "all" | "mine";
 
@@ -145,6 +146,8 @@ export function ComplaintsWorkspace() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Re-read when the server copy of this module lands (login/refresh hydration).
+  useModuleStateHydration("complaints", () => { setState(loadComplaints()); });
   useEffect(() => {
     setMasters(loadMasters());
     setSis(loadSis());

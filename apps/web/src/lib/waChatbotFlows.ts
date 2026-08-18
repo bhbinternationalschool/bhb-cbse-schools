@@ -344,6 +344,7 @@ export function writeWaChatbotFlowsLocalRaw(state: WaChatbotFlowsState) {
 
 export function saveWaChatbotFlows(state: WaChatbotFlowsState) {
   writeWaChatbotFlowsLocalRaw(state);
+  void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("wa_chatbot_flows", state));
 }
 
 export function audienceLabel(a: WaChatbotAudience): string {

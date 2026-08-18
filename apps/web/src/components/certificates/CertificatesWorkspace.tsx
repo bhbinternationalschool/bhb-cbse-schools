@@ -57,6 +57,7 @@ import {
   type HoldCheck,
 } from "@/lib/holds";
 import type { HoldCode } from "@/lib/types";
+import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -105,6 +106,8 @@ export function CertificatesWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
+  // Re-read when the server copy of fee holds lands (login/refresh hydration).
+  useModuleStateHydration("fee_holds", () => setTick((t) => t + 1));
   const [aiLanguage, setAiLanguage] = useState<"en" | "hi" | "both">("both");
   const [aiPurpose, setAiPurpose] = useState("");
   const [aiDetails, setAiDetails] = useState("");

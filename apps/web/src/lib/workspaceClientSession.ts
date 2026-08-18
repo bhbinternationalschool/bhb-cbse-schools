@@ -105,6 +105,9 @@ export async function resetAllWorkspacePersistenceCaches(): Promise<void> {
     import("@/lib/salarySetupPersistence").then((m) =>
       m.resetSalarySetupPersistenceCache(),
     ),
+    import("@/lib/localModulesPersistence").then((m) =>
+      m.resetModuleStatePersistenceCaches(),
+    ),
   ]);
 }
 

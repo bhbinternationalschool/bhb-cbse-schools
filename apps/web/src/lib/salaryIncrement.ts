@@ -215,6 +215,17 @@ export function saveIncrementState(state: IncrementState) {
   if (!assertModulePermission("payroll", "edit", "saveIncrementState")) return;
   if (typeof window === "undefined") return;
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("salary_increment", state));
+}
+
+/** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */
+export function writeIncrementStateLocalRaw(state: IncrementState): void {
+  if (typeof window === "undefined") return;
+  try {
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    /* quota — the server copy is the truth anyway */
+  }
 }
 
 export function monthsOfService(joiningDate: string, asOf: string): number {

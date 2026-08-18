@@ -24,6 +24,7 @@ import {
   ErpTableHead,
   ErpTableShell,
 } from "@/components/ui/erp-roster";
+import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 
 export function TallySyncPanel({
   academicYearCode,
@@ -33,6 +34,8 @@ export function TallySyncPanel({
   const session = useDemoSession();
   const [month, setMonth] = useState(currentMonthIso);
   const [tick, setTick] = useState(0);
+  // Re-read when the server copy of this module lands (login/refresh hydration).
+  useModuleStateHydration(["tally_sync", "salary_account"], () => setTick((t) => t + 1));
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 

@@ -181,6 +181,17 @@ export function saveSalaryHold(state: SalaryHoldState) {
   if (!assertModulePermission("payroll", "edit", "saveSalaryHold")) return;
   if (typeof window === "undefined") return;
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("salary_hold", state));
+}
+
+/** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */
+export function writeSalaryHoldLocalRaw(state: SalaryHoldState): void {
+  if (typeof window === "undefined") return;
+  try {
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    /* quota — the server copy is the truth anyway */
+  }
 }
 
 export function monthIsHoldMonth(

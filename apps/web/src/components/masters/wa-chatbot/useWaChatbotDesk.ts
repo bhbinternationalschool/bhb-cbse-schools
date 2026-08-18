@@ -11,11 +11,14 @@ import {
   useDemoSession,
   useSessionReadOnly,
 } from "@/components/shell/SessionContext";
+import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 
 export function useWaChatbotDesk() {
   const session = useDemoSession();
   const readOnly = useSessionReadOnly();
   const [state, setState] = useState<WaChatbotFlowsState | null>(null);
+  // Re-read when the server copy of this module lands (login/refresh hydration).
+  useModuleStateHydration("wa_chatbot_flows", () => { setState(loadWaChatbotFlows()); });
   const [notice, setNotice] = useState<string | null>(null);
 
   const refresh = useCallback(() => {

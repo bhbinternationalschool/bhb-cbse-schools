@@ -31,6 +31,7 @@ import {
   type VisitorState,
 } from "@/lib/visitors";
 import { VisitorPassSheet, printVisitorPass } from "@/components/visitors/VisitorPassSheet";
+import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 
 type Tab = "register" | "gatepasses" | "gateduty";
 
@@ -126,6 +127,8 @@ export function VisitorsWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [printEntry, setPrintEntry] = useState<VisitorEntry | null>(null);
 
+  // Re-read when the server copy of this module lands (login/refresh hydration).
+  useModuleStateHydration(["visitors", "duty_roster"], () => { setDutyRoster(loadDutyRoster()); setState(loadVisitors()); });
   useEffect(() => {
     setMasters(loadMasters());
     setSis(loadSis());

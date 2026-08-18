@@ -123,7 +123,11 @@ export function AppShell({
     function onSyncStatus(e: Event) {
       const d = (e as CustomEvent<{ key: string; state: { status: string; error?: string } }>).detail;
       if (d?.state?.status !== "failed") return;
-      const key = d.key.replace(/^blob:/, "").replace(/_state$/, "").replace(/_/g, " ");
+      const key = d.key
+        .replace(/^blob:/, "")
+        .replace(/^module_state:/, "")
+        .replace(/_state$/, "")
+        .replace(/_/g, " ");
       void import("@/components/shell/Toast").then(({ pushToast }) => {
         pushToast({
           kind: "error",

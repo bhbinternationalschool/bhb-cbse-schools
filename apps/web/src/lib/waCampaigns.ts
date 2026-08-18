@@ -353,6 +353,17 @@ export function saveWaCampaigns(state: WaCampaignsState): void {
   if (!assertModulePermission("admissions", "edit", "saveWaCampaigns")) return;
   if (typeof window === "undefined") return;
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("wa_campaigns", state));
+}
+
+/** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */
+export function writeWaCampaignsLocalRaw(state: WaCampaignsState): void {
+  if (typeof window === "undefined") return;
+  try {
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    /* quota — the server copy is the truth anyway */
+  }
 }
 
 export function feeStatusOfLead(

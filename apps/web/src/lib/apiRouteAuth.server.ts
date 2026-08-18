@@ -212,6 +212,7 @@ export const DESK_SLICE_RBAC: Partial<Record<DeskModuleId, RbacModule>> = {
   wa_templates: "wa_templates",
   staff_hr: "staff",
   staff_advances: "staff_advances",
+  staff_agreements: "staff",
   module_registry: "settings",
   fee_recovery_tasks: "fees",
   automation: "wa_automation",

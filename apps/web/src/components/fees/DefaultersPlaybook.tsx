@@ -49,6 +49,7 @@ import {
 import { openWaMe } from "@/lib/waMe";
 import type { HoldCode } from "@/lib/types";
 import { paymentLikelihood } from "@/lib/collectionsAi";
+import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 
 const STAGE_FILTERS: { value: "" | OverdueStage; label: string }[] = [
   { value: "", label: "All stages" },
@@ -77,6 +78,8 @@ export function DefaultersPlaybook() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
+  // Re-read when the server copy of fee holds lands (login/refresh hydration).
+  useModuleStateHydration("fee_holds", () => setTick((t) => t + 1));
   const [planOpen, setPlanOpen] = useState(false);
   const [holdDialog, setHoldDialog] = useState(false);
   const [holdTarget, setHoldTarget] = useState<{

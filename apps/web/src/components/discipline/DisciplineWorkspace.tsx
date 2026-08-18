@@ -29,6 +29,7 @@ import {
   type EscalationLevel,
   type IncidentStatus,
 } from "@/lib/discipline";
+import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 
 type Tab = "log" | "all" | "student";
 
@@ -53,6 +54,8 @@ export function DisciplineWorkspace() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Re-read when the server copy of this module lands (login/refresh hydration).
+  useModuleStateHydration("discipline", () => { setState(loadDiscipline()); });
   useEffect(() => {
     setMasters(loadMasters());
     setSis(loadSis());
