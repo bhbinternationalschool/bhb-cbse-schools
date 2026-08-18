@@ -176,6 +176,8 @@ export async function selfServiceCheckIn(input: {
   purpose: VisitorPurpose;
   personToMeet?: string;
   linkedTo?: string;
+  /** Which self-service channel created it (default gate QR page). */
+  source?: "gate_qr" | "whatsapp";
 }): Promise<{ ok: true; entry: VisitorEntry; alreadyIn: boolean } | { ok: false; error: string }> {
   const mobile = normalizeMobile10(input.mobile);
   if (mobile.length !== 10) return { ok: false, error: "Enter a valid 10-digit mobile number" };
@@ -191,7 +193,7 @@ export async function selfServiceCheckIn(input: {
   const entry: VisitorEntry = {
     id,
     visitorNo: nextVisitorNo(cur.state, now),
-    source: "gate_qr",
+    source: input.source || "gate_qr",
     linkedTo: input.linkedTo?.trim() || undefined,
     visitorName: name,
     mobile,
@@ -201,7 +203,7 @@ export async function selfServiceCheckIn(input: {
     outTime: null,
     idProofNote: "",
     qrPayload: visitorQrPayload(id, name),
-    createdBy: "gate-qr",
+    createdBy: input.source === "whatsapp" ? "whatsapp-bot" : "gate-qr",
     createdAt: now.toISOString(),
   };
   const merged = await mergeWriteVisitorState({ version: 1, visitorLog: [entry], gatePasses: [] });

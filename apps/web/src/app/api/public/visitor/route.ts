@@ -16,6 +16,36 @@ import { VISITOR_PURPOSES, type VisitorPurpose } from "@/lib/visitors";
 
 export const runtime = "nodejs";
 
+/**
+ * GET → { whatsapp: "91XXXXXXXXXX" | null, startText } — the school WhatsApp
+ * number for the poster's second QR (wa.me link). WHATSAPP_GATE_NUMBER
+ * overrides; otherwise the Meta phone's display number (cached 10 min).
+ */
+let waNumberCache: { value: string | null; at: number } | null = null;
+export async function GET() {
+  const override = (process.env.WHATSAPP_GATE_NUMBER || "").replace(/\D/g, "");
+  let value: string | null = override || null;
+  if (!value) {
+    if (waNumberCache && Date.now() - waNumberCache.at < 10 * 60_000) {
+      value = waNumberCache.value;
+    } else {
+      try {
+        const { fetchWhatsAppPhoneHealth } = await import("@/lib/waMeta.server");
+        const h = await fetchWhatsAppPhoneHealth();
+        value = h.displayNumber ? h.displayNumber.replace(/\D/g, "") : null;
+      } catch {
+        value = null;
+      }
+      waNumberCache = { value, at: Date.now() };
+    }
+  }
+  const { WA_GATE_START_TEXT } = await import("@/lib/waGateVisit.server");
+  return NextResponse.json(
+    { ok: true, whatsapp: value, startText: WA_GATE_START_TEXT },
+    { headers: { "Cache-Control": "public, max-age=300" } },
+  );
+}
+
 const hits = new Map<string, { n: number; at: number }>();
 function rateLimited(ip: string): boolean {
   const now = Date.now();

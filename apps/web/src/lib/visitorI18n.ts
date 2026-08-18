@@ -113,3 +113,21 @@ export const GATE_POSTER_STEPS = {
     "जाते समय फिर स्कैन करें और चेक-आउट दबाएँ।",
   ],
 };
+
+/** Poster: the WhatsApp alternative (second QR → wa.me/<school>?text=VISIT). */
+export const GATE_WA_POSTER_STEPS = {
+  en: [
+    "Scan this QR — WhatsApp opens with the school number.",
+    "Send the message VISIT (already typed for you).",
+    "The school bot greets you by name — choose your purpose from the list.",
+    "You get a visitor number on WhatsApp — show it at the gate.",
+    "When leaving, send OUT to check out.",
+  ],
+  hi: [
+    "यह QR स्कैन करें — स्कूल के नंबर पर WhatsApp खुलेगा।",
+    "VISIT संदेश भेजें (पहले से लिखा मिलेगा)।",
+    "स्कूल बॉट आपका नाम लेकर स्वागत करेगा — सूची से कारण चुनें।",
+    "WhatsApp पर विज़िटर नंबर मिलेगा — गेट पर दिखाएँ।",
+    "जाते समय OUT भेजकर चेक-आउट करें।",
+  ],
+};

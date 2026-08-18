@@ -2,6 +2,7 @@
  * Unified school WhatsApp entry — role-aware greeting + visitor onboarding + flow delegation.
  */
 
+import { handleWaGateVisit, type WaGateVisitPending } from "@/lib/waGateVisit.server";
 import {
   composeActiveFlowHint,
   composeCollectPurposePrompt,
@@ -58,6 +59,8 @@ export type WaUnifiedSession = {
   phase: "menu" | "pick_role" | "collect_name" | "collect_purpose" | "active";
   activeFlow: WaUnifiedFlow | null;
   updatedAt: string;
+  /** Pending gate check-in (VISIT keyword / poster WhatsApp QR). */
+  gate?: WaGateVisitPending | null;
 };
 
 type WaUnifiedStore = {
@@ -513,6 +516,39 @@ export async function handleWaUnifiedInbound(opts: {
 
   let store = await readStore();
   let session = store.sessions[mobile10];
+
+  // Gate visit (VISIT / OUT / poster WhatsApp QR) — before any role flow so
+  // a parent or staff session cannot swallow the gate keywords.
+  const gate = await handleWaGateVisit({
+    mobile10,
+    rawText,
+    profileName: opts.profileName,
+    pending: session?.gate ?? null,
+  });
+  if (gate.handled) {
+    const base = session ?? sessionFor(mobile10, identity, opts.profileName);
+    store = {
+      ...store,
+      sessions: {
+        ...store.sessions,
+        [mobile10]: { ...base, gate: gate.pending ?? null, updatedAt: nowIso() },
+      },
+    };
+    await writeStore(store);
+    let ok = true;
+    for (const r of gate.replies) {
+      const sent = await sendBotReply({
+        mobile10,
+        displayName: identity.displayName || opts.profileName || "",
+        category: "general",
+        audience: gate.audience,
+        ...("menu" in r ? { menu: r.menu } : { text: r.text }),
+        inbound: inboundLog,
+      });
+      ok = ok && sent;
+    }
+    return { replied: ok, escalate: false, audience: gate.audience, stub: !ok };
+  }
 
   if (isUnifiedMenuCommand(text)) {
     session = sessionFor(mobile10, identity, opts.profileName);

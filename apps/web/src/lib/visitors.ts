@@ -36,7 +36,7 @@ export type VisitorEntry = {
   /** Human number for the day, e.g. "V-20260818-007" (self-service + reception). */
   visitorNo?: string;
   /** How the entry was created — reception desk or the gate QR self-service. */
-  source?: "reception" | "gate_qr";
+  source?: "reception" | "gate_qr" | "whatsapp";
   /** What the phone lookup found at check-in (parent of…, admission lead…). */
   linkedTo?: string;
   visitorName: string;
@@ -116,7 +116,7 @@ function normalizeVisitorEntry(raw: Partial<VisitorEntry> | null | undefined): V
   return {
     id,
     visitorNo: raw.visitorNo ? String(raw.visitorNo) : undefined,
-    source: raw.source === "gate_qr" ? "gate_qr" : raw.source === "reception" ? "reception" : undefined,
+    source: raw.source === "gate_qr" || raw.source === "whatsapp" || raw.source === "reception" ? raw.source : undefined,
     linkedTo: raw.linkedTo ? String(raw.linkedTo) : undefined,
     visitorName: String(raw.visitorName).trim(),
     mobile: String(raw.mobile || "").trim(),
