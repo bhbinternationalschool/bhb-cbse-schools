@@ -8,6 +8,7 @@
  */
 
 import { saveSis, type SisState, type SisStudent } from "@/lib/sis";
+import { recordSisDeletion } from "@/lib/sisNormalizedClient";
 import { normalizeSessionCode } from "@/lib/studentImport";
 
 export type DuplicateReason =
@@ -338,6 +339,17 @@ export function mergeStudents(
     students: survivors,
     households: state.households.filter((h) => usedHouseholds.has(h.id)),
   };
+  // State the deletions before pushing. The roster push only upserts, so
+  // without this the dropped duplicates stayed in sis_students and came
+  // straight back on the next hydrate — "the merge didn't stick"
+  // (reported 2026-08-18). The single-student remove path already did this
+  // (StudentsWorkspace); merge and bulk-remove never did.
+  recordSisDeletion({
+    studentIds: [...dropSet],
+    householdIds: state.households
+      .filter((h) => !usedHouseholds.has(h.id))
+      .map((h) => h.id),
+  });
   saveSis(next);
   void import("@/lib/sisPersistence").then(({ pushSisState, flushSisSync }) => {
     pushSisState(next).then(() => flushSisSync()).catch(console.error);
@@ -361,6 +373,13 @@ export function removeDuplicateStudents(
     students: survivors,
     households: state.households.filter((h) => usedHouseholds.has(h.id)),
   };
+  // Same rule as mergeStudents — deletions must be stated, not inferred.
+  recordSisDeletion({
+    studentIds: [...dropSet].filter((id) => state.students.some((s) => s.id === id)),
+    householdIds: state.households
+      .filter((h) => !usedHouseholds.has(h.id))
+      .map((h) => h.id),
+  });
   saveSis(next);
   void import("@/lib/sisPersistence").then(({ pushSisState, flushSisSync }) => {
     pushSisState(next).then(() => flushSisSync()).catch(console.error);
