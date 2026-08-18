@@ -38,7 +38,16 @@ const KNOWN_ALERT_NAMES = new Set([
   "GeoFenceExited",
   "OverSpeedEvent",
   "DriverSOSAlert",
+  "PanicSosEvent",
 ]);
+
+/** Live Fleet Edge traffic (confirmed 2026-08-18) sends "PanicSosEvent" for
+ * a panic-button press, not the "DriverSOSAlert" name the vendor's own
+ * TimeBound Push doc uses as its example — 159 real alerts were stored with
+ * an "unrecognized alertName" warning and never notified anyone until this
+ * was caught. Treat both as the same safety escalation rather than trusting
+ * either doc/sample name alone. */
+export const SOS_ALERT_NAMES = new Set(["DriverSOSAlert", "PanicSosEvent"]);
 
 export type FleetEdgeAlertPayload = {
   timestamp?: string;
@@ -285,7 +294,7 @@ export async function ingestFleetEdgeAlert(
     source_ip: sourceIp,
     payload: alert,
   });
-  if (alert.alertName === "DriverSOSAlert") {
+  if (alert.alertName && SOS_ALERT_NAMES.has(alert.alertName)) {
     // Fire regardless of insert success — a DB hiccup must never suppress
     // a safety escalation.
     void notifyFleetEdgeSos(alert);

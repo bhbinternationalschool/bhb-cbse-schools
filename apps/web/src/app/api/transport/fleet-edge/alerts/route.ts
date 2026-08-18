@@ -2,8 +2,10 @@
  * Tata Motors Fleet Edge "TimeBound Push (Webhook) API" — real-time alerts.
  * POST /alerts per Fleet Edge's own spec: FuelDrainAlert, RefuelAlert,
  * GeoFenceEntered, GeoFenceExited, OverSpeedEvent, DriverSOSAlert — pushed
- * as and when they occur. DriverSOSAlert additionally fires an immediate
- * WhatsApp escalation (see ingestFleetEdgeAlert / notifyFleetEdgeSos).
+ * as and when they occur. A panic-button press additionally fires an
+ * immediate WhatsApp escalation (see ingestFleetEdgeAlert / notifyFleetEdgeSos
+ * / SOS_ALERT_NAMES — live traffic uses "PanicSosEvent", not the vendor
+ * doc's "DriverSOSAlert" sample name, so both are treated as the trigger).
  */
 
 import { NextResponse } from "next/server";

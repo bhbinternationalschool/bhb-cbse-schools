@@ -9,6 +9,7 @@
 import { NextResponse } from "next/server";
 import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { SOS_ALERT_NAMES } from "@/lib/fleetEdge.server";
 import {
   buildFleetDashboard,
   computeOfflinePeriods,
@@ -163,7 +164,7 @@ export async function GET(req: Request) {
     if (ev.event_type === "alert") {
       const eventDetails = isObj(ev.payload.eventDetails) ? ev.payload.eventDetails : {};
       if (ev.alert_name === "OverSpeedEvent") m.overSpeedCount += 1;
-      else if (ev.alert_name === "DriverSOSAlert") m.sosCount += 1;
+      else if (ev.alert_name && SOS_ALERT_NAMES.has(ev.alert_name)) m.sosCount += 1;
       else if (ev.alert_name === "FuelDrainAlert") {
         m.fuelDrainCount += 1;
         m.fuelDrainedLiters += num(eventDetails.fuelDifference);
