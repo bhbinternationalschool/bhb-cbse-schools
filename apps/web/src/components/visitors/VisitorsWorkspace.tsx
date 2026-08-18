@@ -13,6 +13,7 @@ import { dutyStaffLabel, loadDutyRoster, type DutyRosterState } from "@/lib/duty
 import {
   checkInVisitor,
   checkOutVisitor,
+  nextVisitorNo,
   deleteGatePass,
   deleteVisitorEntry,
   emptyVisitorState,
@@ -32,14 +33,29 @@ import {
 } from "@/lib/visitors";
 import { VisitorPassSheet, printVisitorPass } from "@/components/visitors/VisitorPassSheet";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
+import { GateQrPanel } from "@/components/visitors/GateQrPanel";
+import { VISITOR_PURPOSE_HI, type VisitorLang } from "@/lib/visitorI18n";
 
-type Tab = "register" | "gatepasses" | "gateduty";
+type Tab = "register" | "gateqr" | "gatepasses" | "gateduty";
 
-const TABS: ModuleTabItem[] = [
+const TABS_EN: ModuleTabItem[] = [
   { id: "register", label: "Visitor register", tone: "teal" },
+  { id: "gateqr", label: "Gate QR", tone: "navy" },
   { id: "gatepasses", label: "Gate passes", tone: "amber" },
   { id: "gateduty", label: "Gate duty today", tone: "sky" },
 ];
+const TABS_HI: ModuleTabItem[] = [
+  { id: "register", label: "विज़िटर रजिस्टर", tone: "teal" },
+  { id: "gateqr", label: "गेट QR", tone: "navy" },
+  { id: "gatepasses", label: "गेट पास", tone: "amber" },
+  { id: "gateduty", label: "आज की गेट ड्यूटी", tone: "sky" },
+];
+const LANG_KEY = "bhb_visitor_desk_lang";
+/** Register/gate labels in Hindi for a gateman who does not read English. */
+const T = {
+  en: { checkIn: "Check in visitor", name: "Visitor name", mobile: "Mobile", purpose: "Purpose", meet: "Person to meet", idProof: "ID proof note", checkInBtn: "Check in", onCampus: "on campus", out: "out", inWord: "in", checkOut: "Check out", checkedOut: "Checked out", printPass: "Print pass", del: "Delete", noVisitors: "No visitors logged yet.", gateQr: "Gate QR", langToggle: "हिन्दी", live: "Live — refreshes every 20 s", meeting: "meeting" },
+  hi: { checkIn: "विज़िटर चेक-इन", name: "विज़िटर का नाम", mobile: "मोबाइल", purpose: "उद्देश्य", meet: "किससे मिलना है", idProof: "पहचान पत्र नोट", checkInBtn: "चेक-इन", onCampus: "परिसर में", out: "बाहर", inWord: "अंदर", checkOut: "चेक-आउट", checkedOut: "चेक-आउट हो गया", printPass: "पास प्रिंट", del: "हटाएँ", noVisitors: "अभी कोई विज़िटर दर्ज नहीं।", gateQr: "गेट QR", langToggle: "English", live: "लाइव — हर 20 सेकंड रिफ्रेश", meeting: "मिलना" },
+} as const;
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -126,9 +142,50 @@ export function VisitorsWorkspace() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [printEntry, setPrintEntry] = useState<VisitorEntry | null>(null);
+  const [lang, setLang] = useState<VisitorLang>("en");
+  const L = T[lang];
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(LANG_KEY);
+      if (saved === "hi" || saved === "en") setLang(saved);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  function toggleLang() {
+    const next: VisitorLang = lang === "en" ? "hi" : "en";
+    setLang(next);
+    try {
+      localStorage.setItem(LANG_KEY, next);
+    } catch {
+      /* ignore */
+    }
+  }
 
   // Re-read when the server copy of this module lands (login/refresh hydration).
   useModuleStateHydration(["visitors", "duty_roster"], () => { setDutyRoster(loadDutyRoster()); setState(loadVisitors()); });
+
+  // Gate-QR check-ins land on the server without this browser knowing —
+  // pull every 20 s while the register is open and the tab is visible.
+  useEffect(() => {
+    if (tab !== "register") return;
+    let stopped = false;
+    const tick = async () => {
+      if (document.visibilityState !== "visible") return;
+      const [{ resetDeskHydrated }, { ensureModuleStateHydrated }] = await Promise.all([
+        import("@/lib/deskHydrateGuard"),
+        import("@/lib/localModulesPersistence"),
+      ]);
+      resetDeskHydrated("module_state:visitors");
+      const changed = await ensureModuleStateHydrated("visitors");
+      if (changed && !stopped) setState(loadVisitors());
+    };
+    const h = window.setInterval(() => void tick(), 20_000);
+    return () => {
+      stopped = true;
+      window.clearInterval(h);
+    };
+  }, [tab]);
   useEffect(() => {
     setMasters(loadMasters());
     setSis(loadSis());
@@ -187,6 +244,8 @@ export function VisitorsWorkspace() {
       personToMeet: regPersonToMeet,
       idProofNote: regIdProof,
       createdBy: session.staffId || session.fullName || "",
+      visitorNo: nextVisitorNo(state),
+      source: "reception",
     });
     setState(saveVisitors(withEntry));
     resetRegForm();
@@ -285,36 +344,45 @@ export function VisitorsWorkspace() {
       notice={notice}
       error={error}
     >
-      <ModuleTabs value={tab} onChange={(id) => setTab(id as Tab)} items={TABS} />
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <ModuleTabs value={tab} onChange={(id) => setTab(id as Tab)} items={lang === "hi" ? TABS_HI : TABS_EN} />
+        </div>
+        <button type="button" onClick={toggleLang} className="rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-bold" title="Switch language / भाषा बदलें">
+          {L.langToggle}
+        </button>
+      </div>
+
+      {tab === "gateqr" ? <GateQrPanel lang={lang} /> : null}
 
       {tab === "register" ? (
         <div className="mt-5 space-y-5">
           <div className="max-w-xl space-y-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-            <p className="text-sm font-bold">Check in visitor</p>
+            <p className="text-sm font-bold">{L.checkIn} <span className="ml-2 text-[10px] font-semibold text-[var(--muted)]">{L.live}</span></p>
             <label className="block text-sm">
-              <span className="mb-1 block text-[11px] text-[var(--muted)]">Visitor name</span>
+              <span className="mb-1 block text-[11px] text-[var(--muted)]">{L.name}</span>
               <input className={field} value={regName} onChange={(e) => setRegName(e.target.value)} />
             </label>
             <div className="grid grid-cols-2 gap-3">
               <label className="block text-sm">
-                <span className="mb-1 block text-[11px] text-[var(--muted)]">Mobile</span>
+                <span className="mb-1 block text-[11px] text-[var(--muted)]">{L.mobile}</span>
                 <input className={field} value={regMobile} onChange={(e) => setRegMobile(e.target.value)} />
               </label>
               <label className="block text-sm">
-                <span className="mb-1 block text-[11px] text-[var(--muted)]">Purpose</span>
+                <span className="mb-1 block text-[11px] text-[var(--muted)]">{L.purpose}</span>
                 <select className={field} value={regPurpose} onChange={(e) => setRegPurpose(e.target.value as VisitorPurpose)}>
                   {VISITOR_PURPOSES.map((p) => (
-                    <option key={p.value} value={p.value}>{p.label}</option>
+                    <option key={p.value} value={p.value}>{lang === "hi" ? VISITOR_PURPOSE_HI[p.value] || p.label : p.label}</option>
                   ))}
                 </select>
               </label>
             </div>
             <label className="block text-sm">
-              <span className="mb-1 block text-[11px] text-[var(--muted)]">Meeting (staff / department)</span>
+              <span className="mb-1 block text-[11px] text-[var(--muted)]">{L.meet}</span>
               <input className={field} value={regPersonToMeet} onChange={(e) => setRegPersonToMeet(e.target.value)} />
             </label>
             <label className="block text-sm">
-              <span className="mb-1 block text-[11px] text-[var(--muted)]">ID proof note</span>
+              <span className="mb-1 block text-[11px] text-[var(--muted)]">{L.idProof}</span>
               <input className={field} placeholder="e.g. Aadhaar last 4 digits" value={regIdProof} onChange={(e) => setRegIdProof(e.target.value)} />
             </label>
             <button
@@ -323,13 +391,13 @@ export function VisitorsWorkspace() {
               disabled={readOnly}
               onClick={onCheckIn}
             >
-              Check in
+              {L.checkInBtn}
             </button>
           </div>
 
           {visitorRows.length === 0 ? (
             <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-8 text-center text-sm text-[var(--muted)]">
-              No visitors logged yet.
+              {L.noVisitors}
             </p>
           ) : (
             <ul className="space-y-2">
@@ -337,12 +405,17 @@ export function VisitorsWorkspace() {
                 <li key={v.id} className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
+                      {v.visitorNo ? <span className="mr-2 rounded-md bg-[var(--brand-deep)]/10 px-1.5 py-0.5 font-mono text-[11px] font-black text-[var(--brand-deep)]">{v.visitorNo}</span> : null}
                       <span className="font-semibold">{v.visitorName}</span>
+                      {v.source === "gate_qr" ? <span className="ml-2 rounded-md bg-[var(--success-soft)] px-1.5 py-0.5 text-[10px] font-black uppercase text-[var(--success)]">{lang === "hi" ? "गेट QR" : "Gate QR"}</span> : null}
+                      {!v.outTime ? <span className="ml-2 rounded-md bg-[var(--warning-soft,var(--surface-sunken))] px-1.5 py-0.5 text-[10px] font-black uppercase">{L.onCampus}</span> : null}
                       <span className="ml-2 text-xs text-[var(--muted)]">
-                        {visitorPurposeLabel(v.purpose)}
-                        {v.personToMeet ? ` · meeting ${v.personToMeet}` : ""} · in {new Date(v.inTime).toLocaleTimeString()}
-                        {v.outTime ? ` · out ${new Date(v.outTime).toLocaleTimeString()}` : " · on campus"}
+                        {lang === "hi" ? VISITOR_PURPOSE_HI[v.purpose] || v.purpose : visitorPurposeLabel(v.purpose)}
+                        {v.personToMeet ? ` · ${L.meeting} ${v.personToMeet}` : ""}
+                        {v.mobile ? ` · ${v.mobile}` : ""} · {L.inWord} {new Date(v.inTime).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                        {v.outTime ? ` · ${L.out} ${new Date(v.outTime).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}` : ""}
                       </span>
+                      {v.linkedTo ? <div className="text-[11px] text-[var(--muted)]">{v.linkedTo}</div> : null}
                     </div>
                     <div className="flex items-center gap-2">
                       <button
@@ -350,7 +423,7 @@ export function VisitorsWorkspace() {
                         className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs font-semibold"
                         onClick={() => setPrintEntry(v)}
                       >
-                        Print pass
+                        {L.printPass}
                       </button>
                       <button
                         type="button"
@@ -358,7 +431,7 @@ export function VisitorsWorkspace() {
                         disabled={readOnly || !!v.outTime}
                         onClick={() => onCheckOut(v.id)}
                       >
-                        {v.outTime ? "Checked out" : "Check out"}
+                        {v.outTime ? L.checkedOut : L.checkOut}
                       </button>
                       <button
                         type="button"
@@ -366,7 +439,7 @@ export function VisitorsWorkspace() {
                         disabled={readOnly}
                         onClick={() => onDeleteEntry(v.id)}
                       >
-                        Delete
+                        {L.del}
                       </button>
                     </div>
                   </div>

@@ -59,6 +59,15 @@ export async function POST(req: Request, ctx: RouteCtx) {
   const tctx = await getServerTenantContext();
   if (!tctx) return NextResponse.json({ ok: false, error: "Tenant unavailable" }, { status: 503 });
   const now = new Date().toISOString();
+  if (module === "visitors") {
+    // Gate-QR self-service writes the same row without a browser session;
+    // union by id so neither side erases the other's rows.
+    const { mergeWriteVisitorState } = await import("@/lib/visitorSelfService.server");
+    const { normalizeVisitorState } = await import("@/lib/visitors");
+    const merged = await mergeWriteVisitorState(normalizeVisitorState(body.state));
+    if (!merged) return NextResponse.json({ ok: false, error: "Merge write failed" }, { status: 502 });
+    return NextResponse.json({ ok: true, updatedAt: now });
+  }
   const { error } = await tctx.sb.from("module_local_state").upsert(
     { tenant_id: tctx.tenantId, module_key: module, state: body.state, updated_at: now },
     { onConflict: "tenant_id,module_key" },

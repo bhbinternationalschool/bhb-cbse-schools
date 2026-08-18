@@ -33,6 +33,12 @@ export const VISITOR_PURPOSES: { value: VisitorPurpose; label: string }[] = [
 
 export type VisitorEntry = {
   id: string;
+  /** Human number for the day, e.g. "V-20260818-007" (self-service + reception). */
+  visitorNo?: string;
+  /** How the entry was created — reception desk or the gate QR self-service. */
+  source?: "reception" | "gate_qr";
+  /** What the phone lookup found at check-in (parent of…, admission lead…). */
+  linkedTo?: string;
   visitorName: string;
   mobile: string;
   purpose: VisitorPurpose;
@@ -109,6 +115,9 @@ function normalizeVisitorEntry(raw: Partial<VisitorEntry> | null | undefined): V
   const id = raw.id || nid("visit");
   return {
     id,
+    visitorNo: raw.visitorNo ? String(raw.visitorNo) : undefined,
+    source: raw.source === "gate_qr" ? "gate_qr" : raw.source === "reception" ? "reception" : undefined,
+    linkedTo: raw.linkedTo ? String(raw.linkedTo) : undefined,
     visitorName: String(raw.visitorName).trim(),
     mobile: String(raw.mobile || "").trim(),
     purpose,
@@ -140,6 +149,51 @@ function normalizeGatePass(raw: Partial<GatePass> | null | undefined): GatePass 
     notifiedParentAt: raw.notifiedParentAt || null,
     createdAt: raw.createdAt || now,
     updatedAt: now,
+  };
+}
+
+/** Sequential number for the day: V-YYYYMMDD-NNN (IST day). */
+export function nextVisitorNo(state: VisitorState, at: Date = new Date()): string {
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" })
+    .format(at)
+    .replace(/-/g, "");
+  const prefix = `V-${day}-`;
+  let max = 0;
+  for (const v of state.visitorLog) {
+    if (v.visitorNo && v.visitorNo.startsWith(prefix)) {
+      const n = Number(v.visitorNo.slice(prefix.length));
+      if (Number.isFinite(n) && n > max) max = n;
+    }
+  }
+  return `${prefix}${String(max + 1).padStart(3, "0")}`;
+}
+
+/**
+ * Union of two visitor states by id — the newer/more-complete entry wins
+ * (an entry with outTime beats one without). Used server-side so a
+ * reception browser's push can never erase a self-service check-in that
+ * landed after it hydrated, and vice versa.
+ */
+export function mergeVisitorStates(a: VisitorState, b: VisitorState): VisitorState {
+  const byId = new Map<string, VisitorEntry>();
+  const pick = (x: VisitorEntry, y: VisitorEntry): VisitorEntry => {
+    if (x.outTime && !y.outTime) return x;
+    if (y.outTime && !x.outTime) return y;
+    return (y.createdAt || "") >= (x.createdAt || "") ? y : x;
+  };
+  for (const v of [...a.visitorLog, ...b.visitorLog]) {
+    const cur = byId.get(v.id);
+    byId.set(v.id, cur ? pick(cur, v) : v);
+  }
+  const passes = new Map<string, GatePass>();
+  for (const g of [...a.gatePasses, ...b.gatePasses]) {
+    const cur = passes.get(g.id);
+    passes.set(g.id, cur && (cur.updatedAt || "") > (g.updatedAt || "") ? cur : g);
+  }
+  return {
+    version: 1,
+    visitorLog: [...byId.values()].sort((x, y) => (y.inTime || "").localeCompare(x.inTime || "")),
+    gatePasses: [...passes.values()],
   };
 }
 

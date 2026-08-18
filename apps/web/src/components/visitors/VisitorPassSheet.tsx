@@ -56,8 +56,9 @@ export function VisitorPassSheet({ entry }: { entry: VisitorEntry }) {
       <div className="mt-4 flex items-start justify-between gap-4">
         <div className="space-y-2 text-sm">
           <div>
-            <p className="text-[10px] uppercase text-[var(--muted)]">Visitor</p>
+            <p className="text-[10px] uppercase text-[var(--muted)]">Visitor · विज़िटर</p>
             <p className="font-bold">{entry.visitorName}</p>
+            {entry.visitorNo ? <p className="font-mono text-lg font-black tracking-wide">{entry.visitorNo}</p> : null}
           </div>
           <div>
             <p className="text-[10px] uppercase text-[var(--muted)]">Purpose</p>
@@ -70,7 +71,7 @@ export function VisitorPassSheet({ entry }: { entry: VisitorEntry }) {
             </div>
           ) : null}
           <div>
-            <p className="text-[10px] uppercase text-[var(--muted)]">Check-in</p>
+            <p className="text-[10px] uppercase text-[var(--muted)]">Check-in · आने का समय</p>
             <p className="font-semibold">{new Date(entry.inTime).toLocaleString()}</p>
           </div>
         </div>
