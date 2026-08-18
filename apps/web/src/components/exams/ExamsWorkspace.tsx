@@ -72,12 +72,14 @@ import { InvigilationPanel } from "@/components/exams/InvigilationPanel";
 import { ExamPapersPanel } from "@/components/exams/ExamPapersPanel";
 import { AdmitCardsPanel } from "@/components/exams/AdmitCardsPanel";
 import { RemarksPanel } from "@/components/exams/RemarksPanel";
+import { ItemScoresPanel } from "@/components/exams/ItemScoresPanel";
 import { ExamReportsRunner } from "@/components/reports/ModuleReportRunners";
 import { hasPermission } from "@/lib/rbac";
 
 type Tab =
   | "dashboard"
   | "marks"
+  | "items"
   | "remarks"
   | "datesheet"
   | "invigilation"
@@ -660,6 +662,7 @@ export function ExamsWorkspace() {
         items={[
           { id: "dashboard", label: "Dashboard", tone: "navy" },
           { id: "marks", label: "Mark entry", tone: "sky" },
+          { id: "items", label: "Item scores", tone: "sky" },
           { id: "remarks", label: "Remarks", tone: "teal" },
           { id: "datesheet", label: "Date-sheet", tone: "violet" },
           { id: "invigilation", label: "Invigilation", tone: "coral" },
@@ -1666,6 +1669,23 @@ export function ExamsWorkspace() {
             </>
           )}
         </div>
+      ) : null}
+
+      {tab === "items" ? (
+        <ItemScoresPanel
+          ay={ay}
+          term={term}
+          classId={classId}
+          sectionId={sectionId}
+          roster={roster}
+          subjects={subjects}
+          masters={masters}
+          canEdit={!!masters && hasPermission(session, masters, "exams", "edit")}
+          enteredBy={session.fullName}
+          onSaved={refresh}
+          onFlash={flash}
+          onError={setError}
+        />
       ) : null}
 
       {tab === "remarks" ? (

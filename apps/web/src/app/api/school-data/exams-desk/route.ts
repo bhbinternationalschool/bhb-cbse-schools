@@ -8,6 +8,7 @@ import { auditArrayDiff } from "@/lib/auditDeskDiff.server";
 import {
   flattenCoScholastic,
   flattenExamMarks,
+  flattenItemScores,
   flattenOverallRemarks,
   type ExamsState,
 } from "@/lib/exams";
@@ -66,6 +67,7 @@ export async function POST(req: Request) {
   const beforeMarks = flattenExamMarks(priorBundle.sheets);
   const beforeCoScholastic = flattenCoScholastic(priorBundle.sheets);
   const beforeRemarks = flattenOverallRemarks(priorBundle.sheets);
+  const beforeItemScores = flattenItemScores(priorBundle.sheets);
 
   const result = await pushExamDeskToDb({
     version: 1,
@@ -87,6 +89,7 @@ export async function POST(req: Request) {
   const afterMarks = flattenExamMarks(pushedSheets);
   const afterCoScholastic = flattenCoScholastic(pushedSheets);
   const afterRemarks = flattenOverallRemarks(pushedSheets);
+  const afterItemScores = flattenItemScores(pushedSheets);
   const { ip, userAgent } = requestMeta(req);
   await auditArrayDiff({
     session: auth.ctx.session,
@@ -112,6 +115,15 @@ export async function POST(req: Request) {
     entityType: "report_card_remark",
     before: beforeRemarks,
     after: afterRemarks,
+    ip,
+    userAgent,
+  });
+  await auditArrayDiff({
+    session: auth.ctx.session,
+    module: "exams",
+    entityType: "exam_item_score",
+    before: beforeItemScores,
+    after: afterItemScores,
     ip,
     userAgent,
   });

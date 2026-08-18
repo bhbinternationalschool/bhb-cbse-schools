@@ -57,7 +57,7 @@ Legend: ✅ exists and works · 🟡 partial / foundations exist · ❌ missing
 | Model | Gemini Pro (as 1b) |
 | Effort | ~5 days |
 
-**Prerequisite that unlocks all of §1 and §3:** per-question student results. Today only subject-level marks are stored — no item-level scores, so "Class 8-B is weak on application-based Geometry" is not derivable. Add `exam_item_scores (studentId, paperId, questionId, marksObtained)` and a fast entry grid / OMR-style import. Without this, "competency analytics" is a slide, not a feature.
+**Prerequisite that unlocks all of §1 and §3 — ✅ shipped 2026-08-19:** per-question student results. Exams → **Item scores** tab: student × question grid for one paper + set (paper picked from Question papers for the exam/class/subject; exam ↔ masters subject linked by code), max-mark guard per cell, row totals, class average per question (red < 40 %), "Apply totals" sums each student's items onto the mark sheet with grade recomputed. Stored as `MarkSheet.itemScores` → `exam_desk_item_scores` (child of `exam_desk_sheets`, migration `20260819090000`), audited as `exam_item_score`. Verified end-to-end under the ZZ1 test term (then cleaned). Still to do: OMR-style import; LO/unit roll-ups from these rows (§3.2–3.3).
 
 ---
 
