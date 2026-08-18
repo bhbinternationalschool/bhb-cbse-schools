@@ -119,10 +119,17 @@ export async function lookupVisitorMobile(raw: string): Promise<VisitorLookup | 
 
   const className = new Map((classes.data || []).map((c) => [String(c.id), String(c.name)]));
   const parentOf: VisitorLookup["parentOf"] = [];
+  const seen = new Set<string>();
+  const add = (row: VisitorLookup["parentOf"][number]) => {
+    const k = `${row.admissionNo}|${row.studentName}`.toUpperCase();
+    if (seen.has(k)) return;
+    seen.add(k);
+    parentOf.push(row);
+  };
   let suggestedName = "";
   for (const s of students.data || []) {
     if (s.status && s.status !== "active") continue;
-    parentOf.push({
+    add({
       studentName: String(s.full_name),
       classLabel: className.get(String(s.class_id)) || "",
       admissionNo: String(s.admission_no || ""),
@@ -143,8 +150,7 @@ export async function lookupVisitorMobile(raw: string): Promise<VisitorLookup | 
       .limit(10);
     for (const s of hhStudents || []) {
       if (s.status && s.status !== "active") continue;
-      if (parentOf.some((p) => p.admissionNo === String(s.admission_no || ""))) continue;
-      parentOf.push({ studentName: String(s.full_name), classLabel: className.get(String(s.class_id)) || "", admissionNo: String(s.admission_no || "") });
+      add({ studentName: String(s.full_name), classLabel: className.get(String(s.class_id)) || "", admissionNo: String(s.admission_no || "") });
     }
     if (!suggestedName) suggestedName = String(households.data?.[0]?.guardian_name || "");
   }

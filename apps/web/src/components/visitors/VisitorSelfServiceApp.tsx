@@ -211,7 +211,7 @@ export function VisitorSelfServiceApp({
   const input = "w-full rounded-2xl border-2 border-[#203050]/25 bg-white px-4 py-4 text-xl tracking-wide text-[#203050] outline-none focus:border-[#203050]";
 
   return (
-    <main className="min-h-screen bg-[#f6f5ef] text-[#203050]" style={{ colorScheme: "light" }}>
+    <main className="theme-light-island min-h-screen bg-[#f6f5ef] text-[#203050]" style={{ colorScheme: "light" }}>
       <div className="mx-auto flex min-h-screen w-full max-w-md flex-col px-4 pb-10 pt-5">
         <header className="mb-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">

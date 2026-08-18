@@ -82,7 +82,7 @@ export function GateQrPanel({ lang }: { lang: VisitorLang }) {
       </div>
 
       {/* Poster — what gets printed */}
-      <div id="gate-poster" className="mx-auto max-w-[210mm] rounded-2xl border border-[var(--border)] bg-white p-8 text-[#203050] shadow-[var(--shadow-1)]" style={{ colorScheme: "light" }}>
+      <div id="gate-poster" className="theme-light-island mx-auto max-w-[210mm] rounded-2xl border border-[var(--border)] bg-white p-8 text-[#203050] shadow-[var(--shadow-1)]" style={{ colorScheme: "light" }}>
         <div className="flex items-center gap-3 border-b-2 border-[#203050]/15 pb-4">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={TENANT.logoCrestUrl} alt="" className="h-14 w-14 object-contain" />
@@ -141,7 +141,7 @@ export function GateQrPanel({ lang }: { lang: VisitorLang }) {
       </div>
 
       {showFull ? (
-        <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-white p-6 text-[#203050]" style={{ colorScheme: "light" }} onClick={() => setShowFull(null)}>
+        <div className="theme-light-island fixed inset-0 z-[100] flex flex-col items-center justify-center bg-white p-6 text-[#203050]" style={{ colorScheme: "light" }} onClick={() => setShowFull(null)}>
           <button type="button" className="absolute right-4 top-4 rounded-full border-2 border-[#203050]/20 p-2" aria-label="Close" onClick={() => setShowFull(null)}>
             <X className="size-6" aria-hidden />
           </button>

@@ -1294,3 +1294,18 @@ h3,
 .dark textarea::placeholder { color: var(--muted); }
 .dark input[type="date"]::-webkit-calendar-picker-indicator,
 .dark input[type="time"]::-webkit-calendar-picker-indicator { filter: invert(0.85); }
+
+/* Deliberately-light islands (public gate page, printed posters/passes):
+   opt out of the .dark remaps above so they read the same on any device. */
+.dark .theme-light-island,
+.dark .theme-light-island .text-\[\#203050\] { color: #203050; }
+.dark .theme-light-island .bg-white { background-color: #ffffff; }
+.dark .theme-light-island input:not([type="checkbox"]):not([type="radio"]),
+.dark .theme-light-island select,
+.dark .theme-light-island textarea {
+  color-scheme: light;
+  background-color: #ffffff;
+  color: #203050;
+  border-color: rgba(32, 48, 80, 0.25);
+}
+.dark .theme-light-island input::placeholder { color: #7a8299; }
