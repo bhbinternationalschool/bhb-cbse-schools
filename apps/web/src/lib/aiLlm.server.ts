@@ -16,6 +16,13 @@ import {
   type StudentRemarkDraft,
   type StudentRemarkFacts,
 } from "@/lib/reportRemarkAi";
+import {
+  buildLessonPlanSystemPrompt,
+  buildLessonPlanUserPrompt,
+  parseLessonPlanJson,
+  type LessonPlanAiInput,
+  type LessonPlanDraft,
+} from "@/lib/lessonPlanAi";
 
 export type LlmEngine = "openai" | "gemini" | "none";
 export type PreferredEngine = "auto" | "openai" | "gemini";
@@ -1019,4 +1026,41 @@ Respond with JSON only: {"items":[{"id":"...","text":"..."}]} — every id given
   );
   if (r.ok) return { ok: true, items: r.data, engine: r.engine };
   return { ok: false, error: r.error, engine: r.engine };
+}
+
+/**
+ * One lesson-plan draft from the syllabus units the teacher ticked. Returns
+ * the draft only — the editor shows it, the teacher saves it (or not) and
+ * `LessonPlan.source` records provenance.
+ */
+export async function generateLessonPlanJson(opts: {
+  input: LessonPlanAiInput;
+  schoolName: string;
+}): Promise<
+  | { ok: true; draft: LessonPlanDraft; engine: LlmEngine }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const r = await callLlmJson(
+    {
+      system: buildLessonPlanSystemPrompt({
+        language: opts.input.language,
+        schoolName: opts.schoolName,
+      }),
+      userMessage: buildLessonPlanUserPrompt(opts.input),
+      // Activities grow with periods; Hindi is ~1.6× the tokens of English.
+      maxTokens: Math.min(
+        4000,
+        (900 + opts.input.periods * 250) * (opts.input.language === "hi" ? 1.6 : 1),
+      ),
+      temperature: 0.5,
+      geminiMaxTokens: Math.min(8192, 3000 + opts.input.periods * 400),
+    },
+    parseLessonPlanJson,
+  );
+  if (r.ok) return { ok: true, draft: r.data, engine: r.engine };
+  return {
+    ok: false,
+    error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI lesson plans",
+    engine: r.engine,
+  };
 }

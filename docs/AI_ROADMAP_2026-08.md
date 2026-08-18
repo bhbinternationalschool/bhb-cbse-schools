@@ -28,6 +28,7 @@ Legend: ✅ exists and works · 🟡 partial / foundations exist · ❌ missing
 ### 1a. Auto-generated report card remarks
 | | |
 |---|---|
+| Status | ✅ shipped 2026-08-18 — Exams → Remarks tab, `POST /api/ai/report-remarks`, `exam_desk_remarks` + `remark_source`, Hindi via Sarvam |
 | Have | Term marks per subject with `grade` (CBSE 8-point) and a **free-text `remark` typed by the teacher** (`lib/exams.ts` `StudentSubjectMark`); NEP-2020 HPC co-scholastic ratings A/B/C per domain (`StudentCoScholasticEntry`); attendance module; discipline incidents; PTM feedback (strengths / areas / follow-up); `ReportCardSheet.tsx` renders it all |
 | Missing | Any AI remark generation. No tone control. No "trend vs last term" input. No AI/human flag on `remark` |
 | Build | `POST /api/ai/report-remark` (single) + `report-remarks-batch` (whole class). Prompt = marks + grade + previous-term delta + attendance % + co-scholastic ratings + discipline count + tone (`encouraging`/`balanced`/`firm`) + language. Output JSON `{ subjectRemark, overallRemark, hindiRemark? }`. Review grid: teacher sees generated remark inline in the mark-entry sheet, edits, accepts → writes `remark` + `remarkSource: "ai"\|"ai_edited"\|"manual"` |
@@ -92,12 +93,12 @@ Model:
 |---|---|---|
 | At-risk flagging | 🟡 | Exists for **fee defaulters** and **admission leads** only. No academic at-risk |
 | Pedagogical suggestions | ❌ | Blocked on item-level scores (§1 prerequisite) |
-| AI lesson plans | ❌ but cheapest win | `LessonPlan` model already has `objectives / teachingAids / activities / assessment / homework` + links to `SyllabusUnit`s with `learningOutcomes` text. Only the generator is missing |
+| AI lesson plans | ✅ (2026-08-18) | `POST /api/ai/lesson-plan` + "Draft with AI" in `LessonPlansPanel` editor — ticked chapters/topics + their `learningOutcomes` → objectives / aids / period-by-period activities / assessment / homework, EN or HI; `LessonPlan.source` (`manual`/`ai`/`ai_edited`) + `aiModel` recorded on save. `lib/lessonPlanAi.ts` |
 | CBSE Learning-Outcomes mapping | ❌ | free-text per unit; no codes |
 | Syllabus pacing analytics (deterministic) | ✅ | `lib/teaching.ts` |
 
 Build:
-1. `POST /api/ai/lesson-plan` — topic (unitIds) + class + periods → fills the existing `LessonPlan` fields, teacher edits in `LessonPlansPanel` (1 day). **Do this first — it's pure glue.**
+1. ~~`POST /api/ai/lesson-plan` — topic (unitIds) + class + periods → fills the existing `LessonPlan` fields, teacher edits in `LessonPlansPanel`~~ **Done 2026-08-18.** Follow-up when §1b lands: feed `competencyCodes` per unit into the prompt.
 2. Academic at-risk: deterministic rules (grade drop ≥1 band vs last term, attendance < 75%, ≥N discipline incidents, homework completion < X) → list; LLM only writes the per-student "what to do" note. Never let the model decide who is at risk (½ day rules + ½ day narrative).
 3. Class-level pedagogy suggestions + remedial worksheet — after item-level scores exist.
 
@@ -174,8 +175,8 @@ Why Gemini as default: cheapest at this volume, same GCP project/billing/IAM as 
 
 ## 8. Suggested build order (impact ÷ effort)
 
-1. **Report-card remark generator** (§1a) — 2 days, every teacher feels it at term end.
-2. **AI lesson plans** (§3.1) — 1 day, pure glue on existing model.
+1. ~~**Report-card remark generator** (§1a)~~ — shipped 2026-08-18 (`914b421`).
+2. ~~**AI lesson plans** (§3.1)~~ — shipped 2026-08-18.
 3. **`ai_generations` audit table + prompt versioning + per-route model tier** (§6) — 1–2 days, do before 1 goes to parents.
 4. **Household language preference + Sarvam translate adapter** (§2.1) — 1–2 days, unlocks regional comms everywhere.
 5. **PTM per-student brief** (§2.2) — 1 day.

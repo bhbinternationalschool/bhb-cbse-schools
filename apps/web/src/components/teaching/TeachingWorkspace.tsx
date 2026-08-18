@@ -605,6 +605,11 @@ export function TeachingWorkspace() {
               subjectId={planSubjectId}
               canEdit={canEdit}
               createdBy={me?.id || session.fullName}
+              classLabel={
+                masters?.classes.find((c) => c.id === planClassId)?.name ??
+                ""
+              }
+              subjectName={masters ? subjectLabel(masters, planSubjectId) : ""}
               onError={setError}
               onNotice={setNotice}
             />

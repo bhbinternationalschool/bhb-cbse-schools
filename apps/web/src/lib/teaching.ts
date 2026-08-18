@@ -103,6 +103,13 @@ export type SyllabusUnit = {
  * chapter can have several lesson plans; a lesson plan can span several
  * topics.
  */
+/** Who wrote the plan's text: typed, accepted AI draft, or AI draft then edited. */
+export type LessonPlanSource = "manual" | "ai" | "ai_edited";
+
+export function normalizeLessonPlanSource(v: unknown): LessonPlanSource {
+  return v === "ai" || v === "ai_edited" ? v : "manual";
+}
+
 export type LessonPlan = {
   id: string;
   academicYearCode: string;
@@ -126,6 +133,10 @@ export type LessonPlan = {
   assessment: string;
   homework: string;
   resources: ResourceLink[];
+  /** Provenance of the text fields; plans saved before this existed are "manual" */
+  source: LessonPlanSource;
+  /** Model that produced the draft when source is ai / ai_edited; "" otherwise */
+  aiModel: string;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -429,6 +440,8 @@ export function normalizeLessonPlan(
     assessment: String(raw.assessment || ""),
     homework: String(raw.homework || ""),
     resources: normalizeResourceList(raw.resources),
+    source: normalizeLessonPlanSource(raw.source),
+    aiModel: String(raw.aiModel || ""),
     createdBy: String(raw.createdBy || ""),
     createdAt: raw.createdAt || nowIso(),
     updatedAt: raw.updatedAt || raw.createdAt || nowIso(),
