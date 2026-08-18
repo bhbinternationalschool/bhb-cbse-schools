@@ -43,7 +43,8 @@ export type ServerBlobTable =
   | "automation_state"
   | "erp_chat_state"
   | "staff_chat_state"
-  | "social_integrations_state";
+  | "social_integrations_state"
+  | "salary_setup_state";
 
 export async function fetchServerBlob<T>(
   table: ServerBlobTable,

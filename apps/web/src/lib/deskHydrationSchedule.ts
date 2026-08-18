@@ -27,7 +27,8 @@ export type DeskHydrateId =
   | "waTemplates"
   | "automation"
   | "erpChat"
-  | "staffChat";
+  | "staffChat"
+  | "salarySetup";
 
 type DeskHydrateTask = {
   id: DeskHydrateId;
@@ -49,12 +50,12 @@ const ROUTE_IDS: Record<string, DeskHydrateId[]> = {
   attendance: ["attendance", "staffAttendance"],
   exams: ["exams", "examPapers", "certificates"],
   certificates: ["certificates"],
-  staff: ["staff", "staffHr", "staffAdvances", "staffAgreements", "staffAttendance"],
+  staff: ["staff", "staffHr", "staffAdvances", "staffAgreements", "staffAttendance", "salarySetup"],
   transport: ["transport"],
-  masters: [],
+  masters: ["salarySetup"],
   students: ["fees", "payments"],
   comms: ["waTemplates", "erpChat", "staffChat", "automation"],
-  payroll: ["staff", "staffHr", "staffAdvances"],
+  payroll: ["staff", "staffHr", "staffAdvances", "salarySetup"],
   reports: ["fees", "payments", "attendance", "exams"],
 };
 
@@ -195,6 +196,13 @@ function allDeskHydrateTasks(): DeskHydrateTask[] {
       run: () =>
         import("@/lib/staffChatPersistence").then((m) =>
           m.ensureStaffChatHydrated(),
+        ),
+    },
+    {
+      id: "salarySetup",
+      run: () =>
+        import("@/lib/salarySetupPersistence").then((m) =>
+          m.ensureSalarySetupHydrated(),
         ),
     },
   ];

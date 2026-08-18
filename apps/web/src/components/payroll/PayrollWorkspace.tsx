@@ -151,6 +151,7 @@ export function PayrollWorkspace() {
         { ensureStaffHrHydrated },
         { ensureStaffAdvancesHydrated },
         { ensureStatutoryHydrated },
+        { ensureSalarySetupHydrated },
         { withHydrationSlot },
       ] = await Promise.all([
         import("@/lib/payrollPersistence"),
@@ -158,6 +159,7 @@ export function PayrollWorkspace() {
         import("@/lib/staffHrPersistence"),
         import("@/lib/staffAdvancesPersistence"),
         import("@/lib/statutoryPersistence"),
+        import("@/lib/salarySetupPersistence"),
         import("@/lib/deskHydrateGuard"),
       ]);
       await Promise.all([
@@ -166,6 +168,8 @@ export function PayrollWorkspace() {
         withHydrationSlot(() => ensureStaffHrHydrated()),
         withHydrationSlot(() => ensureStaffAdvancesHydrated()),
         withHydrationSlot(() => ensureStatutoryHydrated()),
+        // Salary structures/assignments — payroll runs are computed from them.
+        withHydrationSlot(() => ensureSalarySetupHydrated()),
       ]);
       setTick((t) => t + 1);
     })();
