@@ -70,23 +70,31 @@ export function sisReadFromDbClientEnabled(): boolean {
  */
 const PENDING_DELETES_KEY = "bhb_sis_pending_deletes_v1";
 
+export type SisMergeInstruction = { keepId: string; dropIds: string[] };
+
 function loadPendingDeletes(): {
   studentIds: Set<string>;
   householdIds: Set<string>;
+  merges: SisMergeInstruction[];
 } {
   if (typeof window === "undefined") {
-    return { studentIds: new Set(), householdIds: new Set() };
+    return { studentIds: new Set(), householdIds: new Set(), merges: [] };
   }
   try {
     const raw = localStorage.getItem(PENDING_DELETES_KEY);
-    if (!raw) return { studentIds: new Set(), householdIds: new Set() };
-    const p = JSON.parse(raw) as { studentIds?: string[]; householdIds?: string[] };
+    if (!raw) return { studentIds: new Set(), householdIds: new Set(), merges: [] };
+    const p = JSON.parse(raw) as {
+      studentIds?: string[];
+      householdIds?: string[];
+      merges?: SisMergeInstruction[];
+    };
     return {
       studentIds: new Set((p.studentIds ?? []).filter(Boolean)),
       householdIds: new Set((p.householdIds ?? []).filter(Boolean)),
+      merges: (p.merges ?? []).filter((m) => m && m.keepId && Array.isArray(m.dropIds)),
     };
   } catch {
-    return { studentIds: new Set(), householdIds: new Set() };
+    return { studentIds: new Set(), householdIds: new Set(), merges: [] };
   }
 }
 
@@ -99,7 +107,11 @@ const pendingDeletes = loadPendingDeletes();
 function persistPendingDeletes() {
   if (typeof window === "undefined") return;
   try {
-    if (pendingDeletes.studentIds.size === 0 && pendingDeletes.householdIds.size === 0) {
+    if (
+      pendingDeletes.studentIds.size === 0 &&
+      pendingDeletes.householdIds.size === 0 &&
+      pendingDeletes.merges.length === 0
+    ) {
       localStorage.removeItem(PENDING_DELETES_KEY);
     } else {
       localStorage.setItem(
@@ -107,6 +119,7 @@ function persistPendingDeletes() {
         JSON.stringify({
           studentIds: [...pendingDeletes.studentIds],
           householdIds: [...pendingDeletes.householdIds],
+          merges: pendingDeletes.merges,
         }),
       );
     }
@@ -128,14 +141,30 @@ export function recordSisDeletion(input: {
   persistPendingDeletes();
 }
 
+/**
+ * A duplicate merge: the server folds every record that points at a dropped
+ * id (fee lines, attendance, exams, homework, PTM, leave, library, store,
+ * payment links, concessions, curriculum, leads, chat, and the household if
+ * it is left empty) into the kept student, then deletes the dropped rows —
+ * one transaction (sis_merge_students). Queued and retried like deletions.
+ */
+export function recordSisMerge(input: SisMergeInstruction): void {
+  const dropIds = [...new Set(input.dropIds.filter((id) => id && id !== input.keepId))];
+  if (!input.keepId || dropIds.length === 0) return;
+  pendingDeletes.merges.push({ keepId: input.keepId, dropIds });
+  persistPendingDeletes();
+}
+
 /** Test seam — lets the selftest observe what would go on the wire. */
 export function peekPendingSisDeletions(): {
   studentIds: string[];
   householdIds: string[];
+  merges: SisMergeInstruction[];
 } {
   return {
     studentIds: [...pendingDeletes.studentIds],
     householdIds: [...pendingDeletes.householdIds],
+    merges: [...pendingDeletes.merges],
   };
 }
 
@@ -181,8 +210,10 @@ async function pushSisDeskApi(
         // once the server confirms — see below.
         deleteStudentIds: [...pendingDeletes.studentIds],
         deleteHouseholdIds: [...pendingDeletes.householdIds],
+        merges: pendingDeletes.merges,
       }),
     });
+    const sentMerges = pendingDeletes.merges.length;
     const body = (await res.json().catch(() => null)) as {
       ok?: boolean;
       updatedAt?: string;
@@ -199,7 +230,21 @@ async function pushSisDeskApi(
       // deletion on any failed or retried push.
       pendingDeletes.studentIds.clear();
       pendingDeletes.householdIds.clear();
+      pendingDeletes.merges.length = 0;
       persistPendingDeletes();
+
+      // A merge moved fee lines / marks / etc. to the kept id on the server;
+      // every module's browser copy still holds the dropped ids. Re-pull them
+      // all now, so a save made in the meantime cannot push the old ids back.
+      if (sentMerges > 0) {
+        void Promise.all([
+          import("@/lib/deskHydrateGuard"),
+          import("@/lib/deskHydrationSchedule"),
+        ]).then(([guard, sched]) => {
+          guard.resetDeskHydrated();
+          return sched.ensureAllDeskHydrated();
+        });
+      }
 
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),

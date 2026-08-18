@@ -8,7 +8,7 @@
  */
 
 import { saveSis, type SisState, type SisStudent } from "@/lib/sis";
-import { recordSisDeletion } from "@/lib/sisNormalizedClient";
+import { recordSisDeletion, recordSisMerge } from "@/lib/sisNormalizedClient";
 import { normalizeSessionCode } from "@/lib/studentImport";
 
 export type DuplicateReason =
@@ -339,17 +339,14 @@ export function mergeStudents(
     students: survivors,
     households: state.households.filter((h) => usedHouseholds.has(h.id)),
   };
-  // State the deletions before pushing. The roster push only upserts, so
-  // without this the dropped duplicates stayed in sis_students and came
-  // straight back on the next hydrate — "the merge didn't stick"
-  // (reported 2026-08-18). The single-student remove path already did this
-  // (StudentsWorkspace); merge and bulk-remove never did.
-  recordSisDeletion({
-    studentIds: [...dropSet],
-    householdIds: state.households
-      .filter((h) => !usedHouseholds.has(h.id))
-      .map((h) => h.id),
-  });
+  // State the merge before pushing. The roster push only upserts, so until
+  // 2026-08-18 the dropped duplicates stayed in sis_students and came
+  // straight back on the next hydrate — and nothing that pointed at them
+  // (fee receipt lines, attendance, exams, homework, PTM, leave, library,
+  // store, payment links, concessions, curriculum, leads, chat) was ever
+  // moved. The server now folds all of that into the kept student and
+  // deletes the dropped rows in one transaction (sis_merge_students).
+  recordSisMerge({ keepId, dropIds: [...dropSet] });
   saveSis(next);
   void import("@/lib/sisPersistence").then(({ pushSisState, flushSisSync }) => {
     pushSisState(next).then(() => flushSisSync()).catch(console.error);

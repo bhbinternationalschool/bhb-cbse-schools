@@ -1071,6 +1071,39 @@ export async function deleteSisRecordsInDb(input: {
   return { ok: true, deletedStudents, deletedHouseholds };
 }
 
+/**
+ * Fold duplicate student rows into one kept row, moving every linked record
+ * with them, in one server-side transaction (sis_merge_students, migration
+ * 20260818070000). Each instruction is applied independently; the first
+ * failure stops the batch and is reported so the client keeps retrying it.
+ */
+export async function mergeSisStudentsInDb(
+  merges: { keepId: string; dropIds: string[] }[],
+): Promise<{ ok: boolean; error?: string; applied: number; summaries: unknown[] }> {
+  const list = (merges ?? []).filter(
+    (m) => m && m.keepId && Array.isArray(m.dropIds) && m.dropIds.length > 0,
+  );
+  if (list.length === 0) return { ok: true, applied: 0, summaries: [] };
+  const ctx = await resolveCtx();
+  if (!ctx) {
+    return { ok: false, error: "Supabase tenant not configured", applied: 0, summaries: [] };
+  }
+  const summaries: unknown[] = [];
+  for (const m of list) {
+    const { data, error } = await ctx.sb.rpc("sis_merge_students", {
+      p_tenant_id: ctx.tenantId,
+      p_keep_id: m.keepId,
+      p_drop_ids: m.dropIds.filter((id) => id && id !== m.keepId),
+    });
+    if (error) {
+      console.warn("[sis-db] merge failed", m.keepId, error.message);
+      return { ok: false, error: error.message, applied: summaries.length, summaries };
+    }
+    summaries.push(data);
+  }
+  return { ok: true, applied: summaries.length, summaries };
+}
+
 export async function wipeSisRosterInDb(): Promise<{ ok: boolean; error?: string }> {
   const ctx = await resolveCtx();
   if (!ctx) return { ok: false, error: "No tenant" };

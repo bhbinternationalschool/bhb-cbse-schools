@@ -25,6 +25,7 @@ import {
 import {
   peekPendingSisDeletions,
   recordSisDeletion,
+  recordSisMerge,
 } from "./sisNormalizedClient";
 
 function student(
@@ -182,6 +183,27 @@ function removedHouseholdIds(before: SisState, after: SisState): string[] {
     /inactivate/i,
     "and the refusal explains what to do instead",
   );
+}
+
+// ── A duplicate merge is stated as a MERGE, not a bare delete ────────────
+// The dropped ids carry fee lines, marks, homework, PTM, leave… on the
+// server. A bare delete would orphan all of that (or, worse, leave the
+// duplicate in place — until 2026-08-18 the merge path stated nothing at
+// all and the duplicates came back on the next hydrate). The merge
+// instruction is queued exactly like a deletion: it goes on the wire with
+// the next push and is cleared only when the server confirms.
+{
+  recordSisMerge({ keepId: "k1", dropIds: ["d1", "d2", "k1", "", "d1"] });
+  const q = peekPendingSisDeletions();
+  assert.equal(q.merges.length, 1, "a merge is queued for the next push");
+  assert.deepEqual(q.merges[0], { keepId: "k1", dropIds: ["d1", "d2"] },
+    "the kept id, blanks and repeats never appear in dropIds");
+
+  // Degenerate merges are not queued: nothing to drop, or no keeper.
+  recordSisMerge({ keepId: "k1", dropIds: ["k1"] });
+  recordSisMerge({ keepId: "", dropIds: ["d9"] });
+  assert.equal(peekPendingSisDeletions().merges.length, 1,
+    "a merge with nothing to drop, or no keeper, is not queued");
 }
 
 console.log("sisDelete.selftest: all assertions passed");
