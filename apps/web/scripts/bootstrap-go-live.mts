@@ -102,18 +102,43 @@ async function main() {
     ],
   };
 
-  const { error: rbacErr } = await sb.from("rbac_state").upsert(
-    {
-      tenant_id: tenantId,
-      state: rbacSeed,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "tenant_id" },
-  );
-  if (rbacErr) {
-    console.warn("rbac_state upsert:", rbacErr.message);
+  // Seed ONLY when the tenant has no roles anywhere. This script runs on
+  // every deploy (deploy-online.sh); until 2026-08-18 it unconditionally
+  // overwrote rbac_state with defaults and `assignments: []`, discarding
+  // every role/assignment the school had made in Settings → Roles from
+  // server-side enforcement (rbac_state audit showed exactly one entry, by
+  // bootstrap-go-live, after each deploy).
+  const [{ data: rbacRow }, { count: deskRoleSlices }] = await Promise.all([
+    sb
+      .from("rbac_state")
+      .select("state")
+      .eq("tenant_id", tenantId)
+      .maybeSingle(),
+    sb
+      .from("rbac_desk_slices")
+      .select("slice_key", { count: "exact", head: true })
+      .eq("tenant_id", tenantId)
+      .eq("slice_key", "roles"),
+  ]);
+  const existingRoles =
+    ((rbacRow?.state as { roles?: unknown[] } | null)?.roles?.length ?? 0) > 0 ||
+    (deskRoleSlices ?? 0) > 0;
+  if (existingRoles) {
+    console.log("ok: rbac already configured — leaving roles/assignments untouched");
   } else {
-    console.log("ok: rbac_state seeded with built-in roles");
+    const { error: rbacErr } = await sb.from("rbac_state").upsert(
+      {
+        tenant_id: tenantId,
+        state: rbacSeed,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "tenant_id" },
+    );
+    if (rbacErr) {
+      console.warn("rbac_state upsert:", rbacErr.message);
+    } else {
+      console.log("ok: rbac_state seeded with built-in roles");
+    }
   }
 
   for (const email of emails) {

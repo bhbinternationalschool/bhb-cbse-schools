@@ -72,6 +72,10 @@ export async function POST(req: Request, ctx: RouteCtx) {
       { status: 502 },
     );
   }
+  if (id === "rbac") {
+    const { invalidateServerRbacCache } = await import("@/lib/api/v1/auth");
+    invalidateServerRbacCache();
+  }
 
   const { meta } = await fetchDeskSliceFromDb(id);
   return NextResponse.json({

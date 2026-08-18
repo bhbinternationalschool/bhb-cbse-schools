@@ -29,22 +29,69 @@ function hashKey(raw: string): string {
   return createHash("sha256").update(raw).digest("hex");
 }
 
+/**
+ * Server-side RBAC. Reads the same place Settings → Roles writes —
+ * rbac_desk_slices — falling back to the legacy rbac_state blob only when
+ * the desk is empty. Until 2026-08-18 this read the blob alone, which the UI
+ * had stopped writing once the desk became the source of truth, and which
+ * bootstrap-go-live reset to defaults on every deploy: server-side
+ * enforcement and the browser were looking at two different role sets.
+ * Cached briefly — this runs on every authenticated request (31 089 blob
+ * reads in six days).
+ */
+const RBAC_CACHE_TTL_MS = 30_000;
+let rbacCache: { state: RbacState; at: number } | null = null;
+
+export function invalidateServerRbacCache(): void {
+  rbacCache = null;
+}
+
 async function loadServerRbac(): Promise<RbacState> {
+  const now = Date.now();
+  if (rbacCache && now - rbacCache.at < RBAC_CACHE_TTL_MS) {
+    return rbacCache.state;
+  }
   const ctx = await getServerTenantContext();
   if (!ctx) return defaultRbacState();
-  const { data } = await ctx.sb
-    .from("rbac_state")
-    .select("state")
-    .eq("tenant_id", ctx.tenantId)
-    .maybeSingle();
-  const state = data?.state as RbacState | undefined;
+
+  let state: RbacState | undefined;
+  try {
+    const { fetchDeskSliceFromDb } = await import(
+      "@/lib/deskSliceNormalized.server"
+    );
+    const { bundle } = await fetchDeskSliceFromDb("rbac");
+    const roles = Array.isArray(bundle.roles) ? bundle.roles : [];
+    if (roles.length > 0) {
+      state = {
+        version: 1,
+        roles,
+        assignments: Array.isArray(bundle.assignments) ? bundle.assignments : [],
+        audit: Array.isArray(bundle.audit) ? bundle.audit : [],
+      } as RbacState;
+    }
+  } catch (e) {
+    console.warn("[apiAuth] rbac desk read failed", e);
+  }
+
+  if (!state) {
+    const { data } = await ctx.sb
+      .from("rbac_state")
+      .select("state")
+      .eq("tenant_id", ctx.tenantId)
+      .maybeSingle();
+    state = data?.state as RbacState | undefined;
+  }
+
   // normalizeRbacState merges any built-in module grant missing from a
-  // persisted role (e.g. a module added after this tenant's rbac_state row
-  // was last saved) onto that role — the same merge loadRbac() already does
+  // persisted role (e.g. a module added after this tenant's rbac row was
+  // last saved) onto that role — the same merge loadRbac() already does
   // client-side. Skipping it here silently denies every module added after
   // go-live until someone happens to re-save Settings → Roles.
-  if (state?.roles?.length) return normalizeRbacState(state);
-  return defaultRbacState();
+  const resolved = state?.roles?.length
+    ? normalizeRbacState(state)
+    : defaultRbacState();
+  rbacCache = { state: resolved, at: now };
+  return resolved;
 }
 
 /**
