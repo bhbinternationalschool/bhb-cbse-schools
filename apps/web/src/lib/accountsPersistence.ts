@@ -59,7 +59,8 @@ export const ensureAccountsHydrated = async () => {
     );
     normChanged = true;
   }
-  if (normChanged) scheduleAccountsSync(loadAccounts());
+  // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
+  if (normChanged && !readFromDb) scheduleAccountsSync(loadAccounts());
   return blobChanged || normChanged;
 };
 

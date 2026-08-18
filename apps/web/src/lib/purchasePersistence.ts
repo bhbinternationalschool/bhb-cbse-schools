@@ -63,7 +63,8 @@ export const ensurePurchaseHydrated = async () => {
     );
     normChanged = true;
   }
-  if (normChanged) schedulePurchaseSync(loadPurchase());
+  // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
+  if (normChanged && !readFromDb) schedulePurchaseSync(loadPurchase());
   return blobChanged || normChanged;
 };
 

@@ -183,7 +183,7 @@ export async function ensureSisHydrated(): Promise<boolean> {
     return false;
   }
 
-  const { loadSis, saveSis, writeSisLocalRaw, emptySisState } =
+  const { loadSis, writeSisLocalRaw, emptySisState } =
     await import("@/lib/sis");
   let next = loadSis();
   let changed = false;
@@ -210,7 +210,6 @@ export async function ensureSisHydrated(): Promise<boolean> {
     if (next.students.length > 0 || next.households.length > 0) {
       next = emptySisState();
       writeSisLocalRaw(next);
-      saveSis(next);
       changed = true;
     }
   } else if (
@@ -223,15 +222,19 @@ export async function ensureSisHydrated(): Promise<boolean> {
     changed = true;
   }
 
-  // If we just replaced local state from the DB, we don't need to push it back
-  // Push is only needed if there are local-only rows or we didn't prefer the DB
+  // Hydration is pull-only. This used to call saveSis(next), which schedules
+  // a full-roster push (and, via syncSisIntoMasters → saveMasters, a masters
+  // and staff push) on every hydrate — 226 of 228 roster POSTs in one day were
+  // within 90 s of a roster GET from the same browser, median 23.6 s each,
+  // and sis_students changed for 3 rows in six days (audit 2026-08-18). That
+  // echo is what was timing out every ordinary read. Local edits reach the
+  // DB only through an explicit saveSis() from the UI.
   if (next.students.length > 0 && !readFromDb) {
     void pushSisState(next);
   }
 
   if (changed) {
     writeSisLocalRaw(next);
-    saveSis(next);
   }
 
   const { ensureCurriculumHydrated } = await import(

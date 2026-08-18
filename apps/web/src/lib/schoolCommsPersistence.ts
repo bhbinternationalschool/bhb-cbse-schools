@@ -77,7 +77,8 @@ export const ensureSchoolCommsHydrated = async () => {
     );
     normChanged = true;
   }
-  if (normChanged) scheduleSchoolCommsSync(loadSchoolComms());
+  // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
+  if (normChanged && !readFromDb) scheduleSchoolCommsSync(loadSchoolComms());
 
   const { ensureGalleryHydrated } = await import("@/lib/galleryPersistence");
   const { ensureNewsHydrated } = await import("@/lib/newsPersistence");

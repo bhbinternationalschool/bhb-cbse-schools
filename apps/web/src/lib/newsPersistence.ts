@@ -38,7 +38,8 @@ export async function ensureNewsHydrated(): Promise<boolean> {
       preferDb: readFromDb,
     }),
   );
-  scheduleNewsDeskSync();
+  // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
+  if (!readFromDb) scheduleNewsDeskSync();
   return true;
 }
 

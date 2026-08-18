@@ -94,7 +94,9 @@ export async function ensureVaultHydrated(): Promise<boolean> {
     normChanged = true;
   }
 
-  if (normChanged) {
+  // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
+
+  if (normChanged && !readFromDb) {
     scheduleVaultSync(loadVault());
   }
 

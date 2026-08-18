@@ -12,7 +12,6 @@ import {
   currentAcademicYearCode,
   ensureStudentClassLinks,
   loadMasters,
-  saveMasters,
   type DemoStudent,
   type FeeStudentType,
   type MastersState,
@@ -1113,7 +1112,22 @@ export function syncSisIntoMasters(
     .filter((s) => demoStudentLinksValid(validSections, s));
   const current = m.students ?? [];
   if (demoStudentsEqual(current, demo)) return;
-  saveMasters({ ...m, students: demo });
+  // Local-only. `masters.students` is a client-side projection of the SIS
+  // roster with exactly one consumer (alignSisToMasters below); the server
+  // derives its own copy from sis_students. This used to call saveMasters(),
+  // which pushed the whole masters state (+ staff roster) to Supabase every
+  // time the roster was hydrated — with the session-year filter above, two
+  // browsers on different years re-pushed it at each other indefinitely.
+  // Cloud Run showed 258 masters pushes / 24 h with 56 "stale" 409s from
+  // that alone (audit 2026-08-18).
+  if (typeof window === "undefined") {
+    setMirrorSlice("masters", { ...m, students: demo });
+    return;
+  }
+  void import("@/lib/mastersPersistence").then(({ writeMastersLocalRaw }) => {
+    writeMastersLocalRaw({ ...m, students: demo });
+    window.dispatchEvent(new CustomEvent("bhb-masters-updated"));
+  });
 }
 
 /** Align SIS students to current masters class/section ids. */

@@ -53,7 +53,7 @@ export type BulkApplyResult = {
 
 export type YearRollMode = "clear" | "draft_copy";
 
-const TEMPLATE_KEY = "bhb_class_curriculum_templates_v1";
+export const TEMPLATE_KEY = "bhb_class_curriculum_templates_v1";
 
 function tid() {
   return `tmpl_${Math.random().toString(36).slice(2, 10)}`;

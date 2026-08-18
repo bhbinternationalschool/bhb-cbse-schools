@@ -232,19 +232,22 @@ export async function ensureCurriculumHydrated(): Promise<boolean> {
 
   const remote = await hydrateCurriculumRemoteOnce();
   if (!remote) return false;
-  const { loadSis, saveSis } = await import("@/lib/sis");
-  const {
-    loadClassCurriculumTemplates,
-    saveClassCurriculumTemplates,
-  } = await import("@/lib/officeCurriculumWorkflow");
-  const merged = mergeCurriculumRemoteIntoSis(loadSis(), remote);
-  saveSis(merged);
-  saveClassCurriculumTemplates(
-    mergeCurriculumTemplates(
-      loadClassCurriculumTemplates(),
-      remote.templates,
-    ),
+  const { loadSis, writeSisLocalRaw } = await import("@/lib/sis");
+  const { loadClassCurriculumTemplates, TEMPLATE_KEY } = await import(
+    "@/lib/officeCurriculumWorkflow"
   );
-  scheduleCurriculumSync(merged);
+  const merged = mergeCurriculumRemoteIntoSis(loadSis(), remote);
+  // Pull-only. This ran saveSis() (a full roster push, 23 s median) plus a
+  // curriculum push and a template push on every SIS hydrate — 173 POST
+  // /curriculum a day for a module nobody was editing (audit 2026-08-18).
+  writeSisLocalRaw(merged);
+  if (typeof window !== "undefined") {
+    localStorage.setItem(
+      TEMPLATE_KEY,
+      JSON.stringify(
+        mergeCurriculumTemplates(loadClassCurriculumTemplates(), remote.templates),
+      ),
+    );
+  }
   return true;
 }
