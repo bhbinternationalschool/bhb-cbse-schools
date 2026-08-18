@@ -26,10 +26,26 @@ import {
   FLEET_LOOKBACK_MS,
   NON_FLEET_VEHICLE_REFS,
   type OfflinePeriod,
-  type VehicleDashboardRow,
   type VehicleFleetMetrics,
 } from "@/lib/fleetEdgeAnalytics";
 import { isSosAlert } from "@/lib/fleetEdge.server";
+import {
+  isServiceDue,
+  type FleetAlertRow,
+  type FleetDailyPoint,
+  type FleetEdgeReport,
+  type FleetNotificationRow,
+  type FleetTotals,
+} from "@/lib/fleetEdgeReport.types";
+
+export type {
+  FleetAlertRow,
+  FleetDailyPoint,
+  FleetEdgeReport,
+  FleetNotificationRow,
+  FleetTotals,
+  FleetVehicleIdentity,
+} from "@/lib/fleetEdgeReport.types";
 
 type RawEvent = {
   id: string;
@@ -58,96 +74,6 @@ function sumDurations(list: unknown): number {
   }, 0);
 }
 
-
-export type FleetAlertRow = {
-  id: string;
-  at: string;
-  receivedAt: string;
-  vehicleRef: string;
-  registrationNumber: string | null;
-  alertName: string;
-  severity: "critical" | "warning" | "info";
-  location: string | null;
-  lat: number | null;
-  lng: number | null;
-  maxSpeed: number | null;
-  duration: number | null;
-  fuelDifference: number | null;
-  fuelTank: string | null;
-};
-
-export type FleetDailyPoint = {
-  day: string; // YYYY-MM-DD (IST)
-  label: string; // "18 Aug"
-  distanceKm: number;
-  fuelL: number;
-  harshEvents: number;
-  overSpeed: number;
-  sos: number;
-  alerts: number;
-  avgSpeedSum: number;
-  avgSpeedN: number;
-  avgSpeed: number | null;
-  windows: number;
-};
-
-export type FleetTotals = {
-  vehicles: number;
-  online: number;
-  offline: number;
-  distanceKm: number;
-  fuelL: number;
-  kmPerL: number | null;
-  avgSpeed: number | null;
-  harshAcceleration: number;
-  harshBrake: number;
-  rashTurning: number;
-  harshEvents: number;
-  overSpeed: number;
-  sos: number;
-  fuelDrain: number;
-  refuel: number;
-  geofence: number;
-  alerts: number;
-  faultCritical: number;
-  faultWarning: number;
-  serviceDue: number;
-  nightDrivingHours: number;
-  idlingHours: number;
-  eventsInRange: number;
-  eventsTotal: number;
-};
-
-export type FleetNotificationRow = {
-  id: string;
-  createdAt: string;
-  eventId: string | null;
-  alertName: string;
-  vehicleRef: string | null;
-  registrationNumber: string | null;
-  channel: string;
-  recipient: string;
-  status: "sent" | "failed" | "suppressed" | "skipped";
-  detail: string | null;
-  body: string | null;
-};
-
-export type FleetVehicleIdentity = { model: string | null; year: number | null; name: string | null };
-
-export type FleetEdgeReport = {
-  ok: true;
-  from: string;
-  to: string;
-  generatedAt: string;
-  kpis: Record<"high" | "average" | "low" | "offline", number>;
-  totals: FleetTotals;
-  vehicles: (VehicleDashboardRow & { identity: FleetVehicleIdentity | null })[];
-  daily: FleetDailyPoint[];
-  alerts: FleetAlertRow[];
-  offlineHistory: OfflinePeriod[];
-  notifications: FleetNotificationRow[];
-  notifyMobiles: string[];
-};
 
 export function alertSeverity(alertName: string): FleetAlertRow["severity"] {
   if (isSosAlert(alertName)) return "critical";
@@ -179,14 +105,33 @@ export async function buildFleetEdgeReport(
   const { from, to } = opts;
   const lookbackFrom = new Date(Date.now() - FLEET_LOOKBACK_MS).toISOString();
 
+  // PostgREST caps every response at max-rows (1 000 on Supabase) no matter
+  // what .limit() asks for. The original dashboard asked for 20 000 and got
+  // the oldest 1 000 — everything after 17 Aug 12:30 UTC was silently
+  // missing (SOS 57 of 159, "last seen" a day stale). Page explicitly.
+  const PAGE = 1000;
+  const MAX_EVENTS = 50_000;
+  async function fetchAllEvents(): Promise<{ data: RawEvent[]; error: string | null }> {
+    const out: RawEvent[] = [];
+    for (let offset = 0; offset < MAX_EVENTS; offset += PAGE) {
+      const { data, error } = await sb
+        .from("fleet_edge_events")
+        .select("id, event_type, alert_name, vehicle_ref, registration_number, event_at, received_at, payload")
+        .eq("tenant_id", tenantId)
+        .gte("received_at", lookbackFrom)
+        .order("received_at", { ascending: true })
+        .order("id", { ascending: true })
+        .range(offset, offset + PAGE - 1);
+      if (error) return { data: out, error: error.message };
+      const rows = (data || []) as RawEvent[];
+      out.push(...rows);
+      if (rows.length < PAGE) break;
+    }
+    return { data: out, error: null };
+  }
+
   const [eventsRes, identityRes, notifRes, totalRes] = await Promise.all([
-    sb
-      .from("fleet_edge_events")
-      .select("id, event_type, alert_name, vehicle_ref, registration_number, event_at, received_at, payload")
-      .eq("tenant_id", tenantId)
-      .gte("received_at", lookbackFrom)
-      .order("received_at", { ascending: true })
-      .limit(20000),
+    fetchAllEvents(),
     sb.from("fleet_edge_vehicle_identity").select("vin, model, year, name").eq("tenant_id", tenantId),
     sb
       .from("fleet_edge_notifications")
@@ -196,9 +141,9 @@ export async function buildFleetEdgeReport(
       .limit(500),
     sb.from("fleet_edge_events").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId),
   ]);
-  if (eventsRes.error) return { ok: false, error: eventsRes.error.message };
+  if (eventsRes.error) return { ok: false, error: eventsRes.error };
 
-  const events = ((eventsRes.data || []) as RawEvent[]).filter((ev) => {
+  const events = eventsRes.data.filter((ev) => {
     if (!opts.vehicleRef) return true;
     return ev.vehicle_ref === opts.vehicleRef || ev.registration_number === opts.vehicleRef;
   });
@@ -210,8 +155,14 @@ export async function buildFleetEdgeReport(
   const alerts: FleetAlertRow[] = [];
   let eventsInRange = 0;
 
+  // Fleet Edge window stamps ("2026-08-18T05:30:00") carry no zone and are
+  // UTC (they arrive seconds after the window ends). Pin them so a server
+  // in any TZ buckets the same day.
+  function utcPinned(iso: string): string {
+    return /(Z|[+-]\d\d:?\d\d)$/.test(iso) ? iso : `${iso}Z`;
+  }
   function dayFor(iso: string): FleetDailyPoint {
-    const { day, label } = istDay(iso);
+    const { day, label } = istDay(utcPinned(iso));
     let d = dailyMap.get(day);
     if (!d) {
       d = { day, label, distanceKm: 0, fuelL: 0, harshEvents: 0, overSpeed: 0, sos: 0, alerts: 0, avgSpeedSum: 0, avgSpeedN: 0, avgSpeed: null, windows: 0 };
@@ -498,7 +449,7 @@ export async function buildFleetEdgeReport(
     totals.geofence += v.geofenceEventCount;
     totals.faultCritical += v.faultCritical;
     totals.faultWarning += v.faultWarning;
-    if (v.serviceDue && v.serviceDue.toLowerCase() !== "not due") totals.serviceDue += 1;
+    if (isServiceDue(v.serviceDue)) totals.serviceDue += 1;
     totals.nightDrivingHours += v.nightDrivingSeconds / 3600;
     totals.idlingHours += v.idlingSeconds / 3600;
     for (const s of v.averageSpeedSamples) if (s > 0) { speedSum += s; speedN += 1; }

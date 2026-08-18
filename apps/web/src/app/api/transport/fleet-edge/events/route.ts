@@ -18,6 +18,7 @@ export async function GET(req: Request) {
   if (!auth.ok) return auth.response;
 
   const url = new URL(req.url);
+  const id = url.searchParams.get("id")?.trim() || null;
   const vehicleRef = url.searchParams.get("vehicleRef")?.trim() || null;
   const eventType = url.searchParams.get("eventType")?.trim() || null;
   const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit")) || 50));
@@ -37,6 +38,7 @@ export async function GET(req: Request) {
     .order("received_at", { ascending: false })
     .limit(limit);
 
+  if (id) query = query.eq("id", id);
   if (vehicleRef) {
     query = query.or(`vehicle_ref.eq.${vehicleRef},registration_number.eq.${vehicleRef}`);
   }
