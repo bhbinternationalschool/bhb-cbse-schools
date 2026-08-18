@@ -217,6 +217,10 @@ export function UdiseComplianceWorkspace({
   const [settings, setSettings] = useState<UdiseComplianceSettings>(
     loadUdiseComplianceSettings,
   );
+  // Re-read when the server copy of this module lands (login/refresh hydration).
+  useModuleStateHydration("udise_compliance", () => {
+    setSettings(loadUdiseComplianceSettings());
+  });
   const ay =
     session.academicYearCode ||
     (masters ? currentAcademicYearCode(masters) : "");
@@ -1317,6 +1321,4 @@ export function UdiseComplianceWorkspace({
       ) : null}
     </div>
   );
-// Re-read when the server copy of this module lands (login/refresh hydration).
-useModuleStateHydration("udise_compliance", () => { setSettings(loadUdiseComplianceSettings()); });
 }
