@@ -25,6 +25,7 @@ import {
   setMirrorSlice,
 } from "@/lib/schoolDataMirror";
 import { deskSkipBlobPushClient } from "@/lib/deskCutover";
+import { writeMastersLocalRaw } from "@/lib/mastersPersistence";
 import {
   normalizeCurriculum,
   normalizeCurriculumRequest,
@@ -1124,10 +1125,14 @@ export function syncSisIntoMasters(
     setMirrorSlice("masters", { ...m, students: demo });
     return;
   }
-  void import("@/lib/mastersPersistence").then(({ writeMastersLocalRaw }) => {
-    writeMastersLocalRaw({ ...m, students: demo });
-    window.dispatchEvent(new CustomEvent("bhb-masters-updated"));
-  });
+  // Synchronous, and re-read masters at write time. The first version of
+  // this write went through a dynamic import; on a fresh page load it then
+  // landed AFTER masters hydration and overwrote the real classes with the
+  // cold-start copy captured earlier — every student showed "Unassigned"
+  // (2026-08-18, minutes after deploy). Only the students projection is
+  // ours to change; everything else must be whatever masters holds now.
+  writeMastersLocalRaw({ ...loadMasters(), students: demo });
+  window.dispatchEvent(new CustomEvent("bhb-masters-updated"));
 }
 
 /** Align SIS students to current masters class/section ids. */
