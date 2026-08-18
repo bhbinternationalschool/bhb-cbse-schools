@@ -1337,6 +1337,11 @@ export function saveSis(state: SisState) {
   void import("@/lib/curriculumPersistence").then(({ scheduleCurriculumSync }) => {
     scheduleCurriculumSync(state);
   });
+  // A same-tab write never fires the native "storage" event (that only
+  // fires in OTHER tabs) — dashboards that relied on it alone (e.g.
+  // SchoolHomeDashboard) stayed stale after a merge/edit until a full
+  // reload. Mirrors masters.ts's "bhb-masters-updated" signal.
+  window.dispatchEvent(new CustomEvent("bhb-sis-updated"));
 }
 
 const SIS_MIRROR_META = "bhb_sis_mirror_meta_v1";

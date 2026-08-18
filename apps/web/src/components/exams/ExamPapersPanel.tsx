@@ -72,13 +72,16 @@ export function ExamPapersPanel({
   const [filterClassId, setFilterClassId] = useState("");
 
   useEffect(() => {
-    void import("@/lib/examPapersPersistence").then(
-      ({ ensureExamPapersHydrated }) => {
-        void ensureExamPapersHydrated().then((changed) => {
+    void Promise.all([
+      import("@/lib/examPapersPersistence"),
+      import("@/lib/deskHydrateGuard"),
+    ]).then(([{ ensureExamPapersHydrated }, { withHydrationSlot }]) => {
+      void withHydrationSlot(() => ensureExamPapersHydrated()).then(
+        (changed) => {
           if (changed) setTick((t) => t + 1);
-        });
-      },
-    );
+        },
+      );
+    });
   }, []);
 
   useEffect(() => {

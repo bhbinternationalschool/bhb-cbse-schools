@@ -151,19 +151,21 @@ export function PayrollWorkspace() {
         { ensureStaffHrHydrated },
         { ensureStaffAdvancesHydrated },
         { ensureStatutoryHydrated },
+        { withHydrationSlot },
       ] = await Promise.all([
         import("@/lib/payrollPersistence"),
         import("@/lib/staffAttendancePersistence"),
         import("@/lib/staffHrPersistence"),
         import("@/lib/staffAdvancesPersistence"),
         import("@/lib/statutoryPersistence"),
+        import("@/lib/deskHydrateGuard"),
       ]);
       await Promise.all([
-        ensurePayrollHydrated(),
-        ensureStaffAttendanceHydrated(),
-        ensureStaffHrHydrated(),
-        ensureStaffAdvancesHydrated(),
-        ensureStatutoryHydrated(),
+        withHydrationSlot(() => ensurePayrollHydrated()),
+        withHydrationSlot(() => ensureStaffAttendanceHydrated()),
+        withHydrationSlot(() => ensureStaffHrHydrated()),
+        withHydrationSlot(() => ensureStaffAdvancesHydrated()),
+        withHydrationSlot(() => ensureStatutoryHydrated()),
       ]);
       setTick((t) => t + 1);
     })();

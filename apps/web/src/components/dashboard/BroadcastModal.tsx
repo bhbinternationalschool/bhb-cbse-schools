@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ensureWaTemplatesHydrated } from "@/lib/waTemplatesPersistence";
+import { withHydrationSlot } from "@/lib/deskHydrateGuard";
 import {
   loadWaTemplates,
   listApprovedTemplates,
@@ -80,7 +81,7 @@ export function BroadcastModal({
   useEffect(() => {
     if (!open) return;
     setTemplates(listApprovedTemplates(loadWaTemplates()));
-    void ensureWaTemplatesHydrated().then(() => {
+    void withHydrationSlot(() => ensureWaTemplatesHydrated()).then(() => {
       setTemplates(listApprovedTemplates(loadWaTemplates()));
     });
   }, [open]);

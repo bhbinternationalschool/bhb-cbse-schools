@@ -28,33 +28,37 @@ export function ModuleDashboardHost({
   const [mastersTick, setMastersTick] = useState(0);
 
   useEffect(() => {
-    const onMastersUpdated = () => setMastersTick((t) => t + 1);
-    window.addEventListener("bhb-masters-updated", onMastersUpdated);
-    return () =>
-      window.removeEventListener("bhb-masters-updated", onMastersUpdated);
+    const onDataUpdated = () => setMastersTick((t) => t + 1);
+    window.addEventListener("bhb-masters-updated", onDataUpdated);
+    window.addEventListener("bhb-sis-updated", onDataUpdated);
+    return () => {
+      window.removeEventListener("bhb-masters-updated", onDataUpdated);
+      window.removeEventListener("bhb-sis-updated", onDataUpdated);
+    };
   }, []);
 
   useEffect(() => {
     void (async () => {
       let did = false;
+      const { withHydrationSlot } = await import("@/lib/deskHydrateGuard");
       if (moduleId === "admissions") {
         const { ensureAdmissionsHydrated } = await import("@/lib/admissionsPersistence");
-        did = await ensureAdmissionsHydrated();
+        did = await withHydrationSlot(() => ensureAdmissionsHydrated());
       } else if (moduleId === "students") {
         const { ensureSisHydrated } = await import("@/lib/sisPersistence");
-        did = await ensureSisHydrated();
+        did = await withHydrationSlot(() => ensureSisHydrated());
       } else if (moduleId === "fees") {
         const { ensureFeesHydrated } = await import("@/lib/feesPersistence");
-        did = await ensureFeesHydrated();
+        did = await withHydrationSlot(() => ensureFeesHydrated());
       } else if (moduleId === "staff") {
         const { ensureStaffHydrated } = await import("@/lib/staffPersistence");
-        did = await ensureStaffHydrated();
+        did = await withHydrationSlot(() => ensureStaffHydrated());
       } else if (moduleId === "attendance") {
         const { ensureAttendanceHydrated } = await import("@/lib/attendancePersistence");
-        did = await ensureAttendanceHydrated();
+        did = await withHydrationSlot(() => ensureAttendanceHydrated());
       } else if (moduleId === "exams") {
         const { ensureExamsHydrated } = await import("@/lib/examsPersistence");
-        did = await ensureExamsHydrated();
+        did = await withHydrationSlot(() => ensureExamsHydrated());
       }
       if (did) setMastersTick((t) => t + 1);
     })();

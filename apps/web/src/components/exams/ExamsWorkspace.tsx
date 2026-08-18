@@ -151,9 +151,16 @@ export function ExamsWorkspace() {
     // Paint immediately from localStorage, then refresh after remote hydrate
     refresh();
     void (async () => {
-      const { ensureSisHydrated } = await import("@/lib/sisPersistence");
-      const { ensureExamsHydrated } = await import("@/lib/examsPersistence");
-      await Promise.all([ensureSisHydrated(), ensureExamsHydrated()]);
+      const [{ ensureSisHydrated }, { ensureExamsHydrated }, { withHydrationSlot }] =
+        await Promise.all([
+          import("@/lib/sisPersistence"),
+          import("@/lib/examsPersistence"),
+          import("@/lib/deskHydrateGuard"),
+        ]);
+      await Promise.all([
+        withHydrationSlot(() => ensureSisHydrated()),
+        withHydrationSlot(() => ensureExamsHydrated()),
+      ]);
       refresh();
     })();
   }, []);

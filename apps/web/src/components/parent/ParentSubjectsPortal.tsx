@@ -87,8 +87,11 @@ export function ParentSubjectsPortal({
 
   useEffect(() => {
     void (async () => {
-      const { ensureSisHydrated } = await import("@/lib/sisPersistence");
-      await ensureSisHydrated();
+      const [{ ensureSisHydrated }, { withHydrationSlot }] = await Promise.all([
+        import("@/lib/sisPersistence"),
+        import("@/lib/deskHydrateGuard"),
+      ]);
+      await withHydrationSlot(() => ensureSisHydrated());
       reload();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps

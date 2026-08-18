@@ -435,10 +435,12 @@ export function PurchaseWorkspace({
   useEffect(() => {
     if (typeof window === "undefined") return;
     void (async () => {
-      const { ensurePurchaseHydrated } = await import(
-        "@/lib/purchasePersistence"
-      );
-      await ensurePurchaseHydrated();
+      const [{ ensurePurchaseHydrated }, { withHydrationSlot }] =
+        await Promise.all([
+          import("@/lib/purchasePersistence"),
+          import("@/lib/deskHydrateGuard"),
+        ]);
+      await withHydrationSlot(() => ensurePurchaseHydrated());
       refresh();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps

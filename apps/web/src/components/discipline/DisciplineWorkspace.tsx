@@ -58,9 +58,16 @@ export function DisciplineWorkspace() {
     setSis(loadSis());
     setState(loadDiscipline());
     void (async () => {
-      const { ensureMastersHydrated } = await import("@/lib/mastersPersistence");
-      const { ensureSisHydrated } = await import("@/lib/sisPersistence");
-      await Promise.all([ensureMastersHydrated(), ensureSisHydrated()]);
+      const [{ ensureMastersHydrated }, { ensureSisHydrated }, { withHydrationSlot }] =
+        await Promise.all([
+          import("@/lib/mastersPersistence"),
+          import("@/lib/sisPersistence"),
+          import("@/lib/deskHydrateGuard"),
+        ]);
+      await Promise.all([
+        withHydrationSlot(() => ensureMastersHydrated()),
+        withHydrationSlot(() => ensureSisHydrated()),
+      ]);
       setMasters(loadMasters());
       setSis(loadSis());
     })();

@@ -262,10 +262,11 @@ export function FeeTakeWorkspace() {
       const { ensurePaymentsHydrated } = await import(
         "@/lib/paymentsPersistence"
       );
+      const { withHydrationSlot } = await import("@/lib/deskHydrateGuard");
       await Promise.all([
-        ensureSisHydrated(),
-        ensureFeesHydrated(),
-        ensurePaymentsHydrated(),
+        withHydrationSlot(() => ensureSisHydrated()),
+        withHydrationSlot(() => ensureFeesHydrated()),
+        withHydrationSlot(() => ensurePaymentsHydrated()),
       ]);
       await hydrateFeesStore();
       const { applyCollectionWipeSignalIfNeeded } = await import(

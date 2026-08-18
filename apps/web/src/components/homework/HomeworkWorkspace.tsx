@@ -163,10 +163,12 @@ export function HomeworkWorkspace() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     void (async () => {
-      const { ensureHomeworkHydrated } = await import(
-        "@/lib/homeworkPersistence"
-      );
-      await ensureHomeworkHydrated();
+      const [{ ensureHomeworkHydrated }, { withHydrationSlot }] =
+        await Promise.all([
+          import("@/lib/homeworkPersistence"),
+          import("@/lib/deskHydrateGuard"),
+        ]);
+      await withHydrationSlot(() => ensureHomeworkHydrated());
       refresh();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps

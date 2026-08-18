@@ -84,8 +84,12 @@ export function RolesPermissionsPanel() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     void (async () => {
-      const { ensureRbacHydrated } = await import("@/lib/rbacPersistence");
-      await ensureRbacHydrated();
+      const [{ ensureRbacHydrated }, { withHydrationSlot }] =
+        await Promise.all([
+          import("@/lib/rbacPersistence"),
+          import("@/lib/deskHydrateGuard"),
+        ]);
+      await withHydrationSlot(() => ensureRbacHydrated());
       const r = loadRbac();
       setState(r);
     })();

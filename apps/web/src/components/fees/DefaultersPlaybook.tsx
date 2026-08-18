@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { withHydrationSlot } from "@/lib/deskHydrateGuard";
 import {
   buildPlaybook,
   composeEscalationNotice,
@@ -119,7 +120,7 @@ export function DefaultersPlaybook() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     void (async () => {
-      await ensureFeeRecoveryTasksHydrated();
+      await withHydrationSlot(() => ensureFeeRecoveryTasksHydrated());
       setMeetings(listOpenParentMeetings());
     })();
   }, []);

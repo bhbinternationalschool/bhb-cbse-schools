@@ -3,6 +3,7 @@
  */
 
 import { yieldToMain } from "@/lib/runWhenIdle";
+import { withHydrationSlot } from "@/lib/deskHydrateGuard";
 
 export type DeskHydrateId =
   | "rbac"
@@ -225,9 +226,13 @@ function dispatchAdmissionsHydrated() {
 }
 
 async function runDeskTasks(tasks: DeskHydrateTask[]): Promise<void> {
+  // Each task's actual network work is gated through withHydrationSlot, so
+  // even the "priority" tier (up to 9 tasks for the home route) can't fire
+  // more than a handful of concurrent DB round trips at once — Promise.all
+  // here just waits for all of them, it no longer controls concurrency.
   await Promise.allSettled(
     tasks.map(async (task) => {
-      await task.run();
+      await withHydrationSlot(() => task.run());
       if (task.id === "admissions") dispatchAdmissionsHydrated();
     }),
   );

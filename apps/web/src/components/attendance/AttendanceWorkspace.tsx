@@ -115,10 +115,12 @@ export function AttendanceWorkspace() {
   useEffect(() => {
     refresh();
     void (async () => {
-      const { ensureAttendanceHydrated } = await import(
-        "@/lib/attendancePersistence"
-      );
-      const changed = await ensureAttendanceHydrated();
+      const [{ ensureAttendanceHydrated }, { withHydrationSlot }] =
+        await Promise.all([
+          import("@/lib/attendancePersistence"),
+          import("@/lib/deskHydrateGuard"),
+        ]);
+      const changed = await withHydrationSlot(() => ensureAttendanceHydrated());
       if (changed) refresh();
     })();
   }, []);

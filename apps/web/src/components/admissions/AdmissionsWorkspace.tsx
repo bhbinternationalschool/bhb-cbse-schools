@@ -238,10 +238,12 @@ export function AdmissionsWorkspace() {
     let cancelled = false;
     void (async () => {
       try {
-        const { ensureAdmissionsHydrated } = await import(
-          "@/lib/admissionsPersistence"
-        );
-        const pulled = await ensureAdmissionsHydrated();
+        const [{ ensureAdmissionsHydrated }, { withHydrationSlot }] =
+          await Promise.all([
+            import("@/lib/admissionsPersistence"),
+            import("@/lib/deskHydrateGuard"),
+          ]);
+        const pulled = await withHydrationSlot(() => ensureAdmissionsHydrated());
         if (cancelled) return;
         const next = loadAdmissions();
         setState(next);

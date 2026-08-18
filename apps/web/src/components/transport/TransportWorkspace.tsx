@@ -175,10 +175,12 @@ export function TransportWorkspace() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     void (async () => {
-      const { ensureTransportHydrated } = await import(
-        "@/lib/transportPersistence"
-      );
-      await ensureTransportHydrated();
+      const [{ ensureTransportHydrated }, { withHydrationSlot }] =
+        await Promise.all([
+          import("@/lib/transportPersistence"),
+          import("@/lib/deskHydrateGuard"),
+        ]);
+      await withHydrationSlot(() => ensureTransportHydrated());
       refresh();
     })();
   }, []);

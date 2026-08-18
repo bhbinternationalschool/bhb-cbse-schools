@@ -55,6 +55,7 @@ import {
   type LibraryTitle,
 } from "@/lib/library";
 import { ensureLibraryHydrated } from "@/lib/libraryPersistence";
+import { withHydrationSlot } from "@/lib/deskHydrateGuard";
 import {
   runLibraryProcurementOcrApi,
   type LibraryProcurementOcrSuggestion,
@@ -169,7 +170,7 @@ export function LibraryWorkspace() {
   const [reportTo, setReportTo] = useState(todayIso());
 
   useEffect(() => {
-    void ensureLibraryHydrated().then((changed) => {
+    void withHydrationSlot(() => ensureLibraryHydrated()).then((changed) => {
       if (changed) refresh();
     });
      

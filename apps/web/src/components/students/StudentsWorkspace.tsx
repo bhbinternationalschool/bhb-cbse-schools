@@ -208,8 +208,11 @@ export function StudentsWorkspace() {
     }
 
     void (async () => {
-      const { ensureSisHydrated } = await import("@/lib/sisPersistence");
-      const did = await ensureSisHydrated();
+      const [{ ensureSisHydrated }, { withHydrationSlot }] = await Promise.all([
+        import("@/lib/sisPersistence"),
+        import("@/lib/deskHydrateGuard"),
+      ]);
+      const did = await withHydrationSlot(() => ensureSisHydrated());
       if (did) setState(loadSis());
     })();
   }, []);
@@ -1000,6 +1003,7 @@ export function StudentsWorkspace() {
       {mainTab === "dashboard" ? (
         <ModuleDashboardHost
           moduleId="students"
+          refreshKey={panelTick}
           onNavigateTab={(t) => setMainTabPersist(t as MainTab)}
         />
       ) : null}

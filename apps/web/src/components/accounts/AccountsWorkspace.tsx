@@ -111,10 +111,11 @@ export function AccountsWorkspace() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     void (async () => {
+      const { withHydrationSlot } = await import("@/lib/deskHydrateGuard");
       const { ensureAccountsHydrated } = await import(
         "@/lib/accountsPersistence"
       );
-      await ensureAccountsHydrated();
+      await withHydrationSlot(() => ensureAccountsHydrated());
       refresh();
     })();
   }, []);

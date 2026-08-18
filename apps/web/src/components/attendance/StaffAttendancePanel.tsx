@@ -92,13 +92,15 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
 
   useEffect(() => {
     void (async () => {
-      const { ensureStaffHydrated } = await import("@/lib/staffPersistence");
-      const { ensureStaffAttendanceHydrated } = await import(
-        "@/lib/staffAttendancePersistence"
-      );
+      const [{ ensureStaffHydrated }, { ensureStaffAttendanceHydrated }, { withHydrationSlot }] =
+        await Promise.all([
+          import("@/lib/staffPersistence"),
+          import("@/lib/staffAttendancePersistence"),
+          import("@/lib/deskHydrateGuard"),
+        ]);
       const [didStaff, didAtt] = await Promise.all([
-        ensureStaffHydrated(),
-        ensureStaffAttendanceHydrated(),
+        withHydrationSlot(() => ensureStaffHydrated()),
+        withHydrationSlot(() => ensureStaffAttendanceHydrated()),
       ]);
       if (didStaff || didAtt) setTick((n) => n + 1);
     })();

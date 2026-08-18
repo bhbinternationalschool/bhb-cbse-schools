@@ -193,8 +193,11 @@ export function PtmWorkspace() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     void (async () => {
-      const { ensurePtmHydrated } = await import("@/lib/ptmPersistence");
-      await ensurePtmHydrated();
+      const [{ ensurePtmHydrated }, { withHydrationSlot }] = await Promise.all([
+        import("@/lib/ptmPersistence"),
+        import("@/lib/deskHydrateGuard"),
+      ]);
+      await withHydrationSlot(() => ensurePtmHydrated());
       refresh();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps

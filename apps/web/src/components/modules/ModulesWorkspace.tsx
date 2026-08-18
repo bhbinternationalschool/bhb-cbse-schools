@@ -24,10 +24,12 @@ export function ModulesWorkspace() {
     loadModuleRegistry();
     setTick((n) => n + 1);
     void (async () => {
-      const { ensureModuleRegistryHydrated } = await import(
-        "@/lib/moduleRegistryPersistence"
-      );
-      await ensureModuleRegistryHydrated();
+      const [{ ensureModuleRegistryHydrated }, { withHydrationSlot }] =
+        await Promise.all([
+          import("@/lib/moduleRegistryPersistence"),
+          import("@/lib/deskHydrateGuard"),
+        ]);
+      await withHydrationSlot(() => ensureModuleRegistryHydrated());
       loadModuleRegistry();
       setTick((n) => n + 1);
     })();

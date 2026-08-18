@@ -65,10 +65,12 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
   useEffect(() => {
     if (typeof window === "undefined") return;
     void (async () => {
-      const { ensureStaffAdvancesHydrated } = await import(
-        "@/lib/staffAdvancesPersistence"
-      );
-      await ensureStaffAdvancesHydrated();
+      const [{ ensureStaffAdvancesHydrated }, { withHydrationSlot }] =
+        await Promise.all([
+          import("@/lib/staffAdvancesPersistence"),
+          import("@/lib/deskHydrateGuard"),
+        ]);
+      await withHydrationSlot(() => ensureStaffAdvancesHydrated());
       setTick((t) => t + 1);
     })();
   }, []);
