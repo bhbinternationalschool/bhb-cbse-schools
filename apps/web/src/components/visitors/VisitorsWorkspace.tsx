@@ -407,8 +407,8 @@ export function VisitorsWorkspace() {
                     <div>
                       {v.visitorNo ? <span className="mr-2 rounded-md bg-[var(--brand-deep)]/10 px-1.5 py-0.5 font-mono text-[11px] font-black text-[var(--brand-deep)]">{v.visitorNo}</span> : null}
                       <span className="font-semibold">{v.visitorName}</span>
-                      {v.source === "gate_qr" ? <span className="ml-2 rounded-md bg-[var(--success-soft)] px-1.5 py-0.5 text-[10px] font-black uppercase text-[var(--success)]">{lang === "hi" ? "गेट QR" : "Gate QR"}</span> : null}
-                      {!v.outTime ? <span className="ml-2 rounded-md bg-[var(--warning-soft,var(--surface-sunken))] px-1.5 py-0.5 text-[10px] font-black uppercase">{L.onCampus}</span> : null}
+                      {v.source === "gate_qr" ? <span className="ml-2 inline-block whitespace-nowrap rounded-md bg-[var(--success-soft)] px-1.5 py-0.5 text-[10px] font-black uppercase text-[var(--success)]">{lang === "hi" ? "गेट QR" : "Gate QR"}</span> : null}
+                      {!v.outTime ? <span className="ml-2 inline-block whitespace-nowrap rounded-md bg-[var(--warning-soft,var(--surface-sunken))] px-1.5 py-0.5 text-[10px] font-black uppercase">{L.onCampus}</span> : null}
                       <span className="ml-2 text-xs text-[var(--muted)]">
                         {lang === "hi" ? VISITOR_PURPOSE_HI[v.purpose] || v.purpose : visitorPurposeLabel(v.purpose)}
                         {v.personToMeet ? ` · ${L.meeting} ${v.personToMeet}` : ""}
