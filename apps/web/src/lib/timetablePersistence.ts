@@ -98,7 +98,9 @@ export async function ensureTimetableHydrated(): Promise<boolean> {
     normChanged = true;
   }
 
-  if (normChanged) scheduleTimetableSync(loadTimetable());
+  // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
+
+  if (normChanged && !readFromDb) scheduleTimetableSync(loadTimetable());
   return blobChanged || normChanged;
 }
 

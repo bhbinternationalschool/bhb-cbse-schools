@@ -98,7 +98,9 @@ export async function ensureTransportHydrated(): Promise<boolean> {
     normChanged = true;
   }
 
-  if (normChanged) scheduleTransportSync(loadTransport());
+  // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
+
+  if (normChanged && !readFromDb) scheduleTransportSync(loadTransport());
   return blobChanged || normChanged;
 }
 

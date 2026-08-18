@@ -92,7 +92,9 @@ export async function ensureTrustHydrated(): Promise<boolean> {
     normChanged = true;
   }
 
-  if (normChanged) scheduleTrustSync(loadTrust());
+  // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
+
+  if (normChanged && !readFromDb) scheduleTrustSync(loadTrust());
   return blobChanged || normChanged;
 }
 

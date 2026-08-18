@@ -2,9 +2,16 @@ import "package:flutter/material.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
+import "../modules/homework_screen.dart";
 import "../modules/module_shell.dart";
 import "../modules/notices_screen.dart";
+import "../modules/transport_screen.dart";
+import "attendance_screen.dart";
+import "broadcast_screen.dart";
+import "principal_lists.dart";
+import "section_picker.dart";
 import "self_attendance_screen.dart";
+import "students_screen.dart";
 
 String _greeting() {
   final h = DateTime.now().hour;
@@ -32,8 +39,86 @@ class PrincipalHomeScreen extends StatefulWidget {
 
 class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
   PrincipalSnapshot? _snap;
+  StaffSummary? _staff;
   String? _name;
   String? _error;
+
+  void _push(Widget screen) {
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
+  }
+
+  /// Class/section picker over the school-wide class list (from
+  /// /api/v1/staff/summary, which lists every active class for any staff).
+  Future<(String, String, String)?> _pickSection() async {
+    var staff = _staff;
+    if (staff == null) {
+      try {
+        staff = await widget.api.fetchStaffSummary();
+        if (mounted) setState(() => _staff = staff);
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Could not load the class list.")),
+          );
+        }
+        return null;
+      }
+    }
+    if (!mounted) return null;
+    final classes = staff.classes;
+    return showModalBottomSheet<(String, String, String)>(
+      context: context,
+      backgroundColor: Colors.white,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => SectionPicker(classes: classes),
+    );
+  }
+
+  Future<void> _markAttendance() async {
+    final target = await _pickSection();
+    if (target == null || !mounted) return;
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => AttendanceScreen(
+          api: widget.api,
+          classId: target.$1,
+          sectionId: target.$2,
+          date: _snap?.attendanceDate.isNotEmpty == true
+              ? _snap!.attendanceDate
+              : DateTime.now().toIso8601String().substring(0, 10),
+          title: target.$3,
+        ),
+      ),
+    );
+    if (changed == true) _load();
+  }
+
+  Future<void> _postHomework() async {
+    final target = await _pickSection();
+    if (target == null || !mounted) return;
+    _push(HomeworkScreen(
+      api: widget.api,
+      subtitle: target.$3,
+      classId: target.$1,
+      sectionId: target.$2,
+      canPost: true,
+    ));
+  }
+
+  Future<void> _openStudents() async {
+    final target = await _pickSection();
+    if (target == null || !mounted) return;
+    _push(StudentsScreen(
+      api: widget.api,
+      classId: target.$1,
+      sectionId: target.$2,
+      date: _snap?.attendanceDate ?? "",
+      title: target.$3,
+    ));
+  }
 
   @override
   void initState() {
@@ -183,12 +268,14 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                         label: "Open dues",
                         value: formatInrPaise(snap.openDuesPaise),
                         color: AppColors.warning,
+                        onTap: () => _push(DefaultersScreen(api: widget.api)),
                       ),
                       const SizedBox(width: 8),
                       _Stat(
-                        label: "Defaulter families",
+                        label: "Students with dues",
                         value: "${snap.defaulterHouseholds}",
                         color: AppColors.danger,
+                        onTap: () => _push(DefaultersScreen(api: widget.api)),
                       ),
                     ],
                   ),
@@ -197,16 +284,19 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                     "Student attendance · ${snap.attendanceDate.isEmpty ? "today" : formatDateLabel(snap.attendanceDate)}",
                   ),
                   if (attTotal == 0)
-                    const Card(
-                      child: Padding(
-                        padding: EdgeInsets.all(14),
-                        child: Text(
+                    Card(
+                      child: ListTile(
+                        dense: true,
+                        title: const Text(
                           "No sections marked yet today.",
                           style: TextStyle(
                             fontSize: 12.5,
                             color: AppColors.muted,
                           ),
                         ),
+                        subtitle: const Text("Tap to see registers by section"),
+                        trailing: const Icon(Icons.chevron_right, size: 18),
+                        onTap: () => _push(RegistersScreen(api: widget.api)),
                       ),
                     )
                   else ...[
@@ -216,18 +306,21 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                           label: "Present",
                           value: "${snap.studentPresent}",
                           color: AppColors.success,
+                          onTap: () => _push(RegistersScreen(api: widget.api)),
                         ),
                         const SizedBox(width: 8),
                         _Stat(
                           label: "Absent",
                           value: "${snap.studentAbsent}",
                           color: AppColors.danger,
+                          onTap: () => _push(RegistersScreen(api: widget.api)),
                         ),
                         const SizedBox(width: 8),
                         _Stat(
                           label: "Marked",
                           value: "${snap.studentMarkedPct}%",
                           color: AppColors.primary,
+                          onTap: () => _push(RegistersScreen(api: widget.api)),
                         ),
                       ],
                     ),
@@ -238,6 +331,7 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                           icon: Icons.pending_actions,
                           text:
                               "${snap.registersPending} section registers not marked yet",
+                          onTap: () => _push(RegistersScreen(api: widget.api)),
                         ),
                       ),
                   ],
@@ -249,18 +343,24 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                         label: "Active staff",
                         value: "${snap.staffActive}",
                         color: AppColors.primary,
+                        onTap: () =>
+                            _push(StaffAttendanceTodayScreen(api: widget.api)),
                       ),
                       const SizedBox(width: 8),
                       _Stat(
                         label: "Present today",
                         value: "${snap.staffPresent}",
                         color: AppColors.success,
+                        onTap: () =>
+                            _push(StaffAttendanceTodayScreen(api: widget.api)),
                       ),
                       const SizedBox(width: 8),
                       _Stat(
                         label: "Absent",
                         value: "${snap.staffAbsent}",
                         color: AppColors.danger,
+                        onTap: () =>
+                            _push(StaffAttendanceTodayScreen(api: widget.api)),
                       ),
                     ],
                   ),
@@ -284,6 +384,7 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                         label: "Follow-ups due",
                         value: "${snap.followUpsDue}",
                         color: AppColors.warning,
+                        onTap: () => _push(FollowUpsScreen(api: widget.api)),
                       ),
                     ],
                   ),
@@ -303,42 +404,79 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                       ),
                   ],
                   const SizedBox(height: 18),
-                  const _SectionTitle("Quick actions"),
+                  const _SectionTitle("Actions"),
                   const SizedBox(height: 6),
-                  Card(
-                    child: Column(
-                      children: [
-                        ListTile(
-                          dense: true,
-                          leading: Icon(
-                            Icons.campaign_outlined,
-                            color: ModuleTone.coral.foreground,
-                          ),
-                          title: const Text("Notices & news"),
-                          trailing: const Icon(Icons.chevron_right, size: 18),
-                          onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => NoticesScreen(api: widget.api),
-                            ),
-                          ),
-                        ),
-                        ListTile(
-                          dense: true,
-                          leading: Icon(
-                            Icons.where_to_vote_outlined,
-                            color: ModuleTone.teal.foreground,
-                          ),
-                          title: const Text("My attendance (GPS punch)"),
-                          trailing: const Icon(Icons.chevron_right, size: 18),
-                          onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  SelfAttendanceScreen(api: widget.api),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                  GridView.count(
+                    crossAxisCount: 3,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    mainAxisSpacing: 8,
+                    crossAxisSpacing: 8,
+                    childAspectRatio: 1.05,
+                    children: [
+                      _Action(
+                        icon: Icons.campaign_outlined,
+                        label: "Broadcast",
+                        tone: ModuleTone.coral,
+                        onTap: () => _push(BroadcastScreen(api: widget.api)),
+                      ),
+                      _Action(
+                        icon: Icons.fact_check_outlined,
+                        label: "Mark attendance",
+                        tone: ModuleTone.teal,
+                        onTap: _markAttendance,
+                      ),
+                      _Action(
+                        icon: Icons.menu_book_outlined,
+                        label: "Post homework",
+                        tone: ModuleTone.blue,
+                        onTap: _postHomework,
+                      ),
+                      _Action(
+                        icon: Icons.groups_outlined,
+                        label: "Students",
+                        tone: ModuleTone.blue,
+                        onTap: _openStudents,
+                      ),
+                      _Action(
+                        icon: Icons.currency_rupee,
+                        label: "Fee defaulters",
+                        tone: ModuleTone.coral,
+                        onTap: () => _push(DefaultersScreen(api: widget.api)),
+                      ),
+                      _Action(
+                        icon: Icons.badge_outlined,
+                        label: "Staff today",
+                        tone: ModuleTone.teal,
+                        onTap: () =>
+                            _push(StaffAttendanceTodayScreen(api: widget.api)),
+                      ),
+                      _Action(
+                        icon: Icons.person_add_alt_outlined,
+                        label: "Admissions",
+                        tone: ModuleTone.blue,
+                        onTap: () => _push(FollowUpsScreen(api: widget.api)),
+                      ),
+                      _Action(
+                        icon: Icons.newspaper_outlined,
+                        label: "Notices",
+                        tone: ModuleTone.coral,
+                        onTap: () => _push(NoticesScreen(api: widget.api)),
+                      ),
+                      _Action(
+                        icon: Icons.directions_bus_outlined,
+                        label: "Transport",
+                        tone: ModuleTone.blue,
+                        onTap: () => _push(TransportScreen(api: widget.api)),
+                      ),
+                      _Action(
+                        icon: Icons.where_to_vote_outlined,
+                        label: "My GPS punch",
+                        tone: ModuleTone.teal,
+                        onTap: () =>
+                            _push(SelfAttendanceScreen(api: widget.api)),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 8),
                   const Text(
@@ -381,36 +519,104 @@ class _Stat extends StatelessWidget {
     required this.label,
     required this.value,
     required this.color,
+    this.onTap,
   });
 
   final String label;
   final String value;
   final Color color;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     return Expanded(
       child: Card(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(
-                  value,
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: color,
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    value,
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: color,
+                    ),
                   ),
                 ),
+                const SizedBox(height: 2),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        label,
+                        style: const TextStyle(
+                            fontSize: 10.5, color: AppColors.muted),
+                      ),
+                    ),
+                    if (onTap != null)
+                      const Icon(Icons.chevron_right,
+                          size: 14, color: AppColors.muted),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Action extends StatelessWidget {
+  const _Action({
+    required this.icon,
+    required this.label,
+    required this.tone,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final ModuleTone tone;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: tone.background,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, color: tone.foreground, size: 22),
               ),
-              const SizedBox(height: 2),
+              const SizedBox(height: 8),
               Text(
                 label,
-                style: const TextStyle(fontSize: 10.5, color: AppColors.muted),
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.ink,
+                ),
               ),
             ],
           ),
@@ -421,31 +627,39 @@ class _Stat extends StatelessWidget {
 }
 
 class _AlertRow extends StatelessWidget {
-  const _AlertRow({required this.icon, required this.text});
+  const _AlertRow({required this.icon, required this.text, this.onTap});
 
   final IconData icon;
   final String text;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     return Card(
       color: const Color(0xFFF5EDD4),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Row(
-          children: [
-            Icon(icon, size: 18, color: const Color(0xFF854F0B)),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                text,
-                style: const TextStyle(
-                  fontSize: 12.5,
-                  color: Color(0xFF854F0B),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Row(
+            children: [
+              Icon(icon, size: 18, color: const Color(0xFF854F0B)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  text,
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    color: Color(0xFF854F0B),
+                  ),
                 ),
               ),
-            ),
-          ],
+              if (onTap != null)
+                const Icon(Icons.chevron_right,
+                    size: 16, color: Color(0xFF854F0B)),
+            ],
+          ),
         ),
       ),
     );

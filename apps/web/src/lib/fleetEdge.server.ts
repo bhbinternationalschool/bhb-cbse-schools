@@ -41,13 +41,24 @@ const KNOWN_ALERT_NAMES = new Set([
   "PanicSosEvent",
 ]);
 
-/** Live Fleet Edge traffic (confirmed 2026-08-18) sends "PanicSosEvent" for
- * a panic-button press, not the "DriverSOSAlert" name the vendor's own
- * TimeBound Push doc uses as its example — 159 real alerts were stored with
- * an "unrecognized alertName" warning and never notified anyone until this
- * was caught. Treat both as the same safety escalation rather than trusting
- * either doc/sample name alone. */
+/**
+ * Every alertName Fleet Edge uses for a driver panic button. The spec PDF
+ * says "DriverSOSAlert"; the live system sends "PanicSosEvent" — 159 of
+ * them from two school buses on 16–18 Aug 2026, none of which was
+ * recognised, escalated, or counted (audit 2026-08-18). Both are SOS.
+ */
 export const SOS_ALERT_NAMES = new Set(["DriverSOSAlert", "PanicSosEvent"]);
+export function isSosAlert(alertName: string | null | undefined): boolean {
+  return !!alertName && SOS_ALERT_NAMES.has(alertName);
+}
+
+/**
+ * Minimum gap between two SOS escalations for the same vehicle. A held or
+ * repeatedly pressed panic button pushes an alert every few seconds; the
+ * first one is the escalation, the rest are logged as suppressed so the
+ * desk still sees them, but no one gets 159 WhatsApp messages.
+ */
+export const SOS_NOTIFY_COOLDOWN_MS = 10 * 60 * 1000;
 
 export type FleetEdgeAlertPayload = {
   timestamp?: string;
@@ -172,7 +183,7 @@ export function parseFleetEdgeTelemetry(raw: unknown): FleetEdgeTelemetryPayload
     crankOn: bool(raw.crankOn),
     speed: num(raw.speed),
     odometer: num(raw.odometer),
-    fuelLevelPercent: num(raw.fuelLevelPercent),
+    fuelLevelPercent: num(raw.fuelLevelPercent ?? raw.primaryFuelLevel),
     vehicleStatus: str(raw.vehicleStatus),
     engineRunHour: num(raw.engineRunHour),
     currentGear: num(raw.currentGear),
@@ -217,7 +228,7 @@ async function insertEvent(row: {
   window_to: string | null;
   source_ip: string | null;
   payload: unknown;
-}): Promise<{ ok: boolean; error?: string }> {
+}): Promise<{ ok: boolean; error?: string; id?: string }> {
   try {
     const ctx = await getServerTenantContext();
     if (!ctx) {
@@ -225,38 +236,118 @@ async function insertEvent(row: {
       return { ok: false, error: "No tenant context" };
     }
     const { sb, tenantId } = ctx;
-    const { error } = await sb.from("fleet_edge_events").insert({
-      tenant_id: tenantId,
-      ...row,
-    });
+    const { data, error } = await sb
+      .from("fleet_edge_events")
+      .insert({ tenant_id: tenantId, ...row })
+      .select("id")
+      .maybeSingle();
     if (error) {
       console.warn("[fleetEdge] insert failed", error.message);
       return { ok: false, error: error.message };
     }
-    return { ok: true };
+    return { ok: true, id: (data?.id as string | undefined) ?? undefined };
   } catch (e) {
     console.warn("[fleetEdge] insertEvent threw", e);
     return { ok: false, error: String(e) };
   }
 }
 
-/**
- * DriverSOSAlert notify — best-effort, never throws, never blocks the
- * caller's ack back to Fleet Edge. FLEET_EDGE_SOS_NOTIFY_MOBILE is a
- * comma-separated list of mobiles; unset = logged skip, not a silent no-op.
- */
-async function notifyFleetEdgeSos(alert: FleetEdgeAlertPayload): Promise<void> {
-  const mobiles = (process.env.FLEET_EDGE_SOS_NOTIFY_MOBILE || "")
+type NotificationLogRow = {
+  event_id: string | null;
+  alert_name: string;
+  vehicle_ref: string | null;
+  registration_number: string | null;
+  recipient: string;
+  status: "sent" | "failed" | "suppressed" | "skipped";
+  detail?: string | null;
+  body?: string | null;
+};
+
+async function logFleetEdgeNotification(row: NotificationLogRow): Promise<void> {
+  try {
+    const ctx = await getServerTenantContext();
+    if (!ctx) return;
+    const { error } = await ctx.sb.from("fleet_edge_notifications").insert({
+      tenant_id: ctx.tenantId,
+      channel: "whatsapp",
+      ...row,
+    });
+    if (error) console.warn("[fleetEdge] notification log insert failed", error.message);
+  } catch (e) {
+    console.warn("[fleetEdge] notification log threw", e);
+  }
+}
+
+export function fleetEdgeNotifyMobiles(): string[] {
+  return (process.env.FLEET_EDGE_SOS_NOTIFY_MOBILE || "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+/**
+ * SOS notify — best-effort, never throws, never blocks the caller's ack
+ * back to Fleet Edge. FLEET_EDGE_SOS_NOTIFY_MOBILE is a comma-separated
+ * list of mobiles; unset = a logged "skipped" row, not a silent no-op.
+ * One escalation per vehicle per SOS_NOTIFY_COOLDOWN_MS; the rest are
+ * logged as "suppressed" so the Notifications tab still shows them.
+ */
+async function notifyFleetEdgeSos(
+  alert: FleetEdgeAlertPayload,
+  eventId: string | null,
+): Promise<void> {
+  const alertName = alert.alertName || "DriverSOSAlert";
+  const vehicleRef = alert.vehicleId || null;
+  const reg = alert.registrationNumber || alert.vehicleId || "unknown vehicle";
+  const mobiles = fleetEdgeNotifyMobiles();
   if (mobiles.length === 0) {
     console.warn(
-      "[fleetEdge] DriverSOSAlert received but FLEET_EDGE_SOS_NOTIFY_MOBILE is unset — no one notified",
+      "[fleetEdge] SOS received but FLEET_EDGE_SOS_NOTIFY_MOBILE is unset — no one notified",
     );
+    await logFleetEdgeNotification({
+      event_id: eventId,
+      alert_name: alertName,
+      vehicle_ref: vehicleRef,
+      registration_number: alert.registrationNumber || null,
+      recipient: "—",
+      status: "skipped",
+      detail: "FLEET_EDGE_SOS_NOTIFY_MOBILE is not set",
+    });
     return;
   }
-  const reg = alert.registrationNumber || alert.vehicleId || "unknown vehicle";
+
+  // Cooldown: latest SENT escalation for this vehicle.
+  try {
+    const ctx = await getServerTenantContext();
+    if (ctx && vehicleRef) {
+      const since = new Date(Date.now() - SOS_NOTIFY_COOLDOWN_MS).toISOString();
+      const { data } = await ctx.sb
+        .from("fleet_edge_notifications")
+        .select("id, created_at")
+        .eq("tenant_id", ctx.tenantId)
+        .eq("vehicle_ref", vehicleRef)
+        .eq("status", "sent")
+        .in("alert_name", [...SOS_ALERT_NAMES])
+        .gte("created_at", since)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if ((data?.length ?? 0) > 0) {
+        await logFleetEdgeNotification({
+          event_id: eventId,
+          alert_name: alertName,
+          vehicle_ref: vehicleRef,
+          registration_number: alert.registrationNumber || null,
+          recipient: mobiles.join(","),
+          status: "suppressed",
+          detail: `Within ${SOS_NOTIFY_COOLDOWN_MS / 60000}-minute cooldown of an escalation already sent for ${reg}`,
+        });
+        return;
+      }
+    }
+  } catch (e) {
+    console.warn("[fleetEdge] SOS cooldown check threw — sending anyway", e);
+  }
+
   const details = alert.eventDetails || {};
   const location = str(details.location);
   const lat = typeof details.latitude === "number" ? details.latitude : undefined;
@@ -265,14 +356,32 @@ async function notifyFleetEdgeSos(alert: FleetEdgeAlertPayload): Promise<void> {
   const body =
     `DRIVER SOS ALERT — vehicle ${reg} — ${when}.` +
     `${location ? ` Location: ${location}.` : ""}` +
-    `${lat != null && lng != null ? ` (${lat}, ${lng})` : ""}`;
+    `${lat != null && lng != null ? ` https://maps.google.com/?q=${lat},${lng}` : ""}`;
   for (const mobile of mobiles) {
+    let status: NotificationLogRow["status"] = "sent";
+    let detail: string | null = null;
     try {
       const r = await sendWaWithFailover({ primaryMobile: mobile, body });
-      if (!r.ok) console.warn("[fleetEdge] SOS notify failed", mobile, r.error);
+      if (!r.ok) {
+        status = "failed";
+        detail = r.error || "send failed";
+        console.warn("[fleetEdge] SOS notify failed", mobile, r.error);
+      }
     } catch (e) {
+      status = "failed";
+      detail = String(e);
       console.warn("[fleetEdge] SOS notify threw", mobile, e);
     }
+    await logFleetEdgeNotification({
+      event_id: eventId,
+      alert_name: alertName,
+      vehicle_ref: vehicleRef,
+      registration_number: alert.registrationNumber || null,
+      recipient: mobile,
+      status,
+      detail,
+      body,
+    });
   }
 }
 
@@ -294,12 +403,12 @@ export async function ingestFleetEdgeAlert(
     source_ip: sourceIp,
     payload: alert,
   });
-  if (alert.alertName && SOS_ALERT_NAMES.has(alert.alertName)) {
+  if (isSosAlert(alert.alertName)) {
     // Fire regardless of insert success — a DB hiccup must never suppress
     // a safety escalation.
-    void notifyFleetEdgeSos(alert);
+    void notifyFleetEdgeSos(alert, result.id ?? null);
   }
-  return result;
+  return { ok: result.ok, error: result.error };
 }
 
 export async function ingestFleetEdgeDetails(
@@ -327,19 +436,34 @@ export async function ingestFleetEdgeDetails(
  * harmless (worse would be silence).
  */
 async function notifyFleetEdgeFirstSeen(vehicleRef: string): Promise<void> {
-  const mobiles = (process.env.FLEET_EDGE_SOS_NOTIFY_MOBILE || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const mobiles = fleetEdgeNotifyMobiles();
   if (mobiles.length === 0) return;
   const body = `Fleet Edge tracker is live for vehicle ${vehicleRef} — first telemetry received.`;
   for (const mobile of mobiles) {
+    let status: NotificationLogRow["status"] = "sent";
+    let detail: string | null = null;
     try {
       const r = await sendWaWithFailover({ primaryMobile: mobile, body });
-      if (!r.ok) console.warn("[fleetEdge] first-seen notify failed", mobile, r.error);
+      if (!r.ok) {
+        status = "failed";
+        detail = r.error || "send failed";
+        console.warn("[fleetEdge] first-seen notify failed", mobile, r.error);
+      }
     } catch (e) {
+      status = "failed";
+      detail = String(e);
       console.warn("[fleetEdge] first-seen notify threw", mobile, e);
     }
+    await logFleetEdgeNotification({
+      event_id: null,
+      alert_name: "TrackerFirstSeen",
+      vehicle_ref: vehicleRef,
+      registration_number: null,
+      recipient: mobile,
+      status,
+      detail,
+      body,
+    });
   }
 }
 

@@ -31,7 +31,7 @@ const tabsListVariants = cva(
         default: "bg-muted",
         line: "gap-1 bg-transparent",
         workspace:
-          "h-auto gap-3.5 rounded-2xl border border-[rgba(32,48,80,0.1)] bg-gradient-to-br from-white/95 to-[rgba(248,248,240,0.88)] p-3.5 shadow-[0_4px_24px_rgba(32,48,80,0.07),inset_0_1px_0_rgba(255,255,255,0.9)] backdrop-blur-sm",
+          "h-auto gap-3.5 rounded-2xl border border-[var(--border)] bg-gradient-to-br from-white/95 to-[rgba(248,248,240,0.88)] dark:from-[var(--card)] dark:to-[var(--surface-sunken)] p-3.5 shadow-[0_4px_24px_rgba(32,48,80,0.07),inset_0_1px_0_rgba(255,255,255,0.9)] dark:shadow-[0_4px_20px_rgba(0,0,0,0.35)] backdrop-blur-sm",
       },
     },
     defaultVariants: {

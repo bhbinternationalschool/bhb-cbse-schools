@@ -158,8 +158,14 @@ export async function buildPrincipalSnapshot(
     admissions: {
       pipeline,
       enrolled: funnel.enrolled || 0,
+      // Same filter as /api/v1/principal/lists?kind=followups so the card
+      // and its drill-down agree: closed leads (enrolled/lost) need no follow-up.
       followUpsDue: adm.leads.filter(
-        (l) => l.nextFollowUpAt && l.nextFollowUpAt.slice(0, 10) <= today,
+        (l) =>
+          l.nextFollowUpAt &&
+          l.nextFollowUpAt.slice(0, 10) <= today &&
+          l.stage !== "enrolled" &&
+          l.stage !== "lost",
       ).length,
     },
     alerts: {

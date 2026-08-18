@@ -103,10 +103,26 @@ export async function pushDeskSliceToDb(
     }));
 
   const slicesTable = `${def.deskPrefix}_desk_slices`;
-  const { data: existing } = await sb
+  const { data: existing, error: existingErr } = await sb
     .from(slicesTable)
     .select("slice_key")
     .eq("tenant_id", tenantId);
+  if (existingErr) {
+    // Cannot see what is there → cannot safely decide what to prune.
+    return { ok: false, error: existingErr.message };
+  }
+  // A payload that carries no slice keys at all is not an instruction to
+  // wipe the desk — it is a client that never held this module's state
+  // (pushed before its own hydration finished, or after localStorage was
+  // cleared). The empty-state guard in createDeskSlicePersistence ran only
+  // AFTER this delete, which is how module toggles / templates / rules
+  // "reset themselves" (ensure-desk then re-seeded defaults). Explicit
+  // empty arrays (`rules: []`) are still honoured — deleting the last row
+  // is a real edit. Unknown ≠ empty.
+  const carriesNoKeys = allSliceKeys(def).every((k) => rest[k] === undefined);
+  if (carriesNoKeys && (existing?.length ?? 0) > 0) {
+    return { ok: false, error: "Refusing to sync: payload carries no slice keys" };
+  }
   const keep = new Set(rows.map((r) => String(r.slice_key)));
   const stale = (existing ?? [])
     .map((r) => String((r as { slice_key: string }).slice_key))
@@ -144,15 +160,20 @@ export async function pushDeskSliceToDb(
 export async function fetchDeskSliceFromDb(id: DeskModuleId): Promise<{
   bundle: Record<string, unknown>;
   meta: DeskSliceSyncMeta | null;
+  /** false = the read itself failed; the bundle is unknown, not empty. */
+  ok: boolean;
+  error?: string;
 }> {
   const def = resolveDef(id);
-  if (!def) return { bundle: {}, meta: null };
+  if (!def) return { bundle: {}, meta: null, ok: false, error: "Unknown module" };
 
   const ctx = await getServerTenantContext();
-  if (!ctx) return { bundle: {}, meta: null };
+  if (!ctx) {
+    return { bundle: {}, meta: null, ok: false, error: "Tenant not configured" };
+  }
   const { sb, tenantId } = ctx;
 
-  const [{ data: sliceRows }, { data: metaRow }] = await Promise.all([
+  const [slicesRes, metaRes] = await Promise.all([
     sb.from(`${def.deskPrefix}_desk_slices`).select("*").eq("tenant_id", tenantId),
     sb
       .from(`${def.deskPrefix}_desk_sync_meta`)
@@ -160,6 +181,15 @@ export async function fetchDeskSliceFromDb(id: DeskModuleId): Promise<{
       .eq("tenant_id", tenantId)
       .maybeSingle(),
   ]);
+  // A timed-out or denied read used to come back as an empty bundle with
+  // ok-shaped output; the client then took "empty" as the desk's state.
+  if (slicesRes.error || metaRes.error) {
+    const message = slicesRes.error?.message || metaRes.error?.message || "read failed";
+    console.warn(`[${id}-desk] fetch failed`, message);
+    return { bundle: {}, meta: null, ok: false, error: message };
+  }
+  const sliceRows = slicesRes.data;
+  const metaRow = metaRes.data;
 
   const sliceMap: Record<string, unknown> = {};
   for (const row of sliceRows ?? []) {
@@ -179,7 +209,7 @@ export async function fetchDeskSliceFromDb(id: DeskModuleId): Promise<{
       }
     : null;
 
-  return { bundle, meta };
+  return { bundle, meta, ok: true };
 }
 
 export function countDeskSliceStateRows(

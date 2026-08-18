@@ -8,8 +8,8 @@
  */
 
 import { saveSis, type SisState, type SisStudent } from "@/lib/sis";
+import { recordSisDeletion, recordSisMerge } from "@/lib/sisNormalizedClient";
 import { normalizeSessionCode } from "@/lib/studentImport";
-import { recordSisDeletion } from "@/lib/sisNormalizedClient";
 
 export type DuplicateReason =
   | "admissionNo"
@@ -334,26 +334,19 @@ export function mergeStudents(
   );
   const survivors = nextStudents.filter((s) => !dropSet.has(s.id));
   const usedHouseholds = new Set(survivors.map((s) => s.householdId));
-  const nextHouseholds = state.households.filter((h) => usedHouseholds.has(h.id));
   const next: SisState = {
     ...state,
     students: survivors,
-    households: nextHouseholds,
+    households: state.households.filter((h) => usedHouseholds.has(h.id)),
   };
-
-  // State the deletion before saving. The push upserts whatever's in the
-  // payload — dropping ids from the local array doesn't tell the server
-  // to delete those rows, so without this the merged-away duplicates
-  // stay in the database and come back on the next hydrate (see the
-  // identical gotcha documented at StudentsWorkspace.tsx's onRemove).
-  const removedHouseholdIds = state.households
-    .filter((h) => !nextHouseholds.some((x) => x.id === h.id))
-    .map((h) => h.id);
-  recordSisDeletion({
-    studentIds: [...dropSet],
-    householdIds: removedHouseholdIds,
-  });
-
+  // State the merge before pushing. The roster push only upserts, so until
+  // 2026-08-18 the dropped duplicates stayed in sis_students and came
+  // straight back on the next hydrate — and nothing that pointed at them
+  // (fee receipt lines, attendance, exams, homework, PTM, leave, library,
+  // store, payment links, concessions, curriculum, leads, chat) was ever
+  // moved. The server now folds all of that into the kept student and
+  // deletes the dropped rows in one transaction (sis_merge_students).
+  recordSisMerge({ keepId, dropIds: [...dropSet] });
   saveSis(next);
   void import("@/lib/sisPersistence").then(({ pushSisState, flushSisSync }) => {
     pushSisState(next).then(() => flushSisSync()).catch(console.error);
@@ -372,21 +365,18 @@ export function removeDuplicateStudents(
   const dropSet = new Set(ids);
   const survivors = state.students.filter((s) => !dropSet.has(s.id));
   const usedHouseholds = new Set(survivors.map((s) => s.householdId));
-  const nextHouseholds = state.households.filter((h) => usedHouseholds.has(h.id));
   const next: SisState = {
     ...state,
     students: survivors,
-    households: nextHouseholds,
+    households: state.households.filter((h) => usedHouseholds.has(h.id)),
   };
-
-  const removedHouseholdIds = state.households
-    .filter((h) => !nextHouseholds.some((x) => x.id === h.id))
-    .map((h) => h.id);
+  // Same rule as mergeStudents — deletions must be stated, not inferred.
   recordSisDeletion({
-    studentIds: [...dropSet],
-    householdIds: removedHouseholdIds,
+    studentIds: [...dropSet].filter((id) => state.students.some((s) => s.id === id)),
+    householdIds: state.households
+      .filter((h) => !usedHouseholds.has(h.id))
+      .map((h) => h.id),
   });
-
   saveSis(next);
   void import("@/lib/sisPersistence").then(({ pushSisState, flushSisSync }) => {
     pushSisState(next).then(() => flushSisSync()).catch(console.error);

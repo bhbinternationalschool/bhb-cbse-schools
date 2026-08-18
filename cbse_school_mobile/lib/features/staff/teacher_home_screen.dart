@@ -9,6 +9,7 @@ import "../modules/notices_screen.dart";
 import "../modules/syllabus_scan_screen.dart";
 import "../modules/teaching_screen.dart";
 import "attendance_screen.dart";
+import "section_picker.dart";
 import "self_attendance_screen.dart";
 import "students_screen.dart";
 
@@ -143,7 +144,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (context) => _SectionPicker(classes: summary.classes),
+      builder: (context) => SectionPicker(classes: summary.classes),
     );
   }
 
@@ -668,89 +669,6 @@ class _AttendanceBanner extends StatelessWidget {
                 ),
               ),
               const Icon(Icons.chevron_right, color: Colors.white),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SectionPicker extends StatelessWidget {
-  const _SectionPicker({required this.classes});
-
-  final List<ClassRef> classes;
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: SizedBox(
-        height: MediaQuery.sizeOf(context).height * 0.6,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                "Choose class & section",
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.ink,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Expanded(
-                child: ListView(
-                  children: [
-                    for (final c in classes)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            SizedBox(
-                              width: 64,
-                              child: Padding(
-                                padding: const EdgeInsets.only(top: 8),
-                                child: Text(
-                                  c.name,
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppColors.ink,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            Expanded(
-                              child: Wrap(
-                                spacing: 8,
-                                children: [
-                                  for (final s in c.sections)
-                                    ActionChip(
-                                      label: Text(s.name),
-                                      backgroundColor:
-                                          ModuleTone.teal.background,
-                                      labelStyle: TextStyle(
-                                        color: ModuleTone.teal.foreground,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                      side: BorderSide.none,
-                                      onPressed: () => Navigator.pop(
-                                        context,
-                                        (c.id, s.id, "${c.name} ${s.name}"),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                  ],
-                ),
-              ),
             ],
           ),
         ),

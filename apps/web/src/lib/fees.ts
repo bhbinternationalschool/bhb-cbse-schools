@@ -952,7 +952,8 @@ export async function hydrateFeesStore(): Promise<boolean> {
   return true;
 }
 
-function persistFeesClient(state: FeesState) {
+function persistFeesClient(state: FeesState, opts?: { sync?: boolean }) {
+  const sync = opts?.sync ?? true;
   feesWorkingCopy = state;
   const compact = compactFeesForStorage(state);
 
@@ -983,10 +984,12 @@ function persistFeesClient(state: FeesState) {
     });
   }
 
-  scheduleClientSchoolMirrorSync({ fees: state });
-  void import("@/lib/feesPersistence").then(({ scheduleFeesSync }) => {
-    scheduleFeesSync(state);
-  });
+  if (sync) {
+    scheduleClientSchoolMirrorSync({ fees: state });
+    void import("@/lib/feesPersistence").then(({ scheduleFeesSync }) => {
+      scheduleFeesSync(state);
+    });
+  }
   notifyFeesUpdated();
 }
 
@@ -1369,13 +1372,20 @@ export function saveFees(state: FeesState) {
   persistFeesClient(state);
 }
 
-/** Hydrate path — write localStorage + mirror without closed-session guard / cloud schedule. */
+/**
+ * Hydrate path — write localStorage + IndexedDB WITHOUT scheduling a push.
+ * Until 2026-08-18 this delegated to persistFeesClient, which always
+ * scheduled the fees desk push — so every fees hydration re-uploaded all
+ * vouchers and re-ran the open-dues rebuild (5 pushes in the 6 minutes
+ * after one deploy, 37 open-dues rebuilds in an hour, from a desk nobody
+ * was editing). Edits reach the DB through saveFees() only.
+ */
 export function writeFeesLocalRaw(state: FeesState) {
   if (typeof window === "undefined") {
     setMirrorSlice("fees", state);
     return;
   }
-  persistFeesClient(state);
+  persistFeesClient(state, { sync: false });
 }
 
 /** Wipe all collection vouchers from desk + IndexedDB + mirror sync. */

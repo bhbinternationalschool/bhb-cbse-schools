@@ -14,6 +14,39 @@ import {
   listAllStaffMobiles,
 } from "@/lib/bulkRecipients";
 import { listOptedOutSet, toE164India } from "@/lib/waContactState.server";
+import { loadSis } from "@/lib/sis";
+import { loadMasters } from "@/lib/masters";
+import { sendPushToSubjects } from "@/lib/webPush.server";
+import { fetchServerBlob } from "@/lib/serverBlob";
+import {
+  listApprovedTemplates,
+  normalizeWaTemplatesState,
+  type WaTemplatesState,
+} from "@/lib/waTemplates";
+
+/**
+ * Human-readable text for a template send, for the app-push mirror: the
+ * approved template's body with {{tokens}} filled from the same variables
+ * the WA send used. Empty string if the template can't be resolved (the
+ * push is then skipped rather than sent with a bare template name).
+ */
+async function renderTemplateForPush(t: BroadcastTemplate): Promise<string> {
+  try {
+    const { state: raw } = await fetchServerBlob<WaTemplatesState>("wa_templates_state");
+    const tpl = listApprovedTemplates(normalizeWaTemplatesState(raw)).find(
+      (x) => x.metaName === t.name && (x.metaLanguage || x.language) === t.language,
+    );
+    if (!tpl) return "";
+    let body = tpl.body || "";
+    for (const [k, v] of Object.entries(t.variables || {})) {
+      body = body.split(`{{${k}}}`).join(v);
+    }
+    // Strip WhatsApp *bold* markers — plain text in a notification.
+    return body.replace(/\*([^*]+)\*/g, "$1").trim();
+  } catch {
+    return "";
+  }
+}
 import { POST as dispatchPost } from "@/app/api/wa/dispatch/route";
 
 export const runtime = "nodejs";
@@ -128,6 +161,28 @@ export async function POST(req: Request) {
     failed += json.failed ?? 0;
   }
 
+  // Mirror a live broadcast to app/PWA push — free text as-is, template
+  // sends rendered from the approved body. Best-effort — never affects the
+  // WA result above.
+  let push = { sent: 0, expired: 0, failed: 0 };
+  const pushText = !dryRun
+    ? text || (template ? await renderTemplateForPush(template) : "")
+    : "";
+  if (!dryRun && pushText) {
+    const subjectIds =
+      audience === "parents"
+        ? loadSis().households.map((h) => h.id)
+        : (loadMasters().staff ?? [])
+            .filter((s) => s.status === "active")
+            .map((s) => s.id);
+    push = await sendPushToSubjects(audience === "parents" ? "parent" : "staff", subjectIds, {
+      title: `${auth.ctx.session.fullName} · BHB International School`,
+      body: pushText.length > 200 ? `${pushText.slice(0, 197)}…` : pushText,
+      url: "/notices",
+      data: { kind: "broadcast" },
+    }).catch(() => ({ sent: 0, expired: 0, failed: 0 }));
+  }
+
   return NextResponse.json({
     ok: true,
     mode: dryRun ? "dry_run" : "live",
@@ -135,6 +190,7 @@ export async function POST(req: Request) {
     skippedOptOut,
     sent,
     failed,
+    push,
     results: allResults,
   });
 }

@@ -17,7 +17,34 @@ import {
 import type { SisState } from "@/lib/sis";
 
 const APPLIED_KEY = "bhb_fee_discount_seed_applied_v1";
+/**
+ * Set once a run of this seed version applied nothing new. The seed is a
+ * one-time July-2026 import: 19 of its 96 rows match today's roster (the
+ * other 77 carry pre-renumbering admission numbers that no longer exist),
+ * so isSeedFullyApplied() can never be true and, until 2026-08-18, every
+ * boot and every SIS hydrate re-ran the merge and re-pushed masters. A
+ * settled seed is skipped until the bundled seed's version changes.
+ */
+const SETTLED_KEY = "bhb_fee_discount_seed_settled_v1";
 const bundledSeed = feeDiscountSeedJson as FeeDiscountImportSeed;
+
+function seedIsSettled(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    return localStorage.getItem(SETTLED_KEY) === seedMarker(bundledSeed);
+  } catch {
+    return false;
+  }
+}
+
+function markSeedSettled(): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(SETTLED_KEY, seedMarker(bundledSeed));
+  } catch {
+    /* storage full — we just run again next time */
+  }
+}
 
 let running = false;
 
@@ -68,7 +95,7 @@ export function mergeAndPersistFeeDiscountSeed(
       return { masters, applied: 0, pending: bundledSeed.grants.length };
     }
 
-    if (isSeedFullyApplied(masters, bundledSeed)) {
+    if (seedIsSettled() || isSeedFullyApplied(masters, bundledSeed)) {
       return { masters, applied: 0, pending: 0 };
     }
 
@@ -90,6 +117,8 @@ export function mergeAndPersistFeeDiscountSeed(
       return { masters: next, applied, pending };
     }
 
+    // Nothing new to apply — this seed version is done on this browser.
+    markSeedSettled();
     return { masters: next, applied, pending };
   } finally {
     running = false;

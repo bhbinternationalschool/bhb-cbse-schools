@@ -105,7 +105,10 @@ export async function ensureAttendanceHydrated(): Promise<boolean> {
     normChanged = true;
   }
 
-  if (normChanged) {
+  // Hydration is pull-only under desk-as-truth — see feesPersistence.ts for
+  // the measured cost of pushing here (audit 2026-08-18). Legacy blob mode
+  // still publishes the merge.
+  if (normChanged && !readFromDb) {
     scheduleAttendanceSync(loadAttendance());
   }
 

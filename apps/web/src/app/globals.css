@@ -83,6 +83,11 @@
      wells). Distinct from --card so dark mode can keep them apart. */
   --surface-raised: #ffffff;
   --surface-sunken: #efeee7;
+  /* App shell chrome — the sidebar and sticky header. Were hardcoded
+     rgba(255,255,255,.98) / rgba(248,248,240,.92) in the components, so
+     they stayed cream in dark mode with cream-on-cream text (2026-08-18). */
+  --shell-sidebar-bg: rgba(255, 255, 255, 0.98);
+  --shell-header-bg: rgba(248, 248, 240, 0.92);
   --overlay: rgba(18, 26, 46, 0.45);
   color-scheme: light;
   --sidebar: oklch(0.985 0 0);
@@ -1227,6 +1232,8 @@ h3,
   --shadow-4: 0 16px 48px rgba(0, 0, 0, 0.6);
   --surface-raised: #182238;
   --surface-sunken: #0a0f1c;
+  --shell-sidebar-bg: rgba(14, 21, 38, 0.98);
+  --shell-header-bg: rgba(14, 21, 38, 0.92);
   --overlay: rgba(2, 5, 12, 0.6);
   color-scheme: dark;
   --sidebar: #0e1526;
@@ -1238,3 +1245,52 @@ h3,
   --sidebar-border: rgba(200, 214, 245, 0.12);
   --sidebar-ring: #d4b84a;
 }
+
+/* ── Dark-mode safety net for literal light utilities ─────────────────────
+   264 `bg-white` sites (measured 2026-08-18) plus a handful of slate/gray
+   utilities and `text-black` were written for the light theme and never got
+   a dark: variant — white cards on a navy page, black text on dark cards,
+   invisible sidebar text. Remapping the utility classes themselves under
+   .dark fixes every site at once and cannot regress as new screens are
+   added; a screen that genuinely wants white in dark mode should say so with
+   an explicit token. Translucent bg-white/N (N ≤ 25) are highlights over
+   coloured surfaces and are left alone. */
+.dark .bg-white { background-color: var(--card); }
+.dark .bg-white\/95,
+.dark .bg-white\/90,
+.dark .bg-white\/80,
+.dark .bg-white\/70 { background-color: color-mix(in srgb, var(--card) 88%, transparent); }
+.dark .text-black,
+.dark .text-slate-900,
+.dark .text-slate-800,
+.dark .text-slate-700,
+.dark .text-\[\#203050\],
+.dark .text-\[\#0f172a\] { color: var(--foreground); }
+.dark .text-slate-600,
+.dark .text-slate-500,
+.dark .text-slate-400,
+.dark .text-gray-500 { color: var(--muted); }
+.dark .bg-slate-50,
+.dark .bg-slate-100,
+.dark .bg-slate-200,
+.dark .bg-\[\#f0f2f5\],
+.dark .bg-\[\#f5f6f6\],
+.dark .bg-\[\#f3f4f6\],
+.dark .bg-\[\#f8faf8\],
+.dark .bg-\[\#f5f8fb\] { background-color: var(--surface-sunken); }
+.dark .border-slate-200 { border-color: var(--border); }
+/* Native controls (select popups, date pickers, scrollbars) follow the theme
+   only when the element itself is scoped; .dark already sets color-scheme,
+   this makes sure inputs inherit it and never render a white field. */
+.dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.dark select,
+.dark textarea {
+  color-scheme: dark;
+  background-color: var(--surface-sunken);
+  color: var(--foreground);
+  border-color: var(--input);
+}
+.dark input::placeholder,
+.dark textarea::placeholder { color: var(--muted); }
+.dark input[type="date"]::-webkit-calendar-picker-indicator,
+.dark input[type="time"]::-webkit-calendar-picker-indicator { filter: invert(0.85); }

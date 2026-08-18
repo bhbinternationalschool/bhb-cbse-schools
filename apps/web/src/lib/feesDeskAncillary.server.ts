@@ -503,43 +503,27 @@ export async function rebuildFeeOpenDuesCache(
     }
   }
 
-  // Upsert-then-delete-stale, not delete-then-insert: two rebuilds for the
-  // same tenant+year can legitimately overlap (e.g. two staff editing fees
-  // at once, each triggering a debounced sync). A blanket DELETE up front
-  // raced against a concurrent run's UPSERTs into the same rows and
-  // produced real Postgres deadlocks (AccessExclusiveLock contention,
-  // "deadlock detected") in production. Writing fresh rows first (upsert
-  // is row-level and PK-safe under concurrency) and only removing rows
-  // stamped strictly before this run's `now` means a concurrent rebuild's
-  // writes are never clobbered mid-flight, and only genuinely-stale dues
-  // (ones this run recomputed as gone) get removed.
-  if (rows.length > 0) {
-    const chunk = 500;
-    for (let i = 0; i < rows.length; i += chunk) {
-      const { error } = await sb
-        .from("fee_desk_open_dues")
-        .upsert(rows.slice(i, i + chunk));
-      if (error) return { ok: false, count: 0, error: error.message };
-    }
+  // One transaction on the server (fee_desk_replace_open_dues, migration
+  // 20260818060000): rows absent from the payload are deleted, present rows
+  // upserted only where they differ, sync meta updated — all or nothing.
+  // The previous delete-all-then-upsert here ignored the delete's error,
+  // deadlocked when two browsers pushed together, and left readers a window
+  // where every due read as zero (audit 2026-08-18).
+  const { data, error } = await sb.rpc("fee_desk_replace_open_dues", {
+    p_tenant_id: tenantId,
+    p_academic_year_code: ay,
+    p_rows: rows.map((r) => {
+      const { tenant_id, academic_year_code, updated_at, ...rest } = r;
+      void tenant_id; void academic_year_code; void updated_at;
+      return rest;
+    }),
+  });
+  if (error) {
+    console.warn("[fees] open-dues rebuild failed", error.message);
+    return { ok: false, count: 0, error: error.message };
   }
-
-  await sb
-    .from("fee_desk_open_dues")
-    .delete()
-    .eq("tenant_id", tenantId)
-    .eq("academic_year_code", ay)
-    .lt("updated_at", now);
-
-  await sb.from("fee_desk_sync_meta").upsert(
-    {
-      tenant_id: tenantId,
-      open_dues_count: rows.length,
-      updated_at: now,
-    },
-    { onConflict: "tenant_id" },
-  );
-
-  return { ok: true, count: rows.length };
+  const result = (data ?? {}) as { count?: number };
+  return { ok: true, count: Number(result.count ?? rows.length) };
 }
 
 export async function fetchOpenDuesSummary(academicYearCode?: string): Promise<{

@@ -626,7 +626,8 @@ export async function ensureStaffHydrated(): Promise<boolean> {
   if (!remote) return false;
 
   markDeskHydrated(MODULE);
-  const { loadMasters, saveMasters } = await import("@/lib/masters");
+  const { loadMasters } = await import("@/lib/masters");
+  const { writeMastersLocalRaw } = await import("@/lib/mastersPersistence");
   let next = loadMasters();
   let changed = false;
 
@@ -665,7 +666,14 @@ export async function ensureStaffHydrated(): Promise<boolean> {
   }
 
   if (changed) {
-    saveMasters(next);
+    // Local-only. saveMasters() here pushed masters AND re-pushed the staff
+    // roster on every staff hydrate (269 POST /staff-roster a day, audit
+    // 2026-08-18). The roster we just merged came from the DB; nothing needs
+    // to go back.
+    writeMastersLocalRaw(next);
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("bhb-masters-updated"));
+    }
   }
 
   return changed;

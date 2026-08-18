@@ -457,8 +457,10 @@ export async function pushFeeDeskToDb(
   }
 
   let openDuesCount: number | undefined;
-  if (opts?.rebuildOpenDues !== false) {
-    const ay = opts?.academicYearCode || state.vouchers[0]?.academicYearCode || "2025-26";
+  // No academic year to scope the rebuild to is "unknown", not "2025-26":
+  // a guessed year rebuilt (and pruned) the wrong year's dues cache. Skip.
+  const ay = opts?.academicYearCode || state.vouchers[0]?.academicYearCode || "";
+  if (opts?.rebuildOpenDues !== false && ay) {
     const dues = await rebuildFeeOpenDuesCache(ay);
     if (!dues.ok) {
       return {

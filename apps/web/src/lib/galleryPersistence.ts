@@ -38,7 +38,8 @@ export async function ensureGalleryHydrated(): Promise<boolean> {
       preferDb: readFromDb,
     }),
   );
-  scheduleGalleryDeskSync();
+  // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
+  if (!readFromDb) scheduleGalleryDeskSync();
   return true;
 }
 

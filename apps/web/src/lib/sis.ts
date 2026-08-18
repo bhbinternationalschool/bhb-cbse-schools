@@ -12,7 +12,6 @@ import {
   currentAcademicYearCode,
   ensureStudentClassLinks,
   loadMasters,
-  saveMasters,
   type DemoStudent,
   type FeeStudentType,
   type MastersState,
@@ -26,6 +25,7 @@ import {
   setMirrorSlice,
 } from "@/lib/schoolDataMirror";
 import { deskSkipBlobPushClient } from "@/lib/deskCutover";
+import { writeMastersLocalRaw } from "@/lib/mastersPersistence";
 import {
   normalizeCurriculum,
   normalizeCurriculumRequest,
@@ -1113,7 +1113,26 @@ export function syncSisIntoMasters(
     .filter((s) => demoStudentLinksValid(validSections, s));
   const current = m.students ?? [];
   if (demoStudentsEqual(current, demo)) return;
-  saveMasters({ ...m, students: demo });
+  // Local-only. `masters.students` is a client-side projection of the SIS
+  // roster with exactly one consumer (alignSisToMasters below); the server
+  // derives its own copy from sis_students. This used to call saveMasters(),
+  // which pushed the whole masters state (+ staff roster) to Supabase every
+  // time the roster was hydrated — with the session-year filter above, two
+  // browsers on different years re-pushed it at each other indefinitely.
+  // Cloud Run showed 258 masters pushes / 24 h with 56 "stale" 409s from
+  // that alone (audit 2026-08-18).
+  if (typeof window === "undefined") {
+    setMirrorSlice("masters", { ...m, students: demo });
+    return;
+  }
+  // Synchronous, and re-read masters at write time. The first version of
+  // this write went through a dynamic import; on a fresh page load it then
+  // landed AFTER masters hydration and overwrote the real classes with the
+  // cold-start copy captured earlier — every student showed "Unassigned"
+  // (2026-08-18, minutes after deploy). Only the students projection is
+  // ours to change; everything else must be whatever masters holds now.
+  writeMastersLocalRaw({ ...loadMasters(), students: demo });
+  window.dispatchEvent(new CustomEvent("bhb-masters-updated"));
 }
 
 /** Align SIS students to current masters class/section ids. */

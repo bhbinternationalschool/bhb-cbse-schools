@@ -62,7 +62,8 @@ export const ensureLibraryHydrated = async () => {
     );
     normChanged = true;
   }
-  if (normChanged) scheduleLibrarySync(loadLibrary());
+  // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
+  if (normChanged && !readFromDb) scheduleLibrarySync(loadLibrary());
   return blobChanged || normChanged;
 };
 

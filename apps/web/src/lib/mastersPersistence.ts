@@ -22,18 +22,55 @@ import {
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { guardMastersOverwrite } from "@/lib/mastersWriteGuard";
 
 const MODULE = "masters";
 
 const STORAGE_KEY = "bhb_masters_v5";
+
+/**
+ * The same rule the server applies to a masters push (guardMastersOverwrite),
+ * applied to the browser's own copy: a write that would leave the desk with
+ * no classes, or with a class-id generation sharing nothing with what is
+ * stored, keeps the stored classes/sections/subjects instead. On 2026-08-18
+ * a browser at its storage quota lost its masters key, loadMasters() seeded
+ * the empty shell, and every subsequent local write (staff hydrate, fee seed)
+ * carried zero classes — the server refused the push ("would have removed
+ * every class") but the browser kept the empty copy and showed every student
+ * as "Unassigned" until the next hydrate, then lost it again.
+ */
+function protectLocalClasses(next: MastersState): MastersState {
+  if (typeof window === "undefined") return next;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return next;
+    const stored = JSON.parse(raw) as Partial<MastersState>;
+    const storedIds = (stored.classes ?? []).map((c) => c.id);
+    if (storedIds.length === 0) return next;
+    const incomingIds = (next.classes ?? []).map((c) => c.id);
+    const verdict = guardMastersOverwrite(storedIds, incomingIds);
+    if (verdict.allow) return next;
+    console.warn(`[masters] local write kept stored classes — ${verdict.message}`);
+    return {
+      ...next,
+      classes: stored.classes ?? [],
+      sections: stored.sections ?? next.sections,
+      classSubjects: stored.classSubjects ?? next.classSubjects,
+      subjects: stored.subjects ?? next.subjects,
+    };
+  } catch {
+    return next;
+  }
+}
 
 export function writeMastersLocalRaw(state: MastersState): void {
   if (typeof window === "undefined") {
     setMirrorSlice("masters", state);
     return;
   }
-  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify({ ...state, version: 2 }));
-  setMirrorSlice("masters", state);
+  const safe = protectLocalClasses(state);
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify({ ...safe, version: 2 }));
+  setMirrorSlice("masters", safe);
 }
 
 export function scheduleMastersSync(state: MastersState) {

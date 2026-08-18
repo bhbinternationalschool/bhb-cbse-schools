@@ -8,7 +8,12 @@ import { resetDeskHydrated } from "@/lib/deskHydrateGuard";
 
 const DESK_PREFIX = "bhb_";
 
-const LOCAL_STORAGE_KEEP = new Set<string>(["bhb_tenant_data_wipe_seen_v1"]);
+const LOCAL_STORAGE_KEEP = new Set<string>([
+  "bhb_tenant_data_wipe_seen_v1",
+  // Deletions the server has not confirmed yet must survive a re-login,
+  // or the removed student comes back on the next hydrate.
+  "bhb_sis_pending_deletes_v1",
+]);
 
 export function markFreshLoginSession(): void {
   if (typeof window === "undefined") return;
@@ -107,11 +112,18 @@ export async function prepareWorkspaceAfterLogin(): Promise<void> {
   markFreshLoginSession();
 }
 
+/**
+ * Flush every debounced push before the tab hides / idle logout signs out.
+ * Until 2026-08-18 only masters was flushed; a roster edit made just before
+ * the 5-minute idle logout was abandoned mid-retry, and the login-time
+ * localStorage wipe then removed it for good.
+ */
 export async function flushAllDeskSyncPending(): Promise<void> {
   await Promise.allSettled([
     import("@/lib/mastersNormalizedClient").then((m) =>
       m.flushMastersDeskSyncPending(),
     ),
+    import("@/lib/sisNormalizedClient").then((m) => m.flushSisDeskSync()),
   ]);
 }
 

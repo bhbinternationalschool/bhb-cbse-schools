@@ -89,7 +89,14 @@ export async function ensureFeesHydrated(): Promise<boolean> {
     normChanged = true;
   }
 
-  if (normChanged) {
+  // Hydration is pull-only. Re-pushing here re-ran the open-dues
+  // delete-all-then-insert (~2 000 rows) and the full voucher upsert on every
+  // fees hydrate — 107 POST /fees-vouchers a day at a 20.8 s median, with
+  // deadlocks on fee_desk_open_dues when two browsers overlapped (audit
+  // 2026-08-18). Edits reach the DB through saveFees() only. When the desk
+  // is not the source of truth (legacy blob mode) the local merge still has
+  // to be published, so keep that one path.
+  if (normChanged && !readFromDb) {
     scheduleFeesSync(loadFees());
   }
 

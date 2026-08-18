@@ -16,7 +16,8 @@ import {
   ServicePanel,
 } from "@/components/transport/TransportFleetPanels";
 import { FleetEdgeEventsPanel } from "@/components/transport/FleetEdgeEventsPanel";
-import { FleetDashboard } from "@/components/transport/FleetDashboard";
+import { FleetEdgeReport } from "@/components/transport/FleetEdgeReport";
+import { hasPermission } from "@/lib/rbac";
 import {
   FleetPanel,
   FuelPanel,
@@ -81,7 +82,7 @@ const TABS: ModuleTabItem[] = [
   { id: "board", label: "Boarding", tone: "sky" },
   { id: "compliance", label: "Compliance", tone: "rose" },
   { id: "live", label: "Live", tone: "teal" },
-  { id: "fleetDashboard", label: "Fleet Dashboard", tone: "amber" },
+  { id: "fleetDashboard", label: "Fleet Edge report", tone: "amber" },
   { id: "reports", label: "Reports", tone: "navy" },
 ];
 
@@ -455,7 +456,9 @@ export function TransportWorkspace() {
               <FleetEdgeEventsPanel />
             </>
           ) : null}
-          {tab === "fleetDashboard" ? <FleetDashboard /> : null}
+          {tab === "fleetDashboard" ? (
+            <FleetEdgeReport canEdit={hasPermission(session, masters, "transport", "edit")} />
+          ) : null}
           {tab === "reports" ? (
             <ReportsPanel
               state={state}

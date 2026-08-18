@@ -178,7 +178,13 @@ export function createDomainBlobPersistence<T>(opts: {
 
   /**
    * Pull once per tab session. Remote wins when newer (or local empty).
-   * Then push working copy so cloud stays warm.
+   *
+   * Pull-only. This used to end by pushing the local working copy "so the
+   * cloud stays warm" — including when fetchRemote() had failed, so a
+   * browser that could not read the server overwrote it with whatever it
+   * held. Multiplied across ~30 modules that is the login-time write storm
+   * seen in Cloud Run (audit 2026-08-18). Local edits reach the DB through
+   * scheduleSync() from an explicit save only.
    */
   async function ensureHydrated(): Promise<boolean> {
     if (!remoteEnabled()) return false;
@@ -186,6 +192,11 @@ export function createDomainBlobPersistence<T>(opts: {
     hydratedOnce = true;
 
     const remote = await fetchRemote();
+    if (!remote) {
+      // Unknown is not empty: leave local alone, and let a later call retry.
+      hydratedOnce = false;
+      return false;
+    }
     const local = opts.loadLocal();
     const localAt = readMetaUpdatedAt();
     let changed = false;
@@ -216,9 +227,6 @@ export function createDomainBlobPersistence<T>(opts: {
       opts.writeLocalRaw(remoteState);
       writeMetaUpdatedAt(remote?.updated_at || new Date().toISOString());
       return true;
-    }
-    if (!opts.isEmpty(next)) {
-      await pushState(next);
     }
     return changed;
   }

@@ -10,6 +10,7 @@ import {
   deleteSisRecordsInDb,
   fetchSisFromDb,
   fetchSisFromDbViaIdentitySplit,
+  mergeSisStudentsInDb,
   pushSisToDb,
   sisIdentitySplitEnabled,
 } from "@/lib/sisNormalized.server";
@@ -44,7 +45,8 @@ export async function GET(req: Request) {
       : bundle.students,
     householdCount: bundle.households.length,
     studentCount: bundle.students.length,
-    updatedAt: meta?.updatedAt || new Date().toISOString(),
+    // Unknown meta is reported as "", not as "now" (see desk-slice route).
+    updatedAt: meta?.updatedAt || "",
     meta,
   });
 }
@@ -57,6 +59,8 @@ type RosterPostBody = Pick<SisState, "households" | "students"> & {
    */
   deleteStudentIds?: string[];
   deleteHouseholdIds?: string[];
+  /** Duplicate merges: fold dropIds (and everything pointing at them) into keepId. */
+  merges?: { keepId: string; dropIds: string[] }[];
 };
 
 /** POST — push full SIS roster snapshot */
@@ -78,9 +82,20 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  // Deletes run BEFORE the upsert: the roster in this same payload no longer
-  // contains the removed rows, so upserting first then deleting would be a
-  // no-op ordering hazard if the two ever disagreed.
+  // Merges first (they move linked records, then delete the dropped rows),
+  // then plain deletes, then the upsert: the roster in this same payload no
+  // longer contains the removed rows, so upserting first would be a no-op
+  // ordering hazard if the two ever disagreed.
+  const merged = await mergeSisStudentsInDb(
+    Array.isArray(body.merges) ? body.merges : [],
+  );
+  if (!merged.ok) {
+    return NextResponse.json(
+      { ok: false, error: merged.error || "Merge failed" },
+      { status: 502 },
+    );
+  }
+
   const removed = await deleteSisRecordsInDb({
     studentIds: Array.isArray(body.deleteStudentIds) ? body.deleteStudentIds : [],
     householdIds: Array.isArray(body.deleteHouseholdIds)
@@ -116,6 +131,7 @@ export async function POST(req: Request) {
     // Authoritative versions so the client can re-stamp what it just wrote.
     studentVersions: result.studentVersions ?? {},
     householdVersions: result.householdVersions ?? {},
+    merged: merged.applied,
     updatedAt: new Date().toISOString(),
   });
 }

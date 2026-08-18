@@ -55,6 +55,12 @@ count_metric() {
       # sweeps each screen; the design-token themselves are dark-mode
       # aware, arbitrary hex is not.
       code_grep '(bg|text|border|ring|from|to|via)-\[#[0-9a-fA-F]{3,8}\]' "$SRC" ;;
+    dynamic_public_env)
+      # `process.env[expr]` with a NEXT_PUBLIC key is never inlined by Next
+      # and reads undefined in the browser. On 2026-08-18 every
+      # NEXT_PUBLIC_*_READ_FROM_DB / _DUAL_WRITE_DB client flag was inert for
+      # that reason. All browser reads go through lib/deskPublicEnv.ts.
+      code_grep 'process\.env\[[^]]*NEXT_PUBLIC' "$SRC" ;;
     raw_table)
       # Hand-rolled <table> instead of ui/erp-roster.tsx's ErpTableShell —
       # no shared sticky header, zebra, density, or empty/skeleton states.

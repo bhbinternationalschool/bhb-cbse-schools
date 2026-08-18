@@ -63,7 +63,8 @@ export const ensurePayrollHydrated = async () => {
     );
     normChanged = true;
   }
-  if (normChanged) schedulePayrollSync(loadPayroll());
+  // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
+  if (normChanged && !readFromDb) schedulePayrollSync(loadPayroll());
   return blobChanged || normChanged;
 };
 

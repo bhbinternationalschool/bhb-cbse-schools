@@ -47,6 +47,20 @@ export function isStorageQuotaError(err: unknown): boolean {
  * froze earlier the same day. An absent cache simply re-reads from the
  * database, which is the intended behaviour anyway.
  */
+/**
+ * Small, load-bearing caches: everything else on the page resolves through
+ * them (class names, sections, fee heads). When storage is full, evict the
+ * bulky roster/CRM caches — which re-hydrate from the DB on the next
+ * navigation anyway — before giving up on one of these.
+ */
+const PROTECTED_KEYS = new Set(["bhb_masters_v5"]);
+const EVICTABLE_BULK_KEYS = [
+  "bhb_admissions_v1",
+  "bhb_sis_v1",
+  "bhb_homework_v1",
+  "bhb_school_comms_v1",
+];
+
 export function writeCacheOrInvalidate(key: string, value: string): boolean {
   if (typeof window === "undefined") return false;
   try {
@@ -54,6 +68,29 @@ export function writeCacheOrInvalidate(key: string, value: string): boolean {
     return true;
   } catch (err) {
     if (!isStorageQuotaError(err)) throw err;
+    if (PROTECTED_KEYS.has(key)) {
+      // Make room by dropping the big re-hydratable caches, then retry once.
+      for (const bulk of EVICTABLE_BULK_KEYS) {
+        if (bulk === key) continue;
+        try {
+          window.localStorage.removeItem(bulk);
+        } catch {
+          /* ignore */
+        }
+      }
+      try {
+        window.localStorage.setItem(key, value);
+        console.warn(
+          `[storage] ${key} written after evicting bulk caches (quota); they re-hydrate from the database.`,
+        );
+        return true;
+      } catch {
+        // Still no room — leave the previous masters in place rather than
+        // dropping the one cache the whole page resolves through.
+        console.warn(`[storage] ${key} could not be written (quota); previous copy kept.`);
+        return false;
+      }
+    }
     try {
       window.localStorage.removeItem(key);
     } catch {
