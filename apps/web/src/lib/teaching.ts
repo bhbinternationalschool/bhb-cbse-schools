@@ -89,6 +89,12 @@ export type SyllabusUnit = {
   targetEndDate: string;
   /** What the learner should be able to do; free text, one per line */
   learningOutcomes: string;
+  /**
+   * CBSE / NCERT learning-outcome codes for this unit as printed in the
+   * board's LO document (e.g. "M601", "S704"). Entered by the teacher from
+   * the published document — never generated. Used to tag exam questions.
+   */
+  competencyCodes: string[];
   /** E-book / video / worksheet links for this chapter or topic */
   resources: ResourceLink[];
   isActive: boolean;
@@ -406,6 +412,15 @@ export function normalizeSyllabusUnit(
       ? String(raw.targetEndDate)
       : "",
     learningOutcomes: String(raw.learningOutcomes || ""),
+    competencyCodes: Array.isArray(raw.competencyCodes)
+      ? Array.from(
+          new Set(
+            raw.competencyCodes
+              .map((c) => String(c ?? "").trim().toUpperCase().slice(0, 20))
+              .filter(Boolean),
+          ),
+        )
+      : [],
     resources: normalizeResourceList(raw.resources),
     isActive: raw.isActive !== false,
     updatedAt: raw.updatedAt || nowIso(),

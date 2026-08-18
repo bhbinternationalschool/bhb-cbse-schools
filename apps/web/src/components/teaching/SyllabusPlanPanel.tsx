@@ -11,6 +11,7 @@ import {
   upsertSyllabusUnit,
   type ResourceKind,
   type SyllabusImportChapter,
+  type SyllabusUnit,
   type TeachingState,
   type UnitProgress,
   type UnitStatus,
@@ -140,6 +141,19 @@ export function SyllabusPlanPanel(props: {
     );
   }
 
+  /** Learning outcomes + CBSE LO codes for a chapter — feeds lesson plans and paper tagging. */
+  function saveOutcomes(unit: SyllabusUnit, learningOutcomes: string, codesRaw: string) {
+    props.onError(null);
+    const competencyCodes = codesRaw
+      .split(/[,\s;]+/)
+      .map((c) => c.trim())
+      .filter(Boolean);
+    const result = upsertSyllabusUnit(state, { ...unit, learningOutcomes, competencyCodes });
+    if (!result.ok) return props.onError(result.error);
+    onChange(result.value.state);
+    props.onNotice("Learning outcomes saved");
+  }
+
   function drop(unitId: string, label: string) {
     onChange(removeSyllabusUnit(state, unitId));
     props.onNotice(`${label} removed`);
@@ -231,6 +245,7 @@ export function SyllabusPlanPanel(props: {
               onDrop={drop}
               onAttach={attach}
               onDetach={detach}
+              onSaveOutcomes={saveOutcomes}
             />
           ))}
         </ul>
@@ -330,6 +345,7 @@ function ChapterRow({
   onDrop,
   onAttach,
   onDetach,
+  onSaveOutcomes,
 }: {
   index: number;
   chapter: UnitProgress;
@@ -349,6 +365,7 @@ function ChapterRow({
     input: { kind: ResourceKind; title: string; url: string; locator: string },
   ) => void;
   onDetach: (unitId: string, resourceId: string) => void;
+  onSaveOutcomes: (unit: SyllabusUnit, learningOutcomes: string, codesRaw: string) => void;
 }) {
   const u = chapter.unit;
   const plannedFromTopics = chapter.topics.reduce(
@@ -409,6 +426,12 @@ function ChapterRow({
 
       {open ? (
         <div className="border-t border-[var(--border)] px-3 py-2.5 pl-10">
+          <OutcomesEditor
+            key={`${u.id}:${u.updatedAt}`}
+            unit={u}
+            canEdit={canEdit}
+            onSave={onSaveOutcomes}
+          />
           {chapter.topics.length === 0 ? (
             <p className="text-xs text-[var(--muted)]">
               No topics — the whole chapter is tracked as one unit.
@@ -522,5 +545,67 @@ function ChapterRow({
         </div>
       ) : null}
     </li>
+  );
+}
+
+/**
+ * Learning outcomes (free text, one per line) and CBSE LO codes for a
+ * chapter. Codes are typed from the board's published LO document — the
+ * ERP never generates them; the exam-paper AI can only tag a question with
+ * a code that appears here.
+ */
+function OutcomesEditor({
+  unit,
+  canEdit,
+  onSave,
+}: {
+  unit: SyllabusUnit;
+  canEdit: boolean;
+  onSave: (unit: SyllabusUnit, learningOutcomes: string, codesRaw: string) => void;
+}) {
+  const [outcomes, setOutcomes] = useState(unit.learningOutcomes);
+  const [codes, setCodes] = useState(unit.competencyCodes.join(", "));
+  const dirty =
+    outcomes !== unit.learningOutcomes || codes !== unit.competencyCodes.join(", ");
+  if (!canEdit && !unit.learningOutcomes && unit.competencyCodes.length === 0) return null;
+  return (
+    <div className="mb-3 rounded-lg border border-dashed border-[var(--border)] p-2">
+      <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--muted)]">
+        Learning outcomes · LO codes
+      </p>
+      {canEdit ? (
+        <div className="mt-1 grid gap-2 sm:grid-cols-[1fr_220px_auto]">
+          <textarea
+            value={outcomes}
+            onChange={(e) => setOutcomes(e.target.value)}
+            rows={2}
+            placeholder="One outcome per line — e.g. Classifies quadrilaterals by sides and angles"
+            className="block w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-xs"
+          />
+          <input
+            value={codes}
+            onChange={(e) => setCodes(e.target.value)}
+            placeholder="CBSE LO codes, e.g. M801, M802"
+            title="From the board's Learning Outcomes document for this class and subject"
+            className="block w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-xs uppercase"
+          />
+          <button
+            type="button"
+            disabled={!dirty}
+            onClick={() => onSave(unit, outcomes, codes)}
+            className="self-start rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)] disabled:opacity-50"
+          >
+            Save
+          </button>
+        </div>
+      ) : (
+        <div className="mt-1 text-xs text-[var(--brand-deep)]">
+          <p className="whitespace-pre-wrap">{unit.learningOutcomes || "—"}</p>
+          {unit.competencyCodes.length ? (
+            <p className="mt-1 text-[var(--muted)]">LO codes: {unit.competencyCodes.join(", ")}</p>
+          ) : null}
+        </div>
+      )}
+    </div>
   );
 }

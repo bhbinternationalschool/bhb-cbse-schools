@@ -4,6 +4,7 @@ import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { loadMasters } from "@/lib/masters";
 import { hasPermission } from "@/lib/rbac";
 import {
+  cleanUnitFacts,
   suggestExamPaperDraftLlm,
   suggestMoreQuestionsLlm,
 } from "@/lib/examPaperAiLlm.server";
@@ -11,14 +12,14 @@ import {
   suggestExamPaperDraft,
   suggestMoreQuestions,
 } from "@/lib/examPaperAi";
-import type { ExamPaperHardness } from "@/lib/examPapers";
+import type { ExamPaperHardness, ExamPaperQuestionType } from "@/lib/examPapers";
 
 export const runtime = "nodejs";
 
 export async function GET() {
   return NextResponse.json({
     service: "exam-paper-ai",
-    note: 'POST { mode: "draft" | "more", classId, subjectId, hardness, maxMarks?, sectionId?, excludeTexts? }',
+    note: 'POST { mode: "draft" | "more", classId, subjectId, hardness, maxMarks?, units?: [{id, code, title, level, learningOutcomes, competencyCodes}], competencyShare?, type?, excludeTexts? } — LLM runs on the pro tier; competencyCode/unitId on returned questions are restricted to the units given',
   });
 }
 
@@ -46,6 +47,9 @@ export async function POST(req: Request) {
     count?: number;
     excludeTexts?: string[];
     preferLocal?: boolean;
+    units?: unknown;
+    competencyShare?: number;
+    type?: string;
   };
   try {
     body = (await req.json()) as typeof body;
@@ -57,6 +61,7 @@ export async function POST(req: Request) {
   const classId = (body.classId || "").trim();
   const subjectId = (body.subjectId || "").trim();
   const hardness = body.hardness || "mixed";
+  const units = cleanUnitFacts(body.units);
 
   if (!classId || !subjectId) {
     return NextResponse.json(
@@ -78,6 +83,9 @@ export async function POST(req: Request) {
         subjectId,
         hardness,
         maxMarks,
+        units,
+        competencyShare:
+          typeof body.competencyShare === "number" ? body.competencyShare : undefined,
       });
       if (llm.ok) {
         return NextResponse.json({
@@ -86,6 +94,7 @@ export async function POST(req: Request) {
           source: "llm",
           sections: llm.sections,
           explanation: llm.explanation,
+          generationId: llm.generationId,
         });
       }
     }
@@ -117,6 +126,8 @@ export async function POST(req: Request) {
         hardness,
         count,
         excludeTexts: body.excludeTexts,
+        units,
+        type: (body.type || undefined) as ExamPaperQuestionType | undefined,
       });
       if (llm.ok) {
         return NextResponse.json({
@@ -124,6 +135,7 @@ export async function POST(req: Request) {
           engine: llm.engine,
           source: "llm",
           questions: llm.questions,
+          generationId: llm.generationId,
         });
       }
     }

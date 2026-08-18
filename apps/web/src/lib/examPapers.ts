@@ -17,7 +17,34 @@ export type ExamPaperQuestionType =
   | "match"
   | "numerical"
   | "diagram"
-  | "primary_picture";
+  | "primary_picture"
+  /** CBSE competency-based formats (weighted since 2023-24 board pattern) */
+  | "case_study"
+  | "assertion_reason"
+  | "competency";
+
+/** Bloom's level a question targets; "" = not tagged. */
+export type BloomLevel =
+  | "remember"
+  | "understand"
+  | "apply"
+  | "analyse"
+  | "evaluate"
+  | "create";
+
+export const BLOOM_LEVELS: { code: BloomLevel; label: string }[] = [
+  { code: "remember", label: "Remember" },
+  { code: "understand", label: "Understand" },
+  { code: "apply", label: "Apply" },
+  { code: "analyse", label: "Analyse" },
+  { code: "evaluate", label: "Evaluate" },
+  { code: "create", label: "Create" },
+];
+
+export function normalizeBloomLevel(v: unknown): BloomLevel | "" {
+  const s = String(v ?? "").trim().toLowerCase().replace("analyze", "analyse");
+  return BLOOM_LEVELS.some((b) => b.code === s) ? (s as BloomLevel) : "";
+}
 
 export type ExamPaperHardness = "easy" | "medium" | "hard" | "mixed";
 
@@ -47,6 +74,13 @@ export type ExamPaperQuestion = {
   hardness: Exclude<ExamPaperHardness, "mixed">;
   /** Source: teacher typed / AI suggested / imported */
   source: "manual" | "ai" | "bank";
+  /** CBSE learning-outcome / competency code this item assesses; "" = untagged */
+  competencyCode: string;
+  /** SyllabusUnit (chapter/topic) this item is drawn from; "" = not linked */
+  unitId: string;
+  bloomLevel: BloomLevel | "";
+  /** Step-wise marking scheme for the teacher copy, one step per line; [] = answer key only */
+  markingScheme: string[];
 };
 
 export type ExamPaperSection = {
@@ -87,6 +121,8 @@ export type ExamPaper = {
   durationMinutes: number;
   maxMarks: number;
   hardness: ExamPaperHardness;
+  /** SyllabusUnit ids (chapters/topics) this paper covers; [] = whole subject */
+  unitIds: string[];
   generalInstructions: string;
   status: ExamPaperStatus;
   sets: ExamPaperSet[];
@@ -128,6 +164,9 @@ export const QUESTION_TYPES: {
   { code: "numerical", label: "Numerical / sum", short: "Num" },
   { code: "diagram", label: "Diagram / label", short: "Diag" },
   { code: "primary_picture", label: "Picture (primary)", short: "Pic" },
+  { code: "case_study", label: "Case study / source-based", short: "Case" },
+  { code: "assertion_reason", label: "Assertion–Reason", short: "A–R" },
+  { code: "competency", label: "Competency (application / HOTS)", short: "Comp" },
 ];
 
 export const HARDNESS_LEVELS: {
@@ -226,6 +265,12 @@ export function emptyQuestion(
     icons: Array.isArray(partial?.icons) ? partial!.icons : [],
     hardness: partial?.hardness || "medium",
     source: partial?.source || "manual",
+    competencyCode: partial?.competencyCode || "",
+    unitId: partial?.unitId || "",
+    bloomLevel: normalizeBloomLevel(partial?.bloomLevel),
+    markingScheme: Array.isArray(partial?.markingScheme)
+      ? partial!.markingScheme.map(String).filter(Boolean)
+      : [],
   };
 }
 
@@ -295,6 +340,12 @@ function normalizeQuestion(
       : [],
     hardness,
     source: q.source === "ai" || q.source === "bank" ? q.source : "manual",
+    competencyCode: String(q.competencyCode || "").trim().slice(0, 40),
+    unitId: String(q.unitId || ""),
+    bloomLevel: normalizeBloomLevel(q.bloomLevel),
+    markingScheme: Array.isArray(q.markingScheme)
+      ? q.markingScheme.map((m) => String(m || "").trim()).filter(Boolean)
+      : [],
   };
 }
 
@@ -365,6 +416,7 @@ export function normalizePaper(p: Partial<ExamPaper>): ExamPaper | null {
     durationMinutes: Math.max(0, Math.floor(Number(p.durationMinutes) || 0)),
     maxMarks: Math.max(0, Math.floor(Number(p.maxMarks) || 0)),
     hardness,
+    unitIds: Array.isArray(p.unitIds) ? p.unitIds.map(String).filter(Boolean) : [],
     generalInstructions:
       p.generalInstructions ||
       "1. All questions are compulsory.\n2. Read each question carefully.\n3. Write neatly.",

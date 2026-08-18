@@ -312,21 +312,27 @@ export async function generateTutorText(opts: {
   });
 }
 
+/**
+ * Exam paper draft. Runs on the "pro" tier: a plausible-but-wrong numerical
+ * or a marking scheme that doesn't add up costs a teacher more than the
+ * tokens (roadmap §1b). Prompt v2 = competency formats + LO tagging.
+ */
 export async function generateExamPaperJson(opts: {
   system: string;
   userMessage: string;
+  promptVersion?: string;
 }): Promise<
-  | { ok: true; text: string; engine: LlmEngine }
+  | { ok: true; text: string; engine: LlmEngine; generationId: string }
   | { ok: false; error: string; engine: LlmEngine }
 > {
   return callLlmText({
     system: opts.system,
     userMessage: opts.userMessage,
     jsonMode: true,
-    maxTokens: 4096,
+    maxTokens: 6000,
     temperature: 0.55,
-    geminiMaxTokens: 4096,
-    meta: { route: "exam-paper", promptVersion: "v1" },
+    geminiMaxTokens: 8192,
+    meta: { route: "exam-paper", promptVersion: opts.promptVersion ?? "v2", tier: "pro" },
   });
 }
 
