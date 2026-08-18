@@ -9,10 +9,10 @@ import { SIS_BOT_QUICK_PROMPTS } from "@/lib/sisParentBotEngine";
 import {
   STAFF_BOT_OFFICE_PROMPTS,
   STAFF_BOT_OWNER_PROMPTS,
-} from "@/lib/waStaffBotEngine";
+} from "@/lib/waStaffBotPrompts";
 import type { WaInteractiveMenu } from "@/lib/waInteractive";
 import { VISITOR_PURPOSE_OPTIONS } from "@/lib/waUnifiedBotEngine";
-import { TRANSPORT_BOT_PROMPTS } from "@/lib/waTransportBotEngine";
+import { TRANSPORT_BOT_PROMPTS } from "@/lib/waTransportBotPrompts";
 
 export function menuKnownUserGreeting(
   identity: WaResolvedIdentity,

@@ -9,8 +9,8 @@ import { SURVEY_BOT_QUICK_PROMPTS } from "@/lib/surveyFieldBotEngine";
 import {
   STAFF_BOT_OFFICE_PROMPTS,
   STAFF_BOT_OWNER_PROMPTS,
-} from "@/lib/waStaffBotEngine";
-import { TRANSPORT_BOT_PROMPTS } from "@/lib/waTransportBotEngine";
+} from "@/lib/waStaffBotPrompts";
+import { TRANSPORT_BOT_PROMPTS } from "@/lib/waTransportBotPrompts";
 import { VISITOR_PURPOSE_OPTIONS } from "@/lib/waUnifiedBotEngine";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 

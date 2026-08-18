@@ -5,13 +5,14 @@
 import { loadTransport } from "@/lib/transport";
 import { TENANT } from "@/lib/types";
 import { generateTutorText } from "@/lib/aiLlm.server";
+import {
+  TRANSPORT_BOT_PROMPTS,
+  type TransportBotQuickId,
+} from "@/lib/waTransportBotPrompts";
 
-export type TransportBotQuickId =
-  | "route"
-  | "students"
-  | "breakdown"
-  | "human"
-  | "menu";
+// Re-exported for server-side callers; client code must import from
+// waTransportBotPrompts directly (this module is server-only via aiLlm.server).
+export { TRANSPORT_BOT_PROMPTS, type TransportBotQuickId };
 
 export type TransportDriverContext = {
   driverName: string;
@@ -20,18 +21,6 @@ export type TransportDriverContext = {
   routeName: string;
   studentCount: number;
 };
-
-export const TRANSPORT_BOT_PROMPTS: {
-  id: TransportBotQuickId;
-  label: string;
-  waKeyword: string;
-}[] = [
-  { id: "route", label: "My route", waKeyword: "ROUTE" },
-  { id: "students", label: "Students on bus", waKeyword: "STUDENTS" },
-  { id: "breakdown", label: "Breakdown / delay", waKeyword: "BREAKDOWN" },
-  { id: "human", label: "Talk to transport desk", waKeyword: "HUMAN" },
-  { id: "menu", label: "Main menu", waKeyword: "MENU" },
-];
 
 export function resolveTransportDriverContext(
   mobile10: string,

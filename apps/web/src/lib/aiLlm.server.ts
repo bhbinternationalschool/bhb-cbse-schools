@@ -1,6 +1,12 @@
 /**
  * Route LLM calls — preferred engine first, fallback on API error or bad JSON.
+ *
+ * Server-only: reads provider keys, the request cookie (requester for the
+ * ai_generations audit row) and Supabase. Anything client-side that needs a
+ * shared constant from a bot engine must import it from a client-safe module
+ * (see waTransportBotPrompts.ts) — never from here.
  */
+import "server-only";
 
 import {
   generateGeminiText,
