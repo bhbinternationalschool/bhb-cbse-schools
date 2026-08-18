@@ -14,7 +14,9 @@ import {
   type MarkSheet,
   type PromotionDecision,
   type PromotionRecord,
+  normalizeRemarkSource,
   type StudentCoScholasticEntry,
+  type StudentOverallRemark,
   type StudentSubjectMark,
 } from "@/lib/exams";
 import { examsDualWriteDbEnabled } from "@/lib/examsDbConfig";
@@ -224,6 +226,7 @@ function sheetToRows(
   header: Record<string, unknown>;
   marks: Record<string, unknown>[];
   coScholastic: Record<string, unknown>[];
+  remarks: Record<string, unknown>[];
 } {
   const header = {
     id: s.id,
@@ -245,6 +248,7 @@ function sheetToRows(
     marks_obtained: m.marksObtained,
     grade: m.grade || "—",
     remark: m.remark || "",
+    remark_source: normalizeRemarkSource(m.remarkSource),
   }));
   const coScholastic = (s.coScholastic || []).map((e) => ({
     id: `${s.id}:${e.studentId}:${e.domain}`,
@@ -254,13 +258,26 @@ function sheetToRows(
     domain: e.domain,
     rating: e.rating || "",
   }));
-  return { header, marks, coScholastic };
+  const remarks = (s.overallRemarks || []).map((r) => ({
+    id: `${s.id}:${r.studentId}`,
+    mark_sheet_id: s.id,
+    tenant_id: tenantId,
+    student_id: r.studentId,
+    text: r.text || "",
+    text_hi: r.textHi || "",
+    source: normalizeRemarkSource(r.source),
+    generated_at: r.generatedAt,
+    model: r.model || "",
+    updated_at: s.updatedAt || new Date().toISOString(),
+  }));
+  return { header, marks, coScholastic, remarks };
 }
 
 function rowToSheet(
   header: Record<string, unknown>,
   markRows: Record<string, unknown>[],
   coScholasticRows: Record<string, unknown>[] = [],
+  remarkRows: Record<string, unknown>[] = [],
 ): MarkSheet {
   return {
     id: String(header.id),
@@ -281,6 +298,17 @@ function rowToSheet(
             : Number(m.marks_obtained),
         grade: String(m.grade || "—"),
         remark: String(m.remark || ""),
+        remarkSource: normalizeRemarkSource(m.remark_source),
+      }),
+    ),
+    overallRemarks: remarkRows.map(
+      (r): StudentOverallRemark => ({
+        studentId: String(r.student_id),
+        text: String(r.text || ""),
+        textHi: String(r.text_hi || ""),
+        source: normalizeRemarkSource(r.source),
+        generatedAt: (r.generated_at as string | null) ?? null,
+        model: String(r.model || ""),
       }),
     ),
     coScholastic: coScholasticRows.map((r): StudentCoScholasticEntry => {
@@ -444,13 +472,15 @@ export async function pushExamDeskToDb(
   const sheetHeaders: Record<string, unknown>[] = [];
   const allMarks: Record<string, unknown>[] = [];
   const allCoScholastic: Record<string, unknown>[] = [];
+  const allRemarks: Record<string, unknown>[] = [];
   let lastSheetAt: string | null = null;
 
   for (const sheet of sheets) {
-    const { header, marks, coScholastic } = sheetToRows(tenantId, sheet);
+    const { header, marks, coScholastic, remarks } = sheetToRows(tenantId, sheet);
     sheetHeaders.push(header);
     allMarks.push(...marks);
     allCoScholastic.push(...coScholastic);
+    allRemarks.push(...remarks);
     const updated = String(header.updated_at);
     if (!lastSheetAt || updated > lastSheetAt) lastSheetAt = updated;
   }
@@ -485,6 +515,20 @@ export async function pushExamDeskToDb(
   }
 
   r = await upsertChunks(sb, "exam_desk_coscholastic", allCoScholastic, 500);
+  if (!r.ok) return r;
+
+  const { data: existingRemarks } = await sb
+    .from("exam_desk_remarks")
+    .select("id, mark_sheet_id")
+    .eq("tenant_id", tenantId);
+  const staleRemarkIds = (existingRemarks ?? [])
+    .filter((e) => sheetIds.has(String(e.mark_sheet_id)))
+    .map((e) => String(e.id));
+  if (staleRemarkIds.length) {
+    await sb.from("exam_desk_remarks").delete().in("id", staleRemarkIds);
+  }
+
+  r = await upsertChunks(sb, "exam_desk_remarks", allRemarks, 500);
   if (!r.ok) return r;
 
   r = await upsertChunks(
@@ -608,11 +652,29 @@ export async function fetchExamDeskFromDb(): Promise<{
     coScholasticBySheet.set(sid, list);
   }
 
+  let remarkRows: Record<string, unknown>[] = [];
+  if (sheetIds.length) {
+    const { data } = await sb
+      .from("exam_desk_remarks")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .in("mark_sheet_id", sheetIds);
+    remarkRows = (data ?? []) as Record<string, unknown>[];
+  }
+  const remarksBySheet = new Map<string, Record<string, unknown>[]>();
+  for (const e of remarkRows) {
+    const sid = String(e.mark_sheet_id);
+    const list = remarksBySheet.get(sid) ?? [];
+    list.push(e);
+    remarksBySheet.set(sid, list);
+  }
+
   const sheets = (sheetHeaders ?? []).map((h) =>
     rowToSheet(
       h as Record<string, unknown>,
       marksBySheet.get(String(h.id)) ?? [],
       coScholasticBySheet.get(String(h.id)) ?? [],
+      remarksBySheet.get(String(h.id)) ?? [],
     ),
   );
 
@@ -637,7 +699,7 @@ export async function pushExamSheetToDb(
   const ctx = await resolveCtx();
   if (!ctx) return { ok: false, error: "No tenant" };
   const { sb, tenantId } = ctx;
-  const { header, marks } = sheetToRows(tenantId, sheet);
+  const { header, marks, coScholastic, remarks } = sheetToRows(tenantId, sheet);
 
   const { error: hErr } = await sb.from("exam_desk_sheets").upsert(header);
   if (hErr) return { ok: false, error: hErr.message };
@@ -646,6 +708,16 @@ export async function pushExamSheetToDb(
   if (marks.length) {
     const { error: mErr } = await sb.from("exam_desk_marks").upsert(marks);
     if (mErr) return { ok: false, error: mErr.message };
+  }
+  await sb.from("exam_desk_coscholastic").delete().eq("mark_sheet_id", sheet.id);
+  if (coScholastic.length) {
+    const { error: cErr } = await sb.from("exam_desk_coscholastic").upsert(coScholastic);
+    if (cErr) return { ok: false, error: cErr.message };
+  }
+  await sb.from("exam_desk_remarks").delete().eq("mark_sheet_id", sheet.id);
+  if (remarks.length) {
+    const { error: rErr } = await sb.from("exam_desk_remarks").upsert(remarks);
+    if (rErr) return { ok: false, error: rErr.message };
   }
 
   await sb.from("exam_desk_sync_meta").upsert(

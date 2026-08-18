@@ -16,6 +16,8 @@ import {
   buildEmptyCoScholasticGrid,
   flattenCoScholastic,
   flattenExamMarks,
+  flattenOverallRemarks,
+  normalizeRemarkSource,
   type MarkSheet,
 } from "./exams";
 import type { SisStudent } from "./sis";
@@ -29,12 +31,22 @@ const sheetA: MarkSheet = {
   classId: "class-9",
   sectionId: "section-a",
   marks: [
-    { studentId: "stu-1", subjectId: "sub-math", marksObtained: 88, grade: "A1", remark: "" },
-    { studentId: "stu-2", subjectId: "sub-math", marksObtained: 72, grade: "B1", remark: "" },
+    { studentId: "stu-1", subjectId: "sub-math", marksObtained: 88, grade: "A1", remark: "", remarkSource: "manual" },
+    { studentId: "stu-2", subjectId: "sub-math", marksObtained: 72, grade: "B1", remark: "", remarkSource: "manual" },
   ],
   coScholastic: [
     { studentId: "stu-1", domain: "socioEmotional", rating: "A" },
     { studentId: "stu-1", domain: "psychomotor", rating: "B" },
+  ],
+  overallRemarks: [
+    {
+      studentId: "stu-1",
+      text: "Consistent effort in Mathematics.",
+      textHi: "गणित में निरंतर प्रयास।",
+      source: "ai_edited",
+      generatedAt: "2026-08-10T00:00:00.000Z",
+      model: "gemini-3.6-flash",
+    },
   ],
   lockedAt: null,
   enteredBy: "teacher-1",
@@ -48,9 +60,10 @@ const sheetB: MarkSheet = {
   classId: "class-9",
   sectionId: "section-b",
   marks: [
-    { studentId: "stu-3", subjectId: "sub-eng", marksObtained: 91, grade: "A1", remark: "" },
+    { studentId: "stu-3", subjectId: "sub-eng", marksObtained: 91, grade: "A1", remark: "", remarkSource: "manual" },
   ],
   coScholastic: [],
+  overallRemarks: [],
   lockedAt: null,
   enteredBy: "teacher-2",
   updatedAt: "2026-08-10T00:00:00.000Z",
@@ -91,7 +104,7 @@ const sheetB: MarkSheet = {
   const absentSheet: MarkSheet = {
     ...sheetA,
     id: "sheet-absent",
-    marks: [{ studentId: "stu-4", subjectId: "sub-sci", marksObtained: null, grade: "", remark: "Absent" }],
+    marks: [{ studentId: "stu-4", subjectId: "sub-sci", marksObtained: null, grade: "", remark: "Absent", remarkSource: "manual" }],
   };
   const flat = flattenExamMarks([absentSheet]);
   assert.equal(flat.length, 1);
@@ -141,6 +154,34 @@ const sheetB: MarkSheet = {
   const grid = buildEmptyCoScholasticGrid(students);
   assert.equal(grid.length, 2);
   assert.ok(grid.every((e) => e.rating === null));
+}
+
+// --- flattenOverallRemarks: `${sheetId}:${studentId}` keys, provenance kept
+{
+  const flat = flattenOverallRemarks([sheetA, sheetB]);
+  assert.equal(flat.length, 1, "only sheetA has a remark; sheetB's empty array adds nothing");
+  assert.equal(flat[0].id, "sheet-a:stu-1");
+  assert.equal(flat[0].source, "ai_edited");
+  assert.equal(flat[0].textHi, "गणित में निरंतर प्रयास।");
+}
+
+// --- normalizeRemarkSource: anything unknown is "manual" — an old row or a
+// garbled value must never be promoted to "ai" (that would misattribute a
+// human's words to a machine on an official record).
+{
+  assert.equal(normalizeRemarkSource("ai"), "ai");
+  assert.equal(normalizeRemarkSource("ai_edited"), "ai_edited");
+  assert.equal(normalizeRemarkSource("manual"), "manual");
+  assert.equal(normalizeRemarkSource(undefined), "manual");
+  assert.equal(normalizeRemarkSource("AI"), "manual");
+  assert.equal(normalizeRemarkSource(null), "manual");
+}
+
+// --- flattenExamMarks carries remarkSource so per-subject remark
+// provenance is auditable alongside the mark itself
+{
+  const flat = flattenExamMarks([sheetA]);
+  assert.ok(flat.every((m) => m.remarkSource === "manual"));
 }
 
 console.log("OK — exams.selftest.ts");

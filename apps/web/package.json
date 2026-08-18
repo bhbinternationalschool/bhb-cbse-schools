@@ -9,6 +9,8 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test:playbook": "npx tsx src/lib/playbook.selftest.ts",
+    "test:report-remark-ai": "npx tsx src/lib/reportRemarkAi.selftest.ts",
+    "test:exams": "npx tsx src/lib/exams.selftest.ts",
     "test:masters-revision-guard": "npx tsx src/lib/mastersRevisionGuard.selftest.ts",
     "test:masters-revision-lifecycle": "npx tsx src/lib/mastersRevisionLifecycle.selftest.ts",
     "test:tenant-wipe-expiry": "npx tsx src/lib/tenantDataWipe.selftest.ts",

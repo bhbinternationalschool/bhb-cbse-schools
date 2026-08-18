@@ -124,6 +124,16 @@ export type ExamDateSheetEntry = {
   updatedAt: string;
 };
 
+/** Provenance of a remark that ends up on a printed report card. "ai" = an
+ * accepted AI draft, untouched; "ai_edited" = AI draft the teacher changed;
+ * "manual" = typed by a human. Kept on the record itself so the report can
+ * be audited later without consulting a separate log. */
+export type RemarkSource = "manual" | "ai" | "ai_edited";
+
+export function normalizeRemarkSource(v: unknown): RemarkSource {
+  return v === "ai" || v === "ai_edited" ? v : "manual";
+}
+
 export type StudentSubjectMark = {
   studentId: string;
   subjectId: string;
@@ -131,6 +141,23 @@ export type StudentSubjectMark = {
   marksObtained: number | null;
   grade: string;
   remark: string;
+  /** Provenance of `remark`; "manual" for anything saved before this existed */
+  remarkSource: RemarkSource;
+};
+
+/** Class teacher's overall remark for one student on one mark sheet — the
+ * "Remarks" line at the bottom of the report card. Optional Hindi text is a
+ * translation of `text` (never independently authored) so both say the same
+ * thing to the parent. */
+export type StudentOverallRemark = {
+  studentId: string;
+  text: string;
+  textHi: string;
+  source: RemarkSource;
+  /** When the AI draft behind this was produced; null for manual */
+  generatedAt: string | null;
+  /** Engine/model label recorded at generation time, "" for manual */
+  model: string;
 };
 
 /** NEP 2020 Holistic Progress Card — co-scholastic domains rated by whoever
@@ -188,6 +215,9 @@ export type MarkSheet = {
    * subject, so this sits alongside `marks`, not nested inside it. Empty on
    * sheets saved before this field existed. */
   coScholastic: StudentCoScholasticEntry[];
+  /** Class teacher's overall remark per student — sits beside `marks` like
+   * `coScholastic` does. Empty on sheets saved before this field existed. */
+  overallRemarks: StudentOverallRemark[];
   lockedAt: string | null;
   enteredBy: string;
   updatedAt: string;
@@ -201,6 +231,7 @@ export type FlatExamMark = {
   marksObtained: number | null;
   grade: string;
   remark: string;
+  remarkSource: RemarkSource;
 };
 
 /** Pure — flattens every sheet's `marks[]` into one addressable record per
@@ -221,6 +252,36 @@ export function flattenExamMarks(sheets: MarkSheet[]): FlatExamMark[] {
         marksObtained: mark.marksObtained,
         grade: mark.grade,
         remark: mark.remark,
+        remarkSource: mark.remarkSource,
+      });
+    }
+  }
+  return out;
+}
+
+export type FlatOverallRemark = {
+  id: string;
+  sheetId: string;
+  studentId: string;
+  text: string;
+  textHi: string;
+  source: RemarkSource;
+};
+
+/** Pure — same key scheme as the other flatteners, for the class teacher's
+ * overall remark: `${sheetId}:${studentId}`, matching exam_desk_remarks'
+ * synthetic id at the DB layer. */
+export function flattenOverallRemarks(sheets: MarkSheet[]): FlatOverallRemark[] {
+  const out: FlatOverallRemark[] = [];
+  for (const sheet of sheets) {
+    for (const r of sheet.overallRemarks) {
+      out.push({
+        id: `${sheet.id}:${r.studentId}`,
+        sheetId: sheet.id,
+        studentId: r.studentId,
+        text: r.text,
+        textHi: r.textHi,
+        source: r.source,
       });
     }
   }
@@ -702,6 +763,20 @@ function normalizeMark(m: Partial<StudentSubjectMark>): StudentSubjectMark {
     marksObtained: obtained,
     grade: m.grade ?? "—",
     remark: m.remark ?? "",
+    remarkSource: normalizeRemarkSource(m.remarkSource),
+  };
+}
+
+function normalizeOverallRemark(
+  r: Partial<StudentOverallRemark>,
+): StudentOverallRemark {
+  return {
+    studentId: r.studentId ?? "",
+    text: String(r.text ?? ""),
+    textHi: String(r.textHi ?? ""),
+    source: normalizeRemarkSource(r.source),
+    generatedAt: r.generatedAt ?? null,
+    model: String(r.model ?? ""),
   };
 }
 
@@ -727,6 +802,11 @@ function normalizeSheet(s: Partial<MarkSheet>): MarkSheet {
     marks: Array.isArray(s.marks) ? s.marks.map(normalizeMark) : [],
     coScholastic: Array.isArray(s.coScholastic)
       ? s.coScholastic.map(normalizeCoScholasticEntry)
+      : [],
+    overallRemarks: Array.isArray(s.overallRemarks)
+      ? s.overallRemarks
+          .map(normalizeOverallRemark)
+          .filter((r) => r.studentId && (r.text || r.textHi))
       : [],
     lockedAt: s.lockedAt ?? null,
     enteredBy: s.enteredBy ?? "",
@@ -1553,6 +1633,7 @@ export function buildEmptyMarksGrid(
         marksObtained: obtained,
         grade: gradeFromMarks(obtained, max, passPercent),
         remark: prev?.remark ?? "",
+        remarkSource: prev?.remarkSource ?? "manual",
       });
     }
   }
@@ -1668,6 +1749,7 @@ export function saveMarkSheet(input: {
     sectionId: input.sectionId,
     marks: normalizedMarks,
     coScholastic: input.coScholastic ?? existing?.coScholastic ?? [],
+    overallRemarks: existing?.overallRemarks ?? [],
     lockedAt: input.lock ? now : existing?.lockedAt ?? null,
     enteredBy: input.enteredBy,
     updatedAt: now,
@@ -1676,6 +1758,65 @@ export function saveMarkSheet(input: {
   const sheets = existing
     ? state.sheets.map((s) => (s.id === existing.id ? sheet : s))
     : [sheet, ...state.sheets];
+  saveExams({ ...state, sheets });
+  return { ok: true, sheet };
+}
+
+/**
+ * Save report-card remarks onto an existing mark sheet — the class teacher's
+ * overall remark per student plus (optionally) per-subject remarks — without
+ * touching marks, grades or co-scholastic ratings.
+ *
+ * Deliberately allowed on a LOCKED sheet: locking freezes marks so subject
+ * teachers can't change scores after moderation, but the class teacher
+ * writes remarks *after* that, right before printing. Remarks never feed
+ * grades or promotion, so this can't disturb what the lock protects.
+ *
+ * Marks are the source of a remark, so a sheet must already exist — there is
+ * no remark without something to remark on.
+ */
+export function saveSheetRemarks(input: {
+  academicYearCode: string;
+  examTermId: string;
+  sectionId: string;
+  overallRemarks: StudentOverallRemark[];
+  /** Per-subject remarks to write; entries for unknown student/subject pairs are ignored */
+  subjectRemarks?: {
+    studentId: string;
+    subjectId: string;
+    remark: string;
+    remarkSource: RemarkSource;
+  }[];
+}): { ok: true; sheet: MarkSheet } | { ok: false; error: string } {
+  const state = loadExams();
+  const existing = findMarkSheet(
+    input.academicYearCode,
+    input.examTermId,
+    input.sectionId,
+    state,
+  );
+  if (!existing) {
+    return { ok: false, error: "Save marks for this exam and section first" };
+  }
+  const subjectByKey = new Map(
+    (input.subjectRemarks ?? []).map((r) => [`${r.studentId}:${r.subjectId}`, r]),
+  );
+  const marks = existing.marks.map((m) => {
+    const r = subjectByKey.get(`${m.studentId}:${m.subjectId}`);
+    if (!r) return m;
+    return normalizeMark({
+      ...m,
+      remark: r.remark,
+      remarkSource: r.remark.trim() ? r.remarkSource : "manual",
+    });
+  });
+  const sheet = normalizeSheet({
+    ...existing,
+    marks,
+    overallRemarks: input.overallRemarks,
+    updatedAt: new Date().toISOString(),
+  });
+  const sheets = state.sheets.map((s) => (s.id === existing.id ? sheet : s));
   saveExams({ ...state, sheets });
   return { ok: true, sheet };
 }
@@ -1734,7 +1875,23 @@ export type ReportCard = {
     rating: CoScholasticRating | null;
     ratingLabel: string;
   }[];
+  /** Class teacher's overall remark from THIS term's own sheet (never
+   * aggregated across component exams). null when none was written. */
+  overallRemark: { text: string; textHi: string; source: RemarkSource } | null;
 };
+
+function overallRemarkForReportCard(
+  ay: string,
+  examTermId: string,
+  sectionId: string,
+  studentId: string,
+  state: ExamsState,
+): ReportCard["overallRemark"] {
+  const sheet = findMarkSheet(ay, examTermId, sectionId, state);
+  const r = sheet?.overallRemarks.find((x) => x.studentId === studentId);
+  if (!r || (!r.text.trim() && !r.textHi.trim())) return null;
+  return { text: r.text, textHi: r.textHi, source: r.source };
+}
 
 function attendanceSummaryForStudent(
   studentId: string,
@@ -2061,6 +2218,13 @@ export function buildReportCard(input: {
         state,
         policy,
       ),
+      overallRemark: overallRemarkForReportCard(
+        ay,
+        term.id,
+        input.student.sectionId,
+        input.student.id,
+        state,
+      ),
     };
   }
 
@@ -2144,6 +2308,13 @@ export function buildReportCard(input: {
       input.student.id,
       state,
       policy,
+    ),
+    overallRemark: overallRemarkForReportCard(
+      ay,
+      term.id,
+      input.student.sectionId,
+      input.student.id,
+      state,
     ),
   };
 }

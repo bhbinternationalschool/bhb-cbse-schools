@@ -8,6 +8,14 @@ import {
   openAiConfigured,
   type OpenAiChatTurn,
 } from "@/lib/openAi.server";
+import {
+  buildRemarkSystemPrompt,
+  buildRemarkUserPrompt,
+  parseRemarkDraftsJson,
+  type RemarkTone,
+  type StudentRemarkDraft,
+  type StudentRemarkFacts,
+} from "@/lib/reportRemarkAi";
 
 export type LlmEngine = "openai" | "gemini" | "none";
 export type PreferredEngine = "auto" | "openai" | "gemini";
@@ -931,4 +939,84 @@ function parseSubstitutionSummaryJson(text: string): { summary: string } | null 
   } catch {
     return null;
   }
+}
+
+/**
+ * Report-card remarks for a batch of students (≤ REMARK_STUDENTS_PER_LLM_CALL
+ * per call — the route chunks). English only; Hindi is produced afterwards
+ * by the Sarvam translation layer (or, if that is not configured, by a
+ * second LLM pass) so both languages always say the same thing. Returns
+ * drafts — nothing here is persisted.
+ */
+export async function generateReportRemarksJson(opts: {
+  students: StudentRemarkFacts[];
+  tone: RemarkTone;
+  includeSubjectRemarks: boolean;
+  schoolName: string;
+}): Promise<
+  | { ok: true; drafts: StudentRemarkDraft[]; engine: LlmEngine }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const ids = opts.students.map((s) => s.studentId);
+  const r = await callLlmJson(
+    {
+      system: buildRemarkSystemPrompt({
+        tone: opts.tone,
+        includeSubjectRemarks: opts.includeSubjectRemarks,
+        schoolName: opts.schoolName,
+      }),
+      userMessage: buildRemarkUserPrompt(opts.students),
+      // ~120 tokens per student for overall + subject phrases, with headroom.
+      maxTokens: Math.min(4000, 400 + opts.students.length * 220),
+      temperature: 0.6,
+      // Gemini 3.x thinking tokens share the budget with the visible reply.
+      geminiMaxTokens: Math.min(8192, 2048 + opts.students.length * 400),
+    },
+    (text) => parseRemarkDraftsJson(text, ids),
+  );
+  if (r.ok) return { ok: true, drafts: r.data, engine: r.engine };
+  return {
+    ok: false,
+    error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI remarks",
+    engine: r.engine,
+  };
+}
+
+/** Hindi rendering of finished English remarks when Sarvam is unavailable —
+ * translation only, the model is told not to add or drop content. */
+export async function translateRemarksToHindiJson(opts: {
+  items: { id: string; text: string }[];
+}): Promise<
+  | { ok: true; items: { id: string; text: string }[]; engine: LlmEngine }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const system = `You translate school report-card remarks from English to Hindi (Devanagari) for parents at an Indian CBSE school. Translate faithfully — same meaning, same length, formal register (आप), no additions, no omissions, keep subject names in Hindi where a standard Hindi name exists (गणित, विज्ञान, अंग्रेज़ी, हिंदी, सामाजिक विज्ञान) and otherwise as given.
+Respond with JSON only: {"items":[{"id":"...","text":"..."}]} — every id given, same order.`;
+  const userMessage = opts.items
+    .map((i) => `id: ${i.id}\n${i.text}`)
+    .join("\n\n");
+  const ids = new Set(opts.items.map((i) => i.id));
+  const r = await callLlmJson(
+    {
+      system,
+      userMessage,
+      maxTokens: Math.min(4000, 300 + opts.items.length * 200),
+      temperature: 0.2,
+      geminiMaxTokens: Math.min(8192, 2048 + opts.items.length * 300),
+    },
+    (text) => {
+      try {
+        const raw = JSON.parse(text) as { items?: { id?: unknown; text?: unknown }[] };
+        if (!Array.isArray(raw.items)) return null;
+        const items = raw.items
+          .map((x) => ({ id: String(x?.id ?? "").trim(), text: String(x?.text ?? "").trim() }))
+          .filter((x) => x.id && x.text && ids.has(x.id));
+        return items.length ? items : null;
+      } catch {
+        return null;
+      }
+    },
+  );
+  if (r.ok) return { ok: true, items: r.data, engine: r.engine };
+  return { ok: false, error: r.error, engine: r.engine };
 }
