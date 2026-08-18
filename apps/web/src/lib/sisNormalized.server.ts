@@ -46,6 +46,10 @@ type HouseholdRow = {
   state: string | null;
   pincode: string | null;
   alt_mobile: string | null;
+  preferred_language?: string | null;
+  channel_preference?: string | null;
+  quiet_hours_start?: string | null;
+  quiet_hours_end?: string | null;
   updated_at: string;
 };
 
@@ -140,6 +144,10 @@ function rowToHousehold(row: HouseholdRow): Household {
     state: row.state ?? "",
     pincode: row.pincode ?? "",
     altMobile: row.alt_mobile ?? "",
+    preferredLanguage: row.preferred_language ?? "",
+    channelPreference: row.channel_preference ?? "",
+    quietHoursStart: row.quiet_hours_start ?? "",
+    quietHoursEnd: row.quiet_hours_end ?? "",
   });
 }
 
@@ -210,6 +218,10 @@ function householdToRow(h: Household, tenantId: string, now: string) {
     state: h.state,
     pincode: h.pincode,
     alt_mobile: h.altMobile,
+    preferred_language: h.preferredLanguage,
+    channel_preference: h.channelPreference,
+    quiet_hours_start: h.quietHoursStart,
+    quiet_hours_end: h.quietHoursEnd,
     updated_at: now,
   };
 }

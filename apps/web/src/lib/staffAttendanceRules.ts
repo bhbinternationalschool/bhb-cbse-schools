@@ -360,6 +360,17 @@ export function saveAttendanceRules(state: StaffAttendanceRulesState) {
   if (!assertModulePermission("staff", "edit", "saveAttendanceRules")) return;
   if (typeof window === "undefined") return;
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(normalizeState(state)));
+  void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("staff_attendance_rules", normalizeState(state)));
+}
+
+/** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */
+export function writeAttendanceRulesLocalRaw(state: StaffAttendanceRulesState): void {
+  if (typeof window === "undefined") return;
+  try {
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    /* quota — the server copy is the truth anyway */
+  }
 }
 
 export function upsertAttendanceRule(

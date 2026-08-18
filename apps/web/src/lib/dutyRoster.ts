@@ -160,9 +160,21 @@ export function saveDutyRoster(state: DutyRosterState): DutyRosterState {
   const next = normalizeDutyRosterState(state);
   if (typeof window !== "undefined") {
     writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
+    void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("duty_roster", next));
     window.dispatchEvent(new CustomEvent("bhb-duty-roster"));
   }
   return next;
+}
+
+/** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */
+export function writeDutyRosterLocalRaw(state: DutyRosterState): void {
+  if (typeof window === "undefined") return;
+  try {
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    /* quota — the server copy is the truth anyway */
+  }
+  window.dispatchEvent(new CustomEvent("bhb-duty-roster"));
 }
 
 export function upsertTemplate(

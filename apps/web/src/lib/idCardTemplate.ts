@@ -233,7 +233,19 @@ export function saveIdCardTemplateState(state: IdCardTemplateState): IdCardTempl
   const next = normalizeIdCardTemplateState(state);
   if (typeof window !== "undefined") {
     writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
+    void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("id_card_template", next));
     window.dispatchEvent(new CustomEvent("bhb-id-card-template"));
   }
   return next;
+}
+
+/** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */
+export function writeIdCardTemplateStateLocalRaw(state: IdCardTemplateState): void {
+  if (typeof window === "undefined") return;
+  try {
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    /* quota — the server copy is the truth anyway */
+  }
+  window.dispatchEvent(new CustomEvent("bhb-id-card-template"));
 }

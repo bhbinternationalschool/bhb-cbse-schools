@@ -167,8 +167,19 @@ export function saveHolds(state: HoldsState) {
   if (typeof window === "undefined") return;
   try {
     writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+    void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("fee_holds", state));
   } catch (e) {
     console.warn("[holds] localStorage quota exceeded", e);
+  }
+}
+
+/** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */
+export function writeHoldsLocalRaw(state: HoldsState): void {
+  if (typeof window === "undefined") return;
+  try {
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    /* quota — the server copy is the truth anyway */
   }
 }
 

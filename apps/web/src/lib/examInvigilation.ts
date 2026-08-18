@@ -100,9 +100,21 @@ export function saveInvigilation(state: InvigilationState): InvigilationState {
   const next = normalizeInvigilationState(state);
   if (typeof window !== "undefined") {
     writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
+    void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("exam_invigilation", next));
     window.dispatchEvent(new CustomEvent("bhb-invigilation"));
   }
   return next;
+}
+
+/** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */
+export function writeInvigilationLocalRaw(state: InvigilationState): void {
+  if (typeof window === "undefined") return;
+  try {
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    /* quota — the server copy is the truth anyway */
+  }
+  window.dispatchEvent(new CustomEvent("bhb-invigilation"));
 }
 
 export function assignmentsForEntry(

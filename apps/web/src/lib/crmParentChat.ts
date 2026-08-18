@@ -155,6 +155,17 @@ export function saveCrmParentChat(state: CrmParentChatState): void {
     STORAGE_KEY,
     JSON.stringify({ ...state, audience: CRM_CHAT_AUDIENCE }),
   );
+  void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("crm_parent_chat", { ...state, audience: CRM_CHAT_AUDIENCE }));
+}
+
+/** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */
+export function writeCrmParentChatLocalRaw(state: CrmParentChatState): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, audience: CRM_CHAT_AUDIENCE }));
+  } catch {
+    /* quota — the server copy is the truth anyway */
+  }
 }
 
 export function findLeadByMobile(

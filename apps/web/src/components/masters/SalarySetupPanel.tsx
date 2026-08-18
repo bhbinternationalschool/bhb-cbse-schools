@@ -65,6 +65,20 @@ export function SalarySetupPanel() {
   useEffect(() => {
     setMasters(loadMasters());
     setState(loadSalarySetup());
+    // Pull the server copy (salary_setup_state) and re-read; the login-time
+    // cache wipe means the local copy is empty on a fresh session.
+    let cancelled = false;
+    void import("@/lib/salarySetupPersistence").then(({ ensureSalarySetupHydrated }) =>
+      ensureSalarySetupHydrated().then(() => {
+        if (!cancelled) setState(loadSalarySetup());
+      }),
+    );
+    const onUpdated = () => setState(loadSalarySetup());
+    window.addEventListener("bhb-salary-setup-updated", onUpdated);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("bhb-salary-setup-updated", onUpdated);
+    };
   }, []);
 
   const allowed = useMemo(() => {

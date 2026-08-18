@@ -36,6 +36,7 @@ import {
   type FleetEdgeReport,
   type FleetNotificationRow,
   type FleetTotals,
+  type FleetVehicleIdentity,
 } from "@/lib/fleetEdgeReport.types";
 
 export type {
@@ -132,7 +133,7 @@ export async function buildFleetEdgeReport(
 
   const [eventsRes, identityRes, notifRes, totalRes] = await Promise.all([
     fetchAllEvents(),
-    sb.from("fleet_edge_vehicle_identity").select("vin, model, year, name").eq("tenant_id", tenantId),
+    sb.from("fleet_edge_vehicle_identity").select("vin, model, year, name, fuel_type").eq("tenant_id", tenantId),
     sb
       .from("fleet_edge_notifications")
       .select("id, created_at, event_id, alert_name, vehicle_ref, registration_number, channel, recipient, status, detail, body")
@@ -427,7 +428,12 @@ export async function buildFleetEdgeReport(
   const identityByVin = new Map(
     (identityRes.data || []).map((r) => [
       r.vin as string,
-      { model: r.model as string | null, year: r.year as number | null, name: r.name as string | null },
+      {
+        model: r.model as string | null,
+        year: r.year as number | null,
+        name: r.name as string | null,
+        fuelType: (r.fuel_type as FleetVehicleIdentity["fuelType"]) ?? null,
+      },
     ]),
   );
   const vehicles = rows.map((r) => ({ ...r, identity: identityByVin.get(r.vehicleRef) || null }));

@@ -41,7 +41,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { DeskListActions } from "@/components/ui/desk-list-actions";
 import { cn } from "@/lib/utils";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
-import { loadSis, type SisState } from "@/lib/sis";
+import { householdOf, loadSis, type SisState } from "@/lib/sis";
+import { buildPtmBriefFacts } from "@/lib/ptmBriefFacts";
+import type { PtmBriefDraft } from "@/lib/ptmBriefAi";
+import { languageLabel } from "@/lib/householdPrefs";
+import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import { useModuleTabQuery } from "@/lib/useModuleTabQuery";
 import {
   addPtmSlots,
@@ -165,6 +169,13 @@ export function PtmWorkspace() {
   const [fbAreas, setFbAreas] = useState("");
   const [fbFollowUp, setFbFollowUp] = useState("");
 
+  const [brief, setBrief] = useState<
+    | (PtmBriefDraft & { generationId: string; model: string; language: string; warnings: string[] })
+    | null
+  >(null);
+  const [briefLoading, setBriefLoading] = useState(false);
+  const [briefError, setBriefError] = useState<string | null>(null);
+  const [briefNote, setBriefNote] = useState("");
   const [fbDigest, setFbDigest] = useState<string | null>(null);
   const [fbDigestLoading, setFbDigestLoading] = useState(false);
   const [fbDigestError, setFbDigestError] = useState<string | null>(null);
@@ -362,6 +373,100 @@ export function PtmWorkspace() {
     setFbBookingId("");
     refresh();
     flash("Feedback saved");
+  }
+
+  /** Household + student behind the selected booking (for the brief). */
+  const fbBooking = useMemo(
+    () => state?.bookings.find((b) => b.id === fbBookingId) ?? null,
+    [state, fbBookingId],
+  );
+  const fbHousehold = useMemo(
+    () => (sis && fbBooking ? householdOf(sis, fbBooking.householdId) ?? null : null),
+    [sis, fbBooking],
+  );
+
+  useEffect(() => {
+    // A brief is for one meeting; switching booking discards it (rejected if AI).
+    if (brief?.generationId) {
+      reportAiOutcome({ ids: [brief.generationId], outcome: "rejected", targetType: "ptm_booking" });
+    }
+    setBrief(null);
+    setBriefError(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fbBookingId]);
+
+  async function prepareBrief() {
+    if (!fbBooking || !sis || !masters || !state) return;
+    setBriefLoading(true);
+    setBriefError(null);
+    try {
+      const facts = buildPtmBriefFacts({
+        sis,
+        masters,
+        ptm: state,
+        studentId: fbBooking.studentId,
+        excludeBookingId: fbBooking.id,
+        academicYearCode: ay,
+        teacherNote: briefNote,
+      });
+      if (!facts) {
+        setBriefError("Student not found in the register");
+        return;
+      }
+      const res = await fetch("/api/ai/ptm-student-brief", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          language: fbHousehold?.preferredLanguage ?? "",
+          facts,
+        }),
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        draft?: PtmBriefDraft;
+        generationId?: string;
+        model?: string;
+        language?: string;
+        warnings?: string[];
+      };
+      if (!res.ok || !json.ok || !json.draft) {
+        setBriefError(json.error || "Brief failed");
+        return;
+      }
+      if (brief?.generationId && brief.generationId !== json.generationId) {
+        reportAiOutcome({ ids: [brief.generationId], outcome: "rejected", targetType: "ptm_booking" });
+      }
+      setBrief({
+        ...json.draft,
+        generationId: json.generationId || "",
+        model: json.model || "",
+        language: json.language || "en",
+        warnings: json.warnings || [],
+      });
+    } catch (e) {
+      setBriefError(e instanceof Error ? e.message : "Brief failed");
+    } finally {
+      setBriefLoading(false);
+    }
+  }
+
+  function useBriefAsFeedback() {
+    if (!brief || !fbBooking) return;
+    // Starter text only — the teacher edits before saving feedback.
+    setFbStrengths((v) => v.trim() || brief.observations);
+    setFbAreas((v) => v.trim() || brief.concerns);
+    setFbFollowUp((v) => v.trim() || brief.suggestions);
+    if (brief.generationId) {
+      reportAiOutcome({
+        ids: [brief.generationId],
+        outcome: "accepted",
+        targetType: "ptm_booking",
+        targetId: fbBooking.id,
+      });
+      setBrief({ ...brief, generationId: "" });
+    }
+    flash("Brief copied into the feedback fields — edit before saving");
   }
 
   const eventFeedback = useMemo(() => {
@@ -960,6 +1065,81 @@ export function PtmWorkspace() {
               </Button>
             </CardFooter>
           </Card>
+
+          {fbBooking ? (
+            <Card size="sm" className="max-w-xl">
+              <CardHeader>
+                <div className="flex items-center justify-between gap-2">
+                  <CardTitle className="flex items-center gap-1.5 text-sm">
+                    <Sparkles className="h-4 w-4 text-[var(--brand-gold)]" />
+                    Meeting brief
+                  </CardTitle>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={briefLoading}
+                    onClick={() => void prepareBrief()}
+                  >
+                    {briefLoading ? "Preparing…" : brief ? "Prepare again" : "Prepare with AI"}
+                  </Button>
+                </div>
+                <CardDescription>
+                  Observations · concerns · suggestions from the last two exams,
+                  attendance, homework, conduct log and earlier PTM notes.
+                  {fbHousehold?.preferredLanguage
+                    ? ` Family prefers ${languageLabel(fbHousehold.preferredLanguage)}.`
+                    : " Family language not asked yet — English."}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-3 pt-0">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="brief-note">Note for the AI (optional)</Label>
+                  <Input
+                    id="brief-note"
+                    value={briefNote}
+                    onChange={(e) => setBriefNote(e.target.value)}
+                    placeholder="e.g. parent asked about maths tuition last time"
+                  />
+                </div>
+                {briefError ? (
+                  <p className="text-[11px] text-[var(--danger)]">{briefError}</p>
+                ) : null}
+                {brief ? (
+                  <>
+                    {(
+                      [
+                        ["Observations", "observations"],
+                        ["Concerns", "concerns"],
+                        ["Suggestions", "suggestions"],
+                      ] as const
+                    ).map(([label, key]) => (
+                      <div key={key} className="grid gap-1">
+                        <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--muted)]">
+                          {label}
+                        </p>
+                        <p
+                          className="whitespace-pre-wrap text-sm text-[var(--ink)]"
+                          lang={brief.language === "en" ? undefined : brief.language}
+                        >
+                          {brief[key] || "—"}
+                        </p>
+                      </div>
+                    ))}
+                    <p className="text-[11px] text-[var(--muted)]">
+                      AI draft{brief.model ? ` · ${brief.model}` : ""} · not saved anywhere until you use it
+                      {brief.warnings.length ? ` · ${brief.warnings[0]}` : ""}
+                    </p>
+                    <div>
+                      <Button type="button" size="sm" onClick={useBriefAsFeedback}>
+                        Use as feedback starter
+                      </Button>
+                    </div>
+                  </>
+                ) : null}
+              </CardContent>
+            </Card>
+          ) : null}
 
           {eventId ? (
             <Card size="sm" className="max-w-xl">

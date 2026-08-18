@@ -41,6 +41,7 @@ import {
   ErpTableHead,
   ErpTableShell,
 } from "@/components/ui/erp-roster";
+import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 
 type FilterGap = "all" | UdiseGapCode | "due" | "call" | "unregistered";
 type ViewMode = "worklist" | "call" | "unregistered";
@@ -216,6 +217,10 @@ export function UdiseComplianceWorkspace({
   const [settings, setSettings] = useState<UdiseComplianceSettings>(
     loadUdiseComplianceSettings,
   );
+  // Re-read when the server copy of this module lands (login/refresh hydration).
+  useModuleStateHydration("udise_compliance", () => {
+    setSettings(loadUdiseComplianceSettings());
+  });
   const ay =
     session.academicYearCode ||
     (masters ? currentAcademicYearCode(masters) : "");

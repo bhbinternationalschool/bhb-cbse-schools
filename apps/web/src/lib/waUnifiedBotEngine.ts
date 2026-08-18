@@ -6,7 +6,7 @@ import { TENANT } from "@/lib/types";
 import type { WaResolvedIdentity, WaResolvedRole, WaRoleKind } from "@/lib/waRoleResolver";
 import { CRM_BOT_QUICK_PROMPTS } from "@/lib/crmAdmissionBotEngine";
 import { SIS_BOT_QUICK_PROMPTS } from "@/lib/sisParentBotEngine";
-import { staffBotMenuText } from "@/lib/waStaffBotEngine";
+import { staffBotMenuText } from "@/lib/waStaffBotPrompts";
 
 export type WaVisitorPurpose =
   | "admission"

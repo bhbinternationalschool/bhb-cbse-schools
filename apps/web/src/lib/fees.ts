@@ -8,6 +8,7 @@ import {
   resolvedConcessionGrantsForStudent,
 } from "@/lib/feeDiscountRuntime";
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import {
   getSchoolMirrorSync,
   scheduleClientSchoolMirrorSync,
@@ -3489,7 +3490,11 @@ export async function deliverWhatsAppFeeReceipt(input: {
       const approvedFees = listApprovedTemplates(loadWaTemplates(), {
         module: "fees",
       });
-      const feeTpl = approvedFees[0];
+      // Family's language first (Students → Family → Preferred language),
+      // any approved fees template otherwise.
+      const wantLang = waTemplateLanguageFor(hh, "en");
+      const feeTpl =
+        approvedFees.find((t) => t.language === wantLang) ?? approvedFees[0];
       const template = feeTpl
         ? {
             name: feeTpl.metaName,

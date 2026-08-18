@@ -6,9 +6,18 @@ export function openAiApiKey(): string {
   return (process.env.OPENAI_API_KEY || "").trim();
 }
 
-export function openAiModel(): string {
+/** Model per tier — see geminiModel() for the rule. */
+export function openAiModel(tier: "flash" | "pro" = "flash"): string {
+  if (tier === "pro") {
+    return (process.env.OPENAI_PRO_MODEL || "gpt-4o").trim();
+  }
   return (process.env.AI_TUTOR_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini").trim();
 }
+
+export type OpenAiUsage = {
+  promptTokens: number | null;
+  completionTokens: number | null;
+};
 
 export function openAiConfigured(): boolean {
   return openAiApiKey().length > 0;
@@ -26,10 +35,16 @@ export async function generateOpenAiText(opts: {
   jsonMode?: boolean;
   maxTokens?: number;
   temperature?: number;
-}): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  /** Explicit model id; defaults to the flash-tier model */
+  model?: string;
+}): Promise<
+  | { ok: true; text: string; model: string; usage: OpenAiUsage }
+  | { ok: false; error: string; model: string }
+> {
+  const model = (opts.model || openAiModel()).trim();
   const key = openAiApiKey();
   if (!key) {
-    return { ok: false, error: "OPENAI_API_KEY not configured" };
+    return { ok: false, error: "OPENAI_API_KEY not configured", model };
   }
 
   const messages: { role: string; content: string }[] = [
@@ -50,7 +65,7 @@ export async function generateOpenAiText(opts: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: openAiModel(),
+        model,
         messages,
         temperature: opts.temperature ?? 0.4,
         max_tokens: opts.maxTokens ?? 1200,
@@ -60,6 +75,7 @@ export async function generateOpenAiText(opts: {
 
     const json = (await res.json().catch(() => ({}))) as {
       choices?: { message?: { content?: string } }[];
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
       error?: { message?: string };
     };
 
@@ -67,19 +83,29 @@ export async function generateOpenAiText(opts: {
       return {
         ok: false,
         error: json.error?.message || `OpenAI HTTP ${res.status}`,
+        model,
       };
     }
 
     const text = (json.choices?.[0]?.message?.content || "").trim();
     if (!text) {
-      return { ok: false, error: "Empty OpenAI response" };
+      return { ok: false, error: "Empty OpenAI response", model };
     }
 
-    return { ok: true, text };
+    return {
+      ok: true,
+      text,
+      model,
+      usage: {
+        promptTokens: json.usage?.prompt_tokens ?? null,
+        completionTokens: json.usage?.completion_tokens ?? null,
+      },
+    };
   } catch (e) {
     return {
       ok: false,
       error: e instanceof Error ? e.message : "OpenAI request failed",
+      model,
     };
   }
 }

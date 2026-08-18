@@ -62,6 +62,17 @@ export function saveSalaryAccount(state: SalaryAccountState) {
   if (!assertModulePermission("payroll", "edit", "saveSalaryAccount")) return;
   if (typeof window === "undefined") return;
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("salary_account", state));
+}
+
+/** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */
+export function writeSalaryAccountLocalRaw(state: SalaryAccountState): void {
+  if (typeof window === "undefined") return;
+  try {
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    /* quota — the server copy is the truth anyway */
+  }
 }
 
 function entriesFromLine(

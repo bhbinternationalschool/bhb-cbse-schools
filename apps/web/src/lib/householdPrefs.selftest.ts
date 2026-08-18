@@ -1,0 +1,58 @@
+import assert from "node:assert/strict";
+
+import {
+  householdLanguage,
+  isInQuietHours,
+  normalizeHouseholdChannel,
+  normalizeHouseholdLanguage,
+  normalizeQuietTime,
+  quietHoursLabel,
+  sarvamTargetFor,
+  waTemplateLanguageFor,
+} from "./householdPrefs";
+
+console.log("householdPrefs.selftest.ts");
+
+// Unknown must not become fact: "" stays "", garbage stays "".
+assert.equal(normalizeHouseholdLanguage(""), "");
+assert.equal(normalizeHouseholdLanguage("fr"), "");
+assert.equal(normalizeHouseholdLanguage(" HI "), "hi");
+assert.equal(normalizeHouseholdChannel("WhatsApp"), "whatsapp");
+assert.equal(normalizeHouseholdChannel("pigeon"), "");
+assert.equal(normalizeQuietTime("9:05"), "09:05");
+assert.equal(normalizeQuietTime("24:00"), "");
+assert.equal(normalizeQuietTime("21"), "");
+
+// Default is labelled as default, not as the family's choice.
+assert.deepEqual(householdLanguage(null), { language: "en", source: "default" });
+assert.deepEqual(householdLanguage({ preferredLanguage: "" }, "hi"), { language: "hi", source: "default" });
+assert.deepEqual(householdLanguage({ preferredLanguage: "bho" }), { language: "bho", source: "household" });
+
+// Regional collapses to Hindi templates; en/hi pass through; unset → school default.
+assert.equal(waTemplateLanguageFor({ preferredLanguage: "mai" }), "hi");
+assert.equal(waTemplateLanguageFor({ preferredLanguage: "en" }, "hi"), "en");
+assert.equal(waTemplateLanguageFor({ preferredLanguage: "" }, "hi"), "hi");
+assert.equal(waTemplateLanguageFor(undefined), "en");
+
+// Sarvam only for languages beyond en/hi that it can actually produce.
+assert.equal(sarvamTargetFor({ preferredLanguage: "en" }), null);
+assert.equal(sarvamTargetFor({ preferredLanguage: "hi" }), null);
+assert.equal(sarvamTargetFor({ preferredLanguage: "bn" }), "bn-IN");
+assert.equal(sarvamTargetFor({ preferredLanguage: "bho" }), null, "Bhojpuri: no Sarvam target → send Hindi");
+
+// Quiet hours in IST, crossing midnight.
+const at = (utcHour: number, utcMin = 0) => new Date(Date.UTC(2026, 7, 18, utcHour, utcMin));
+const night = { quietHoursStart: "21:00", quietHoursEnd: "07:00" };
+assert.equal(isInQuietHours(night, at(17, 0)), true, "22:30 IST is quiet");
+assert.equal(isInQuietHours(night, at(0, 0)), true, "05:30 IST is quiet");
+assert.equal(isInQuietHours(night, at(6, 0)), false, "11:30 IST is not");
+assert.equal(isInQuietHours(night, at(1, 30)), false, "07:00 IST — window end is exclusive");
+const lunch = { quietHoursStart: "13:00", quietHoursEnd: "14:00" };
+assert.equal(isInQuietHours(lunch, at(8, 0)), true, "13:30 IST");
+assert.equal(isInQuietHours(lunch, at(9, 0)), false, "14:30 IST");
+assert.equal(isInQuietHours({}, at(17, 0)), false, "no window → never quiet");
+assert.equal(isInQuietHours({ quietHoursStart: "21:00", quietHoursEnd: "" }, at(17, 0)), false, "half a window is no window");
+assert.equal(quietHoursLabel(night), "21:00–07:00");
+assert.equal(quietHoursLabel({}), "");
+
+console.log("OK — householdPrefs.selftest.ts");

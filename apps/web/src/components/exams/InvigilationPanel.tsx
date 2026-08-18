@@ -17,6 +17,7 @@ import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { DeskListActions } from "@/components/ui/desk-list-actions";
 import { ErpAlerts } from "@/components/ui/erp-alerts";
+import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 
 type Props = {
   academicYearCode: string;
@@ -27,6 +28,8 @@ type Props = {
 export function InvigilationPanel({ academicYearCode, masters, terms }: Props) {
   const session = useDemoSession();
   const [tick, setTick] = useState(0);
+  // Re-read when the server copy of this module lands (login/refresh hydration).
+  useModuleStateHydration("exam_invigilation", () => setTick((t) => t + 1));
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
   const [roomInput, setRoomInput] = useState("");
   const [teacherInput, setTeacherInput] = useState("");

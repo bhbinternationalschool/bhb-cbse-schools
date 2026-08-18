@@ -49,6 +49,7 @@ import {
 import { openWaMe } from "@/lib/waMe";
 import type { HoldCode } from "@/lib/types";
 import { paymentLikelihood } from "@/lib/collectionsAi";
+import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 
 const STAGE_FILTERS: { value: "" | OverdueStage; label: string }[] = [
   { value: "", label: "All stages" },
@@ -77,6 +78,8 @@ export function DefaultersPlaybook() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
+  // Re-read when the server copy of fee holds lands (login/refresh hydration).
+  useModuleStateHydration("fee_holds", () => setTick((t) => t + 1));
   const [planOpen, setPlanOpen] = useState(false);
   const [holdDialog, setHoldDialog] = useState(false);
   const [holdTarget, setHoldTarget] = useState<{
@@ -197,6 +200,8 @@ export function DefaultersPlaybook() {
                 ? "due today"
                 : `${row.overdueDays} day(s) overdue`,
           stageLabel: row.stageLabel,
+          // Household's preferred language (Students → Family); "" = not asked → English.
+          language: sis ? householdOf(sis, row.householdId)?.preferredLanguage ?? "" : "",
         }),
       });
       const json = (await res.json()) as {
@@ -204,6 +209,8 @@ export function DefaultersPlaybook() {
         error?: string;
         whatsappMessage?: string;
         callScript?: string;
+        language?: string;
+        warnings?: string[];
       };
       if (!json.ok || !json.whatsappMessage || !json.callScript) {
         setAiDraftError(json.error || "Draft failed");

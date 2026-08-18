@@ -27,6 +27,7 @@ import {
 import { useDemoSession } from "@/components/shell/SessionContext";
 import type { MastersState } from "@/lib/masters";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
+import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 
 type Mode = "policy" | "ops" | "full";
 
@@ -53,6 +54,10 @@ export function IncrementPanel({ mode = "full" }: { mode?: Mode }) {
   const [indEffective, setIndEffective] = useState("");
   const [indNote, setIndNote] = useState("");
 
+  const [hydrateTick, setHydrateTick] = useState(0);
+  // Re-read when the server copy of this module lands (login/refresh hydration).
+  useModuleStateHydration("salary_increment", () => setHydrateTick((t) => t + 1));
+
   useEffect(() => {
     const s = loadIncrementState();
     setPolicy(normalizeIncrementPolicy(s.policy));
@@ -65,7 +70,7 @@ export function IncrementPanel({ mode = "full" }: { mode?: Mode }) {
       setIndEffective(defaultEffectiveFrom(s.policy));
     }
     if (!selectedId && s.batches[0]) setSelectedId(s.batches[0].id);
-  }, [tick]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tick, hydrateTick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selected = useMemo(
     () => batches.find((b) => b.id === selectedId) ?? null,

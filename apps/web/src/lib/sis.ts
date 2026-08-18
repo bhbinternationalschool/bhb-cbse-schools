@@ -25,6 +25,11 @@ import {
   setMirrorSlice,
 } from "@/lib/schoolDataMirror";
 import { deskSkipBlobPushClient } from "@/lib/deskCutover";
+import {
+  normalizeHouseholdChannel,
+  normalizeHouseholdLanguage,
+  normalizeQuietTime,
+} from "@/lib/householdPrefs";
 import { writeMastersLocalRaw } from "@/lib/mastersPersistence";
 import {
   normalizeCurriculum,
@@ -122,6 +127,16 @@ export type Household = {
   altMobile: string;
   /** Guardian / parent photo (data URL or https) */
   guardianPhotoUrl: string;
+  /**
+   * Communication preferences (lib/householdPrefs.ts). "" = not asked —
+   * callers fall back to the school default and must not record the
+   * fallback as the family's choice.
+   */
+  preferredLanguage: string;
+  channelPreference: string;
+  /** "HH:MM" IST; both set = do-not-disturb window for non-urgent sends */
+  quietHoursStart: string;
+  quietHoursEnd: string;
   /** Google Maps geocode — shared by siblings on this household */
   geoLat?: number;
   geoLng?: number;
@@ -834,6 +849,10 @@ export function normalizeHousehold(h: Partial<Household> & { id: string }): Hous
     altMobile: normalizeMobile(h.altMobile ?? ""),
     guardianPhotoUrl:
       typeof h.guardianPhotoUrl === "string" ? h.guardianPhotoUrl : "",
+    preferredLanguage: normalizeHouseholdLanguage(h.preferredLanguage),
+    channelPreference: normalizeHouseholdChannel(h.channelPreference),
+    quietHoursStart: normalizeQuietTime(h.quietHoursStart),
+    quietHoursEnd: normalizeQuietTime(h.quietHoursEnd),
     revisionAt: typeof h.revisionAt === "string" ? h.revisionAt : "",
     ...(keepGeo
       ? {

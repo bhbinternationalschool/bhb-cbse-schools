@@ -52,6 +52,7 @@ import {
 } from "@/components/masters/MastersLayout";
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import type { CampaignMessage } from "@/lib/waCampaigns";
+import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 
 const inp =
   "w-full rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm";
@@ -101,6 +102,8 @@ export function AdmissionCampaignsPanel({
   onAdmissionsCommit: (next: AdmissionsState, msg?: string) => void;
 }) {
   const [wa, setWa] = useState<WaCampaignsState>(() => loadWaCampaigns());
+  // Re-read when the server copy of this module lands (login/refresh hydration).
+  useModuleStateHydration("wa_campaigns", () => { setWa(loadWaCampaigns()); });
   const [panel, setPanel] = useState<PanelTab>("lists");
   const [notice, setNotice] = useState<string | null>(null);
 

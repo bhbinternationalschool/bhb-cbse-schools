@@ -24,6 +24,7 @@ export function printReportCard(studentId: string, examTermId: string) {
 }
 
 export function ReportCardSheet({ card }: { card: ReportCard }) {
+  const hasSubjectRemarks = card.lines.some((l) => l.remark.trim());
   return (
     <div
       id={`report-card-${card.student.id}-${card.examTerm.id}`}
@@ -102,6 +103,7 @@ export function ReportCardSheet({ card }: { card: ReportCard }) {
               <th className="py-2 pr-2 text-right">Max</th>
               <th className="py-2 pr-2 text-right">Obtained</th>
               <th className="py-2 text-right">Grade</th>
+              {hasSubjectRemarks ? <th className="py-2 pl-3">Remark</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -122,6 +124,11 @@ export function ReportCardSheet({ card }: { card: ReportCard }) {
                 <td className="py-2 text-right font-semibold">
                   {line.grade}
                 </td>
+                {hasSubjectRemarks ? (
+                  <td className="py-2 pl-3 text-xs text-[var(--muted)]">
+                    {line.remark}
+                  </td>
+                ) : null}
               </tr>
             ))}
           </tbody>
@@ -135,6 +142,7 @@ export function ReportCardSheet({ card }: { card: ReportCard }) {
                 {card.totalObtained}
               </td>
               <td className="py-2.5 text-right">{card.overallGrade}</td>
+              {hasSubjectRemarks ? <td /> : null}
             </tr>
           </tfoot>
         </table>
@@ -231,6 +239,24 @@ export function ReportCardSheet({ card }: { card: ReportCard }) {
                 </div>
               ))}
             </div>
+          </div>
+        ) : null}
+
+        {card.overallRemark ? (
+          <div className="mt-5">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+              Class teacher&apos;s remarks
+            </p>
+            {card.overallRemark.text ? (
+              <p className="mt-1.5 text-sm leading-relaxed text-[var(--brand-deep)]">
+                {card.overallRemark.text}
+              </p>
+            ) : null}
+            {card.overallRemark.textHi ? (
+              <p className="mt-1.5 text-sm leading-relaxed text-[var(--brand-deep)]" lang="hi">
+                {card.overallRemark.textHi}
+              </p>
+            ) : null}
           </div>
         ) : null}
 

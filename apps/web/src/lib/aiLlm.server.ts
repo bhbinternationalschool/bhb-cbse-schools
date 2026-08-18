@@ -1,13 +1,50 @@
 /**
  * Route LLM calls — preferred engine first, fallback on API error or bad JSON.
+ *
+ * Server-only: reads provider keys, the request cookie (requester for the
+ * ai_generations audit row) and Supabase. Anything client-side that needs a
+ * shared constant from a bot engine must import it from a client-safe module
+ * (see waTransportBotPrompts.ts) — never from here.
  */
+import "server-only";
 
-import { generateGeminiText, geminiConfigured } from "@/lib/erpAiGemini.server";
+import {
+  generateGeminiText,
+  geminiConfigured,
+  geminiModel,
+  type LlmUsage,
+} from "@/lib/erpAiGemini.server";
 import {
   generateOpenAiText,
   openAiConfigured,
+  openAiModel,
   type OpenAiChatTurn,
 } from "@/lib/openAi.server";
+import { getDemoSession } from "@/lib/auth";
+import { recordAiGeneration, type AiTier } from "@/lib/aiGenerations.server";
+import {
+  buildRemarkSystemPrompt,
+  buildRemarkUserPrompt,
+  parseRemarkDraftsJson,
+  type RemarkTone,
+  type StudentRemarkDraft,
+  type StudentRemarkFacts,
+} from "@/lib/reportRemarkAi";
+import {
+  buildLessonPlanSystemPrompt,
+  buildLessonPlanUserPrompt,
+  parseLessonPlanJson,
+  type LessonPlanAiInput,
+  type LessonPlanDraft,
+} from "@/lib/lessonPlanAi";
+import {
+  buildPtmBriefSystemPrompt,
+  buildPtmBriefUserPrompt,
+  parsePtmBriefJson,
+  type PtmBriefDraft,
+  type PtmBriefFacts,
+  type PtmBriefLanguage,
+} from "@/lib/ptmBriefAi";
 
 export type LlmEngine = "openai" | "gemini" | "none";
 export type PreferredEngine = "auto" | "openai" | "gemini";
@@ -81,6 +118,19 @@ export function llmStatus(): {
   };
 }
 
+/**
+ * Who/what is asking — recorded on every attempt in ai_generations.
+ * `route` is the generator name (usually the /api/ai/<route> path);
+ * `promptVersion` bumps whenever the prompt text for that route changes so
+ * quality regressions can be tied to a prompt edit; `tier` picks the model
+ * class ("pro" only where reasoning matters — see geminiModel()).
+ */
+export type AiCallMeta = {
+  route: string;
+  promptVersion: string;
+  tier?: AiTier;
+};
+
 type LlmTextOpts = {
   system: string;
   history?: OpenAiChatTurn[];
@@ -90,12 +140,90 @@ type LlmTextOpts = {
   temperature?: number;
   geminiMaxTokens?: number;
   geminiTemperature?: number;
+  meta: AiCallMeta;
 };
+
+/**
+ * Best-effort requester for the audit row: the staff session when the call
+ * comes from a route handler, "system" from webhooks / cron / anywhere
+ * without a request cookie store (cookies() throws there — swallowed).
+ */
+async function resolveRequester(): Promise<string> {
+  try {
+    const s = await getDemoSession();
+    return s ? s.email || s.fullName || s.persona : "system";
+  } catch {
+    return "system";
+  }
+}
+
+type AttemptResult =
+  | { ok: true; text: string; model: string; usage: LlmUsage }
+  | { ok: false; error: string; model: string };
+
+/** One provider attempt, timed and recorded. */
+async function attemptEngine(
+  engine: "openai" | "gemini",
+  opts: LlmTextOpts,
+  requester: string,
+): Promise<{ r: AttemptResult; generationId: string }> {
+  const tier: AiTier = opts.meta.tier ?? "flash";
+  const t0 = Date.now();
+  let r: AttemptResult;
+  if (engine === "openai") {
+    r = await generateOpenAiText({
+      system: opts.system,
+      history: opts.history,
+      userMessage: opts.userMessage,
+      jsonMode: opts.jsonMode,
+      maxTokens: opts.maxTokens,
+      temperature: opts.temperature,
+      model: openAiModel(tier),
+    });
+  } else {
+    const geminiSystem = opts.jsonMode
+      ? `${opts.system}\n\nRespond with valid JSON only — no markdown fences.`
+      : opts.system;
+    const g = await generateGeminiText({
+      system: geminiSystem,
+      history: (opts.history || []).map((h) => ({
+        role: h.role === "assistant" ? "model" : "user",
+        text: h.content,
+      })),
+      userMessage: opts.userMessage,
+      maxTokens: opts.geminiMaxTokens ?? opts.maxTokens,
+      temperature: opts.geminiTemperature ?? opts.temperature,
+      model: geminiModel(tier),
+    });
+    r = g.ok
+      ? { ...g, text: opts.jsonMode ? stripJsonFence(g.text) : g.text }
+      : g;
+  }
+  const latencyMs = Date.now() - t0;
+  const generationId = await recordAiGeneration({
+    route: opts.meta.route,
+    promptVersion: opts.meta.promptVersion,
+    tier,
+    engine,
+    model: r.model,
+    status: r.ok ? "ok" : "error",
+    error: r.ok ? "" : r.error,
+    inputText: `${opts.system}\n---\n${(opts.history || [])
+      .map((h) => `${h.role}: ${h.content}`)
+      .join("\n")}\n---\n${opts.userMessage}`,
+    outputText: r.ok ? r.text : "",
+    promptTokens: r.ok ? r.usage.promptTokens : null,
+    completionTokens: r.ok ? r.usage.completionTokens : null,
+    latencyMs,
+    requester,
+  });
+  return { r, generationId };
+}
 
 async function callLlmText(
   opts: LlmTextOpts,
 ): Promise<
-  | { ok: true; text: string; engine: LlmEngine }
+  | { ok: true; text: string; engine: LlmEngine; generationId: string }
   | { ok: false; error: string; engine: LlmEngine }
 > {
   const engines = resolveEngineOrder();
@@ -106,42 +234,13 @@ async function callLlmText(
       engine: "none",
     };
   }
-
+  const requester = await resolveRequester();
   const errors: string[] = [];
 
   for (const engine of engines) {
-    if (engine === "openai") {
-      const r = await generateOpenAiText({
-        system: opts.system,
-        history: opts.history,
-        userMessage: opts.userMessage,
-        jsonMode: opts.jsonMode,
-        maxTokens: opts.maxTokens,
-        temperature: opts.temperature,
-      });
-      if (r.ok) return { ...r, engine: "openai" };
-      errors.push(`openai: ${r.error}`);
-      continue;
-    }
-
-    const geminiSystem = opts.jsonMode
-      ? `${opts.system}\n\nRespond with valid JSON only — no markdown fences.`
-      : opts.system;
-    const r = await generateGeminiText({
-      system: geminiSystem,
-      history: (opts.history || []).map((h) => ({
-        role: h.role === "assistant" ? "model" : "user",
-        text: h.content,
-      })),
-      userMessage: opts.userMessage,
-      maxTokens: opts.geminiMaxTokens ?? opts.maxTokens,
-      temperature: opts.geminiTemperature ?? opts.temperature,
-    });
-    if (r.ok) {
-      const text = opts.jsonMode ? stripJsonFence(r.text) : r.text;
-      return { ok: true, text, engine: "gemini" };
-    }
-    errors.push(`gemini: ${r.error}`);
+    const { r, generationId } = await attemptEngine(engine, opts, requester);
+    if (r.ok) return { ok: true, text: r.text, engine, generationId };
+    errors.push(`${engine}: ${r.error}`);
   }
 
   return {
@@ -155,7 +254,7 @@ async function callLlmJson<T>(
   opts: LlmTextOpts,
   parse: (text: string) => T | null,
 ): Promise<
-  | { ok: true; data: T; engine: LlmEngine }
+  | { ok: true; data: T; engine: LlmEngine; generationId: string }
   | { ok: false; error: string; engine: LlmEngine }
 > {
   const engines = resolveEngineOrder();
@@ -166,46 +265,21 @@ async function callLlmJson<T>(
       engine: "none",
     };
   }
-
+  const requester = await resolveRequester();
   const errors: string[] = [];
 
   for (const engine of engines) {
-    let text: string | null = null;
-
-    if (engine === "openai") {
-      const r = await generateOpenAiText({
-        system: opts.system,
-        history: opts.history,
-        userMessage: opts.userMessage,
-        jsonMode: true,
-        maxTokens: opts.maxTokens,
-        temperature: opts.temperature,
-      });
-      if (!r.ok) {
-        errors.push(`openai: ${r.error}`);
-        continue;
-      }
-      text = r.text;
-    } else {
-      const r = await generateGeminiText({
-        system: `${opts.system}\n\nRespond with valid JSON only — no markdown fences.`,
-        history: (opts.history || []).map((h) => ({
-          role: h.role === "assistant" ? "model" : "user",
-          text: h.content,
-        })),
-        userMessage: opts.userMessage,
-        maxTokens: opts.geminiMaxTokens ?? opts.maxTokens,
-        temperature: opts.geminiTemperature ?? opts.temperature,
-      });
-      if (!r.ok) {
-        errors.push(`gemini: ${r.error}`);
-        continue;
-      }
-      text = stripJsonFence(r.text);
+    const { r, generationId } = await attemptEngine(
+      engine,
+      { ...opts, jsonMode: true },
+      requester,
+    );
+    if (!r.ok) {
+      errors.push(`${engine}: ${r.error}`);
+      continue;
     }
-
-    const parsed = parse(text);
-    if (parsed) return { ok: true, data: parsed, engine };
+    const parsed = parse(r.text);
+    if (parsed) return { ok: true, data: parsed, engine, generationId };
     errors.push(`${engine}: invalid JSON in response`);
   }
 
@@ -240,23 +314,31 @@ export async function generateTutorText(opts: {
     // the visible reply — 900 was enough for OpenAI but truncated Gemini's
     // actual answer, so Gemini gets a larger budget for the same reply length.
     geminiMaxTokens: 1536,
+    meta: { route: "tutor", promptVersion: "v1" },
   });
 }
 
+/**
+ * Exam paper draft. Runs on the "pro" tier: a plausible-but-wrong numerical
+ * or a marking scheme that doesn't add up costs a teacher more than the
+ * tokens (roadmap §1b). Prompt v2 = competency formats + LO tagging.
+ */
 export async function generateExamPaperJson(opts: {
   system: string;
   userMessage: string;
+  promptVersion?: string;
 }): Promise<
-  | { ok: true; text: string; engine: LlmEngine }
+  | { ok: true; text: string; engine: LlmEngine; generationId: string }
   | { ok: false; error: string; engine: LlmEngine }
 > {
   return callLlmText({
     system: opts.system,
     userMessage: opts.userMessage,
     jsonMode: true,
-    maxTokens: 4096,
+    maxTokens: 6000,
     temperature: 0.55,
-    geminiMaxTokens: 4096,
+    geminiMaxTokens: 8192,
+    meta: { route: "exam-paper", promptVersion: opts.promptVersion ?? "v2", tier: "pro" },
   });
 }
 
@@ -290,6 +372,7 @@ Include 2-4 relevant variables in the body.`;
       // "thinking" tokens on top of the visible JSON reply, or the JSON
       // comes back truncated/invalid.
       geminiMaxTokens: 2048,
+      meta: { route: "wa-template-draft", promptVersion: "v1" },
     },
     parseWaDraftJson,
   );
@@ -355,6 +438,7 @@ Language: ${opts.language === "hi" ? "Hindi (Devanagari)" : "English"}`;
       // See generateTutorText — Gemini 3.x's internal "thinking" tokens eat
       // into a small budget before the visible JSON reply is produced.
       geminiMaxTokens: 2048,
+      meta: { route: "collections-draft", promptVersion: "v1" },
     },
     parseCollectionsDraftJson,
   );
@@ -425,6 +509,7 @@ Language: ${opts.language === "hi" ? "Hindi (Devanagari)" : "English"}`;
       // See generateTutorText — Gemini 3.x's internal "thinking" tokens eat
       // into a small budget before the visible JSON reply is produced.
       geminiMaxTokens: 2048,
+      meta: { route: "lead-next-action", promptVersion: "v1" },
     },
     parseLeadNextActionJson,
   );
@@ -486,6 +571,7 @@ ${opts.metricsSummary}`;
       // See generateTutorText — Gemini 3.x's internal "thinking" tokens eat
       // into a small budget before the visible JSON reply is produced.
       geminiMaxTokens: 2048,
+      meta: { route: "leadership-digest", promptVersion: "v1" },
     },
     parseLeadershipDigestJson,
   );
@@ -602,6 +688,7 @@ Staff request: ${opts.hint}`;
       // See generateTutorText — Gemini 3.x's internal "thinking" tokens eat
       // into a small budget before the visible JSON reply is produced.
       geminiMaxTokens: 2048,
+      meta: { route: "automation-setup", promptVersion: "v1" },
     },
     parseSetup,
   );
@@ -657,6 +744,7 @@ export async function generateSchoolDocumentText(opts: {
       // See generateTutorText — give Gemini 3.x headroom over its internal
       // "thinking" tokens on top of a document-length JSON reply.
       geminiMaxTokens: 3072,
+      meta: { route: "school-document", promptVersion: "v1" },
     },
     parseSchoolDocumentJson,
   );
@@ -715,6 +803,7 @@ export async function generateStaffAgreementText(opts: {
       maxTokens: 8000,
       temperature: 0.4,
       geminiMaxTokens: 8000,
+      meta: { route: "staff-agreement", promptVersion: "v1" },
     },
     parseStaffAgreementAiJson,
   );
@@ -763,6 +852,7 @@ export async function generateStudentCertificateText(opts: {
       maxTokens: 6000,
       temperature: 0.4,
       geminiMaxTokens: 6000,
+      meta: { route: "student-certificate", promptVersion: "v1" },
     },
     parseStudentCertificateAiJson,
   );
@@ -822,6 +912,7 @@ ${opts.extractedText}`;
       // See generateTutorText — Gemini 3.x's internal "thinking" tokens eat
       // into a small budget before the visible JSON reply is produced.
       geminiMaxTokens: 2048,
+      meta: { route: "homework-grading-assist", promptVersion: "v1" },
     },
     parseHomeworkGradingAssistJson,
   );
@@ -910,6 +1001,7 @@ ${uncoveredLines}`;
       maxTokens: 500,
       temperature: 0.4,
       geminiMaxTokens: 2048,
+      meta: { route: "substitution-summary", promptVersion: "v1" },
     },
     parseSubstitutionSummaryJson,
   );
@@ -931,4 +1023,161 @@ function parseSubstitutionSummaryJson(text: string): { summary: string } | null 
   } catch {
     return null;
   }
+}
+
+/**
+ * Report-card remarks for a batch of students (≤ REMARK_STUDENTS_PER_LLM_CALL
+ * per call — the route chunks). English only; Hindi is produced afterwards
+ * by the Sarvam translation layer (or, if that is not configured, by a
+ * second LLM pass) so both languages always say the same thing. Returns
+ * drafts — nothing here is persisted.
+ */
+export async function generateReportRemarksJson(opts: {
+  students: StudentRemarkFacts[];
+  tone: RemarkTone;
+  includeSubjectRemarks: boolean;
+  schoolName: string;
+}): Promise<
+  | { ok: true; drafts: StudentRemarkDraft[]; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const ids = opts.students.map((s) => s.studentId);
+  const r = await callLlmJson(
+    {
+      system: buildRemarkSystemPrompt({
+        tone: opts.tone,
+        includeSubjectRemarks: opts.includeSubjectRemarks,
+        schoolName: opts.schoolName,
+      }),
+      userMessage: buildRemarkUserPrompt(opts.students),
+      // ~120 tokens per student for overall + subject phrases, with headroom.
+      maxTokens: Math.min(4000, 400 + opts.students.length * 220),
+      temperature: 0.6,
+      // Gemini 3.x thinking tokens share the budget with the visible reply.
+      geminiMaxTokens: Math.min(8192, 2048 + opts.students.length * 400),
+      meta: { route: "report-remarks", promptVersion: "v1" },
+    },
+    (text) => parseRemarkDraftsJson(text, ids),
+  );
+  if (r.ok) {
+    return { ok: true, drafts: r.data, engine: r.engine, generationId: r.generationId };
+  }
+  return {
+    ok: false,
+    error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI remarks",
+    engine: r.engine,
+  };
+}
+
+/** Hindi rendering of finished English remarks when Sarvam is unavailable —
+ * translation only, the model is told not to add or drop content. */
+export async function translateRemarksToHindiJson(opts: {
+  items: { id: string; text: string }[];
+}): Promise<
+  | { ok: true; items: { id: string; text: string }[]; engine: LlmEngine }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const system = `You translate school report-card remarks from English to Hindi (Devanagari) for parents at an Indian CBSE school. Translate faithfully — same meaning, same length, formal register (आप), no additions, no omissions, keep subject names in Hindi where a standard Hindi name exists (गणित, विज्ञान, अंग्रेज़ी, हिंदी, सामाजिक विज्ञान) and otherwise as given.
+Respond with JSON only: {"items":[{"id":"...","text":"..."}]} — every id given, same order.`;
+  const userMessage = opts.items
+    .map((i) => `id: ${i.id}\n${i.text}`)
+    .join("\n\n");
+  const ids = new Set(opts.items.map((i) => i.id));
+  const r = await callLlmJson(
+    {
+      system,
+      userMessage,
+      maxTokens: Math.min(4000, 300 + opts.items.length * 200),
+      temperature: 0.2,
+      geminiMaxTokens: Math.min(8192, 2048 + opts.items.length * 300),
+      meta: { route: "report-remarks-hi", promptVersion: "v1" },
+    },
+    (text) => {
+      try {
+        const raw = JSON.parse(text) as { items?: { id?: unknown; text?: unknown }[] };
+        if (!Array.isArray(raw.items)) return null;
+        const items = raw.items
+          .map((x) => ({ id: String(x?.id ?? "").trim(), text: String(x?.text ?? "").trim() }))
+          .filter((x) => x.id && x.text && ids.has(x.id));
+        return items.length ? items : null;
+      } catch {
+        return null;
+      }
+    },
+  );
+  if (r.ok) return { ok: true, items: r.data, engine: r.engine };
+  return { ok: false, error: r.error, engine: r.engine };
+}
+
+/**
+ * One lesson-plan draft from the syllabus units the teacher ticked. Returns
+ * the draft only — the editor shows it, the teacher saves it (or not) and
+ * `LessonPlan.source` records provenance.
+ */
+export async function generateLessonPlanJson(opts: {
+  input: LessonPlanAiInput;
+  schoolName: string;
+}): Promise<
+  | { ok: true; draft: LessonPlanDraft; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const r = await callLlmJson(
+    {
+      system: buildLessonPlanSystemPrompt({
+        language: opts.input.language,
+        schoolName: opts.schoolName,
+      }),
+      userMessage: buildLessonPlanUserPrompt(opts.input),
+      // Activities grow with periods; Hindi is ~1.6× the tokens of English.
+      maxTokens: Math.min(
+        4000,
+        (900 + opts.input.periods * 250) * (opts.input.language === "hi" ? 1.6 : 1),
+      ),
+      temperature: 0.5,
+      geminiMaxTokens: Math.min(8192, 3000 + opts.input.periods * 400),
+      meta: { route: "lesson-plan", promptVersion: "v1" },
+    },
+    parseLessonPlanJson,
+  );
+  if (r.ok) {
+    return { ok: true, draft: r.data, engine: r.engine, generationId: r.generationId };
+  }
+  return {
+    ok: false,
+    error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI lesson plans",
+    engine: r.engine,
+  };
+}
+
+/** Three-paragraph PTM brief for one student. Draft only — nothing saved. */
+export async function generatePtmBriefJson(opts: {
+  facts: PtmBriefFacts;
+  language: PtmBriefLanguage;
+  schoolName: string;
+}): Promise<
+  | { ok: true; draft: PtmBriefDraft; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const r = await callLlmJson(
+    {
+      system: buildPtmBriefSystemPrompt({
+        language: opts.language,
+        schoolName: opts.schoolName,
+      }),
+      userMessage: buildPtmBriefUserPrompt(opts.facts),
+      maxTokens: opts.language === "hi" ? 1600 : 1000,
+      temperature: 0.5,
+      geminiMaxTokens: 4096,
+      meta: { route: "ptm-student-brief", promptVersion: "v1" },
+    },
+    parsePtmBriefJson,
+  );
+  if (r.ok) {
+    return { ok: true, draft: r.data, engine: r.engine, generationId: r.generationId };
+  }
+  return {
+    ok: false,
+    error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI PTM briefs",
+    engine: r.engine,
+  };
 }

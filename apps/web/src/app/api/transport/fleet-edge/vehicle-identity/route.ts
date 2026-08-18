@@ -24,7 +24,7 @@ export async function GET(req: Request) {
 
   const { data, error } = await sb
     .from("fleet_edge_vehicle_identity")
-    .select("vin, registration_number, model, year, name")
+    .select("vin, registration_number, model, year, name, fuel_type")
     .eq("tenant_id", tenantId);
 
   if (error) {
@@ -40,7 +40,11 @@ type UpsertBody = {
   model?: unknown;
   year?: unknown;
   name?: unknown;
+  /** diesel | petrol | cng | petrol_cng | diesel_cng | electric — Fleet Edge never sends this. */
+  fuelType?: unknown;
 };
+
+const FUEL_TYPES = new Set(["diesel", "petrol", "cng", "petrol_cng", "diesel_cng", "electric"]);
 
 export async function POST(req: Request) {
   const auth = await requireStaffPermission(req, "transport", "edit");
@@ -66,6 +70,10 @@ export async function POST(req: Request) {
   const year = typeof body.year === "number" && Number.isFinite(body.year) ? body.year : null;
   const model = typeof body.model === "string" && body.model.trim() ? body.model.trim() : null;
   const name = typeof body.name === "string" && body.name.trim() ? body.name.trim() : null;
+  const fuelType =
+    typeof body.fuelType === "string" && FUEL_TYPES.has(body.fuelType.trim().toLowerCase())
+      ? body.fuelType.trim().toLowerCase()
+      : null;
   const registrationNumber =
     typeof body.registrationNumber === "string" && body.registrationNumber.trim()
       ? body.registrationNumber.trim()
@@ -79,6 +87,7 @@ export async function POST(req: Request) {
       model,
       year,
       name,
+      fuel_type: fuelType,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "tenant_id,vin" },

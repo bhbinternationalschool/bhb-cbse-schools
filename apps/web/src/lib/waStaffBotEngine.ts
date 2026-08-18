@@ -10,35 +10,20 @@ import {
   composeStaffAttendanceWhatsAppSnapshot,
 } from "@/lib/waLeadershipReports.server";
 import { generateTutorText } from "@/lib/aiLlm.server";
+import {
+  STAFF_BOT_OFFICE_PROMPTS,
+  STAFF_BOT_OWNER_PROMPTS,
+  staffBotMenuText,
+  type StaffBotQuickId,
+} from "@/lib/waStaffBotPrompts";
 
-export type StaffBotQuickId =
-  | "reports"
-  | "admissions"
-  | "staff"
-  | "fee"
-  | "meeting"
-  | "timing"
-  | "human"
-  | "menu";
-
-export const STAFF_BOT_OWNER_PROMPTS: {
-  id: StaffBotQuickId;
-  label: string;
-  waKeyword: string;
-}[] = [
-  { id: "reports", label: "Today summary", waKeyword: "REPORTS" },
-  { id: "admissions", label: "Admissions / leads", waKeyword: "ADMISSIONS" },
-  { id: "staff", label: "Staff snapshot", waKeyword: "STAFF" },
-  { id: "fee", label: "Fee collection", waKeyword: "FEE" },
-  { id: "meeting", label: "Meeting / visit", waKeyword: "MEETING" },
-  { id: "timing", label: "School timing", waKeyword: "TIMING" },
-  { id: "human", label: "Talk to office", waKeyword: "HUMAN" },
-  { id: "menu", label: "Main menu", waKeyword: "MENU" },
-];
-
-export const STAFF_BOT_OFFICE_PROMPTS = STAFF_BOT_OWNER_PROMPTS.filter(
-  (p) => p.id !== "reports",
-);
+// Re-exported for server-side callers; client code imports waStaffBotPrompts.
+export {
+  STAFF_BOT_OFFICE_PROMPTS,
+  STAFF_BOT_OWNER_PROMPTS,
+  staffBotMenuText,
+  type StaffBotQuickId,
+};
 
 export function detectStaffBotIntent(text: string): StaffBotQuickId | "unknown" {
   const upper = (text || "").trim().toUpperCase();
@@ -182,22 +167,3 @@ export async function replyStaffBotIntentWithAi(
   return base;
 }
 
-export function staffBotMenuText(ctx: {
-  fullName: string;
-  isOwner: boolean;
-}): string {
-  const prompts = ctx.isOwner
-    ? STAFF_BOT_OWNER_PROMPTS
-    : STAFF_BOT_OFFICE_PROMPTS;
-  const role = ctx.isOwner ? "Leadership" : "Staff";
-  return [
-    `*${role} desk* — ${ctx.fullName || "Team"}`,
-    "",
-    "Reply with a keyword:",
-    ...prompts
-      .filter((p) => p.id !== "menu")
-      .map((q) => `• *${q.waKeyword}* — ${q.label}`),
-    "",
-    "Type *MENU* anytime for this list · *MAIN* for school main menu.",
-  ].join("\n");
-}

@@ -43,7 +43,8 @@ export type DomainBlobTable =
   | "wa_templates_state"
   | "automation_state"
   | "admissions_state"
-  | "library_state";
+  | "library_state"
+  | "salary_setup_state";
 
 type BlobRow = {
   state: unknown;

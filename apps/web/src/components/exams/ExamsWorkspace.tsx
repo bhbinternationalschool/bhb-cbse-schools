@@ -71,12 +71,14 @@ import { ExamDateSheetPanel } from "@/components/exams/ExamDateSheetPanel";
 import { InvigilationPanel } from "@/components/exams/InvigilationPanel";
 import { ExamPapersPanel } from "@/components/exams/ExamPapersPanel";
 import { AdmitCardsPanel } from "@/components/exams/AdmitCardsPanel";
+import { RemarksPanel } from "@/components/exams/RemarksPanel";
 import { ExamReportsRunner } from "@/components/reports/ModuleReportRunners";
 import { hasPermission } from "@/lib/rbac";
 
 type Tab =
   | "dashboard"
   | "marks"
+  | "remarks"
   | "datesheet"
   | "invigilation"
   | "papers"
@@ -658,6 +660,7 @@ export function ExamsWorkspace() {
         items={[
           { id: "dashboard", label: "Dashboard", tone: "navy" },
           { id: "marks", label: "Mark entry", tone: "sky" },
+          { id: "remarks", label: "Remarks", tone: "teal" },
           { id: "datesheet", label: "Date-sheet", tone: "violet" },
           { id: "invigilation", label: "Invigilation", tone: "coral" },
           { id: "papers", label: "Question papers", tone: "rose" },
@@ -1663,6 +1666,24 @@ export function ExamsWorkspace() {
             </>
           )}
         </div>
+      ) : null}
+
+      {tab === "remarks" ? (
+        <RemarksPanel
+          ay={ay}
+          term={term}
+          terms={terms}
+          classId={classId}
+          sectionId={sectionId}
+          classLabel={classLabel}
+          roster={roster}
+          subjects={subjects}
+          policy={policy}
+          canEdit={!!masters && hasPermission(session, masters, "exams", "edit")}
+          onSaved={refresh}
+          onFlash={flash}
+          onError={setError}
+        />
       ) : null}
 
       {tab === "reports" ? (

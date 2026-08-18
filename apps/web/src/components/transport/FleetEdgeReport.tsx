@@ -53,7 +53,10 @@ import { downloadExcelCsv } from "@/lib/reportExport";
 import type { FleetBucket, OfflinePeriod, VehicleDashboardRow } from "@/lib/fleetEdgeAnalytics";
 import { averageEngineLoad, averageGsa, averageSpeed } from "@/lib/fleetEdgeAnalytics";
 import {
+  FUEL_TYPE_LABEL,
   isServiceDue,
+  usesCng,
+  type FleetFuelType,
   type FleetAlertRow,
   type FleetDailyPoint,
   type FleetNotificationRow,
@@ -195,7 +198,7 @@ export function FleetEdgeReport({ canEdit }: { canEdit: boolean }) {
   const [alertTypeFilter, setAlertTypeFilter] = useState<string>("");
 
   // Identity edit
-  const [identityDrafts, setIdentityDrafts] = useState<Record<string, { model: string; year: string }>>({});
+  const [identityDrafts, setIdentityDrafts] = useState<Record<string, { model: string; year: string; fuelType: string }>>({});
   const [identitySaving, setIdentitySaving] = useState<string | null>(null);
 
   // Director's report
@@ -365,12 +368,13 @@ export function FleetEdgeReport({ canEdit }: { canEdit: boolean }) {
     const model = (draft?.model ?? v.identity?.model ?? "").trim();
     const yearStr = draft?.year ?? (v.identity?.year != null ? String(v.identity.year) : "");
     const year = yearStr.trim() ? Number(yearStr.trim()) : null;
+    const fuelType = ((draft?.fuelType ?? v.identity?.fuelType ?? "") || null) as FleetFuelType | null;
     setIdentitySaving(v.vehicleRef);
     try {
       const res = await fetch("/api/transport/fleet-edge/vehicle-identity", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ vin: v.vehicleRef, registrationNumber: v.registrationNumber, model: model || null, year }),
+        body: JSON.stringify({ vin: v.vehicleRef, registrationNumber: v.registrationNumber, model: model || null, year, fuelType }),
       });
       if (!res.ok) {
         pushToast({ kind: "error", message: `Could not save vehicle details (HTTP ${res.status})` });
@@ -378,7 +382,7 @@ export function FleetEdgeReport({ canEdit }: { canEdit: boolean }) {
       }
       setData((prev) =>
         prev
-          ? { ...prev, vehicles: prev.vehicles.map((row) => (row.vehicleRef === v.vehicleRef ? { ...row, identity: { model: model || null, year, name: row.identity?.name ?? null } } : row)) }
+          ? { ...prev, vehicles: prev.vehicles.map((row) => (row.vehicleRef === v.vehicleRef ? { ...row, identity: { model: model || null, year, name: row.identity?.name ?? null, fuelType } } : row)) }
           : prev,
       );
       setIdentityDrafts((prev) => {
@@ -435,7 +439,7 @@ export function FleetEdgeReport({ canEdit }: { canEdit: boolean }) {
 
   function exportSummary() {
     if (!data) return;
-    const headers = ["Vehicle", "VIN", "Model", "Status", "Score", "Distance km", "Fuel L", "km/L", "Avg speed", "Harsh accel", "Harsh brake", "Rash turn", "Over-speed", "SOS", "Critical faults", "Warnings", "Service due", "Odometer", "Last seen"];
+    const headers = ["Vehicle", "VIN", "Model", "Fuel type", "Status", "Score", "Distance km", "Fuel L", "km/L", "Avg speed", "Harsh accel", "Harsh brake", "Rash turn", "Over-speed", "SOS", "Critical faults", "Warnings", "Service due", "Odometer", "Last seen"];
     downloadExcelCsv({
       title: `Fleet Edge report ${fromDate} to ${toDate}`,
       fileBaseName: `fleet-edge-report-${fromDate}-${toDate}`,
@@ -443,7 +447,7 @@ export function FleetEdgeReport({ canEdit }: { canEdit: boolean }) {
       rows: data.vehicles.map((v) => {
         const spd = averageSpeed(v);
         const cells: (string | number | null)[] = [
-          v.registrationNumber || "", v.vehicleRef, v.identity?.model || "", bucketLabel(v.bucket), v.score ?? "",
+          v.registrationNumber || "", v.vehicleRef, v.identity?.model || "", v.identity?.fuelType ? FUEL_TYPE_LABEL[v.identity.fuelType] : "", bucketLabel(v.bucket), v.score ?? "",
           Math.round(v.distanceTravelledKm * 10) / 10, Math.round(v.fuelConsumed * 10) / 10,
           v.fuelConsumed > 0 ? Math.round((v.distanceTravelledKm / v.fuelConsumed) * 10) / 10 : "",
           spd != null ? Math.round(spd * 10) / 10 : "",
@@ -458,21 +462,53 @@ export function FleetEdgeReport({ canEdit }: { canEdit: boolean }) {
   const vehicleCols: DataTableColumn<VehicleRow>[] = [
     { key: "vehicle", header: "Vehicle", sortable: true, value: (v) => vehicleLabel(v), render: (v) => (
       <div>
-        <div className="font-semibold">{v.registrationNumber && v.registrationNumber !== "NA" ? v.registrationNumber : <span className="text-[var(--muted)]">No reg. yet</span>}</div>
+        <div className="flex items-center gap-1.5 font-semibold">{v.registrationNumber && v.registrationNumber !== "NA" ? v.registrationNumber : <span className="text-[var(--muted)]">No reg. yet</span>}{usesCng(v.identity?.fuelType) ? chip("info", "CNG") : null}</div>
         <div className="text-[11px] text-[var(--muted)]">{v.vehicleRef}</div>
       </div>
     ) },
-    { key: "model", header: "Model / year", className: "min-w-[420px]", render: (v) => canEdit ? (
-      <div className="flex items-center gap-2">
-        <input className={`${field} h-9 w-52 min-w-[13rem] text-sm`} placeholder="Model (e.g. Starbus 32)" title="Vehicle model" value={identityDrafts[v.vehicleRef]?.model ?? v.identity?.model ?? ""} onChange={(e) => setIdentityDrafts((p) => ({ ...p, [v.vehicleRef]: { model: e.target.value, year: p[v.vehicleRef]?.year ?? (v.identity?.year != null ? String(v.identity.year) : "") } }))} />
-        <input className={`${field} h-9 w-24 min-w-[6rem] text-sm tabular-nums`} placeholder="Year" title="Year of manufacture" inputMode="numeric" maxLength={4} value={identityDrafts[v.vehicleRef]?.year ?? (v.identity?.year != null ? String(v.identity.year) : "")} onChange={(e) => setIdentityDrafts((p) => ({ ...p, [v.vehicleRef]: { model: p[v.vehicleRef]?.model ?? v.identity?.model ?? "", year: e.target.value } }))} />
-        <Button size="sm" variant={identityDrafts[v.vehicleRef] ? "default" : "outline"} disabled={identitySaving === v.vehicleRef || !identityDrafts[v.vehicleRef]} onClick={() => void saveIdentity(v)}>{identitySaving === v.vehicleRef ? "Saving…" : "Save"}</Button>
-      </div>
-    ) : <span>{v.identity?.model || "—"}{v.identity?.year ? ` (${v.identity.year})` : ""}</span>, value: (v) => v.identity?.model || "" },
+    { key: "model", header: "Model / year / fuel", className: "min-w-[560px]", render: (v) => {
+      const d = identityDrafts[v.vehicleRef];
+      const cur = {
+        model: d?.model ?? v.identity?.model ?? "",
+        year: d?.year ?? (v.identity?.year != null ? String(v.identity.year) : ""),
+        fuelType: d?.fuelType ?? v.identity?.fuelType ?? "",
+      };
+      const set = (patch: Partial<typeof cur>) => setIdentityDrafts((p) => ({ ...p, [v.vehicleRef]: { ...cur, ...patch } }));
+      if (!canEdit) {
+        return (
+          <span className="flex flex-wrap items-center gap-1.5">
+            <span>{v.identity?.model || "—"}{v.identity?.year ? ` (${v.identity.year})` : ""}</span>
+            {v.identity?.fuelType ? chip(usesCng(v.identity.fuelType) ? "info" : "muted", FUEL_TYPE_LABEL[v.identity.fuelType]) : null}
+          </span>
+        );
+      }
+      return (
+        <div className="flex items-center gap-2">
+          <input className={`${field} h-9 w-52 min-w-[13rem] text-sm`} placeholder="Model (e.g. Starbus 32)" title="Vehicle model" value={cur.model} onChange={(e) => set({ model: e.target.value })} />
+          <input className={`${field} h-9 w-24 min-w-[6rem] text-sm tabular-nums`} placeholder="Year" title="Year of manufacture" inputMode="numeric" maxLength={4} value={cur.year} onChange={(e) => set({ year: e.target.value })} />
+          <select className={`${field} h-9 w-36 min-w-[9rem] text-sm`} title="Fuel type" value={cur.fuelType} onChange={(e) => set({ fuelType: e.target.value })}>
+            <option value="">Fuel…</option>
+            {(Object.keys(FUEL_TYPE_LABEL) as FleetFuelType[]).map((k) => <option key={k} value={k}>{FUEL_TYPE_LABEL[k]}</option>)}
+          </select>
+          <Button size="sm" variant={d ? "default" : "outline"} disabled={identitySaving === v.vehicleRef || !d} onClick={() => void saveIdentity(v)}>{identitySaving === v.vehicleRef ? "Saving…" : "Save"}</Button>
+        </div>
+      );
+    }, value: (v) => `${v.identity?.model || ""} ${v.identity?.fuelType || ""}` },
     { key: "status", header: "Status", sortable: true, value: (v) => v.bucket, render: (v) => chip(v.bucket === "offline" ? "muted" : v.bucket === "low" ? "critical" : v.bucket === "average" ? "warning" : "ok", bucketLabel(v.bucket)) },
     { key: "score", header: "Score", align: "right", sortable: true, value: (v) => v.score, render: (v) => <span className="tabular-nums font-semibold">{v.score ?? "—"}</span> },
     { key: "km", header: "Distance", align: "right", sortable: true, value: (v) => v.distanceTravelledKm, render: (v) => <span className="tabular-nums">{n1(v.distanceTravelledKm, " km")}</span> },
-    { key: "fuel", header: "Fuel", align: "right", sortable: true, value: (v) => v.fuelConsumed, render: (v) => <span className="tabular-nums">{v.fuelConsumed > 0 ? `${n1(v.fuelConsumed, " L")} · ${n1(v.distanceTravelledKm / v.fuelConsumed, " km/L")}` : "—"}</span> },
+    { key: "fuel", header: "Fuel", align: "right", sortable: true, value: (v) => v.fuelConsumed, render: (v) => {
+      const t = v.lastTelemetry;
+      const cng = usesCng(v.identity?.fuelType);
+      const tank1 = t?.fuelLevelPercent != null ? `${cng && v.identity?.fuelType === "cng" ? "CNG" : "tank 1"} ${t.fuelLevelPercent}%` : null;
+      const tank2 = t?.secondaryFuelLevel1 != null ? `${cng ? "CNG" : "tank 2"} ${t.secondaryFuelLevel1}%` : null;
+      return (
+        <div className="text-right tabular-nums">
+          <div>{v.fuelConsumed > 0 ? `${n1(v.fuelConsumed, " L")} · ${n1(v.distanceTravelledKm / v.fuelConsumed, " km/L")}` : <span className="text-[var(--muted)]">no usage reported</span>}</div>
+          {tank1 || tank2 ? <div className="text-[11px] text-[var(--muted)]">{[tank1, tank2].filter(Boolean).join(" · ")}</div> : null}
+        </div>
+      );
+    } },
     { key: "speed", header: "Avg speed", align: "right", sortable: true, value: (v) => averageSpeed(v), render: (v) => <span className="tabular-nums">{n1(averageSpeed(v), " km/h")}</span> },
     { key: "harsh", header: "HA / HB / RT", align: "right", sortable: true, value: (v) => v.haCount + v.hbCount + v.rtCount, render: (v) => <span className="tabular-nums">{v.haCount} / {v.hbCount} / {v.rtCount}</span> },
     { key: "overspeed", header: "Over-speed", align: "right", sortable: true, value: (v) => v.overSpeedCount, render: (v) => <span className="tabular-nums">{v.overSpeedCount}</span> },

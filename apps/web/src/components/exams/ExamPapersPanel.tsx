@@ -8,6 +8,7 @@ import {
   HARDNESS_LEVELS,
   PRIMARY_ICON_BANK,
   QUESTION_TYPES,
+  BLOOM_LEVELS,
   activeSet,
   createExamPaper,
   deleteExamPaper,
@@ -28,6 +29,8 @@ import {
   type ExamPaperSection,
   type ExamPaperSet,
 } from "@/lib/examPapers";
+import { loadTeaching, type SyllabusUnit } from "@/lib/teaching";
+import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import {
   suggestExamPaperDraft,
   suggestMoreQuestions,
@@ -65,6 +68,38 @@ export function ExamPapersPanel({
   const [showPreview, setShowPreview] = useState(false);
   const [aiHardness, setAiHardness] = useState<ExamPaperHardness>("mixed");
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiMoreType, setAiMoreType] = useState<ExamPaperQuestionType | "">("");
+
+  /** Chapters/topics in the Teaching plan for this paper's class + subject. */
+  const syllabusUnits = useMemo<SyllabusUnit[]>(() => {
+    void tick;
+    if (!draft?.classId || !draft?.subjectId) return [];
+    return loadTeaching()
+      .units.filter(
+        (u) =>
+          u.isActive &&
+          u.academicYearCode === ay &&
+          u.classId === draft.classId &&
+          u.subjectId === draft.subjectId,
+      )
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+  }, [ay, draft?.classId, draft?.subjectId, tick]);
+
+  /** What the AI is told about the ticked units (id, code, title, outcomes, LO codes). */
+  function unitFactsForAi() {
+    if (!draft) return [];
+    const picked = new Set(draft.unitIds);
+    return syllabusUnits
+      .filter((u) => picked.has(u.id))
+      .map((u) => ({
+        id: u.id,
+        code: u.code,
+        title: u.title,
+        level: u.level,
+        learningOutcomes: u.learningOutcomes,
+        competencyCodes: u.competencyCodes,
+      }));
+  }
 
   const [newExamTermId, setNewExamTermId] = useState(terms[0]?.id ?? "");
   const [newClassId, setNewClassId] = useState("");
@@ -209,6 +244,7 @@ export function ExamPapersPanel({
           subjectId: draft.subjectId,
           hardness: aiHardness,
           maxMarks: draft.maxMarks,
+          units: unitFactsForAi(),
         }),
       });
       const json = (await res.json()) as {
@@ -218,6 +254,7 @@ export function ExamPapersPanel({
         engine?: string;
         source?: string;
         error?: string;
+        generationId?: string;
       };
       if (res.ok && json.ok && json.sections?.length) {
         mutateActiveSet((set) => ({
@@ -225,6 +262,15 @@ export function ExamPapersPanel({
           sections: json.sections!,
         }));
         updateDraft({ hardness: aiHardness });
+        // Whole-set draft accepted into the editor; the teacher edits before print.
+        if (json.generationId) {
+          reportAiOutcome({
+            ids: [json.generationId],
+            outcome: "accepted",
+            targetType: "exam_paper",
+            targetId: draft.id,
+          });
+        }
         onNotice(
           [
             ...(json.explanation || []),
@@ -276,12 +322,15 @@ export function ExamPapersPanel({
           hardness: draft.hardness,
           count: 2,
           excludeTexts: section.questions.map((q) => q.text),
+          units: unitFactsForAi(),
+          type: aiMoreType || undefined,
         }),
       });
       const json = (await res.json()) as {
         ok?: boolean;
         questions?: ExamPaperQuestion[];
         engine?: string;
+        generationId?: string;
       };
       if (res.ok && json.ok && json.questions?.length) {
         mutateActiveSet((s) => ({
@@ -592,6 +641,58 @@ export function ExamPapersPanel({
               }
             />
           </label>
+
+          <div className="mt-3 text-sm">
+            <span className="mb-1 block text-[11px] text-[var(--muted)]">
+              Syllabus covered · from Teaching → Syllabus (LO codes drive competency tagging)
+            </span>
+            {syllabusUnits.length === 0 ? (
+              <p className="rounded-lg bg-[var(--surface-sunken)] px-3 py-2 text-xs text-[var(--muted)]">
+                No chapters in the Teaching plan for this class + subject yet —
+                the AI drafts for the whole subject and cannot tag LO codes.
+              </p>
+            ) : (
+              <div className="flex max-h-36 flex-wrap gap-1.5 overflow-y-auto rounded-lg border border-[var(--border)] p-2">
+                {syllabusUnits.map((u) => {
+                  const on = draft.unitIds.includes(u.id);
+                  return (
+                    <label
+                      key={u.id}
+                      className={`inline-flex cursor-pointer items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${
+                        on
+                          ? "border-[var(--brand-deep)] bg-[var(--brand-deep)] text-white"
+                          : "border-[var(--border)] text-[var(--brand-deep)]"
+                      } ${u.level === "topic" ? "ml-3" : ""}`}
+                      title={
+                        u.competencyCodes.length
+                          ? `LO codes: ${u.competencyCodes.join(", ")}`
+                          : "No LO codes recorded for this unit"
+                      }
+                    >
+                      <input
+                        type="checkbox"
+                        className="sr-only"
+                        disabled={!canEdit}
+                        checked={on}
+                        onChange={() =>
+                          updateDraft({
+                            unitIds: on
+                              ? draft.unitIds.filter((id) => id !== u.id)
+                              : [...draft.unitIds, u.id],
+                          })
+                        }
+                      />
+                      {u.code ? `${u.code} · ` : ""}
+                      {u.title}
+                      {u.competencyCodes.length ? (
+                        <span className="opacity-70">· {u.competencyCodes.length} LO</span>
+                      ) : null}
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Sets + AI */}
@@ -666,6 +767,21 @@ export function ExamPapersPanel({
               >
                 {aiLoading ? "Drafting…" : "AI draft this set"}
               </button>
+              <label className="text-[11px] text-[var(--muted)]">
+                &ldquo;+ AI Qs&rdquo; format
+                <select
+                  className="field mt-0.5 !w-auto !py-1 text-xs"
+                  value={aiMoreType}
+                  onChange={(e) => setAiMoreType(e.target.value as ExamPaperQuestionType | "")}
+                >
+                  <option value="">Model&apos;s choice</option>
+                  {QUESTION_TYPES.map((t) => (
+                    <option key={t.code} value={t.code}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
           ) : null}
         </div>
@@ -676,6 +792,10 @@ export function ExamPapersPanel({
             key={section.id}
             section={section}
             canEdit={canEdit}
+            unitLabel={(id) => {
+              const u = syllabusUnits.find((x) => x.id === id);
+              return u ? `${u.code ? `${u.code} · ` : ""}${u.title}` : "";
+            }}
             index={sIdx}
             onChange={(next) =>
               mutateActiveSet((st) => ({
@@ -932,6 +1052,7 @@ function SectionEditor(props: {
   onAddQuestion: () => void;
   onAiMore: () => void;
   readImageFile: (file: File, onDone: (dataUrl: string) => void) => void;
+  unitLabel: (unitId: string) => string;
 }) {
   const { section, canEdit } = props;
 
@@ -996,6 +1117,7 @@ function SectionEditor(props: {
             question={q}
             index={qi}
             canEdit={canEdit}
+            unitLabel={props.unitLabel}
             onChange={(patch) => patchQuestion(q.id, patch)}
             onRemove={() =>
               props.onChange({
@@ -1028,6 +1150,8 @@ function QuestionEditor(props: {
   onChange: (patch: Partial<ExamPaperQuestion>) => void;
   onRemove: () => void;
   readImageFile: (file: File, onDone: (dataUrl: string) => void) => void;
+  /** "Ch 3 · Quadrilaterals" for a unitId, "" when unknown / unlinked */
+  unitLabel: (unitId: string) => string;
 }) {
   const { question: q, canEdit } = props;
   const [showIcons, setShowIcons] = useState(false);
@@ -1242,6 +1366,55 @@ function QuestionEditor(props: {
             placeholder="Answer key (teacher)"
             value={q.answerKey}
             onChange={(e) => props.onChange({ answerKey: e.target.value })}
+          />
+        </div>
+      ) : null}
+
+      {canEdit || q.competencyCode || q.bloomLevel || q.markingScheme.length ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+          <input
+            className="field !inline-block !w-24 !py-0.5 text-[11px] uppercase"
+            placeholder="LO code"
+            title="CBSE learning-outcome code this item assesses (from the Syllabus tab)"
+            disabled={!canEdit}
+            value={q.competencyCode}
+            onChange={(e) => props.onChange({ competencyCode: e.target.value.toUpperCase() })}
+          />
+          <select
+            className="field !inline-block !w-auto !py-0.5 text-[11px]"
+            disabled={!canEdit}
+            value={q.bloomLevel}
+            onChange={(e) =>
+              props.onChange({ bloomLevel: e.target.value as ExamPaperQuestion["bloomLevel"] })
+            }
+            title="Bloom's level"
+          >
+            <option value="">Bloom —</option>
+            {BLOOM_LEVELS.map((b) => (
+              <option key={b.code} value={b.code}>
+                {b.label}
+              </option>
+            ))}
+          </select>
+          {props.unitLabel(q.unitId) ? (
+            <span className="rounded-full border border-[var(--border)] px-2 py-0.5 text-[var(--muted)]">
+              {props.unitLabel(q.unitId)}
+            </span>
+          ) : null}
+          <textarea
+            className="field min-h-[28px] !flex-1 !py-0.5 text-[11px]"
+            rows={Math.max(1, Math.min(4, q.markingScheme.length || 1))}
+            placeholder="Marking scheme (teacher copy) — one step per line, e.g. formula 1 · substitution 1 · answer 1"
+            disabled={!canEdit}
+            value={q.markingScheme.join("\n")}
+            onChange={(e) =>
+              props.onChange({
+                markingScheme: e.target.value.split("\n").map((l) => l.trimEnd()),
+              })
+            }
+            onBlur={() =>
+              props.onChange({ markingScheme: q.markingScheme.map((l) => l.trim()).filter(Boolean) })
+            }
           />
         </div>
       ) : null}

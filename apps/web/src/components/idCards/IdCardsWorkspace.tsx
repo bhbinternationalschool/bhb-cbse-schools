@@ -25,6 +25,7 @@ import {
   type IdCardTemplate,
   type IdCardTemplateState,
 } from "@/lib/idCardTemplate";
+import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 
 type Tab = "student" | "staff" | "design";
 
@@ -64,6 +65,8 @@ export function IdCardsWorkspace() {
   );
   const [designKind, setDesignKind] = useState<IdCardKind>("student");
 
+  // Re-read when the server copy of this module lands (login/refresh hydration).
+  useModuleStateHydration("id_card_template", () => { setTemplateState(loadIdCardTemplateState()); });
   useEffect(() => {
     setMasters(loadMasters());
     setSis(loadSis());

@@ -196,6 +196,18 @@ export function ExamPaperPrintSheet(props: {
                               Key: {q.answerKey}
                             </p>
                           ) : null}
+                          {showAnswers && q.markingScheme.length ? (
+                            <ul className="mt-0.5 list-disc pl-4 text-[11px] text-[#0f7a4c] print-hide">
+                              {q.markingScheme.map((m, i) => (
+                                <li key={i}>{m}</li>
+                              ))}
+                            </ul>
+                          ) : null}
+                          {showAnswers && (q.competencyCode || q.bloomLevel) ? (
+                            <p className="mt-0.5 text-[10px] text-[var(--muted)] print-hide">
+                              {[q.competencyCode, q.bloomLevel].filter(Boolean).join(" · ")}
+                            </p>
+                          ) : null}
                         </div>
                       </div>
                     </li>

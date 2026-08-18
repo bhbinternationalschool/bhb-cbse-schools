@@ -168,8 +168,19 @@ export function saveUdiseComplianceSettings(
   );
   if (typeof window !== "undefined") {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
+    void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("udise_compliance", { settings: next }));
   }
   return next;
+}
+
+/** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */
+export function writeUdiseComplianceSettingsLocalRaw(state: { settings: UdiseComplianceSettings }): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(state.settings));
+  } catch {
+    /* quota — the server copy is the truth anyway */
+  }
 }
 
 export function gapLabel(code: UdiseGapCode): string {

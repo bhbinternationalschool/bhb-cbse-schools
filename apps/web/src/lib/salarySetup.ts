@@ -405,6 +405,50 @@ export function saveSalarySetup(state: SalarySetupState) {
 
   if (typeof window === "undefined") return;
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  // Persist to Supabase (salary_setup_state). Until 2026-08-18 this stopped
+  // at localStorage and the login-time cache wipe erased the whole setup.
+  void import("@/lib/salarySetupPersistence").then(({ scheduleSalarySetupSync }) => {
+    scheduleSalarySetupSync(state);
+  });
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("bhb-salary-setup-updated"));
+  }
+}
+
+/** Hydrate path — write the local cache without RBAC checks or a push. */
+export function writeSalarySetupLocalRaw(state: SalarySetupState) {
+  if (typeof window === "undefined") return;
+  const seed = defaultSalarySetupState();
+  const next: SalarySetupState = {
+    version: 1,
+    settings: normalizeSalarySettings(state.settings),
+    heads: Array.isArray(state.heads) && state.heads.length ? state.heads.map(normalizeHead) : seed.heads,
+    structures:
+      Array.isArray(state.structures) && state.structures.length
+        ? state.structures.map(normalizeStructure)
+        : seed.structures,
+    staffLinks: Array.isArray(state.staffLinks) ? state.staffLinks.map(normalizeLink) : [],
+  };
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
+  window.dispatchEvent(new CustomEvent("bhb-salary-setup-updated"));
+}
+
+/**
+ * "Empty" = nothing beyond the bundled defaults: no staff assigned and no
+ * structure other than the seeded ones. Used by the blob helper so a
+ * cold browser never overwrites a configured server copy with defaults.
+ */
+export function salarySetupIsEmpty(state: SalarySetupState): boolean {
+  const seed = defaultSalarySetupState();
+  const seedStructureIds = new Set(seed.structures.map((x) => x.id));
+  const seedHeadIds = new Set(seed.heads.map((x) => x.id));
+  const customStructures = (state.structures ?? []).filter((x) => !seedStructureIds.has(x.id));
+  const customHeads = (state.heads ?? []).filter((x) => !seedHeadIds.has(x.id));
+  return (
+    (state.staffLinks ?? []).length === 0 &&
+    customStructures.length === 0 &&
+    customHeads.length === 0
+  );
 }
 
 function normalizeHead(h: Partial<SalaryHead>): SalaryHead {

@@ -29,6 +29,7 @@ import { PaymentReportImportPanel } from "@/components/fees/PaymentReportImportP
 import { PreviousDuesImportPanel } from "@/components/fees/PreviousDuesImportPanel";
 import { ManualPreviousDuePanel } from "@/components/fees/ManualPreviousDuePanel";
 import { BulkPreviousDueByClassPanel } from "@/components/fees/BulkPreviousDueByClassPanel";
+import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 
 export function FeeAdjustmentsPanel({
   onChanged,
@@ -62,6 +63,8 @@ export function FeeAdjustmentsPanel({
     setRows(loadFeeAdjustments());
     onChanged?.();
   }
+  // Re-read when the server copy of this module lands (login/refresh hydration).
+  useModuleStateHydration("fee_adjustments", () => { setRows(loadFeeAdjustments()); });
 
   useEffect(() => {
     refresh();

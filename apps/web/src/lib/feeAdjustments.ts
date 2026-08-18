@@ -94,6 +94,17 @@ export function saveFeeAdjustments(rows: FeeAdjustment[]) {
 
   if (typeof window === "undefined") return;
   localStorage.setItem(ADJUST_KEY, JSON.stringify(rows));
+  void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("fee_adjustments", { rows: rows }));
+}
+
+/** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */
+export function writeFeeAdjustmentsLocalRaw(state: { rows: FeeAdjustment[] }): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(ADJUST_KEY, JSON.stringify(state.rows));
+  } catch {
+    /* quota — the server copy is the truth anyway */
+  }
 }
 
 function normalizeAdjustment(a: Partial<FeeAdjustment>): FeeAdjustment {

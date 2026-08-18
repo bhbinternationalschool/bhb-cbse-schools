@@ -13,7 +13,20 @@ export function geminiApiKey(): string {
   ).trim();
 }
 
-export function geminiModel(): string {
+/**
+ * Model per tier. "flash" is the default for every route; "pro" is opted
+ * into per call (exam papers, marking schemes — anything where a plausible
+ * but wrong answer costs more than the tokens). Both overridable by env so
+ * a retired model name is a config change, not a deploy.
+ */
+export function geminiModel(tier: "flash" | "pro" = "flash"): string {
+  if (tier === "pro") {
+    return (
+      process.env.GEMINI_PRO_MODEL ||
+      // Available on the prod key as of 2026-08-18 (see docs/AI_ROADMAP_2026-08.md §1b).
+      "gemini-2.5-pro"
+    ).trim();
+  }
   return (
     process.env.GEMINI_MODEL ||
     process.env.GOOGLE_GEMINI_MODEL ||
@@ -22,6 +35,11 @@ export function geminiModel(): string {
     "gemini-3.6-flash"
   ).trim();
 }
+
+export type LlmUsage = {
+  promptTokens: number | null;
+  completionTokens: number | null;
+};
 
 export function geminiConfigured(): boolean {
   return geminiApiKey().length > 0;
@@ -38,13 +56,18 @@ export async function generateGeminiText(opts: {
   userMessage: string;
   maxTokens?: number;
   temperature?: number;
-}): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  /** Explicit model id; defaults to the flash-tier model */
+  model?: string;
+}): Promise<
+  | { ok: true; text: string; model: string; usage: LlmUsage }
+  | { ok: false; error: string; model: string }
+> {
+  const model = (opts.model || geminiModel()).trim();
   const key = geminiApiKey();
   if (!key) {
-    return { ok: false, error: "GEMINI_API_KEY not configured" };
+    return { ok: false, error: "GEMINI_API_KEY not configured", model };
   }
 
-  const model = geminiModel();
   const version = process.env.GEMINI_API_VERSION || "v1beta";
   const url = `https://generativelanguage.googleapis.com/${version}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
 
@@ -96,6 +119,10 @@ export async function generateGeminiText(opts: {
         content?: { parts?: { text?: string }[] };
         finishReason?: string;
       }[];
+      usageMetadata?: {
+        promptTokenCount?: number;
+        candidatesTokenCount?: number;
+      };
       error?: { message?: string };
     };
 
@@ -103,8 +130,13 @@ export async function generateGeminiText(opts: {
       return {
         ok: false,
         error: json.error?.message || `Gemini HTTP ${res.status}`,
+        model,
       };
     }
+    const usage: LlmUsage = {
+      promptTokens: json.usageMetadata?.promptTokenCount ?? null,
+      completionTokens: json.usageMetadata?.candidatesTokenCount ?? null,
+    };
 
     const text = (json.candidates?.[0]?.content?.parts || [])
       .map((p) => p.text || "")
@@ -115,14 +147,16 @@ export async function generateGeminiText(opts: {
       return {
         ok: false,
         error: `Empty Gemini response (${json.candidates?.[0]?.finishReason || "unknown"})`,
+        model,
       };
     }
 
-    return { ok: true, text: sanitizeGeminiReply(text) };
+    return { ok: true, text: sanitizeGeminiReply(text), model, usage };
   } catch (e) {
     return {
       ok: false,
       error: e instanceof Error ? e.message : "Gemini request failed",
+      model,
     };
   }
 }

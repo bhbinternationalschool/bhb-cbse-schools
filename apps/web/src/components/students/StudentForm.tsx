@@ -13,6 +13,7 @@ import {
   type MastersState,
 } from "@/lib/masters";
 import { bumpStudentSeriesUses } from "@/lib/numberSeries";
+import { HOUSEHOLD_CHANNELS, HOUSEHOLD_LANGUAGES } from "@/lib/householdPrefs";
 import { diffForAudit, recordAudit } from "@/lib/auditClient";
 import { suggestSystemAdmissionForImport } from "@/lib/studentLegacyAdmission";
 import {
@@ -265,6 +266,10 @@ export function StudentForm({
   const [mobile, setMobile] = useState("");
   const [whatsappMobile, setWhatsappMobile] = useState("");
   const [altMobile, setAltMobile] = useState("");
+  const [preferredLanguage, setPreferredLanguage] = useState("");
+  const [channelPreference, setChannelPreference] = useState("");
+  const [quietHoursStart, setQuietHoursStart] = useState("");
+  const [quietHoursEnd, setQuietHoursEnd] = useState("");
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState("");
   const [locality, setLocality] = useState("");
@@ -379,6 +384,10 @@ export function StudentForm({
       setMobile(hh?.mobile ?? "");
       setWhatsappMobile(hh?.whatsappMobile || hh?.mobile || "");
       setAltMobile(hh?.altMobile ?? "");
+      setPreferredLanguage(hh?.preferredLanguage ?? "");
+      setChannelPreference(hh?.channelPreference ?? "");
+      setQuietHoursStart(hh?.quietHoursStart ?? "");
+      setQuietHoursEnd(hh?.quietHoursEnd ?? "");
       setEmail(hh?.email ?? "");
       setAddress(hh?.address ?? "");
       setLocality(hh?.locality ?? "");
@@ -531,6 +540,10 @@ export function StudentForm({
       pincode,
       altMobile,
       guardianPhotoUrl: "",
+      preferredLanguage,
+      channelPreference,
+      quietHoursStart,
+      quietHoursEnd,
     };
     return profileCompleteness(draft, hhDraft);
   }, [
@@ -811,6 +824,10 @@ export function StudentForm({
       state: stateName.trim() || "Uttar Pradesh",
       pincode: pincode.replace(/\D/g, "").slice(0, 6),
       altMobile: normalizeMobile(altMobile),
+      preferredLanguage,
+      channelPreference,
+      quietHoursStart,
+      quietHoursEnd,
     };
 
     if (householdId && households.some((h) => h.id === householdId)) {
@@ -2009,6 +2026,10 @@ export function StudentForm({
                       setMobile(hh.mobile);
                       setWhatsappMobile(hh.whatsappMobile || hh.mobile);
                       setAltMobile(hh.altMobile);
+                      setPreferredLanguage(hh.preferredLanguage);
+                      setChannelPreference(hh.channelPreference);
+                      setQuietHoursStart(hh.quietHoursStart);
+                      setQuietHoursEnd(hh.quietHoursEnd);
                       setEmail(hh.email);
                       setAddress(hh.address);
                       setLocality(hh.locality);
@@ -2090,6 +2111,60 @@ export function StudentForm({
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                   />
+                </Field>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <Field label="Preferred language">
+                  <select
+                    className="field"
+                    value={preferredLanguage}
+                    onChange={(e) => setPreferredLanguage(e.target.value)}
+                  >
+                    <option value="">Not asked yet</option>
+                    {HOUSEHOLD_LANGUAGES.map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.label} · {l.native}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-[11px] text-[var(--muted)]">
+                    Messages, reminders and AI drafts for this family are
+                    written in this language.
+                  </p>
+                </Field>
+                <Field label="Preferred channel">
+                  <select
+                    className="field"
+                    value={channelPreference}
+                    onChange={(e) => setChannelPreference(e.target.value)}
+                  >
+                    <option value="">Not asked yet</option>
+                    {HOUSEHOLD_CHANNELS.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Quiet hours from">
+                  <input
+                    className="field"
+                    type="time"
+                    value={quietHoursStart}
+                    onChange={(e) => setQuietHoursStart(e.target.value)}
+                  />
+                </Field>
+                <Field label="Quiet hours until">
+                  <input
+                    className="field"
+                    type="time"
+                    value={quietHoursEnd}
+                    onChange={(e) => setQuietHoursEnd(e.target.value)}
+                  />
+                  <p className="mt-1 text-[11px] text-[var(--muted)]">
+                    Non-urgent messages (fee reminders, campaigns) wait
+                    outside this window. Attendance and safety alerts ignore it.
+                  </p>
                 </Field>
               </div>
               <Field label="Address line (house / street)">

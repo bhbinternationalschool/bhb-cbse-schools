@@ -12,6 +12,7 @@ import { generateExamPaperJson } from "@/lib/aiLlm.server";
 import {
   emptyQuestion,
   emptySection,
+  normalizeBloomLevel,
   type ExamPaperHardness,
   type ExamPaperQuestion,
   type ExamPaperQuestionType,
@@ -28,9 +29,56 @@ const VALID_TYPES = new Set<ExamPaperQuestionType>([
   "numerical",
   "diagram",
   "primary_picture",
+  "case_study",
+  "assertion_reason",
+  "competency",
 ]);
 
 const VALID_HARDNESS = new Set(["easy", "medium", "hard"]);
+
+/**
+ * Syllabus units the paper should draw from — sent by the client from the
+ * Teaching module (title, code, learning outcomes, CBSE LO codes). The
+ * model may only tag a question with a competencyCode / unitId that appears
+ * here; anything else is dropped on parse so an invented code never lands
+ * on a paper.
+ */
+export type ExamPaperUnitFact = {
+  id: string;
+  code: string;
+  title: string;
+  level: "chapter" | "topic";
+  learningOutcomes: string;
+  competencyCodes: string[];
+};
+
+export function cleanUnitFacts(raw: unknown): ExamPaperUnitFact[] {
+  if (!Array.isArray(raw)) return [];
+  const str = (v: unknown, max: number) => String(v ?? "").trim().slice(0, max);
+  return raw
+    .map((u) => {
+      const x = (u ?? {}) as Record<string, unknown>;
+      const id = str(x.id, 60);
+      const title = str(x.title, 120);
+      if (!id || !title) return null;
+      return {
+        id,
+        code: str(x.code, 20),
+        title,
+        level: x.level === "topic" ? ("topic" as const) : ("chapter" as const),
+        learningOutcomes: str(x.learningOutcomes, 1500),
+        competencyCodes: Array.isArray(x.competencyCodes)
+          ? Array.from(
+              new Set(
+                x.competencyCodes.map((c) => str(c, 20).toUpperCase()).filter(Boolean),
+              ),
+            ).slice(0, 12)
+          : [],
+      };
+    })
+    .filter((u): u is NonNullable<typeof u> => !!u)
+    .slice(0, 12);
+}
 
 type LlmQuestion = {
   type?: string;
@@ -39,6 +87,10 @@ type LlmQuestion = {
   options?: string[];
   answerKey?: string;
   hardness?: string;
+  competencyCode?: string;
+  unitId?: string;
+  bloomLevel?: string;
+  markingScheme?: string[];
 };
 
 type LlmSection = {
@@ -61,7 +113,21 @@ function subjectName(masters: MastersState, subjectId: string): string {
   return s?.nameEn || s?.code || subjectId;
 }
 
-function toQuestion(q: LlmQuestion, defaultHardness: ExamPaperHardness): ExamPaperQuestion {
+/** Codes and unit ids the model is allowed to use — anything else is dropped. */
+type TagAllowlist = { codes: Set<string>; unitIds: Set<string> };
+
+function allowlistFor(units: ExamPaperUnitFact[]): TagAllowlist {
+  return {
+    codes: new Set(units.flatMap((u) => u.competencyCodes)),
+    unitIds: new Set(units.map((u) => u.id)),
+  };
+}
+
+function toQuestion(
+  q: LlmQuestion,
+  defaultHardness: ExamPaperHardness,
+  allow: TagAllowlist,
+): ExamPaperQuestion {
   const type = VALID_TYPES.has(q.type as ExamPaperQuestionType)
     ? (q.type as ExamPaperQuestionType)
     : "short";
@@ -71,6 +137,8 @@ function toQuestion(q: LlmQuestion, defaultHardness: ExamPaperHardness): ExamPap
       : defaultHardness === "mixed"
         ? "medium"
         : defaultHardness;
+  const code = String(q.competencyCode || "").trim().toUpperCase();
+  const unitId = String(q.unitId || "").trim();
   return emptyQuestion({
     type,
     text: (q.text || "").trim(),
@@ -79,17 +147,25 @@ function toQuestion(q: LlmQuestion, defaultHardness: ExamPaperHardness): ExamPap
     answerKey: (q.answerKey || "").trim(),
     hardness,
     source: "ai",
+    // Never let the model mint an LO code or point at a chapter it wasn't given.
+    competencyCode: allow.codes.has(code) ? code : "",
+    unitId: allow.unitIds.has(unitId) ? unitId : "",
+    bloomLevel: normalizeBloomLevel(q.bloomLevel),
+    markingScheme: Array.isArray(q.markingScheme)
+      ? q.markingScheme.map((m) => String(m ?? "").trim()).filter(Boolean).slice(0, 12)
+      : [],
   });
 }
 
 function parseSections(
   raw: LlmDraft,
   defaultHardness: ExamPaperHardness,
+  allow: TagAllowlist,
 ): ExamPaperSection[] {
   const sections: ExamPaperSection[] = [];
   for (const sec of raw.sections || []) {
     const questions = (sec.questions || [])
-      .map((q) => toQuestion(q, defaultHardness))
+      .map((q) => toQuestion(q, defaultHardness, allow))
       .filter((q) => q.text.length > 0);
     if (!questions.length) continue;
     sections.push(
@@ -103,6 +179,37 @@ function parseSections(
   return sections;
 }
 
+/** How the paper's units and their outcomes are shown to the model. */
+function unitsBlock(units: ExamPaperUnitFact[]): string[] {
+  if (units.length === 0) return ["Syllabus coverage: whole subject (no chapters specified)."];
+  const L = ["Syllabus coverage — draw every question from these units only:"];
+  for (const u of units) {
+    L.push(
+      `- unitId=${u.id} [${u.level}] ${u.code ? `${u.code} · ` : ""}${u.title}${
+        u.competencyCodes.length ? ` · LO codes: ${u.competencyCodes.join(", ")}` : ""
+      }`,
+    );
+    const los = u.learningOutcomes
+      .split(/\r?\n/)
+      .map((x) => x.trim())
+      .filter(Boolean)
+      .slice(0, 8);
+    for (const lo of los) L.push(`    outcome: ${lo}`);
+  }
+  return L;
+}
+
+const FORMAT_RULES = [
+  "Question types and how to write each:",
+  "- mcq: 4 options, exactly one correct; answerKey is the option text.",
+  "- assertion_reason: text = 'Assertion (A): … Reason (R): …'; options must be exactly the four CBSE choices: 'Both A and R are true and R is the correct explanation of A', 'Both A and R are true but R is not the correct explanation of A', 'A is true but R is false', 'A is false but R is true'; answerKey names the correct one.",
+  "- case_study: text = a short passage / data table / source (60–120 words, original, age-appropriate) followed by 3–4 numbered sub-questions on new lines, each with its own marks in brackets; marks = total; markingScheme lists one line per sub-question.",
+  "- competency: an application / HOTS item set in a real-life or unfamiliar context that requires using the concept, not recalling it; bloomLevel apply or above.",
+  "- numerical: give the worked answer in answerKey and step marks in markingScheme so the total equals marks.",
+  "- short / long / fill / true_false / match / diagram / primary_picture: as usual for a school test.",
+  "For every question also give: competencyCode (one of the LO codes listed for its unit, or \"\" if that unit has none — never invent a code), unitId (the unitId it is drawn from, \"\" if whole-subject), bloomLevel (remember|understand|apply|analyse|evaluate|create), markingScheme (array of strings; step-wise value points for the teacher copy — required for anything above 1 mark).",
+];
+
 function buildDraftPrompt(opts: {
   masters: MastersState;
   classId: string;
@@ -112,21 +219,27 @@ function buildDraftPrompt(opts: {
   flavour: PaperSubjectFlavour;
   className: string;
   subjectLabel: string;
+  units: ExamPaperUnitFact[];
+  competencyShare: number;
 }): { system: string; userMessage: string } {
   const system = [
-    "You are an experienced Indian CBSE school teacher drafting an exam question paper.",
+    "You are an experienced Indian CBSE school teacher drafting an exam question paper that follows the board's competency-based assessment pattern.",
     "Output JSON only with shape:",
-    '{"sections":[{"title":"Section A","instructions":"...","questions":[{"type":"mcq|short|long|fill|true_false|match|numerical|diagram|primary_picture","text":"...","marks":2,"options":["A","B"],"answerKey":"teacher key","hardness":"easy|medium|hard"}]}],"explanation":["brief note"]}',
-    "Use age-appropriate language for the class. Include answerKey for teacher review (not shown to students).",
-    "Aim total marks close to maxMarks. Mix question types appropriately.",
+    '{"sections":[{"title":"Section A","instructions":"...","questions":[{"type":"mcq|short|long|fill|true_false|match|numerical|diagram|primary_picture|case_study|assertion_reason|competency","text":"...","marks":2,"options":["A","B"],"answerKey":"teacher key","hardness":"easy|medium|hard","competencyCode":"","unitId":"","bloomLevel":"apply","markingScheme":["step 1 — 1 mark","step 2 — 1 mark"]}]}],"explanation":["brief note"]}',
+    ...FORMAT_RULES,
+    "Use age-appropriate language for the class. answerKey and markingScheme are for the teacher only.",
+    "The marks of all questions MUST add up to exactly maxMarks — before answering, total your marks and add or resize questions until they do; a paper that is short of maxMarks is unusable. Sections in the usual CBSE order: objective (mcq / assertion_reason / fill / true_false) first, then short, then long / case_study / competency.",
+    "Do not reuse a passage, context or numbers across questions. No question may depend on a diagram you cannot describe in text.",
   ].join("\n");
 
   const userMessage = [
     `Class: ${opts.className}`,
     `Subject: ${opts.subjectLabel} (${opts.flavour})`,
     `Hardness: ${opts.hardness}`,
-    `Target max marks: ${opts.maxMarks}`,
-    "Create 2–4 sections with varied questions suitable for a school test.",
+    `Target max marks: ${opts.maxMarks} (the paper must total exactly this)`,
+    `Competency-based share: about ${opts.competencyShare}% of marks from case_study / assertion_reason / competency items (CBSE weighting); the rest conventional.`,
+    ...unitsBlock(opts.units),
+    "Create 3–5 sections with varied questions suitable for a school test.",
   ].join("\n");
 
   return { system, userMessage };
@@ -144,12 +257,16 @@ export async function suggestExamPaperDraftLlm(input: {
   subjectId: string;
   hardness: ExamPaperHardness;
   maxMarks: number;
+  units?: ExamPaperUnitFact[];
+  /** % of marks from competency-based formats; CBSE weighting is ~40–50 for IX–XII, lower below */
+  competencyShare?: number;
 }): Promise<
   | {
       ok: true;
       sections: ExamPaperSection[];
       explanation: string[];
       engine: "openai" | "gemini";
+      generationId: string;
     }
   | { ok: false; error: string }
 > {
@@ -158,14 +275,26 @@ export async function suggestExamPaperDraftLlm(input: {
     input.subjectId,
     stageForClass(input.masters, input.classId),
   );
+  const units = input.units ?? [];
+  const stage = stageForClass(input.masters, input.classId);
+  const competencyShare =
+    typeof input.competencyShare === "number"
+      ? Math.max(0, Math.min(100, Math.round(input.competencyShare)))
+      : stage === "SENIOR" || stage === "SECONDARY"
+        ? 50
+        : stage === "MIDDLE"
+          ? 30
+          : 10;
   const { system, userMessage } = buildDraftPrompt({
     ...input,
     flavour,
     className: classLabel(input.masters, input.classId),
     subjectLabel: subjectName(input.masters, input.subjectId),
+    units,
+    competencyShare,
   });
 
-  const llm = await generateExamPaperJson({ system, userMessage });
+  const llm = await generateExamPaperJson({ system, userMessage, promptVersion: "v2" });
   if (!llm.ok) return { ok: false, error: llm.error };
 
   const engine = llm.engine === "openai" ? "openai" : "gemini";
@@ -176,23 +305,70 @@ export async function suggestExamPaperDraftLlm(input: {
     return { ok: false, error: "AI returned invalid JSON — use local draft or retry" };
   }
 
-  const sections = parseSections(parsed, input.hardness);
+  const sections = parseSections(parsed, input.hardness, allowlistFor(units));
   if (!sections.length) {
     return { ok: false, error: "AI draft had no usable questions" };
   }
 
-  const total = sections.reduce(
+  // Models routinely stop 30–50% short of maxMarks whatever the prompt says.
+  // One deterministic top-up: ask for questions worth exactly the shortfall
+  // and append them to the last section. Still a draft the teacher edits.
+  let total = sections.reduce(
     (s, sec) => s + sec.questions.reduce((a, q) => a + q.marks, 0),
     0,
   );
+  const shortfall = input.maxMarks - total;
+  if (shortfall >= 2) {
+    const topUp = await suggestMoreQuestionsLlm({
+      masters: input.masters,
+      classId: input.classId,
+      subjectId: input.subjectId,
+      hardness: input.hardness,
+      count: Math.min(8, Math.max(1, Math.ceil(shortfall / 3))),
+      excludeTexts: sections.flatMap((sec) => sec.questions.map((q) => q.text)),
+      units,
+      exactMarks: shortfall,
+    });
+    if (topUp.ok && topUp.questions.length) {
+      const last = sections[sections.length - 1]!;
+      // Never overshoot: take questions in order until the shortfall is met.
+      let room = shortfall;
+      const take: ExamPaperQuestion[] = [];
+      for (const q of topUp.questions) {
+        if (q.marks > room) continue;
+        take.push(q);
+        room -= q.marks;
+        if (room <= 0) break;
+      }
+      last.questions.push(...take);
+      total = sections.reduce(
+        (s, sec) => s + sec.questions.reduce((a, q) => a + q.marks, 0),
+        0,
+      );
+    }
+  }
   const explanation = Array.isArray(parsed.explanation)
     ? parsed.explanation.map(String)
     : [];
+  const tagged = sections.reduce(
+    (n, sec) => n + sec.questions.filter((q) => q.competencyCode).length,
+    0,
+  );
+  const compMarks = sections.reduce(
+    (n, sec) =>
+      n +
+      sec.questions
+        .filter((q) => q.type === "case_study" || q.type === "assertion_reason" || q.type === "competency")
+        .reduce((a, q) => a + q.marks, 0),
+    0,
+  );
   explanation.unshift(
-    `AI draft (${llm.engine}) · ~${total} marks (target ${input.maxMarks}). Edit every line before printing.`,
+    `AI draft (${llm.engine}) · ~${total} marks (target ${input.maxMarks}) · ${compMarks} marks competency-based${
+      units.length ? ` · ${tagged} question(s) LO-tagged` : ""
+    }. Edit every line before printing.`,
   );
 
-  return { ok: true, sections, explanation, engine };
+  return { ok: true, sections, explanation, engine, generationId: llm.generationId };
 }
 
 export async function suggestMoreQuestionsLlm(input: {
@@ -202,14 +378,22 @@ export async function suggestMoreQuestionsLlm(input: {
   hardness: ExamPaperHardness;
   count?: number;
   excludeTexts?: string[];
+  units?: ExamPaperUnitFact[];
+  /** Ask for a specific format, e.g. "case_study"; omit for the model's choice */
+  type?: ExamPaperQuestionType;
+  /** The new questions must add up to exactly this many marks (draft top-up) */
+  exactMarks?: number;
 }): Promise<
-  | { ok: true; questions: ExamPaperQuestion[]; engine: "openai" | "gemini" }
+  | { ok: true; questions: ExamPaperQuestion[]; engine: "openai" | "gemini"; generationId: string }
   | { ok: false; error: string }
 > {
   const count = input.count ?? 2;
+  const units = input.units ?? [];
+  const wantType = input.type && VALID_TYPES.has(input.type) ? input.type : null;
   const system = [
     "You are a CBSE teacher adding more exam questions.",
-    'Output JSON: {"questions":[{"type":"short","text":"...","marks":2,"options":[],"answerKey":"...","hardness":"medium"}]}',
+    'Output JSON: {"questions":[{"type":"short","text":"...","marks":2,"options":[],"answerKey":"...","hardness":"medium","competencyCode":"","unitId":"","bloomLevel":"apply","markingScheme":[]}]}',
+    ...FORMAT_RULES,
     "JSON only.",
   ].join("\n");
 
@@ -217,11 +401,14 @@ export async function suggestMoreQuestionsLlm(input: {
     `Class: ${classLabel(input.masters, input.classId)}`,
     `Subject: ${subjectName(input.masters, input.subjectId)}`,
     `Hardness: ${input.hardness === "mixed" ? "medium" : input.hardness}`,
-    `Add ${count} new questions. Do not repeat:`,
+    ...unitsBlock(units),
+    `Add ${count} new question(s)${wantType ? ` of type ${wantType}` : ""}${
+      input.exactMarks ? ` whose marks add up to exactly ${input.exactMarks}` : ""
+    }. Do not repeat:`,
     ...(input.excludeTexts || []).slice(0, 8).map((t) => `- ${t.slice(0, 120)}`),
   ].join("\n");
 
-  const llm = await generateExamPaperJson({ system, userMessage });
+  const llm = await generateExamPaperJson({ system, userMessage, promptVersion: "v2" });
   if (!llm.ok) return { ok: false, error: llm.error };
 
   const engine = llm.engine === "openai" ? "openai" : "gemini";
@@ -234,8 +421,9 @@ export async function suggestMoreQuestionsLlm(input: {
   }
 
   const hardness = input.hardness === "mixed" ? "medium" : input.hardness;
+  const allow = allowlistFor(units);
   const questions = (parsed.questions || [])
-    .map((q) => toQuestion(q, hardness))
+    .map((q) => toQuestion(q, hardness, allow))
     .filter((q) => q.text.length > 0)
     .slice(0, count);
 
@@ -243,5 +431,5 @@ export async function suggestMoreQuestionsLlm(input: {
     return { ok: false, error: "No questions in AI response" };
   }
 
-  return { ok: true, questions, engine };
+  return { ok: true, questions, engine, generationId: llm.generationId };
 }

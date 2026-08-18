@@ -1279,6 +1279,11 @@ h3,
 .dark .bg-\[\#f8faf8\],
 .dark .bg-\[\#f5f8fb\] { background-color: var(--surface-sunken); }
 .dark .border-slate-200 { border-color: var(--border); }
+/* `bg-[var(--brand-deep)] text-white` (167 sites — primary buttons, active
+   navy tabs, badges): --brand-deep flips to a LIGHT text colour in dark
+   mode, so these became white-on-white. Keep them a solid deep navy that
+   white text stays readable on. */
+.dark .bg-\[var\(--brand-deep\)\] { background-color: #2c4170; }
 /* Native controls (select popups, date pickers, scrollbars) follow the theme
    only when the element itself is scoped; .dark already sets color-scheme,
    this makes sure inputs inherit it and never render a white field. */
@@ -1294,3 +1299,19 @@ h3,
 .dark textarea::placeholder { color: var(--muted); }
 .dark input[type="date"]::-webkit-calendar-picker-indicator,
 .dark input[type="time"]::-webkit-calendar-picker-indicator { filter: invert(0.85); }
+
+/* Deliberately-light islands (public gate page, printed posters/passes):
+   opt out of the .dark remaps above so they read the same on any device. */
+.dark .theme-light-island,
+.dark .theme-light-island .text-\[\#203050\] { color: #203050; }
+.dark .theme-light-island.bg-white,
+.dark .theme-light-island .bg-white { background-color: #ffffff; }
+.dark .theme-light-island input:not([type="checkbox"]):not([type="radio"]),
+.dark .theme-light-island select,
+.dark .theme-light-island textarea {
+  color-scheme: light;
+  background-color: #ffffff;
+  color: #203050;
+  border-color: rgba(32, 48, 80, 0.25);
+}
+.dark .theme-light-island input::placeholder { color: #7a8299; }

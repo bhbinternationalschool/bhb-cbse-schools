@@ -208,9 +208,21 @@ export function saveHealth(state: HealthState): HealthState {
   const next = normalizeHealthState(state);
   if (typeof window !== "undefined") {
     writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
+    void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("health", next));
     window.dispatchEvent(new CustomEvent("bhb-health"));
   }
   return next;
+}
+
+/** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */
+export function writeHealthLocalRaw(state: HealthState): void {
+  if (typeof window === "undefined") return;
+  try {
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    /* quota — the server copy is the truth anyway */
+  }
+  window.dispatchEvent(new CustomEvent("bhb-health"));
 }
 
 export function upsertVisit(
