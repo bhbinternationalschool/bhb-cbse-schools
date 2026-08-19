@@ -84,5 +84,5 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: r.error }, { status: 502 });
   }
 
-  return NextResponse.json({ ok: true, summary: r.summary, engine: r.engine });
+  return NextResponse.json({ ok: true, summary: r.summary, engine: r.engine, generationId: r.generationId });
 }

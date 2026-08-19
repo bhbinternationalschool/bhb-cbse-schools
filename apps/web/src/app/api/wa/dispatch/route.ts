@@ -24,6 +24,8 @@ import {
   type WaTemplateComponent,
 } from "@/lib/waSend";
 import { logHouseholdWaSend } from "@/lib/householdMessageLog.server";
+import { resolveHouseholdByMobileServer } from "@/lib/parentHousehold.server";
+import { isInQuietHours, quietHoursLabel } from "@/lib/householdPrefs";
 
 export const runtime = "nodejs";
 
@@ -50,7 +52,27 @@ type DispatchItem = {
   fallbackMobile?: string;
   body?: string;
   template?: DispatchTemplate;
+  /**
+   * Skip the household's quiet-hours window? Attendance, transport, health
+   * and safety messages are urgent by module; anything else can set this
+   * explicitly (e.g. an OTP). Default false → fee reminders, campaigns and
+   * notices are deferred inside the family's quiet hours.
+   */
+  urgent?: boolean;
 };
+
+/** Modules whose messages are time-critical for the family — never held. */
+const URGENT_MODULES = new Set<string>([
+  "attendance",
+  "transport",
+  "fleet",
+  "health",
+  "visitors",
+  "discipline",
+  "student_leave",
+  "student-leave",
+  "auth",
+]);
 
 export async function GET() {
   return NextResponse.json({
@@ -133,7 +155,7 @@ export async function POST(req: Request) {
   const results: {
     messageId?: string;
     mobile: string;
-    status: "sent" | "failed";
+    status: "sent" | "failed" | "deferred";
     error?: string;
     providerId?: string;
     mode?: string;
@@ -142,6 +164,7 @@ export async function POST(req: Request) {
   }[] = [];
 
   const purpose = body?.module || "admissions";
+  const purposeUrgent = URGENT_MODULES.has(String(purpose));
 
   for (const item of messages) {
     const mobile = (item.mobile || "").replace(/\D/g, "");
@@ -154,6 +177,22 @@ export async function POST(req: Request) {
         error: "Invalid mobile",
       });
       continue;
+    }
+
+    // Household quiet hours (Students → Family). Non-urgent sends inside the
+    // family's window are returned as "deferred" — the caller (campaign
+    // queue, automation tick) retries later; nothing is dropped silently.
+    if (!item.urgent && !purposeUrgent) {
+      const hh = await resolveHouseholdByMobileServer(mobile).catch(() => null);
+      if (hh && isInQuietHours(hh.household)) {
+        results.push({
+          messageId: item.messageId,
+          mobile,
+          status: "deferred",
+          error: `Family quiet hours ${quietHoursLabel(hh.household)} — retry after the window`,
+        });
+        continue;
+      }
     }
 
     if (item.template?.name) {

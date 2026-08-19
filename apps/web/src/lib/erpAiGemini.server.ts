@@ -170,3 +170,66 @@ function sanitizeGeminiReply(text: string): string {
   }
   return out;
 }
+
+/**
+ * One image (or PDF) + instructions → JSON. Used for form / document
+ * extraction where Gemini's multimodal input does OCR + structuring in one
+ * call. Returns raw text (caller parses); strips a ```json fence if present.
+ */
+export async function generateGeminiVisionJson(opts: {
+  system: string;
+  prompt: string;
+  /** Raw base64 (no data: prefix) */
+  base64: string;
+  mimeType: string;
+  maxTokens?: number;
+  model?: string;
+}): Promise<
+  | { ok: true; text: string; model: string; usage: LlmUsage }
+  | { ok: false; error: string; model: string }
+> {
+  const model = (opts.model || geminiModel()).trim();
+  const key = geminiApiKey();
+  if (!key) return { ok: false, error: "GEMINI_API_KEY not configured", model };
+  const version = process.env.GEMINI_API_VERSION || "v1beta";
+  const url = `https://generativelanguage.googleapis.com/${version}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: `${opts.system}\n\nRespond with valid JSON only — no markdown fences.` }] },
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { inline_data: { mime_type: opts.mimeType, data: opts.base64 } },
+              { text: opts.prompt },
+            ],
+          },
+        ],
+        generationConfig: { temperature: 0.1, maxOutputTokens: opts.maxTokens ?? 1500, responseMimeType: "application/json" },
+      }),
+    });
+    const json = (await res.json().catch(() => ({}))) as {
+      candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[];
+      usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+      error?: { message?: string };
+    };
+    if (!res.ok) return { ok: false, error: json.error?.message || `Gemini HTTP ${res.status}`, model };
+    const text = (json.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("").trim();
+    if (!text) return { ok: false, error: `Empty Gemini response (${json.candidates?.[0]?.finishReason || "unknown"})`, model };
+    const m = text.match(/^```(?:json)?\s*([\s\S]*?)```$/i);
+    return {
+      ok: true,
+      text: (m ? m[1] : text).trim(),
+      model,
+      usage: {
+        promptTokens: json.usageMetadata?.promptTokenCount ?? null,
+        completionTokens: json.usageMetadata?.candidatesTokenCount ?? null,
+      },
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Gemini request failed", model };
+  }
+}

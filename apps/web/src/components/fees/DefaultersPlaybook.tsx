@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import Link from "next/link";
 import { withHydrationSlot } from "@/lib/deskHydrateGuard";
 import {
@@ -89,7 +90,7 @@ export function DefaultersPlaybook() {
   } | null>(null);
   const [meetings, setMeetings] = useState<FeeRecoveryMeeting[]>([]);
   const [aiDraft, setAiDraft] = useState<
-    { whatsappMessage: string; callScript: string } | null
+    { whatsappMessage: string; callScript: string; generationId?: string } | null
   >(null);
   const [aiDraftLoading, setAiDraftLoading] = useState(false);
   const [aiDraftError, setAiDraftError] = useState<string | null>(null);
@@ -211,6 +212,7 @@ export function DefaultersPlaybook() {
         callScript?: string;
         language?: string;
         warnings?: string[];
+        generationId?: string;
       };
       if (!json.ok || !json.whatsappMessage || !json.callScript) {
         setAiDraftError(json.error || "Draft failed");
@@ -219,6 +221,7 @@ export function DefaultersPlaybook() {
       setAiDraft({
         whatsappMessage: json.whatsappMessage,
         callScript: json.callScript,
+        generationId: json.generationId,
       });
     } catch (e) {
       setAiDraftError(e instanceof Error ? e.message : "Draft failed");
@@ -895,7 +898,13 @@ export function DefaultersPlaybook() {
                             void navigator.clipboard
                               .writeText(aiDraft.whatsappMessage)
                               .then(
-                                () => flash("Draft message copied"),
+                                () => {
+                                  flash("Draft message copied");
+                                  if (aiDraft.generationId) {
+                                    reportAiOutcome({ ids: [aiDraft.generationId], outcome: "accepted", targetType: "fee_defaulter", targetId: selectedId ?? "" });
+                                    setAiDraft({ ...aiDraft, generationId: undefined });
+                                  }
+                                },
                                 () => setError("Could not copy"),
                               )
                           }

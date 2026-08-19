@@ -73,6 +73,7 @@ export async function POST(req: Request) {
   return NextResponse.json({
     ok: true,
     engine: result.engine,
+    generationId: result.generationId,
     headline: result.headline,
     highlights: result.highlights,
   });

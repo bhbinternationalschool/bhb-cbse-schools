@@ -68,6 +68,7 @@ export async function POST(req: Request) {
   return NextResponse.json({
     ok: true,
     engine: result.engine,
+    generationId: result.generationId,
     nextAction: result.nextAction,
     outreachMessage: result.outreachMessage,
   });

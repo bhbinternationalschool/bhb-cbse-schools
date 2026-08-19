@@ -32,6 +32,7 @@ import {
   writeUdiseComplianceSettingsLocalRaw,
 } from "@/lib/udiseCompliance";
 import { loadTallySync, writeTallySyncLocalRaw } from "@/lib/tallySync";
+import { complianceFactsIsEmpty, loadComplianceFacts, writeComplianceFactsLocalRaw } from "@/lib/complianceFacts";
 import { loadWaCampaigns, writeWaCampaignsLocalRaw } from "@/lib/waCampaigns";
 import { loadCrmParentChat, writeCrmParentChatLocalRaw } from "@/lib/crmParentChat";
 import { loadWaChatbotFlows, writeWaChatbotFlowsLocalRaw } from "@/lib/waChatbotFlows";
@@ -126,6 +127,12 @@ const registry: Record<ModuleStateKey, ModuleStatePersistence<any>> = {
     isEmpty: () => true,
     loadLocal: () => ({ settings: loadUdiseComplianceSettings() }),
     writeLocalRaw: writeUdiseComplianceSettingsLocalRaw,
+  }),
+  compliance_facts: createModuleStatePersistence({
+    key: "compliance_facts",
+    isEmpty: complianceFactsIsEmpty,
+    loadLocal: loadComplianceFacts,
+    writeLocalRaw: writeComplianceFactsLocalRaw,
   }),
   tally_sync: createModuleStatePersistence({
     key: "tally_sync",

@@ -72,6 +72,7 @@ ${listing}`;
   return NextResponse.json({
     ok: true,
     engine: result.engine,
+    generationId: result.generationId,
     digest: result.text.trim(),
   });
 }

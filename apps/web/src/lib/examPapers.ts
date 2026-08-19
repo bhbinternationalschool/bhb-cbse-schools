@@ -135,9 +135,63 @@ export type ExamPaper = {
   updatedBy: string;
 };
 
+/**
+ * A reusable question with the metadata that makes it findable: which
+ * masters class/subject it suits, its unit / LO code / Bloom / type /
+ * marks (all on the question itself) and free tags. Bank items are copied
+ * *into* papers (new question id, source "bank"), never referenced — a
+ * later edit to the bank must not silently change a printed paper.
+ */
+export type BankQuestion = {
+  id: string;
+  classId: string;
+  subjectId: string;
+  question: ExamPaperQuestion;
+  tags: string[];
+  addedBy: string;
+  addedAt: string;
+  /** Times pulled into a paper — helps rotate items across years */
+  usedCount: number;
+  lastUsedAt: string;
+};
+
+export type BlueprintHardness = ExamPaperHardness;
+
+/** One cell of the blueprint matrix: "3 × 2-mark competency items from Ch 3 (M802), medium". */
+export type ExamBlueprintRow = {
+  id: string;
+  /** SyllabusUnit id; "" = anywhere in the subject */
+  unitId: string;
+  questionType: ExamPaperQuestionType;
+  /** Marks per question */
+  marks: number;
+  count: number;
+  hardness: BlueprintHardness;
+  /** LO code the items should assess; "" = untagged */
+  competencyCode: string;
+};
+
+export type ExamBlueprint = {
+  id: string;
+  academicYearCode: string;
+  classId: string;
+  subjectId: string;
+  /** "" = generic for the subject; else the exam term it was designed for */
+  examTermId: string;
+  title: string;
+  rows: ExamBlueprintRow[];
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type ExamPapersState = {
   version: 1;
   papers: ExamPaper[];
+  /** Question bank — desk slice "bank" */
+  bank: BankQuestion[];
+  /** Blueprints — desk slice "blueprints" */
+  blueprints: ExamBlueprint[];
 };
 
 const STORAGE_KEY = "bhb_exam_papers_v1";
@@ -247,7 +301,7 @@ export const FORMULA_PALETTE: { insert: string; label: string; group: string }[]
   ];
 
 export function emptyExamPapersState(): ExamPapersState {
-  return { version: 1, papers: [] };
+  return { version: 1, papers: [], bank: [], blueprints: [] };
 }
 
 export function emptyQuestion(
@@ -443,7 +497,75 @@ export function normalizeExamPapersState(raw: unknown): ExamPapersState {
     papers: Array.isArray(p.papers)
       ? p.papers.map(normalizePaper).filter((x): x is ExamPaper => !!x)
       : [],
+    bank: Array.isArray(p.bank)
+      ? p.bank.map(normalizeBankQuestion).filter((x): x is BankQuestion => !!x)
+      : [],
+    blueprints: Array.isArray(p.blueprints)
+      ? p.blueprints.map(normalizeBlueprint).filter((x): x is ExamBlueprint => !!x)
+      : [],
   };
+}
+
+function normalizeBankQuestion(b: Partial<BankQuestion>): BankQuestion | null {
+  if (!b || !b.question) return null;
+  const question = normalizeQuestion(b.question);
+  if (!question || !question.text.trim()) return null;
+  return {
+    id: b.id || nid("bq"),
+    classId: String(b.classId || ""),
+    subjectId: String(b.subjectId || ""),
+    question,
+    tags: Array.isArray(b.tags) ? b.tags.map((t) => String(t || "").trim()).filter(Boolean).slice(0, 12) : [],
+    addedBy: String(b.addedBy || ""),
+    addedAt: b.addedAt || nowIso(),
+    usedCount: Math.max(0, Math.floor(Number(b.usedCount) || 0)),
+    lastUsedAt: String(b.lastUsedAt || ""),
+  };
+}
+
+function normalizeBlueprintRow(r: Partial<ExamBlueprintRow>): ExamBlueprintRow | null {
+  if (!r) return null;
+  const questionType = QUESTION_TYPES.some((t) => t.code === r.questionType)
+    ? (r.questionType as ExamPaperQuestionType)
+    : "short";
+  const marks = Math.max(0, Number(r.marks) || 0);
+  const count = Math.max(0, Math.floor(Number(r.count) || 0));
+  if (marks <= 0 || count <= 0) return null;
+  const hardness: BlueprintHardness = HARDNESS_LEVELS.some((h) => h.code === r.hardness)
+    ? (r.hardness as BlueprintHardness)
+    : "mixed";
+  return {
+    id: r.id || nid("bpr"),
+    unitId: String(r.unitId || ""),
+    questionType,
+    marks,
+    count,
+    hardness,
+    competencyCode: String(r.competencyCode || "").trim().toUpperCase().slice(0, 40),
+  };
+}
+
+function normalizeBlueprint(b: Partial<ExamBlueprint>): ExamBlueprint | null {
+  // A blueprint without its session is not a blueprint — never invent the year.
+  if (!b || !b.classId || !b.subjectId || !b.academicYearCode) return null;
+  return {
+    id: b.id || nid("bp"),
+    academicYearCode: b.academicYearCode,
+    classId: String(b.classId),
+    subjectId: String(b.subjectId),
+    examTermId: String(b.examTermId || ""),
+    title: String(b.title || "Blueprint"),
+    rows: Array.isArray(b.rows)
+      ? b.rows.map(normalizeBlueprintRow).filter((x): x is ExamBlueprintRow => !!x)
+      : [],
+    createdBy: String(b.createdBy || ""),
+    createdAt: b.createdAt || nowIso(),
+    updatedAt: b.updatedAt || nowIso(),
+  };
+}
+
+export function blueprintTotalMarks(bp: Pick<ExamBlueprint, "rows">): number {
+  return bp.rows.reduce((a, r) => a + r.marks * r.count, 0);
 }
 
 function provisionalPaperCode() {
@@ -732,4 +854,234 @@ export function schoolHeaderDefaults() {
 
 export function questionTypeLabel(type: ExamPaperQuestionType): string {
   return QUESTION_TYPES.find((t) => t.code === type)?.label || type;
+}
+
+/* ─── Question bank ──────────────────────────────────────────────── */
+
+function normText(t: string): string {
+  return t.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Add questions to the bank for a class + subject. Duplicates (same text
+ * for the same class+subject) are skipped, not doubled. Pure: returns the
+ * next state and how many were actually added.
+ */
+export function addQuestionsToBank(
+  state: ExamPapersState,
+  input: {
+    classId: string;
+    subjectId: string;
+    questions: ExamPaperQuestion[];
+    tags?: string[];
+    by: string;
+  },
+): { state: ExamPapersState; added: number } {
+  const existing = new Set(
+    state.bank
+      .filter((b) => b.classId === input.classId && b.subjectId === input.subjectId)
+      .map((b) => normText(b.question.text)),
+  );
+  const now = nowIso();
+  const fresh: BankQuestion[] = [];
+  for (const q of input.questions) {
+    const key = normText(q.text);
+    if (!key || existing.has(key)) continue;
+    existing.add(key);
+    fresh.push({
+      id: nid("bq"),
+      classId: input.classId,
+      subjectId: input.subjectId,
+      // Bank copy gets its own question id so a paper never shares ids with the bank.
+      question: emptyQuestion({ ...q, id: nid("q"), source: "bank" }),
+      tags: (input.tags ?? []).map((t) => t.trim()).filter(Boolean),
+      addedBy: input.by,
+      addedAt: now,
+      usedCount: 0,
+      lastUsedAt: "",
+    });
+  }
+  return { state: { ...state, bank: [...state.bank, ...fresh] }, added: fresh.length };
+}
+
+export function removeFromBank(state: ExamPapersState, bankId: string): ExamPapersState {
+  return { ...state, bank: state.bank.filter((b) => b.id !== bankId) };
+}
+
+export function listBank(
+  state: ExamPapersState,
+  filters: { classId?: string; subjectId?: string; unitId?: string; type?: ExamPaperQuestionType; search?: string },
+): BankQuestion[] {
+  const q = normText(filters.search || "");
+  return state.bank.filter((b) => {
+    if (filters.classId && b.classId !== filters.classId) return false;
+    if (filters.subjectId && b.subjectId !== filters.subjectId) return false;
+    if (filters.unitId && b.question.unitId !== filters.unitId) return false;
+    if (filters.type && b.question.type !== filters.type) return false;
+    if (q && !normText(`${b.question.text} ${b.question.competencyCode} ${b.tags.join(" ")}`).includes(q)) return false;
+    return true;
+  });
+}
+
+/**
+ * Bank items that satisfy one blueprint row: same class+subject, same
+ * type and marks, unit and LO code when the row names them, hardness when
+ * the row is not "mixed". Least-used first so the same item is not pulled
+ * every year; `exclude` = ids already used in this paper.
+ */
+export function matchBankForRow(
+  state: ExamPapersState,
+  ctx: { classId: string; subjectId: string },
+  row: ExamBlueprintRow,
+  exclude: Set<string> = new Set(),
+): BankQuestion[] {
+  return state.bank
+    .filter((b) => {
+      if (exclude.has(b.id)) return false;
+      if (b.classId !== ctx.classId || b.subjectId !== ctx.subjectId) return false;
+      const q = b.question;
+      if (q.type !== row.questionType) return false;
+      if (q.marks !== row.marks) return false;
+      if (row.unitId && q.unitId !== row.unitId) return false;
+      if (row.competencyCode && q.competencyCode !== row.competencyCode) return false;
+      if (row.hardness !== "mixed" && q.hardness !== row.hardness) return false;
+      return true;
+    })
+    .sort((a, b) => a.usedCount - b.usedCount || a.addedAt.localeCompare(b.addedAt));
+}
+
+/** Copy a bank item into a paper (fresh id, source "bank") and count the use. */
+export function takeFromBank(
+  state: ExamPapersState,
+  bankId: string,
+): { state: ExamPapersState; question: ExamPaperQuestion } | null {
+  const item = state.bank.find((b) => b.id === bankId);
+  if (!item) return null;
+  const now = nowIso();
+  return {
+    state: {
+      ...state,
+      bank: state.bank.map((b) =>
+        b.id === bankId ? { ...b, usedCount: b.usedCount + 1, lastUsedAt: now } : b,
+      ),
+    },
+    question: emptyQuestion({ ...item.question, id: nid("q"), source: "bank" }),
+  };
+}
+
+/* ─── Blueprints ─────────────────────────────────────────────────── */
+
+export function upsertBlueprint(
+  state: ExamPapersState,
+  input: Partial<ExamBlueprint> & { classId: string; subjectId: string; by: string },
+): { ok: true; state: ExamPapersState; blueprint: ExamBlueprint } | { ok: false; error: string } {
+  const existing = input.id ? state.blueprints.find((b) => b.id === input.id) : undefined;
+  const bp = normalizeBlueprint({
+    ...(existing ?? {}),
+    ...input,
+    createdBy: existing?.createdBy || input.by,
+    createdAt: existing?.createdAt || nowIso(),
+    updatedAt: nowIso(),
+  });
+  if (!bp) return { ok: false, error: "Blueprint needs a class and subject" };
+  if (bp.rows.length === 0) return { ok: false, error: "Add at least one row (type · marks · count)" };
+  const blueprints = existing
+    ? state.blueprints.map((b) => (b.id === bp.id ? bp : b))
+    : [...state.blueprints, bp];
+  return { ok: true, state: { ...state, blueprints }, blueprint: bp };
+}
+
+export function removeBlueprint(state: ExamPapersState, id: string): ExamPapersState {
+  return { ...state, blueprints: state.blueprints.filter((b) => b.id !== id) };
+}
+
+export function listBlueprints(
+  state: ExamPapersState,
+  filters: { academicYearCode?: string; classId?: string; subjectId?: string },
+): ExamBlueprint[] {
+  return state.blueprints.filter(
+    (b) =>
+      (!filters.academicYearCode || b.academicYearCode === filters.academicYearCode) &&
+      (!filters.classId || b.classId === filters.classId) &&
+      (!filters.subjectId || b.subjectId === filters.subjectId),
+  );
+}
+
+/** CBSE-ish section order for assembling a paper from rows. */
+export const BLUEPRINT_TYPE_ORDER: ExamPaperQuestionType[] = [
+  "mcq",
+  "assertion_reason",
+  "fill",
+  "true_false",
+  "match",
+  "primary_picture",
+  "short",
+  "numerical",
+  "diagram",
+  "long",
+  "case_study",
+  "competency",
+];
+
+/**
+ * Fill a blueprint from the bank. Returns, per row, the questions taken and
+ * how many are still missing (for the LLM), plus the bank state with use
+ * counts bumped. Pure.
+ */
+export function fillBlueprintFromBank(
+  state: ExamPapersState,
+  ctx: { classId: string; subjectId: string },
+  rows: ExamBlueprintRow[],
+): {
+  state: ExamPapersState;
+  cells: { row: ExamBlueprintRow; taken: ExamPaperQuestion[]; missing: number }[];
+} {
+  let next = state;
+  const used = new Set<string>();
+  const cells = rows.map((row) => {
+    const matches = matchBankForRow(next, ctx, row, used).slice(0, row.count);
+    const taken: ExamPaperQuestion[] = [];
+    for (const m of matches) {
+      const t = takeFromBank(next, m.id);
+      if (!t) continue;
+      next = t.state;
+      used.add(m.id);
+      taken.push(t.question);
+    }
+    return { row, taken, missing: Math.max(0, row.count - taken.length) };
+  });
+  return { state: next, cells };
+}
+
+/**
+ * Group filled cells into sections in CBSE order. Rows of the same type
+ * share a section; each section's title says what it holds.
+ */
+export function assembleSectionsFromCells(
+  cells: { row: ExamBlueprintRow; questions: ExamPaperQuestion[] }[],
+): ExamPaperSection[] {
+  const byType = new Map<ExamPaperQuestionType, ExamPaperQuestion[]>();
+  for (const c of cells) {
+    const list = byType.get(c.row.questionType) ?? [];
+    list.push(...c.questions);
+    byType.set(c.row.questionType, list);
+  }
+  const sections: ExamPaperSection[] = [];
+  let letter = 0;
+  for (const type of BLUEPRINT_TYPE_ORDER) {
+    const qs = byType.get(type);
+    if (!qs || qs.length === 0) continue;
+    const marks = qs[0]?.marks ?? 1;
+    const uniform = qs.every((q) => q.marks === marks);
+    sections.push(
+      emptySection({
+        title: `Section ${String.fromCharCode(65 + letter++)} — ${questionTypeLabel(type)}`,
+        instructions: uniform
+          ? `${qs.length} question${qs.length === 1 ? "" : "s"} × ${marks} mark${marks === 1 ? "" : "s"}.`
+          : `${qs.length} questions.`,
+        questions: qs,
+      }),
+    );
+  }
+  return sections;
 }

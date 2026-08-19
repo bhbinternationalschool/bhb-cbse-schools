@@ -16,6 +16,7 @@ import {
   buildEmptyCoScholasticGrid,
   flattenCoScholastic,
   flattenExamMarks,
+  flattenItemScores,
   flattenOverallRemarks,
   normalizeRemarkSource,
   type MarkSheet,
@@ -48,6 +49,7 @@ const sheetA: MarkSheet = {
       model: "gemini-3.6-flash",
     },
   ],
+  itemScores: [],
   lockedAt: null,
   enteredBy: "teacher-1",
   updatedAt: "2026-08-10T00:00:00.000Z",
@@ -64,6 +66,10 @@ const sheetB: MarkSheet = {
   ],
   coScholastic: [],
   overallRemarks: [],
+  itemScores: [
+    { studentId: "stu-3", subjectId: "sub-eng", paperId: "ep-1", setCode: "A", questionId: "q-1", marks: 4 },
+    { studentId: "stu-3", subjectId: "sub-eng", paperId: "ep-1", setCode: "A", questionId: "q-2", marks: null },
+  ],
   lockedAt: null,
   enteredBy: "teacher-2",
   updatedAt: "2026-08-10T00:00:00.000Z",
@@ -182,6 +188,19 @@ const sheetB: MarkSheet = {
 {
   const flat = flattenExamMarks([sheetA]);
   assert.ok(flat.every((m) => m.remarkSource === "manual"));
+}
+
+// --- item scores flatten with the same key scheme as exam_desk_item_scores --
+{
+  const flat = flattenItemScores([sheetA, sheetB]);
+  assert.equal(flat.length, 2, "only sheetB has item scores");
+  assert.deepEqual(
+    flat.map((e) => e.id).sort(),
+    ["sheet-b:stu-3:ep-1:A:q-1", "sheet-b:stu-3:ep-1:A:q-2"],
+    "id must be `${sheetId}:${studentId}:${paperId}:${setCode}:${questionId}`",
+  );
+  assert.equal(flat.find((e) => e.questionId === "q-2")?.marks, null, "unmarked item stays null, never 0");
+  assert.deepEqual(flattenItemScores([{ ...sheetA, itemScores: [] }]), []);
 }
 
 console.log("OK — exams.selftest.ts");

@@ -57,6 +57,7 @@ export async function POST(req: Request) {
   return NextResponse.json({
     ok: true,
     engine: result.engine,
+    generationId: result.generationId,
     audienceSummary: result.audienceSummary,
     audienceExplanation: result.audienceExplanation,
     triggerType: result.triggerType,

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import {
   WA_TEMPLATE_CONTENT_SNIPPETS,
   type WaTemplateLanguage,
@@ -51,12 +52,17 @@ export function WaTemplateContentHelper({
         error?: string;
         body?: string;
         footer?: string;
+        generationId?: string;
       };
       if (!json.ok || !json.body) {
         setAiError(json.error || "Generation failed");
         return;
       }
       onApply(json.body, json.footer || "");
+      // Applying the draft into the template editor is the acceptance signal.
+      if (json.generationId) {
+        reportAiOutcome({ ids: [json.generationId], outcome: "accepted", targetType: "wa_template" });
+      }
       setPurpose("");
     } catch (e) {
       setAiError(e instanceof Error ? e.message : "Generation failed");

@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import { FileText } from "lucide-react";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { currentAcademicYearCode, loadMasters, type MastersState } from "@/lib/masters";
 import {
   SCHOOL_DOCUMENT_PRESETS,
+  buildComplianceFactsFromMasters,
   presetForType,
   type SchoolDocumentLanguage,
   type SchoolDocumentType,
@@ -19,6 +21,7 @@ import {
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { hasPermission } from "@/lib/rbac";
+import { MeetingMinutesPanel } from "@/components/documents/MeetingMinutesPanel";
 
 type GeneratedDoc = {
   titleEn: string;
@@ -26,6 +29,8 @@ type GeneratedDoc = {
   bodyEn: string;
   bodyHi: string;
   subject: string;
+  /** ai_generations row behind this draft; "" for minutes / already reported */
+  generationId?: string;
 };
 
 function splitParagraphs(text: string): string[] {
@@ -41,6 +46,7 @@ export function DocumentMakerWorkspace() {
   const [docType, setDocType] = useState<SchoolDocumentType>("formal_letter");
   const [language, setLanguage] = useState<SchoolDocumentLanguage>("both");
   const [details, setDetails] = useState("");
+  const [mode, setMode] = useState<"letter" | "minutes">("letter");
   const [generated, setGenerated] = useState<GeneratedDoc | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,6 +61,19 @@ export function DocumentMakerWorkspace() {
     if (!masters) return false;
     return hasPermission(session, masters, "documents", "export");
   }, [session, masters]);
+
+  // Prefill from a deep link (Admissions → "Offer letter" etc.): ?type=&details=
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const sp = new URLSearchParams(window.location.search);
+    const t = sp.get("type");
+    if (t && SCHOOL_DOCUMENT_PRESETS.some((p) => p.id === t)) setDocType(t as SchoolDocumentType);
+    const d = sp.get("details");
+    if (d) setDetails(d.slice(0, 4000));
+    const l = sp.get("language");
+    if (l === "en" || l === "hi" || l === "both") setLanguage(l);
+    if (sp.get("mode") === "minutes") setMode("minutes");
+  }, []);
 
   useEffect(() => {
     setMasters(loadMasters());
@@ -98,6 +117,7 @@ export function DocumentMakerWorkspace() {
         bodyEn: data.bodyEn || "",
         bodyHi: data.bodyHi || "",
         subject: data.subject || preset.defaultSubjectEn,
+        generationId: (data as { generationId?: string }).generationId || "",
       });
       setNotice("Document generated — review preview below");
       window.setTimeout(() => setNotice(null), 2800);
@@ -162,6 +182,11 @@ export function DocumentMakerWorkspace() {
 
     await drawPdfDocumentSignatures(doc, brand, margin, pageW, pageH);
     doc.save(`school_document_${Date.now()}.pdf`);
+    // Printing is the acceptance signal for a document draft.
+    if (generated.generationId) {
+      reportAiOutcome({ ids: [generated.generationId], outcome: "accepted", targetType: "school_document" });
+      setGenerated({ ...generated, generationId: "" });
+    }
   }
 
   return (
@@ -173,11 +198,79 @@ export function DocumentMakerWorkspace() {
     >
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
         <section className="space-y-4 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm">
-          <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
-            Compose
-          </h2>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
+              Compose
+            </h2>
+            <div className="inline-flex rounded-lg border border-[var(--border)] p-0.5 text-xs">
+              {(
+                [
+                  ["letter", "Letter / notice"],
+                  ["minutes", "Meeting minutes"],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => {
+                    setMode(id);
+                    setGenerated(null);
+                  }}
+                  className={`rounded-md px-2.5 py-1 font-semibold ${
+                    mode === id ? "bg-[var(--brand-deep)] text-white" : "text-[var(--brand-deep)]"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
 
           <label className="block text-sm">
+            <span className="mb-1 block text-[11px] text-[var(--muted)]">
+              Language
+            </span>
+            <select
+              className="field !py-1.5"
+              value={language}
+              onChange={(e) =>
+                setLanguage(e.target.value as SchoolDocumentLanguage)
+              }
+            >
+              <option value="en">English</option>
+              <option value="hi">Hindi</option>
+              <option value="both">English + Hindi</option>
+            </select>
+          </label>
+
+          {mode === "minutes" ? (
+            <>
+              <MeetingMinutesPanel
+                canCreate={canCreate}
+                language={language}
+                onDocument={(doc) => setGenerated(doc)}
+                onError={setError}
+                onNotice={(m) => {
+                  setNotice(m);
+                  if (m) window.setTimeout(() => setNotice(null), 2800);
+                }}
+              />
+              {error ? (
+                <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-800">{error}</p>
+              ) : null}
+              {generated && canExport ? (
+                <button
+                  type="button"
+                  className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm font-semibold text-[var(--brand-deep)]"
+                  onClick={() => void printPdf()}
+                >
+                  Print PDF
+                </button>
+              ) : null}
+            </>
+          ) : null}
+
+          <label className={mode === "minutes" ? "hidden" : "block text-sm"}>
             <span className="mb-1 block text-[11px] text-[var(--muted)]">
               Document type
             </span>
@@ -197,24 +290,7 @@ export function DocumentMakerWorkspace() {
             </span>
           </label>
 
-          <label className="block text-sm">
-            <span className="mb-1 block text-[11px] text-[var(--muted)]">
-              Language
-            </span>
-            <select
-              className="field !py-1.5"
-              value={language}
-              onChange={(e) =>
-                setLanguage(e.target.value as SchoolDocumentLanguage)
-              }
-            >
-              <option value="en">English</option>
-              <option value="hi">Hindi</option>
-              <option value="both">English + Hindi</option>
-            </select>
-          </label>
-
-          <label className="block text-sm">
+          <label className={mode === "minutes" ? "hidden" : "block text-sm"}>
             <span className="mb-1 block text-[11px] text-[var(--muted)]">
               Details for AI
             </span>
@@ -224,15 +300,39 @@ export function DocumentMakerWorkspace() {
               value={details}
               onChange={(e) => setDetails(e.target.value)}
             />
+            {docType === "compliance_narrative" && masters ? (
+              <button
+                type="button"
+                className="mt-1 text-[11px] font-semibold text-[var(--brand-deep)] underline"
+                onClick={() => {
+                  void Promise.all([import("@/lib/sis"), import("@/lib/exams"), import("@/lib/complianceFacts")]).then(
+                    ([sisMod, examsMod, cf]) => {
+                      const ay = currentAcademicYearCode(masters);
+                      const facts = buildComplianceFactsFromMasters({
+                        academicYearCode: ay,
+                        masters,
+                        students: sisMod.loadSis().students,
+                        examTermCount: examsMod.listExamTerms(ay).length,
+                      });
+                      const recorded = cf.complianceFactsToText(cf.loadComplianceFacts(), ay);
+                      const all = recorded ? `${facts}\n\nRecorded under Compliance → School facts:\n${recorded}` : facts;
+                      setDetails((d) => (d.trim() ? `${d.trim()}\n\n${all}` : all));
+                    },
+                  );
+                }}
+              >
+                Insert school facts from the ERP (enrolment, sections, staff, fees, exams)
+              </button>
+            ) : null}
           </label>
 
-          {error ? (
+          {error && mode === "letter" ? (
             <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-800">
               {error}
             </p>
           ) : null}
 
-          <div className="flex flex-wrap gap-2">
+          <div className={mode === "minutes" ? "hidden" : "flex flex-wrap gap-2"}>
             <button
               type="button"
               className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-[var(--primary-foreground)] disabled:opacity-50"

@@ -72,12 +72,16 @@ import { InvigilationPanel } from "@/components/exams/InvigilationPanel";
 import { ExamPapersPanel } from "@/components/exams/ExamPapersPanel";
 import { AdmitCardsPanel } from "@/components/exams/AdmitCardsPanel";
 import { RemarksPanel } from "@/components/exams/RemarksPanel";
+import { ItemScoresPanel } from "@/components/exams/ItemScoresPanel";
+import { AtRiskPanel } from "@/components/exams/AtRiskPanel";
 import { ExamReportsRunner } from "@/components/reports/ModuleReportRunners";
 import { hasPermission } from "@/lib/rbac";
 
 type Tab =
   | "dashboard"
   | "marks"
+  | "items"
+  | "atrisk"
   | "remarks"
   | "datesheet"
   | "invigilation"
@@ -660,6 +664,8 @@ export function ExamsWorkspace() {
         items={[
           { id: "dashboard", label: "Dashboard", tone: "navy" },
           { id: "marks", label: "Mark entry", tone: "sky" },
+          { id: "items", label: "Item scores", tone: "sky" },
+          { id: "atrisk", label: "At-risk", tone: "coral" },
           { id: "remarks", label: "Remarks", tone: "teal" },
           { id: "datesheet", label: "Date-sheet", tone: "violet" },
           { id: "invigilation", label: "Invigilation", tone: "coral" },
@@ -1327,6 +1333,43 @@ export function ExamsWorkspace() {
                   Enable NEP 2020 co-scholastic domains (socio-emotional,
                   psychomotor) on marks entry and report cards
                 </label>
+                <div className="rounded-lg border border-[var(--border)] p-3">
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--muted)]">
+                    At-risk thresholds (early-warning list)
+                  </p>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-5">
+                    {(
+                      [
+                        ["attendancePct", "Attendance below %", 0, 100, 1],
+                        ["incidents", "Incidents ≥", 1, 50, 1],
+                        ["homeworkRatio", "Homework below (0–1)", 0, 1, 0.05],
+                        ["homeworkMinDue", "…with at least N due", 1, 100, 1],
+                        ["subjectDrops", "Subjects slipped ≥", 1, 20, 1],
+                      ] as const
+                    ).map(([key, label, min, max, step]) => (
+                      <label key={key} className="block text-[11px] text-[var(--muted)]">
+                        {label}
+                        <input
+                          type="number"
+                          min={min}
+                          max={max}
+                          step={step}
+                          className="field mt-0.5 !py-1 text-sm"
+                          value={policyDraft.riskThresholds[key]}
+                          onChange={(e) =>
+                            setPolicyDraft({
+                              ...policyDraft,
+                              riskThresholds: {
+                                ...policyDraft.riskThresholds,
+                                [key]: Number(e.target.value),
+                              },
+                            })
+                          }
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
                 <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
                   <input
                     type="checkbox"
@@ -1666,6 +1709,39 @@ export function ExamsWorkspace() {
             </>
           )}
         </div>
+      ) : null}
+
+      {tab === "items" ? (
+        <ItemScoresPanel
+          ay={ay}
+          term={term}
+          classId={classId}
+          sectionId={sectionId}
+          roster={roster}
+          subjects={subjects}
+          classLabel={classLabel}
+          masters={masters}
+          canEdit={!!masters && hasPermission(session, masters, "exams", "edit")}
+          enteredBy={session.fullName}
+          onSaved={refresh}
+          onFlash={flash}
+          onError={setError}
+        />
+      ) : null}
+
+      {tab === "atrisk" ? (
+        <AtRiskPanel
+          ay={ay}
+          term={term}
+          classId={classId}
+          sectionId={sectionId}
+          roster={roster}
+          masters={masters}
+          policy={policy}
+          canEdit={!!masters && hasPermission(session, masters, "exams", "edit")}
+          onFlash={flash}
+          onError={setError}
+        />
       ) : null}
 
       {tab === "remarks" ? (

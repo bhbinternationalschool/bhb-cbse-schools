@@ -97,6 +97,17 @@ export type ExamPolicy = {
    * ratings on the marks-entry grid and printed report card. Opt-in
    * (defaults false) so it never appears on a report unannounced. */
   enableCoScholastic: boolean;
+  /**
+   * Early-warning thresholds for the At-risk tab (lib/academicRisk.ts).
+   * Absent → DEFAULT_RISK_THRESHOLDS; the school tunes them here.
+   */
+  riskThresholds: {
+    attendancePct: number;
+    incidents: number;
+    homeworkRatio: number;
+    homeworkMinDue: number;
+    subjectDrops: number;
+  };
 };
 
 export type ExamSubject = {
@@ -160,6 +171,26 @@ export type StudentOverallRemark = {
   model: string;
 };
 
+/**
+ * One student's marks on one question of one question paper — the item
+ * level beneath the subject total. Lets "Class 8-B is weak on Ch 3 /
+ * LO M802 / application items" be derived instead of guessed, and lets
+ * subject totals be summed rather than typed. Sits on the mark sheet like
+ * `coScholastic` does; empty on sheets saved before this existed.
+ */
+export type StudentItemScore = {
+  studentId: string;
+  subjectId: string;
+  /** ExamPaper.id the student wrote */
+  paperId: string;
+  /** Which set (A/B/…) the student wrote — questions differ per set */
+  setCode: string;
+  /** ExamPaperQuestion.id */
+  questionId: string;
+  /** null = not marked yet / absent for this item */
+  marks: number | null;
+};
+
 /** NEP 2020 Holistic Progress Card — co-scholastic domains rated by whoever
  * enters marks for the class (same permission, no separate class-teacher
  * gate — see the co-scholastic rounds's plan for why). */
@@ -218,6 +249,8 @@ export type MarkSheet = {
   /** Class teacher's overall remark per student — sits beside `marks` like
    * `coScholastic` does. Empty on sheets saved before this field existed. */
   overallRemarks: StudentOverallRemark[];
+  /** Question-wise marks per student per paper — see StudentItemScore. */
+  itemScores: StudentItemScore[];
   lockedAt: string | null;
   enteredBy: string;
   updatedAt: string;
@@ -282,6 +315,36 @@ export function flattenOverallRemarks(sheets: MarkSheet[]): FlatOverallRemark[] 
         text: r.text,
         textHi: r.textHi,
         source: r.source,
+      });
+    }
+  }
+  return out;
+}
+
+export type FlatItemScore = {
+  id: string;
+  sheetId: string;
+  studentId: string;
+  subjectId: string;
+  paperId: string;
+  setCode: string;
+  questionId: string;
+  marks: number | null;
+};
+
+export function flattenItemScores(sheets: MarkSheet[]): FlatItemScore[] {
+  const out: FlatItemScore[] = [];
+  for (const sheet of sheets) {
+    for (const e of sheet.itemScores ?? []) {
+      out.push({
+        id: `${sheet.id}:${e.studentId}:${e.paperId}:${e.setCode}:${e.questionId}`,
+        sheetId: sheet.id,
+        studentId: e.studentId,
+        subjectId: e.subjectId,
+        paperId: e.paperId,
+        setCode: e.setCode,
+        questionId: e.questionId,
+        marks: e.marks,
       });
     }
   }
@@ -385,6 +448,7 @@ export function defaultExamPolicy(): ExamPolicy {
     defaultRequiresSeparateMarksheet: true,
     requireAllSubjectsPassForPromotion: true,
     enableCoScholastic: false,
+    riskThresholds: { attendancePct: 75, incidents: 3, homeworkRatio: 0.6, homeworkMinDue: 5, subjectDrops: 2 },
   };
 }
 
@@ -435,6 +499,23 @@ export function normalizeExamPolicy(
     requireAllSubjectsPassForPromotion:
       p.requireAllSubjectsPassForPromotion !== false,
     enableCoScholastic: !!p.enableCoScholastic,
+    riskThresholds: normalizeRiskThresholds(p.riskThresholds),
+  };
+}
+
+function normalizeRiskThresholds(
+  r: Partial<ExamPolicy["riskThresholds"]> | null | undefined,
+): ExamPolicy["riskThresholds"] {
+  const d = { attendancePct: 75, incidents: 3, homeworkRatio: 0.6, homeworkMinDue: 5, subjectDrops: 2 };
+  if (!r) return d;
+  const n = (v: unknown, lo: number, hi: number, dflt: number) =>
+    typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : dflt;
+  return {
+    attendancePct: n(r.attendancePct, 0, 100, d.attendancePct),
+    incidents: Math.floor(n(r.incidents, 1, 50, d.incidents)),
+    homeworkRatio: n(r.homeworkRatio, 0, 1, d.homeworkRatio),
+    homeworkMinDue: Math.floor(n(r.homeworkMinDue, 1, 100, d.homeworkMinDue)),
+    subjectDrops: Math.floor(n(r.subjectDrops, 1, 20, d.subjectDrops)),
   };
 }
 
@@ -780,6 +861,18 @@ function normalizeOverallRemark(
   };
 }
 
+function normalizeItemScore(e: Partial<StudentItemScore>): StudentItemScore {
+  const n = e.marks == null || e.marks === undefined ? null : Number(e.marks);
+  return {
+    studentId: String(e.studentId ?? ""),
+    subjectId: String(e.subjectId ?? ""),
+    paperId: String(e.paperId ?? ""),
+    setCode: String(e.setCode ?? "A").toUpperCase().slice(0, 1) || "A",
+    questionId: String(e.questionId ?? ""),
+    marks: n == null || !Number.isFinite(n) ? null : Math.max(0, n),
+  };
+}
+
 function normalizeCoScholasticEntry(
   e: Partial<StudentCoScholasticEntry>,
 ): StudentCoScholasticEntry {
@@ -807,6 +900,11 @@ function normalizeSheet(s: Partial<MarkSheet>): MarkSheet {
       ? s.overallRemarks
           .map(normalizeOverallRemark)
           .filter((r) => r.studentId && (r.text || r.textHi))
+      : [],
+    itemScores: Array.isArray(s.itemScores)
+      ? s.itemScores
+          .map(normalizeItemScore)
+          .filter((e) => e.studentId && e.subjectId && e.paperId && e.questionId)
       : [],
     lockedAt: s.lockedAt ?? null,
     enteredBy: s.enteredBy ?? "",
@@ -1750,6 +1848,7 @@ export function saveMarkSheet(input: {
     marks: normalizedMarks,
     coScholastic: input.coScholastic ?? existing?.coScholastic ?? [],
     overallRemarks: existing?.overallRemarks ?? [],
+    itemScores: existing?.itemScores ?? [],
     lockedAt: input.lock ? now : existing?.lockedAt ?? null,
     enteredBy: input.enteredBy,
     updatedAt: now,
@@ -1819,6 +1918,115 @@ export function saveSheetRemarks(input: {
   const sheets = state.sheets.map((s) => (s.id === existing.id ? sheet : s));
   saveExams({ ...state, sheets });
   return { ok: true, sheet };
+}
+
+/**
+ * Save question-wise marks for one paper (and set) onto the section's mark
+ * sheet, creating the sheet if this is the first entry for the exam. With
+ * `applyTotals`, each student's subject mark becomes the sum of their item
+ * marks (clamped to the subject max) and the grade is recomputed — the
+ * item grid becomes the source of truth for that subject; students with no
+ * item entered keep whatever subject mark they had.
+ *
+ * Refuses on a locked sheet: item marks feed subject totals, and a locked
+ * sheet means those totals are frozen.
+ */
+export function saveSheetItemScores(input: {
+  academicYearCode: string;
+  examTermId: string;
+  classId: string;
+  sectionId: string;
+  subjectId: string;
+  paperId: string;
+  setCode: string;
+  /** Full grid for this paper+set; entries for other papers are untouched */
+  scores: { studentId: string; questionId: string; marks: number | null }[];
+  applyTotals: boolean;
+  enteredBy: string;
+}): { ok: true; sheet: MarkSheet; totalsApplied: number } | { ok: false; error: string } {
+  const state = loadExams();
+  const term = state.terms.find((t) => t.id === input.examTermId);
+  if (!term) return { ok: false, error: "Exam term not found" };
+  const existing = findMarkSheet(
+    input.academicYearCode,
+    input.examTermId,
+    input.sectionId,
+    state,
+  );
+  if (existing?.lockedAt) {
+    return { ok: false, error: "Mark sheet is locked — item marks feed the totals" };
+  }
+  const setCode = (input.setCode || "A").toUpperCase().slice(0, 1);
+  const kept = (existing?.itemScores ?? []).filter(
+    (e) => !(e.paperId === input.paperId && e.setCode === setCode),
+  );
+  const fresh: StudentItemScore[] = input.scores
+    .map((x) =>
+      normalizeItemScore({
+        studentId: x.studentId,
+        subjectId: input.subjectId,
+        paperId: input.paperId,
+        setCode,
+        questionId: x.questionId,
+        marks: x.marks,
+      }),
+    )
+    .filter((e) => e.studentId && e.questionId);
+
+  let marks = existing?.marks ?? [];
+  let totalsApplied = 0;
+  if (input.applyTotals) {
+    const sub =
+      state.subjects.find((s) => s.id === input.subjectId) ?? null;
+    const max = sub ? effectiveMaxMarks(term, sub) : 100;
+    const passPercent = getExamPolicy(state).passPercent;
+    const totals = new Map<string, number>();
+    const touched = new Set<string>();
+    for (const e of fresh) {
+      if (e.marks == null) continue;
+      totals.set(e.studentId, (totals.get(e.studentId) ?? 0) + e.marks);
+      touched.add(e.studentId);
+    }
+    const byStudent = new Map(marks.filter((m) => m.subjectId === input.subjectId).map((m) => [m.studentId, m]));
+    for (const studentId of touched) {
+      const total = Math.min(max, Math.round((totals.get(studentId) ?? 0) * 100) / 100);
+      const prev = byStudent.get(studentId);
+      const next = normalizeMark({
+        ...(prev ?? { studentId, subjectId: input.subjectId, remark: "", remarkSource: "manual" }),
+        marksObtained: total,
+        grade: gradeFromMarks(total, max, passPercent),
+      });
+      if (prev) {
+        marks = marks.map((m) => (m === prev ? next : m));
+      } else {
+        marks = [...marks, next];
+      }
+      totalsApplied += 1;
+    }
+  }
+
+  const now = new Date().toISOString();
+  const sheet = normalizeSheet({
+    ...(existing ?? {
+      id: id("ms"),
+      academicYearCode: input.academicYearCode,
+      examTermId: input.examTermId,
+      classId: input.classId,
+      sectionId: input.sectionId,
+      coScholastic: [],
+      overallRemarks: [],
+      lockedAt: null,
+    }),
+    marks,
+    itemScores: [...kept, ...fresh],
+    enteredBy: input.enteredBy || existing?.enteredBy || "",
+    updatedAt: now,
+  });
+  const sheets = existing
+    ? state.sheets.map((s) => (s.id === existing.id ? sheet : s))
+    : [sheet, ...state.sheets];
+  saveExams({ ...state, sheets });
+  return { ok: true, sheet, totalsApplied };
 }
 
 export type ReportCardLine = {

@@ -50,7 +50,18 @@ import {
   sendWhatsAppText,
   waNormalizeLocal10,
 } from "@/lib/waSend";
-import { generateTutorText } from "@/lib/aiLlm.server";
+import { generateParentBotReplyJson } from "@/lib/aiLlm.server";
+import {
+  householdLanguage,
+  languageChoiceConfirmation,
+  languageLabel,
+  languageMenuText,
+  LANGUAGE_MENU_KEYWORDS,
+  parseLanguageChoice,
+  sarvamTargetFor,
+} from "@/lib/householdPrefs";
+import { patchMirrorHousehold } from "@/lib/parentHousehold.server";
+import { sarvamConfigured, sarvamTranslate, type SarvamLang } from "@/lib/sarvam.server";
 import { formatKbContext, retrieveRelevantKb } from "@/lib/schoolKb.server";
 import {
   buildComplaintFlowJson,
@@ -194,10 +205,13 @@ function dueStudentName(due: FeeDueLine): string {
  * fallback) on any failure — this is a graceful upgrade, never a hard
  * dependency for the bot to keep working.
  */
+const UNGROUNDED_REPLY =
+  "I don't have that information here. Reply *HUMAN* and the school office will get back to you.";
+
 async function tryAiFallbackReply(
   hh: Household,
   text: string,
-): Promise<string | null> {
+): Promise<{ text: string; grounded: boolean } | null> {
   const masters = loadMasters();
   const kids = childrenOf(hh);
   const dues = flattenOpenDues(hh.id);
@@ -221,7 +235,19 @@ async function tryAiFallbackReply(
   const kbMatches = await retrieveRelevantKb(text, { audiences: ["all", "parents"] });
   const kbContext = formatKbContext(kbMatches);
 
+  // Family's language (Students → Family). Unset → mirror the parent's own
+  // language; regional → draft in Hindi and render through Sarvam below.
+  const pref = householdLanguage(hh, "en");
+  const sarvamTarget = sarvamTargetFor(hh);
+  const langRule =
+    pref.source === "default"
+      ? "Reply in the language the parent wrote in — Hindi (Devanagari) if they wrote in Hindi or Hinglish, otherwise simple English."
+      : pref.language === "en"
+        ? "Reply in simple English."
+        : `Reply in Hindi (Devanagari), formal register (आप).${sarvamTarget ? ` (The family's language is ${languageLabel(pref.language)}; the reply will be translated from Hindi.)` : ""}`;
+
   const system = `You are a WhatsApp assistant for parents of ${TENANT.nameDisplay}.
+${langRule}
 You may discuss ONLY: (1) the household data given below (their children, dues), and (2) the school notices given below, if any are given — you do NOT know this school's policies, dates, timings, curriculum, transport, uniform, or any other fact beyond what's given here, even if it seems like common knowledge for a school. Do not state or confirm anything outside the data given.
 For ANY question neither the household data nor the notices below answer, reply that you don't have that information and to reply *HUMAN* to talk to the school office — do not attempt to answer it a different way.
 Keep the reply under 300 characters, warm and simple, plain text (no markdown headers).`;
@@ -232,12 +258,47 @@ Open dues: total ${formatInr(totalDuePaise)} — ${duesLine}
 ${kbContext ? `Relevant school notices:\n${kbContext}\n` : ""}Parent's message: "${text}"`;
 
   try {
-    const r = await generateTutorText({ system, userMessage });
+    const r = await generateParentBotReplyJson({ system, userMessage });
     if (!r.ok) return null;
-    return r.text.trim() || null;
+    // Hard gate: an ungrounded answer never reaches the parent verbatim.
+    if (!r.grounded) return { text: UNGROUNDED_REPLY, grounded: false };
+    const reply = r.reply.trim();
+    if (!reply) return null;
+    // Regional preference: render the Hindi draft in the family's language
+    // when Sarvam can; otherwise the Hindi text goes as-is.
+    if (sarvamTarget && sarvamConfigured()) {
+      const t = await sarvamTranslate({ text: reply, from: "hi-IN", to: sarvamTarget as SarvamLang, mode: "modern-colloquial" });
+      if (t.ok && t.text.trim()) return { text: t.text.trim(), grounded: true };
+    }
+    return { text: reply, grounded: true };
   } catch {
     return null;
   }
+}
+
+/** Record parent + bot turns for the language flow, send the bot text, and return. */
+async function finishLanguageFlow(
+  store: Store,
+  thread: WaSisBotThread,
+  parentMsg: WaSisBotMsg,
+  replyText: string,
+): Promise<{ matched: boolean; replied: boolean; escalate: boolean; replyText: string; stub: boolean; error?: string }> {
+  const botMsg: WaSisBotMsg = { id: nid("wsm"), role: "bot", text: replyText, at: nowIso(), by: "SIS parent WA bot" };
+  const next: WaSisBotThread = {
+    ...thread,
+    messages: [...thread.messages, parentMsg, botMsg],
+    updatedAt: nowIso(),
+  };
+  await writeStore({ ...store, threads: store.threads.map((t) => (t.id === next.id ? next : t)) });
+  const send = await sendWhatsAppText({ toMobile: next.mobile, body: replyText, clientMessageId: botMsg.id });
+  return {
+    matched: true,
+    replied: send.ok || send.mode === "stub",
+    escalate: false,
+    replyText,
+    stub: !send.ok,
+    error: send.ok ? undefined : send.error,
+  };
 }
 
 export async function listWaSisBotThreads(): Promise<WaSisBotThread[]> {
@@ -566,6 +627,32 @@ export async function handleWaSisBotInbound(opts: {
   const isGreeting =
     !opts.fromUnified &&
     (!text || /^(hi|hello|namaste|hey|start|menu)$/i.test(text));
+
+  // ── Language preference flow: "LANG" → numbered menu; a number / name
+  // right after the menu (last bot message) → save on the household. ──
+  const upper = text.toUpperCase();
+  const askedForMenu = LANGUAGE_MENU_KEYWORDS.some((k) => upper === k || upper.startsWith(`${k} `));
+  const lastBot = [...thread.messages].reverse().find((m) => m.role === "bot");
+  const awaitingChoice = !!lastBot && lastBot.text.startsWith("Which language should the school message you in?");
+  const inlineChoice = askedForMenu ? parseLanguageChoice(text.replace(/^\S+\s*/, "")) : null;
+  const choice = inlineChoice ?? (awaitingChoice ? parseLanguageChoice(text) : null);
+  if (askedForMenu && !choice) {
+    return finishLanguageFlow(store, thread, parentMsg, languageMenuText());
+  }
+  if (choice) {
+    const updated: Household = { ...hh, preferredLanguage: choice };
+    const kids = childrenOf(hh);
+    try {
+      const { pushSisToDb } = await import("@/lib/sisNormalized.server");
+      const r = await pushSisToDb({ households: [updated], students: [] });
+      if (!r.ok) console.warn("[wa-sis-bot] language pref push failed", r.error);
+      patchMirrorHousehold(updated, kids);
+    } catch (e) {
+      console.warn("[wa-sis-bot] language pref save failed", e);
+    }
+    return finishLanguageFlow(store, thread, parentMsg, languageChoiceConfirmation(choice));
+  }
+
   const intent = isGreeting ? ("unknown" as const) : detectSisBotIntent(text);
   const bot = await buildBotReply(hh, intent, text);
   let replyText = bot.text;
@@ -573,9 +660,14 @@ export async function handleWaSisBotInbound(opts: {
     replyText =
       "Reply *KIDS* · *DUES* · *PAY* (GPay/UPI) · *PAY 1* · *RECEIPTS* · *HUMAN* — or *MENU* for the main school menu.";
   }
+  let escalateUngrounded = false;
   if (intent === "unknown" && !isGreeting && text.trim().length > 3) {
     const aiReply = await tryAiFallbackReply(hh, text);
-    if (aiReply) replyText = aiReply;
+    if (aiReply) {
+      replyText = aiReply.text;
+      // Not answerable from what we know → the office should see it.
+      escalateUngrounded = !aiReply.grounded;
+    }
   }
 
   const botMsg: WaSisBotMsg = {
@@ -586,14 +678,15 @@ export async function handleWaSisBotInbound(opts: {
     by: "SIS parent WA bot",
   };
 
+  const escalate = bot.escalate || escalateUngrounded;
   thread = {
     ...thread,
-    status: bot.escalate
+    status: escalate
       ? "needs_staff"
       : thread.status === "closed"
         ? "bot"
         : thread.status || "bot",
-    unreadStaff: bot.escalate ? thread.unreadStaff + 1 : thread.unreadStaff,
+    unreadStaff: escalate ? thread.unreadStaff + 1 : thread.unreadStaff,
     messages: [...thread.messages, parentMsg, botMsg],
     updatedAt: nowIso(),
   };
@@ -651,7 +744,7 @@ export async function handleWaSisBotInbound(opts: {
   return {
     matched: true,
     replied: send.ok || send.mode === "stub",
-    escalate: bot.escalate,
+    escalate,
     replyText,
     stub: !send.ok,
     error: send.ok ? undefined : send.error,

@@ -17,6 +17,7 @@ import {
   normalizeRemarkSource,
   type StudentCoScholasticEntry,
   type StudentOverallRemark,
+  type StudentItemScore,
   type StudentSubjectMark,
 } from "@/lib/exams";
 import { examsDualWriteDbEnabled } from "@/lib/examsDbConfig";
@@ -227,6 +228,7 @@ function sheetToRows(
   marks: Record<string, unknown>[];
   coScholastic: Record<string, unknown>[];
   remarks: Record<string, unknown>[];
+  itemScores: Record<string, unknown>[];
 } {
   const header = {
     id: s.id,
@@ -270,7 +272,19 @@ function sheetToRows(
     model: r.model || "",
     updated_at: s.updatedAt || new Date().toISOString(),
   }));
-  return { header, marks, coScholastic, remarks };
+  const itemScores = (s.itemScores || []).map((e) => ({
+    id: `${s.id}:${e.studentId}:${e.paperId}:${e.setCode}:${e.questionId}`,
+    mark_sheet_id: s.id,
+    tenant_id: tenantId,
+    student_id: e.studentId,
+    subject_id: e.subjectId,
+    paper_id: e.paperId,
+    set_code: e.setCode,
+    question_id: e.questionId,
+    marks_obtained: e.marks,
+    updated_at: s.updatedAt || new Date().toISOString(),
+  }));
+  return { header, marks, coScholastic, remarks, itemScores };
 }
 
 function rowToSheet(
@@ -278,6 +292,7 @@ function rowToSheet(
   markRows: Record<string, unknown>[],
   coScholasticRows: Record<string, unknown>[] = [],
   remarkRows: Record<string, unknown>[] = [],
+  itemScoreRows: Record<string, unknown>[] = [],
 ): MarkSheet {
   return {
     id: String(header.id),
@@ -320,6 +335,19 @@ function rowToSheet(
         rating,
       };
     }),
+    itemScores: itemScoreRows.map(
+      (r): StudentItemScore => ({
+        studentId: String(r.student_id),
+        subjectId: String(r.subject_id),
+        paperId: String(r.paper_id),
+        setCode: String(r.set_code || "A"),
+        questionId: String(r.question_id),
+        marks:
+          r.marks_obtained === null || r.marks_obtained === undefined
+            ? null
+            : Number(r.marks_obtained),
+      }),
+    ),
   };
 }
 
@@ -473,14 +501,16 @@ export async function pushExamDeskToDb(
   const allMarks: Record<string, unknown>[] = [];
   const allCoScholastic: Record<string, unknown>[] = [];
   const allRemarks: Record<string, unknown>[] = [];
+  const allItemScores: Record<string, unknown>[] = [];
   let lastSheetAt: string | null = null;
 
   for (const sheet of sheets) {
-    const { header, marks, coScholastic, remarks } = sheetToRows(tenantId, sheet);
+    const { header, marks, coScholastic, remarks, itemScores } = sheetToRows(tenantId, sheet);
     sheetHeaders.push(header);
     allMarks.push(...marks);
     allCoScholastic.push(...coScholastic);
     allRemarks.push(...remarks);
+    allItemScores.push(...itemScores);
     const updated = String(header.updated_at);
     if (!lastSheetAt || updated > lastSheetAt) lastSheetAt = updated;
   }
@@ -529,6 +559,20 @@ export async function pushExamDeskToDb(
   }
 
   r = await upsertChunks(sb, "exam_desk_remarks", allRemarks, 500);
+  if (!r.ok) return r;
+
+  const { data: existingItemScores } = await sb
+    .from("exam_desk_item_scores")
+    .select("id, mark_sheet_id")
+    .eq("tenant_id", tenantId);
+  const staleItemScoreIds = (existingItemScores ?? [])
+    .filter((e) => sheetIds.has(String(e.mark_sheet_id)))
+    .map((e) => String(e.id));
+  for (let i = 0; i < staleItemScoreIds.length; i += 500) {
+    await sb.from("exam_desk_item_scores").delete().in("id", staleItemScoreIds.slice(i, i + 500));
+  }
+
+  r = await upsertChunks(sb, "exam_desk_item_scores", allItemScores, 500);
   if (!r.ok) return r;
 
   r = await upsertChunks(
@@ -669,12 +713,38 @@ export async function fetchExamDeskFromDb(): Promise<{
     remarksBySheet.set(sid, list);
   }
 
+  const itemScoreRows: Record<string, unknown>[] = [];
+  if (sheetIds.length) {
+    // Item scores can be large (students × questions × papers): page through.
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data } = await sb
+        .from("exam_desk_item_scores")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .in("mark_sheet_id", sheetIds)
+        .order("id")
+        .range(from, from + PAGE - 1);
+      const rows = (data ?? []) as Record<string, unknown>[];
+      itemScoreRows.push(...rows);
+      if (rows.length < PAGE) break;
+    }
+  }
+  const itemScoresBySheet = new Map<string, Record<string, unknown>[]>();
+  for (const e of itemScoreRows) {
+    const sid = String(e.mark_sheet_id);
+    const list = itemScoresBySheet.get(sid) ?? [];
+    list.push(e);
+    itemScoresBySheet.set(sid, list);
+  }
+
   const sheets = (sheetHeaders ?? []).map((h) =>
     rowToSheet(
       h as Record<string, unknown>,
       marksBySheet.get(String(h.id)) ?? [],
       coScholasticBySheet.get(String(h.id)) ?? [],
       remarksBySheet.get(String(h.id)) ?? [],
+      itemScoresBySheet.get(String(h.id)) ?? [],
     ),
   );
 
@@ -699,7 +769,7 @@ export async function pushExamSheetToDb(
   const ctx = await resolveCtx();
   if (!ctx) return { ok: false, error: "No tenant" };
   const { sb, tenantId } = ctx;
-  const { header, marks, coScholastic, remarks } = sheetToRows(tenantId, sheet);
+  const { header, marks, coScholastic, remarks, itemScores } = sheetToRows(tenantId, sheet);
 
   const { error: hErr } = await sb.from("exam_desk_sheets").upsert(header);
   if (hErr) return { ok: false, error: hErr.message };
@@ -718,6 +788,13 @@ export async function pushExamSheetToDb(
   if (remarks.length) {
     const { error: rErr } = await sb.from("exam_desk_remarks").upsert(remarks);
     if (rErr) return { ok: false, error: rErr.message };
+  }
+  await sb.from("exam_desk_item_scores").delete().eq("mark_sheet_id", sheet.id);
+  for (let i = 0; i < itemScores.length; i += 500) {
+    const { error: iErr } = await sb
+      .from("exam_desk_item_scores")
+      .upsert(itemScores.slice(i, i + 500));
+    if (iErr) return { ok: false, error: iErr.message };
   }
 
   await sb.from("exam_desk_sync_meta").upsert(

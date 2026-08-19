@@ -50,14 +50,14 @@ Legend: ✅ exists and works · 🟡 partial / foundations exist · ❌ missing
 ### 1c. Blueprint-driven papers
 | | |
 |---|---|
-| Have | Sections, sets, max marks, hardness mix, print sheet, question `source` flag; **Question bank is a Tier-B placeholder** (module registered, `defaultEnabled: false`, no data) |
-| Missing | Blueprint matrix (chapter × marks × difficulty × competency), fill-the-grid generation, real question bank with metadata tags |
-| Build | `ExamBlueprint { rows: { unitId, questionType, marks, count, hardness, competencyCode }[] }` stored per class×subject×term; generator iterates rows, pulls from bank first (tagged match), asks LLM only for unfilled cells; marking scheme sheet printed alongside |
-| Data needed | Question bank tables (`exam_question_bank` with the metadata above); blueprint table |
+| Status | ✅ shipped 2026-08-19 — **Blueprint** rows (chapter/topic × type × marks-each × count × hardness × LO code) in the paper editor, saved per class × subject, "Generate set from blueprint" fills the active set **bank first** (exact match on type/marks/unit/LO/hardness, least-used first) then one AI call per still-empty cell (`mode: "blueprint"`, marks-each and LO tag enforced deterministically). **Question bank** = `bank` slice of exam papers (no new table): "→ Bank" per question / "→ Bank all" per section (dedupe by text per class × subject), "+ From bank" picker (search, type filter, remove), copies carry `source: "bank"` and bump use counts |
+| Was missing | Blueprint matrix (chapter × marks × difficulty × competency), fill-the-grid generation, real question bank with metadata tags |
+| Built as | `ExamBlueprint { rows: ExamBlueprintRow[] }` + `BankQuestion` in `ExamPapersState` (desk slices `blueprints`, `bank` on `exam_papers_desk_slices`); generator in `lib/examPapers.ts` (`fillBlueprintFromBank`, `assembleSectionsFromCells`) + `generateBlueprintCellsLlm`; marking scheme already prints on the teacher copy since §1b |
+| Data needed | none new — slices are generic jsonb rows |
 | Model | Gemini Pro (as 1b) |
 | Effort | ~5 days |
 
-**Prerequisite that unlocks all of §1 and §3:** per-question student results. Today only subject-level marks are stored — no item-level scores, so "Class 8-B is weak on application-based Geometry" is not derivable. Add `exam_item_scores (studentId, paperId, questionId, marksObtained)` and a fast entry grid / OMR-style import. Without this, "competency analytics" is a slide, not a feature.
+**Prerequisite that unlocks all of §1 and §3 — ✅ shipped 2026-08-19:** per-question student results. Exams → **Item scores** tab: student × question grid for one paper + set (paper picked from Question papers for the exam/class/subject; exam ↔ masters subject linked by code), max-mark guard per cell, row totals, class average per question (red < 40 %), "Apply totals" sums each student's items onto the mark sheet with grade recomputed. Stored as `MarkSheet.itemScores` → `exam_desk_item_scores` (child of `exam_desk_sheets`, migration `20260819090000`), audited as `exam_item_score`. Verified end-to-end under the ZZ1 test term (then cleaned). Still to do: OMR-style import; LO/unit roll-ups from these rows (§3.2–3.3).
 
 ---
 
@@ -92,16 +92,16 @@ Model:
 
 | Feature | Status | Notes |
 |---|---|---|
-| At-risk flagging | 🟡 | Exists for **fee defaulters** and **admission leads** only. No academic at-risk |
-| Pedagogical suggestions | ❌ | Blocked on item-level scores (§1 prerequisite) |
+| At-risk flagging | ✅ (2026-08-19) | Exams → **At-risk** tab: deterministic rules in `lib/academicRisk.ts` (grade band drop, ≥2 subjects slipped, below pass, attendance < 75 %, ≥3 incidents / any escalation, homework < 60 % of due) → high / watch list per section + exam; `POST /api/ai/at-risk-notes` re-runs the rules server-side and writes a "what to do" note only for flagged students. Missing data never counts for or against a student |
+| Pedagogical suggestions | ✅ (2026-08-19) | Item scores tab → "Where the class stood": roll-ups by chapter / LO code / Bloom / type / question (`lib/itemAnalytics.ts`), weak = class avg < 50 % with 5+ marked, tap a row for the under-half group; **Teaching moves** (`/api/ai/pedagogy-suggestions`, 3–6 area-named moves + remedial focus); **Remedial worksheet** (`/api/ai/remedial-worksheet`, pro tier, LO-tagged, saved as a draft question paper under the same exam) |
 | AI lesson plans | ✅ (2026-08-18) | `POST /api/ai/lesson-plan` + "Draft with AI" in `LessonPlansPanel` editor — ticked chapters/topics + their `learningOutcomes` → objectives / aids / period-by-period activities / assessment / homework, EN or HI; `LessonPlan.source` (`manual`/`ai`/`ai_edited`) + `aiModel` recorded on save. `lib/lessonPlanAi.ts` |
 | CBSE Learning-Outcomes mapping | ❌ | free-text per unit; no codes |
 | Syllabus pacing analytics (deterministic) | ✅ | `lib/teaching.ts` |
 
 Build:
 1. ~~`POST /api/ai/lesson-plan` — topic (unitIds) + class + periods → fills the existing `LessonPlan` fields, teacher edits in `LessonPlansPanel`~~ **Done 2026-08-18.** Follow-up when §1b lands: feed `competencyCodes` per unit into the prompt.
-2. Academic at-risk: deterministic rules (grade drop ≥1 band vs last term, attendance < 75%, ≥N discipline incidents, homework completion < X) → list; LLM only writes the per-student "what to do" note. Never let the model decide who is at risk (½ day rules + ½ day narrative).
-3. Class-level pedagogy suggestions + remedial worksheet — after item-level scores exist.
+2. ~~Academic at-risk~~ **Done 2026-08-19** — rules + note as specified; thresholds in `DEFAULT_RISK_THRESHOLDS` (not yet UI-configurable).
+3. ~~Class-level pedagogy suggestions + remedial worksheet~~ **Done 2026-08-19.**
 
 Model: **Gemini Flash** for lesson plans and narratives; Gemini Pro for remedial worksheet generation (it's question generation). Detection is code, not a model.
 
@@ -113,8 +113,8 @@ Model: **Gemini Flash** for lesson plans and narratives; Gemini Pro for remedial
 |---|---|---|
 | Circulars / notices / letters / govt submissions, EN/HI/both | ✅ | `school-document` with 10 presets (formal letter, govt submission, permission, leave approval, bonafide, fee concession, transport NOC, event permission, staff appointment, general circular); PDF letterhead + Devanagari |
 | Certificates, TCs, staff agreements | ✅ | AI-drafted, `aiDrafted` flag, human edits |
-| Meeting minutes from notes/transcript | ❌ | No meeting entity. Build `POST /api/ai/meeting-minutes` (raw notes or audio → structured minutes + action items → tasks/duties). Existing Google Speech for EN audio |
-| Compliance narrative (CCE records, teacher-training logs, infra audit) | 🟡 | `lib/udiseCompliance.ts` + `/mpd` (mandatory public disclosure) exist; no AI narrative sections, no teacher-training log |
+| Meeting minutes from notes/transcript | ✅ (2026-08-19) | Document maker → **Meeting minutes** mode: paste / dictate notes → `POST /api/ai/meeting-minutes` → agenda, discussion, decisions, action items (owner/due only as stated), next meeting → editable → letterhead PDF; Copy list for action items. No meeting entity yet — action items are not turned into duties |
+| Compliance narrative (CCE records, teacher-training logs, infra audit) | ✅ (2026-08-19) | `compliance_narrative` preset + "Insert school facts" pulls enrolment / sections / staff / fees / exams **and** the new Students → UDISE+ → **School facts** module (`lib/complianceFacts.ts`, module_local_state `compliance_facts`): infrastructure, safety certificates with validity, teacher-training log, committees |
 | Translation of existing docs | 🟡 | only via regenerating in `hi` |
 
 Model: **Gemini Flash** for drafts and minutes (long context handles a 2-hour transcript); **Sarvam** for formal Hindi translation of finished documents; Hindi meeting audio → Sarvam Saarika.
@@ -128,8 +128,8 @@ Model: **Gemini Flash** for drafts and minutes (long context handles a 2-hour tr
 | Lead scoring + AI next-best-action + follow-up drafts | ✅ | `lib/admissionsAi.ts`, `lead-next-action` |
 | WhatsApp inquiry bot, partial-lead capture, campaigns | ✅ | |
 | Inbound documents from parents (Aadhaar, birth cert) → OCR | 🟡 | `waInboundMedia.server.ts` + Vision extracts text; **no structured field extraction, no completeness check** |
-| Application form (PDF/image) → structured record | ❌ | |
-| Offer letter / fee structure / welcome packet | 🟡 | Add 3 presets to `SCHOOL_DOCUMENT_PRESETS` (`admission_offer`, `fee_structure_letter`, `welcome_packet`) fed with the lead + fee plan — ½ day |
+| Application form (PDF/image) → structured record | ✅ (2026-08-19) | Lead form → Scan document → "Application form (AI)": Gemini multimodal (`generateGeminiVisionJson`) → 15 fields + `missing` list, applied to the lead for review; OpenAI vision fallback for images |
+| Offer letter / fee structure / welcome packet | ✅ (2026-08-19) | Presets `admission_offer`, `fee_structure_letter`, `welcome_packet`; lead panel links open the document maker prefilled with the lead + the class's published NEW-admission fee lines |
 
 Build: `POST /api/ai/application-extract` — image/PDF → `{ studentName, dob, aadhaarLast4, parentName, mobile, previousSchool, class, missing: [] }` → pre-fills the admission form, flags incomplete.
 
@@ -143,11 +143,11 @@ Model: **Gemini Flash multimodal** — one call does OCR + structuring (cheaper 
 |---|---|---|
 | Centralised server-side AI layer, no frontend API calls | ✅ | — |
 | Failover between providers | ✅ | Per-call `meta.tier: "flash"\|"pro"` (2026-08-18) — `geminiModel(tier)` / `openAiModel(tier)`, pro models via `GEMINI_PRO_MODEL` (default `gemini-2.5-pro`) / `OPENAI_PRO_MODEL` (default `gpt-4o`). No route requests pro yet; §1b will |
-| Human-in-the-loop | 🟡 | All staff-facing generators land in an editor before save/print ✅. **Exception: WA bot LLM fallback auto-replies to parents** — add a confidence gate + "escalate to staff" default for anything not grounded by RAG |
+| Human-in-the-loop | ✅ (2026-08-19) | All staff-facing generators land in an editor before save/print and report accepted / edited / rejected to `ai_generations`. WA parent-bot fallback now has a **hard grounding gate**: the model must declare `grounded`; when false the parent gets the fixed "reply HUMAN" text and the thread escalates to staff |
 | Language preference per family | ✅ | `Household.preferredLanguage` (see §2) |
 | AI audit trail | ✅ (2026-08-18) | `ai_generations` (migration `20260818150000`) written by the router for **every** attempt on every route: route, prompt_version, tier, engine/model, status/error, input+output sha256 (no text), tokens, latency, requester (session email or `system`). `POST /api/ai/generations/outcome` closes the loop — Remarks tab and Lesson plans editor report accepted / edited / rejected + target record. Other generators record attempts but don't yet report outcomes |
-| Rate limiting / quotas | ❌ | Per-user + per-tenant daily token budget in the router (reuse `mapsRateLimit.ts` pattern) |
-| Caching | ❌ | Hash(prompt) → response for deterministic drafts (certificates, lesson plans); skip for personalised outputs |
+| Rate limiting / quotas | ✅ (2026-08-19) | `lib/aiBudget.server.ts` — per-user calls, per-tenant calls, per-tenant tokens per IST day, counted from `ai_generations` (multi-instance safe); env `AI_DAILY_CALLS_PER_USER` / `AI_DAILY_CALLS_PER_TENANT` / `AI_DAILY_TOKENS_PER_TENANT` |
+| Caching | ✅ (2026-08-19) | `ai_response_cache` (migration `20260819120000`) for `meta.cacheable` routes — school-document, staff-agreement, student-certificate, lesson-plan; 30-day TTL; personalised generators never cached |
 | Prompt versioning | 🟡 | Every router call carries `meta.promptVersion` (all "v1" today), recorded in `ai_generations`; bump it when a route's prompt changes. Prompts themselves still inline in `aiLlm.server.ts` / `lib/*Ai.ts` — moving them to `lib/prompts/` is cosmetic now that the version is tracked |
 | Data quality for §1/§3 | ❌ | Item-level scores; competency codes on syllabus units and questions |
 | Sarvam adapter | 🟡 | `lib/sarvam.server.ts` translate (en/hi/bn/ur/mai/ta/te/mr/gu/kn/ml/pa/od) ✅; STT/TTS ❌; `SARVAM_API_KEY` in Secret Manager **pending** |
@@ -182,6 +182,6 @@ Why Gemini as default: cheapest at this volume, same GCP project/billing/IAM as 
 4. ~~**Household language preference + Sarvam translate adapter** (§2.1)~~ — shipped 2026-08-18 (quiet-hours gate on automation sends and bot reply language still to wire).
 5. ~~**PTM per-student brief** (§2.2)~~ — shipped 2026-08-18.
 6. ~~**Competency question types + LO codes on syllabus** (§1b)~~ — shipped 2026-08-18 (LO seed import outstanding).
-7. **Item-level scores** → academic at-risk → pedagogy suggestions (§1 prereq, §3.2–3.3) — 5+ days.
-8. **Blueprint + question bank** (§1c) — 5 days.
-9. Application extraction, meeting minutes, compliance narratives, admission presets — ½–1 day each, slot anywhere.
+7. ~~**Item-level scores** → academic at-risk → pedagogy suggestions (§1 prereq, §3.2–3.3)~~ — shipped 2026-08-19 (three commits). Left: OMR import, UI-configurable thresholds.
+8. ~~**Blueprint + question bank** (§1c)~~ — shipped 2026-08-19.
+9. ~~Application extraction, meeting minutes, compliance narratives, admission presets~~ — shipped 2026-08-19 (compliance narrative is a preset + ERP facts helper; infra/training data models still absent).

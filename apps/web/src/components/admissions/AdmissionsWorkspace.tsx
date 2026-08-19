@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import Link from "next/link";
 import { UserPlus } from "lucide-react";
 import {
@@ -56,6 +57,7 @@ import {
   type TransportInterest,
 } from "@/lib/admissions";
 import { listSessionYearOptions, loadMasters, type MastersState } from "@/lib/masters";
+import { admissionDocumentHref, buildAdmissionDocumentDetails } from "@/lib/admissionDocumentLinks";
 import { leadConversionLikelihood } from "@/lib/admissionsAi";
 import { pushToast } from "@/components/shell/Toast";
 import { STUDENT_CATEGORIES, loadSis, type SisState } from "@/lib/sis";
@@ -2100,8 +2102,14 @@ function LeadDetail({
   const likelihood = leadConversionLikelihood(lead);
 
   const [aiSuggestion, setAiSuggestion] = useState<
-    { nextAction: string; outreachMessage: string } | null
+    { nextAction: string; outreachMessage: string; generationId?: string } | null
   >(null);
+  function acceptSuggestion() {
+    if (aiSuggestion?.generationId) {
+      reportAiOutcome({ ids: [aiSuggestion.generationId], outcome: "accepted", targetType: "admission_lead", targetId: lead.id });
+      setAiSuggestion({ ...aiSuggestion, generationId: undefined });
+    }
+  }
   const [aiSuggestionLoading, setAiSuggestionLoading] = useState(false);
   const [aiSuggestionError, setAiSuggestionError] = useState<string | null>(
     null,
@@ -2159,6 +2167,7 @@ function LeadDetail({
       setAiSuggestion({
         nextAction: json.nextAction,
         outreachMessage: json.outreachMessage,
+        generationId: (json as { generationId?: string }).generationId,
       });
     } catch (e) {
       setAiSuggestionError(e instanceof Error ? e.message : "Suggestion failed");
@@ -2536,12 +2545,46 @@ function LeadDetail({
           </div>
         ) : null}
 
+        {masters ? (
+          <div className="mt-3">
+            <p className="text-[10px] font-semibold uppercase text-[var(--muted)]">
+              Documents · AI drafted on letterhead
+            </p>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {(
+                [
+                  ["admission_offer", "Offer letter"],
+                  ["fee_structure_letter", "Fee structure"],
+                  ["welcome_packet", "Welcome packet"],
+                ] as const
+              ).map(([type, label]) => (
+                <Link
+                  key={type}
+                  href={admissionDocumentHref(
+                    type,
+                    buildAdmissionDocumentDetails({
+                      type,
+                      lead,
+                      masters,
+                      className: classes.find((c) => c.id === classId)?.name || "",
+                    }),
+                  )}
+                  className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)]"
+                >
+                  {label} →
+                </Link>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         {canEdit && !locked ? (
           <div className="mt-3">
             <div className="flex items-center justify-between gap-2">
               <p className="text-[10px] font-semibold uppercase text-[var(--muted)]">
                 AI suggestion
               </p>
+
               <button
                 type="button"
                 disabled={aiSuggestionLoading}
@@ -2582,11 +2625,13 @@ function LeadDetail({
                         void navigator.clipboard
                           .writeText(aiSuggestion.outreachMessage)
                           .then(
-                            () =>
+                            () => {
+                              acceptSuggestion();
                               pushToast({
                                 kind: "success",
                                 message: "Outreach message copied",
-                              }),
+                              });
+                            },
                             () =>
                               pushToast({
                                 kind: "error",
@@ -2604,9 +2649,10 @@ function LeadDetail({
                   {lead.mobile ? (
                     <button
                       type="button"
-                      onClick={() =>
-                        openWaMe(lead.mobile, aiSuggestion.outreachMessage)
-                      }
+                      onClick={() => {
+                        acceptSuggestion();
+                        openWaMe(lead.mobile, aiSuggestion.outreachMessage);
+                      }}
                       className="mt-2 rounded-lg border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
                     >
                       Open in WhatsApp
@@ -2857,6 +2903,37 @@ function LeadDetail({
             <AdmissionDocOcrPanel
               disabled={locked || !canEdit}
               onApply={(patch) => onPatch(patch)}
+              onApplyApplication={(f) => {
+                // Only overwrite with what the form actually says; class by name match.
+                const cls = f.classSought
+                  ? classes.find(
+                      (c) => c.name.trim().toLowerCase() === f.classSought.trim().toLowerCase(),
+                    )
+                  : undefined;
+                const patch: Partial<AdmissionLead> = {};
+                if (f.studentName) patch.childName = f.studentName;
+                if (f.dob) patch.dob = f.dob;
+                if (f.gender) patch.gender = f.gender;
+                if (cls) patch.classSoughtId = cls.id;
+                if (f.fatherName || f.guardianName) patch.guardianName = f.guardianName || f.fatherName;
+                if (f.motherName) patch.motherName = f.motherName;
+                if (f.mobile) patch.mobile = f.mobile;
+                if (f.email) patch.email = f.email;
+                if (f.address) patch.address = f.address;
+                if (f.pincode) patch.pincode = f.pincode;
+                if (f.previousSchool) patch.previousSchool = f.previousSchool;
+                if (f.category) patch.category = f.category;
+                if (f.aadhaarLast4) {
+                  patch.docsAadhaar = true;
+                  patch.registrationFeeNote = [lead.registrationFeeNote, `Aadhaar ····${f.aadhaarLast4} (from form)`]
+                    .filter(Boolean)
+                    .join(" · ");
+                }
+                if (f.classSought && !cls) {
+                  patch.campaignNote = [lead.campaignNote, `Form says class: ${f.classSought}`].filter(Boolean).join(" · ");
+                }
+                onPatch(patch);
+              }}
             />
           </div>
         ) : null}

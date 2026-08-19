@@ -75,6 +75,7 @@ export async function POST(req: Request) {
 
   return NextResponse.json({
     ok: true,
+    generationId: r.generationId,
     extractedText: vision.text,
     completeness: r.completeness,
     feedbackDraft: r.feedbackDraft,

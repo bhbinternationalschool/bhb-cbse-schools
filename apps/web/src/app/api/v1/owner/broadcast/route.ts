@@ -11,6 +11,7 @@ import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import {
   listAllHouseholdWaNumbers,
+  listLanguageUnsetHouseholdWaNumbers,
   listAllStaffMobiles,
 } from "@/lib/bulkRecipients";
 import { listOptedOutSet, toE164India } from "@/lib/waContactState.server";
@@ -59,7 +60,7 @@ type BroadcastTemplate = {
 };
 
 type BroadcastBody = {
-  audience?: "parents" | "staff";
+  audience?: "parents" | "staff" | "parents_language_unset";
   body?: string;
   template?: BroadcastTemplate;
   dryRun?: boolean;
@@ -85,9 +86,9 @@ export async function POST(req: Request) {
   // school-wide send must never happen because a flag was merely omitted.
   const dryRun = body?.dryRun !== false;
 
-  if (audience !== "parents" && audience !== "staff") {
+  if (audience !== "parents" && audience !== "staff" && audience !== "parents_language_unset") {
     return NextResponse.json(
-      { error: 'audience must be "parents" or "staff"' },
+      { error: 'audience must be "parents", "parents_language_unset" or "staff"' },
       { status: 400 },
     );
   }
@@ -100,11 +101,16 @@ export async function POST(req: Request) {
 
   await Promise.all([ensureSisHydratedServer(), ensureSchoolMirrorHydrated()]);
 
+  const parentsAudience = audience === "parents" || audience === "parents_language_unset";
   let numbers =
-    audience === "parents" ? listAllHouseholdWaNumbers() : listAllStaffMobiles();
+    audience === "parents"
+      ? listAllHouseholdWaNumbers()
+      : audience === "parents_language_unset"
+        ? listLanguageUnsetHouseholdWaNumbers()
+        : listAllStaffMobiles();
   let skippedOptOut = 0;
 
-  if (audience === "parents") {
+  if (parentsAudience) {
     // One batch query instead of one round trip per household — a
     // broadcast to hundreds of numbers must not serialize hundreds of
     // sequential DB calls. Fails open (empty set) on a lookup error,
@@ -172,10 +178,12 @@ export async function POST(req: Request) {
     const subjectIds =
       audience === "parents"
         ? loadSis().households.map((h) => h.id)
-        : (loadMasters().staff ?? [])
-            .filter((s) => s.status === "active")
-            .map((s) => s.id);
-    push = await sendPushToSubjects(audience === "parents" ? "parent" : "staff", subjectIds, {
+        : audience === "parents_language_unset"
+          ? loadSis().households.filter((h) => !(h.preferredLanguage || "").trim()).map((h) => h.id)
+          : (loadMasters().staff ?? [])
+              .filter((s) => s.status === "active")
+              .map((s) => s.id);
+    push = await sendPushToSubjects(parentsAudience ? "parent" : "staff", subjectIds, {
       title: `${auth.ctx.session.fullName} · BHB International School`,
       body: pushText.length > 200 ? `${pushText.slice(0, 197)}…` : pushText,
       url: "/notices",

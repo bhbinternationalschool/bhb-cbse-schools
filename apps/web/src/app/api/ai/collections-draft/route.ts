@@ -108,6 +108,7 @@ export async function POST(req: Request) {
   return NextResponse.json({
     ok: true,
     engine: result.engine,
+    generationId: result.generationId,
     /** What the family will actually read: the preferred code when Sarvam rendered it, else en/hi */
     language: renderedLanguage,
     requestedLanguage: preferred,

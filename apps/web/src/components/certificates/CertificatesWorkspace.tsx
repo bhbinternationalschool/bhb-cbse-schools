@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import { Award, Sparkles } from "lucide-react";
 import {
   CERTIFICATE_KINDS,
@@ -115,6 +116,7 @@ export function CertificatesWorkspace() {
   const [customTitle, setCustomTitle] = useState("");
   const [customBody, setCustomBody] = useState("");
   const [customIsAi, setCustomIsAi] = useState(false);
+  const [aiGenerationId, setAiGenerationId] = useState("");
 
   function refresh() {
     const m = loadMasters();
@@ -296,6 +298,7 @@ export function CertificatesWorkspace() {
         tcSubjectsStudied?: string;
         tcGamesActivities?: string;
         tcAnnualExamResult?: string;
+        generationId?: string;
       };
       if (!res.ok || data.error) {
         setError(data.error || "AI generation failed");
@@ -304,6 +307,7 @@ export function CertificatesWorkspace() {
       setCustomTitle(data.title || "");
       setCustomBody(data.body || "");
       setCustomIsAi(true);
+      setAiGenerationId(data.generationId || "");
       if (data.remarks) setRemarks(data.remarks);
       if (kind === "tc") {
         setTcForm((prev) => ({
@@ -395,11 +399,20 @@ export function CertificatesWorkspace() {
         result.issue.inactivatedStudent ? " · student marked inactive" : ""
       }`,
     );
+    if (customIsAi && aiGenerationId) {
+      reportAiOutcome({
+        ids: [aiGenerationId],
+        outcome: "accepted",
+        targetType: "certificate",
+        targetId: result.issue.id,
+      });
+    }
     setRemarks("");
     setReasonForLeaving("");
     setCustomTitle("");
     setCustomBody("");
     setCustomIsAi(false);
+    setAiGenerationId("");
     refresh();
     setPreviewId(result.issue.id);
     window.setTimeout(() => printCertificate(result.issue.id), 200);

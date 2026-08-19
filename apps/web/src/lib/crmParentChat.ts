@@ -21,6 +21,7 @@ import {
 import { formatInr } from "@/lib/masters";
 
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 const STORAGE_KEY = "bhb_crm_parent_chat_v1";
 
 /** Distinguishes this product surface from SIS parent account chats */
@@ -162,7 +163,8 @@ export function saveCrmParentChat(state: CrmParentChatState): void {
 export function writeCrmParentChatLocalRaw(state: CrmParentChatState): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, audience: CRM_CHAT_AUDIENCE }));
+    // Never a bare setItem on module state — a full origin must not throw here.
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify({ ...state, audience: CRM_CHAT_AUDIENCE }));
   } catch {
     /* quota — the server copy is the truth anyway */
   }

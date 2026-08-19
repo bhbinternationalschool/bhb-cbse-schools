@@ -75,6 +75,7 @@ ${transcript}`;
   return NextResponse.json({
     ok: true,
     engine: result.engine,
+    generationId: result.generationId,
     summary: result.text.trim(),
   });
 }
