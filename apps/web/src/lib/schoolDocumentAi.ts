@@ -12,7 +12,10 @@ export type SchoolDocumentType =
   | "transport_noc"
   | "event_permission"
   | "staff_appointment"
-  | "general_circular";
+  | "general_circular"
+  | "admission_offer"
+  | "fee_structure_letter"
+  | "welcome_packet";
 
 export type SchoolDocumentLanguage = "en" | "hi" | "both";
 
@@ -104,6 +107,30 @@ export const SCHOOL_DOCUMENT_PRESETS: SchoolDocumentPreset[] = [
     defaultSubjectEn: "Circular —",
     promptContext:
       "School circular — bullet points, action required, deadline.",
+  },
+  {
+    id: "admission_offer",
+    label: "Admission offer letter",
+    hint: "Provisional admission for an enquiry / registered lead",
+    defaultSubjectEn: "Offer of provisional admission —",
+    promptContext:
+      "Provisional admission offer to the parent/guardian: child's name, class and session offered, what makes it firm (documents to submit, fee to pay by a date), validity of the offer, contact for queries. Warm but formal; no promises beyond what the details state; leave a reference number placeholder.",
+  },
+  {
+    id: "fee_structure_letter",
+    label: "Fee structure letter",
+    hint: "Class-wise fee heads, amounts, installments",
+    defaultSubjectEn: "Fee structure for session —",
+    promptContext:
+      "Fee structure communication for a class and session: a clear table of fee heads with amounts (use exactly the amounts given — never invent or round), installment due dates if given, payment modes, late-fee/concession note only if given. Plain, factual, no marketing language.",
+  },
+  {
+    id: "welcome_packet",
+    label: "Welcome packet",
+    hint: "First-day information for a newly admitted family",
+    defaultSubjectEn: "Welcome to —",
+    promptContext:
+      "Welcome note for a newly admitted family: warm greeting naming the child and class, school timings and first day, uniform and books (only what the details say), transport / app / WhatsApp channel info if given, whom to contact. Short sections with headings; friendly and clear.",
   },
 ];
 

@@ -56,6 +56,7 @@ import {
   type TransportInterest,
 } from "@/lib/admissions";
 import { listSessionYearOptions, loadMasters, type MastersState } from "@/lib/masters";
+import { admissionDocumentHref, buildAdmissionDocumentDetails } from "@/lib/admissionDocumentLinks";
 import { leadConversionLikelihood } from "@/lib/admissionsAi";
 import { pushToast } from "@/components/shell/Toast";
 import { STUDENT_CATEGORIES, loadSis, type SisState } from "@/lib/sis";
@@ -2536,12 +2537,46 @@ function LeadDetail({
           </div>
         ) : null}
 
+        {masters ? (
+          <div className="mt-3">
+            <p className="text-[10px] font-semibold uppercase text-[var(--muted)]">
+              Documents · AI drafted on letterhead
+            </p>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {(
+                [
+                  ["admission_offer", "Offer letter"],
+                  ["fee_structure_letter", "Fee structure"],
+                  ["welcome_packet", "Welcome packet"],
+                ] as const
+              ).map(([type, label]) => (
+                <Link
+                  key={type}
+                  href={admissionDocumentHref(
+                    type,
+                    buildAdmissionDocumentDetails({
+                      type,
+                      lead,
+                      masters,
+                      className: classes.find((c) => c.id === classId)?.name || "",
+                    }),
+                  )}
+                  className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)]"
+                >
+                  {label} →
+                </Link>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         {canEdit && !locked ? (
           <div className="mt-3">
             <div className="flex items-center justify-between gap-2">
               <p className="text-[10px] font-semibold uppercase text-[var(--muted)]">
                 AI suggestion
               </p>
+
               <button
                 type="button"
                 disabled={aiSuggestionLoading}

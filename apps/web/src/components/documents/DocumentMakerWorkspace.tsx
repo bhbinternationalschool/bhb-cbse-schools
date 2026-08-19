@@ -56,6 +56,18 @@ export function DocumentMakerWorkspace() {
     return hasPermission(session, masters, "documents", "export");
   }, [session, masters]);
 
+  // Prefill from a deep link (Admissions → "Offer letter" etc.): ?type=&details=
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const sp = new URLSearchParams(window.location.search);
+    const t = sp.get("type");
+    if (t && SCHOOL_DOCUMENT_PRESETS.some((p) => p.id === t)) setDocType(t as SchoolDocumentType);
+    const d = sp.get("details");
+    if (d) setDetails(d.slice(0, 4000));
+    const l = sp.get("language");
+    if (l === "en" || l === "hi" || l === "both") setLanguage(l);
+  }, []);
+
   useEffect(() => {
     setMasters(loadMasters());
     void (async () => {
