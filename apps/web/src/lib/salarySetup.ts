@@ -627,11 +627,47 @@ export function resolveStructureForStaff(
   return scored[0]?.s ?? active[0] ?? null;
 }
 
+/**
+ * Wage ceilings from Masters → Statutory (EPF/ESIC establishment config).
+ *   - PF: when applyEpfWageCeiling, the 12% (EE and ER) is computed on
+ *     min(basic, epfWageCeiling) — ₹15,000 by statute — not on the whole basic.
+ *   - ESIC: the ceiling is an eligibility threshold — staff whose gross is
+ *     above esicWageCeiling (₹21,000) are outside ESIC, so both ESIC heads
+ *     drop to 0 for them.
+ */
+export type StatutoryCeilings = {
+  applyEpfWageCeiling: boolean;
+  epfWageCeiling: number;
+  esicWageCeiling: number;
+};
+
+export function statutoryCeilingsFrom(
+  cfg?: Partial<StatutoryCeilings> | null,
+): StatutoryCeilings {
+  return {
+    applyEpfWageCeiling: cfg?.applyEpfWageCeiling !== false,
+    epfWageCeiling: Number(cfg?.epfWageCeiling) > 0 ? Number(cfg?.epfWageCeiling) : 15000,
+    esicWageCeiling: Number(cfg?.esicWageCeiling) > 0 ? Number(cfg?.esicWageCeiling) : 21000,
+  };
+}
+
+export function isPfHeadCode(raw: string): boolean {
+  const code = (raw || "").toUpperCase();
+  return code === "PF_EE" || code === "PF_ER" || code.startsWith("PF_");
+}
+export function isEsicHeadCode(raw: string): boolean {
+  const code = (raw || "").toUpperCase();
+  return (
+    code === "ESIC_EE" || code === "ESIC_ER" || code.startsWith("ESIC_") || code === "ESI_EE" || code === "ESI_ER"
+  );
+}
+
 export function computeStructureAmounts(
   state: SalarySetupState,
   structure: SalaryStructure,
   basicOverride = 0,
   statutoryCover: StatutoryCover = "both",
+  statutory?: Partial<StatutoryCeilings> | null,
 ): {
   basic: number;
   earnings: { head: SalaryHead; amount: number }[];
@@ -657,24 +693,34 @@ export function computeStructureAmounts(
   const earnings: { head: SalaryHead; amount: number }[] = [];
   const deductions: { head: SalaryHead; amount: number }[] = [];
   const employer: { head: SalaryHead; amount: number }[] = [];
+  const ceilings = statutoryCeilingsFrom(statutory);
+  const pfWages = ceilings.applyEpfWageCeiling ? Math.min(basic, ceilings.epfWageCeiling) : basic;
 
+  const lineAmount = (head: SalaryHead, line: SalaryStructureLine): number => {
+    if (head.code === "BASIC" && basicOverride > 0) return basicOverride;
+    if (line.calc !== "percent_of_basic") return line.amount;
+    const base = isPfHeadCode(head.code) ? pfWages : basic;
+    return Math.round((base * line.amount) / 100);
+  };
+
+  // Earnings first — ESIC eligibility depends on gross.
+  const statutoryLines: { head: SalaryHead; line: SalaryStructureLine }[] = [];
   for (const line of structure.lines) {
     const head = headsById.get(line.headId);
     if (!head || !head.isActive) continue;
     if (!headAllowedByStatutory(head.code, cover)) continue;
-    const amount =
-      head.code === "BASIC" && basicOverride > 0
-        ? basicOverride
-        : line.calc === "percent_of_basic"
-          ? Math.round((basic * line.amount) / 100)
-          : line.amount;
+    if (head.kind === "earning") earnings.push({ head, amount: lineAmount(head, line) });
+    else statutoryLines.push({ head, line });
+  }
+  const gross = earnings.reduce((s, e) => s + e.amount, 0);
+  const esicEligible = gross <= ceilings.esicWageCeiling;
+  for (const { head, line } of statutoryLines) {
+    const amount = isEsicHeadCode(head.code) && !esicEligible ? 0 : lineAmount(head, line);
     const row = { head, amount };
-    if (head.kind === "earning") earnings.push(row);
-    else if (head.kind === "deduction") deductions.push(row);
+    if (head.kind === "deduction") deductions.push(row);
     else employer.push(row);
   }
 
-  const gross = earnings.reduce((s, e) => s + e.amount, 0);
   const totalDeductions = deductions.reduce((s, e) => s + e.amount, 0);
   return {
     basic,

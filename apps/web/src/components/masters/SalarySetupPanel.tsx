@@ -21,6 +21,9 @@ import {
   saveSalarySetup,
   salarySetupCompleteness,
   STATUTORY_COVER_OPTIONS,
+  isEsicHeadCode,
+  isPfHeadCode,
+  statutoryCeilingsFrom,
   SCHOOL_SALARY_BANK,
   type SalaryHead,
   type SalaryHeadKind,
@@ -572,7 +575,7 @@ function StructuresPanel({
   }
 
   const preview = editing
-    ? computeStructureAmounts(state, editing, 0)
+    ? computeStructureAmounts(state, editing, 0, "both", masters.statutoryConfig)
     : null;
 
   return (
@@ -592,7 +595,7 @@ function StructuresPanel({
         >
           <ul className="divide-y divide-[var(--border)]">
             {state.structures.map((s) => {
-              const amounts = computeStructureAmounts(state, s, 0);
+              const amounts = computeStructureAmounts(state, s, 0, "both", masters.statutoryConfig);
               const selected = s.id === editId;
               return (
                 <li
@@ -1125,12 +1128,35 @@ function AssignPanel({
                     structureForPreview,
                     Number(draft.basicOverride) || 0,
                     draft.statutoryCover,
+                    masters.statutoryConfig,
                   )
                 : null;
               const savedLabel = link
                 ? state.structures.find((x) => x.id === link.structureId)
                     ?.name ?? "Assigned"
                 : "Auto (by stream)";
+              // What is actually saved for this staff (not the unsaved draft):
+              // PF / ESIC amounts after the Masters → Statutory wage ceilings.
+              const savedStructure = link
+                ? state.structures.find((x) => x.id === link.structureId && x.isActive) ?? resolveStructureForStaff(state, s)
+                : resolveStructureForStaff(state, s);
+              const saved = savedStructure
+                ? computeStructureAmounts(
+                    state,
+                    savedStructure,
+                    link?.basicOverride || 0,
+                    normalizeStatutoryCover(link?.statutoryCover),
+                    masters.statutoryConfig,
+                  )
+                : null;
+              const sumBy = (rows: { head: { code: string }; amount: number }[], test: (c: string) => boolean) =>
+                rows.filter((r) => test(r.head.code)).reduce((t, r) => t + r.amount, 0);
+              const savedPfEe = saved ? sumBy(saved.deductions, isPfHeadCode) : 0;
+              const savedPfEr = saved ? sumBy(saved.employer, isPfHeadCode) : 0;
+              const savedEsicEe = saved ? sumBy(saved.deductions, isEsicHeadCode) : 0;
+              const savedEsicEr = saved ? sumBy(saved.employer, isEsicHeadCode) : 0;
+              const savedCover = normalizeStatutoryCover(link?.statutoryCover);
+              const inr = (n: number) => `₹${n.toLocaleString("en-IN")}`;
 
               return (
                 <tr
@@ -1155,14 +1181,37 @@ function AssignPanel({
                     {link?.basicOverride
                       ? ` · basic ₹${link.basicOverride.toLocaleString("en-IN")}`
                       : ""}
-                    <div className="text-[10px]">
-                      {
-                        STATUTORY_COVER_OPTIONS.find(
-                          (o) =>
-                            o.value ===
-                            normalizeStatutoryCover(link?.statutoryCover),
-                        )?.label
-                      }
+                    <div className="mt-0.5 space-y-0.5 text-[10px]">
+                      {savedCover === "none" ? (
+                        <span>No PF / ESIC</span>
+                      ) : (
+                        <>
+                          {savedCover !== "esic_only" ? (
+                            <div>
+                              <span className="font-semibold text-[var(--foreground)]">PF</span>{" "}
+                              {inr(savedPfEe)} <span className="opacity-70">emp</span> + {inr(savedPfEr)}{" "}
+                              <span className="opacity-70">employer</span>
+                            </div>
+                          ) : null}
+                          {savedCover !== "pf_only" ? (
+                            <div>
+                              <span className="font-semibold text-[var(--foreground)]">ESIC</span>{" "}
+                              {savedEsicEe + savedEsicEr > 0 ? (
+                                <>
+                                  {inr(savedEsicEe)} <span className="opacity-70">emp</span> + {inr(savedEsicEr)}{" "}
+                                  <span className="opacity-70">employer</span>
+                                </>
+                              ) : (
+                                <span className="opacity-70">
+                                  {saved && saved.gross > statutoryCeilingsFrom(masters.statutoryConfig).esicWageCeiling
+                                    ? `not applicable (gross above ₹${statutoryCeilingsFrom(masters.statutoryConfig).esicWageCeiling.toLocaleString("en-IN")})`
+                                    : "₹0"}
+                                </span>
+                              )}
+                            </div>
+                          ) : null}
+                        </>
+                      )}
                     </div>
                   </td>
                   <td className="px-3 py-2">

@@ -336,7 +336,9 @@ export async function fetchMastersFromRowTables(): Promise<{
   const profile = settingsFor("schoolProfile");
   const timing = settingsFor("schoolTiming");
   const midYear = settingsFor("midYearFeePolicy");
+  const statutory = settingsFor("statutoryConfig");
   if (profile) bundle.schoolProfile = profile as MastersDeskBundle["schoolProfile"];
+  if (statutory) bundle.statutoryConfig = statutory as MastersDeskBundle["statutoryConfig"];
   if (timing) bundle.schoolTiming = timing as MastersDeskBundle["schoolTiming"];
   if (midYear) {
     bundle.midYearFeePolicy = midYear as MastersDeskBundle["midYearFeePolicy"];
