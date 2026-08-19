@@ -32,6 +32,7 @@ import {
 } from "@/lib/examPapers";
 import type { SyllabusUnit } from "@/lib/teaching";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
+import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 
 function nid() {
   return `bpr_${Math.random().toString(36).slice(2, 10)}`;
@@ -239,8 +240,9 @@ export function BlueprintPanel(props: {
 
       {open ? (
         <div className="mt-2 space-y-2">
-          <table className="w-full text-xs">
-            <thead className="text-[10px] uppercase tracking-wide text-[var(--muted)]">
+          <ErpTableShell>
+          <ErpTable className="text-xs">
+            <ErpTableHead>
               <tr>
                 <th className="py-1 text-left">Chapter / topic</th>
                 <th className="py-1 text-left">Type</th>
@@ -251,8 +253,8 @@ export function BlueprintPanel(props: {
                 <th className="py-1 text-right" title="Matching questions already in the bank">Bank</th>
                 <th />
               </tr>
-            </thead>
-            <tbody>
+            </ErpTableHead>
+            <ErpTableBody>
               {rows.map((r) => (
                 <tr key={r.id} className="border-t border-[var(--border)]">
                   <td className="py-1 pr-1">
@@ -350,8 +352,9 @@ export function BlueprintPanel(props: {
                   </td>
                 </tr>
               ))}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
+          </ErpTableShell>
           {canEdit ? (
             <div className="flex flex-wrap items-center gap-2">
               <button

@@ -32,6 +32,7 @@ import {
 } from "@/lib/itemAnalytics";
 import type { SisStudent } from "@/lib/sis";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
+import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 
 const DIMENSIONS: { id: RollupDimension; label: string }[] = [
   { id: "unit", label: "Chapter / topic" },
@@ -291,8 +292,9 @@ export function ItemAnalysis(props: {
         </p>
       ) : (
         <div className="grid gap-3 lg:grid-cols-[1.4fr_1fr]">
-          <table className="w-full text-xs">
-            <thead className="text-[10px] uppercase tracking-wide text-[var(--muted)]">
+          <ErpTableShell>
+          <ErpTable className="text-xs">
+            <ErpTableHead>
               <tr>
                 <th className="py-1 text-left">Area</th>
                 <th className="py-1 text-right">Marks</th>
@@ -300,8 +302,8 @@ export function ItemAnalysis(props: {
                 <th className="py-1 text-right">Class avg</th>
                 <th className="py-1 text-right">Under ½</th>
               </tr>
-            </thead>
-            <tbody>
+            </ErpTableHead>
+            <ErpTableBody>
               {rows.map((r) => (
                 <tr
                   key={r.key}
@@ -323,8 +325,9 @@ export function ItemAnalysis(props: {
                   <td className="py-1.5 text-right tabular-nums">{r.students ? `${Math.round(r.belowHalfShare * 100)}%` : "—"}</td>
                 </tr>
               ))}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
+          </ErpTableShell>
 
           <div className="rounded-lg bg-[var(--surface-sunken)] p-2 text-xs">
             {selected ? (
