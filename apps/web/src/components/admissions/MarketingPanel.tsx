@@ -24,6 +24,8 @@ import {
 } from "@/lib/schoolAchievements";
 import { loadAdmissionsKb } from "@/lib/admissionsKb";
 import { approvedTestimonialLines, loadReferrals } from "@/lib/referrals";
+import { campaignAttribution, inrPaise, loadMarketingSpend, saveMarketingSpend, type MarketingSpendState, type SpendEntry } from "@/lib/marketingSpend";
+import { ADMISSION_SOURCES, type AdmissionsState } from "@/lib/admissions";
 import { complianceFactsToText, loadComplianceFacts } from "@/lib/complianceFacts";
 import { currentAcademicYearCode, type MastersState } from "@/lib/masters";
 import { HOUSEHOLD_LANGUAGES } from "@/lib/householdPrefs";
@@ -38,7 +40,7 @@ const inp = "w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px
 type Draft = { id: string; kind: AchievementKind; academicYearCode: string; title: string; detail: string; metrics: string; date: string; publicSafe: boolean; sourceNote: string };
 type Variant = MarketingVariant & { flags: MarketingVariantFlags; accepted: boolean };
 
-export function MarketingPanel({ masters, canEdit, by }: { masters: MastersState | null; canEdit: boolean; by: string }) {
+export function MarketingPanel({ masters, admissions, canEdit, by }: { masters: MastersState | null; admissions: AdmissionsState | null; canEdit: boolean; by: string }) {
   const ay = masters ? currentAcademicYearCode(masters) : "";
   const [state, setState] = useState<SchoolAchievementsState>(() => loadSchoolAchievements());
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -58,6 +60,10 @@ export function MarketingPanel({ masters, canEdit, by }: { masters: MastersState
   const [note, setNote] = useState("");
   const [useTestimonials, setUseTestimonials] = useState(false);
   const testimonialLines = useMemo(() => approvedTestimonialLines(loadReferrals()), []);
+  const [spend, setSpend] = useState<MarketingSpendState>(() => loadMarketingSpend());
+  const [spendDraft, setSpendDraft] = useState<{ campaignId: string; source: string; label: string; from: string; to: string; amount: string } | null>(null);
+  useModuleStateHydration("marketing_spend", () => setSpend(loadMarketingSpend()));
+  const attribution = useMemo(() => campaignAttribution(admissions?.leads ?? [], spend.entries), [admissions?.leads, spend.entries]);
   const [busy, setBusy] = useState<"gen" | "post" | null>(null);
   const [result, setResult] = useState<{ variants: Variant[]; generationId: string; engine: string } | null>(null);
 
@@ -430,6 +436,126 @@ export function MarketingPanel({ masters, canEdit, by }: { masters: MastersState
             })}
           </div>
         ) : null}
+      </div>
+
+      {/* Spend & attribution */}
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <div>
+            <p className="text-sm font-semibold">Campaign spend &amp; attribution</p>
+            <p className="text-[11px] text-[var(--muted)]">Leads → registered → enrolled per source and per ad campaign id (as carried on leads); cost per lead / enrolment only where a spend is recorded. Export: Report → Campaign &amp; source attribution.</p>
+          </div>
+          {canEdit ? (
+            <button type="button" className="ml-auto rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold" onClick={() => setSpendDraft({ campaignId: "", source: "google", label: "", from: "", to: "", amount: "" })}>
+              + Spend
+            </button>
+          ) : null}
+        </div>
+        {spendDraft ? (
+          <div className="mt-2 grid gap-2 rounded-lg border border-[var(--border)] p-2 sm:grid-cols-6">
+            <label className="text-[11px] text-[var(--muted)]">
+              Source
+              <select className={`${inp} mt-0.5`} value={spendDraft.source} onChange={(e) => setSpendDraft({ ...spendDraft, source: e.target.value })}>
+                {ADMISSION_SOURCES.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-[11px] text-[var(--muted)]">
+              Campaign id (blank = whole source)
+              <input className={`${inp} mt-0.5`} value={spendDraft.campaignId} onChange={(e) => setSpendDraft({ ...spendDraft, campaignId: e.target.value.trim() })} />
+            </label>
+            <label className="text-[11px] text-[var(--muted)]">
+              Label
+              <input className={`${inp} mt-0.5`} value={spendDraft.label} onChange={(e) => setSpendDraft({ ...spendDraft, label: e.target.value })} placeholder="Aug search ads" />
+            </label>
+            <label className="text-[11px] text-[var(--muted)]">
+              From
+              <input type="date" className={`${inp} mt-0.5`} value={spendDraft.from} onChange={(e) => setSpendDraft({ ...spendDraft, from: e.target.value })} />
+            </label>
+            <label className="text-[11px] text-[var(--muted)]">
+              To
+              <input type="date" className={`${inp} mt-0.5`} value={spendDraft.to} onChange={(e) => setSpendDraft({ ...spendDraft, to: e.target.value })} />
+            </label>
+            <label className="text-[11px] text-[var(--muted)]">
+              Amount ₹
+              <input type="number" min={0} className={`${inp} mt-0.5`} value={spendDraft.amount} onChange={(e) => setSpendDraft({ ...spendDraft, amount: e.target.value })} />
+            </label>
+            <div className="flex gap-2 sm:col-span-6">
+              <button
+                type="button"
+                className="rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-[var(--primary-foreground)]"
+                onClick={() => {
+                  const e: SpendEntry = { id: `spend_${Date.now().toString(36)}`, campaignId: spendDraft.campaignId, source: spendDraft.source, label: spendDraft.label, from: spendDraft.from, to: spendDraft.to, amountPaise: Math.round((Number(spendDraft.amount) || 0) * 100), note: "", updatedAt: new Date().toISOString(), updatedBy: by };
+                  if (!e.label && !e.campaignId) return setError("Give the spend a label or campaign id");
+                  setSpend(saveMarketingSpend({ ...spend, entries: [e, ...spend.entries] }));
+                  setSpendDraft(null);
+                  setNotice("Spend recorded");
+                }}
+              >
+                Save
+              </button>
+              <button type="button" className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold" onClick={() => setSpendDraft(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : null}
+        {spend.entries.length ? (
+          <ul className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
+            {spend.entries.map((e) => (
+              <li key={e.id} className="rounded-full border border-[var(--border)] px-2 py-0.5">
+                {e.label || e.campaignId} · {inrPaise(e.amountPaise)}
+                {e.from || e.to ? ` · ${e.from || "…"}→${e.to || "…"}` : ""}
+                {canEdit ? (
+                  <button type="button" className="ml-1 text-[var(--danger)]" title="Remove" onClick={() => setSpend(saveMarketingSpend({ ...spend, entries: spend.entries.filter((x) => x.id !== e.id) }))}>
+                    ×
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <div className="mt-2">
+          <ErpTableShell>
+            <ErpTable>
+              <ErpTableHead>
+                <tr>
+                  <th className="px-2 py-2 text-left">Source / campaign</th>
+                  <th className="px-2 py-2 text-right">Leads</th>
+                  <th className="px-2 py-2 text-right">Registered</th>
+                  <th className="px-2 py-2 text-right">Enrolled</th>
+                  <th className="px-2 py-2 text-right">Conv.</th>
+                  <th className="px-2 py-2 text-right">Spend</th>
+                  <th className="px-2 py-2 text-right">Cost / lead</th>
+                  <th className="px-2 py-2 text-right">Cost / enrolment</th>
+                </tr>
+              </ErpTableHead>
+              <ErpTableBody>
+                {attribution.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="px-2 py-4 text-center text-xs text-[var(--muted)]">No leads yet.</td>
+                  </tr>
+                ) : (
+                  attribution.map((r) => (
+                    <tr key={r.key} className={`text-xs ${r.level === "campaign" ? "text-[var(--muted)]" : "font-semibold"}`}>
+                      <td className="px-2 py-1.5">{r.level === "campaign" ? `↳ ${r.label}` : r.label}</td>
+                      <td className="px-2 py-1.5 text-right">{r.leads}</td>
+                      <td className="px-2 py-1.5 text-right">{r.registered}</td>
+                      <td className="px-2 py-1.5 text-right">{r.enrolled}</td>
+                      <td className="px-2 py-1.5 text-right">{r.conversionPct}%</td>
+                      <td className="px-2 py-1.5 text-right">{inrPaise(r.spendPaise)}</td>
+                      <td className="px-2 py-1.5 text-right">{inrPaise(r.costPerLeadPaise)}</td>
+                      <td className="px-2 py-1.5 text-right">{inrPaise(r.costPerEnrolmentPaise)}</td>
+                    </tr>
+                  ))
+                )}
+              </ErpTableBody>
+            </ErpTable>
+          </ErpTableShell>
+        </div>
       </div>
     </div>
   );

@@ -37,6 +37,7 @@ import { loadWaCampaigns, writeWaCampaignsLocalRaw } from "@/lib/waCampaigns";
 import { admissionsKbIsEmpty, loadAdmissionsKb, writeAdmissionsKbLocalRaw } from "@/lib/admissionsKb";
 import { loadSchoolAchievements, schoolAchievementsIsEmpty, writeSchoolAchievementsLocalRaw } from "@/lib/schoolAchievements";
 import { loadReferrals, referralsIsEmpty, writeReferralsLocalRaw } from "@/lib/referrals";
+import { loadMarketingSpend, marketingSpendIsEmpty, writeMarketingSpendLocalRaw } from "@/lib/marketingSpend";
 import { loadCrmParentChat, writeCrmParentChatLocalRaw } from "@/lib/crmParentChat";
 import { loadWaChatbotFlows, writeWaChatbotFlowsLocalRaw } from "@/lib/waChatbotFlows";
 import { loadIdCardTemplateState, writeIdCardTemplateStateLocalRaw } from "@/lib/idCardTemplate";
@@ -154,6 +155,12 @@ const registry: Record<ModuleStateKey, ModuleStatePersistence<any>> = {
     isEmpty: referralsIsEmpty,
     loadLocal: loadReferrals,
     writeLocalRaw: writeReferralsLocalRaw,
+  }),
+  marketing_spend: createModuleStatePersistence({
+    key: "marketing_spend",
+    isEmpty: marketingSpendIsEmpty,
+    loadLocal: loadMarketingSpend,
+    writeLocalRaw: writeMarketingSpendLocalRaw,
   }),
   tally_sync: createModuleStatePersistence({
     key: "tally_sync",

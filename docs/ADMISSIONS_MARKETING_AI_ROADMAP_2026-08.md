@@ -184,11 +184,11 @@ Effort: ~2 days after 3a and 2e.
 | Need | Status | Work |
 |---|---|---|
 | Lead fields: `preferredLanguage`, `previousBoard`, `locality`, `concerns[]`, `quality`, `utm`/`campaignId`, `referredByHouseholdId`, `consentAt` | 🟡 (2026-08-19: all but `quality` added; `locality`/`parentConsentAt` already existed) | `AdmissionLead` + `normalizeAdmissionLead` (all default `""`/`[]` — never guessed); Google lead webhook already carries campaign ids → map to `campaignId` |
-| Unified communication timeline per lead | 🟡 (3 stores) | Read-only merge view in the lead panel: follow-ups + WA bot thread + campaign messages + widget thread, chronological; the same merge feeds `lead-followup-draft` as "last 5 touchpoints" |
+| Unified communication timeline per lead | ✅ 2026-08-19 — `lib/leadTimeline.ts` merges milestones (created/consent/registration/admitted), follow-ups, campaign sends (sent/failed/skipped), chat-widget and WhatsApp-bot messages by mobile; `LeadTimeline` in the lead panel (in/out counts, "last heard"); `timelineTouchpoints` feeds the follow-up draft as the last 5 touchpoints across all channels; selftest `test:lead-timeline` |
 | Marketing asset library | 🟡 (2026-08-19: brand lines in Marketing → Positioning; no image library yet) | generators reference brand lines, not images |
 | School knowledge base (admissions) | 🟡 | §1 |
 | Achievements store | ✅ 2026-08-19 | §3a |
-| Campaign attribution & reporting | 🟡 | `campaignId` on lead → report: leads / registrations / enrolments per campaign & source, cost field per campaign (manual), cost per enrolment; a `leadership-digest` style AI summary of "where to focus" is optional and last |
+| Campaign attribution & reporting | ✅ 2026-08-19 — `lib/marketingSpend.ts` (module state `marketing_spend`: spend entries per source / campaign id, optional period) + `campaignAttribution` (source rows + campaign rows: leads → registered → enrolled → lost, conversion %, cost per lead / enrolment only when spend is recorded); Marketing tab "Campaign spend & attribution" table + spend entry; Report → **Campaign & source attribution** (Excel/PDF). AI "where to focus" summary not built (optional) |
 | DPDP notice | 🟡 (2026-08-19: consent text + required checkbox on `/apply` and `/register`, `parentConsentAt/By` stored, status shown in the lead panel; bot first-contact notice still to do) |
 
 ---
@@ -213,7 +213,7 @@ Effort: ~2 days after 3a and 2e.
 5. ~~**§3a achievements store + marketing-content generator (+3b, 3c)**~~ — shipped 2026-08-19.
 6. ~~**§2e sequences + §7 event/result/festival campaigns**~~ — shipped 2026-08-19 (no automatic occasion calendar — the office sets the date).
 7. ~~**§5 referral + testimonials**~~ — shipped 2026-08-19.
-8. **§8 unified timeline + attribution report** (~2 d).
+8. ~~**§8 unified timeline + attribution report**~~ — shipped 2026-08-19.
 9. **§2a free-text lead extraction, §4 deficiency preset, §6b retention consumer** (~2.5 d).
 
 Total ≈ 25 working days. Items 1–4 (~9 d) are the "single admission cycle" ROI set.

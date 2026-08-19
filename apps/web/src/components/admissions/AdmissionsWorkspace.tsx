@@ -105,6 +105,8 @@ import { AdmissionCrmChatInbox } from "@/components/admissions/AdmissionCrmChatI
 import { AdmissionsKbPanel } from "@/components/admissions/AdmissionsKbPanel";
 import { MarketingPanel } from "@/components/admissions/MarketingPanel";
 import { ReferralsPanel } from "@/components/admissions/ReferralsPanel";
+import { LeadTimeline } from "@/components/admissions/LeadTimeline";
+import { timelineTouchpoints, type LeadTimelineEvent } from "@/lib/leadTimeline";
 import { referralCodeFor, resolveReferralCode } from "@/lib/referrals";
 import { LeadFollowupDraftPanel } from "@/components/admissions/LeadFollowupDraftPanel";
 import { engagementCtxFromChat, LEAD_QUALITY_LABEL, leadQuality, stalledLeadFlags } from "@/lib/leadQuality";
@@ -1643,7 +1645,7 @@ export function AdmissionsWorkspace() {
       ) : null}
 
       {tab === "marketing" ? (
-        <MarketingPanel masters={masters} canEdit={canCreate} by={session.fullName} />
+        <MarketingPanel masters={masters} admissions={state} canEdit={canCreate} by={session.fullName} />
       ) : null}
 
       {tab === "referrals" && state ? (
@@ -2168,6 +2170,7 @@ function LeadDetail({
     [lead],
   );
   const stalled = useMemo(() => stalledLeadFlags(lead, {}), [lead]);
+  const [timelineEvents, setTimelineEvents] = useState<LeadTimelineEvent[]>([]);
 
   const [aiSuggestion, setAiSuggestion] = useState<
     { nextAction: string; outreachMessage: string; generationId?: string } | null
@@ -2761,6 +2764,7 @@ function LeadDetail({
             counsellorName={agentName}
             registerUrl={publicRegisterAbsoluteUrl("counsellor")}
             hook={stalled[0]?.hook || ""}
+            touchpoints={timelineTouchpoints(timelineEvents, 5)}
             canEdit={canEdit}
             onLogFollowUp={(input) => onLogFollowUp(input)}
             onFlash={(message) => pushToast({ kind: "success", message })}
@@ -2768,44 +2772,7 @@ function LeadDetail({
           />
         ) : null}
 
-        <div className="mt-3">
-          <p className="mb-1.5 text-[10px] font-semibold uppercase text-[var(--muted)]">
-            Activity timeline
-          </p>
-          {(lead.followUps || []).length === 0 ? (
-            <p className="text-[12px] text-[var(--muted)]">
-              No follow-ups yet — calling agent should log the first contact.
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {lead.followUps.map((f) => (
-                <li
-                  key={f.id}
-                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-[12px]"
-                >
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <span className="font-semibold text-[var(--brand-deep)]">
-                      {followUpChannelLabel(f.channel)} ·{" "}
-                      {followUpOutcomeLabel(f.outcome)}
-                    </span>
-                    <span className="text-[10px] text-[var(--muted)]">
-                      {f.at.slice(0, 16).replace("T", " ")}
-                      {f.by ? ` · ${f.by}` : ""}
-                    </span>
-                  </div>
-                  {f.note ? (
-                    <p className="mt-0.5 text-[var(--brand-deep)]">{f.note}</p>
-                  ) : null}
-                  {f.nextFollowUpAt ? (
-                    <p className="mt-0.5 text-[10px] text-[var(--muted)]">
-                      Next: {f.nextFollowUpAt.slice(0, 10)}
-                    </p>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <LeadTimeline lead={lead} onEvents={setTimelineEvents} />
       </MastersWorkCard>
 
       {hh ? (
