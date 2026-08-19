@@ -19,6 +19,18 @@ export function listAllHouseholdWaNumbers(): string[] {
   return Array.from(seen);
 }
 
+/** Households that have not told us their language yet (Students → Family). */
+export function listLanguageUnsetHouseholdWaNumbers(): string[] {
+  const sis = loadSis();
+  const seen = new Set<string>();
+  for (const hh of sis.households) {
+    if ((hh.preferredLanguage || "").trim()) continue;
+    const mobile = householdWhatsApp(hh);
+    if (mobile) seen.add(mobile);
+  }
+  return Array.from(seen);
+}
+
 /** Deduped mobiles for every active staff member. */
 export function listAllStaffMobiles(): string[] {
   const masters = loadMasters();

@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import {
   householdLanguage,
   isInQuietHours,
+  languageChoiceConfirmation,
+  languageMenuText,
+  parseLanguageChoice,
   normalizeHouseholdChannel,
   normalizeHouseholdLanguage,
   normalizeQuietTime,
@@ -54,5 +57,19 @@ assert.equal(isInQuietHours({}, at(17, 0)), false, "no window → never quiet");
 assert.equal(isInQuietHours({ quietHoursStart: "21:00", quietHoursEnd: "" }, at(17, 0)), false, "half a window is no window");
 assert.equal(quietHoursLabel(night), "21:00–07:00");
 assert.equal(quietHoursLabel({}), "");
+
+// Language menu flow parsing
+{
+  assert.equal(parseLanguageChoice("2"), "hi");
+  assert.equal(parseLanguageChoice("2."), "hi");
+  assert.equal(parseLanguageChoice("Hindi"), "hi");
+  assert.equal(parseLanguageChoice("हिन्दी"), "hi");
+  assert.equal(parseLanguageChoice("bangla"), "bn");
+  assert.equal(parseLanguageChoice("7"), null);
+  assert.equal(parseLanguageChoice("kids"), null);
+  assert.match(languageMenuText(), /^Which language should the school message you in\?/);
+  assert.match(languageMenuText(), /2 — हिंदी \(Hindi\)/);
+  assert.match(languageChoiceConfirmation("ur"), /LANG/);
+}
 
 console.log("OK — householdPrefs.selftest.ts");

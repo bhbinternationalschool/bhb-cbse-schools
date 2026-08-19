@@ -51,7 +51,16 @@ import {
   waNormalizeLocal10,
 } from "@/lib/waSend";
 import { generateTutorText } from "@/lib/aiLlm.server";
-import { householdLanguage, languageLabel, sarvamTargetFor } from "@/lib/householdPrefs";
+import {
+  householdLanguage,
+  languageChoiceConfirmation,
+  languageLabel,
+  languageMenuText,
+  LANGUAGE_MENU_KEYWORDS,
+  parseLanguageChoice,
+  sarvamTargetFor,
+} from "@/lib/householdPrefs";
+import { patchMirrorHousehold } from "@/lib/parentHousehold.server";
 import { sarvamConfigured, sarvamTranslate, type SarvamLang } from "@/lib/sarvam.server";
 import { formatKbContext, retrieveRelevantKb } from "@/lib/schoolKb.server";
 import {
@@ -260,6 +269,31 @@ ${kbContext ? `Relevant school notices:\n${kbContext}\n` : ""}Parent's message: 
   } catch {
     return null;
   }
+}
+
+/** Record parent + bot turns for the language flow, send the bot text, and return. */
+async function finishLanguageFlow(
+  store: Store,
+  thread: WaSisBotThread,
+  parentMsg: WaSisBotMsg,
+  replyText: string,
+): Promise<{ matched: boolean; replied: boolean; escalate: boolean; replyText: string; stub: boolean; error?: string }> {
+  const botMsg: WaSisBotMsg = { id: nid("wsm"), role: "bot", text: replyText, at: nowIso(), by: "SIS parent WA bot" };
+  const next: WaSisBotThread = {
+    ...thread,
+    messages: [...thread.messages, parentMsg, botMsg],
+    updatedAt: nowIso(),
+  };
+  await writeStore({ ...store, threads: store.threads.map((t) => (t.id === next.id ? next : t)) });
+  const send = await sendWhatsAppText({ toMobile: next.mobile, body: replyText, clientMessageId: botMsg.id });
+  return {
+    matched: true,
+    replied: send.ok || send.mode === "stub",
+    escalate: false,
+    replyText,
+    stub: !send.ok,
+    error: send.ok ? undefined : send.error,
+  };
 }
 
 export async function listWaSisBotThreads(): Promise<WaSisBotThread[]> {
@@ -588,6 +622,32 @@ export async function handleWaSisBotInbound(opts: {
   const isGreeting =
     !opts.fromUnified &&
     (!text || /^(hi|hello|namaste|hey|start|menu)$/i.test(text));
+
+  // ── Language preference flow: "LANG" → numbered menu; a number / name
+  // right after the menu (last bot message) → save on the household. ──
+  const upper = text.toUpperCase();
+  const askedForMenu = LANGUAGE_MENU_KEYWORDS.some((k) => upper === k || upper.startsWith(`${k} `));
+  const lastBot = [...thread.messages].reverse().find((m) => m.role === "bot");
+  const awaitingChoice = !!lastBot && lastBot.text.startsWith("Which language should the school message you in?");
+  const inlineChoice = askedForMenu ? parseLanguageChoice(text.replace(/^\S+\s*/, "")) : null;
+  const choice = inlineChoice ?? (awaitingChoice ? parseLanguageChoice(text) : null);
+  if (askedForMenu && !choice) {
+    return finishLanguageFlow(store, thread, parentMsg, languageMenuText());
+  }
+  if (choice) {
+    const updated: Household = { ...hh, preferredLanguage: choice };
+    const kids = childrenOf(hh);
+    try {
+      const { pushSisToDb } = await import("@/lib/sisNormalized.server");
+      const r = await pushSisToDb({ households: [updated], students: [] });
+      if (!r.ok) console.warn("[wa-sis-bot] language pref push failed", r.error);
+      patchMirrorHousehold(updated, kids);
+    } catch (e) {
+      console.warn("[wa-sis-bot] language pref save failed", e);
+    }
+    return finishLanguageFlow(store, thread, parentMsg, languageChoiceConfirmation(choice));
+  }
+
   const intent = isGreeting ? ("unknown" as const) : detectSisBotIntent(text);
   const bot = await buildBotReply(hh, intent, text);
   let replyText = bot.text;

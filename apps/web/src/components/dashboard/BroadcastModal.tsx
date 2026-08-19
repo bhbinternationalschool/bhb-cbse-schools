@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { languageMenuText } from "@/lib/householdPrefs";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -20,7 +21,7 @@ import {
   type WaTemplate,
 } from "@/lib/waTemplates";
 
-type Audience = "parents" | "staff";
+type Audience = "parents" | "staff" | "parents_language_unset";
 
 type TemplateSend = {
   name: string;
@@ -177,13 +178,25 @@ export function BroadcastModal({
         ) : (
           <div className="space-y-3">
             <DialogDescription>
-              Sends a real WhatsApp message to every {audience === "parents" ? "parent household" : "active staff member"} on file. Preview the recipient count before sending.
+              Sends a real WhatsApp message to every{" "}
+              {audience === "parents"
+                ? "parent household"
+                : audience === "parents_language_unset"
+                  ? "household that has not yet told us its language"
+                  : "active staff member"}{" "}
+              on file. Preview the recipient count before sending.
             </DialogDescription>
 
             <div className="flex items-center gap-2 text-sm">
               <span className="font-medium text-[var(--brand-deep)]">Audience</span>
               <div className="inline-flex rounded-lg border border-[var(--border)] p-0.5">
-                {(["parents", "staff"] as Audience[]).map((a) => (
+                {(
+                  [
+                    ["parents", "Parents"],
+                    ["staff", "Staff"],
+                    ["parents_language_unset", "Parents · language not asked"],
+                  ] as [Audience, string][]
+                ).map(([a, label]) => (
                   <button
                     key={a}
                     type="button"
@@ -191,17 +204,35 @@ export function BroadcastModal({
                       setAudience(a);
                       setPreview(null);
                     }}
-                    className={`rounded-md px-3 py-1 text-xs font-medium capitalize ${
+                    className={`rounded-md px-3 py-1 text-xs font-medium ${
                       audience === a
                         ? "bg-[var(--brand-deep)] text-white"
                         : "text-[var(--muted)]"
                     }`}
                   >
-                    {a}
+                    {label}
                   </button>
                 ))}
               </div>
             </div>
+
+            {audience === "parents_language_unset" ? (
+              <div className="rounded-lg border border-dashed border-[var(--border)] p-2 text-xs text-[var(--muted)]">
+                Ask each family which language they want messages in. Their reply (a number or a language name) is saved
+                on the household by the WhatsApp bot; they can change it any time with LANG.
+                <button
+                  type="button"
+                  className="ml-2 font-semibold text-[var(--brand-deep)] underline"
+                  onClick={() => {
+                    setTemplateId("");
+                    setMessage(languageMenuText());
+                    setPreview(null);
+                  }}
+                >
+                  Use the language question
+                </button>
+              </div>
+            ) : null}
 
             <label className="block text-sm">
               <span className="mb-1 block text-xs font-medium text-[var(--brand-deep)]">

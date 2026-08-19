@@ -137,3 +137,53 @@ export function quietHoursLabel(hh: HouseholdPrefsLike): string {
   const e = normalizeQuietTime(hh?.quietHoursEnd ?? "");
   return s && e ? `${s}–${e}` : "";
 }
+
+/* ─── WhatsApp "which language?" flow (parent bot) ─────────────────── */
+
+export const LANGUAGE_MENU_KEYWORDS = ["LANG", "LANGUAGE", "BHASHA", "भाषा"];
+
+/** Numbered menu the bot sends; the number → code map is the same list. */
+export function languageMenuText(): string {
+  return [
+    "Which language should the school message you in? Reply with the number:",
+    ...HOUSEHOLD_LANGUAGES.map((l, i) => `${i + 1} — ${l.native}${l.native !== l.label ? ` (${l.label})` : ""}`),
+    "You can change it any time by replying LANG.",
+  ].join("\n");
+}
+
+/** Interpret a parent's reply to the menu: "2", "hindi", "हिंदी", "urdu"… → code, or null. */
+export function parseLanguageChoice(text: string): HouseholdLanguage | null {
+  const t = (text || "").trim().toLowerCase().replace(/[.)\]]+$/, "");
+  const n = Number(t);
+  if (Number.isInteger(n) && n >= 1 && n <= HOUSEHOLD_LANGUAGES.length) return HOUSEHOLD_LANGUAGES[n - 1].id;
+  for (const l of HOUSEHOLD_LANGUAGES) {
+    if (t === l.id || t === l.label.toLowerCase() || t === l.native.toLowerCase()) return l.id;
+  }
+  const alias: Record<string, HouseholdLanguage> = {
+    english: "en", angrezi: "en", "अंग्रेजी": "en", "अंग्रेज़ी": "en",
+    hindi: "hi", "हिन्दी": "hi",
+    bhojpuri: "bho", "भोजपुरी": "bho",
+    maithili: "mai", "मैथिली": "mai",
+    urdu: "ur", "उर्दू": "ur", "اردو": "ur",
+    bengali: "bn", bangla: "bn", "বাংলা": "bn", "बंगाली": "bn",
+  };
+  return alias[t] ?? null;
+}
+
+/** Confirmation in the chosen language (static — never sent through a model). */
+export function languageChoiceConfirmation(code: HouseholdLanguage): string {
+  switch (code) {
+    case "hi":
+      return "धन्यवाद। अब स्कूल के संदेश आपको हिंदी में मिलेंगे। बदलने के लिए LANG लिखें।";
+    case "bho":
+      return "धन्यवाद। अब स्कूल के संदेश आपको हिंदी (भोजपुरी परिवारों के लिए) में मिलेंगे। बदलने के लिए LANG लिखें।";
+    case "mai":
+      return "धन्यवाद। आब स्कूलक संदेश अहाँकेँ मैथिली/हिंदी मे भेटत। बदलबाक लेल LANG लिखू।";
+    case "ur":
+      return "شکریہ۔ اب اسکول کے پیغامات آپ کو اردو میں ملیں گے۔ تبدیل کرنے کے لیے LANG لکھیں۔";
+    case "bn":
+      return "ধন্যবাদ। এখন থেকে স্কুলের বার্তা আপনি বাংলায় পাবেন। বদলাতে LANG লিখুন।";
+    default:
+      return "Thank you. School messages will now come to you in English. Reply LANG any time to change.";
+  }
+}
