@@ -113,8 +113,8 @@ Model: **Gemini Flash** for lesson plans and narratives; Gemini Pro for remedial
 |---|---|---|
 | Circulars / notices / letters / govt submissions, EN/HI/both | ✅ | `school-document` with 10 presets (formal letter, govt submission, permission, leave approval, bonafide, fee concession, transport NOC, event permission, staff appointment, general circular); PDF letterhead + Devanagari |
 | Certificates, TCs, staff agreements | ✅ | AI-drafted, `aiDrafted` flag, human edits |
-| Meeting minutes from notes/transcript | ❌ | No meeting entity. Build `POST /api/ai/meeting-minutes` (raw notes or audio → structured minutes + action items → tasks/duties). Existing Google Speech for EN audio |
-| Compliance narrative (CCE records, teacher-training logs, infra audit) | 🟡 | `lib/udiseCompliance.ts` + `/mpd` (mandatory public disclosure) exist; no AI narrative sections, no teacher-training log |
+| Meeting minutes from notes/transcript | ✅ (2026-08-19) | Document maker → **Meeting minutes** mode: paste / dictate notes → `POST /api/ai/meeting-minutes` → agenda, discussion, decisions, action items (owner/due only as stated), next meeting → editable → letterhead PDF; Copy list for action items. No meeting entity yet — action items are not turned into duties |
+| Compliance narrative (CCE records, teacher-training logs, infra audit) | 🟡 | `compliance_narrative` document preset + "Insert school facts from the ERP" (enrolment by class, sections, staff, published fee structures, exam terms); infrastructure / safety / training / results still typed by the office (no data model). Still no teacher-training log |
 | Translation of existing docs | 🟡 | only via regenerating in `hi` |
 
 Model: **Gemini Flash** for drafts and minutes (long context handles a 2-hour transcript); **Sarvam** for formal Hindi translation of finished documents; Hindi meeting audio → Sarvam Saarika.
@@ -128,8 +128,8 @@ Model: **Gemini Flash** for drafts and minutes (long context handles a 2-hour tr
 | Lead scoring + AI next-best-action + follow-up drafts | ✅ | `lib/admissionsAi.ts`, `lead-next-action` |
 | WhatsApp inquiry bot, partial-lead capture, campaigns | ✅ | |
 | Inbound documents from parents (Aadhaar, birth cert) → OCR | 🟡 | `waInboundMedia.server.ts` + Vision extracts text; **no structured field extraction, no completeness check** |
-| Application form (PDF/image) → structured record | ❌ | |
-| Offer letter / fee structure / welcome packet | 🟡 | Add 3 presets to `SCHOOL_DOCUMENT_PRESETS` (`admission_offer`, `fee_structure_letter`, `welcome_packet`) fed with the lead + fee plan — ½ day |
+| Application form (PDF/image) → structured record | ✅ (2026-08-19) | Lead form → Scan document → "Application form (AI)": Gemini multimodal (`generateGeminiVisionJson`) → 15 fields + `missing` list, applied to the lead for review; OpenAI vision fallback for images |
+| Offer letter / fee structure / welcome packet | ✅ (2026-08-19) | Presets `admission_offer`, `fee_structure_letter`, `welcome_packet`; lead panel links open the document maker prefilled with the lead + the class's published NEW-admission fee lines |
 
 Build: `POST /api/ai/application-extract` — image/PDF → `{ studentName, dob, aadhaarLast4, parentName, mobile, previousSchool, class, missing: [] }` → pre-fills the admission form, flags incomplete.
 
@@ -184,4 +184,4 @@ Why Gemini as default: cheapest at this volume, same GCP project/billing/IAM as 
 6. ~~**Competency question types + LO codes on syllabus** (§1b)~~ — shipped 2026-08-18 (LO seed import outstanding).
 7. ~~**Item-level scores** → academic at-risk → pedagogy suggestions (§1 prereq, §3.2–3.3)~~ — shipped 2026-08-19 (three commits). Left: OMR import, UI-configurable thresholds.
 8. ~~**Blueprint + question bank** (§1c)~~ — shipped 2026-08-19.
-9. Application extraction, meeting minutes, compliance narratives, admission presets — ½–1 day each, slot anywhere.
+9. ~~Application extraction, meeting minutes, compliance narratives, admission presets~~ — shipped 2026-08-19 (compliance narrative is a preset + ERP facts helper; infra/training data models still absent).

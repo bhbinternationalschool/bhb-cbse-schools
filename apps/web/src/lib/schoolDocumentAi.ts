@@ -15,7 +15,8 @@ export type SchoolDocumentType =
   | "general_circular"
   | "admission_offer"
   | "fee_structure_letter"
-  | "welcome_packet";
+  | "welcome_packet"
+  | "compliance_narrative";
 
 export type SchoolDocumentLanguage = "en" | "hi" | "both";
 
@@ -125,6 +126,14 @@ export const SCHOOL_DOCUMENT_PRESETS: SchoolDocumentPreset[] = [
       "Fee structure communication for a class and session: a clear table of fee heads with amounts (use exactly the amounts given — never invent or round), installment due dates if given, payment modes, late-fee/concession note only if given. Plain, factual, no marketing language.",
   },
   {
+    id: "compliance_narrative",
+    label: "Compliance narrative (CBSE MPD / affiliation / UDISE)",
+    hint: "Section text for mandatory public disclosure, affiliation renewal, inspection reports",
+    defaultSubjectEn: "Compliance narrative —",
+    promptContext:
+      "Formal narrative sections for a CBSE school's mandatory public disclosure / affiliation renewal / inspection file. Use ONLY the facts given (enrolment, sections, staff, infrastructure, safety, training, results); write one short factual paragraph per section given, with a heading. Where a required section has no facts, write 'To be provided:' and name the fact needed — never invent numbers, dates, certificates or approvals. Formal register, third person, no marketing.",
+  },
+  {
     id: "welcome_packet",
     label: "Welcome packet",
     hint: "First-day information for a newly admitted family",
@@ -178,4 +187,54 @@ export function buildSchoolDocumentSystemPrompt(): string {
 Tone: formal, respectful, legally appropriate. Use Indian date format in body when dates appear.
 Do not invent specific student names unless provided — use placeholders like [Student Name] if needed.
 Respond with valid JSON only — no markdown fences.`;
+}
+
+/**
+ * Facts the ERP already knows for a compliance narrative — counts only,
+ * pulled client-side and pasted into the details box for the office to
+ * extend (infrastructure, safety, training come from the office).
+ */
+export function buildComplianceFactsFromMasters(input: {
+  academicYearCode: string;
+  masters: {
+    classes: { id: string; name: string; isActive?: boolean }[];
+    sections: { id: string; classId: string; isActive?: boolean }[];
+    staff?: { status: string; stream: string; category?: string; qualification?: string }[];
+    feeGroups?: { academicYearCode: string; isActive: boolean; structurePublishedAt: string | null }[];
+  };
+  students: { status: string; classId: string; gender?: string; academicYearCode?: string }[];
+  examTermCount: number;
+}): string {
+  const { masters } = input;
+  const activeClasses = masters.classes.filter((c) => c.isActive !== false);
+  const activeSections = masters.sections.filter((s) => s.isActive !== false);
+  const students = input.students.filter(
+    (s) => s.status === "active" && (!s.academicYearCode || s.academicYearCode === input.academicYearCode),
+  );
+  const boys = students.filter((s) => (s.gender || "").toLowerCase().startsWith("m")).length;
+  const girls = students.filter((s) => (s.gender || "").toLowerCase().startsWith("f")).length;
+  const staff = (masters.staff ?? []).filter((s) => s.status === "active");
+  const teaching = staff.filter((s) => s.stream === "teaching");
+  const withQual = teaching.filter((s) => (s.qualification || "").trim()).length;
+  const publishedGroups = (masters.feeGroups ?? []).filter(
+    (g) => g.isActive && g.academicYearCode === input.academicYearCode && g.structurePublishedAt,
+  ).length;
+  const perClass = activeClasses
+    .map((c) => `${c.name}: ${students.filter((s) => s.classId === c.id).length}`)
+    .join(", ");
+  return [
+    `Session: ${input.academicYearCode}`,
+    `Enrolment (active): ${students.length} students (${boys} boys, ${girls} girls) across ${activeClasses.length} classes and ${activeSections.length} sections.`,
+    `Class-wise: ${perClass}`,
+    `Staff (active): ${staff.length} total; ${teaching.length} teaching, ${staff.length - teaching.length} non-teaching. Qualification recorded for ${withQual} of ${teaching.length} teachers.`,
+    `Fee: ${publishedGroups} fee structure${publishedGroups === 1 ? "" : "s"} published for the session (see the fee disclosure page).`,
+    `Assessment: ${input.examTermCount} exam term${input.examTermCount === 1 ? "" : "s"} configured for the session.`,
+    "",
+    "Sections to write (add facts below each; leave blank to get a 'To be provided' line):",
+    "Infrastructure (rooms, labs, library, playground, toilets, drinking water):",
+    "Safety & health (fire NOC, building safety, transport safety, medical, POCSO / anti-bullying committees):",
+    "Teacher training (CBSE / other trainings this session, hours, participants):",
+    "Academic results (board results, pass %, toppers if applicable):",
+    "Committees & governance (SMC, PTA, grievance cell):",
+  ].join("\n");
 }

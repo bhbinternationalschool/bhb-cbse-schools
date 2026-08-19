@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { FileText } from "lucide-react";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { currentAcademicYearCode, loadMasters, type MastersState } from "@/lib/masters";
 import {
   SCHOOL_DOCUMENT_PRESETS,
+  buildComplianceFactsFromMasters,
   presetForType,
   type SchoolDocumentLanguage,
   type SchoolDocumentType,
@@ -290,6 +291,26 @@ export function DocumentMakerWorkspace() {
               value={details}
               onChange={(e) => setDetails(e.target.value)}
             />
+            {docType === "compliance_narrative" && masters ? (
+              <button
+                type="button"
+                className="mt-1 text-[11px] font-semibold text-[var(--brand-deep)] underline"
+                onClick={() => {
+                  void Promise.all([import("@/lib/sis"), import("@/lib/exams")]).then(([sisMod, examsMod]) => {
+                    const ay = currentAcademicYearCode(masters);
+                    const facts = buildComplianceFactsFromMasters({
+                      academicYearCode: ay,
+                      masters,
+                      students: sisMod.loadSis().students,
+                      examTermCount: examsMod.listExamTerms(ay).length,
+                    });
+                    setDetails((d) => (d.trim() ? `${d.trim()}\n\n${facts}` : facts));
+                  });
+                }}
+              >
+                Insert school facts from the ERP (enrolment, sections, staff, fees, exams)
+              </button>
+            ) : null}
           </label>
 
           {error && mode === "letter" ? (
