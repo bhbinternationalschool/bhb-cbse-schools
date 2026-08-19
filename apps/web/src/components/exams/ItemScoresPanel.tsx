@@ -30,6 +30,7 @@ import type { MastersState } from "@/lib/masters";
 import { StudentAvatar, StudentNameLabel } from "@/components/students/StudentAvatar";
 import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import { ItemAnalysis } from "@/components/exams/ItemAnalysis";
+import { itemScoreTemplateCsv, parseItemScoreGrid } from "@/lib/itemScoreImport";
 
 type Cell = string; // raw text in the input; "" = not marked
 
@@ -57,6 +58,9 @@ export function ItemScoresPanel(props: {
   const [dirty, setDirty] = useState(false);
   const [applyTotals, setApplyTotals] = useState(true);
   const [tick, setTick] = useState(0);
+  const [showImport, setShowImport] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [importReport, setImportReport] = useState<string | null>(null);
 
   const subject = subjects.find((s) => s.id === subjectId) ?? null;
 
@@ -158,6 +162,49 @@ export function ItemScoresPanel(props: {
     }
     if (n === 0 || q.marks === 0) return null;
     return Math.round((sum / (n * q.marks)) * 100);
+  }
+
+  function downloadTemplate() {
+    if (!paper) return;
+    const csv = itemScoreTemplateCsv(
+      roster.map((s) => ({ id: s.id, admissionNo: s.admissionNo, rollNo: s.rollNo, fullName: s.fullName })),
+      questions.map((q) => ({ id: q.id, marks: q.marks })),
+    );
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `item-scores-${paper.paperCode}-set${setCode}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function applyImport(text: string) {
+    if (!paper || !canEdit) return;
+    const r = parseItemScoreGrid(text, {
+      students: roster.map((s) => ({ id: s.id, admissionNo: s.admissionNo, rollNo: s.rollNo, fullName: s.fullName })),
+      questions: questions.map((q) => ({ id: q.id, marks: q.marks })),
+    });
+    if (r.questionColumns.length === 0) {
+      setImportReport("No Q1, Q2… columns found in the header — download the template to see the expected shape.");
+      return;
+    }
+    setGrid((prev) => {
+      const next = new Map(prev);
+      for (const sc of r.scores) next.set(`${sc.studentId}:${sc.questionId}`, sc.marks == null ? "" : String(sc.marks));
+      return next;
+    });
+    if (r.scores.length) setDirty(true);
+    const parts = [`${r.matched} student${r.matched === 1 ? "" : "s"} matched`, `${r.scores.filter((x) => x.marks != null).length} marks filled`];
+    if (r.unmatchedRows.length) parts.push(`${r.unmatchedRows.length} row(s) not matched: ${r.unmatchedRows.slice(0, 5).map((u) => u.key || `row ${u.row}`).join(", ")}`);
+    if (r.problems.length) parts.push(`${r.problems.length} cell(s) skipped: ${r.problems.slice(0, 5).map((p) => `row ${p.row} ${p.question} "${p.value}" (${p.reason})`).join("; ")}`);
+    setImportReport(parts.join(" · ") + (r.scores.length ? " — review the grid, then Save." : ""));
+  }
+
+  async function onImportFile(file: File | null) {
+    if (!file) return;
+    const text = await file.text();
+    setImportText(text);
+    applyImport(text);
   }
 
   function onSave() {
@@ -272,6 +319,16 @@ export function ItemScoresPanel(props: {
             {roster.length} students · {questions.length} questions
             {dirty ? " · unsaved changes" : ""}
           </span>
+          {paper && canEdit ? (
+            <button
+              type="button"
+              className="rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
+              onClick={() => setShowImport((v) => !v)}
+              title="Paste from a spreadsheet or upload a CSV / OMR export"
+            >
+              Import
+            </button>
+          ) : null}
           {canEdit ? (
             <button
               type="button"
@@ -284,6 +341,41 @@ export function ItemScoresPanel(props: {
           ) : null}
         </div>
       </div>
+
+      {showImport && paper ? (
+        <div className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--card)] p-3 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold">Import item scores</span>
+            <span className="text-[var(--muted)]">
+              columns: Admission No / Roll / Student + Q1…Q{questions.length}; blank or AB = not marked
+            </span>
+            <button type="button" className="ml-auto underline" onClick={downloadTemplate}>
+              Download template CSV
+            </button>
+            <label className="cursor-pointer underline">
+              Upload CSV / TSV
+              <input type="file" accept=".csv,.tsv,text/csv,text/tab-separated-values,text/plain" className="hidden" onChange={(e) => void onImportFile(e.target.files?.[0] ?? null)} />
+            </label>
+          </div>
+          <textarea
+            className="field mt-2 min-h-[90px] w-full !py-1.5 font-mono text-[11px]"
+            placeholder={"Or paste from Excel / Google Sheets (tab-separated), e.g.\nAdmission No\tStudent\tQ1\tQ2\nBHB-1001\tAarav Singh\t2\t3"}
+            value={importText}
+            onChange={(e) => setImportText(e.target.value)}
+          />
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              type="button"
+              className="rounded-lg bg-[var(--primary)] px-3 py-1 text-xs font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
+              disabled={!importText.trim()}
+              onClick={() => applyImport(importText)}
+            >
+              Fill grid from text
+            </button>
+            {importReport ? <span className="text-[var(--muted)]">{importReport}</span> : null}
+          </div>
+        </div>
+      ) : null}
 
       {!paper ? (
         <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-8 text-center text-sm text-[var(--muted)]">
