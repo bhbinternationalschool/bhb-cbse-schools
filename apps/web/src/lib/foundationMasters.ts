@@ -84,6 +84,12 @@ export type StatutoryEstablishmentConfig = {
   epfWageCeiling: number;
   esicEmployerCode: string;
   esicWageCeiling: number;
+  /**
+   * Low-wage exemption: staff whose monthly wages are up to this amount pay
+   * no employee ESIC share (ESI Act — daily wage up to ₹176 ≈ ₹5,000/month);
+   * the employer share is still payable. 0 = no exemption.
+   */
+  esicEmployeeExemptWageLimit: number;
   esicEmployeeRatePct: number;
   esicEmployerRatePct: number;
   penalty: {
@@ -1306,6 +1312,7 @@ export function defaultStatutoryConfig(): StatutoryEstablishmentConfig {
     epfWageCeiling: 15000,
     esicEmployerCode: "",
     esicWageCeiling: 21000,
+    esicEmployeeExemptWageLimit: 5000,
     esicEmployeeRatePct: 0.75,
     esicEmployerRatePct: 3.25,
     penalty: {
@@ -2018,6 +2025,10 @@ export function normalizeStatutoryConfig(
     epfWageCeiling: Number(p?.epfWageCeiling) || d.epfWageCeiling,
     esicEmployerCode: (p?.esicEmployerCode ?? "").trim(),
     esicWageCeiling: Number(p?.esicWageCeiling) || d.esicWageCeiling,
+    esicEmployeeExemptWageLimit:
+      p?.esicEmployeeExemptWageLimit === undefined || p?.esicEmployeeExemptWageLimit === null
+        ? d.esicEmployeeExemptWageLimit
+        : Math.max(0, Number(p.esicEmployeeExemptWageLimit) || 0),
     esicEmployeeRatePct:
       Number(p?.esicEmployeeRatePct) || d.esicEmployeeRatePct,
     esicEmployerRatePct:
