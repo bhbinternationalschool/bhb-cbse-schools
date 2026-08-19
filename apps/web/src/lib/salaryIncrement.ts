@@ -7,6 +7,7 @@
 import type { StaffStream } from "@/lib/foundationMasters";
 import type { MastersState } from "@/lib/masters";
 import {
+  additionalFromLink,
   computeStructureAmounts,
   loadSalarySetup,
   resolveStructureForStaff,
@@ -341,6 +342,7 @@ export function buildIncrementDraft(input: {
       link?.basicOverride || 0,
       link?.statutoryCover || "both",
       input.masters.statutoryConfig,
+      additionalFromLink(link),
     );
     const oldBasic = amounts.basic;
     const service = monthsOfService(staff.joiningDate, effectiveFrom);
@@ -505,6 +507,7 @@ export function previewStaffIncrement(input: {
     link?.basicOverride || 0,
     link?.statutoryCover || "both",
     input.masters.statutoryConfig,
+    additionalFromLink(link),
   );
   const oldBasic = amounts.basic;
   if (oldBasic <= 0) {
@@ -780,6 +783,9 @@ export function applyIncrementBatch(
       structureId: existing?.structureId || line.structureId,
       basicOverride: line.newBasic,
       statutoryCover: existing?.statutoryCover || "both",
+      // Increments move basic only; the additional amount is left as set.
+      additionalAmount: existing?.additionalAmount || 0,
+      additionalLabel: existing?.additionalLabel || "",
       effectiveFrom: batch.effectiveFrom,
       salaryAccountNote: existing?.salaryAccountNote || "",
     };

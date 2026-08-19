@@ -70,9 +70,32 @@ export type StaffSalaryLink = {
   basicOverride: number;
   /** Who avails PF / ESIC on this assignment */
   statutoryCover: StatutoryCover;
+  /**
+   * Extra ₹/month paid on top of the structure. Earned and shown on the
+   * payslip, but outside every statutory base: PF wages, ESIC eligibility
+   * and ESIC wages are computed on the structure (basic + its allowances)
+   * alone. 0 = none.
+   */
+  additionalAmount: number;
+  /** Label printed for the additional line, e.g. "Additional allowance" */
+  additionalLabel: string;
   effectiveFrom: string;
   salaryAccountNote: string;
 };
+
+/** Virtual earning head for the per-staff additional amount (no master row). */
+export const ADDITIONAL_HEAD_CODE = "ADDL";
+export function additionalHead(label?: string): SalaryHead {
+  return {
+    id: "addl",
+    code: ADDITIONAL_HEAD_CODE,
+    name: (label || "").trim() || "Additional allowance",
+    kind: "earning",
+    tallyLedger: "Additional Allowance",
+    isActive: true,
+    sortOrder: 99,
+  };
+}
 
 export function normalizeStatutoryCover(
   v?: string | null,
@@ -500,6 +523,8 @@ function normalizeLink(l: Partial<StaffSalaryLink>): StaffSalaryLink {
     structureId: String(l.structureId || ""),
     basicOverride: Math.max(0, Number(l.basicOverride) || 0),
     statutoryCover: normalizeStatutoryCover(l.statutoryCover),
+    additionalAmount: Math.max(0, Math.round(Number(l.additionalAmount) || 0)),
+    additionalLabel: String(l.additionalLabel || "").trim().slice(0, 60),
     effectiveFrom: String(l.effectiveFrom || "").slice(0, 10),
     salaryAccountNote: String(l.salaryAccountNote || ""),
   };
@@ -675,12 +700,19 @@ export function computeStructureAmounts(
   basicOverride = 0,
   statutoryCover: StatutoryCover = "both",
   statutory?: Partial<StatutoryCeilings> | null,
+  /** Per-staff additional ₹/month — paid, shown, but outside PF/ESIC bases */
+  additional?: { amount: number; label?: string } | null,
 ): {
   basic: number;
   earnings: { head: SalaryHead; amount: number }[];
   deductions: { head: SalaryHead; amount: number }[];
   employer: { head: SalaryHead; amount: number }[];
+  /** Everything paid, additional included */
   gross: number;
+  /** Structure earnings only — the wage the statutory rules looked at */
+  statutoryGross: number;
+  /** The additional line, 0 when none */
+  additionalAmount: number;
   totalDeductions: number;
 } {
   const cover = normalizeStatutoryCover(statutoryCover);
@@ -719,11 +751,11 @@ export function computeStructureAmounts(
     if (head.kind === "earning") earnings.push({ head, amount: lineAmount(head, line) });
     else statutoryLines.push({ head, line });
   }
-  const gross = earnings.reduce((s, e) => s + e.amount, 0);
-  const esicEligible = gross <= ceilings.esicWageCeiling;
+  const statutoryGross = earnings.reduce((s, e) => s + e.amount, 0);
+  const esicEligible = statutoryGross <= ceilings.esicWageCeiling;
   // Low-wage staff: no employee ESIC share, employer share still due.
   const esicEmployeeExempt =
-    ceilings.esicEmployeeExemptWageLimit > 0 && gross <= ceilings.esicEmployeeExemptWageLimit;
+    ceilings.esicEmployeeExemptWageLimit > 0 && statutoryGross <= ceilings.esicEmployeeExemptWageLimit;
   for (const { head, line } of statutoryLines) {
     const isEsic = isEsicHeadCode(head.code);
     const amount =
@@ -737,6 +769,14 @@ export function computeStructureAmounts(
     else employer.push(row);
   }
 
+  // Additional is appended AFTER every statutory decision above so it can
+  // never widen PF wages, ESIC eligibility or the ESIC wage base.
+  const additionalAmount = Math.max(0, Math.round(Number(additional?.amount) || 0));
+  if (additionalAmount > 0) {
+    earnings.push({ head: additionalHead(additional?.label), amount: additionalAmount });
+  }
+  const gross = statutoryGross + additionalAmount;
+
   const totalDeductions = deductions.reduce((s, e) => s + e.amount, 0);
   return {
     basic,
@@ -744,8 +784,18 @@ export function computeStructureAmounts(
     deductions,
     employer,
     gross,
+    statutoryGross,
+    additionalAmount,
     totalDeductions,
   };
+}
+
+/** The additional-amount argument for computeStructureAmounts from a staff link. */
+export function additionalFromLink(
+  link?: Pick<StaffSalaryLink, "additionalAmount" | "additionalLabel"> | null,
+): { amount: number; label?: string } | null {
+  if (!link || !(link.additionalAmount > 0)) return null;
+  return { amount: link.additionalAmount, label: link.additionalLabel };
 }
 
 export function salarySetupCompleteness(state: SalarySetupState): {

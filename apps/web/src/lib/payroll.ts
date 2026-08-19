@@ -37,6 +37,7 @@ import {
   voidAdvanceRecoveriesForRun,
 } from "@/lib/staffAdvance";
 import {
+  additionalFromLink,
   computeStructureAmounts,
   loadSalarySetup,
   normalizeSalarySettings,
@@ -404,6 +405,7 @@ export function buildPayrollDraft(opts: BuildPayrollOpts): PayrollRun {
       link?.basicOverride || 0,
       link?.statutoryCover || "both",
       opts.masters.statutoryConfig,
+      additionalFromLink(link),
     );
 
     let daysPresent = 0;

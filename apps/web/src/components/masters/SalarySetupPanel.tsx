@@ -12,6 +12,7 @@ import { loadMasters, type MastersState } from "@/lib/masters";
 import {
   buildStructureLinesFromPack,
   cloneSalaryStructure,
+  additionalFromLink,
   computeStructureAmounts,
   loadSalarySetup,
   newSalaryId,
@@ -995,6 +996,8 @@ function AssignPanel({
     structureId: string;
     basicOverride: string;
     statutoryCover: StatutoryCover;
+    additionalAmount: string;
+    additionalLabel: string;
   };
 
   const roster = (masters.staff ?? [])
@@ -1011,6 +1014,8 @@ function AssignPanel({
       basicOverride:
         link && link.basicOverride > 0 ? String(link.basicOverride) : "",
       statutoryCover: normalizeStatutoryCover(link?.statutoryCover),
+      additionalAmount: link && link.additionalAmount > 0 ? String(link.additionalAmount) : "",
+      additionalLabel: link?.additionalLabel || "",
     };
   }
 
@@ -1025,7 +1030,9 @@ function AssignPanel({
     return (
       d.structureId !== s.structureId ||
       d.basicOverride !== s.basicOverride ||
-      d.statutoryCover !== s.statutoryCover
+      d.statutoryCover !== s.statutoryCover ||
+      d.additionalAmount !== s.additionalAmount ||
+      d.additionalLabel !== s.additionalLabel
     );
   }
 
@@ -1066,6 +1073,8 @@ function AssignPanel({
       structureId: d.structureId,
       basicOverride: Math.max(0, Number(d.basicOverride) || 0),
       statutoryCover: normalizeStatutoryCover(d.statutoryCover),
+      additionalAmount: Math.max(0, Math.round(Number(d.additionalAmount) || 0)),
+      additionalLabel: d.additionalLabel.trim().slice(0, 60),
       effectiveFrom:
         existing?.effectiveFrom || new Date().toISOString().slice(0, 10),
       salaryAccountNote: existing?.salaryAccountNote || "",
@@ -1094,7 +1103,10 @@ function AssignPanel({
         <strong className="text-[var(--brand-deep)]">Assign</strong>. Wrong
         select? use{" "}
         <strong className="text-[var(--brand-deep)]">Cancel</strong> to
-        revert. PF / ESIC: both, PF only, ESIC only, or neither.
+        revert. PF / ESIC: both, PF only, ESIC only, or neither.{" "}
+        <strong className="text-[var(--brand-deep)]">Additional</strong> is paid
+        and printed on the payslip but stays outside PF wages and ESIC — those
+        are computed on the structure alone.
         {dirtyCount > 0 ? (
           <span className="ml-1 font-semibold text-[var(--warning)]">
             · {dirtyCount} unsaved row{dirtyCount > 1 ? "s" : ""}
@@ -1109,6 +1121,9 @@ function AssignPanel({
               <th className="px-3 py-2 font-medium">Saved</th>
               <th className="px-3 py-2 font-medium">Structure</th>
               <th className="px-3 py-2 font-medium">Basic override</th>
+              <th className="px-3 py-2 font-medium" title="Paid on top of the structure; not counted for PF wages or ESIC">
+                Additional ₹ / month
+              </th>
               <th className="px-3 py-2 font-medium">PF / ESIC</th>
               <th className="px-3 py-2 font-medium">Action</th>
             </tr>
@@ -1129,6 +1144,9 @@ function AssignPanel({
                     Number(draft.basicOverride) || 0,
                     draft.statutoryCover,
                     masters.statutoryConfig,
+                    Number(draft.additionalAmount) > 0
+                      ? { amount: Number(draft.additionalAmount), label: draft.additionalLabel }
+                      : null,
                   )
                 : null;
               const savedLabel = link
@@ -1147,6 +1165,7 @@ function AssignPanel({
                     link?.basicOverride || 0,
                     normalizeStatutoryCover(link?.statutoryCover),
                     masters.statutoryConfig,
+                    additionalFromLink(link),
                   )
                 : null;
               const sumBy = (rows: { head: { code: string }; amount: number }[], test: (c: string) => boolean) =>
@@ -1180,6 +1199,9 @@ function AssignPanel({
                     {savedLabel}
                     {link?.basicOverride
                       ? ` · basic ₹${link.basicOverride.toLocaleString("en-IN")}`
+                      : ""}
+                    {link?.additionalAmount
+                      ? ` · + ₹${link.additionalAmount.toLocaleString("en-IN")} ${link.additionalLabel || "additional"} (outside PF/ESIC)`
                       : ""}
                     <div className="mt-0.5 space-y-0.5 text-[10px]">
                       {savedCover === "none" ? (
@@ -1243,6 +1265,23 @@ function AssignPanel({
                       onChange={(e) =>
                         patchDraft(s.id, { basicOverride: e.target.value })
                       }
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      className="field !w-28 !py-1 text-[11px]"
+                      type="number"
+                      min={0}
+                      placeholder="0"
+                      value={draft.additionalAmount}
+                      onChange={(e) => patchDraft(s.id, { additionalAmount: e.target.value })}
+                    />
+                    <input
+                      className="field mt-1 !w-36 !py-1 text-[10px]"
+                      placeholder="label on payslip"
+                      maxLength={60}
+                      value={draft.additionalLabel}
+                      onChange={(e) => patchDraft(s.id, { additionalLabel: e.target.value })}
                     />
                   </td>
                   <td className="px-3 py-2">
