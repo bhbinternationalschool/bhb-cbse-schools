@@ -35,6 +35,7 @@ import {
   markLost,
   markVerified,
   promoteToRegistration,
+  publicRegisterAbsoluteUrl,
   relationLabel,
   saveAdmissions,
   setLeadCallerAssigned,
@@ -102,6 +103,9 @@ import { RteWorkspace } from "@/components/rte/RteWorkspace";
 import { AdmissionCampaignsPanel } from "@/components/admissions/AdmissionCampaignsPanel";
 import { AdmissionCrmChatInbox } from "@/components/admissions/AdmissionCrmChatInbox";
 import { AdmissionsKbPanel } from "@/components/admissions/AdmissionsKbPanel";
+import { LeadFollowupDraftPanel } from "@/components/admissions/LeadFollowupDraftPanel";
+import { engagementCtxFromChat, LEAD_QUALITY_LABEL, leadQuality, stalledLeadFlags } from "@/lib/leadQuality";
+import { loadCrmParentChat } from "@/lib/crmParentChat";
 import { HOUSEHOLD_LANGUAGES } from "@/lib/householdPrefs";
 import { LEAD_CONCERNS, PREVIOUS_BOARDS } from "@/lib/admissionsEnquiryForm";
 import { AdmissionReportsPanel } from "@/components/admissions/AdmissionReportsPanel";
@@ -176,6 +180,8 @@ export function AdmissionsWorkspace() {
     | "overdue"
     | "unassigned"
     | "mine"
+    | "stalled"
+    | "hot"
   >("open");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [leadDateFrom, setLeadDateFrom] = useState("");
@@ -393,6 +399,12 @@ export function AdmissionsWorkspace() {
           !assigned
         );
       }
+      if (filter === "stalled") {
+        return stalledLeadFlags(l, {}).length > 0;
+      }
+      if (filter === "hot") {
+        return leadQuality(l, engagementCtx).quality === "hot";
+      }
       if (filter === "mine") {
         return (
           l.stage !== "enrolled" &&
@@ -458,6 +470,22 @@ export function AdmissionsWorkspace() {
     () => (state ? followUpCounts(state) : null),
     [state],
   );
+  // Engagement the client can see: chat-widget threads (by mobile).
+  const engagementCtx = useMemo(
+    () => engagementCtxFromChat(loadCrmParentChat().threads),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state?.leads.length],
+  );
+  const { stalledCount, hotCount } = useMemo(() => {
+    let stalled = 0;
+    let hot = 0;
+    for (const l of state?.leads ?? []) {
+      if (l.stage === "enrolled" || l.stage === "lost") continue;
+      if (stalledLeadFlags(l, {}).length) stalled += 1;
+      if (leadQuality(l, engagementCtx).quality === "hot") hot += 1;
+    }
+    return { stalledCount: stalled, hotCount: hot };
+  }, [state?.leads, engagementCtx]);
 
   function commit(next: AdmissionsState, msg?: string) {
     setState(next);
@@ -1231,6 +1259,8 @@ export function AdmissionsWorkspace() {
                       ["overdue", "Overdue", fuCounts?.overdue],
                       ["mine", "My leads", null],
                       ["unassigned", "Unassigned", fuCounts?.unassigned],
+                      ["stalled", "Stalled", stalledCount],
+                      ["hot", "Hot", hotCount],
                     ] as const
                   ).map(([id, label, n]) => (
                     <button
@@ -2112,6 +2142,11 @@ function LeadDetail({
   const siblings = siblingsOfHousehold(state, lead.householdId, lead.id);
   const bucket = leadFollowUpBucket(lead);
   const likelihood = leadConversionLikelihood(lead);
+  const quality = useMemo(
+    () => leadQuality(lead, engagementCtxFromChat(loadCrmParentChat().threads)),
+    [lead],
+  );
+  const stalled = useMemo(() => stalledLeadFlags(lead, {}), [lead]);
 
   const [aiSuggestion, setAiSuggestion] = useState<
     { nextAction: string; outreachMessage: string; generationId?: string } | null
@@ -2255,7 +2290,29 @@ function LeadDetail({
               >
                 {likelihood.label} · {likelihood.score}%
               </span>
+              <span
+                className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${
+                  quality.quality === "hot"
+                    ? "bg-[var(--danger)]/10 text-[var(--danger)]"
+                    : quality.quality === "warm"
+                      ? "bg-[var(--warning-soft)] text-[var(--warning)]"
+                      : "bg-[var(--surface-sunken)] text-[var(--muted)]"
+                }`}
+                title={
+                  quality.signals.length
+                    ? `Engagement: ${quality.signals.map((x) => x.label).join(" · ")}`
+                    : "No engagement signals yet — warm means unknown, not cold"
+                }
+              >
+                {LEAD_QUALITY_LABEL[quality.quality]} · {quality.score}
+              </span>
             </div>
+            {stalled.length ? (
+              <p className="mt-1 rounded bg-[var(--warning-soft)] px-2 py-1 text-[11px] font-semibold text-[var(--warning)]">
+                Stalled: {stalled[0].label}
+                {stalled.length > 1 ? ` (+${stalled.length - 1})` : ""} — Draft follow-up below uses this as the hook.
+              </p>
+            ) : null}
             <p className="mt-1 font-mono text-[11px] text-[var(--muted)]">
               {lead.enquiryNo}
               {lead.applicationNo ? ` · ${lead.applicationNo}` : ""}
@@ -2674,6 +2731,20 @@ function LeadDetail({
               </div>
             ) : null}
           </div>
+        ) : null}
+
+        {canEdit && !locked ? (
+          <LeadFollowupDraftPanel
+            lead={lead}
+            classLabel={classes.find((c) => c.id === classId)?.name || ""}
+            counsellorName={agentName}
+            registerUrl={publicRegisterAbsoluteUrl("counsellor")}
+            hook={stalled[0]?.hook || ""}
+            canEdit={canEdit}
+            onLogFollowUp={(input) => onLogFollowUp(input)}
+            onFlash={(message) => pushToast({ kind: "success", message })}
+            onError={(message) => pushToast({ kind: "error", message })}
+          />
         ) : null}
 
         <div className="mt-3">

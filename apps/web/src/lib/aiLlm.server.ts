@@ -7,6 +7,14 @@
  * (see waTransportBotPrompts.ts) — never from here.
  */
 import "server-only";
+import {
+  buildFollowupSystemPrompt,
+  buildFollowupUserPrompt,
+  parseFollowupDraft,
+  type FollowupTone,
+  type LeadFollowupDraft,
+  type LeadFollowupFacts,
+} from "@/lib/leadFollowupAi";
 
 import {
   generateGeminiText,
@@ -1365,6 +1373,30 @@ export async function generateParentBotReplyJson(opts: {
   );
   if (r.ok) return { ok: true, grounded: r.data.grounded, reply: r.data.reply, engine: r.engine, generationId: r.generationId };
   return { ok: false, error: r.error, engine: r.engine };
+}
+
+/** Per-lead follow-up drafts (WhatsApp · SMS · email · call script). Draft only. */
+export async function generateLeadFollowupJson(opts: {
+  facts: LeadFollowupFacts;
+  tone: FollowupTone;
+  draftIn: "en" | "hi";
+}): Promise<
+  | { ok: true; draft: LeadFollowupDraft; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const r = await callLlmJson(
+    {
+      system: buildFollowupSystemPrompt({ tone: opts.tone, draftIn: opts.draftIn }),
+      userMessage: buildFollowupUserPrompt(opts.facts),
+      maxTokens: 1400,
+      temperature: 0.5,
+      geminiMaxTokens: 4096,
+      meta: { route: "lead-followup-draft", promptVersion: "v1" },
+    },
+    parseFollowupDraft,
+  );
+  if (r.ok) return { ok: true, draft: r.data, engine: r.engine, generationId: r.generationId };
+  return { ok: false, error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI follow-up drafts", engine: r.engine };
 }
 
 /**
