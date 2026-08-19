@@ -8,6 +8,9 @@ import {
   loadSalarySetup,
   normalizeSalarySettings,
 } from "@/lib/salarySetup";
+import { buildSalaryRegister, salaryRegisterTitle } from "@/lib/payrollRegister";
+import { downloadPdfReport, downloadXlsxReport } from "@/lib/reportExport";
+import { TENANT } from "@/lib/types";
 import {
   approvePayrollRun,
   auditDraftRebuilt,
@@ -405,6 +408,27 @@ export function PayrollWorkspace() {
     refresh();
   }
 
+  /** One row per staff, heads as columns, totals — Excel or PDF. */
+  async function onExportRegister(format: "xlsx" | "pdf") {
+    if (!selected) return;
+    const reg = buildSalaryRegister(selected);
+    const input = {
+      title: salaryRegisterTitle(selected),
+      subtitle: `${TENANT.nameDisplay} · ${selected.lines.length} staff${selected.status === "draft" || selected.status === "pending_approval" ? " · DRAFT — not posted to accounts" : ""}`,
+      columns: reg.columns,
+      rows: [...reg.rows, reg.totals],
+      fileBaseName: `salary_register_${selected.month}_${selected.status}`,
+    };
+    try {
+      if (format === "pdf") await downloadPdfReport(input);
+      else await downloadXlsxReport(input);
+      flash(`Salary register ${format.toUpperCase()} downloaded`);
+    } catch (e) {
+      flash(e instanceof Error ? e.message : "Export failed", true);
+    }
+  }
+
+  /** Tally-style ledger: one row per head per staff — for accounts import only. */
   function onExport() {
     if (!selected) return;
     const salary = loadSalarySetup();
@@ -412,11 +436,11 @@ export function PayrollWorkspace() {
       normalizeSalarySettings(salary.settings).salaryAccountLabel ||
       "Salary account";
     const csv = payrollTallyCsv(selected, label);
-    downloadTextFile(`payroll_${selected.month}_${selected.status}.csv`, csv);
+    downloadTextFile(`payroll_ledger_${selected.month}_${selected.status}.csv`, csv);
     flash(
       selected.status === "posted" || selected.status === "paid"
-        ? "Account CSV downloaded"
-        : "Preview CSV (draft — not posted to accounts)",
+        ? "Tally ledger CSV downloaded"
+        : "Tally ledger CSV (draft — not posted to accounts)",
     );
   }
 
@@ -780,6 +804,7 @@ export function PayrollWorkspace() {
             onPaid={onPaid}
             onDelete={onDelete}
             onExport={onExport}
+            onExportRegister={onExportRegister}
             onExportAccount={onExportAccountLedger}
             onRebuild={rebuildDraft}
             onRemoveLine={onRemoveLine}
@@ -874,6 +899,7 @@ function RunDetail({
   onPaid,
   onDelete,
   onExport,
+  onExportRegister,
   onExportAccount,
   onRebuild,
   onRemoveLine,
@@ -894,6 +920,7 @@ function RunDetail({
   onPaid: () => void;
   onDelete: () => void;
   onExport: () => void;
+  onExportRegister: (format: "xlsx" | "pdf") => void;
   onExportAccount: () => void;
   onRebuild: () => void;
   onRemoveLine: (staffId: string) => void;
@@ -1099,10 +1126,26 @@ function RunDetail({
           ) : null}
           <button
             type="button"
-            className="rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-[11px] font-semibold"
-            onClick={onExport}
+            className="rounded-lg bg-[var(--brand-deep)] px-2.5 py-1.5 text-[11px] font-semibold text-white"
+            onClick={() => onExportRegister("xlsx")}
+            title="One row per staff, every head as a column, totals"
           >
-            Preview CSV
+            Register Excel
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-[11px] font-semibold"
+            onClick={() => onExportRegister("pdf")}
+          >
+            Register PDF
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--muted)]"
+            onClick={onExport}
+            title="One row per head per staff — for Tally / accounts import"
+          >
+            Tally ledger CSV
           </button>
           {inAccounts ? (
             <button
