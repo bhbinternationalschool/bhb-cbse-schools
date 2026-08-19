@@ -14,6 +14,7 @@
     "test:household-prefs": "npx tsx src/lib/householdPrefs.selftest.ts",
     "test:ptm-brief-ai": "npx tsx src/lib/ptmBriefAi.selftest.ts",
     "test:academic-risk": "npx tsx src/lib/academicRisk.selftest.ts",
+    "test:item-analytics": "npx tsx src/lib/itemAnalytics.selftest.ts",
     "test:exams": "npx tsx src/lib/exams.selftest.ts",
     "test:masters-revision-guard": "npx tsx src/lib/mastersRevisionGuard.selftest.ts",
     "test:masters-revision-lifecycle": "npx tsx src/lib/mastersRevisionLifecycle.selftest.ts",

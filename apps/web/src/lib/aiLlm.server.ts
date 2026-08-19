@@ -54,6 +54,13 @@ import {
   type RiskNoteLanguage,
   type StudentRiskFacts,
 } from "@/lib/academicRisk";
+import {
+  buildPedagogySystemPrompt,
+  buildPedagogyUserPrompt,
+  parsePedagogyJson,
+  type PedagogyDraft,
+  type PedagogyFacts,
+} from "@/lib/itemAnalytics";
 
 export type LlmEngine = "openai" | "gemini" | "none";
 export type PreferredEngine = "auto" | "openai" | "gemini";
@@ -1214,4 +1221,28 @@ export async function generateRiskNotesJson(opts: {
   );
   if (r.ok) return { ok: true, notes: r.data, engine: r.engine, generationId: r.generationId };
   return { ok: false, error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI notes", engine: r.engine };
+}
+
+/** Teaching moves from item-score roll-ups. Draft only. */
+export async function generatePedagogyJson(opts: {
+  facts: PedagogyFacts;
+  language: "en" | "hi";
+  schoolName: string;
+}): Promise<
+  | { ok: true; draft: PedagogyDraft; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const r = await callLlmJson(
+    {
+      system: buildPedagogySystemPrompt({ language: opts.language, schoolName: opts.schoolName }),
+      userMessage: buildPedagogyUserPrompt(opts.facts),
+      maxTokens: opts.language === "hi" ? 1400 : 900,
+      temperature: 0.5,
+      geminiMaxTokens: 4096,
+      meta: { route: "pedagogy-suggestions", promptVersion: "v1" },
+    },
+    parsePedagogyJson,
+  );
+  if (r.ok) return { ok: true, draft: r.data, engine: r.engine, generationId: r.generationId };
+  return { ok: false, error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI suggestions", engine: r.engine };
 }

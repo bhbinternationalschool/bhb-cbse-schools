@@ -29,6 +29,7 @@ import type { SisStudent } from "@/lib/sis";
 import type { MastersState } from "@/lib/masters";
 import { StudentAvatar, StudentNameLabel } from "@/components/students/StudentAvatar";
 import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
+import { ItemAnalysis } from "@/components/exams/ItemAnalysis";
 
 type Cell = string; // raw text in the input; "" = not marked
 
@@ -39,6 +40,7 @@ export function ItemScoresPanel(props: {
   sectionId: string;
   roster: SisStudent[];
   subjects: ExamSubject[];
+  classLabel: string;
   /** Question papers are keyed by masters subject id; exam subjects link to masters by code */
   masters: MastersState | null;
   canEdit: boolean;
@@ -362,6 +364,27 @@ export function ItemScoresPanel(props: {
           </ErpTable>
         </ErpTableShell>
       )}
+
+      {paper && term ? (
+        <ItemAnalysis
+          key={`${paper.id}:${setCode}:${tick}`}
+          ay={ay}
+          term={term}
+          classId={classId}
+          sectionId={sectionId}
+          paper={paper}
+          setCode={setCode}
+          questions={questions}
+          roster={roster}
+          classLabel={props.classLabel}
+          subjectName={subject?.name ?? ""}
+          canEdit={canEdit}
+          enteredBy={props.enteredBy}
+          onFlash={props.onFlash}
+          onError={props.onError}
+          onPaperCreated={() => setTick((t) => t + 1)}
+        />
+      ) : null}
     </div>
   );
 }

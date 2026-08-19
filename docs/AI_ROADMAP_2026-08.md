@@ -93,7 +93,7 @@ Model:
 | Feature | Status | Notes |
 |---|---|---|
 | At-risk flagging | ✅ (2026-08-19) | Exams → **At-risk** tab: deterministic rules in `lib/academicRisk.ts` (grade band drop, ≥2 subjects slipped, below pass, attendance < 75 %, ≥3 incidents / any escalation, homework < 60 % of due) → high / watch list per section + exam; `POST /api/ai/at-risk-notes` re-runs the rules server-side and writes a "what to do" note only for flagged students. Missing data never counts for or against a student |
-| Pedagogical suggestions | ❌ | Blocked on item-level scores (§1 prerequisite) |
+| Pedagogical suggestions | ✅ (2026-08-19) | Item scores tab → "Where the class stood": roll-ups by chapter / LO code / Bloom / type / question (`lib/itemAnalytics.ts`), weak = class avg < 50 % with 5+ marked, tap a row for the under-half group; **Teaching moves** (`/api/ai/pedagogy-suggestions`, 3–6 area-named moves + remedial focus); **Remedial worksheet** (`/api/ai/remedial-worksheet`, pro tier, LO-tagged, saved as a draft question paper under the same exam) |
 | AI lesson plans | ✅ (2026-08-18) | `POST /api/ai/lesson-plan` + "Draft with AI" in `LessonPlansPanel` editor — ticked chapters/topics + their `learningOutcomes` → objectives / aids / period-by-period activities / assessment / homework, EN or HI; `LessonPlan.source` (`manual`/`ai`/`ai_edited`) + `aiModel` recorded on save. `lib/lessonPlanAi.ts` |
 | CBSE Learning-Outcomes mapping | ❌ | free-text per unit; no codes |
 | Syllabus pacing analytics (deterministic) | ✅ | `lib/teaching.ts` |
@@ -101,7 +101,7 @@ Model:
 Build:
 1. ~~`POST /api/ai/lesson-plan` — topic (unitIds) + class + periods → fills the existing `LessonPlan` fields, teacher edits in `LessonPlansPanel`~~ **Done 2026-08-18.** Follow-up when §1b lands: feed `competencyCodes` per unit into the prompt.
 2. ~~Academic at-risk~~ **Done 2026-08-19** — rules + note as specified; thresholds in `DEFAULT_RISK_THRESHOLDS` (not yet UI-configurable).
-3. Class-level pedagogy suggestions + remedial worksheet — after item-level scores exist.
+3. ~~Class-level pedagogy suggestions + remedial worksheet~~ **Done 2026-08-19.**
 
 Model: **Gemini Flash** for lesson plans and narratives; Gemini Pro for remedial worksheet generation (it's question generation). Detection is code, not a model.
 
@@ -182,6 +182,6 @@ Why Gemini as default: cheapest at this volume, same GCP project/billing/IAM as 
 4. ~~**Household language preference + Sarvam translate adapter** (§2.1)~~ — shipped 2026-08-18 (quiet-hours gate on automation sends and bot reply language still to wire).
 5. ~~**PTM per-student brief** (§2.2)~~ — shipped 2026-08-18.
 6. ~~**Competency question types + LO codes on syllabus** (§1b)~~ — shipped 2026-08-18 (LO seed import outstanding).
-7. **Item-level scores** → academic at-risk → pedagogy suggestions (§1 prereq, §3.2–3.3) — 5+ days.
+7. ~~**Item-level scores** → academic at-risk → pedagogy suggestions (§1 prereq, §3.2–3.3)~~ — shipped 2026-08-19 (three commits). Left: OMR import, UI-configurable thresholds.
 8. **Blueprint + question bank** (§1c) — 5 days.
 9. Application extraction, meeting minutes, compliance narratives, admission presets — ½–1 day each, slot anywhere.

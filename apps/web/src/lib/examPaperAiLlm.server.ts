@@ -383,6 +383,9 @@ export async function suggestMoreQuestionsLlm(input: {
   type?: ExamPaperQuestionType;
   /** The new questions must add up to exactly this many marks (draft top-up) */
   exactMarks?: number;
+  /** Extra instruction, e.g. "remedial practice for students who scored under 50 % on M802" */
+  focus?: string;
+  promptVersion?: string;
 }): Promise<
   | { ok: true; questions: ExamPaperQuestion[]; engine: "openai" | "gemini"; generationId: string }
   | { ok: false; error: string }
@@ -402,13 +405,18 @@ export async function suggestMoreQuestionsLlm(input: {
     `Subject: ${subjectName(input.masters, input.subjectId)}`,
     `Hardness: ${input.hardness === "mixed" ? "medium" : input.hardness}`,
     ...unitsBlock(units),
+    ...(input.focus ? [`Purpose: ${input.focus.slice(0, 600)}`] : []),
     `Add ${count} new question(s)${wantType ? ` of type ${wantType}` : ""}${
       input.exactMarks ? ` whose marks add up to exactly ${input.exactMarks}` : ""
     }. Do not repeat:`,
     ...(input.excludeTexts || []).slice(0, 8).map((t) => `- ${t.slice(0, 120)}`),
   ].join("\n");
 
-  const llm = await generateExamPaperJson({ system, userMessage, promptVersion: "v2" });
+  const llm = await generateExamPaperJson({
+    system,
+    userMessage,
+    promptVersion: input.promptVersion ?? "v2",
+  });
   if (!llm.ok) return { ok: false, error: llm.error };
 
   const engine = llm.engine === "openai" ? "openai" : "gemini";

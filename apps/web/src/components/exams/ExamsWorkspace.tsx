@@ -1682,6 +1682,7 @@ export function ExamsWorkspace() {
           sectionId={sectionId}
           roster={roster}
           subjects={subjects}
+          classLabel={classLabel}
           masters={masters}
           canEdit={!!masters && hasPermission(session, masters, "exams", "edit")}
           enteredBy={session.fullName}
