@@ -38,6 +38,7 @@ import { admissionsKbIsEmpty, loadAdmissionsKb, writeAdmissionsKbLocalRaw } from
 import { loadSchoolAchievements, schoolAchievementsIsEmpty, writeSchoolAchievementsLocalRaw } from "@/lib/schoolAchievements";
 import { loadReferrals, referralsIsEmpty, writeReferralsLocalRaw } from "@/lib/referrals";
 import { loadMarketingSpend, marketingSpendIsEmpty, writeMarketingSpendLocalRaw } from "@/lib/marketingSpend";
+import { birthdayStateIsEmpty, loadBirthdayState, writeBirthdayStateLocalRaw } from "@/lib/birthdayCards";
 import { loadCrmParentChat, writeCrmParentChatLocalRaw } from "@/lib/crmParentChat";
 import { loadWaChatbotFlows, writeWaChatbotFlowsLocalRaw } from "@/lib/waChatbotFlows";
 import { loadIdCardTemplateState, writeIdCardTemplateStateLocalRaw } from "@/lib/idCardTemplate";
@@ -161,6 +162,12 @@ const registry: Record<ModuleStateKey, ModuleStatePersistence<any>> = {
     isEmpty: marketingSpendIsEmpty,
     loadLocal: loadMarketingSpend,
     writeLocalRaw: writeMarketingSpendLocalRaw,
+  }),
+  birthday_settings: createModuleStatePersistence({
+    key: "birthday_settings",
+    isEmpty: birthdayStateIsEmpty,
+    loadLocal: loadBirthdayState,
+    writeLocalRaw: writeBirthdayStateLocalRaw,
   }),
   tally_sync: createModuleStatePersistence({
     key: "tally_sync",
