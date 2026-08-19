@@ -18,6 +18,7 @@ import {
 } from "@/lib/teaching";
 import { AddResourceForm, ResourceList } from "@/components/teaching/ResourceLinks";
 import { SyllabusOcrImport } from "@/components/teaching/SyllabusOcrImport";
+import { applyOutcomesImport, parseOutcomesCsv } from "@/lib/syllabusOutcomesImport";
 
 const STATUS_LABEL: Record<UnitStatus, string> = {
   not_started: "Not started",
@@ -141,6 +142,22 @@ export function SyllabusPlanPanel(props: {
     );
   }
 
+  const [outcomesCsv, setOutcomesCsv] = useState("");
+  const [showOutcomesImport, setShowOutcomesImport] = useState(false);
+
+  /** CSV/TSV of chapter → outcomes + LO codes (from the board's LO document / school mapping sheet). */
+  function importOutcomes(text: string) {
+    props.onError(null);
+    const parsed = parseOutcomesCsv(text);
+    if (parsed.error) return props.onError(parsed.error);
+    const r = applyOutcomesImport(state, { academicYearCode: ay, classId, subjectId, rows: parsed.rows });
+    if (r.errors.length) props.onError(r.errors.slice(0, 3).join(" · "));
+    onChange(r.state);
+    props.onNotice(`Outcomes import: ${r.updated} chapter${r.updated === 1 ? "" : "s"} updated, ${r.created} created`);
+    setOutcomesCsv("");
+    setShowOutcomesImport(false);
+  }
+
   /** Learning outcomes + CBSE LO codes for a chapter — feeds lesson plans and paper tagging. */
   function saveOutcomes(unit: SyllabusUnit, learningOutcomes: string, codesRaw: string) {
     props.onError(null);
@@ -256,6 +273,53 @@ export function SyllabusPlanPanel(props: {
           onImport={importChapters}
           onError={props.onError}
         />
+      ) : null}
+
+      {canEdit ? (
+        <div className="rounded-xl border border-dashed border-[var(--border)] px-4 py-3 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold text-[var(--brand-deep)]">Learning outcomes · LO codes import</span>
+            <span className="text-[var(--muted)]">
+              CSV/TSV: chapter code · chapter title · learning outcomes (separate with ;) · LO codes (comma). Codes are copied as typed — from the board&apos;s LO document.
+            </span>
+            <button type="button" className="ml-auto underline" onClick={() => setShowOutcomesImport((v) => !v)}>
+              {showOutcomesImport ? "Hide" : "Paste / upload"}
+            </button>
+          </div>
+          {showOutcomesImport ? (
+            <div className="mt-2 space-y-2">
+              <textarea
+                className="block min-h-[80px] w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 font-mono text-[11px]"
+                placeholder={"Chapter code,Chapter title,Learning outcomes,LO codes\nCh 3,Understanding Quadrilaterals,Classifies quadrilaterals; Applies angle-sum property,\"M801, M802\""}
+                value={outcomesCsv}
+                onChange={(e) => setOutcomesCsv(e.target.value)}
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  disabled={!outcomesCsv.trim()}
+                  onClick={() => importOutcomes(outcomesCsv)}
+                  className="rounded-lg bg-[var(--primary)] px-3 py-1 text-xs font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
+                >
+                  Import
+                </button>
+                <label className="cursor-pointer underline">
+                  Upload CSV / TSV
+                  <input
+                    type="file"
+                    accept=".csv,.tsv,text/csv,text/tab-separated-values,text/plain"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) void f.text().then((t) => importOutcomes(t));
+                    }}
+                  />
+                </label>
+                <span className="text-[var(--muted)]">Existing chapters are matched by code or title; outcomes are merged, codes added.</span>
+              </div>
+            </div>
+          ) : null}
+        </div>
       ) : null}
 
       {canEdit ? (
