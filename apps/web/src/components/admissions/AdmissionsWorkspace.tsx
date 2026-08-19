@@ -101,6 +101,7 @@ import { AdmissionRegistrationPanel } from "@/components/admissions/AdmissionReg
 import { RteWorkspace } from "@/components/rte/RteWorkspace";
 import { AdmissionCampaignsPanel } from "@/components/admissions/AdmissionCampaignsPanel";
 import { AdmissionCrmChatInbox } from "@/components/admissions/AdmissionCrmChatInbox";
+import { AdmissionsKbPanel } from "@/components/admissions/AdmissionsKbPanel";
 import { AdmissionReportsPanel } from "@/components/admissions/AdmissionReportsPanel";
 
 type AdmTab =
@@ -113,6 +114,7 @@ type AdmTab =
   | "rte"
   | "campaigns"
   | "crm_chat"
+  | "kb"
   | "reports";
 
 export function AdmissionsWorkspace() {
@@ -146,6 +148,7 @@ export function AdmissionsWorkspace() {
       "rte",
       "campaigns",
       "crm_chat",
+      "kb",
       "reports",
     ];
     if (raw && (allowed as string[]).includes(raw)) setTab(raw as AdmTab);
@@ -320,6 +323,7 @@ export function AdmissionsWorkspace() {
         tab === "import" ||
         tab === "campaigns" ||
         tab === "crm_chat" ||
+        tab === "kb" ||
         tab === "reports")
     ) {
       setTab("enquiry");
@@ -1009,6 +1013,7 @@ export function AdmissionsWorkspace() {
               next === "import" ||
               next === "campaigns" ||
               next === "crm_chat" ||
+              next === "kb" ||
               next === "reports")
           ) {
             setNotice(
@@ -1031,6 +1036,7 @@ export function AdmissionsWorkspace() {
                 { id: "rte", label: "RTE / EWS", tone: "sky" },
                 { id: "campaigns", label: "WA campaigns", tone: "teal" },
                 { id: "crm_chat", label: "CRM parent chat", tone: "navy" },
+                { id: "kb", label: "Knowledge base", tone: "sky" },
                 { id: "reports", label: "Report", tone: "green" },
               ] as const)
             : []),
@@ -1585,6 +1591,10 @@ export function AdmissionsWorkspace() {
 
       {tab === "crm_chat" ? (
         <AdmissionCrmChatInbox by={session.fullName} canEdit={canCreate} />
+      ) : null}
+
+      {tab === "kb" ? (
+        <AdmissionsKbPanel masters={masters} canEdit={canCreate} by={session.fullName} />
       ) : null}
 
       {tab === "reports" ? (

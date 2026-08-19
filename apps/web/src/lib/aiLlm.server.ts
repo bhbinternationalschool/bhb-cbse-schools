@@ -1366,3 +1366,45 @@ export async function generateParentBotReplyJson(opts: {
   if (r.ok) return { ok: true, grounded: r.data.grounded, reply: r.data.reply, engine: r.engine, generationId: r.generationId };
   return { ok: false, error: r.error, engine: r.engine };
 }
+
+/**
+ * Admissions-KB answer with the same hard grounding gate as the parent bot:
+ * the model must say whether every fact came from the numbered KB entries
+ * it was given and which ones it used. Ungrounded → caller discards the
+ * text and sends the fixed handoff. Cacheable: same KB entries + same
+ * question → same answer (the KB text is part of the cache key).
+ */
+export async function generateAdmissionsAnswerJson(opts: {
+  system: string;
+  userMessage: string;
+}): Promise<
+  | { ok: true; grounded: boolean; reply: string; sources: number[]; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const r = await callLlmJson(
+    {
+      system: `${opts.system}\n\nRespond with JSON only: {"grounded": true|false, "sources": [entry numbers used], "reply": "…"}. grounded=true ONLY if every fact in reply comes from the KB entries given; if the question is not answered by them, set grounded=false and leave reply empty.`,
+      userMessage: opts.userMessage,
+      maxTokens: 400,
+      temperature: 0.2,
+      geminiMaxTokens: 1024,
+      meta: { route: "admissions-answer", promptVersion: "v1", cacheable: true },
+    },
+    (text) => {
+      try {
+        const j = JSON.parse(text) as { grounded?: unknown; reply?: unknown; sources?: unknown };
+        const reply = String(j.reply ?? "").trim().slice(0, 700);
+        const sources = Array.isArray(j.sources)
+          ? j.sources.map((n) => Number(n)).filter((n) => Number.isInteger(n) && n > 0 && n <= 20)
+          : [];
+        return { grounded: j.grounded === true && !!reply, reply, sources };
+      } catch {
+        return null;
+      }
+    },
+  );
+  if (r.ok) {
+    return { ok: true, grounded: r.data.grounded, reply: r.data.reply, sources: r.data.sources, engine: r.engine, generationId: r.generationId };
+  }
+  return { ok: false, error: r.error, engine: r.engine };
+}

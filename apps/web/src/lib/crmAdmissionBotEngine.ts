@@ -38,6 +38,19 @@ export function crmBotWelcomeText(): string {
   ].join("\n");
 }
 
+/**
+ * An exact keyword / button id ("FEE", "docs") or a greeting — the canned
+ * menu reply is the right answer and the KB should not be consulted. Any
+ * other sentence is a free question: KB first, keyword reply as fallback.
+ */
+export function isCrmKeywordOrGreeting(text: string): boolean {
+  const t = (text || "").trim();
+  if (t.length < 4) return true;
+  const upper = t.toUpperCase();
+  if (CRM_BOT_QUICK_PROMPTS.some((q) => upper === q.waKeyword || q.id === t.toLowerCase())) return true;
+  return /^(hi|hello|hey|namaste|namaskar|menu|start|ok|okay|thanks|thank you|yes|no|haan|nahi)\b/i.test(t);
+}
+
 export function detectCrmBotIntent(text: string): CrmBotQuickId | "unknown" {
   const t = (text || "").trim();
   const upper = t.toUpperCase();
@@ -51,7 +64,7 @@ export function detectCrmBotIntent(text: string): CrmBotQuickId | "unknown" {
   if (CRM_BOT_QUICK_PROMPTS.some((q) => q.id === asId)) return asId;
 
   const low = t.toLowerCase();
-  if (/fee|payment|pay|upi|amount|₹|rs\.?/.test(low)) return "fee";
+  if (/fee|payment|\bpay\b|upi|amount|₹|\brs\.?\b/.test(low)) return "fee";
   if (/register|registration|apply|admission form|sibling/.test(low))
     return "register";
   if (/document|docs|certificate|aadhaar|aadhar|birth|tc\b/.test(low))

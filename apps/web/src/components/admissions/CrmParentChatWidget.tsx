@@ -5,9 +5,11 @@ import {
   CRM_CHAT_AUDIENCE,
   crmBotQuickPrompts,
   crmBotWelcome,
+  crmTextIsFreeQuestion,
   loadCrmParentChat,
   openOrCreateCrmThread,
   postCrmParentMessage,
+  postCrmParentMessageWithReply,
   saveCrmParentChat,
   type CrmBotQuickId,
   type CrmChatThread,
@@ -29,6 +31,7 @@ export function CrmParentChatWidget({
   const [thread, setThread] = useState<CrmChatThread | null>(null);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -51,9 +54,35 @@ export function CrmParentChatWidget({
     setThread(r.thread);
   }
 
-  function send(text: string, quickId?: CrmBotQuickId) {
-    if (!thread) return;
+  async function send(text: string, quickId?: CrmBotQuickId) {
+    if (!thread || busy) return;
     setError(null);
+    // Free-text question → ask the office-approved admissions KB first.
+    // Grounded answer → show it; otherwise fall back to the local menu bot.
+    if (!quickId && crmTextIsFreeQuestion(text)) {
+      setBusy(true);
+      try {
+        const res = await fetch("/api/ai/admissions-answer", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question: text, mobile: thread.mobile }),
+        });
+        const json = (await res.json().catch(() => ({}))) as { ok?: boolean; grounded?: boolean; reply?: string };
+        if (res.ok && json.ok && json.grounded && json.reply) {
+          const r2 = postCrmParentMessageWithReply(loadCrmParentChat(), thread.id, text, json.reply);
+          if (r2.ok) {
+            saveCrmParentChat(r2.state);
+            setThread(r2.thread);
+            setDraft("");
+            return;
+          }
+        }
+      } catch {
+        /* network — fall through to the local bot */
+      } finally {
+        setBusy(false);
+      }
+    }
     const state = loadCrmParentChat();
     const r = postCrmParentMessage(state, thread.id, text, { quickId });
     if (!r.ok) {
@@ -156,6 +185,11 @@ export function CrmParentChatWidget({
                   {m.text}
                 </div>
               ))}
+              {busy ? (
+                <div className="max-w-[90%] rounded-xl bg-white px-2.5 py-1.5 text-[12px] text-[var(--muted)] shadow-sm">
+                  Checking the admissions desk notes…
+                </div>
+              ) : null}
               <div ref={bottomRef} />
             </div>
             <div className="flex flex-wrap gap-1 border-t border-[rgba(32,48,80,0.08)] bg-white px-2 py-1.5">
@@ -164,7 +198,7 @@ export function CrmParentChatWidget({
                   key={q.id}
                   type="button"
                   className="rounded-full border border-[rgba(32,48,80,0.15)] px-2 py-0.5 text-[10px] font-semibold text-[var(--brand-deep)]"
-                  onClick={() => send(q.label, q.id)}
+                  onClick={() => void send(q.label, q.id)}
                 >
                   {q.label}
                 </button>
@@ -174,7 +208,7 @@ export function CrmParentChatWidget({
               className="flex gap-1 border-t border-[rgba(32,48,80,0.08)] bg-white p-2"
               onSubmit={(e) => {
                 e.preventDefault();
-                if (draft.trim()) send(draft.trim());
+                if (draft.trim()) void send(draft.trim());
               }}
             >
               <input
@@ -185,7 +219,8 @@ export function CrmParentChatWidget({
               />
               <button
                 type="submit"
-                className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-[11px] font-semibold text-white"
+                disabled={busy}
+                className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-[11px] font-semibold text-white disabled:opacity-60"
               >
                 Send
               </button>

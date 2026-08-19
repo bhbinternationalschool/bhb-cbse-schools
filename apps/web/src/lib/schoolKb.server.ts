@@ -127,7 +127,9 @@ export async function schoolKbStats(): Promise<{
  */
 export async function retrieveRelevantKb(
   query: string,
-  opts?: { audiences?: CommsAudience[]; limit?: number },
+  // Audience strings beyond CommsAudience exist for non-notice sources
+  // (e.g. "prospects" for the admissions KB) — the RPC filters by string.
+  opts?: { audiences?: (CommsAudience | string)[]; limit?: number },
 ): Promise<KbMatch[]> {
   try {
     if (!embeddingsConfigured()) return [];

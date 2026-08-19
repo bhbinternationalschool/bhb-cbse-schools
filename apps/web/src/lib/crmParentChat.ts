@@ -14,6 +14,7 @@ import {
   CRM_BOT_QUICK_PROMPTS,
   crmBotWelcomeText,
   detectCrmBotIntent,
+  isCrmKeywordOrGreeting,
   replyCrmBotIntent,
   stageLabelForBot,
   type CrmBotQuickId,
@@ -334,6 +335,45 @@ export function postCrmParentMessage(
       ),
     },
   };
+}
+
+/**
+ * Parent message + a reply composed elsewhere (the KB-grounded answer from
+ * /api/ai/admissions-answer). The engine is not run; the thread stays in
+ * bot mode. Used only when the server said the answer is grounded.
+ */
+export function postCrmParentMessageWithReply(
+  state: CrmParentChatState,
+  threadId: string,
+  text: string,
+  replyText: string,
+): { ok: true; state: CrmParentChatState; thread: CrmChatThread } | { ok: false; reason: string } {
+  const body = text.trim();
+  if (!body) return { ok: false, reason: "Enter a message" };
+  const thread = state.threads.find((t) => t.id === threadId);
+  if (!thread) return { ok: false, reason: "Chat not found" };
+  if (thread.audience !== CRM_CHAT_AUDIENCE) {
+    return { ok: false, reason: "Wrong audience — SIS parent chat is separate" };
+  }
+  const parentMsg = normalizeMessage({ role: "parent", text: body, by: thread.parentName || "Parent" });
+  const botMsg = normalizeMessage({ role: "bot", text: replyText.trim(), by: "Admissions bot" });
+  const nextThread: CrmChatThread = {
+    ...thread,
+    status: thread.status === "closed" ? "bot" : thread.status,
+    messages: [...thread.messages, parentMsg, botMsg],
+    updatedAt: nowIso(),
+    lastParentAt: nowIso(),
+  };
+  return {
+    ok: true,
+    thread: nextThread,
+    state: { ...state, audience: CRM_CHAT_AUDIENCE, threads: state.threads.map((t) => (t.id === threadId ? nextThread : t)) },
+  };
+}
+
+/** A typed question worth asking the KB: not a quick-prompt intent, not a greeting. */
+export function crmTextIsFreeQuestion(text: string): boolean {
+  return !isCrmKeywordOrGreeting(text);
 }
 
 export function postCrmStaffReply(
