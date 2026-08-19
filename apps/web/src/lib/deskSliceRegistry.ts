@@ -45,7 +45,8 @@ export const DESK_SLICE_MODULE_DEFS: DeskSliceModuleDef[] = [
     envPrefix: "EXAM_PAPERS",
     deskPrefix: "exam_papers",
     blobTable: "exam_papers_state",
-    sliceKeys: ["papers"],
+    // bank + blueprints added 2026-08-19 — same slice table, new slice_key rows.
+    sliceKeys: ["papers", "bank", "blueprints"],
     objectSlices: [],
     signalSlice: "papers",
   },

@@ -19,6 +19,9 @@ import {
   listExamPapers,
   recordPaperPrint,
   saveExamPaper,
+  saveExamPapers,
+  loadExamPapers,
+  addQuestionsToBank,
   sectionMarks,
   setMarks,
   totalPrintCount,
@@ -30,6 +33,8 @@ import {
   type ExamPaperSet,
 } from "@/lib/examPapers";
 import { loadTeaching, type SyllabusUnit } from "@/lib/teaching";
+import { BlueprintPanel } from "@/components/exams/BlueprintPanel";
+import { BankPicker } from "@/components/exams/BankPicker";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import {
   suggestExamPaperDraft,
@@ -202,6 +207,21 @@ export function ExamPapersPanel({
     refresh();
     openEdit(r.paper.id);
     onNotice(`Created ${r.paper.paperCode} — draft ready to edit`);
+  }
+
+  /** Save questions into the bank for this paper's class × subject. */
+  function bankQuestions(qs: ExamPaperQuestion[], label: string) {
+    if (!draft || !canEdit) return;
+    const r = addQuestionsToBank(loadExamPapers(), {
+      classId: draft.classId,
+      subjectId: draft.subjectId,
+      questions: qs.filter((q) => q.text.trim()),
+      tags: [draft.examName || ""].filter(Boolean),
+      by: actorName,
+    });
+    saveExamPapers(r.state);
+    setTick((t) => t + 1);
+    onNotice(r.added ? `${r.added} question${r.added === 1 ? "" : "s"} added to the bank (${label})` : `Already in the bank (${label})`);
   }
 
   function updateDraft(patch: Partial<ExamPaper>) {
@@ -784,6 +804,23 @@ export function ExamPapersPanel({
               </label>
             </div>
           ) : null}
+
+          <BlueprintPanel
+            key={draft.id}
+            paper={draft}
+            syllabusUnits={syllabusUnits}
+            canEdit={canEdit}
+            actorName={actorName}
+            onGenerated={(sections, unitIds, note) => {
+              mutateActiveSet((st) => ({ ...st, sections }));
+              if (unitIds.length) {
+                updateDraft({ unitIds: Array.from(new Set([...draft.unitIds, ...unitIds])) });
+              }
+              onNotice(note);
+            }}
+            onError={onError}
+            onNotice={onNotice}
+          />
         </div>
 
         {/* Sections / questions */}
@@ -812,6 +849,20 @@ export function ExamPapersPanel({
               }))
             }
             onAiMore={() => onAiMore(section.id)}
+            onBankSection={() => bankQuestions(section.questions, section.title)}
+            onBankQuestion={(q) => bankQuestions([q], `Q in ${section.title}`)}
+            bankPicker={{
+              classId: draft.classId,
+              subjectId: draft.subjectId,
+              excludeTexts: set.sections.flatMap((s) => s.questions.map((q) => q.text)),
+              onAdd: (q) =>
+                mutateActiveSet((st) => ({
+                  ...st,
+                  sections: st.sections.map((sec) =>
+                    sec.id === section.id ? { ...sec, questions: [...sec.questions, q] } : sec,
+                  ),
+                })),
+            }}
             onAddQuestion={() =>
               mutateActiveSet((st) => ({
                 ...st,
@@ -1051,10 +1102,19 @@ function SectionEditor(props: {
   onRemove: () => void;
   onAddQuestion: () => void;
   onAiMore: () => void;
+  onBankSection: () => void;
+  onBankQuestion: (q: ExamPaperQuestion) => void;
+  bankPicker: {
+    classId: string;
+    subjectId: string;
+    excludeTexts: string[];
+    onAdd: (q: ExamPaperQuestion) => void;
+  };
   readImageFile: (file: File, onDone: (dataUrl: string) => void) => void;
   unitLabel: (unitId: string) => string;
 }) {
   const { section, canEdit } = props;
+  const [showBank, setShowBank] = useState(false);
 
   function patchQuestion(qid: string, patch: Partial<ExamPaperQuestion>) {
     props.onChange({
@@ -1100,6 +1160,23 @@ function SectionEditor(props: {
               </button>
               <button
                 type="button"
+                className="rounded border border-[var(--border)] px-2 py-0.5 text-[11px] font-semibold text-[var(--brand-deep)]"
+                onClick={() => setShowBank((v) => !v)}
+                title="Add questions from the question bank"
+              >
+                + From bank
+              </button>
+              <button
+                type="button"
+                className="rounded border border-[var(--border)] px-2 py-0.5 text-[11px] font-semibold text-[var(--muted)]"
+                onClick={props.onBankSection}
+                title="Save every question in this section to the bank"
+                disabled={section.questions.length === 0}
+              >
+                → Bank all
+              </button>
+              <button
+                type="button"
                 className="rounded border border-[var(--danger)]/30 px-2 py-0.5 text-[11px] font-semibold text-[var(--danger)]"
                 onClick={props.onRemove}
               >
@@ -1110,6 +1187,17 @@ function SectionEditor(props: {
         </div>
       </div>
 
+      {showBank && canEdit ? (
+        <BankPicker
+          classId={props.bankPicker.classId}
+          subjectId={props.bankPicker.subjectId}
+          excludeTexts={props.bankPicker.excludeTexts}
+          unitLabel={props.unitLabel}
+          onAdd={props.bankPicker.onAdd}
+          onClose={() => setShowBank(false)}
+        />
+      ) : null}
+
       <ul className="mt-3 space-y-3">
         {section.questions.map((q, qi) => (
           <QuestionEditor
@@ -1118,6 +1206,7 @@ function SectionEditor(props: {
             index={qi}
             canEdit={canEdit}
             unitLabel={props.unitLabel}
+            onBank={() => props.onBankQuestion(q)}
             onChange={(patch) => patchQuestion(q.id, patch)}
             onRemove={() =>
               props.onChange({
@@ -1152,6 +1241,7 @@ function QuestionEditor(props: {
   readImageFile: (file: File, onDone: (dataUrl: string) => void) => void;
   /** "Ch 3 · Quadrilaterals" for a unitId, "" when unknown / unlinked */
   unitLabel: (unitId: string) => string;
+  onBank: () => void;
 }) {
   const { question: q, canEdit } = props;
   const [showIcons, setShowIcons] = useState(false);
@@ -1210,14 +1300,30 @@ function QuestionEditor(props: {
             AI
           </span>
         ) : null}
+        {q.source === "bank" ? (
+          <span className="rounded-full border border-[var(--border)] px-2 py-0.5 text-[9px] font-semibold text-[var(--muted)]">
+            bank
+          </span>
+        ) : null}
         {canEdit ? (
-          <button
-            type="button"
-            className="ml-auto text-sm font-bold text-[var(--danger)]"
-            onClick={props.onRemove}
-          >
-            ×
-          </button>
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              type="button"
+              className="text-[11px] font-semibold text-[var(--muted)] underline"
+              onClick={props.onBank}
+              title="Save this question to the bank for reuse"
+              disabled={!q.text.trim()}
+            >
+              → Bank
+            </button>
+            <button
+              type="button"
+              className="text-sm font-bold text-[var(--danger)]"
+              onClick={props.onRemove}
+            >
+              ×
+            </button>
+          </div>
         ) : null}
       </div>
 

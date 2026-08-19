@@ -15,6 +15,7 @@
     "test:ptm-brief-ai": "npx tsx src/lib/ptmBriefAi.selftest.ts",
     "test:academic-risk": "npx tsx src/lib/academicRisk.selftest.ts",
     "test:item-analytics": "npx tsx src/lib/itemAnalytics.selftest.ts",
+    "test:question-bank": "npx tsx src/lib/questionBank.selftest.ts",
     "test:exams": "npx tsx src/lib/exams.selftest.ts",
     "test:masters-revision-guard": "npx tsx src/lib/mastersRevisionGuard.selftest.ts",
     "test:masters-revision-lifecycle": "npx tsx src/lib/mastersRevisionLifecycle.selftest.ts",

@@ -441,3 +441,99 @@ export async function suggestMoreQuestionsLlm(input: {
 
   return { ok: true, questions, engine, generationId: llm.generationId };
 }
+
+/* ─── Blueprint cells ────────────────────────────────────────────── */
+
+export type BlueprintCellRequest = {
+  rowId: string;
+  type: ExamPaperQuestionType;
+  /** Marks per question */
+  marks: number;
+  /** Questions still needed after the bank was consulted */
+  count: number;
+  hardness: ExamPaperHardness;
+  unitId: string;
+  competencyCode: string;
+};
+
+export function cleanBlueprintCells(raw: unknown): BlueprintCellRequest[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((c) => {
+      const x = (c ?? {}) as Record<string, unknown>;
+      const rowId = String(x.rowId ?? "").trim().slice(0, 40);
+      const type = String(x.type ?? "") as ExamPaperQuestionType;
+      const marks = Number(x.marks);
+      const count = Math.floor(Number(x.count));
+      if (!rowId || !VALID_TYPES.has(type) || !(marks > 0) || !(count > 0)) return null;
+      const h = String(x.hardness ?? "mixed");
+      return {
+        rowId,
+        type,
+        marks: Math.min(20, marks),
+        count: Math.min(10, count),
+        hardness: (h === "easy" || h === "medium" || h === "hard" ? h : "mixed") as ExamPaperHardness,
+        unitId: String(x.unitId ?? "").trim().slice(0, 60),
+        competencyCode: String(x.competencyCode ?? "").trim().toUpperCase().slice(0, 40),
+      };
+    })
+    .filter((c): c is NonNullable<typeof c> => !!c)
+    .slice(0, 12);
+}
+
+/**
+ * Generate the questions a blueprint still needs after the bank was
+ * consulted — one model call per cell so type, marks-each, unit and LO
+ * code are exact. Tags are restricted to the units given (allow-list).
+ */
+export async function generateBlueprintCellsLlm(input: {
+  masters: MastersState;
+  classId: string;
+  subjectId: string;
+  units: ExamPaperUnitFact[];
+  cells: BlueprintCellRequest[];
+}): Promise<{
+  cells: { rowId: string; questions: ExamPaperQuestion[]; error?: string }[];
+  engine: "openai" | "gemini" | "none";
+  generationIds: string[];
+}> {
+  const out: { rowId: string; questions: ExamPaperQuestion[]; error?: string }[] = [];
+  const generationIds: string[] = [];
+  let engine: "openai" | "gemini" | "none" = "none";
+  for (const cell of input.cells) {
+    const unit = input.units.find((u) => u.id === cell.unitId);
+    const units = unit ? [unit] : input.units;
+    const r = await suggestMoreQuestionsLlm({
+      masters: input.masters,
+      classId: input.classId,
+      subjectId: input.subjectId,
+      hardness: cell.hardness,
+      count: cell.count,
+      units,
+      type: cell.type,
+      exactMarks: cell.count * cell.marks,
+      focus: `Blueprint cell: exactly ${cell.count} question(s) of type ${cell.type}, EACH worth exactly ${cell.marks} mark(s)${
+        unit ? `, drawn only from ${unit.code ? `${unit.code} · ` : ""}${unit.title}` : ""
+      }${cell.competencyCode ? `, each assessing LO code ${cell.competencyCode} (set competencyCode to it)` : ""}.`,
+      promptVersion: "v2-blueprint",
+    });
+    if (!r.ok) {
+      out.push({ rowId: cell.rowId, questions: [], error: r.error });
+      continue;
+    }
+    engine = r.engine;
+    generationIds.push(r.generationId);
+    // Enforce marks-each and LO tag deterministically; the model is told but not trusted.
+    const questions = r.questions.slice(0, cell.count).map((q) => ({
+      ...q,
+      marks: cell.marks,
+      unitId: unit ? unit.id : q.unitId,
+      competencyCode:
+        cell.competencyCode && unit?.competencyCodes.includes(cell.competencyCode)
+          ? cell.competencyCode
+          : q.competencyCode,
+    }));
+    out.push({ rowId: cell.rowId, questions });
+  }
+  return { cells: out, engine, generationIds };
+}

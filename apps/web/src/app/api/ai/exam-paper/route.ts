@@ -4,7 +4,9 @@ import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { loadMasters } from "@/lib/masters";
 import { hasPermission } from "@/lib/rbac";
 import {
+  cleanBlueprintCells,
   cleanUnitFacts,
+  generateBlueprintCellsLlm,
   suggestExamPaperDraftLlm,
   suggestMoreQuestionsLlm,
 } from "@/lib/examPaperAiLlm.server";
@@ -39,7 +41,7 @@ export async function POST(req: Request) {
   }
 
   let body: {
-    mode?: "draft" | "more";
+    mode?: "draft" | "more" | "blueprint";
     classId?: string;
     subjectId?: string;
     hardness?: ExamPaperHardness;
@@ -50,6 +52,7 @@ export async function POST(req: Request) {
     units?: unknown;
     competencyShare?: number;
     type?: string;
+    cells?: unknown;
   };
   try {
     body = (await req.json()) as typeof body;
@@ -68,6 +71,21 @@ export async function POST(req: Request) {
       { error: "classId and subjectId required" },
       { status: 400 },
     );
+  }
+
+  if (mode === "blueprint") {
+    const cells = cleanBlueprintCells(body.cells);
+    if (cells.length === 0) {
+      return NextResponse.json({ error: "cells required (rowId, type, marks, count)" }, { status: 400 });
+    }
+    const r = await generateBlueprintCellsLlm({ masters, classId, subjectId, units, cells });
+    return NextResponse.json({
+      ok: true,
+      engine: r.engine,
+      source: "llm",
+      cells: r.cells,
+      generationIds: r.generationIds,
+    });
   }
 
   if (mode === "draft") {

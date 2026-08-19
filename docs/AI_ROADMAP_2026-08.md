@@ -50,10 +50,10 @@ Legend: ✅ exists and works · 🟡 partial / foundations exist · ❌ missing
 ### 1c. Blueprint-driven papers
 | | |
 |---|---|
-| Have | Sections, sets, max marks, hardness mix, print sheet, question `source` flag; **Question bank is a Tier-B placeholder** (module registered, `defaultEnabled: false`, no data) |
-| Missing | Blueprint matrix (chapter × marks × difficulty × competency), fill-the-grid generation, real question bank with metadata tags |
-| Build | `ExamBlueprint { rows: { unitId, questionType, marks, count, hardness, competencyCode }[] }` stored per class×subject×term; generator iterates rows, pulls from bank first (tagged match), asks LLM only for unfilled cells; marking scheme sheet printed alongside |
-| Data needed | Question bank tables (`exam_question_bank` with the metadata above); blueprint table |
+| Status | ✅ shipped 2026-08-19 — **Blueprint** rows (chapter/topic × type × marks-each × count × hardness × LO code) in the paper editor, saved per class × subject, "Generate set from blueprint" fills the active set **bank first** (exact match on type/marks/unit/LO/hardness, least-used first) then one AI call per still-empty cell (`mode: "blueprint"`, marks-each and LO tag enforced deterministically). **Question bank** = `bank` slice of exam papers (no new table): "→ Bank" per question / "→ Bank all" per section (dedupe by text per class × subject), "+ From bank" picker (search, type filter, remove), copies carry `source: "bank"` and bump use counts |
+| Was missing | Blueprint matrix (chapter × marks × difficulty × competency), fill-the-grid generation, real question bank with metadata tags |
+| Built as | `ExamBlueprint { rows: ExamBlueprintRow[] }` + `BankQuestion` in `ExamPapersState` (desk slices `blueprints`, `bank` on `exam_papers_desk_slices`); generator in `lib/examPapers.ts` (`fillBlueprintFromBank`, `assembleSectionsFromCells`) + `generateBlueprintCellsLlm`; marking scheme already prints on the teacher copy since §1b |
+| Data needed | none new — slices are generic jsonb rows |
 | Model | Gemini Pro (as 1b) |
 | Effort | ~5 days |
 
@@ -183,5 +183,5 @@ Why Gemini as default: cheapest at this volume, same GCP project/billing/IAM as 
 5. ~~**PTM per-student brief** (§2.2)~~ — shipped 2026-08-18.
 6. ~~**Competency question types + LO codes on syllabus** (§1b)~~ — shipped 2026-08-18 (LO seed import outstanding).
 7. ~~**Item-level scores** → academic at-risk → pedagogy suggestions (§1 prereq, §3.2–3.3)~~ — shipped 2026-08-19 (three commits). Left: OMR import, UI-configurable thresholds.
-8. **Blueprint + question bank** (§1c) — 5 days.
+8. ~~**Blueprint + question bank** (§1c)~~ — shipped 2026-08-19.
 9. Application extraction, meeting minutes, compliance narratives, admission presets — ½–1 day each, slot anywhere.
