@@ -58,7 +58,7 @@ import {
   type TransportInterest,
 } from "@/lib/admissions";
 import { listSessionYearOptions, loadMasters, type MastersState } from "@/lib/masters";
-import { admissionDocumentHref, buildAdmissionDocumentDetails } from "@/lib/admissionDocumentLinks";
+import { admissionDocumentHref, buildAdmissionDocumentDetails, pendingDocumentsForLead } from "@/lib/admissionDocumentLinks";
 import { leadConversionLikelihood } from "@/lib/admissionsAi";
 import { pushToast } from "@/components/shell/Toast";
 import { STUDENT_CATEGORIES, loadSis, type SisState } from "@/lib/sis";
@@ -106,6 +106,7 @@ import { AdmissionsKbPanel } from "@/components/admissions/AdmissionsKbPanel";
 import { MarketingPanel } from "@/components/admissions/MarketingPanel";
 import { ReferralsPanel } from "@/components/admissions/ReferralsPanel";
 import { LeadTimeline } from "@/components/admissions/LeadTimeline";
+import { LeadExtractPanel } from "@/components/admissions/LeadExtractPanel";
 import { timelineTouchpoints, type LeadTimelineEvent } from "@/lib/leadTimeline";
 import { referralCodeFor, resolveReferralCode } from "@/lib/referrals";
 import { LeadFollowupDraftPanel } from "@/components/admissions/LeadFollowupDraftPanel";
@@ -1671,6 +1672,45 @@ export function AdmissionsWorkspace() {
             <AdmissionCaptureLinks />
           </MastersWorkCard>
 
+          <LeadExtractPanel
+            canEdit={canCreate}
+            classNames={classes.map((c) => c.name)}
+            onApply={(f, summary) => {
+              const cls = f.classSoughtLabel ? classes.find((c) => c.name.toLowerCase() === f.classSoughtLabel!.toLowerCase()) : undefined;
+              setDraft((d) => ({
+                ...d,
+                guardianName: f.guardianName ?? d.guardianName,
+                motherName: f.motherName ?? d.motherName,
+                mobile: f.mobile ?? d.mobile,
+                email: f.email ?? d.email,
+                locality: f.locality ?? d.locality,
+                address: f.address ?? d.address,
+                pincode: f.pincode ?? d.pincode,
+                previousBoard: f.previousBoard ?? d.previousBoard,
+                preferredLanguage: f.preferredLanguage ?? d.preferredLanguage,
+                concerns: f.concerns ?? d.concerns,
+                note: summary ? [d.note, `Enquiry text: ${summary}`].filter(Boolean).join(" · ") : d.note,
+              }));
+              setChildrenRows((rows) =>
+                rows.map((r, i) =>
+                  i === 0
+                    ? {
+                        ...r,
+                        childName: f.childName ?? r.childName,
+                        dob: f.dob ?? r.dob,
+                        gender: f.gender ?? r.gender,
+                        classSoughtId: cls?.id ?? r.classSoughtId,
+                        previousSchool: f.previousSchool ?? r.previousSchool,
+                        transportInterest: (f.transportInterest || r.transportInterest) as TransportInterest,
+                      }
+                    : r,
+                ),
+              );
+              setNotice("Fields applied from the pasted text — check before saving");
+              window.setTimeout(() => setNotice(null), 3000);
+            }}
+          />
+
           <p className="text-[12px] text-[var(--muted)]">
             Desk form below is for <strong>walk-in</strong> only. After save,
             work the lead in{" "}
@@ -2649,6 +2689,7 @@ function LeadDetail({
                   ["admission_offer", "Offer letter"],
                   ["fee_structure_letter", "Fee structure"],
                   ["welcome_packet", "Welcome packet"],
+                  ...(pendingDocumentsForLead(lead).length ? ([["admission_deficiency", "Documents pending letter"]] as const) : []),
                 ] as const
               ).map(([type, label]) => (
                 <Link
@@ -3327,6 +3368,13 @@ function LeadDetail({
             </label>
           ))}
         </div>
+        {pendingDocumentsForLead(lead).length ? (
+          <p className="mt-2 rounded bg-[var(--warning-soft)] px-2 py-1 text-[11px] text-[var(--warning)]">
+            Still due: {pendingDocumentsForLead(lead).join(" · ")} — send the &ldquo;Documents pending letter&rdquo; from the lead header.
+          </p>
+        ) : (
+          <p className="mt-2 text-[11px] text-[var(--success)]">Documents complete.</p>
+        )}
         {lead.rte ? (
           <Field label="Govt RTE application no. (official list)">
             <input

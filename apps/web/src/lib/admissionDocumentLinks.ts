@@ -55,6 +55,17 @@ export function feeSummaryForClass(
   };
 }
 
+/** Documents the registration checklist still lacks, from the lead's own ticks. */
+export function pendingDocumentsForLead(lead: AdmissionLead): string[] {
+  const out: string[] = [];
+  if (!lead.docsBirthCert) out.push("Birth certificate (original + copy)");
+  if (!lead.docsPhoto) out.push("Passport-size photographs of the child");
+  if (!lead.docsAadhaar) out.push("Aadhaar of the child (and one parent)");
+  if (!lead.docsTc && lead.previousSchool) out.push("Transfer certificate / last report card from the previous school");
+  if (!lead.docsCategory && (lead.rte || (lead.category && lead.category.toLowerCase() !== "general"))) out.push("Category / income certificate");
+  return out;
+}
+
 export function buildAdmissionDocumentDetails(input: {
   type: SchoolDocumentType;
   lead: AdmissionLead;
@@ -75,6 +86,14 @@ export function buildAdmissionDocumentDetails(input: {
     L.push("Documents to submit: birth certificate, previous school report card / TC (if any), Aadhaar of child and parent, 4 passport photos, address proof.");
     if (fee.total) L.push(`Admission-time fee as per ${fee.groupName}: total ${fee.total} (details in the fee structure letter).`);
     L.push("Offer valid for 7 days from the date of this letter; contact the school office for queries.");
+  }
+  if (input.type === "admission_deficiency") {
+    const pending = pendingDocumentsForLead(lead);
+    L.push("");
+    L.push(`Status: ${lead.stage === "applied" || lead.stage === "verified" ? "registered" : "enquiry"}${lead.applicationNo ? ` · application ${lead.applicationNo}` : lead.enquiryNo ? ` · ${lead.enquiryNo}` : ""}${lead.registrationPaymentStatus === "paid" ? " · registration fee paid" : ""}.`);
+    L.push(pending.length ? `Documents still pending (exactly these): ${pending.join("; ")}.` : "Documents: checklist complete — nothing pending (letter may not be needed).");
+    L.push("How to submit: at the school office on working days, or send clear photos on the school WhatsApp number; originals shown at verification.");
+    L.push("After submission: the admission file is completed and the parent is informed.");
   }
   if (input.type === "fee_structure_letter") {
     L.push("");

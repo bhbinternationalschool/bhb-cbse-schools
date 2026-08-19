@@ -25,6 +25,10 @@ import type { SisStudent } from "@/lib/sis";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import { StudentAvatar, StudentNameLabel } from "@/components/students/StudentAvatar";
 import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
+import { loadSis } from "@/lib/sis";
+import { openWaMe } from "@/lib/waMe";
+import { retentionOutreachText } from "@/lib/retentionOutreach";
+import { TENANT } from "@/lib/types";
 
 const LEVEL_TONE: Record<RiskLevel, string> = {
   high: "bg-[var(--danger)]/15 text-[var(--danger)]",
@@ -67,6 +71,30 @@ export function AtRiskPanel(props: {
   }, [ay, term, masters, roster, thresholds]);
 
   const flagged = rows.filter((r) => r.result.level !== "none");
+  const households = useMemo(() => {
+    const sis = loadSis();
+    return new Map(sis.households.map((h) => [h.id, h]));
+  }, []);
+  function parentOutreach(f: StudentRiskFacts) {
+    const st = roster.find((s) => s.id === f.studentId);
+    const hh = st ? households.get(st.householdId) : undefined;
+    const mobile = hh?.whatsappMobile || hh?.mobile || "";
+    if (!mobile) {
+      props.onError("No household WhatsApp number on record for this student");
+      return;
+    }
+    const msg = retentionOutreachText({
+      schoolName: TENANT.nameDisplay,
+      parentName: hh?.guardianName || "",
+      childName: f.fullName,
+      classLabel: masters?.classes.find((c) => c.id === classId)?.name || "",
+      termLabel: term?.label || "",
+      teacherName: "",
+      household: hh,
+    });
+    openWaMe(mobile, msg.text);
+    props.onFlash(`WhatsApp opened (${msg.language}) — log the outcome in PTM / follow-up`);
+  }
   const counts = {
     high: rows.filter((r) => r.result.level === "high").length,
     watch: rows.filter((r) => r.result.level === "watch").length,
@@ -271,6 +299,16 @@ export function AtRiskPanel(props: {
                       ) : (
                         <span className="text-[var(--muted)]">not drafted</span>
                       )}
+                      {r.level !== "none" && canEdit ? (
+                        <button
+                          type="button"
+                          className="mt-1 block text-[11px] font-semibold text-[var(--brand-deep)] underline"
+                          title="Invite the parent to talk — in the family's language, over the household WhatsApp. Not an assessment; the PTM / follow-up is the record."
+                          onClick={() => parentOutreach(f)}
+                        >
+                          Message parent (WhatsApp)
+                        </button>
+                      ) : null}
                     </td>
                   </tr>
                 );
