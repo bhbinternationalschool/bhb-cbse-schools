@@ -139,6 +139,7 @@ export async function POST(req: Request) {
   return NextResponse.json({
     ok: true,
     engine: result.engine,
+    generationId: result.generationId,
     title: picked.title,
     body: picked.body,
     remarks: result.doc.remarks,

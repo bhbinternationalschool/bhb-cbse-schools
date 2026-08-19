@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import { FileText } from "lucide-react";
 import { currentAcademicYearCode, loadMasters, type MastersState } from "@/lib/masters";
 import {
@@ -28,6 +29,8 @@ type GeneratedDoc = {
   bodyEn: string;
   bodyHi: string;
   subject: string;
+  /** ai_generations row behind this draft; "" for minutes / already reported */
+  generationId?: string;
 };
 
 function splitParagraphs(text: string): string[] {
@@ -114,6 +117,7 @@ export function DocumentMakerWorkspace() {
         bodyEn: data.bodyEn || "",
         bodyHi: data.bodyHi || "",
         subject: data.subject || preset.defaultSubjectEn,
+        generationId: (data as { generationId?: string }).generationId || "",
       });
       setNotice("Document generated — review preview below");
       window.setTimeout(() => setNotice(null), 2800);
@@ -178,6 +182,11 @@ export function DocumentMakerWorkspace() {
 
     await drawPdfDocumentSignatures(doc, brand, margin, pageW, pageH);
     doc.save(`school_document_${Date.now()}.pdf`);
+    // Printing is the acceptance signal for a document draft.
+    if (generated.generationId) {
+      reportAiOutcome({ ids: [generated.generationId], outcome: "accepted", targetType: "school_document" });
+      setGenerated({ ...generated, generationId: "" });
+    }
   }
 
   return (

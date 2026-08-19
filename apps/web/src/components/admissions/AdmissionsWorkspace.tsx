@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import Link from "next/link";
 import { UserPlus } from "lucide-react";
 import {
@@ -2101,8 +2102,14 @@ function LeadDetail({
   const likelihood = leadConversionLikelihood(lead);
 
   const [aiSuggestion, setAiSuggestion] = useState<
-    { nextAction: string; outreachMessage: string } | null
+    { nextAction: string; outreachMessage: string; generationId?: string } | null
   >(null);
+  function acceptSuggestion() {
+    if (aiSuggestion?.generationId) {
+      reportAiOutcome({ ids: [aiSuggestion.generationId], outcome: "accepted", targetType: "admission_lead", targetId: lead.id });
+      setAiSuggestion({ ...aiSuggestion, generationId: undefined });
+    }
+  }
   const [aiSuggestionLoading, setAiSuggestionLoading] = useState(false);
   const [aiSuggestionError, setAiSuggestionError] = useState<string | null>(
     null,
@@ -2160,6 +2167,7 @@ function LeadDetail({
       setAiSuggestion({
         nextAction: json.nextAction,
         outreachMessage: json.outreachMessage,
+        generationId: (json as { generationId?: string }).generationId,
       });
     } catch (e) {
       setAiSuggestionError(e instanceof Error ? e.message : "Suggestion failed");
@@ -2617,11 +2625,13 @@ function LeadDetail({
                         void navigator.clipboard
                           .writeText(aiSuggestion.outreachMessage)
                           .then(
-                            () =>
+                            () => {
+                              acceptSuggestion();
                               pushToast({
                                 kind: "success",
                                 message: "Outreach message copied",
-                              }),
+                              });
+                            },
                             () =>
                               pushToast({
                                 kind: "error",
@@ -2639,9 +2649,10 @@ function LeadDetail({
                   {lead.mobile ? (
                     <button
                       type="button"
-                      onClick={() =>
-                        openWaMe(lead.mobile, aiSuggestion.outreachMessage)
-                      }
+                      onClick={() => {
+                        acceptSuggestion();
+                        openWaMe(lead.mobile, aiSuggestion.outreachMessage);
+                      }}
                       className="mt-2 rounded-lg border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
                     >
                       Open in WhatsApp

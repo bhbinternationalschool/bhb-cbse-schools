@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import {
   Download,
   FileText,
@@ -74,6 +75,7 @@ export function StaffAgreementPanel({
   const [draftTitle, setDraftTitle] = useState("");
   const [draftBody, setDraftBody] = useState("");
   const [draftIsAi, setDraftIsAi] = useState(false);
+  const [draftGenerationId, setDraftGenerationId] = useState("");
 
   const [aiDetails, setAiDetails] = useState("");
   const [aiLanguage, setAiLanguage] = useState<AiLanguage>("both");
@@ -179,7 +181,7 @@ export function StaffAgreementPanel({
     title?: string;
     body?: string;
     changeRequest?: string;
-  }): Promise<{ title: string; body: string } | null> {
+  }): Promise<{ title: string; body: string; generationId: string } | null> {
     setAiLoading(true);
     setError(null);
     try {
@@ -202,6 +204,7 @@ export function StaffAgreementPanel({
         error?: string;
         title?: string;
         body?: string;
+        generationId?: string;
       };
       if (!res.ok || data.error) {
         flash(data.error || "AI generation failed", true);
@@ -210,6 +213,7 @@ export function StaffAgreementPanel({
       return {
         title: data.title || "Employment Agreement",
         body: data.body || "",
+        generationId: data.generationId || "",
       };
     } catch {
       flash("Network error — try again", true);
@@ -232,6 +236,7 @@ export function StaffAgreementPanel({
     setDraftTitle(result.title);
     setDraftBody(result.body);
     setDraftIsAi(true);
+    setDraftGenerationId(result.generationId);
     flash("CBSE-style AI draft ready — review, edit, then create draft");
   }
 
@@ -257,6 +262,10 @@ export function StaffAgreementPanel({
     if (!r.ok) {
       flash(r.error, true);
       return;
+    }
+    if (draftIsAi && draftGenerationId) {
+      reportAiOutcome({ ids: [draftGenerationId], outcome: "accepted", targetType: "staff_agreement" });
+      setDraftGenerationId("");
     }
     flash("Agreement created (draft)");
     setDraftTitle("");

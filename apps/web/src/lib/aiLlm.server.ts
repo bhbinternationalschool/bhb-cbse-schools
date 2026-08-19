@@ -370,7 +370,7 @@ export async function generateTutorText(opts: {
   history?: OpenAiChatTurn[];
   userMessage: string;
 }): Promise<
-  | { ok: true; text: string; engine: LlmEngine }
+  | { ok: true; text: string; engine: LlmEngine; generationId: string }
   | { ok: false; error: string; engine: LlmEngine }
 > {
   return callLlmText({
@@ -417,7 +417,7 @@ export async function generateWaTemplateDraftJson(opts: {
   language: string;
   layoutKind: string;
 }): Promise<
-  | { ok: true; body: string; footer: string; engine: LlmEngine }
+  | { ok: true; body: string; footer: string; engine: LlmEngine; generationId: string }
   | { ok: false; error: string; engine: LlmEngine }
 > {
   const system = `You draft WhatsApp Business API message templates for Indian CBSE schools.
@@ -446,7 +446,7 @@ Include 2-4 relevant variables in the body.`;
     parseWaDraftJson,
   );
 
-  if (r.ok) return { ok: true, ...r.data, engine: r.engine };
+  if (r.ok) return { ok: true, ...r.data, engine: r.engine, generationId: r.generationId };
   return {
     ok: false,
     error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI template drafts",
@@ -481,7 +481,7 @@ export async function generateCollectionsDraftJson(opts: {
   stageLabel: string;
   language: string;
 }): Promise<
-  | { ok: true; whatsappMessage: string; callScript: string; engine: LlmEngine }
+  | { ok: true; whatsappMessage: string; callScript: string; engine: LlmEngine; generationId: string }
   | { ok: false; error: string; engine: LlmEngine }
 > {
   const system = `You draft fee-collection outreach for an Indian CBSE school's accounts office.
@@ -512,7 +512,7 @@ Language: ${opts.language === "hi" ? "Hindi (Devanagari)" : "English"}`;
     parseCollectionsDraftJson,
   );
 
-  if (r.ok) return { ok: true, ...r.data, engine: r.engine };
+  if (r.ok) return { ok: true, ...r.data, engine: r.engine, generationId: r.generationId };
   return {
     ok: false,
     error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI collections drafts",
@@ -551,7 +551,7 @@ export async function generateLeadNextActionJson(opts: {
   followUpSummary: string;
   language: string;
 }): Promise<
-  | { ok: true; nextAction: string; outreachMessage: string; engine: LlmEngine }
+  | { ok: true; nextAction: string; outreachMessage: string; engine: LlmEngine; generationId: string }
   | { ok: false; error: string; engine: LlmEngine }
 > {
   const system = `You advise a school admissions counsellor on the single next-best action for one enquiry lead, and draft the outreach message for it.
@@ -583,7 +583,7 @@ Language: ${opts.language === "hi" ? "Hindi (Devanagari)" : "English"}`;
     parseLeadNextActionJson,
   );
 
-  if (r.ok) return { ok: true, ...r.data, engine: r.engine };
+  if (r.ok) return { ok: true, ...r.data, engine: r.engine, generationId: r.generationId };
   return {
     ok: false,
     error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI next-action suggestions",
@@ -618,7 +618,7 @@ export async function generateLeadershipDigestJson(opts: {
   schoolName: string;
   metricsSummary: string;
 }): Promise<
-  | { ok: true; headline: string; highlights: string[]; engine: LlmEngine }
+  | { ok: true; headline: string; highlights: string[]; engine: LlmEngine; generationId: string }
   | { ok: false; error: string; engine: LlmEngine }
 > {
   const system = `You write a one-paragraph daily digest for a school principal from KPI numbers they give you.
@@ -645,7 +645,7 @@ ${opts.metricsSummary}`;
     parseLeadershipDigestJson,
   );
 
-  if (r.ok) return { ok: true, ...r.data, engine: r.engine };
+  if (r.ok) return { ok: true, ...r.data, engine: r.engine, generationId: r.generationId };
   return {
     ok: false,
     error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for the AI digest",
@@ -681,6 +681,7 @@ export async function generateAutomationSetupJson(opts: {
   | {
       ok: true;
       engine: LlmEngine;
+      generationId: string;
       audienceSummary: string;
       audienceExplanation: string;
       triggerType?: "schedule" | "interval" | "event";
@@ -762,7 +763,7 @@ Staff request: ${opts.hint}`;
     parseSetup,
   );
 
-  if (r.ok) return { ok: true, engine: r.engine, ...r.data };
+  if (r.ok) return { ok: true, engine: r.engine, generationId: r.generationId, ...r.data };
   return {
     ok: false,
     error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI automation helper",
@@ -801,7 +802,7 @@ export async function generateSchoolDocumentText(opts: {
   system: string;
   userMessage: string;
 }): Promise<
-  | { ok: true; doc: SchoolDocumentText; engine: LlmEngine }
+  | { ok: true; doc: SchoolDocumentText; engine: LlmEngine; generationId: string }
   | { ok: false; error: string; engine: LlmEngine }
 > {
   const r = await callLlmJson(
@@ -818,7 +819,7 @@ export async function generateSchoolDocumentText(opts: {
     parseSchoolDocumentJson,
   );
 
-  if (r.ok) return { ok: true, doc: r.data, engine: r.engine };
+  if (r.ok) return { ok: true, doc: r.data, engine: r.engine, generationId: r.generationId };
   return {
     ok: false,
     error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI document maker",
@@ -862,7 +863,7 @@ export async function generateStaffAgreementText(opts: {
   system: string;
   userMessage: string;
 }): Promise<
-  | { ok: true; doc: StaffAgreementAiText; engine: LlmEngine }
+  | { ok: true; doc: StaffAgreementAiText; engine: LlmEngine; generationId: string }
   | { ok: false; error: string; engine: LlmEngine }
 > {
   const r = await callLlmJson(
@@ -877,7 +878,7 @@ export async function generateStaffAgreementText(opts: {
     parseStaffAgreementAiJson,
   );
 
-  if (r.ok) return { ok: true, doc: r.data, engine: r.engine };
+  if (r.ok) return { ok: true, doc: r.data, engine: r.engine, generationId: r.generationId };
   return {
     ok: false,
     error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI agreement drafting",
@@ -911,7 +912,7 @@ export async function generateStudentCertificateText(opts: {
   system: string;
   userMessage: string;
 }): Promise<
-  | { ok: true; doc: StudentCertificateAiText; engine: LlmEngine }
+  | { ok: true; doc: StudentCertificateAiText; engine: LlmEngine; generationId: string }
   | { ok: false; error: string; engine: LlmEngine }
 > {
   const r = await callLlmJson(
@@ -926,7 +927,7 @@ export async function generateStudentCertificateText(opts: {
     parseStudentCertificateAiJson,
   );
 
-  if (r.ok) return { ok: true, doc: r.data, engine: r.engine };
+  if (r.ok) return { ok: true, doc: r.data, engine: r.engine, generationId: r.generationId };
   return {
     ok: false,
     error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI certificate drafting",
@@ -952,6 +953,7 @@ export async function generateHomeworkGradingAssistJson(opts: {
       completeness: "complete" | "partial" | "unclear";
       feedbackDraft: string;
       engine: LlmEngine;
+      generationId: string;
     }
   | { ok: false; error: string; engine: LlmEngine }
 > {
@@ -986,7 +988,7 @@ ${opts.extractedText}`;
     parseHomeworkGradingAssistJson,
   );
 
-  if (r.ok) return { ok: true, ...r.data, engine: r.engine };
+  if (r.ok) return { ok: true, ...r.data, engine: r.engine, generationId: r.generationId };
   return {
     ok: false,
     error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI grading assist",
@@ -1031,7 +1033,7 @@ export async function generateSubstitutionSummaryJson(opts: {
   covered: { periodLabel: string; classSection: string; subject: string; substituteName: string }[];
   uncovered: { periodLabel: string; classSection: string; subject: string }[];
 }): Promise<
-  | { ok: true; summary: string; engine: LlmEngine }
+  | { ok: true; summary: string; engine: LlmEngine; generationId: string }
   | { ok: false; error: string; engine: LlmEngine }
 > {
   const system = `You write a short, plain-language note for a school office/principal, summarizing a substitute-teacher arrangement that has ALREADY been decided and saved by the system.
@@ -1075,7 +1077,7 @@ ${uncoveredLines}`;
     parseSubstitutionSummaryJson,
   );
 
-  if (r.ok) return { ok: true, summary: r.data.summary, engine: r.engine };
+  if (r.ok) return { ok: true, summary: r.data.summary, engine: r.engine, generationId: r.generationId };
   return {
     ok: false,
     error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI summary",
@@ -1143,7 +1145,7 @@ export async function generateReportRemarksJson(opts: {
 export async function translateRemarksToHindiJson(opts: {
   items: { id: string; text: string }[];
 }): Promise<
-  | { ok: true; items: { id: string; text: string }[]; engine: LlmEngine }
+  | { ok: true; items: { id: string; text: string }[]; engine: LlmEngine; generationId: string }
   | { ok: false; error: string; engine: LlmEngine }
 > {
   const system = `You translate school report-card remarks from English to Hindi (Devanagari) for parents at an Indian CBSE school. Translate faithfully — same meaning, same length, formal register (आप), no additions, no omissions, keep subject names in Hindi where a standard Hindi name exists (गणित, विज्ञान, अंग्रेज़ी, हिंदी, सामाजिक विज्ञान) and otherwise as given.
@@ -1174,7 +1176,7 @@ Respond with JSON only: {"items":[{"id":"...","text":"..."}]} — every id given
       }
     },
   );
-  if (r.ok) return { ok: true, items: r.data, engine: r.engine };
+  if (r.ok) return { ok: true, items: r.data, engine: r.engine, generationId: r.generationId };
   return { ok: false, error: r.error, engine: r.engine };
 }
 

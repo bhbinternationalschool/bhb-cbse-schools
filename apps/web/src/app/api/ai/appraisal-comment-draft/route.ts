@@ -63,6 +63,7 @@ ${body.cycleLabel ? `Appraisal cycle: ${body.cycleLabel}\n` : ""}Ratings (out of
   return NextResponse.json({
     ok: true,
     engine: result.engine,
+    generationId: result.generationId,
     draft: result.text.trim(),
   });
 }
