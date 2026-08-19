@@ -153,6 +153,8 @@ function defaultLinkForKind(kind: SocialCrossPostKind): string {
       return `${base}/parent?tab=gallery`;
     case "notice":
       return `${base}/parent?tab=notices`;
+    case "marketing":
+      return `${base}/apply?src=social`;
   }
 }
 
