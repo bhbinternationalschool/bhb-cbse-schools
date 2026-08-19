@@ -2892,6 +2892,37 @@ function LeadDetail({
             <AdmissionDocOcrPanel
               disabled={locked || !canEdit}
               onApply={(patch) => onPatch(patch)}
+              onApplyApplication={(f) => {
+                // Only overwrite with what the form actually says; class by name match.
+                const cls = f.classSought
+                  ? classes.find(
+                      (c) => c.name.trim().toLowerCase() === f.classSought.trim().toLowerCase(),
+                    )
+                  : undefined;
+                const patch: Partial<AdmissionLead> = {};
+                if (f.studentName) patch.childName = f.studentName;
+                if (f.dob) patch.dob = f.dob;
+                if (f.gender) patch.gender = f.gender;
+                if (cls) patch.classSoughtId = cls.id;
+                if (f.fatherName || f.guardianName) patch.guardianName = f.guardianName || f.fatherName;
+                if (f.motherName) patch.motherName = f.motherName;
+                if (f.mobile) patch.mobile = f.mobile;
+                if (f.email) patch.email = f.email;
+                if (f.address) patch.address = f.address;
+                if (f.pincode) patch.pincode = f.pincode;
+                if (f.previousSchool) patch.previousSchool = f.previousSchool;
+                if (f.category) patch.category = f.category;
+                if (f.aadhaarLast4) {
+                  patch.docsAadhaar = true;
+                  patch.registrationFeeNote = [lead.registrationFeeNote, `Aadhaar ····${f.aadhaarLast4} (from form)`]
+                    .filter(Boolean)
+                    .join(" · ");
+                }
+                if (f.classSought && !cls) {
+                  patch.campaignNote = [lead.campaignNote, `Form says class: ${f.classSought}`].filter(Boolean).join(" · ");
+                }
+                onPatch(patch);
+              }}
             />
           </div>
         ) : null}
