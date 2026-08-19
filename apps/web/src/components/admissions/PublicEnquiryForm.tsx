@@ -12,6 +12,13 @@ import {
   type AdmissionSource,
 } from "@/lib/admissions";
 import type { PublicRegistrationConfig } from "@/lib/publicRegistration";
+import { HOUSEHOLD_LANGUAGES } from "@/lib/householdPrefs";
+import {
+  dpdpNoticeText,
+  enquiryQuestionsFor,
+  LEAD_CONCERNS,
+  PREVIOUS_BOARDS,
+} from "@/lib/admissionsEnquiryForm";
 import { TENANT } from "@/lib/types";
 import { AddressAutocompleteField } from "@/components/maps/AddressAutocompleteField";
 
@@ -44,12 +51,16 @@ function resolveSource(raw: string | null): AdmissionSource {
 
 export function PublicEnquiryForm({
   initialSource,
+  initialCampaignId,
   config,
 }: {
   initialSource?: string | null;
+  /** ?c=<campaign id> on the link — attribution only, never shown */
+  initialCampaignId?: string | null;
   config: PublicRegistrationConfig;
 }) {
   const source = resolveSource(initialSource ?? null);
+  const campaignId = (initialCampaignId || "").trim().slice(0, 80);
   // Classes come from the DB via the server. Never call loadMasters() here:
   // this page is public, so masters are cold and the fallback would mint
   // random class ids (see lib/publicRegistration.server.ts). When the DB has
@@ -74,6 +85,13 @@ export function PublicEnquiryForm({
   const [address, setAddress] = useState("");
   const [pincode, setPincode] = useState("");
   const [note, setNote] = useState("");
+  const [preferredLanguage, setPreferredLanguage] = useState("");
+  const [previousBoard, setPreviousBoard] = useState("");
+  const [previousSchool, setPreviousSchool] = useState("");
+  const [transport, setTransport] = useState<"" | "yes" | "no" | "undecided">("");
+  const [rte, setRte] = useState(false);
+  const [concerns, setConcerns] = useState<string[]>([]);
+  const [consent, setConsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<{ enquiryNo: string } | null>(null);
 
@@ -83,6 +101,11 @@ export function PublicEnquiryForm({
     const cls = classes.find((c) => c.name === classKey || c.id === classKey);
     const classSoughtId = cls?.id || "";
     const classLabel = cls?.name || classKey;
+    if (!consent) {
+      setError("Please tick the consent box so we can contact you about this enquiry.");
+      return;
+    }
+    const ask = enquiryQuestionsFor(classLabel);
     const state = loadAdmissions();
     const r = createEnquiry(
       state,
@@ -99,7 +122,17 @@ export function PublicEnquiryForm({
         address,
         pincode,
         campaignNote: `Public · ${sourceLabel(source)}${classSoughtId ? "" : ` · Class ${classLabel}`}`,
+        campaignId,
         note,
+        preferredLanguage,
+        previousBoard: ask.previousBoard ? previousBoard : "",
+        previousSchool: ask.previousSchool ? previousSchool : "",
+        transportInterest: transport === "yes" ? "yes" : transport === "no" ? "no" : "undecided",
+        rte,
+        concerns,
+        declarationAccepted: true,
+        parentConsentAt: new Date().toISOString(),
+        parentConsentBy: "parent (public form)",
         leadDate: new Date().toISOString().slice(0, 10),
       },
       "Public form",
@@ -193,6 +226,25 @@ export function PublicEnquiryForm({
             ))}
           </select>
         </label>
+        {enquiryQuestionsFor(classes.find((c) => c.name === classKey || c.id === classKey)?.name || classKey).previousBoard ? (
+          <div className="grid grid-cols-2 gap-3 rounded-xl border border-dashed border-[rgba(32,48,80,0.2)] p-3">
+            <label className="block text-[11px] font-semibold text-[var(--muted)]">
+              Current / previous board
+              <select className={`${inp} mt-1`} value={previousBoard} onChange={(e) => setPreviousBoard(e.target.value)}>
+                <option value="">Select</option>
+                {PREVIOUS_BOARDS.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-[11px] font-semibold text-[var(--muted)]">
+              Previous school
+              <input className={`${inp} mt-1`} value={previousSchool} onChange={(e) => setPreviousSchool(e.target.value)} />
+            </label>
+          </div>
+        ) : null}
         <label className="block text-[11px] font-semibold text-[var(--muted)]">
           Father / guardian *
           <input
@@ -262,6 +314,48 @@ export function PublicEnquiryForm({
             }
           />
         </label>
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block text-[11px] font-semibold text-[var(--muted)]">
+            Need school transport?
+            <select className={`${inp} mt-1`} value={transport} onChange={(e) => setTransport(e.target.value as typeof transport)}>
+              <option value="">Select</option>
+              <option value="yes">Yes</option>
+              <option value="no">No</option>
+              <option value="undecided">Not sure yet</option>
+            </select>
+          </label>
+          <label className="block text-[11px] font-semibold text-[var(--muted)]">
+            Language for school messages
+            <select className={`${inp} mt-1`} value={preferredLanguage} onChange={(e) => setPreferredLanguage(e.target.value)}>
+              <option value="">Select</option>
+              {HOUSEHOLD_LANGUAGES.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.native}
+                  {l.native !== l.label ? ` (${l.label})` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <fieldset className="rounded-xl border border-[rgba(32,48,80,0.15)] p-3">
+          <legend className="px-1 text-[11px] font-semibold text-[var(--muted)]">What matters most to you? (optional)</legend>
+          <div className="grid grid-cols-2 gap-1.5">
+            {LEAD_CONCERNS.map((c) => (
+              <label key={c.id} className="inline-flex items-center gap-2 text-[12px]">
+                <input
+                  type="checkbox"
+                  checked={concerns.includes(c.id)}
+                  onChange={(e) => setConcerns((prev) => (e.target.checked ? [...prev, c.id] : prev.filter((x) => x !== c.id)))}
+                />
+                {c.label}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <label className="inline-flex items-center gap-2 text-[12px]">
+          <input type="checkbox" checked={rte} onChange={(e) => setRte(e.target.checked)} />
+          Applying under the RTE / EWS quota
+        </label>
         <label className="block text-[11px] font-semibold text-[var(--muted)]">
           Message (optional)
           <textarea
@@ -270,6 +364,11 @@ export function PublicEnquiryForm({
             value={note}
             onChange={(e) => setNote(e.target.value)}
           />
+        </label>
+
+        <label className="flex items-start gap-2 rounded-xl bg-[rgba(32,48,80,0.05)] p-3 text-[11px] text-[var(--muted)]">
+          <input type="checkbox" className="mt-0.5" checked={consent} onChange={(e) => setConsent(e.target.checked)} required />
+          <span>{dpdpNoticeText(TENANT.nameDisplay)}</span>
         </label>
 
         {error ? (

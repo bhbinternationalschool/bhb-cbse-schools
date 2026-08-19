@@ -34,6 +34,8 @@ export type ParsedGoogleLead = {
   pincode: string;
   note: string;
   campaignMeta: string;
+  /** Google Ads campaign_id as a string — attribution key on the lead; "" when absent */
+  campaignId: string;
   isTest: boolean;
 };
 
@@ -165,6 +167,7 @@ export function parseGoogleLeadFormPayload(
     pincode,
     note: customNotes,
     campaignMeta: campaignParts.join(" · "),
+    campaignId: raw.campaign_id != null ? String(raw.campaign_id).trim().slice(0, 80) : "",
     isTest: !!raw.is_test,
   };
 }
@@ -196,6 +199,7 @@ function parseSimpleLeadBody(body: SimpleLeadWebhookBody): ParsedGoogleLead {
     pincode: (body.pincode || "").trim(),
     note: (body.note || "").trim(),
     campaignMeta: "manual / zapier",
+    campaignId: String((body as { campaignId?: string }).campaignId || "").trim().slice(0, 80),
     isTest: false,
   };
 }

@@ -17,6 +17,8 @@ import {
 } from "@/lib/admissions";
 import { formatInr } from "@/lib/fees";
 import type { PublicRegistrationConfig } from "@/lib/publicRegistration";
+import { HOUSEHOLD_LANGUAGES } from "@/lib/householdPrefs";
+import { dpdpNoticeText } from "@/lib/admissionsEnquiryForm";
 import { TENANT } from "@/lib/types";
 
 const inp =
@@ -234,6 +236,9 @@ export function PublicFamilyRegisterForm({
     setStep("pay");
   }
 
+  const [consent, setConsent] = useState(false);
+  const [preferredLanguage, setPreferredLanguage] = useState("");
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -244,6 +249,10 @@ export function PublicFamilyRegisterForm({
     const known = new Set(classes.map((c) => c.id));
     if (children.some((c) => !known.has(c.classSoughtId))) {
       setError("Please pick a class for every student.");
+      return;
+    }
+    if (!consent) {
+      setError("Please tick the consent box to continue.");
       return;
     }
     if (linked) {
@@ -262,6 +271,8 @@ export function PublicFamilyRegisterForm({
             classSoughtId: c.classSoughtId,
             feeAmountPaise: Math.max(0, Math.round(Number(c.feeInr) * 100) || 0),
           })),
+          consent,
+          preferredLanguage,
         }),
       });
       const body = (await res.json()) as {
@@ -287,6 +298,8 @@ export function PublicFamilyRegisterForm({
         motherName,
         mobile,
         campaignSrc: initialSrc || "website",
+        consent,
+        preferredLanguage,
         feeHeadName: feeHead?.name || "Registration fee",
         children: children.map((c) => ({
           childName: c.childName,
@@ -669,6 +682,23 @@ export function PublicFamilyRegisterForm({
         <p className="text-[14px] font-semibold text-[var(--brand-deep)]">
           Total registration fee {formatInr(totalPaise)}
         </p>
+
+        <label className="block text-[11px] font-semibold text-[var(--muted)]">
+          Language for school messages
+          <select className={`${inp} mt-1`} value={preferredLanguage} onChange={(e) => setPreferredLanguage(e.target.value)}>
+            <option value="">Select</option>
+            {HOUSEHOLD_LANGUAGES.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.native}
+                {l.native !== l.label ? ` (${l.label})` : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex items-start gap-2 rounded-xl bg-[rgba(32,48,80,0.05)] p-3 text-[11px] text-[var(--muted)]">
+          <input type="checkbox" className="mt-0.5" checked={consent} onChange={(e) => setConsent(e.target.checked)} required />
+          <span>{dpdpNoticeText(TENANT.nameDisplay)}</span>
+        </label>
 
         {error ? (
           <p className="text-sm font-medium text-[#b42318]">{error}</p>

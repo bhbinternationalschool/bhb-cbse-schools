@@ -20,6 +20,7 @@ import {
   registerExistingFamily,
   registrationBalancePaise,
   stageLabel,
+  updateLead,
   type AdmissionLead,
   type AdmissionsState,
 } from "@/lib/admissions";
@@ -167,6 +168,9 @@ export async function registerFromAdmissionLink(input: {
     classSoughtId: string;
     feeAmountPaise: number;
   }[];
+  /** Parent ticked the DPDP consent box on the form */
+  consent?: boolean;
+  preferredLanguage?: string;
 }): Promise<
   | { ok: true; leadIds: string[]; step: AdmissionLinkPaymentStep | null }
   | { ok: false; reason: string }
@@ -197,7 +201,17 @@ export async function registerFromAdmissionLink(input: {
   if (!registered.ok) return registered;
 
   const leadIds = registered.leads.map((l) => l.id);
-  const stepped = nextPaymentStep(registered.state, leadIds, input.feeHeadName);
+  let withConsent = registered.state;
+  if (input.consent || input.preferredLanguage) {
+    const at = new Date().toISOString();
+    for (const id of leadIds) {
+      withConsent = updateLead(withConsent, id, {
+        ...(input.consent ? { declarationAccepted: true, parentConsentAt: at, parentConsentBy: "parent (register link)" } : {}),
+        ...(input.preferredLanguage ? { preferredLanguage: input.preferredLanguage } : {}),
+      });
+    }
+  }
+  const stepped = nextPaymentStep(withConsent, leadIds, input.feeHeadName);
   if (!stepped.ok) return stepped;
 
   const error = await persist(stepped.state);
