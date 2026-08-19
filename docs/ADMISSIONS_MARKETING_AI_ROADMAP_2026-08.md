@@ -73,7 +73,8 @@ Standing rules for everything below (same as the AI roadmap, restated because ma
 ### 2c. Lead quality — hot / warm / cold with engagement signals
 | | |
 |---|---|
-| Status | 🟡 |
+| Status | ✅ shipped 2026-08-19 — `lib/leadQuality.ts`: `leadEngagementSignals` (WhatsApp contact via bot-stamped wa id, chat-widget parent messages by mobile, logged replies, payment started/paid, told concerns/language), `leadQuality` = conversion heuristic + capped engagement bump → hot / warm / cold (**unknown = warm, never cold**; lost/enrolled/not-interested = cold). CRM: quality chip with signal tooltip, **Hot** and **Stalled** counsellor-queue filters; selftest `test:lead-quality`. Not done: campaign delivered/read signals (no BSP webhook → statuses are queued/sent/failed only), event RSVPs (server table) |
+| Was | 🟡 |
 | Have | `leadConversionScore` heuristic (stage, age, follow-up outcomes) |
 | Missing | Engagement inputs: WA bot replies, campaign message delivered/read/replied, widget threads, event RSVPs, registration link opened, payment started. Label hot/warm/cold surfaced on the list |
 | Build | Extend the heuristic (keep it rules, not a model) with a `leadEngagement` view built from `waCampaigns` message statuses, `crmParentChat` threads, `event_rsvps`, registration link token use. Add `quality: "hot"\|"warm"\|"cold"` computed, filterable in the CRM list and usable as an audience filter |
@@ -154,7 +155,7 @@ Effort: ~2 days after §1.
 
 | Item | Status | Build |
 |---|---|---|
-| 6a. Stalled-lead alerts + re-engagement draft | 🟡 (buckets ✅) | Rules in `admissionsAi.ts`: form completed & no reply in N days; registration fee paid & admission not completed; enquiry with no follow-up in N days. Flagged list on the Dashboard tab; "Draft re-engagement" → `lead-followup-draft` with `hook` = open house (from `events`), deadline (KB dates), scholarship (KB criteria) — hook chosen by rule, text by model. Thresholds in admissions policy |
+| 6a. Stalled-lead alerts + re-engagement draft | ✅ 2026-08-19 — `stalledLeadFlags` rules: paid-not-completed (14 d), went-quiet after interest (10 d), digital enquiry not reached (3 d), no follow-up (5 d); each carries a facts-only **hook**; Dashboard KPI "Stalled leads" with detail rows (why · days · quality); lead panel shows the reason and feeds the hook into the follow-up draft. Thresholds are code defaults (`DEFAULT_STALLED_THRESHOLDS`) — not yet in admissions policy UI | Rules in `admissionsAi.ts`: form completed & no reply in N days; registration fee paid & admission not completed; enquiry with no follow-up in N days. Flagged list on the Dashboard tab; "Draft re-engagement" → `lead-followup-draft` with `hook` = open house (from `events`), deadline (KB dates), scholarship (KB criteria) — hook chosen by rule, text by model. Thresholds in admissions policy |
 | 6b. Post-admission churn → retention outreach | 🟡 (at-risk ✅ academic) | At-risk flags (`academicRisk.ts`) + fee overdue + attendance drop → "retention watch" list for the principal; draft parent outreach through the existing `at-risk-notes` style route, sent via household-pref channel/language. Not a new AI route — a new consumer of existing ones |
 
 Effort: ~2 days.
@@ -203,7 +204,7 @@ Effort: ~2 days after 3a and 2e.
 1. ~~**§1 Admissions KB + grounded bot/widget answers**~~ — shipped 2026-08-19.
 2. ~~**§8 lead fields + DPDP consent + §2b dynamic form**~~ — shipped 2026-08-19 (WA-bot language ask + bot DPDP line deferred).
 3. ~~**§2d per-lead follow-up drafts, language + channel**~~ — shipped 2026-08-19.
-4. **§2c engagement-aware hot/warm/cold + §6a stalled-lead rules & drafts** (~2.5 d).
+4. ~~**§2c engagement-aware hot/warm/cold + §6a stalled-lead rules & drafts**~~ — shipped 2026-08-19.
 5. **§3a achievements store + marketing-content generator (+3b, 3c)** (~4 d) — results-season readiness.
 6. **§2e sequences + §7 event/result/festival campaigns** (~5 d).
 7. **§5 referral + testimonials** (~3 d).

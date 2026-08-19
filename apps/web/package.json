@@ -68,6 +68,7 @@
     "test:admissions-enquiry-form": "npx tsx src/lib/admissionsEnquiryForm.selftest.ts",
     "test:salary-additional": "npx tsx src/lib/salaryAdditional.selftest.ts",
     "test:lead-followup-ai": "npx tsx src/lib/leadFollowupAi.selftest.ts",
+    "test:lead-quality": "npx tsx src/lib/leadQuality.selftest.ts",
     "import:leads": "npx tsx scripts/import-lead-excels.ts",
     "import:fee-discounts": "npx tsx scripts/import-fee-discounts-excel.ts",
     "clear:collections": "npx tsx scripts/clear-fee-collections.ts",

@@ -3,6 +3,8 @@
  * Demo data from localStorage loaders — client-only.
  */
 
+import { engagementCtxFromChat, LEAD_QUALITY_LABEL, leadQuality, stalledLeadFlags } from "@/lib/leadQuality";
+import { loadCrmParentChat } from "@/lib/crmParentChat";
 import type {
   DashboardTableColumn,
   DashboardTableRow,
@@ -293,6 +295,18 @@ function admissionsDash(academicYearCode?: string): ModuleDashboardModel {
     }));
   const sourceChart = sourceRows.map((r) => chartPt(r.name, r.count));
   const funnelChart = chart.filter((p) => p.value > 0);
+  const engagement = engagementCtxFromChat(loadCrmParentChat().threads);
+  const stalledRows = state.leads
+    .flatMap((l) => {
+      const flags = stalledLeadFlags(l, {});
+      if (!flags.length) return [];
+      const q = leadQuality(l, engagement);
+      return [{ id: l.id, child: l.childName || l.enquiryNo, rule: flags[0].label, days: flags[0].days, quality: LEAD_QUALITY_LABEL[q.quality], severity: flags[0].severity }];
+    })
+    .sort((a, b) => b.severity - a.severity || b.days - a.days)
+    .map(({ severity: _s, ...r }) => r);
+  const stalledTotal = stalledRows.length;
+  const stalledPaid = stalledRows.filter((r) => r.rule === "Registration fee paid, admission not completed").length;
   return {
     title: "Admissions",
     subtitle: `Session ${academicYearCode || "all"} · enquiry funnel, follow-ups, and conversion.`,
@@ -336,6 +350,24 @@ function admissionsDash(academicYearCode?: string): ModuleDashboardModel {
         hint: `${fu.overdue} overdue · ${fu.dueToday} today`,
         tone: "coral",
         tab: "leads",
+      },
+      {
+        id: "stalled",
+        label: "Stalled leads",
+        value: String(stalledTotal),
+        hint: stalledTotal
+          ? `${stalledPaid} paid & not completed · open Leads → Stalled`
+          : "Nothing stalled by the rules",
+        tone: stalledTotal ? "coral" : "green",
+        tab: "leads",
+        detailTitle: "Stalled leads — why, and the hook for the re-engagement draft",
+        detailColumns: [
+          { key: "child", label: "Child" },
+          { key: "rule", label: "Why" },
+          { key: "days", label: "Days", align: "right" },
+          { key: "quality", label: "Quality" },
+        ],
+        detailRows: stalledRows.slice(0, 200),
       },
     ],
     chartTitle: "Admission funnel",
