@@ -106,7 +106,7 @@ else
   echo "Gemini: not configured — ERP assistant uses offline guides only"
 fi
 if [[ -n "$OPENAI_API_KEY" ]]; then
-  echo "OpenAI: API key present (${AI_TUTOR_MODEL:-gpt-4o-mini}, engine ${AI_PREFERRED_ENGINE:-auto})"
+  echo "OpenAI: API key present (${AI_TUTOR_MODEL:-gpt-4o-mini}, engine ${AI_PREFERRED_ENGINE:-gemini})"
 else
   echo "OpenAI: not configured — AI uses Gemini only when both keys not set"
 fi
@@ -200,7 +200,8 @@ SUBSTITUTIONS+="@_WHATSAPP_WABA_ID=${WHATSAPP_WABA_ID}"
 SUBSTITUTIONS+="@_WHATSAPP_DEFAULT_COUNTRY_CODE=${WHATSAPP_DEFAULT_COUNTRY_CODE}"
 SUBSTITUTIONS+="@_WHATSAPP_GRAPH_VERSION=${WHATSAPP_GRAPH_VERSION}"
 SUBSTITUTIONS+="@_AI_TUTOR_MODEL=${AI_TUTOR_MODEL:-gpt-4o-mini}"
-SUBSTITUTIONS+="@_AI_PREFERRED_ENGINE=${AI_PREFERRED_ENGINE:-auto}"
+# Default gemini (decision 2026-08-18) — "auto" here silently undid it once.
+SUBSTITUTIONS+="@_AI_PREFERRED_ENGINE=${AI_PREFERRED_ENGINE:-gemini}"
 SUBSTITUTIONS+="@_GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}"
 SUBSTITUTIONS+="@_NEXT_PUBLIC_VAPID_PUBLIC_KEY=${NEXT_PUBLIC_VAPID_PUBLIC_KEY}"
 SUBSTITUTIONS+="@_FLEET_EDGE_ALLOWED_IPS=${FLEET_EDGE_ALLOWED_IPS}"
