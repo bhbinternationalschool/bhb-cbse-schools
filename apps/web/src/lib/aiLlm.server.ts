@@ -61,6 +61,13 @@ import {
   type PedagogyDraft,
   type PedagogyFacts,
 } from "@/lib/itemAnalytics";
+import {
+  buildMinutesSystemPrompt,
+  buildMinutesUserPrompt,
+  parseMinutesJson,
+  type MeetingMinutesDraft,
+  type MinutesLanguage,
+} from "@/lib/meetingMinutesAi";
 
 export type LlmEngine = "openai" | "gemini" | "none";
 export type PreferredEngine = "auto" | "openai" | "gemini";
@@ -1245,4 +1252,32 @@ export async function generatePedagogyJson(opts: {
   );
   if (r.ok) return { ok: true, draft: r.data, engine: r.engine, generationId: r.generationId };
   return { ok: false, error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI suggestions", engine: r.engine };
+}
+
+/** Formal minutes from raw notes / transcript. Draft only. */
+export async function generateMeetingMinutesJson(opts: {
+  title: string;
+  date: string;
+  attendees: string;
+  notes: string;
+  language: MinutesLanguage;
+  schoolName: string;
+}): Promise<
+  | { ok: true; draft: MeetingMinutesDraft; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const r = await callLlmJson(
+    {
+      system: buildMinutesSystemPrompt({ language: opts.language, schoolName: opts.schoolName }),
+      userMessage: buildMinutesUserPrompt(opts),
+      // Long transcripts → long minutes; Hindi doubles the output.
+      maxTokens: opts.language === "en" ? 3000 : 4000,
+      temperature: 0.3,
+      geminiMaxTokens: 8192,
+      meta: { route: "meeting-minutes", promptVersion: "v1" },
+    },
+    parseMinutesJson,
+  );
+  if (r.ok) return { ok: true, draft: r.data, engine: r.engine, generationId: r.generationId };
+  return { ok: false, error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI minutes", engine: r.engine };
 }

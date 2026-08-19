@@ -19,6 +19,7 @@ import {
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { hasPermission } from "@/lib/rbac";
+import { MeetingMinutesPanel } from "@/components/documents/MeetingMinutesPanel";
 
 type GeneratedDoc = {
   titleEn: string;
@@ -41,6 +42,7 @@ export function DocumentMakerWorkspace() {
   const [docType, setDocType] = useState<SchoolDocumentType>("formal_letter");
   const [language, setLanguage] = useState<SchoolDocumentLanguage>("both");
   const [details, setDetails] = useState("");
+  const [mode, setMode] = useState<"letter" | "minutes">("letter");
   const [generated, setGenerated] = useState<GeneratedDoc | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,6 +68,7 @@ export function DocumentMakerWorkspace() {
     if (d) setDetails(d.slice(0, 4000));
     const l = sp.get("language");
     if (l === "en" || l === "hi" || l === "both") setLanguage(l);
+    if (sp.get("mode") === "minutes") setMode("minutes");
   }, []);
 
   useEffect(() => {
@@ -185,11 +188,79 @@ export function DocumentMakerWorkspace() {
     >
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
         <section className="space-y-4 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm">
-          <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
-            Compose
-          </h2>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
+              Compose
+            </h2>
+            <div className="inline-flex rounded-lg border border-[var(--border)] p-0.5 text-xs">
+              {(
+                [
+                  ["letter", "Letter / notice"],
+                  ["minutes", "Meeting minutes"],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => {
+                    setMode(id);
+                    setGenerated(null);
+                  }}
+                  className={`rounded-md px-2.5 py-1 font-semibold ${
+                    mode === id ? "bg-[var(--brand-deep)] text-white" : "text-[var(--brand-deep)]"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
 
           <label className="block text-sm">
+            <span className="mb-1 block text-[11px] text-[var(--muted)]">
+              Language
+            </span>
+            <select
+              className="field !py-1.5"
+              value={language}
+              onChange={(e) =>
+                setLanguage(e.target.value as SchoolDocumentLanguage)
+              }
+            >
+              <option value="en">English</option>
+              <option value="hi">Hindi</option>
+              <option value="both">English + Hindi</option>
+            </select>
+          </label>
+
+          {mode === "minutes" ? (
+            <>
+              <MeetingMinutesPanel
+                canCreate={canCreate}
+                language={language}
+                onDocument={(doc) => setGenerated(doc)}
+                onError={setError}
+                onNotice={(m) => {
+                  setNotice(m);
+                  if (m) window.setTimeout(() => setNotice(null), 2800);
+                }}
+              />
+              {error ? (
+                <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-800">{error}</p>
+              ) : null}
+              {generated && canExport ? (
+                <button
+                  type="button"
+                  className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm font-semibold text-[var(--brand-deep)]"
+                  onClick={() => void printPdf()}
+                >
+                  Print PDF
+                </button>
+              ) : null}
+            </>
+          ) : null}
+
+          <label className={mode === "minutes" ? "hidden" : "block text-sm"}>
             <span className="mb-1 block text-[11px] text-[var(--muted)]">
               Document type
             </span>
@@ -209,24 +280,7 @@ export function DocumentMakerWorkspace() {
             </span>
           </label>
 
-          <label className="block text-sm">
-            <span className="mb-1 block text-[11px] text-[var(--muted)]">
-              Language
-            </span>
-            <select
-              className="field !py-1.5"
-              value={language}
-              onChange={(e) =>
-                setLanguage(e.target.value as SchoolDocumentLanguage)
-              }
-            >
-              <option value="en">English</option>
-              <option value="hi">Hindi</option>
-              <option value="both">English + Hindi</option>
-            </select>
-          </label>
-
-          <label className="block text-sm">
+          <label className={mode === "minutes" ? "hidden" : "block text-sm"}>
             <span className="mb-1 block text-[11px] text-[var(--muted)]">
               Details for AI
             </span>
@@ -238,13 +292,13 @@ export function DocumentMakerWorkspace() {
             />
           </label>
 
-          {error ? (
+          {error && mode === "letter" ? (
             <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-800">
               {error}
             </p>
           ) : null}
 
-          <div className="flex flex-wrap gap-2">
+          <div className={mode === "minutes" ? "hidden" : "flex flex-wrap gap-2"}>
             <button
               type="button"
               className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
