@@ -61,6 +61,42 @@ export function LeadFollowupDraftPanel(props: {
   const [channel, setChannel] = useState<FollowupChannel>("whatsapp");
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState<Result | null>(null);
+  const [emailBusy, setEmailBusy] = useState(false);
+  const [emailTo, setEmailTo] = useState(lead.email || "");
+  const [emailReady, setEmailReady] = useState<boolean | null>(null);
+  useEffect(() => {
+    setEmailTo(lead.email || "");
+  }, [lead.id, lead.email]);
+  useEffect(() => {
+    fetch("/api/email/send")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { configured?: boolean } | null) => setEmailReady(!!j?.configured))
+      .catch(() => setEmailReady(false));
+  }, []);
+
+  async function sendEmailNow() {
+    if (!res || emailBusy) return;
+    const d = res.draft;
+    const subject = d.email.subject || `Regarding ${lead.childName}'s admission enquiry`;
+    if (!d.email.body) return props.onError("No email body in the draft");
+    setEmailBusy(true);
+    try {
+      const r = await fetch("/api/email/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ purpose: "admissions", to: emailTo, subject, text: d.email.body, ref: `lead:${lead.id}` }),
+      });
+      const j = (await r.json()) as { ok?: boolean; error?: string; from?: string };
+      if (!r.ok || !j.ok) return props.onError(j.error || "Email failed");
+      accept();
+      props.onLogFollowUp({ channel: "email", outcome: "message_sent", note: `Email sent from ${j.from} (AI draft, ${language}): ${subject.slice(0, 100)}`, nextFollowUpAt: "" });
+      props.onFlash(`Email sent from ${j.from}`);
+    } catch (e) {
+      props.onError(e instanceof Error ? e.message : "Email failed");
+    } finally {
+      setEmailBusy(false);
+    }
+  }
 
   useEffect(() => {
     setRes(null);
@@ -168,7 +204,7 @@ export function LeadFollowupDraftPanel(props: {
     if (!t) return;
     accept();
     props.onLogFollowUp({
-      channel: ch === "sms" ? "sms" : ch === "email" ? "other" : "call",
+      channel: ch === "sms" ? "sms" : ch === "email" ? "email" : "call",
       outcome: ch === "call_script" ? "connected" : "message_sent",
       note: `${ch === "call_script" ? "Call (AI script)" : ch === "email" ? "Email sent (AI draft)" : "SMS sent (AI draft)"}: ${t.slice(0, 140)}${t.length > 140 ? "…" : ""}`,
       nextFollowUpAt: "",
@@ -254,6 +290,20 @@ export function LeadFollowupDraftPanel(props: {
               <button type="button" className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)]" onClick={sendWhatsApp}>
                 Open WhatsApp & log
               </button>
+            ) : null}
+            {channel === "email" ? (
+              <span className="inline-flex items-center gap-1">
+                <input className="field !w-52 !py-1 text-[11px]" value={emailTo} onChange={(e) => setEmailTo(e.target.value)} placeholder="parent@email" />
+                <button
+                  type="button"
+                  disabled={emailBusy || !emailReady || !emailTo}
+                  title={emailReady === false ? "Email channel not connected — Comms → Email" : "Send through the school's Google Workspace (admissions mailbox)"}
+                  className="rounded-lg bg-[var(--primary)] px-2.5 py-1 text-[11px] font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
+                  onClick={() => void sendEmailNow()}
+                >
+                  {emailBusy ? "Sending…" : "Send email & log"}
+                </button>
+              </span>
             ) : null}
             {channel !== "whatsapp" ? (
               <button type="button" className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)]" onClick={() => logSent(channel)}>

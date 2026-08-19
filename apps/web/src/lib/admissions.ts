@@ -111,6 +111,7 @@ export type FollowUpChannel =
   | "whatsapp"
   | "visit"
   | "sms"
+  | "email"
   | "other";
 
 /** Call / visit disposition logged by counsellor */
@@ -494,6 +495,7 @@ export const FOLLOW_UP_CHANNELS: {
   { value: "whatsapp", label: "WhatsApp" },
   { value: "visit", label: "Campus visit" },
   { value: "sms", label: "SMS" },
+  { value: "email", label: "Email" },
   { value: "other", label: "Other" },
 ];
 

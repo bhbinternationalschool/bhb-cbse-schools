@@ -10,6 +10,7 @@ import { ErpTableShell } from "@/components/ui/erp-roster";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ClassChannelsPanel } from "@/components/comms/ClassChannelsPanel";
 import { SocialCredentialsPanel } from "@/components/comms/SocialCredentialsPanel";
+import { EmailIntegrationPanel } from "@/components/comms/EmailIntegrationPanel";
 import { SocialCrossPostPrefsPanel } from "@/components/comms/SocialCrossPostPanel";
 import { WaChatHubPanel } from "@/components/comms/WaChatHubPanel";
 import { HouseholdMessageLogPanel } from "@/components/comms/HouseholdMessageLogPanel";
@@ -68,6 +69,7 @@ type CommsTab =
   | "news"
   | "gallery"
   | "social"
+  | "email"
   | "inbox"
   | "channels"
   | "wa_hub"
@@ -80,6 +82,7 @@ const TABS: ModuleTabItem[] = [
   { id: "news", label: "News", tone: "teal" },
   { id: "gallery", label: "Gallery", tone: "amber" },
   { id: "social", label: "Social", tone: "rose" },
+  { id: "email", label: "Email", tone: "sky" },
   { id: "channels", label: "Class WA", tone: "violet" },
   { id: "wa_hub", label: "WhatsApp hub", tone: "teal" },
   { id: "household_log", label: "Household log", tone: "slate" },
@@ -96,6 +99,7 @@ function tabFromSearch(raw: string | null, path: string): CommsTab {
     raw === "news" ||
     raw === "gallery" ||
     raw === "social" ||
+    raw === "email" ||
     raw === "inbox" ||
     raw === "notices" ||
     raw === "channels" ||
@@ -1182,6 +1186,10 @@ export function CommsWorkspace() {
             </section>
           ) : null}
         </div>
+      ) : null}
+
+      {tab === "email" ? (
+        <EmailIntegrationPanel canEdit={!readOnly} />
       ) : null}
 
       {tab === "social" ? (
