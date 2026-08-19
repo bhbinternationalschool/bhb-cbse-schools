@@ -87,6 +87,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonModulePage } from "@/components/ui/skeleton";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { BirthdaysPanel } from "@/components/students/BirthdaysPanel";
+import { hasPermission } from "@/lib/rbac";
 import { listImportSessions, normalizeSessionCode } from "@/lib/studentImport";
 import {
   classNeedsCartEnrollment,
@@ -105,7 +107,8 @@ type MainTab =
   | "update"
   | "duplicates"
   | "udise"
-  | "doc_verify";
+  | "doc_verify"
+  | "birthdays";
 const VIEW_KEY = "bhb_sis_view";
 const TAB_KEY = "bhb_sis_main_tab";
 
@@ -185,7 +188,8 @@ export function StudentsWorkspace() {
         tab === "update" ||
         tab === "duplicates" ||
         tab === "udise" ||
-        tab === "doc_verify"
+        tab === "doc_verify" ||
+        tab === "birthdays"
       ) {
         setMainTab(tab);
         if (!urlTab && tab !== "dashboard") {
@@ -997,6 +1001,7 @@ export function StudentsWorkspace() {
           { id: "upgrade", label: "Upgrade", tone: "amber" },
           { id: "reports", label: "Reports", tone: "green" },
           { id: "tags", label: "Tags", tone: "slate" },
+          { id: "birthdays", label: "Birthdays", tone: "coral" },
         ]}
       />
 
@@ -1042,6 +1047,10 @@ export function StudentsWorkspace() {
             window.setTimeout(() => setNotice(null), 2800);
           }}
         />
+      ) : null}
+
+      {mainTab === "birthdays" ? (
+        <BirthdaysPanel canEdit={!!session && !!masters && hasPermission(session, masters, "students", "edit")} />
       ) : null}
 
       {mainTab === "tags" ? (

@@ -111,6 +111,13 @@ create_job "bhb-bigquery-nightly-sync" "0 2 * * *" \
   "${APP_URL}/api/analytics/bigquery-sync/tick" \
   "Asia/Kolkata"
 
+# Birthday greetings: the tick sends once the IST clock passes the hour set in
+# Students → Birthdays (and auto-send is on); it is idempotent, so hourly is safe
+# and also retries quiet-hours deferrals.
+create_job "bhb-birthday-tick" "5 * * * *" \
+  "${APP_URL}/api/birthday/tick" \
+  "Asia/Kolkata"
+
 echo ""
 echo "Done. Jobs in $REGION:"
 gcloud scheduler jobs list --location="$REGION" --format="table(name,schedule,state)"

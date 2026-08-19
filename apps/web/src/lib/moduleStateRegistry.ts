@@ -30,7 +30,8 @@ export type ModuleStateKey =
   | "admissions_kb"
   | "school_achievements"
   | "referrals"
-  | "marketing_spend";
+  | "marketing_spend"
+  | "birthday_settings";
 
 export const MODULE_STATE_DEFS: Record<
   ModuleStateKey,
@@ -59,6 +60,7 @@ export const MODULE_STATE_DEFS: Record<
   school_achievements: { rbac: "admissions", label: "achievements & positioning" },
   referrals: { rbac: "admissions", label: "referrals & testimonials" },
   marketing_spend: { rbac: "admissions", label: "marketing spend" },
+  birthday_settings: { rbac: "students", label: "birthday cards & greetings" },
 };
 
 export function isModuleStateKey(raw: string): raw is ModuleStateKey {
