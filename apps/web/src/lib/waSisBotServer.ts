@@ -51,6 +51,8 @@ import {
   waNormalizeLocal10,
 } from "@/lib/waSend";
 import { generateTutorText } from "@/lib/aiLlm.server";
+import { householdLanguage, languageLabel, sarvamTargetFor } from "@/lib/householdPrefs";
+import { sarvamConfigured, sarvamTranslate, type SarvamLang } from "@/lib/sarvam.server";
 import { formatKbContext, retrieveRelevantKb } from "@/lib/schoolKb.server";
 import {
   buildComplaintFlowJson,
@@ -221,7 +223,19 @@ async function tryAiFallbackReply(
   const kbMatches = await retrieveRelevantKb(text, { audiences: ["all", "parents"] });
   const kbContext = formatKbContext(kbMatches);
 
+  // Family's language (Students → Family). Unset → mirror the parent's own
+  // language; regional → draft in Hindi and render through Sarvam below.
+  const pref = householdLanguage(hh, "en");
+  const sarvamTarget = sarvamTargetFor(hh);
+  const langRule =
+    pref.source === "default"
+      ? "Reply in the language the parent wrote in — Hindi (Devanagari) if they wrote in Hindi or Hinglish, otherwise simple English."
+      : pref.language === "en"
+        ? "Reply in simple English."
+        : `Reply in Hindi (Devanagari), formal register (आप).${sarvamTarget ? ` (The family's language is ${languageLabel(pref.language)}; the reply will be translated from Hindi.)` : ""}`;
+
   const system = `You are a WhatsApp assistant for parents of ${TENANT.nameDisplay}.
+${langRule}
 You may discuss ONLY: (1) the household data given below (their children, dues), and (2) the school notices given below, if any are given — you do NOT know this school's policies, dates, timings, curriculum, transport, uniform, or any other fact beyond what's given here, even if it seems like common knowledge for a school. Do not state or confirm anything outside the data given.
 For ANY question neither the household data nor the notices below answer, reply that you don't have that information and to reply *HUMAN* to talk to the school office — do not attempt to answer it a different way.
 Keep the reply under 300 characters, warm and simple, plain text (no markdown headers).`;
@@ -234,7 +248,15 @@ ${kbContext ? `Relevant school notices:\n${kbContext}\n` : ""}Parent's message: 
   try {
     const r = await generateTutorText({ system, userMessage });
     if (!r.ok) return null;
-    return r.text.trim() || null;
+    const reply = r.text.trim();
+    if (!reply) return null;
+    // Regional preference: render the Hindi draft in the family's language
+    // when Sarvam can; otherwise the Hindi text goes as-is.
+    if (sarvamTarget && sarvamConfigured()) {
+      const t = await sarvamTranslate({ text: reply, from: "hi-IN", to: sarvamTarget as SarvamLang, mode: "modern-colloquial" });
+      if (t.ok && t.text.trim()) return t.text.trim();
+    }
+    return reply;
   } catch {
     return null;
   }
