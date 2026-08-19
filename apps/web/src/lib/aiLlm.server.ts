@@ -8,6 +8,15 @@
  */
 import "server-only";
 import {
+  buildMarketingSystemPrompt,
+  buildMarketingUserPrompt,
+  parseMarketingVariants,
+  type MarketingAudience,
+  type MarketingFacts,
+  type MarketingKind,
+  type MarketingVariant,
+} from "@/lib/marketingContentAi";
+import {
   buildFollowupSystemPrompt,
   buildFollowupUserPrompt,
   parseFollowupDraft,
@@ -1373,6 +1382,32 @@ export async function generateParentBotReplyJson(opts: {
   );
   if (r.ok) return { ok: true, grounded: r.data.grounded, reply: r.data.reply, engine: r.engine, generationId: r.generationId };
   return { ok: false, error: r.error, engine: r.engine };
+}
+
+/** Marketing copy from ERP facts — one call, one variant per direct audience. Draft only. */
+export async function generateMarketingContentJson(opts: {
+  kind: MarketingKind;
+  facts: MarketingFacts;
+  direct: MarketingAudience[];
+  positioning: boolean;
+}): Promise<
+  | { ok: true; variants: MarketingVariant[]; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const long = opts.kind === "press_release" || opts.kind === "brochure_para";
+  const r = await callLlmJson(
+    {
+      system: buildMarketingSystemPrompt({ kind: opts.kind, direct: opts.direct, positioning: opts.positioning }),
+      userMessage: buildMarketingUserPrompt(opts.facts),
+      maxTokens: long ? 2200 : 1200,
+      temperature: 0.6,
+      geminiMaxTokens: long ? 6144 : 4096,
+      meta: { route: "marketing-content", promptVersion: "v1", tier: long ? "pro" : "flash" },
+    },
+    parseMarketingVariants,
+  );
+  if (r.ok) return { ok: true, variants: r.data, engine: r.engine, generationId: r.generationId };
+  return { ok: false, error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI marketing drafts", engine: r.engine };
 }
 
 /** Per-lead follow-up drafts (WhatsApp · SMS · email · call script). Draft only. */

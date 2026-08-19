@@ -27,7 +27,8 @@ export type ModuleStateKey =
   | "wa_chatbot_flows"
   | "id_card_template"
   | "compliance_facts"
-  | "admissions_kb";
+  | "admissions_kb"
+  | "school_achievements";
 
 export const MODULE_STATE_DEFS: Record<
   ModuleStateKey,
@@ -53,6 +54,7 @@ export const MODULE_STATE_DEFS: Record<
   id_card_template: { rbac: "id_cards", label: "ID card templates" },
   compliance_facts: { rbac: "compliance", label: "compliance facts" },
   admissions_kb: { rbac: "admissions", label: "admissions knowledge base" },
+  school_achievements: { rbac: "admissions", label: "achievements & positioning" },
 };
 
 export function isModuleStateKey(raw: string): raw is ModuleStateKey {

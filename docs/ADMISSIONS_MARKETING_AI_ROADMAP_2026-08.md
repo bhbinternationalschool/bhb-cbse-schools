@@ -92,7 +92,8 @@ Standing rules for everything below (same as the AI roadmap, restated because ma
 ### 2e. Nurture sequences (drip)
 | | |
 |---|---|
-| Status | ❌ (one-shot campaigns ✅) |
+| Status | ✅ shipped 2026-08-19 — `WaSequence` (steps: day offset · time · label · template · body; anchor = start day or an event date) in `waCampaigns.ts`; WA campaigns → **Sequences** tab with presets (open house −7/−1/+1, enquiry nurture 0/4/9, result day 0/+3, festival greeting); **Start** creates one scheduled campaign per step (`sequenceId`/`sequenceStep`) through the existing `createCampaign`/`scheduleCampaign` → queue → dispatch; **Stop** pauses + skips; `pruneSequenceQueue` runs before every dispatch and skips families who enrolled / were lost / said not interested (STOP already enforced at send by `waSend`). Step bodies: "Draft with AI from school facts" → `marketing-content` (`wa_broadcast` / `event_invite` / `greeting`) with the public achievements + positioning + occasion, placeholders preserved; every body editable before Start. Selftest `test:wa-sequences` |
+| Was | ❌ (one-shot campaigns ✅) |
 | Build | `WaSequence { steps: { dayOffset, templateKey\|customBody, condition }[] }` in `waCampaigns.ts`; enrol an audience list; `dispatchDueCampaigns` already runs on a schedule — extend it to materialise the next step per lead, skipping leads whose stage advanced or who replied STOP. Step bodies can be AI-drafted **from ERP facts** (§3a) — "how Class 9 did", "a day in Class 3", "meet the Science faculty" — all rendered from data the school entered, each step human-approved once per sequence |
 | Data | New `sequences` + `sequence_enrolments` keys in the campaigns state (desk slice) |
 | Effort | ~3 days |
@@ -104,7 +105,8 @@ Standing rules for everything below (same as the AI roadmap, restated because ma
 ### 3a. Results / achievements → multi-format assets
 | | |
 |---|---|
-| Status | ❌ |
+| Status | ✅ shipped 2026-08-19 — Admissions → **Marketing** tab. `lib/schoolAchievements.ts` (module state `school_achievements`): achievements by kind (board result · competition · sports · recognition · alumni · facility · event) with session, date, detail, **named metrics** ("Pass %: 100") and source note, public-safe flag; positioning notes (our strengths · what others advertise · blocked competitor names · brand lines). `lib/marketingContentAi.ts` + `generateMarketingContentJson` (route `marketing-content`, pro tier for brochure/press) + `POST /api/ai/marketing-content`: 8 formats (social post · brochure paragraph · press release · website banner · WA broadcast · referral invite · event invite · greeting), en/hi direct, regional via Sarvam, one variant per language. `lib/aiGrounding.ts`: `ungroundedNumbers`, `forbiddenNameHits`, `sensitiveClaims` — every variant carries flags; competitor-name hits **cannot be accepted**; cross-post (new kind `marketing` → `/apply?src=social`) only after Accept. Selftest `test:marketing-content-ai`. Verified on dev: EN+HI social post from a board-result fact — all numbers grounded, "100% pass" flagged for human review |
+| Was | ❌ |
 | Have | Exam results per term (internal); board results and achievements have **no structured store**; social cross-post exists for notices |
 | Build | `lib/schoolAchievements.ts` (module state): board results per year (pass %, distinctions, subject toppers — typed by staff from the CBSE result, never generated), competition wins, sports, alumni notes, each with `publicSafe` + source note. `POST /api/ai/marketing-content` — input: selected achievement facts + asset kind (`social_post`/`brochure_para`/`press_release`/`website_banner`/`wa_broadcast`) + language + audience tone. Output per kind; shown in a "Marketing" tab with Copy / Cross-post (reuses `socialCrossPost` with staff approval) / Send as broadcast |
 | Guardrail | Numbers are interpolated from facts, not written by the model; a ratchet-style selftest asserts no digit in the output is absent from the facts. Human review step before any cross-post (CBSE ad norms on "100%"/rank claims) |
@@ -114,14 +116,16 @@ Standing rules for everything below (same as the AI roadmap, restated because ma
 ### 3b. Competitor-aware positioning
 | | |
 |---|---|
-| Status | ❌ |
+| Status | ✅ shipped 2026-08-19 — positioning notes in the Marketing tab; "Differentiate vs what others advertise" toggle; prompt forbids naming; `forbiddenNameHits` blocks acceptance |
+| Was | ❌ |
 | Build | Small `positioning` section in the admissions KB: our USPs (from compliance facts + achievements + masters: ratio, labs, transport, sports) and a staff-entered list of nearby schools' publicly advertised points. `marketing-content` takes `positionAgainst: true` to emphasise differences — **never names or disparages a competitor in output** |
 | Effort | ~0.5 day on top of 3a |
 
 ### 3c. Localised variants
 | | |
 |---|---|
-| Status | 🟡 (Sarvam ✅, no marketing use) |
+| Status | ✅ shipped 2026-08-19 — up to 4 languages per generation (en/hi written; bho→hi; bn/ur/mai via Sarvam from the Hindi draft), warm/formal register |
+| Was | 🟡 (Sarvam ✅, no marketing use) |
 | Build | `marketing-content` accepts `audiences: [{ language, register: "formal"\|"warm" }]` and returns variants; Sarvam for bn/ur/mai. Festival/occasion greetings (§6c) share this |
 | Effort | ~0.5 day |
 
@@ -166,9 +170,9 @@ Effort: ~2 days.
 
 | Item | Status | Build |
 |---|---|---|
-| 7a. Open house / tour campaigns | 🟡 (events + RSVP + open_day template) | Event → "Generate campaign": invite, 2 reminders, thank-you + next step, all `marketing-content` kinds with the event facts; lands as a sequence (§2e) on a chosen audience list |
-| 7b. Result-season announcements | ❌ | Achievements entry (§3a) → one click → social post + WA broadcast + website banner copy in en/hi; human approve → cross-post |
-| 7c. Festival / occasion greetings | ❌ | Calendar of occasions (from holiday master + a small editable list) → greeting drafts per language, subtle brand line, scheduled as campaigns, quiet-hours gated |
+| 7a. Open house / tour campaigns | ✅ 2026-08-19 — Sequences preset "Open house / school tour" anchored on the event date (invite −7 d, reminder −1 d, thank-you +1 d), bodies drafted from facts via `event_invite` | Event → "Generate campaign": invite, 2 reminders, thank-you + next step, all `marketing-content` kinds with the event facts; lands as a sequence (§2e) on a chosen audience list |
+| 7b. Result-season announcements | ✅ 2026-08-19 — Marketing tab: board-result achievement → social post / banner / press release / WA broadcast (accept → cross-post); Sequences preset "Result-season announcement" (day 0 + day 3 CTA) | Achievements entry (§3a) → one click → social post + WA broadcast + website banner copy in en/hi; human approve → cross-post |
+| 7c. Festival / occasion greetings | ✅ 2026-08-19 — Marketing kind `greeting` (no selling, one brand line) + Sequences preset "Festival / occasion greeting" anchored on the date; quiet hours still gate the send | Calendar of occasions (from holiday master + a small editable list) → greeting drafts per language, subtle brand line, scheduled as campaigns, quiet-hours gated |
 
 Effort: ~2 days after 3a and 2e.
 
@@ -180,9 +184,9 @@ Effort: ~2 days after 3a and 2e.
 |---|---|---|
 | Lead fields: `preferredLanguage`, `previousBoard`, `locality`, `concerns[]`, `quality`, `utm`/`campaignId`, `referredByHouseholdId`, `consentAt` | 🟡 (2026-08-19: all but `quality` added; `locality`/`parentConsentAt` already existed) | `AdmissionLead` + `normalizeAdmissionLead` (all default `""`/`[]` — never guessed); Google lead webhook already carries campaign ids → map to `campaignId` |
 | Unified communication timeline per lead | 🟡 (3 stores) | Read-only merge view in the lead panel: follow-ups + WA bot thread + campaign messages + widget thread, chronological; the same merge feeds `lead-followup-draft` as "last 5 touchpoints" |
-| Marketing asset library | ❌ | Logo/photos/brand lines; start as a `brand` section in the admissions KB + existing media upload; generators reference brand lines, not images |
+| Marketing asset library | 🟡 (2026-08-19: brand lines in Marketing → Positioning; no image library yet) | generators reference brand lines, not images |
 | School knowledge base (admissions) | 🟡 | §1 |
-| Achievements store | ❌ | §3a |
+| Achievements store | ✅ 2026-08-19 | §3a |
 | Campaign attribution & reporting | 🟡 | `campaignId` on lead → report: leads / registrations / enrolments per campaign & source, cost field per campaign (manual), cost per enrolment; a `leadership-digest` style AI summary of "where to focus" is optional and last |
 | DPDP notice | 🟡 (2026-08-19: consent text + required checkbox on `/apply` and `/register`, `parentConsentAt/By` stored, status shown in the lead panel; bot first-contact notice still to do) |
 
@@ -205,8 +209,8 @@ Effort: ~2 days after 3a and 2e.
 2. ~~**§8 lead fields + DPDP consent + §2b dynamic form**~~ — shipped 2026-08-19 (WA-bot language ask + bot DPDP line deferred).
 3. ~~**§2d per-lead follow-up drafts, language + channel**~~ — shipped 2026-08-19.
 4. ~~**§2c engagement-aware hot/warm/cold + §6a stalled-lead rules & drafts**~~ — shipped 2026-08-19.
-5. **§3a achievements store + marketing-content generator (+3b, 3c)** (~4 d) — results-season readiness.
-6. **§2e sequences + §7 event/result/festival campaigns** (~5 d).
+5. ~~**§3a achievements store + marketing-content generator (+3b, 3c)**~~ — shipped 2026-08-19.
+6. ~~**§2e sequences + §7 event/result/festival campaigns**~~ — shipped 2026-08-19 (no automatic occasion calendar — the office sets the date).
 7. **§5 referral + testimonials** (~3 d).
 8. **§8 unified timeline + attribution report** (~2 d).
 9. **§2a free-text lead extraction, §4 deficiency preset, §6b retention consumer** (~2.5 d).

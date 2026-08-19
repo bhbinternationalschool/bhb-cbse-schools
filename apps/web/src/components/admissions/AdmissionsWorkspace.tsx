@@ -103,6 +103,7 @@ import { RteWorkspace } from "@/components/rte/RteWorkspace";
 import { AdmissionCampaignsPanel } from "@/components/admissions/AdmissionCampaignsPanel";
 import { AdmissionCrmChatInbox } from "@/components/admissions/AdmissionCrmChatInbox";
 import { AdmissionsKbPanel } from "@/components/admissions/AdmissionsKbPanel";
+import { MarketingPanel } from "@/components/admissions/MarketingPanel";
 import { LeadFollowupDraftPanel } from "@/components/admissions/LeadFollowupDraftPanel";
 import { engagementCtxFromChat, LEAD_QUALITY_LABEL, leadQuality, stalledLeadFlags } from "@/lib/leadQuality";
 import { loadCrmParentChat } from "@/lib/crmParentChat";
@@ -121,6 +122,7 @@ type AdmTab =
   | "campaigns"
   | "crm_chat"
   | "kb"
+  | "marketing"
   | "reports";
 
 export function AdmissionsWorkspace() {
@@ -155,6 +157,7 @@ export function AdmissionsWorkspace() {
       "campaigns",
       "crm_chat",
       "kb",
+      "marketing",
       "reports",
     ];
     if (raw && (allowed as string[]).includes(raw)) setTab(raw as AdmTab);
@@ -332,6 +335,7 @@ export function AdmissionsWorkspace() {
         tab === "campaigns" ||
         tab === "crm_chat" ||
         tab === "kb" ||
+        tab === "marketing" ||
         tab === "reports")
     ) {
       setTab("enquiry");
@@ -1044,6 +1048,7 @@ export function AdmissionsWorkspace() {
               next === "campaigns" ||
               next === "crm_chat" ||
               next === "kb" ||
+              next === "marketing" ||
               next === "reports")
           ) {
             setNotice(
@@ -1067,6 +1072,7 @@ export function AdmissionsWorkspace() {
                 { id: "campaigns", label: "WA campaigns", tone: "teal" },
                 { id: "crm_chat", label: "CRM parent chat", tone: "navy" },
                 { id: "kb", label: "Knowledge base", tone: "sky" },
+                { id: "marketing", label: "Marketing", tone: "coral" },
                 { id: "reports", label: "Report", tone: "green" },
               ] as const)
             : []),
@@ -1627,6 +1633,10 @@ export function AdmissionsWorkspace() {
 
       {tab === "kb" ? (
         <AdmissionsKbPanel masters={masters} canEdit={canCreate} by={session.fullName} />
+      ) : null}
+
+      {tab === "marketing" ? (
+        <MarketingPanel masters={masters} canEdit={canCreate} by={session.fullName} />
       ) : null}
 
       {tab === "reports" ? (

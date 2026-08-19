@@ -1,6 +1,6 @@
 export type SocialPlatform = "facebook" | "instagram" | "telegram";
 
-export type SocialCrossPostKind = "notice" | "news" | "gallery";
+export type SocialCrossPostKind = "notice" | "news" | "gallery" | "marketing";
 
 export type SocialCrossPostPayload = {
   kind: SocialCrossPostKind;
