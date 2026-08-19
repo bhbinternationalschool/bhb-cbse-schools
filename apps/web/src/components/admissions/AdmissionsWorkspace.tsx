@@ -35,6 +35,7 @@ import {
   markLost,
   markVerified,
   promoteToRegistration,
+  publicRegisterAbsoluteUrl,
   relationLabel,
   saveAdmissions,
   setLeadCallerAssigned,
@@ -102,6 +103,7 @@ import { RteWorkspace } from "@/components/rte/RteWorkspace";
 import { AdmissionCampaignsPanel } from "@/components/admissions/AdmissionCampaignsPanel";
 import { AdmissionCrmChatInbox } from "@/components/admissions/AdmissionCrmChatInbox";
 import { AdmissionsKbPanel } from "@/components/admissions/AdmissionsKbPanel";
+import { LeadFollowupDraftPanel } from "@/components/admissions/LeadFollowupDraftPanel";
 import { HOUSEHOLD_LANGUAGES } from "@/lib/householdPrefs";
 import { LEAD_CONCERNS, PREVIOUS_BOARDS } from "@/lib/admissionsEnquiryForm";
 import { AdmissionReportsPanel } from "@/components/admissions/AdmissionReportsPanel";
@@ -2674,6 +2676,19 @@ function LeadDetail({
               </div>
             ) : null}
           </div>
+        ) : null}
+
+        {canEdit && !locked ? (
+          <LeadFollowupDraftPanel
+            lead={lead}
+            classLabel={classes.find((c) => c.id === classId)?.name || ""}
+            counsellorName={agentName}
+            registerUrl={publicRegisterAbsoluteUrl("counsellor")}
+            canEdit={canEdit}
+            onLogFollowUp={(input) => onLogFollowUp(input)}
+            onFlash={(message) => pushToast({ kind: "success", message })}
+            onError={(message) => pushToast({ kind: "error", message })}
+          />
         ) : null}
 
         <div className="mt-3">

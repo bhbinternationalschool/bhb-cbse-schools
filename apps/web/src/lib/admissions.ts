@@ -122,7 +122,9 @@ export type FollowUpOutcome =
   | "interested"
   | "not_interested"
   | "visit_scheduled"
-  | "wrong_number";
+  | "wrong_number"
+  /** One-way message sent (WhatsApp / SMS / email) — no reply yet */
+  | "message_sent";
 
 export type AdmissionFollowUp = {
   id: string;
@@ -505,6 +507,7 @@ export const FOLLOW_UP_OUTCOMES: {
   { value: "visit_scheduled", label: "School visit scheduled" },
   { value: "not_interested", label: "Not interested" },
   { value: "wrong_number", label: "Wrong number" },
+  { value: "message_sent", label: "Message sent" },
 ];
 
 export function followUpChannelLabel(c: FollowUpChannel): string {

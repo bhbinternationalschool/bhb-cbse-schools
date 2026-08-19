@@ -82,7 +82,8 @@ Standing rules for everything below (same as the AI roadmap, restated because ma
 ### 2d. Per-lead AI follow-up drafts, in the parent's language, per channel
 | | |
 |---|---|
-| Status | ❌ (next-action ✅ tells *what*, not *the words*) |
+| Status | ✅ shipped 2026-08-19 — `lib/leadFollowupAi.ts` (facts · prompts · parser · `followupUngroundedNumbers` digit check · language routing: en/hi direct, bn/ur/mai drafted in Hindi then Sarvam; selftest `test:lead-followup-ai`), `generateLeadFollowupJson` (route `lead-followup-draft` v1), `POST /api/ai/lead-followup-draft` (admissions view; adds prospect-KB snippets for the lead's `concerns[]`), `LeadFollowupDraftPanel` in the CRM lead panel: tone, language (defaults to the lead's), note, WhatsApp / SMS / email / call-script tabs, "check numbers not in the facts" warning, Copy, **Open WhatsApp & log** (new follow-up outcome `message_sent`), Log as sent / Log call. Verified on dev against prod data: Hindi draft referencing the bus question + Saturday visit, no invented fees; Bengali via Sarvam |
+| Was | ❌ (next-action ✅ tells *what*, not *the words*) |
 | Build | `POST /api/ai/lead-followup-draft` — input: lead facts (child, class sought, stage, days since enquiry, `concerns[]`, last 3 follow-ups, admissions-KB snippets that answer the concerns), tone, channel (`whatsapp`/`email`/`sms`/`call_script`), language. Output JSON per channel. Lead panel "Draft follow-up" → edit → "Log & send" logs the follow-up and opens wa.me / copies; Sarvam for regional languages via `sarvamTargetFor`. `preferredLanguage` on the lead (2b) drives the default |
 | Guardrail | Facts only from lead + KB; the prompt lists what it may not claim (seat availability, discounts) unless present in KB |
 | Effort | ~2 days |
@@ -201,7 +202,7 @@ Effort: ~2 days after 3a and 2e.
 
 1. ~~**§1 Admissions KB + grounded bot/widget answers**~~ — shipped 2026-08-19.
 2. ~~**§8 lead fields + DPDP consent + §2b dynamic form**~~ — shipped 2026-08-19 (WA-bot language ask + bot DPDP line deferred).
-3. **§2d per-lead follow-up drafts, language + channel** (~2 d) — the most visible counsellor productivity win.
+3. ~~**§2d per-lead follow-up drafts, language + channel**~~ — shipped 2026-08-19.
 4. **§2c engagement-aware hot/warm/cold + §6a stalled-lead rules & drafts** (~2.5 d).
 5. **§3a achievements store + marketing-content generator (+3b, 3c)** (~4 d) — results-season readiness.
 6. **§2e sequences + §7 event/result/festival campaigns** (~5 d).
