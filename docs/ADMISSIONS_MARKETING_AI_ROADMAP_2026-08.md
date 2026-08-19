@@ -144,10 +144,11 @@ Effort: ~2 days after §1.
 
 ---
 
-## 5. Referral & testimonial engine — ❌
+## 5. Referral & testimonial engine — ✅ shipped 2026-08-19
 
 | | |
 |---|---|
+| Shipped | `lib/referrals.ts` (module state `referrals`): **referral codes** derived deterministically per enrolled household (`BHB-XXXX-000`, `referralCodeFor`/`resolveReferralCode` — no lookup table, an old flyer still resolves); `?ref=CODE` on `/apply` sets `lead.referralCode` + source `referral`; CRM lead panel "Referred by" field resolves to `referredByHouseholdId`; `referralAttribution` (leads → registered → enrolled per referrer); Admissions → **Referrals & stories** tab: per-household code, Invite (WhatsApp, message drafted from school facts via `marketing-content` kind `referral_invite` with `{{guardianName}} {{code}} {{link}}`), Copy link, invited-at, reward note (informational only). **Testimonials**: Ask for story (WA) → paste the parent's words → `POST /api/ai/testimonial-polish` (grammar/flow only; guard `testimonialPolishProblems` refuses added numbers, growth > 20 %, over-cutting; polish with problems cannot be kept) → Send for approval (WA) → Mark approved with consent note + name permission → `approvedTestimonialLines` offered to the Marketing generator ("Quote approved parent stories"). Selftest `test:referrals`. Not done: WA inbound `STORY` keyword capture (manual paste instead) |
 | Have | `referral` source, `referredByStaffId` (staff only) |
 | Build | **Referral**: `referredByHouseholdId` on the lead + a referral code per enrolled household (`householdPrefs`-adjacent); referral invite broadcast (audience: enrolled parents, language-aware, quiet-hours gated) drafted by `marketing-content` kind `referral_invite`; attribution in the admissions report (referrals → registrations → enrolments per referrer); reward tracking as a note field — money movement stays manual. **Testimonials**: `lib/testimonials.ts` module state — request sent to parents identified from PTM feedback / surveys (opt-in), raw reply captured (WA inbound keyword `STORY` or portal form), `POST /api/ai/testimonial-polish` returns a tidied version **preserving the parent's words and claims only**, parent approves (WA YES / portal), then `approved` → usable by 3a. Consent recorded with timestamp |
 | Guardrail | No testimonial is generated; polish = grammar/length only; diff shown to staff; unapproved never leaves the module |
@@ -211,7 +212,7 @@ Effort: ~2 days after 3a and 2e.
 4. ~~**§2c engagement-aware hot/warm/cold + §6a stalled-lead rules & drafts**~~ — shipped 2026-08-19.
 5. ~~**§3a achievements store + marketing-content generator (+3b, 3c)**~~ — shipped 2026-08-19.
 6. ~~**§2e sequences + §7 event/result/festival campaigns**~~ — shipped 2026-08-19 (no automatic occasion calendar — the office sets the date).
-7. **§5 referral + testimonials** (~3 d).
+7. ~~**§5 referral + testimonials**~~ — shipped 2026-08-19.
 8. **§8 unified timeline + attribution report** (~2 d).
 9. **§2a free-text lead extraction, §4 deficiency preset, §6b retention consumer** (~2.5 d).
 

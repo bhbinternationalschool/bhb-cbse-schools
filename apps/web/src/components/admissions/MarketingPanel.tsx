@@ -23,6 +23,7 @@ import {
   type SchoolAchievementsState,
 } from "@/lib/schoolAchievements";
 import { loadAdmissionsKb } from "@/lib/admissionsKb";
+import { approvedTestimonialLines, loadReferrals } from "@/lib/referrals";
 import { complianceFactsToText, loadComplianceFacts } from "@/lib/complianceFacts";
 import { currentAcademicYearCode, type MastersState } from "@/lib/masters";
 import { HOUSEHOLD_LANGUAGES } from "@/lib/householdPrefs";
@@ -55,6 +56,8 @@ export function MarketingPanel({ masters, canEdit, by }: { masters: MastersState
   const [occasion, setOccasion] = useState("");
   const [ctaUrl, setCtaUrl] = useState("");
   const [note, setNote] = useState("");
+  const [useTestimonials, setUseTestimonials] = useState(false);
+  const testimonialLines = useMemo(() => approvedTestimonialLines(loadReferrals()), []);
   const [busy, setBusy] = useState<"gen" | "post" | null>(null);
   const [result, setResult] = useState<{ variants: Variant[]; generationId: string; engine: string } | null>(null);
 
@@ -120,7 +123,7 @@ export function MarketingPanel({ masters, canEdit, by }: { masters: MastersState
           positioning,
           audiences: langs.map((language) => ({ language, register })),
           facts: {
-            achievementLines: achievementsToFactLines(chosen),
+            achievementLines: [...achievementsToFactLines(chosen), ...(useTestimonials ? testimonialLines.slice(0, 3) : [])],
             usps: usps.split("\n").map((l) => l.trim()).filter(Boolean),
             brandLines: pos.brandLines.split("\n").map((l) => l.trim()).filter(Boolean),
             positioningOthers: positioning ? pos.others : "",
@@ -379,6 +382,10 @@ export function MarketingPanel({ masters, canEdit, by }: { masters: MastersState
           <label className="mt-5 inline-flex items-center gap-2 text-xs">
             <input type="checkbox" checked={positioning} onChange={(e) => setPositioning(e.target.checked)} disabled={!pos.others} />
             Differentiate vs what others advertise
+          </label>
+          <label className="mt-5 inline-flex items-center gap-2 text-xs" title={testimonialLines.length ? `${testimonialLines.length} approved parent stories` : "No approved parent stories yet (Referrals & stories tab)"}>
+            <input type="checkbox" checked={useTestimonials} onChange={(e) => setUseTestimonials(e.target.checked)} disabled={testimonialLines.length === 0} />
+            Quote approved parent stories ({testimonialLines.length})
           </label>
         </div>
         <button type="button" disabled={busy === "gen" || !canEdit} className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-[var(--primary-foreground)] disabled:opacity-50" onClick={() => void generate()}>

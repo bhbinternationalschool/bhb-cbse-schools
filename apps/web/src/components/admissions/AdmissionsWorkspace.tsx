@@ -104,6 +104,8 @@ import { AdmissionCampaignsPanel } from "@/components/admissions/AdmissionCampai
 import { AdmissionCrmChatInbox } from "@/components/admissions/AdmissionCrmChatInbox";
 import { AdmissionsKbPanel } from "@/components/admissions/AdmissionsKbPanel";
 import { MarketingPanel } from "@/components/admissions/MarketingPanel";
+import { ReferralsPanel } from "@/components/admissions/ReferralsPanel";
+import { referralCodeFor, resolveReferralCode } from "@/lib/referrals";
 import { LeadFollowupDraftPanel } from "@/components/admissions/LeadFollowupDraftPanel";
 import { engagementCtxFromChat, LEAD_QUALITY_LABEL, leadQuality, stalledLeadFlags } from "@/lib/leadQuality";
 import { loadCrmParentChat } from "@/lib/crmParentChat";
@@ -123,6 +125,7 @@ type AdmTab =
   | "crm_chat"
   | "kb"
   | "marketing"
+  | "referrals"
   | "reports";
 
 export function AdmissionsWorkspace() {
@@ -158,6 +161,7 @@ export function AdmissionsWorkspace() {
       "crm_chat",
       "kb",
       "marketing",
+      "referrals",
       "reports",
     ];
     if (raw && (allowed as string[]).includes(raw)) setTab(raw as AdmTab);
@@ -336,6 +340,7 @@ export function AdmissionsWorkspace() {
         tab === "crm_chat" ||
         tab === "kb" ||
         tab === "marketing" ||
+        tab === "referrals" ||
         tab === "reports")
     ) {
       setTab("enquiry");
@@ -1049,6 +1054,7 @@ export function AdmissionsWorkspace() {
               next === "crm_chat" ||
               next === "kb" ||
               next === "marketing" ||
+              next === "referrals" ||
               next === "reports")
           ) {
             setNotice(
@@ -1073,6 +1079,7 @@ export function AdmissionsWorkspace() {
                 { id: "crm_chat", label: "CRM parent chat", tone: "navy" },
                 { id: "kb", label: "Knowledge base", tone: "sky" },
                 { id: "marketing", label: "Marketing", tone: "coral" },
+                { id: "referrals", label: "Referrals & stories", tone: "amber" },
                 { id: "reports", label: "Report", tone: "green" },
               ] as const)
             : []),
@@ -1637,6 +1644,10 @@ export function AdmissionsWorkspace() {
 
       {tab === "marketing" ? (
         <MarketingPanel masters={masters} canEdit={canCreate} by={session.fullName} />
+      ) : null}
+
+      {tab === "referrals" && state ? (
+        <ReferralsPanel admissions={state} sis={sis} canEdit={canCreate} by={session.fullName} />
       ) : null}
 
       {tab === "reports" ? (
@@ -3198,6 +3209,30 @@ function LeadDetail({
               onChange={(e) => onPatch({ campaignId: e.target.value.trim().slice(0, 80) })}
               placeholder="from the ad / link, blank = unknown"
             />
+          </Field>
+          <Field label="Referred by (parent referral code)">
+            <input
+              className={inp}
+              disabled={locked || !canEdit}
+              value={lead.referralCode}
+              placeholder="BHB-XXXX-000"
+              onChange={(e) => {
+                const code = e.target.value.toUpperCase();
+                const hh = resolveReferralCode(code, sis.households);
+                onPatch({ referralCode: code, referredByHouseholdId: hh || lead.referredByHouseholdId, ...(hh ? { source: "referral" } : {}) });
+              }}
+            />
+            {lead.referredByHouseholdId ? (
+              <p className="mt-0.5 text-[10px] text-[var(--muted)]">
+                → {sis.households.find((h) => h.id === lead.referredByHouseholdId)?.guardianName || lead.referredByHouseholdId}
+                {(() => {
+                  const h = sis.households.find((x) => x.id === lead.referredByHouseholdId);
+                  return h ? ` (${referralCodeFor(h)})` : "";
+                })()}
+              </p>
+            ) : lead.referralCode ? (
+              <p className="mt-0.5 text-[10px] text-[var(--warning)]">Code not matched to an enrolled household yet.</p>
+            ) : null}
           </Field>
           <Field label="Consent (DPDP)">
             <p className="rounded-lg border border-[var(--border)] px-2 py-1.5 text-xs">
