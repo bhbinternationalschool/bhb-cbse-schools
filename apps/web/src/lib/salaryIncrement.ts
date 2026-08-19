@@ -340,6 +340,7 @@ export function buildIncrementDraft(input: {
       structure,
       link?.basicOverride || 0,
       link?.statutoryCover || "both",
+      input.masters.statutoryConfig,
     );
     const oldBasic = amounts.basic;
     const service = monthsOfService(staff.joiningDate, effectiveFrom);
@@ -503,6 +504,7 @@ export function previewStaffIncrement(input: {
     structure,
     link?.basicOverride || 0,
     link?.statutoryCover || "both",
+    input.masters.statutoryConfig,
   );
   const oldBasic = amounts.basic;
   if (oldBasic <= 0) {

@@ -10,12 +10,14 @@ import {
   composeAdmissionOffer,
   composeAdmissionRegisterStep,
   detectCrmBotIntent,
+  isCrmKeywordOrGreeting,
   replyCrmBotIntent,
 } from "@/lib/crmAdmissionBotEngine";
 import { signAdmissionLinkToken } from "@/lib/admissionLinkToken.server";
 import { TENANT } from "@/lib/types";
 import { sendWhatsAppText, waNormalizeLocal10 } from "@/lib/waSend";
 import { generateTutorText } from "@/lib/aiLlm.server";
+import { answerAdmissionsQuestion } from "@/lib/admissionsKb.server";
 
 export type WaCrmBotChannel = "whatsapp";
 
@@ -451,16 +453,30 @@ export async function handleWaCrmBotInbound(opts: {
   if (leadRow?.guardianName && !thread.parentName) {
     thread = { ...thread, parentName: leadRow.guardianName };
   }
+  // A typed sentence (not an exact keyword / button / greeting / HUMAN):
+  // 1. office-approved admissions KB — grounded answer or nothing;
+  // 2. for still-unknown intents, the enquiry-record-only fallback;
+  // 3. otherwise the keyword reply already in replyText stands.
   if (
-    intent === "unknown" &&
     !isGreeting &&
     !leadCreatedEnquiryNo &&
     !opts.forceEscalate &&
     !handledAdmissionOffer &&
-    text.trim().length > 3
+    intent !== "human" &&
+    !isCrmKeywordOrGreeting(text)
   ) {
-    const aiReply = await tryAiFallbackReply(text, leadCtx);
-    if (aiReply) replyText = aiReply;
+    const kb = await answerAdmissionsQuestion({
+      question: text,
+      channel: "wa",
+      lead: leadCtx,
+      registerUrl: publicRegisterUrl(),
+    });
+    if (kb.grounded) {
+      replyText = kb.reply;
+    } else if (intent === "unknown") {
+      const aiReply = await tryAiFallbackReply(text, leadCtx);
+      if (aiReply) replyText = aiReply;
+    }
   }
 
   const botMsg: WaCrmBotMsg = {

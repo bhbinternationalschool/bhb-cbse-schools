@@ -403,6 +403,7 @@ export function buildPayrollDraft(opts: BuildPayrollOpts): PayrollRun {
       structure,
       link?.basicOverride || 0,
       link?.statutoryCover || "both",
+      opts.masters.statutoryConfig,
     );
 
     let daysPresent = 0;

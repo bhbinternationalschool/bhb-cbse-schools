@@ -34,6 +34,7 @@ import {
 import { loadTallySync, writeTallySyncLocalRaw } from "@/lib/tallySync";
 import { complianceFactsIsEmpty, loadComplianceFacts, writeComplianceFactsLocalRaw } from "@/lib/complianceFacts";
 import { loadWaCampaigns, writeWaCampaignsLocalRaw } from "@/lib/waCampaigns";
+import { admissionsKbIsEmpty, loadAdmissionsKb, writeAdmissionsKbLocalRaw } from "@/lib/admissionsKb";
 import { loadCrmParentChat, writeCrmParentChatLocalRaw } from "@/lib/crmParentChat";
 import { loadWaChatbotFlows, writeWaChatbotFlowsLocalRaw } from "@/lib/waChatbotFlows";
 import { loadIdCardTemplateState, writeIdCardTemplateStateLocalRaw } from "@/lib/idCardTemplate";
@@ -133,6 +134,12 @@ const registry: Record<ModuleStateKey, ModuleStatePersistence<any>> = {
     isEmpty: complianceFactsIsEmpty,
     loadLocal: loadComplianceFacts,
     writeLocalRaw: writeComplianceFactsLocalRaw,
+  }),
+  admissions_kb: createModuleStatePersistence({
+    key: "admissions_kb",
+    isEmpty: admissionsKbIsEmpty,
+    loadLocal: loadAdmissionsKb,
+    writeLocalRaw: writeAdmissionsKbLocalRaw,
   }),
   tally_sync: createModuleStatePersistence({
     key: "tally_sync",

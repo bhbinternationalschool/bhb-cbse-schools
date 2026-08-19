@@ -15,6 +15,10 @@ export const MASTERS_OBJECT_SLICES: MastersSliceKey[] = [
   "midYearFeePolicy",
   "schoolProfile",
   "schoolTiming",
+  // EPF/ESIC establishment config (wage ceilings, rates). Until 2026-08-19 it
+  // was not in this list, so the ceilings set in Masters → Statutory lived in
+  // one browser only and never reached payroll on another device.
+  "statutoryConfig",
 ];
 
 export const MASTERS_ARRAY_SLICES: MastersSliceKey[] = [
