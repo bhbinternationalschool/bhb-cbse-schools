@@ -27,6 +27,7 @@ import {
   loadWaCampaigns,
   openEnquiryFilters,
   previewCampaignSample,
+  pruneSequenceQueue,
   publicRegisterUrl,
   refreshListCounts,
   resolveAudienceLeads,
@@ -53,11 +54,12 @@ import {
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import type { CampaignMessage } from "@/lib/waCampaigns";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
+import { SequencesPanel } from "@/components/admissions/SequencesPanel";
 
 const inp =
   "w-full rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm";
 
-type PanelTab = "lists" | "campaigns" | "queue";
+type PanelTab = "lists" | "campaigns" | "sequences" | "queue";
 
 const CAMPAIGN_MESSAGE_COLUMNS: DataTableColumn<CampaignMessage>[] = [
   { key: "childName", header: "Child", value: (m) => m.childName, sortable: true },
@@ -276,8 +278,13 @@ export function AdmissionCampaignsPanel({
   function onDispatch(openWaMe: boolean) {
     if (!canEdit) return;
     void (async () => {
+      // Sequence steps: drop families who enrolled / were lost / said no
+      // since the step was queued. Persist only when something changed.
+      const pruned = pruneSequenceQueue(wa, admissions);
+      if (pruned.skipped) commitWa(pruned.wa, `${pruned.skipped} sequence message(s) skipped — family moved on`);
+      const waNow = pruned.wa;
       if (openWaMe) {
-        const r = dispatchDueCampaigns(wa, { openWaMe: true });
+        const r = dispatchDueCampaigns(waNow, { openWaMe: true });
         commitWa(r.wa, r.note);
         for (const url of r.opened) {
           window.open(url, "_blank", "noopener,noreferrer");
@@ -286,7 +293,7 @@ export function AdmissionCampaignsPanel({
       }
 
       // Prefer live Meta/BSP when configured; otherwise stub-mark for demo
-      const prepared = dispatchDueCampaigns(wa, { stubMarkSent: false });
+      const prepared = dispatchDueCampaigns(waNow, { stubMarkSent: false });
       if (prepared.pending.length === 0) {
         commitWa(prepared.wa, prepared.note);
         return;
@@ -298,7 +305,7 @@ export function AdmissionCampaignsPanel({
         );
         const live = !!health?.whatsappOutbound;
         if (!live) {
-          const stub = dispatchDueCampaigns(wa, { stubMarkSent: true });
+          const stub = dispatchDueCampaigns(waNow, { stubMarkSent: true });
           commitWa(stub.wa, stub.note);
           return;
         }
@@ -339,7 +346,7 @@ export function AdmissionCampaignsPanel({
           return;
         }
         if (body.mode === "stub" || body.mode === "dry_run") {
-          const stub = dispatchDueCampaigns(wa, { stubMarkSent: true });
+          const stub = dispatchDueCampaigns(waNow, { stubMarkSent: true });
           commitWa(
             stub.wa,
             `API returned ${body.mode} — ${stub.note}`,
@@ -395,6 +402,7 @@ export function AdmissionCampaignsPanel({
           [
             ["lists", "Audience lists"],
             ["campaigns", "Campaigns"],
+            ["sequences", "Sequences"],
             ["queue", "Queue & dispatch"],
           ] as const
         ).map(([id, label]) => (
@@ -830,6 +838,8 @@ export function AdmissionCampaignsPanel({
                   registryLanguage:
                     approvedTemplates.find((t) => t.id === campRegistryId)
                       ?.language || "",
+                  sequenceId: "",
+                  sequenceStep: 0,
                 })}
               </div>
               {canEdit ? (
@@ -923,6 +933,18 @@ export function AdmissionCampaignsPanel({
             )}
           </MastersTableCard>
         </div>
+      ) : null}
+
+      {panel === "sequences" ? (
+        <SequencesPanel
+          wa={wa}
+          admissions={admissions}
+          by={by}
+          canEdit={canEdit}
+          commitWa={commitWa}
+          onAdmissionsCommit={onAdmissionsCommit}
+          onError={(m) => setNotice(m)}
+        />
       ) : null}
 
       {panel === "queue" ? (

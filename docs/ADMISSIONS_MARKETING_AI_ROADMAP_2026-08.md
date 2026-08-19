@@ -92,7 +92,8 @@ Standing rules for everything below (same as the AI roadmap, restated because ma
 ### 2e. Nurture sequences (drip)
 | | |
 |---|---|
-| Status | ❌ (one-shot campaigns ✅) |
+| Status | ✅ shipped 2026-08-19 — `WaSequence` (steps: day offset · time · label · template · body; anchor = start day or an event date) in `waCampaigns.ts`; WA campaigns → **Sequences** tab with presets (open house −7/−1/+1, enquiry nurture 0/4/9, result day 0/+3, festival greeting); **Start** creates one scheduled campaign per step (`sequenceId`/`sequenceStep`) through the existing `createCampaign`/`scheduleCampaign` → queue → dispatch; **Stop** pauses + skips; `pruneSequenceQueue` runs before every dispatch and skips families who enrolled / were lost / said not interested (STOP already enforced at send by `waSend`). Step bodies: "Draft with AI from school facts" → `marketing-content` (`wa_broadcast` / `event_invite` / `greeting`) with the public achievements + positioning + occasion, placeholders preserved; every body editable before Start. Selftest `test:wa-sequences` |
+| Was | ❌ (one-shot campaigns ✅) |
 | Build | `WaSequence { steps: { dayOffset, templateKey\|customBody, condition }[] }` in `waCampaigns.ts`; enrol an audience list; `dispatchDueCampaigns` already runs on a schedule — extend it to materialise the next step per lead, skipping leads whose stage advanced or who replied STOP. Step bodies can be AI-drafted **from ERP facts** (§3a) — "how Class 9 did", "a day in Class 3", "meet the Science faculty" — all rendered from data the school entered, each step human-approved once per sequence |
 | Data | New `sequences` + `sequence_enrolments` keys in the campaigns state (desk slice) |
 | Effort | ~3 days |
@@ -169,9 +170,9 @@ Effort: ~2 days.
 
 | Item | Status | Build |
 |---|---|---|
-| 7a. Open house / tour campaigns | 🟡 (events + RSVP + open_day template) | Event → "Generate campaign": invite, 2 reminders, thank-you + next step, all `marketing-content` kinds with the event facts; lands as a sequence (§2e) on a chosen audience list |
-| 7b. Result-season announcements | ❌ | Achievements entry (§3a) → one click → social post + WA broadcast + website banner copy in en/hi; human approve → cross-post |
-| 7c. Festival / occasion greetings | ❌ | Calendar of occasions (from holiday master + a small editable list) → greeting drafts per language, subtle brand line, scheduled as campaigns, quiet-hours gated |
+| 7a. Open house / tour campaigns | ✅ 2026-08-19 — Sequences preset "Open house / school tour" anchored on the event date (invite −7 d, reminder −1 d, thank-you +1 d), bodies drafted from facts via `event_invite` | Event → "Generate campaign": invite, 2 reminders, thank-you + next step, all `marketing-content` kinds with the event facts; lands as a sequence (§2e) on a chosen audience list |
+| 7b. Result-season announcements | ✅ 2026-08-19 — Marketing tab: board-result achievement → social post / banner / press release / WA broadcast (accept → cross-post); Sequences preset "Result-season announcement" (day 0 + day 3 CTA) | Achievements entry (§3a) → one click → social post + WA broadcast + website banner copy in en/hi; human approve → cross-post |
+| 7c. Festival / occasion greetings | ✅ 2026-08-19 — Marketing kind `greeting` (no selling, one brand line) + Sequences preset "Festival / occasion greeting" anchored on the date; quiet hours still gate the send | Calendar of occasions (from holiday master + a small editable list) → greeting drafts per language, subtle brand line, scheduled as campaigns, quiet-hours gated |
 
 Effort: ~2 days after 3a and 2e.
 
@@ -209,7 +210,7 @@ Effort: ~2 days after 3a and 2e.
 3. ~~**§2d per-lead follow-up drafts, language + channel**~~ — shipped 2026-08-19.
 4. ~~**§2c engagement-aware hot/warm/cold + §6a stalled-lead rules & drafts**~~ — shipped 2026-08-19.
 5. ~~**§3a achievements store + marketing-content generator (+3b, 3c)**~~ — shipped 2026-08-19.
-6. **§2e sequences + §7 event/result/festival campaigns** (~5 d).
+6. ~~**§2e sequences + §7 event/result/festival campaigns**~~ — shipped 2026-08-19 (no automatic occasion calendar — the office sets the date).
 7. **§5 referral + testimonials** (~3 d).
 8. **§8 unified timeline + attribution report** (~2 d).
 9. **§2a free-text lead extraction, §4 deficiency preset, §6b retention consumer** (~2.5 d).
