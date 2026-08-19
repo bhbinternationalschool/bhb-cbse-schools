@@ -1329,3 +1329,40 @@ export async function generateMeetingMinutesJson(opts: {
   if (r.ok) return { ok: true, draft: r.data, engine: r.engine, generationId: r.generationId };
   return { ok: false, error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI minutes", engine: r.engine };
 }
+
+/**
+ * Parent WhatsApp bot fallback with a hard grounding gate: the model must
+ * say whether its reply is grounded in the household data / notices it was
+ * given. Ungrounded → the caller sends the fixed "reply HUMAN" text and
+ * escalates the thread; the model's own words never reach the parent.
+ */
+export async function generateParentBotReplyJson(opts: {
+  system: string;
+  userMessage: string;
+}): Promise<
+  | { ok: true; grounded: boolean; reply: string; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const r = await callLlmJson(
+    {
+      system: `${opts.system}\n\nRespond with JSON only: {"grounded": true|false, "reply": "…"}. grounded=true ONLY if every fact in reply comes from the household data or notices given; if the parent asked something those do not answer, set grounded=false and put a short "please reply HUMAN" message in reply.`,
+      userMessage: opts.userMessage,
+      maxTokens: 400,
+      temperature: 0.3,
+      geminiMaxTokens: 1024,
+      meta: { route: "wa-parent-bot", promptVersion: "v2" },
+    },
+    (text) => {
+      try {
+        const j = JSON.parse(text) as { grounded?: unknown; reply?: unknown };
+        const reply = String(j.reply ?? "").trim();
+        if (!reply) return null;
+        return { grounded: j.grounded === true, reply: reply.slice(0, 600) };
+      } catch {
+        return null;
+      }
+    },
+  );
+  if (r.ok) return { ok: true, grounded: r.data.grounded, reply: r.data.reply, engine: r.engine, generationId: r.generationId };
+  return { ok: false, error: r.error, engine: r.engine };
+}

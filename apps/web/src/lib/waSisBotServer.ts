@@ -50,7 +50,7 @@ import {
   sendWhatsAppText,
   waNormalizeLocal10,
 } from "@/lib/waSend";
-import { generateTutorText } from "@/lib/aiLlm.server";
+import { generateParentBotReplyJson } from "@/lib/aiLlm.server";
 import {
   householdLanguage,
   languageChoiceConfirmation,
@@ -205,10 +205,13 @@ function dueStudentName(due: FeeDueLine): string {
  * fallback) on any failure — this is a graceful upgrade, never a hard
  * dependency for the bot to keep working.
  */
+const UNGROUNDED_REPLY =
+  "I don't have that information here. Reply *HUMAN* and the school office will get back to you.";
+
 async function tryAiFallbackReply(
   hh: Household,
   text: string,
-): Promise<string | null> {
+): Promise<{ text: string; grounded: boolean } | null> {
   const masters = loadMasters();
   const kids = childrenOf(hh);
   const dues = flattenOpenDues(hh.id);
@@ -255,17 +258,19 @@ Open dues: total ${formatInr(totalDuePaise)} — ${duesLine}
 ${kbContext ? `Relevant school notices:\n${kbContext}\n` : ""}Parent's message: "${text}"`;
 
   try {
-    const r = await generateTutorText({ system, userMessage });
+    const r = await generateParentBotReplyJson({ system, userMessage });
     if (!r.ok) return null;
-    const reply = r.text.trim();
+    // Hard gate: an ungrounded answer never reaches the parent verbatim.
+    if (!r.grounded) return { text: UNGROUNDED_REPLY, grounded: false };
+    const reply = r.reply.trim();
     if (!reply) return null;
     // Regional preference: render the Hindi draft in the family's language
     // when Sarvam can; otherwise the Hindi text goes as-is.
     if (sarvamTarget && sarvamConfigured()) {
       const t = await sarvamTranslate({ text: reply, from: "hi-IN", to: sarvamTarget as SarvamLang, mode: "modern-colloquial" });
-      if (t.ok && t.text.trim()) return t.text.trim();
+      if (t.ok && t.text.trim()) return { text: t.text.trim(), grounded: true };
     }
-    return reply;
+    return { text: reply, grounded: true };
   } catch {
     return null;
   }
@@ -655,9 +660,14 @@ export async function handleWaSisBotInbound(opts: {
     replyText =
       "Reply *KIDS* · *DUES* · *PAY* (GPay/UPI) · *PAY 1* · *RECEIPTS* · *HUMAN* — or *MENU* for the main school menu.";
   }
+  let escalateUngrounded = false;
   if (intent === "unknown" && !isGreeting && text.trim().length > 3) {
     const aiReply = await tryAiFallbackReply(hh, text);
-    if (aiReply) replyText = aiReply;
+    if (aiReply) {
+      replyText = aiReply.text;
+      // Not answerable from what we know → the office should see it.
+      escalateUngrounded = !aiReply.grounded;
+    }
   }
 
   const botMsg: WaSisBotMsg = {
@@ -668,14 +678,15 @@ export async function handleWaSisBotInbound(opts: {
     by: "SIS parent WA bot",
   };
 
+  const escalate = bot.escalate || escalateUngrounded;
   thread = {
     ...thread,
-    status: bot.escalate
+    status: escalate
       ? "needs_staff"
       : thread.status === "closed"
         ? "bot"
         : thread.status || "bot",
-    unreadStaff: bot.escalate ? thread.unreadStaff + 1 : thread.unreadStaff,
+    unreadStaff: escalate ? thread.unreadStaff + 1 : thread.unreadStaff,
     messages: [...thread.messages, parentMsg, botMsg],
     updatedAt: nowIso(),
   };
@@ -733,7 +744,7 @@ export async function handleWaSisBotInbound(opts: {
   return {
     matched: true,
     replied: send.ok || send.mode === "stub",
-    escalate: bot.escalate,
+    escalate,
     replyText,
     stub: !send.ok,
     error: send.ok ? undefined : send.error,
