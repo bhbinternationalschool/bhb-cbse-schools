@@ -22,6 +22,8 @@ import {
 } from "@/lib/openAi.server";
 import { getDemoSession } from "@/lib/auth";
 import { recordAiGeneration, type AiTier } from "@/lib/aiGenerations.server";
+import { checkAiBudget } from "@/lib/aiBudget.server";
+import { aiCacheGet, aiCacheKey, aiCachePut } from "@/lib/aiCache.server";
 import {
   buildRemarkSystemPrompt,
   buildRemarkUserPrompt,
@@ -152,6 +154,11 @@ export type AiCallMeta = {
   route: string;
   promptVersion: string;
   tier?: AiTier;
+  /**
+   * Same input → same output is acceptable (certificates, agreements,
+   * documents, lesson plans). Personalised generators must leave this off.
+   */
+  cacheable?: boolean;
 };
 
 type LlmTextOpts = {
@@ -243,6 +250,18 @@ async function attemptEngine(
   return { r, generationId };
 }
 
+function cacheKeyFor(opts: LlmTextOpts): string | null {
+  if (!opts.meta.cacheable) return null;
+  return aiCacheKey({
+    route: opts.meta.route,
+    promptVersion: opts.meta.promptVersion,
+    tier: opts.meta.tier ?? "flash",
+    system: opts.system,
+    userMessage: opts.userMessage,
+    history: (opts.history || []).map((h) => `${h.role}:${h.content}`).join("|"),
+  });
+}
+
 async function callLlmText(
   opts: LlmTextOpts,
 ): Promise<
@@ -257,12 +276,24 @@ async function callLlmText(
       engine: "none",
     };
   }
+  const key = cacheKeyFor(opts);
+  if (key) {
+    const hit = await aiCacheGet(key);
+    if (hit) {
+      return { ok: true, text: hit.response, engine: (hit.engine as LlmEngine) || "none", generationId: hit.generationId };
+    }
+  }
   const requester = await resolveRequester();
+  const budget = await checkAiBudget(requester);
+  if (!budget.ok) return { ok: false, error: budget.reason, engine: "none" };
   const errors: string[] = [];
 
   for (const engine of engines) {
     const { r, generationId } = await attemptEngine(engine, opts, requester);
-    if (r.ok) return { ok: true, text: r.text, engine, generationId };
+    if (r.ok) {
+      if (key) void aiCachePut({ key, route: opts.meta.route, engine, model: r.model, response: r.text, generationId });
+      return { ok: true, text: r.text, engine, generationId };
+    }
     errors.push(`${engine}: ${r.error}`);
   }
 
@@ -288,7 +319,19 @@ async function callLlmJson<T>(
       engine: "none",
     };
   }
+  const key = cacheKeyFor(opts);
+  if (key) {
+    const hit = await aiCacheGet(key);
+    if (hit) {
+      const parsed = parse(hit.response);
+      if (parsed) {
+        return { ok: true, data: parsed, engine: (hit.engine as LlmEngine) || "none", generationId: hit.generationId };
+      }
+    }
+  }
   const requester = await resolveRequester();
+  const budget = await checkAiBudget(requester);
+  if (!budget.ok) return { ok: false, error: budget.reason, engine: "none" };
   const errors: string[] = [];
 
   for (const engine of engines) {
@@ -302,7 +345,10 @@ async function callLlmJson<T>(
       continue;
     }
     const parsed = parse(r.text);
-    if (parsed) return { ok: true, data: parsed, engine, generationId };
+    if (parsed) {
+      if (key) void aiCachePut({ key, route: opts.meta.route, engine, model: r.model, response: r.text, generationId });
+      return { ok: true, data: parsed, engine, generationId };
+    }
     errors.push(`${engine}: invalid JSON in response`);
   }
 
@@ -767,7 +813,7 @@ export async function generateSchoolDocumentText(opts: {
       // See generateTutorText — give Gemini 3.x headroom over its internal
       // "thinking" tokens on top of a document-length JSON reply.
       geminiMaxTokens: 3072,
-      meta: { route: "school-document", promptVersion: "v1" },
+      meta: { route: "school-document", promptVersion: "v1", cacheable: true },
     },
     parseSchoolDocumentJson,
   );
@@ -826,7 +872,7 @@ export async function generateStaffAgreementText(opts: {
       maxTokens: 8000,
       temperature: 0.4,
       geminiMaxTokens: 8000,
-      meta: { route: "staff-agreement", promptVersion: "v1" },
+      meta: { route: "staff-agreement", promptVersion: "v1", cacheable: true },
     },
     parseStaffAgreementAiJson,
   );
@@ -875,7 +921,7 @@ export async function generateStudentCertificateText(opts: {
       maxTokens: 6000,
       temperature: 0.4,
       geminiMaxTokens: 6000,
-      meta: { route: "student-certificate", promptVersion: "v1" },
+      meta: { route: "student-certificate", promptVersion: "v1", cacheable: true },
     },
     parseStudentCertificateAiJson,
   );
@@ -1158,7 +1204,7 @@ export async function generateLessonPlanJson(opts: {
       ),
       temperature: 0.5,
       geminiMaxTokens: Math.min(8192, 3000 + opts.input.periods * 400),
-      meta: { route: "lesson-plan", promptVersion: "v1" },
+      meta: { route: "lesson-plan", promptVersion: "v1", cacheable: true },
     },
     parseLessonPlanJson,
   );
