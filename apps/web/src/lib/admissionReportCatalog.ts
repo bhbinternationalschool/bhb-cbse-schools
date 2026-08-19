@@ -3,6 +3,7 @@
  * Filters: dates, stage, source, class, beat, counsellor, fee, follow-up, locality.
  */
 
+import { campaignAttribution, inrPaise, loadMarketingSpend } from "@/lib/marketingSpend";
 import {
   ADMISSION_SOURCES,
   ADMISSION_STAGES,
@@ -64,6 +65,7 @@ export type AdmissionReportId =
   | "capture_year_summary"
   | "locality_summary"
   | "counsellor_summary"
+  | "campaign_attribution"
   | "overdue_follow_ups"
   | "due_today_follow_ups"
   | "follow_up_activity_log"
@@ -165,6 +167,12 @@ export const ADMISSION_REPORTS: AdmissionReportDef[] = [
     id: "counsellor_summary",
     category: "analytics",
     label: "Counsellor / assignee summary",
+  },
+  {
+    id: "campaign_attribution",
+    category: "analytics",
+    label: "Campaign & source attribution",
+    hint: "Leads → registered → enrolled per source and ad campaign; cost per lead / enrolment from Marketing → spend",
   },
   {
     id: "overdue_follow_ups",
@@ -881,6 +889,46 @@ export function runAdmissionReport(
       );
       return r.ok
         ? { ok: true, message: `Localities: ${rows.length}` }
+        : r;
+    }
+    case "campaign_attribution": {
+      const rows = campaignAttribution(filtered, loadMarketingSpend().entries).map((r) => ({
+        level: r.level === "source" ? "Source" : "Campaign",
+        label: r.label,
+        source: r.source,
+        leads: r.leads,
+        registered: r.registered,
+        enrolled: r.enrolled,
+        lost: r.lost,
+        conversion: `${r.conversionPct}%`,
+        spend: inrPaise(r.spendPaise),
+        cpl: inrPaise(r.costPerLeadPaise),
+        cpe: inrPaise(r.costPerEnrolmentPaise),
+      }));
+      const r = exportFilterReport(
+        {
+          title: "Campaign & source attribution",
+          subtitle: `${TENANT.shortName} · Admissions · spend as recorded in Marketing`,
+          filterNote: note,
+          columns: [
+            { key: "level", header: "Level", width: 0.8 },
+            { key: "label", header: "Source / campaign", width: 1.8 },
+            { key: "leads", header: "Leads", width: 0.7, align: "right" },
+            { key: "registered", header: "Registered", width: 0.9, align: "right" },
+            { key: "enrolled", header: "Enrolled", width: 0.8, align: "right" },
+            { key: "lost", header: "Lost", width: 0.6, align: "right" },
+            { key: "conversion", header: "Conv.", width: 0.7, align: "right" },
+            { key: "spend", header: "Spend", width: 0.9, align: "right" },
+            { key: "cpl", header: "Cost / lead", width: 0.9, align: "right" },
+            { key: "cpe", header: "Cost / enrolment", width: 1, align: "right" },
+          ],
+          rows,
+          fileBaseName: "adm_attribution",
+        },
+        filters.format,
+      );
+      return r.ok
+        ? { ok: true, message: `Attribution · ${rows.length} rows` }
         : r;
     }
     case "counsellor_summary": {

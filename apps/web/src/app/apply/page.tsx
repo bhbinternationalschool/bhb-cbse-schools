@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 export default async function ApplyPage({
   searchParams,
 }: {
-  searchParams: Promise<{ src?: string; c?: string }>;
+  searchParams: Promise<{ src?: string; c?: string; ref?: string }>;
 }) {
   const [sp, config] = await Promise.all([
     searchParams,
@@ -22,7 +22,7 @@ export default async function ApplyPage({
   ]);
   return (
     <>
-      <PublicEnquiryForm initialSource={sp.src ?? null} initialCampaignId={sp.c ?? null} config={config} />
+      <PublicEnquiryForm initialSource={sp.src ?? null} initialCampaignId={sp.c ?? null} initialReferralCode={sp.ref ?? null} config={config} />
       <CrmParentChatWidget />
     </>
   );

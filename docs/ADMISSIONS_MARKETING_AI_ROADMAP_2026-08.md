@@ -144,10 +144,11 @@ Effort: ~2 days after §1.
 
 ---
 
-## 5. Referral & testimonial engine — ❌
+## 5. Referral & testimonial engine — ✅ shipped 2026-08-19
 
 | | |
 |---|---|
+| Shipped | `lib/referrals.ts` (module state `referrals`): **referral codes** derived deterministically per enrolled household (`BHB-XXXX-000`, `referralCodeFor`/`resolveReferralCode` — no lookup table, an old flyer still resolves); `?ref=CODE` on `/apply` sets `lead.referralCode` + source `referral`; CRM lead panel "Referred by" field resolves to `referredByHouseholdId`; `referralAttribution` (leads → registered → enrolled per referrer); Admissions → **Referrals & stories** tab: per-household code, Invite (WhatsApp, message drafted from school facts via `marketing-content` kind `referral_invite` with `{{guardianName}} {{code}} {{link}}`), Copy link, invited-at, reward note (informational only). **Testimonials**: Ask for story (WA) → paste the parent's words → `POST /api/ai/testimonial-polish` (grammar/flow only; guard `testimonialPolishProblems` refuses added numbers, growth > 20 %, over-cutting; polish with problems cannot be kept) → Send for approval (WA) → Mark approved with consent note + name permission → `approvedTestimonialLines` offered to the Marketing generator ("Quote approved parent stories"). Selftest `test:referrals`. Not done: WA inbound `STORY` keyword capture (manual paste instead) |
 | Have | `referral` source, `referredByStaffId` (staff only) |
 | Build | **Referral**: `referredByHouseholdId` on the lead + a referral code per enrolled household (`householdPrefs`-adjacent); referral invite broadcast (audience: enrolled parents, language-aware, quiet-hours gated) drafted by `marketing-content` kind `referral_invite`; attribution in the admissions report (referrals → registrations → enrolments per referrer); reward tracking as a note field — money movement stays manual. **Testimonials**: `lib/testimonials.ts` module state — request sent to parents identified from PTM feedback / surveys (opt-in), raw reply captured (WA inbound keyword `STORY` or portal form), `POST /api/ai/testimonial-polish` returns a tidied version **preserving the parent's words and claims only**, parent approves (WA YES / portal), then `approved` → usable by 3a. Consent recorded with timestamp |
 | Guardrail | No testimonial is generated; polish = grammar/length only; diff shown to staff; unapproved never leaves the module |
@@ -183,11 +184,11 @@ Effort: ~2 days after 3a and 2e.
 | Need | Status | Work |
 |---|---|---|
 | Lead fields: `preferredLanguage`, `previousBoard`, `locality`, `concerns[]`, `quality`, `utm`/`campaignId`, `referredByHouseholdId`, `consentAt` | 🟡 (2026-08-19: all but `quality` added; `locality`/`parentConsentAt` already existed) | `AdmissionLead` + `normalizeAdmissionLead` (all default `""`/`[]` — never guessed); Google lead webhook already carries campaign ids → map to `campaignId` |
-| Unified communication timeline per lead | 🟡 (3 stores) | Read-only merge view in the lead panel: follow-ups + WA bot thread + campaign messages + widget thread, chronological; the same merge feeds `lead-followup-draft` as "last 5 touchpoints" |
+| Unified communication timeline per lead | ✅ 2026-08-19 — `lib/leadTimeline.ts` merges milestones (created/consent/registration/admitted), follow-ups, campaign sends (sent/failed/skipped), chat-widget and WhatsApp-bot messages by mobile; `LeadTimeline` in the lead panel (in/out counts, "last heard"); `timelineTouchpoints` feeds the follow-up draft as the last 5 touchpoints across all channels; selftest `test:lead-timeline` |
 | Marketing asset library | 🟡 (2026-08-19: brand lines in Marketing → Positioning; no image library yet) | generators reference brand lines, not images |
 | School knowledge base (admissions) | 🟡 | §1 |
 | Achievements store | ✅ 2026-08-19 | §3a |
-| Campaign attribution & reporting | 🟡 | `campaignId` on lead → report: leads / registrations / enrolments per campaign & source, cost field per campaign (manual), cost per enrolment; a `leadership-digest` style AI summary of "where to focus" is optional and last |
+| Campaign attribution & reporting | ✅ 2026-08-19 — `lib/marketingSpend.ts` (module state `marketing_spend`: spend entries per source / campaign id, optional period) + `campaignAttribution` (source rows + campaign rows: leads → registered → enrolled → lost, conversion %, cost per lead / enrolment only when spend is recorded); Marketing tab "Campaign spend & attribution" table + spend entry; Report → **Campaign & source attribution** (Excel/PDF). AI "where to focus" summary not built (optional) |
 | DPDP notice | 🟡 (2026-08-19: consent text + required checkbox on `/apply` and `/register`, `parentConsentAt/By` stored, status shown in the lead panel; bot first-contact notice still to do) |
 
 ---
@@ -211,8 +212,8 @@ Effort: ~2 days after 3a and 2e.
 4. ~~**§2c engagement-aware hot/warm/cold + §6a stalled-lead rules & drafts**~~ — shipped 2026-08-19.
 5. ~~**§3a achievements store + marketing-content generator (+3b, 3c)**~~ — shipped 2026-08-19.
 6. ~~**§2e sequences + §7 event/result/festival campaigns**~~ — shipped 2026-08-19 (no automatic occasion calendar — the office sets the date).
-7. **§5 referral + testimonials** (~3 d).
-8. **§8 unified timeline + attribution report** (~2 d).
+7. ~~**§5 referral + testimonials**~~ — shipped 2026-08-19.
+8. ~~**§8 unified timeline + attribution report**~~ — shipped 2026-08-19.
 9. **§2a free-text lead extraction, §4 deficiency preset, §6b retention consumer** (~2.5 d).
 
 Total ≈ 25 working days. Items 1–4 (~9 d) are the "single admission cycle" ROI set.

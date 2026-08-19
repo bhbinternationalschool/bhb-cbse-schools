@@ -48,6 +48,8 @@ export function LeadFollowupDraftPanel(props: {
   canEdit: boolean;
   /** Optional rule-chosen hook (stalled-lead re-engagement) */
   hook?: string;
+  /** Unified-timeline touchpoints (all channels); falls back to follow-ups when absent */
+  touchpoints?: string[];
   onLogFollowUp: (input: { channel: FollowUpChannel; outcome: FollowUpOutcome; note: string; nextFollowUpAt: string }) => void;
   onFlash: (msg: string) => void;
   onError: (msg: string) => void;
@@ -72,9 +74,11 @@ export function LeadFollowupDraftPanel(props: {
       const days = lead.leadDate
         ? Math.max(0, Math.round((Date.now() - new Date(`${lead.leadDate}T00:00:00`).getTime()) / 86_400_000))
         : 0;
-      const recentTouchpoints = (lead.followUps || [])
-        .slice(-4)
-        .map((f) => `${followUpChannelLabel(f.channel)}: ${followUpOutcomeLabel(f.outcome)}${f.note ? ` (${f.note.slice(0, 120)})` : ""}`);
+      const recentTouchpoints = props.touchpoints?.length
+        ? props.touchpoints
+        : (lead.followUps || [])
+            .slice(-4)
+            .map((f) => `${followUpChannelLabel(f.channel)}: ${followUpOutcomeLabel(f.outcome)}${f.note ? ` (${f.note.slice(0, 120)})` : ""}`);
       const r = await fetch("/api/ai/lead-followup-draft", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

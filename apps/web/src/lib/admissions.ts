@@ -185,6 +185,8 @@ export type AdmissionLead = {
   concerns: string[];
   /** Enrolled household that referred this family (parent referral); "" = none */
   referredByHouseholdId: string;
+  /** Referral code as typed / on the link (resolved to referredByHouseholdId by the CRM); "" = none */
+  referralCode: string;
   declarationAccepted: boolean;
   registrationFeePaid: boolean;
   registrationFeeNote: string;
@@ -761,6 +763,7 @@ export function emptyAdmissionLead(
         ).slice(0, 12)
       : [],
     referredByHouseholdId: String(partial?.referredByHouseholdId || "").trim().slice(0, 40),
+    referralCode: String(partial?.referralCode || "").trim().toUpperCase().slice(0, 20),
     declarationAccepted: !!partial?.declarationAccepted,
     registrationFeePaid: !!partial?.registrationFeePaid,
     registrationFeeNote: partial?.registrationFeeNote || "",

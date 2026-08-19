@@ -20,6 +20,7 @@ import {
   PREVIOUS_BOARDS,
 } from "@/lib/admissionsEnquiryForm";
 import { TENANT } from "@/lib/types";
+import { normalizeReferralCode } from "@/lib/referrals";
 import { AddressAutocompleteField } from "@/components/maps/AddressAutocompleteField";
 
 const FALLBACK_CLASSES = [
@@ -52,14 +53,18 @@ function resolveSource(raw: string | null): AdmissionSource {
 export function PublicEnquiryForm({
   initialSource,
   initialCampaignId,
+  initialReferralCode,
   config,
 }: {
   initialSource?: string | null;
   /** ?c=<campaign id> on the link — attribution only, never shown */
   initialCampaignId?: string | null;
+  /** ?ref=<referral code> from an existing parent's share link */
+  initialReferralCode?: string | null;
   config: PublicRegistrationConfig;
 }) {
-  const source = resolveSource(initialSource ?? null);
+  const referralCode = normalizeReferralCode(initialReferralCode);
+  const source = referralCode ? "referral" : resolveSource(initialSource ?? null);
   const campaignId = (initialCampaignId || "").trim().slice(0, 80);
   // Classes come from the DB via the server. Never call loadMasters() here:
   // this page is public, so masters are cold and the fallback would mint
@@ -123,6 +128,7 @@ export function PublicEnquiryForm({
         pincode,
         campaignNote: `Public · ${sourceLabel(source)}${classSoughtId ? "" : ` · Class ${classLabel}`}`,
         campaignId,
+        referralCode,
         note,
         preferredLanguage,
         previousBoard: ask.previousBoard ? previousBoard : "",

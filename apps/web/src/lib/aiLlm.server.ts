@@ -1384,6 +1384,39 @@ export async function generateParentBotReplyJson(opts: {
   return { ok: false, error: r.error, engine: r.engine };
 }
 
+/** Testimonial polish — grammar, flow and length only; the parent's claims and numbers stay as said. */
+export async function generateTestimonialPolishJson(opts: {
+  rawText: string;
+  language: "en" | "hi";
+  maxChars: number;
+}): Promise<
+  | { ok: true; polished: string; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const r = await callLlmJson(
+    {
+      system: `You lightly edit a parent's testimonial about a school for publication. Fix grammar, spelling, punctuation and flow; expand chat abbreviations ("r" → "are", "yrs" → "years"); keep the parent's voice, first person, and EVERY claim, number and name exactly as they wrote it. Do not add praise, facts, numbers or superlatives the parent did not write. Do not remove a caveat. Keep it under ${opts.maxChars} characters. Output language: ${opts.language === "hi" ? "the same Hindi (Devanagari) as the input — do not translate" : "the same English as the input — do not translate"}.
+Respond with JSON only: {"polished":"…"}`,
+      userMessage: `Parent's words:\n"""${opts.rawText}"""`,
+      maxTokens: 600,
+      temperature: 0.2,
+      geminiMaxTokens: 2048,
+      meta: { route: "testimonial-polish", promptVersion: "v1", cacheable: true },
+    },
+    (text) => {
+      try {
+        const j = JSON.parse(text) as { polished?: unknown };
+        const polished = String(j.polished ?? "").trim();
+        return polished ? { polished } : null;
+      } catch {
+        return null;
+      }
+    },
+  );
+  if (r.ok) return { ok: true, polished: r.data.polished, engine: r.engine, generationId: r.generationId };
+  return { ok: false, error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI polish", engine: r.engine };
+}
+
 /** Marketing copy from ERP facts — one call, one variant per direct audience. Draft only. */
 export async function generateMarketingContentJson(opts: {
   kind: MarketingKind;

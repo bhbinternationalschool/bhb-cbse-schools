@@ -28,7 +28,9 @@ export type ModuleStateKey =
   | "id_card_template"
   | "compliance_facts"
   | "admissions_kb"
-  | "school_achievements";
+  | "school_achievements"
+  | "referrals"
+  | "marketing_spend";
 
 export const MODULE_STATE_DEFS: Record<
   ModuleStateKey,
@@ -55,6 +57,8 @@ export const MODULE_STATE_DEFS: Record<
   compliance_facts: { rbac: "compliance", label: "compliance facts" },
   admissions_kb: { rbac: "admissions", label: "admissions knowledge base" },
   school_achievements: { rbac: "admissions", label: "achievements & positioning" },
+  referrals: { rbac: "admissions", label: "referrals & testimonials" },
+  marketing_spend: { rbac: "admissions", label: "marketing spend" },
 };
 
 export function isModuleStateKey(raw: string): raw is ModuleStateKey {
