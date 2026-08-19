@@ -305,16 +305,20 @@ export function DocumentMakerWorkspace() {
                 type="button"
                 className="mt-1 text-[11px] font-semibold text-[var(--brand-deep)] underline"
                 onClick={() => {
-                  void Promise.all([import("@/lib/sis"), import("@/lib/exams")]).then(([sisMod, examsMod]) => {
-                    const ay = currentAcademicYearCode(masters);
-                    const facts = buildComplianceFactsFromMasters({
-                      academicYearCode: ay,
-                      masters,
-                      students: sisMod.loadSis().students,
-                      examTermCount: examsMod.listExamTerms(ay).length,
-                    });
-                    setDetails((d) => (d.trim() ? `${d.trim()}\n\n${facts}` : facts));
-                  });
+                  void Promise.all([import("@/lib/sis"), import("@/lib/exams"), import("@/lib/complianceFacts")]).then(
+                    ([sisMod, examsMod, cf]) => {
+                      const ay = currentAcademicYearCode(masters);
+                      const facts = buildComplianceFactsFromMasters({
+                        academicYearCode: ay,
+                        masters,
+                        students: sisMod.loadSis().students,
+                        examTermCount: examsMod.listExamTerms(ay).length,
+                      });
+                      const recorded = cf.complianceFactsToText(cf.loadComplianceFacts(), ay);
+                      const all = recorded ? `${facts}\n\nRecorded under Compliance → School facts:\n${recorded}` : facts;
+                      setDetails((d) => (d.trim() ? `${d.trim()}\n\n${all}` : all));
+                    },
+                  );
                 }}
               >
                 Insert school facts from the ERP (enrolment, sections, staff, fees, exams)

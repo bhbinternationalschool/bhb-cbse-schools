@@ -34,6 +34,8 @@ import {
 import type { ReportColumn } from "@/lib/reportExport";
 import { runSisReport } from "@/lib/sisReportCatalog";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { hasPermission } from "@/lib/rbac";
+import { ComplianceFactsPanel } from "@/components/students/ComplianceFactsPanel";
 import { currentAcademicYearCode } from "@/lib/masters";
 import {
   ErpTable,
@@ -44,7 +46,7 @@ import {
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 
 type FilterGap = "all" | UdiseGapCode | "due" | "call" | "unregistered";
-type ViewMode = "worklist" | "call" | "unregistered";
+type ViewMode = "worklist" | "call" | "unregistered" | "facts";
 
 const GAP_COLUMNS: ReportColumn[] = [
   { key: "student", header: "Student", width: 2 },
@@ -547,6 +549,18 @@ export function UdiseComplianceWorkspace({
         </button>
         <button
           type="button"
+          className={`rounded-lg px-3 py-1.5 text-xs font-medium ${
+            view === "facts"
+              ? "bg-[var(--brand-deep)] text-white"
+              : "border border-[var(--border)] bg-[var(--card)] text-[var(--brand-deep)]"
+          }`}
+          onClick={() => setView("facts")}
+          title="Infrastructure, safety certificates, teacher-training log, committees — for MPD / affiliation narratives"
+        >
+          School facts
+        </button>
+        <button
+          type="button"
           className="rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-medium text-[var(--primary-foreground)]"
           onClick={() => {
             const r = runSisReport("udise_compliance", {
@@ -945,7 +959,9 @@ export function UdiseComplianceWorkspace({
         ))}
       </div>
 
-      {view === "unregistered" ? (
+      {view === "facts" ? (
+        <ComplianceFactsPanel canEdit={hasPermission(session, masters, "compliance", "edit")} />
+      ) : view === "unregistered" ? (
         <div className="space-y-3">
           <div className="rounded-xl border border-[rgba(138,90,16,0.35)] bg-[rgba(138,90,16,0.08)] px-4 py-3">
             <p className="text-sm font-semibold text-[#8a5a10]">
