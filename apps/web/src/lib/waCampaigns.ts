@@ -1057,6 +1057,10 @@ export function applyCampaignDispatchResults(
         error: "",
       };
     }
+    if (r.status === "deferred") {
+      // Family quiet hours — stays queued so the next dispatch picks it up.
+      return { ...m, status: "queued" as const, error: r.error || "Deferred (quiet hours)" };
+    }
     return {
       ...m,
       status: "failed" as const,
