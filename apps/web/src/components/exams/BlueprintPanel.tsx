@@ -391,7 +391,7 @@ export function BlueprintPanel(props: {
                 type="button"
                 disabled={busy || rows.length === 0}
                 onClick={() => void generate()}
-                className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-[#6d28d9] px-3 py-1.5 text-sm font-bold text-white disabled:opacity-50"
+                className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-[var(--primary)] px-3 py-1.5 text-sm font-bold text-[var(--primary-foreground)] disabled:opacity-50"
                 title="Replaces this set's sections: bank items first, AI for the rest"
               >
                 <Sparkles className="h-4 w-4" />

@@ -28,7 +28,7 @@ import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/component
 
 const LEVEL_TONE: Record<RiskLevel, string> = {
   high: "bg-[var(--danger)]/15 text-[var(--danger)]",
-  watch: "bg-[rgba(245,158,11,0.15)] text-[#b45309]",
+  watch: "bg-[var(--warning-soft)] text-[var(--warning)]",
   none: "bg-[var(--success-soft)] text-[var(--success)]",
 };
 

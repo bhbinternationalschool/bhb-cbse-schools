@@ -273,7 +273,7 @@ export function ItemAnalysis(props: {
                 type="button"
                 disabled={!!aiBusy || weakAll.length === 0}
                 onClick={() => void worksheet()}
-                className="inline-flex items-center gap-1 rounded-lg bg-[#6d28d9] px-2.5 py-1 text-xs font-bold text-white disabled:opacity-50"
+                className="inline-flex items-center gap-1 rounded-lg bg-[var(--primary)] px-2.5 py-1 text-xs font-bold text-[var(--primary-foreground)] disabled:opacity-50"
                 title="Drafts 8 practice questions on the weak units / LO codes and saves them as a draft question paper"
               >
                 <Sparkles className="h-3.5 w-3.5" />

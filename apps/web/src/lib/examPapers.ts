@@ -546,10 +546,11 @@ function normalizeBlueprintRow(r: Partial<ExamBlueprintRow>): ExamBlueprintRow |
 }
 
 function normalizeBlueprint(b: Partial<ExamBlueprint>): ExamBlueprint | null {
-  if (!b || !b.classId || !b.subjectId) return null;
+  // A blueprint without its session is not a blueprint — never invent the year.
+  if (!b || !b.classId || !b.subjectId || !b.academicYearCode) return null;
   return {
     id: b.id || nid("bp"),
-    academicYearCode: b.academicYearCode || DEFAULT_AY,
+    academicYearCode: b.academicYearCode,
     classId: String(b.classId),
     subjectId: String(b.subjectId),
     examTermId: String(b.examTermId || ""),
