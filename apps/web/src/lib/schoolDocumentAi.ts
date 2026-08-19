@@ -14,6 +14,7 @@ export type SchoolDocumentType =
   | "staff_appointment"
   | "general_circular"
   | "admission_offer"
+  | "admission_deficiency"
   | "fee_structure_letter"
   | "welcome_packet"
   | "compliance_narrative";
@@ -116,6 +117,14 @@ export const SCHOOL_DOCUMENT_PRESETS: SchoolDocumentPreset[] = [
     defaultSubjectEn: "Offer of provisional admission —",
     promptContext:
       "Provisional admission offer to the parent/guardian: child's name, class and session offered, what makes it firm (documents to submit, fee to pay by a date), validity of the offer, contact for queries. Warm but formal; no promises beyond what the details state; leave a reference number placeholder.",
+  },
+  {
+    id: "admission_deficiency",
+    label: "Documents pending (deficiency) letter",
+    hint: "Which documents are still due for a registered lead, how and by when to submit",
+    defaultSubjectEn: "Documents pending for admission —",
+    promptContext:
+      "Polite deficiency letter to the parent/guardian: the child's admission / registration is on record; list EXACTLY the documents still pending as given (never add or drop one), how to submit (office hours / WhatsApp photo / upload), the by-date only if given, what happens after submission (admission confirmed / file completed), and a contact for help. Reassuring, not threatening; no fee amounts unless given.",
   },
   {
     id: "fee_structure_letter",

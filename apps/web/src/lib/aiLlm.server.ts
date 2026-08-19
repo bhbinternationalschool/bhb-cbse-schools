@@ -7,6 +7,7 @@
  * (see waTransportBotPrompts.ts) — never from here.
  */
 import "server-only";
+import { buildLeadExtractSystemPrompt, buildLeadExtractUserPrompt, parseLeadExtract, type LeadExtract } from "@/lib/leadExtractAi";
 import {
   buildMarketingSystemPrompt,
   buildMarketingUserPrompt,
@@ -1382,6 +1383,26 @@ export async function generateParentBotReplyJson(opts: {
   );
   if (r.ok) return { ok: true, grounded: r.data.grounded, reply: r.data.reply, engine: r.engine, generationId: r.generationId };
   return { ok: false, error: r.error, engine: r.engine };
+}
+
+/** Pasted enquiry text → lead fields (only what the text says). */
+export async function generateLeadExtractJson(opts: { text: string; classNames: string[] }): Promise<
+  | { ok: true; extract: LeadExtract; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const r = await callLlmJson(
+    {
+      system: buildLeadExtractSystemPrompt(opts.classNames),
+      userMessage: buildLeadExtractUserPrompt(opts.text),
+      maxTokens: 700,
+      temperature: 0.1,
+      geminiMaxTokens: 2048,
+      meta: { route: "lead-extract", promptVersion: "v1" },
+    },
+    (text) => parseLeadExtract(text, opts.classNames),
+  );
+  if (r.ok) return { ok: true, extract: r.data, engine: r.engine, generationId: r.generationId };
+  return { ok: false, error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI extraction", engine: r.engine };
 }
 
 /** Testimonial polish — grammar, flow and length only; the parent's claims and numbers stay as said. */

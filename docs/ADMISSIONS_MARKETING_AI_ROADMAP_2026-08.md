@@ -56,7 +56,8 @@ Standing rules for everything below (same as the AI roadmap, restated because ma
 ### 2a. Lead enrichment from unstructured input
 | | |
 |---|---|
-| Status | ❌ (image/PDF path ✅) |
+| Status | ✅ shipped 2026-08-19 — `lib/leadExtractAi.ts` (prompt + parser that normalises every value against the fixed code lists; unknown language/board/class → "not asked", `missing[]` recomputed after normalisation), `generateLeadExtractJson` (route `lead-extract` v1), `POST /api/ai/lead-extract` (class names supplied by the client — the server's masters copy may be cold), `LeadExtractPanel` on the Walk-in enquiry desk: paste email / WhatsApp / call note → tick the fields to apply into the enquiry form (child rows + guardian + concerns + language + summary into the note). Selftest `test:lead-extract-ai` |
+| Was | ❌ (image/PDF path ✅) |
 | Have | `application-extract` for documents; WA bot captures name/class via keyword prompts |
 | Missing | Paste an email / WA thread / call note → structured lead (parent name, child, class sought, source, medium, transport interest, urgency, concerns[]) |
 | Build | `POST /api/ai/lead-extract` → `{ fields, concerns[], missing[] }`; "Paste enquiry text" on the walk-in enquiry tab and the lead panel; writes only fields the user ticks. `concerns[]` saved on the lead (new field `concerns: string[]`) — this is what later follow-ups reference |
@@ -138,7 +139,7 @@ Standing rules for everything below (same as the AI roadmap, restated because ma
 | Instant contextual first response | 🟡 | On new lead (any channel): `lead-followup-draft` auto-runs a "first response" in the lead's language and queues it as a **suggested** message for the counsellor (one-click send), or — if the school opts in per source — sends immediately for website/Google leads within 5 min via the dispatch worker. Log as follow-up channel `whatsapp`, outcome `sent_auto` |
 | Smart FAQ engine | 🟡 → ✅ via §1 | KB-grounded answers in bot + widget; unanswered questions surface as a "KB gaps" list for staff to add approved answers |
 | Virtual assistant on portal | 🟡 | Widget gains `admissions-answer`; logs every thread (already), auto-routes to `needs_staff` when quality is hot or question is outside KB |
-| Document guidance / deficiency | 🟡 | Per-class documents list in KB (§1) + OCR `missing[]` → "Documents still due" checklist on the lead; new preset `admission_deficiency` (what is missing, how to submit, by when) alongside `admission_offer` |
+| Document guidance / deficiency | ✅ 2026-08-19 — `pendingDocumentsForLead` (from the lead's own checklist ticks) shows "Still due: …" on the Registration checklist; new Document-maker preset `admission_deficiency` ("Documents pending letter" link appears on the lead only while something is due; lists exactly the pending items, never adds one) |
 
 Effort: ~2 days after §1.
 
@@ -161,7 +162,7 @@ Effort: ~2 days after §1.
 | Item | Status | Build |
 |---|---|---|
 | 6a. Stalled-lead alerts + re-engagement draft | ✅ 2026-08-19 — `stalledLeadFlags` rules: paid-not-completed (14 d), went-quiet after interest (10 d), digital enquiry not reached (3 d), no follow-up (5 d); each carries a facts-only **hook**; Dashboard KPI "Stalled leads" with detail rows (why · days · quality); lead panel shows the reason and feeds the hook into the follow-up draft. Thresholds are code defaults (`DEFAULT_STALLED_THRESHOLDS`) — not yet in admissions policy UI | Rules in `admissionsAi.ts`: form completed & no reply in N days; registration fee paid & admission not completed; enquiry with no follow-up in N days. Flagged list on the Dashboard tab; "Draft re-engagement" → `lead-followup-draft` with `hook` = open house (from `events`), deadline (KB dates), scholarship (KB criteria) — hook chosen by rule, text by model. Thresholds in admissions policy |
-| 6b. Post-admission churn → retention outreach | 🟡 (at-risk ✅ academic) | At-risk flags (`academicRisk.ts`) + fee overdue + attendance drop → "retention watch" list for the principal; draft parent outreach through the existing `at-risk-notes` style route, sent via household-pref channel/language. Not a new AI route — a new consumer of existing ones |
+| 6b. Post-admission churn → retention outreach | ✅ 2026-08-19 — Exams → At-risk: "Message parent (WhatsApp)" per flagged student — `lib/retentionOutreach.ts` deterministic meeting invitation in the household's language (en/hi/ur/bn; bho/mai → hi) to the household WhatsApp; no model, no assessment text; PTM / follow-up remains the record. Fee-overdue / attendance-drop inputs not merged into one list yet | At-risk flags (`academicRisk.ts`) + fee overdue + attendance drop → "retention watch" list for the principal; draft parent outreach through the existing `at-risk-notes` style route, sent via household-pref channel/language. Not a new AI route — a new consumer of existing ones |
 
 Effort: ~2 days.
 
@@ -214,6 +215,8 @@ Effort: ~2 days after 3a and 2e.
 6. ~~**§2e sequences + §7 event/result/festival campaigns**~~ — shipped 2026-08-19 (no automatic occasion calendar — the office sets the date).
 7. ~~**§5 referral + testimonials**~~ — shipped 2026-08-19.
 8. ~~**§8 unified timeline + attribution report**~~ — shipped 2026-08-19.
-9. **§2a free-text lead extraction, §4 deficiency preset, §6b retention consumer** (~2.5 d).
+9. ~~**§2a free-text lead extraction, §4 deficiency preset, §6b retention consumer**~~ — shipped 2026-08-19.
 
 Total ≈ 25 working days. Items 1–4 (~9 d) are the "single admission cycle" ROI set.
+
+**Status 2026-08-19: all nine items shipped** (PRs #32–#39). Deliberately left for later, all data-or-ops, not code gaps: WA bot asking prospects their language + a DPDP line on bot first contact; campaign delivered/read signals (needs a BSP webhook); event RSVPs as an engagement signal; an automatic occasion calendar; WA inbound `STORY` keyword; stalled-lead thresholds in the admissions policy UI; an AI "where to focus" spend summary. The office now has to **fill the stores**: Knowledge base entries (start with Import fees), Achievements (latest board result), Positioning, spend entries — the generators refuse to invent what is not there.
