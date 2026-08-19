@@ -73,6 +73,7 @@ import { ExamPapersPanel } from "@/components/exams/ExamPapersPanel";
 import { AdmitCardsPanel } from "@/components/exams/AdmitCardsPanel";
 import { RemarksPanel } from "@/components/exams/RemarksPanel";
 import { ItemScoresPanel } from "@/components/exams/ItemScoresPanel";
+import { AtRiskPanel } from "@/components/exams/AtRiskPanel";
 import { ExamReportsRunner } from "@/components/reports/ModuleReportRunners";
 import { hasPermission } from "@/lib/rbac";
 
@@ -80,6 +81,7 @@ type Tab =
   | "dashboard"
   | "marks"
   | "items"
+  | "atrisk"
   | "remarks"
   | "datesheet"
   | "invigilation"
@@ -663,6 +665,7 @@ export function ExamsWorkspace() {
           { id: "dashboard", label: "Dashboard", tone: "navy" },
           { id: "marks", label: "Mark entry", tone: "sky" },
           { id: "items", label: "Item scores", tone: "sky" },
+          { id: "atrisk", label: "At-risk", tone: "coral" },
           { id: "remarks", label: "Remarks", tone: "teal" },
           { id: "datesheet", label: "Date-sheet", tone: "violet" },
           { id: "invigilation", label: "Invigilation", tone: "coral" },
@@ -1683,6 +1686,20 @@ export function ExamsWorkspace() {
           canEdit={!!masters && hasPermission(session, masters, "exams", "edit")}
           enteredBy={session.fullName}
           onSaved={refresh}
+          onFlash={flash}
+          onError={setError}
+        />
+      ) : null}
+
+      {tab === "atrisk" ? (
+        <AtRiskPanel
+          ay={ay}
+          term={term}
+          classId={classId}
+          sectionId={sectionId}
+          roster={roster}
+          masters={masters}
+          canEdit={!!masters && hasPermission(session, masters, "exams", "edit")}
           onFlash={flash}
           onError={setError}
         />

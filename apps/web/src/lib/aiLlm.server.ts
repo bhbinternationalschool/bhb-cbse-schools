@@ -45,6 +45,15 @@ import {
   type PtmBriefFacts,
   type PtmBriefLanguage,
 } from "@/lib/ptmBriefAi";
+import {
+  buildRiskNoteSystemPrompt,
+  buildRiskNoteUserPrompt,
+  parseRiskNotesJson,
+  type RiskFlag,
+  type RiskNoteDraft,
+  type RiskNoteLanguage,
+  type StudentRiskFacts,
+} from "@/lib/academicRisk";
 
 export type LlmEngine = "openai" | "gemini" | "none";
 export type PreferredEngine = "auto" | "openai" | "gemini";
@@ -1180,4 +1189,29 @@ export async function generatePtmBriefJson(opts: {
     error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI PTM briefs",
     engine: r.engine,
   };
+}
+
+/** "What to do" notes for a batch of rule-flagged students. Draft only. */
+export async function generateRiskNotesJson(opts: {
+  students: (StudentRiskFacts & { flags: RiskFlag[] })[];
+  language: RiskNoteLanguage;
+  schoolName: string;
+}): Promise<
+  | { ok: true; notes: RiskNoteDraft[]; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const ids = opts.students.map((s) => s.studentId);
+  const r = await callLlmJson(
+    {
+      system: buildRiskNoteSystemPrompt({ language: opts.language, schoolName: opts.schoolName }),
+      userMessage: buildRiskNoteUserPrompt(opts.students),
+      maxTokens: Math.min(4000, 300 + opts.students.length * (opts.language === "hi" ? 260 : 170)),
+      temperature: 0.5,
+      geminiMaxTokens: Math.min(8192, 2048 + opts.students.length * 400),
+      meta: { route: "at-risk-notes", promptVersion: "v1" },
+    },
+    (text) => parseRiskNotesJson(text, ids),
+  );
+  if (r.ok) return { ok: true, notes: r.data, engine: r.engine, generationId: r.generationId };
+  return { ok: false, error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI notes", engine: r.engine };
 }
