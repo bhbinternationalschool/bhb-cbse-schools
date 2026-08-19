@@ -102,6 +102,8 @@ import { RteWorkspace } from "@/components/rte/RteWorkspace";
 import { AdmissionCampaignsPanel } from "@/components/admissions/AdmissionCampaignsPanel";
 import { AdmissionCrmChatInbox } from "@/components/admissions/AdmissionCrmChatInbox";
 import { AdmissionsKbPanel } from "@/components/admissions/AdmissionsKbPanel";
+import { HOUSEHOLD_LANGUAGES } from "@/lib/householdPrefs";
+import { LEAD_CONCERNS, PREVIOUS_BOARDS } from "@/lib/admissionsEnquiryForm";
 import { AdmissionReportsPanel } from "@/components/admissions/AdmissionReportsPanel";
 
 type AdmTab =
@@ -3050,6 +3052,78 @@ function LeadDetail({
               <option value="English">English</option>
               <option value="Hindi">Hindi</option>
             </select>
+          </Field>
+        </div>
+      </MastersWorkCard>
+
+      <MastersWorkCard title="Family preferences & attribution">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Language for school messages">
+            <select
+              className={inp}
+              disabled={locked || !canEdit}
+              value={lead.preferredLanguage}
+              onChange={(e) => onPatch({ preferredLanguage: e.target.value })}
+            >
+              <option value="">Not asked</option>
+              {HOUSEHOLD_LANGUAGES.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.label} · {l.native}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Previous board (Class VI+)">
+            <select
+              className={inp}
+              disabled={locked || !canEdit}
+              value={lead.previousBoard}
+              onChange={(e) => onPatch({ previousBoard: e.target.value })}
+            >
+              <option value="">Not asked</option>
+              {PREVIOUS_BOARDS.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <div className="sm:col-span-2">
+            <span className="mb-1 block text-[11px] text-[var(--muted)]">What matters most to the family</span>
+            <div className="flex flex-wrap gap-1.5">
+              {LEAD_CONCERNS.map((c) => {
+                const on = lead.concerns.includes(c.id);
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    disabled={locked || !canEdit}
+                    className={`rounded-full border px-2 py-0.5 text-[11px] ${on ? "border-[var(--brand-deep)] bg-[var(--brand-deep)] text-white" : "border-[var(--border)] text-[var(--muted)]"}`}
+                    onClick={() =>
+                      onPatch({ concerns: on ? lead.concerns.filter((x) => x !== c.id) : [...lead.concerns, c.id] })
+                    }
+                  >
+                    {c.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <Field label="Campaign id (attribution)">
+            <input
+              className={inp}
+              disabled={locked || !canEdit}
+              value={lead.campaignId}
+              onChange={(e) => onPatch({ campaignId: e.target.value.trim().slice(0, 80) })}
+              placeholder="from the ad / link, blank = unknown"
+            />
+          </Field>
+          <Field label="Consent (DPDP)">
+            <p className="rounded-lg border border-[var(--border)] px-2 py-1.5 text-xs">
+              {lead.parentConsentAt
+                ? `Given ${new Date(lead.parentConsentAt).toLocaleString("en-IN")}${lead.parentConsentBy ? ` · ${lead.parentConsentBy}` : ""}`
+                : "Not recorded — ask before marketing messages"}
+            </p>
           </Field>
         </div>
       </MastersWorkCard>

@@ -165,6 +165,7 @@ export function StatutoryConfigPanel({
               [
                 ["Employer code", draft.esicEmployerCode || "—"],
                 ["Wage ceiling", `₹${draft.esicWageCeiling}`],
+                ["Employee share exempt up to", draft.esicEmployeeExemptWageLimit > 0 ? `₹${draft.esicEmployeeExemptWageLimit}` : "No exemption"],
                 ["Employee rate", `${draft.esicEmployeeRatePct}%`],
                 ["Employer rate", `${draft.esicEmployerRatePct}%`],
               ] as const
@@ -208,6 +209,7 @@ export function StatutoryConfigPanel({
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Employer code" value={draft.esicEmployerCode} onChange={(v) => set("esicEmployerCode", v)} />
               <Field label="Wage ceiling (₹)" type="number" value={String(draft.esicWageCeiling)} onChange={(v) => set("esicWageCeiling", Number(v) || 0)} />
+              <Field label="Employee share exempt up to (₹/month)" type="number" value={String(draft.esicEmployeeExemptWageLimit)} onChange={(v) => set("esicEmployeeExemptWageLimit", Math.max(0, Number(v) || 0))} />
               <Field label="Employee rate (%)" type="number" value={String(draft.esicEmployeeRatePct)} onChange={(v) => set("esicEmployeeRatePct", Number(v) || 0)} />
               <Field label="Employer rate (%)" type="number" value={String(draft.esicEmployerRatePct)} onChange={(v) => set("esicEmployerRatePct", Number(v) || 0)} />
             </div>

@@ -36,6 +36,8 @@ type RegisterBody = {
   feeHeadId?: string;
   feeHeadName?: string;
   children?: { childName?: string; classSoughtId?: string; feeAmountPaise?: number }[];
+  consent?: boolean;
+  preferredLanguage?: string;
 };
 
 type ConfirmBody = {
@@ -89,6 +91,8 @@ export async function POST(req: Request) {
     feeHeadId: (body.feeHeadId || "").trim(),
     feeHeadName: (body.feeHeadName || "Registration fee").trim(),
     children,
+    consent: body.consent === true,
+    preferredLanguage: String(body.preferredLanguage || "").trim().slice(0, 10),
   });
   if (!r.ok) {
     return NextResponse.json({ ok: false, error: r.reason }, { status: 400 });

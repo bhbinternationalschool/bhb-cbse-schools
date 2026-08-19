@@ -5,6 +5,7 @@
  */
 
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { normalizeHouseholdLanguage } from "@/lib/householdPrefs";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import {
   currentAcademicYearCode,
@@ -172,6 +173,16 @@ export type AdmissionLead = {
   siblingInSchool: boolean;
   referredByStaffId: string;
   campaignNote: string;
+  /** Ad-platform campaign id (Google lead form campaign_id, UTM campaign) — "" = unknown */
+  campaignId: string;
+  /** Family's preferred language for school messages (HouseholdLanguage code); "" = not asked */
+  preferredLanguage: string;
+  /** Board of the previous school for Class VI+ enquiries; "" = not asked */
+  previousBoard: string;
+  /** What the family said matters most (transport, fees, academics…) — drives follow-up drafts */
+  concerns: string[];
+  /** Enrolled household that referred this family (parent referral); "" = none */
+  referredByHouseholdId: string;
   declarationAccepted: boolean;
   registrationFeePaid: boolean;
   registrationFeeNote: string;
@@ -736,6 +747,17 @@ export function emptyAdmissionLead(
     siblingInSchool: !!partial?.siblingInSchool,
     referredByStaffId: partial?.referredByStaffId || "",
     campaignNote: partial?.campaignNote || "",
+    campaignId: String(partial?.campaignId || "").trim().slice(0, 80),
+    preferredLanguage: normalizeHouseholdLanguage(partial?.preferredLanguage),
+    previousBoard: String(partial?.previousBoard || "").trim().slice(0, 40),
+    concerns: Array.isArray(partial?.concerns)
+      ? Array.from(
+          new Set(
+            partial!.concerns.map((c) => String(c || "").trim().toLowerCase().slice(0, 40)).filter(Boolean),
+          ),
+        ).slice(0, 12)
+      : [],
+    referredByHouseholdId: String(partial?.referredByHouseholdId || "").trim().slice(0, 40),
     declarationAccepted: !!partial?.declarationAccepted,
     registrationFeePaid: !!partial?.registrationFeePaid,
     registrationFeeNote: partial?.registrationFeeNote || "",
@@ -3577,6 +3599,9 @@ export function createFamilyRegistrationsFromPublic(
     children: FamilyRegistrationChildDraft[];
     feeHeadName?: string;
     campaignSrc?: string;
+    /** Parent ticked the DPDP consent box */
+    consent?: boolean;
+    preferredLanguage?: string;
   },
   by = "Parent self-register",
 ):
@@ -3616,10 +3641,13 @@ export function createFamilyRegistrationsFromPublic(
   const note = input.campaignSrc
     ? `Parent self-register · ${input.campaignSrc}`
     : "Parent self-register · /register";
+  const consentAt = input.consent ? new Date().toISOString() : "";
   for (const lead of r.leads) {
     next = updateLead(next, lead.id, {
       campaignNote: [lead.campaignNote, note].filter(Boolean).join(" · "),
       source,
+      ...(consentAt ? { declarationAccepted: true, parentConsentAt: consentAt, parentConsentBy: "parent (public register)" } : {}),
+      ...(input.preferredLanguage ? { preferredLanguage: input.preferredLanguage } : {}),
     });
   }
   return {

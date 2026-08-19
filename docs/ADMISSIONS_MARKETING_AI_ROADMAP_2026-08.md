@@ -65,7 +65,8 @@ Standing rules for everything below (same as the AI roadmap, restated because ma
 ### 2b. Dynamic public enquiry form
 | | |
 |---|---|
-| Status | ❌ |
+| Status | ✅ shipped 2026-08-19 — `lib/admissionsEnquiryForm.ts` (pure: `isSeniorClassName`, `enquiryQuestionsFor`, `LEAD_CONCERNS`, `PREVIOUS_BOARDS`, `dpdpNoticeText`; selftest `test:admissions-enquiry-form`). `/apply`: Class VI+ reveals previous board + previous school; transport interest; language for school messages (`HOUSEHOLD_LANGUAGES`); "What matters most" concern chips; RTE/EWS tick; **DPDP consent box required** → `parentConsentAt/By` + `declarationAccepted`; `?c=<campaign>` → `campaignId`. `/register` (local + tokenised server path): language + required consent. New `AdmissionLead` fields (`campaignId`, `preferredLanguage`, `previousBoard`, `concerns[]`, `referredByHouseholdId`) default to ""/[] — never guessed — live in `lead_json` (no migration); Google lead webhook maps `campaign_id` → `campaignId`. CRM lead panel: **Family preferences & attribution** card (language, board, concern chips, campaign id, consent status). Not done: WA bot asking prospects their language (LANG flow is enrolled-only) |
+| Was | ❌ |
 | Build | Deterministic branching (no model needed): class ≥ 6 → previous board + last result; any class → medium; transport interest → locality/stop; RTE eligibility question. Add `preferredLanguage` (from `HOUSEHOLD_LANGUAGES`), `previousBoard`, `locality` to `AdmissionLead`. DPDP consent line + checkbox on `PublicEnquiryForm` / `PublicFamilyRegisterForm` |
 | Effort | ~1 day |
 
@@ -175,13 +176,13 @@ Effort: ~2 days after 3a and 2e.
 
 | Need | Status | Work |
 |---|---|---|
-| Lead fields: `preferredLanguage`, `previousBoard`, `locality`, `concerns[]`, `quality`, `utm`/`campaignId`, `referredByHouseholdId`, `consentAt` | ❌ | `AdmissionLead` + `normalizeAdmissionLead` (all default `""`/`[]` — never guessed); Google lead webhook already carries campaign ids → map to `campaignId` |
+| Lead fields: `preferredLanguage`, `previousBoard`, `locality`, `concerns[]`, `quality`, `utm`/`campaignId`, `referredByHouseholdId`, `consentAt` | 🟡 (2026-08-19: all but `quality` added; `locality`/`parentConsentAt` already existed) | `AdmissionLead` + `normalizeAdmissionLead` (all default `""`/`[]` — never guessed); Google lead webhook already carries campaign ids → map to `campaignId` |
 | Unified communication timeline per lead | 🟡 (3 stores) | Read-only merge view in the lead panel: follow-ups + WA bot thread + campaign messages + widget thread, chronological; the same merge feeds `lead-followup-draft` as "last 5 touchpoints" |
 | Marketing asset library | ❌ | Logo/photos/brand lines; start as a `brand` section in the admissions KB + existing media upload; generators reference brand lines, not images |
 | School knowledge base (admissions) | 🟡 | §1 |
 | Achievements store | ❌ | §3a |
 | Campaign attribution & reporting | 🟡 | `campaignId` on lead → report: leads / registrations / enrolments per campaign & source, cost field per campaign (manual), cost per enrolment; a `leadership-digest` style AI summary of "where to focus" is optional and last |
-| DPDP notice | ❌ | Consent text + checkbox on public forms and bot first contact; `consentAt` stored; retention/deletion note in the lead panel |
+| DPDP notice | 🟡 (2026-08-19: consent text + required checkbox on `/apply` and `/register`, `parentConsentAt/By` stored, status shown in the lead panel; bot first-contact notice still to do) |
 
 ---
 
@@ -199,7 +200,7 @@ Effort: ~2 days after 3a and 2e.
 ## 10. Suggested build order (impact ÷ effort)
 
 1. ~~**§1 Admissions KB + grounded bot/widget answers**~~ — shipped 2026-08-19.
-2. **§8 lead fields + DPDP consent + §2b dynamic form** (~1.5 d) — cheap, needed by everything after.
+2. ~~**§8 lead fields + DPDP consent + §2b dynamic form**~~ — shipped 2026-08-19 (WA-bot language ask + bot DPDP line deferred).
 3. **§2d per-lead follow-up drafts, language + channel** (~2 d) — the most visible counsellor productivity win.
 4. **§2c engagement-aware hot/warm/cold + §6a stalled-lead rules & drafts** (~2.5 d).
 5. **§3a achievements store + marketing-content generator (+3b, 3c)** (~4 d) — results-season readiness.

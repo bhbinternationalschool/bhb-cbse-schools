@@ -634,11 +634,14 @@ export function resolveStructureForStaff(
  *   - ESIC: the ceiling is an eligibility threshold — staff whose gross is
  *     above esicWageCeiling (₹21,000) are outside ESIC, so both ESIC heads
  *     drop to 0 for them.
+ *   - ESIC low-wage exemption: gross up to esicEmployeeExemptWageLimit
+ *     (₹5,000) → employee share 0, employer share still payable.
  */
 export type StatutoryCeilings = {
   applyEpfWageCeiling: boolean;
   epfWageCeiling: number;
   esicWageCeiling: number;
+  esicEmployeeExemptWageLimit: number;
 };
 
 export function statutoryCeilingsFrom(
@@ -648,6 +651,10 @@ export function statutoryCeilingsFrom(
     applyEpfWageCeiling: cfg?.applyEpfWageCeiling !== false,
     epfWageCeiling: Number(cfg?.epfWageCeiling) > 0 ? Number(cfg?.epfWageCeiling) : 15000,
     esicWageCeiling: Number(cfg?.esicWageCeiling) > 0 ? Number(cfg?.esicWageCeiling) : 21000,
+    esicEmployeeExemptWageLimit:
+      cfg?.esicEmployeeExemptWageLimit === undefined || cfg?.esicEmployeeExemptWageLimit === null
+        ? 5000
+        : Math.max(0, Number(cfg.esicEmployeeExemptWageLimit) || 0),
   };
 }
 
@@ -714,8 +721,17 @@ export function computeStructureAmounts(
   }
   const gross = earnings.reduce((s, e) => s + e.amount, 0);
   const esicEligible = gross <= ceilings.esicWageCeiling;
+  // Low-wage staff: no employee ESIC share, employer share still due.
+  const esicEmployeeExempt =
+    ceilings.esicEmployeeExemptWageLimit > 0 && gross <= ceilings.esicEmployeeExemptWageLimit;
   for (const { head, line } of statutoryLines) {
-    const amount = isEsicHeadCode(head.code) && !esicEligible ? 0 : lineAmount(head, line);
+    const isEsic = isEsicHeadCode(head.code);
+    const amount =
+      isEsic && !esicEligible
+        ? 0
+        : isEsic && head.kind === "deduction" && esicEmployeeExempt
+          ? 0
+          : lineAmount(head, line);
     const row = { head, amount };
     if (head.kind === "deduction") deductions.push(row);
     else employer.push(row);

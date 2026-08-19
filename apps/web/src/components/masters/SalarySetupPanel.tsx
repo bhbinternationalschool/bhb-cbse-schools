@@ -1198,7 +1198,8 @@ function AssignPanel({
                               <span className="font-semibold text-[var(--foreground)]">ESIC</span>{" "}
                               {savedEsicEe + savedEsicEr > 0 ? (
                                 <>
-                                  {inr(savedEsicEe)} <span className="opacity-70">emp</span> + {inr(savedEsicEr)}{" "}
+                                  {inr(savedEsicEe)} <span className="opacity-70">emp</span>
+                                  {savedEsicEe === 0 ? <span className="opacity-70"> (exempt)</span> : null} + {inr(savedEsicEr)}{" "}
                                   <span className="opacity-70">employer</span>
                                 </>
                               ) : (
