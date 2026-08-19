@@ -19,7 +19,7 @@ import {
   type StudentRiskResult,
 } from "@/lib/academicRisk";
 import { buildSectionRiskFacts } from "@/lib/academicRiskFacts";
-import type { ExamTerm } from "@/lib/exams";
+import type { ExamPolicy, ExamTerm } from "@/lib/exams";
 import type { MastersState } from "@/lib/masters";
 import type { SisStudent } from "@/lib/sis";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
@@ -39,11 +39,13 @@ export function AtRiskPanel(props: {
   sectionId: string;
   roster: SisStudent[];
   masters: MastersState | null;
+  policy: ExamPolicy;
   canEdit: boolean;
   onFlash: (msg: string) => void;
   onError: (msg: string) => void;
 }) {
   const { ay, term, classId, sectionId, roster, masters, canEdit } = props;
+  const thresholds = props.policy.riskThresholds;
   const [showAll, setShowAll] = useState(false);
   const [language, setLanguage] = useState<"en" | "hi">("en");
   const [busy, setBusy] = useState(false);
@@ -59,10 +61,10 @@ export function AtRiskPanel(props: {
       academicYearCode: ay,
     });
     const rows = facts
-      .map((f) => ({ facts: f, result: assessStudentRisk(f) }))
+      .map((f) => ({ facts: f, result: assessStudentRisk(f, thresholds) }))
       .sort((a, b) => b.result.score - a.result.score || a.facts.fullName.localeCompare(b.facts.fullName));
     return { rows, prevLabels: previousTermLabels };
-  }, [ay, term, masters, roster]);
+  }, [ay, term, masters, roster, thresholds]);
 
   const flagged = rows.filter((r) => r.result.level !== "none");
   const counts = {
@@ -80,7 +82,7 @@ export function AtRiskPanel(props: {
       const res = await fetch("/api/ai/at-risk-notes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ language, students }),
+        body: JSON.stringify({ language, students, thresholds }),
       });
       const json = (await res.json()) as {
         ok?: boolean;
@@ -179,9 +181,10 @@ export function AtRiskPanel(props: {
       </div>
 
       <p className="text-[11px] text-[var(--muted)]">
-        Rules: overall grade dropped a band vs the previous exam · ≥2 subjects slipped a band · any subject below pass ·
-        attendance &lt; 75 % · ≥3 conduct incidents or any escalation · homework &lt; 60 % of due (≥5 due). A source with
-        no data for a student never counts for or against them.
+        Rules: overall grade dropped a band vs the previous exam · ≥{thresholds.subjectDrops} subjects slipped a band ·
+        any subject below pass · attendance &lt; {thresholds.attendancePct} % · ≥{thresholds.incidents} conduct incidents
+        or any escalation · homework &lt; {Math.round(thresholds.homeworkRatio * 100)} % of due (≥{thresholds.homeworkMinDue} due).
+        A source with no data for a student never counts for or against them. Thresholds: Exams &amp; policy.
       </p>
 
       {visible.length === 0 ? (

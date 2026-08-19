@@ -97,6 +97,17 @@ export type ExamPolicy = {
    * ratings on the marks-entry grid and printed report card. Opt-in
    * (defaults false) so it never appears on a report unannounced. */
   enableCoScholastic: boolean;
+  /**
+   * Early-warning thresholds for the At-risk tab (lib/academicRisk.ts).
+   * Absent → DEFAULT_RISK_THRESHOLDS; the school tunes them here.
+   */
+  riskThresholds: {
+    attendancePct: number;
+    incidents: number;
+    homeworkRatio: number;
+    homeworkMinDue: number;
+    subjectDrops: number;
+  };
 };
 
 export type ExamSubject = {
@@ -437,6 +448,7 @@ export function defaultExamPolicy(): ExamPolicy {
     defaultRequiresSeparateMarksheet: true,
     requireAllSubjectsPassForPromotion: true,
     enableCoScholastic: false,
+    riskThresholds: { attendancePct: 75, incidents: 3, homeworkRatio: 0.6, homeworkMinDue: 5, subjectDrops: 2 },
   };
 }
 
@@ -487,6 +499,23 @@ export function normalizeExamPolicy(
     requireAllSubjectsPassForPromotion:
       p.requireAllSubjectsPassForPromotion !== false,
     enableCoScholastic: !!p.enableCoScholastic,
+    riskThresholds: normalizeRiskThresholds(p.riskThresholds),
+  };
+}
+
+function normalizeRiskThresholds(
+  r: Partial<ExamPolicy["riskThresholds"]> | null | undefined,
+): ExamPolicy["riskThresholds"] {
+  const d = { attendancePct: 75, incidents: 3, homeworkRatio: 0.6, homeworkMinDue: 5, subjectDrops: 2 };
+  if (!r) return d;
+  const n = (v: unknown, lo: number, hi: number, dflt: number) =>
+    typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : dflt;
+  return {
+    attendancePct: n(r.attendancePct, 0, 100, d.attendancePct),
+    incidents: Math.floor(n(r.incidents, 1, 50, d.incidents)),
+    homeworkRatio: n(r.homeworkRatio, 0, 1, d.homeworkRatio),
+    homeworkMinDue: Math.floor(n(r.homeworkMinDue, 1, 100, d.homeworkMinDue)),
+    subjectDrops: Math.floor(n(r.subjectDrops, 1, 20, d.subjectDrops)),
   };
 }
 

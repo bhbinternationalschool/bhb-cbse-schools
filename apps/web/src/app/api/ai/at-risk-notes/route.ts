@@ -19,6 +19,7 @@ import {
   assessStudentRisk,
   chunkRiskStudents,
   cleanRiskFacts,
+  DEFAULT_RISK_THRESHOLDS,
   RISK_NOTES_MAX_STUDENTS,
   type RiskNoteDraft,
   type RiskNoteLanguage,
@@ -48,7 +49,7 @@ export async function POST(req: Request) {
   if (!hasPermission(session, masters, "exams", "edit")) {
     return NextResponse.json({ error: "Exams edit permission required" }, { status: 403 });
   }
-  let body: { language?: unknown; students?: unknown };
+  let body: { language?: unknown; students?: unknown; thresholds?: unknown };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -59,9 +60,20 @@ export async function POST(req: Request) {
     .map(cleanRiskFacts)
     .filter((f): f is NonNullable<typeof f> => !!f)
     .slice(0, RISK_NOTES_MAX_STUDENTS);
-  // Server-side re-assessment — the client's flags are advisory only.
+  // Server-side re-assessment — the client's flags are advisory only. The
+  // school's own thresholds are honoured (bounded); anything else → defaults.
+  const t = (body.thresholds ?? {}) as Record<string, unknown>;
+  const num = (v: unknown, lo: number, hi: number, d: number) =>
+    typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d;
+  const thresholds = {
+    attendancePct: num(t.attendancePct, 0, 100, DEFAULT_RISK_THRESHOLDS.attendancePct),
+    incidents: Math.floor(num(t.incidents, 1, 50, DEFAULT_RISK_THRESHOLDS.incidents)),
+    homeworkRatio: num(t.homeworkRatio, 0, 1, DEFAULT_RISK_THRESHOLDS.homeworkRatio),
+    homeworkMinDue: Math.floor(num(t.homeworkMinDue, 1, 100, DEFAULT_RISK_THRESHOLDS.homeworkMinDue)),
+    subjectDrops: Math.floor(num(t.subjectDrops, 1, 20, DEFAULT_RISK_THRESHOLDS.subjectDrops)),
+  };
   const flagged = facts
-    .map((f) => ({ ...f, flags: assessStudentRisk(f).flags }))
+    .map((f) => ({ ...f, flags: assessStudentRisk(f, thresholds).flags }))
     .filter((f) => f.flags.length > 0);
   if (flagged.length === 0) {
     return NextResponse.json({ error: "No flagged students in the request" }, { status: 400 });
