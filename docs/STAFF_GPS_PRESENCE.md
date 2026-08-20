@@ -8,6 +8,8 @@
 - recovery → "Returned" / "Sharing resumed".
 Each state change WhatsApps the configured recipients (owner, admin, principal) **once** — no repeat spam — and is logged with the alert delivery result.
 
+**Mobile app (recommended, 2026-08-20):** the BHB staff app now has **School presence** (teacher home card / principal quick action). Staff tap "I agree — start sharing" once; an Android **foreground service** then pings every few minutes **even with the app closed and the screen off**, showing a permanent "School presence — sharing" notification (on-premises / distance / last-sent). The service reads the school's config each tick: outside school timing it does not touch the GPS at all; if the school disables the feature it idles; a logged-out session stops it; it restarts after a phone reboot. Staff must choose **"Allow all the time"** for location (Android 10+). Battery-saver settings on some phones (Xiaomi/Oppo/Vivo) can kill background services — staff should exempt the app from battery optimisation; a killed service simply looks like "location off" and is flagged, so the incentive is aligned. iOS is best-effort (foreground + short background).
+
 **Honest limitation (web):** a phone browser only reports location while the page is open. Staff must keep the "My presence" page open (it takes a screen wake-lock). A closed page is indistinguishable from location-off — and is flagged as exactly that, which is the behaviour asked for. Thresholds (default: 20 min stale, 10 min outside grace, 150 m radius + 60 m GPS tolerance) absorb short phone locks; tighten or relax in settings.
 
 **Privacy / DPDP (built in, deliberate):**
@@ -20,7 +22,7 @@ Each state change WhatsApps the configured recipients (owner, admin, principal) 
 
 **Setup:**
 1. Staff → GPS presence → set radius/timing/thresholds, add recipient mobiles, tick **Enable**, Save.
-2. Ask staff to open Staff → My presence on their phone once and tap "I agree — start sharing"; their login must be linked to their staff record (Staff → Login).
+2. Ask staff to sign in to the **BHB staff app** and tap School presence → "I agree — start sharing" (choose "Allow all the time"), or use the web page Staff → My presence (page must stay open); their login must be linked to their staff record (Staff → Login).
 3. `bash scripts/setup-cloud-scheduler.sh` (adds `bhb-staff-geo-tick`, every 5 min).
 
 Tables: `staff_geo_last` (one row per staff, upserted), `staff_geo_incidents`; settings/consents in `module_local_state("staff_geo_settings")`. Migration `20260820090000_staff_geo` applied to prod.

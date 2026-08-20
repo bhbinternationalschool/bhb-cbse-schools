@@ -10,6 +10,7 @@ import "attendance_screen.dart";
 import "broadcast_screen.dart";
 import "principal_lists.dart";
 import "section_picker.dart";
+import "presence_screen.dart";
 import "self_attendance_screen.dart";
 import "students_screen.dart";
 
@@ -475,6 +476,12 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                         tone: ModuleTone.teal,
                         onTap: () =>
                             _push(SelfAttendanceScreen(api: widget.api)),
+                      ),
+                      _Action(
+                        icon: Icons.my_location,
+                        label: "School presence",
+                        tone: ModuleTone.green,
+                        onTap: () => _push(PresenceScreen(api: widget.api)),
                       ),
                     ],
                   ),

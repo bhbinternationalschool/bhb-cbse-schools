@@ -7,6 +7,7 @@ import "../modules/homework_screen.dart";
 import "../modules/module_shell.dart";
 import "../modules/notices_screen.dart";
 import "../modules/syllabus_scan_screen.dart";
+import "presence_screen.dart";
 import "../modules/teaching_screen.dart";
 import "attendance_screen.dart";
 import "section_picker.dart";
@@ -417,6 +418,44 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                       ),
                       subtitle: const Text(
                         "GPS punch in / out from campus",
+                        style:
+                            TextStyle(fontSize: 11.5, color: AppColors.muted),
+                      ),
+                      trailing: const Icon(Icons.chevron_right,
+                          color: AppColors.muted),
+                    ),
+                  ),
+                  Card(
+                    margin: const EdgeInsets.only(bottom: 16),
+                    child: ListTile(
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => PresenceScreen(api: widget.api),
+                        ),
+                      ),
+                      leading: Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: ModuleTone.green.background,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          Icons.my_location,
+                          color: ModuleTone.green.foreground,
+                          size: 22,
+                        ),
+                      ),
+                      title: const Text(
+                        "School presence",
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.ink,
+                        ),
+                      ),
+                      subtitle: const Text(
+                        "Share location during school hours (works with app closed)",
                         style:
                             TextStyle(fontSize: 11.5, color: AppColors.muted),
                       ),
