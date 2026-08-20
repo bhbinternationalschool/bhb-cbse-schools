@@ -3843,7 +3843,56 @@ export type StudentSearchHit = {
   household: Household | null;
   classLabel: string;
   balancePaise: number;
+  /**
+   * Why this student matched — "father: Rakesh Kumar", "class: 4". Shown on
+   * the counter so a clerk can trust a hit that does not carry the typed
+   * words in the child's own name. Empty when the query was empty.
+   */
+  matchReasons?: string[];
 };
+
+/** One searchable field of a student: its label and the value to match. */
+function studentSearchFields(
+  st: SisStudent,
+  hh: Household | null,
+  classLabel: string,
+): { label: string; value: string }[] {
+  return [
+    { label: "name", value: st.fullName },
+    { label: "adm no", value: st.admissionNo },
+    { label: "father", value: st.fatherName ?? "" },
+    { label: "mother", value: st.motherName ?? "" },
+    { label: "guardian", value: hh?.guardianName ?? "" },
+    { label: "class", value: classLabel },
+    { label: "mobile", value: hh?.mobile ?? "" },
+    { label: "WhatsApp", value: hh?.whatsappMobile ?? "" },
+    { label: "father's mobile", value: st.fatherMobile ?? "" },
+    { label: "mother's mobile", value: st.motherMobile ?? "" },
+  ];
+}
+
+/**
+ * Every typed word must match some field (AND across words, OR across
+ * fields) — "rakesh 4" finds Rakesh's children in class 4, not everyone
+ * named Rakesh plus everyone in class 4. Returns null when nothing matched.
+ */
+function matchStudentQuery(
+  fields: { label: string; value: string }[],
+  words: string[],
+): string[] | null {
+  const reasons = new Map<string, string>();
+  for (const word of words) {
+    // A bare 1–2 digit word is a class ("4", "12"), not a fragment of an
+    // admission number or a phone — ADM-0412 and 9990004111 both contain
+    // "4", and matching those made "rakesh 4" return the whole family.
+    const classOnly = /^\d{1,2}$/.test(word);
+    const pool = classOnly ? fields.filter((f) => f.label === "class") : fields;
+    const hit = pool.find((f) => f.value && f.value.toLowerCase().includes(word));
+    if (!hit) return null;
+    if (hit.label !== "name") reasons.set(hit.label, `${hit.label}: ${hit.value}`);
+  }
+  return [...reasons.values()];
+}
 
 function normAyCode(code: string): string {
   const t = (code || "").trim().replace(/\s+/g, "").replace(/–/g, "-");
@@ -3907,17 +3956,25 @@ export function searchFeeStudents(
   if (sectionId) {
     list = list.filter((st) => st.sectionId === sectionId);
   }
+  const labelOf = (st: SisStudent) => {
+    const sec = sectionName(st.sectionId);
+    return sec
+      ? `${className(st.classId)}-${sec}`
+      : className(st.classId);
+  };
+  // Why each student matched — attached to the hit so the counter can show it.
+  const reasonsById = new Map<string, string[]>();
   if (q) {
+    const words = q.split(/\s+/).filter(Boolean);
     list = list.filter((st) => {
-      const hh = householdById.get(st.householdId);
-      return (
-        st.fullName.toLowerCase().includes(q) ||
-        st.admissionNo.toLowerCase().includes(q) ||
-        (hh?.mobile ?? "").includes(q) ||
-        (hh?.whatsappMobile ?? "").includes(q) ||
-        (hh?.guardianName ?? "").toLowerCase().includes(q) ||
-        (st.fatherName ?? "").toLowerCase().includes(q)
+      const hh = householdById.get(st.householdId) ?? null;
+      const reasons = matchStudentQuery(
+        studentSearchFields(st, hh, labelOf(st)),
+        words,
       );
+      if (!reasons) return false;
+      reasonsById.set(st.id, reasons);
+      return true;
     });
   }
 
@@ -3935,8 +3992,9 @@ export function searchFeeStudents(
       return {
         student,
         household: hh,
-        classLabel: `${className(student.classId)}-${sectionName(student.sectionId)}`,
+        classLabel: labelOf(student),
         balancePaise,
+        matchReasons: reasonsById.get(student.id) ?? [],
       };
     })
     .sort((a, b) => a.student.fullName.localeCompare(b.student.fullName));

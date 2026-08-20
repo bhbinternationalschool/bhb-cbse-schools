@@ -181,6 +181,7 @@ jobs:
           npm run test:playbook
           npm run test:erp-chat
           npm run test:wa-templates-automation
+          npm run test:fee-student-search
 
   build:
     name: Production build

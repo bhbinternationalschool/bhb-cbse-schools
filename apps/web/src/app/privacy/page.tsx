@@ -1,4 +1,10 @@
 import type { Metadata } from "next";
+import { PublicChrome } from "@/components/public/PublicChrome";
+import {
+  ADDRESS_ONE_LINE,
+  TRADING_NAME,
+  displayLegalName,
+} from "@/lib/publicOrgProfile";
 
 export const metadata: Metadata = {
   title: "Privacy Policy — BHB International School",
@@ -12,6 +18,7 @@ export const metadata: Metadata = {
  */
 export default function PrivacyPolicyPage() {
   return (
+    <PublicChrome>
     <main className="mx-auto max-w-3xl px-6 py-12 text-[15px] leading-7 text-slate-800">
       <h1 className="text-2xl font-bold text-slate-900">
         Privacy Policy — BHB International School App
@@ -19,12 +26,11 @@ export default function PrivacyPolicyPage() {
       <p className="mt-2 text-sm text-slate-500">Last updated: 13 August 2026</p>
 
       <p className="mt-6">
-        The BHB International School mobile app and web portal
-        (bhbinternational.school) are operated by BHB International School,
-        Piyamilan Chauraha, Baniyavapar, Ayar, Varanasi, Uttar Pradesh 221202,
-        India (&ldquo;the School&rdquo;). This policy explains what data the
-        app handles and why. It applies to parents, guardians, students and
-        staff who use the app.
+        The {TRADING_NAME} mobile app and web portal
+        (bhbinternational.school) are operated by {displayLegalName()},{" "}
+        {ADDRESS_ONE_LINE} (&ldquo;the School&rdquo;). This policy explains
+        what data the app handles and why. It applies to parents, guardians,
+        students and staff who use the app.
       </p>
 
       <h2 className="mt-8 text-lg font-semibold text-slate-900">
@@ -117,8 +123,7 @@ export default function PrivacyPolicyPage() {
 
       <h2 className="mt-8 text-lg font-semibold text-slate-900">Contact</h2>
       <p className="mt-3">
-        BHB International School, Piyamilan Chauraha, Baniyavapar, Ayar,
-        Varanasi, Uttar Pradesh 221202, India.
+        {displayLegalName()}, {ADDRESS_ONE_LINE}.
         <br />
         Email:{" "}
         <a
@@ -134,5 +139,6 @@ export default function PrivacyPolicyPage() {
         will also be announced in the app&rsquo;s Notices section.
       </p>
     </main>
+    </PublicChrome>
   );
 }

@@ -1279,6 +1279,11 @@ h3,
 .dark .bg-\[\#f8faf8\],
 .dark .bg-\[\#f5f8fb\] { background-color: var(--surface-sunken); }
 .dark .border-slate-200 { border-color: var(--border); }
+/* `text-blue-700` inline links on the public/legal pages (privacy, terms,
+   refund, about): a 700-weight blue on the near-black dark background lands
+   around 2.4:1. Lift it to the light-blue ramp so the links stay legible. */
+.dark .text-blue-700,
+.dark .text-blue-600 { color: #7dabf8; }
 /* `bg-[var(--brand-deep)] text-white` (167 sites — primary buttons, active
    navy tabs, badges): --brand-deep flips to a LIGHT text colour in dark
    mode, so these became white-on-white. Keep them a solid deep navy that
