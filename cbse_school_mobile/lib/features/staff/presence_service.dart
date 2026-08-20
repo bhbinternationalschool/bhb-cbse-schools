@@ -130,6 +130,7 @@ Future<void> presenceServiceEntry(ServiceInstance service) async {
               "lat": pos.latitude,
               "lng": pos.longitude,
               "accuracyM": pos.accuracy.round(),
+              "mocked": pos.isMocked,
               "device": "flutter-bg",
             }),
           )
@@ -140,6 +141,12 @@ Future<void> presenceServiceEntry(ServiceInstance service) async {
       }
       if (res.statusCode == 428) {
         _setNotification(service, "School presence", "Open the app once to give consent");
+        return;
+      }
+      if (res.statusCode == 400) {
+        final j = jsonDecode(res.body) as Map<String, dynamic>;
+        final err = (j["error"] as String?) ?? "Ping rejected";
+        _setNotification(service, "School presence — problem", err.length > 90 ? "${err.substring(0, 90)}…" : err);
         return;
       }
       final j = jsonDecode(res.body) as Map<String, dynamic>;

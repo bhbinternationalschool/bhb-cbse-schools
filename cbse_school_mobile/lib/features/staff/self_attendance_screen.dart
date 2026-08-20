@@ -108,6 +108,12 @@ class _SelfAttendanceScreenState extends State<SelfAttendanceScreen> {
   Future<void> _punch(String kind) async {
     final pos = _position;
     if (pos == null || _punching) return;
+    if (pos.isMocked) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text(
+              "Mock location is ON (fake-GPS app / developer setting). Disable it — mock punches are rejected and flagged.")));
+      return;
+    }
     setState(() => _punching = true);
     try {
       final result = await widget.api.punchAttendance(
@@ -115,6 +121,7 @@ class _SelfAttendanceScreenState extends State<SelfAttendanceScreen> {
         lat: pos.latitude,
         lng: pos.longitude,
         accuracyM: pos.accuracy,
+        mocked: pos.isMocked,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(

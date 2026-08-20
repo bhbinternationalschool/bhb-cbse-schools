@@ -1886,12 +1886,14 @@ class ApiClient {
     required double lat,
     required double lng,
     double? accuracyM,
+    bool mocked = false,
   }) async {
     final data = await _postData("/api/v1/staff/attendance/punch", {
       "kind": kind,
       "lat": lat,
       "lng": lng,
       "accuracyM": ?accuracyM,
+      "mocked": mocked,
     });
     return PunchResult(
       kind: (data["kind"] as String?) ?? kind,

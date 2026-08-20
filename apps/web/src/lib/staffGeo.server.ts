@@ -16,6 +16,7 @@ import { loadMasters, type MastersState } from "@/lib/masters";
 import { loadStaffAttendance, findStaffRegister, type StaffAttendanceState } from "@/lib/staffAttendance";
 import {
   evaluateStaffGeo,
+  implausibleJump,
   inTrackingWindow,
   isInsideFence,
   istParts,
@@ -73,6 +74,8 @@ export async function recordStaffPing(input: {
   accuracyM: number;
   device: string;
   consent?: boolean;
+  /** Android geolocator isMocked — a mock provider is feeding coordinates */
+  mocked?: boolean;
 }): Promise<
   | { ok: true; inside: boolean; distanceM: number; tracking: boolean; consented: true }
   | { ok: false; error: string; needsConsent?: boolean }
@@ -91,11 +94,19 @@ export async function recordStaffPing(input: {
   if (!Number.isFinite(input.lat) || !Number.isFinite(input.lng) || Math.abs(input.lat) > 90 || Math.abs(input.lng) > 180) {
     return { ok: false, error: "Invalid coordinates" };
   }
+  if (input.mocked === true) {
+    // Refusing the ping stops the stream → the tick raises "location off",
+    // which is exactly the incident a fake-GPS phone deserves.
+    return { ok: false, error: "Mock location detected — disable the fake-GPS app; this is reported as location-off during school timing" };
+  }
   const accuracyM = Math.min(9999, Math.max(0, Math.round(Number(input.accuracyM) || 0)));
   const { inside, distance } = isInsideFence(st.settings, { lat: input.lat, lng: input.lng, accuracyM });
   const now = new Date();
   // outside_since: keep the start of a continuous outside stretch.
-  const { data: prev } = await ctx.sb.from("staff_geo_last").select("outside_since").eq("tenant_id", ctx.tenantId).eq("staff_id", input.staffId).maybeSingle();
+  const { data: prev } = await ctx.sb.from("staff_geo_last").select("outside_since, at, lat, lng").eq("tenant_id", ctx.tenantId).eq("staff_id", input.staffId).maybeSingle();
+  if (prev?.at && implausibleJump({ lat: Number(prev.lat), lng: Number(prev.lng), at: String(prev.at) }, { lat: input.lat, lng: input.lng, at: now.toISOString() })) {
+    return { ok: false, error: "Location jump is not physically possible — ping rejected (spoofing suspected)" };
+  }
   const outsideSince = inside ? null : (prev?.outside_since as string | null) || now.toISOString();
   const { error } = await ctx.sb.from("staff_geo_last").upsert(
     {

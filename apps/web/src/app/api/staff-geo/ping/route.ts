@@ -25,7 +25,7 @@ export async function POST(req: Request) {
   const session = await getDemoSession();
   if (!session || session.persona !== "staff") return NextResponse.json({ error: "Staff login required" }, { status: 403 });
   if (!session.staffId) return NextResponse.json({ error: "Your login is not linked to a staff record — ask the office to link it (Staff → Login)" }, { status: 400 });
-  let body: { lat?: number; lng?: number; accuracyM?: number; consent?: boolean; device?: string };
+  let body: { lat?: number; lng?: number; accuracyM?: number; consent?: boolean; device?: string; mocked?: boolean };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -38,6 +38,7 @@ export async function POST(req: Request) {
     accuracyM: Number(body.accuracyM) || 0,
     device: String(body.device || "").slice(0, 120),
     consent: body.consent === true,
+    mocked: body.mocked === true,
   });
   if (!r.ok) return NextResponse.json({ ok: false, error: r.error, needsConsent: r.needsConsent }, { status: r.needsConsent ? 428 : 400 });
   return NextResponse.json({ ok: true, inside: r.inside, distanceM: r.distanceM, tracking: r.tracking });
