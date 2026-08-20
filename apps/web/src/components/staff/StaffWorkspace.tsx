@@ -69,6 +69,9 @@ import { TeacherAssignmentsPanel } from "@/components/staff/TeacherAssignmentsPa
 import { TeachingAllocationPanel } from "@/components/staff/TeachingAllocationPanel";
 import { DocVerificationQueuePanel } from "@/components/students/DocVerificationQueuePanel";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { StaffPresenceCard } from "@/components/staff/StaffPresenceCard";
+import { StaffGeoAdminPanel } from "@/components/staff/StaffGeoAdminPanel";
+import { hasPermission } from "@/lib/rbac";
 
 type NamedCount = ErpChartRow;
 
@@ -106,7 +109,9 @@ type StaffMainTab =
   | "payslips"
   | "my_docs"
   | "doc_verify"
-  | "agreements";
+  | "agreements"
+  | "presence"
+  | "gps";
 
 export function StaffWorkspace() {
   const router = useRouter();
@@ -132,6 +137,8 @@ export function StaffWorkspace() {
       "my_docs",
       "doc_verify",
       "agreements",
+      "presence",
+      "gps",
     ];
     if (raw && (allowed as string[]).includes(raw)) setTab(raw as StaffMainTab);
   }, []);
@@ -363,6 +370,8 @@ export function StaffWorkspace() {
           { id: "appraisal", label: "Appraisal", tone: "violet" },
           { id: "payslips", label: "Payslips", tone: "green" },
           { id: "reports", label: "Reports", tone: "amber" },
+          { id: "presence", label: "My presence", tone: "green" },
+          { id: "gps", label: "GPS presence", tone: "coral" },
         ]}
       />
 
@@ -426,6 +435,14 @@ export function StaffWorkspace() {
       {tab === "leave" ? <StaffLeavePanel ay={ay} /> : null}
       {tab === "requests" ? <StaffRequestsPanel /> : null}
       {tab === "outdoor_duty" ? <StaffOutdoorDutyPanel /> : null}
+      {tab === "presence" ? (
+        <div className="mt-4 max-w-xl">
+          <StaffPresenceCard />
+        </div>
+      ) : null}
+      {tab === "gps" ? (
+        <StaffGeoAdminPanel canEdit={hasPermission(session, state ?? loadMasters(), "staff", "edit")} />
+      ) : null}
       {tab === "reports" ? (
         <StaffLeaveReportsPanel ay={ay} scope="leave" />
       ) : null}

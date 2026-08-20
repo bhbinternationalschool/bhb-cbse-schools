@@ -118,6 +118,12 @@ create_job "bhb-birthday-tick" "5 * * * *" \
   "${APP_URL}/api/birthday/tick" \
   "Asia/Kolkata"
 
+# Staff GPS presence: evaluates geofence/staleness and alerts on state
+# changes; no-op outside school timing and when the feature is off.
+create_job "bhb-staff-geo-tick" "*/5 * * * *" \
+  "${APP_URL}/api/staff-geo/tick" \
+  "Asia/Kolkata"
+
 echo ""
 echo "Done. Jobs in $REGION:"
 gcloud scheduler jobs list --location="$REGION" --format="table(name,schedule,state)"
