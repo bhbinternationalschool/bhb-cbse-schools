@@ -1421,6 +1421,18 @@ class ApiClient {
 
   Future<String?> sessionCookie() => _storage.read(key: _cookieKey);
 
+  /// Public base URL (for screens/services that build their own requests).
+  String get baseUrl => config.apiBaseUrl;
+
+  /// Raw JSON POST with the session cookie — for endpoints that return the
+  /// whole body (not the {data} envelope), e.g. /api/staff-geo/ping.
+  Future<Map<String, dynamic>> postJson(String path, Map<String, dynamic> body) async {
+    final res = await http.post(_uri(path), headers: await _authHeaders(), body: jsonEncode(body));
+    final decoded = jsonDecode(res.body.isEmpty ? "{}" : res.body) as Map<String, dynamic>;
+    if (res.statusCode >= 500) _throwFrom(res);
+    return decoded;
+  }
+
   Future<String?> guardianName() => _storage.read(key: _guardianKey);
 
   Future<bool> hasSession() async =>

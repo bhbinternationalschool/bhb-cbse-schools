@@ -68,6 +68,8 @@
 	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Your location is used only while punching attendance or recording that you taught a period, to confirm you are on the school campus.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>During school timing the app shares your location with the school to confirm presence on campus, including when the app is closed. Only your latest position is kept.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>The camera is used to photograph a textbook contents page so chapters can be added to the syllabus plan.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
@@ -79,6 +81,8 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
+		<string>location</string>
+		<string>fetch</string>
 	</array>
 </dict>
 </plist>
