@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cachedDeskJson, deskJsonResponse } from "@/lib/deskProbeCache.server";
 import { stripEmptyList } from "@/lib/wirePayload";
 import {
   authorizeSchoolDataDesk,
@@ -21,34 +22,43 @@ export const runtime = "nodejs";
 export async function GET(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["sis-roster"], "GET");
   if (!auth.ok) return auth.response
-  const { bundle, meta, ok } = sisIdentitySplitEnabled()
-    ? await fetchSisFromDbViaIdentitySplit()
-    : await fetchSisFromDb();
-  if (!ok) {
+  try {
+    const result = await cachedDeskJson({
+      cacheKey: "sis-roster",
+      tables: ["sis_students", "sis_households", "sis_enrollments", "sis_student_identities"],
+      ifNoneMatch: req.headers.get("if-none-match"),
+      build: async () => {
+        const { bundle, meta, ok } = sisIdentitySplitEnabled()
+          ? await fetchSisFromDbViaIdentitySplit()
+          : await fetchSisFromDb();
+        if (!ok) throw new Error("SIS roster fetch failed — tenant/db unavailable");
+        // Same lossless strip as admissions — normalizeStudent defaults absent
+        // fields to "" exactly as an empty value would. See lib/wirePayload.ts.
+        const lean = process.env.LEAN_WIRE_PAYLOAD?.trim().toLowerCase();
+        const leanOn = lean === "true" || lean === "1";
+        return {
+          ok: true,
+          households: leanOn
+            ? stripEmptyList(bundle.households as unknown as Record<string, unknown>[])
+            : bundle.households,
+          students: leanOn
+            ? stripEmptyList(bundle.students as unknown as Record<string, unknown>[])
+            : bundle.students,
+          householdCount: bundle.households.length,
+          studentCount: bundle.students.length,
+          // Unknown meta is reported as "", not as "now" (see desk-slice route).
+          updatedAt: meta?.updatedAt || "",
+          meta,
+        };
+      },
+    });
+    return deskJsonResponse(result);
+  } catch (e) {
     return NextResponse.json(
-      { ok: false, error: "SIS roster fetch failed — tenant/db unavailable" },
+      { ok: false, error: e instanceof Error ? e.message : "SIS roster fetch failed" },
       { status: 503 },
     );
   }
-  // Same lossless strip as admissions — normalizeStudent defaults absent
-  // fields to "" exactly as an empty value would. See lib/wirePayload.ts.
-  const lean = process.env.LEAN_WIRE_PAYLOAD?.trim().toLowerCase();
-  const leanOn = lean === "true" || lean === "1";
-
-  return NextResponse.json({
-    ok: true,
-    households: leanOn
-      ? stripEmptyList(bundle.households as unknown as Record<string, unknown>[])
-      : bundle.households,
-    students: leanOn
-      ? stripEmptyList(bundle.students as unknown as Record<string, unknown>[])
-      : bundle.students,
-    householdCount: bundle.households.length,
-    studentCount: bundle.students.length,
-    // Unknown meta is reported as "", not as "now" (see desk-slice route).
-    updatedAt: meta?.updatedAt || "",
-    meta,
-  });
 }
 
 type RosterPostBody = Pick<SisState, "households" | "students"> & {

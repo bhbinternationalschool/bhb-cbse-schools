@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cachedDeskJson, deskJsonResponse } from "@/lib/deskProbeCache.server";
 import {
   authorizeSchoolDataDesk,
   SCHOOL_DATA_DESK_RBAC,
@@ -30,21 +31,31 @@ export const runtime = "nodejs";
 export async function GET(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["fees-vouchers"], "GET");
   if (!auth.ok) return auth.response
-  const desk = await fetchFeeDeskFromDb();
-  if (!desk.ok) {
+  try {
+    const result = await cachedDeskJson({
+      cacheKey: "fees-vouchers",
+      tables: ["fee_desk_vouchers", "fee_desk_voucher_lines", "fee_desk_voucher_tenders", "fee_desk_open_dues"],
+      ifNoneMatch: req.headers.get("if-none-match"),
+      build: async () => {
+        const desk = await fetchFeeDeskFromDb();
+        if (!desk.ok) throw new Error("Fee desk fetch failed — tenant/db unavailable");
+        return {
+          ok: true,
+          vouchers: desk.vouchers,
+          ancillary: desk.ancillary,
+          count: desk.vouchers.length,
+          updatedAt: desk.meta?.updatedAt || new Date().toISOString(),
+          meta: desk.meta,
+        };
+      },
+    });
+    return deskJsonResponse(result);
+  } catch (e) {
     return NextResponse.json(
-      { ok: false, error: "Fee desk fetch failed — tenant/db unavailable" },
+      { ok: false, error: e instanceof Error ? e.message : "Fee desk fetch failed" },
       { status: 503 },
     );
   }
-  return NextResponse.json({
-    ok: true,
-    vouchers: desk.vouchers,
-    ancillary: desk.ancillary,
-    count: desk.vouchers.length,
-    updatedAt: desk.meta?.updatedAt || new Date().toISOString(),
-    meta: desk.meta,
-  });
 }
 
 type DeskPostBody = Pick<FeesState, "vouchers"> &
