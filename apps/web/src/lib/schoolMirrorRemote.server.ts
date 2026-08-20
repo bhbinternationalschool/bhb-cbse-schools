@@ -25,6 +25,25 @@ import { mergeDeskMastersOverBlob } from "@/lib/mastersMergePolicy";
 let lastHydrateMs = 0;
 let inFlightPromise: Promise<boolean> | null = null;
 const HYDRATE_TTL_MS = 45_000;
+/** Fingerprint of the mirror's Supabase sources at the last full hydrate —
+ * when the probe still matches, the multi-MB re-pull is skipped entirely
+ * (the in-memory mirror is provably current). See lib/deskProbeCache.server. */
+let lastProbe = "";
+const MIRROR_PROBE_TABLES = [
+  "sis_students",
+  "sis_households",
+  "sis_enrollments",
+  "sis_staff",
+  "sis_student_identities",
+  "admission_desk_leads",
+  "admission_desk_households",
+  "admission_desk_registration_payments",
+  "fee_desk_vouchers",
+  "fee_desk_voucher_lines",
+  "payment_desk_links",
+  "masters_desk_slices",
+  "masters_desk_settings",
+];
 
 function nowIso() {
   return new Date().toISOString();
@@ -75,6 +94,24 @@ export async function hydrateSchoolMirrorFromRemote(
 
   inFlightPromise = (async () => {
     try {
+      // Egress guard: a ~200-byte probe decides whether anything below is
+      // worth pulling. Unchanged sources → refresh the TTL stamp and keep
+      // the in-memory mirror. Probe unavailable → hydrate as always.
+      // Taken BEFORE the pull so a write landing mid-pull changes the next
+      // probe (an extra re-pull, never staleness).
+      let prePullProbe = "";
+      if (!opts?.force) {
+        try {
+          const { deskProbe } = await import("@/lib/deskProbeCache.server");
+          prePullProbe = (await deskProbe(MIRROR_PROBE_TABLES, "probe:school_mirror")) || "";
+        } catch {
+          prePullProbe = "";
+        }
+        if (prePullProbe && lastProbe && prePullProbe === lastProbe && !mirrorLooksEmpty(cur)) {
+          lastHydrateMs = Date.now();
+          return false;
+        }
+      }
       const remoteBlob = await fetchServerBlob<SchoolMirrorBundle>(
         "school_mirror_state",
       );
@@ -215,6 +252,7 @@ export async function hydrateSchoolMirrorFromRemote(
 
       replaceSchoolMirror(next);
       lastHydrateMs = Date.now();
+      lastProbe = prePullProbe;
       return true;
     } finally {
       inFlightPromise = null;

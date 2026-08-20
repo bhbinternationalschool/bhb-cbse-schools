@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cachedBlobJson, deskJsonResponse } from "@/lib/deskProbeCache.server";
 import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import type { DomainBlobTable } from "@/lib/domainBlobPersistence";
 import { domainBlobRbacModule } from "@/lib/domainBlobRbac";
@@ -22,18 +23,23 @@ export async function GET(req: Request) {
   const auth = await requireStaffPermission(req, rbacModule, "view");
   if (!auth.ok) return auth.response;
 
-  const result = await fetchDomainBlobFromDb(table);
-  if (!result.ok) {
+  try {
+    const cached = await cachedBlobJson({
+      table,
+      ifNoneMatch: req.headers.get("if-none-match"),
+      build: async () => {
+        const result = await fetchDomainBlobFromDb(table);
+        if (!result.ok) throw new Error("Fetch failed — tenant/db unavailable");
+        return { payload: { ok: true, state: result.state, updatedAt: result.updatedAt }, updatedAt: result.updatedAt || "" };
+      },
+    });
+    return deskJsonResponse(cached);
+  } catch (e) {
     return NextResponse.json(
-      { ok: false, error: "Fetch failed — tenant/db unavailable" },
+      { ok: false, error: e instanceof Error ? e.message : "Fetch failed" },
       { status: 503 },
     );
   }
-  return NextResponse.json({
-    ok: true,
-    state: result.state,
-    updatedAt: result.updatedAt,
-  });
 }
 
 type PostBody = { table?: string; state?: unknown };

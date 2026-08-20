@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cachedDeskJson, deskJsonResponse } from "@/lib/deskProbeCache.server";
 import { stripEmptyList } from "@/lib/wirePayload";
 import {
   authorizeSchoolDataDesk,
@@ -65,35 +66,46 @@ export async function GET(req: Request) {
     }
   }
 
-  const { state, meta, ok } = await fetchAdmissionDeskFromDb();
-  if (!ok) {
-    return NextResponse.json(
-      { ok: false, error: "Admissions desk fetch failed — tenant/db unavailable" },
-      { status: 503 },
-    );
-  }
-  // Drop empty strings and nulls the client rebuilds anyway — 37.5% of this
-  // payload, measured on all 919 leads. Lossless: emptyAdmissionLead does
-  // `partial?.x || ""`, so absent and empty produce the same record. `false`
-  // and `0` are kept; see lib/wirePayload.ts.
-  const wireState = leanWireEnabled()
-    ? {
+  try {
+    const result = await cachedDeskJson({
+      cacheKey: "admissions-desk",
+      tables: ["admission_desk_leads", "admission_desk_households", "admission_desk_registration_payments", "admission_desk_field_ops"],
+      ifNoneMatch: req.headers.get("if-none-match"),
+      build: async () => {
+        const { state, meta, ok } = await fetchAdmissionDeskFromDb();
+        if (!ok) throw new Error("Admissions desk fetch failed — tenant/db unavailable");
+
+        // Drop empty strings and nulls the client rebuilds anyway — 37.5% of this
+        // payload, measured on all 919 leads. Lossless: emptyAdmissionLead does
+        // `partial?.x || ""`, so absent and empty produce the same record. `false`
+        // and `0` are kept; see lib/wirePayload.ts.
+        const wireState = leanWireEnabled()
+        ? {
         ...state,
         leads: stripEmptyList(state.leads as unknown as Record<string, unknown>[]),
         households: stripEmptyList(
-          state.households as unknown as Record<string, unknown>[],
+        state.households as unknown as Record<string, unknown>[],
         ),
-      }
-    : state;
+        }
+        : state;
 
-  return NextResponse.json({
-    ok: true,
-    state: wireState,
-    leadCount: state.leads.length,
-    householdCount: state.households.length,
-    updatedAt: meta?.updatedAt || new Date().toISOString(),
-    meta,
-  });
+        return ({
+        ok: true,
+        state: wireState,
+        leadCount: state.leads.length,
+        householdCount: state.households.length,
+        updatedAt: meta?.updatedAt || new Date().toISOString(),
+        meta,
+        });
+      },
+    });
+    return deskJsonResponse(result);
+  } catch (e) {
+    return NextResponse.json(
+      { ok: false, error: e instanceof Error ? e.message : "Admissions desk fetch failed" },
+      { status: 503 },
+    );
+  }
 }
 
 /** POST — push full admissions desk snapshot */

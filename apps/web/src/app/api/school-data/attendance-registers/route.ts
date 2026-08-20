@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cachedDeskJson, deskJsonResponse } from "@/lib/deskProbeCache.server";
 import {
   authorizeSchoolDataDesk,
   SCHOOL_DATA_DESK_RBAC,
@@ -17,21 +18,31 @@ export const runtime = "nodejs";
 export async function GET(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["attendance-registers"], "GET");
   if (!auth.ok) return auth.response
-  const desk = await fetchAttendanceDeskFromDb();
-  if (!desk.ok) {
+  try {
+    const result = await cachedDeskJson({
+      cacheKey: "attendance-registers",
+      tables: ["attendance_desk_registers", "attendance_desk_marks"],
+      ifNoneMatch: req.headers.get("if-none-match"),
+      build: async () => {
+        const desk = await fetchAttendanceDeskFromDb();
+        if (!desk.ok) throw new Error("Attendance desk fetch failed — tenant/db unavailable");
+        return {
+          ok: true,
+          registers: desk.registers,
+          ancillary: desk.ancillary,
+          count: desk.registers.length,
+          updatedAt: desk.meta?.updatedAt || new Date().toISOString(),
+          meta: desk.meta,
+        };
+      },
+    });
+    return deskJsonResponse(result);
+  } catch (e) {
     return NextResponse.json(
-      { ok: false, error: "Attendance desk fetch failed — tenant/db unavailable" },
+      { ok: false, error: e instanceof Error ? e.message : "Attendance desk fetch failed" },
       { status: 503 },
     );
   }
-  return NextResponse.json({
-    ok: true,
-    registers: desk.registers,
-    ancillary: desk.ancillary,
-    count: desk.registers.length,
-    updatedAt: desk.meta?.updatedAt || new Date().toISOString(),
-    meta: desk.meta,
-  });
 }
 
 type DeskPostBody = Pick<AttendanceState, "registers"> &

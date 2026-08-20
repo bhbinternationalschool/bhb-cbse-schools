@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cachedDeskJson, deskJsonResponse } from "@/lib/deskProbeCache.server";
 import {
   authorizeSchoolDataDesk,
   SCHOOL_DATA_DESK_RBAC,
@@ -38,6 +39,28 @@ export async function GET(req: Request) {
   if (!auth.ok) return auth.response
 
   if (readFromRowTables()) {
+    const cachedRows = await cachedDeskJson({
+      cacheKey: "masters-desk-rows",
+      tables: ["masters_desk_slices", "masters_desk_settings"],
+      ifNoneMatch: req.headers.get("if-none-match"),
+      build: async () => {
+        const rows = await fetchMastersFromRowTables();
+        if (!rows.ok) throw new Error("row path failed");
+        const meta = await fetchMastersSyncMeta(rows.bundle);
+        return {
+          ok: true,
+          ...rows.bundle,
+          classCount: rows.bundle.classes.length,
+          feeHeadCount: rows.bundle.feeHeads.length,
+          subjectCount: rows.bundle.subjects.length,
+          sliceCount: meta?.sliceCount ?? 0,
+          updatedAt: meta?.updatedAt || new Date().toISOString(),
+          meta,
+          source: "rows",
+        };
+      },
+    }).catch(() => null);
+    if (cachedRows) return deskJsonResponse(cachedRows);
     const rows = await fetchMastersFromRowTables();
     if (rows.ok) {
       // The revision still comes from masters_desk_sync_meta, so the
