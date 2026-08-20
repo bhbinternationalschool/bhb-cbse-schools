@@ -75,6 +75,10 @@ class _PresenceScreenState extends State<PresenceScreen> {
         return;
       }
       // First ping carries consent (the server records it once).
+      if (pos.isMocked) {
+        setState(() => _error = "Mock location is ON on this phone (fake-GPS app / developer setting). Disable it and try again — mock locations are rejected and flagged.");
+        return;
+      }
       final res = await widget.api.postJson("/api/staff-geo/ping", {
         "lat": pos.latitude,
         "lng": pos.longitude,

@@ -26,3 +26,10 @@ Each state change WhatsApps the configured recipients (owner, admin, principal) 
 3. `bash scripts/setup-cloud-scheduler.sh` (adds `bhb-staff-geo-tick`, every 5 min).
 
 Tables: `staff_geo_last` (one row per staff, upserted), `staff_geo_incidents`; settings/consents in `module_local_state("staff_geo_settings")`. Migration `20260820090000_staff_geo` applied to prod.
+
+**Anti-spoofing (2026-08-20) — honest scope:**
+- WhatsApp punches: a searched/saved **place pin is rejected** (only a live "Send your current location" share, which carries no name/address, is accepted); GPS accuracy limit; geofence distance.
+- App pings & app punches: Android's **mock-location flag is rejected** (fake-GPS apps set it; the app also refuses to start sharing while it is on) and a refused stream shows up as "location off" — flagged during school timing.
+- **Teleport guard**: a ping implying > 150 km/h over ≥ 2 km versus the previous ping is rejected as spoofing.
+- **Not covered** (nothing client-side honestly can): a rooted phone with a system-level spoofer that hides the mock flag, or a second phone left at school signed in. Mitigations are procedural: occasional physical checks, and the incident log showing patterns (e.g. always exactly on the fence edge).
+

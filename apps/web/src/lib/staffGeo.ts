@@ -138,6 +138,19 @@ export function normalizeStaffGeoSettings(raw: unknown, school?: { lat: number; 
   };
 }
 
+/**
+ * Implausible-jump check between two pings: the implied speed a real staff
+ * phone cannot have (spoofers flipping between home and school teleport).
+ * Below 2 km apart is never flagged — GPS scatter and short gaps stay safe.
+ */
+export function implausibleJump(prev: { lat: number; lng: number; at: string }, next: { lat: number; lng: number; at: string }, maxKmh = 150): boolean {
+  const meters = distanceM(prev.lat, prev.lng, next.lat, next.lng);
+  if (meters < 2000) return false;
+  const seconds = Math.max(1, (new Date(next.at).getTime() - new Date(prev.at).getTime()) / 1000);
+  const kmh = (meters / 1000) / (seconds / 3600);
+  return kmh > maxKmh;
+}
+
 /** Haversine distance in metres. */
 export function distanceM(aLat: number, aLng: number, bLat: number, bLng: number): number {
   const R = 6371000;

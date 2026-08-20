@@ -19,6 +19,8 @@ export type PunchGeoInput = {
   accuracyM?: number;
   name?: string;
   address?: string;
+  /** Client-reported mock-location flag (Android isMocked) */
+  mocked?: boolean;
 };
 
 export type GeofenceValidation = {
@@ -62,6 +64,25 @@ export function validateStaffPunchLocation(
 ): GeofenceValidation {
   if (!Number.isFinite(geo.lat) || !Number.isFinite(geo.lng)) {
     return { ok: false, distanceM: -1, reason: "Invalid GPS coordinates." };
+  }
+  // A WhatsApp "current location" share carries only coordinates; a pin
+  // picked from search / saved places carries a name/address. Those can be
+  // any place on earth (including the school), so they are never accepted.
+  if ((geo.name || "").trim() || (geo.address || "").trim()) {
+    return {
+      ok: false,
+      distanceM: -1,
+      reason:
+        "That is a searched/saved place pin, not your live location — not accepted. Tap 📎 → Location → *Send your current location*. / यह सर्च की गई जगह का पिन है — मान्य नहीं। 📎 → Location → *Send your current location* भेजें।",
+    };
+  }
+  if (geo.mocked === true) {
+    return {
+      ok: false,
+      distanceM: -1,
+      reason:
+        "Mock location detected on this phone — disable the fake-GPS app and try again. / फ़ोन पर नकली (mock) लोकेशन चालू है — fake-GPS ऐप बंद करके फिर से भेजें।",
+    };
   }
 
   const distanceM = haversineDistanceM(

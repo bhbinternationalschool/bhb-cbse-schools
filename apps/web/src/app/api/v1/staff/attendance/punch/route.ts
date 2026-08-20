@@ -91,6 +91,7 @@ type PunchBody = {
   lat: number;
   lng: number;
   accuracyM?: number;
+    mocked?: boolean;
   staffId?: string;
 };
 
@@ -118,6 +119,7 @@ export async function POST(request: Request) {
         lat: body.lat,
         lng: body.lng,
         accuracyM: body.accuracyM,
+        mocked: body.mocked === true,
       },
       via: "app",
     });

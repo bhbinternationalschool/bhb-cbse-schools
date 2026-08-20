@@ -79,3 +79,16 @@ assert.deepEqual(n.workingDays, [1]);
 assert.deepEqual(n.recipients, [{ name: "Owner", mobile: "9999900001" }]);
 assert.equal(n.lat, school.lat);
 console.log("OK — staffGeo.selftest.ts");
+
+// Teleport guard: 2 km in 30 s is impossible; 500 m scatter is fine; slow real travel is fine.
+import { implausibleJump } from "./staffGeo";
+{
+  const at0 = "2026-08-19T04:00:00.000Z";
+  const at30s = "2026-08-19T04:00:30.000Z";
+  const at1h = "2026-08-19T05:00:00.000Z";
+  const p0 = { lat: school.lat, lng: school.lng, at: at0 };
+  assert.equal(implausibleJump(p0, { lat: school.lat + 0.05, lng: school.lng, at: at30s }), true, "≈5.5 km in 30 s → spoof");
+  assert.equal(implausibleJump(p0, { lat: school.lat + 0.004, lng: school.lng, at: at30s }), false, "≈450 m scatter never flagged");
+  assert.equal(implausibleJump(p0, { lat: school.lat + 0.05, lng: school.lng, at: at1h }), false, "5.5 km in an hour is normal");
+}
+console.log("OK — teleport guard");
