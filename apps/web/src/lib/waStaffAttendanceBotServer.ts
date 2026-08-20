@@ -16,12 +16,25 @@ import {
   composeStaffAttHumanReply,
   composeStaffAttPunchSuccess,
   detectStaffAttBotIntent,
+  isEarlyOutConfirm,
+  parseStaffAttLanguage,
   staffAttAskLocationText,
   staffAttBotWelcomeText,
+  staffAttCancelText,
+  staffAttEarlyOutWarningText,
+  staffAttLanguageConfirmText,
+  staffAttLanguageMenuText,
+  staffAttLocationWithoutPendingText,
+  type StaffAttLang,
 } from "@/lib/waStaffAttendanceBotEngine";
+import { expectedWindowForTiming } from "@/lib/schoolTiming";
 import { sendWhatsAppText, waNormalizeLocal10 } from "@/lib/waSend";
 
-export type WaStaffAttPending = { kind: "punch_in" } | { kind: "punch_out" };
+export type WaStaffAttPending =
+  | { kind: "punch_in" }
+  | { kind: "punch_out"; early?: boolean }
+  /** OUT requested inside school timing — waiting for YES / CANCEL */
+  | { kind: "punch_out_confirm"; end: string };
 
 export type WaStaffAttBotThread = {
   id: string;
@@ -31,6 +44,8 @@ export type WaStaffAttBotThread = {
   staffId: string;
   staffName: string;
   pending: WaStaffAttPending | null;
+  /** "" until the staff picks — first contact asks once, LANG changes it */
+  language?: StaffAttLang | "";
   status: "bot" | "needs_staff" | "closed";
   messages: { id: string; role: string; text: string; at: string }[];
   updatedAt: string;
@@ -124,6 +139,23 @@ function openThread(
   };
 }
 
+function nowHhmmIstLocal(): string {
+  const ist = new Date(Date.now() + 330 * 60_000);
+  return ist.toISOString().slice(11, 16);
+}
+
+/** Is a check-out right now inside school timing? Returns the end time when yes. */
+function earlyOutWindow(): { early: boolean; now: string; end: string } {
+  const masters = loadMasters();
+  const timing = masters.schoolTiming?.default;
+  const now = nowHhmmIstLocal();
+  if (!timing) return { early: false, now, end: "" };
+  const today = new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10);
+  const win = expectedWindowForTiming(timing, today);
+  if (!win.isWorking) return { early: false, now, end: win.end };
+  return { early: now < win.end, now, end: win.end };
+}
+
 export function shouldRouteStaffAttendance(opts: {
   text: string;
   location?: { lat: number; lng: number } | null;
@@ -204,22 +236,58 @@ export async function handleWaStaffAttendanceInbound(opts: {
   let replyText = "";
   let escalate = false;
   let pending = thread.pending;
+  let language: StaffAttLang | "" = thread.language || "";
 
-  if (intent === "cancel") {
+  // One-time language choice (remembered on the thread; LANG re-asks).
+  if (!language) {
+    const picked = parseStaffAttLanguage(text);
+    if (picked) {
+      language = picked;
+      replyText = `${staffAttLanguageConfirmText(picked)}\n\n${staffAttBotWelcomeText(staff.fullName, picked)}`;
+    } else {
+      replyText = staffAttLanguageMenuText(staff.fullName);
+    }
+  } else if (intent === "lang") {
+    const picked = parseStaffAttLanguage(text.replace(/^lang\s*/i, ""));
+    if (picked) {
+      language = picked;
+      replyText = staffAttLanguageConfirmText(picked);
+    } else {
+      language = "";
+      replyText = staffAttLanguageMenuText(staff.fullName);
+    }
+  }
+  const lang: StaffAttLang = language || "en";
+
+  if (replyText) {
+    // language step handled above
+  } else if (intent === "cancel") {
     pending = null;
-    replyText = "Attendance step cancelled. Reply *IN*, *OUT*, or *STATUS*.";
+    replyText = staffAttCancelText(lang);
   } else if (intent === "human") {
     pending = null;
     escalate = true;
-    replyText = composeStaffAttHumanReply();
+    replyText = composeStaffAttHumanReply(lang);
   } else if (intent === "status" || intent === "attend") {
     pending = null;
     replyText =
       intent === "attend"
-        ? staffAttBotWelcomeText(staff.fullName)
+        ? staffAttBotWelcomeText(staff.fullName, lang)
         : await staffAttendanceStatusForWa(staff.id);
+  } else if (pending?.kind === "punch_out_confirm") {
+    if (!opts.location && isEarlyOutConfirm(text)) {
+      pending = { kind: "punch_out", early: true };
+      replyText = staffAttAskLocationText("out", lang);
+    } else {
+      // Anything else — including a location sent without confirming —
+      // repeats the warning; the punch is NOT taken until YES.
+      const win = earlyOutWindow();
+      replyText = staffAttEarlyOutWarningText({ now: win.now, end: pending.end, lang });
+    }
   } else if (opts.location && pending) {
     const kind = pending.kind === "punch_in" ? "in" : "out";
+    const early = pending.kind === "punch_out" && pending.early === true;
+    const win = earlyOutWindow();
     const result = await applyWhatsAppStaffPunch({
       staff,
       mobile10,
@@ -231,6 +299,7 @@ export async function handleWaStaffAttendanceInbound(opts: {
         name: opts.location.name,
         address: opts.location.address,
       },
+      earlyOutNote: early ? `early checkout ${win.now} (school till ${win.end})` : undefined,
     });
     pending = null;
     if (!result.ok) {
@@ -242,26 +311,36 @@ export async function handleWaStaffAttendanceInbound(opts: {
         distanceM: result.distanceM,
         staffName: staff.fullName,
         altMobile: result.altMobile,
+        earlyOut: early,
+        schoolEnd: win.end,
+        lang,
       });
     }
   } else if (opts.location && !pending) {
-    replyText =
-      "Reply *IN* or *OUT* first, then share your location pin.";
+    replyText = staffAttLocationWithoutPendingText(lang);
   } else if (intent === "in") {
     pending = { kind: "punch_in" };
-    replyText = staffAttAskLocationText("in");
+    replyText = staffAttAskLocationText("in", lang);
   } else if (intent === "out") {
-    pending = { kind: "punch_out" };
-    replyText = staffAttAskLocationText("out");
+    // Checking out while school is still running → alert + confirm first.
+    const win = earlyOutWindow();
+    if (win.early) {
+      pending = { kind: "punch_out_confirm", end: win.end };
+      replyText = staffAttEarlyOutWarningText({ now: win.now, end: win.end, lang });
+    } else {
+      pending = { kind: "punch_out" };
+      replyText = staffAttAskLocationText("out", lang);
+    }
   } else if (!text && !opts.location) {
-    replyText = staffAttBotWelcomeText(staff.fullName);
+    replyText = staffAttBotWelcomeText(staff.fullName, lang);
   } else {
-    replyText = staffAttBotWelcomeText(staff.fullName);
+    replyText = staffAttBotWelcomeText(staff.fullName, lang);
   }
 
   thread = {
     ...thread,
     pending,
+    language,
     status: escalate ? "needs_staff" : "bot",
     updatedAt: nowIso(),
     messages: [

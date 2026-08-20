@@ -8,6 +8,9 @@
  */
 
 export type StaffBotQuickId =
+  | "in"
+  | "out"
+  | "att_status"
   | "reports"
   | "admissions"
   | "staff"
@@ -22,6 +25,9 @@ export const STAFF_BOT_OWNER_PROMPTS: {
   label: string;
   waKeyword: string;
 }[] = [
+  { id: "in", label: "Attendance punch IN (📍 location)", waKeyword: "IN" },
+  { id: "out", label: "Attendance punch OUT", waKeyword: "OUT" },
+  { id: "att_status", label: "My attendance today", waKeyword: "STATUS" },
   { id: "reports", label: "Today summary", waKeyword: "REPORTS" },
   { id: "admissions", label: "Admissions / leads", waKeyword: "ADMISSIONS" },
   { id: "staff", label: "Staff snapshot", waKeyword: "STAFF" },

@@ -148,6 +148,8 @@ export async function applyWhatsAppStaffPunch(opts: {
   geo: PunchGeoInput;
   /** Punch channel: WhatsApp location share (default) or the mobile app's GPS. */
   via?: "whatsapp" | "app";
+  /** Confirmed early check-out — appended to the register note so HR sees it */
+  earlyOutNote?: string;
 }): Promise<ApplyWaStaffPunchResult> {
   const via = opts.via ?? "whatsapp";
   let state = await loadStaffAttendanceServer();
@@ -271,6 +273,7 @@ export async function applyWhatsAppStaffPunch(opts: {
   const noteParts = [
     cur.note || `${channelLabel} campus punch`,
     `OUT ${time}`,
+    opts.earlyOutNote || null,
     altMobile ? "alt mobile" : null,
     `~${formatDistanceLabel(check.distanceM)} from school`,
   ].filter(Boolean);
