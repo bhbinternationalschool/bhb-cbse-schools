@@ -77,6 +77,7 @@
     "test:birthday-cards": "npx tsx src/lib/birthdayCards.selftest.ts",
     "test:email": "npx tsx src/lib/email.selftest.ts",
     "test:payroll-register": "npx tsx src/lib/payrollRegister.selftest.ts",
+    "test:staff-geo": "npx tsx src/lib/staffGeo.selftest.ts",
     "import:leads": "npx tsx scripts/import-lead-excels.ts",
     "import:fee-discounts": "npx tsx scripts/import-fee-discounts-excel.ts",
     "clear:collections": "npx tsx scripts/clear-fee-collections.ts",
