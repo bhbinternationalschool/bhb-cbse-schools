@@ -88,6 +88,7 @@ SELFTESTS=(
   test:playbook
   test:erp-chat
   test:wa-templates-automation
+  test:fee-student-search
   test:substitution-auto
   test:timetable-substitution
 )

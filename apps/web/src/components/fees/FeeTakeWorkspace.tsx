@@ -200,6 +200,15 @@ export function FeeTakeWorkspace() {
   const [sectionId, setSectionId] = useState("");
   const [hits, setHits] = useState<StudentSearchHit[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /**
+   * Which children of the household are open on the counter. Picking a
+   * student seeds this with just that child; tapping a sibling card adds
+   * them. Only these children's fees are shown and collectable — a child
+   * who is not on the counter can never contribute a rupee to the receipt.
+   */
+  const [activeStudentIds, setActiveStudentIds] = useState<Set<string>>(
+    new Set(),
+  );
   const [includeFuture, setIncludeFuture] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   /** Rupees to collect at counter — defaults to full selected balance; lower for partial pay */
@@ -393,9 +402,24 @@ export function FeeTakeWorkspace() {
     0,
   );
 
+  /**
+   * The children whose fees are on the counter right now. Falls back to the
+   * picked student when the active set does not match this household — that
+   * happens for one render after switching families, and an empty right
+   * panel would read as "this child has no dues", which is not what we know.
+   */
+  const activeBundle = useMemo(() => {
+    const onCounter = householdBundle.filter((row) =>
+      activeStudentIds.has(row.student.id),
+    );
+    if (onCounter.length > 0) return onCounter;
+    return householdBundle.filter((row) => row.student.id === selectedId);
+  }, [householdBundle, activeStudentIds, selectedId]);
+
+  /** Dues that can be ticked — only from children open on the counter. */
   const allDues = useMemo(
-    () => householdBundle.flatMap((row) => row.dues),
-    [householdBundle],
+    () => activeBundle.flatMap((row) => row.dues),
+    [activeBundle],
   );
 
   const selectedDues = useMemo(
@@ -545,8 +569,28 @@ export function FeeTakeWorkspace() {
 
   function pickStudent(hit: StudentSearchHit) {
     setSelectedId(hit.student.id);
+    setActiveStudentIds(new Set([hit.student.id]));
     setSelectedKeys(new Set());
     resetPaymentFields();
+  }
+
+  /**
+   * Open or close a child on the counter. Closing also drops that child's
+   * ticked fee lines: leaving them in the selection would collect money for
+   * a student whose fees are no longer on screen.
+   */
+  function toggleActiveStudent(studentId: string) {
+    setActiveStudentIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(studentId)) {
+        if (next.size === 1) return prev; // never leave the counter empty
+        next.delete(studentId);
+        clearStudentDues(studentId);
+      } else {
+        next.add(studentId);
+      }
+      return next;
+    });
   }
 
   function toggleDue(due: FeeDueLine) {
@@ -1116,7 +1160,7 @@ export function FeeTakeWorkspace() {
                   className="field"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Name, admission no, or mobile…"
+                  placeholder="Child, father, mother, mobile, adm no, class…"
                   autoComplete="off"
                   autoFocus={mounted}
                 />
@@ -1214,20 +1258,40 @@ export function FeeTakeWorkspace() {
                     empty.
                   </p>
                 ) : (
-                  <ul className="flex max-h-40 flex-wrap gap-2 overflow-y-auto">
+                  <ul className="max-h-56 space-y-1 overflow-y-auto pr-1">
                     {hits.map((h) => (
                       <li key={h.student.id}>
                         <button
                           type="button"
                           onClick={() => pickStudent(h)}
-                          className="rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2 text-left hover:border-[rgba(197,160,40,0.45)] hover:bg-[rgba(197,160,40,0.1)]"
+                          className="flex w-full flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2 text-left hover:border-[rgba(197,160,40,0.45)] hover:bg-[rgba(197,160,40,0.1)]"
                         >
-                          <div className="text-sm font-semibold text-[var(--brand-deep)]">
+                          <span className="text-sm font-semibold text-[var(--brand-deep)]">
                             <StudentNameLabel student={h.student} />
-                          </div>
-                          <div className="text-[11px] text-[var(--muted)]">
-                            {h.classLabel} · {formatInr(h.balancePaise)}
-                          </div>
+                          </span>
+                          <span className="text-[11px] text-[var(--muted)]">
+                            {h.classLabel} · {h.student.admissionNo}
+                          </span>
+                          {/* Why this row is here — a hit on the mother's
+                              name or a sibling's mobile is not obvious from
+                              the child's name alone. */}
+                          {(h.matchReasons ?? []).map((r) => (
+                            <span
+                              key={r}
+                              className="rounded-full border border-[var(--border)] bg-[var(--card)] px-2 py-0.5 text-[10px] font-semibold text-[var(--muted)]"
+                            >
+                              {r}
+                            </span>
+                          ))}
+                          <span
+                            className={`ml-auto text-xs font-bold tabular-nums ${
+                              h.balancePaise > 0
+                                ? "text-[var(--danger)]"
+                                : "text-[var(--success)]"
+                            }`}
+                          >
+                            {formatInr(h.balancePaise)}
+                          </span>
                         </button>
                       </li>
                     ))}
@@ -1404,7 +1468,14 @@ export function FeeTakeWorkspace() {
               onOpenReceipt={setPreviewReceiptId}
               transferPreviews={lastSessionPreviews}
               onTransferLastSession={onTransferLastSessionDues}
-              onSelectStudent={setSelectedId}
+              activeBundle={activeBundle}
+              activeStudentIds={activeStudentIds}
+              onToggleActiveStudent={toggleActiveStudent}
+              onOpenAllSiblings={() =>
+                setActiveStudentIds(
+                  new Set(householdBundle.map((r) => r.student.id)),
+                )
+              }
             />
           )}
         </div>
@@ -1532,65 +1603,6 @@ export function FeeTakeWorkspace() {
   );
 }
 
-/**
- * A reference section that is collapsed on a phone and open on a desktop.
- *
- * The fee counter carries 25 buttons and 19 inputs in one view. On a desktop
- * that reads as dense; on a phone it becomes a long scroll where the Collect
- * button sits below everything a clerk does not need to read.
- *
- * Only REFERENCE sections use this — household details, discount breakdown.
- * Nothing in the collect path (dues, amount, tender lines, Collect) is ever
- * hidden behind a tap: a clerk taking money must see what they are taking.
- */
-function CollapsibleSection({
-  title,
-  badge,
-  children,
-  defaultOpenOnDesktop = true,
-}: {
-  title: string;
-  badge?: React.ReactNode;
-  children: React.ReactNode;
-  defaultOpenOnDesktop?: boolean;
-}) {
-  // Open on desktop, closed on phones. Read once on mount rather than tracked,
-  // so a clerk who opens a section does not have it snap shut on rotate.
-  const [open, setOpen] = useState(() => {
-    if (typeof window === "undefined") return defaultOpenOnDesktop;
-    return window.matchMedia("(min-width: 1024px)").matches
-      ? defaultOpenOnDesktop
-      : false;
-  });
-
-  return (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-sm">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        // min-h-11 keeps the tap target at ~44px, the smallest a thumb hits
-        // reliably. Several controls on this page were under 32px.
-        className="flex min-h-11 w-full items-center justify-between gap-2 px-3.5 py-2.5 text-left"
-      >
-        <span className="text-xs font-bold uppercase tracking-wider text-[var(--brand-deep)]">
-          {title}
-        </span>
-        <span className="flex items-center gap-2">
-          {badge}
-          <span
-            className={`text-[var(--muted)] transition-transform ${open ? "rotate-180" : ""}`}
-            aria-hidden
-          >
-            ▾
-          </span>
-        </span>
-      </button>
-      {open ? <div className="px-3.5 pb-3.5">{children}</div> : null}
-    </div>
-  );
-}
-
 function FeeSummaryChip({
   label,
   value,
@@ -1693,10 +1705,18 @@ function CollectPanel({
   transferPreviews,
   onTransferLastSession,
   readOnly = false,
-  onSelectStudent,
+  activeBundle,
+  activeStudentIds,
+  onToggleActiveStudent,
+  onOpenAllSiblings,
 }: {
   student: SisStudent;
   householdBundle: { student: SisStudent; dues: FeeDueLine[] }[];
+  /** Subset of householdBundle currently open on the counter. */
+  activeBundle: { student: SisStudent; dues: FeeDueLine[] }[];
+  activeStudentIds: Set<string>;
+  onToggleActiveStudent: (studentId: string) => void;
+  onOpenAllSiblings: () => void;
   selectedKeys: Set<string>;
   includeFuture: boolean;
   onIncludeFuture: (v: boolean) => void;
@@ -1744,7 +1764,6 @@ function CollectPanel({
   transferPreviews: LastSessionTransferPreview[];
   onTransferLastSession: () => void;
   readOnly?: boolean;
-  onSelectStudent?: (id: string) => void;
 }) {
   const today = todayIso();
   const composerMode = composer.channel
@@ -1966,85 +1985,140 @@ function CollectPanel({
         ) : null}
       </div>
 
-      {/* ── Side-by-Side Layout: 
-             LEFT COLUMN = Dynamic Sibling Tabs & Month Dues Breakdown
-             RIGHT COLUMN = Household Card & Collect Fee Payment Counter Panel
+      {/* ── Counter layout ────────────────────────────────────────────────
+             LEFT   = who is paying (every child of the family, side by side)
+             RIGHT  = what they are paying (that child's fees, group-wise)
+             BELOW  = the money (full width, always the last thing on screen)
+             The old household-information card is gone: guardian name and
+             WhatsApp sit on the search line, one glance away, and the space
+             it used belongs to the fees.
       ── */}
-      <div className="grid gap-5 lg:grid-cols-[1.25fr_1fr] items-start">
-        {/* ── LEFT COLUMN: Dynamic Sibling Tabs & Month Dues Breakdown ── */}
-        <div className="space-y-4 min-w-0">
-          {/* Dynamic Sibling Selector Bar */}
-          {siblingCount > 1 ? (
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-sm">
-              <div className="flex items-center justify-between border-b border-[var(--border)] pb-2 mb-2.5">
-                <span className="text-xs font-bold uppercase tracking-wider text-[var(--brand-deep)]">
-                  Household Siblings ({siblingCount})
-                </span>
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,0.62fr)_minmax(0,1.38fr)] items-start">
+        {/* ── LEFT COLUMN: children of this family ── */}
+        <div className="space-y-3 min-w-0">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-sm">
+            <div className="mb-2.5 flex items-center justify-between gap-2 border-b border-[var(--border)] pb-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-[var(--brand-deep)]">
+                {siblingCount > 1
+                  ? `Children in this family (${siblingCount})`
+                  : "Student"}
+              </span>
+              {siblingCount > 1 ? (
                 <button
                   type="button"
                   className="text-xs font-semibold text-[var(--brand-mid)] hover:underline"
-                  onClick={onSelectAllSiblings}
+                  onClick={onOpenAllSiblings}
                 >
-                  Select all siblings
+                  Open all
                 </button>
-              </div>
+              ) : null}
+            </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                {householdBundle.map((row) => {
-                  const isCur = row.student.id === student.id;
-                  const openDs = openFeeDues(row.dues);
-                  const rDue = openDs.reduce((s, d) => s + d.balancePaise, 0);
-                  const rOver = openDs.some((d) => d.dueOn <= today);
-
-                  return (
-                    <button
-                      key={row.student.id}
-                      type="button"
-                      onClick={() => onSelectStudent?.(row.student.id)}
-                      className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-bold transition active:scale-95 ${
-                        isCur
-                          ? "bg-[var(--brand-deep)] text-white shadow-md ring-2 ring-[var(--brand-deep)]/30"
-                          : "border border-[var(--border)] bg-[var(--card)] text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1 2xl:grid-cols-2">
+              {householdBundle.map((row) => {
+                const openDs = openFeeDues(row.dues);
+                const rDue = openDs.reduce((s, d) => s + d.balancePaise, 0);
+                const rOver = openDs.some((d) => d.dueOn <= today);
+                const on = activeStudentIds.has(row.student.id);
+                const pickedForStudent = openDs.filter((d) =>
+                  selectedKeys.has(d.dueKey),
+                );
+                const pickedPaise = pickedForStudent.reduce(
+                  (s, d) => s + d.balancePaise,
+                  0,
+                );
+                return (
+                  <button
+                    key={row.student.id}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => onToggleActiveStudent(row.student.id)}
+                    className={`relative rounded-xl border-2 p-2.5 text-left transition active:scale-[0.99] ${
+                      on
+                        ? "border-[var(--brand-gold)] bg-[rgba(197,160,40,0.08)]"
+                        : "border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[rgba(197,160,40,0.45)]"
+                    }`}
+                  >
+                    <span
+                      className={`absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full border text-[11px] font-bold ${
+                        on
+                          ? "border-[var(--brand-gold)] bg-[var(--brand-gold)] text-white"
+                          : "border-[var(--border)] bg-[var(--card)] text-transparent"
+                      }`}
+                      aria-hidden
+                    >
+                      ✓
+                    </span>
+                    <div className="pr-6 text-sm font-bold text-[var(--brand-deep)]">
+                      <StudentNameLabel student={row.student} />
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-[var(--muted)]">
+                      {classLabel(row.student)} · {row.student.admissionNo}
+                    </div>
+                    <div
+                      className={`mt-1.5 text-base font-bold tabular-nums ${
+                        rOver
+                          ? "text-[var(--danger)]"
+                          : rDue > 0
+                            ? "text-[var(--brand-deep)]"
+                            : "text-[var(--success)]"
                       }`}
                     >
-                      <span>{row.student.fullName}</span>
+                      {formatInr(rDue)}
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-1">
                       <span
-                        className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold ${
-                          isCur
-                            ? "bg-white/20 text-white"
-                            : rOver
-                              ? "bg-[var(--danger-soft)] text-[var(--danger)]"
-                              : rDue > 0
-                                ? "bg-[rgba(197,160,40,0.18)] text-[var(--brand-deep)]"
-                                : "bg-[var(--success-soft)] text-[var(--success)]"
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                          rOver
+                            ? "bg-[var(--danger-soft)] text-[var(--danger)]"
+                            : rDue > 0
+                              ? "bg-[rgba(197,160,40,0.18)] text-[var(--brand-deep)]"
+                              : "bg-[var(--success-soft)] text-[var(--success)]"
                         }`}
                       >
-                        {classLabel(row.student)} · {formatInr(rDue)}
+                        {rOver
+                          ? "Overdue"
+                          : rDue > 0
+                            ? `${openDs.length} open`
+                            : "All clear"}
                       </span>
-                    </button>
-                  );
-                })}
-              </div>
+                      {pickedPaise > 0 ? (
+                        <span className="rounded-full bg-[var(--success-soft)] px-2 py-0.5 text-[10px] font-bold text-[var(--success)]">
+                          ticked {formatInr(pickedPaise)}
+                        </span>
+                      ) : null}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
-          ) : null}
 
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap gap-1.5">
-              {siblingCount > 1 ? (
-                <MiniBtn onClick={onSelectAllSiblings}>
-                  Select all siblings
-                </MiniBtn>
-              ) : (
-                <MiniBtn onClick={onSelectAllSiblings}>Select all dues</MiniBtn>
-              )}
-              <MiniBtn onClick={onSelectOverdue}>Select all overdue</MiniBtn>
-              <MiniBtn onClick={onClear}>Clear all</MiniBtn>
-            </div>
+            {siblingCount > 1 ? (
+              <p className="mt-2.5 border-t border-dashed border-[var(--border)] pt-2 text-[11px] leading-snug text-[var(--muted)]">
+                Tap a child to put their fees on the counter. Closing a child
+                also un-ticks their fees, so nothing hidden is ever collected.
+              </p>
+            ) : null}
           </div>
 
-          <div className="max-h-[min(70vh,40rem)] space-y-3 overflow-y-auto pr-1">
-            {householdBundle.every((r) => openFeeDues(r.dues).length === 0) &&
-            householdBundle.every((r) => r.dues.length === 0) ? (
+          <div className="flex flex-wrap gap-1.5">
+            {siblingCount > 1 ? (
+              <MiniBtn onClick={onSelectAllSiblings}>
+                Tick all open fees
+              </MiniBtn>
+            ) : (
+              <MiniBtn onClick={onSelectAllSiblings}>Select all dues</MiniBtn>
+            )}
+            <MiniBtn onClick={onSelectOverdue}>Tick overdue</MiniBtn>
+            <MiniBtn onClick={onClear}>Clear all</MiniBtn>
+          </div>
+        </div>
+
+        {/* ── RIGHT COLUMN: fees of the children on the counter ── */}
+        <div className="space-y-3 min-w-0">
+          <div className="max-h-[min(70vh,44rem)] space-y-3 overflow-y-auto pr-1">
+            {activeBundle.every((r) => openFeeDues(r.dues).length === 0) &&
+            activeBundle.every((r) => r.dues.length === 0) ? (
               <p className="text-xs text-[var(--muted)]">
                 No open dues
                 {!student.feeGroupId
@@ -2053,7 +2127,7 @@ function CollectPanel({
                 .
               </p>
             ) : (
-              householdBundle.map((row) => {
+              activeBundle.map((row) => {
                 const openDues = openFeeDues(row.dues);
                 const dueKeys = openDues.map((d) => d.dueKey);
                 const selectedForStudent = openDues.filter((d) =>
@@ -2073,19 +2147,13 @@ function CollectPanel({
                   0,
                 );
                 const hasOverdue = openDues.some((d) => d.dueOn <= today);
-                const isFocus = row.student.id === student.id;
-                const isSibling = !isFocus && siblingCount > 1;
 
                 return (
                   <div
                     key={row.student.id}
-                    className={`flex min-h-0 flex-col rounded-xl border p-3 ${
-                      isFocus
-                        ? "border-[rgba(197,160,40,0.45)] bg-[rgba(197,160,40,0.06)]"
-                        : "border-[var(--border)] bg-[var(--surface-sunken)]"
-                    }`}
+                    className="flex min-h-0 flex-col rounded-xl border border-[rgba(197,160,40,0.45)] bg-[var(--card)] p-3"
                   >
-                    <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="flex flex-wrap items-start justify-between gap-2 border-b border-[var(--border)] pb-2">
                       <label className="flex min-w-0 cursor-pointer items-start gap-2.5">
                         <input
                           type="checkbox"
@@ -2098,23 +2166,12 @@ function CollectPanel({
                           disabled={openDues.length === 0}
                         />
                         <div className="min-w-0">
-                          <div className="text-xs font-bold text-[var(--brand-deep)]">
+                          <div className="text-sm font-bold text-[var(--brand-deep)]">
                             <StudentNameLabel student={row.student} />
-                            {isSibling ? (
-                              <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
-                                Sibling
-                              </span>
-                            ) : siblingCount > 1 ? (
-                              <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--brand-gold)]">
-                                Selected
-                              </span>
-                            ) : null}
                           </div>
-                          <div className="mt-0.5 text-xs text-[var(--muted)]">
-                            {row.student.admissionNo} · {classLabel(row.student)}
-                          </div>
-                          <div className="text-[11px] text-[var(--muted)]">
-                            {feeGroupLabel(row.student)}
+                          <div className="mt-0.5 text-[11px] text-[var(--muted)]">
+                            {classLabel(row.student)} · {row.student.admissionNo}{" "}
+                            · {feeGroupLabel(row.student)}
                           </div>
                         </div>
                       </label>
@@ -2189,60 +2246,10 @@ function CollectPanel({
             )}
           </div>
         </div>
+      </div>
 
-        {/* ── RIGHT COLUMN: Household Card & Collect Fee Payment Panel ── */}
-        <div className="space-y-4 min-w-0">
-          {/* Reference, not part of taking the money — collapsed on phones. */}
-          <CollapsibleSection
-            title="Household Information"
-            badge={
-              siblingCount > 1 ? (
-                <span className="rounded bg-[var(--brand-gold-soft)] px-2 py-0.5 text-[10px] font-bold text-[var(--brand-gold)]">
-                  {siblingCount} Siblings
-                </span>
-              ) : null
-            }
-          >
-            <div className="space-y-2 text-xs">
-              <div className="flex justify-between gap-2">
-                <span className="text-[var(--muted)]">Guardian Name:</span>
-                <span className="font-bold text-[var(--brand-deep)]">
-                  {student.fatherName || student.motherName || "Guardian"}
-                </span>
-              </div>
-
-              {student.fatherMobile || student.motherMobile ? (
-                <div className="flex justify-between gap-2 items-center">
-                  <span className="text-[var(--muted)]">Primary Mobile:</span>
-                  <span className="font-bold text-[var(--brand-deep)]">
-                    {student.fatherMobile || student.motherMobile}
-                  </span>
-                </div>
-              ) : null}
-
-              <div className="flex justify-between gap-2">
-                <span className="text-[var(--muted)]">Active Student:</span>
-                <span className="font-semibold text-[var(--brand-deep)]">
-                  {student.fullName} ({classLabel(student)})
-                </span>
-              </div>
-
-              <div className="flex justify-between gap-2">
-                <span className="text-[var(--muted)]">Admission No:</span>
-                <span className="font-semibold text-[var(--brand-deep)]">
-                  {student.admissionNo}
-                </span>
-              </div>
-
-              <div className="flex justify-between gap-2">
-                <span className="text-[var(--muted)]">Fee Group:</span>
-                <span className="font-semibold text-[var(--brand-deep)]">
-                  {feeGroupLabel(student)}
-                </span>
-              </div>
-            </div>
-          </CollapsibleSection>
-
+      {/* ── THE MONEY: full width, under both columns ── */}
+      <div className="mt-4 space-y-4">
           <div
             className="relative overflow-hidden rounded-2xl border border-[var(--border)] shadow-[0_12px_40px_rgba(32,48,80,0.1)]"
             style={{
@@ -2635,7 +2642,6 @@ function CollectPanel({
         )}
       </div>
     </div>
-  </div>
 
       {/* ── Sticky collect bar, phones only ──────────────────────────────
           The page stacks on a phone: sibling tabs, then every month's dues,
