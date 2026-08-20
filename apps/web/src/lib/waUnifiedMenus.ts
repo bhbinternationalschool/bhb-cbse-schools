@@ -243,12 +243,12 @@ function teacherMenu(
       kind: "buttons",
       body,
       buttons: [
+        { id: "teacher_att", title: "Attendance IN/OUT" },
         { id: "teacher_hw", title: "Homework" },
         { id: "teacher_notice", title: "Notice" },
-        { id: "menu_main", title: "Main menu" },
       ],
     },
-    textFallback: `${body}\n\n• *HW* 8A Maths: …\n• *NOTICE* …\n• *MENU*`,
+    textFallback: `${body}\n\n• *IN* / *OUT* — attendance punch (📍 location)\n• *HW* 8A Maths: …\n• *NOTICE* …\n• *MENU*`,
   };
 }
 
@@ -316,7 +316,11 @@ export function interactiveIdToText(id: string): string | null {
   if (raw.startsWith("purpose_")) {
     return raw.slice(8).toUpperCase();
   }
-  if (raw.startsWith("staff_")) return raw.slice(6).toUpperCase();
+  if (raw.startsWith("staff_")) {
+    const sub = raw.slice(6);
+    const hit = STAFF_BOT_OWNER_PROMPTS.find((q) => q.id === sub);
+    return hit?.waKeyword || sub.toUpperCase();
+  }
   if (raw.startsWith("transport_")) return raw.slice(10).toUpperCase();
   if (raw.startsWith("parent_")) {
     const sub = raw.slice(7);
@@ -328,6 +332,7 @@ export function interactiveIdToText(id: string): string | null {
     const hit = CRM_BOT_QUICK_PROMPTS.find((q) => q.id === sub);
     return hit?.waKeyword || sub.toUpperCase();
   }
+  if (raw === "teacher_att") return "ATTEND";
   if (raw === "teacher_hw") return "HW";
   if (raw === "teacher_notice") return "NOTICE";
   if (raw === "survey_status") return "STATUS";
