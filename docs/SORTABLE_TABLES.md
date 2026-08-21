@@ -68,7 +68,31 @@ Note that `0` is a real value and stays with the numbers.
 
 - `components/transport/FleetRosterPanel.tsx` — riders by bus
 - `components/students/BirthdaysPanel.tsx` — today's birthdays
+- `components/staff/StaffWorkspace.tsx` — staff roster
+- `components/library/LibraryWorkspace.tsx` — catalogue
 
-Roughly 79 components use `ErpTable` / `ErpTableShell`. The rest are a
-mechanical follow-on using the recipe above; do them a module at a time and
-look at each one, rather than in a single sweep.
+## The real scope, and what to skip
+
+68 components render roughly **147 tables** between them (294 `ErpTableHead`
+occurrences, 627 `<th>` cells). That is a lot more than it looks from the
+component count, and it is not a job for one sweep.
+
+**About 40 of those files already sort their rows deliberately.** Do not
+blanket-convert them. `StockMasterWorkspace`'s category list, for instance,
+orders by `sortOrder` then name — a sequence somebody arranged on purpose.
+Bolting a sortable header onto it would fight the arrangement rather than help.
+Leave those alone unless the manual order is genuinely incidental.
+
+Others are not lists at all: a totals row, a five-row summary, a timetable grid
+whose rows are periods, a fee schedule whose rows run April to March. Row order
+there *is* information. Sorting it destroys the thing the reader came for.
+
+So the checklist per table is:
+
+1. Is it a list somebody hunts through? If not, skip it.
+2. Does the current order mean something? If yes, skip it.
+3. Otherwise apply the recipe above — and read each column, because the whole
+   value is in yielding the right underlying field.
+
+Work module at a time and look at the result. A wrong column getter compiles
+perfectly and only shows up when a clerk sorts by fee and sees nonsense.
