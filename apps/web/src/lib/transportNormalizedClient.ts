@@ -97,6 +97,8 @@ export async function hydrateTransportDeskFromDb(
       minFeePaise: 0,
       maxFeePaise: null,
       slabs: [],
+      bands: [],
+      formula: { basePaise: 0, baseCoversKm: 0, perKmPaise: 0 },
       repairApprovalPaise: 0,
     },
     routes: [],

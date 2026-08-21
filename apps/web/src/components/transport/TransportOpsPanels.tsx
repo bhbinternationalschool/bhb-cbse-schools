@@ -72,6 +72,7 @@ export function RoutesPanel({
         geoLng: s.geoLng,
         placeId: s.placeId,
         geoAddress: s.geoAddress,
+        monthlyFeePaise: s.monthlyFeePaise,
       })),
     );
   }
@@ -97,6 +98,7 @@ export function RoutesPanel({
         geoLng: r.geoLng,
         placeId: r.placeId,
         geoAddress: r.geoAddress,
+        monthlyFeePaise: r.monthlyFeePaise,
       }));
     const veh = vehicles.find((v) => v.id === vehicleId);
     const r = upsertTransportRoute({
@@ -118,6 +120,7 @@ export function RoutesPanel({
         geoLng: s.geoLng,
         placeId: s.placeId,
         geoAddress: s.geoAddress,
+        monthlyFeePaise: s.monthlyFeePaise,
       })),
     });
     if (!r.ok) {
@@ -218,6 +221,9 @@ export function RoutesPanel({
                 rows={stopRows}
                 onChange={setStopRows}
                 showDistance
+                bands={
+                  policy.rateMode === "band_then_formula" ? policy.bands : undefined
+                }
               />
             </div>
           </div>
@@ -274,8 +280,133 @@ export function RoutesPanel({
                 <option value="flat_route">Flat route fee</option>
                 <option value="per_km">Per km</option>
                 <option value="slab">Distance slabs</option>
+                <option value="band_then_formula">
+                  Stop-priced bands, then per km (2026-27 rule)
+                </option>
               </select>
             </label>
+
+            {policy.rateMode === "band_then_formula" ? (
+              <div className="sm:col-span-2 space-y-2">
+                <p className="rounded-lg bg-[var(--surface-sunken)] px-3 py-2 text-[12px] text-[var(--brand-deep)]">
+                  Stops inside a band carry their own monthly fee — everyone
+                  boarding at the same stop pays the same. Past the last band
+                  the fee is worked out from distance instead.
+                </p>
+                {[...policy.bands]
+                  .sort((a, b) => a.upToKm - b.upToKm)
+                  .map((b, i) => (
+                    <div
+                      key={b.id}
+                      className="flex flex-wrap items-center gap-2 text-[12px]"
+                    >
+                      <span className="text-[var(--muted)]">Up to</span>
+                      <input
+                        className="field !w-16 !py-1 text-right tabular-nums"
+                        inputMode="decimal"
+                        value={b.upToKm}
+                        onChange={(e) =>
+                          setPolicy((p) => ({
+                            ...p,
+                            bands: p.bands.map((x) =>
+                              x.id === b.id
+                                ? { ...x, upToKm: Number(e.target.value) || 0 }
+                                : x,
+                            ),
+                          }))
+                        }
+                      />
+                      <span className="text-[var(--muted)]">km · ₹</span>
+                      <input
+                        className="field !w-20 !py-1 text-right tabular-nums"
+                        inputMode="decimal"
+                        value={Math.round(b.minPaise / 100)}
+                        onChange={(e) =>
+                          setPolicy((p) => ({
+                            ...p,
+                            bands: p.bands.map((x) =>
+                              x.id === b.id
+                                ? { ...x, minPaise: Math.round(Number(e.target.value) * 100) || 0 }
+                                : x,
+                            ),
+                          }))
+                        }
+                      />
+                      <span className="text-[var(--muted)]">to ₹</span>
+                      <input
+                        className="field !w-20 !py-1 text-right tabular-nums"
+                        inputMode="decimal"
+                        value={Math.round(b.maxPaise / 100)}
+                        onChange={(e) =>
+                          setPolicy((p) => ({
+                            ...p,
+                            bands: p.bands.map((x) =>
+                              x.id === b.id
+                                ? { ...x, maxPaise: Math.round(Number(e.target.value) * 100) || 0 }
+                                : x,
+                            ),
+                          }))
+                        }
+                      />
+                      <span className="text-[var(--muted)]">
+                        {i === 0 ? "(nearest band)" : ""}
+                      </span>
+                    </div>
+                  ))}
+                <div className="flex flex-wrap items-center gap-2 text-[12px]">
+                  <span className="text-[var(--muted)]">Beyond that: ₹</span>
+                  <input
+                    className="field !w-20 !py-1 text-right tabular-nums"
+                    inputMode="decimal"
+                    value={Math.round(policy.formula.basePaise / 100)}
+                    onChange={(e) =>
+                      setPolicy((p) => ({
+                        ...p,
+                        formula: {
+                          ...p.formula,
+                          basePaise: Math.round(Number(e.target.value) * 100) || 0,
+                        },
+                      }))
+                    }
+                  />
+                  <span className="text-[var(--muted)]">covering the first</span>
+                  <input
+                    className="field !w-14 !py-1 text-right tabular-nums"
+                    inputMode="decimal"
+                    value={policy.formula.baseCoversKm}
+                    onChange={(e) =>
+                      setPolicy((p) => ({
+                        ...p,
+                        formula: {
+                          ...p.formula,
+                          baseCoversKm: Number(e.target.value) || 0,
+                        },
+                      }))
+                    }
+                  />
+                  <span className="text-[var(--muted)]">km, then ₹</span>
+                  <input
+                    className="field !w-16 !py-1 text-right tabular-nums"
+                    inputMode="decimal"
+                    value={Math.round(policy.formula.perKmPaise / 100)}
+                    onChange={(e) =>
+                      setPolicy((p) => ({
+                        ...p,
+                        formula: {
+                          ...p.formula,
+                          perKmPaise: Math.round(Number(e.target.value) * 100) || 0,
+                        },
+                      }))
+                    }
+                  />
+                  <span className="text-[var(--muted)]">per started km</span>
+                </div>
+                <p className="text-[11px] text-[var(--muted)]">
+                  A part kilometre counts as a whole one — 8.2 km is charged as
+                  9 km.
+                </p>
+              </div>
+            ) : null}
 
             {policy.rateMode === "flat_route" ? (
               <p className="sm:col-span-2 rounded-lg bg-[var(--surface-sunken)] px-3 py-2 text-[12px] text-[var(--brand-deep)]">

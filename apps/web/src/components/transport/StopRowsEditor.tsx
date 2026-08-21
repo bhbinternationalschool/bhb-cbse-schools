@@ -10,6 +10,8 @@ export type StopDraft = {
   name: string;
   distanceKm: number;
   distanceSource: StopDistanceSource;
+  /** This stop's own monthly fee, in paise. 0 = not priced yet, not free. */
+  monthlyFeePaise?: number;
   geoLat?: number;
   geoLng?: number;
   placeId?: string;
@@ -41,11 +43,17 @@ export function StopRowsEditor({
   rows,
   onChange,
   showDistance,
+  bands,
 }: {
   rows: StopDraft[];
   onChange: (next: StopDraft[]) => void;
   /** Distances only bill under per-km / slab policies; still shown, but calmer. */
   showDistance: boolean;
+  /**
+   * Stop-priced bands, when the policy uses them. A stop inside a band needs
+   * its own fee; a stop past the last band is priced by distance instead.
+   */
+  bands?: { upToKm: number; minPaise: number; maxPaise: number }[];
 }) {
   function patch(key: string, next: Partial<StopDraft>) {
     onChange(rows.map((r) => (r.key === key ? { ...r, ...next } : r)));
@@ -65,6 +73,7 @@ export function StopRowsEditor({
           row={row}
           index={i}
           showDistance={showDistance}
+          bands={bands}
           onPatch={(next) => patch(row.key, next)}
           onRemove={() => onChange(rows.filter((r) => r.key !== row.key))}
           onMove={(dir) => {
@@ -92,6 +101,7 @@ function StopRow({
   row,
   index,
   showDistance,
+  bands,
   onPatch,
   onRemove,
   onMove,
@@ -99,6 +109,7 @@ function StopRow({
   row: StopDraft;
   index: number;
   showDistance: boolean;
+  bands?: { upToKm: number; minPaise: number; maxPaise: number }[];
   onPatch: (next: Partial<StopDraft>) => void;
   onRemove: () => void;
   onMove: (dir: -1 | 1) => void;
@@ -200,6 +211,16 @@ function StopRow({
     setBusy(false);
   }
 
+  // Which band this stop falls in decides whether it needs its own price.
+  // Past the last band, distance decides and no price field is shown.
+  const sorted = [...(bands ?? [])].sort((a, b) => a.upToKm - b.upToKm);
+  const band =
+    row.distanceKm > 0 ? sorted.find((b) => row.distanceKm <= b.upToKm) : undefined;
+  const priceOutsideBand =
+    !!band &&
+    !!row.monthlyFeePaise &&
+    (row.monthlyFeePaise < band.minPaise || row.monthlyFeePaise > band.maxPaise);
+
   const sourceLabel =
     row.distanceSource === "google"
       ? "by road (Google)"
@@ -255,6 +276,28 @@ function StopRow({
             </ul>
           ) : null}
         </div>
+
+        {band ? (
+          <label className="flex items-center gap-1">
+            <span className="text-[11px] text-[var(--muted)]">₹</span>
+            <input
+              className="field !w-24 !py-1.5 text-right tabular-nums"
+              inputMode="decimal"
+              value={row.monthlyFeePaise ? Math.round(row.monthlyFeePaise / 100) : ""}
+              placeholder={`${Math.round(band.minPaise / 100)}–${Math.round(band.maxPaise / 100)}`}
+              title={`Stops up to ${band.upToKm} km carry their own fee`}
+              onChange={(e) => {
+                const rupees = Number(e.target.value);
+                onPatch({
+                  monthlyFeePaise:
+                    Number.isFinite(rupees) && rupees > 0
+                      ? Math.round(rupees * 100)
+                      : undefined,
+                });
+              }}
+            />
+          </label>
+        ) : null}
 
         {showDistance ? (
           <label className="flex items-center gap-1">
@@ -314,6 +357,21 @@ function StopRow({
           >
             {busy ? "Measuring…" : "Re-measure"}
           </button>
+        ) : null}
+        {band && !row.monthlyFeePaise ? (
+          <span className="font-semibold text-[var(--danger)]">
+            Needs a stop fee (₹{Math.round(band.minPaise / 100)}–
+            {Math.round(band.maxPaise / 100)})
+          </span>
+        ) : null}
+        {priceOutsideBand && band ? (
+          <span className="font-semibold text-[var(--brand-mid)]">
+            Outside the ₹{Math.round(band.minPaise / 100)}–
+            {Math.round(band.maxPaise / 100)} band
+          </span>
+        ) : null}
+        {!band && row.distanceKm > 0 && sorted.length > 0 ? (
+          <span className="text-[var(--muted)]">Priced by distance</span>
         ) : null}
         {note ? <span className="text-[var(--danger)]">{note}</span> : null}
       </div>

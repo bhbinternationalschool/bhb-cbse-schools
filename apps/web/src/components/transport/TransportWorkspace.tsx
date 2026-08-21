@@ -50,6 +50,7 @@ import {
   assignStudentToRoute,
   computeTransportPeriodDues,
   endTransportAssignment,
+  expectedMonthlyFeeDetail,
   expectedMonthlyFeePaise,
   listActiveRiders,
   listActiveRoutes,
@@ -252,14 +253,15 @@ export function TransportWorkspace() {
     }
   }, [selectedRoute, stopId]);
 
-  const expectedFeePaise =
+  const feeDetail =
     state && selectedRoute
-      ? expectedMonthlyFeePaise(
+      ? expectedMonthlyFeeDetail(
           selectedRoute,
           selectedStop ?? undefined,
           state.feePolicy,
         )
-      : 0;
+      : null;
+  const expectedFeePaise = feeDetail?.paise ?? 0;
   const overridePaise = feeOverride.trim()
     ? Math.round((Number(feeOverride) || 0) * 100)
     : 0;
@@ -301,6 +303,12 @@ export function TransportWorkspace() {
       !feeOverrideReason.trim()
     ) {
       setError("Enter a reason when overriding the expected monthly fee");
+      return;
+    }
+    // A stop the policy cannot price must not be billed on a guess. An
+    // explicit override is still allowed — somebody has then decided.
+    if (feeDetail && !feeDetail.ok && overridePaise <= 0) {
+      setError(feeDetail.reason ?? "This stop has no fee yet");
       return;
     }
     // Never bill transport before the child joined, or through a month the
@@ -428,6 +436,7 @@ export function TransportWorkspace() {
               feeOverrideReason={feeOverrideReason}
               setFeeOverrideReason={setFeeOverrideReason}
               expectedFeePaise={expectedFeePaise}
+              feeDetail={feeDetail}
               proposedFeePaise={proposedFeePaise}
               existingDues={existingDues}
               riders={riders}
@@ -570,6 +579,7 @@ type RidersPanelProps = {
   feeOverrideReason: string;
   setFeeOverrideReason: (value: string) => void;
   expectedFeePaise: number;
+  feeDetail: ReturnType<typeof expectedMonthlyFeeDetail> | null;
   proposedFeePaise: number;
   existingDues: ReturnType<typeof computeTransportPeriodDues>;
   riders: ReturnType<typeof listActiveRiders>;
@@ -612,6 +622,7 @@ function RidersPanel(props: RidersPanelProps) {
     feeOverrideReason,
     setFeeOverrideReason,
     expectedFeePaise,
+    feeDetail,
     proposedFeePaise,
     existingDues,
     riders,
@@ -973,6 +984,16 @@ function RidersPanel(props: RidersPanelProps) {
               />
             </label>
           </div>
+
+          {feeDetail && !feeDetail.ok ? (
+            <p className="mt-3 rounded-lg border border-[color-mix(in_srgb,var(--danger)_40%,transparent)] bg-[color-mix(in_srgb,var(--danger)_8%,transparent)] px-3 py-2 text-[11px] font-semibold text-[var(--danger)]">
+              {feeDetail.reason}
+            </p>
+          ) : feeDetail?.warning ? (
+            <p className="mt-3 rounded-lg border border-[color-mix(in_srgb,var(--brand-mid)_45%,transparent)] px-3 py-2 text-[11px] font-semibold text-[var(--brand-mid)]">
+              {feeDetail.warning}
+            </p>
+          ) : null}
 
           {selected && selectedRoute && stopId ? (
             <div className="mt-3 rounded-lg border border-[rgba(15,118,110,0.2)] bg-[rgba(15,118,110,0.06)] px-3 py-2 text-xs">

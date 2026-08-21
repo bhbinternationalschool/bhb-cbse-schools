@@ -40,6 +40,14 @@ export type TransportStop = {
   /** Full address Google returned — shown so a clerk can sanity-check the pin. */
   geoAddress?: string;
   distanceSource: StopDistanceSource;
+  /**
+   * Monthly fee for this stop, in paise.
+   *
+   * Under `band_then_formula` the two lower bands are stop-priced: everybody
+   * boarding at the same stop pays the same, which is the fairness argument
+   * parents actually make. 0 means nobody has priced it yet — NOT free.
+   */
+  monthlyFeePaise?: number;
 };
 
 export type TransportRoute = {
@@ -72,12 +80,34 @@ export type TransportAssignment = {
   createdAt: string;
 };
 
-export type TransportFeeRateMode = "flat_route" | "per_km" | "slab";
+export type TransportFeeRateMode =
+  | "flat_route"
+  | "per_km"
+  | "slab"
+  | "band_then_formula";
 
 export type TransportFeeSlab = {
   id: string;
   upToKm: number;
   monthlyFeePaise: number;
+};
+
+/**
+ * A stop-priced distance band. The stop carries the actual number; the band
+ * says what range is acceptable, so a mistyped ₹50 or ₹5,000 is caught.
+ */
+export type TransportFeeBand = {
+  id: string;
+  upToKm: number;
+  minPaise: number;
+  maxPaise: number;
+};
+
+/** Charged beyond the last band: base, what it covers, then per started km. */
+export type TransportFeeFormula = {
+  basePaise: number;
+  baseCoversKm: number;
+  perKmPaise: number;
 };
 
 export type TransportFeePolicy = {
@@ -87,6 +117,10 @@ export type TransportFeePolicy = {
   minFeePaise: number;
   maxFeePaise: number | null;
   slabs: TransportFeeSlab[];
+  /** Stop-priced bands, used when rateMode = band_then_formula. */
+  bands: TransportFeeBand[];
+  /** Applied past the last band. */
+  formula: TransportFeeFormula;
   /** Soft Principal approval threshold for repair estimates */
   repairApprovalPaise: number;
 };
@@ -458,6 +492,13 @@ export function defaultFeePolicy(ay = DEFAULT_AY): TransportFeePolicy {
       { id: id("slb"), upToKm: 8, monthlyFeePaise: 70000 },
       { id: id("slb"), upToKm: 99, monthlyFeePaise: 90000 },
     ],
+    // The school's published 2026-27 rule: stop-priced up to 8 km, then
+    // ₹500 covering the first 5 km plus ₹100 for every started km after that.
+    bands: [
+      { id: id("bnd"), upToKm: 5, minPaise: 30000, maxPaise: 50000 },
+      { id: id("bnd"), upToKm: 8, minPaise: 70000, maxPaise: 80000 },
+    ],
+    formula: { basePaise: 50000, baseCoversKm: 5, perKmPaise: 10000 },
     repairApprovalPaise: 2500000,
   };
 }
@@ -508,6 +549,9 @@ export function normalizeStop(
     sequence: s.sequence ?? i + 1,
     distanceKm: km,
     distanceSource: src,
+    ...(Number(s.monthlyFeePaise) > 0
+      ? { monthlyFeePaise: Math.round(Number(s.monthlyFeePaise)) }
+      : {}),
     ...(hasGeo ? { geoLat: lat, geoLng: lng } : {}),
     ...(s.placeId ? { placeId: String(s.placeId) } : {}),
     ...(s.geoAddress ? { geoAddress: String(s.geoAddress) } : {}),
@@ -592,6 +636,8 @@ function normalizeFeePolicy(p?: Partial<TransportFeePolicy>): TransportFeePolicy
     ...base,
     ...p,
     slabs: Array.isArray(p.slabs) && p.slabs.length ? p.slabs : base.slabs,
+    bands: Array.isArray(p.bands) && p.bands.length ? p.bands : base.bands,
+    formula: p.formula ?? base.formula,
     repairApprovalPaise:
       p.repairApprovalPaise ?? base.repairApprovalPaise,
   };
@@ -780,12 +826,133 @@ function assignmentCoversPeriod(
   return true;
 }
 
+export type FeeBasis =
+  | "route-flat"
+  | "stop-price"
+  | "formula"
+  | "per-km"
+  | "slab"
+  | "unpriced";
+
+export type ExpectedFee = {
+  paise: number;
+  basis: FeeBasis;
+  /** False when the fee could not be established and must not be billed as-is. */
+  ok: boolean;
+  /** Why, when not ok — shown to the clerk instead of a confident number. */
+  reason?: string;
+  /** Set when a stop price sits outside its band. */
+  warning?: string;
+};
+
+/** Every started kilometre counts — 8.2 km is charged as 9. */
+function kmBeyond(km: number, covered: number): number {
+  return Math.max(0, Math.ceil(km - covered));
+}
+
+/**
+ * What the policy says this stop costs, and whether that is knowable.
+ *
+ * Returns `ok: false` rather than a plausible number when the stop has no
+ * measured distance or no price. A transport fee that quietly defaults is a
+ * wrong invoice nobody notices — the counter should say "not priced" and make
+ * somebody decide.
+ */
+export function expectedMonthlyFeeDetail(
+  route: TransportRoute,
+  stop: TransportStop | undefined,
+  policy?: TransportFeePolicy,
+): ExpectedFee {
+  const p = policy ?? loadTransport().feePolicy;
+
+  if (p.rateMode === "band_then_formula") {
+    if (!stop) {
+      return {
+        paise: 0,
+        basis: "unpriced",
+        ok: false,
+        reason: "No stop selected",
+      };
+    }
+    const km = stop.distanceKm || 0;
+    if (km <= 0) {
+      return {
+        paise: 0,
+        basis: "unpriced",
+        ok: false,
+        reason: `${stop.name} has no measured distance — pin it on the map and measure before billing`,
+      };
+    }
+
+    const bands = [...(p.bands ?? [])].sort((a, b) => a.upToKm - b.upToKm);
+    const band = bands.find((b) => km <= b.upToKm);
+
+    if (band) {
+      const priced = stop.monthlyFeePaise ?? 0;
+      if (priced <= 0) {
+        return {
+          paise: 0,
+          basis: "unpriced",
+          ok: false,
+          reason: `${stop.name} is within ${band.upToKm} km, where each stop carries its own fee — set it between ${formatPaise(band.minPaise)} and ${formatPaise(band.maxPaise)}`,
+        };
+      }
+      const outside = priced < band.minPaise || priced > band.maxPaise;
+      return {
+        paise: priced,
+        basis: "stop-price",
+        ok: true,
+        warning: outside
+          ? `${formatPaise(priced)} is outside the ${formatPaise(band.minPaise)}–${formatPaise(band.maxPaise)} band for stops up to ${band.upToKm} km`
+          : undefined,
+      };
+    }
+
+    const f = p.formula;
+    return {
+      paise: f.basePaise + kmBeyond(km, f.baseCoversKm) * f.perKmPaise,
+      basis: "formula",
+      ok: true,
+    };
+  }
+
+  return { paise: legacyExpectedFee(route, stop, p), basis: legacyBasis(p), ok: true };
+}
+
+function formatPaise(paise: number): string {
+  return `₹${Math.round(paise / 100).toLocaleString("en-IN")}`;
+}
+
+function legacyBasis(p: TransportFeePolicy): FeeBasis {
+  if (p.rateMode === "per_km") return "per-km";
+  if (p.rateMode === "slab") return "slab";
+  return "route-flat";
+}
+
+/**
+ * Backwards-compatible number.
+ *
+ * Callers that only want a figure keep working; an unpriced stop yields 0 here,
+ * which `computeTransportPeriodDues` already skips rather than billing.
+ * New UI should prefer `expectedMonthlyFeeDetail` so it can say why.
+ */
 export function expectedMonthlyFeePaise(
   route: TransportRoute,
   stop: TransportStop | undefined,
   policy?: TransportFeePolicy,
 ): number {
   const p = policy ?? loadTransport().feePolicy;
+  if (p.rateMode === "band_then_formula") {
+    return expectedMonthlyFeeDetail(route, stop, p).paise;
+  }
+  return legacyExpectedFee(route, stop, p);
+}
+
+function legacyExpectedFee(
+  route: TransportRoute,
+  stop: TransportStop | undefined,
+  p: TransportFeePolicy,
+): number {
   if (p.rateMode === "flat_route" || !stop) {
     return Math.max(0, route.monthlyFeePaise);
   }
@@ -945,6 +1112,7 @@ export function setRouteStops(
     placeId?: string;
     geoAddress?: string;
     distanceSource?: StopDistanceSource;
+    monthlyFeePaise?: number;
   }[],
 ):
   | { ok: true; route: TransportRoute }
@@ -966,6 +1134,7 @@ export function setRouteStops(
           placeId: stops[i]?.placeId,
           geoAddress: stops[i]?.geoAddress,
           distanceSource: stops[i]?.distanceSource,
+          monthlyFeePaise: stops[i]?.monthlyFeePaise,
         },
         i,
       ),
