@@ -16,12 +16,30 @@ import { TENANT } from "@/lib/types";
 
 /* ─── Core ops ─────────────────────────────────────────────── */
 
+/**
+ * Where a stop's distance came from.
+ *
+ * `google` is a Distance Matrix road result and is the only value safe to bill
+ * on without a human having looked. `manual` was typed by a person. `""` means
+ * nobody has established it — which is NOT the same as zero kilometres, and
+ * must never be quietly treated as such.
+ */
+export type StopDistanceSource = "" | "google" | "manual";
+
 export type TransportStop = {
   id: string;
   name: string;
   sequence: number;
   /** Distance from school (km) — for per-km / slab fee policy */
   distanceKm: number;
+  /** Coordinates, when the stop was picked from Google Places. */
+  geoLat?: number;
+  geoLng?: number;
+  /** Google place id, so the same stop resolves identically next time. */
+  placeId?: string;
+  /** Full address Google returned — shown so a clerk can sanity-check the pin. */
+  geoAddress?: string;
+  distanceSource: StopDistanceSource;
 };
 
 export type TransportRoute = {
@@ -467,13 +485,43 @@ function emptyTransport(): TransportState {
   };
 }
 
-function normalizeStop(s: Partial<TransportStop>, i: number): TransportStop {
+export function normalizeStop(
+  s: Partial<TransportStop>,
+  i: number,
+): TransportStop {
+  const km = Math.max(0, Number(s.distanceKm) || 0);
+  const src: StopDistanceSource =
+    s.distanceSource === "google" || s.distanceSource === "manual"
+      ? s.distanceSource
+      : // Stops saved before distances were sourced carry a hand-typed km and
+        // no provenance. Call that `manual` rather than inventing `google`; a
+        // stop with no distance at all stays unsourced.
+        km > 0
+        ? "manual"
+        : "";
+  const lat = Number(s.geoLat);
+  const lng = Number(s.geoLng);
+  const hasGeo = Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0);
   return {
     id: s.id ?? id("st"),
     name: s.name ?? `Stop ${i + 1}`,
     sequence: s.sequence ?? i + 1,
-    distanceKm: Math.max(0, Number(s.distanceKm) || 0),
+    distanceKm: km,
+    distanceSource: src,
+    ...(hasGeo ? { geoLat: lat, geoLng: lng } : {}),
+    ...(s.placeId ? { placeId: String(s.placeId) } : {}),
+    ...(s.geoAddress ? { geoAddress: String(s.geoAddress) } : {}),
   };
+}
+
+/** True when the stop has coordinates we can measure a road distance from. */
+export function stopHasGeo(stop: TransportStop | undefined): boolean {
+  return (
+    !!stop &&
+    Number.isFinite(stop.geoLat) &&
+    Number.isFinite(stop.geoLng) &&
+    (stop.geoLat !== 0 || stop.geoLng !== 0)
+  );
 }
 
 function normalizeRoute(r: Partial<TransportRoute>): TransportRoute {
@@ -889,7 +937,15 @@ export function deactivateTransportRoute(routeId: string): boolean {
 
 export function setRouteStops(
   routeId: string,
-  stops: { name: string; distanceKm?: number }[],
+  stops: {
+    name: string;
+    distanceKm?: number;
+    geoLat?: number;
+    geoLng?: number;
+    placeId?: string;
+    geoAddress?: string;
+    distanceSource?: StopDistanceSource;
+  }[],
 ):
   | { ok: true; route: TransportRoute }
   | { ok: false; error: string } {
@@ -905,6 +961,11 @@ export function setRouteStops(
           name,
           sequence: i + 1,
           distanceKm: stops[i]?.distanceKm ?? 0,
+          geoLat: stops[i]?.geoLat,
+          geoLng: stops[i]?.geoLng,
+          placeId: stops[i]?.placeId,
+          geoAddress: stops[i]?.geoAddress,
+          distanceSource: stops[i]?.distanceSource,
         },
         i,
       ),
@@ -2303,11 +2364,15 @@ export function importTransportRoutesCsv(text: string): {
       .filter(Boolean);
     const stops: TransportStop[] = stopNames.map((n, idx) => {
       const [nm, km] = n.split(":").map((x) => x.trim());
+      const importedKm = Number(km) || 0;
       return {
         id: id("st"),
         name: nm || n,
         sequence: idx + 1,
-        distanceKm: Number(km) || 0,
+        distanceKm: importedKm,
+        // A km in the CSV is someone's typed figure, not a measured road
+        // distance — record it as manual so it is never mistaken for Google.
+        distanceSource: importedKm > 0 ? ("manual" as const) : ("" as const),
       };
     });
     const existing = byCode.get(code);

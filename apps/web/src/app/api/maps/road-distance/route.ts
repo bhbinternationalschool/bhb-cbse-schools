@@ -32,6 +32,7 @@ export async function GET(req: NextRequest) {
   const destination =
     req.nextUrl.searchParams.get("destination")?.trim() ||
     `${SCHOOL_LAT},${SCHOOL_LNG}`;
+  const strict = req.nextUrl.searchParams.get("strict") === "1";
 
   if (!origin && !(originLat && originLng)) {
     return NextResponse.json({ error: "origin required" }, { status: 400 });
@@ -67,6 +68,23 @@ export async function GET(req: NextRequest) {
     } catch {
       /* fall through */
     }
+  }
+
+  // `strict` callers would rather have nothing than a guess. Transport stop
+  // distances bill parents by the kilometre, so the estimate below — which is a
+  // ring around the school plus jitter derived from the length of the address
+  // string — must never reach a fee. Return no distance and say why.
+  if (strict) {
+    return NextResponse.json(
+      {
+        km: null,
+        source: "unavailable",
+        error: apiKey
+          ? "Google returned no road distance for this origin"
+          : "GOOGLE_MAPS_API_KEY not configured",
+      },
+      { status: 200 },
+    );
   }
 
   // Rough estimate: assume origin is ~road factor 1.3× straight line from a ring around school

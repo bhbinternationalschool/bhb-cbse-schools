@@ -100,7 +100,7 @@ export function TransportRiderChip({
         type="button"
         onClick={() => setOpen(true)}
         title="Transport assignment and monthly schedule"
-        className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-[rgba(15,118,110,0.35)] bg-[rgba(15,118,110,0.08)] px-2 py-0.5 text-[11px] font-semibold text-[#0f766e] hover:bg-[rgba(15,118,110,0.16)]"
+        className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-[color-mix(in_srgb,var(--success)_40%,transparent)] bg-[var(--success-soft)] px-2 py-0.5 text-[11px] font-semibold text-[var(--success)] hover:bg-[color-mix(in_srgb,var(--success)_22%,transparent)]"
       >
         <BusGlyph />
         <span className="truncate">{chipLabel || "Transport"}</span>

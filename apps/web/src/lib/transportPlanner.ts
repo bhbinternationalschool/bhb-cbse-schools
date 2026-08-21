@@ -468,6 +468,57 @@ export async function fetchRoadDistanceKm(
   return { km: 5, source: "estimate" };
 }
 
+/**
+ * Road distance from campus to a stop, or `null` when Google cannot say.
+ *
+ * Deliberately separate from `fetchRoadDistanceKm`, which falls back to an
+ * estimate. A stop's distance sets what every family at that stop is billed,
+ * so an estimate here would become an invoice. No answer is the correct answer
+ * when the road network cannot be measured.
+ */
+export async function fetchStopRoadDistanceKm(input: {
+  placeId?: string;
+  lat?: number;
+  lng?: number;
+  address?: string;
+}): Promise<
+  { ok: true; km: number } | { ok: false; error: string }
+> {
+  const hasLatLng =
+    typeof input.lat === "number" &&
+    typeof input.lng === "number" &&
+    Number.isFinite(input.lat) &&
+    Number.isFinite(input.lng);
+  if (!hasLatLng && !input.address?.trim()) {
+    return { ok: false, error: "Pick the stop on the map first" };
+  }
+  const q = new URLSearchParams({ strict: "1" });
+  if (hasLatLng) {
+    q.set("originLat", String(input.lat));
+    q.set("originLng", String(input.lng));
+    q.set("origin", input.address?.trim() || `${input.lat},${input.lng}`);
+  } else {
+    q.set("origin", input.address!.trim());
+  }
+  try {
+    const res = await fetch(`/api/maps/road-distance?${q}`);
+    const data = (await res.json()) as {
+      km?: number | null;
+      source?: string;
+      error?: string;
+    };
+    if (data.source === "google" && typeof data.km === "number" && data.km > 0) {
+      return { ok: true, km: Math.round(data.km * 10) / 10 };
+    }
+    return {
+      ok: false,
+      error: data.error || "Google returned no road distance",
+    };
+  } catch {
+    return { ok: false, error: "Could not reach the distance service" };
+  }
+}
+
 export function suggestStopDistanceKm(
   stop: TransportStop | undefined,
   roadKm?: number,
