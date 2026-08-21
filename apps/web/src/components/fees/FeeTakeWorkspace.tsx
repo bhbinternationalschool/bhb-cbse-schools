@@ -100,13 +100,10 @@ import { SisParentWaInbox } from "@/components/fees/SisParentWaInbox";
 import { FeeAdjustmentsPanel } from "@/components/fees/FeeAdjustmentsPanel";
 import { FeeReportsPanel } from "@/components/fees/FeeFinancePanels";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
+import { TransportRiderChip } from "@/components/transport/TransportRiderChip";
 const ChargeVouchersPanel = lazyNamedTabPanel(
   () => import("@/components/fees/ChargeVouchersPanel"),
   "ChargeVouchersPanel",
-);
-const TransportFeeSchedulePanel = lazyNamedTabPanel(
-  () => import("@/components/fees/TransportFeeSchedulePanel"),
-  "TransportFeeSchedulePanel",
 );
 
 function FeeAgreementPdfLogo({ className = "" }: { className?: string }) {
@@ -2154,27 +2151,35 @@ function CollectPanel({
                     className="flex min-h-0 flex-col rounded-xl border border-[rgba(197,160,40,0.45)] bg-[var(--card)] p-3"
                   >
                     <div className="flex flex-wrap items-start justify-between gap-2 border-b border-[var(--border)] pb-2">
-                      <label className="flex min-w-0 cursor-pointer items-start gap-2.5">
-                        <input
-                          type="checkbox"
-                          className="mt-1"
-                          checked={allSelected}
-                          ref={(el) => {
-                            if (el) el.indeterminate = someSelected;
-                          }}
-                          onChange={() => onToggleStudentAll(row.student.id)}
-                          disabled={openDues.length === 0}
+                      <div className="flex min-w-0 flex-col items-start gap-1">
+                        <label className="flex min-w-0 cursor-pointer items-start gap-2.5">
+                          <input
+                            type="checkbox"
+                            className="mt-1"
+                            checked={allSelected}
+                            ref={(el) => {
+                              if (el) el.indeterminate = someSelected;
+                            }}
+                            onChange={() => onToggleStudentAll(row.student.id)}
+                            disabled={openDues.length === 0}
+                          />
+                          <div className="min-w-0">
+                            <div className="text-sm font-bold text-[var(--brand-deep)]">
+                              <StudentNameLabel student={row.student} />
+                            </div>
+                            <div className="mt-0.5 text-[11px] text-[var(--muted)]">
+                              {classLabel(row.student)} ·{" "}
+                              {row.student.admissionNo} ·{" "}
+                              {feeGroupLabel(row.student)}
+                            </div>
+                          </div>
+                        </label>
+                        <TransportRiderChip
+                          studentId={row.student.id}
+                          academicYearCode={row.student.academicYearCode}
+                          dues={row.dues}
                         />
-                        <div className="min-w-0">
-                          <div className="text-sm font-bold text-[var(--brand-deep)]">
-                            <StudentNameLabel student={row.student} />
-                          </div>
-                          <div className="mt-0.5 text-[11px] text-[var(--muted)]">
-                            {classLabel(row.student)} · {row.student.admissionNo}{" "}
-                            · {feeGroupLabel(row.student)}
-                          </div>
-                        </div>
-                      </label>
+                      </div>
                       <div className="text-right">
                         <div
                           className={`text-sm font-bold ${
@@ -2223,22 +2228,15 @@ function CollectPanel({
                         No fee lines for this student
                       </p>
                     ) : (
-                      <>
-                        <TransportFeeSchedulePanel
-                          studentId={row.student.id}
-                          academicYearCode={row.student.academicYearCode}
-                          dues={row.dues}
-                        />
-                        <DueBreakupPicker
-                          dues={row.dues}
-                          selectedKeys={selectedKeys}
-                          today={today}
-                          onToggle={onToggle}
-                          onToggleMonth={onToggleMonth}
-                          lineDiscountRupees={lineDiscountRupees}
-                          onLineDiscount={onLineDiscount}
-                        />
-                      </>
+                      <DueBreakupPicker
+                        dues={row.dues}
+                        selectedKeys={selectedKeys}
+                        today={today}
+                        onToggle={onToggle}
+                        onToggleMonth={onToggleMonth}
+                        lineDiscountRupees={lineDiscountRupees}
+                        onLineDiscount={onLineDiscount}
+                      />
                     )}
                   </div>
                 );

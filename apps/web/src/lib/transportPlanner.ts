@@ -176,6 +176,94 @@ export function buildStudentTransportProfiles(
     });
 }
 
+export type SiblingTransportGap = {
+  householdId: string;
+  /** Guardian or father's name — how the front desk refers to the family. */
+  householdLabel: string;
+  riders: {
+    studentId: string;
+    fullName: string;
+    classLabel: string;
+    routeLabel: string;
+  }[];
+  nonRiders: { studentId: string; fullName: string; classLabel: string }[];
+  /** True when the riding siblings are not all on the same bus. */
+  splitAcrossRoutes: boolean;
+};
+
+/**
+ * Households where somebody rides the bus and somebody does not.
+ *
+ * Two different things fall out of the same query. A family with one child on
+ * the bus and one walking is a sales prompt. Siblings on *different* buses is
+ * almost always a data-entry mistake, since the same house cannot be on two
+ * catchments — so that case is flagged separately rather than buried.
+ *
+ * Deliberately deterministic: this is a grouping over `householdId`, and there
+ * is nothing here for a model to infer.
+ */
+export function findSiblingTransportGaps(
+  profiles: StudentTransportProfile[],
+  state: TransportState,
+  householdLabels?: Map<string, string>,
+): SiblingTransportGap[] {
+  const byHousehold = new Map<string, StudentTransportProfile[]>();
+  for (const p of profiles) {
+    if (!p.householdId) continue;
+    const list = byHousehold.get(p.householdId);
+    if (list) list.push(p);
+    else byHousehold.set(p.householdId, [p]);
+  }
+
+  const out: SiblingTransportGap[] = [];
+  for (const [householdId, members] of byHousehold) {
+    if (members.length < 2) continue;
+    const riders = members.filter((m) => m.hasAssignment);
+    const nonRiders = members.filter((m) => !m.hasAssignment);
+    if (riders.length === 0 || nonRiders.length === 0) continue;
+
+    const riderRows = riders.map((m) => {
+      const route = m.assignment
+        ? state.routes.find((r) => r.id === m.assignment?.routeId)
+        : undefined;
+      const stop = route?.stops.find((st) => st.id === m.assignment?.stopId);
+      return {
+        studentId: m.studentId,
+        fullName: m.fullName,
+        classLabel: m.classLabel,
+        routeLabel:
+          [route?.busNo || route?.code, stop?.name].filter(Boolean).join(" · ") ||
+          "a bus",
+      };
+    });
+
+    const routeIds = new Set(
+      riders.map((m) => m.assignment?.routeId).filter(Boolean),
+    );
+
+    out.push({
+      householdId,
+      householdLabel: householdLabels?.get(householdId) || "",
+      riders: riderRows,
+      nonRiders: nonRiders.map((m) => ({
+        studentId: m.studentId,
+        fullName: m.fullName,
+        classLabel: m.classLabel,
+      })),
+      splitAcrossRoutes: routeIds.size > 1,
+    });
+  }
+
+  // Split families first — those are errors, not opportunities — then the
+  // households with the most children left off the bus.
+  return out.sort((a, b) => {
+    if (a.splitAcrossRoutes !== b.splitAcrossRoutes) {
+      return a.splitAcrossRoutes ? -1 : 1;
+    }
+    return b.nonRiders.length - a.nonRiders.length;
+  });
+}
+
 export function ridersOnRoute(state: TransportState, routeId: string): number {
   const today = new Date().toISOString().slice(0, 10);
   return state.assignments.filter(
