@@ -110,6 +110,7 @@ import {
   ErpTableHead,
   ErpTableShell,
 } from "@/components/ui/erp-roster";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 export type AccountsPanelProps = {
   state: AccountsState;
@@ -1379,6 +1380,23 @@ export function ExpensesPanel({
     (v) => !isExpenseVoucherCancelled(v),
   );
 
+  // Sort before the 30-row cut below, not after — sorting a slice would only
+  // reorder the first page and hide the rows the clerk is looking for.
+  const voucherSort = useTableSort(
+    openVouchers,
+    {
+      date: (v) => v.date,
+      voucherNo: (v) => v.voucherNo || null,
+      lines: (v) => v.lines.length || 1,
+      status: (v) => v.paymentStatus,
+      total: (v) => v.grandTotalPaise || v.amountPaise,
+      paid: (v) => v.paidPaise,
+      due: (v) => v.duePaise,
+    },
+    "date",
+    "desc",
+  );
+
   function cancelVoucher(voucherId: string) {
     const reason = window.prompt("Reason for cancellation (required):");
     if (!reason?.trim()) {
@@ -1855,18 +1873,18 @@ export function ExpensesPanel({
             <ErpTable minWidth="min-w-[720px]">
               <ErpTableHead>
                 <tr>
-                  <th className="px-4 py-2.5 font-bold">Date</th>
-                  <th className="px-4 py-2.5 font-bold">Voucher</th>
-                  <th className="px-4 py-2.5 font-bold">Lines</th>
-                  <th className="px-4 py-2.5 font-bold">Status</th>
-                  <th className="px-4 py-2.5 font-bold text-right">Total</th>
-                  <th className="px-4 py-2.5 font-bold text-right">Paid</th>
-                  <th className="px-4 py-2.5 font-bold text-right">Due</th>
+                  <ErpSortTh sort={voucherSort} field="date">Date</ErpSortTh>
+                  <ErpSortTh sort={voucherSort} field="voucherNo">Voucher</ErpSortTh>
+                  <ErpSortTh sort={voucherSort} field="lines">Lines</ErpSortTh>
+                  <ErpSortTh sort={voucherSort} field="status">Status</ErpSortTh>
+                  <ErpSortTh sort={voucherSort} field="total" align="right">Total</ErpSortTh>
+                  <ErpSortTh sort={voucherSort} field="paid" align="right">Paid</ErpSortTh>
+                  <ErpSortTh sort={voucherSort} field="due" align="right">Due</ErpSortTh>
                   <th className="px-4 py-2.5 font-bold">Actions</th>
                 </tr>
               </ErpTableHead>
               <ErpTableBody>
-                {openVouchers.slice(0, 30).map((v) => (
+                {voucherSort.rows.slice(0, 30).map((v) => (
                   <tr key={v.id} className="hover:bg-[var(--surface-sunken)]">
                     <td className="px-4 py-2">{v.date}</td>
                     <td className="px-4 py-2 font-mono text-xs">{v.voucherNo || v.id.slice(-8)}</td>
@@ -2050,6 +2068,19 @@ export function BillsPanel({
   }, []);
 
   const payables = listUnifiedPayables(state);
+
+  // Balance is amount minus paid, computed per row — sort the arithmetic, not
+  // the formatted "₹1,200" the cell shows.
+  const payableSort = useTableSort(
+    payables,
+    {
+      due: (p) => p.dueOn || null,
+      source: (p) => p.sourceType,
+      balance: (p) => Math.max(0, p.amountPaise - p.paidPaise),
+      note: (p) => p.note || null,
+    },
+    "due",
+  );
 
   function billLineTotalPaise(l: BillLineDraft) {
     return vendorBillLineTotalPaise({
@@ -2424,15 +2455,17 @@ export function BillsPanel({
         <ErpTable minWidth="min-w-full">
           <ErpTableHead>
             <tr>
-              <th className="pb-2">Due</th>
-              <th className="pb-2">Source</th>
-              <th className="pb-2 text-right">Balance</th>
-              <th className="pb-2">Note</th>
+              <ErpSortTh sort={payableSort} field="due">Due</ErpSortTh>
+              <ErpSortTh sort={payableSort} field="source">Source</ErpSortTh>
+              <ErpSortTh sort={payableSort} field="balance" align="right">
+                Balance
+              </ErpSortTh>
+              <ErpSortTh sort={payableSort} field="note">Note</ErpSortTh>
               <th className="pb-2" />
             </tr>
           </ErpTableHead>
           <ErpTableBody>
-            {payables.map((p) => {
+            {payableSort.rows.map((p) => {
               const bal = Math.max(0, p.amountPaise - p.paidPaise);
               return (
                 <tr key={p.id}>

@@ -77,6 +77,7 @@ import {
   ErpTableBody,
   ErpTableHead,
 } from "@/components/ui/erp-roster";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 import { AddressAutocompleteField } from "@/components/maps/AddressAutocompleteField";
 import { lazyNamedTabPanel } from "@/components/ui/lazyTabPanel";
 import {
@@ -457,6 +458,25 @@ export function AdmissionsWorkspace() {
     leadDateTo,
     localityQ,
   ]);
+
+  // Lead date falls back to createdAt exactly as the cell does, so the column
+  // orders on the same value the clerk is reading.
+  const leadSort = useTableSort(
+    filtered,
+    {
+      enquiryNo: (l) => l.enquiryNo || null,
+      leadDate: (l) => String(l.leadDate || l.createdAt || "").slice(0, 10) || null,
+      ay: (l) => l.academicYearCode || null,
+      stage: (l) => l.stage,
+      source: (l) => l.source || null,
+      child: (l) => l.childName || null,
+      guardian: (l) => l.guardianName || null,
+      counsellor: (l) => l.assignedTo || null,
+      followUp: (l) => l.nextFollowUpAt || null,
+    },
+    "leadDate",
+    "desc",
+  );
 
   // Admission-year chips (derived from enquiry dates via the Oct→Sep rule)
   const captureYears = useMemo(() => {
@@ -1393,19 +1413,25 @@ export function AdmissionsWorkspace() {
               <ErpTable minWidth="min-w-full">
                 <ErpTableHead>
                   <tr>
-                    <th className="px-4 py-2.5 font-bold">Lead no.</th>
-                    <th className="px-4 py-2.5 font-bold">Lead date</th>
-                    <th className="px-4 py-2.5 font-bold">Adm. year</th>
-                    <th className="px-4 py-2.5 font-bold">Status</th>
-                    <th className="px-4 py-2.5 font-bold">Source</th>
-                    <th className="px-4 py-2.5 font-bold">Child</th>
-                    <th className="px-4 py-2.5 font-bold">Guardian / mobile</th>
-                    <th className="px-4 py-2.5 font-bold">Counsellor</th>
-                    <th className="px-4 py-2.5 font-bold">Next follow-up</th>
+                    <ErpSortTh sort={leadSort} field="enquiryNo">Lead no.</ErpSortTh>
+                    <ErpSortTh sort={leadSort} field="leadDate">Lead date</ErpSortTh>
+                    <ErpSortTh sort={leadSort} field="ay">Adm. year</ErpSortTh>
+                    <ErpSortTh sort={leadSort} field="stage">Status</ErpSortTh>
+                    <ErpSortTh sort={leadSort} field="source">Source</ErpSortTh>
+                    <ErpSortTh sort={leadSort} field="child">Child</ErpSortTh>
+                    <ErpSortTh sort={leadSort} field="guardian">
+                      Guardian / mobile
+                    </ErpSortTh>
+                    <ErpSortTh sort={leadSort} field="counsellor">
+                      Counsellor
+                    </ErpSortTh>
+                    <ErpSortTh sort={leadSort} field="followUp">
+                      Next follow-up
+                    </ErpSortTh>
                   </tr>
                 </ErpTableHead>
                 <ErpTableBody>
-                  {filtered.map((l) => {
+                  {leadSort.rows.map((l) => {
                     const hh = householdOf(state, l.householdId);
                     const showOnly = isConvertedShowOnly(l.stage);
                     const active =

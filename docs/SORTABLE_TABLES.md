@@ -70,6 +70,23 @@ Note that `0` is a real value and stays with the numbers.
 - `components/students/BirthdaysPanel.tsx` — today's birthdays
 - `components/staff/StaffWorkspace.tsx` — staff roster
 - `components/library/LibraryWorkspace.tsx` — catalogue
+- `components/accounts/AccountsPanels.tsx` — expense vouchers, payables
+- `components/payroll/PayrollWorkspace.tsx` — salary run lines
+- `components/store/StoreAccountsWorkspace.tsx` — open vendor bills
+- `components/admissions/AdmissionsWorkspace.tsx` — lead list
+
+## Tables deliberately left alone
+
+Recorded so nobody "finishes the job" by breaking them.
+
+| Table | Why |
+|---|---|
+| Accounts — cash ledger | Carries a **running balance** column. Reorder the rows and the balance means nothing. |
+| Store — stock master categories | Ordered by `sortOrder`, a sequence somebody arranged. |
+| Store — multi-SKU entry grid | An editable grid keyed by array index; edits write `next[idx]`, so sorting would put changes on the wrong row. |
+
+The last one is the trap worth remembering: any table whose rows are inputs
+keyed by index must not be reordered.
 
 ## The real scope, and what to skip
 
