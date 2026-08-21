@@ -1,19 +1,23 @@
 /**
  * When transport billing is allowed to start.
  *
- * Two independent rules, deliberately kept apart because they fail for
- * different reasons and the clerk needs to know which one bit:
+ * One rule with a wrinkle, not two rules.
  *
- *  1. Never before the child joined. A student admitted in July cannot be
- *     billed for April, May or June — they were not here.
- *  2. Never in a month the school is closed. A summer vacation month carries
- *     no service, so it carries no transport fee.
+ * The floor is the month the child joined: a student admitted in July cannot be
+ * billed for April, May or June, because they were not here. If that joining
+ * month is itself a full school closure — a child admitted during the summer
+ * break — the floor moves to the next month that runs, because there is no
+ * service to start in.
  *
- * Rule 2 reads the holiday calendar rather than hard-coding June. If the
- * calendar does not say a month is closed, nothing is blocked — an unconfigured
- * calendar must not silently invent a vacation, and equally must not silently
- * bill through a real one. Whether June is closed is a fact about the school's
- * published holidays, not something this module should assume.
+ * What this deliberately does NOT do is block a closed month for everybody.
+ * The school bills June transport to continuing riders and to anyone whose
+ * assignment already started, and that is correct: the seat is held for the
+ * year, not rented by the day. An earlier version of this module blocked any
+ * start in a closed month, which would have stopped a child admitted in April
+ * from adding transport in June. Only the *joining* month gets bumped.
+ *
+ * Closure comes from the published holiday calendar, never from a hard-coded
+ * June. An unconfigured calendar bumps nothing.
  */
 
 import { classifyHolidayDay } from "@/lib/holidayPolicy";
@@ -85,6 +89,39 @@ export function closedMonthsInSession(
   );
 }
 
+function nextMonthKey(periodKey: string): string {
+  const [y, m] = periodKey.split("-").map(Number);
+  if (!y || !m) return periodKey;
+  const ny = m === 12 ? y + 1 : y;
+  const nm = m === 12 ? 1 : m + 1;
+  return `${ny}-${String(nm).padStart(2, "0")}`;
+}
+
+/**
+ * The earliest month this child may start transport.
+ *
+ * The joining month, unless the school was shut for all of it — then the next
+ * month that runs. Bumps at most a few months so a badly configured calendar
+ * cannot loop forever.
+ */
+export function transportFloorMonth(input: {
+  joinedOn?: string;
+  academicYearCode: string;
+  masters: MastersState | null;
+}): string | null {
+  const joined = (input.joinedOn || "").slice(0, 10);
+  if (!joined) return null;
+  let month = joined.slice(0, 7);
+  if (!input.masters) return month;
+  for (let hop = 0; hop < 6; hop += 1) {
+    if (!monthIsSchoolClosed(input.masters, input.academicYearCode, month)) {
+      return month;
+    }
+    month = nextMonthKey(month);
+  }
+  return month;
+}
+
 export function checkTransportStartMonth(input: {
   /** ISO date the assignment would start from. */
   effectiveFrom: string;
@@ -98,28 +135,26 @@ export function checkTransportStartMonth(input: {
   const fromMonth = from.slice(0, 7);
 
   const joined = (input.joinedOn || "").slice(0, 10);
-  if (joined) {
-    const joinedMonth = joined.slice(0, 7);
-    if (fromMonth < joinedMonth) {
-      return {
-        ok: false,
-        code: "before-admission",
-        reason: `Admitted ${monthLabel(joinedMonth)} — transport cannot start in ${monthLabel(fromMonth)}, before the child joined.`,
-      };
-    }
-  }
+  if (!joined) return { ok: true };
+  const joinedMonth = joined.slice(0, 7);
 
-  if (input.masters) {
-    if (monthIsSchoolClosed(input.masters, input.academicYearCode, fromMonth)) {
-      return {
-        ok: false,
-        code: "school-closed",
-        reason: `${monthLabel(fromMonth)} is closed for the whole month in the school calendar — no transport runs, so none is billed.`,
-      };
-    }
-  }
+  const floor = transportFloorMonth(input) ?? joinedMonth;
+  if (fromMonth >= floor) return { ok: true };
 
-  return { ok: true };
+  // Below the floor. Which of the two reasons applies changes the wording, and
+  // the clerk needs to know whether the problem is the child or the calendar.
+  if (fromMonth < joinedMonth) {
+    return {
+      ok: false,
+      code: "before-admission",
+      reason: `Admitted ${monthLabel(joinedMonth)} — transport cannot start in ${monthLabel(fromMonth)}, before the child joined.`,
+    };
+  }
+  return {
+    ok: false,
+    code: "school-closed",
+    reason: `Admitted in ${monthLabel(joinedMonth)}, which is a full school closure — transport starts from ${monthLabel(floor)}.`,
+  };
 }
 
 /**

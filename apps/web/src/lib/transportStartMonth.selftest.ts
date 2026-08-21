@@ -2,9 +2,10 @@
  * Self-test: when transport billing may start.
  * Run: npx tsx apps/web/src/lib/transportStartMonth.selftest.ts
  *
- * Two rules under test — never before the child joined, and never in a month
- * the school is shut — plus the thing that matters most: an unconfigured
- * calendar must block nothing rather than inventing a vacation.
+ * The floor is the joining month, bumped past a full closure only when the
+ * child joined during one. A closed month is NOT off-limits to everybody —
+ * the school bills June transport to continuing riders, and the regression
+ * section below exists to keep it that way.
  */
 
 import assert from "node:assert/strict";
@@ -15,6 +16,7 @@ import {
   earliestAllowedMonth,
   monthIsSchoolClosed,
   monthLabel,
+  transportFloorMonth,
 } from "./transportStartMonth";
 import type { Holiday } from "./foundationMasters";
 import type { MastersState } from "./masters";
@@ -103,7 +105,7 @@ assert.equal(
   true,
 );
 
-/* ── rule 2: never in a month the school is shut ───────────── */
+/* ── rule 2: a joining month that is a full closure ────────── */
 
 const summerShut = masters([
   holiday({ title: "Summer vacation", startsOn: "2026-05-20", endsOn: "2026-06-30" }),
@@ -116,6 +118,7 @@ assert.equal(monthIsSchoolClosed(summerShut, AY, "2026-05"), false);
 // July is untouched.
 assert.equal(monthIsSchoolClosed(summerShut, AY, "2026-07"), false);
 
+// Admitted DURING the closure → the floor bumps to the next month that runs.
 const verdict = checkTransportStartMonth({
   effectiveFrom: "2026-06-01",
   joinedOn: "2026-06-10",
@@ -124,6 +127,51 @@ const verdict = checkTransportStartMonth({
 });
 assert.equal(verdict.ok, false);
 assert.equal(verdict.ok === false && verdict.code, "school-closed");
+assert.equal(
+  transportFloorMonth({ joinedOn: "2026-06-10", academicYearCode: AY, masters: summerShut }),
+  "2026-07",
+);
+
+/* ── THE regression this file exists to prevent ─────────────── */
+//
+// The school bills June transport to continuing riders. An earlier version
+// blocked any start in a closed month, which would have stopped a child
+// admitted in April from adding transport in June. Only the JOINING month
+// gets bumped — a closed month is not off-limits to everybody.
+
+assert.equal(
+  checkTransportStartMonth({
+    effectiveFrom: "2026-06-01",
+    joinedOn: "2026-04-05",
+    academicYearCode: AY,
+    masters: summerShut,
+  }).ok,
+  true,
+  "a child admitted in April may start transport in June",
+);
+
+// Same for a rider from a previous session — their floor is long past.
+assert.equal(
+  checkTransportStartMonth({
+    effectiveFrom: "2026-06-01",
+    joinedOn: "2024-04-01",
+    academicYearCode: AY,
+    masters: summerShut,
+  }).ok,
+  true,
+  "a continuing rider is billed through the summer closure",
+);
+
+// And a child admitted in May, when May is partly open.
+assert.equal(
+  checkTransportStartMonth({
+    effectiveFrom: "2026-06-01",
+    joinedOn: "2026-05-10",
+    academicYearCode: AY,
+    masters: summerShut,
+  }).ok,
+  true,
+);
 
 // An unpublished holiday is a draft and must not block billing.
 const draftOnly = masters([
@@ -153,10 +201,12 @@ assert.equal(monthIsSchoolClosed(masters([]), AY, "2026-06"), false);
 assert.equal(
   checkTransportStartMonth({
     effectiveFrom: "2026-06-01",
+    joinedOn: "2026-06-02",
     academicYearCode: AY,
     masters: masters([]),
   }).ok,
   true,
+  "an unconfigured calendar bumps nothing",
 );
 
 // A working-day override inside the break reopens the month.
@@ -191,11 +241,21 @@ assert.equal(
   "2026-07",
 );
 
-// Admitted in April, June still skipped but April already qualifies.
+// Admitted in April — April already qualifies.
 assert.equal(
   earliestAllowedMonth({
     monthKeys: SESSION,
     joinedOn: "2026-04-05",
+    academicYearCode: AY,
+    masters: summerShut,
+  }),
+  "2026-04",
+);
+
+// No admission date recorded → nothing is blocked at all, including June.
+assert.equal(
+  earliestAllowedMonth({
+    monthKeys: SESSION,
     academicYearCode: AY,
     masters: summerShut,
   }),
