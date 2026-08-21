@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
+    "dev:verify": "npx --yes dotenv-cli -e .env.verify.local -o -- next dev --turbopack",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
