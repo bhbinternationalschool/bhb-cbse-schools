@@ -23,6 +23,11 @@ import {
   FuelPanel,
   RoutesPanel,
 } from "@/components/transport/TransportOpsPanels";
+import { FleetRosterPanel } from "@/components/transport/FleetRosterPanel";
+import {
+  checkTransportStartMonth,
+  monthLabel,
+} from "@/lib/transportStartMonth";
 import { TransportPlannerPanel } from "@/components/transport/TransportPlannerPanel";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpTableShell } from "@/components/ui/erp-roster";
@@ -62,6 +67,7 @@ type TransportTab =
   | "dashboard"
   | "planner"
   | "riders"
+  | "rosters"
   | "routes"
   | "fleet"
   | "fuel"
@@ -78,6 +84,7 @@ const TABS: ModuleTabItem[] = [
   { id: "dashboard", label: "Dashboard", tone: "navy" },
   { id: "planner", label: "Planner", tone: "teal" },
   { id: "riders", label: "Riders", tone: "navy" },
+  { id: "rosters", label: "Riders by bus", tone: "sky" },
   { id: "routes", label: "Routes", tone: "teal" },
   { id: "fleet", label: "Fleet", tone: "slate" },
   { id: "fuel", label: "Fuel", tone: "amber" },
@@ -106,6 +113,7 @@ export function TransportWorkspace() {
       "dashboard",
       "planner",
       "riders",
+      "rosters",
       "routes",
       "fleet",
       "fuel",
@@ -258,6 +266,11 @@ export function TransportWorkspace() {
     });
   }, [selected, state]);
 
+  // The student's own session year, falling back to the workspace's selected
+  // year rather than a hardcoded constant.
+  const selectedAy =
+    selected?.student.academicYearCode || session.academicYearCode;
+
   function onAssign() {
     if (!selected) {
       setError("Pick a student first");
@@ -280,6 +293,19 @@ export function TransportWorkspace() {
       !feeOverrideReason.trim()
     ) {
       setError("Enter a reason when overriding the expected monthly fee");
+      return;
+    }
+    // Never bill transport before the child joined, or through a month the
+    // school is shut. Checked here rather than only in the UI hint, so a
+    // stale form state cannot slip a bad start date through.
+    const startCheck = checkTransportStartMonth({
+      effectiveFrom,
+      joinedOn: selected.student.joinedOn,
+      academicYearCode: selectedAy,
+      masters,
+    });
+    if (!startCheck.ok) {
+      setError(startCheck.reason);
       return;
     }
     const result = assignStudentToRoute({
@@ -367,6 +393,7 @@ export function TransportWorkspace() {
               masters={masters}
               sis={sis}
               sessionName={session.fullName}
+              academicYearCode={selectedAy}
               query={query}
               setQuery={setQuery}
               classId={classId}
@@ -400,6 +427,14 @@ export function TransportWorkspace() {
               onRefresh={refresh}
               onFlash={flash}
               onNotice={setNotice}
+            />
+          ) : null}
+          {tab === "rosters" ? (
+            <FleetRosterPanel
+              state={state}
+              masters={masters}
+              sis={sis}
+              academicYearCode={session.academicYearCode}
             />
           ) : null}
           {tab === "routes" ? (
@@ -500,6 +535,7 @@ type RidersPanelProps = {
   masters: MastersState | null;
   sis: SisState | null;
   sessionName: string;
+  academicYearCode: string;
   query: string;
   setQuery: (value: string) => void;
   classId: string;
@@ -541,6 +577,7 @@ function RidersPanel(props: RidersPanelProps) {
     masters,
     sis,
     sessionName,
+    academicYearCode,
     query,
     setQuery,
     classId,
@@ -601,6 +638,18 @@ function RidersPanel(props: RidersPanelProps) {
     }
     return { unassignedHits: free, assignedHits: taken };
   }, [hits, riders, routes]);
+
+  // Same check the assign handler runs, surfaced while the clerk is still
+  // choosing the date rather than after they click.
+  const startCheck = useMemo(() => {
+    if (!selected || !effectiveFrom) return null;
+    return checkTransportStartMonth({
+      effectiveFrom,
+      joinedOn: selected.student.joinedOn,
+      academicYearCode,
+      masters,
+    });
+  }, [selected, effectiveFrom, masters, academicYearCode]);
 
   const siblingGaps = useMemo(() => {
     if (!sis || !masters) return [];
@@ -870,7 +919,17 @@ function RidersPanel(props: RidersPanelProps) {
                 type="date"
                 value={effectiveFrom}
                 onChange={(event) => setEffectiveFrom(event.target.value)}
+                aria-invalid={startCheck && !startCheck.ok ? true : undefined}
               />
+              {startCheck && !startCheck.ok ? (
+                <span className="mt-1 block text-[11px] font-semibold text-[var(--danger)]">
+                  {startCheck.reason}
+                </span>
+              ) : selected?.student.joinedOn ? (
+                <span className="mt-1 block text-[10px] text-[var(--muted)]">
+                  Admitted {monthLabel(selected.student.joinedOn.slice(0, 7))}
+                </span>
+              ) : null}
             </label>
             <label className="text-sm">
               <span className="mb-1 block text-[11px] text-[var(--muted)]">

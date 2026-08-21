@@ -11,7 +11,10 @@ import {
   alignVehiclesToRoutes,
   computeTransportPeriodDues,
   expectedMonthlyFeePaise,
+  haversineKm,
   listActiveRoutes,
+  stopHasGeo,
+  type StopDistanceSource,
   type TransportAssignment,
   type TransportRoute,
   type TransportState,
@@ -517,6 +520,244 @@ export async function fetchStopRoadDistanceKm(input: {
   } catch {
     return { ok: false, error: "Could not reach the distance service" };
   }
+}
+
+/* ── Point 3: who is on each bus ───────────────────────────── */
+
+export type FleetRiderRow = {
+  studentId: string;
+  fullName: string;
+  classLabel: string;
+  fatherName: string;
+  householdId: string;
+  stopName: string;
+  distanceKm: number;
+  distanceSource: StopDistanceSource;
+  monthlyFeePaise: number;
+  /** True when the fee differs from what the policy would charge. */
+  feeOverridden: boolean;
+  effectiveFrom: string;
+  boardingSuspended: boolean;
+  /** Sibling on the same bus — useful when the conductor calls the roll. */
+  siblingOnBoard: boolean;
+};
+
+export type FleetRosterRow = {
+  routeId: string;
+  routeCode: string;
+  routeName: string;
+  busNo: string;
+  vehicleReg: string;
+  seatCapacity: number;
+  crewLabel: string;
+  stops: { id: string; name: string; distanceKm: number; pinned: boolean }[];
+  riders: FleetRiderRow[];
+  monthlyTotalPaise: number;
+  /** Riders whose monthly fee is zero — on the bus, billed nothing. */
+  unbilledRiders: number;
+};
+
+/**
+ * One roster per bus: who rides it, from which stop, at what fee.
+ *
+ * `ridersOnRoute` only ever returned a count, so nobody could see the list —
+ * which is also why fee leakage was invisible. `unbilledRiders` counts riders
+ * carrying a zero monthly fee: on the vehicle, billed nothing.
+ */
+export function buildFleetRosters(
+  state: TransportState,
+  profiles: StudentTransportProfile[],
+  fatherNameByStudent?: Map<string, string>,
+  crewLabelByRoute?: Map<string, string>,
+): FleetRosterRow[] {
+  const byRoute = new Map<string, StudentTransportProfile[]>();
+  for (const p of profiles) {
+    if (!p.hasAssignment || !p.assignment) continue;
+    const list = byRoute.get(p.assignment.routeId);
+    if (list) list.push(p);
+    else byRoute.set(p.assignment.routeId, [p]);
+  }
+
+  return listActiveRoutes(state).map((route) => {
+    const veh = vehicleForRoute(route, state);
+    const members = byRoute.get(route.id) ?? [];
+
+    const householdCounts = new Map<string, number>();
+    for (const p of members) {
+      householdCounts.set(
+        p.householdId,
+        (householdCounts.get(p.householdId) ?? 0) + 1,
+      );
+    }
+
+    const riders: FleetRiderRow[] = members
+      .map((p) => {
+        const asg = p.assignment!;
+        const stop = route.stops.find((s) => s.id === asg.stopId);
+        const expected = expectedMonthlyFeePaise(route, stop, state.feePolicy);
+        const fee = asg.monthlyFeePaise > 0 ? asg.monthlyFeePaise : expected;
+        return {
+          studentId: p.studentId,
+          fullName: p.fullName,
+          classLabel: p.classLabel,
+          fatherName: fatherNameByStudent?.get(p.studentId) || "",
+          householdId: p.householdId,
+          stopName: stop?.name || "—",
+          distanceKm: stop?.distanceKm ?? 0,
+          distanceSource: stop?.distanceSource ?? "",
+          monthlyFeePaise: fee,
+          feeOverridden: asg.monthlyFeePaise > 0 && asg.monthlyFeePaise !== expected,
+          effectiveFrom: asg.effectiveFrom,
+          boardingSuspended: asg.boardingSuspended,
+          siblingOnBoard: (householdCounts.get(p.householdId) ?? 0) > 1,
+        };
+      })
+      // Stop order first, then name — this is read off the bus in boarding
+      // sequence, not alphabetically across the whole route.
+      .sort((a, b) => {
+        const sa = route.stops.findIndex((s) => s.name === a.stopName);
+        const sb = route.stops.findIndex((s) => s.name === b.stopName);
+        if (sa !== sb) return sa - sb;
+        return a.fullName.localeCompare(b.fullName);
+      });
+
+    return {
+      routeId: route.id,
+      routeCode: route.code,
+      routeName: route.name,
+      busNo: veh.busNo,
+      vehicleReg: veh.vehicleReg,
+      seatCapacity: veh.seatCapacity,
+      crewLabel: crewLabelByRoute?.get(route.id) || "",
+      stops: route.stops.map((s) => ({
+        id: s.id,
+        name: s.name,
+        distanceKm: s.distanceKm,
+        pinned: stopHasGeo(s),
+      })),
+      riders,
+      monthlyTotalPaise: riders.reduce((sum, r) => sum + r.monthlyFeePaise, 0),
+      unbilledRiders: riders.filter((r) => r.monthlyFeePaise <= 0).length,
+    };
+  });
+}
+
+/* ── Point 6: riders who are not on their nearest bus ──────── */
+
+export type MisroutedRider = {
+  studentId: string;
+  fullName: string;
+  classLabel: string;
+  householdId: string;
+  currentRouteId: string;
+  currentRouteLabel: string;
+  currentStopName: string;
+  currentStopKm: number;
+  betterRouteId: string;
+  betterRouteLabel: string;
+  betterStopName: string;
+  betterStopKm: number;
+  /** How much closer the child's home is to the suggested stop. */
+  savingKm: number;
+};
+
+/**
+ * Riders whose home sits closer to a stop on a *different* route.
+ *
+ * Straight-line distance from the house to the boarding point, which is what
+ * the walk to the stop actually is — road distance is the right measure from
+ * campus to stop (that is what gets billed), but not for the last 500 metres.
+ *
+ * Only riders whose household AND assigned stop both carry coordinates are
+ * considered. A stop nobody has pinned yet cannot be compared, and guessing
+ * would move a child onto a different bus on the strength of a blank field.
+ *
+ * Never auto-reassigns. Route changes have reasons the system cannot see —
+ * an aunt on the route, a sibling at another school, a road the family will
+ * not cross — so this produces a list for a human to approve.
+ */
+export function findMisroutedRiders(
+  profiles: StudentTransportProfile[],
+  state: TransportState,
+  opts?: { minSavingKm?: number },
+): MisroutedRider[] {
+  const minSaving = opts?.minSavingKm ?? 1.5;
+  const routes = listActiveRoutes(state);
+
+  const pinnedStops: {
+    routeId: string;
+    routeLabel: string;
+    stop: TransportStop;
+  }[] = [];
+  for (const route of routes) {
+    for (const stop of route.stops) {
+      if (!stopHasGeo(stop)) continue;
+      pinnedStops.push({
+        routeId: route.id,
+        routeLabel: route.busNo || route.code,
+        stop,
+      });
+    }
+  }
+  if (pinnedStops.length === 0) return [];
+
+  const out: MisroutedRider[] = [];
+  for (const p of profiles) {
+    if (!p.hasAssignment || !p.assignment) continue;
+    if (!p.hasGeo || p.geoLat == null || p.geoLng == null) continue;
+
+    const current = pinnedStops.find(
+      (x) =>
+        x.routeId === p.assignment?.routeId &&
+        x.stop.id === p.assignment?.stopId,
+    );
+    if (!current) continue; // assigned stop not pinned — nothing to compare
+
+    const currentKm = haversineKm(
+      p.geoLat,
+      p.geoLng,
+      current.stop.geoLat!,
+      current.stop.geoLng!,
+    );
+
+    let best = current;
+    let bestKm = currentKm;
+    for (const cand of pinnedStops) {
+      const km = haversineKm(
+        p.geoLat,
+        p.geoLng,
+        cand.stop.geoLat!,
+        cand.stop.geoLng!,
+      );
+      if (km < bestKm) {
+        best = cand;
+        bestKm = km;
+      }
+    }
+
+    // A closer stop on the same bus is a stop change, not a wrong vehicle.
+    if (best.routeId === current.routeId) continue;
+    const saving = currentKm - bestKm;
+    if (saving < minSaving) continue;
+
+    out.push({
+      studentId: p.studentId,
+      fullName: p.fullName,
+      classLabel: p.classLabel,
+      householdId: p.householdId,
+      currentRouteId: current.routeId,
+      currentRouteLabel: current.routeLabel,
+      currentStopName: current.stop.name,
+      currentStopKm: Math.round(currentKm * 10) / 10,
+      betterRouteId: best.routeId,
+      betterRouteLabel: best.routeLabel,
+      betterStopName: best.stop.name,
+      betterStopKm: Math.round(bestKm * 10) / 10,
+      savingKm: Math.round(saving * 10) / 10,
+    });
+  }
+
+  return out.sort((a, b) => b.savingKm - a.savingKm);
 }
 
 export function suggestStopDistanceKm(
