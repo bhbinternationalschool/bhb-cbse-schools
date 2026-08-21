@@ -18,6 +18,8 @@ import {
   StudentAvatar,
   StudentNameLabel,
 } from "@/components/students/StudentAvatar";
+import { loadTransport, type TransportState } from "@/lib/transport";
+import { studentTransportSummary } from "@/lib/transportForStudent";
 import {
   computeStudentDues,
   loadFees,
@@ -84,6 +86,7 @@ export function StudentProfileModal({
 }) {
   const [tab, setTab] = useState<ProfileTab>("profile");
   const [fees, setFees] = useState<FeesState | null>(null);
+  const [transport, setTransport] = useState<TransportState | null>(null);
   const [exams, setExams] = useState<ExamsState | null>(null);
   const [attendance, setAttendance] = useState<AttendanceState | null>(null);
 
@@ -92,6 +95,11 @@ export function StudentProfileModal({
       setFees(loadFees());
     } catch {
       setFees(null);
+    }
+    try {
+      setTransport(loadTransport());
+    } catch {
+      setTransport(null);
     }
     try {
       setExams(loadExams());
@@ -317,6 +325,12 @@ export function StudentProfileModal({
                   <Field label="Hobbies" value={student.hobbies} full />
                 ) : null}
               </Section>
+
+              <TransportSection
+                studentId={student.id}
+                academicYearCode={student.academicYearCode}
+                transport={transport}
+              />
 
               <Section title="Compliance IDs">
                 <Field label="PEN" value={student.pen || student.penStatus || "—"} />
@@ -672,6 +686,68 @@ export function StudentProfileModal({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * The child's bus, on their SIS record.
+ *
+ * Renders nothing at all when they do not ride — an empty "Transport" heading
+ * with dashes reads as missing data, when the truth is simply that the family
+ * does not use the bus.
+ */
+function TransportSection({
+  studentId,
+  academicYearCode,
+  transport,
+}: {
+  studentId: string;
+  academicYearCode: string;
+  transport: TransportState | null;
+}) {
+  const summary = studentTransportSummary(studentId, transport, {
+    academicYearCode,
+  });
+  if (!summary.assigned) return null;
+
+  return (
+    <Section title="Transport">
+      <Field
+        label="Route"
+        value={
+          [summary.routeCode, summary.routeName].filter(Boolean).join(" · ") ||
+          "—"
+        }
+      />
+      <Field
+        label="Bus"
+        value={
+          summary.busNo
+            ? `${summary.busNo}${summary.vehicleReg ? ` (${summary.vehicleReg})` : ""}`
+            : "—"
+        }
+      />
+      <Field label="Stop" value={summary.stopName || "—"} />
+      <Field
+        label="Distance from school"
+        value={
+          summary.distanceKm > 0
+            ? `${summary.distanceKm} km${summary.distanceSource === "manual" ? " (typed)" : ""}`
+            : "Not measured"
+        }
+      />
+      <Field
+        label="Monthly fee"
+        value={summary.monthlyFeePaise > 0 ? inr(summary.monthlyFeePaise) : "Per route policy"}
+      />
+      <Field label="Riding since" value={summary.effectiveFrom || "—"} />
+      {summary.boardingSuspended ? (
+        <Field label="Boarding" value="Suspended" full />
+      ) : null}
+      {summary.feeOverrideReason ? (
+        <Field label="Fee override reason" value={summary.feeOverrideReason} full />
+      ) : null}
+    </Section>
   );
 }
 

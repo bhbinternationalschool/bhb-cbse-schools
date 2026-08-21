@@ -23,12 +23,25 @@ import {
   FuelPanel,
   RoutesPanel,
 } from "@/components/transport/TransportOpsPanels";
+import { FleetRosterPanel } from "@/components/transport/FleetRosterPanel";
+import { TransportAmendDialog } from "@/components/transport/TransportAmendDialog";
+import {
+  checkTransportStartMonth,
+  monthLabel,
+} from "@/lib/transportStartMonth";
 import { TransportPlannerPanel } from "@/components/transport/TransportPlannerPanel";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpTableShell } from "@/components/ui/erp-roster";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
-import { formatInr, searchFeeStudents, type StudentSearchHit } from "@/lib/fees";
+import {
+  computeStudentDues,
+  formatInr,
+  loadFees,
+  searchFeeStudents,
+  type FeeDueLine,
+  type StudentSearchHit,
+} from "@/lib/fees";
 import { checkHold, type HoldCheck } from "@/lib/holds";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
 import { loadSis, type SisState } from "@/lib/sis";
@@ -37,6 +50,7 @@ import {
   assignStudentToRoute,
   computeTransportPeriodDues,
   endTransportAssignment,
+  expectedMonthlyFeeDetail,
   expectedMonthlyFeePaise,
   listActiveRiders,
   listActiveRoutes,
@@ -62,6 +76,7 @@ type TransportTab =
   | "dashboard"
   | "planner"
   | "riders"
+  | "rosters"
   | "routes"
   | "fleet"
   | "fuel"
@@ -78,6 +93,7 @@ const TABS: ModuleTabItem[] = [
   { id: "dashboard", label: "Dashboard", tone: "navy" },
   { id: "planner", label: "Planner", tone: "teal" },
   { id: "riders", label: "Riders", tone: "navy" },
+  { id: "rosters", label: "Riders by bus", tone: "sky" },
   { id: "routes", label: "Routes", tone: "teal" },
   { id: "fleet", label: "Fleet", tone: "slate" },
   { id: "fuel", label: "Fuel", tone: "amber" },
@@ -106,6 +122,7 @@ export function TransportWorkspace() {
       "dashboard",
       "planner",
       "riders",
+      "rosters",
       "routes",
       "fleet",
       "fuel",
@@ -236,14 +253,15 @@ export function TransportWorkspace() {
     }
   }, [selectedRoute, stopId]);
 
-  const expectedFeePaise =
+  const feeDetail =
     state && selectedRoute
-      ? expectedMonthlyFeePaise(
+      ? expectedMonthlyFeeDetail(
           selectedRoute,
           selectedStop ?? undefined,
           state.feePolicy,
         )
-      : 0;
+      : null;
+  const expectedFeePaise = feeDetail?.paise ?? 0;
   const overridePaise = feeOverride.trim()
     ? Math.round((Number(feeOverride) || 0) * 100)
     : 0;
@@ -257,6 +275,11 @@ export function TransportWorkspace() {
       state,
     });
   }, [selected, state]);
+
+  // The student's own session year, falling back to the workspace's selected
+  // year rather than a hardcoded constant.
+  const selectedAy =
+    selected?.student.academicYearCode || session.academicYearCode;
 
   function onAssign() {
     if (!selected) {
@@ -280,6 +303,25 @@ export function TransportWorkspace() {
       !feeOverrideReason.trim()
     ) {
       setError("Enter a reason when overriding the expected monthly fee");
+      return;
+    }
+    // A stop the policy cannot price must not be billed on a guess. An
+    // explicit override is still allowed — somebody has then decided.
+    if (feeDetail && !feeDetail.ok && overridePaise <= 0) {
+      setError(feeDetail.reason ?? "This stop has no fee yet");
+      return;
+    }
+    // Never bill transport before the child joined, or through a month the
+    // school is shut. Checked here rather than only in the UI hint, so a
+    // stale form state cannot slip a bad start date through.
+    const startCheck = checkTransportStartMonth({
+      effectiveFrom,
+      joinedOn: selected.student.joinedOn,
+      academicYearCode: selectedAy,
+      masters,
+    });
+    if (!startCheck.ok) {
+      setError(startCheck.reason);
       return;
     }
     const result = assignStudentToRoute({
@@ -367,6 +409,7 @@ export function TransportWorkspace() {
               masters={masters}
               sis={sis}
               sessionName={session.fullName}
+              academicYearCode={selectedAy}
               query={query}
               setQuery={setQuery}
               classId={classId}
@@ -393,6 +436,7 @@ export function TransportWorkspace() {
               feeOverrideReason={feeOverrideReason}
               setFeeOverrideReason={setFeeOverrideReason}
               expectedFeePaise={expectedFeePaise}
+              feeDetail={feeDetail}
               proposedFeePaise={proposedFeePaise}
               existingDues={existingDues}
               riders={riders}
@@ -400,6 +444,14 @@ export function TransportWorkspace() {
               onRefresh={refresh}
               onFlash={flash}
               onNotice={setNotice}
+            />
+          ) : null}
+          {tab === "rosters" ? (
+            <FleetRosterPanel
+              state={state}
+              masters={masters}
+              sis={sis}
+              academicYearCode={session.academicYearCode}
             />
           ) : null}
           {tab === "routes" ? (
@@ -500,6 +552,7 @@ type RidersPanelProps = {
   masters: MastersState | null;
   sis: SisState | null;
   sessionName: string;
+  academicYearCode: string;
   query: string;
   setQuery: (value: string) => void;
   classId: string;
@@ -526,6 +579,7 @@ type RidersPanelProps = {
   feeOverrideReason: string;
   setFeeOverrideReason: (value: string) => void;
   expectedFeePaise: number;
+  feeDetail: ReturnType<typeof expectedMonthlyFeeDetail> | null;
   proposedFeePaise: number;
   existingDues: ReturnType<typeof computeTransportPeriodDues>;
   riders: ReturnType<typeof listActiveRiders>;
@@ -541,6 +595,7 @@ function RidersPanel(props: RidersPanelProps) {
     masters,
     sis,
     sessionName,
+    academicYearCode,
     query,
     setQuery,
     classId,
@@ -567,6 +622,7 @@ function RidersPanel(props: RidersPanelProps) {
     feeOverrideReason,
     setFeeOverrideReason,
     expectedFeePaise,
+    feeDetail,
     proposedFeePaise,
     existingDues,
     riders,
@@ -601,6 +657,24 @@ function RidersPanel(props: RidersPanelProps) {
     }
     return { unassignedHits: free, assignedHits: taken };
   }, [hits, riders, routes]);
+
+  const [amending, setAmending] = useState<{
+    assignment: (typeof riders)[number];
+    studentName: string;
+    dues: FeeDueLine[];
+  } | null>(null);
+
+  // Same check the assign handler runs, surfaced while the clerk is still
+  // choosing the date rather than after they click.
+  const startCheck = useMemo(() => {
+    if (!selected || !effectiveFrom) return null;
+    return checkTransportStartMonth({
+      effectiveFrom,
+      joinedOn: selected.student.joinedOn,
+      academicYearCode,
+      masters,
+    });
+  }, [selected, effectiveFrom, masters, academicYearCode]);
 
   const siblingGaps = useMemo(() => {
     if (!sis || !masters) return [];
@@ -870,7 +944,17 @@ function RidersPanel(props: RidersPanelProps) {
                 type="date"
                 value={effectiveFrom}
                 onChange={(event) => setEffectiveFrom(event.target.value)}
+                aria-invalid={startCheck && !startCheck.ok ? true : undefined}
               />
+              {startCheck && !startCheck.ok ? (
+                <span className="mt-1 block text-[11px] font-semibold text-[var(--danger)]">
+                  {startCheck.reason}
+                </span>
+              ) : selected?.student.joinedOn ? (
+                <span className="mt-1 block text-[10px] text-[var(--muted)]">
+                  Admitted {monthLabel(selected.student.joinedOn.slice(0, 7))}
+                </span>
+              ) : null}
             </label>
             <label className="text-sm">
               <span className="mb-1 block text-[11px] text-[var(--muted)]">
@@ -900,6 +984,16 @@ function RidersPanel(props: RidersPanelProps) {
               />
             </label>
           </div>
+
+          {feeDetail && !feeDetail.ok ? (
+            <p className="mt-3 rounded-lg border border-[color-mix(in_srgb,var(--danger)_40%,transparent)] bg-[color-mix(in_srgb,var(--danger)_8%,transparent)] px-3 py-2 text-[11px] font-semibold text-[var(--danger)]">
+              {feeDetail.reason}
+            </p>
+          ) : feeDetail?.warning ? (
+            <p className="mt-3 rounded-lg border border-[color-mix(in_srgb,var(--brand-mid)_45%,transparent)] px-3 py-2 text-[11px] font-semibold text-[var(--brand-mid)]">
+              {feeDetail.warning}
+            </p>
+          ) : null}
 
           {selected && selectedRoute && stopId ? (
             <div className="mt-3 rounded-lg border border-[rgba(15,118,110,0.2)] bg-[rgba(15,118,110,0.06)] px-3 py-2 text-xs">
@@ -974,6 +1068,35 @@ function RidersPanel(props: RidersPanelProps) {
                           : ""}
                       </div>
                     </div>
+                    <div className="flex shrink-0 flex-col items-end gap-1">
+                    <button
+                      type="button"
+                      className="text-[11px] font-semibold text-[var(--brand-mid)]"
+                      onClick={() => {
+                        // Which months are already paid decides when the change
+                        // may land, so the ledger is read at open time.
+                        let dues: FeeDueLine[] = [];
+                        if (student && masters) {
+                          try {
+                            dues = computeStudentDues(
+                              student,
+                              masters,
+                              loadFees(),
+                              { includeFuture: true, includePaid: true },
+                            );
+                          } catch {
+                            dues = [];
+                          }
+                        }
+                        setAmending({
+                          assignment,
+                          studentName: student?.fullName ?? "this student",
+                          dues,
+                        });
+                      }}
+                    >
+                      Change
+                    </button>
                     <button
                       type="button"
                       className="text-[11px] font-semibold text-[var(--danger)]"
@@ -993,6 +1116,7 @@ function RidersPanel(props: RidersPanelProps) {
                     >
                       End
                     </button>
+                    </div>
                   </li>
                 );
               })}
@@ -1049,6 +1173,22 @@ function RidersPanel(props: RidersPanelProps) {
 
       <SiblingGapsCard gaps={siblingGaps} />
       </div>
+
+      {amending ? (
+        <TransportAmendDialog
+          assignment={amending.assignment}
+          studentName={amending.studentName}
+          academicYearCode={academicYearCode}
+          state={state}
+          dues={amending.dues}
+          onClose={() => setAmending(null)}
+          onDone={(message) => {
+            setAmending(null);
+            onRefresh();
+            onFlash(message);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

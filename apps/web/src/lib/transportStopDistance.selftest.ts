@@ -93,6 +93,8 @@ const slabPolicy: TransportFeePolicy = {
     { id: "s1", upToKm: 5, monthlyFeePaise: 50000 },
     { id: "s2", upToKm: 99, monthlyFeePaise: 90000 },
   ],
+  bands: [],
+  formula: { basePaise: 0, baseCoversKm: 0, perKmPaise: 0 },
   repairApprovalPaise: 0,
 };
 

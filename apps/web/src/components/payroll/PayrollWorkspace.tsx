@@ -67,6 +67,7 @@ import {
   ErpTableHead,
   ErpTableShell,
 } from "@/components/ui/erp-roster";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { JuneHoldPanel } from "@/components/payroll/JuneHoldPanel";
 import { StatutoryRemitPanel } from "@/components/payroll/StatutoryRemitPanel";
@@ -946,6 +947,19 @@ function RunDetail({
   const gross = run.lines.reduce((s, l) => s + l.gross, 0);
   const inAccounts = run.status === "posted" || run.status === "paid";
 
+  // Attendance renders as "22/1/0/0"; sorting that string is meaningless, so
+  // the column yields days present. Gross and net sort on paise.
+  const lineSort = useTableSort(
+    run.lines,
+    {
+      staff: (l) => l.fullName,
+      present: (l) => l.daysPresent,
+      gross: (l) => l.gross,
+      net: (l) => l.netPay,
+    },
+    "staff",
+  );
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
@@ -1172,10 +1186,10 @@ function RunDetail({
         <ErpTable minWidth="min-w-[780px]">
           <ErpTableHead>
             <tr>
-              <th className="px-4 py-2.5 font-bold">Staff</th>
-              <th className="px-4 py-2.5 font-bold">P / A / HD / LWP</th>
-              <th className="px-4 py-2.5 font-bold">Gross</th>
-              <th className="px-4 py-2.5 font-bold">Net</th>
+              <ErpSortTh sort={lineSort} field="staff">Staff</ErpSortTh>
+              <ErpSortTh sort={lineSort} field="present">P / A / HD / LWP</ErpSortTh>
+              <ErpSortTh sort={lineSort} field="gross">Gross</ErpSortTh>
+              <ErpSortTh sort={lineSort} field="net">Net</ErpSortTh>
               <th className="px-4 py-2.5 font-bold">Payable</th>
               <th className="px-4 py-2.5 font-bold">Govt PF/ESIC</th>
               <th className="px-4 py-2.5 font-bold">Hold</th>
@@ -1183,7 +1197,7 @@ function RunDetail({
             </tr>
           </ErpTableHead>
           <ErpTableBody>
-            {run.lines.map((l) => {
+            {lineSort.rows.map((l) => {
               const open = expandedStaffId === l.staffId;
               const lockedDue = editable
                 ? outstandingForStaff(l.staffId)

@@ -6,6 +6,7 @@ import {
   ErpTableBody,
   ErpTableHead,
 } from "@/components/ui/erp-roster";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 import { payUnifiedPayable } from "@/lib/accountsPayables";
 import {
   loadAccounts,
@@ -156,6 +157,21 @@ export function StoreAccountsWorkspace() {
         .sort((a, b) => a.dueOn.localeCompare(b.dueOn)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [bills, tick],
+  );
+
+  // openBills already arrives due-date first; that stays the default and the
+  // headers let a clerk re-order from there.
+  const billSort = useTableSort(
+    openBills,
+    {
+      vendor: (b) => vendors.find((x) => x.id === b.vendorId)?.name || null,
+      receipt: (b) => b.receiptNo || b.billNo || null,
+      due: (b) => b.dueOn || null,
+      bill: (b) => b.amountPaise,
+      paid: (b) => b.paidPaise,
+      balance: (b) => vendorBillBalancePaise(b),
+    },
+    "due",
   );
 
   const selectedBill = bills.find((b) => b.id === payBillId);
@@ -533,12 +549,16 @@ export function StoreAccountsWorkspace() {
               <ErpTable minWidth="min-w-[640px]">
                 <ErpTableHead>
                   <tr className="text-[11px] uppercase text-[var(--muted)]">
-                    <th className="py-2 pr-3">Vendor</th>
-                    <th className="py-2 pr-3">Receipt / invoice</th>
-                    <th className="py-2 pr-3">Due</th>
-                    <th className="py-2 pr-3 text-right">Bill</th>
-                    <th className="py-2 pr-3 text-right">Paid</th>
-                    <th className="py-2 text-right">Balance</th>
+                    <ErpSortTh sort={billSort} field="vendor">Vendor</ErpSortTh>
+                    <ErpSortTh sort={billSort} field="receipt">
+                      Receipt / invoice
+                    </ErpSortTh>
+                    <ErpSortTh sort={billSort} field="due">Due</ErpSortTh>
+                    <ErpSortTh sort={billSort} field="bill" align="right">Bill</ErpSortTh>
+                    <ErpSortTh sort={billSort} field="paid" align="right">Paid</ErpSortTh>
+                    <ErpSortTh sort={billSort} field="balance" align="right">
+                      Balance
+                    </ErpSortTh>
                   </tr>
                 </ErpTableHead>
                 <ErpTableBody hoverable>
@@ -549,7 +569,7 @@ export function StoreAccountsWorkspace() {
                       </td>
                     </tr>
                   ) : (
-                    openBills.map((b) => {
+                    billSort.rows.map((b) => {
                       const v = vendors.find((x) => x.id === b.vendorId);
                       return (
                         <tr

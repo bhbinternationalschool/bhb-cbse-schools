@@ -20,6 +20,7 @@ import {
   ErpTableShell,
 } from "@/components/ui/erp-roster";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 import { DeskListActions } from "@/components/ui/desk-list-actions";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import { DOC_ACCEPT, DOC_MAX_BYTES } from "@/lib/sis";
@@ -228,6 +229,22 @@ export function LibraryWorkspace() {
       );
     });
   }, [titles, catalogSearch, catalogCategory]);
+
+  // "Available" is computed per title rather than stored, so it sorts on the
+  // count itself, not on the rendered cell.
+  const titleSort = useTableSort(
+    filteredTitles,
+    {
+      title: (t) => t.title,
+      category: (t) => categoryLabel(t.category),
+      author: (t) => t.author || null,
+      shelf: (t) => t.shelf || null,
+      copies: (t) => t.copiesTotal,
+      available: (t) => availableCountForTitle(t.id, state),
+      purchase: (t) => t.purchaseDate || null,
+    },
+    "title",
+  );
 
   const studentHits = useMemo(() => {
     const q = borrowerQuery.trim().toLowerCase();
@@ -792,13 +809,13 @@ export function LibraryWorkspace() {
               <ErpTable minWidth="min-w-[56rem]">
                 <ErpTableHead>
                   <tr>
-                    <th className="px-4 py-2.5 font-bold">Title</th>
-                    <th className="px-4 py-2.5 font-bold">Category</th>
-                    <th className="px-4 py-2.5 font-bold">Author</th>
-                    <th className="px-4 py-2.5 font-bold">Rack</th>
-                    <th className="px-4 py-2.5 font-bold">Copies</th>
-                    <th className="px-4 py-2.5 font-bold">Available</th>
-                    <th className="px-4 py-2.5 font-bold">Purchase</th>
+                    <ErpSortTh sort={titleSort} field="title">Title</ErpSortTh>
+                    <ErpSortTh sort={titleSort} field="category">Category</ErpSortTh>
+                    <ErpSortTh sort={titleSort} field="author">Author</ErpSortTh>
+                    <ErpSortTh sort={titleSort} field="shelf">Rack</ErpSortTh>
+                    <ErpSortTh sort={titleSort} field="copies">Copies</ErpSortTh>
+                    <ErpSortTh sort={titleSort} field="available">Available</ErpSortTh>
+                    <ErpSortTh sort={titleSort} field="purchase">Purchase</ErpSortTh>
                     <th className="px-4 py-2.5 font-bold" />
                   </tr>
                 </ErpTableHead>
@@ -814,7 +831,7 @@ export function LibraryWorkspace() {
                       </td>
                     </tr>
                   ) : (
-                    filteredTitles.map((t) => (
+                    titleSort.rows.map((t) => (
                       <tr key={t.id} className="hover:bg-[var(--surface-sunken)]">
                         <td className="px-4 py-2">
                           <p className="font-medium">{t.title}</p>

@@ -54,6 +54,7 @@ import {
   ErpToolbarBtn,
 } from "@/components/ui/erp-roster";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 import { field, btn } from "@/components/ui/erp-ui";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { StaffLeavePanel } from "@/components/staff/StaffLeavePanel";
@@ -323,6 +324,26 @@ export function StaffWorkspace() {
       })
       .sort((a, b) => a.empCode.localeCompare(b.empCode));
   }, [state, staffFilters]);
+
+  // Role and status render as composed text / a badge, so they sort on the
+  // underlying values rather than on what the cell happens to show.
+  const staffSort = useTableSort(
+    filtered,
+    {
+      code: (s) => s.empCode || null,
+      name: (s) => s.fullName,
+      role: (s) => {
+        const des = state?.designations.find((d) => d.id === s.designationId);
+        const dep = state?.departments.find((d) => d.id === s.departmentId);
+        return [des?.name, dep?.name].filter(Boolean).join(" · ") || null;
+      },
+      stream: (s) => s.stream,
+      gender: (s) => s.gender || null,
+      mobile: (s) => s.mobile || null,
+      status: (s) => s.status,
+    },
+    "name",
+  );
 
   function scrollTo(id: string) {
     document.getElementById(id)?.scrollIntoView({
@@ -608,18 +629,18 @@ export function StaffWorkspace() {
             <ErpTableHead>
               <tr>
                 <th className="px-4 py-3 font-bold">Photo</th>
-                <th className="px-4 py-3 font-bold">Code</th>
-                <th className="px-4 py-3 font-bold">Name</th>
-                <th className="px-4 py-3 font-bold">Role</th>
-                <th className="px-4 py-3 font-bold">Stream</th>
-                <th className="px-4 py-3 font-bold">Gender</th>
-                <th className="px-4 py-3 font-bold">Mobile</th>
-                <th className="px-4 py-3 font-bold">Status</th>
+                <ErpSortTh sort={staffSort} field="code">Code</ErpSortTh>
+                <ErpSortTh sort={staffSort} field="name">Name</ErpSortTh>
+                <ErpSortTh sort={staffSort} field="role">Role</ErpSortTh>
+                <ErpSortTh sort={staffSort} field="stream">Stream</ErpSortTh>
+                <ErpSortTh sort={staffSort} field="gender">Gender</ErpSortTh>
+                <ErpSortTh sort={staffSort} field="mobile">Mobile</ErpSortTh>
+                <ErpSortTh sort={staffSort} field="status">Status</ErpSortTh>
                 <th className="px-4 py-3 font-bold" />
               </tr>
             </ErpTableHead>
             <ErpTableBody>
-              {filtered.map((s) => {
+              {staffSort.rows.map((s) => {
                 const dep = state.departments.find(
                   (d) => d.id === s.departmentId,
                 );
