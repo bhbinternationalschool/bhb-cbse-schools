@@ -47,6 +47,11 @@ import {
   type TransportState,
 } from "@/lib/transport";
 import {
+  buildStudentTransportProfiles,
+  findSiblingTransportGaps,
+  type SiblingTransportGap,
+} from "@/lib/transportPlanner";
+import {
   TRANSPORT_REPORT_CATEGORIES,
   TRANSPORT_REPORTS,
   runTransportReport,
@@ -532,6 +537,7 @@ type RidersPanelProps = {
 
 function RidersPanel(props: RidersPanelProps) {
   const {
+    state,
     masters,
     sis,
     sessionName,
@@ -569,6 +575,47 @@ function RidersPanel(props: RidersPanelProps) {
     onFlash,
     onNotice,
   } = props;
+
+  // Split the search hits by whether the child is already on a bus. Showing one
+  // undifferentiated list meant the clerk could pick a rider who was already
+  // assigned and only find out at save time.
+  const { unassignedHits, assignedHits } = useMemo(() => {
+    const byStudent = new Map(riders.map((a) => [a.studentId, a]));
+    const free: StudentSearchHit[] = [];
+    const taken: { hit: StudentSearchHit; routeLabel: string }[] = [];
+    for (const hit of hits) {
+      const asg = byStudent.get(hit.student.id);
+      if (!asg) {
+        free.push(hit);
+        continue;
+      }
+      const route = routes.find((r) => r.id === asg.routeId);
+      const stop = route?.stops.find((st) => st.id === asg.stopId);
+      taken.push({
+        hit,
+        routeLabel:
+          [route?.busNo || route?.code, stop?.name]
+            .filter(Boolean)
+            .join(" · ") || "a bus",
+      });
+    }
+    return { unassignedHits: free, assignedHits: taken };
+  }, [hits, riders, routes]);
+
+  const siblingGaps = useMemo(() => {
+    if (!sis || !masters) return [];
+    const profiles = buildStudentTransportProfiles(sis, masters, state);
+    // The household carries a guardian name; the father's name lives on the
+    // student. Prefer the guardian, fall back to any sibling's father.
+    const labels = new Map(
+      sis.households.map((h) => [h.id, h.guardianName || ""]),
+    );
+    for (const st of sis.students) {
+      if (!st.householdId || labels.get(st.householdId)) continue;
+      if (st.fatherName) labels.set(st.householdId, st.fatherName);
+    }
+    return findSiblingTransportGaps(profiles, state, labels);
+  }, [sis, masters, state]);
 
   return (
     <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(20rem,0.85fr)]">
@@ -667,33 +714,84 @@ function RidersPanel(props: RidersPanelProps) {
           </div>
 
           {!selected && (query.trim() || classId || sectionId) ? (
-            <ul className="mt-2 max-h-44 space-y-1 overflow-y-auto">
+            <div className="mt-2 max-h-60 space-y-2 overflow-y-auto">
               {hits.length === 0 ? (
-                <li className="rounded-lg bg-[var(--surface-sunken)] px-3 py-3 text-sm text-[var(--muted)]">
+                <p className="rounded-lg bg-[var(--surface-sunken)] px-3 py-3 text-sm text-[var(--muted)]">
                   No students match.
-                </li>
+                </p>
               ) : (
-                hits.slice(0, 12).map((hit) => (
-                  <li key={hit.student.id}>
-                    <button
-                      type="button"
-                      className="w-full rounded-lg border border-[var(--border)] px-3 py-2 text-left hover:bg-[rgba(197,160,40,0.08)]"
-                      onClick={() => {
-                        setSelected(hit);
-                        setQuery(hit.student.fullName);
-                      }}
+                <>
+                  <PickerGroup
+                    heading="Not on any bus"
+                    count={unassignedHits.length}
+                    tone="open"
+                  >
+                    {unassignedHits.length === 0 ? (
+                      <li className="px-3 py-2 text-[11px] text-[var(--muted)]">
+                        Every match is already assigned.
+                      </li>
+                    ) : (
+                      unassignedHits.slice(0, 12).map((hit) => (
+                        <li key={hit.student.id}>
+                          <button
+                            type="button"
+                            className="w-full rounded-lg border border-[var(--border)] px-3 py-2 text-left hover:bg-[rgba(197,160,40,0.08)]"
+                            onClick={() => {
+                              setSelected(hit);
+                              setQuery(hit.student.fullName);
+                            }}
+                          >
+                            <div className="text-sm font-semibold text-[var(--brand-deep)]">
+                              <StudentNameLabel student={hit.student} />
+                            </div>
+                            <div className="text-[11px] text-[var(--muted)]">
+                              {hit.classLabel}
+                              {hit.student.fatherName
+                                ? ` · F/O ${hit.student.fatherName}`
+                                : ""}{" "}
+                              · open dues {formatInr(hit.balancePaise)}
+                            </div>
+                          </button>
+                        </li>
+                      ))
+                    )}
+                  </PickerGroup>
+
+                  {assignedHits.length > 0 ? (
+                    <PickerGroup
+                      heading="Already on a bus"
+                      count={assignedHits.length}
+                      tone="done"
                     >
-                      <div className="text-sm font-semibold text-[var(--brand-deep)]">
-                        <StudentNameLabel student={hit.student} />
-                      </div>
-                      <div className="text-[11px] text-[var(--muted)]">
-                        {hit.classLabel} · open dues {formatInr(hit.balancePaise)}
-                      </div>
-                    </button>
-                  </li>
-                ))
+                      {assignedHits.slice(0, 12).map(({ hit, routeLabel }) => (
+                        <li key={hit.student.id}>
+                          {/*
+                            Shown but not selectable. Hiding these outright made
+                            the clerk retype the name wondering why the search
+                            "lost" the child; naming the bus answers it.
+                          */}
+                          <div
+                            className="w-full cursor-not-allowed rounded-lg border border-dashed border-[var(--border)] px-3 py-2 text-left opacity-70"
+                            aria-disabled="true"
+                          >
+                            <div className="text-sm font-semibold text-[var(--muted)]">
+                              <StudentNameLabel student={hit.student} />
+                            </div>
+                            <div className="text-[11px] text-[var(--muted)]">
+                              {hit.classLabel}
+                              {hit.student.fatherName
+                                ? ` · F/O ${hit.student.fatherName}`
+                                : ""}{" "}
+                              · on {routeLabel}
+                            </div>
+                          </div>
+                        </li>
+                      ))}
+                    </PickerGroup>
+                  ) : null}
+                </>
               )}
-            </ul>
+            </div>
           ) : null}
 
           {selected ? (
@@ -904,7 +1002,8 @@ function RidersPanel(props: RidersPanelProps) {
         </section>
       </div>
 
-      <section className="h-fit rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+      <div className="h-fit space-y-4">
+      <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-bold text-[var(--brand-deep)]">
           Routes snapshot
         </h2>
@@ -947,7 +1046,77 @@ function RidersPanel(props: RidersPanelProps) {
           })}
         </ul>
       </section>
+
+      <SiblingGapsCard gaps={siblingGaps} />
+      </div>
     </div>
+  );
+}
+
+/**
+ * Households split between riding and not riding. Two audiences in one list:
+ * siblings on different buses is a mistake to correct, siblings left off the
+ * bus is transport revenue nobody has asked the family about.
+ */
+function SiblingGapsCard({ gaps }: { gaps: SiblingTransportGap[] }) {
+  const [showAll, setShowAll] = useState(false);
+  if (gaps.length === 0) return null;
+  const shown = showAll ? gaps : gaps.slice(0, 6);
+
+  return (
+    <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+      <h2 className="text-sm font-bold text-[var(--brand-deep)]">
+        Siblings not on the bus
+      </h2>
+      <p className="mt-0.5 text-[11px] text-[var(--muted)]">
+        {gaps.length} famil{gaps.length === 1 ? "y has" : "ies have"} one child
+        riding and another not.
+      </p>
+      <ul className="mt-2 space-y-2">
+        {shown.map((gap) => (
+          <li
+            key={gap.householdId}
+            className={`rounded-lg border px-3 py-2 ${
+              gap.splitAcrossRoutes
+                ? "border-[rgba(180,69,58,0.4)] bg-[rgba(180,69,58,0.06)]"
+                : "border-[var(--border)]"
+            }`}
+          >
+            {gap.splitAcrossRoutes ? (
+              <p className="text-[10px] font-bold uppercase tracking-wide text-[var(--danger)]">
+                Siblings on different buses — check this
+              </p>
+            ) : null}
+            {gap.householdLabel ? (
+              <p className="text-xs font-bold text-[var(--brand-deep)]">
+                {gap.householdLabel}
+              </p>
+            ) : null}
+            <p className="mt-0.5 text-[11px] text-[var(--muted)]">
+              Riding:{" "}
+              {gap.riders
+                .map((r) => `${r.fullName} (${r.classLabel}, ${r.routeLabel})`)
+                .join(" · ")}
+            </p>
+            <p className="mt-0.5 text-[11px] font-medium text-[var(--ink)]">
+              Not riding:{" "}
+              {gap.nonRiders
+                .map((r) => `${r.fullName} (${r.classLabel})`)
+                .join(" · ")}
+            </p>
+          </li>
+        ))}
+      </ul>
+      {gaps.length > shown.length || showAll ? (
+        <button
+          type="button"
+          className="mt-2 text-[11px] font-semibold text-[var(--brand-mid)] underline"
+          onClick={() => setShowAll((v) => !v)}
+        >
+          {showAll ? "Show fewer" : `Show all ${gaps.length}`}
+        </button>
+      ) : null}
+    </section>
   );
 }
 
@@ -1093,6 +1262,35 @@ function ReportsPanel({
           </section>
         ))}
       </div>
+    </div>
+  );
+}
+
+/** Headed, counted group inside the rider search results. */
+function PickerGroup({
+  heading,
+  count,
+  tone,
+  children,
+}: {
+  heading: string;
+  count: number;
+  tone: "open" | "done";
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <p
+        className={`sticky top-0 z-[1] flex items-center justify-between rounded-md px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${
+          tone === "open"
+            ? "bg-[rgba(197,160,40,0.16)] text-[var(--brand-deep)]"
+            : "bg-[var(--surface-sunken)] text-[var(--muted)]"
+        }`}
+      >
+        <span>{heading}</span>
+        <span className="tabular-nums">{count}</span>
+      </p>
+      <ul className="mt-1 space-y-1">{children}</ul>
     </div>
   );
 }

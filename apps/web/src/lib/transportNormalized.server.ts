@@ -136,23 +136,55 @@ export async function pushTransportDeskToDb(
     .from("transport_desk_slices")
     .select("slice_key")
     .eq("tenant_id", tenantId);
+  const existingKeys = (existing ?? []).map((r) =>
+    String((r as { slice_key: string }).slice_key),
+  );
   const keep = new Set<string>(rows.map((r) => String(r.slice_key)));
-  const stale = (existing ?? [])
-    .map((r) => String((r as { slice_key: string }).slice_key))
-    .filter((k) => !keep.has(k));
-  if (stale.length > 0) {
+  const stale = existingKeys.filter((k) => !keep.has(k));
+
+  // A slice going missing from the payload is treated as "delete it". That is
+  // only ever right when the client actually knows the desk is empty — and a
+  // client that failed to hydrate (a 401, a timeout) looks exactly the same
+  // from here. On 2026-08-21 an unauthenticated page load pushed an empty
+  // state and hard-deleted the live routes and assignments.
+  //
+  // Nothing in the UI empties these arrays anyway: deactivating a route sets
+  // isActive=false and ending an assignment sets effectiveTo, both of which
+  // keep the row. So an empty array arriving on top of a populated slice is a
+  // bug every time, and refusing it costs nothing.
+  const PROTECTED = new Set(["routes", "assignments", "vehicles"]);
+  const refused = stale.filter((k) => PROTECTED.has(k));
+  if (refused.length > 0) {
+    return {
+      ok: false,
+      error:
+        `Refusing to clear transport ${refused.join(", ")} — the client sent ` +
+        `an empty desk while the database holds data. This is almost always ` +
+        `an unhydrated client, not a deletion.`,
+    };
+  }
+
+  const deletable = stale.filter((k) => !PROTECTED.has(k));
+  if (deletable.length > 0) {
     await sb
       .from("transport_desk_slices")
       .delete()
       .eq("tenant_id", tenantId)
-      .in("slice_key", stale);
+      .in("slice_key", deletable);
   }
 
   if (rows.length > 0) {
     const { error } = await sb.from("transport_desk_slices").upsert(rows);
     if (error) return { ok: false, error: error.message };
-  } else {
-    await sb.from("transport_desk_slices").delete().eq("tenant_id", tenantId);
+  } else if (existingKeys.length > 0) {
+    // Same reasoning, the whole-desk case: an empty push against a populated
+    // desk wipes everything. Never do it implicitly.
+    return {
+      ok: false,
+      error:
+        "Refusing to clear the whole transport desk — the client sent nothing " +
+        "while the database holds data.",
+    };
   }
 
   await sb.from("transport_desk_sync_meta").upsert(

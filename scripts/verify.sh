@@ -91,6 +91,8 @@ SELFTESTS=(
   test:fee-student-search
   test:substitution-auto
   test:timetable-substitution
+  test:transport-sibling-gaps
+  test:transport-stop-distance
 )
 
 bold "Verifying $(git rev-parse --short HEAD 2>/dev/null || echo 'working tree') on $(git branch --show-current 2>/dev/null || echo '?')"

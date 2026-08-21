@@ -2,6 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { formatInr } from "@/lib/fees";
+import { StopDistanceBackfillCard } from "@/components/transport/StopDistanceBackfillCard";
+import {
+  StopRowsEditor,
+  newStopDraft,
+  type StopDraft,
+} from "@/components/transport/StopRowsEditor";
 import type { MastersState } from "@/lib/masters";
 import type { SisState } from "@/lib/sis";
 import {
@@ -42,7 +48,7 @@ export function RoutesPanel({
   const [busNo, setBusNo] = useState("");
   const [vehicleId, setVehicleId] = useState("");
   const [fee, setFee] = useState("");
-  const [stopsText, setStopsText] = useState("");
+  const [stopRows, setStopRows] = useState<StopDraft[]>([]);
   const [policy, setPolicy] = useState<TransportFeePolicy>(state.feePolicy);
 
   useEffect(() => {
@@ -56,12 +62,17 @@ export function RoutesPanel({
     setBusNo(r.busNo);
     setVehicleId(r.vehicleId);
     setFee(String(r.monthlyFeePaise / 100));
-    setStopsText(
-      r.stops
-        .map((s) =>
-          s.distanceKm > 0 ? `${s.name}:${s.distanceKm}` : s.name,
-        )
-        .join("\n"),
+    setStopRows(
+      r.stops.map((s) => ({
+        ...newStopDraft(),
+        name: s.name,
+        distanceKm: s.distanceKm,
+        distanceSource: s.distanceSource,
+        geoLat: s.geoLat,
+        geoLng: s.geoLng,
+        placeId: s.placeId,
+        geoAddress: s.geoAddress,
+      })),
     );
   }
 
@@ -72,18 +83,21 @@ export function RoutesPanel({
     setBusNo("");
     setVehicleId("");
     setFee("");
-    setStopsText("");
+    setStopRows([]);
   }
 
   function save() {
-    const stopLines = stopsText
-      .split(/\n|,/)
-      .map((l) => l.trim())
-      .filter(Boolean)
-      .map((line) => {
-        const [nm, km] = line.split(":").map((x) => x.trim());
-        return { name: nm || line, distanceKm: Number(km) || 0 };
-      });
+    const stopLines = stopRows
+      .filter((r) => r.name.trim())
+      .map((r) => ({
+        name: r.name.trim(),
+        distanceKm: r.distanceKm,
+        distanceSource: r.distanceSource,
+        geoLat: r.geoLat,
+        geoLng: r.geoLng,
+        placeId: r.placeId,
+        geoAddress: r.geoAddress,
+      }));
     const veh = vehicles.find((v) => v.id === vehicleId);
     const r = upsertTransportRoute({
       id: editId || undefined,
@@ -99,6 +113,11 @@ export function RoutesPanel({
         name: s.name,
         sequence: i + 1,
         distanceKm: s.distanceKm,
+        distanceSource: s.distanceSource,
+        geoLat: s.geoLat,
+        geoLng: s.geoLng,
+        placeId: s.placeId,
+        geoAddress: s.geoAddress,
       })),
     });
     if (!r.ok) {
@@ -106,10 +125,7 @@ export function RoutesPanel({
       return;
     }
     if (stopLines.length) {
-      setRouteStops(
-        r.route.id,
-        stopLines.map((s) => ({ name: s.name, distanceKm: s.distanceKm })),
-      );
+      setRouteStops(r.route.id, stopLines);
     }
     clearForm();
     onRefresh();
@@ -190,20 +206,20 @@ export function RoutesPanel({
                 }
               />
             </label>
-            <label className="text-sm sm:col-span-2">
+            <div className="text-sm sm:col-span-2">
               <span className="mb-1 block text-[11px] text-[var(--muted)]">
-                Stops (one per line
-                {policy.rateMode !== "flat_route"
-                  ? ", use Name:km e.g. Lanka:2"
-                  : ", optional :km e.g. Lanka:2"}
-                )
+                Stops in boarding order — type a name to search Google, then the
+                distance is measured by road from campus
+                {policy.rateMode === "flat_route"
+                  ? " (this route bills a flat fee, so distance is recorded but not charged)"
+                  : ""}
               </span>
-              <textarea
-                className="field min-h-[6rem] !py-1.5"
-                value={stopsText}
-                onChange={(e) => setStopsText(e.target.value)}
+              <StopRowsEditor
+                rows={stopRows}
+                onChange={setStopRows}
+                showDistance
               />
-            </label>
+            </div>
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
             <button
@@ -224,6 +240,13 @@ export function RoutesPanel({
             ) : null}
           </div>
         </div>
+
+        <StopDistanceBackfillCard
+          state={state}
+          onRefresh={onRefresh}
+          onFlash={onFlash}
+          onError={onError}
+        />
 
         <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">

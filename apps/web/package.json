@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
+    "dev:verify": "npx --yes dotenv-cli -e .env.verify.local -o -- next dev --turbopack",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -57,6 +58,8 @@
     "test:exam-invigilation": "npx tsx src/lib/examInvigilation.selftest.ts",
     "test:substitution-auto": "npx tsx src/lib/timetableSubstitutionAuto.selftest.ts",
     "test:timetable-substitution": "npx tsx src/lib/timetableSubstitution.selftest.ts",
+    "test:transport-sibling-gaps": "npx tsx src/lib/transportSiblingGaps.selftest.ts",
+    "test:transport-stop-distance": "npx tsx src/lib/transportStopDistance.selftest.ts",
     "test:duty-roster": "npx tsx src/lib/dutyRoster.selftest.ts",
     "test:module-filters": "npx tsx src/lib/moduleFilters.selftest.ts",
     "test:report-export": "npx tsx src/lib/reportExport.selftest.ts",
