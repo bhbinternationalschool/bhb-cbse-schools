@@ -24,6 +24,7 @@ import {
   RoutesPanel,
 } from "@/components/transport/TransportOpsPanels";
 import { FleetRosterPanel } from "@/components/transport/FleetRosterPanel";
+import { TransportAmendDialog } from "@/components/transport/TransportAmendDialog";
 import {
   checkTransportStartMonth,
   monthLabel,
@@ -33,7 +34,14 @@ import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpTableShell } from "@/components/ui/erp-roster";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
-import { formatInr, searchFeeStudents, type StudentSearchHit } from "@/lib/fees";
+import {
+  computeStudentDues,
+  formatInr,
+  loadFees,
+  searchFeeStudents,
+  type FeeDueLine,
+  type StudentSearchHit,
+} from "@/lib/fees";
 import { checkHold, type HoldCheck } from "@/lib/holds";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
 import { loadSis, type SisState } from "@/lib/sis";
@@ -639,6 +647,12 @@ function RidersPanel(props: RidersPanelProps) {
     return { unassignedHits: free, assignedHits: taken };
   }, [hits, riders, routes]);
 
+  const [amending, setAmending] = useState<{
+    assignment: (typeof riders)[number];
+    studentName: string;
+    dues: FeeDueLine[];
+  } | null>(null);
+
   // Same check the assign handler runs, surfaced while the clerk is still
   // choosing the date rather than after they click.
   const startCheck = useMemo(() => {
@@ -1033,6 +1047,35 @@ function RidersPanel(props: RidersPanelProps) {
                           : ""}
                       </div>
                     </div>
+                    <div className="flex shrink-0 flex-col items-end gap-1">
+                    <button
+                      type="button"
+                      className="text-[11px] font-semibold text-[var(--brand-mid)]"
+                      onClick={() => {
+                        // Which months are already paid decides when the change
+                        // may land, so the ledger is read at open time.
+                        let dues: FeeDueLine[] = [];
+                        if (student && masters) {
+                          try {
+                            dues = computeStudentDues(
+                              student,
+                              masters,
+                              loadFees(),
+                              { includeFuture: true, includePaid: true },
+                            );
+                          } catch {
+                            dues = [];
+                          }
+                        }
+                        setAmending({
+                          assignment,
+                          studentName: student?.fullName ?? "this student",
+                          dues,
+                        });
+                      }}
+                    >
+                      Change
+                    </button>
                     <button
                       type="button"
                       className="text-[11px] font-semibold text-[var(--danger)]"
@@ -1052,6 +1095,7 @@ function RidersPanel(props: RidersPanelProps) {
                     >
                       End
                     </button>
+                    </div>
                   </li>
                 );
               })}
@@ -1108,6 +1152,22 @@ function RidersPanel(props: RidersPanelProps) {
 
       <SiblingGapsCard gaps={siblingGaps} />
       </div>
+
+      {amending ? (
+        <TransportAmendDialog
+          assignment={amending.assignment}
+          studentName={amending.studentName}
+          academicYearCode={academicYearCode}
+          state={state}
+          dues={amending.dues}
+          onClose={() => setAmending(null)}
+          onDone={(message) => {
+            setAmending(null);
+            onRefresh();
+            onFlash(message);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

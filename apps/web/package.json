@@ -62,6 +62,7 @@
     "test:transport-stop-distance": "npx tsx src/lib/transportStopDistance.selftest.ts",
     "test:transport-start-month": "npx tsx src/lib/transportStartMonth.selftest.ts",
     "test:transport-misrouted": "npx tsx src/lib/transportMisrouted.selftest.ts",
+    "test:transport-amend": "npx tsx src/lib/transportAmend.selftest.ts",
     "test:duty-roster": "npx tsx src/lib/dutyRoster.selftest.ts",
     "test:module-filters": "npx tsx src/lib/moduleFilters.selftest.ts",
     "test:report-export": "npx tsx src/lib/reportExport.selftest.ts",
