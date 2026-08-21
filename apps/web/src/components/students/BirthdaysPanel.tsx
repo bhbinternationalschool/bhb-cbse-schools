@@ -32,6 +32,7 @@ import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 import { openWaMe } from "@/lib/waMe";
 import { TENANT } from "@/lib/types";
 import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 const inp = "w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-sm";
 
@@ -123,6 +124,22 @@ export function BirthdaysPanel({ canEdit }: { canEdit: boolean }) {
 
   const logToday = state.log.filter((e) => e.date === date);
 
+  // Default order is whatever the API returned; the office usually wants
+  // "who has not been sent yet" first, which is one click on Status.
+  const todaySort = useTableSort(
+    today,
+    {
+      name: (r) => r.fullName,
+      family: (r) => r.guardianName || null,
+      // Sort on whether a greeting went out, not on the rendered channel text.
+      sent: (r) =>
+        state.log.some(
+          (e) => e.date === date && e.studentId === r.studentId && e.status === "sent",
+        ),
+    },
+    "name",
+  );
+
   return (
     <div className="mt-4 space-y-4">
       {notice ? <p className="rounded-lg bg-[var(--success-soft)] px-3 py-1.5 text-xs font-semibold text-[var(--success)]">{notice}</p> : null}
@@ -156,14 +173,14 @@ export function BirthdaysPanel({ canEdit }: { canEdit: boolean }) {
                 <ErpTableHead>
                   <tr>
                     <th className="px-2 py-2 text-left">Card</th>
-                    <th className="px-2 py-2 text-left">Student</th>
-                    <th className="px-2 py-2 text-left">Family</th>
-                    <th className="px-2 py-2 text-left">Status today</th>
+                    <ErpSortTh sort={todaySort} field="name">Student</ErpSortTh>
+                    <ErpSortTh sort={todaySort} field="family">Family</ErpSortTh>
+                    <ErpSortTh sort={todaySort} field="sent">Status today</ErpSortTh>
                     <th className="px-2 py-2" />
                   </tr>
                 </ErpTableHead>
                 <ErpTableBody>
-                  {today.map((row) => {
+                  {todaySort.rows.map((row) => {
                     const log = logToday.filter((e) => e.studentId === row.studentId);
                     return (
                       <tr key={row.studentId} className="text-xs align-top">

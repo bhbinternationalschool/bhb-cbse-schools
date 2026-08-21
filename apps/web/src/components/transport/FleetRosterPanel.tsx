@@ -18,6 +18,7 @@ import {
   ErpTableBody,
   ErpTableHead,
 } from "@/components/ui/erp-roster";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 /**
  * Who is on each bus — the list that did not exist.
@@ -166,6 +167,24 @@ function RosterCard({
   const seatsLeft = Math.max(0, roster.seatCapacity - roster.riders.length);
   const over = roster.riders.length > roster.seatCapacity;
 
+  // Default order is the stop sequence the list already arrives in — that is
+  // how the conductor reads it. Sorting is opt-in per column from there.
+  const sort = useTableSort(
+    roster.riders,
+    {
+      name: (r) => r.fullName,
+      classLabel: (r) => r.classLabel,
+      father: (r) => r.fatherName || null,
+      stop: (r) => r.stopName,
+      // Sort by the number behind the cell, never the rendered "4 km" string,
+      // and let an unmeasured stop stay unknown rather than becoming 0.
+      km: (r) => (r.distanceKm > 0 ? r.distanceKm : null),
+      fee: (r) => r.monthlyFeePaise,
+      from: (r) => r.effectiveFrom,
+    },
+    "stop",
+  );
+
   return (
     <section className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] print:break-inside-avoid">
       <div className="flex flex-wrap items-start gap-3 p-4">
@@ -233,17 +252,19 @@ function RosterCard({
             <ErpTable minWidth="min-w-[46rem]">
               <ErpTableHead>
                 <tr>
-                  <th className="px-3 py-2 font-bold">Student</th>
-                  <th className="px-3 py-2 font-bold">Class</th>
-                  <th className="px-3 py-2 font-bold">Father</th>
-                  <th className="px-3 py-2 font-bold">Stop</th>
-                  <th className="px-3 py-2 text-right font-bold">Km</th>
-                  <th className="px-3 py-2 text-right font-bold">Per month</th>
-                  <th className="px-3 py-2 font-bold">From</th>
+                  <ErpSortTh sort={sort} field="name">Student</ErpSortTh>
+                  <ErpSortTh sort={sort} field="classLabel">Class</ErpSortTh>
+                  <ErpSortTh sort={sort} field="father">Father</ErpSortTh>
+                  <ErpSortTh sort={sort} field="stop">Stop</ErpSortTh>
+                  <ErpSortTh sort={sort} field="km" align="right">Km</ErpSortTh>
+                  <ErpSortTh sort={sort} field="fee" align="right">
+                    Per month
+                  </ErpSortTh>
+                  <ErpSortTh sort={sort} field="from">From</ErpSortTh>
                 </tr>
               </ErpTableHead>
               <ErpTableBody>
-                {roster.riders.map((r) => (
+                {sort.rows.map((r) => (
                   <tr
                     key={r.studentId}
                     className="border-t border-[var(--border)]"

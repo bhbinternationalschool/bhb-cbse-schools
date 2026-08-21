@@ -96,6 +96,7 @@ SELFTESTS=(
   test:transport-start-month
   test:transport-misrouted
   test:transport-amend
+  test:table-sort
 )
 
 bold "Verifying $(git rev-parse --short HEAD 2>/dev/null || echo 'working tree') on $(git branch --show-current 2>/dev/null || echo '?')"
