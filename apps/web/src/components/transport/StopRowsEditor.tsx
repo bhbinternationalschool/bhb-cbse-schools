@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { PlacePrediction, ResolvedPlaceAddress } from "@/lib/mapsPlaces";
 import { fetchStopRoadDistanceKm } from "@/lib/transportPlanner";
+import { StopMapPicker, type PickedPoint } from "@/components/transport/StopMapPicker";
 import type { StopDistanceSource } from "@/lib/transport";
 
 export type StopDraft = {
@@ -267,6 +268,7 @@ function StopRow({
   const [openList, setOpenList] = useState(false);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [mapOpen, setMapOpen] = useState(false);
   // One Places session token per stop keeps autocomplete + details billed as a
   // single lookup rather than one charge per keystroke.
   const sessionRef = useRef(`st_${Math.random().toString(36).slice(2, 12)}`);
@@ -338,6 +340,36 @@ function StopRow({
       } else {
         // Pinned, but not measured. Keep the pin, leave the distance alone and
         // say why — an unmeasured stop must not silently bill as 0 km.
+        onPatch(base);
+        setNote(`${dist.error} — enter the distance by hand`);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function usePickedPoint(picked: PickedPoint) {
+    setMapOpen(false);
+    setBusy(true);
+    setNote(null);
+    const base: Partial<StopDraft> = {
+      geoLat: picked.lat,
+      geoLng: picked.lng,
+      // A hand-placed pin has no Google place id, and inventing one would make
+      // it look like a resolved Places result. Clear it instead.
+      placeId: undefined,
+      geoAddress:
+        picked.address || `${picked.lat.toFixed(5)}, ${picked.lng.toFixed(5)}`,
+    };
+    try {
+      const dist = await fetchStopRoadDistanceKm({
+        lat: picked.lat,
+        lng: picked.lng,
+        address: picked.address || undefined,
+      });
+      if (dist.ok) {
+        onPatch({ ...base, distanceKm: dist.km, distanceSource: "google" });
+      } else {
         onPatch(base);
         setNote(`${dist.error} — enter the distance by hand`);
       }
@@ -468,6 +500,14 @@ function StopRow({
         ) : null}
 
         <div className="flex items-center gap-1">
+          <button
+            type="button"
+            title="Place this stop on the map — for spots Google search cannot find"
+            onClick={() => setMapOpen(true)}
+            className="h-7 rounded-md border border-[var(--border)] px-2 text-[10px] font-semibold text-[var(--brand-mid)] hover:bg-[var(--surface-sunken)]"
+          >
+            Map
+          </button>
           <IconBtn label="Move up" onClick={() => onMove(-1)}>
             ↑
           </IconBtn>
@@ -524,6 +564,19 @@ function StopRow({
         ) : null}
         {note ? <span className="text-[var(--danger)]">{note}</span> : null}
       </div>
+
+      {mapOpen ? (
+        <StopMapPicker
+          stopName={row.name}
+          initial={
+            row.geoLat != null && row.geoLng != null
+              ? { lat: row.geoLat, lng: row.geoLng }
+              : null
+          }
+          onCancel={() => setMapOpen(false)}
+          onPick={usePickedPoint}
+        />
+      ) : null}
     </div>
   );
 }
