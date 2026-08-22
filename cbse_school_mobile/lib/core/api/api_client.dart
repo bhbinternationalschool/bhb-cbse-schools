@@ -1456,6 +1456,19 @@ class ApiClient {
 
   Future<String?> roleCode() => _storage.read(key: _roleKey);
 
+  /// Drivers and attendants get the bus home instead of the teacher home.
+  ///
+  /// Keyed on roleCode, NOT persona. Every driver signs in through staff OTP,
+  /// which mints `persona: "staff"` exactly as it does for a teacher — the
+  /// "field" persona is a login label nothing in the codebase ever assigns,
+  /// so routing on it sent every driver to the teacher home and left the bus
+  /// screens unreachable. roleCode is already derived from their sis_staff
+  /// designation at login, and is what actually tells them apart.
+  Future<bool> isTransportCrew() async {
+    final rc = (await roleCode())?.toLowerCase() ?? "";
+    return RegExp(r"driver|conductor|attendant|transport").hasMatch(rc);
+  }
+
   /// principal / owner / admin / director style roles get the school-wide
   /// snapshot home instead of the teacher home (mirror of the server's
   /// isPrincipalLikeRole).

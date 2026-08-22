@@ -1,5 +1,5 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
-import { resolveApiAuth } from "@/lib/api/v1/auth";
+import { assertPermission, resolveApiAuth } from "@/lib/api/v1/auth";
 import { appendBoardingEventToDb } from "@/lib/transportNormalized.server";
 import { TENANT } from "@/lib/types";
 
@@ -30,13 +30,22 @@ function haversineKm(aLat: number, aLng: number, bLat: number, bLng: number) {
  * it — a mark with no pin looks identical to one with a pin on the roster, and
  * the whole record would quietly become untrustworthy. "absent" needs no pin,
  * because nobody got on.
+ *
+ * Gated on `transport.view`, not `transport.create`. That looks lax for a
+ * write and is deliberate: the built-in Driver role is view-only on the
+ * transport desk ("Field / transport self-service"), so demanding `create`
+ * would 403 the exact people the feature exists for. Marking a child aboard
+ * is field self-service, not desk editing — anyone trusted to see the roster
+ * is trusted to mark it, and everyone else (teacher, parent) holds no
+ * transport grant at all. Tightening this to `create` means granting the
+ * Driver role `create` in Settings -> Roles first; the built-in default never
+ * reaches an already-persisted role, whose grants are merged by module and
+ * never by action.
  */
 export async function POST(request: Request) {
   try {
     const ctx = await resolveApiAuth(request);
-    if (ctx.session.persona !== "staff" && ctx.session.persona !== "field") {
-      throw new ApiError("forbidden", "Driver or attendant sign-in required", 403);
-    }
+    assertPermission(ctx, "transport", "view");
 
     let body: {
       routeId?: string;
