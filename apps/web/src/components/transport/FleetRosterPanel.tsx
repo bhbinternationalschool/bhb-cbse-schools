@@ -85,7 +85,24 @@ export function FleetRosterPanel({
     );
     const plans = planAfternoonWaves(state, sis, masters, academicYearCode);
     return {
-      rosters: buildFleetRosters(state, profiles, fathers, crew),
+      rosters: buildFleetRosters(state, profiles, fathers, crew, {
+        // The roster must quote the same discount the invoice charges, so it
+        // is resolved from the same masters through the same rule engine.
+        concessions: {
+          masters,
+          students: new Map(
+            sis.students.map((st) => [
+              st.id,
+              {
+                id: st.id,
+                admissionNo: st.admissionNo,
+                academicYearCode: st.academicYearCode,
+              },
+            ]),
+          ),
+          asOf: new Date().toISOString().slice(0, 10),
+        },
+      }),
       misrouted: findMisroutedRiders(profiles, state),
       plans,
       shares: suggestVehicleSharing(plans),
@@ -98,6 +115,22 @@ export function FleetRosterPanel({
   const totalShortfall = rosters.reduce((n, r) => n + r.shortfallTotalPaise, 0);
   const totalUnknown = rosters.reduce((n, r) => n + r.ridersUnknownShortfall, 0);
   const totalBrokenLinks = rosters.reduce((n, r) => n + r.ridersBrokenLink, 0);
+  const totalConcession = rosters.reduce((n, r) => n + r.concessionTotalPaise, 0);
+  const netTotal = rosters.reduce((n, r) => n + r.netTotalPaise, 0);
+  const totalWithConcession = rosters.reduce(
+    (n, r) => n + r.ridersWithConcession,
+    0,
+  );
+  // A rider discounted to nothing rides free BY DECISION. One with no fee set
+  // rides free by accident. Both pay zero, and the office needs to act on
+  // only one of them — so they are never pooled into a single count.
+  const fullyDiscounted = rosters.reduce(
+    (n, r) =>
+      n +
+      r.riders.filter((x) => x.monthlyFeePaise > 0 && x.netFeePaise <= 0)
+        .length,
+    0,
+  );
 
   // "0 riders" and "the roster has not loaded" look identical on screen and
   // mean opposite things — one says nobody rides this bus, the other says we
@@ -128,7 +161,17 @@ export function FleetRosterPanel({
             <p className="mt-0.5 text-[11px] text-[var(--muted)]">
               {rosters.length} active route{rosters.length === 1 ? "" : "s"} ·{" "}
               {totalRiders} rider{totalRiders === 1 ? "" : "s"} ·{" "}
-              {formatInr(monthlyTotal)} billed per month
+              {totalConcession > 0 ? (
+                <>
+                  {formatInr(monthlyTotal)} gross −{" "}
+                  {formatInr(totalConcession)} discount ={" "}
+                  <strong className="text-[var(--ink)]">
+                    {formatInr(netTotal)} collected per month
+                  </strong>
+                </>
+              ) : (
+                `${formatInr(monthlyTotal)} billed per month`
+              )}
             </p>
           </div>
           <button
@@ -200,6 +243,25 @@ export function FleetRosterPanel({
           <p className="mt-3 rounded-lg border border-[color-mix(in_srgb,var(--danger)_40%,transparent)] bg-[color-mix(in_srgb,var(--danger)_8%,transparent)] px-3 py-2 text-[11px] font-semibold text-[var(--danger)]">
             {totalUnbilled} rider{totalUnbilled === 1 ? " is" : "s are"} on a bus
             with no monthly fee — on board, billed nothing.
+          </p>
+        ) : null}
+
+        {totalConcession > 0 ? (
+          <p className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2 text-[11px] text-[var(--muted)]">
+            {totalWithConcession} rider
+            {totalWithConcession === 1 ? " has" : "s have"} a transport
+            concession worth {formatInr(totalConcession)} a month.
+            {fullyDiscounted > 0 ? (
+              <>
+                {" "}
+                <strong className="text-[var(--ink)]">
+                  {fullyDiscounted} of them ride free by decision
+                </strong>{" "}
+                — a full discount, not a missing fee.
+              </>
+            ) : null}{" "}
+            The shortfall figures above compare the distance rule against the
+            fee before discount, so an approved concession never shows as a gap.
           </p>
         ) : null}
       </section>
@@ -370,6 +432,8 @@ function RosterCard({
       // and let an unmeasured stop stay unknown rather than becoming 0.
       km: (r) => (r.distanceKm > 0 ? r.distanceKm : null),
       fee: (r) => r.monthlyFeePaise,
+      // No discount is a real zero here — it is known, not unknown.
+      concession: (r) => r.concessionPaise,
       // Unmeasured stops yield no benchmark, so they sort as unknown, not zero.
       shortfall: (r) => (r.shortfallKnown ? r.shortfallPaise : null),
       from: (r) => r.effectiveFrom,
@@ -407,7 +471,11 @@ function RosterCard({
             <span className="text-[var(--muted)]">
               {over
                 ? " — over capacity"
-                : ` · ${seatsLeft} free · ${formatInr(roster.monthlyTotalPaise)}/month`}
+                : ` · ${seatsLeft} free · ${
+                    roster.concessionTotalPaise > 0
+                      ? `${formatInr(roster.monthlyTotalPaise)} gross − ${formatInr(roster.concessionTotalPaise)} discount = ${formatInr(roster.netTotalPaise)}/month`
+                      : `${formatInr(roster.monthlyTotalPaise)}/month`
+                  }`}
             </span>
             {roster.shortfallTotalPaise > 0 ? (
               <span className="ml-2 font-bold text-[var(--danger)]">
@@ -490,6 +558,9 @@ function RosterCard({
                   <ErpSortTh sort={sort} field="km" align="right">Km</ErpSortTh>
                   <ErpSortTh sort={sort} field="fee" align="right">
                     Per month
+                  </ErpSortTh>
+                  <ErpSortTh sort={sort} field="concession" align="right">
+                    Discount
                   </ErpSortTh>
                   <ErpSortTh sort={sort} field="shortfall" align="right">
                     Shortfall
@@ -576,6 +647,21 @@ function RosterCard({
                           †
                         </span>
                       ) : null}
+                    </td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">
+                      {r.concessionPaise > 0 ? (
+                        <span
+                          className="font-semibold text-[var(--brand-mid)]"
+                          title={`${r.concessionLabel} — billed ${formatInr(r.netFeePaise)}/month`}
+                        >
+                          −{formatInr(r.concessionPaise)}
+                          <span className="ml-1 block text-[9px] font-normal text-[var(--muted)]">
+                            net {formatInr(r.netFeePaise)}
+                          </span>
+                        </span>
+                      ) : (
+                        <span className="text-[var(--muted)]">—</span>
+                      )}
                     </td>
                     <td className="px-3 py-1.5 text-right tabular-nums">
                       {!r.shortfallKnown ? (

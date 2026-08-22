@@ -7,6 +7,7 @@ import { DEFAULT_AY, type MastersState } from "@/lib/masters";
 import type { SisState, SisStudent } from "@/lib/sis";
 import { TENANT } from "@/lib/types";
 import { householdHasGeo } from "@/lib/mapsGeocode";
+import { transportConcessionForStudent } from "@/lib/fees";
 import {
   alignVehiclesToRoutes,
   computeTransportPeriodDues,
@@ -728,6 +729,17 @@ export type FleetRiderRow = {
   boardingSuspended: boolean;
   /** Sibling on the same bus — useful when the conductor calls the roll. */
   siblingOnBoard: boolean;
+  /**
+   * Monthly transport discount from Fees -> Concessions, and what granted it.
+   *
+   * Shown ALONGSIDE the gross fee, never instead of it. Replacing the fee
+   * with the net figure would hide the discount, which is the one thing about
+   * it worth auditing. Zero when the student has no transport concession.
+   */
+  concessionPaise: number;
+  concessionLabel: string;
+  /** monthlyFeePaise - concessionPaise. What the family is actually billed. */
+  netFeePaise: number;
   /** Where the attendant's phone was when they marked the child today. */
   todayBoarding: {
     status: string;
@@ -764,6 +776,11 @@ export type FleetRosterRow = {
   ridersUnknownShortfall: number;
   /** Riders whose assignment names a stop that no longer exists. */
   ridersBrokenLink: number;
+  /** Total monthly transport concession granted across this bus. */
+  concessionTotalPaise: number;
+  /** monthlyTotalPaise - concessionTotalPaise. The bus's real monthly income. */
+  netTotalPaise: number;
+  ridersWithConcession: number;
 };
 
 /**
@@ -778,7 +795,21 @@ export function buildFleetRosters(
   profiles: StudentTransportProfile[],
   fatherNameByStudent?: Map<string, string>,
   crewLabelByRoute?: Map<string, string>,
-  opts?: { boardingDate?: string; trip?: "AM" | "PM" },
+  opts?: {
+    boardingDate?: string;
+    trip?: "AM" | "PM";
+    /**
+     * Masters plus the roster, so the discount shown here is the one the
+     * invoice charges. Omit them and every concession reads as zero — which
+     * is why the panel passes what it already has rather than leaving the
+     * column quietly blank.
+     */
+    concessions?: {
+      masters: MastersState;
+      students: Map<string, { id: string; admissionNo: string; academicYearCode?: string }>;
+      asOf: string;
+    };
+  },
 ): FleetRosterRow[] {
   const day = opts?.boardingDate ?? new Date().toISOString().slice(0, 10);
   const trip = opts?.trip ?? "AM";
@@ -833,6 +864,23 @@ export function buildFleetRosters(
           distanceBenchmarkPaise(km, state.feePolicy),
           asg.serviceMode,
         );
+        const conc = (() => {
+          const c = opts?.concessions;
+          const student = c?.students.get(p.studentId);
+          if (!c || !student) return { totalPaise: 0, label: "" };
+          const got = transportConcessionForStudent(
+            c.masters,
+            student,
+            fee,
+            c.asOf,
+          );
+          return {
+            totalPaise: got.totalPaise,
+            // The rule's own name, so the office recognises what they granted.
+            label: got.details.map((d) => `${d.name} ${d.rateLabel}`).join(" + "),
+          };
+        })();
+
         return {
           studentId: p.studentId,
           fullName: p.fullName,
@@ -850,6 +898,9 @@ export function buildFleetRosters(
           // not a negative shortfall, and showing one would read as a refund.
           shortfallPaise: benchmark > 0 ? Math.max(0, benchmark - fee) : 0,
           shortfallKnown: benchmark > 0,
+          concessionPaise: conc.totalPaise,
+          concessionLabel: conc.label,
+          netFeePaise: Math.max(0, fee - conc.totalPaise),
           feeOverridden: asg.monthlyFeePaise > 0 && asg.monthlyFeePaise !== expected,
           effectiveFrom: asg.effectiveFrom,
           boardingSuspended: asg.boardingSuspended,
@@ -899,6 +950,9 @@ export function buildFleetRosters(
       ridersWithShortfall: riders.filter((r) => r.shortfallPaise > 0).length,
       ridersUnknownShortfall: riders.filter((r) => !r.shortfallKnown).length,
       ridersBrokenLink: riders.filter((r) => r.stopLinkBroken).length,
+      concessionTotalPaise: riders.reduce((sum, r) => sum + r.concessionPaise, 0),
+      netTotalPaise: riders.reduce((sum, r) => sum + r.netFeePaise, 0),
+      ridersWithConcession: riders.filter((r) => r.concessionPaise > 0).length,
     };
   });
 }
