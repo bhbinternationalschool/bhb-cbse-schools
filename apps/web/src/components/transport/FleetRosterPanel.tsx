@@ -62,10 +62,20 @@ export function FleetRosterPanel({
   const totalUnbilled = rosters.reduce((n, r) => n + r.unbilledRiders, 0);
   const monthlyTotal = rosters.reduce((n, r) => n + r.monthlyTotalPaise, 0);
 
-  if (!sis || !masters) {
+  // "0 riders" and "the roster has not loaded" look identical on screen and
+  // mean opposite things — one says nobody rides this bus, the other says we
+  // do not know yet. A cold browser used to render a confident zero against
+  // buses that were fully assigned, so say which it is.
+  const rosterUnknown = !sis || !masters || sis.students.length === 0;
+  if (rosterUnknown) {
     return (
-      <p className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 text-sm text-[var(--muted)]">
-        Loading students…
+      <p className="mt-4 rounded-xl border border-[color-mix(in_srgb,var(--brand-mid)_45%,transparent)] bg-[var(--card)] p-4 text-sm text-[var(--muted)]">
+        <strong className="text-[var(--brand-deep)]">
+          Student roster has not loaded yet.
+        </strong>{" "}
+        Rider counts cannot be shown until it does — they would read as zero,
+        which is not the same as an empty bus. Give it a moment, or open
+        Students once and come back.
       </p>
     );
   }
