@@ -110,6 +110,82 @@ function bundleToState(bundle: TransportDeskBundle): TransportState {
   return { version: 2, ...bundle };
 }
 
+/**
+ * Append one boarding event, touching only the boardingEvents slice.
+ *
+ * Deliberately NOT a whole-desk push. The driver's phone knows about one child
+ * at one stop; it has no business sending back a routes or assignments slice,
+ * and a read-modify-write of the entire desk from a handset on a patchy 4G
+ * connection is exactly how the desk got wiped on 2026-08-21. This reads the
+ * one slice it needs and writes the one slice it changed.
+ *
+ * Idempotent per student per trip per day: marking the same child twice
+ * updates the existing record rather than stacking duplicates, because a
+ * driver tapping again after a dead spot is expected, not an error.
+ */
+export async function appendBoardingEventToDb(event: {
+  id: string;
+  date: string;
+  routeId: string;
+  trip: "AM" | "PM";
+  studentId: string;
+  status: "boarded" | "absent" | "unauthorized";
+  note: string;
+  createdAt: string;
+  boardedLocation?: unknown;
+  offboardedLocation?: unknown;
+}): Promise<{ ok: boolean; error?: string }> {
+  if (!transportDualWriteDbEnabled()) return { ok: true };
+  const ctx = await resolveCtx();
+  if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
+  const { sb, tenantId } = ctx;
+
+  const { data, error: readErr } = await sb
+    .from("transport_desk_slices")
+    .select("payload")
+    .eq("tenant_id", tenantId)
+    .eq("slice_key", "boardingEvents")
+    .maybeSingle();
+  if (readErr) return { ok: false, error: readErr.message };
+
+  const existing = Array.isArray(data?.payload)
+    ? (data!.payload as Record<string, unknown>[])
+    : [];
+
+  const sameSlot = (e: Record<string, unknown>) =>
+    e.studentId === event.studentId &&
+    e.date === event.date &&
+    e.trip === event.trip &&
+    e.routeId === event.routeId;
+
+  const prior = existing.find(sameSlot);
+  const merged = prior
+    ? existing.map((e) =>
+        sameSlot(e)
+          ? {
+              ...e,
+              ...event,
+              id: (e.id as string) ?? event.id,
+              // A later offboard must not erase the earlier boarding pin.
+              boardedLocation: event.boardedLocation ?? e.boardedLocation ?? null,
+              offboardedLocation:
+                event.offboardedLocation ?? e.offboardedLocation ?? null,
+            }
+          : e,
+      )
+    : [event, ...existing];
+
+  const now = nowIso();
+  const { error } = await sb.from("transport_desk_slices").upsert({
+    tenant_id: tenantId,
+    slice_key: "boardingEvents",
+    payload: merged,
+    updated_at: now,
+  });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
 export async function pushTransportDeskToDb(
   state: TransportState,
 ): Promise<{ ok: boolean; error?: string }> {

@@ -52,6 +52,9 @@ import {
   assignStudentToRoute,
   computeTransportPeriodDues,
   endTransportAssignment,
+  serviceModeLabel,
+  type TransportServiceMode,
+  applyServiceMode,
   expectedMonthlyFeeDetail,
   expectedMonthlyFeePaise,
   listActiveRiders,
@@ -150,6 +153,8 @@ export function TransportWorkspace() {
   const [routeId, setRouteId] = useState("");
   const [stopId, setStopId] = useState("");
   const [effectiveFrom, setEffectiveFrom] = useState(todayIso);
+  const [serviceMode, setServiceMode] =
+    useState<TransportServiceMode>("both");
   const [feeOverride, setFeeOverride] = useState("");
   const [feeOverrideReason, setFeeOverrideReason] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -298,7 +303,7 @@ export function TransportWorkspace() {
   const selectedAy =
     selected?.student.academicYearCode || session.academicYearCode;
 
-  function onAssign() {
+  function onAssign(alsoStudentIds: string[] = []) {
     if (!selected) {
       setError("Pick a student first");
       return;
@@ -350,18 +355,56 @@ export function TransportWorkspace() {
       academicYearCode: selected.student.academicYearCode || DEFAULT_AY,
       monthlyFeePaise: overridePaise > 0 ? overridePaise : undefined,
       feeOverrideReason: feeOverrideReason.trim(),
+      serviceMode,
     });
     if (!result.ok) {
       setError(result.error);
       return;
     }
+    // Siblings ride the same bus from the same stop on the same terms. Each is
+    // written through the same guarded path, so a hold or a start-date rule
+    // still applies per child rather than being waived by the bulk action.
+    const alsoDone: string[] = [];
+    const alsoFailed: string[] = [];
+    for (const id of alsoStudentIds) {
+      const sib = sis?.students.find((x) => x.id === id);
+      if (!sib) continue;
+      const sibCheck = checkTransportStartMonth({
+        effectiveFrom,
+        joinedOn: sib.joinedOn,
+        academicYearCode: sib.academicYearCode || selectedAy,
+        masters,
+      });
+      if (!sibCheck.ok) {
+        alsoFailed.push(`${sib.fullName}: ${sibCheck.reason}`);
+        continue;
+      }
+      const r = assignStudentToRoute({
+        studentId: sib.id,
+        householdId: sib.householdId,
+        routeId,
+        stopId,
+        effectiveFrom,
+        academicYearCode: sib.academicYearCode || selectedAy,
+        monthlyFeePaise: overridePaise > 0 ? overridePaise : undefined,
+        feeOverrideReason: feeOverrideReason.trim(),
+        serviceMode,
+      });
+      if (r.ok) alsoDone.push(sib.fullName);
+      else alsoFailed.push(`${sib.fullName}: ${r.error}`);
+    }
+
     flash(
-      `Assigned ${selected.student.fullName} to ${selectedRoute?.code ?? "route"} — monthly dues are available in Fee Take`,
+      `Assigned ${[selected.student.fullName, ...alsoDone].join(", ")} to ${selectedRoute?.code ?? "route"} — monthly dues are available in Fee Take`,
     );
+    // Partial success is reported, never swallowed: the clerk must know which
+    // sibling did not go on.
+    if (alsoFailed.length) setError(alsoFailed.join(" · "));
     setSelected(null);
     setQuery("");
     setFeeOverride("");
     setFeeOverrideReason("");
+    setServiceMode("both");
     refresh();
   }
 
@@ -448,6 +491,8 @@ export function TransportWorkspace() {
               setStopId={setStopId}
               effectiveFrom={effectiveFrom}
               setEffectiveFrom={setEffectiveFrom}
+              serviceMode={serviceMode}
+              setServiceMode={setServiceMode}
               feeOverride={feeOverride}
               setFeeOverride={setFeeOverride}
               feeOverrideReason={feeOverrideReason}
@@ -591,6 +636,8 @@ type RidersPanelProps = {
   setStopId: (value: string) => void;
   effectiveFrom: string;
   setEffectiveFrom: (value: string) => void;
+  serviceMode: TransportServiceMode;
+  setServiceMode: (v: TransportServiceMode) => void;
   feeOverride: string;
   setFeeOverride: (value: string) => void;
   feeOverrideReason: string;
@@ -600,7 +647,7 @@ type RidersPanelProps = {
   proposedFeePaise: number;
   existingDues: ReturnType<typeof computeTransportPeriodDues>;
   riders: ReturnType<typeof listActiveRiders>;
-  onAssign: () => void;
+  onAssign: (alsoStudentIds?: string[]) => void;
   onRefresh: () => void;
   onFlash: (message: string) => void;
   onNotice: (message: string | null) => void;
@@ -634,6 +681,8 @@ function RidersPanel(props: RidersPanelProps) {
     setStopId,
     effectiveFrom,
     setEffectiveFrom,
+    serviceMode,
+    setServiceMode,
     feeOverride,
     setFeeOverride,
     feeOverrideReason,
@@ -680,6 +729,32 @@ function RidersPanel(props: RidersPanelProps) {
     studentName: string;
     dues: FeeDueLine[];
   } | null>(null);
+
+  // Siblings on the same household who do not already ride. Transport is bought
+  // per family far more often than per child, and assigning them one at a time
+  // is how a sibling ends up on a different bus from their brother.
+  const householdSiblings = useMemo(() => {
+    if (!selected || !sis) return [];
+    const hh = selected.student.householdId;
+    if (!hh) return [];
+    const riding = new Set(riders.map((a) => a.studentId));
+    return sis.students.filter(
+      (st) =>
+        st.householdId === hh &&
+        st.id !== selected.student.id &&
+        st.status === "active" &&
+        st.academicYearCode === academicYearCode &&
+        !riding.has(st.id),
+    );
+  }, [selected, sis, riders, academicYearCode]);
+
+  const [bulkIds, setBulkIds] = useState<Set<string>>(new Set());
+
+  // A new child clears the previous family's ticks — carrying them over would
+  // assign the wrong household on the next click.
+  useEffect(() => {
+    setBulkIds(new Set());
+  }, [selected?.student.id]);
 
   // The child's home, when the school has geocoded it. Null rather than a
   // guess — the picker says so and offers a locality search instead.
@@ -998,6 +1073,31 @@ function RidersPanel(props: RidersPanelProps) {
             </label>
             <label className="text-sm">
               <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                Service
+              </span>
+              <select
+                className="field !py-1.5"
+                value={serviceMode}
+                onChange={(e) =>
+                  setServiceMode(e.target.value as TransportServiceMode)
+                }
+              >
+                <option value="both">Both ways</option>
+                <option value="pickup">Pick-up only (half fee)</option>
+                <option value="drop">Drop only (half fee)</option>
+              </select>
+              {serviceMode !== "both" && proposedFeePaise > 0 ? (
+                <span className="mt-1 block text-[10px] text-[var(--muted)]">
+                  {formatInr(proposedFeePaise)} full ·{" "}
+                  <strong className="text-[var(--ink)]">
+                    {formatInr(applyServiceMode(proposedFeePaise, serviceMode))}
+                  </strong>{" "}
+                  billed
+                </span>
+              ) : null}
+            </label>
+            <label className="text-sm">
+              <span className="mb-1 block text-[11px] text-[var(--muted)]">
                 Fee override ₹/month
               </span>
               <input
@@ -1051,13 +1151,69 @@ function RidersPanel(props: RidersPanelProps) {
             </div>
           ) : null}
 
+          {selected && householdSiblings.length > 0 ? (
+            <div className="mt-3 rounded-lg border border-[color-mix(in_srgb,var(--brand-mid)_45%,transparent)] bg-[var(--card)] p-3">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <p className="text-[12px] font-bold text-[var(--brand-deep)]">
+                  Same family, not yet on a bus
+                </p>
+                <button
+                  type="button"
+                  className="text-[11px] font-semibold text-[var(--brand-mid)] underline"
+                  onClick={() =>
+                    setBulkIds((cur) =>
+                      cur.size === householdSiblings.length
+                        ? new Set()
+                        : new Set(householdSiblings.map((x) => x.id)),
+                    )
+                  }
+                >
+                  {bulkIds.size === householdSiblings.length
+                    ? "Clear all"
+                    : "Select all"}
+                </button>
+              </div>
+              <p className="mt-0.5 text-[10px] text-[var(--muted)]">
+                Ticked children go on the same bus, stop, start date and fee.
+              </p>
+              <ul className="mt-2 space-y-1">
+                {householdSiblings.map((sib) => (
+                  <li key={sib.id}>
+                    <label className="flex cursor-pointer items-center gap-2 text-[12px]">
+                      <input
+                        type="checkbox"
+                        checked={bulkIds.has(sib.id)}
+                        onChange={(e) =>
+                          setBulkIds((cur) => {
+                            const next = new Set(cur);
+                            if (e.target.checked) next.add(sib.id);
+                            else next.delete(sib.id);
+                            return next;
+                          })
+                        }
+                      />
+                      <span className="font-semibold text-[var(--brand-deep)]">
+                        {sib.fullName}
+                      </span>
+                      <span className="text-[var(--muted)]">
+                        {sib.admissionNo}
+                      </span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
           <button
             type="button"
             className="mt-4 rounded-lg bg-[var(--primary)] px-4 py-2.5 text-sm font-bold text-[var(--primary-foreground)] disabled:opacity-50"
             disabled={!selected || !routeId || !stopId}
-            onClick={onAssign}
+            onClick={() => onAssign(Array.from(bulkIds))}
           >
-            Assign to route
+            {bulkIds.size > 0
+              ? `Assign ${bulkIds.size + 1} children to route`
+              : "Assign to route"}
           </button>
         </section>
 
@@ -1110,7 +1266,11 @@ function RidersPanel(props: RidersPanelProps) {
                         {assignment.stopName} · from {assignment.effectiveFrom}
                       </div>
                       <div className="text-[10px] text-[var(--muted)]">
-                        {formatInr(fee)}/month
+                        {formatInr(applyServiceMode(fee, assignment.serviceMode))}/month
+                        {assignment.serviceMode &&
+                        assignment.serviceMode !== "both"
+                          ? ` · ${serviceModeLabel(assignment.serviceMode)}`
+                          : ""}
                         {assignment.feeOverrideReason
                           ? ` · override: ${assignment.feeOverrideReason}`
                           : ""}

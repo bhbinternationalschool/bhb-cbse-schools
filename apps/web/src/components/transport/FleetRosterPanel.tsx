@@ -19,6 +19,10 @@ import {
   ErpTableHead,
 } from "@/components/ui/erp-roster";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
+import {
+  planAfternoonWaves,
+  suggestVehicleSharing,
+} from "@/lib/transportAfternoonWaves";
 
 /**
  * Who is on each bus — the list that did not exist.
@@ -40,8 +44,9 @@ export function FleetRosterPanel({
 }) {
   const [openRoute, setOpenRoute] = useState<string | null>(null);
 
-  const { rosters, misrouted } = useMemo(() => {
-    if (!sis || !masters) return { rosters: [], misrouted: [] };
+  const { rosters, misrouted, plans, shares } = useMemo(() => {
+    if (!sis || !masters)
+      return { rosters: [], misrouted: [], plans: [], shares: [] };
     const profiles = buildStudentTransportProfiles(sis, masters, state, academicYearCode);
     const fathers = new Map(
       sis.students.map((s) => [s.id, s.fatherName || ""]),
@@ -52,15 +57,19 @@ export function FleetRosterPanel({
         formatRouteCrew(staffAssignedToRoute(masters, r.id)),
       ]),
     );
+    const plans = planAfternoonWaves(state, sis, masters, academicYearCode);
     return {
       rosters: buildFleetRosters(state, profiles, fathers, crew),
       misrouted: findMisroutedRiders(profiles, state),
+      plans,
+      shares: suggestVehicleSharing(plans),
     };
   }, [state, masters, sis, academicYearCode]);
 
   const totalRiders = rosters.reduce((n, r) => n + r.riders.length, 0);
   const totalUnbilled = rosters.reduce((n, r) => n + r.unbilledRiders, 0);
   const monthlyTotal = rosters.reduce((n, r) => n + r.monthlyTotalPaise, 0);
+  const totalShortfall = rosters.reduce((n, r) => n + r.shortfallTotalPaise, 0);
 
   // "0 riders" and "the roster has not loaded" look identical on screen and
   // mean opposite things — one says nobody rides this bus, the other says we
@@ -103,6 +112,15 @@ export function FleetRosterPanel({
           </button>
         </div>
 
+        {totalShortfall > 0 ? (
+          <p className="mt-3 rounded-lg border border-[color-mix(in_srgb,var(--danger)_40%,transparent)] bg-[color-mix(in_srgb,var(--danger)_8%,transparent)] px-3 py-2 text-[11px] text-[var(--danger)]">
+            <strong>{formatInr(totalShortfall)} a month</strong> less than the
+            distance rule (₹500 to 5 km, then ₹100 per started km) across{" "}
+            {rosters.reduce((n, r) => n + r.ridersWithShortfall, 0)} riders.
+            Some of that will be deliberate concessions — this is where to check.
+          </p>
+        ) : null}
+
         {totalUnbilled > 0 ? (
           <p className="mt-3 rounded-lg border border-[color-mix(in_srgb,var(--danger)_40%,transparent)] bg-[color-mix(in_srgb,var(--danger)_8%,transparent)] px-3 py-2 text-[11px] font-semibold text-[var(--danger)]">
             {totalUnbilled} rider{totalUnbilled === 1 ? " is" : "s are"} on a bus
@@ -142,6 +160,86 @@ export function FleetRosterPanel({
               </li>
             ))}
           </ul>
+        </section>
+      ) : null}
+
+      {plans.some((p) => p.riders > 0) ? (
+        <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+          <h2 className="text-sm font-bold text-[var(--brand-deep)]">
+            Afternoon dismissals
+          </h2>
+          <p className="mt-0.5 text-[11px] text-[var(--muted)]">
+            Mornings are one wave — everyone starts together. The afternoon is
+            where a vehicle is either used twice or bought twice.
+          </p>
+          <ul className="mt-2 space-y-1">
+            {plans
+              .filter((p) => p.riders > 0)
+              .map((p) => (
+                <li
+                  key={p.routeId}
+                  className={`rounded-lg border px-3 py-2 text-[11px] ${
+                    p.verdict === "needs-second-vehicle"
+                      ? "border-[color-mix(in_srgb,var(--danger)_40%,transparent)]"
+                      : p.verdict === "unknown-round-trip"
+                        ? "border-[color-mix(in_srgb,var(--brand-mid)_45%,transparent)]"
+                        : "border-[var(--border)]"
+                  }`}
+                >
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <span className="font-bold text-[var(--brand-deep)]">
+                      {p.routeLabel}
+                    </span>
+                    <span
+                      className={
+                        p.verdict === "one-vehicle-two-trips"
+                          ? "font-bold text-[var(--success)]"
+                          : p.verdict === "needs-second-vehicle"
+                            ? "font-bold text-[var(--danger)]"
+                            : "text-[var(--muted)]"
+                      }
+                    >
+                      {p.verdict === "one-vehicle-two-trips"
+                        ? "One vehicle, two trips"
+                        : p.verdict === "needs-second-vehicle"
+                          ? "Second vehicle, or they wait"
+                          : p.verdict === "unknown-round-trip"
+                            ? "Round trip not measured"
+                            : "One trip"}
+                    </span>
+                  </div>
+                  <div className="text-[var(--muted)]">
+                    {p.waves
+                      .map(
+                        (w) =>
+                          `${w.endTime} — ${w.riders} rider${w.riders === 1 ? "" : "s"} (${w.groups.map((g) => g.label).join(", ")})`,
+                      )
+                      .join(" · ")}
+                  </div>
+                  <div className="mt-0.5 text-[var(--ink)]">{p.detail}</div>
+                </li>
+              ))}
+          </ul>
+
+          {shares.length > 0 ? (
+            <div className="mt-3 rounded-lg border border-[color-mix(in_srgb,var(--success)_35%,transparent)] bg-[var(--success-soft)] px-3 py-2">
+              <p className="text-[11px] font-bold text-[var(--success)]">
+                One vehicle could cover two routes
+              </p>
+              <ul className="mt-1 space-y-0.5 text-[11px] text-[var(--ink)]">
+                {shares.slice(0, 5).map((sh) => (
+                  <li key={`${sh.earlyRouteId}:${sh.lateRouteId}`}>
+                    {sh.detail}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1 text-[10px] text-[var(--muted)]">
+                Driving time only. It does not know about driver hours, the
+                second vehicle&rsquo;s own morning run, or whether the two routes go
+                in opposite directions.
+              </p>
+            </div>
+          ) : null}
         </section>
       ) : null}
 
@@ -190,6 +288,8 @@ function RosterCard({
       // and let an unmeasured stop stay unknown rather than becoming 0.
       km: (r) => (r.distanceKm > 0 ? r.distanceKm : null),
       fee: (r) => r.monthlyFeePaise,
+      // Unmeasured stops yield no benchmark, so they sort as unknown, not zero.
+      shortfall: (r) => (r.distanceKm > 0 ? r.shortfallPaise : null),
       from: (r) => r.effectiveFrom,
     },
     "stop",
@@ -227,6 +327,13 @@ function RosterCard({
                 ? " — over capacity"
                 : ` · ${seatsLeft} free · ${formatInr(roster.monthlyTotalPaise)}/month`}
             </span>
+            {roster.shortfallTotalPaise > 0 ? (
+              <span className="ml-2 font-bold text-[var(--danger)]">
+                {formatInr(roster.shortfallTotalPaise)}/month under the distance
+                rule across {roster.ridersWithShortfall} rider
+                {roster.ridersWithShortfall === 1 ? "" : "s"}
+              </span>
+            ) : null}
           </p>
         </div>
         <button
@@ -270,7 +377,11 @@ function RosterCard({
                   <ErpSortTh sort={sort} field="fee" align="right">
                     Per month
                   </ErpSortTh>
+                  <ErpSortTh sort={sort} field="shortfall" align="right">
+                    Shortfall
+                  </ErpSortTh>
                   <ErpSortTh sort={sort} field="from">From</ErpSortTh>
+                  <th className="px-3 py-2 font-bold">Today</th>
                 </tr>
               </ErpTableHead>
               <ErpTableBody>
@@ -287,6 +398,14 @@ function RosterCard({
                           className="ml-1 text-[var(--muted)]"
                         >
                           ⧉
+                        </span>
+                      ) : null}
+                      {r.serviceMode !== "both" ? (
+                        <span
+                          className="ml-1 rounded bg-[var(--surface-sunken)] px-1 text-[9px] font-bold uppercase text-[var(--muted)]"
+                          title="Half service, half fee"
+                        >
+                          {r.serviceMode === "pickup" ? "pick-up" : "drop"}
                         </span>
                       ) : null}
                       {r.boardingSuspended ? (
@@ -322,8 +441,67 @@ function RosterCard({
                         </span>
                       ) : null}
                     </td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">
+                      {r.distanceKm <= 0 ? (
+                        <span className="text-[var(--muted)]" title="Stop not measured — no benchmark">
+                          —
+                        </span>
+                      ) : r.shortfallPaise > 0 ? (
+                        <span
+                          className="font-bold text-[var(--danger)]"
+                          title={`Distance rule says ${formatInr(r.benchmarkPaise)} for ${r.distanceKm} km`}
+                        >
+                          {formatInr(r.shortfallPaise)}
+                        </span>
+                      ) : (
+                        <span className="text-[var(--success)]">nil</span>
+                      )}
+                    </td>
                     <td className="px-3 py-1.5 text-[var(--muted)]">
                       {r.effectiveFrom}
+                    </td>
+                    <td className="px-3 py-1.5">
+                      {r.todayBoarding ? (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span
+                            className={
+                              r.todayBoarding.status === "boarded"
+                                ? "font-semibold text-[var(--success)]"
+                                : "font-semibold text-[var(--danger)]"
+                            }
+                          >
+                            {r.todayBoarding.status === "boarded"
+                              ? "on board"
+                              : r.todayBoarding.status}
+                          </span>
+                          <span className="text-[10px] text-[var(--muted)]">
+                            {r.todayBoarding.markedAt.slice(11, 16)}
+                          </span>
+                          {r.todayBoarding.lat != null &&
+                          r.todayBoarding.lng != null ? (
+                            <a
+                              className="text-[10px] font-semibold text-[var(--brand-mid)] underline"
+                              target="_blank"
+                              rel="noreferrer"
+                              href={`https://www.google.com/maps?q=${r.todayBoarding.lat},${r.todayBoarding.lng}`}
+                              title={`Marked ${r.todayBoarding.accuracyM ?? "?"} m accuracy, ${r.todayBoarding.distanceFromSchoolKm ?? "?"} km from school`}
+                            >
+                              📍 pin
+                            </a>
+                          ) : (
+                            <span
+                              className="text-[10px] text-[var(--muted)]"
+                              title="Marked without a location — older record"
+                            >
+                              no pin
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-[10px] text-[var(--muted)]">
+                          not marked
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))}

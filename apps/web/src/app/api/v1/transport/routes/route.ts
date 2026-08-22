@@ -49,6 +49,10 @@ export async function GET(request: Request) {
               name: s.name,
               sequence: s.sequence,
               distanceKm: s.distanceKm,
+              // Null when the stop has never been pinned. The app must show
+              // "not pinned" rather than drop a marker at 0,0 in the Atlantic.
+              lat: s.geoLat ?? null,
+              lng: s.geoLng ?? null,
             })),
           vehicle: vehicle
             ? {

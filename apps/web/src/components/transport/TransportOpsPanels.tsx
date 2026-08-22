@@ -18,6 +18,7 @@ import {
   recordFuelPurchase,
   recordFuelRefill,
   saveFeePolicy,
+  setRouteRoundTrip,
   setRouteStops,
   upsertFuelStockLocation,
   upsertTransportRoute,
@@ -49,6 +50,10 @@ export function RoutesPanel({
   const [vehicleId, setVehicleId] = useState("");
   const [fee, setFee] = useState("");
   const [stopRows, setStopRows] = useState<StopDraft[]>([]);
+  const [measuredRoundTrip, setMeasuredRoundTrip] = useState<{
+    minutes: number;
+    km: number;
+  } | null>(null);
   const [policy, setPolicy] = useState<TransportFeePolicy>(state.feePolicy);
 
   useEffect(() => {
@@ -85,6 +90,7 @@ export function RoutesPanel({
     setVehicleId("");
     setFee("");
     setStopRows([]);
+    setMeasuredRoundTrip(null);
   }
 
   function save() {
@@ -126,6 +132,9 @@ export function RoutesPanel({
     if (!r.ok) {
       onError(r.error);
       return;
+    }
+    if (measuredRoundTrip) {
+      setRouteRoundTrip(r.route.id, measuredRoundTrip);
     }
     if (stopLines.length) {
       setRouteStops(r.route.id, stopLines);
@@ -221,6 +230,7 @@ export function RoutesPanel({
                 rows={stopRows}
                 onChange={setStopRows}
                 showDistance
+                onMeasured={(m) => setMeasuredRoundTrip(m)}
                 bands={
                   policy.rateMode === "band_then_formula" ? policy.bands : undefined
                 }

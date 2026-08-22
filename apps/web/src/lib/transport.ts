@@ -61,6 +61,16 @@ export type TransportRoute = {
   monthlyFeePaise: number;
   isActive: boolean;
   stops: TransportStop[];
+  /**
+   * Measured round trip for the whole route — campus out, every stop, campus
+   * back — from Google Directions when "Suggest order" was last run.
+   *
+   * 0 means never measured. Deliberately not estimated from stop distance:
+   * this figure decides whether one vehicle can serve two dismissals, and a
+   * guess that is ten minutes optimistic strands small children at the gate.
+   */
+  roundTripMinutes?: number;
+  roundTripKm?: number;
 };
 
 export type TransportAssignment = {
@@ -72,6 +82,12 @@ export type TransportAssignment = {
   academicYearCode: string;
   effectiveFrom: string;
   effectiveTo: string | null;
+  /**
+   * Which legs the child actually uses. Half the service is billed at half the
+   * fee, applied on top of whatever the full fee works out to — so an override
+   * is always entered as the FULL-service amount and halved from there.
+   */
+  serviceMode?: TransportServiceMode;
   /** Override route / policy fee when > 0 */
   monthlyFeePaise: number;
   /** Audit when fee override differs from expected */
@@ -79,6 +95,9 @@ export type TransportAssignment = {
   boardingSuspended: boolean;
   createdAt: string;
 };
+
+/** "both" is the default; the one-way modes bill at half. */
+export type TransportServiceMode = "both" | "pickup" | "drop";
 
 export type TransportFeeRateMode =
   | "flat_route"
@@ -572,6 +591,8 @@ function normalizeRoute(r: Partial<TransportRoute>): TransportRoute {
   const stops = Array.isArray(r.stops)
     ? r.stops.map((s, i) => normalizeStop(s, i))
     : [];
+  const rtMin = Number(r.roundTripMinutes);
+  const rtKm = Number(r.roundTripKm);
   return {
     id: r.id ?? id("tr"),
     code: (r.code ?? "").trim().toUpperCase() || "R-00",
@@ -582,6 +603,8 @@ function normalizeRoute(r: Partial<TransportRoute>): TransportRoute {
     monthlyFeePaise: Math.max(0, r.monthlyFeePaise ?? 0),
     isActive: r.isActive !== false,
     stops,
+    ...(Number.isFinite(rtMin) && rtMin > 0 ? { roundTripMinutes: Math.round(rtMin) } : {}),
+    ...(Number.isFinite(rtKm) && rtKm > 0 ? { roundTripKm: Math.round(rtKm * 10) / 10 } : {}),
   };
 }
 
@@ -600,6 +623,10 @@ function normalizeAssignment(
     monthlyFeePaise: Math.max(0, a.monthlyFeePaise ?? 0),
     feeOverrideReason: a.feeOverrideReason ?? "",
     boardingSuspended: !!a.boardingSuspended,
+    serviceMode:
+      a.serviceMode === "pickup" || a.serviceMode === "drop"
+        ? a.serviceMode
+        : "both",
     createdAt: a.createdAt ?? new Date().toISOString(),
   };
 }
@@ -826,6 +853,29 @@ function assignmentCoversPeriod(
   return true;
 }
 
+/**
+ * Half the service, half the fee.
+ *
+ * Applied on top of the full-service figure, whether that came from the policy
+ * or from a clerk's override — so an override is always entered as the full
+ * amount and this halves it. Rounded to whole rupees, because a receipt showing
+ * ₹337.50 invites an argument at the counter.
+ */
+export function applyServiceMode(
+  fullPaise: number,
+  mode: TransportServiceMode | undefined,
+): number {
+  if (!fullPaise || fullPaise <= 0) return 0;
+  if (mode !== "pickup" && mode !== "drop") return fullPaise;
+  return Math.round(fullPaise / 2 / 100) * 100;
+}
+
+export function serviceModeLabel(mode: TransportServiceMode | undefined): string {
+  if (mode === "pickup") return "Pick-up only";
+  if (mode === "drop") return "Drop only";
+  return "Both ways";
+}
+
 export type FeeBasis =
   | "route-flat"
   | "stop-price"
@@ -1004,8 +1054,8 @@ export function computeTransportPeriodDues(
     const stop =
       route.stops.find((st) => st.id === asg.stopId) ?? route.stops[0];
     const expected = expectedMonthlyFeePaise(route, stop, s.feePolicy);
-    const fee =
-      asg.monthlyFeePaise > 0 ? asg.monthlyFeePaise : expected;
+    const fullFee = asg.monthlyFeePaise > 0 ? asg.monthlyFeePaise : expected;
+    const fee = applyServiceMode(fullFee, asg.serviceMode);
     if (fee <= 0) continue;
 
     const veh = route.vehicleId
@@ -1102,6 +1152,34 @@ export function deactivateTransportRoute(routeId: string): boolean {
   return true;
 }
 
+/**
+ * Record what Directions measured for the whole route.
+ *
+ * Written only from a real measurement, never from an estimate — see the
+ * comment on TransportRoute.roundTripMinutes for why.
+ */
+export function setRouteRoundTrip(
+  routeId: string,
+  measured: { minutes: number; km: number },
+): boolean {
+  if (!(measured.minutes > 0)) return false;
+  const state = loadTransport();
+  if (!state.routes.some((r) => r.id === routeId)) return false;
+  saveTransport({
+    ...state,
+    routes: state.routes.map((r) =>
+      r.id === routeId
+        ? {
+            ...r,
+            roundTripMinutes: Math.round(measured.minutes),
+            roundTripKm: Math.round(measured.km * 10) / 10,
+          }
+        : r,
+    ),
+  });
+  return true;
+}
+
 export function setRouteStops(
   routeId: string,
   stops: {
@@ -1158,6 +1236,7 @@ export function assignStudentToRoute(input: {
   academicYearCode?: string;
   monthlyFeePaise?: number;
   feeOverrideReason?: string;
+  serviceMode?: TransportServiceMode;
 }):
   | { ok: true; assignment: TransportAssignment }
   | { ok: false; error: string } {
@@ -1218,6 +1297,7 @@ export function assignStudentToRoute(input: {
     effectiveTo: null,
     monthlyFeePaise: override,
     feeOverrideReason: input.feeOverrideReason ?? "",
+    serviceMode: input.serviceMode ?? "both",
     createdAt: new Date().toISOString(),
   });
 

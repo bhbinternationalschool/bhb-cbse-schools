@@ -678,11 +678,20 @@ class TransportStopInfo {
     required this.name,
     required this.sequence,
     required this.distanceKm,
+    this.lat,
+    this.lng,
   });
 
   final String name;
   final int sequence;
   final double distanceKm;
+
+  /// Null when the office has never pinned this stop on the map. Nullable on
+  /// purpose — an unpinned stop must read as unpinned, not as 0,0.
+  final double? lat;
+  final double? lng;
+
+  bool get hasPin => lat != null && lng != null;
 }
 
 class PlanTargetSubject {
@@ -1021,6 +1030,7 @@ class TeachingDay {
 
 class TransportRouteInfo {
   const TransportRouteInfo({
+    required this.id,
     required this.code,
     required this.name,
     required this.stops,
@@ -1033,6 +1043,7 @@ class TransportRouteInfo {
   factory TransportRouteInfo.fromJson(Map<String, dynamic> j) {
     final v = j["vehicle"] as Map<String, dynamic>?;
     return TransportRouteInfo(
+      id: (j["id"] as String?) ?? "",
       code: (j["code"] as String?) ?? "",
       name: (j["name"] as String?) ?? "",
       stops: ((j["stops"] as List?) ?? const [])
@@ -1040,6 +1051,8 @@ class TransportRouteInfo {
                 name: (s["name"] as String?) ?? "",
                 sequence: (s["sequence"] as num?)?.toInt() ?? 0,
                 distanceKm: (s["distanceKm"] as num?)?.toDouble() ?? 0,
+                lat: (s["lat"] as num?)?.toDouble(),
+                lng: (s["lng"] as num?)?.toDouble(),
               ))
           .toList(),
       vehicleName: (v?["name"] as String?) ?? "",
@@ -1049,6 +1062,7 @@ class TransportRouteInfo {
     );
   }
 
+  final String id;
   final String code;
   final String name;
   final List<TransportStopInfo> stops;
@@ -1856,6 +1870,38 @@ class ApiClient {
     return ((data["routes"] as List?) ?? const [])
         .map((r) => TransportRouteInfo.fromJson(r as Map<String, dynamic>))
         .toList();
+  }
+
+  /// Driver / attendant manifest: stops in boarding order with the children
+  /// due at each, and what has already been marked today.
+  Future<Map<String, dynamic>> fetchTransportManifest({
+    required String routeId,
+    required String trip,
+  }) async =>
+      _getData("/api/v1/transport/manifest?routeId=$routeId&trip=$trip");
+
+  /// Mark one child on or off the bus. Location is required by the server for
+  /// anything but "absent" — a mark with no pin is not evidence of anything.
+  Future<void> markBoarding({
+    required String routeId,
+    required String studentId,
+    required String trip,
+    required String kind,
+    double? lat,
+    double? lng,
+    double? accuracyM,
+    String note = "",
+  }) async {
+    await _postData("/api/v1/transport/boarding", {
+      "routeId": routeId,
+      "studentId": studentId,
+      "trip": trip,
+      "kind": kind,
+      "lat": ?lat,
+      "lng": ?lng,
+      "accuracyM": ?accuracyM,
+      "note": note,
+    });
   }
 
   /// Staff (class teacher) inbox: one thread per student in their section.
