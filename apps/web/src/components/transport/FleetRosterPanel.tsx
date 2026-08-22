@@ -381,6 +381,7 @@ function RosterCard({
                     Shortfall
                   </ErpSortTh>
                   <ErpSortTh sort={sort} field="from">From</ErpSortTh>
+                  <th className="px-3 py-2 font-bold">Today</th>
                 </tr>
               </ErpTableHead>
               <ErpTableBody>
@@ -458,6 +459,49 @@ function RosterCard({
                     </td>
                     <td className="px-3 py-1.5 text-[var(--muted)]">
                       {r.effectiveFrom}
+                    </td>
+                    <td className="px-3 py-1.5">
+                      {r.todayBoarding ? (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span
+                            className={
+                              r.todayBoarding.status === "boarded"
+                                ? "font-semibold text-[var(--success)]"
+                                : "font-semibold text-[var(--danger)]"
+                            }
+                          >
+                            {r.todayBoarding.status === "boarded"
+                              ? "on board"
+                              : r.todayBoarding.status}
+                          </span>
+                          <span className="text-[10px] text-[var(--muted)]">
+                            {r.todayBoarding.markedAt.slice(11, 16)}
+                          </span>
+                          {r.todayBoarding.lat != null &&
+                          r.todayBoarding.lng != null ? (
+                            <a
+                              className="text-[10px] font-semibold text-[var(--brand-mid)] underline"
+                              target="_blank"
+                              rel="noreferrer"
+                              href={`https://www.google.com/maps?q=${r.todayBoarding.lat},${r.todayBoarding.lng}`}
+                              title={`Marked ${r.todayBoarding.accuracyM ?? "?"} m accuracy, ${r.todayBoarding.distanceFromSchoolKm ?? "?"} km from school`}
+                            >
+                              📍 pin
+                            </a>
+                          ) : (
+                            <span
+                              className="text-[10px] text-[var(--muted)]"
+                              title="Marked without a location — older record"
+                            >
+                              no pin
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-[10px] text-[var(--muted)]">
+                          not marked
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))}

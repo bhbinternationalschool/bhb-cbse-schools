@@ -1,14 +1,17 @@
 import "package:flutter/material.dart";
+import "package:url_launcher/url_launcher.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
-import "../modules/module_shell.dart";
+import "route_manifest_screen.dart";
 import "self_attendance_screen.dart";
 
 /// Driver home (field persona): the school's routes with ordered stops and
-/// vehicle details, plus GPS self-attendance. Student boarding lists and
-/// live tracking stay honest coming-soon states until the office assigns
-/// students to stops.
+/// vehicle details, GPS self-attendance, and the day's boarding list.
+///
+/// In Hindi, because the drivers and attendants who use it read Hindi. The
+/// rest of the app stays in English — this is the one screen whose audience
+/// is different.
 class DriverHomeScreen extends StatefulWidget {
   const DriverHomeScreen({
     super.key,
@@ -22,6 +25,11 @@ class DriverHomeScreen extends StatefulWidget {
   @override
   State<DriverHomeScreen> createState() => _DriverHomeScreenState();
 }
+
+/// The campus, as the transport desk records it. Every route ends here in the
+/// morning and starts here in the afternoon.
+const _schoolLat = 25.4354328;
+const _schoolLng = 82.9439863;
 
 class _DriverHomeScreenState extends State<DriverHomeScreen> {
   List<TransportRouteInfo>? _routes;
@@ -48,9 +56,44 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
       if (mounted) {
-        setState(() => _error = "Could not reach the school server.");
+        setState(() => _error = "स्कूल सर्वर से संपर्क नहीं हुआ।");
       }
     }
+  }
+
+  /// Opens the route in Google Maps: stops in order, campus as the
+  /// destination. Only pinned stops go in — an unpinned stop is left out of
+  /// the route rather than guessed at, and the count is shown to the driver
+  /// so a half-mapped route is never mistaken for the whole one.
+  Future<void> _openRouteMap(TransportRouteInfo route) async {
+    final pinned = route.stops.where((s) => s.hasPin).toList();
+    if (pinned.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              "इस रूट का कोई स्टॉप मैप पर नहीं लगा है — दफ़्तर से कहें",
+              style: TextStyle(fontSize: 15),
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
+    final origin = "${pinned.first.lat},${pinned.first.lng}";
+    final waypoints = pinned
+        .skip(1)
+        .map((s) => "${s.lat},${s.lng}")
+        .join("|");
+    final uri = Uri.parse(
+      "https://www.google.com/maps/dir/?api=1"
+      "&origin=$origin"
+      "&destination=$_schoolLat,$_schoolLng"
+      "&travelmode=driving"
+      "${waypoints.isEmpty ? "" : "&waypoints=${Uri.encodeComponent(waypoints)}"}",
+    );
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
   Future<void> _signOut() async {
@@ -73,10 +116,13 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                     children: [
                       Text(_error!, textAlign: TextAlign.center),
                       const SizedBox(height: 12),
-                      FilledButton(onPressed: _load, child: const Text("Retry")),
+                      FilledButton(
+                        onPressed: _load,
+                        child: const Text("दोबारा कोशिश करें"),
+                      ),
                       TextButton(
                         onPressed: _signOut,
-                        child: const Text("Sign out"),
+                        child: const Text("साइन आउट"),
                       ),
                     ],
                   ),
@@ -125,7 +171,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          _name ?? "Driver",
+                          _name ?? "चालक",
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             color: Colors.white,
@@ -134,7 +180,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                           ),
                         ),
                         const Text(
-                          "Transport",
+                          "परिवहन",
                           style: TextStyle(
                             color: Color(0xFFB8C0D4),
                             fontSize: 12,
@@ -144,7 +190,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                     ),
                   ),
                   IconButton(
-                    tooltip: "Sign out",
+                    tooltip: "साइन आउट",
                     onPressed: _signOut,
                     icon: const Icon(Icons.logout, color: Colors.white),
                   ),
@@ -177,7 +223,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                         ),
                       ),
                       title: const Text(
-                        "My attendance",
+                        "मेरी हाज़िरी",
                         style: TextStyle(
                           fontSize: 13.5,
                           fontWeight: FontWeight.w600,
@@ -185,7 +231,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                         ),
                       ),
                       subtitle: const Text(
-                        "GPS punch in / out from campus",
+                        "कैंपस से GPS पंच इन / आउट",
                         style:
                             TextStyle(fontSize: 11.5, color: AppColors.muted),
                       ),
@@ -195,7 +241,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                   ),
                   const SizedBox(height: 14),
                   const Text(
-                    "Routes",
+                    "रूट",
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
@@ -208,7 +254,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                       child: Padding(
                         padding: EdgeInsets.all(14),
                         child: Text(
-                          "No routes published yet. Routes appear here once the transport desk sets them up.",
+                          "अभी कोई रूट नहीं है। दफ़्तर से रूट बनते ही यहाँ दिखेंगे।",
                           style: TextStyle(
                             fontSize: 12.5,
                             color: AppColors.muted,
@@ -265,14 +311,54 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                                   if (route.vehicleReg.isNotEmpty)
                                     route.vehicleReg,
                                   if (route.seatCapacity != null)
-                                    "${route.seatCapacity} seats",
+                                    "${route.seatCapacity} सीट",
                                   if ((route.driverName ?? "").isNotEmpty)
-                                    "Driver: ${route.driverName}",
+                                    "चालक: ${route.driverName}",
                                 ].join(" · "),
                                 style: const TextStyle(
                                   fontSize: 12,
                                   color: AppColors.muted,
                                 ),
+                              ),
+                              const SizedBox(height: 12),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: FilledButton.icon(
+                                      onPressed: () =>
+                                          Navigator.of(context).push(
+                                        MaterialPageRoute(
+                                          builder: (_) => RouteManifestScreen(
+                                            api: widget.api,
+                                            routeId: route.id,
+                                            routeLabel: route.name.isEmpty
+                                                ? route.code
+                                                : route.name,
+                                          ),
+                                        ),
+                                      ),
+                                      icon: const Icon(Icons.fact_check_outlined,
+                                          size: 18),
+                                      label: const Text(
+                                        "हाज़िरी लें",
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  OutlinedButton.icon(
+                                    onPressed: () => _openRouteMap(route),
+                                    icon: const Icon(Icons.map_outlined,
+                                        size: 18),
+                                    label: const Text(
+                                      "रास्ता",
+                                      style: TextStyle(fontSize: 14),
+                                    ),
+                                  ),
+                                ],
                               ),
                               const SizedBox(height: 12),
                               for (var i = 0; i < route.stops.length; i++)
@@ -321,10 +407,14 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                                         ),
                                       ),
                                       Text(
-                                        "${route.stops[i].distanceKm} km",
-                                        style: const TextStyle(
+                                        route.stops[i].hasPin
+                                            ? "${route.stops[i].distanceKm} कि.मी."
+                                            : "मैप पर नहीं",
+                                        style: TextStyle(
                                           fontSize: 11.5,
-                                          color: AppColors.muted,
+                                          color: route.stops[i].hasPin
+                                              ? AppColors.muted
+                                              : AppColors.danger,
                                         ),
                                       ),
                                     ],
@@ -334,28 +424,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                           ),
                         ),
                       ),
-                  const SizedBox(height: 8),
-                  Card(
-                    child: ListTile(
-                      dense: true,
-                      leading: const Icon(Icons.qr_code_scanner,
-                          color: AppColors.muted),
-                      title: const Text(
-                        "Student boarding & live GPS",
-                        style: TextStyle(fontSize: 13, color: AppColors.ink),
-                      ),
-                      subtitle: const Text(
-                        "Opens once the office assigns students to stops.",
-                        style:
-                            TextStyle(fontSize: 11.5, color: AppColors.muted),
-                      ),
-                      onTap: () => showComingSoon(
-                        context,
-                        "Boarding & tracking",
-                        "Student stop assignments haven't been set up in the transport desk yet. Scanning student IDs at boarding and live bus tracking go live once they are.",
-                      ),
-                    ),
-                  ),
                 ],
               ),
             ),

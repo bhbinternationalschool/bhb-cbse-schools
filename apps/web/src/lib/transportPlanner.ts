@@ -662,6 +662,15 @@ export type FleetRiderRow = {
   boardingSuspended: boolean;
   /** Sibling on the same bus — useful when the conductor calls the roll. */
   siblingOnBoard: boolean;
+  /** Where the attendant's phone was when they marked the child today. */
+  todayBoarding: {
+    status: string;
+    markedAt: string;
+    lat: number | null;
+    lng: number | null;
+    accuracyM: number | null;
+    distanceFromSchoolKm: number | null;
+  } | null;
 };
 
 export type FleetRosterRow = {
@@ -694,7 +703,22 @@ export function buildFleetRosters(
   profiles: StudentTransportProfile[],
   fatherNameByStudent?: Map<string, string>,
   crewLabelByRoute?: Map<string, string>,
+  opts?: { boardingDate?: string; trip?: "AM" | "PM" },
 ): FleetRosterRow[] {
+  const day = opts?.boardingDate ?? new Date().toISOString().slice(0, 10);
+  const trip = opts?.trip ?? "AM";
+  // One mark per child per trip per day. The DB merges a re-mark into the
+  // existing row, so duplicates should not exist — but it prepends new rows,
+  // so a plain Map would silently keep the OLDEST of any pair. Pick by
+  // timestamp instead: whichever mark is newest is the one that happened.
+  const markByStudent = new Map<string, (typeof state.boardingEvents)[number]>();
+  for (const e of state.boardingEvents ?? []) {
+    if (e.date !== day || e.trip !== trip) continue;
+    const held = markByStudent.get(e.studentId);
+    if (!held || (e.createdAt ?? "") >= (held.createdAt ?? "")) {
+      markByStudent.set(e.studentId, e);
+    }
+  }
   const byRoute = new Map<string, StudentTransportProfile[]>();
   for (const p of profiles) {
     if (!p.hasAssignment || !p.assignment) continue;
@@ -749,6 +773,19 @@ export function buildFleetRosters(
           effectiveFrom: asg.effectiveFrom,
           boardingSuspended: asg.boardingSuspended,
           siblingOnBoard: (householdCounts.get(p.householdId) ?? 0) > 1,
+          todayBoarding: (() => {
+            const mark = markByStudent.get(p.studentId);
+            if (!mark) return null;
+            const geo = mark.boardedLocation ?? mark.offboardedLocation ?? null;
+            return {
+              status: mark.status,
+              markedAt: mark.createdAt,
+              lat: geo?.lat ?? null,
+              lng: geo?.lng ?? null,
+              accuracyM: geo?.accuracyM ?? null,
+              distanceFromSchoolKm: geo?.distanceFromSchoolKm ?? null,
+            };
+          })(),
         };
       })
       // Stop order first, then name — this is read off the bus in boarding
