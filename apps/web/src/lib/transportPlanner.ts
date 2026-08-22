@@ -207,6 +207,59 @@ export type SiblingTransportGap = {
  * Deliberately deterministic: this is a grouping over `householdId`, and there
  * is nothing here for a model to infer.
  */
+export type TransportCrewOption = {
+  staffId: string;
+  fullName: string;
+  mobile: string;
+  designation: string;
+  /** No mobile on the staff row = cannot receive an OTP = cannot sign in. */
+  canSignIn: boolean;
+};
+
+/**
+ * Staff who could actually crew a bus, for the fleet form's driver picker.
+ *
+ * Matches on the designation name rather than a fixed id list, because the
+ * school types its own designations — this roster spells one of them
+ * "Transport Attendent". Inactive staff are excluded: assigning a bus to
+ * someone who has left is how a vehicle ends up with nobody responsible for
+ * it while still looking assigned.
+ *
+ * `canSignIn` is surfaced rather than filtered on. A driver with no mobile is
+ * still the right person to record against the vehicle; they just cannot open
+ * the app yet, and the office needs to see which of those two things is
+ * missing instead of wondering why the name is absent from the list.
+ */
+export function listTransportCrew(
+  masters: MastersState | null,
+): TransportCrewOption[] {
+  if (!masters) return [];
+  const designationById = new Map(
+    (masters.designations ?? []).map((d) => [d.id, d.name ?? ""]),
+  );
+  return (masters.staff ?? [])
+    .filter((s) => s.status === "active")
+    .map((s) => ({
+      staff: s,
+      designation: designationById.get(s.designationId ?? "") ?? "",
+    }))
+    .filter(({ designation }) =>
+      /driv|conduct|attend|khalasi|helper|transport/i.test(designation),
+    )
+    .map(({ staff, designation }) => ({
+      staffId: staff.id,
+      fullName: staff.fullName,
+      mobile: staff.mobile ?? "",
+      designation,
+      canSignIn: Boolean((staff.mobile ?? "").replace(/\D/g, "").length >= 10),
+    }))
+    .sort(
+      (a, b) =>
+        a.designation.localeCompare(b.designation) ||
+        a.fullName.localeCompare(b.fullName),
+    );
+}
+
 export function findSiblingTransportGaps(
   profiles: StudentTransportProfile[],
   state: TransportState,

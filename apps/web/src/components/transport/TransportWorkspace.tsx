@@ -209,21 +209,29 @@ export function TransportWorkspace() {
       // every per-bus roster reports zero. Hydrating only the transport desk
       // meant landing straight on /transport in a cold browser showed student
       // codes and empty buses while the assignments were perfectly fine.
+      //
+      // The staff roster is a fourth hydrate, not part of masters: staff is
+      // stripped out of the masters blob and lives in sis_staff. Without it
+      // the fleet form's driver picker comes up empty and says nobody on the
+      // payroll drives — a blank presented as a fact.
       const [
         { ensureTransportHydrated },
         { ensureSisHydrated },
         { ensureMastersHydrated },
+        { ensureStaffHydrated },
         { withHydrationSlot },
       ] = await Promise.all([
         import("@/lib/transportPersistence"),
         import("@/lib/sisPersistence"),
         import("@/lib/mastersPersistence"),
+        import("@/lib/staffPersistence"),
         import("@/lib/deskHydrateGuard"),
       ]);
       await Promise.all([
         withHydrationSlot(() => ensureTransportHydrated()),
         withHydrationSlot(() => ensureSisHydrated()),
         withHydrationSlot(() => ensureMastersHydrated()),
+        withHydrationSlot(() => ensureStaffHydrated()),
       ]);
       refresh();
     })();

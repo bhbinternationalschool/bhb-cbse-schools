@@ -203,6 +203,15 @@ export type FleetVehicle = {
   /** Assigned driver (WhatsApp hub / fleet comms) */
   driverName?: string;
   driverMobile?: string;
+  /**
+   * The sis_staff row this vehicle's driver is, when they are on the payroll.
+   * The name alone is not a link: it breaks on a spelling correction, and it
+   * cannot answer "can this person sign in and mark boarding?", which is the
+   * question the driver app actually asks. Empty for an outside driver
+   * supplied by a vehicle provider — those have a name and no staff record,
+   * and must stay recordable.
+   */
+  driverStaffId?: string;
   status: VehicleStatus;
   compliance: VehicleComplianceDoc[];
   serviceSchedule: ServiceScheduleItem[];
@@ -648,6 +657,7 @@ function normalizeVehicle(v: Partial<FleetVehicle>): FleetVehicle {
     seatCapacity: Math.max(1, Number(v.seatCapacity) || 40),
     driverName: (v.driverName ?? "").trim(),
     driverMobile: (v.driverMobile ?? "").replace(/\D/g, "").slice(-10),
+    driverStaffId: (v.driverStaffId ?? "").trim(),
     status: (v.status as VehicleStatus) || "active",
     compliance: Array.isArray(v.compliance) ? v.compliance : [],
     serviceSchedule: Array.isArray(v.serviceSchedule) ? v.serviceSchedule : [],
