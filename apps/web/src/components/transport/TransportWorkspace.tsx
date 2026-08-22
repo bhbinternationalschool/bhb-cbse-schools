@@ -25,6 +25,8 @@ import {
 } from "@/components/transport/TransportOpsPanels";
 import { FleetRosterPanel } from "@/components/transport/FleetRosterPanel";
 import { TransportAmendDialog } from "@/components/transport/TransportAmendDialog";
+import { NearestStopPicker } from "@/components/transport/NearestStopPicker";
+import { householdHasGeo } from "@/lib/mapsGeocode";
 import {
   checkTransportStartMonth,
   monthLabel,
@@ -664,6 +666,15 @@ function RidersPanel(props: RidersPanelProps) {
     dues: FeeDueLine[];
   } | null>(null);
 
+  // The child's home, when the school has geocoded it. Null rather than a
+  // guess — the picker says so and offers a locality search instead.
+  const selectedHome = useMemo(() => {
+    if (!selected || !sis) return null;
+    const hh = sis.households.find((h) => h.id === selected.student.householdId);
+    if (!hh || !householdHasGeo(hh)) return null;
+    return { lat: hh.geoLat as number, lng: hh.geoLng as number };
+  }, [selected, sis]);
+
   // Same check the assign handler runs, surfaced while the clerk is still
   // choosing the date rather than after they click.
   const startCheck = useMemo(() => {
@@ -892,6 +903,20 @@ function RidersPanel(props: RidersPanelProps) {
               <HoldStatusBanner
                 check={holdCheck}
                 onOverride={() => setHoldDialog(true)}
+              />
+            </div>
+          ) : null}
+
+          {selected ? (
+            <div className="mt-3">
+              <NearestStopPicker
+                state={state}
+                home={selectedHome}
+                selectedStopId={stopId}
+                onPick={({ routeId: r, stopId: st }) => {
+                  setRouteId(r);
+                  setStopId(st);
+                }}
               />
             </div>
           ) : null}

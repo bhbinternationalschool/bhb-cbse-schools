@@ -14,9 +14,19 @@ export async function GET(req: NextRequest) {
   if (mapsRateLimited(req)) {
     return NextResponse.json({ error: "Too many requests" }, { status: 429 });
   }
+  // Reverse: a pin dropped on the map has coordinates but no name yet.
+  const lat = Number(req.nextUrl.searchParams.get("lat"));
+  const lng = Number(req.nextUrl.searchParams.get("lng"));
+  if (Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0)) {
+    return reverseGeocode(lat, lng);
+  }
+
   const address = req.nextUrl.searchParams.get("address")?.trim() || "";
   if (!address) {
-    return NextResponse.json({ error: "address required" }, { status: 400 });
+    return NextResponse.json(
+      { error: "address, or lat and lng, required" },
+      { status: 400 },
+    );
   }
   return geocodeOne(address);
 }
@@ -68,6 +78,59 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json({ results });
+}
+
+/**
+ * Coordinates → a human label for a dropped pin.
+ *
+ * Returns `ok: false` with the coordinates intact when Google has no address
+ * for the spot, which is common for a field turning or an unnamed crossing.
+ * That is not a failure — the pin is still exactly where the clerk put it, and
+ * the stop keeps the name they typed. Only the label is missing.
+ */
+async function reverseGeocode(lat: number, lng: number) {
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY?.trim();
+  if (!apiKey) {
+    return NextResponse.json(
+      { error: "GOOGLE_MAPS_API_KEY not configured" },
+      { status: 503 },
+    );
+  }
+  const url = new URL("https://maps.googleapis.com/maps/api/geocode/json");
+  url.searchParams.set("latlng", `${lat},${lng}`);
+  url.searchParams.set("key", apiKey);
+  try {
+    const res = await fetch(url.toString(), { next: { revalidate: 86400 } });
+    const data = (await res.json()) as {
+      status?: string;
+      results?: { formatted_address?: string; place_id?: string }[];
+    };
+    const hit = data.results?.[0];
+    if (data.status !== "OK" || !hit?.formatted_address) {
+      return NextResponse.json({
+        ok: false,
+        lat,
+        lng,
+        formattedAddress: "",
+        note: "Google has no address for this spot — the pin is still valid.",
+      });
+    }
+    return NextResponse.json({
+      ok: true,
+      lat,
+      lng,
+      formattedAddress: hit.formatted_address,
+      placeId: hit.place_id ?? "",
+    });
+  } catch {
+    return NextResponse.json({
+      ok: false,
+      lat,
+      lng,
+      formattedAddress: "",
+      note: "Could not reach the geocoding service — the pin is still valid.",
+    });
+  }
 }
 
 async function geocodeOne(address: string) {

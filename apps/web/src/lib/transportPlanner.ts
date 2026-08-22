@@ -522,6 +522,88 @@ export async function fetchStopRoadDistanceKm(input: {
   }
 }
 
+/* ── Nearest stops to a point ──────────────────────────────── */
+
+export type RankedStop = {
+  routeId: string;
+  routeCode: string;
+  routeLabel: string;
+  stopId: string;
+  stopName: string;
+  /** Straight-line km from the point being searched from. */
+  fromPointKm: number;
+  /** Road km from campus — what the fee is worked out on. */
+  distanceFromSchoolKm: number;
+  monthlyFeePaise: number;
+  seatsLeft: number;
+};
+
+export type NearestStops = {
+  ranked: RankedStop[];
+  /** Stops that carry no coordinates, so they cannot be ranked at all. */
+  unpinned: { routeId: string; routeLabel: string; stopId: string; stopName: string }[];
+};
+
+/**
+ * Every mapped stop, ordered by how close it is to a point.
+ *
+ * The point is normally the child's home; the stop picker also lets a clerk
+ * type a village or locality and rank from there instead, which is what you
+ * want when the household has never been geocoded.
+ *
+ * Unpinned stops are returned separately rather than sorted to the end. A stop
+ * with no coordinates is not "far away" — its distance is unknown, and putting
+ * it in the ranked list at any position would state something untrue.
+ */
+export function rankStopsNearPoint(
+  state: TransportState,
+  point: { lat: number; lng: number },
+  opts?: { limit?: number; withinKm?: number },
+): NearestStops {
+  const ranked: RankedStop[] = [];
+  const unpinned: NearestStops["unpinned"] = [];
+
+  for (const route of listActiveRoutes(state)) {
+    const routeLabel = route.busNo || route.code;
+    const veh = vehicleForRoute(route, state);
+    const seatsLeft = Math.max(0, veh.seatCapacity - ridersOnRoute(state, route.id));
+
+    for (const stop of route.stops) {
+      if (!stopHasGeo(stop)) {
+        unpinned.push({
+          routeId: route.id,
+          routeLabel,
+          stopId: stop.id,
+          stopName: stop.name,
+        });
+        continue;
+      }
+      const km = haversineKm(point.lat, point.lng, stop.geoLat!, stop.geoLng!);
+      if (opts?.withinKm != null && km > opts.withinKm) continue;
+      ranked.push({
+        routeId: route.id,
+        routeCode: route.code,
+        routeLabel,
+        stopId: stop.id,
+        stopName: stop.name,
+        fromPointKm: Math.round(km * 10) / 10,
+        distanceFromSchoolKm: stop.distanceKm,
+        monthlyFeePaise: expectedMonthlyFeePaise(route, stop, state.feePolicy),
+        seatsLeft,
+      });
+    }
+  }
+
+  ranked.sort(
+    (a, b) => a.fromPointKm - b.fromPointKm || a.stopName.localeCompare(b.stopName),
+  );
+
+  return {
+    ranked: opts?.limit ? ranked.slice(0, opts.limit) : ranked,
+    unpinned,
+  };
+}
+
 /* ── Point 3: who is on each bus ───────────────────────────── */
 
 export type FleetRiderRow = {

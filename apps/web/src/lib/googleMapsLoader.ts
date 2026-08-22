@@ -1,11 +1,24 @@
+/** A click or drag on the map, in the shape the JS SDK hands back. */
+export type GMapsMouseEvent = {
+  latLng?: { lat: () => number; lng: () => number };
+};
+
+export type GMapsMap = {
+  fitBounds: (b: unknown) => void;
+  setCenter: (c: { lat: number; lng: number }) => void;
+  setZoom: (z: number) => void;
+  addListener: (event: string, cb: (e: GMapsMouseEvent) => void) => void;
+};
+
+export type GMapsMarker = {
+  setMap: (m: unknown) => void;
+  setPosition: (p: { lat: number; lng: number }) => void;
+  addListener: (event: string, cb: (e: GMapsMouseEvent) => void) => void;
+};
+
 type GoogleMapsNamespace = {
-  Map: new (
-    el: HTMLElement,
-    opts: Record<string, unknown>,
-  ) => {
-    fitBounds: (b: unknown) => void;
-  };
-  Marker: new (opts: Record<string, unknown>) => { setMap: (m: unknown) => void };
+  Map: new (el: HTMLElement, opts: Record<string, unknown>) => GMapsMap;
+  Marker: new (opts: Record<string, unknown>) => GMapsMarker;
   LatLngBounds: new () => {
     extend: (p: { lat: number; lng: number }) => void;
   };

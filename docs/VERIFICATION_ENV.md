@@ -88,6 +88,29 @@ The verification project starts empty. Seed it through the app rather than copyi
 production data across — the production tables hold student names, guardian mobile
 numbers and fee records, and there is no reason for a second copy of that to exist.
 
+## Google Maps APIs this app needs
+
+The single `GOOGLE_MAPS_API_KEY` is checked against several services. All five
+the app uses were verified live on 2026-08-22:
+
+| API | Used by | Status |
+|---|---|---|
+| Geocoding (forward) | Household addresses | enabled |
+| Geocoding (reverse) | Labelling a dropped map pin | enabled |
+| Places (Autocomplete + Details) | Stop search, enquiry form, locality search | enabled |
+| Distance Matrix | Stop distance from campus, which sets the fee | enabled |
+| Directions (+ waypoint optimize) | Suggested pickup order for a route | enabled |
+
+To re-check after a key rotation or a restriction change, call each endpoint
+directly with the key rather than trusting `gcloud services list` — a key can
+carry an **API restriction** list that blocks a service the project has enabled,
+and only the live call catches that. Directions was refused that way until the
+restriction was widened; the project setting alone looked fine.
+
+Confirm optimisation specifically by sending three or more waypoints with
+`optimize:true` and checking `waypoint_order` comes back **reordered**. A plain
+Directions call succeeding does not prove optimisation is permitted.
+
 ## Rule
 
 Do not point a dev server at `.env.local` to check UI work. `.env.local` is
