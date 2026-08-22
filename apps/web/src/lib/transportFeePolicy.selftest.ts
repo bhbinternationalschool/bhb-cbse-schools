@@ -15,11 +15,13 @@
 import assert from "node:assert/strict";
 
 import {
+  computeTransportPeriodDues,
   expectedMonthlyFeeDetail,
   expectedMonthlyFeePaise,
   normalizeStop,
   type TransportFeePolicy,
   type TransportRoute,
+  type TransportState,
   type TransportStop,
 } from "./transport";
 
@@ -130,5 +132,107 @@ const flat: TransportFeePolicy = { ...policy, rateMode: "flat_route" };
 assert.equal(expectedMonthlyFeePaise(route, stop(12), flat), 60000);
 assert.equal(expectedMonthlyFeeDetail(route, stop(12), flat).basis, "route-flat");
 assert.equal(expectedMonthlyFeeDetail(route, stop(12), flat).ok, true);
+
+/* ── THE billing protection: a broken stop link bills nothing ─ */
+
+// Until 2026-08-23 computeTransportPeriodDues resolved the stop as
+//   route.stops.find(...) ?? route.stops[0]
+// so a rider whose stopId pointed at nothing was billed at whatever the
+// FIRST stop on the route happened to cost. When every assignment on the
+// fleet was orphaned, that fallback was quietly pricing families by an
+// arbitrary stop they had never been near. A gap is visible; a guess goes
+// out on an invoice.
+
+// Stated outright rather than imported: this test owns both sides of the
+// comparison, and a literal keeps it readable when the school's year rolls.
+const BILL_AY = "2026-27";
+
+const priced = {
+  id: "r_bill",
+  code: "R1",
+  name: "R1",
+  busNo: "R1",
+  vehicleReg: "",
+  vehicleId: "",
+  monthlyFeePaise: 0,
+  isActive: true,
+  stops: [
+    normalizeStop(
+      {
+        id: "st_first",
+        name: "Expensive First Stop",
+        distanceKm: 12,
+        distanceSource: "google",
+        monthlyFeePaise: 150000,
+      },
+      0,
+    ),
+    normalizeStop(
+      {
+        id: "st_real",
+        name: "Ayar Mod",
+        distanceKm: 4,
+        distanceSource: "google",
+        monthlyFeePaise: 50000,
+      },
+      1,
+    ),
+  ],
+};
+
+function billingState(stopId: string, ownFeePaise: number) {
+  return {
+    routes: [priced],
+    vehicles: [],
+    feePolicy: policy,
+    assignments: [
+      {
+        id: "a_b",
+        studentId: "stu_1",
+        householdId: "hh_1",
+        routeId: "r_bill",
+        stopId,
+        academicYearCode: BILL_AY,
+        effectiveFrom: "2026-04-01",
+        effectiveTo: null,
+        monthlyFeePaise: ownFeePaise,
+        feeOverrideReason: "",
+        serviceMode: "both",
+        boardingSuspended: false,
+        createdAt: "",
+      },
+    ],
+  } as unknown as TransportState;
+}
+
+const opts = { academicYearCode: BILL_AY, asOf: "2026-08-01", includeFuture: false };
+
+// Healthy link: billed at their own stop, not the first one.
+const healthy = computeTransportPeriodDues("stu_1", {
+  ...opts,
+  state: billingState("st_real", 0),
+});
+assert.ok(healthy.length > 0, "a resolvable stop still bills");
+assert.equal(healthy[0].amountPaise, 50000, "billed at Ayar Mod, not the first stop");
+
+// Broken link, no agreed fee: bills NOTHING, rather than the first stop's price.
+const orphaned = computeTransportPeriodDues("stu_1", {
+  ...opts,
+  state: billingState("st_VANISHED", 0),
+});
+assert.deepEqual(
+  orphaned,
+  [],
+  "an unresolvable stop must not be billed at route.stops[0]",
+);
+
+// Broken link, but the family has an agreed fee: that still bills. The
+// agreement is a fact; only the stop-derived price was ever a guess.
+const agreed = computeTransportPeriodDues("stu_1", {
+  ...opts,
+  state: billingState("st_VANISHED", 60000),
+});
+assert.ok(agreed.length > 0, "an explicitly agreed fee survives a broken link");
+assert.equal(agreed[0].amountPaise, 60000);
 
 console.log("  ok");

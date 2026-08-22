@@ -1061,9 +1061,19 @@ export function computeTransportPeriodDues(
   for (const asg of assignments) {
     const route = s.routes.find((r) => r.id === asg.routeId);
     if (!route || !route.isActive) continue;
-    const stop =
-      route.stops.find((st) => st.id === asg.stopId) ?? route.stops[0];
-    const expected = expectedMonthlyFeePaise(route, stop, s.feePolicy);
+    // A rider whose stopId does not resolve has NO stop, and therefore no
+    // stop price. This used to fall back to route.stops[0] — the first stop
+    // on the route — so when every assignment's stop link was orphaned on
+    // 2026-08-23, riders with no explicit fee were quietly billed at whatever
+    // the first stop happened to cost, wherever they actually live. A guess
+    // in the fee engine is worse than a gap: the gap is visible, the guess
+    // goes out on an invoice. No stop means no policy fee; the rider's own
+    // agreed fee still bills, and anyone left at zero is skipped below and
+    // surfaced as unbilled on the roster.
+    const stop = route.stops.find((st) => st.id === asg.stopId);
+    const expected = stop
+      ? expectedMonthlyFeePaise(route, stop, s.feePolicy)
+      : 0;
     const fullFee = asg.monthlyFeePaise > 0 ? asg.monthlyFeePaise : expected;
     const fee = applyServiceMode(fullFee, asg.serviceMode);
     if (fee <= 0) continue;
@@ -1362,6 +1372,39 @@ export function endTransportAssignment(
     ...state,
     assignments: state.assignments.map((a) =>
       a.id === assignmentId ? { ...a, effectiveTo } : a,
+    ),
+  });
+  return true;
+}
+
+/**
+ * Switch a rider between full service and one-way.
+ *
+ * Deliberately narrow: it flips the mode on the live assignment and nothing
+ * else. The fee is not rewritten, because `applyServiceMode` halves the full
+ * figure at billing time — storing a halved fee here would halve it twice the
+ * next time someone edited it.
+ *
+ * Note for the caller: this takes effect on every month the fee engine has
+ * not yet collected, including the current one. A rider who has already paid
+ * a full month and switches to one-way part-way through needs the amendment
+ * dialog instead, which splits the assignment so paid months keep the fee
+ * they were collected at.
+ */
+export function setAssignmentServiceMode(
+  assignmentId: string,
+  mode: TransportServiceMode,
+): boolean {
+  const state = loadTransport();
+  const target = state.assignments.find(
+    (a) => a.id === assignmentId && a.effectiveTo == null,
+  );
+  if (!target) return false;
+  if (target.serviceMode === mode) return true;
+  saveTransport({
+    ...state,
+    assignments: state.assignments.map((a) =>
+      a.id === assignmentId ? { ...a, serviceMode: mode } : a,
     ),
   });
   return true;

@@ -43,6 +43,7 @@ import {
 export type RiderAction =
   | "amend"
   | "change-stop"
+  | "service-mode"
   | "suspend"
   | "resume"
   | "end"
@@ -647,23 +648,39 @@ function RosterCard({
                     </td>
                     <td className="px-3 py-1.5 print:hidden">
                       <div className="flex flex-wrap gap-1">
-                        {r.stopLinkBroken ? (
-                          // The one thing worth doing first on this row.
-                          <RiderBtn
-                            label="Fix stop"
-                            tone="warn"
-                            onClick={() => onRiderAction?.("change-stop", r, roster.routeId)}
-                          />
-                        ) : (
-                          <RiderBtn
-                            label="Stop"
-                            onClick={() => onRiderAction?.("change-stop", r, roster.routeId)}
-                          />
-                        )}
+                        {/*
+                          One editor, not three. Route, stop, fee and the month
+                          a change may land in all interact, so they are edited
+                          together in the amendment dialog. The label changes
+                          to name whatever is wrong with this row, so the
+                          office can see the problem and the fix in one place.
+                        */}
                         <RiderBtn
-                          label="Fee"
-                          tone={r.monthlyFeePaise <= 0 ? "warn" : undefined}
-                          onClick={() => onRiderAction?.("amend", r, roster.routeId)}
+                          label={
+                            r.stopLinkBroken
+                              ? "Fix stop"
+                              : r.monthlyFeePaise <= 0
+                                ? "Set fee"
+                                : "Edit"
+                          }
+                          tone={
+                            r.stopLinkBroken || r.monthlyFeePaise <= 0
+                              ? "warn"
+                              : undefined
+                          }
+                          onClick={() =>
+                            onRiderAction?.(
+                              r.stopLinkBroken ? "change-stop" : "amend",
+                              r,
+                              roster.routeId,
+                            )
+                          }
+                        />
+                        <RiderBtn
+                          label={
+                            r.serviceMode === "both" ? "One way" : "Both ways"
+                          }
+                          onClick={() => onRiderAction?.("service-mode", r, roster.routeId)}
                         />
                         {r.boardingSuspended ? (
                           <RiderBtn

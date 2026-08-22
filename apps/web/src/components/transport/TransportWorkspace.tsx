@@ -56,7 +56,9 @@ import {
   assignStudentToRoute,
   computeTransportPeriodDues,
   endTransportAssignment,
+  setAssignmentServiceMode,
   setBoardingSuspended,
+  type TransportAssignment,
   serviceModeLabel,
   type TransportServiceMode,
   applyServiceMode,
@@ -165,6 +167,11 @@ export function TransportWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [repairingStopLinks, setRepairingStopLinks] = useState(false);
+  const [rosterEditing, setRosterEditing] = useState<{
+    assignment: TransportAssignment;
+    studentName: string;
+    dues: FeeDueLine[];
+  } | null>(null);
   const [holdCheck, setHoldCheck] = useState<HoldCheck | null>(null);
   const [holdDialog, setHoldDialog] = useState(false);
 
@@ -208,6 +215,32 @@ export function TransportWorkspace() {
       return;
     }
 
+    if (action === "service-mode") {
+      const asg = state.assignments.find(
+        (a) => a.studentId === rider.studentId && a.effectiveTo == null,
+      );
+      if (!asg) {
+        setNotice(`No live assignment found for ${rider.fullName}`);
+        return;
+      }
+      const now = asg.serviceMode ?? "both";
+      const next = now === "both" ? "pickup" : "both";
+      const yes = window.confirm(
+        next === "both"
+          ? `Put ${rider.fullName} back on both trips?\n\nTheir monthly fee returns to the full amount from the next uncollected month.`
+          : `Change ${rider.fullName} to pick-up only?\n\nHalf the service, half the fee — from the next uncollected month. If they have already paid a full month and this should apply mid-month, use Edit instead so the paid months keep the fee they were collected at.`,
+      );
+      if (!yes) return;
+      const ok = setAssignmentServiceMode(asg.id, next);
+      refresh();
+      flash(
+        ok
+          ? `${rider.fullName} — ${next === "both" ? "both trips, full fee" : "pick-up only, half fee"}`
+          : `Could not update ${rider.fullName}`,
+      );
+      return;
+    }
+
     if (action === "end") {
       // Taking a child off a bus stops their billing and removes them from
       // the driver's list, so it asks first and says what the effect is.
@@ -228,14 +261,36 @@ export function TransportWorkspace() {
       return;
     }
 
-    // amend / change-stop / open-student — go to where the full editor is.
-    setTab("riders");
-    setQuery(rider.fullName);
-    setNotice(
-      action === "change-stop"
-        ? `Find ${rider.fullName} below and use Amend to set their stop.`
-        : `Find ${rider.fullName} below and use Amend to change the fee.`,
+    // edit / change-stop — open the amendment dialog on this rider. It is the
+    // same editor the Riders tab uses, deliberately: route, stop, fee and the
+    // month a change may land in all interact, and a second thinner editor
+    // here could quietly disagree with the one next door.
+    const asg = state.assignments.find(
+      (a) => a.studentId === rider.studentId && a.effectiveTo == null,
     );
+    if (!asg) {
+      setNotice(`No live assignment found for ${rider.fullName}`);
+      return;
+    }
+    const student = sis?.students.find((st) => st.id === rider.studentId) ?? null;
+    let dues: FeeDueLine[] = [];
+    if (student && masters) {
+      try {
+        // Which months are already paid decides when a change may land, so
+        // the ledger is read now rather than assumed.
+        dues = computeStudentDues(student, masters, loadFees(), {
+          includeFuture: true,
+          includePaid: true,
+        });
+      } catch {
+        dues = [];
+      }
+    }
+    setRosterEditing({
+      assignment: asg,
+      studentName: rider.fullName,
+      dues,
+    });
   }
 
   function flash(message: string) {
@@ -614,6 +669,21 @@ export function TransportWorkspace() {
                 onRiderAction={handleRiderAction}
               />
             )
+          ) : null}
+          {rosterEditing ? (
+            <TransportAmendDialog
+              assignment={rosterEditing.assignment}
+              studentName={rosterEditing.studentName}
+              academicYearCode={session.academicYearCode}
+              state={state}
+              dues={rosterEditing.dues}
+              onClose={() => setRosterEditing(null)}
+              onDone={(message) => {
+                setRosterEditing(null);
+                refresh();
+                flash(message);
+              }}
+            />
           ) : null}
           {tab === "routes" ? (
             <RoutesPanel
