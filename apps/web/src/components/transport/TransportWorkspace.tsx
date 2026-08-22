@@ -23,7 +23,11 @@ import {
   FuelPanel,
   RoutesPanel,
 } from "@/components/transport/TransportOpsPanels";
-import { FleetRosterPanel } from "@/components/transport/FleetRosterPanel";
+import {
+  FleetRosterPanel,
+  type RiderAction,
+} from "@/components/transport/FleetRosterPanel";
+import { StopLinkRepairPanel } from "@/components/transport/StopLinkRepairPanel";
 import { TransportAmendDialog } from "@/components/transport/TransportAmendDialog";
 import { NearestStopPicker } from "@/components/transport/NearestStopPicker";
 import { householdHasGeo } from "@/lib/mapsGeocode";
@@ -52,6 +56,7 @@ import {
   assignStudentToRoute,
   computeTransportPeriodDues,
   endTransportAssignment,
+  setBoardingSuspended,
   serviceModeLabel,
   type TransportServiceMode,
   applyServiceMode,
@@ -159,8 +164,79 @@ export function TransportWorkspace() {
   const [feeOverrideReason, setFeeOverrideReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [repairingStopLinks, setRepairingStopLinks] = useState(false);
   const [holdCheck, setHoldCheck] = useState<HoldCheck | null>(null);
   const [holdDialog, setHoldDialog] = useState(false);
+
+  /**
+   * The roster's per-rider buttons.
+   *
+   * Suspend, resume and take-off-bus are done here because they are one
+   * decision each and the office is already looking at the rider. Changing a
+   * stop or a fee is not — it needs the amendment dialog with the student's
+   * dues in front of it — so those hand off to the Riders tab with that child
+   * already found, rather than opening a second, thinner editor that could
+   * disagree with the first.
+   */
+  function handleRiderAction(
+    action: RiderAction,
+    rider: { studentId: string; fullName: string; boardingSuspended: boolean },
+  ) {
+    // The roster cannot render without state, so this is belt and braces —
+    // but acting on a desk that has not loaded would silently do nothing.
+    if (!state) {
+      setNotice("Transport data has not loaded yet — try again in a moment");
+      return;
+    }
+
+    if (action === "suspend" || action === "resume") {
+      const want = action === "suspend";
+      const asg = state.assignments.find(
+        (a) => a.studentId === rider.studentId && a.effectiveTo == null,
+      );
+      if (!asg) {
+        setNotice(`No live assignment found for ${rider.fullName}`);
+        return;
+      }
+      const ok = setBoardingSuspended(asg.id, want);
+      refresh();
+      flash(
+        ok
+          ? `${rider.fullName} — boarding ${want ? "suspended" : "resumed"}`
+          : `Could not update ${rider.fullName}`,
+      );
+      return;
+    }
+
+    if (action === "end") {
+      // Taking a child off a bus stops their billing and removes them from
+      // the driver's list, so it asks first and says what the effect is.
+      const yes = window.confirm(
+        `Take ${rider.fullName} off this bus?\n\nTheir transport billing stops and they disappear from the driver's list from today. Their fee history is kept.`,
+      );
+      if (!yes) return;
+      const asg = state.assignments.find(
+        (a) => a.studentId === rider.studentId && a.effectiveTo == null,
+      );
+      if (!asg) {
+        setNotice(`No live assignment found for ${rider.fullName}`);
+        return;
+      }
+      const r = endTransportAssignment(asg.id, new Date().toISOString().slice(0, 10));
+      refresh();
+      flash(r ? `${rider.fullName} taken off the bus` : `Could not update ${rider.fullName}`);
+      return;
+    }
+
+    // amend / change-stop / open-student — go to where the full editor is.
+    setTab("riders");
+    setQuery(rider.fullName);
+    setNotice(
+      action === "change-stop"
+        ? `Find ${rider.fullName} below and use Amend to set their stop.`
+        : `Find ${rider.fullName} below and use Amend to change the fee.`,
+    );
+  }
 
   function flash(message: string) {
     setNotice(message);
@@ -517,12 +593,27 @@ export function TransportWorkspace() {
             />
           ) : null}
           {tab === "rosters" ? (
-            <FleetRosterPanel
-              state={state}
-              masters={masters}
-              sis={sis}
-              academicYearCode={session.academicYearCode}
-            />
+            repairingStopLinks ? (
+              <StopLinkRepairPanel
+                state={state}
+                masters={masters}
+                sis={sis}
+                academicYearCode={session.academicYearCode}
+                onDone={() => {
+                  setRepairingStopLinks(false);
+                  refresh();
+                }}
+              />
+            ) : (
+              <FleetRosterPanel
+                state={state}
+                masters={masters}
+                sis={sis}
+                academicYearCode={session.academicYearCode}
+                onRepairStopLinks={() => setRepairingStopLinks(true)}
+                onRiderAction={handleRiderAction}
+              />
+            )
           ) : null}
           {tab === "routes" ? (
             <RoutesPanel

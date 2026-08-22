@@ -711,6 +711,19 @@ export type FleetRiderRow = {
   benchmarkPaise: number;
   /** benchmark − charged, floored at 0. The money not being collected. */
   shortfallPaise: number;
+  /**
+   * Whether a shortfall could be worked out at all. False when the stop is
+   * unmeasured or the link to it is broken — and then shortfallPaise is 0
+   * because nothing is known, NOT because nothing is owed. The screen must
+   * say "can't tell"; reporting a confident nil here is how every rider on
+   * every bus looked square while the stop links were orphaned.
+   */
+  shortfallKnown: boolean;
+  /**
+   * The assignment names a stop that no longer exists on this route. Fee,
+   * distance and the driver's manifest all fail together when this is true.
+   */
+  stopLinkBroken: boolean;
   effectiveFrom: string;
   boardingSuspended: boolean;
   /** Sibling on the same bus — useful when the conductor calls the roll. */
@@ -742,6 +755,15 @@ export type FleetRosterRow = {
   /** Total monthly gap against the distance rule across this bus. */
   shortfallTotalPaise: number;
   ridersWithShortfall: number;
+  /**
+   * Riders whose shortfall could not be worked out — unmeasured stop, or a
+   * broken link to one. shortfallTotalPaise EXCLUDES them, so a bus showing
+   * "₹0 under the rule" with a non-zero count here is not a bus that is
+   * square; it is a bus nobody can assess yet.
+   */
+  ridersUnknownShortfall: number;
+  /** Riders whose assignment names a stop that no longer exists. */
+  ridersBrokenLink: number;
 };
 
 /**
@@ -796,6 +818,10 @@ export function buildFleetRosters(
       .map((p) => {
         const asg = p.assignment!;
         const stop = route.stops.find((s) => s.id === asg.stopId);
+        // No stop object means the id points at nothing — the row cannot be
+        // priced, measured, or handed to a driver. Carried explicitly so the
+        // screen distinguishes it from a stop that merely has no distance.
+        const stopLinkBroken = !stop;
         const expected = expectedMonthlyFeePaise(route, stop, state.feePolicy);
         const fullFee = asg.monthlyFeePaise > 0 ? asg.monthlyFeePaise : expected;
         const fee = applyServiceMode(fullFee, asg.serviceMode);
@@ -813,7 +839,8 @@ export function buildFleetRosters(
           classLabel: p.classLabel,
           fatherName: fatherNameByStudent?.get(p.studentId) || "",
           householdId: p.householdId,
-          stopName: stop?.name || "—",
+          stopName: stop?.name || "",
+          stopLinkBroken,
           distanceKm: km,
           distanceSource: stop?.distanceSource ?? "",
           monthlyFeePaise: fee,
@@ -822,6 +849,7 @@ export function buildFleetRosters(
           // Only a genuine gap counts. A rider paying above the benchmark is
           // not a negative shortfall, and showing one would read as a refund.
           shortfallPaise: benchmark > 0 ? Math.max(0, benchmark - fee) : 0,
+          shortfallKnown: benchmark > 0,
           feeOverridden: asg.monthlyFeePaise > 0 && asg.monthlyFeePaise !== expected,
           effectiveFrom: asg.effectiveFrom,
           boardingSuspended: asg.boardingSuspended,
@@ -869,6 +897,8 @@ export function buildFleetRosters(
       unbilledRiders: riders.filter((r) => r.monthlyFeePaise <= 0).length,
       shortfallTotalPaise: riders.reduce((sum, r) => sum + r.shortfallPaise, 0),
       ridersWithShortfall: riders.filter((r) => r.shortfallPaise > 0).length,
+      ridersUnknownShortfall: riders.filter((r) => !r.shortfallKnown).length,
+      ridersBrokenLink: riders.filter((r) => r.stopLinkBroken).length,
     };
   });
 }
