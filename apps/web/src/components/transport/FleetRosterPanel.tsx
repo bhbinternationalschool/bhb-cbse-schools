@@ -19,6 +19,10 @@ import {
   ErpTableHead,
 } from "@/components/ui/erp-roster";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
+import {
+  planAfternoonWaves,
+  suggestVehicleSharing,
+} from "@/lib/transportAfternoonWaves";
 
 /**
  * Who is on each bus — the list that did not exist.
@@ -40,8 +44,9 @@ export function FleetRosterPanel({
 }) {
   const [openRoute, setOpenRoute] = useState<string | null>(null);
 
-  const { rosters, misrouted } = useMemo(() => {
-    if (!sis || !masters) return { rosters: [], misrouted: [] };
+  const { rosters, misrouted, plans, shares } = useMemo(() => {
+    if (!sis || !masters)
+      return { rosters: [], misrouted: [], plans: [], shares: [] };
     const profiles = buildStudentTransportProfiles(sis, masters, state, academicYearCode);
     const fathers = new Map(
       sis.students.map((s) => [s.id, s.fatherName || ""]),
@@ -52,9 +57,12 @@ export function FleetRosterPanel({
         formatRouteCrew(staffAssignedToRoute(masters, r.id)),
       ]),
     );
+    const plans = planAfternoonWaves(state, sis, masters, academicYearCode);
     return {
       rosters: buildFleetRosters(state, profiles, fathers, crew),
       misrouted: findMisroutedRiders(profiles, state),
+      plans,
+      shares: suggestVehicleSharing(plans),
     };
   }, [state, masters, sis, academicYearCode]);
 
@@ -152,6 +160,86 @@ export function FleetRosterPanel({
               </li>
             ))}
           </ul>
+        </section>
+      ) : null}
+
+      {plans.some((p) => p.riders > 0) ? (
+        <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+          <h2 className="text-sm font-bold text-[var(--brand-deep)]">
+            Afternoon dismissals
+          </h2>
+          <p className="mt-0.5 text-[11px] text-[var(--muted)]">
+            Mornings are one wave — everyone starts together. The afternoon is
+            where a vehicle is either used twice or bought twice.
+          </p>
+          <ul className="mt-2 space-y-1">
+            {plans
+              .filter((p) => p.riders > 0)
+              .map((p) => (
+                <li
+                  key={p.routeId}
+                  className={`rounded-lg border px-3 py-2 text-[11px] ${
+                    p.verdict === "needs-second-vehicle"
+                      ? "border-[color-mix(in_srgb,var(--danger)_40%,transparent)]"
+                      : p.verdict === "unknown-round-trip"
+                        ? "border-[color-mix(in_srgb,var(--brand-mid)_45%,transparent)]"
+                        : "border-[var(--border)]"
+                  }`}
+                >
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <span className="font-bold text-[var(--brand-deep)]">
+                      {p.routeLabel}
+                    </span>
+                    <span
+                      className={
+                        p.verdict === "one-vehicle-two-trips"
+                          ? "font-bold text-[var(--success)]"
+                          : p.verdict === "needs-second-vehicle"
+                            ? "font-bold text-[var(--danger)]"
+                            : "text-[var(--muted)]"
+                      }
+                    >
+                      {p.verdict === "one-vehicle-two-trips"
+                        ? "One vehicle, two trips"
+                        : p.verdict === "needs-second-vehicle"
+                          ? "Second vehicle, or they wait"
+                          : p.verdict === "unknown-round-trip"
+                            ? "Round trip not measured"
+                            : "One trip"}
+                    </span>
+                  </div>
+                  <div className="text-[var(--muted)]">
+                    {p.waves
+                      .map(
+                        (w) =>
+                          `${w.endTime} — ${w.riders} rider${w.riders === 1 ? "" : "s"} (${w.groups.map((g) => g.label).join(", ")})`,
+                      )
+                      .join(" · ")}
+                  </div>
+                  <div className="mt-0.5 text-[var(--ink)]">{p.detail}</div>
+                </li>
+              ))}
+          </ul>
+
+          {shares.length > 0 ? (
+            <div className="mt-3 rounded-lg border border-[color-mix(in_srgb,var(--success)_35%,transparent)] bg-[var(--success-soft)] px-3 py-2">
+              <p className="text-[11px] font-bold text-[var(--success)]">
+                One vehicle could cover two routes
+              </p>
+              <ul className="mt-1 space-y-0.5 text-[11px] text-[var(--ink)]">
+                {shares.slice(0, 5).map((sh) => (
+                  <li key={`${sh.earlyRouteId}:${sh.lateRouteId}`}>
+                    {sh.detail}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1 text-[10px] text-[var(--muted)]">
+                Driving time only. It does not know about driver hours, the
+                second vehicle&rsquo;s own morning run, or whether the two routes go
+                in opposite directions.
+              </p>
+            </div>
+          ) : null}
         </section>
       ) : null}
 

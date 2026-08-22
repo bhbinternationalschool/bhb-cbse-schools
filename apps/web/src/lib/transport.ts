@@ -61,6 +61,16 @@ export type TransportRoute = {
   monthlyFeePaise: number;
   isActive: boolean;
   stops: TransportStop[];
+  /**
+   * Measured round trip for the whole route — campus out, every stop, campus
+   * back — from Google Directions when "Suggest order" was last run.
+   *
+   * 0 means never measured. Deliberately not estimated from stop distance:
+   * this figure decides whether one vehicle can serve two dismissals, and a
+   * guess that is ten minutes optimistic strands small children at the gate.
+   */
+  roundTripMinutes?: number;
+  roundTripKm?: number;
 };
 
 export type TransportAssignment = {
@@ -572,6 +582,8 @@ function normalizeRoute(r: Partial<TransportRoute>): TransportRoute {
   const stops = Array.isArray(r.stops)
     ? r.stops.map((s, i) => normalizeStop(s, i))
     : [];
+  const rtMin = Number(r.roundTripMinutes);
+  const rtKm = Number(r.roundTripKm);
   return {
     id: r.id ?? id("tr"),
     code: (r.code ?? "").trim().toUpperCase() || "R-00",
@@ -582,6 +594,8 @@ function normalizeRoute(r: Partial<TransportRoute>): TransportRoute {
     monthlyFeePaise: Math.max(0, r.monthlyFeePaise ?? 0),
     isActive: r.isActive !== false,
     stops,
+    ...(Number.isFinite(rtMin) && rtMin > 0 ? { roundTripMinutes: Math.round(rtMin) } : {}),
+    ...(Number.isFinite(rtKm) && rtKm > 0 ? { roundTripKm: Math.round(rtKm * 10) / 10 } : {}),
   };
 }
 
@@ -1097,6 +1111,34 @@ export function deactivateTransportRoute(routeId: string): boolean {
     ...state,
     routes: state.routes.map((r) =>
       r.id === routeId ? { ...r, isActive: false } : r,
+    ),
+  });
+  return true;
+}
+
+/**
+ * Record what Directions measured for the whole route.
+ *
+ * Written only from a real measurement, never from an estimate — see the
+ * comment on TransportRoute.roundTripMinutes for why.
+ */
+export function setRouteRoundTrip(
+  routeId: string,
+  measured: { minutes: number; km: number },
+): boolean {
+  if (!(measured.minutes > 0)) return false;
+  const state = loadTransport();
+  if (!state.routes.some((r) => r.id === routeId)) return false;
+  saveTransport({
+    ...state,
+    routes: state.routes.map((r) =>
+      r.id === routeId
+        ? {
+            ...r,
+            roundTripMinutes: Math.round(measured.minutes),
+            roundTripKm: Math.round(measured.km * 10) / 10,
+          }
+        : r,
     ),
   });
   return true;

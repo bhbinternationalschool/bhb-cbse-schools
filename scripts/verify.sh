@@ -100,6 +100,7 @@ SELFTESTS=(
   test:transport-fee-policy
   test:transport-nearest-stops
   test:transport-shortfall
+  test:transport-afternoon-waves
 )
 
 bold "Verifying $(git rev-parse --short HEAD 2>/dev/null || echo 'working tree') on $(git branch --show-current 2>/dev/null || echo '?')"

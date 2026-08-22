@@ -45,6 +45,7 @@ export function StopRowsEditor({
   onChange,
   showDistance,
   bands,
+  onMeasured,
 }: {
   rows: StopDraft[];
   onChange: (next: StopDraft[]) => void;
@@ -55,6 +56,12 @@ export function StopRowsEditor({
    * its own fee; a stop past the last band is priced by distance instead.
    */
   bands?: { upToKm: number; minPaise: number; maxPaise: number }[];
+  /**
+   * The round trip Directions measured, when an order is applied. The
+   * afternoon planner needs a measured figure — it refuses to guess — so this
+   * is the only place it comes from.
+   */
+  onMeasured?: (measured: { minutes: number; km: number }) => void;
 }) {
   function patch(key: string, next: Partial<StopDraft>) {
     onChange(rows.map((r) => (r.key === key ? { ...r, ...next } : r)));
@@ -95,7 +102,7 @@ export function StopRowsEditor({
         >
           + Add stop
         </button>
-        <SuggestOrderButton rows={rows} onChange={onChange} />
+        <SuggestOrderButton rows={rows} onChange={onChange} onMeasured={onMeasured} />
       </div>
     </div>
   );
@@ -111,9 +118,11 @@ export function StopRowsEditor({
 function SuggestOrderButton({
   rows,
   onChange,
+  onMeasured,
 }: {
   rows: StopDraft[];
   onChange: (next: StopDraft[]) => void;
+  onMeasured?: (measured: { minutes: number; km: number }) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -200,6 +209,10 @@ function SuggestOrderButton({
             className="rounded-lg bg-[var(--primary)] px-3 py-1 text-xs font-bold text-[var(--primary-foreground)]"
             onClick={() => {
               onChange(proposal.order);
+              onMeasured?.({
+                minutes: proposal.totalMinutes,
+                km: proposal.totalKm,
+              });
               setProposal(null);
             }}
           >
