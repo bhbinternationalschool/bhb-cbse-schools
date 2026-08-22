@@ -199,12 +199,27 @@ export function TransportWorkspace() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     void (async () => {
-      const [{ ensureTransportHydrated }, { withHydrationSlot }] =
-        await Promise.all([
-          import("@/lib/transportPersistence"),
-          import("@/lib/deskHydrateGuard"),
-        ]);
-      await withHydrationSlot(() => ensureTransportHydrated());
+      // Transport is meaningless without the roster and the class masters: a
+      // rider row falls back to the raw student id when SIS is missing, and
+      // every per-bus roster reports zero. Hydrating only the transport desk
+      // meant landing straight on /transport in a cold browser showed student
+      // codes and empty buses while the assignments were perfectly fine.
+      const [
+        { ensureTransportHydrated },
+        { ensureSisHydrated },
+        { ensureMastersHydrated },
+        { withHydrationSlot },
+      ] = await Promise.all([
+        import("@/lib/transportPersistence"),
+        import("@/lib/sisPersistence"),
+        import("@/lib/mastersPersistence"),
+        import("@/lib/deskHydrateGuard"),
+      ]);
+      await Promise.all([
+        withHydrationSlot(() => ensureTransportHydrated()),
+        withHydrationSlot(() => ensureSisHydrated()),
+        withHydrationSlot(() => ensureMastersHydrated()),
+      ]);
       refresh();
     })();
   }, []);
@@ -1080,7 +1095,15 @@ function RidersPanel(props: RidersPanelProps) {
                   >
                     <div>
                       <div className="text-sm font-semibold text-[var(--brand-deep)]">
-                        {student?.fullName ?? assignment.studentId}
+                        {student?.fullName ?? (
+                          // A raw stu_ id on screen reads as data corruption.
+                          // It is almost always the roster not being loaded.
+                          <span className="text-[var(--muted)]">
+                            {sis
+                              ? `Not in ${academicYearCode} roster (${assignment.studentId})`
+                              : "Loading student…"}
+                          </span>
+                        )}
                       </div>
                       <div className="text-[11px] text-[var(--muted)]">
                         {assignment.route?.code} · {assignment.route?.busNo} ·{" "}

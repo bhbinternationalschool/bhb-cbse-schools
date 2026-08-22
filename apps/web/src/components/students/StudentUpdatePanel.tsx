@@ -32,6 +32,8 @@ import {
   StudentNameLabel,
 } from "@/components/students/StudentAvatar";
 import { InlinePhotoCapture } from "@/components/students/InlinePhotoCapture";
+import { useDemoSession } from "@/components/shell/SessionContext";
+import { normalizeSessionCode } from "@/lib/studentImport";
 import {
   ErpTable,
   ErpTableBody,
@@ -84,17 +86,31 @@ function StudentPicker({
   sis,
   masters,
   selectedId,
+  sessionCode,
   onSelect,
 }: {
   sis: SisState;
   masters: MastersState;
   selectedId: string;
+  /** The session shown in the header — searches are scoped to it by default. */
+  sessionCode: string;
   onSelect: (s: SisStudent | null) => void;
 }) {
   const [query, setQuery] = useState("");
+  // Off by default. sis.students holds one row per student per session, so an
+  // unscoped search returns the same child several times over and invites
+  // editing last year's record while believing you are on this year's.
+  const [allSessions, setAllSessions] = useState(false);
+  const wantSession = normalizeSessionCode(sessionCode || "");
+
   const hits = useMemo(() => {
     const q = query.trim().toLowerCase();
     let rows = sis.students.filter((s) => s.status === "active");
+    if (!allSessions && wantSession) {
+      rows = rows.filter(
+        (s) => normalizeSessionCode(s.academicYearCode || "") === wantSession,
+      );
+    }
     if (q) {
       rows = rows.filter(
         (s) =>
@@ -109,7 +125,7 @@ function StudentPicker({
       .slice()
       .sort((a, b) => a.fullName.localeCompare(b.fullName))
       .slice(0, 10);
-  }, [sis, query]);
+  }, [sis, query, allSessions, wantSession]);
 
   const selected = sis.students.find((s) => s.id === selectedId) ?? null;
 
@@ -144,6 +160,19 @@ function StudentPicker({
           </button>
         </div>
       ) : null}
+      {!selected ? (
+        <label className="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--muted)]">
+          <input
+            type="checkbox"
+            checked={allSessions}
+            onChange={(e) => setAllSessions(e.target.checked)}
+          />
+          <span>
+            Search other sessions too
+            {!allSessions && wantSession ? ` (showing ${wantSession} only)` : ""}
+          </span>
+        </label>
+      ) : null}
       {!selected && query.trim() ? (
         <ul className="mt-2 max-h-48 overflow-auto rounded-lg border border-[rgba(32,48,80,0.08)]">
           {hits.map((s) => (
@@ -163,6 +192,12 @@ function StudentPicker({
                   </div>
                   <div className="text-[11px] text-[var(--muted)]">
                     {s.admissionNo} · {classLabel(s, masters)}
+                    {normalizeSessionCode(s.academicYearCode || "") !==
+                    wantSession ? (
+                      <span className="ml-1 rounded bg-[color-mix(in_srgb,var(--danger)_14%,transparent)] px-1 font-bold text-[var(--danger)]">
+                        {s.academicYearCode || "no session"}
+                      </span>
+                    ) : null}
                   </div>
                 </div>
               </button>
@@ -186,6 +221,7 @@ export function StudentUpdatePanel({
   tick?: number;
   onChanged?: (sis: SisState) => void;
 }) {
+  const session = useDemoSession();
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [sis, setSis] = useState<SisState | null>(null);
   const [tool, setTool] = useState<UpdateTool>("details");
@@ -248,8 +284,16 @@ export function StudentUpdatePanel({
 
   const photoRoster = useMemo(() => {
     if (!sis || !masters || !photoClassId) return [] as SisStudent[];
+    const wantSession = normalizeSessionCode(session.academicYearCode || "");
     let rows = sis.students.filter((s) => {
       if (s.status !== "active") return false;
+      // Same reasoning as the picker: a class roster must not mix sessions.
+      if (
+        wantSession &&
+        normalizeSessionCode(s.academicYearCode || "") !== wantSession
+      ) {
+        return false;
+      }
       if (s.classId === photoClassId) return true;
       const sec = masters.sections.find((x) => x.id === s.sectionId);
       return sec?.classId === photoClassId;
@@ -277,7 +321,7 @@ export function StudentUpdatePanel({
         if (ra && rb && ra !== rb) return ra - rb;
         return a.fullName.localeCompare(b.fullName);
       });
-  }, [sis, masters, photoClassId, photoSectionId, photoQuery]);
+  }, [sis, masters, photoClassId, photoSectionId, photoQuery, session.academicYearCode]);
 
   function flash(msg: string) {
     setNotice(msg);
@@ -756,6 +800,7 @@ export function StudentUpdatePanel({
                 sis={sis}
                 masters={masters}
                 selectedId={selectedId}
+                sessionCode={session.academicYearCode}
                 onSelect={onSelectStudent}
               />
             </div>
