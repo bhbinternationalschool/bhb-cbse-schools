@@ -86,14 +86,163 @@ export function StopRowsEditor({
         />
       ))}
 
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          className="rounded-lg border border-dashed border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-mid)]"
+          onClick={() => onChange([...rows, newStopDraft()])}
+        >
+          + Add stop
+        </button>
+        <SuggestOrderButton rows={rows} onChange={onChange} />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Ask Google Directions for the best driving order of the pinned stops.
+ *
+ * The suggestion is shown before anything moves. A route order is a decision
+ * about children waiting at the roadside — the fastest loop is not always the
+ * right one, and the person who knows the road decides.
+ */
+function SuggestOrderButton({
+  rows,
+  onChange,
+}: {
+  rows: StopDraft[];
+  onChange: (next: StopDraft[]) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const [proposal, setProposal] = useState<{
+    order: StopDraft[];
+    totalKm: number;
+    totalMinutes: number;
+  } | null>(null);
+
+  const pinned = rows.filter(
+    (r) => r.name.trim() && r.geoLat != null && r.geoLng != null,
+  );
+  const unpinnedCount = rows.filter((r) => r.name.trim()).length - pinned.length;
+
+  async function suggest() {
+    setBusy(true);
+    setNote(null);
+    setProposal(null);
+    try {
+      const res = await fetch("/api/maps/optimize-stops", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          stops: pinned.map((r) => ({
+            id: r.key,
+            name: r.name,
+            lat: r.geoLat,
+            lng: r.geoLng,
+          })),
+        }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        orderedStopIds?: string[];
+        totalKm?: number;
+        totalMinutes?: number;
+      };
+      if (!data.ok || !data.orderedStopIds) {
+        setNote(data.error || "Could not work out an order");
+        return;
+      }
+      const byKey = new Map(rows.map((r) => [r.key, r]));
+      const reordered = data.orderedStopIds
+        .map((k) => byKey.get(k))
+        .filter((r): r is StopDraft => !!r);
+      // Unpinned stops keep their existing places at the end rather than being
+      // dropped — they were never part of the calculation.
+      const rest = rows.filter((r) => !data.orderedStopIds!.includes(r.key));
+      setProposal({
+        order: [...reordered, ...rest],
+        totalKm: data.totalKm ?? 0,
+        totalMinutes: data.totalMinutes ?? 0,
+      });
+    } catch {
+      setNote("Could not reach the Directions service");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (proposal) {
+    return (
+      <div className="w-full rounded-lg border border-[color-mix(in_srgb,var(--success)_35%,transparent)] bg-[var(--success-soft)] px-3 py-2">
+        <p className="text-[11px] font-bold text-[var(--success)]">
+          Suggested pickup order — {proposal.totalKm} km round trip, about{" "}
+          {proposal.totalMinutes} min driving
+        </p>
+        <ol className="mt-1 list-decimal pl-5 text-[11px] text-[var(--ink)]">
+          {proposal.order
+            .filter((r) => r.name.trim())
+            .map((r) => (
+              <li key={r.key}>{r.name}</li>
+            ))}
+        </ol>
+        <p className="mt-1 text-[10px] text-[var(--muted)]">
+          Google’s fastest loop from campus and back. It does not know about
+          school timings, safe crossings, or which side of the road a child
+          waits on — check it before applying.
+        </p>
+        <div className="mt-2 flex gap-2">
+          <button
+            type="button"
+            className="rounded-lg bg-[var(--primary)] px-3 py-1 text-xs font-bold text-[var(--primary-foreground)]"
+            onClick={() => {
+              onChange(proposal.order);
+              setProposal(null);
+            }}
+          >
+            Apply this order
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-[var(--border)] px-3 py-1 text-xs font-semibold"
+            onClick={() => setProposal(null)}
+          >
+            Keep current order
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
       <button
         type="button"
-        className="rounded-lg border border-dashed border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-mid)]"
-        onClick={() => onChange([...rows, newStopDraft()])}
+        className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-mid)] disabled:opacity-40"
+        onClick={suggest}
+        disabled={busy || pinned.length < 3}
+        title={
+          pinned.length < 3
+            ? "Pin at least three stops on the map first"
+            : "Ask Google for the best driving order"
+        }
       >
-        + Add stop
+        {busy ? "Working out the order…" : "Suggest order"}
       </button>
-    </div>
+      {unpinnedCount > 0 ? (
+        <span className="text-[10px] text-[var(--muted)]">
+          {unpinnedCount} unpinned stop{unpinnedCount === 1 ? "" : "s"} left out
+          of the calculation
+        </span>
+      ) : null}
+      {note ? (
+        <span className="text-[10px] font-semibold text-[var(--danger)]">
+          {note}
+        </span>
+      ) : null}
+    </>
   );
 }
 

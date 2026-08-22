@@ -88,6 +88,24 @@ The verification project starts empty. Seed it through the app rather than copyi
 production data across — the production tables hold student names, guardian mobile
 numbers and fee records, and there is no reason for a second copy of that to exist.
 
+## Google Maps APIs this app needs
+
+The single `GOOGLE_MAPS_API_KEY` is checked against several services. As of
+2026-08-22 the key can reach Geocoding, Places and Distance Matrix, but **not
+Directions** — `REQUEST_DENIED: This API key is not authorized to use this
+service or API`.
+
+| API | Used by | Status |
+|---|---|---|
+| Geocoding | Household addresses | enabled |
+| Places (Autocomplete + Details) | Stop search, enquiry form, locality search | enabled |
+| Distance Matrix | Stop distance from campus, which sets the fee | enabled |
+| Directions | Suggested stop order for a route | **not enabled** |
+
+"Suggest order" in the route stop editor will show Google's refusal until
+Directions is enabled for the key in Google Cloud Console → APIs & Services.
+It fails safely — the message is shown and no stop is reordered.
+
 ## Rule
 
 Do not point a dev server at `.env.local` to check UI work. `.env.local` is
