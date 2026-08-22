@@ -90,21 +90,26 @@ numbers and fee records, and there is no reason for a second copy of that to exi
 
 ## Google Maps APIs this app needs
 
-The single `GOOGLE_MAPS_API_KEY` is checked against several services. As of
-2026-08-22 the key can reach Geocoding, Places and Distance Matrix, but **not
-Directions** — `REQUEST_DENIED: This API key is not authorized to use this
-service or API`.
+The single `GOOGLE_MAPS_API_KEY` is checked against several services. All five
+the app uses were verified live on 2026-08-22:
 
 | API | Used by | Status |
 |---|---|---|
-| Geocoding | Household addresses | enabled |
+| Geocoding (forward) | Household addresses | enabled |
+| Geocoding (reverse) | Labelling a dropped map pin | enabled |
 | Places (Autocomplete + Details) | Stop search, enquiry form, locality search | enabled |
 | Distance Matrix | Stop distance from campus, which sets the fee | enabled |
-| Directions | Suggested stop order for a route | **not enabled** |
+| Directions (+ waypoint optimize) | Suggested pickup order for a route | enabled |
 
-"Suggest order" in the route stop editor will show Google's refusal until
-Directions is enabled for the key in Google Cloud Console → APIs & Services.
-It fails safely — the message is shown and no stop is reordered.
+To re-check after a key rotation or a restriction change, call each endpoint
+directly with the key rather than trusting `gcloud services list` — a key can
+carry an **API restriction** list that blocks a service the project has enabled,
+and only the live call catches that. Directions was refused that way until the
+restriction was widened; the project setting alone looked fine.
+
+Confirm optimisation specifically by sending three or more waypoints with
+`optimize:true` and checking `waypoint_order` comes back **reordered**. A plain
+Directions call succeeding does not prove optimisation is permitted.
 
 ## Rule
 
