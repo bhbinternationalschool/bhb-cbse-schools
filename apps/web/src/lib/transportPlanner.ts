@@ -604,6 +604,36 @@ export function rankStopsNearPoint(
   };
 }
 
+/**
+ * The distance rule, applied to every rider regardless of how they are billed.
+ *
+ * ₹500 covers the first 5 km; beyond that ₹100 for each started kilometre, so
+ * 5.4 km benchmarks at ₹600 and 8.1 km at ₹900. Whole rupees, no decimals —
+ * this is read off a screen and argued about, not accounted to the paisa.
+ *
+ * This is a yardstick, NOT the billing rule. Stops inside a band are priced
+ * per stop and a rider may legitimately sit below the benchmark on a
+ * concession. Its job is to show where money is not being collected, so the
+ * office can decide whether each gap is deliberate.
+ *
+ * Returns 0 when the distance is unknown — an unmeasured stop cannot produce a
+ * shortfall, and inventing one would send the office chasing a family over a
+ * blank field.
+ */
+export function distanceBenchmarkPaise(
+  km: number,
+  policy?: { formula?: { basePaise: number; baseCoversKm: number; perKmPaise: number } },
+): number {
+  if (!km || km <= 0) return 0;
+  const f = policy?.formula ?? {
+    basePaise: 50000,
+    baseCoversKm: 5,
+    perKmPaise: 10000,
+  };
+  const beyond = Math.max(0, Math.ceil(km - f.baseCoversKm));
+  return f.basePaise + beyond * f.perKmPaise;
+}
+
 /* ── Point 3: who is on each bus ───────────────────────────── */
 
 export type FleetRiderRow = {
@@ -618,6 +648,13 @@ export type FleetRiderRow = {
   monthlyFeePaise: number;
   /** True when the fee differs from what the policy would charge. */
   feeOverridden: boolean;
+  /**
+   * What the plain distance rule says this rider should pay: ₹500 covering the
+   * first 5 km, then ₹100 for every started km after that.
+   */
+  benchmarkPaise: number;
+  /** benchmark − charged, floored at 0. The money not being collected. */
+  shortfallPaise: number;
   effectiveFrom: string;
   boardingSuspended: boolean;
   /** Sibling on the same bus — useful when the conductor calls the roll. */
@@ -637,6 +674,9 @@ export type FleetRosterRow = {
   monthlyTotalPaise: number;
   /** Riders whose monthly fee is zero — on the bus, billed nothing. */
   unbilledRiders: number;
+  /** Total monthly gap against the distance rule across this bus. */
+  shortfallTotalPaise: number;
+  ridersWithShortfall: number;
 };
 
 /**
@@ -678,6 +718,8 @@ export function buildFleetRosters(
         const stop = route.stops.find((s) => s.id === asg.stopId);
         const expected = expectedMonthlyFeePaise(route, stop, state.feePolicy);
         const fee = asg.monthlyFeePaise > 0 ? asg.monthlyFeePaise : expected;
+        const km = stop?.distanceKm ?? 0;
+        const benchmark = distanceBenchmarkPaise(km, state.feePolicy);
         return {
           studentId: p.studentId,
           fullName: p.fullName,
@@ -685,9 +727,13 @@ export function buildFleetRosters(
           fatherName: fatherNameByStudent?.get(p.studentId) || "",
           householdId: p.householdId,
           stopName: stop?.name || "—",
-          distanceKm: stop?.distanceKm ?? 0,
+          distanceKm: km,
           distanceSource: stop?.distanceSource ?? "",
           monthlyFeePaise: fee,
+          benchmarkPaise: benchmark,
+          // Only a genuine gap counts. A rider paying above the benchmark is
+          // not a negative shortfall, and showing one would read as a refund.
+          shortfallPaise: benchmark > 0 ? Math.max(0, benchmark - fee) : 0,
           feeOverridden: asg.monthlyFeePaise > 0 && asg.monthlyFeePaise !== expected,
           effectiveFrom: asg.effectiveFrom,
           boardingSuspended: asg.boardingSuspended,
@@ -720,6 +766,8 @@ export function buildFleetRosters(
       riders,
       monthlyTotalPaise: riders.reduce((sum, r) => sum + r.monthlyFeePaise, 0),
       unbilledRiders: riders.filter((r) => r.monthlyFeePaise <= 0).length,
+      shortfallTotalPaise: riders.reduce((sum, r) => sum + r.shortfallPaise, 0),
+      ridersWithShortfall: riders.filter((r) => r.shortfallPaise > 0).length,
     };
   });
 }

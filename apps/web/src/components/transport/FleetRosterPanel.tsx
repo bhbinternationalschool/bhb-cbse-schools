@@ -61,6 +61,7 @@ export function FleetRosterPanel({
   const totalRiders = rosters.reduce((n, r) => n + r.riders.length, 0);
   const totalUnbilled = rosters.reduce((n, r) => n + r.unbilledRiders, 0);
   const monthlyTotal = rosters.reduce((n, r) => n + r.monthlyTotalPaise, 0);
+  const totalShortfall = rosters.reduce((n, r) => n + r.shortfallTotalPaise, 0);
 
   // "0 riders" and "the roster has not loaded" look identical on screen and
   // mean opposite things — one says nobody rides this bus, the other says we
@@ -102,6 +103,15 @@ export function FleetRosterPanel({
             Print rosters
           </button>
         </div>
+
+        {totalShortfall > 0 ? (
+          <p className="mt-3 rounded-lg border border-[color-mix(in_srgb,var(--danger)_40%,transparent)] bg-[color-mix(in_srgb,var(--danger)_8%,transparent)] px-3 py-2 text-[11px] text-[var(--danger)]">
+            <strong>{formatInr(totalShortfall)} a month</strong> less than the
+            distance rule (₹500 to 5 km, then ₹100 per started km) across{" "}
+            {rosters.reduce((n, r) => n + r.ridersWithShortfall, 0)} riders.
+            Some of that will be deliberate concessions — this is where to check.
+          </p>
+        ) : null}
 
         {totalUnbilled > 0 ? (
           <p className="mt-3 rounded-lg border border-[color-mix(in_srgb,var(--danger)_40%,transparent)] bg-[color-mix(in_srgb,var(--danger)_8%,transparent)] px-3 py-2 text-[11px] font-semibold text-[var(--danger)]">
@@ -190,6 +200,8 @@ function RosterCard({
       // and let an unmeasured stop stay unknown rather than becoming 0.
       km: (r) => (r.distanceKm > 0 ? r.distanceKm : null),
       fee: (r) => r.monthlyFeePaise,
+      // Unmeasured stops yield no benchmark, so they sort as unknown, not zero.
+      shortfall: (r) => (r.distanceKm > 0 ? r.shortfallPaise : null),
       from: (r) => r.effectiveFrom,
     },
     "stop",
@@ -227,6 +239,13 @@ function RosterCard({
                 ? " — over capacity"
                 : ` · ${seatsLeft} free · ${formatInr(roster.monthlyTotalPaise)}/month`}
             </span>
+            {roster.shortfallTotalPaise > 0 ? (
+              <span className="ml-2 font-bold text-[var(--danger)]">
+                {formatInr(roster.shortfallTotalPaise)}/month under the distance
+                rule across {roster.ridersWithShortfall} rider
+                {roster.ridersWithShortfall === 1 ? "" : "s"}
+              </span>
+            ) : null}
           </p>
         </div>
         <button
@@ -269,6 +288,9 @@ function RosterCard({
                   <ErpSortTh sort={sort} field="km" align="right">Km</ErpSortTh>
                   <ErpSortTh sort={sort} field="fee" align="right">
                     Per month
+                  </ErpSortTh>
+                  <ErpSortTh sort={sort} field="shortfall" align="right">
+                    Shortfall
                   </ErpSortTh>
                   <ErpSortTh sort={sort} field="from">From</ErpSortTh>
                 </tr>
@@ -321,6 +343,22 @@ function RosterCard({
                           †
                         </span>
                       ) : null}
+                    </td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">
+                      {r.distanceKm <= 0 ? (
+                        <span className="text-[var(--muted)]" title="Stop not measured — no benchmark">
+                          —
+                        </span>
+                      ) : r.shortfallPaise > 0 ? (
+                        <span
+                          className="font-bold text-[var(--danger)]"
+                          title={`Distance rule says ${formatInr(r.benchmarkPaise)} for ${r.distanceKm} km`}
+                        >
+                          {formatInr(r.shortfallPaise)}
+                        </span>
+                      ) : (
+                        <span className="text-[var(--success)]">nil</span>
+                      )}
                     </td>
                     <td className="px-3 py-1.5 text-[var(--muted)]">
                       {r.effectiveFrom}
