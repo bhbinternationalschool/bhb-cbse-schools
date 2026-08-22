@@ -82,6 +82,12 @@ export type TransportAssignment = {
   academicYearCode: string;
   effectiveFrom: string;
   effectiveTo: string | null;
+  /**
+   * Which legs the child actually uses. Half the service is billed at half the
+   * fee, applied on top of whatever the full fee works out to — so an override
+   * is always entered as the FULL-service amount and halved from there.
+   */
+  serviceMode?: TransportServiceMode;
   /** Override route / policy fee when > 0 */
   monthlyFeePaise: number;
   /** Audit when fee override differs from expected */
@@ -89,6 +95,9 @@ export type TransportAssignment = {
   boardingSuspended: boolean;
   createdAt: string;
 };
+
+/** "both" is the default; the one-way modes bill at half. */
+export type TransportServiceMode = "both" | "pickup" | "drop";
 
 export type TransportFeeRateMode =
   | "flat_route"
@@ -614,6 +623,10 @@ function normalizeAssignment(
     monthlyFeePaise: Math.max(0, a.monthlyFeePaise ?? 0),
     feeOverrideReason: a.feeOverrideReason ?? "",
     boardingSuspended: !!a.boardingSuspended,
+    serviceMode:
+      a.serviceMode === "pickup" || a.serviceMode === "drop"
+        ? a.serviceMode
+        : "both",
     createdAt: a.createdAt ?? new Date().toISOString(),
   };
 }
@@ -840,6 +853,29 @@ function assignmentCoversPeriod(
   return true;
 }
 
+/**
+ * Half the service, half the fee.
+ *
+ * Applied on top of the full-service figure, whether that came from the policy
+ * or from a clerk's override — so an override is always entered as the full
+ * amount and this halves it. Rounded to whole rupees, because a receipt showing
+ * ₹337.50 invites an argument at the counter.
+ */
+export function applyServiceMode(
+  fullPaise: number,
+  mode: TransportServiceMode | undefined,
+): number {
+  if (!fullPaise || fullPaise <= 0) return 0;
+  if (mode !== "pickup" && mode !== "drop") return fullPaise;
+  return Math.round(fullPaise / 2 / 100) * 100;
+}
+
+export function serviceModeLabel(mode: TransportServiceMode | undefined): string {
+  if (mode === "pickup") return "Pick-up only";
+  if (mode === "drop") return "Drop only";
+  return "Both ways";
+}
+
 export type FeeBasis =
   | "route-flat"
   | "stop-price"
@@ -1018,8 +1054,8 @@ export function computeTransportPeriodDues(
     const stop =
       route.stops.find((st) => st.id === asg.stopId) ?? route.stops[0];
     const expected = expectedMonthlyFeePaise(route, stop, s.feePolicy);
-    const fee =
-      asg.monthlyFeePaise > 0 ? asg.monthlyFeePaise : expected;
+    const fullFee = asg.monthlyFeePaise > 0 ? asg.monthlyFeePaise : expected;
+    const fee = applyServiceMode(fullFee, asg.serviceMode);
     if (fee <= 0) continue;
 
     const veh = route.vehicleId
@@ -1200,6 +1236,7 @@ export function assignStudentToRoute(input: {
   academicYearCode?: string;
   monthlyFeePaise?: number;
   feeOverrideReason?: string;
+  serviceMode?: TransportServiceMode;
 }):
   | { ok: true; assignment: TransportAssignment }
   | { ok: false; error: string } {
@@ -1260,6 +1297,7 @@ export function assignStudentToRoute(input: {
     effectiveTo: null,
     monthlyFeePaise: override,
     feeOverrideReason: input.feeOverrideReason ?? "",
+    serviceMode: input.serviceMode ?? "both",
     createdAt: new Date().toISOString(),
   });
 

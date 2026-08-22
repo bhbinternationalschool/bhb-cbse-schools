@@ -12,9 +12,11 @@ import {
   computeTransportPeriodDues,
   expectedMonthlyFeePaise,
   haversineKm,
+  applyServiceMode,
   listActiveRoutes,
   stopHasGeo,
   type StopDistanceSource,
+  type TransportServiceMode,
   type TransportAssignment,
   type TransportRoute,
   type TransportState,
@@ -646,6 +648,7 @@ export type FleetRiderRow = {
   distanceKm: number;
   distanceSource: StopDistanceSource;
   monthlyFeePaise: number;
+  serviceMode: TransportServiceMode;
   /** True when the fee differs from what the policy would charge. */
   feeOverridden: boolean;
   /**
@@ -717,9 +720,16 @@ export function buildFleetRosters(
         const asg = p.assignment!;
         const stop = route.stops.find((s) => s.id === asg.stopId);
         const expected = expectedMonthlyFeePaise(route, stop, state.feePolicy);
-        const fee = asg.monthlyFeePaise > 0 ? asg.monthlyFeePaise : expected;
+        const fullFee = asg.monthlyFeePaise > 0 ? asg.monthlyFeePaise : expected;
+        const fee = applyServiceMode(fullFee, asg.serviceMode);
         const km = stop?.distanceKm ?? 0;
-        const benchmark = distanceBenchmarkPaise(km, state.feePolicy);
+        // The benchmark halves with the service too. Without that, every
+        // pick-up-only rider would show a permanent shortfall for money the
+        // school never intended to charge.
+        const benchmark = applyServiceMode(
+          distanceBenchmarkPaise(km, state.feePolicy),
+          asg.serviceMode,
+        );
         return {
           studentId: p.studentId,
           fullName: p.fullName,
@@ -730,6 +740,7 @@ export function buildFleetRosters(
           distanceKm: km,
           distanceSource: stop?.distanceSource ?? "",
           monthlyFeePaise: fee,
+          serviceMode: asg.serviceMode ?? "both",
           benchmarkPaise: benchmark,
           // Only a genuine gap counts. A rider paying above the benchmark is
           // not a negative shortfall, and showing one would read as a refund.

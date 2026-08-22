@@ -399,6 +399,14 @@ function RosterCard({
                           ⧉
                         </span>
                       ) : null}
+                      {r.serviceMode !== "both" ? (
+                        <span
+                          className="ml-1 rounded bg-[var(--surface-sunken)] px-1 text-[9px] font-bold uppercase text-[var(--muted)]"
+                          title="Half service, half fee"
+                        >
+                          {r.serviceMode === "pickup" ? "pick-up" : "drop"}
+                        </span>
+                      ) : null}
                       {r.boardingSuspended ? (
                         <span className="ml-1 font-bold text-[var(--danger)]">
                           suspended

@@ -12,6 +12,7 @@
 import assert from "node:assert/strict";
 
 import { distanceBenchmarkPaise } from "./transportPlanner";
+import { applyServiceMode } from "./transport";
 
 console.log("transportShortfall.selftest.ts");
 
@@ -90,5 +91,38 @@ assert.equal(distanceBenchmarkPaise(5.5, cheaper) / 100, 450);
 
 // No policy passed falls back to the school's current rule.
 assert.equal(distanceBenchmarkPaise(5.4) / 100, 600);
+
+/* ── half service, half fee ─────────────────────────────────── */
+
+// A pick-up-only rider is billed half, and the benchmark halves with it — so
+// they show no shortfall. Halving only the fee would brand every one-way rider
+// a defaulter for money the school never meant to charge.
+const half = (paise: number) => applyServiceMode(paise, "pickup") / 100;
+
+assert.equal(half(50000), 250, "Rs500 both ways -> Rs250 one way");
+assert.equal(half(70000), 350);
+assert.equal(applyServiceMode(50000, "drop") / 100, 250);
+assert.equal(applyServiceMode(50000, "both") / 100, 500, "both ways is unchanged");
+assert.equal(applyServiceMode(50000, undefined) / 100, 500, "missing mode = both");
+
+// Whole rupees on the receipt, never a paisa fraction to argue about.
+assert.equal(applyServiceMode(50100, "pickup") % 100, 0);
+assert.equal(applyServiceMode(70100, "drop") % 100, 0);
+
+// Nothing to halve stays nothing — an unpriced rider does not become a
+// half-price rider.
+assert.equal(applyServiceMode(0, "pickup"), 0);
+
+// The pairing that matters: fee and benchmark halve together, so 9.1 km
+// pick-up-only at Rs500 shows the same Rs500 gap halved to Rs250, not a
+// phantom shortfall.
+const benchFull = distanceBenchmarkPaise(9.1, P);
+assert.equal(benchFull / 100, 1000);
+assert.equal(applyServiceMode(benchFull, "pickup") / 100, 500);
+assert.equal(
+  Math.max(0, applyServiceMode(benchFull, "pickup") - applyServiceMode(50000, "pickup")) / 100,
+  250,
+  "half of the Rs500 full-service gap",
+);
 
 console.log("  ok");

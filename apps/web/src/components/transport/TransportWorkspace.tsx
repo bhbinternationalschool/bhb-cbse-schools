@@ -52,6 +52,9 @@ import {
   assignStudentToRoute,
   computeTransportPeriodDues,
   endTransportAssignment,
+  serviceModeLabel,
+  type TransportServiceMode,
+  applyServiceMode,
   expectedMonthlyFeeDetail,
   expectedMonthlyFeePaise,
   listActiveRiders,
@@ -150,6 +153,8 @@ export function TransportWorkspace() {
   const [routeId, setRouteId] = useState("");
   const [stopId, setStopId] = useState("");
   const [effectiveFrom, setEffectiveFrom] = useState(todayIso);
+  const [serviceMode, setServiceMode] =
+    useState<TransportServiceMode>("both");
   const [feeOverride, setFeeOverride] = useState("");
   const [feeOverrideReason, setFeeOverrideReason] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -350,6 +355,7 @@ export function TransportWorkspace() {
       academicYearCode: selected.student.academicYearCode || DEFAULT_AY,
       monthlyFeePaise: overridePaise > 0 ? overridePaise : undefined,
       feeOverrideReason: feeOverrideReason.trim(),
+      serviceMode,
     });
     if (!result.ok) {
       setError(result.error);
@@ -382,6 +388,7 @@ export function TransportWorkspace() {
         academicYearCode: sib.academicYearCode || selectedAy,
         monthlyFeePaise: overridePaise > 0 ? overridePaise : undefined,
         feeOverrideReason: feeOverrideReason.trim(),
+        serviceMode,
       });
       if (r.ok) alsoDone.push(sib.fullName);
       else alsoFailed.push(`${sib.fullName}: ${r.error}`);
@@ -397,6 +404,7 @@ export function TransportWorkspace() {
     setQuery("");
     setFeeOverride("");
     setFeeOverrideReason("");
+    setServiceMode("both");
     refresh();
   }
 
@@ -483,6 +491,8 @@ export function TransportWorkspace() {
               setStopId={setStopId}
               effectiveFrom={effectiveFrom}
               setEffectiveFrom={setEffectiveFrom}
+              serviceMode={serviceMode}
+              setServiceMode={setServiceMode}
               feeOverride={feeOverride}
               setFeeOverride={setFeeOverride}
               feeOverrideReason={feeOverrideReason}
@@ -626,6 +636,8 @@ type RidersPanelProps = {
   setStopId: (value: string) => void;
   effectiveFrom: string;
   setEffectiveFrom: (value: string) => void;
+  serviceMode: TransportServiceMode;
+  setServiceMode: (v: TransportServiceMode) => void;
   feeOverride: string;
   setFeeOverride: (value: string) => void;
   feeOverrideReason: string;
@@ -669,6 +681,8 @@ function RidersPanel(props: RidersPanelProps) {
     setStopId,
     effectiveFrom,
     setEffectiveFrom,
+    serviceMode,
+    setServiceMode,
     feeOverride,
     setFeeOverride,
     feeOverrideReason,
@@ -1059,6 +1073,31 @@ function RidersPanel(props: RidersPanelProps) {
             </label>
             <label className="text-sm">
               <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                Service
+              </span>
+              <select
+                className="field !py-1.5"
+                value={serviceMode}
+                onChange={(e) =>
+                  setServiceMode(e.target.value as TransportServiceMode)
+                }
+              >
+                <option value="both">Both ways</option>
+                <option value="pickup">Pick-up only (half fee)</option>
+                <option value="drop">Drop only (half fee)</option>
+              </select>
+              {serviceMode !== "both" && proposedFeePaise > 0 ? (
+                <span className="mt-1 block text-[10px] text-[var(--muted)]">
+                  {formatInr(proposedFeePaise)} full ·{" "}
+                  <strong className="text-[var(--ink)]">
+                    {formatInr(applyServiceMode(proposedFeePaise, serviceMode))}
+                  </strong>{" "}
+                  billed
+                </span>
+              ) : null}
+            </label>
+            <label className="text-sm">
+              <span className="mb-1 block text-[11px] text-[var(--muted)]">
                 Fee override ₹/month
               </span>
               <input
@@ -1227,7 +1266,11 @@ function RidersPanel(props: RidersPanelProps) {
                         {assignment.stopName} · from {assignment.effectiveFrom}
                       </div>
                       <div className="text-[10px] text-[var(--muted)]">
-                        {formatInr(fee)}/month
+                        {formatInr(applyServiceMode(fee, assignment.serviceMode))}/month
+                        {assignment.serviceMode &&
+                        assignment.serviceMode !== "both"
+                          ? ` · ${serviceModeLabel(assignment.serviceMode)}`
+                          : ""}
                         {assignment.feeOverrideReason
                           ? ` · override: ${assignment.feeOverrideReason}`
                           : ""}
