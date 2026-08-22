@@ -1,0 +1,23 @@
+[
+  {
+    "name": "keep-recent-releases",
+    "action": { "type": "Keep" },
+    "mostRecentVersions": {
+      "keepCount": 10
+    }
+  },
+  {
+    "name": "keep-anything-from-the-last-30-days",
+    "action": { "type": "Keep" },
+    "condition": {
+      "newerThan": "30d"
+    }
+  },
+  {
+    "name": "delete-older-untagged-builds",
+    "action": { "type": "Delete" },
+    "condition": {
+      "olderThan": "30d"
+    }
+  }
+]
