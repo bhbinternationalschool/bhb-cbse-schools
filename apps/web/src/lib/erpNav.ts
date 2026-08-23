@@ -376,15 +376,6 @@ export const HUB_GROUPS: HubGroup[] = [
         tone: "green",
       },
       {
-        href: "/store",
-        title: "Store (old)",
-        blurb: "Being replaced",
-        detail:
-          "The previous browser-stored store. Kept only until its data is moved across.",
-        icon: BookOpen,
-        tone: "slate",
-      },
-      {
         href: "/accounts",
         title: "Accounts",
         blurb: "School books",

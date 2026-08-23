@@ -54,8 +54,20 @@ const TABS: {
   { id: "masters", label: "Setup", tone: "violet" },
 ];
 
+const TAB_IDS = TABS.map((t) => t.id);
+
 export function InventoryWorkspace() {
   const [tab, setTab] = useState<Tab>("counter");
+
+  // Honour ?tab=… from a deep link (the old /purchase route redirects here).
+  // Done in an effect rather than a useState initializer: the server renders
+  // with no URL search, and hydration keeps that server value, so an
+  // initializer reading window.location is silently discarded. Runs once, so
+  // the tab then stays wherever the user puts it.
+  useEffect(() => {
+    const asked = new URLSearchParams(window.location.search).get("tab");
+    if (asked && TAB_IDS.includes(asked as Tab)) setTab(asked as Tab);
+  }, []);
   const boot = useInvBootstrap();
 
   // Class names come from masters, which is still a localStorage-backed

@@ -383,9 +383,9 @@ export const REGISTRY_MODULES: RegistryModuleDef[] = [
   },
   {
     id: "purchase",
-    label: "Purchase (legacy)",
-    blurb: "Old indent/PO/GRN screens — folded into Store & purchase",
-    href: "/store?tab=purchase",
+    label: "Purchase",
+    blurb: "Indents, orders, goods receipt and vendor bills",
+    href: "/inventory?tab=purchase",
     group: "finance",
     defaultEnabled: true,
   },
