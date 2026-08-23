@@ -25,7 +25,7 @@ import {
   Pill,
   StatTile,
 } from "@/components/inventory/InvUi";
-import { invApi, useAsync } from "@/lib/inventory/client";
+import { invApi, useAsync, useSaver } from "@/lib/inventory/client";
 import { downloadExcelCsv } from "@/lib/reportExport";
 import {
   formatPaise,
@@ -36,7 +36,13 @@ import {
   type InvSaleStatus,
 } from "@/lib/inventory/types";
 
-type ReportId = "dashboard" | "stock" | "margin" | "daybook" | "purchases";
+type ReportId =
+  | "dashboard"
+  | "stock"
+  | "margin"
+  | "daybook"
+  | "purchases"
+  | "closing";
 
 const REPORTS: { id: ReportId; label: string }[] = [
   { id: "dashboard", label: "Overview" },
@@ -44,6 +50,7 @@ const REPORTS: { id: ReportId; label: string }[] = [
   { id: "margin", label: "Item margin" },
   { id: "daybook", label: "Sales day book" },
   { id: "purchases", label: "Purchases by vendor" },
+  { id: "closing", label: "Closing stock" },
 ];
 
 function monthStart(): string {
@@ -78,7 +85,7 @@ export function ReportsTab({ boot }: { boot: InvBootstrap }) {
         ))}
       </div>
 
-      {report !== "dashboard" && report !== "stock" ? (
+      {report !== "dashboard" && report !== "stock" && report !== "closing" ? (
         <div className="flex flex-wrap items-end gap-2">
           <label className="text-xs">
             <span className="block text-muted-foreground">From</span>
@@ -123,6 +130,116 @@ export function ReportsTab({ boot }: { boot: InvBootstrap }) {
       {report === "margin" ? <MarginReport from={from} to={to} /> : null}
       {report === "daybook" ? <DayBook from={from} to={to} /> : null}
       {report === "purchases" ? <Purchases from={from} to={to} /> : null}
+      {report === "closing" ? <ClosingStock /> : null}
+    </div>
+  );
+}
+
+/* ─── Closing stock ────────────────────────────────────────── */
+
+/**
+ * The period-end entry that brings unsold stock back onto the balance sheet.
+ *
+ * The copy here matters as much as the button: the natural expectation is that
+ * every stock adjustment posts to the books, and under this chart it must not.
+ * Saying so plainly is what stops someone "fixing" it later.
+ */
+function ClosingStock() {
+  const [asOf, setAsOf] = useState(today());
+  const value = useAsync(() => invApi.stockValueAsOf(asOf), [asOf]);
+  const saver = useSaver();
+
+  async function post() {
+    const res = await saver.run(() => invApi.postClosingStock(asOf));
+    if (res) {
+      saver.setNotice(
+        res.created
+          ? `${res.voucherNo} posted for ${formatPaise(res.valuePaise)}` +
+              (res.reversedVoucherNo
+                ? ` · previous entry reversed as ${res.reversedVoucherNo}`
+                : "")
+          : res.note || "Already posted for this date",
+      );
+      value.reload();
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <InvAlert
+        error={value.error || saver.error}
+        notice={saver.notice}
+        onDismiss={() => {
+          saver.setError("");
+          saver.setNotice("");
+        }}
+      />
+
+      <div className="grid gap-2 sm:grid-cols-2">
+        <StatTile
+          label="Stock value at this date"
+          value={value.data === null ? "—" : formatPaise(value.data)}
+          sub="quantity on hand × average cost"
+        />
+        <div className="rounded-xl border bg-card px-3 py-2.5">
+          <label className="block text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+            Value as at
+          </label>
+          <input
+            type="date"
+            className={`${FIELD_CLASS} mt-1 w-full`}
+            value={asOf}
+            onChange={(e) => setAsOf(e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="space-y-2 rounded-xl border p-3 text-sm">
+        <h3 className="font-semibold">What this posts</h3>
+        <p className="text-muted-foreground">
+          Goods are charged to <strong>Store Purchases</strong> the moment they
+          arrive. At a period end the stock still on the shelf has been paid for
+          but not used, so its value comes back onto the balance sheet:
+        </p>
+        <div className="rounded-lg bg-muted/50 px-3 py-2 font-mono text-xs">
+          Dr Closing Stock (1090)
+          {"    "}
+          {value.data ? formatPaise(value.data) : "—"}
+          <br />
+          Cr Store Purchases (5060)
+          {"  "}
+          {value.data ? formatPaise(value.data) : "—"}
+        </div>
+        <p className="text-muted-foreground">
+          The previous period&rsquo;s entry is reversed as part of this, so the
+          books never carry two closing-stock balances at once.
+        </p>
+      </div>
+
+      <div className="space-y-2 rounded-xl border border-dashed p-3 text-xs text-muted-foreground">
+        <h3 className="text-sm font-semibold text-foreground">
+          Why adjustments do not post
+        </h3>
+        <p>
+          A shrinkage, damage or physical-count correction has already had its
+          cost charged to Store Purchases when the goods were bought. Writing it
+          off again would charge the same goods twice. It shows up here instead,
+          as less stock left to bring back — which is the correct effect.
+        </p>
+        <p>
+          A transfer between locations changes nothing the books care about, so
+          it posts nothing either.
+        </p>
+        <p>
+          Stock the school already owned before it started using this module
+          belongs in the ledger&rsquo;s own opening-balance entry, not here — its
+          cost sits in the previous year&rsquo;s accounts.
+        </p>
+      </div>
+
+      <Button size="sm" onClick={post} disabled={saver.saving || !value.data}>
+        {saver.saving ? "Posting…" : `Post closing stock as at ${asOf}`}
+      </Button>
     </div>
   );
 }

@@ -43,6 +43,8 @@ export const L_TDS_PAYABLE = "2310";
 export const L_PF_PAYABLE = "2320";
 export const L_ESI_PAYABLE = "2330";
 export const L_GST_INPUT = "1080";
+/** Stock on hand at a period end — see the closing-stock journal. */
+export const L_CLOSING_STOCK = "1090";
 /** GST charged on sales — owed to the government, not income. */
 export const L_GST_OUTPUT = "2340";
 export const L_FEE_CONCESSION = "5100";
@@ -80,6 +82,11 @@ export function defaultLedgerAccounts(): LedgerAccountSeed[] {
     { code: L_FEE_RECEIVABLE, name: "Fee Receivable", kind: "asset", parentCode: "1", scheduleGroup: G.currentAssets, isControl: true },
     { code: L_STAFF_ADVANCES, name: "Staff Advances", kind: "asset", parentCode: "1", scheduleGroup: G.currentAssets, isControl: true },
     { code: L_GST_INPUT, name: "GST Input Credit", kind: "asset", parentCode: "1", scheduleGroup: G.currentAssets },
+    // Purchases are expensed to 5060 when goods arrive, so stock is not an
+    // asset day to day. At a period end the value still on the shelf is
+    // brought back: Dr here, Cr Store Purchases, leaving the expense equal to
+    // what was actually consumed. Reversed at the start of the next period.
+    { code: L_CLOSING_STOCK, name: "Closing Stock", kind: "asset", parentCode: "1", scheduleGroup: G.currentAssets },
 
     { code: L_CWIP, name: "Capital Work in Progress", kind: "asset", parentCode: "1", scheduleGroup: G.fixedAssets },
     { code: L_FIXED_ASSETS, name: "Fixed Assets", kind: "asset", parentCode: "1", scheduleGroup: G.fixedAssets },

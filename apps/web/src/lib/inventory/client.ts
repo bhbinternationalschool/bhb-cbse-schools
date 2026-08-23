@@ -505,6 +505,25 @@ export const invApi = {
       };
     }>("/reports", { query: { report: "daybook", from, to } }),
 
+  stockValueAsOf: (asOf: string) =>
+    req<{ valuePaise: number }>("/reports", {
+      query: { report: "stock-value", asOf },
+    }).then((r) => r.valuePaise),
+
+  postClosingStock: (asOf: string) =>
+    req<{
+      closingStock: {
+        created: boolean;
+        valuePaise: number;
+        voucherNo: string;
+        reversedVoucherNo: string;
+        note: string;
+      };
+    }>("/reports", {
+      method: "POST",
+      body: JSON.stringify({ asOf }),
+    }).then((r) => r.closingStock),
+
   purchaseReport: (from: string, to: string) =>
     req<{
       rows: InvPurchaseRowData[];
