@@ -64,6 +64,20 @@ export function containsWords(haystack: string, needle: string): boolean {
   return ` ${haystack} `.includes(` ${needle} `);
 }
 
+/**
+ * Consonant skeleton — drop the vowels, keep the order.
+ *
+ * "Aayar" and "Ayar" both give "yr"… which is why this is only used when the
+ * skeleton is long enough to be distinctive. On short names it collides
+ * freely (Akla / Ekala / Koila all give "kl").
+ */
+export function consonantKey(s: string): string {
+  return s.replace(/[^a-z]/g, "").replace(/[aeiou]/g, "");
+}
+
+/** Minimum consonant skeleton length before a skeleton match is trusted. */
+const MIN_SKELETON = 4;
+
 export type MatchResult =
   | { kind: "exact"; village: Village; matchedOn: string }
   | { kind: "ambiguous"; name: string; block: string; matchedOn: string }
@@ -85,16 +99,47 @@ export function matchVillageInAddress(
   const addr = fold(address);
   if (!addr) return { kind: "none" };
 
+  const decide = (name: string, matchedOn: string): MatchResult | null => {
+    const hits = villagesByName.get(name) ?? [];
+    if (hits.length === 1) return { kind: "exact", village: hits[0], matchedOn };
+    if (hits.length > 1) return { kind: "ambiguous", name: hits[0].name, block: "", matchedOn };
+    return null;
+  };
+
+  // Pass 1 — the name appears as whole words. Longest first, so "Puari Kala"
+  // is tried before "Puari".
   for (const name of namesLongestFirst) {
     if (!containsWords(addr, name)) continue;
-    const hits = villagesByName.get(name) ?? [];
-    if (hits.length === 1) {
-      return { kind: "exact", village: hits[0], matchedOn: name };
-    }
-    if (hits.length > 1) {
-      return { kind: "ambiguous", name: hits[0].name, block: "", matchedOn: name };
-    }
+    const hit = decide(name, name);
+    if (hit) return hit;
   }
+
+  // Pass 2 — the same name written without its spaces. Addresses here say
+  // "Puarikala" and "Puarikalan" where the census says "Puari Kala"; that is
+  // 25 of the 55 households pass 1 could not place. Still an exact string
+  // comparison, just with spacing normalised out of both sides.
+  const addrSquashed = addr.replace(/\s+/g, "");
+  for (const name of namesLongestFirst) {
+    const squashed = name.replace(/\s+/g, "");
+    if (squashed.length < MIN_NAME + 2) continue;
+    if (!addrSquashed.includes(squashed)) continue;
+    const hit = decide(name, `${name} (as "${squashed}")`);
+    if (hit) return hit;
+  }
+
+  // Pass 3 — same consonants, different vowels: "Aayar" for "Ayar". Only for
+  // skeletons long enough to be distinctive, and only against a single
+  // address word, so this cannot match halfway across a sentence.
+  const words = addr.split(" ").filter((w) => w.length >= MIN_NAME);
+  for (const name of namesLongestFirst) {
+    if (name.includes(" ")) continue;
+    const key = consonantKey(name);
+    if (key.length < MIN_SKELETON) continue;
+    if (!words.some((w) => consonantKey(w) === key)) continue;
+    const hit = decide(name, `${name} (same consonants)`);
+    if (hit) return hit;
+  }
+
   return { kind: "none" };
 }
 
@@ -147,6 +192,17 @@ async function main() {
     if (page.length < 1000) break;
   }
 
+  // A person's choice outranks any re-run of the scanner.
+  const { data: manualRows } = await ctx.sb
+    .from("sis_household_village")
+    .select("household_id")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("match_source", "manual");
+  const manual = new Set(
+    ((manualRows as { household_id: string }[] | null) ?? []).map((r) => r.household_id),
+  );
+  if (manual.size) console.info(`${LOG} ${manual.size} household(s) confirmed by hand — left alone`);
+
   const rows: Record<string, unknown>[] = [];
   let exact = 0;
   let ambiguous = 0;
@@ -154,6 +210,7 @@ async function main() {
   const byBlock: Record<string, number> = {};
 
   for (const h of households) {
+    if (manual.has(h.id)) continue;
     const result = matchVillageInAddress(
       `${h.address ?? ""} ${h.city ?? ""}`,
       byName,

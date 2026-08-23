@@ -128,14 +128,28 @@ export function StudentVillageStopPicker({
   /* ── derived ──────────────────────────────────────────────── */
 
   const blocks = useMemo(() => {
-    const set = new Set((directory ?? []).map((v) => v.blockName).filter(Boolean));
-    return [...set].sort((a, b) => a.localeCompare(b));
+    const counts = new Map<string, number>();
+    for (const v of directory ?? []) {
+      if (!v.blockName) continue;
+      counts.set(v.blockName, (counts.get(v.blockName) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }, [directory]);
 
+  /**
+   * Villages of the chosen block only.
+   *
+   * Block first, deliberately. The district has 1,292 settlements and a flat
+   * list of them is not something anyone scrolls — narrowing to a block
+   * leaves 106-214, which is a list a person can actually read.
+   */
   const villagesInBlock = useMemo(() => {
-    if (!directory) return [];
-    const rows = block ? directory.filter((v) => v.blockName === block) : directory;
-    return [...rows].sort((a, b) => a.villageName.localeCompare(b.villageName));
+    if (!directory || !block) return [];
+    return directory
+      .filter((v) => v.blockName === block)
+      .sort((a, b) => a.villageName.localeCompare(b.villageName));
   }, [directory, block]);
 
   const chosen = useMemo(
@@ -231,6 +245,14 @@ export function StudentVillageStopPicker({
         ) : null}
       </div>
 
+      {loaded && !loaded.village ? (
+        <p className="rounded-lg border border-[var(--danger)]/25 bg-[var(--danger-soft)] px-2.5 py-1.5 text-micro text-[var(--danger)]">
+          No village on file for this family — their address does not name one
+          we recognise. Pick the block, then the village, and it is recorded for
+          every sibling too.
+        </p>
+      ) : null}
+
       {scanned ? (
         <p className="rounded-lg border border-[var(--warning)]/25 bg-[var(--warning-soft)] px-2.5 py-1.5 text-micro text-[var(--warning)]">
           This village was read off the household address, not confirmed by
@@ -250,10 +272,12 @@ export function StudentVillageStopPicker({
               setVillageId("");
             }}
           >
-            <option value="">All blocks</option>
+            <option value="">
+              {directory ? "Choose a block…" : "Loading…"}
+            </option>
             {blocks.map((b) => (
-              <option key={b} value={b}>
-                {b}
+              <option key={b.name} value={b.name}>
+                {b.name} ({b.count})
               </option>
             ))}
           </select>
@@ -264,23 +288,24 @@ export function StudentVillageStopPicker({
           <select
             className={erpField}
             value={villageId}
-            disabled={!canEdit || !directory}
+            disabled={!canEdit || !directory || !block}
             onChange={(e) => {
               setVillageId(e.target.value);
-              const v = (directory ?? []).find((x) => x.villageId === e.target.value);
-              if (v) setBlock(v.blockName);
               // A new village invalidates a pin dropped in the old one.
               setPin(null);
             }}
           >
             <option value="">
-              {directory ? "Choose a village…" : "Loading villages…"}
+              {!directory
+                ? "Loading…"
+                : !block
+                  ? "Choose a block first"
+                  : `Choose a village… (${villagesInBlock.length})`}
             </option>
             {villagesInBlock.map((v) => (
               <option key={v.villageId} value={v.villageId}>
                 {v.villageName}
                 {v.settlementType === "town" ? " (town)" : ""}
-                {!block ? ` · ${v.blockName}` : ""}
                 {v.durationMinutes !== null ? ` — ${v.durationMinutes} min` : ""}
                 {v.students > 0 ? ` · ${v.students} enrolled` : ""}
               </option>
