@@ -105,6 +105,8 @@ import { AdmissionCampaignsPanel } from "@/components/admissions/AdmissionCampai
 import { AdmissionCrmChatInbox } from "@/components/admissions/AdmissionCrmChatInbox";
 import { AdmissionsKbPanel } from "@/components/admissions/AdmissionsKbPanel";
 import { MarketingPanel } from "@/components/admissions/MarketingPanel";
+import { VillageDemographicsGrid } from "@/components/admissions/VillageDemographicsGrid";
+import { TENANT } from "@/lib/types";
 import { ReferralsPanel } from "@/components/admissions/ReferralsPanel";
 import { LeadTimeline } from "@/components/admissions/LeadTimeline";
 import { LeadExtractPanel } from "@/components/admissions/LeadExtractPanel";
@@ -129,6 +131,7 @@ type AdmTab =
   | "crm_chat"
   | "kb"
   | "marketing"
+  | "village_market"
   | "referrals"
   | "reports";
 
@@ -165,6 +168,7 @@ export function AdmissionsWorkspace() {
       "crm_chat",
       "kb",
       "marketing",
+      "village_market",
       "referrals",
       "reports",
     ];
@@ -344,6 +348,7 @@ export function AdmissionsWorkspace() {
         tab === "crm_chat" ||
         tab === "kb" ||
         tab === "marketing" ||
+        tab === "village_market" ||
         tab === "referrals" ||
         tab === "reports")
     ) {
@@ -1077,6 +1082,7 @@ export function AdmissionsWorkspace() {
               next === "crm_chat" ||
               next === "kb" ||
               next === "marketing" ||
+              next === "village_market" ||
               next === "referrals" ||
               next === "reports")
           ) {
@@ -1102,6 +1108,7 @@ export function AdmissionsWorkspace() {
                 { id: "crm_chat", label: "CRM parent chat", tone: "navy" },
                 { id: "kb", label: "Knowledge base", tone: "sky" },
                 { id: "marketing", label: "Marketing", tone: "coral" },
+                { id: "village_market", label: "Village market", tone: "sky" },
                 { id: "referrals", label: "Referrals & stories", tone: "amber" },
                 { id: "reports", label: "Report", tone: "green" },
               ] as const)
@@ -1673,6 +1680,14 @@ export function AdmissionsWorkspace() {
 
       {tab === "marketing" ? (
         <MarketingPanel masters={masters} admissions={state} canEdit={canCreate} by={session.fullName} />
+      ) : null}
+
+      {tab === "village_market" ? (
+        <VillageDemographicsGrid
+          lat={TENANT.schoolLat}
+          lon={TENANT.schoolLng}
+          academicYearCode={session.academicYearCode || ""}
+        />
       ) : null}
 
       {tab === "referrals" && state ? (

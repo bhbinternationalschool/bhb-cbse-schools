@@ -66,6 +66,19 @@ count_metric() {
       # no shared sticky header, zebra, density, or empty/skeleton states.
       grep -rl '<table' "$SRC" 2>/dev/null \
         | grep -vE 'ui/(erp-roster|data-table)\.tsx' | wc -l ;;
+    duplicate_migration_versions)
+      # Two migration files sharing one numeric prefix. The prefix IS the
+      # migration version: Supabase keys supabase_migrations.schema_migrations
+      # on it, so on a fresh apply one file can be recorded as already-run and
+      # skipped, and the sort order between the pair is arbitrary either way.
+      # Counts distinct COLLIDING versions, not files.
+      #
+      # `ls <dir>` rather than `ls <dir>/*.sql | xargs basename`: the repo path
+      # contains a space ("CBSE Schools"), and xargs splits on it, inventing
+      # duplicates out of the path fragments. Listing the directory yields bare
+      # filenames, which have no spaces.
+      ls "$ROOT/supabase/migrations" 2>/dev/null \
+        | grep '\.sql$' | sed 's/_.*//' | sort | uniq -d | wc -l ;;
     *)
       echo "-1" ;;
   esac

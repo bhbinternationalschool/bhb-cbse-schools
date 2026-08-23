@@ -183,6 +183,10 @@ jobs:
           npm run test:wa-templates-automation
           npm run test:fee-student-search
 
+      - name: Test — admissions village market
+        working-directory: apps/web
+        run: npm run test:village-market
+
   build:
     name: Production build
     runs-on: ubuntu-latest
