@@ -5,6 +5,7 @@
 import type { AccountsState } from "@/lib/accountsTypes";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
+import { trackDeskPush } from "@/lib/deskSyncStatus";
 
 const META_KEY = "bhb_accounts_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -79,8 +80,22 @@ function deskPayload(state: AccountsState) {
   };
 }
 
+/**
+ * Push the accounts desk to the server, and record whether it landed.
+ *
+ * The previous version lost a failure two ways: the `catch` fired only when
+ * the request threw, and a response that was merely not ok fell past the
+ * success branch having done nothing — no write, no log, no error. A role
+ * without server-side `accounts:edit` therefore produced a screen that said
+ * "saved" and a server that never heard about it.
+ *
+ * The outcome now goes through trackDeskPush, which records it and raises
+ * `bhb-desk-sync-failed` for the workspace to surface. The server's own error
+ * message is passed through rather than replaced with a generic one: "Your
+ * role cannot write accounts" is actionable and "save failed" is not.
+ */
 async function pushAccountsDeskApi(state: AccountsState) {
-  try {
+  await trackDeskPush("accounts", async () => {
     const res = await fetch("/api/school-data/accounts-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -92,15 +107,30 @@ async function pushAccountsDeskApi(state: AccountsState) {
       coaCount?: number;
       error?: string;
     } | null;
+
     if (res.ok && body?.ok) {
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         coaCount: body.coaCount ?? state.coaAccounts.length,
       });
+      return { ok: true, status: res.status };
     }
-  } catch (e) {
-    console.warn("[accounts-db] desk push error", e);
-  }
+    return { ok: false, status: res.status, error: body?.error };
+  });
+}
+
+/**
+ * Push what the desk holds right now.
+ *
+ * Retry deliberately re-pushes current state rather than replaying a stored
+ * payload: a desk push carries the whole module, and the freshest version is
+ * both smaller to reason about and the one the operator actually wants saved.
+ */
+export async function retryAccountsDeskSync(state: AccountsState): Promise<boolean> {
+  if (!accountsNormalizedSyncEnabled() || typeof window === "undefined") return false;
+  await pushAccountsDeskApi(state);
+  const { deskSyncState } = await import("@/lib/deskSyncStatus");
+  return deskSyncState("accounts").consecutiveFailures === 0;
 }
 
 export async function fetchAccountsDeskFromApi() {

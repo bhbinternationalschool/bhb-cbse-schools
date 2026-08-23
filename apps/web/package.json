@@ -51,6 +51,7 @@
     "test:masters-merge": "npx tsx src/lib/mastersMergePolicy.selftest.ts",
     "test:erp-chat": "npx tsx src/lib/erpChat.selftest.ts",
     "test:accounts": "npx tsx src/lib/accounts.selftest.ts",
+    "test:desk-sync-status": "npx tsx src/lib/deskSyncStatus.selftest.ts",
     "test:ledger": "npx tsx src/lib/ledger/ledger.selftest.ts",
     "test:ledger:live": "npx --yes dotenv-cli -e .env.verify.local -o -- npx tsx src/lib/ledger/ledger.selftest.ts",
     "test:wa-templates-automation": "npx tsx src/lib/waTemplatesAutomation.selftest.ts",
