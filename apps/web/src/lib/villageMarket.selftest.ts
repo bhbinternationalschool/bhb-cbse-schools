@@ -27,7 +27,12 @@ import {
   projectPopulation,
   leadsPlacedBy,
   toNumber,
+  buildMetaCustomAudienceCsv,
+  buildVillageTargetingCsv,
+  countUniquePhones,
+  csvCell,
   type VillageAliasRow,
+  type VillageContactRow,
   type VillageMarketRow,
 } from "./villageMarket";
 import {
@@ -375,5 +380,78 @@ assert.equal(
   0,
   "ignoring everything places nothing",
 );
+
+/* ── CSV export ─────────────────────────────────────────────── */
+
+// The whole point of the targeting sheet is a cell holding a comma-separated
+// list of numbers. Unquoted, that shifts every column after it and the file
+// silently misreports which village each number belongs to.
+assert.equal(csvCell("plain"), "plain");
+assert.equal(csvCell("+919876543210, +919876543211"), '"+919876543210, +919876543211"');
+assert.equal(csvCell('He said "hi"'), '"He said ""hi"""');
+assert.equal(csvCell("line\r\nbreak"), '"line\r\nbreak"');
+assert.equal(csvCell(null), "");
+assert.equal(csvCell(0), "0", "zero is a value, not an empty cell");
+
+const contacts: VillageContactRow[] = [
+  {
+    villageId: "v1",
+    // A real PCA name with a comma in it — this is why quoting matters.
+    villageName: "Ayar, Rural",
+    blockName: "Harhua",
+    latitude: null,
+    longitude: null,
+    childPool: 907,
+    leadCount: 58,
+    phones: ["+919000000001", "+919000000002"],
+  },
+  {
+    villageId: "v2",
+    villageName: "Puari Kala",
+    blockName: "Harhua",
+    latitude: 25.44,
+    longitude: 82.95,
+    childPool: 1546,
+    leadCount: 35,
+    // Shares a number with v1: a household that moved, or one parent listed
+    // in two villages. The audience file must not upload it twice.
+    phones: ["+919000000002", "+919000000003"],
+  },
+];
+
+const targeting = buildVillageTargetingCsv(contacts).split("\r\n");
+assert.equal(targeting.length, 3, "header + one row per settlement");
+assert.ok(targeting[0].startsWith("Village Name,Block,Latitude,Longitude"));
+assert.ok(
+  targeting[1].startsWith('"Ayar, Rural",Harhua,,,'),
+  `name with a comma must be quoted, and missing coords empty — got ${targeting[1]}`,
+);
+assert.ok(
+  targeting[1].endsWith('"+919000000001, +919000000002"'),
+  "the phone list is one quoted cell",
+);
+// Every data row must have the same field count as the header once parsed.
+assert.equal(
+  (targeting[1].match(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/g) ?? []).length,
+  7,
+  "8 columns => 7 unquoted separators, whatever the values contain",
+);
+assert.ok(targeting[2].includes(",25.44,82.95,"), "real coordinates pass through");
+
+const audience = buildMetaCustomAudienceCsv(contacts).split("\r\n");
+assert.equal(audience[0], "phone,country", "Meta's own column names, lowercase");
+assert.deepEqual(
+  audience.slice(1),
+  ["+919000000001,IN", "+919000000002,IN", "+919000000003,IN"],
+  "one identifier per row, de-duplicated across settlements",
+);
+assert.equal(countUniquePhones(contacts), 3, "the shared number counts once");
+assert.equal(countUniquePhones([]), 0);
+
+// A settlement with no reachable parent still belongs on the planning sheet
+// (it is a real gap to look at) but contributes nothing to the audience.
+const empty: VillageContactRow[] = [{ ...contacts[0], phones: [] }];
+assert.equal(buildVillageTargetingCsv(empty).split("\r\n").length, 2);
+assert.equal(buildMetaCustomAudienceCsv(empty), "phone,country");
 
 console.log("  ok");

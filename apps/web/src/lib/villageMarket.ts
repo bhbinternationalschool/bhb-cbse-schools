@@ -405,6 +405,107 @@ export function leadsPlacedBy(aliases: VillageAliasRow[]): number {
     .reduce((sum, a) => sum + (a.leadCountAtConfirm || 0), 0);
 }
 
+/* ─── Ad-targeting export ──────────────────────────────────── */
+
+/** One settlement's contactable parents, fetched only on an explicit export. */
+export type VillageContactRow = {
+  villageId: string;
+  villageName: string;
+  blockName: string;
+  latitude: number | null;
+  longitude: number | null;
+  childPool: number;
+  leadCount: number;
+  /** Distinct E.164 numbers. Empty when nobody in this village is reachable. */
+  phones: string[];
+};
+
+export type VillageContactsResponse = {
+  ok: true;
+  rows: VillageContactRow[];
+  totals: { settlements: number; contacts: number; withCoordinates: number };
+};
+
+export type VillageContactsResult = VillageContactsResponse | { ok: false; error: string };
+
+/** RFC 4180: quote when the value contains a comma, quote or newline. */
+export function csvCell(value: string | number | null | undefined): string {
+  if (value === null || value === undefined) return "";
+  const s = String(value);
+  if (!/[",\r\n]/.test(s)) return s;
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
+export function csvRow(cells: (string | number | null | undefined)[]): string {
+  return cells.map(csvCell).join(",");
+}
+
+/**
+ * The planning sheet: one row per settlement, with its whole contact list in
+ * a single cell.
+ *
+ * This is NOT a Meta customer-list upload and will not import as one — that
+ * format is one row per person and has no village or coordinate columns. This
+ * is the sheet you plan location targeting and field routes from, and hand to
+ * whoever sets the campaign up.
+ */
+export function buildVillageTargetingCsv(rows: VillageContactRow[]): string {
+  const header = [
+    "Village Name",
+    "Block",
+    "Latitude",
+    "Longitude",
+    "Estimated Children 0-6",
+    "Registered Leads",
+    "Contactable Numbers",
+    "Collected Parent Phone Numbers",
+  ];
+  const body = rows.map((r) =>
+    csvRow([
+      r.villageName,
+      r.blockName,
+      r.latitude ?? "",
+      r.longitude ?? "",
+      r.childPool,
+      r.leadCount,
+      r.phones.length,
+      // The comma-separated blob is why every cell goes through csvCell:
+      // unquoted, it would shift every column after it.
+      r.phones.join(", "),
+    ]),
+  );
+  return [csvRow(header), ...body].join("\r\n");
+}
+
+/**
+ * The file Meta Ads Manager actually ingests for a Customer List audience:
+ * one identifier per row, using Meta's own column names.
+ *
+ * Numbers are E.164 because that is what matches; `country` is included
+ * because Meta's matcher uses it to disambiguate. Nothing inaccurate is
+ * added — a wrong city or name column lowers the match rate rather than
+ * raising it.
+ */
+export function buildMetaCustomAudienceCsv(rows: VillageContactRow[]): string {
+  const seen = new Set<string>();
+  const lines = [csvRow(["phone", "country"])];
+  for (const r of rows) {
+    for (const phone of r.phones) {
+      if (seen.has(phone)) continue;
+      seen.add(phone);
+      lines.push(csvRow([phone, "IN"]));
+    }
+  }
+  return lines.join("\r\n");
+}
+
+/** Numbers exported, de-duplicated across settlements. */
+export function countUniquePhones(rows: VillageContactRow[]): number {
+  const seen = new Set<string>();
+  for (const r of rows) for (const p of r.phones) seen.add(p);
+  return seen.size;
+}
+
 /* ─── Component state ──────────────────────────────────────── */
 
 export type VillageGridQuery = {

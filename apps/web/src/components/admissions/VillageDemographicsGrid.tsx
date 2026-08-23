@@ -23,6 +23,7 @@ import {
   Compass,
   MapPin,
   RefreshCw,
+  Download,
   Target,
   TrendingUp,
   Users,
@@ -34,6 +35,9 @@ import {
   type BlockMarketRow,
   DEFAULT_ORIGIN,
   DEFAULT_RADIUS_M,
+  buildMetaCustomAudienceCsv,
+  buildVillageTargetingCsv,
+  countUniquePhones,
   formatIndianNumber,
   formatPct,
   opportunityScore,
@@ -44,6 +48,7 @@ import {
   type VillageMarketRow,
   type VillageQueryMode,
   type SettlementFilter,
+  type VillageContactsResult,
   type VillagesNearbyResult,
 } from "@/lib/villageMarket";
 
@@ -542,6 +547,31 @@ function LoadingGrid() {
 
 /* ─── Container ────────────────────────────────────────────── */
 
+/**
+ * Hand the browser a file.
+ *
+ * The object URL is revoked on the next tick rather than immediately: Safari
+ * aborts the download if the URL dies before it has read the blob.
+ */
+function downloadCsv(filename: string, csv: string) {
+  // A BOM so Excel opens UTF-8 correctly. Meta's uploader tolerates it; a
+  // reviewer opening the planning sheet in Excel does not tolerate its absence.
+  const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function stamp(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 /** Everything the server needs; changing any of these refetches. */
 type ServerFilters = {
   mode: VillageQueryMode;
@@ -717,6 +747,84 @@ function VillageDemographicsGridInner({
     }
   }, [data, sort, status]);
 
+  const [exporting, setExporting] = useState<"targeting" | "audience" | null>(null);
+  const [exportNote, setExportNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    const t = exportNote ? window.setTimeout(() => setExportNote(null), 6000) : null;
+    return () => {
+      if (t) window.clearTimeout(t);
+    };
+  }, [exportNote]);
+
+  /**
+   * Fetch contacts and hand over a file.
+   *
+   * Contacts are deliberately not in the dashboard payload — they are pulled
+   * only here, on an explicit press, and the server audits the pull.
+   */
+  const runExport = useCallback(
+    async (kind: "targeting" | "audience") => {
+      if (exporting) return;
+      setExporting(kind);
+      setExportNote(null);
+      const params = new URLSearchParams({ settlementType, onlyWithContacts: "true" });
+      if (blocks.length) params.set("blocks", blocks.join(","));
+      if (minChildPool > 0) params.set("minChildPool", String(minChildPool));
+      if (academicYearCode) params.set("academicYearCode", academicYearCode);
+
+      try {
+        const res = await fetch(`/api/admissions/village-contacts?${params}`, {
+          cache: "no-store",
+        });
+        const body = (await res.json()) as VillageContactsResult;
+        if (!res.ok || !body.ok) {
+          const message =
+            "error" in body && body.error ? body.error : `Export failed (${res.status})`;
+          console.warn("[VillageDemographicsGrid] export failed:", message);
+          setExportNote(message);
+          return;
+        }
+        if (!body.rows.length) {
+          setExportNote(
+            "No settlement in this selection has a contactable parent number yet.",
+          );
+          return;
+        }
+
+        const scope = blocks.length ? blocks.join("-").replace(/\s+/g, "") : "all-blocks";
+        if (kind === "audience") {
+          const unique = countUniquePhones(body.rows);
+          downloadCsv(
+            `meta-custom-audience-${scope}-${stamp()}.csv`,
+            buildMetaCustomAudienceCsv(body.rows),
+          );
+          setExportNote(
+            `${formatIndianNumber(unique)} number${unique === 1 ? "" : "s"} exported for a Meta Customer List audience.`,
+          );
+        } else {
+          downloadCsv(
+            `village-targeting-${scope}-${stamp()}.csv`,
+            buildVillageTargetingCsv(body.rows),
+          );
+          setExportNote(
+            `${formatIndianNumber(body.totals.settlements)} settlements, ${formatIndianNumber(body.totals.contacts)} numbers.` +
+              (body.totals.withCoordinates < body.totals.settlements
+                ? ` Coordinates are blank for ${formatIndianNumber(body.totals.settlements - body.totals.withCoordinates)} of them — the census carries no lat/long.`
+                : ""),
+          );
+        }
+      } catch (e) {
+        const message = e instanceof Error ? e.message : "Network error";
+        console.error("[VillageDemographicsGrid] export failed:", message);
+        setExportNote(`Could not reach the server (${message}).`);
+      } finally {
+        setExporting(null);
+      }
+    },
+    [exporting, settlementType, blocks, minChildPool, academicYearCode],
+  );
+
   const busy = state.status === "loading";
   const visible = sorted.slice(0, page * PAGE_SIZE);
   const hasMore = sorted.length > visible.length;
@@ -795,6 +903,31 @@ function VillageDemographicsGridInner({
               <RefreshCw className={`size-3.5 ${busy ? "animate-spin" : ""}`} aria-hidden />
               {busy ? "Loading" : "Refresh"}
             </button>
+
+            {canEdit ? (
+              <>
+                <button
+                  type="button"
+                  className={erpBtnOutline}
+                  disabled={!!exporting}
+                  onClick={() => void runExport("targeting")}
+                  title="One row per village with its whole contact list in a single cell. A planning sheet — not a Meta upload."
+                >
+                  <Download className="size-3.5" aria-hidden />
+                  {exporting === "targeting" ? "Preparing…" : "Export Meta Ads Targeting CSV"}
+                </button>
+                <button
+                  type="button"
+                  className={erpBtnOutline}
+                  disabled={!!exporting}
+                  onClick={() => void runExport("audience")}
+                  title="One number per row in Meta's own column format — this is the file Ads Manager ingests as a Customer List."
+                >
+                  <Download className="size-3.5" aria-hidden />
+                  {exporting === "audience" ? "Preparing…" : "Export Meta Customer List"}
+                </button>
+              </>
+            ) : null}
           </div>
         </div>
         <p className="text-micro text-[var(--muted)]">
@@ -805,6 +938,22 @@ function VillageDemographicsGridInner({
             ? ` · OpenStreetMap data ${data.source.cached ? "cached" : "fetched"} ${new Date(data.source.fetchedAt).toLocaleString("en-IN")}`
             : ""}
         </p>
+
+        {exportNote ? (
+          <p className="rounded-lg border border-[var(--border)] bg-[var(--accent)] px-3 py-1.5 text-xs text-[var(--brand-deep)]">
+            {exportNote}
+          </p>
+        ) : null}
+
+        {canEdit ? (
+          <p className="text-micro text-[var(--muted)]">
+            Exports follow the filters above and include only settlements with a
+            contactable number. They carry parents&rsquo; phone numbers, so every
+            download is recorded in the audit log against your name — and the
+            families must already have been told their number may be used this
+            way before it goes to an ad platform.
+          </p>
+        ) : null}
       </header>
 
       {state.status === "error" ? (
