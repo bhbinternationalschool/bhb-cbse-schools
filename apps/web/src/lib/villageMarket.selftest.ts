@@ -167,6 +167,8 @@ function row(over: Partial<VillageMarketRow>): VillageMarketRow {
       projected: { targetYear: 2026, growthMultiplier: 1.19, childRatio: 0.14, popTotal: 1190, child06Total: 500, annualBirthCohort: 71 },
     },
     leads: { total: 0, enrolled: 0, open: 0, lost: 0, lastLeadAt: null },
+    travel: null,
+    scores: null,
     penetrationPct: 0,
     enrolledPenetrationPct: 0,
     penetrationBand: "untouched",

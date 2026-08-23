@@ -733,6 +733,11 @@ export async function buildVillagesNearby(
   let leadCounts = new Map<string, VillageLeadCountRow>();
   let leadCoverage: LeadCoverage | null = null;
   let leadsUnavailable = !tenant;
+  const travelById = new Map<string, { distanceKm: number | null; minutes: number | null; source: string }>();
+  const scoresById = new Map<
+    string,
+    { hot: number; warm: number; cold: number; enrolled: number; avgScore: number }
+  >();
 
   if (tenant) {
     leadCoverage = await fetchLeadCoverage(
@@ -756,6 +761,47 @@ export async function buildVillagesNearby(
       query.academicYearCode,
     );
     leadCounts = counts;
+
+    // Travel times and score mix are optional enrichments: a village with
+    // neither still renders, showing "not resolved" rather than a zero.
+    if (ids.length) {
+      const [travelRes, scoreRes] = await Promise.all([
+        tenant.sb
+          .from("village_travel")
+          .select("village_id, distance_km, duration_minutes, source")
+          .eq("tenant_id", tenant.tenantId)
+          .in("village_id", ids),
+        tenant.sb.rpc("village_lead_score_summary", {
+          p_tenant_id: tenant.tenantId,
+          p_village_ids: ids,
+        }),
+      ]);
+      if (travelRes.error) {
+        console.warn(`${LOG} travel lookup failed: ${travelRes.error.message}`);
+      } else {
+        for (const r of (travelRes.data as Record<string, unknown>[] | null) ?? []) {
+          const km = r.distance_km;
+          travelById.set(String(r.village_id), {
+            distanceKm: km === null || km === undefined ? null : Number(km),
+            minutes: r.duration_minutes === null ? null : Number(r.duration_minutes),
+            source: String(r.source ?? ""),
+          });
+        }
+      }
+      if (scoreRes.error) {
+        console.warn(`${LOG} score summary failed: ${scoreRes.error.message}`);
+      } else {
+        for (const r of (scoreRes.data as Record<string, unknown>[] | null) ?? []) {
+          scoresById.set(String(r.village_id), {
+            hot: Number(r.hot) || 0,
+            warm: Number(r.warm) || 0,
+            cold: Number(r.cold) || 0,
+            enrolled: Number(r.enrolled) || 0,
+            avgScore: Number(r.avg_score) || 0,
+          });
+        }
+      }
+    }
     if (failed) {
       leadsUnavailable = true;
       warnings.push(
@@ -834,6 +880,8 @@ export async function buildVillagesNearby(
         lost: lead?.lost_count ?? 0,
         lastLeadAt: lead?.last_lead_at ?? null,
       },
+      travel: row ? (travelById.get(row.id) as VillageMarketRow["travel"]) ?? null : null,
+      scores: row ? (scoresById.get(row.id) ?? null) : null,
       penetrationPct: pct,
       enrolledPenetrationPct: enrolledPct,
       penetrationBand: penetrationBand(pct),

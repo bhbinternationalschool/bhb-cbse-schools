@@ -201,6 +201,28 @@ export type VillageMarketRow = {
     lastLeadAt: string | null;
   };
 
+  /** Road travel to campus. Null until resolved — it costs API quota. */
+  travel: {
+    distanceKm: number | null;
+    minutes: number | null;
+    /**
+     * "google" is a real road route. "haversine" is a straight line, which
+     * around Varanasi is optimistic by a wide margin — the UI must never let
+     * the two read the same.
+     */
+    source: "google" | "haversine" | "unresolved" | "";
+  } | null;
+
+  /** Lead temperature mix here. Null before the first scoring run. */
+  scores: {
+    hot: number;
+    warm: number;
+    cold: number;
+    enrolled: number;
+    /** Mean excluding enrolled, who are a flat 100 by definition. */
+    avgScore: number;
+  } | null;
+
   /** leads.total ÷ projected 0-6 pool × 100. Null when the pool is unknown. */
   penetrationPct: number | null;
   /** enrolled ÷ projected 0-6 pool × 100. Null when the pool is unknown. */

@@ -22,6 +22,7 @@ import {
   Baby,
   Compass,
   MapPin,
+  MessageCircle,
   RefreshCw,
   Download,
   Target,
@@ -30,7 +31,7 @@ import {
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { VillageAliasPanel } from "@/components/admissions/VillageAliasPanel";
-import { erpBtnOutline, erpField } from "@/components/ui/erp-ui";
+import { erpBtn, erpBtnOutline, erpField } from "@/components/ui/erp-ui";
 import {
   type BlockMarketRow,
   DEFAULT_ORIGIN,
@@ -347,6 +348,33 @@ function VillageCard({ row }: { row: VillageMarketRow }) {
             </p>
           ) : null}
 
+          {row.travel || row.scores ? (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-2.5 py-1.5 text-micro">
+              {row.travel && row.travel.distanceKm !== null ? (
+                <span className="inline-flex items-center gap-1 text-[var(--muted)]">
+                  <Compass className="size-3" aria-hidden />
+                  {row.travel.minutes !== null
+                    ? `${row.travel.minutes} min drive`
+                    : `${row.travel.distanceKm.toFixed(1)} km`}
+                  {/* A straight line reads optimistically around Varanasi, so
+                      it is never allowed to look like a road route. */}
+                  {row.travel.source === "haversine" ? (
+                    <span className="text-[var(--warning)]"> (straight line)</span>
+                  ) : null}
+                </span>
+              ) : (
+                <span className="text-[var(--muted)]">Travel time not resolved</span>
+              )}
+              {row.scores && row.scores.hot + row.scores.warm > 0 ? (
+                <span className="inline-flex items-center gap-1 font-semibold text-[var(--brand-deep)]">
+                  {row.scores.hot > 0 ? `${row.scores.hot} hot` : ""}
+                  {row.scores.hot > 0 && row.scores.warm > 0 ? " · " : ""}
+                  {row.scores.warm > 0 ? `${row.scores.warm} warm` : ""}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+
           <dl className="grid grid-cols-3 gap-2 text-micro">
             <div>
               <dt className="text-[var(--muted)]">Enrolled</dt>
@@ -572,6 +600,24 @@ function stamp(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+/** What a campaign preview returns, before anything is sent. */
+type CampaignPreview = {
+  campaignId: string;
+  previewOnly: boolean;
+  audience: number;
+  templateName: string;
+  counts: {
+    freeform: number;
+    template: number;
+    skippedOptedOut: number;
+    skippedNoMobile: number;
+    sent: number;
+    failed: number;
+  };
+  recipients: { leadId: string; childName: string; villageName: string; route: string; reason: string; draft?: string }[];
+  warnings: string[];
+};
+
 /** Everything the server needs; changing any of these refetches. */
 type ServerFilters = {
   mode: VillageQueryMode;
@@ -749,6 +795,8 @@ function VillageDemographicsGridInner({
 
   const [exporting, setExporting] = useState<"targeting" | "audience" | null>(null);
   const [exportNote, setExportNote] = useState<string | null>(null);
+  const [working, setWorking] = useState<"travel" | "rescore" | "campaign" | null>(null);
+  const [campaign, setCampaign] = useState<CampaignPreview | null>(null);
 
   useEffect(() => {
     const t = exportNote ? window.setTimeout(() => setExportNote(null), 6000) : null;
@@ -823,6 +871,34 @@ function VillageDemographicsGridInner({
       }
     },
     [exporting, settlementType, blocks, minChildPool, academicYearCode],
+  );
+
+  /** POST one intelligence action and report what it did. */
+  const runAction = useCallback(
+    async (kind: "travel" | "rescore" | "campaign", body: Record<string, unknown>) => {
+      if (working) return null;
+      setWorking(kind);
+      setExportNote(null);
+      try {
+        const res = await fetch("/api/admissions/lead-intelligence", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = (await res.json()) as Record<string, unknown> & { ok?: boolean; error?: string };
+        if (!res.ok || !data.ok) {
+          setExportNote(data.error || `Failed (${res.status})`);
+          return null;
+        }
+        return data;
+      } catch (e) {
+        setExportNote(e instanceof Error ? e.message : "Network error");
+        return null;
+      } finally {
+        setWorking(null);
+      }
+    },
+    [working],
   );
 
   const busy = state.status === "loading";
@@ -926,6 +1002,70 @@ function VillageDemographicsGridInner({
                   <Download className="size-3.5" aria-hidden />
                   {exporting === "audience" ? "Preparing…" : "Export Meta Customer List"}
                 </button>
+
+                {mode === "block" && blocks.length ? (
+                  <button
+                    type="button"
+                    className={erpBtnOutline}
+                    disabled={!!working}
+                    onClick={async () => {
+                      const r = await runAction("travel", {
+                        action: "resolveTravel",
+                        blocks,
+                      });
+                      if (r) {
+                        setExportNote(
+                          `Travel: ${r.routed} routed, ${r.fellBackToStraightLine} straight-line, ` +
+                            `${r.failed} unplaceable, ${r.alreadyCached} already cached` +
+                            (r.more ? " — press again for the rest." : "."),
+                        );
+                        reload();
+                      }
+                    }}
+                    title="Geocodes each village then asks Google Distance Matrix for the drive to campus. Costs API quota; results are cached forever."
+                  >
+                    <Compass className="size-3.5" aria-hidden />
+                    {working === "travel" ? "Resolving…" : `Resolve travel times (${blocks[0]})`}
+                  </button>
+                ) : null}
+
+                <button
+                  type="button"
+                  className={erpBtnOutline}
+                  disabled={!!working}
+                  onClick={async () => {
+                    const r = await runAction("rescore", { action: "rescore" });
+                    if (r) {
+                      const by = r.byStatus as Record<string, number>;
+                      setExportNote(
+                        `Re-scored ${r.scored} leads — ${by.hot} hot, ${by.warm} warm, ${by.cold} cold, ${by.enrolled} enrolled.`,
+                      );
+                      reload();
+                    }
+                  }}
+                >
+                  <TrendingUp className="size-3.5" aria-hidden />
+                  {working === "rescore" ? "Scoring…" : "Re-score leads"}
+                </button>
+
+                <button
+                  type="button"
+                  className={erpBtnOutline}
+                  disabled={!!working}
+                  onClick={async () => {
+                    // Preview first, always. Nothing is sent by this press.
+                    const r = await runAction("campaign", {
+                      action: "followUpCampaign",
+                      blocks,
+                      language: "hi",
+                      confirm: false,
+                    });
+                    if (r) setCampaign(r as unknown as CampaignPreview);
+                  }}
+                >
+                  <MessageCircle className="size-3.5" aria-hidden />
+                  {working === "campaign" ? "Preparing…" : "Trigger AI WhatsApp Follow-up"}
+                </button>
               </>
             ) : null}
           </div>
@@ -943,6 +1083,116 @@ function VillageDemographicsGridInner({
           <p className="rounded-lg border border-[var(--border)] bg-[var(--accent)] px-3 py-1.5 text-xs text-[var(--brand-deep)]">
             {exportNote}
           </p>
+        ) : null}
+
+        {campaign ? (
+          <div className="space-y-2 rounded-xl border border-[var(--brand-mid)] bg-[var(--surface-sunken)] px-3 py-2.5">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h4 className="text-sm font-semibold text-[var(--brand-deep)]">
+                {campaign.previewOnly
+                  ? "WhatsApp follow-up — nothing sent yet"
+                  : "WhatsApp follow-up — sent"}
+              </h4>
+              <button
+                type="button"
+                className="text-micro font-semibold text-[var(--info)] underline"
+                onClick={() => setCampaign(null)}
+              >
+                Close
+              </button>
+            </div>
+
+            {campaign.previewOnly ? (
+              <>
+                <p className="text-xs text-[var(--muted)]">
+                  {formatIndianNumber(campaign.audience)} lead
+                  {campaign.audience === 1 ? "" : "s"} in scope ·{" "}
+                  <strong>{campaign.counts.freeform}</strong> can get a personal AI
+                  message (they wrote to us in the last 24 hours) ·{" "}
+                  <strong>{campaign.counts.template}</strong> can only get the
+                  approved template{campaign.templateName ? ` "${campaign.templateName}"` : ""} ·{" "}
+                  {campaign.counts.skippedOptedOut + campaign.counts.skippedNoMobile} skipped.
+                </p>
+                <p className="text-micro text-[var(--muted)]">
+                  Meta only allows free-form text within 24 hours of the family
+                  writing to us. Everyone else must receive a template whose wording
+                  Meta approved — an AI cannot write that message.
+                </p>
+
+                {campaign.recipients.some((r) => r.draft) ? (
+                  <details className="text-micro">
+                    <summary className="cursor-pointer font-semibold text-[var(--brand-deep)]">
+                      Read the AI drafts before sending
+                    </summary>
+                    <ul className="mt-1 space-y-1">
+                      {campaign.recipients
+                        .filter((r) => r.draft)
+                        .slice(0, 8)
+                        .map((r) => (
+                          <li
+                            key={r.leadId}
+                            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5"
+                          >
+                            <span className="font-semibold text-[var(--brand-deep)]">
+                              {r.childName}
+                              {r.villageName ? ` · ${r.villageName}` : ""}
+                            </span>
+                            <p className="mt-0.5 whitespace-pre-wrap text-[var(--muted)]">
+                              {r.draft}
+                            </p>
+                          </li>
+                        ))}
+                    </ul>
+                  </details>
+                ) : null}
+
+                {campaign.warnings.map((w) => (
+                  <p
+                    key={w}
+                    className="flex items-start gap-1.5 text-micro text-[var(--warning)]"
+                  >
+                    <AlertTriangle className="mt-0.5 size-3 shrink-0" aria-hidden />
+                    {w}
+                  </p>
+                ))}
+
+                <button
+                  type="button"
+                  className={erpBtn}
+                  disabled={
+                    !!working ||
+                    campaign.counts.freeform + campaign.counts.template === 0
+                  }
+                  onClick={async () => {
+                    const r = await runAction("campaign", {
+                      action: "followUpCampaign",
+                      blocks,
+                      language: "hi",
+                      confirm: true,
+                    });
+                    if (r) {
+                      setCampaign(r as unknown as CampaignPreview);
+                      reload();
+                    }
+                  }}
+                >
+                  <MessageCircle className="size-3.5" aria-hidden />
+                  {working === "campaign"
+                    ? "Sending…"
+                    : `Send to ${campaign.counts.freeform + campaign.counts.template} famil${
+                        campaign.counts.freeform + campaign.counts.template === 1 ? "y" : "ies"
+                      }`}
+                </button>
+              </>
+            ) : (
+              <p className="text-xs text-[var(--brand-deep)]">
+                {formatIndianNumber(campaign.counts.sent)} sent,{" "}
+                {formatIndianNumber(campaign.counts.failed)} failed. Each send is
+                logged as a touchpoint, so the lead scores will reflect it on the
+                next re-score.
+              </p>
+            )}
+          </div>
         ) : null}
 
         {canEdit ? (
