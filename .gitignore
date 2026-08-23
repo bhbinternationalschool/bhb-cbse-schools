@@ -52,3 +52,9 @@ cbse_school_mobile/play-store-assets/app-release.aab
 
 # Supabase CLI scratch (npx supabase writes its version cache here)
 supabase/.temp/
+
+# Deploy service-account key — must never be committed. It normally lives
+# outside the repo (~/.config/bhb-deploy/), this is a guard in case one is
+# ever dropped in the tree by mistake.
+**/deploy-sa*.json
+**/bhb-deploy*.json
