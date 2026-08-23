@@ -118,12 +118,19 @@ export function matchVillageInAddress(
   // "Puarikala" and "Puarikalan" where the census says "Puari Kala"; that is
   // 25 of the 55 households pass 1 could not place. Still an exact string
   // comparison, just with spacing normalised out of both sides.
-  const addrSquashed = addr.replace(/\s+/g, "");
+  //
+  // Token equality, NOT substring. The first version used
+  // addrSquashed.includes(squashed) and that reintroduced the very bug pass 1
+  // exists to avoid: "Pahari" matched inside "Paharia" and put five families
+  // in a village 12 km from the stop whose name their address actually
+  // carried. "Shambhu Pur" matched inside "Pali Shambhupur" the same way.
+  // Comparing whole words on both sides cannot do that.
+  const addrWords = addr.split(" ").filter(Boolean);
   for (const name of namesLongestFirst) {
     const squashed = name.replace(/\s+/g, "");
     if (squashed.length < MIN_NAME + 2) continue;
-    if (!addrSquashed.includes(squashed)) continue;
-    const hit = decide(name, `${name} (as "${squashed}")`);
+    if (!addrWords.some((w) => w === squashed)) continue;
+    const hit = decide(name, `${name} (written "${squashed}")`);
     if (hit) return hit;
   }
 
