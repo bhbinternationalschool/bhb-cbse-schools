@@ -1,8 +1,12 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Camera, Loader2, ScanLine } from "lucide-react";
-import { readFileAsDataUrlForOcr, runSyllabusOcrApi } from "@/lib/ocrClient";
+import { Camera, ClipboardList, Loader2, ScanLine } from "lucide-react";
+import {
+  parseSyllabusTextApi,
+  readFileAsDataUrlForOcr,
+  runSyllabusOcrApi,
+} from "@/lib/ocrClient";
 import type { SyllabusImportChapter } from "@/lib/teaching";
 
 type ReviewTopic = { code: string; title: string; include: boolean };
@@ -30,6 +34,8 @@ export function SyllabusOcrImport(props: {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
+  const [pasteText, setPasteText] = useState("");
+  const [showPaste, setShowPaste] = useState(false);
   const [rows, setRows] = useState<ReviewChapter[] | null>(null);
   const [ignored, setIgnored] = useState<string[]>([]);
   const [rawText, setRawText] = useState("");
@@ -85,6 +91,42 @@ export function SyllabusOcrImport(props: {
     }
   }
 
+  async function onPaste() {
+    props.onError(null);
+    setBusy(true);
+    setRows(null);
+    setVerdict(null);
+    try {
+      // Same parser, same review, same no-invention rule as a scan — the only
+      // difference is the text arrived clean instead of through a camera.
+      const result = await parseSyllabusTextApi(pasteText);
+      if (!result.ok) {
+        props.onError(result.error || "Could not read that list");
+        return;
+      }
+      setRows(
+        (result.chapters ?? []).map((c) => ({
+          code: c.code,
+          title: c.title,
+          include: true,
+          confidence: c.confidence,
+          topics: (c.topics ?? []).map((t) => ({
+            code: t.code,
+            title: t.title,
+            include: true,
+          })),
+        })),
+      );
+      setIgnored(result.ignored ?? []);
+      setRawText(result.rawText ?? "");
+      setVerdict(result.quality?.verdict ?? null);
+      setOpen(true);
+      setShowPaste(false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function save() {
     if (!rows) return;
     const chapters: SyllabusImportChapter[] = rows
@@ -116,8 +158,9 @@ export function SyllabusOcrImport(props: {
             Import from the book
           </p>
           <p className="text-xs text-[var(--muted)]">
-            Photograph the contents page — chapters and topics are detected
-            for you to check before saving.
+            Paste the contents list from an e-book, or photograph a printed
+            page — chapters and topics are detected for you to check before
+            saving. Nothing is added to the plan until you confirm.
           </p>
         </div>
         <input
@@ -130,20 +173,63 @@ export function SyllabusOcrImport(props: {
           className="hidden"
           onChange={(e) => void onFile(e.target.files?.[0])}
         />
-        <button
-          type="button"
-          disabled={props.disabled || busy}
-          onClick={() => fileRef.current?.click()}
-          className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
-        >
-          {busy ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Camera className="h-4 w-4" />
-          )}
-          {busy ? "Reading…" : "Scan page"}
-        </button>
+        <div className="flex shrink-0 gap-2">
+          <button
+            type="button"
+            disabled={props.disabled || busy}
+            onClick={() => {
+              setShowPaste((v) => !v);
+              props.onError(null);
+            }}
+            className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-semibold text-[var(--ink)] disabled:opacity-50"
+          >
+            <ClipboardList className="h-4 w-4" />
+            Paste list
+          </button>
+          <button
+            type="button"
+            disabled={props.disabled || busy}
+            onClick={() => fileRef.current?.click()}
+            className="inline-flex items-center gap-2 rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
+          >
+            {busy ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Camera className="h-4 w-4" />
+            )}
+            {busy ? "Reading…" : "Scan page"}
+          </button>
+        </div>
       </div>
+
+      {showPaste ? (
+        <div className="mt-3 border-t border-[var(--border)] pt-3">
+          <label className="text-xs font-semibold text-[var(--muted)]">
+            Contents list from the book
+          </label>
+          <textarea
+            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--card)] p-2 text-sm"
+            rows={8}
+            value={pasteText}
+            onChange={(e) => setPasteText(e.target.value)}
+            placeholder={"Chapter 1  Knowing Our Numbers\n1.1 Introduction\n1.2 Comparing Numbers\nChapter 2  Whole Numbers\n…"}
+          />
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              type="button"
+              disabled={busy || !pasteText.trim()}
+              onClick={() => void onPaste()}
+              className="inline-flex items-center gap-2 rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {busy ? "Reading…" : "Detect chapters"}
+            </button>
+            <span className="text-[11px] text-[var(--muted)]">
+              Open the shelf, copy the contents page, paste it here.
+            </span>
+          </div>
+        </div>
+      ) : null}
 
       {open && rows ? (
         <div className="mt-3 space-y-3 border-t border-[var(--border)] pt-3">

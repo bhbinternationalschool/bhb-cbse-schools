@@ -22,7 +22,9 @@ import {
   EBOOK_SHELF_SEED,
   mergeEbookShelfSeed,
   normalizeEbook,
+  upsertEbookShelf,
   type LibraryEbook,
+  type LibraryState,
 } from "./library";
 
 console.log("ebookAccess.selftest.ts");
@@ -192,5 +194,53 @@ const partial = mergeEbookShelfSeed([
 ]);
 assert.equal(partial.added, 19, "the other nineteen are added");
 assert.equal(partial.ebooks.find((e) => bookcaseCode(e.url) === "ooiny")!.title, "Kept");
+
+/* ── labelling a shelf: the "which class/subject" answer ────── */
+
+// The codes are opaque and nothing can read the shelf, so a teacher decides.
+// upsertEbookShelf records that decision against the bookcase code, once.
+const baseState = {
+  version: 2,
+  titles: [],
+  ebooks: mergeEbookShelfSeed([]).ebooks,
+  copies: [],
+  issues: [],
+  procurementDocs: [],
+  settings: { maxBooksPerStudent: 3, maxBooksPerStaff: 5, loanDays: 14, finePaisePerDay: 100 },
+} as unknown as LibraryState;
+
+const labelled = upsertEbookShelf(baseState, {
+  url: "https://fliphtml5.com/bookcase/acdlv/",
+  title: "Class 6 Science",
+  subject: "Science",
+  classLabels: ["VI"],
+});
+assert.ok(!("error" in labelled), "a valid shelf link labels");
+if ("error" in labelled) throw new Error("unreachable");
+assert.equal(labelled.state.ebooks.length, 20, "labelling matches, never adds a duplicate");
+const acdlv = labelled.state.ebooks.find((e) => bookcaseCode(e.url) === "acdlv")!;
+assert.equal(acdlv.title, "Class 6 Science");
+assert.deepEqual(acdlv.classLabels, ["VI"]);
+
+// A second teacher tags only the class — the title the first set survives.
+const again = upsertEbookShelf(labelled.state, {
+  url: "https://fliphtml5.com/bookcase/acdlv/",
+  classLabels: ["VI", "VII"],
+});
+if ("error" in again) throw new Error("unreachable");
+const acdlv2 = again.state.ebooks.find((e) => bookcaseCode(e.url) === "acdlv")!;
+assert.equal(acdlv2.title, "Class 6 Science", "a partial update keeps fields it did not touch");
+assert.deepEqual(acdlv2.classLabels, ["VI", "VII"]);
+
+// A shelf that was not in the seed is added, not rejected.
+const added = upsertEbookShelf(baseState, {
+  url: "https://fliphtml5.com/bookcase/newone/",
+  title: "New book",
+});
+if ("error" in added) throw new Error("unreachable");
+assert.equal(added.state.ebooks.length, 21);
+
+// Junk is refused rather than stored as a shelf with no code.
+assert.ok("error" in upsertEbookShelf(baseState, { url: "not a link" }));
 
 console.log("  ok");

@@ -552,6 +552,49 @@ export function conditionLabel(condition: LibraryItemCondition | undefined): str
   return LIBRARY_CONDITIONS.find((c) => c.id === condition)?.label ?? condition;
 }
 
+/**
+ * Label a shelf (or add a new one) — title, subject, classes, and whether it
+ * needs a key. Matched on bookcase code, so the same physical shelf is one
+ * record however many times a teacher stamps it.
+ *
+ * This is where "which link belongs to which class and subject" is answered:
+ * the codes are opaque and the shelf pages are not readable, so a person who
+ * has the shelf open decides, once, and it sticks. Nothing else can know it.
+ */
+export function upsertEbookShelf(
+  state: LibraryState,
+  input: {
+    url: string;
+    title?: string;
+    subject?: string;
+    classLabels?: string[];
+    keyKind?: LibraryEbook["keyKind"];
+  },
+): { state: LibraryState; ebook: LibraryEbook } | { error: string } {
+  const code = bookcaseCode(input.url);
+  if (!code) return { error: "That does not look like a FlipHTML5 shelf link" };
+
+  const existing = state.ebooks.find((e) => bookcaseCode(e.url) === code);
+  const ebook = normalizeEbook({
+    ...existing,
+    id: existing?.id ?? `eb_${code}`,
+    url: input.url,
+    // Only overwrite a field the caller actually supplied — a teacher tagging
+    // the class must not blank a title someone else set.
+    title: input.title ?? existing?.title ?? "",
+    subject: input.subject ?? existing?.subject ?? "",
+    classLabels: input.classLabels ?? existing?.classLabels ?? [],
+    keyKind: input.keyKind ?? existing?.keyKind ?? "shelf",
+    addedOn: existing?.addedOn || new Date().toISOString().slice(0, 10),
+    isActive: existing?.isActive ?? true,
+  });
+
+  const ebooks = existing
+    ? state.ebooks.map((e) => (e.id === ebook.id ? ebook : e))
+    : [...state.ebooks, ebook];
+  return { state: { ...state, ebooks }, ebook };
+}
+
 export function listActiveTitles(state = loadLibrary()): LibraryTitle[] {
   return state.titles.filter((t) => t.isActive);
 }

@@ -226,9 +226,34 @@ export type SyllabusOcrApiResult = {
   ignored?: string[];
   quality?: ReturnType<typeof syllabusOcrQuality>;
   rawText?: string;
+  source?: "text" | "ocr";
   error?: string;
   visionConfigured?: boolean;
 };
+
+/**
+ * Parse a contents list pasted as text — no OCR, no Vision key.
+ *
+ * This is the e-book path: the book's page is already digital, so a teacher
+ * copies its contents list rather than photographing the screen. The parser
+ * and the review step downstream are exactly the same as for a scan.
+ */
+export async function parseSyllabusTextApi(
+  text: string,
+): Promise<SyllabusOcrApiResult> {
+  const trimmed = text.trim();
+  if (!trimmed) return { ok: false, error: "Paste the contents list first" };
+  const res = await fetch("/api/ocr/syllabus", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: trimmed }),
+  });
+  const json = (await res.json().catch(() => ({}))) as SyllabusOcrApiResult;
+  if (!res.ok) {
+    return { ok: false, error: json.error || "Could not read that list" };
+  }
+  return json;
+}
 
 /** Read a textbook contents page into chapter/topic candidates. */
 export async function runSyllabusOcrApi(opts: {
