@@ -11,6 +11,10 @@ import {
   seedAccountsIfEmpty,
 } from "@/lib/accountsStore";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import {
+  recordAccountsPostingFailure,
+  type AccountsPostingAction,
+} from "@/lib/accountsPostingFailures";
 
 /** Legacy fixed codes — still accepted on import / migration. */
 export type StoreCategoryCode = "book" | "uniform" | "stationery" | "other";
@@ -1864,6 +1868,41 @@ export function seedStoreIfEmpty(): StoreState {
   return state;
 }
 
+/**
+ * Fire an accounts posting without blocking the store desk — and without
+ * losing it if accounts refuses.
+ *
+ * These used to end in `.catch(() => {})`, so a refused posting (role without
+ * `accounts:edit`, closed fiscal year) left the issue saved and the books
+ * untouched with nothing surfaced (audit 2026-08-23, S3).
+ */
+function runAccountsPosting(
+  spec: {
+    action: AccountsPostingAction;
+    sourceId: string;
+    label: string;
+    amountPaise: number;
+    payload: unknown;
+  },
+  post: (
+    m: typeof import("@/lib/accountsPostings"),
+  ) => { ok: true } | { ok: false; error: string },
+): void {
+  void import("@/lib/accountsPostings")
+    .then((m) => {
+      const res = post(m);
+      if (!res.ok) {
+        recordAccountsPostingFailure({ ...spec, reason: res.error });
+      }
+    })
+    .catch((e: unknown) => {
+      recordAccountsPostingFailure({
+        ...spec,
+        reason: e instanceof Error ? e.message : String(e),
+      });
+    });
+}
+
 export function createStoreIssue(input: {
   recipientKind?: "student" | "staff";
   studentId?: string;
@@ -2107,36 +2146,50 @@ export function createStoreIssue(input: {
   };
   saveStore(state);
 
-  // Post to Accounts (cashbook / daybook / BS) — non-blocking if accounts unavailable
-  void import("@/lib/accountsPostings")
-    .then((m) => {
-      if (issue.counterPaidPaise > 0) {
-        m.postStoreSaleToAccounts({
-          issueId: issue.id,
-          issueNo: issue.issueNo,
-          issuedOn: issue.issuedOn,
-          amountPaise: issue.counterPaidPaise,
-          paymentMode: "cash",
-          tenderMode: issue.tenderMode,
-          paymentChannel: issue.paymentChannel,
-          transactionRef: input.paymentTransactionRef?.trim(),
-        });
-      }
-      if (storeIssueBalanceDuePaise(issue) > 0) {
-        m.postStoreSaleToAccounts({
-          issueId: `${issue.id}_ar`,
-          issueNo: issue.issueNo,
-          issuedOn: issue.issuedOn,
-          amountPaise: storeIssueBalanceDuePaise(issue),
-          paymentMode: "credit",
-          narration: `Store credit balance · ${issue.issueNo}`,
-        });
-      }
-    })
-    .catch(() => {
-      /* accounts optional */
-    });
-
+  // Post to Accounts (cashbook / daybook / BS) — never blocks the desk, but a
+  // refusal is queued for retry rather than swallowed.
+  if (issue.counterPaidPaise > 0) {
+    const cashArgs = {
+      issueId: issue.id,
+      issueNo: issue.issueNo,
+      issuedOn: issue.issuedOn,
+      amountPaise: issue.counterPaidPaise,
+      paymentMode: "cash" as const,
+      tenderMode: issue.tenderMode,
+      paymentChannel: issue.paymentChannel,
+      transactionRef: input.paymentTransactionRef?.trim(),
+    };
+    runAccountsPosting(
+      {
+        action: "store_sale",
+        sourceId: `store_issue_${issue.id}`,
+        label: `Store issue ${issue.issueNo}`,
+        amountPaise: issue.counterPaidPaise,
+        payload: cashArgs,
+      },
+      (m) => m.postStoreSaleToAccounts(cashArgs),
+    );
+  }
+  if (storeIssueBalanceDuePaise(issue) > 0) {
+    const arArgs = {
+      issueId: `${issue.id}_ar`,
+      issueNo: issue.issueNo,
+      issuedOn: issue.issuedOn,
+      amountPaise: storeIssueBalanceDuePaise(issue),
+      paymentMode: "credit" as const,
+      narration: `Store credit balance · ${issue.issueNo}`,
+    };
+    runAccountsPosting(
+      {
+        action: "store_sale",
+        sourceId: `store_issue_${issue.id}_ar`,
+        label: `Store credit ${issue.issueNo}`,
+        amountPaise: arArgs.amountPaise,
+        payload: arArgs,
+      },
+      (m) => m.postStoreSaleToAccounts(arArgs),
+    );
+  }
   return { ok: true, issue, state };
 }
 
@@ -2209,20 +2262,24 @@ export function voidStoreIssue(
 
   const netBilled = Math.max(0, issue.totalPaise - (issue.returnedPaise || 0));
   if (netBilled > 0) {
-    void import("@/lib/accountsPostings")
-      .then((m) => {
-        m.postStoreSellReturnToAccounts({
-          returnId: `void_${issue.id}`,
-          returnNo: `VOID-${issue.issueNo}`,
-          returnedOn: now.slice(0, 10),
-          amountPaise: netBilled,
-          paymentMode: issue.paymentMode,
-          narration: `Void store issue ${issue.issueNo}`,
-        });
-      })
-      .catch(() => {
-        /* accounts optional */
-      });
+    const voidArgs = {
+      returnId: `void_${issue.id}`,
+      returnNo: `VOID-${issue.issueNo}`,
+      returnedOn: now.slice(0, 10),
+      amountPaise: netBilled,
+      paymentMode: issue.paymentMode,
+      narration: `Void store issue ${issue.issueNo}`,
+    };
+    runAccountsPosting(
+      {
+        action: "store_return",
+        sourceId: `store_sret_void_${issue.id}`,
+        label: `Void store issue ${issue.issueNo}`,
+        amountPaise: netBilled,
+        payload: voidArgs,
+      },
+      (m) => m.postStoreSellReturnToAccounts(voidArgs),
+    );
   }
 
   return { ok: true, state };
@@ -2927,19 +2984,25 @@ export function createStoreSellReturn(input: {
   };
   saveStore(state);
 
-  void import("@/lib/accountsPostings")
-    .then((m) => {
-      m.postStoreSellReturnToAccounts({
-        returnId: sellReturn.id,
-        returnNo: sellReturn.returnNo,
-        returnedOn: sellReturn.returnedOn,
+  {
+    const returnArgs = {
+      returnId: sellReturn.id,
+      returnNo: sellReturn.returnNo,
+      returnedOn: sellReturn.returnedOn,
+      amountPaise: sellReturn.totalPaise,
+      paymentMode: issue.paymentMode,
+    };
+    runAccountsPosting(
+      {
+        action: "store_return",
+        sourceId: `store_sret_${sellReturn.id}`,
+        label: `Store return ${sellReturn.returnNo}`,
         amountPaise: sellReturn.totalPaise,
-        paymentMode: issue.paymentMode,
-      });
-    })
-    .catch(() => {
-      /* accounts optional */
-    });
+        payload: returnArgs,
+      },
+      (m) => m.postStoreSellReturnToAccounts(returnArgs),
+    );
+  }
 
   return { ok: true, sellReturn, state };
 }

@@ -43,9 +43,29 @@ import {
 } from "@/lib/accountsLookups";
 import {
   postJournal,
+  resolveFiscalYearForDate,
 } from "@/lib/accountsJournal";
 
 /* ─── Cash book ────────────────────────────────────────────── */
+/**
+ * Refuse sub-ledger movements dated into a closed fiscal year.
+ *
+ * postJournal has always enforced this, but the cash and bank books did not:
+ * a closed year could still have its cash book altered through any path that
+ * moved a pool without a journal (audit 2026-08-23, L4). A date outside every
+ * defined year is left alone — that is a masters gap, not a locked period.
+ */
+function assertPeriodOpen(
+  date: string,
+  state: AccountsState,
+): { ok: false; error: string } | null {
+  const fy = resolveFiscalYearForDate(date, state);
+  if (fy?.status === "closed") {
+    return fail(`Fiscal year ${fy.label} is closed — reopen it to post on ${date}`);
+  }
+  return null;
+}
+
 
 export function cashInHandPaise(state?: AccountsState): number {
   const s = state ?? loadAccounts();
@@ -69,6 +89,9 @@ export function postCashMovement(input: {
   const state = loadAccounts();
   const pool = state.cashPools.find((p) => p.id === input.poolId);
   if (!pool) return fail("Cash pool not found");
+  const entryDate = input.date || todayIso();
+  const closed = assertPeriodOpen(entryDate, state);
+  if (closed) return closed;
   const delta = input.direction === "in" ? amount : -amount;
   const nextBalance = pool.balancePaise + delta;
   if (nextBalance < 0) return fail("Insufficient cash in pool");
@@ -76,7 +99,7 @@ export function postCashMovement(input: {
   const entry: CashLedgerEntry = {
     id: id("cle"),
     poolId: pool.id,
-    date: input.date || todayIso(),
+    date: entryDate,
     direction: input.direction,
     amountPaise: amount,
     sourceType: input.sourceType,
@@ -189,10 +212,13 @@ export function postBankMovement(input: {
   const state = loadAccounts();
   const bank = state.bankAccounts.find((b) => b.id === input.bankId);
   if (!bank) return fail("Bank account not found");
+  const entryDate = input.date || todayIso();
+  const closed = assertPeriodOpen(entryDate, state);
+  if (closed) return closed;
   const entry: BankLedgerEntry = {
     id: id("ble"),
     bankId: bank.id,
-    date: input.date || todayIso(),
+    date: entryDate,
     direction: input.direction,
     amountPaise: amount,
     mode: input.mode,

@@ -11,6 +11,7 @@ import {
   COA_ACCOUNTS_RECEIVABLE,
   COA_BANK_ACCOUNTS,
   COA_CASH_IN_HAND,
+  COA_CHEQUES_IN_HAND,
   COA_FEE_INCOME,
   COA_STORE_SALES,
 } from "@/lib/accountsTypes";
@@ -26,6 +27,7 @@ import {
   todayIso,
 } from "@/lib/accountsUtil";
 import {
+  ensureChequeCoaAccount,
   ensureStoreCoaAccounts,
   normalizeReconSession,
 } from "@/lib/accountsNormalize";
@@ -40,12 +42,53 @@ import {
 } from "@/lib/accountsLookups";
 import {
   postJournal,
+  voidJournalEntry,
 } from "@/lib/accountsJournal";
 import {
   postBankMovement,
   postCashMovement,
   transferCashBetweenPools,
+  voidBankLedgerEntry,
+  voidCashLedgerEntry,
 } from "@/lib/accountsCashBank";
+import { assertModulePermission } from "@/lib/rbacGuard";
+
+/**
+ * Refuse to post when the operator's role cannot write Accounts.
+ *
+ * saveAccounts() drops the write and returns in that case, so a posting used
+ * to leave the receipt saved and the journal missing with nothing surfaced
+ * (audit 2026-08-23, S3). Failing here instead lets the caller record the
+ * posting in the retry queue, where somebody with the right role can replay
+ * it. assertModulePermission also raises `bhb-rbac-denied` for the UI.
+ */
+function assertAccountsWritable(
+  label: string,
+): { ok: false; error: string } | null {
+  if (assertModulePermission("accounts", "edit", label)) return null;
+  return fail(
+    `Your role cannot post to Accounts, so "${label}" was not written to the books. ` +
+      "It is queued — an accounts user can retry it.",
+  );
+}
+
+/** Idempotency key for everything posted out of one fee receipt. */
+export function feeVoucherSourceId(voucherId: string): string {
+  return `fee_v_${voucherId}`;
+}
+
+/** Idempotency key for the bank clearance of one cheque on that receipt. */
+export function feeChequeSourceId(voucherId: string, chequeId: string): string {
+  return `fee_chq_${voucherId}_${chequeId}`;
+}
+
+const FEE_BANK_MODES: PaymentMode[] = ["upi", "neft", "rtgs", "card"];
+
+function normalizeFeeBankMode(mode: string): PaymentMode {
+  return (FEE_BANK_MODES as string[]).includes(mode)
+    ? (mode as PaymentMode)
+    : "neft";
+}
 
 export function applyDayCloseHandover(session: {
   id: string;
@@ -101,6 +144,27 @@ export function applyDayCloseHandover(session: {
   return { ok: true, applied: true };
 }
 
+/**
+ * Post a fee receipt into the cash/bank books and the GL (idempotent by
+ * voucher id).
+ *
+ *   cash            Dr Cash in Hand      (drawer pool moves)
+ *   upi/neft/rtgs   Dr Bank Accounts     (bank book moves)
+ *   cheque          Dr Cheques in Hand   (no bank movement until it clears)
+ *   store portion   Cr Accounts Receivable, the rest Cr Fee Income
+ *
+ * A cheque is not money in the bank on the day it is handed over, so it is
+ * held in its own asset account and moved to Bank by
+ * postChequeClearanceToAccounts when the bank actually clears it — the bank
+ * book could never reconcile while cheques were debited on collection
+ * (audit 2026-08-23, L2).
+ *
+ * Every bank tender is routed to an account BEFORE anything is written. An
+ * unroutable tender used to be skipped in the bank book while its amount was
+ * still debited to Bank in the journal, so the sub-ledger and the GL drifted
+ * apart by exactly that tender. Now the whole receipt refuses to post and is
+ * queued, which keeps the two sides of the book in step.
+ */
 export function postFeeCollectionToAccounts(input: {
   voucherId: string;
   collectionDate: string;
@@ -110,10 +174,15 @@ export function postFeeCollectionToAccounts(input: {
   /** Portion of collection that settles store credit dues. */
   storeAmountPaise?: number;
 }): { ok: true; posted: boolean } | { ok: false; error: string } {
+  const denied = assertAccountsWritable(
+    `fee receipt ${input.receiptNo || input.voucherId}`,
+  );
+  if (denied) return denied;
+
   seedAccountsIfEmpty();
-  const ensured = ensureStoreCoaAccounts(loadAccounts());
-  saveAccounts(ensured);
-  const sourceId = `fee_v_${input.voucherId}`;
+  saveAccounts(ensureChequeCoaAccount(ensureStoreCoaAccounts(loadAccounts())));
+
+  const sourceId = feeVoucherSourceId(input.voucherId);
   const state = loadAccounts();
   if (
     state.cashLedger.some((e) => e.sourceId === sourceId || e.sourceId.startsWith(`${sourceId}_`)) ||
@@ -126,22 +195,52 @@ export function postFeeCollectionToAccounts(input: {
   const drawer = state.cashPools.find((p) => p.code === "drawer");
   if (!drawer) return fail("Drawer cash pool not seeded");
 
-  const cashPaise = input.tenders
-    .filter((t) => t.mode === "cash" && t.amountPaise > 0)
+  const live = input.tenders.filter((t) => t.amountPaise > 0);
+  const cashPaise = live
+    .filter((t) => t.mode === "cash")
     .reduce((n, t) => n + t.amountPaise, 0);
-  const bankTenders = input.tenders.filter(
-    (t) => t.mode !== "cash" && t.amountPaise > 0,
-  );
-  const narrationBase =
-    input.receiptNo
-      ? `Fee receipt ${input.receiptNo}`
-      : input.label || "Fee collection";
+  const chequeTenders = live.filter((t) => t.mode === "cheque");
+  const chequePaise = chequeTenders.reduce((n, t) => n + t.amountPaise, 0);
+
+  // Route every bank tender first — nothing is written until all of them
+  // resolve, so a missing bank master can never split the books.
+  const routed: {
+    mode: PaymentMode;
+    amountPaise: number;
+    bankId: string;
+    ref: string;
+  }[] = [];
+  const unroutable = new Set<string>();
+  for (const t of live) {
+    if (t.mode === "cash" || t.mode === "cheque") continue;
+    const mode = normalizeFeeBankMode(t.mode);
+    const bankId = t.bankAccountId || resolveBankForPaymentMode(mode, state);
+    if (!bankId) {
+      unroutable.add(mode.toUpperCase());
+      continue;
+    }
+    routed.push({
+      mode,
+      amountPaise: t.amountPaise,
+      bankId,
+      ref: t.ref?.trim() || "",
+    });
+  }
+  if (unroutable.size > 0) {
+    return fail(
+      `No bank account is set up to receive ${[...unroutable].join(" / ")} — ` +
+        "add one under Accounts → Masters → Banks, then retry this posting. " +
+        `Nothing was posted for receipt ${input.receiptNo || input.voucherId}.`,
+    );
+  }
+
+  const narrationBase = input.receiptNo
+    ? `Fee receipt ${input.receiptNo}`
+    : input.label || "Fee collection";
 
   if (cashPaise > 0) {
     const cashRef =
-      input.tenders.find((t) => t.mode === "cash" && t.amountPaise > 0)?.ref?.trim() ||
-      input.receiptNo ||
-      "";
+      live.find((t) => t.mode === "cash")?.ref?.trim() || input.receiptNo || "";
     const res = postCashMovement({
       poolId: drawer.id,
       date: input.collectionDate,
@@ -155,34 +254,27 @@ export function postFeeCollectionToAccounts(input: {
     if (!res.ok) return res;
   }
 
-  for (const t of bankTenders) {
-    const mode = (
-      ["upi", "cheque", "neft", "rtgs", "card"].includes(t.mode)
-        ? t.mode
-        : "neft"
-    ) as PaymentMode;
-    const s = loadAccounts();
-    const bankId =
-      t.bankAccountId || resolveBankForPaymentMode(mode, s);
-    if (!bankId) continue;
+  for (const t of routed) {
     const res = postBankMovement({
-      bankId,
+      bankId: t.bankId,
       date: input.collectionDate,
       direction: "dr",
       amountPaise: t.amountPaise,
-      mode,
+      mode: t.mode,
       sourceType: "fee_voucher",
-      sourceId: `${sourceId}_${mode}`,
-      narration: `${narrationBase} · ${mode}`,
-      transactionRef: t.ref?.trim() || input.receiptNo || "",
+      sourceId: `${sourceId}_${t.mode}`,
+      narration: `${narrationBase} · ${t.mode}`,
+      transactionRef: t.ref || input.receiptNo || "",
     });
     if (!res.ok) return res;
   }
 
-  const total = cashPaise + bankTenders.reduce((n, t) => n + t.amountPaise, 0);
+  const bankPaise = routed.reduce((n, t) => n + t.amountPaise, 0);
+  const total = cashPaise + bankPaise + chequePaise;
   if (total > 0) {
     const cashCoa = getCoaByCode(COA_CASH_IN_HAND);
     const bankCoa = getCoaByCode(COA_BANK_ACCOUNTS);
+    const chequeCoa = getCoaByCode(COA_CHEQUES_IN_HAND);
     const feeCoa = getCoaByCode(COA_FEE_INCOME);
     const arCoa = getCoaByCode(COA_ACCOUNTS_RECEIVABLE);
     const storeShare = Math.min(
@@ -190,7 +282,7 @@ export function postFeeCollectionToAccounts(input: {
       Math.max(0, Math.round(Number(input.storeAmountPaise) || 0)),
     );
     const feeShare = total - storeShare;
-    if ((feeCoa || arCoa) && (cashCoa || bankCoa)) {
+    if ((feeCoa || arCoa) && (cashCoa || bankCoa || chequeCoa)) {
       const lines: JournalLine[] = [];
       if (cashPaise > 0 && cashCoa) {
         lines.push({
@@ -200,13 +292,20 @@ export function postFeeCollectionToAccounts(input: {
           narration: "Cash",
         });
       }
-      const bankTotal = bankTenders.reduce((n, t) => n + t.amountPaise, 0);
-      if (bankTotal > 0 && bankCoa) {
+      if (bankPaise > 0 && bankCoa) {
         lines.push({
           coaId: bankCoa.id,
-          debitPaise: bankTotal,
+          debitPaise: bankPaise,
           creditPaise: 0,
           narration: "Bank modes",
+        });
+      }
+      if (chequePaise > 0 && chequeCoa) {
+        lines.push({
+          coaId: chequeCoa.id,
+          debitPaise: chequePaise,
+          creditPaise: 0,
+          narration: "Cheques in hand",
         });
       }
       if (storeShare > 0 && arCoa) {
@@ -234,18 +333,176 @@ export function postFeeCollectionToAccounts(input: {
         });
       }
       if (lines.length >= 2) {
-        postJournal({
+        const jv = postJournal({
           date: input.collectionDate,
           narration: narrationBase,
           sourceType: "fee_voucher",
           sourceId,
           lines,
         });
+        if (!jv.ok) return jv;
       }
     }
   }
 
   return { ok: true, posted: true };
+}
+
+/**
+ * Move one cleared cheque out of Cheques in Hand and into the bank book.
+ *
+ * Fired when the fee desk marks a cheque cleared. Idempotent by cheque id,
+ * and keyed under the receipt so voiding the receipt reverses the clearance
+ * along with the collection.
+ */
+export function postChequeClearanceToAccounts(input: {
+  chequeId: string;
+  voucherId: string;
+  amountPaise: number;
+  clearedOn: string;
+  chequeNo?: string;
+  receiptNo?: string;
+  bankId?: string;
+}): { ok: true; posted: boolean } | { ok: false; error: string } {
+  const label = `cheque ${input.chequeNo || input.chequeId}`;
+  const denied = assertAccountsWritable(label);
+  if (denied) return denied;
+
+  const amount = Math.max(0, Math.round(Number(input.amountPaise) || 0));
+  if (amount <= 0) return { ok: true, posted: false };
+
+  seedAccountsIfEmpty();
+  saveAccounts(ensureChequeCoaAccount(loadAccounts()));
+
+  const sourceId = feeChequeSourceId(input.voucherId, input.chequeId);
+  const state = loadAccounts();
+  if (
+    state.bankLedger.some((e) => e.sourceId === sourceId) ||
+    state.journalEntries.some((j) => j.sourceId === sourceId)
+  ) {
+    return { ok: true, posted: false };
+  }
+
+  const bankId = input.bankId || resolveBankForPaymentMode("cheque", state);
+  if (!bankId) {
+    return fail(
+      "No bank account is set up to receive cheques — add one under " +
+        "Accounts → Masters → Banks, then retry this posting.",
+    );
+  }
+
+  const bankCoa = getCoaByCode(COA_BANK_ACCOUNTS);
+  const chequeCoa = getCoaByCode(COA_CHEQUES_IN_HAND);
+  if (!bankCoa || !chequeCoa) return fail("Bank / Cheques in Hand COA missing");
+
+  const narration = `Cheque ${input.chequeNo || ""} cleared${
+    input.receiptNo ? ` · receipt ${input.receiptNo}` : ""
+  }`.replace(/\s+/g, " ").trim();
+
+  const res = postBankMovement({
+    bankId,
+    date: input.clearedOn,
+    direction: "dr",
+    amountPaise: amount,
+    mode: "cheque",
+    sourceType: "fee_cheque",
+    sourceId,
+    narration,
+    transactionRef: input.chequeNo || "",
+  });
+  if (!res.ok) return res;
+
+  const jv = postJournal({
+    date: input.clearedOn,
+    narration,
+    sourceType: "fee_cheque",
+    sourceId,
+    lines: [
+      {
+        coaId: bankCoa.id,
+        debitPaise: amount,
+        creditPaise: 0,
+        narration: "Bank",
+      },
+      {
+        coaId: chequeCoa.id,
+        debitPaise: 0,
+        creditPaise: amount,
+        narration: "Cheque cleared",
+      },
+    ],
+  });
+  if (!jv.ok) return jv;
+
+  return { ok: true, posted: true };
+}
+
+/**
+ * Back a fee receipt out of the books when it is voided or its cheque bounces.
+ *
+ * Voiding a receipt used to touch nothing in accounts at all: the cash went
+ * in, the journal credited fee income, and both stayed there for good, so
+ * cash in hand and fee income were overstated by every voided receipt
+ * (audit 2026-08-23, L1). Store returns already reversed properly; fees just
+ * never did.
+ *
+ * Entries are voided rather than deleted — `voidedAt` keeps them out of the
+ * trial balance while the audit trail survives — and the cash pool balance is
+ * restored by voidCashLedgerEntry. Idempotent: re-running finds nothing live
+ * and reports `reversed: false`.
+ */
+export function reverseFeeCollectionInAccounts(input: {
+  voucherId: string;
+  reason?: string;
+}): { ok: true; reversed: boolean } | { ok: false; error: string } {
+  const denied = assertAccountsWritable(`void of receipt ${input.voucherId}`);
+  if (denied) return denied;
+
+  const sourceId = feeVoucherSourceId(input.voucherId);
+  const chequePrefix = `fee_chq_${input.voucherId}_`;
+  const belongs = (sid: string) =>
+    sid === sourceId ||
+    sid.startsWith(`${sourceId}_`) ||
+    sid.startsWith(chequePrefix);
+
+  const reason = input.reason?.trim() || "Fee receipt voided";
+  const state = loadAccounts();
+
+  const cashIds = state.cashLedger
+    .filter((e) => !e.voidedAt && belongs(e.sourceId))
+    .map((e) => e.id);
+  const bankIds = state.bankLedger
+    .filter((e) => !e.voidedAt && belongs(e.sourceId))
+    .map((e) => e.id);
+  const journalIds = state.journalEntries
+    .filter((j) => !j.voidedAt && belongs(j.sourceId))
+    .map((j) => j.id);
+
+  if (cashIds.length + bankIds.length + journalIds.length === 0) {
+    return { ok: true, reversed: false };
+  }
+
+  // Cash first: it is the only one that can refuse (the drawer would go
+  // negative because the money has already been handed over or banked).
+  for (const entryId of cashIds) {
+    const res = voidCashLedgerEntry(entryId, reason);
+    if (!res.ok) {
+      return fail(
+        `${res.error} — receipt ${input.voucherId} could not be reversed in the ` +
+          "cash book. Reverse the handover or deposit first, then retry.",
+      );
+    }
+  }
+  for (const entryId of bankIds) {
+    const res = voidBankLedgerEntry(entryId, reason);
+    if (!res.ok) return res;
+  }
+  for (const journalId of journalIds) {
+    const res = voidJournalEntry(journalId, reason);
+    if (!res.ok) return res;
+  }
+
+  return { ok: true, reversed: true };
 }
 
 /**

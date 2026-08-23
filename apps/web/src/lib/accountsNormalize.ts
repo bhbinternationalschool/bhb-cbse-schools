@@ -12,6 +12,7 @@ import {
   COA_ACCOUNTS_PAYABLE,
   COA_ACCOUNTS_RECEIVABLE,
   COA_BANK_ACCOUNTS,
+  COA_CHEQUES_IN_HAND,
   COA_CAPITAL_EQUITY,
   COA_CASH_IN_HAND,
   COA_CWIP,
@@ -98,6 +99,7 @@ export function defaultCoaAccounts(): CoaAccount[] {
   return [
     row(COA_CASH_IN_HAND, "Cash in Hand", "assets"),
     row(COA_BANK_ACCOUNTS, "Bank Accounts", "assets"),
+    row(COA_CHEQUES_IN_HAND, "Cheques in Hand", "assets"),
     row(COA_CWIP, "Capital Work in Progress", "assets"),
     row(COA_FIXED_ASSETS, "Fixed Assets", "assets"),
     row(COA_ACCOUNTS_RECEIVABLE, "Accounts Receivable (Store)", "assets"),
@@ -685,6 +687,26 @@ export function ensureConstructionCoaAccounts(state: AccountsState): AccountsSta
     }
   }
   return changed ? { ...state, coaAccounts } : state;
+}
+
+/**
+ * Ensure the "Cheques in Hand" COA exists on books seeded before cheques
+ * were held off the bank book (audit 2026-08-23). A cheque tender debits
+ * this account on collection and clears to Bank only when the bank does.
+ */
+export function ensureChequeCoaAccount(state: AccountsState): AccountsState {
+  if (state.coaAccounts.some((c) => c.code === COA_CHEQUES_IN_HAND)) return state;
+  return {
+    ...state,
+    coaAccounts: [
+      ...state.coaAccounts,
+      normalizeCoa({
+        code: COA_CHEQUES_IN_HAND,
+        name: "Cheques in Hand",
+        group: "assets",
+      }),
+    ],
+  };
 }
 
 /** Ensure store AR / sales / purchases COA exist on older tenants. */

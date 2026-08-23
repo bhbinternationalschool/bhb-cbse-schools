@@ -5,6 +5,7 @@ import { Landmark } from "lucide-react";
 import {
   AccountsMastersPanel,
 } from "@/components/accounts/AccountsMastersPanel";
+import { UnpostedEntriesBanner } from "@/components/accounts/UnpostedEntriesBanner";
 import {
   BanksPanel,
   BillsPanel,
@@ -162,6 +163,8 @@ export function AccountsWorkspace() {
         onChange={(id) => setTab(id as AccountsTab)}
         aria-label="Accounts sections"
       />
+
+      <UnpostedEntriesBanner onRefresh={refresh} />
 
       {!state ? (
         <div className="mt-6">

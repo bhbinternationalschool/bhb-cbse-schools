@@ -83,6 +83,10 @@ import {
   type PlanAllocation,
 } from "@/lib/installmentPlans";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import {
+  recordAccountsPostingFailure,
+  type AccountsPostingAction,
+} from "@/lib/accountsPostingFailures";
 
 export type DueKind =
   | "academic"
@@ -2876,6 +2880,44 @@ export function receiptSeriesOf(receiptNo: string): FeeReceiptSeries | "" {
   return "";
 }
 
+/**
+ * Fire an accounts posting without letting a books problem block the desk —
+ * but never let it fail silently either.
+ *
+ * The receipt is already saved by the time this runs; accounts is a second
+ * write that may legitimately be refused (role without `accounts:edit`, no
+ * bank master yet, a closed fiscal year). Until 2026-08-23 all three ended in
+ * `.catch(() => {})` and the books simply drifted from the fee desk. Now the
+ * failure lands in the retry queue and raises `bhb-accounts-posting-failed`,
+ * so it is visible and replayable.
+ */
+function runAccountsPosting(
+  spec: {
+    action: AccountsPostingAction;
+    sourceId: string;
+    label: string;
+    amountPaise: number;
+    payload: unknown;
+  },
+  post: (
+    m: typeof import("@/lib/accountsPostings"),
+  ) => { ok: true } | { ok: false; error: string },
+): void {
+  void import("@/lib/accountsPostings")
+    .then((m) => {
+      const res = post(m);
+      if (!res.ok) {
+        recordAccountsPostingFailure({ ...spec, reason: res.error });
+      }
+    })
+    .catch((e: unknown) => {
+      recordAccountsPostingFailure({
+        ...spec,
+        reason: e instanceof Error ? e.message : String(e),
+      });
+    });
+}
+
 export function collectPayment(input: {
   householdId: string;
   lines: VoucherLine[];
@@ -3094,27 +3136,33 @@ export function collectPayment(input: {
     voucher.receiptNo,
   );
 
-  void import("@/lib/accountsPostings")
-    .then((m) => {
-      const storeAmountPaise = voucher.lines
-        .filter((l) => l.kind === "store")
-        .reduce((n, l) => n + l.amountPaise, 0);
-      m.postFeeCollectionToAccounts({
-        voucherId: voucher.id,
-        collectionDate: voucher.collectionDate,
-        receiptNo: voucher.receiptNo,
-        label: voucher.householdId,
-        tenders: voucher.tenders.map((t) => ({
-          mode: t.mode,
-          amountPaise: t.amountPaise,
-          bankAccountId: t.bankAccountId,
-        })),
-        storeAmountPaise,
-      });
-    })
-    .catch(() => {
-      /* accounts optional */
-    });
+  {
+    const storeAmountPaise = voucher.lines
+      .filter((l) => l.kind === "store")
+      .reduce((n, l) => n + l.amountPaise, 0);
+    const args = {
+      voucherId: voucher.id,
+      collectionDate: voucher.collectionDate,
+      receiptNo: voucher.receiptNo,
+      label: voucher.householdId,
+      tenders: voucher.tenders.map((t) => ({
+        mode: t.mode,
+        amountPaise: t.amountPaise,
+        bankAccountId: t.bankAccountId,
+      })),
+      storeAmountPaise,
+    };
+    runAccountsPosting(
+      {
+        action: "fee_receipt",
+        sourceId: `fee_v_${voucher.id}`,
+        label: `Receipt ${voucher.receiptNo}`,
+        amountPaise: voucher.totalPaise,
+        payload: args,
+      },
+      (m) => m.postFeeCollectionToAccounts(args),
+    );
+  }
 
   return { ok: true, voucher };
 }
@@ -3234,7 +3282,35 @@ export function voidVoucher(voucherId: string): boolean {
     planAllocations: nextAllocations,
     installmentPlans: nextPlans,
   });
+
+  // Back the receipt out of the cash book, the bank book and the GL. Without
+  // this the money stayed on the books for good — cash in hand and fee income
+  // were overstated by every voided receipt (audit 2026-08-23, L1).
+  reverseFeeCollectionInBooks(voucher, "Fee receipt voided");
   return true;
+}
+
+/**
+ * Reverse one receipt in accounts, surfacing any refusal to the retry queue.
+ *
+ * Shared by voidVoucher and bounceCheque — a bounce voids the receipt inline
+ * rather than calling voidVoucher, so both doors need the same reversal.
+ */
+function reverseFeeCollectionInBooks(
+  voucher: CollectionVoucher,
+  reason: string,
+): void {
+  const args = { voucherId: voucher.id, reason };
+  runAccountsPosting(
+    {
+      action: "fee_reversal",
+      sourceId: `fee_v_${voucher.id}`,
+      label: `Void of receipt ${voucher.receiptNo}`,
+      amountPaise: voucher.totalPaise,
+      payload: args,
+    },
+    (m) => m.reverseFeeCollectionInAccounts(args),
+  );
 }
 
 /** 10-digit IN mobile → WhatsApp E.164 without plus (e.g. 9198…). */
@@ -3791,6 +3867,30 @@ export function clearCheque(
         : v,
     ),
   });
+
+  // The collection debited Cheques in Hand, not Bank. This is the day the
+  // bank actually has the money, so this is the day it moves.
+  {
+    const args = {
+      chequeId: cheque.id,
+      voucherId: cheque.voucherId,
+      amountPaise: cheque.amountPaise,
+      clearedOn: now.slice(0, 10),
+      chequeNo: cheque.chequeNo,
+      receiptNo: cheque.receiptNo,
+      bankId: voucher.tenders[cheque.tenderIndex]?.bankAccountId || undefined,
+    };
+    runAccountsPosting(
+      {
+        action: "cheque_clearance",
+        sourceId: `fee_chq_${cheque.voucherId}_${cheque.id}`,
+        label: `Cheque ${cheque.chequeNo || cheque.receiptNo} cleared`,
+        amountPaise: cheque.amountPaise,
+        payload: args,
+      },
+      (m) => m.postChequeClearanceToAccounts(args),
+    );
+  }
   return { ok: true, cheque: nextCheque };
 }
 
@@ -3859,6 +3959,14 @@ export function bounceCheque(
     ),
     cheques: nextCheques,
   });
+
+  // A bounce voids the receipt inline (above), so the books have to come off
+  // too — including the bank leg if a sibling cheque on this receipt had
+  // already cleared.
+  reverseFeeCollectionInBooks(
+    voucher,
+    `Cheque ${cheque.chequeNo || "—"} bounced: ${reason}`,
+  );
   return { ok: true, cheque: nextCheque };
 }
 
@@ -4448,13 +4556,16 @@ export function approveDayClose(input: {
     resolvedAt: now,
   };
   saveFees(upsertDayClose(session, fees));
-  void import("@/lib/accountsPostings")
-    .then((m) => {
-      m.applyDayCloseHandover(session);
-    })
-    .catch(() => {
-      /* accounts optional */
-    });
+  runAccountsPosting(
+    {
+      action: "day_close",
+      sourceId: `day_close_${session.id}`,
+      label: `Day close ${session.closeDate}`,
+      amountPaise: session.systemCashPaise,
+      payload: session,
+    },
+    (m) => m.applyDayCloseHandover(session),
+  );
   return { ok: true, session };
 }
 
