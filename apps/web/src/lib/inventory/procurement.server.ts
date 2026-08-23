@@ -836,6 +836,8 @@ export async function postGoodsReceipt(
   billId: string;
   billNo: string;
   totalPaise: number;
+  /** Empty when the server ledger is not in use for this school. */
+  ledgerVoucherNo: string;
 }> {
   const { sb, tenantId } = await invCtx();
 
@@ -889,6 +891,7 @@ export async function postGoodsReceipt(
     billId: str(out.bill_id),
     billNo: str(out.bill_no),
     totalPaise: int(out.total_paise),
+    ledgerVoucherNo: str(out.ledger_voucher_no),
   };
 }
 
@@ -967,6 +970,14 @@ export async function listVendorBills(opts: {
  * Over-payment is refused rather than silently absorbed: a bill showing more
  * paid than it is worth hides either a keying error or a duplicate payment.
  */
+/**
+ * Record a payment against a bill.
+ *
+ * Delegates to `inv_pay_vendor_bill`, so the payment row, the bill's new
+ * balance and the ledger entry commit together — and over-payment is refused
+ * by the same code that writes them. A bill showing more paid than it is worth
+ * hides either a keying error or a duplicate payment.
+ */
 export async function recordVendorPayment(
   input: {
     billId: string;
@@ -977,67 +988,39 @@ export async function recordVendorPayment(
     note?: string;
   },
   actor: string,
-  academicYearCode: string,
-): Promise<{ paidPaise: number; balancePaise: number; status: InvBillStatus }> {
-  const ctx = await invCtx();
-  const { sb, tenantId } = ctx;
-
+): Promise<{
+  paidPaise: number;
+  balancePaise: number;
+  status: InvBillStatus;
+  paymentNo: string;
+  /** Empty when the server ledger is not in use for this school. */
+  ledgerVoucherNo: string;
+}> {
   const amount = int(input.amountPaise);
   if (amount <= 0) throw new InvError("Payment amount must be more than zero", 400);
 
-  const { data: bill } = await sb
-    .from("inv_vendor_bills")
-    .select("id, vendor_id, total_paise, paid_paise, status")
-    .eq("tenant_id", tenantId)
-    .eq("id", input.billId)
-    .maybeSingle();
-  if (!bill) throw new InvError("Bill not found", 404);
-  if (str(bill.status) === "cancelled") {
-    throw new InvError("This bill is cancelled", 409);
-  }
-
-  const total = int(bill.total_paise);
-  const paid = int(bill.paid_paise);
-  const balance = total - paid;
-  if (amount > balance) {
-    throw new InvError(
-      `Only ${(balance / 100).toFixed(2)} is outstanding on this bill`,
-      409,
-    );
-  }
-
-  const paymentNo = await nextDocNo(ctx, "payment", academicYearCode, "PAY");
-  const { error: payError } = await sb.from("inv_vendor_payments").insert({
-    tenant_id: tenantId,
-    payment_no: paymentNo,
-    vendor_id: str(bill.vendor_id),
-    bill_id: input.billId,
-    paid_on: input.paidOn || new Date().toISOString().slice(0, 10),
-    amount_paise: amount,
-    mode: input.mode || "bank",
-    reference: str(input.reference),
-    note: str(input.note),
-    created_by: actor,
+  const { sb, tenantId } = await invCtx();
+  const { data, error } = await sb.rpc("inv_pay_vendor_bill", {
+    p_tenant_id: tenantId,
+    p_actor: actor,
+    p_payload: {
+      bill_id: input.billId,
+      amount_paise: amount,
+      mode: input.mode || "bank",
+      paid_on: input.paidOn || null,
+      reference: str(input.reference),
+      note: str(input.note),
+    },
   });
-  if (payError) throw new InvError(`Record payment: ${payError.message}`, 500);
+  if (error) throw new InvError(cleanDbMessage(error.message), 409);
 
-  const nextPaid = paid + amount;
-  const nextStatus: InvBillStatus = nextPaid >= total ? "paid" : "part_paid";
-  const { error: billError } = await sb
-    .from("inv_vendor_bills")
-    .update({
-      paid_paise: nextPaid,
-      status: nextStatus,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("tenant_id", tenantId)
-    .eq("id", input.billId);
-  if (billError) throw new InvError(`Update bill: ${billError.message}`, 500);
-
+  const out = (data ?? {}) as Row;
   return {
-    paidPaise: nextPaid,
-    balancePaise: Math.max(0, total - nextPaid),
-    status: nextStatus,
+    paidPaise: int(out.paid_paise),
+    balancePaise: int(out.balance_paise),
+    status: str(out.status) as InvBillStatus,
+    paymentNo: str(out.payment_no),
+    ledgerVoucherNo: str(out.ledger_voucher_no),
   };
 }
 
@@ -1132,7 +1115,12 @@ export async function postPurchaseReturn(
   },
   actor: string,
   academicYearCode: string,
-): Promise<{ returnId: string; returnNo: string; totalPaise: number }> {
+): Promise<{
+  returnId: string;
+  returnNo: string;
+  totalPaise: number;
+  ledgerVoucherNo: string;
+}> {
   const { sb, tenantId } = await invCtx();
 
   if (!input.vendorId) throw new InvError("A vendor is required", 400);
@@ -1171,6 +1159,7 @@ export async function postPurchaseReturn(
     returnId: str(out.return_id),
     returnNo: str(out.return_no),
     totalPaise: int(out.total_paise),
+    ledgerVoucherNo: str(out.ledger_voucher_no),
   };
 }
 

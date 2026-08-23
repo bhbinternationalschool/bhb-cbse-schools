@@ -22,8 +22,10 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  return invRoute(req, "edit", async ({ actor, academicYearCode }) => {
+  return invRoute(req, "edit", async ({ actor }) => {
     const body = await invBody<Parameters<typeof recordVendorPayment>[0]>(req);
-    return recordVendorPayment(body, actor, academicYearCode);
+    // The document number now comes from the bill's own academic year inside
+    // the RPC, so the route no longer supplies one.
+    return recordVendorPayment(body, actor);
   });
 }
