@@ -48,3 +48,18 @@ raw_table|7|Hand-rolled <table> instead of ui/erp-roster.tsx's ErpTableShell. Ta
 # browser, so the flag it guards silently takes its default. Found 2026-08-18
 # with every desk cutover client flag affected. Target is 0 and stays 0.
 dynamic_public_env|0|Dynamic process.env[...NEXT_PUBLIC...] reads (always undefined in the browser)
+
+# Two migration files sharing one numeric prefix. The prefix is the migration
+# VERSION, not a sort hint — Supabase keys schema_migrations on it, so a
+# collision means one file can be recorded as already-applied and skipped on a
+# fresh database, and which of the pair sorts first is arbitrary.
+#
+# Found 2026-08-24 when three sessions numbered migrations the same afternoon:
+# 20260823220000 and 20260823230000 each had an inventory file and a village
+# file. Both village files were still untracked and were moved to free slots
+# (…215000 / …225000), verified by applying the whole set to an empty database
+# in filename order. The remaining 1 is 20260814170000 (chat_messages +
+# fleet_edge_events), long since committed and both applied — harmless where it
+# sits, not worth rewriting history for. Target is 0 if that pair is ever
+# renumbered; it must never go up.
+duplicate_migration_versions|1|Migration files sharing one version prefix
