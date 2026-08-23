@@ -432,6 +432,39 @@ export type GpsPing = {
 
 /* ─── State ────────────────────────────────────────────────── */
 
+/**
+ * A staff member who rides the school bus.
+ *
+ * Kept separate from student assignments rather than bolted onto them. A
+ * student rider is billed through the fee engine against a household; a staff
+ * rider is not billed at all — any cost is recovered through payroll — and has
+ * no household, no academic fee head and no concession rules. Forcing both
+ * through one record would mean a studentId that is really a staffId and a
+ * fee that must never reach an invoice.
+ */
+export type TransportStaffRider = {
+  id: string;
+  staffId: string;
+  routeId: string;
+  stopId: string;
+  academicYearCode: string;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  /**
+   * Stated, never inferred from a zero fee. "Free" is a decision someone made;
+   * a blank fee is a decision nobody made yet, and the two must not look alike
+   * on a roster — that is the whole reason riders billed nothing were invisible
+   * for so long.
+   */
+  costMode: "free" | "charged";
+  /** Monthly recovery in paise. Always 0 when costMode is "free". */
+  monthlyFeePaise: number;
+  serviceMode: TransportServiceMode;
+  /** Why it is free, or what the charge was agreed as. */
+  note: string;
+  createdAt: string;
+};
+
 export type TransportState = {
   version: 2;
   feePolicy: TransportFeePolicy;
@@ -451,6 +484,7 @@ export type TransportState = {
   repairRequests: RepairRequest[];
   boardingEvents: BoardingEvent[];
   gpsPings: GpsPing[];
+  staffRiders: TransportStaffRider[];
 };
 
 /** One month of transport due for a rider (computed, not stored). */
@@ -551,6 +585,34 @@ function emptyTransport(): TransportState {
     repairRequests: [],
     boardingEvents: [],
     gpsPings: [],
+    staffRiders: [],
+  };
+}
+
+/** Exported for the self-test — every saved and reloaded row passes here. */
+export function normalizeStaffRider(
+  r: Partial<TransportStaffRider>,
+): TransportStaffRider {
+  // A record that says "charged" but carries no amount is not a charge — it
+  // is an unfinished one. Reading it as free would waive money nobody agreed
+  // to waive, so it stays "charged" with a zero and shows up as incomplete.
+  const charged = r.costMode === "charged";
+  return {
+    id: String(r.id || ""),
+    staffId: String(r.staffId || ""),
+    routeId: String(r.routeId || ""),
+    stopId: String(r.stopId || ""),
+    academicYearCode: String(r.academicYearCode || ""),
+    effectiveFrom: String(r.effectiveFrom || ""),
+    effectiveTo: r.effectiveTo ?? null,
+    costMode: charged ? "charged" : "free",
+    monthlyFeePaise: charged ? Math.max(0, Number(r.monthlyFeePaise) || 0) : 0,
+    serviceMode:
+      r.serviceMode === "pickup" || r.serviceMode === "drop"
+        ? r.serviceMode
+        : "both",
+    note: String(r.note || ""),
+    createdAt: String(r.createdAt || new Date().toISOString()),
   };
 }
 
@@ -766,6 +828,9 @@ export function loadTransport(): TransportState {
           ? parsed.boardingEvents
           : [],
         gpsPings: Array.isArray(parsed.gpsPings) ? parsed.gpsPings : [],
+        staffRiders: Array.isArray(parsed.staffRiders)
+          ? parsed.staffRiders.map(normalizeStaffRider)
+          : [],
       };
     }
     const legacy = localStorage.getItem(LEGACY_KEY);
@@ -1408,6 +1473,116 @@ export function setAssignmentServiceMode(
     ),
   });
   return true;
+}
+
+/**
+ * Put a staff member on a bus, free or charged.
+ *
+ * `costMode` is required and is not derived from the amount. "Free" has to be
+ * a decision somebody recorded, because the alternative — treating a blank
+ * fee as free — silently waives money and is indistinguishable on screen from
+ * a fee nobody has set yet.
+ *
+ * Nothing here touches payroll. The monthly figure is recorded and surfaced
+ * for the payroll desk to recover; creating a salary deduction as a side
+ * effect of a transport screen would move someone's pay from a module that
+ * has no business doing so.
+ */
+export function assignStaffToTransport(input: {
+  id?: string;
+  staffId: string;
+  routeId: string;
+  stopId: string;
+  academicYearCode: string;
+  effectiveFrom: string;
+  costMode: "free" | "charged";
+  monthlyFeePaise?: number;
+  serviceMode?: TransportServiceMode;
+  note?: string;
+}):
+  | { ok: true; rider: TransportStaffRider }
+  | { ok: false; error: string } {
+  if (!input.staffId) return { ok: false, error: "Pick a staff member" };
+  if (!input.effectiveFrom) {
+    return { ok: false, error: "Effective from date is required" };
+  }
+  const state = loadTransport();
+  const route = state.routes.find((r) => r.id === input.routeId && r.isActive);
+  if (!route) return { ok: false, error: "Route not found or inactive" };
+  if (!route.stops.some((st) => st.id === input.stopId)) {
+    return { ok: false, error: "Select a stop on this route" };
+  }
+
+  const fee = Math.max(0, Number(input.monthlyFeePaise) || 0);
+  if (input.costMode === "charged" && fee <= 0) {
+    // Refused rather than saved as a zero: a charge of nothing is not a
+    // charge, and it would sit in the ledger looking settled.
+    return {
+      ok: false,
+      error: "Enter the monthly amount, or mark this ride as free",
+    };
+  }
+  if (input.costMode === "free" && !(input.note ?? "").trim()) {
+    // Free rides are the ones an auditor asks about. A reason costs the clerk
+    // one line now and answers the question later.
+    return { ok: false, error: "Say why this ride is free" };
+  }
+
+  const existing = input.id
+    ? state.staffRiders.find((r) => r.id === input.id)
+    : state.staffRiders.find(
+        (r) =>
+          r.staffId === input.staffId &&
+          r.academicYearCode === input.academicYearCode &&
+          r.effectiveTo == null,
+      );
+
+  const rider = normalizeStaffRider({
+    ...existing,
+    id: existing?.id ?? input.id ?? id("str"),
+    staffId: input.staffId,
+    routeId: input.routeId,
+    stopId: input.stopId,
+    academicYearCode: input.academicYearCode,
+    effectiveFrom: input.effectiveFrom,
+    effectiveTo: null,
+    costMode: input.costMode,
+    monthlyFeePaise: fee,
+    serviceMode: input.serviceMode ?? "both",
+    note: (input.note ?? "").trim(),
+    createdAt: existing?.createdAt ?? new Date().toISOString(),
+  });
+
+  saveTransport({
+    ...state,
+    staffRiders: existing
+      ? state.staffRiders.map((r) => (r.id === rider.id ? rider : r))
+      : [...state.staffRiders, rider],
+  });
+  return { ok: true, rider };
+}
+
+export function endStaffTransport(riderId: string, endDate: string): boolean {
+  const state = loadTransport();
+  if (!state.staffRiders.some((r) => r.id === riderId)) return false;
+  saveTransport({
+    ...state,
+    staffRiders: state.staffRiders.map((r) =>
+      r.id === riderId ? { ...r, effectiveTo: endDate } : r,
+    ),
+  });
+  return true;
+}
+
+export function listActiveStaffRiders(
+  state: TransportState,
+  academicYearCode?: string,
+): TransportStaffRider[] {
+  return state.staffRiders.filter(
+    (r) =>
+      r.effectiveTo == null &&
+      (!academicYearCode || r.academicYearCode === academicYearCode),
+  );
 }
 
 export function setBoardingSuspended(

@@ -5,6 +5,7 @@
 
 import { DEFAULT_AY, type MastersState } from "@/lib/masters";
 import type { SisState, SisStudent } from "@/lib/sis";
+import type { TransportStaffRider } from "@/lib/transport";
 import { TENANT } from "@/lib/types";
 import { householdHasGeo } from "@/lib/mapsGeocode";
 import { transportConcessionForStudent } from "@/lib/fees";
@@ -37,6 +38,12 @@ export type StudentTransportProfile = {
   fullName: string;
   admissionNo: string;
   classLabel: string;
+  /** Ids kept alongside the labels so a class/section view can group and
+   *  order properly — two sections both labelled "A" belong to different
+   *  classes, and sorting on the label alone would merge them. */
+  classId: string;
+  sectionId: string;
+  sectionLabel: string;
   householdId: string;
   addressLine: string;
   locality: string;
@@ -152,6 +159,12 @@ export function buildStudentTransportProfiles(
   const ay = academicYearCode || DEFAULT_AY;
   const hhMap = new Map(sis.households.map((h) => [h.id, h]));
   const classMap = new Map(masters.classes.map((c) => [c.id, c.name]));
+  const sectionMap = new Map(
+    (masters.sections ?? []).map((sec) => [sec.id, sec.name]),
+  );
+  // Classes are ordered by the school's own sequence, not alphabetically —
+  // "X" must not sort before "II".
+  const classOrder = new Map(masters.classes.map((c, i) => [c.id, i]));
 
   return sis.students
     .filter((s) => s.status === "active" && (!ay || s.academicYearCode === ay))
@@ -166,6 +179,12 @@ export function buildStudentTransportProfiles(
         fullName: student.fullName,
         admissionNo: student.admissionNo,
         classLabel: classMap.get(student.classId || "") || "—",
+        classId: student.classId || "",
+        sectionId: student.sectionId || "",
+        // Blank, not "—": a student genuinely not in a section reads as
+        // "no section", which the view says in words rather than a dash
+        // that looks like missing data.
+        sectionLabel: sectionMap.get(student.sectionId || "") || "",
         householdId: student.householdId,
         addressLine: studentAddressBlob(student, hh),
         locality: hh?.locality || "",
@@ -259,6 +278,109 @@ export function listTransportCrew(
         a.designation.localeCompare(b.designation) ||
         a.fullName.localeCompare(b.fullName),
     );
+}
+
+export type ClassTransportRow = {
+  classId: string;
+  classLabel: string;
+  sectionId: string;
+  sectionLabel: string;
+  /** Class order from masters, so "X" never sorts before "II". */
+  order: number;
+  riders: {
+    studentId: string;
+    fullName: string;
+    admissionNo: string;
+    routeLabel: string;
+    stopName: string;
+    stopLinkBroken: boolean;
+    monthlyFeePaise: number;
+    serviceMode: TransportServiceMode;
+    boardingSuspended: boolean;
+  }[];
+  /** Active students in this section who are NOT on any bus. */
+  nonRiderCount: number;
+  totalStudents: number;
+  monthlyTotalPaise: number;
+};
+
+/**
+ * Transport riders grouped by class and section.
+ *
+ * The same people as riders-by-bus, read along the other axis. A class
+ * teacher asking "who in my section goes by bus" cannot answer it from a
+ * per-vehicle list without reading all five, and the office needs this shape
+ * when a class trip, an early dismissal or a section merge changes who needs
+ * transporting.
+ *
+ * Non-riders are counted, not hidden. "18 of 24 ride" is the useful sentence;
+ * a list of six riders on its own does not say whether the rest walk or
+ * whether nobody got round to assigning them.
+ */
+export function buildClassTransportRows(
+  profiles: StudentTransportProfile[],
+  state: TransportState,
+): ClassTransportRow[] {
+  const routeById = new Map(state.routes.map((r) => [r.id, r]));
+  const buckets = new Map<string, ClassTransportRow>();
+
+  profiles.forEach((p, i) => {
+    const key = `${p.classId}::${p.sectionId}`;
+    let row = buckets.get(key);
+    if (!row) {
+      row = {
+        classId: p.classId,
+        classLabel: p.classLabel,
+        sectionId: p.sectionId,
+        sectionLabel: p.sectionLabel,
+        order: i,
+        riders: [],
+        nonRiderCount: 0,
+        totalStudents: 0,
+        monthlyTotalPaise: 0,
+      };
+      buckets.set(key, row);
+    }
+    row.totalStudents += 1;
+
+    const asg = p.hasAssignment ? p.assignment : undefined;
+    if (!asg) {
+      row.nonRiderCount += 1;
+      return;
+    }
+    const route = routeById.get(asg.routeId);
+    const stop = route?.stops.find((st) => st.id === asg.stopId);
+    // No route means no policy fee to derive — the same rule the billing
+    // engine now follows. Their own agreed fee still stands.
+    const expected = route
+      ? expectedMonthlyFeePaise(route, stop, state.feePolicy)
+      : 0;
+    const full = asg.monthlyFeePaise > 0 ? asg.monthlyFeePaise : expected;
+    const fee = applyServiceMode(full, asg.serviceMode);
+    row.riders.push({
+      studentId: p.studentId,
+      fullName: p.fullName,
+      admissionNo: p.admissionNo,
+      routeLabel: route ? route.busNo || route.code : "—",
+      stopName: stop?.name ?? "",
+      // Same fault the roster surfaces; a class teacher should see it too
+      // rather than wonder why a stop is blank.
+      stopLinkBroken: Boolean(route) && !stop,
+      monthlyFeePaise: fee,
+      serviceMode: asg.serviceMode ?? "both",
+      boardingSuspended: Boolean(asg.boardingSuspended),
+    });
+    row.monthlyTotalPaise += fee;
+  });
+
+  const rows = [...buckets.values()];
+  for (const r of rows) {
+    r.riders.sort((a, b) => a.fullName.localeCompare(b.fullName));
+  }
+  return rows.sort(
+    (a, b) =>
+      a.order - b.order || a.sectionLabel.localeCompare(b.sectionLabel),
+  );
 }
 
 export function findSiblingTransportGaps(
@@ -776,6 +898,27 @@ export type FleetRosterRow = {
   ridersUnknownShortfall: number;
   /** Riders whose assignment names a stop that no longer exists. */
   ridersBrokenLink: number;
+  /**
+   * Staff riding this bus. They occupy seats exactly as children do, so
+   * `seatsUsed` counts both — a bus reported as having room because only the
+   * children were counted is how someone ends up standing.
+   */
+  staffRiders: {
+    id: string;
+    staffId: string;
+    fullName: string;
+    designation: string;
+    stopName: string;
+    stopLinkBroken: boolean;
+    costMode: "free" | "charged";
+    monthlyFeePaise: number;
+    serviceMode: TransportServiceMode;
+    note: string;
+  }[];
+  /** Children plus staff. What actually fills the vehicle. */
+  seatsUsed: number;
+  /** Monthly amount to recover from staff pay. Never auto-deducted. */
+  staffRecoveryPaise: number;
   /** Total monthly transport concession granted across this bus. */
   concessionTotalPaise: number;
   /** monthlyTotalPaise - concessionTotalPaise. The bus's real monthly income. */
@@ -804,6 +947,12 @@ export function buildFleetRosters(
      * is why the panel passes what it already has rather than leaving the
      * column quietly blank.
      */
+    /** Active staff riders plus how to name them. Omit and the bus simply
+     *  reports no staff, which is why the panel always passes them. */
+    staff?: {
+      riders: TransportStaffRider[];
+      nameById: Map<string, { fullName: string; designation: string }>;
+    };
     concessions?: {
       masters: MastersState;
       students: Map<string, { id: string; admissionNo: string; academicYearCode?: string }>;
@@ -929,6 +1078,28 @@ export function buildFleetRosters(
         return a.fullName.localeCompare(b.fullName);
       });
 
+    const staffOnBus = (opts?.staff?.riders ?? [])
+      .filter((sr) => sr.routeId === route.id && sr.effectiveTo == null)
+      .map((sr) => {
+        const stop = route.stops.find((st) => st.id === sr.stopId);
+        const who = opts?.staff?.nameById.get(sr.staffId);
+        return {
+          id: sr.id,
+          staffId: sr.staffId,
+          // An unresolved staff id reads as unknown, not blank — a nameless
+          // person on a bus list is not something to render as empty space.
+          fullName: who?.fullName || "(staff record not found)",
+          designation: who?.designation || "",
+          stopName: stop?.name ?? "",
+          stopLinkBroken: !stop,
+          costMode: sr.costMode,
+          monthlyFeePaise: sr.costMode === "charged" ? sr.monthlyFeePaise : 0,
+          serviceMode: sr.serviceMode,
+          note: sr.note,
+        };
+      })
+      .sort((a, b) => a.fullName.localeCompare(b.fullName));
+
     return {
       routeId: route.id,
       routeCode: route.code,
@@ -950,6 +1121,12 @@ export function buildFleetRosters(
       ridersWithShortfall: riders.filter((r) => r.shortfallPaise > 0).length,
       ridersUnknownShortfall: riders.filter((r) => !r.shortfallKnown).length,
       ridersBrokenLink: riders.filter((r) => r.stopLinkBroken).length,
+      staffRiders: staffOnBus,
+      seatsUsed: riders.length + staffOnBus.length,
+      staffRecoveryPaise: staffOnBus.reduce(
+        (sum, r) => sum + r.monthlyFeePaise,
+        0,
+      ),
       concessionTotalPaise: riders.reduce((sum, r) => sum + r.concessionPaise, 0),
       netTotalPaise: riders.reduce((sum, r) => sum + r.netFeePaise, 0),
       ridersWithConcession: riders.filter((r) => r.concessionPaise > 0).length,

@@ -28,6 +28,7 @@ export const TRANSPORT_SLICE_KEYS: TransportSliceKey[] = [
   "repairRequests",
   "boardingEvents",
   "gpsPings",
+  "staffRiders",
 ];
 
 export type TransportDeskSyncMeta = {
@@ -74,6 +75,7 @@ function emptyBundle(): TransportDeskBundle {
     repairRequests: [],
     boardingEvents: [],
     gpsPings: [],
+    staffRiders: [],
   };
 }
 
@@ -228,7 +230,14 @@ export async function pushTransportDeskToDb(
   // isActive=false and ending an assignment sets effectiveTo, both of which
   // keep the row. So an empty array arriving on top of a populated slice is a
   // bug every time, and refusing it costs nothing.
-  const PROTECTED = new Set(["routes", "assignments", "vehicles"]);
+  const PROTECTED = new Set([
+    "routes",
+    "assignments",
+    "vehicles",
+    // Staff riders are assignments too — losing them silently takes people
+    // off the bus and stops any payroll recovery against them.
+    "staffRiders",
+  ]);
   const refused = stale.filter((k) => PROTECTED.has(k));
   if (refused.length > 0) {
     return {

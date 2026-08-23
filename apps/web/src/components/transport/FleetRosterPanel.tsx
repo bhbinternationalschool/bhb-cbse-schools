@@ -5,7 +5,7 @@ import { formatInr } from "@/lib/fees";
 import type { MastersState } from "@/lib/masters";
 import type { SisState } from "@/lib/sis";
 import { formatRouteCrew, staffAssignedToRoute } from "@/lib/staffResolve";
-import type { TransportState } from "@/lib/transport";
+import { listActiveStaffRiders, type TransportState } from "@/lib/transport";
 import {
   buildFleetRosters,
   buildStudentTransportProfiles,
@@ -86,6 +86,21 @@ export function FleetRosterPanel({
     const plans = planAfternoonWaves(state, sis, masters, academicYearCode);
     return {
       rosters: buildFleetRosters(state, profiles, fathers, crew, {
+        staff: {
+          riders: listActiveStaffRiders(state, academicYearCode),
+          nameById: new Map(
+            (masters.staff ?? []).map((st) => [
+              st.id,
+              {
+                fullName: st.fullName,
+                designation:
+                  (masters.designations ?? []).find(
+                    (d) => d.id === st.designationId,
+                  )?.name ?? "",
+              },
+            ]),
+          ),
+        },
         // The roster must quote the same discount the invoice charges, so it
         // is resolved from the same masters through the same rule engine.
         concessions: {
@@ -415,8 +430,10 @@ function RosterCard({
   onRepair?: () => void;
   onRiderAction?: (action: RiderAction, rider: FleetRiderRow, routeId: string) => void;
 }) {
-  const seatsLeft = Math.max(0, roster.seatCapacity - roster.riders.length);
-  const over = roster.riders.length > roster.seatCapacity;
+  // Staff occupy seats exactly as children do. Counting only the children
+  // reports room on a bus that is already full.
+  const seatsLeft = Math.max(0, roster.seatCapacity - roster.seatsUsed);
+  const over = roster.seatsUsed > roster.seatCapacity;
 
   // Default order is the stop sequence the list already arrives in — that is
   // how the conductor reads it. Sorting is opt-in per column from there.
@@ -466,7 +483,10 @@ function RosterCard({
                   : "font-semibold text-[var(--ink)]"
               }
             >
-              {roster.riders.length}/{roster.seatCapacity} seats
+              {roster.seatsUsed}/{roster.seatCapacity} seats
+              {roster.staffRiders.length > 0
+                ? ` (${roster.riders.length} students + ${roster.staffRiders.length} staff)`
+                : ""}
             </span>
             <span className="text-[var(--muted)]">
               {over
@@ -540,6 +560,59 @@ function RosterCard({
           <span className="ml-2 text-[var(--danger)]">⚑ not pinned on the map</span>
         ) : null}
       </div>
+
+      {roster.staffRiders.length > 0 ? (
+        <div className="border-t border-[var(--border)] px-4 py-2">
+          <p className="text-[11px] font-bold text-[var(--brand-deep)]">
+            Staff on this bus ({roster.staffRiders.length})
+          </p>
+          <ul className="mt-1 space-y-1">
+            {roster.staffRiders.map((sr) => (
+              <li key={sr.id} className="text-[11px]">
+                <span className="font-semibold text-[var(--ink)]">
+                  {sr.fullName}
+                </span>
+                {sr.designation ? (
+                  <span className="text-[var(--muted)]"> · {sr.designation}</span>
+                ) : null}
+                <span className="text-[var(--muted)]">
+                  {" · "}
+                  {sr.stopLinkBroken ? (
+                    <span className="font-semibold text-[var(--warning)]">
+                      ⚠ stop link broken
+                    </span>
+                  ) : (
+                    sr.stopName || "no stop"
+                  )}
+                  {sr.serviceMode !== "both"
+                    ? ` · ${sr.serviceMode === "pickup" ? "pick-up only" : "drop only"}`
+                    : ""}
+                </span>
+                {sr.costMode === "free" ? (
+                  <span
+                    className="ml-1 rounded bg-[var(--surface-sunken)] px-1 text-[9px] font-bold uppercase text-[var(--muted)]"
+                    title={sr.note || "No reason recorded"}
+                  >
+                    free
+                  </span>
+                ) : (
+                  <span className="ml-1 font-semibold text-[var(--ink)]">
+                    {formatInr(sr.monthlyFeePaise)}/month
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+          {roster.staffRecoveryPaise > 0 ? (
+            // Said plainly, because nothing in this module deducts it. A
+            // figure shown without that sentence would be assumed collected.
+            <p className="mt-1 text-[10px] text-[var(--muted)]">
+              {formatInr(roster.staffRecoveryPaise)}/month to recover through
+              payroll — this is not deducted automatically.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       {open ? (
         <div className="overflow-x-auto border-t border-[var(--border)]">

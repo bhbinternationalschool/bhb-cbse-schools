@@ -27,6 +27,8 @@ import {
   FleetRosterPanel,
   type RiderAction,
 } from "@/components/transport/FleetRosterPanel";
+import { ClassTransportPanel } from "@/components/transport/ClassTransportPanel";
+import { StaffRiderPanel } from "@/components/transport/StaffRiderPanel";
 import { StopLinkRepairPanel } from "@/components/transport/StopLinkRepairPanel";
 import { TransportAmendDialog } from "@/components/transport/TransportAmendDialog";
 import { NearestStopPicker } from "@/components/transport/NearestStopPicker";
@@ -89,6 +91,8 @@ type TransportTab =
   | "planner"
   | "riders"
   | "rosters"
+  | "classRosters"
+  | "staffRiders"
   | "routes"
   | "fleet"
   | "fuel"
@@ -106,6 +110,8 @@ const TABS: ModuleTabItem[] = [
   { id: "planner", label: "Planner", tone: "teal" },
   { id: "riders", label: "Riders", tone: "navy" },
   { id: "rosters", label: "Riders by bus", tone: "sky" },
+  { id: "classRosters", label: "By class", tone: "sky" },
+  { id: "staffRiders", label: "Staff riders", tone: "sky" },
   { id: "routes", label: "Routes", tone: "teal" },
   { id: "fleet", label: "Fleet", tone: "slate" },
   { id: "fuel", label: "Fuel", tone: "amber" },
@@ -135,6 +141,8 @@ export function TransportWorkspace() {
       "planner",
       "riders",
       "rosters",
+      "classRosters",
+      "staffRiders",
       "routes",
       "fleet",
       "fuel",
@@ -683,6 +691,24 @@ export function TransportWorkspace() {
                 refresh();
                 flash(message);
               }}
+            />
+          ) : null}
+          {tab === "classRosters" ? (
+            <ClassTransportPanel
+              state={state}
+              masters={masters}
+              sis={sis}
+              academicYearCode={session.academicYearCode}
+            />
+          ) : null}
+          {tab === "staffRiders" ? (
+            <StaffRiderPanel
+              state={state}
+              masters={masters}
+              academicYearCode={session.academicYearCode}
+              onRefresh={refresh}
+              onFlash={flash}
+              onError={setNotice}
             />
           ) : null}
           {tab === "routes" ? (

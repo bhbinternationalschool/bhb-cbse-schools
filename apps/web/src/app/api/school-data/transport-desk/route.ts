@@ -70,6 +70,7 @@ export async function POST(req: Request) {
     repairRequests: body.repairRequests ?? [],
     boardingEvents: body.boardingEvents ?? [],
     gpsPings: body.gpsPings ?? [],
+    staffRiders: body.staffRiders ?? [],
   });
   if (!result.ok) {
     return NextResponse.json(
