@@ -1,0 +1,68 @@
+# Deploy to production on merge to main — keyless, via Workload Identity
+# Federation. GitHub Actions gets a short-lived Google token by trust (no
+# service-account key, which this org's policy blocks anyway) and runs the
+# same self-contained cloudbuild.yaml a local deploy does.
+#
+# Set up once — see docs/DEPLOY_GITHUB_ACTIONS_WIF.md. Nothing here is secret:
+# the real credentials live in Secret Manager and are bound by cloudbuild.yaml;
+# the eight substitution values below are non-secret repo *variables*.
+
+name: Deploy to production
+
+# Manual-run-only for now: workflow_dispatch, NO push trigger. This lets the
+# workflow be merged before Workload Identity Federation exists without firing
+# a doomed deploy on the merge itself. Once a manual run has gone green, add
+#   push:
+#     branches: [main]
+# to deploy automatically on merge (see docs/DEPLOY_GITHUB_ACTIONS_WIF.md).
+on:
+  workflow_dispatch: {}
+
+# id-token: write is what lets the job mint the OIDC token WIF verifies.
+# Without it the auth step cannot federate.
+permissions:
+  contents: read
+  id-token: write
+
+# Never run two production deploys at once, and never cancel one mid-flight —
+# a half-applied deploy is worse than a queued one.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: school-erp-prod-493619
+          # From docs/DEPLOY_GITHUB_ACTIONS_WIF.md step 1.
+          workload_identity_provider: projects/287837565122/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: bhb-deploy@school-erp-prod-493619.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build, push, and deploy
+        run: |
+          gcloud builds submit \
+            --project=school-erp-prod-493619 \
+            --config=cloudbuild.yaml \
+            --substitutions="\
+          _NEXT_PUBLIC_SUPABASE_URL=${{ vars.NEXT_PUBLIC_SUPABASE_URL }},\
+          _NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY }},\
+          _NEXT_PUBLIC_VAPID_PUBLIC_KEY=${{ vars.NEXT_PUBLIC_VAPID_PUBLIC_KEY }},\
+          _WHATSAPP_PHONE_ID=${{ vars.WHATSAPP_PHONE_ID }},\
+          _WHATSAPP_WABA_ID=${{ vars.WHATSAPP_WABA_ID }},\
+          _GOOGLE_OAUTH_CLIENT_ID=${{ vars.GOOGLE_OAUTH_CLIENT_ID }},\
+          _FLEET_EDGE_ALLOWED_IPS=${{ vars.FLEET_EDGE_ALLOWED_IPS }},\
+          _FLEET_EDGE_SOS_NOTIFY_MOBILE=${{ vars.FLEET_EDGE_SOS_NOTIFY_MOBILE }}"
+
+      - name: Report the serving revision
+        run: |
+          gcloud run services describe school-erp-web \
+            --project=school-erp-prod-493619 --region=asia-southeast1 \
+            --format='value(status.traffic[0].revisionName)'
