@@ -34,6 +34,53 @@ export const MAX_RESOLVE_PER_CALL = 250;
 /** Google's Distance Matrix takes at most 25 origins in one request. */
 const MATRIX_BATCH = 25;
 
+/**
+ * Does this geocoding result actually describe the village we asked about?
+ *
+ * WHY THIS EXISTS — a real failure, 2026-08-24.
+ * Resolving all 169 Harhua villages "succeeded": 169 geocoded, 169 routed,
+ * zero failures. Every single one came back 18.95 km / 40 min, because Google
+ * had matched none of the village names and silently returned the DISTRICT
+ * centroid — "Varanasi, Uttar Pradesh, India" — for all 169. The giveaway was
+ * Ayar, which the school is inside, reporting a 19 km drive.
+ *
+ * Google does not error on a bad village name; it widens until something
+ * matches. So a result is only accepted when the returned address actually
+ * names the village AND the match is not a coarse administrative area.
+ * Anything else is recorded as unresolved, which is the truth, rather than as
+ * a confident wrong distance that would feed every lead score in the block.
+ */
+export function acceptsGeocode(
+  villageName: string,
+  formattedAddress: string,
+  confidence: string,
+): boolean {
+  // "low" is Google's locality / administrative_area fallback — precisely the
+  // centroid case. A settlement we actually found scores higher than that.
+  if (confidence === "low") return false;
+
+  const addr = (formattedAddress || "").toLowerCase();
+  if (!addr) return false;
+
+  // A missing village name must REJECT, not accept. The first version fell
+  // through to `addr.includes("")`, which is true for every string, so a
+  // guard whose whole job was to catch wrong places accepted all of them the
+  // moment its input went missing. Fail closed.
+  const name = (villageName || "").trim().toLowerCase();
+  if (name.length < 3) return false;
+
+  // The census name may carry qualifiers Google will not echo ("Puari Kala"
+  // vs "Puari"), so match on the distinctive first word rather than the whole
+  // string — but require at least four characters, or short names like "Ayar"
+  // would match "Varanasi" by accident.
+  const head = name.replace(/[^a-z\s]/g, " ").trim().split(/\s+/)[0];
+  if (!head || head.length < 4) {
+    // Too short to match on its own: require the whole name to appear.
+    return addr.includes(name);
+  }
+  return addr.includes(head);
+}
+
 export class VillageTravelError extends Error {
   status: number;
   constructor(message: string, status = 400) {
@@ -50,6 +97,8 @@ export type TravelResolveResult = {
   geocoded: number;
   routed: number;
   fellBackToStraightLine: number;
+  /** Geocoded to something that is demonstrably not this village. */
+  rejectedGeocode: number;
   failed: number;
   /** True when more villages in this block still need resolving. */
   more: boolean;
@@ -65,6 +114,74 @@ type Pending = {
   latitude: number | null;
   longitude: number | null;
 };
+
+/**
+ * Locate one village.
+ *
+ * Places Text Search rather than the Geocoding API, on evidence: geocoding
+ * resolved 0 of Harhua's 169 villages — every one silently widened to the
+ * Varanasi district centroid. Places finds a real share of them (Puari Kala,
+ * Gosaipur Mohaon among the first five tried) and falls back to the BLOCK
+ * centroid rather than the district when it cannot, which `acceptsGeocode`
+ * then rejects by name.
+ *
+ * Geocoding is still tried second: it is precise on the minority of villages
+ * that do carry a postal identity, and by then we have already decided Places
+ * could not help.
+ */
+async function locateVillage(
+  villageName: string,
+  blockName: string,
+  districtName: string,
+  apiKey: string,
+): Promise<{ lat: number; lon: number; confidence: string; address: string } | null> {
+  const region = [blockName, districtName || TENANT.city, TENANT.state].filter(Boolean).join(", ");
+
+  try {
+    const url = new URL("https://maps.googleapis.com/maps/api/place/textsearch/json");
+    url.searchParams.set("query", `${villageName} village, ${region}`);
+    url.searchParams.set("region", "in");
+    url.searchParams.set("key", apiKey);
+    const res = await fetch(url.toString(), { next: { revalidate: 86400 } });
+    if (res.ok) {
+      const data = (await res.json()) as {
+        status?: string;
+        results?: {
+          name?: string;
+          formatted_address?: string;
+          geometry?: { location?: { lat?: number; lng?: number } };
+        }[];
+      };
+      const top = data.results?.[0];
+      const lat = top?.geometry?.location?.lat;
+      const lng = top?.geometry?.location?.lng;
+      if (typeof lat === "number" && typeof lng === "number") {
+        // Places echoes the matched place NAME, which is the honest thing to
+        // test — the formatted address of a village is often just the district.
+        const label = top?.name || top?.formatted_address || "";
+        if (acceptsGeocode(villageName, label, "places")) {
+          return { lat, lon: lng, confidence: "places", address: label };
+        }
+      }
+    }
+  } catch (e) {
+    console.warn(`${LOG} places lookup failed for "${villageName}": ${e instanceof Error ? e.message : e}`);
+  }
+
+  const address = [villageName, blockName, districtName || TENANT.city, TENANT.state, "India"]
+    .filter(Boolean)
+    .join(", ");
+  const hit = await geocodeAddressWithGoogle(address, apiKey);
+  if (hit && acceptsGeocode(villageName, hit.formattedAddress, hit.confidence)) {
+    return {
+      lat: hit.lat,
+      lon: hit.lng,
+      confidence: hit.confidence ?? "",
+      address: hit.formattedAddress ?? "",
+    };
+  }
+  return null;
+}
 
 /**
  * Distance Matrix for a batch of origins against the campus.
@@ -155,7 +272,18 @@ export async function resolveBlockTravel(input: {
   if (error) {
     throw new VillageTravelError(`Could not read settlements: ${error.message}`, 502);
   }
-  const all = (data as unknown as Pending[] | null) ?? [];
+  // Supabase returns the COLUMN names, which are snake_case. Casting the rows
+  // straight to a camelCase type compiles happily and hands every consumer
+  // `undefined` — which is how villageName went missing and every village was
+  // geocoded as the literal string "undefined".
+  const all: Pending[] = ((data as unknown as Record<string, unknown>[] | null) ?? []).map((r) => ({
+    id: String(r.id),
+    villageName: String(r.village_name ?? ""),
+    blockName: String(r.block_name ?? ""),
+    districtName: String(r.district_name ?? ""),
+    latitude: typeof r.latitude === "number" ? r.latitude : null,
+    longitude: typeof r.longitude === "number" ? r.longitude : null,
+  }));
   if (!all.length) {
     throw new VillageTravelError("No settlements match that selection.", 404);
   }
@@ -181,6 +309,7 @@ export async function resolveBlockTravel(input: {
     geocoded: 0,
     routed: 0,
     fellBackToStraightLine: 0,
+    rejectedGeocode: 0,
     failed: 0,
     more: false,
   };
@@ -194,7 +323,7 @@ export async function resolveBlockTravel(input: {
 
   type Located = Pending & { lat: number; lon: number; confidence: string; address: string };
   const located: Located[] = [];
-  const unlocated: Pending[] = [];
+  const unlocated: (Pending & { rejection?: string })[] = [];
 
   for (const v of pending) {
     // A village that already carries OpenStreetMap coordinates needs no
@@ -204,29 +333,25 @@ export async function resolveBlockTravel(input: {
       continue;
     }
     if (!apiKey) {
-      unlocated.push(v);
+      unlocated.push({ ...v, rejection: "GOOGLE_MAPS_API_KEY not configured" });
       continue;
     }
-    const address = [v.villageName, v.blockName, v.districtName || TENANT.city, TENANT.state, "India"]
-      .filter(Boolean)
-      .join(", ");
     try {
-      const hit = await geocodeAddressWithGoogle(address, apiKey);
+      const hit = await locateVillage(v.villageName, v.blockName, v.districtName, apiKey);
       if (hit) {
         result.geocoded += 1;
-        located.push({
-          ...v,
-          lat: hit.lat,
-          lon: hit.lng,
-          confidence: hit.confidence ?? "",
-          address: hit.formattedAddress ?? "",
-        });
+        located.push({ ...v, ...hit });
       } else {
-        unlocated.push(v);
+        result.rejectedGeocode += 1;
+        unlocated.push({
+          ...v,
+          rejection:
+            "neither Places nor Geocoding returned this village — the result named somewhere else",
+        });
       }
     } catch (e) {
-      console.warn(`${LOG} geocode failed for "${v.villageName}": ${e instanceof Error ? e.message : e}`);
-      unlocated.push(v);
+      console.warn(`${LOG} lookup failed for "${v.villageName}": ${e instanceof Error ? e.message : e}`);
+      unlocated.push({ ...v, rejection: "lookup error" });
     }
   }
 
@@ -303,9 +428,7 @@ export async function resolveBlockTravel(input: {
       distance_km: null,
       duration_minutes: null,
       source: "unresolved",
-      note: apiKey
-        ? "No geocoding result for this village name."
-        : "GOOGLE_MAPS_API_KEY not configured.",
+      note: v.rejection || "No geocoding result for this village name.",
       computed_at: new Date().toISOString(),
     });
   }

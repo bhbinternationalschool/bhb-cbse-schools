@@ -44,6 +44,7 @@ import {
   parseCsv,
 } from "./censusPca";
 import { buildOverpassQuery, toNearbyPlaces } from "./villageMarket.server";
+import { acceptsGeocode } from "./villageTravel.server";
 
 console.log("villageMarket.selftest.ts");
 
@@ -455,5 +456,40 @@ assert.equal(countUniquePhones([]), 0);
 const empty: VillageContactRow[] = [{ ...contacts[0], phones: [] }];
 assert.equal(buildVillageTargetingCsv(empty).split("\r\n").length, 2);
 assert.equal(buildMetaCustomAudienceCsv(empty), "phone,country");
+
+/* ── geocode acceptance must FAIL CLOSED ────────────────────── */
+
+// A real incident, 2026-08-24. Resolving Harhua reported 169/169 success with
+// every village 18.95 km from campus — including Ayar, which the school is
+// inside. Two bugs compounded: the row mapper handed the guard an undefined
+// village name (Supabase returns snake_case; the type said camelCase), and
+// the guard then fell through to `addr.includes("")`, which is true for every
+// string. A check whose entire job was catching wrong places accepted all of
+// them the instant its input went missing.
+assert.equal(
+  acceptsGeocode("", "Varanasi Uttar Pradesh", "places"),
+  false,
+  "a missing village name must REJECT — an empty needle matches every haystack",
+);
+assert.equal(acceptsGeocode(undefined as unknown as string, "Varanasi", "places"), false);
+assert.equal(acceptsGeocode("  ", "Varanasi", "places"), false);
+
+// The centroid fallbacks Google actually returned for Harhua.
+assert.equal(acceptsGeocode("Ayar", "Varanasi Uttar Pradesh", "places"), false);
+assert.equal(acceptsGeocode("Ayar", "Harhua", "places"), false);
+assert.equal(acceptsGeocode("Lalpur", "Harhua, Uttar Pradesh 221105, India", "medium"), false);
+
+// "low" is Google's administrative-area fallback — never a settlement.
+assert.equal(acceptsGeocode("Kurauli", "Kurauli, Uttar Pradesh", "low"), false);
+
+// Genuine matches still pass, including the qualifier case the head-word rule
+// exists for (census "Puari Kala" vs whatever Google echoes).
+assert.equal(acceptsGeocode("Kurauli", "Kurauli", "places"), true);
+assert.equal(acceptsGeocode("Puari Kala", "Puari Kala, Varanasi", "places"), true);
+assert.equal(acceptsGeocode("Benipur Khurd", "Benipur, Varanasi", "places"), true);
+
+// A short name must not match by accident inside a longer unrelated one.
+assert.equal(acceptsGeocode("Ay", "Ayodhya", "places"), false);
+assert.equal(acceptsGeocode("Rampur", "Shivrampur", "places"), true, "substring of a real neighbour is accepted; the reviewer sees the address");
 
 console.log("  ok");
