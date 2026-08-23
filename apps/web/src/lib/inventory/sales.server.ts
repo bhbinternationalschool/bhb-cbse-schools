@@ -6,11 +6,14 @@
  * stock, cost, money and the receivable always move together. This file reads,
  * finds buyers, and shapes payloads.
  *
- * Credit balances live on `inv_sales.balance_paise`. They are not pushed into
- * `fee_desk_open_dues`: that table is rebuilt wholesale by the fees client
- * from the OLD localStorage store, so anything written there from here would
- * be deleted on the next fee push. The store owns its receivable until the
- * fees rebuild derives dues server-side.
+ * Credit balances live on `inv_sales.balance_paise` and are never pushed into
+ * `fee_desk_open_dues`: that table is rebuilt wholesale by the fees client,
+ * which deletes every row for the year absent from its payload, so anything
+ * written there from here would survive until the next fee push and no longer.
+ *
+ * The fee counter instead reads them live through `storeDuesForStudents` and
+ * settles them through `collectOnSale` with the receipt as `externalRef`, so a
+ * retry cannot take the money twice.
  */
 
 import { InvError, invCtx, type InvCtx } from "@/lib/inventory/db.server";
@@ -374,6 +377,11 @@ export async function collectOnSale(
     reference?: string;
     paidOn?: string;
     note?: string;
+    /**
+     * An outside document this collection belongs to — a fee receipt number.
+     * Makes the call safely repeatable: a replay settles once.
+     */
+    externalRef?: string;
   },
   actor: string,
 ): Promise<{
@@ -381,6 +389,7 @@ export async function collectOnSale(
   balancePaise: number;
   status: InvSaleStatus;
   ledgerVoucherNo: string;
+  alreadyApplied: boolean;
 }> {
   const amount = int(input.amountPaise);
   if (amount <= 0) throw new InvError("Amount must be more than zero", 400);
@@ -396,6 +405,7 @@ export async function collectOnSale(
       reference: str(input.reference),
       paid_on: input.paidOn || null,
       note: str(input.note),
+      external_ref: str(input.externalRef),
     },
   });
   if (error) throw new InvError(cleanDbMessage(error.message), 409);
@@ -406,6 +416,7 @@ export async function collectOnSale(
     balancePaise: int(out.balance_paise),
     status: str(out.status) as InvSaleStatus,
     ledgerVoucherNo: str(out.ledger_voucher_no),
+    alreadyApplied: out.already_applied === true,
   };
 }
 
@@ -654,4 +665,55 @@ export async function counterPrices(
     };
   }
   return out;
+}
+
+
+/* ─── Store dues for the fee counter ───────────────────────── */
+
+export type InvStoreDue = {
+  saleId: string;
+  saleNo: string;
+  studentId: string;
+  buyerName: string;
+  saleDate: string;
+  academicYearCode: string;
+  totalPaise: number;
+  paidPaise: number;
+  balancePaise: number;
+  itemSummary: string;
+};
+
+/**
+ * What these students still owe the store.
+ *
+ * Read live rather than mirrored into the fee module's own tables: the fees
+ * client rebuilds those wholesale and would delete anything it did not
+ * produce. One request per household on the counter is cheap; a mirror that
+ * silently empties is not.
+ */
+export async function storeDuesForStudents(
+  studentIds: string[],
+): Promise<InvStoreDue[]> {
+  const ids = [...new Set((studentIds ?? []).filter(Boolean))];
+  if (ids.length === 0) return [];
+
+  const { sb, tenantId } = await invCtx();
+  const { data, error } = await sb.rpc("inv_store_dues_for_students", {
+    p_tenant_id: tenantId,
+    p_student_ids: ids,
+  });
+  if (error) throw new InvError(`Store dues: ${error.message}`, 500);
+
+  return ((data ?? []) as Row[]).map((r) => ({
+    saleId: str(r.sale_id),
+    saleNo: str(r.sale_no),
+    studentId: str(r.student_id),
+    buyerName: str(r.buyer_name),
+    saleDate: dateOnly(r.sale_date),
+    academicYearCode: str(r.academic_year_code),
+    totalPaise: int(r.total_paise),
+    paidPaise: int(r.paid_paise),
+    balancePaise: int(r.balance_paise),
+    itemSummary: str(r.item_summary),
+  }));
 }

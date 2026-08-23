@@ -8,6 +8,7 @@ import {
   listSales,
   postSale,
   postSaleReturn,
+  storeDuesForStudents,
   voidSale,
 } from "@/lib/inventory/sales.server";
 import { invBody, invQuery, invRoute } from "@/lib/inventory/route.server";
@@ -24,6 +25,13 @@ export async function GET(req: Request) {
     if (view === "summary") return { summary: await counterSummary() };
     if (view === "returns") {
       return { returns: await listSaleReturns({ saleId: q.get("saleId") ?? "" }) };
+    }
+    if (view === "dues") {
+      return {
+        dues: await storeDuesForStudents(
+          (q.get("studentIds") ?? "").split(",").filter(Boolean),
+        ),
+      };
     }
     if (view === "prices") {
       return {
