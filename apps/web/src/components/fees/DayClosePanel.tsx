@@ -396,53 +396,26 @@ export function DayClosePanel({
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <h3 className="text-sm font-bold text-[var(--brand-deep)]">
-              Store issues raised today
+              Store collections today
             </h3>
             <p className="mt-0.5 text-[11px] text-[var(--muted)]">
-              Credit issues from Store (books/uniform) on {closeDate}
-              {book.storeIssuedPaise > 0
-                ? ` · ${formatInr(book.storeIssuedPaise)} issued`
-                : ""}
+              Collected against store dues on {closeDate}
               {book.storeCollectedPaise > 0
-                ? ` · ${formatInr(book.storeCollectedPaise)} already collected`
+                ? ` · ${formatInr(book.storeCollectedPaise)}`
                 : ""}
             </p>
           </div>
         </div>
-        {book.storeIssues.length === 0 ? (
-          <p className="mt-2 text-sm text-[var(--muted)]">
-            No store issues on this date. Issue books from Store, then collect on
-            Fee Take — both appear here.
-          </p>
-        ) : (
-          <ul className="mt-3 max-h-48 divide-y divide-[var(--border)] overflow-y-auto">
-            {book.storeIssues.map((iss) => (
-              <li
-                key={iss.issueId}
-                className={`flex items-center justify-between gap-2 py-2 ${
-                  iss.voided ? "opacity-50" : ""
-                }`}
-              >
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-[var(--brand-deep)]">
-                    {iss.issueNo}
-                    {iss.voided ? (
-                      <span className="ml-1.5 text-[10px] uppercase text-[#dc2626]">
-                        Void
-                      </span>
-                    ) : null}
-                  </div>
-                  <div className="text-[10px] text-[var(--muted)]">
-                    {iss.itemCount} item{iss.itemCount === 1 ? "" : "s"}
-                  </div>
-                </div>
-                <div className="text-sm font-bold text-[var(--brand-deep)]">
-                  {formatInr(iss.totalPaise)}
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
+        <p className="mt-2 text-sm text-[var(--muted)]">
+          Sales raised in the store are listed in its own day book —{" "}
+          <a
+            className="underline"
+            href="/inventory?tab=reports"
+          >
+            Store &amp; purchase → Reports → Sales day book
+          </a>
+          . This card shows only what was collected here, on Fee Take.
+        </p>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">

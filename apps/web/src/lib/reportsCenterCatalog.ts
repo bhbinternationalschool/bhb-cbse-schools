@@ -8,7 +8,6 @@ import { ACCOUNTS_REPORTS } from "@/lib/accountsReportCatalog";
 import { FEE_REPORTS } from "@/lib/feeReportCatalog";
 import { PAYROLL_REPORTS } from "@/lib/payrollReportCatalog";
 import { SIS_REPORTS } from "@/lib/sisReportCatalog";
-import { STORE_REPORTS } from "@/lib/storeReportCatalog";
 import {
   attendanceReportDefs,
   leaveReportDefs,
@@ -20,7 +19,6 @@ import { HOMEWORK_REPORTS } from "@/lib/homework";
 import { PTM_REPORTS } from "@/lib/ptm";
 import { STUDENT_LEAVE_REPORTS } from "@/lib/studentLeave";
 import { VAULT_REPORTS } from "@/lib/vault";
-import { PURCHASE_REPORTS } from "@/lib/purchase";
 import { RTE_REPORTS } from "@/lib/rteEws";
 import { TIMETABLE_REPORTS } from "@/lib/timetableReportCatalog";
 import { EXAM_REPORTS } from "@/lib/examReportCatalog";
@@ -445,28 +443,23 @@ export function listReportsCenterEntries(): ReportsCenterEntry[] {
       ),
     );
   }
-  for (const r of STORE_REPORTS) {
+  // Store and purchase reports live in the module itself now, where they are
+  // run against the server ledger. Listed here as four real reports rather
+  // than the long menu the old browser-held register advertised.
+  for (const r of [
+    { id: "stock-register", label: "Stock register", hint: "On hand and value per item" },
+    { id: "item-margin", label: "Item margin", hint: "Sold, revenue, cost and margin" },
+    { id: "sales-day-book", label: "Sales day book", hint: "Counter sales with tender split" },
+    { id: "purchases-by-vendor", label: "Purchases by vendor", hint: "Bought, returned and outstanding" },
+  ]) {
     out.push(
       entry(
         "store",
         "store",
-        "/store?tab=reports",
+        "/inventory?tab=reports",
         r.id,
         r.label,
-        r.category,
-        r.hint,
-      ),
-    );
-  }
-  for (const r of PURCHASE_REPORTS) {
-    out.push(
-      entry(
-        "purchase",
-        "purchase",
-        "/store?tab=purchase",
-        r.id,
-        r.label,
-        "procurement",
+        "store",
         r.hint,
       ),
     );

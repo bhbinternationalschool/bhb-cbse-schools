@@ -71,7 +71,16 @@ export function postJournal(input: {
     createdAt: new Date().toISOString(),
     voidedAt: null,
   });
-  saveAccounts({ ...state, journalEntries: [entry, ...state.journalEntries] });
+  const next = { ...state, journalEntries: [entry, ...state.journalEntries] };
+  saveAccounts(next);
+
+  // Parallel run: the same entry also goes to the Ledger v2 server book, so
+  // the two can be compared before any read is cut over. No-ops unless the
+  // mirror flag is on, and never blocks the desk.
+  void import("@/lib/ledger/mirror").then(({ mirrorJournalToLedger }) => {
+    mirrorJournalToLedger(entry, next);
+  });
+
   return { ok: true, entry };
 }
 

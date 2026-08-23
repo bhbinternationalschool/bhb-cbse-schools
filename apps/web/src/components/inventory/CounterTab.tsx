@@ -1,0 +1,1208 @@
+"use client";
+
+/**
+ * Counter — sell to a student, staff member or walk-in.
+ *
+ * The flow is deliberately one screen: find the buyer, their class kit is
+ * offered, adjust the cart, take money or leave a balance. Prices come from
+ * the price list, the discount cap comes with them, and the margin on the
+ * cart is visible while you sell rather than discovered at year end.
+ *
+ * Everything typed here is local component state. The network is touched by a
+ * debounced buyer search and by the explicit "Take payment" — never per
+ * keystroke.
+ */
+
+import { useEffect, useMemo, useState } from "react";
+import { RefreshCw, Search, Trash2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
+import {
+  FIELD_CLASS,
+  InvAlert,
+  InvDrawer,
+  InvSpinner,
+  MoneyField,
+  NumberField,
+  Pill,
+  SelectField,
+  StatTile,
+  TextField,
+} from "@/components/inventory/InvUi";
+import {
+  invApi,
+  useAsync,
+  useDebounced,
+  useSaver,
+} from "@/lib/inventory/client";
+import {
+  formatPaise,
+  inputToPaise,
+  marginPct,
+  paiseToInput,
+  saleLineAmounts,
+  saleStatusLabel,
+  tenderLabel,
+  type InvBootstrap,
+  type InvBuyerKind,
+  type InvBuyerStudent,
+  type InvItemRow,
+  type InvKitDetail,
+  type InvSale,
+  type InvTenderMode,
+} from "@/lib/inventory/types";
+
+type Section = "sell" | "sales" | "dues";
+
+type CartLine = {
+  itemId: string;
+  name: string;
+  sku: string;
+  qty: number;
+  unitPricePaise: number;
+  maxDiscountPct: number;
+  discountPct: number;
+  gstRate: number;
+  costPaise: number;
+};
+
+const TENDERS: InvTenderMode[] = ["cash", "upi", "card", "cheque", "bank"];
+
+export function CounterTab({
+  boot,
+  classes,
+}: {
+  boot: InvBootstrap;
+  classes: { id: string; label: string }[];
+}) {
+  const [section, setSection] = useState<Section>("sell");
+  const summary = useAsync(() => invApi.counterSummary(), []);
+
+  const s = summary.data;
+
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <StatTile
+          label="Sold today"
+          value={s ? formatPaise(s.billedTodayPaise) : "—"}
+          sub={s ? `${s.salesToday} sale${s.salesToday === 1 ? "" : "s"}` : ""}
+        />
+        <StatTile
+          label="Collected today"
+          value={s ? formatPaise(s.collectedTodayPaise) : "—"}
+          tone="good"
+          sub="includes older dues"
+        />
+        <StatTile
+          label="Margin today"
+          value={s ? formatPaise(s.marginTodayPaise) : "—"}
+          tone={s && s.marginTodayPaise < 0 ? "bad" : "neutral"}
+        />
+        <StatTile
+          label="Outstanding"
+          value={s ? formatPaise(s.outstandingPaise) : "—"}
+          tone={s && s.outstandingPaise > 0 ? "warn" : "neutral"}
+          sub={s ? `${s.outstandingCount} unpaid` : ""}
+        />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        {(
+          [
+            { id: "sell", label: "New sale" },
+            { id: "sales", label: "Sales" },
+            { id: "dues", label: "Unpaid" },
+          ] as { id: Section; label: string }[]
+        ).map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setSection(t.id)}
+            className={
+              section === t.id
+                ? "rounded-lg bg-foreground px-3 py-1.5 text-sm font-medium text-background"
+                : "rounded-lg border px-3 py-1.5 text-sm hover:bg-muted"
+            }
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {section === "sell" ? (
+        <SellSection
+          boot={boot}
+          classes={classes}
+          onSold={() => {
+            summary.reload();
+            setSection("sales");
+          }}
+        />
+      ) : null}
+      {section === "sales" ? (
+        <SalesSection classes={classes} onChanged={summary.reload} />
+      ) : null}
+      {section === "dues" ? (
+        <SalesSection classes={classes} onlyUnpaid onChanged={summary.reload} />
+      ) : null}
+    </div>
+  );
+}
+
+/* ─── New sale ─────────────────────────────────────────────── */
+
+function SellSection({
+  boot,
+  classes,
+  onSold,
+}: {
+  boot: InvBootstrap;
+  classes: { id: string; label: string }[];
+  onSold: () => void;
+}) {
+  const saver = useSaver();
+
+  const [buyerKind, setBuyerKind] = useState<InvBuyerKind>("student");
+  const [student, setStudent] = useState<InvBuyerStudent | null>(null);
+  const [walkinName, setWalkinName] = useState("");
+  const [walkinPhone, setWalkinPhone] = useState("");
+  const [staffName, setStaffName] = useState("");
+
+  const [buyerSearch, setBuyerSearch] = useState("");
+  const debouncedBuyer = useDebounced(buyerSearch, 300);
+  const buyers = useAsync(
+    () =>
+      buyerKind === "student" && debouncedBuyer.trim().length >= 2
+        ? invApi.findStudents(debouncedBuyer)
+        : Promise.resolve([] as InvBuyerStudent[]),
+    [debouncedBuyer, buyerKind],
+  );
+
+  const [locationId, setLocationId] = useState(
+    boot.settings.defaultLocationId || boot.locations[0]?.id || "",
+  );
+  const priceListId =
+    boot.settings.defaultPriceListId ||
+    boot.priceLists.find((l) => l.isDefault)?.id ||
+    boot.priceLists[0]?.id ||
+    "";
+
+  const catalogue = useAsync(
+    () =>
+      invApi.listItems({
+        status: "active",
+        pageSize: 300,
+        sort: "name",
+        priceListId,
+      }),
+    [priceListId],
+  );
+  const kits = useAsync(() => invApi.listKits({ status: "active" }), []);
+
+  const [cart, setCart] = useState<CartLine[]>([]);
+  const [kitId, setKitId] = useState("");
+  const [note, setNote] = useState("");
+
+  const [tender, setTender] = useState<InvTenderMode>("cash");
+  const [tenderInput, setTenderInput] = useState("");
+  const [reference, setReference] = useState("");
+  const [onAccount, setOnAccount] = useState(false);
+
+  const itemsById = useMemo(() => {
+    const m = new Map<string, InvItemRow>();
+    for (const r of catalogue.data?.rows ?? []) m.set(r.id, r);
+    return m;
+  }, [catalogue.data]);
+
+  /** Kits assigned to this buyer's class — what they are due to receive. */
+  const suggestedKits = useMemo(() => {
+    const all = kits.data ?? [];
+    if (buyerKind !== "student" || !student?.classId) return [];
+    return all.filter((k) => k.classIds.includes(student.classId));
+  }, [kits.data, buyerKind, student?.classId]);
+
+  function toLine(item: InvItemRow, qty: number): CartLine {
+    return {
+      itemId: item.id,
+      name: item.name + (item.variantLabel ? ` — ${item.variantLabel}` : ""),
+      sku: item.sku,
+      qty,
+      unitPricePaise: item.salePaise,
+      maxDiscountPct: item.maxDiscountPct,
+      discountPct: 0,
+      gstRate: item.gstRate,
+      costPaise: item.avgCostPaise,
+    };
+  }
+
+  function addItem(itemId: string) {
+    const item = itemsById.get(itemId);
+    if (!item) return;
+    setCart((c) =>
+      c.some((l) => l.itemId === itemId)
+        ? c.map((l) => (l.itemId === itemId ? { ...l, qty: l.qty + 1 } : l))
+        : [...c, toLine(item, 1)],
+    );
+  }
+
+  /** Load a kit's required lines into the cart in one action. */
+  function loadKit(kit: InvKitDetail) {
+    setKitId(kit.id);
+    setCart((existing) => {
+      const next = [...existing];
+      for (const kl of kit.items) {
+        if (kl.isOptional) continue;
+        const item = itemsById.get(kl.itemId);
+        if (!item) continue;
+        const at = next.findIndex((l) => l.itemId === kl.itemId);
+        if (at >= 0) next[at] = { ...next[at], qty: next[at].qty + kl.qty };
+        else next.push(toLine(item, kl.qty));
+      }
+      return next;
+    });
+  }
+
+  const totals = useMemo(() => {
+    let gross = 0;
+    let discount = 0;
+    let tax = 0;
+    let cost = 0;
+    for (const l of cart) {
+      const a = saleLineAmounts({
+        qty: l.qty,
+        unitPricePaise: l.unitPricePaise,
+        discountPct: l.discountPct,
+        gstRate: l.gstRate,
+      });
+      gross += a.grossPaise;
+      discount += a.discountPaise;
+      tax += a.taxPaise;
+      cost += Math.round(l.costPaise * l.qty);
+    }
+    const total = gross - discount + tax;
+    return { gross, discount, tax, total, cost, margin: total - cost };
+  }, [cart]);
+
+  // Default the tender to the full amount, until the clerk edits it or
+  // chooses to put the sale on account.
+  useEffect(() => {
+    if (onAccount) return;
+    setTenderInput(totals.total > 0 ? paiseToInput(totals.total) : "");
+  }, [totals.total, onAccount]);
+
+  const tenderPaise = onAccount ? 0 : inputToPaise(tenderInput);
+  const balancePaise = Math.max(0, totals.total - tenderPaise);
+
+  const buyerReady =
+    buyerKind === "student"
+      ? !!student
+      : buyerKind === "walkin"
+        ? walkinName.trim().length > 0
+        : staffName.trim().length > 0;
+
+  const capBreach = cart.find((l) => l.discountPct > l.maxDiscountPct);
+  const overTender = tenderPaise > totals.total;
+
+  function reset() {
+    setCart([]);
+    setKitId("");
+    setStudent(null);
+    setWalkinName("");
+    setWalkinPhone("");
+    setStaffName("");
+    setBuyerSearch("");
+    setNote("");
+    setTenderInput("");
+    setReference("");
+    setOnAccount(false);
+  }
+
+  async function sell() {
+    if (!buyerReady || cart.length === 0 || capBreach || overTender) return;
+
+    const res = await saver.run(() =>
+      invApi.postSale({
+        buyerKind,
+        studentId: buyerKind === "student" ? student?.id : "",
+        buyerName:
+          buyerKind === "student"
+            ? (student?.fullName ?? "")
+            : buyerKind === "walkin"
+              ? walkinName.trim()
+              : staffName.trim(),
+        buyerPhone: buyerKind === "walkin" ? walkinPhone.trim() : (student?.phone ?? ""),
+        classId: buyerKind === "student" ? (student?.classId ?? "") : "",
+        locationId,
+        priceListId,
+        kitId: kitId || undefined,
+        note,
+        lines: cart.map((l) => ({
+          itemId: l.itemId,
+          qty: l.qty,
+          unitPricePaise: l.unitPricePaise,
+          discountPct: l.discountPct,
+          gstRate: l.gstRate,
+        })),
+        payments:
+          tenderPaise > 0
+            ? [{ amountPaise: tenderPaise, mode: tender, reference }]
+            : [],
+      }),
+    );
+
+    if (res) {
+      saver.setNotice(
+        res.balancePaise > 0
+          ? `${res.saleNo} — ${formatPaise(res.paidPaise)} taken, ${formatPaise(res.balancePaise)} left on account`
+          : `${res.saleNo} — paid in full, ${formatPaise(res.totalPaise)}`,
+      );
+      reset();
+      onSold();
+    }
+  }
+
+  const classLabel = useMemo(() => {
+    const m = new Map(classes.map((c) => [c.id, c.label]));
+    return (id: string) => m.get(id) ?? id;
+  }, [classes]);
+
+  const unpricedInCart = cart.filter((l) => l.unitPricePaise <= 0);
+
+  return (
+    <div className="grid gap-3 lg:grid-cols-[1fr_360px]">
+      <div className="space-y-3">
+        <InvAlert
+          error={saver.error}
+          notice={saver.notice}
+          onDismiss={() => {
+            saver.setError("");
+            saver.setNotice("");
+          }}
+        />
+
+        {/* Buyer */}
+        <section className="space-y-2 rounded-xl border p-3">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {(
+              [
+                { id: "student", label: "Student" },
+                { id: "staff", label: "Staff" },
+                { id: "walkin", label: "Walk-in" },
+              ] as const
+            )
+              .filter((b) => b.id !== "walkin" || boot.settings.walkinSalesEnabled)
+              .map((b) => (
+                <button
+                  key={b.id}
+                  type="button"
+                  onClick={() => {
+                    setBuyerKind(b.id);
+                    setStudent(null);
+                  }}
+                  className={
+                    buyerKind === b.id
+                      ? "rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white"
+                      : "rounded-lg border px-3 py-1.5 text-sm hover:bg-muted"
+                  }
+                >
+                  {b.label}
+                </button>
+              ))}
+          </div>
+
+          {buyerKind === "student" ? (
+            student ? (
+              <div className="flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2">
+                <div>
+                  <div className="font-medium">{student.fullName}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {classLabel(student.classId)}
+                    {student.rollNo ? ` · Roll ${student.rollNo}` : ""}
+                    {student.admissionNo ? ` · Adm ${student.admissionNo}` : ""}
+                  </div>
+                </div>
+                <Button variant="ghost" size="xs" onClick={() => setStudent(null)}>
+                  Change
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    className={`${FIELD_CLASS} w-full pl-8`}
+                    placeholder="Search by name, admission no., roll or parent's phone"
+                    value={buyerSearch}
+                    onChange={(e) => setBuyerSearch(e.target.value)}
+                  />
+                </div>
+                {buyers.loading && debouncedBuyer.trim().length >= 2 ? (
+                  <p className="px-1 text-xs text-muted-foreground">Searching…</p>
+                ) : null}
+                {(buyers.data ?? []).length > 0 ? (
+                  <ul className="max-h-52 divide-y overflow-y-auto rounded-lg border">
+                    {(buyers.data ?? []).map((s) => (
+                      <li key={s.id}>
+                        <button
+                          type="button"
+                          className="w-full px-3 py-2 text-left text-sm hover:bg-muted"
+                          onClick={() => {
+                            setStudent(s);
+                            setBuyerSearch("");
+                          }}
+                        >
+                          <div className="font-medium">{s.fullName}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {classLabel(s.classId)}
+                            {s.admissionNo ? ` · Adm ${s.admissionNo}` : ""}
+                            {s.fatherName ? ` · ${s.fatherName}` : ""}
+                          </div>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : debouncedBuyer.trim().length >= 2 && !buyers.loading ? (
+                  <p className="px-1 text-xs text-muted-foreground">
+                    No student matches that.
+                  </p>
+                ) : null}
+              </div>
+            )
+          ) : buyerKind === "walkin" ? (
+            <div className="grid gap-2 sm:grid-cols-2">
+              <TextField
+                label="Buyer name"
+                required
+                value={walkinName}
+                onChange={setWalkinName}
+              />
+              <TextField label="Phone" value={walkinPhone} onChange={setWalkinPhone} />
+            </div>
+          ) : (
+            <TextField
+              label="Staff member"
+              required
+              value={staffName}
+              onChange={setStaffName}
+            />
+          )}
+        </section>
+
+        {/* Kit suggestion */}
+        {suggestedKits.length > 0 ? (
+          <section className="space-y-2 rounded-xl border border-sky-500/40 bg-sky-500/5 p-3">
+            <p className="text-xs font-medium">
+              Kits for {classLabel(student?.classId ?? "")}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {suggestedKits.map((k) => (
+                <button
+                  key={k.id}
+                  type="button"
+                  onClick={() => loadKit(k)}
+                  className="rounded-lg border bg-background px-3 py-2 text-left text-sm hover:border-ring"
+                >
+                  <div className="font-medium">{k.name}</div>
+                  <div className="text-[11px] text-muted-foreground">
+                    {k.items.filter((i) => !i.isOptional).length} items ·{" "}
+                    {formatPaise(k.effectivePricePaise)}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {/* Cart */}
+        <section className="space-y-2 rounded-xl border p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              className={`${FIELD_CLASS} w-full flex-1`}
+              value=""
+              onChange={(e) => {
+                addItem(e.target.value);
+                e.currentTarget.selectedIndex = 0;
+              }}
+            >
+              <option value="">
+                {catalogue.loading ? "Loading catalogue…" : "Add an item…"}
+              </option>
+              {(catalogue.data?.rows ?? []).map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                  {r.variantLabel ? ` — ${r.variantLabel}` : ""} ·{" "}
+                  {r.salePaise ? formatPaise(r.salePaise) : "not priced"}
+                </option>
+              ))}
+            </select>
+            <SelectField
+              label=""
+              className="w-[150px]"
+              value={locationId}
+              options={boot.locations
+                .filter((l) => l.isActive)
+                .map((l) => ({ value: l.id, label: l.name }))}
+              onChange={setLocationId}
+            />
+          </div>
+
+          {cart.length === 0 ? (
+            <p className="py-6 text-center text-xs text-muted-foreground">
+              Nothing in the cart yet.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {cart.map((l, idx) => {
+                const a = saleLineAmounts({
+                  qty: l.qty,
+                  unitPricePaise: l.unitPricePaise,
+                  discountPct: l.discountPct,
+                  gstRate: l.gstRate,
+                });
+                const over = l.discountPct > l.maxDiscountPct;
+                const patch = (p: Partial<CartLine>) =>
+                  setCart((c) => c.map((x, i) => (i === idx ? { ...x, ...p } : x)));
+                return (
+                  <div key={l.itemId} className="rounded-lg border p-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="text-sm font-medium">{l.name}</div>
+                        <div className="text-[11px] text-muted-foreground">
+                          {l.sku} · {formatPaise(l.unitPricePaise)} each
+                          {l.maxDiscountPct
+                            ? ` · up to ${l.maxDiscountPct}% off`
+                            : " · no discount allowed"}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="text-muted-foreground hover:text-destructive"
+                        onClick={() => setCart((c) => c.filter((_, i) => i !== idx))}
+                        aria-label="Remove"
+                      >
+                        <Trash2 className="size-3.5" />
+                      </button>
+                    </div>
+                    <div className="mt-2 flex items-end gap-2">
+                      <NumberField
+                        label="Qty"
+                        className="w-20"
+                        value={String(l.qty)}
+                        onChange={(v) => patch({ qty: Number(v) || 0 })}
+                      />
+                      <NumberField
+                        label="Discount"
+                        suffix="%"
+                        className="w-24"
+                        value={l.discountPct ? String(l.discountPct) : ""}
+                        onChange={(v) => patch({ discountPct: Number(v) || 0 })}
+                      />
+                      <div className="flex-1 text-right text-sm">
+                        <div className="font-medium tabular-nums">
+                          {formatPaise(a.lineTotalPaise + a.taxPaise)}
+                        </div>
+                        {a.discountPaise ? (
+                          <div className="text-[11px] text-muted-foreground">
+                            less {formatPaise(a.discountPaise)}
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                    {over ? (
+                      <p className="mt-1 text-[11px] text-destructive">
+                        Above the {l.maxDiscountPct}% allowed on this item — this
+                        sale will be refused.
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      </div>
+
+      {/* Payment panel */}
+      <aside className="space-y-3">
+        <div className="sticky top-2 space-y-3 rounded-xl border p-3">
+          <h3 className="text-sm font-semibold">Payment</h3>
+
+          <div className="space-y-1 text-sm">
+            <Row label="Items" value={formatPaise(totals.gross)} />
+            {totals.discount ? (
+              <Row
+                label="Discount"
+                value={`− ${formatPaise(totals.discount)}`}
+                muted
+              />
+            ) : null}
+            {totals.tax ? (
+              <Row label="GST" value={formatPaise(totals.tax)} muted />
+            ) : null}
+            <div className="mt-1 flex justify-between border-t pt-1 text-base font-semibold">
+              <span>Total</span>
+              <span className="tabular-nums">{formatPaise(totals.total)}</span>
+            </div>
+            {totals.total > 0 && totals.cost > 0 ? (
+              <div className="text-[11px] text-muted-foreground">
+                Margin {formatPaise(totals.margin)} (
+                {marginPct(totals.total, totals.cost)}%)
+              </div>
+            ) : null}
+          </div>
+
+          <label className="flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={onAccount}
+              disabled={!boot.settings.allowCreditSales}
+              onChange={(e) => {
+                setOnAccount(e.target.checked);
+                if (e.target.checked) setTenderInput("");
+              }}
+            />
+            Put the whole amount on account
+          </label>
+
+          {!onAccount ? (
+            <>
+              <div className="flex flex-wrap gap-1">
+                {TENDERS.map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setTender(t)}
+                    className={
+                      tender === t
+                        ? "rounded-md bg-foreground px-2 py-1 text-xs font-medium text-background"
+                        : "rounded-md border px-2 py-1 text-xs hover:bg-muted"
+                    }
+                  >
+                    {tenderLabel(t)}
+                  </button>
+                ))}
+              </div>
+              <MoneyField
+                label="Amount taken"
+                hint="Leave less than the total to bill the rest"
+                value={tenderInput}
+                onChange={setTenderInput}
+              />
+              {tender !== "cash" ? (
+                <TextField
+                  label="Reference"
+                  value={reference}
+                  onChange={setReference}
+                />
+              ) : null}
+            </>
+          ) : null}
+
+          {balancePaise > 0 ? (
+            <div className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+              {formatPaise(balancePaise)} will stay owing on this sale.
+              <div className="mt-1 text-[11px] opacity-90">
+                Store dues are tracked here in the store, not on the fee
+                counter.
+              </div>
+            </div>
+          ) : null}
+
+          {overTender ? (
+            <p className="text-xs text-destructive">
+              More than the total — reduce the amount taken.
+            </p>
+          ) : null}
+          {unpricedInCart.length > 0 ? (
+            <p className="text-xs text-amber-600">
+              {unpricedInCart.length} item
+              {unpricedInCart.length === 1 ? " has" : "s have"} no price on this
+              list.
+            </p>
+          ) : null}
+
+          <TextField label="Note" value={note} onChange={setNote} />
+
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" className="flex-1" onClick={reset}>
+              Clear
+            </Button>
+            <Button
+              size="sm"
+              className="flex-1"
+              onClick={sell}
+              disabled={
+                saver.saving ||
+                !buyerReady ||
+                cart.length === 0 ||
+                !!capBreach ||
+                overTender
+              }
+            >
+              {saver.saving ? "Saving…" : "Complete sale"}
+            </Button>
+          </div>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function Row({
+  label,
+  value,
+  muted,
+}: {
+  label: string;
+  value: string;
+  muted?: boolean;
+}) {
+  return (
+    <div
+      className={`flex justify-between ${muted ? "text-muted-foreground" : ""}`}
+    >
+      <span>{label}</span>
+      <span className="tabular-nums">{value}</span>
+    </div>
+  );
+}
+
+/* ─── Sales list ───────────────────────────────────────────── */
+
+function SalesSection({
+  classes,
+  onlyUnpaid,
+  onChanged,
+}: {
+  classes: { id: string; label: string }[];
+  onlyUnpaid?: boolean;
+  onChanged: () => void;
+}) {
+  const [search, setSearch] = useState("");
+  const debounced = useDebounced(search, 300);
+  const sales = useAsync(
+    () =>
+      invApi.listSales({
+        search: debounced,
+        status: onlyUnpaid ? "unpaid" : "all",
+        pageSize: 50,
+      }),
+    [debounced, onlyUnpaid],
+  );
+  const saver = useSaver();
+
+  const [collect, setCollect] = useState<InvSale | null>(null);
+  const [collectInput, setCollectInput] = useState("");
+  const [collectMode, setCollectMode] = useState<InvTenderMode>("cash");
+
+  const [ret, setRet] = useState<InvSale | null>(null);
+  const [retReason, setRetReason] = useState("");
+  const [retSettlement, setRetSettlement] = useState<"reduce_balance" | "refund">(
+    "reduce_balance",
+  );
+  const [retRestock, setRetRestock] = useState(true);
+  const [retQty, setRetQty] = useState<Record<string, string>>({});
+
+  const [voidSale, setVoidSale] = useState<InvSale | null>(null);
+  const [voidReason, setVoidReason] = useState("");
+
+  const classLabel = useMemo(() => {
+    const m = new Map(classes.map((c) => [c.id, c.label]));
+    return (id: string) => m.get(id) ?? id;
+  }, [classes]);
+
+  async function submitCollect() {
+    if (!collect) return;
+    const amount = inputToPaise(collectInput);
+    if (amount <= 0) return;
+    const res = await saver.run(() =>
+      invApi.collectOnSale({ saleId: collect.id, amountPaise: amount, mode: collectMode }),
+    );
+    if (res) {
+      saver.setNotice(
+        res.balancePaise > 0
+          ? `Collected — ${formatPaise(res.balancePaise)} still owing`
+          : "Collected in full",
+      );
+      setCollect(null);
+      sales.reload();
+      onChanged();
+    }
+  }
+
+  async function submitReturn() {
+    if (!ret || !retReason.trim()) return;
+    const lines = ret.lines
+      .map((l) => ({ saleLineId: l.id, qty: Number(retQty[l.id]) || 0 }))
+      .filter((l) => l.qty > 0);
+    if (lines.length === 0) return;
+
+    const res = await saver.run(() =>
+      invApi.postSaleReturn({
+        saleId: ret.id,
+        reason: retReason.trim(),
+        settlement: retSettlement,
+        restock: retRestock,
+        lines,
+      }),
+    );
+    if (res) {
+      saver.setNotice(
+        `${res.returnNo} — ${formatPaise(res.totalPaise)} credited` +
+          (res.refundedPaise > 0
+            ? `, ${formatPaise(res.refundedPaise)} refunded`
+            : ""),
+      );
+      setRet(null);
+      setRetReason("");
+      setRetQty({});
+      sales.reload();
+      onChanged();
+    }
+  }
+
+  async function submitVoid() {
+    if (!voidSale || !voidReason.trim()) return;
+    const res = await saver.run(() =>
+      invApi.voidSale(voidSale.id, voidReason.trim()),
+    );
+    if (res) {
+      saver.setNotice(`${res.saleNo} cancelled — stock put back`);
+      setVoidSale(null);
+      setVoidReason("");
+      sales.reload();
+      onChanged();
+    }
+  }
+
+  const rows = sales.data?.rows ?? [];
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-[220px] flex-1">
+          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            className={`${FIELD_CLASS} w-full pl-8`}
+            placeholder="Search receipt no., buyer or phone"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        <Button variant="outline" size="sm" onClick={() => sales.reload()}>
+          <RefreshCw className="size-3.5" />
+        </Button>
+      </div>
+
+      <InvAlert
+        error={sales.error || saver.error}
+        notice={saver.notice}
+        onDismiss={() => {
+          saver.setError("");
+          saver.setNotice("");
+        }}
+      />
+
+      {sales.loading ? (
+        <InvSpinner label="Loading sales" />
+      ) : sales.error ? null : rows.length === 0 ? (
+        <div className="rounded-xl border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">
+          {onlyUnpaid ? "Nothing outstanding." : "No sales yet."}
+        </div>
+      ) : (
+        <ErpTableShell density="compact" className="overflow-x-auto">
+          <ErpTable minWidth="min-w-[940px]">
+            <ErpTableHead>
+              <tr>
+                <th className="px-3 py-2 text-left font-medium">Receipt</th>
+                <th className="px-3 py-2 text-left font-medium">Buyer</th>
+                <th className="px-3 py-2 text-left font-medium">Items</th>
+                <th className="px-3 py-2 text-right font-medium">Total</th>
+                <th className="px-3 py-2 text-right font-medium">Paid</th>
+                <th className="px-3 py-2 text-right font-medium">Owing</th>
+                <th className="px-3 py-2 text-right font-medium" />
+              </tr>
+            </ErpTableHead>
+            <ErpTableBody hoverable>
+              {rows.map((s) => (
+                <tr key={s.id} className={s.status === "void" ? "opacity-60" : ""}>
+                  <td className="px-3 py-2">
+                    <div className="font-mono text-xs">{s.saleNo}</div>
+                    <div className="text-[11px] text-muted-foreground">
+                      {s.saleDate}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="text-sm">{s.buyerName || "—"}</div>
+                    <div className="text-[11px] text-muted-foreground">
+                      {s.buyerKind === "student"
+                        ? classLabel(s.classId)
+                        : s.buyerKind === "walkin"
+                          ? "Walk-in"
+                          : "Staff"}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 text-xs">
+                    {s.lines.map((l) => (
+                      <div key={l.id}>
+                        {l.itemName} × {l.qty}
+                        {l.qtyReturned ? (
+                          <span className="text-muted-foreground">
+                            {" "}
+                            ({l.qtyReturned} returned)
+                          </span>
+                        ) : null}
+                      </div>
+                    ))}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {formatPaise(s.totalPaise)}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                    {formatPaise(s.paidPaise)}
+                  </td>
+                  <td className="px-3 py-2 text-right font-medium tabular-nums">
+                    {s.balancePaise > 0 ? formatPaise(s.balancePaise) : "—"}
+                  </td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap">
+                    <Pill
+                      tone={
+                        s.status === "paid"
+                          ? "good"
+                          : s.status === "void"
+                            ? "bad"
+                            : "warn"
+                      }
+                    >
+                      {saleStatusLabel(s.status)}
+                    </Pill>
+                    {s.status !== "void" && s.balancePaise > 0 ? (
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        onClick={() => {
+                          setCollect(s);
+                          setCollectInput(paiseToInput(s.balancePaise));
+                        }}
+                      >
+                        Collect
+                      </Button>
+                    ) : null}
+                    {s.status !== "void" ? (
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        onClick={() => {
+                          setRet(s);
+                          setRetQty({});
+                          setRetReason("");
+                        }}
+                      >
+                        Return
+                      </Button>
+                    ) : null}
+                    {s.status !== "void" ? (
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        className="text-destructive"
+                        onClick={() => {
+                          setVoidSale(s);
+                          setVoidReason("");
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    ) : null}
+                  </td>
+                </tr>
+              ))}
+            </ErpTableBody>
+          </ErpTable>
+        </ErpTableShell>
+      )}
+
+      {/* Collect */}
+      <InvDrawer
+        open={!!collect}
+        title="Collect payment"
+        subtitle={
+          collect
+            ? `${collect.saleNo} · ${formatPaise(collect.balancePaise)} owing`
+            : ""
+        }
+        onClose={() => setCollect(null)}
+        footer={
+          <>
+            <Button variant="outline" size="sm" onClick={() => setCollect(null)}>
+              Cancel
+            </Button>
+            <Button size="sm" onClick={submitCollect} disabled={saver.saving}>
+              {saver.saving ? "Saving…" : "Record"}
+            </Button>
+          </>
+        }
+      >
+        {collect ? (
+          <div className="space-y-3">
+            <InvAlert error={saver.error} />
+            <MoneyField
+              label="Amount"
+              value={collectInput}
+              onChange={setCollectInput}
+            />
+            <SelectField
+              label="Taken by"
+              value={collectMode}
+              placeholder="Cash"
+              options={TENDERS.map((t) => ({ value: t, label: tenderLabel(t) }))}
+              onChange={(v) => setCollectMode(v as InvTenderMode)}
+            />
+          </div>
+        ) : null}
+      </InvDrawer>
+
+      {/* Return */}
+      <InvDrawer
+        open={!!ret}
+        wide
+        title="Take goods back"
+        subtitle={ret ? `${ret.saleNo} · ${ret.buyerName}` : ""}
+        onClose={() => setRet(null)}
+        footer={
+          <>
+            <Button variant="outline" size="sm" onClick={() => setRet(null)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={submitReturn}
+              disabled={saver.saving || !retReason.trim()}
+            >
+              {saver.saving ? "Saving…" : "Post return"}
+            </Button>
+          </>
+        }
+      >
+        {ret ? (
+          <div className="space-y-3">
+            <InvAlert error={saver.error} />
+            <TextField
+              label="Reason"
+              required
+              value={retReason}
+              onChange={setRetReason}
+              placeholder="e.g. Wrong size"
+            />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <SelectField
+                label="Settle by"
+                value={retSettlement}
+                placeholder="Reduce what they owe"
+                options={[
+                  { value: "reduce_balance", label: "Reduce what they owe" },
+                  { value: "refund", label: "Refund the money" },
+                ]}
+                onChange={(v) =>
+                  setRetSettlement(v === "refund" ? "refund" : "reduce_balance")
+                }
+              />
+              <label className="flex items-end gap-2 pb-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={retRestock}
+                  onChange={(e) => setRetRestock(e.target.checked)}
+                />
+                Put the goods back in stock
+              </label>
+            </div>
+
+            <fieldset className="space-y-2 rounded-lg border p-3">
+              <legend className="px-1 text-xs font-medium text-muted-foreground">
+                What is coming back
+              </legend>
+              {ret.lines.map((l) => {
+                const left = l.qty - (l.qtyReturned ?? 0);
+                const entered = Number(retQty[l.id]) || 0;
+                return (
+                  <div
+                    key={l.id}
+                    className="flex flex-wrap items-end justify-between gap-2 border-b py-2 last:border-0"
+                  >
+                    <div>
+                      <div className="text-sm font-medium">{l.itemName}</div>
+                      <div className="text-[11px] text-muted-foreground">
+                        sold {l.qty}
+                        {l.qtyReturned ? `, ${l.qtyReturned} already back` : ""} ·{" "}
+                        {formatPaise(
+                          l.qty > 0 ? Math.round(l.lineTotalPaise / l.qty) : 0,
+                        )}{" "}
+                        each
+                      </div>
+                    </div>
+                    <div className="w-28">
+                      <NumberField
+                        label={`Return (max ${left})`}
+                        value={retQty[l.id] ?? ""}
+                        onChange={(v) => setRetQty((q) => ({ ...q, [l.id]: v }))}
+                      />
+                      {entered > left ? (
+                        <p className="text-[11px] text-destructive">
+                          Only {left} can come back
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </fieldset>
+          </div>
+        ) : null}
+      </InvDrawer>
+
+      {/* Void */}
+      <InvDrawer
+        open={!!voidSale}
+        title="Cancel this sale"
+        subtitle={voidSale ? `${voidSale.saleNo} · ${voidSale.buyerName}` : ""}
+        onClose={() => setVoidSale(null)}
+        footer={
+          <>
+            <Button variant="outline" size="sm" onClick={() => setVoidSale(null)}>
+              Keep it
+            </Button>
+            <Button
+              size="sm"
+              onClick={submitVoid}
+              disabled={saver.saving || !voidReason.trim()}
+            >
+              {saver.saving ? "Cancelling…" : "Cancel sale"}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <InvAlert error={saver.error} />
+          <p className="text-sm text-muted-foreground">
+            The receipt is kept and marked cancelled, and the stock it took out
+            goes back on the shelf. A sale that already has returns against it
+            cannot be cancelled.
+          </p>
+          <TextField
+            label="Reason"
+            required
+            value={voidReason}
+            onChange={setVoidReason}
+            placeholder="e.g. Rang up twice"
+          />
+        </div>
+      </InvDrawer>
+    </div>
+  );
+}

@@ -196,16 +196,16 @@ export function seedAccountsIfEmpty(): AccountsState {
     normalizePool({ code: "petty", name: "Petty Cash", balancePaise: 0 }),
   ];
 
-  const bankAccounts: BankAccount[] = [
-    normalizeBank({
-      name: "School Main Account",
-      bankName: "State Bank of India",
-      accountNo: "00000000000000",
-      ifsc: "SBIN0000001",
-      openingBalancePaise: 0,
-      isActive: true,
-    }),
-  ];
+  // No bank account is seeded.
+  //
+  // The seed used to install "School Main Account · SBI · 00000000000000 ·
+  // SBIN0000001", and that placeholder reached production as a live master
+  // that bank-mode receipts would post against (audit 2026-08-23, L8). A
+  // chart of accounts can be guessed; a bank account cannot. The school
+  // enters its real account under Accounts → Masters → Banks, and until it
+  // does, non-cash fee tenders refuse to post rather than landing on a
+  // fictional account.
+  const bankAccounts: BankAccount[] = [];
 
   const expenseCategories: ExpenseCategory[] = [
     normalizeExpenseCategory({ name: "Mess", coaCode: COA_EXP_MESS }),

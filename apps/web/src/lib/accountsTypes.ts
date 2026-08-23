@@ -460,6 +460,8 @@ export type AccountsState = {
 
 export const COA_CASH_IN_HAND = "1000";
 export const COA_BANK_ACCOUNTS = "1010";
+/** Cheques received but not yet cleared by the bank. */
+export const COA_CHEQUES_IN_HAND = "1050";
 export const COA_CWIP = "1020";
 export const COA_FIXED_ASSETS = "1030";
 /** Student / parent store credit receivables. */

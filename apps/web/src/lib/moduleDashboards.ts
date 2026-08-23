@@ -71,7 +71,6 @@ import {
   getEventsClientCache,
   getRsvpsClientCache,
 } from "@/lib/events";
-import { loadPurchase } from "@/lib/purchase";
 import { loadReportsCenterRecent } from "@/lib/reportsCenter";
 import { audienceLabel, loadSchoolComms } from "@/lib/schoolComms";
 import { applicationStatusLabel, loadRte } from "@/lib/rteEws";
@@ -83,11 +82,6 @@ import {
   teacherLabel,
   teachingPeriods,
 } from "@/lib/timetable";
-import {
-  listActiveStoreItems,
-  listLowStockItems,
-  loadStore,
-} from "@/lib/store";
 import { loadStudentLeave } from "@/lib/studentLeave";
 import { loadTransport } from "@/lib/transport";
 import { loadTrust } from "@/lib/trust";
@@ -709,120 +703,38 @@ function staffDash(academicYearCode?: string): ModuleDashboardModel {
   };
 }
 
-function storeDash(academicYearCode?: string): ModuleDashboardModel {
-  const store = loadStore();
-  const items = listActiveStoreItems(store);
-  const low = listLowStockItems(store);
-  const issues = store.issues.filter(
-    (i) => !i.voidedAt && inAcademicYear(i, academicYearCode),
-  );
-  const days = lastNDays(7);
-  const trend = days.map((d) => ({
-    label: dayLabel(d),
-    value: issues.filter((i) => i.issuedOn === d).length,
-  }));
-  const salesPaise = issues
-    .filter((i) => i.paymentMode === "cash" || i.paymentMode === "credit")
-    .reduce((n, i) => n + (i.totalPaise || 0), 0);
-  const byCat = new Map<string, number>();
-  for (const it of items) {
-    const cat = store.categories.find((c) => c.id === it.categoryId);
-    const label = cat?.name || "General";
-    byCat.set(label, (byCat.get(label) ?? 0) + 1);
-  }
-  const catRows = [...byCat.entries()]
-    .map(([name, count]) => ({ id: name, name, count }))
-    .sort((a, b) => b.count - a.count);
-  const cashSalesPaise = issues
-    .filter((i) => i.paymentMode === "cash")
-    .reduce((n, i) => n + (i.totalPaise || 0), 0);
-  const creditSalesPaise = issues
-    .filter((i) => i.paymentMode === "credit")
-    .reduce((n, i) => n + (i.totalPaise || 0), 0);
+/**
+ * Store and Purchase moved to the server-truth module at /inventory.
+ *
+ * These tiles used to be computed from the browser-held register. That
+ * register is gone, and deriving figures from an empty cache is exactly the
+ * failure the rebuild removed — so this points at the module's own overview
+ * rather than showing numbers it cannot stand behind.
+ */
+function movedToInventoryDash(
+  title: string,
+  subtitle: string,
+): ModuleDashboardModel {
   return {
-    title: "Store",
-    subtitle: "Stock health, issues, and sales pulse for the school store.",
+    ...emptyModel(title, subtitle),
     kpis: [
       {
-        id: "items",
-        label: "Active items",
-        value: String(items.length),
-        tone: "navy",
-        tab: "master",
-        detailTitle: "By category",
-        detailColumns: [
-          { key: "name", label: "Category" },
-          { key: "count", label: "Items", align: "right" },
-        ],
-        detailRows: catRows,
-      },
-      {
-        id: "low",
-        label: "Low stock",
-        value: String(low.length),
-        hint: "Below reorder level",
-        tone: "coral",
-        tab: "inv_report",
-        detailTitle: "Low stock items",
-        detailColumns: [
-          { key: "name", label: "Item" },
-          { key: "qty", label: "Qty", align: "right" },
-        ],
-        detailRows: low.slice(0, 40).map((i) => ({
-          id: i.id,
-          name: i.name,
-          qty: i.stockOnHand ?? 0,
-        })),
-      },
-      {
-        id: "issues",
-        label: "Issues",
-        value: String(issues.length),
-        tone: "teal",
-        tab: "issue",
-      },
-      {
-        id: "sales",
-        label: "Sales value",
-        value: formatInr(salesPaise),
+        id: "moved",
+        label: "Now in Store & purchase",
+        value: "\u2192",
+        hint: "Open Store & purchase \u2192 Reports for live figures",
         tone: "gold",
-        tab: "acct_report",
       },
-    ],
-    chartTitle: "Issues — last 7 days",
-    chartSeries: trend,
-    ...dualRingLayers(
-      "Issues by day",
-      trend,
-      "Sales mode (₹)",
-      [
-        chartPt("Cash", Math.round(cashSalesPaise / 100), "#15803d"),
-        chartPt("Credit", Math.round(creditSalesPaise / 100), "#203050"),
-      ],
-      String(issues.length),
-      "issues",
-    ),
-    tableTitle: "Low stock watchlist",
-    tableColumns: [
-      { key: "name", label: "Item" },
-      { key: "sku", label: "SKU" },
-      { key: "qty", label: "On hand", align: "right" },
-    ],
-    tableRows: low.slice(0, 30).map((i) => ({
-      id: i.id,
-      name: i.name,
-      sku: i.sku || "—",
-      qty: i.stockOnHand ?? 0,
-    })),
-    quickLinks: [
-      { label: "Stock master", tab: "master" },
-      { label: "Purchase", tab: "purchase" },
-      { label: "Sell / Issue", tab: "issue" },
-      { label: "Accounts", tab: "acct_report" },
     ],
   };
 }
 
+function storeDash(): ModuleDashboardModel {
+  return movedToInventoryDash(
+    "Store & purchase",
+    "Stock, sales and buying live in their own module now",
+  );
+}
 function transportDash(academicYearCode?: string): ModuleDashboardModel {
   const t = loadTransport();
   const routes = t.routes.filter((r) => r.isActive !== false);
@@ -2636,83 +2548,12 @@ function studentLeaveDash(academicYearCode?: string): ModuleDashboardModel {
   };
 }
 
-function purchaseDash(academicYearCode?: string): ModuleDashboardModel {
-  const purchase = loadPurchase();
-  const pos = (purchase.orders ?? []).filter((o) =>
-    inAcademicYear(o, academicYearCode),
+function purchaseDash(): ModuleDashboardModel {
+  return movedToInventoryDash(
+    "Purchase",
+    "Indents, orders, receipts and vendor bills live in Store & purchase",
   );
-  const poIds = new Set(pos.map((o) => o.id));
-  const grns = (purchase.grns ?? []).filter((g) => poIds.has(g.poId));
-  const indents = (purchase.indents ?? []).filter((i) =>
-    inAcademicYear(i, academicYearCode),
-  );
-  const chart = lastNDays(7).map((d) => ({
-    label: dayLabel(d),
-    value: grns.filter((g) => g.date === d).length,
-  }));
-  return {
-    title: "Purchase",
-    subtitle: `Session ${academicYearCode || "all"} · indents, POs, and GRN receipts.`,
-    kpis: [
-      {
-        id: "indents",
-        label: "Indents",
-        value: String(indents.length),
-        tone: "navy",
-      },
-      {
-        id: "pos",
-        label: "POs",
-        value: String(pos.length),
-        tone: "teal",
-      },
-      {
-        id: "grns",
-        label: "GRNs",
-        value: String(grns.length),
-        tone: "sky",
-      },
-      {
-        id: "store",
-        label: "Store",
-        value: "→",
-        hint: "Open store purchase",
-        tone: "gold",
-      },
-    ],
-    chartTitle: "GRNs — last 7 days",
-    chartSeries: chart,
-    ...dualRingLayers(
-      "GRNs by day",
-      chart,
-      "Procurement",
-      [
-        chartPt("Indents", indents.length, "#203050"),
-        chartPt("POs", pos.length, "#0f766e"),
-        chartPt("GRNs", grns.length, "#0284c7"),
-      ],
-      String(grns.length),
-      "grns",
-    ),
-    tableTitle: "Recent GRNs",
-    tableColumns: [
-      { key: "no", label: "GRN" },
-      { key: "po", label: "PO" },
-      { key: "date", label: "Date" },
-    ],
-    tableRows: [...grns]
-      .reverse()
-      .slice(0, 30)
-      .map((g) => ({
-        id: g.id,
-        no: g.grnNo || g.id,
-        po: g.poId || "—",
-        date: g.date || "—",
-      })),
-    quickLinks: [{ label: "Store purchase", href: "/store?tab=purchase" }],
-  };
 }
-
 export function buildModuleDashboard(
   moduleId: DashboardModuleId,
   opts?: { academicYearCode?: string },
@@ -2728,7 +2569,7 @@ export function buildModuleDashboard(
       case "staff":
         return staffDash(opts?.academicYearCode);
       case "store":
-        return storeDash(opts?.academicYearCode);
+        return storeDash();
       case "transport":
         return transportDash(opts?.academicYearCode);
       case "accounts":
@@ -2762,7 +2603,7 @@ export function buildModuleDashboard(
       case "student_leave":
         return studentLeaveDash(opts?.academicYearCode);
       case "purchase":
-        return purchaseDash(opts?.academicYearCode);
+        return purchaseDash();
       case "timetable":
         return timetableDash(opts?.academicYearCode);
       case "comms":
@@ -2838,7 +2679,6 @@ export function buildSchoolDashboard(
     const activeStaff = staffList.filter(isStaffActive).length;
 
     const bankBal = totalBankBalancePaise(loadAccounts());
-    const lowStock = listLowStockItems(loadStore()).length;
 
     const funnelChart = ADMISSION_STAGES.map((s) => ({
       label: s.label,
@@ -3023,11 +2863,13 @@ export function buildSchoolDashboard(
               href: "/accounts",
             },
             {
-              id: "low-stock",
-              label: "Low stock SKUs",
-              value: String(lowStock),
+              // The count is a server read now, and this composer is
+              // synchronous. A link is honest; a stale number would not be.
+              id: "store",
+              label: "Store & purchase",
+              value: "\u2192",
               tone: "gold",
-              href: "/store",
+              href: "/inventory?tab=reports",
             },
           ],
         },

@@ -2,6 +2,9 @@
  * No sync may delete a whole table because a client turned up empty.
  *
  * `deleteStale` was copy-pasted into 20 modules and called from 91 places.
+ * It is 19 now: the store desk's copy went with the Store/Purchase rebuild on
+ * 2026-08-23, whose replacement module has no client-push sync and therefore
+ * nothing to prune. The floor below still applies to every remaining copy.
  * An audit on 2026-08-11 found 86 of those calls unguarded: they passed the
  * ids the client happened to be holding, and every stored row not in that set
  * was deleted. With an EMPTY payload the keep-set is empty, so every row is
@@ -42,8 +45,8 @@ const files = fs
 // ── Every implementation is guarded ───────────────────────────────────────
 {
   assert.ok(
-    files.length >= 20,
-    `expected the 20 known deleteStale modules, found ${files.length} — if a ` +
+    files.length >= 19,
+    `expected the 19 known deleteStale modules, found ${files.length} — if a ` +
       "module was removed, update this test deliberately",
   );
 

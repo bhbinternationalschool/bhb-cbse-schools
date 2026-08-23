@@ -55,14 +55,6 @@ import {
   stopFutureBlocks,
 } from "@/lib/feeAdjustments";
 import {
-  isStoreIssueDueOnFeeTake,
-  listStoreIssuesForStudent,
-  loadStore,
-  storeDueKey,
-  storeIssueNetBilledPaise,
-  type StoreIssueLine,
-} from "@/lib/store";
-import {
   computeTransportPeriodDues,
   loadTransport,
 } from "@/lib/transport";
@@ -83,6 +75,10 @@ import {
   type PlanAllocation,
 } from "@/lib/installmentPlans";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import {
+  recordAccountsPostingFailure,
+  type AccountsPostingAction,
+} from "@/lib/accountsPostingFailures";
 
 export type DueKind =
   | "academic"
@@ -231,6 +227,60 @@ export type FeeDueLine = {
   balancePaise: number;
   label: string;
 };
+
+/**
+ * A store credit sale, as the fee counter needs it.
+ *
+ * Passed in rather than derived: the store is a server-truth module and this
+ * function is synchronous. The caller fetches these once per household and
+ * hands them over, so no fee code reaches into the store's tables and the
+ * store's balance stays the only version of what is owed.
+ */
+export type InjectedStoreDue = {
+  saleId: string;
+  saleNo: string;
+  studentId: string;
+  saleDate: string;
+  balancePaise: number;
+  totalPaise: number;
+  paidPaise: number;
+  itemSummary: string;
+};
+
+/** The due key a store sale collects under. */
+export function storeSaleDueKey(studentId: string, saleId: string): string {
+  return `store:${studentId}:${saleId}`;
+}
+
+function storeDueToLine(d: InjectedStoreDue): FeeDueLine {
+  return {
+    dueKey: storeSaleDueKey(d.studentId, d.saleId),
+    kind: "store",
+    studentId: d.studentId,
+    feeHeadId: "",
+    feeHeadName: "Store",
+    installmentId: null,
+    installmentLabel: "Store",
+    specialFeeId: null,
+    structureLineId: null,
+    storeIssueId: d.saleId,
+    storeIssueNo: d.saleNo,
+    storeItems: [],
+    transport: null,
+    dueOn: d.saleDate,
+    billedPaise: d.totalPaise,
+    concessionPaise: 0,
+    concessionDetails: [],
+    // Straight from the store, not adjusted by this module's paid map: the
+    // store's own balance already accounts for every collection that reached
+    // it, including ones made here. A fee receipt whose store call has not
+    // landed yet leaves the due standing, which is the honest state and is
+    // what prompts the retry.
+    paidPaise: d.paidPaise,
+    balancePaise: d.balancePaise,
+    label: `Store · ${d.saleNo}${d.itemSummary ? ` · ${d.itemSummary}` : ""}`,
+  };
+}
 
 /** One approved grant applied to a due line. */
 export type FeeConcessionDetail = {
@@ -1489,29 +1539,14 @@ function normalizeVoucherLine(l: Partial<VoucherLine>): VoucherLine {
                 : l.dueKey?.startsWith("cv:")
                   ? "voucher"
                   : "academic";
-  let storeItems = Array.isArray(l.storeItems) ? l.storeItems : [];
-  let storeIssueNo = l.storeIssueNo ?? "";
+  const storeItems = Array.isArray(l.storeItems) ? l.storeItems : [];
+  const storeIssueNo = l.storeIssueNo ?? "";
   const transportDetail = l.transport ?? null;
 
-  // Backfill item details for older store receipts from the issue register
-  if (kind === "store" && storeItems.length === 0 && l.dueKey) {
-    const parts = l.dueKey.split(":");
-    const issueId = parts[2];
-    if (issueId) {
-      const iss = loadStore().issues.find((i) => i.id === issueId);
-      if (iss) {
-        storeIssueNo = storeIssueNo || iss.issueNo;
-        storeItems = iss.lines.map((x) => ({
-          sku: x.sku,
-          name: x.name,
-          sizeLabel: x.sizeLabel,
-          qty: x.qty,
-          unitPricePaise: x.unitPricePaise,
-          linePaise: x.linePaise,
-        }));
-      }
-    }
-  }
+  // Older store receipts that were written without their item lines cannot be
+  // backfilled any more: the issue register they were read from is gone with
+  // the old module. The receipt still shows its amount; it simply lists no
+  // items, which is honest about what is known.
 
   const concessionDetails = Array.isArray(l.concessionDetails)
     ? l.concessionDetails.map((c) => ({
@@ -1899,6 +1934,11 @@ export function computeStudentDues(
     includePaid?: boolean;
     /** Include inactive students (inactive dues register). Default false. */
     includeInactive?: boolean;
+    /**
+     * Open store sales for this student, fetched by the caller. Omitted
+     * everywhere except the counter, so no other screen changes.
+     */
+    storeDues?: InjectedStoreDue[];
   },
 ): FeeDueLine[] {
   if (student.status !== "active" && !options?.includeInactive) return [];
@@ -2114,65 +2154,13 @@ export function computeStudentDues(
     });
   }
 
-  const store = loadStore();
-  for (const iss of listStoreIssuesForStudent(student.id, store)) {
-    if (iss.academicYearCode !== (student.academicYearCode || DEFAULT_AY)) {
-      continue;
-    }
-    // Cash / already settled at counter — not a Fee Take due
-    if (
-      iss.paymentStatus === "paid" ||
-      iss.paymentStatus === "void" ||
-      iss.recipientKind === "staff" ||
-      !iss.studentId
-    ) {
-      continue;
-    }
-    if (!isStoreIssueDueOnFeeTake(iss)) {
-      continue;
-    }
-    if (!includeFuture && isAfterRunningSessionMonth(iss.issuedOn, asOf)) {
-      continue;
-    }
-    const dueKey = storeDueKey(student.id, iss.id);
-    const billed = storeIssueNetBilledPaise(iss);
-    const counterPaid = Math.max(0, iss.counterPaidPaise || 0);
-    const paid = (paidMap.get(dueKey) ?? 0) + counterPaid;
-    const balance = Math.max(0, billed - paid);
-    if (balance <= 0) {
-      if (!(includePaid && paid > 0)) continue;
-    }
-    const itemCount = iss.lines.reduce((s, l) => s + l.qty, 0);
-    lines.push({
-      dueKey,
-      kind: "store",
-      studentId: student.id,
-      feeHeadId: "",
-      feeHeadName: "Store",
-      installmentId: null,
-      installmentLabel: "Store",
-      specialFeeId: null,
-      structureLineId: null,
-      storeIssueId: iss.id,
-      storeIssueNo: iss.issueNo,
-      storeItems: iss.lines.map((l: StoreIssueLine) => ({
-        sku: l.sku,
-        name: l.name,
-        sizeLabel: l.sizeLabel,
-        qty: l.qty,
-        unitPricePaise: l.unitPricePaise,
-        linePaise: l.linePaise,
-      })),
-      transport: null,
-      dueOn: iss.issuedOn,
-      billedPaise: billed,
-      concessionPaise: 0,
-      concessionDetails: [],
-      paidPaise: paid,
-      balancePaise: balance,
-      label: `Store · ${iss.issueNo} · ${itemCount} item${itemCount === 1 ? "" : "s"}`,
-    });
-  }
+  // Store dues are no longer derived here.
+  //
+  // The store was rebuilt as a server-truth module (inv_*); a credit sale's
+  // balance lives on inv_sales.balance_paise and is collected in Store &
+  // purchase. Deriving dues from the old browser-held register would report
+  // whatever that empty cache happened to contain. Historical store lines
+  // already written onto vouchers still render — only the derivation is gone.
 
   const paidMapRaw = new Map<string, number>();
   for (const v of fees.vouchers) {
@@ -2271,11 +2259,10 @@ export function computeStudentDues(
       asOf,
       includeFuture,
     });
-    return appendArrearsDues(
-      [...filtered, ...slices],
+    return appendStoreDues(
+      appendArrearsDues([...filtered, ...slices], student, fees, paidMap, includePaid),
       student,
-      fees,
-      paidMap,
+      options?.storeDues,
       includePaid,
     ).sort((a, b) =>
       a.dueOn === b.dueOn
@@ -2284,17 +2271,30 @@ export function computeStudentDues(
     );
   }
 
-  return appendArrearsDues(
-    adjusted,
+  return appendStoreDues(
+    appendArrearsDues(adjusted, student, fees, paidMap, includePaid),
     student,
-    fees,
-    paidMap,
+    options?.storeDues,
     includePaid,
   ).sort((a, b) =>
     a.dueOn === b.dueOn
       ? a.label.localeCompare(b.label)
       : a.dueOn.localeCompare(b.dueOn),
   );
+}
+
+function appendStoreDues(
+  lines: FeeDueLine[],
+  student: SisStudent,
+  storeDues: InjectedStoreDue[] | undefined,
+  includePaid: boolean,
+): FeeDueLine[] {
+  if (!storeDues?.length) return lines;
+  const mine = storeDues.filter(
+    (d) => d.studentId === student.id && (includePaid || d.balancePaise > 0),
+  );
+  if (mine.length === 0) return lines;
+  return [...lines, ...mine.map(storeDueToLine)];
 }
 
 /** Apply active late-fee rules to overdue open dues. */
@@ -2726,6 +2726,7 @@ export function computeHouseholdDues(
     asOf?: string;
     includeFuture?: boolean;
     includePaid?: boolean;
+    storeDues?: InjectedStoreDue[];
   },
 ): { student: SisStudent; dues: FeeDueLine[] }[] {
   const members = sis.students.filter(
@@ -2874,6 +2875,44 @@ export function receiptSeriesOf(receiptNo: string): FeeReceiptSeries | "" {
   if (receiptNo.startsWith("R/")) return "R";
   if (receiptNo.startsWith("F/") || receiptNo.startsWith("REC/")) return "F";
   return "";
+}
+
+/**
+ * Fire an accounts posting without letting a books problem block the desk —
+ * but never let it fail silently either.
+ *
+ * The receipt is already saved by the time this runs; accounts is a second
+ * write that may legitimately be refused (role without `accounts:edit`, no
+ * bank master yet, a closed fiscal year). Until 2026-08-23 all three ended in
+ * `.catch(() => {})` and the books simply drifted from the fee desk. Now the
+ * failure lands in the retry queue and raises `bhb-accounts-posting-failed`,
+ * so it is visible and replayable.
+ */
+function runAccountsPosting(
+  spec: {
+    action: AccountsPostingAction;
+    sourceId: string;
+    label: string;
+    amountPaise: number;
+    payload: unknown;
+  },
+  post: (
+    m: typeof import("@/lib/accountsPostings"),
+  ) => { ok: true } | { ok: false; error: string },
+): void {
+  void import("@/lib/accountsPostings")
+    .then((m) => {
+      const res = post(m);
+      if (!res.ok) {
+        recordAccountsPostingFailure({ ...spec, reason: res.error });
+      }
+    })
+    .catch((e: unknown) => {
+      recordAccountsPostingFailure({
+        ...spec,
+        reason: e instanceof Error ? e.message : String(e),
+      });
+    });
 }
 
 export function collectPayment(input: {
@@ -3094,27 +3133,33 @@ export function collectPayment(input: {
     voucher.receiptNo,
   );
 
-  void import("@/lib/accountsPostings")
-    .then((m) => {
-      const storeAmountPaise = voucher.lines
-        .filter((l) => l.kind === "store")
-        .reduce((n, l) => n + l.amountPaise, 0);
-      m.postFeeCollectionToAccounts({
-        voucherId: voucher.id,
-        collectionDate: voucher.collectionDate,
-        receiptNo: voucher.receiptNo,
-        label: voucher.householdId,
-        tenders: voucher.tenders.map((t) => ({
-          mode: t.mode,
-          amountPaise: t.amountPaise,
-          bankAccountId: t.bankAccountId,
-        })),
-        storeAmountPaise,
-      });
-    })
-    .catch(() => {
-      /* accounts optional */
-    });
+  {
+    const storeAmountPaise = voucher.lines
+      .filter((l) => l.kind === "store")
+      .reduce((n, l) => n + l.amountPaise, 0);
+    const args = {
+      voucherId: voucher.id,
+      collectionDate: voucher.collectionDate,
+      receiptNo: voucher.receiptNo,
+      label: voucher.householdId,
+      tenders: voucher.tenders.map((t) => ({
+        mode: t.mode,
+        amountPaise: t.amountPaise,
+        bankAccountId: t.bankAccountId,
+      })),
+      storeAmountPaise,
+    };
+    runAccountsPosting(
+      {
+        action: "fee_receipt",
+        sourceId: `fee_v_${voucher.id}`,
+        label: `Receipt ${voucher.receiptNo}`,
+        amountPaise: voucher.totalPaise,
+        payload: args,
+      },
+      (m) => m.postFeeCollectionToAccounts(args),
+    );
+  }
 
   return { ok: true, voucher };
 }
@@ -3234,7 +3279,35 @@ export function voidVoucher(voucherId: string): boolean {
     planAllocations: nextAllocations,
     installmentPlans: nextPlans,
   });
+
+  // Back the receipt out of the cash book, the bank book and the GL. Without
+  // this the money stayed on the books for good — cash in hand and fee income
+  // were overstated by every voided receipt (audit 2026-08-23, L1).
+  reverseFeeCollectionInBooks(voucher, "Fee receipt voided");
   return true;
+}
+
+/**
+ * Reverse one receipt in accounts, surfacing any refusal to the retry queue.
+ *
+ * Shared by voidVoucher and bounceCheque — a bounce voids the receipt inline
+ * rather than calling voidVoucher, so both doors need the same reversal.
+ */
+function reverseFeeCollectionInBooks(
+  voucher: CollectionVoucher,
+  reason: string,
+): void {
+  const args = { voucherId: voucher.id, reason };
+  runAccountsPosting(
+    {
+      action: "fee_reversal",
+      sourceId: `fee_v_${voucher.id}`,
+      label: `Void of receipt ${voucher.receiptNo}`,
+      amountPaise: voucher.totalPaise,
+      payload: args,
+    },
+    (m) => m.reverseFeeCollectionInAccounts(args),
+  );
 }
 
 /** 10-digit IN mobile → WhatsApp E.164 without plus (e.g. 9198…). */
@@ -3791,6 +3864,30 @@ export function clearCheque(
         : v,
     ),
   });
+
+  // The collection debited Cheques in Hand, not Bank. This is the day the
+  // bank actually has the money, so this is the day it moves.
+  {
+    const args = {
+      chequeId: cheque.id,
+      voucherId: cheque.voucherId,
+      amountPaise: cheque.amountPaise,
+      clearedOn: now.slice(0, 10),
+      chequeNo: cheque.chequeNo,
+      receiptNo: cheque.receiptNo,
+      bankId: voucher.tenders[cheque.tenderIndex]?.bankAccountId || undefined,
+    };
+    runAccountsPosting(
+      {
+        action: "cheque_clearance",
+        sourceId: `fee_chq_${cheque.voucherId}_${cheque.id}`,
+        label: `Cheque ${cheque.chequeNo || cheque.receiptNo} cleared`,
+        amountPaise: cheque.amountPaise,
+        payload: args,
+      },
+      (m) => m.postChequeClearanceToAccounts(args),
+    );
+  }
   return { ok: true, cheque: nextCheque };
 }
 
@@ -3859,6 +3956,14 @@ export function bounceCheque(
     ),
     cheques: nextCheques,
   });
+
+  // A bounce voids the receipt inline (above), so the books have to come off
+  // too — including the bank leg if a sibling cheque on this receipt had
+  // already cleared.
+  reverseFeeCollectionInBooks(
+    voucher,
+    `Cheque ${cheque.chequeNo || "—"} bounced: ${reason}`,
+  );
   return { ok: true, cheque: nextCheque };
 }
 
@@ -4133,16 +4238,7 @@ export function buildDayBook(
   modeTotals: DayCloseModeTotal[];
   /** Collected amount split by voucher line kind */
   kindTotals: { kind: DueKind; label: string; paise: number; lineCount: number }[];
-  /** Store credit issues raised on this calendar date (may still be unpaid) */
-  storeIssues: {
-    issueId: string;
-    issueNo: string;
-    studentId: string;
-    totalPaise: number;
-    itemCount: number;
-    voided: boolean;
-  }[];
-  storeIssuedPaise: number;
+  /** Collected against store dues, from the vouchers themselves. */
   storeCollectedPaise: number;
 } {
   const vouchers = vouchersForCollectionDate(closeDate, fees);
@@ -4214,22 +4310,9 @@ export function buildDayBook(
       };
     });
 
-  const store = loadStore();
-  const storeIssues = store.issues
-    .filter((i) => i.issuedOn === closeDate)
-    .map((i) => ({
-      issueId: i.id,
-      issueNo: i.issueNo,
-      studentId: i.studentId,
-      totalPaise: i.totalPaise,
-      itemCount: i.lines.reduce((s, l) => s + l.qty, 0),
-      voided: !!i.voidedAt,
-    }))
-    .sort((a, b) => a.issueNo.localeCompare(b.issueNo));
-
-  const storeIssuedPaise = storeIssues
-    .filter((i) => !i.voided)
-    .reduce((s, i) => s + i.totalPaise, 0);
+  // Store issues raised on the day are no longer listed here — they live in
+  // the Store & purchase day book now. Reporting an empty list would read as
+  // "no store sales today", which is not something this function can know.
   const storeCollectedPaise = byKind.get("store")?.paise ?? 0;
 
   const totalPaise = vouchers.reduce((s, v) => s + v.totalPaise, 0);
@@ -4241,8 +4324,6 @@ export function buildDayBook(
     cashPaise,
     modeTotals,
     kindTotals,
-    storeIssues,
-    storeIssuedPaise,
     storeCollectedPaise,
   };
 }
@@ -4448,13 +4529,16 @@ export function approveDayClose(input: {
     resolvedAt: now,
   };
   saveFees(upsertDayClose(session, fees));
-  void import("@/lib/accountsPostings")
-    .then((m) => {
-      m.applyDayCloseHandover(session);
-    })
-    .catch(() => {
-      /* accounts optional */
-    });
+  runAccountsPosting(
+    {
+      action: "day_close",
+      sourceId: `day_close_${session.id}`,
+      label: `Day close ${session.closeDate}`,
+      amountPaise: session.systemCashPaise,
+      payload: session,
+    },
+    (m) => m.applyDayCloseHandover(session),
+  );
   return { ok: true, session };
 }
 

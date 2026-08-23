@@ -365,18 +365,13 @@ export const HUB_GROUPS: HubGroup[] = [
         tone: "violet",
       },
       {
-        href: "/store",
-        title: "Store",
-        blurb: "Books · issue",
-        detail: "Stock master, sell-issue, returns and store accounts.",
-        icon: BookOpen,
-        tone: "green",
-      },
-      {
-        href: "/purchase",
-        title: "Purchase",
-        blurb: "Indent · PO · GRN",
-        detail: "Indents, purchase orders, goods receipt and returns.",
+        // Store and Purchase were two entries for one domain — same items,
+        // same vendors, two stores of truth. They are one module now.
+        href: "/inventory",
+        title: "Store & purchase",
+        blurb: "Catalogue · vendors",
+        detail:
+          "Catalogue, vendors, pricing, kits by class, purchase and stock.",
         icon: Package,
         tone: "green",
       },

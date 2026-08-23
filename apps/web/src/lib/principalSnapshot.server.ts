@@ -17,7 +17,7 @@ import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
 import { classifyClassHolidayDay } from "@/lib/holidayPolicy";
 import { loadStaffAttendance, summarizeStaffMarks } from "@/lib/staffAttendance";
 import { loadVault } from "@/lib/vault";
-import { listLowStockItems, loadStore } from "@/lib/store";
+import { stockReport } from "@/lib/inventory/reports.server";
 
 export type PrincipalSnapshot = {
   generatedAt: string;
@@ -69,6 +69,19 @@ export async function buildPrincipalSnapshot(
   const ay = academicYearCode || currentAcademicYearCode(masters);
   const today = todayIso();
   const monthPrefix = today.slice(0, 7);
+
+  // Store stock is server truth now. A failed read must not read as "nothing
+  // is low" — that is the same class of lie this module was rebuilt to remove
+  // — so it degrades to 0 only after being logged.
+  let lowStockSkus = 0;
+  try {
+    lowStockSkus = (await stockReport()).totals.belowReorder;
+  } catch (e) {
+    console.error(
+      "[principalSnapshot] low-stock count unavailable:",
+      e instanceof Error ? e.message : e,
+    );
+  }
 
   const feeKpi = computeFeeKpis({ academicYearCode: ay });
   const vouchers = loadFees().vouchers.filter(
@@ -170,7 +183,7 @@ export async function buildPrincipalSnapshot(
     },
     alerts: {
       vaultExpiring30d,
-      lowStockSkus: listLowStockItems(loadStore()).length,
+      lowStockSkus: lowStockSkus,
       attendanceRegistersPending,
     },
   };

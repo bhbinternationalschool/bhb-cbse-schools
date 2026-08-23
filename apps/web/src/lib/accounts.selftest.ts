@@ -55,6 +55,7 @@ import {
   recordBankDeposit,
   totalBankBalancePaise,
   transferCashBetweenPools,
+  upsertBankAccount,
 } from "@/lib/accountsCashBank";
 import {
   cancelExpenseVoucher,
@@ -70,7 +71,11 @@ import {
 import { createOwnerLoan } from "@/lib/accountsLoans";
 import { getCoaByCode } from "@/lib/accountsLookups";
 import { listUnifiedPayables } from "@/lib/accountsPayables";
-import { postFeeCollectionToAccounts } from "@/lib/accountsPostings";
+import {
+  postChequeClearanceToAccounts,
+  postFeeCollectionToAccounts,
+  reverseFeeCollectionInAccounts,
+} from "@/lib/accountsPostings";
 import {
   balanceSheet,
   dashboardSnapshot,
@@ -86,6 +91,7 @@ import {
   COA_ACCOUNTS_PAYABLE,
   COA_BANK_ACCOUNTS,
   COA_CASH_IN_HAND,
+  COA_CHEQUES_IN_HAND,
   COA_FEE_INCOME,
   COA_OWNER_LOANS,
   type AccountsState,
@@ -116,10 +122,26 @@ function poolByCode(code: "main" | "drawer" | "petty"): string {
   return pool.id;
 }
 
+/**
+ * The school's bank account, created on demand.
+ *
+ * The seed deliberately installs no bank — a placeholder account number
+ * reached production and became a live master (audit 2026-08-23, L8) — so a
+ * scenario that needs one asks for it here.
+ */
 function firstBankId(): string {
-  const bank = loadAccounts().bankAccounts[0];
-  assert.ok(bank, "seed must create one bank account");
-  return bank.id;
+  const existing = loadAccounts().bankAccounts[0];
+  if (existing) return existing.id;
+  const res = upsertBankAccount({
+    name: "School Main Account",
+    bankName: "Punjab National Bank",
+    accountNo: "1234567890",
+    ifsc: "PUNB0123456",
+    isActive: true,
+    paymentModes: ["upi", "neft", "rtgs", "cheque", "card"],
+  });
+  assert.ok(res.ok, `test bank must be created: ${res.ok ? "" : res.error}`);
+  return res.bank.id;
 }
 
 function categoryIdByName(name: string): string {
@@ -200,7 +222,11 @@ function assertSubledgersTieToGl(label: string): void {
   const state = freshBooks();
 
   assert.equal(state.cashPools.length, 3, "seed installs main/drawer/petty pools");
-  assert.equal(state.bankAccounts.length, 1, "seed installs one bank account");
+  assert.equal(
+    state.bankAccounts.length,
+    0,
+    "seed installs no bank account — a real one is entered by the school",
+  );
   assert.ok(state.expenseCategories.length >= 7, "seed installs expense categories");
   assert.equal(state.trustees.length, 1, "seed installs one trustee");
   assert.equal(state.fiscalYears.length, 1, "seed opens one fiscal year");
@@ -227,7 +253,7 @@ function assertSubledgersTieToGl(label: string): void {
     "re-seeding an existing book must be idempotent",
   );
 
-  console.log("  ok  seed installs pools, bank, categories, COA, and one open FY");
+  console.log("  ok  seed installs pools, categories, COA and one open FY — but no bank");
 }
 
 /* ─── Cash movements ───────────────────────────────────────── */
@@ -778,6 +804,252 @@ function assertSubledgersTieToGl(label: string): void {
   assertBooksBalance("mixed book");
   assertSubledgersTieToGl("mixed book");
   console.log("  ok  a mixed book of fees, expenses, bills, and transfers ties out");
+}
+
+/* ─── Voiding a fee receipt (audit 2026-08-23, L1) ─────────── */
+{
+  freshBooks();
+  const bank = firstBankId();
+
+  postFeeCollectionToAccounts({
+    voucherId: "v_void_001",
+    collectionDate: TODAY,
+    receiptNo: "RC-VOID-1",
+    tenders: [
+      { mode: "cash", amountPaise: 5_000_00 },
+      { mode: "upi", amountPaise: 3_000_00, bankAccountId: bank },
+    ],
+  });
+  assert.equal(cashInHandPaise(), 5_000_00, "the receipt lands before it is voided");
+  assert.equal(tbBalancePaise(COA_FEE_INCOME), 8_000_00, "income booked on collection");
+
+  const reversed = reverseFeeCollectionInAccounts({
+    voucherId: "v_void_001",
+    reason: "Wrong household",
+  });
+  assert.ok(reversed.ok, `void must reverse: ${reversed.ok ? "" : reversed.error}`);
+  assert.equal(reversed.reversed, true, "the first reversal is a real reversal");
+
+  // The whole receipt comes off: cash, bank and the income it credited.
+  assert.equal(cashInHandPaise(), 0, "voiding returns the cash");
+  assert.equal(bankBalancePaise(bank), 0, "voiding returns the bank tender");
+  assert.equal(tbBalancePaise(COA_FEE_INCOME), 0, "voiding removes the fee income");
+
+  // Voided, not deleted — the audit trail has to survive a reversal.
+  const state = loadAccounts();
+  assert.equal(state.cashLedger.length, 1, "the cash entry is kept");
+  assert.ok(state.cashLedger[0]!.voidedAt, "the cash entry is marked void");
+  assert.equal(
+    state.cashLedger[0]!.cancelReason,
+    "Wrong household",
+    "the reason is kept on the entry",
+  );
+  assert.ok(
+    state.journalEntries.every((j) => j.voidedAt),
+    "the journal is voided rather than removed",
+  );
+
+  // Idempotent: fees.ts fires this from a floating promise, and the retry
+  // queue may replay it.
+  const again = reverseFeeCollectionInAccounts({ voucherId: "v_void_001" });
+  assert.ok(again.ok, "a second reversal must not error");
+  assert.equal(again.reversed, false, "a second reversal finds nothing live");
+  assert.equal(cashInHandPaise(), 0, "a replayed reversal does not double-refund");
+
+  assertBooksBalance("fee receipt void");
+  assertSubledgersTieToGl("fee receipt void");
+  console.log("  ok  voiding a fee receipt takes the money back off the books");
+}
+
+/* ─── Cheques are not bank money yet (L2) ──────────────────── */
+{
+  freshBooks();
+  const bank = firstBankId();
+
+  postFeeCollectionToAccounts({
+    voucherId: "v_chq_001",
+    collectionDate: TODAY,
+    receiptNo: "RC-CHQ-1",
+    tenders: [{ mode: "cheque", amountPaise: 15_000_00, ref: "004521" }],
+  });
+
+  // A cheque in the drawer is an asset, but it is not in the bank until the
+  // bank says so — that is what made the bank book impossible to reconcile.
+  assert.equal(bankBalancePaise(bank), 0, "a received cheque does not touch the bank book");
+  assert.equal(
+    tbBalancePaise(COA_CHEQUES_IN_HAND),
+    15_000_00,
+    "the cheque is held in Cheques in Hand",
+  );
+  assert.equal(tbBalancePaise(COA_FEE_INCOME), 15_000_00, "the income is still recognised");
+  assert.equal(cashInHandPaise(), 0, "a cheque is not cash in hand");
+  assertBooksBalance("cheque received");
+
+  const cleared = postChequeClearanceToAccounts({
+    chequeId: "chq_1",
+    voucherId: "v_chq_001",
+    amountPaise: 15_000_00,
+    clearedOn: TODAY,
+    chequeNo: "004521",
+    receiptNo: "RC-CHQ-1",
+    bankId: bank,
+  });
+  assert.ok(cleared.ok, `clearance must post: ${cleared.ok ? "" : cleared.error}`);
+
+  assert.equal(bankBalancePaise(bank), 15_000_00, "clearing moves it into the bank book");
+  assert.equal(tbBalancePaise(COA_CHEQUES_IN_HAND), 0, "Cheques in Hand is emptied");
+  assert.equal(tbBalancePaise(COA_FEE_INCOME), 15_000_00, "clearing does not re-book income");
+
+  const twice = postChequeClearanceToAccounts({
+    chequeId: "chq_1",
+    voucherId: "v_chq_001",
+    amountPaise: 15_000_00,
+    clearedOn: TODAY,
+    bankId: bank,
+  });
+  assert.ok(twice.ok && twice.posted === false, "clearance is idempotent by cheque");
+  assert.equal(bankBalancePaise(bank), 15_000_00, "a replayed clearance does not double-credit");
+
+  assertBooksBalance("cheque cleared");
+  assertSubledgersTieToGl("cheque cleared");
+  console.log("  ok  a cheque waits in Cheques in Hand until the bank clears it");
+}
+
+/* ─── A bounce reverses the collection and its clearance ───── */
+{
+  freshBooks();
+  const bank = firstBankId();
+
+  postFeeCollectionToAccounts({
+    voucherId: "v_bnc_001",
+    collectionDate: TODAY,
+    receiptNo: "RC-BNC-1",
+    tenders: [{ mode: "cheque", amountPaise: 9_000_00, ref: "77812" }],
+  });
+  postChequeClearanceToAccounts({
+    chequeId: "chq_b1",
+    voucherId: "v_bnc_001",
+    amountPaise: 9_000_00,
+    clearedOn: TODAY,
+    bankId: bank,
+  });
+  assert.equal(bankBalancePaise(bank), 9_000_00, "the cheque cleared before it bounced");
+
+  // bounceCheque voids the receipt, so the reversal must find the clearance
+  // leg too — it is keyed under the same voucher.
+  const reversed = reverseFeeCollectionInAccounts({
+    voucherId: "v_bnc_001",
+    reason: "Cheque 77812 bounced: funds insufficient",
+  });
+  assert.ok(reversed.ok, `bounce must reverse: ${reversed.ok ? "" : reversed.error}`);
+
+  assert.equal(bankBalancePaise(bank), 0, "the bounce takes the money back out of the bank");
+  assert.equal(tbBalancePaise(COA_CHEQUES_IN_HAND), 0, "no cheque is left in hand");
+  assert.equal(tbBalancePaise(COA_FEE_INCOME), 0, "a bounced cheque is not income");
+
+  assertBooksBalance("cheque bounced");
+  assertSubledgersTieToGl("cheque bounced");
+  console.log("  ok  a bounced cheque reverses both the receipt and its clearance");
+}
+
+/* ─── A closed year locks the sub-ledgers too (L4) ─────────── */
+{
+  freshBooks();
+  const bank = firstBankId();
+  const main = poolByCode("main");
+  const fy = loadAccounts().fiscalYears[0]!;
+  const insideFy = fy.startDate;
+
+  setFiscalYearStatus(fy.code, "closed");
+
+  // postJournal always refused a closed year; the cash and bank books did
+  // not, so a closed year could still be altered through any path that moved
+  // a pool without a journal.
+  const cash = postCashMovement({
+    poolId: main,
+    date: insideFy,
+    direction: "in",
+    amountPaise: 1_000_00,
+    sourceType: "test",
+  });
+  assert.equal(cash.ok, false, "a closed year refuses cash movements");
+  assert.match(
+    cash.ok ? "" : cash.error,
+    /closed/i,
+    "the refusal names the closed year",
+  );
+
+  const bankMove = postBankMovement({
+    bankId: bank,
+    date: insideFy,
+    direction: "dr",
+    amountPaise: 1_000_00,
+    mode: "neft",
+    sourceType: "test",
+  });
+  assert.equal(bankMove.ok, false, "a closed year refuses bank movements");
+
+  assert.equal(cashInHandPaise(), 0, "nothing reached the cash book");
+  assert.equal(bankBalancePaise(bank), 0, "nothing reached the bank book");
+
+  setFiscalYearStatus(fy.code, "open");
+  const reopened = postCashMovement({
+    poolId: main,
+    date: insideFy,
+    direction: "in",
+    amountPaise: 1_000_00,
+    sourceType: "test",
+  });
+  assert.ok(reopened.ok, "reopening the year lets the sub-ledger move again");
+  console.log("  ok  a closed fiscal year locks the cash and bank books, not just the GL");
+}
+
+/* ─── An unroutable tender posts nothing at all ────────────── */
+{
+  freshBooks();
+  // Deliberately no bank account: the seed no longer invents one.
+  assert.equal(loadAccounts().bankAccounts.length, 0, "the book starts with no bank");
+
+  const posted = postFeeCollectionToAccounts({
+    voucherId: "v_nobank_001",
+    collectionDate: TODAY,
+    receiptNo: "RC-NB-1",
+    tenders: [
+      { mode: "cash", amountPaise: 2_000_00 },
+      { mode: "upi", amountPaise: 6_000_00 },
+    ],
+  });
+
+  // The old path skipped the unroutable tender in the bank book but still
+  // debited Bank in the journal, so the two sides drifted apart by exactly
+  // that tender. Refusing the whole receipt keeps them in step.
+  assert.equal(posted.ok, false, "a tender with nowhere to land refuses the posting");
+  assert.match(
+    posted.ok ? "" : posted.error,
+    /bank account/i,
+    "the refusal tells the operator to add a bank",
+  );
+  assert.equal(cashInHandPaise(), 0, "the cash leg is not posted either — all or nothing");
+  assert.equal(loadAccounts().journalEntries.length, 0, "no half-written journal is left");
+
+  // Once the school enters its real bank, the queued posting replays cleanly.
+  const bank = firstBankId();
+  const retry = postFeeCollectionToAccounts({
+    voucherId: "v_nobank_001",
+    collectionDate: TODAY,
+    receiptNo: "RC-NB-1",
+    tenders: [
+      { mode: "cash", amountPaise: 2_000_00 },
+      { mode: "upi", amountPaise: 6_000_00 },
+    ],
+  });
+  assert.ok(retry.ok, `the retry must post: ${retry.ok ? "" : retry.error}`);
+  assert.equal(cashInHandPaise(), 2_000_00, "the retry posts the cash leg");
+  assert.equal(bankBalancePaise(bank), 6_000_00, "the retry posts the bank leg");
+
+  assertBooksBalance("unroutable tender");
+  assertSubledgersTieToGl("unroutable tender");
+  console.log("  ok  a tender with no bank refuses the whole receipt, then replays cleanly");
 }
 
 console.log("\nAll accounts checks passed.");
