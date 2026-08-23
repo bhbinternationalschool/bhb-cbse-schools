@@ -376,6 +376,29 @@ export function MastersTab({
               />
               Allow stock to go negative
             </label>
+            <label className="flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={boot.settings.allowCreditSales}
+                onChange={(e) =>
+                  saveSettings({ allowCreditSales: e.target.checked })
+                }
+              />
+              Allow sales on account (unpaid)
+            </label>
+            <label className="flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={boot.settings.gstCreditEligible}
+                onChange={(e) =>
+                  saveSettings({ gstCreditEligible: e.target.checked })
+                }
+              />
+              We reclaim input GST
+              <span className="text-[10px] text-muted-foreground">
+                (off = GST counts as part of the cost)
+              </span>
+            </label>
           </div>
         </div>
       </section>

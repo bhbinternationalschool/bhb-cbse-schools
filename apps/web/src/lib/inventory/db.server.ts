@@ -335,6 +335,9 @@ export const INV_DEFAULT_SETTINGS: InvSettings = {
   allowNegativeStock: false,
   walkinSalesEnabled: true,
   trackGst: true,
+  gstCreditEligible: false,
+  allowCreditSales: true,
+  staffDiscountPct: 0,
   docPrefixes: {
     indent: "IND",
     po: "PO",
@@ -365,6 +368,9 @@ export function rowToSettings(r: Row | null): InvSettings {
     allowNegativeStock: bool(r.allow_negative_stock),
     walkinSalesEnabled: bool(r.walkin_sales_enabled, true),
     trackGst: bool(r.track_gst, true),
+    gstCreditEligible: bool(r.gst_credit_eligible, false),
+    allowCreditSales: bool(r.allow_credit_sales, true),
+    staffDiscountPct: num(r.staff_discount_pct),
     docPrefixes: { ...INV_DEFAULT_SETTINGS.docPrefixes, ...prefixes },
   };
 }

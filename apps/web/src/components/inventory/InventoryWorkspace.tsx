@@ -16,6 +16,7 @@ import { Boxes } from "lucide-react";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import { CatalogueTab } from "@/components/inventory/CatalogueTab";
+import { CounterTab } from "@/components/inventory/CounterTab";
 import { InvAlert, InvSpinner } from "@/components/inventory/InvUi";
 import { KitsTab } from "@/components/inventory/KitsTab";
 import { MastersTab } from "@/components/inventory/MastersTab";
@@ -26,13 +27,14 @@ import { ensureMastersHydrated } from "@/lib/mastersPersistence";
 import { loadMasters } from "@/lib/masters";
 import { Button } from "@/components/ui/button";
 
-type Tab = "catalogue" | "purchase" | "vendors" | "kits" | "masters";
+type Tab = "counter" | "catalogue" | "purchase" | "vendors" | "kits" | "masters";
 
 const TABS: {
   id: Tab;
   label: string;
-  tone: "navy" | "sky" | "teal" | "violet" | "green";
+  tone: "navy" | "sky" | "teal" | "violet" | "green" | "coral";
 }[] = [
+  { id: "counter", label: "Counter", tone: "coral" },
   { id: "catalogue", label: "Catalogue", tone: "navy" },
   { id: "purchase", label: "Purchase", tone: "green" },
   { id: "vendors", label: "Vendors", tone: "sky" },
@@ -41,7 +43,7 @@ const TABS: {
 ];
 
 export function InventoryWorkspace() {
-  const [tab, setTab] = useState<Tab>("catalogue");
+  const [tab, setTab] = useState<Tab>("counter");
   const boot = useInvBootstrap();
 
   // Class names come from masters, which is still a localStorage-backed
@@ -95,6 +97,9 @@ export function InventoryWorkspace() {
         </div>
       ) : (
         <div className="pt-1">
+          {tab === "counter" ? (
+            <CounterTab boot={boot.data} classes={classes} />
+          ) : null}
           {tab === "catalogue" ? (
             <CatalogueTab boot={boot.data} onChanged={boot.reload} />
           ) : null}

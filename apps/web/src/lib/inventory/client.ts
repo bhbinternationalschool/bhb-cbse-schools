@@ -17,6 +17,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   InvBootstrap,
+  InvBuyerKind,
+  InvBuyerStudent,
+  InvCounterSummary,
+  InvSalePage,
+  InvSaleReturn,
+  InvSaleStatus,
+  InvTenderMode,
   InvGrn,
   InvIndent,
   InvPendingPoLine,
@@ -341,6 +348,88 @@ export const invApi = {
       "/returns",
       { method: "POST", body: JSON.stringify(input) },
     ).then((r) => r.return),
+
+  /* ─── Counter sales ──────────────────────────────────────── */
+
+  findStudents: (search: string) =>
+    req<{ students: InvBuyerStudent[] }>("/buyers", { query: { search } }).then(
+      (r) => r.students,
+    ),
+
+  listSales: (query: {
+    search?: string;
+    status?: string;
+    buyerKind?: InvBuyerKind | "";
+    studentId?: string;
+    fromDate?: string;
+    toDate?: string;
+    page?: number;
+    pageSize?: number;
+  } = {}) => req<InvSalePage>("/sales", { query }),
+
+  counterSummary: () =>
+    req<{ summary: InvCounterSummary }>("/sales", {
+      query: { view: "summary" },
+    }).then((r) => r.summary),
+
+  counterPrices: (itemIds: string[], priceListId = "") =>
+    req<{
+      prices: Record<
+        string,
+        { salePaise: number; mrpPaise: number; maxDiscountPct: number }
+      >;
+    }>("/sales", {
+      query: { view: "prices", itemIds: itemIds.join(","), priceListId },
+    }).then((r) => r.prices),
+
+  postSale: (sale: Record<string, unknown>) =>
+    req<{
+      sale: {
+        saleId: string;
+        saleNo: string;
+        totalPaise: number;
+        paidPaise: number;
+        balancePaise: number;
+        status: InvSaleStatus;
+      };
+    }>("/sales", { method: "POST", body: JSON.stringify(sale) }).then(
+      (r) => r.sale,
+    ),
+
+  collectOnSale: (input: {
+    saleId: string;
+    amountPaise: number;
+    mode?: InvTenderMode;
+    reference?: string;
+  }) =>
+    req<{ paidPaise: number; balancePaise: number; status: InvSaleStatus }>(
+      "/sales",
+      { method: "POST", body: JSON.stringify({ action: "collect", ...input }) },
+    ),
+
+  postSaleReturn: (input: Record<string, unknown>) =>
+    req<{
+      return: {
+        returnNo: string;
+        totalPaise: number;
+        refundedPaise: number;
+        balanceReducedPaise: number;
+      };
+    }>("/sales", {
+      method: "POST",
+      body: JSON.stringify({ action: "return", ...input }),
+    }).then((r) => r.return),
+
+  voidSale: (saleId: string, reason: string) =>
+    req<{ saleNo: string; status: string }>("/sales", {
+      method: "POST",
+      body: JSON.stringify({ action: "void", saleId, reason }),
+    }),
+
+  listSaleReturns: (saleId = "") =>
+    req<{ returns: InvSaleReturn[] }>("/sales", {
+      query: { view: "returns", saleId },
+    }).then((r) => r.returns),
 };
 
 /* ─── Hooks ────────────────────────────────────────────────── */

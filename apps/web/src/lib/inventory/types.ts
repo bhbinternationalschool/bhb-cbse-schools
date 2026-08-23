@@ -229,6 +229,10 @@ export type InvSettings = {
   allowNegativeStock: boolean;
   walkinSalesEnabled: boolean;
   trackGst: boolean;
+  /** Input GST is usually NOT reclaimable for a school, so it lands in cost. */
+  gstCreditEligible: boolean;
+  allowCreditSales: boolean;
+  staffDiscountPct: number;
   docPrefixes: Record<string, string>;
 };
 
@@ -604,4 +608,198 @@ export function lineAmounts(input: {
     (lineTotalPaise * (Number(input.gstRate) || 0)) / 100,
   );
   return { netRatePaise, lineTotalPaise, taxPaise };
+}
+
+/* ─── Phase 3: counter sales ───────────────────────────────── */
+
+export type InvBuyerKind = "student" | "staff" | "walkin";
+export type InvSaleStatus = "open" | "part_paid" | "paid" | "void";
+export type InvTenderMode =
+  | "cash"
+  | "upi"
+  | "card"
+  | "cheque"
+  | "bank"
+  | "neft"
+  | "rtgs"
+  | "imps";
+
+export type InvSaleLine = {
+  id: string;
+  saleId: string;
+  itemId: string;
+  itemName: string;
+  sku: string;
+  qty: number;
+  unitPricePaise: number;
+  discountPct: number;
+  discountPaise: number;
+  lineTotalPaise: number;
+  gstRate: number;
+  taxPaise: number;
+  /** Cost frozen at sale time — a later purchase cannot rewrite this margin. */
+  unitCostPaise: number;
+  sortOrder: number;
+  /** Quantity already taken back on a sale return. */
+  qtyReturned?: number;
+};
+
+export type InvSalePayment = {
+  id: string;
+  saleId: string;
+  paidOn: string;
+  amountPaise: number;
+  mode: InvTenderMode;
+  reference: string;
+  note: string;
+  createdBy: string;
+};
+
+export type InvSale = {
+  id: string;
+  saleNo: string;
+  academicYearCode: string;
+  saleDate: string;
+  buyerKind: InvBuyerKind;
+  studentId: string;
+  staffId: string;
+  buyerName: string;
+  buyerPhone: string;
+  classId: string;
+  locationId: string;
+  priceListId: string;
+  kitId: string;
+  subtotalPaise: number;
+  discountPaise: number;
+  taxPaise: number;
+  totalPaise: number;
+  paidPaise: number;
+  balancePaise: number;
+  costPaise: number;
+  status: InvSaleStatus;
+  note: string;
+  createdBy: string;
+  createdAt: string;
+  voidedAt: string;
+  voidReason: string;
+  lines: InvSaleLine[];
+  payments: InvSalePayment[];
+  /** totalPaise − costPaise. What the school actually made on this sale. */
+  marginPaise: number;
+};
+
+export type InvSaleReturn = {
+  id: string;
+  returnNo: string;
+  saleId: string;
+  saleNo: string;
+  returnDate: string;
+  reason: string;
+  subtotalPaise: number;
+  taxPaise: number;
+  totalPaise: number;
+  settlement: "reduce_balance" | "refund";
+  refundedPaise: number;
+  refundMode: string;
+  restock: boolean;
+  note: string;
+  createdBy: string;
+  buyerName: string;
+  lines: {
+    id: string;
+    saleLineId: string;
+    itemId: string;
+    itemName: string;
+    qty: number;
+    unitPricePaise: number;
+    amountPaise: number;
+  }[];
+};
+
+/** A student as the counter needs them: who they are and what they owe. */
+export type InvBuyerStudent = {
+  id: string;
+  fullName: string;
+  admissionNo: string;
+  classId: string;
+  sectionId: string;
+  rollNo: string;
+  fatherName: string;
+  phone: string;
+  householdId: string;
+  status: string;
+};
+
+export type InvSaleQuery = {
+  search?: string;
+  buyerKind?: InvBuyerKind | "";
+  status?: InvSaleStatus | "unpaid" | "all";
+  studentId?: string;
+  fromDate?: string;
+  toDate?: string;
+  page?: number;
+  pageSize?: number;
+};
+
+export type InvSalePage = {
+  rows: InvSale[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+/** Today's counter summary. */
+export type InvCounterSummary = {
+  salesToday: number;
+  collectedTodayPaise: number;
+  billedTodayPaise: number;
+  marginTodayPaise: number;
+  outstandingPaise: number;
+  outstandingCount: number;
+};
+
+export function saleStatusLabel(s: InvSaleStatus): string {
+  return {
+    open: "Unpaid",
+    part_paid: "Part paid",
+    paid: "Paid",
+    void: "Cancelled",
+  }[s];
+}
+
+export function tenderLabel(m: InvTenderMode): string {
+  return {
+    cash: "Cash",
+    upi: "UPI",
+    card: "Card",
+    cheque: "Cheque",
+    bank: "Bank transfer",
+    neft: "NEFT",
+    rtgs: "RTGS",
+    imps: "IMPS",
+  }[m];
+}
+
+/** Cart line maths for the counter — the same rules the database enforces. */
+export function saleLineAmounts(input: {
+  qty: number;
+  unitPricePaise: number;
+  discountPct?: number;
+  gstRate?: number;
+}): {
+  grossPaise: number;
+  discountPaise: number;
+  lineTotalPaise: number;
+  taxPaise: number;
+} {
+  const qty = Number(input.qty) || 0;
+  const price = Number(input.unitPricePaise) || 0;
+  const pct = Math.max(0, Number(input.discountPct) || 0);
+  const grossPaise = Math.round(price * qty);
+  const discountPaise = Math.round((grossPaise * pct) / 100);
+  const lineTotalPaise = grossPaise - discountPaise;
+  const taxPaise = Math.round(
+    (lineTotalPaise * (Number(input.gstRate) || 0)) / 100,
+  );
+  return { grossPaise, discountPaise, lineTotalPaise, taxPaise };
 }
