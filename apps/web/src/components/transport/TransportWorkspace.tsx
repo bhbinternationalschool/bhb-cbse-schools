@@ -28,6 +28,7 @@ import {
   type RiderAction,
 } from "@/components/transport/FleetRosterPanel";
 import { ClassTransportPanel } from "@/components/transport/ClassTransportPanel";
+import { FleetEdgeStatusStrip } from "@/components/transport/FleetEdgeStatusStrip";
 import { StaffRiderPanel } from "@/components/transport/StaffRiderPanel";
 import { StopLinkRepairPanel } from "@/components/transport/StopLinkRepairPanel";
 import { TransportAmendDialog } from "@/components/transport/TransportAmendDialog";
@@ -719,6 +720,11 @@ export function TransportWorkspace() {
             />
           ) : null}
           {tab === "fleet" ? (
+            <div className="mt-4 space-y-4">
+              <FleetEdgeStatusStrip vehicles={state.vehicles} variant="fleet" />
+            </div>
+          ) : null}
+          {tab === "fleet" ? (
             <FleetPanel
               state={state}
               masters={masters}
@@ -760,6 +766,9 @@ export function TransportWorkspace() {
           ) : null}
           {tab === "live" ? (
             <>
+              <div className="mt-4">
+                <FleetEdgeStatusStrip vehicles={state.vehicles} variant="live" />
+              </div>
               <LiveMapPanel
                 state={state}
                 sis={sis}
