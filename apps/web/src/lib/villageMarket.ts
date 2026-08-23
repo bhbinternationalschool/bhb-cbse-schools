@@ -326,6 +326,85 @@ export type VillagesNearbyError = {
 
 export type VillagesNearbyResult = VillagesNearbyResponse | VillagesNearbyError;
 
+/* ─── Name aliases ─────────────────────────────────────────── */
+
+/**
+ * A spelling decision a person made.
+ *
+ * "confirmed" pins a locality to a settlement; "ignored" pins it to nothing —
+ * a landmark, a mohalla, a typo beyond rescue. Both outrank the fuzzy guess,
+ * which is the point: an alias is an asserted fact, not a better heuristic.
+ */
+export type VillageAliasStatus = "confirmed" | "ignored";
+
+export type VillageAliasSuggestion = {
+  villageId: string;
+  villageName: string;
+  blockName: string;
+  settlementType: "village" | "town";
+  childPool: number;
+  /** Trigram similarity, 0-1. Shown so a weak suggestion looks weak. */
+  score: number;
+  /**
+   * Same consonant skeleton as the typed spelling (Aayr/Ayar -> "yr").
+   * Ranks first, because trigram scores that pair 0.111 and would bury the
+   * right answer. Never an automatic match — skeletons collide on short names.
+   */
+  skeletonMatch?: boolean;
+};
+
+/** An unresolved spelling awaiting a decision. */
+export type VillageAliasCandidate = {
+  locality: string;
+  leadCount: number;
+  enrolledCount: number;
+  suggestions: VillageAliasSuggestion[];
+};
+
+/** A decision already taken, so it can be reviewed or undone. */
+export type VillageAliasRow = {
+  id: string;
+  alias: string;
+  status: VillageAliasStatus;
+  villageId: string | null;
+  villageName: string;
+  blockName: string;
+  leadCountAtConfirm: number;
+  note: string;
+  confirmedBy: string;
+  updatedAt: string;
+};
+
+export type VillageAliasesResponse = {
+  ok: true;
+  candidates: VillageAliasCandidate[];
+  aliases: VillageAliasRow[];
+  coverage: LeadCoverage | null;
+  /** True when more candidates exist than the page returned. */
+  truncated: boolean;
+};
+
+/** Manual lookup, for spellings the suggestions still miss. */
+export type VillageSearchResponse = {
+  ok: true;
+  results: VillageAliasSuggestion[];
+};
+
+export type VillageAliasesError = { ok: false; error: string };
+export type VillageAliasesResult = VillageAliasesResponse | VillageAliasesError;
+
+/**
+ * Leads that a decision would move out of the unplaced pile.
+ *
+ * Only "confirmed" counts: ignoring a spelling is a valid decision but it
+ * places no leads, and reporting it as progress would overstate coverage.
+ */
+export function leadsPlacedBy(aliases: VillageAliasRow[]): number {
+  return aliases
+    .filter((a) => a.status === "confirmed")
+    .reduce((sum, a) => sum + (a.leadCountAtConfirm || 0), 0);
+}
+
 /* ─── Component state ──────────────────────────────────────── */
 
 export type VillageGridQuery = {

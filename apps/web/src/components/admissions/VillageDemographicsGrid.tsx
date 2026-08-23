@@ -28,6 +28,7 @@ import {
   Users,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { VillageAliasPanel } from "@/components/admissions/VillageAliasPanel";
 import { erpBtnOutline, erpField } from "@/components/ui/erp-ui";
 import {
   type BlockMarketRow,
@@ -558,6 +559,8 @@ export type VillageDemographicsGridProps = {
   radiusM?: number;
   /** Scopes the lead counts to one session; "" counts every year. */
   academicYearCode?: string;
+  /** Confirming a spelling rewrites every figure here, so it needs edit rights. */
+  canEdit?: boolean;
 };
 
 function VillageDemographicsGridInner({
@@ -565,6 +568,7 @@ function VillageDemographicsGridInner({
   lon = DEFAULT_ORIGIN.lon,
   radiusM = DEFAULT_RADIUS_M,
   academicYearCode = "",
+  canEdit = false,
 }: VillageDemographicsGridProps) {
   const [radius, setRadius] = useState(radiusM);
   // Block mode is the default because OpenStreetMap's rural coverage around
@@ -909,6 +913,14 @@ function VillageDemographicsGridInner({
                   </li>
                 ))}
               </ul>
+
+              <div className="mt-3 border-t border-[var(--border)] pt-3">
+                <VillageAliasPanel
+                  academicYearCode={academicYearCode}
+                  canEdit={canEdit}
+                  onChanged={() => reload()}
+                />
+              </div>
             </details>
           ) : null}
 
@@ -1030,6 +1042,14 @@ function VillageDemographicsGridInner({
               </p>
             </div>
           )}
+
+          {data.leadCoverage && data.leadCoverage.unmatchedLeads === 0 ? (
+            <VillageAliasPanel
+              academicYearCode={academicYearCode}
+              canEdit={canEdit}
+              onChanged={() => reload()}
+            />
+          ) : null}
 
           <p className="text-micro text-[var(--muted)]">{data.assumptions.note}</p>
         </>

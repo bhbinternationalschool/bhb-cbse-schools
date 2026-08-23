@@ -1687,6 +1687,7 @@ export function AdmissionsWorkspace() {
           lat={TENANT.schoolLat}
           lon={TENANT.schoolLng}
           academicYearCode={session.academicYearCode || ""}
+          canEdit={canCreate}
         />
       ) : null}
 

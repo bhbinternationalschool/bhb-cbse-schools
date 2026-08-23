@@ -25,7 +25,9 @@ import {
   penetrationBand,
   penetrationPct,
   projectPopulation,
+  leadsPlacedBy,
   toNumber,
+  type VillageAliasRow,
   type VillageMarketRow,
 } from "./villageMarket";
 import {
@@ -355,5 +357,23 @@ assert.equal(
 );
 // Default stays villages-only, so an existing seed does not silently change.
 assert.ok(!buildCensusRowsFromTable(CDB, {}).rows.some((r) => r.settlement_type === "town"));
+
+/* ── alias progress counts only real placements ──────────────── */
+
+// "Not a village" is a legitimate decision and it drains the queue, but it
+// places no leads. Counting it as progress would overstate coverage — the
+// exact failure this whole feature exists to avoid.
+const decided: VillageAliasRow[] = [
+  { id: "1", alias: "Aayr", status: "confirmed", villageId: "v1", villageName: "Ayar", blockName: "Harhua", leadCountAtConfirm: 18, note: "", confirmedBy: "office", updatedAt: "" },
+  { id: "2", alias: "Chandmari", status: "ignored", villageId: null, villageName: "", blockName: "", leadCountAtConfirm: 14, note: "", confirmedBy: "office", updatedAt: "" },
+  { id: "3", alias: "Derwa", status: "confirmed", villageId: "v2", villageName: "Derwan", blockName: "Pindra", leadCountAtConfirm: 16, note: "", confirmedBy: "office", updatedAt: "" },
+];
+assert.equal(leadsPlacedBy(decided), 34, "18 + 16; the 14 ignored leads are not placed");
+assert.equal(leadsPlacedBy([]), 0);
+assert.equal(
+  leadsPlacedBy(decided.filter((a) => a.status === "ignored")),
+  0,
+  "ignoring everything places nothing",
+);
 
 console.log("  ok");
