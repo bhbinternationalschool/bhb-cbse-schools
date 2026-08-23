@@ -23,21 +23,34 @@ gcloud iam service-accounts create bhb-deploy \
   --project="$PROJECT" \
   --display-name="BHB deploy (Cloud Build + Run, local)"
 
-# 2. Exactly the roles the deploy uses — nothing wider.
-#    - submit Cloud Builds (the build pushes the image and deploys)
-#    - update the Cloud Run service (services update / update-traffic)
+# 2. Exactly the roles the deploy uses — nothing wider, and scoped to the
+#    single service / bucket / SA wherever the scoping is robust.
+REGION=asia-southeast1
+
+#    - submit Cloud Builds. Left UNCONDITIONED on purpose: every build gets a
+#      fresh generated id, so there is no stable resource.name to condition on
+#      ahead of time, and a resource.name condition here would deny the very
+#      submit it is meant to allow. This is the one broad grant; it lets the SA
+#      start builds, nothing else.
 gcloud projects add-iam-policy-binding "$PROJECT" \
   --member="serviceAccount:$SA" --role="roles/cloudbuild.builds.editor"
-gcloud projects add-iam-policy-binding "$PROJECT" \
-  --member="serviceAccount:$SA" --role="roles/run.admin"
 
-#    - act AS the runtime service account, so Run can be deployed as it.
+#    - update the Cloud Run service, RESTRICTED to school-erp-web by an IAM
+#      Condition. The SA can deploy this one service and no other.
+gcloud projects add-iam-policy-binding "$PROJECT" \
+  --member="serviceAccount:$SA" --role="roles/run.admin" \
+  --condition="title=only-school-erp-web,description=Deploy only the school-erp-web service,expression=resource.name.startsWith('projects/${PROJECT}/locations/${REGION}/services/school-erp-web')"
+
+#    - act AS the runtime service account. Already resource-scoped: the binding
+#      is on that SA, so no condition is needed — it cannot act as any other.
 gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" \
   --project="$PROJECT" \
   --member="serviceAccount:$SA" --role="roles/iam.serviceAccountUser"
 
-#    - upload the build source tarball to the Cloud Build bucket.
-gcloud projects add-iam-policy-binding "$PROJECT" \
+#    - upload the build source tarball. Bound on the Cloud Build BUCKET, not
+#      the project — a resource-level binding is tighter and less fragile than
+#      a project grant with a condition, and it cannot touch any other bucket.
+gcloud storage buckets add-iam-policy-binding "gs://${PROJECT}_cloudbuild" \
   --member="serviceAccount:$SA" --role="roles/storage.objectAdmin"
 
 # It deliberately gets NO Secret Manager access: the secrets are already bound
@@ -52,6 +65,38 @@ chmod 600 ~/.config/bhb-deploy/deploy-sa.json
 
 That's it. The next `./scripts/deploy-online.sh` prints
 `Authenticating with deploy service-account key…` and runs without a login.
+
+## About the `run.admin` condition — test it once
+
+An IAM Condition that does not match evaluates to **false**, which _denies_
+access. So a condition is only as safe as the `resource.name` it checks: if
+the format is wrong, the deploy fails with a 403 rather than deploying to the
+wrong place — fail-closed, but still a failed deploy. Prove it works on the
+first run:
+
+```bash
+# A real deploy is the honest test. If it 403s on the Run step with a
+# permission error naming school-erp-web, the condition is too tight —
+# confirm the service's resource.name and widen or drop the condition.
+gcloud run services describe school-erp-web --region=asia-southeast1 \
+  --project=school-erp-prod-493619 --format='value(metadata.name)'
+```
+
+If a deploy ever fails **only** on the Run step, remove the condition and
+re-add the plain grant — the SA still cannot touch anything but this project's
+Run, and you have lost only the per-service narrowing:
+
+```bash
+gcloud projects remove-iam-policy-binding "$PROJECT" \
+  --member="serviceAccount:$SA" --role="roles/run.admin" \
+  --condition="title=only-school-erp-web,expression=resource.name.startsWith('projects/${PROJECT}/locations/${REGION}/services/school-erp-web')"
+gcloud projects add-iam-policy-binding "$PROJECT" \
+  --member="serviceAccount:$SA" --role="roles/run.admin"
+```
+
+The other three grants carry no such risk: two are bound directly on their
+resource (the runtime SA, the build bucket) and Cloud Build is intentionally
+left unconditioned.
 
 ## Where the key lives, and why there
 
