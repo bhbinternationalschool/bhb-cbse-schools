@@ -168,6 +168,12 @@ export const WA_TEMPLATE_VARIABLES: WaTemplateVariableDef[] = [
   { key: "orderNo", label: "Store order no.", group: "Store", sample: "STR-882" },
   { key: "orderStatus", label: "Store order status", group: "Store", sample: "Ready" },
   { key: "routeName", label: "Transport route", group: "Transport", sample: "Route 3 — City" },
+  { key: "busNo", label: "Bus number", group: "Transport", sample: "MAGIC 1" },
+  { key: "stopName", label: "Bus stop", group: "Transport", sample: "Ayar Mod" },
+  { key: "expectedTime", label: "Expected time at stop", group: "Transport", sample: "07:10" },
+  { key: "minutesLate", label: "Minutes late", group: "Transport", sample: "20" },
+  { key: "effectiveFrom", label: "Change effective from", group: "Transport", sample: "1 Sep 2026" },
+  { key: "actionTaken", label: "What the school is doing", group: "Transport", sample: "A replacement bus is on the way." },
   { key: "certType", label: "Certificate type", group: "Certificates", sample: "Bonafide" },
   { key: "date", label: "Date", group: "General", sample: "4 Aug 2026" },
   { key: "time", label: "Time", group: "General", sample: "10:30 AM" },
@@ -255,6 +261,85 @@ type SeedDef = {
 };
 
 const SEED_DEFS: SeedDef[] = [
+  // ── Transport ────────────────────────────────────────────────
+  // Drafts for the office to review and submit to Meta. Nothing sends until
+  // Meta approves the name: the fleet-edge alert path has already proved that
+  // free-form fails outside the 24h window, 223 times in a row.
+  //
+  // The ETA wording says "expected" and names it as a schedule on purpose.
+  // There is no live position behind it — Tata's telemetry feed is not
+  // subscribed — and a parent who reads it as live will stand at the stop.
+  {
+    familyKey: "transport_eta",
+    nameEn: "Bus expected time",
+    nameHi: "बस का अनुमानित समय",
+    module: "transport",
+    category: "UTILITY",
+    metaName: "bhb_transport_eta",
+    bodyEn:
+      "Namaste {{guardianName}}, bus *{{busNo}}* is expected at {{stopName}} at about {{expectedTime}} for *{{childName}}*. This is the scheduled time, not the bus's live position.",
+    bodyHi:
+      "नमस्ते {{guardianName}}, *{{childName}}* के लिए बस *{{busNo}}* {{stopName}} पर लगभग {{expectedTime}} बजे पहुँचने की उम्मीद है। यह निर्धारित समय है, बस की लाइव लोकेशन नहीं।",
+    footerEn: "Transport desk",
+    footerHi: "परिवहन कार्यालय",
+  },
+  {
+    familyKey: "transport_delay",
+    nameEn: "Bus running late",
+    nameHi: "बस देरी से",
+    module: "transport",
+    category: "UTILITY",
+    metaName: "bhb_transport_delay",
+    bodyEn:
+      "Namaste {{guardianName}}, bus *{{busNo}}* is running about {{minutesLate}} minutes late for {{stopName}}. *{{childName}}* will be picked up as soon as it arrives.",
+    bodyHi:
+      "नमस्ते {{guardianName}}, बस *{{busNo}}* {{stopName}} के लिए लगभग {{minutesLate}} मिनट देरी से चल रही है। *{{childName}}* को बस पहुँचते ही ले लिया जाएगा।",
+    footerEn: "Transport desk",
+    footerHi: "परिवहन कार्यालय",
+  },
+  {
+    familyKey: "transport_breakdown",
+    nameEn: "Bus breakdown",
+    nameHi: "बस खराब",
+    module: "transport",
+    category: "UTILITY",
+    metaName: "bhb_transport_breakdown",
+    bodyEn:
+      "Namaste {{guardianName}}, bus *{{busNo}}* has broken down. *{{childName}}* is safe with the attendant. {{actionTaken}}",
+    bodyHi:
+      "नमस्ते {{guardianName}}, बस *{{busNo}}* खराब हो गई है। *{{childName}}* परिचारक के साथ सुरक्षित हैं। {{actionTaken}}",
+    footerEn: "Transport desk",
+    footerHi: "परिवहन कार्यालय",
+  },
+  {
+    familyKey: "transport_route_change",
+    nameEn: "Bus or stop changed",
+    nameHi: "बस या स्टॉप में बदलाव",
+    module: "transport",
+    category: "UTILITY",
+    metaName: "bhb_transport_route_change",
+    bodyEn:
+      "Namaste {{guardianName}}, from {{effectiveFrom}} *{{childName}}* will be picked up at {{stopName}} by bus *{{busNo}}*. Please contact the school office if this does not suit.",
+    bodyHi:
+      "नमस्ते {{guardianName}}, {{effectiveFrom}} से *{{childName}}* को {{stopName}} से बस *{{busNo}}* द्वारा लिया जाएगा। यदि यह उपयुक्त न हो तो कृपया विद्यालय कार्यालय से संपर्क करें।",
+    footerEn: "Transport desk",
+    footerHi: "परिवहन कार्यालय",
+  },
+  {
+    familyKey: "transport_not_boarded",
+    nameEn: "Child did not board",
+    nameHi: "बच्चा बस में नहीं चढ़ा",
+    module: "transport",
+    category: "UTILITY",
+    metaName: "bhb_transport_not_boarded",
+    bodyEn:
+      "Namaste {{guardianName}}, *{{childName}}* did not board bus *{{busNo}}* at {{stopName}} at {{time}}. Please tell the school if they are travelling separately today.",
+    bodyHi:
+      "नमस्ते {{guardianName}}, *{{childName}}* {{time}} बजे {{stopName}} पर बस *{{busNo}}* में नहीं चढ़े। यदि वे आज अलग से आ रहे हैं तो कृपया विद्यालय को बताएं।",
+    footerEn: "Transport desk",
+    footerHi: "परिवहन कार्यालय",
+  },
+
   {
     familyKey: "admissions_registration_invite",
     nameEn: "Registration invite",
