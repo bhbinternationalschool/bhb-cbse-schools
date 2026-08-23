@@ -9,6 +9,7 @@ import {
   type StopDraft,
 } from "@/components/transport/StopRowsEditor";
 import type { MastersState } from "@/lib/masters";
+import { listTransportCrew } from "@/lib/transportPlanner";
 import type { SisState } from "@/lib/sis";
 import {
   deactivateTransportRoute,
@@ -763,9 +764,11 @@ export function FleetPanel({
   const [seats, setSeats] = useState("40");
   const [driverName, setDriverName] = useState("");
   const [driverMobile, setDriverMobile] = useState("");
+  const [driverStaffId, setDriverStaffId] = useState("");
   const [editId, setEditId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  const crew = useMemo(() => listTransportCrew(masters), [masters]);
   const selected = state.vehicles.find((v) => v.id === selectedId) ?? null;
 
   function save() {
@@ -778,6 +781,7 @@ export function FleetPanel({
       seatCapacity: Number(seats) || 40,
       driverName: driverName.trim(),
       driverMobile: driverMobile.replace(/\D/g, "").slice(-10),
+      driverStaffId,
       type: "bus",
     });
     if (!r.ok) {
@@ -791,6 +795,7 @@ export function FleetPanel({
     setSeats("40");
     setDriverName("");
     setDriverMobile("");
+    setDriverStaffId("");
     onRefresh();
     onFlash("Vehicle saved");
   }
@@ -860,15 +865,64 @@ export function FleetPanel({
           </label>
           <label className="text-sm sm:col-span-2">
             <span className="mb-1 block text-[11px] text-[var(--muted)]">
-              Driver name
+              Driver
             </span>
-            <input
+            <select
               className="field !py-1.5"
-              value={driverName}
-              onChange={(e) => setDriverName(e.target.value)}
-              placeholder="For WhatsApp hub"
-            />
+              value={driverStaffId || (driverName ? "__other" : "")}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "" || v === "__other") {
+                  // "Other" keeps whatever name was typed; clearing the
+                  // selection clears the person, not just the link.
+                  setDriverStaffId("");
+                  if (v === "") {
+                    setDriverName("");
+                    setDriverMobile("");
+                  }
+                  return;
+                }
+                const picked = crew.find((c) => c.staffId === v);
+                if (!picked) return;
+                setDriverStaffId(picked.staffId);
+                setDriverName(picked.fullName);
+                setDriverMobile(picked.mobile.replace(/\D/g, "").slice(-10));
+              }}
+            >
+              <option value="">— not assigned —</option>
+              {crew.map((c) => (
+                <option key={c.staffId} value={c.staffId}>
+                  {c.fullName} · {c.designation}
+                  {c.canSignIn ? "" : " (no mobile)"}
+                </option>
+              ))}
+              <option value="__other">Other — not on staff roster</option>
+            </select>
+            {!masters ? (
+              // Not "nobody drives" — the roster simply has not arrived yet.
+              <span className="mt-1 block text-[10px] text-[var(--muted)]">
+                Loading staff…
+              </span>
+            ) : crew.length === 0 ? (
+              <span className="mt-1 block text-[10px] text-[var(--muted)]">
+                No active staff carry a driver or attendant designation. Add
+                them in Masters → Staff first.
+              </span>
+            ) : null}
           </label>
+          {!driverStaffId ? (
+            <label className="text-sm sm:col-span-2">
+              <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                Driver name
+              </span>
+              <input
+                className="field !py-1.5"
+                value={driverName}
+                onChange={(e) => setDriverName(e.target.value)}
+                placeholder="Outside driver (vehicle provider)"
+              />
+            </label>
+          ) : null}
           <label className="text-sm sm:col-span-2">
             <span className="mb-1 block text-[11px] text-[var(--muted)]">
               Driver mobile (10-digit)
@@ -879,6 +933,15 @@ export function FleetPanel({
               onChange={(e) => setDriverMobile(e.target.value)}
               placeholder="WhatsApp identity"
             />
+            {driverStaffId && !driverMobile ? (
+              // The staff row itself has no number, so this driver cannot
+              // receive a login OTP. Say so here rather than let the office
+              // wonder later why the app never worked for them.
+              <span className="mt-1 block text-[10px] text-[var(--danger)]">
+                This staff record has no mobile — they cannot sign in to the
+                driver app until one is added in Masters → Staff.
+              </span>
+            ) : null}
           </label>
         </div>
         <button
@@ -920,6 +983,7 @@ export function FleetPanel({
                   setSeats(String(v.seatCapacity || 40));
                   setDriverName(v.driverName || "");
                   setDriverMobile(v.driverMobile || "");
+                  setDriverStaffId(v.driverStaffId || "");
                 }}
               >
                 Edit

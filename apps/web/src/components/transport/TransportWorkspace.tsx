@@ -23,7 +23,14 @@ import {
   FuelPanel,
   RoutesPanel,
 } from "@/components/transport/TransportOpsPanels";
-import { FleetRosterPanel } from "@/components/transport/FleetRosterPanel";
+import {
+  FleetRosterPanel,
+  type RiderAction,
+} from "@/components/transport/FleetRosterPanel";
+import { ClassTransportPanel } from "@/components/transport/ClassTransportPanel";
+import { FleetEdgeStatusStrip } from "@/components/transport/FleetEdgeStatusStrip";
+import { StaffRiderPanel } from "@/components/transport/StaffRiderPanel";
+import { StopLinkRepairPanel } from "@/components/transport/StopLinkRepairPanel";
 import { TransportAmendDialog } from "@/components/transport/TransportAmendDialog";
 import { NearestStopPicker } from "@/components/transport/NearestStopPicker";
 import { householdHasGeo } from "@/lib/mapsGeocode";
@@ -52,6 +59,9 @@ import {
   assignStudentToRoute,
   computeTransportPeriodDues,
   endTransportAssignment,
+  setAssignmentServiceMode,
+  setBoardingSuspended,
+  type TransportAssignment,
   serviceModeLabel,
   type TransportServiceMode,
   applyServiceMode,
@@ -82,6 +92,8 @@ type TransportTab =
   | "planner"
   | "riders"
   | "rosters"
+  | "classRosters"
+  | "staffRiders"
   | "routes"
   | "fleet"
   | "fuel"
@@ -99,6 +111,8 @@ const TABS: ModuleTabItem[] = [
   { id: "planner", label: "Planner", tone: "teal" },
   { id: "riders", label: "Riders", tone: "navy" },
   { id: "rosters", label: "Riders by bus", tone: "sky" },
+  { id: "classRosters", label: "By class", tone: "sky" },
+  { id: "staffRiders", label: "Staff riders", tone: "sky" },
   { id: "routes", label: "Routes", tone: "teal" },
   { id: "fleet", label: "Fleet", tone: "slate" },
   { id: "fuel", label: "Fuel", tone: "amber" },
@@ -128,6 +142,8 @@ export function TransportWorkspace() {
       "planner",
       "riders",
       "rosters",
+      "classRosters",
+      "staffRiders",
       "routes",
       "fleet",
       "fuel",
@@ -159,8 +175,132 @@ export function TransportWorkspace() {
   const [feeOverrideReason, setFeeOverrideReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [repairingStopLinks, setRepairingStopLinks] = useState(false);
+  const [rosterEditing, setRosterEditing] = useState<{
+    assignment: TransportAssignment;
+    studentName: string;
+    dues: FeeDueLine[];
+  } | null>(null);
   const [holdCheck, setHoldCheck] = useState<HoldCheck | null>(null);
   const [holdDialog, setHoldDialog] = useState(false);
+
+  /**
+   * The roster's per-rider buttons.
+   *
+   * Suspend, resume and take-off-bus are done here because they are one
+   * decision each and the office is already looking at the rider. Changing a
+   * stop or a fee is not — it needs the amendment dialog with the student's
+   * dues in front of it — so those hand off to the Riders tab with that child
+   * already found, rather than opening a second, thinner editor that could
+   * disagree with the first.
+   */
+  function handleRiderAction(
+    action: RiderAction,
+    rider: { studentId: string; fullName: string; boardingSuspended: boolean },
+  ) {
+    // The roster cannot render without state, so this is belt and braces —
+    // but acting on a desk that has not loaded would silently do nothing.
+    if (!state) {
+      setNotice("Transport data has not loaded yet — try again in a moment");
+      return;
+    }
+
+    if (action === "suspend" || action === "resume") {
+      const want = action === "suspend";
+      const asg = state.assignments.find(
+        (a) => a.studentId === rider.studentId && a.effectiveTo == null,
+      );
+      if (!asg) {
+        setNotice(`No live assignment found for ${rider.fullName}`);
+        return;
+      }
+      const ok = setBoardingSuspended(asg.id, want);
+      refresh();
+      flash(
+        ok
+          ? `${rider.fullName} — boarding ${want ? "suspended" : "resumed"}`
+          : `Could not update ${rider.fullName}`,
+      );
+      return;
+    }
+
+    if (action === "service-mode") {
+      const asg = state.assignments.find(
+        (a) => a.studentId === rider.studentId && a.effectiveTo == null,
+      );
+      if (!asg) {
+        setNotice(`No live assignment found for ${rider.fullName}`);
+        return;
+      }
+      const now = asg.serviceMode ?? "both";
+      const next = now === "both" ? "pickup" : "both";
+      const yes = window.confirm(
+        next === "both"
+          ? `Put ${rider.fullName} back on both trips?\n\nTheir monthly fee returns to the full amount from the next uncollected month.`
+          : `Change ${rider.fullName} to pick-up only?\n\nHalf the service, half the fee — from the next uncollected month. If they have already paid a full month and this should apply mid-month, use Edit instead so the paid months keep the fee they were collected at.`,
+      );
+      if (!yes) return;
+      const ok = setAssignmentServiceMode(asg.id, next);
+      refresh();
+      flash(
+        ok
+          ? `${rider.fullName} — ${next === "both" ? "both trips, full fee" : "pick-up only, half fee"}`
+          : `Could not update ${rider.fullName}`,
+      );
+      return;
+    }
+
+    if (action === "end") {
+      // Taking a child off a bus stops their billing and removes them from
+      // the driver's list, so it asks first and says what the effect is.
+      const yes = window.confirm(
+        `Take ${rider.fullName} off this bus?\n\nTheir transport billing stops and they disappear from the driver's list from today. Their fee history is kept.`,
+      );
+      if (!yes) return;
+      const asg = state.assignments.find(
+        (a) => a.studentId === rider.studentId && a.effectiveTo == null,
+      );
+      if (!asg) {
+        setNotice(`No live assignment found for ${rider.fullName}`);
+        return;
+      }
+      const r = endTransportAssignment(asg.id, new Date().toISOString().slice(0, 10));
+      refresh();
+      flash(r ? `${rider.fullName} taken off the bus` : `Could not update ${rider.fullName}`);
+      return;
+    }
+
+    // edit / change-stop — open the amendment dialog on this rider. It is the
+    // same editor the Riders tab uses, deliberately: route, stop, fee and the
+    // month a change may land in all interact, and a second thinner editor
+    // here could quietly disagree with the one next door.
+    const asg = state.assignments.find(
+      (a) => a.studentId === rider.studentId && a.effectiveTo == null,
+    );
+    if (!asg) {
+      setNotice(`No live assignment found for ${rider.fullName}`);
+      return;
+    }
+    const student = sis?.students.find((st) => st.id === rider.studentId) ?? null;
+    let dues: FeeDueLine[] = [];
+    if (student && masters) {
+      try {
+        // Which months are already paid decides when a change may land, so
+        // the ledger is read now rather than assumed.
+        dues = computeStudentDues(student, masters, loadFees(), {
+          includeFuture: true,
+          includePaid: true,
+        });
+      } catch {
+        dues = [];
+      }
+    }
+    setRosterEditing({
+      assignment: asg,
+      studentName: rider.fullName,
+      dues,
+    });
+  }
 
   function flash(message: string) {
     setNotice(message);
@@ -209,21 +349,29 @@ export function TransportWorkspace() {
       // every per-bus roster reports zero. Hydrating only the transport desk
       // meant landing straight on /transport in a cold browser showed student
       // codes and empty buses while the assignments were perfectly fine.
+      //
+      // The staff roster is a fourth hydrate, not part of masters: staff is
+      // stripped out of the masters blob and lives in sis_staff. Without it
+      // the fleet form's driver picker comes up empty and says nobody on the
+      // payroll drives — a blank presented as a fact.
       const [
         { ensureTransportHydrated },
         { ensureSisHydrated },
         { ensureMastersHydrated },
+        { ensureStaffHydrated },
         { withHydrationSlot },
       ] = await Promise.all([
         import("@/lib/transportPersistence"),
         import("@/lib/sisPersistence"),
         import("@/lib/mastersPersistence"),
+        import("@/lib/staffPersistence"),
         import("@/lib/deskHydrateGuard"),
       ]);
       await Promise.all([
         withHydrationSlot(() => ensureTransportHydrated()),
         withHydrationSlot(() => ensureSisHydrated()),
         withHydrationSlot(() => ensureMastersHydrated()),
+        withHydrationSlot(() => ensureStaffHydrated()),
       ]);
       refresh();
     })();
@@ -509,11 +657,59 @@ export function TransportWorkspace() {
             />
           ) : null}
           {tab === "rosters" ? (
-            <FleetRosterPanel
+            repairingStopLinks ? (
+              <StopLinkRepairPanel
+                state={state}
+                masters={masters}
+                sis={sis}
+                academicYearCode={session.academicYearCode}
+                onDone={() => {
+                  setRepairingStopLinks(false);
+                  refresh();
+                }}
+              />
+            ) : (
+              <FleetRosterPanel
+                state={state}
+                masters={masters}
+                sis={sis}
+                academicYearCode={session.academicYearCode}
+                onRepairStopLinks={() => setRepairingStopLinks(true)}
+                onRiderAction={handleRiderAction}
+              />
+            )
+          ) : null}
+          {rosterEditing ? (
+            <TransportAmendDialog
+              assignment={rosterEditing.assignment}
+              studentName={rosterEditing.studentName}
+              academicYearCode={session.academicYearCode}
+              state={state}
+              dues={rosterEditing.dues}
+              onClose={() => setRosterEditing(null)}
+              onDone={(message) => {
+                setRosterEditing(null);
+                refresh();
+                flash(message);
+              }}
+            />
+          ) : null}
+          {tab === "classRosters" ? (
+            <ClassTransportPanel
               state={state}
               masters={masters}
               sis={sis}
               academicYearCode={session.academicYearCode}
+            />
+          ) : null}
+          {tab === "staffRiders" ? (
+            <StaffRiderPanel
+              state={state}
+              masters={masters}
+              academicYearCode={session.academicYearCode}
+              onRefresh={refresh}
+              onFlash={flash}
+              onError={setNotice}
             />
           ) : null}
           {tab === "routes" ? (
@@ -522,6 +718,11 @@ export function TransportWorkspace() {
               vehicles={state.vehicles}
               {...commonPanelProps}
             />
+          ) : null}
+          {tab === "fleet" ? (
+            <div className="mt-4 space-y-4">
+              <FleetEdgeStatusStrip vehicles={state.vehicles} variant="fleet" />
+            </div>
           ) : null}
           {tab === "fleet" ? (
             <FleetPanel
@@ -565,6 +766,9 @@ export function TransportWorkspace() {
           ) : null}
           {tab === "live" ? (
             <>
+              <div className="mt-4">
+                <FleetEdgeStatusStrip vehicles={state.vehicles} variant="live" />
+              </div>
               <LiveMapPanel
                 state={state}
                 sis={sis}

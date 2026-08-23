@@ -103,9 +103,39 @@ export type LibraryProcurementDoc = {
   ocrJson?: Record<string, unknown>;
 };
 
+/**
+ * A book that lives on the school's FlipHTML5 shelf rather than on a rack.
+ *
+ * Its own record, not a LibraryTitle with a flag. Everything the physical
+ * catalogue is built around — accession numbers, copies, issue and return,
+ * condition, fines — is meaningless for a book nobody can take away, and a
+ * shared type would mean carrying "copiesTotal: 1" and an issue history that
+ * must never be written.
+ *
+ * The pass key is deliberately NOT stored here. Desk slices sync to the
+ * browser, so a key on this record would be readable by anyone who opened the
+ * page, signed in or not. It lives server-side and is handed out only to a
+ * session that has earned it — see /api/v1/library/ebooks.
+ */
+export type LibraryEbook = {
+  id: string;
+  title: string;
+  author: string;
+  subject: string;
+  /** Class labels this is meant for, e.g. ["VI","VII"]. Empty = all classes. */
+  classLabels: string[];
+  /** Direct FlipHTML5 link for this book. Blank = open the whole shelf. */
+  url: string;
+  /** Does the reader need the individual-book key, the shelf key, or neither. */
+  keyKind: "book" | "shelf" | "none";
+  addedOn: string;
+  isActive: boolean;
+};
+
 export type LibraryState = {
   version: 2;
   titles: LibraryTitle[];
+  ebooks: LibraryEbook[];
   copies: LibraryCopy[];
   issues: LibraryIssue[];
   procurementDocs: LibraryProcurementDoc[];
@@ -315,6 +345,7 @@ export function emptyLibraryState(): LibraryState {
   return {
     version: 2,
     titles: [],
+    ebooks: [],
     copies: [],
     issues: [],
     procurementDocs: [],
@@ -327,6 +358,103 @@ export function emptyLibraryState(): LibraryState {
   };
 }
 
+/**
+ * Exported for the self-test. The keyKind decides what a reader is told they
+ * need, so a junk value must land on the safest reading — "shelf" — rather
+ * than "none", which would send a parent to a password box telling them no
+ * password is required.
+ */
+/**
+ * The school's FlipHTML5 bookcases, as supplied. Twenty distinct shelves
+ * (one URL was listed twice and is kept once). They share one shelf pass key
+ * and one book key, so the keys stay in the environment and only the links
+ * live here.
+ *
+ * No title, class or subject is assigned to any of them. The bookcase codes
+ * are opaque and the shelf pages are JavaScript-rendered, so what each shelf
+ * contains is not something this file can know — inventing "Class 6 Science"
+ * against the wrong code would be worse than a blank the office fills in. Each
+ * entry therefore carries only its link and its code, and reads as "needs a
+ * title" until someone names it.
+ */
+export const EBOOK_SHELF_SEED: string[] = [
+  "https://fliphtml5.com/bookcase/ooiny/",
+  "https://fliphtml5.com/bookcase/npwtl/",
+  "https://fliphtml5.com/bookcase/qtffd/",
+  "https://fliphtml5.com/bookcase/acdlv/",
+  "https://fliphtml5.com/bookcase/hpgcz/",
+  "https://fliphtml5.com/bookcase/oixkm/",
+  "https://fliphtml5.com/bookcase/pdelb/",
+  "https://fliphtml5.com/bookcase/fjhwd/",
+  "https://fliphtml5.com/bookcase/hvtxz/",
+  "https://fliphtml5.com/bookcase/pocjg/",
+  "https://fliphtml5.com/bookcase/fmgmo/",
+  "https://fliphtml5.com/bookcase/jsmnm/",
+  "https://fliphtml5.com/bookcase/fltsh/",
+  "https://fliphtml5.com/bookcase/vrsvv/",
+  "https://fliphtml5.com/bookcase/luqrl/",
+  "https://fliphtml5.com/bookcase/bilbd/",
+  "https://fliphtml5.com/bookcase/cbgnn/",
+  "https://fliphtml5.com/bookcase/feocx/",
+  "https://fliphtml5.com/bookcase/fxwtz/",
+  "https://fliphtml5.com/bookcase/gqxrr/",
+];
+
+/** The bookcase code from a FlipHTML5 shelf URL — the stable identity behind
+ *  an opaque link, used so re-importing does not duplicate a shelf. */
+export function bookcaseCode(url: string): string {
+  const m = /\/bookcase\/([a-z0-9]+)/i.exec(String(url || ""));
+  return m ? m[1].toLowerCase() : "";
+}
+
+/**
+ * Add any shelf from the seed that is not already catalogued, matched on
+ * bookcase code so a re-run adds nothing twice and never overwrites a title
+ * the office has already set. Returns the merged list and how many were new.
+ */
+export function mergeEbookShelfSeed(
+  existing: LibraryEbook[],
+  seedUrls: string[] = EBOOK_SHELF_SEED,
+  addedOn: string = new Date().toISOString().slice(0, 10),
+): { ebooks: LibraryEbook[]; added: number } {
+  const have = new Set(existing.map((e) => bookcaseCode(e.url)).filter(Boolean));
+  const additions: LibraryEbook[] = [];
+  for (const url of seedUrls) {
+    const code = bookcaseCode(url);
+    if (!code || have.has(code)) continue;
+    have.add(code);
+    additions.push(
+      normalizeEbook({
+        id: `eb_${code}`,
+        title: "",
+        url,
+        keyKind: "shelf",
+        addedOn,
+        isActive: true,
+      }),
+    );
+  }
+  return { ebooks: [...existing, ...additions], added: additions.length };
+}
+
+export function normalizeEbook(e: Partial<LibraryEbook>): LibraryEbook {
+  const keyKind =
+    e.keyKind === "book" || e.keyKind === "none" ? e.keyKind : "shelf";
+  return {
+    id: String(e.id || ""),
+    title: String(e.title || "").trim(),
+    author: String(e.author || "").trim(),
+    subject: String(e.subject || "").trim(),
+    classLabels: Array.isArray(e.classLabels)
+      ? e.classLabels.map((c) => String(c).trim()).filter(Boolean)
+      : [],
+    url: String(e.url || "").trim(),
+    keyKind,
+    addedOn: String(e.addedOn || "").slice(0, 10),
+    isActive: e.isActive !== false,
+  };
+}
+
 function migrateLibraryState(raw: unknown): LibraryState {
   const base = emptyLibraryState();
   if (!raw || typeof raw !== "object") return base;
@@ -335,6 +463,11 @@ function migrateLibraryState(raw: unknown): LibraryState {
 
   return {
     version: 2,
+    // Rows saved before e-books existed simply have none. An absent slice is
+    // an empty shelf, not a missing one.
+    ebooks: Array.isArray(parsed.ebooks)
+      ? (parsed.ebooks as LibraryEbook[]).map(normalizeEbook)
+      : [],
     titles: Array.isArray(parsed.titles)
       ? parsed.titles.map((t) =>
           normalizeTitle(t as Partial<LibraryTitle> & { id: string }),
@@ -417,6 +550,49 @@ export function categoryLabel(category: LibraryCategory): string {
 export function conditionLabel(condition: LibraryItemCondition | undefined): string {
   if (!condition) return "—";
   return LIBRARY_CONDITIONS.find((c) => c.id === condition)?.label ?? condition;
+}
+
+/**
+ * Label a shelf (or add a new one) — title, subject, classes, and whether it
+ * needs a key. Matched on bookcase code, so the same physical shelf is one
+ * record however many times a teacher stamps it.
+ *
+ * This is where "which link belongs to which class and subject" is answered:
+ * the codes are opaque and the shelf pages are not readable, so a person who
+ * has the shelf open decides, once, and it sticks. Nothing else can know it.
+ */
+export function upsertEbookShelf(
+  state: LibraryState,
+  input: {
+    url: string;
+    title?: string;
+    subject?: string;
+    classLabels?: string[];
+    keyKind?: LibraryEbook["keyKind"];
+  },
+): { state: LibraryState; ebook: LibraryEbook } | { error: string } {
+  const code = bookcaseCode(input.url);
+  if (!code) return { error: "That does not look like a FlipHTML5 shelf link" };
+
+  const existing = state.ebooks.find((e) => bookcaseCode(e.url) === code);
+  const ebook = normalizeEbook({
+    ...existing,
+    id: existing?.id ?? `eb_${code}`,
+    url: input.url,
+    // Only overwrite a field the caller actually supplied — a teacher tagging
+    // the class must not blank a title someone else set.
+    title: input.title ?? existing?.title ?? "",
+    subject: input.subject ?? existing?.subject ?? "",
+    classLabels: input.classLabels ?? existing?.classLabels ?? [],
+    keyKind: input.keyKind ?? existing?.keyKind ?? "shelf",
+    addedOn: existing?.addedOn || new Date().toISOString().slice(0, 10),
+    isActive: existing?.isActive ?? true,
+  });
+
+  const ebooks = existing
+    ? state.ebooks.map((e) => (e.id === ebook.id ? ebook : e))
+    : [...state.ebooks, ebook];
+  return { state: { ...state, ebooks }, ebook };
 }
 
 export function listActiveTitles(state = loadLibrary()): LibraryTitle[] {

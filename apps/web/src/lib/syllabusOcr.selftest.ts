@@ -329,4 +329,41 @@ Chapter 3 Understanding Quadrilaterals 37
   assert.equal(syllabusOcrQuality(out).verdict, "good");
 }
 
+/* ── a contents list pasted from an e-book page ─────────────── */
+
+// The e-book path feeds this parser pasted text instead of OCR output. A
+// clean digital contents list must parse at least as well as a photographed
+// one — this is the whole reason the paste path exists.
+{
+  const toc = [
+    "Contents",
+    "Chapter 1  Knowing Our Numbers",
+    "1.1 Introduction",
+    "1.2 Comparing Numbers",
+    "1.3 Large Numbers in Practice",
+    "Chapter 2  Whole Numbers",
+    "2.1 Introduction",
+    "2.2 The Number Line",
+    "Chapter 3  Playing with Numbers",
+    "3.1 Factors and Multiples",
+    "3.2 Prime and Composite Numbers",
+  ].join("\n");
+  const out = parseSyllabusFromText(toc);
+  assert.equal(out.chapters.length, 3, "three chapters off a pasted contents list");
+  assert.equal(out.chapters[0]!.title, "Knowing Our Numbers");
+  assert.equal(out.chapters[0]!.topics.length, 3);
+  assert.equal(out.chapters[2]!.topics.length, 2);
+  assert.equal(
+    out.chapters.every((c) => c.confidence === "high"),
+    true,
+    "numbered chapters are high-confidence, not guesses",
+  );
+  // "Contents" is a heading, not a chapter — it must not become one.
+  assert.ok(
+    !out.chapters.some((c) => /^contents$/i.test(c.title)),
+    "the word Contents is furniture, not a chapter",
+  );
+  assert.equal(syllabusOcrQuality(out).verdict, "good");
+}
+
 console.log("  ✓ all syllabus OCR assertions passed");

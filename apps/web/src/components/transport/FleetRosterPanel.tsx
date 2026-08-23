@@ -5,11 +5,12 @@ import { formatInr } from "@/lib/fees";
 import type { MastersState } from "@/lib/masters";
 import type { SisState } from "@/lib/sis";
 import { formatRouteCrew, staffAssignedToRoute } from "@/lib/staffResolve";
-import type { TransportState } from "@/lib/transport";
+import { listActiveStaffRiders, type TransportState } from "@/lib/transport";
 import {
   buildFleetRosters,
   buildStudentTransportProfiles,
   findMisroutedRiders,
+  type FleetRiderRow,
   type FleetRosterRow,
 } from "@/lib/transportPlanner";
 import { TransportBusBadge } from "@/components/transport/TransportBusBadge";
@@ -31,16 +32,41 @@ import {
  * also why riders billed nothing stayed invisible. Printable, because the
  * driver and conductor need it on paper in the vehicle.
  */
+/**
+ * What the office can do to a rider straight from the roster.
+ *
+ * The roster is where problems are noticed — a wrong stop, a fee nobody set,
+ * a child who has stopped riding. Noticing them here and having to go find
+ * the student in another screen to act is what made this list a report
+ * instead of a desk.
+ */
+export type RiderAction =
+  | "amend"
+  | "change-stop"
+  | "service-mode"
+  | "suspend"
+  | "resume"
+  | "end"
+  | "open-student";
+
 export function FleetRosterPanel({
   state,
   masters,
   sis,
   academicYearCode,
+  onRepairStopLinks,
+  onRiderAction,
 }: {
   state: TransportState;
   masters: MastersState | null;
   sis: SisState | null;
   academicYearCode: string;
+  onRepairStopLinks?: () => void;
+  onRiderAction?: (
+    action: RiderAction,
+    rider: FleetRiderRow,
+    routeId: string,
+  ) => void;
 }) {
   const [openRoute, setOpenRoute] = useState<string | null>(null);
 
@@ -59,7 +85,39 @@ export function FleetRosterPanel({
     );
     const plans = planAfternoonWaves(state, sis, masters, academicYearCode);
     return {
-      rosters: buildFleetRosters(state, profiles, fathers, crew),
+      rosters: buildFleetRosters(state, profiles, fathers, crew, {
+        staff: {
+          riders: listActiveStaffRiders(state, academicYearCode),
+          nameById: new Map(
+            (masters.staff ?? []).map((st) => [
+              st.id,
+              {
+                fullName: st.fullName,
+                designation:
+                  (masters.designations ?? []).find(
+                    (d) => d.id === st.designationId,
+                  )?.name ?? "",
+              },
+            ]),
+          ),
+        },
+        // The roster must quote the same discount the invoice charges, so it
+        // is resolved from the same masters through the same rule engine.
+        concessions: {
+          masters,
+          students: new Map(
+            sis.students.map((st) => [
+              st.id,
+              {
+                id: st.id,
+                admissionNo: st.admissionNo,
+                academicYearCode: st.academicYearCode,
+              },
+            ]),
+          ),
+          asOf: new Date().toISOString().slice(0, 10),
+        },
+      }),
       misrouted: findMisroutedRiders(profiles, state),
       plans,
       shares: suggestVehicleSharing(plans),
@@ -70,6 +128,24 @@ export function FleetRosterPanel({
   const totalUnbilled = rosters.reduce((n, r) => n + r.unbilledRiders, 0);
   const monthlyTotal = rosters.reduce((n, r) => n + r.monthlyTotalPaise, 0);
   const totalShortfall = rosters.reduce((n, r) => n + r.shortfallTotalPaise, 0);
+  const totalUnknown = rosters.reduce((n, r) => n + r.ridersUnknownShortfall, 0);
+  const totalBrokenLinks = rosters.reduce((n, r) => n + r.ridersBrokenLink, 0);
+  const totalConcession = rosters.reduce((n, r) => n + r.concessionTotalPaise, 0);
+  const netTotal = rosters.reduce((n, r) => n + r.netTotalPaise, 0);
+  const totalWithConcession = rosters.reduce(
+    (n, r) => n + r.ridersWithConcession,
+    0,
+  );
+  // A rider discounted to nothing rides free BY DECISION. One with no fee set
+  // rides free by accident. Both pay zero, and the office needs to act on
+  // only one of them — so they are never pooled into a single count.
+  const fullyDiscounted = rosters.reduce(
+    (n, r) =>
+      n +
+      r.riders.filter((x) => x.monthlyFeePaise > 0 && x.netFeePaise <= 0)
+        .length,
+    0,
+  );
 
   // "0 riders" and "the roster has not loaded" look identical on screen and
   // mean opposite things — one says nobody rides this bus, the other says we
@@ -100,7 +176,17 @@ export function FleetRosterPanel({
             <p className="mt-0.5 text-[11px] text-[var(--muted)]">
               {rosters.length} active route{rosters.length === 1 ? "" : "s"} ·{" "}
               {totalRiders} rider{totalRiders === 1 ? "" : "s"} ·{" "}
-              {formatInr(monthlyTotal)} billed per month
+              {totalConcession > 0 ? (
+                <>
+                  {formatInr(monthlyTotal)} gross −{" "}
+                  {formatInr(totalConcession)} discount ={" "}
+                  <strong className="text-[var(--ink)]">
+                    {formatInr(netTotal)} collected per month
+                  </strong>
+                </>
+              ) : (
+                `${formatInr(monthlyTotal)} billed per month`
+              )}
             </p>
           </div>
           <button
@@ -112,12 +198,59 @@ export function FleetRosterPanel({
           </button>
         </div>
 
+        {totalBrokenLinks > 0 ? (
+          // Top of the screen, above the money: while this is true, every
+          // number below it on the affected buses is unreliable, and the
+          // shortfall figure in particular is an undercount.
+          <p className="mt-3 rounded-lg border border-[color-mix(in_srgb,var(--warning)_50%,transparent)] bg-[color-mix(in_srgb,var(--warning)_10%,transparent)] px-3 py-2 text-[11px] text-[var(--ink)]">
+            <strong>
+              {totalBrokenLinks} rider{totalBrokenLinks === 1 ? "" : "s"} point
+              at a stop that no longer exists.
+            </strong>{" "}
+            Their distance, fee benchmark and place on the driver&rsquo;s list
+            are all unavailable until the link is restored, so the shortfall
+            below is an undercount rather than a clean bill.{" "}
+            {onRepairStopLinks ? (
+              <button
+                type="button"
+                className="font-bold text-[var(--brand-mid)] underline print:hidden"
+                onClick={onRepairStopLinks}
+              >
+                Repair stop links
+              </button>
+            ) : null}
+          </p>
+        ) : null}
+
         {totalShortfall > 0 ? (
           <p className="mt-3 rounded-lg border border-[color-mix(in_srgb,var(--danger)_40%,transparent)] bg-[color-mix(in_srgb,var(--danger)_8%,transparent)] px-3 py-2 text-[11px] text-[var(--danger)]">
             <strong>{formatInr(totalShortfall)} a month</strong> less than the
             distance rule (₹500 to 5 km, then ₹100 per started km) across{" "}
             {rosters.reduce((n, r) => n + r.ridersWithShortfall, 0)} riders.
             Some of that will be deliberate concessions — this is where to check.
+            {totalUnknown > 0 ? (
+              <>
+                {" "}
+                <strong>
+                  A further {totalUnknown} rider
+                  {totalUnknown === 1 ? "" : "s"} could not be assessed at all
+                </strong>{" "}
+                — unmeasured stops or broken links — so the real gap is larger
+                than this.
+              </>
+            ) : null}
+          </p>
+        ) : null}
+
+        {totalShortfall === 0 && totalUnknown > 0 ? (
+          // The dangerous case: nothing to report, because nothing could be
+          // worked out. Silence here previously read as "all buses square".
+          <p className="mt-3 rounded-lg border border-[color-mix(in_srgb,var(--warning)_50%,transparent)] bg-[color-mix(in_srgb,var(--warning)_10%,transparent)] px-3 py-2 text-[11px] text-[var(--ink)]">
+            No shortfall can be reported because{" "}
+            <strong>
+              {totalUnknown} of {totalRiders} riders cannot be assessed
+            </strong>
+            . That is not the same as every bus being correctly billed.
           </p>
         ) : null}
 
@@ -125,6 +258,25 @@ export function FleetRosterPanel({
           <p className="mt-3 rounded-lg border border-[color-mix(in_srgb,var(--danger)_40%,transparent)] bg-[color-mix(in_srgb,var(--danger)_8%,transparent)] px-3 py-2 text-[11px] font-semibold text-[var(--danger)]">
             {totalUnbilled} rider{totalUnbilled === 1 ? " is" : "s are"} on a bus
             with no monthly fee — on board, billed nothing.
+          </p>
+        ) : null}
+
+        {totalConcession > 0 ? (
+          <p className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2 text-[11px] text-[var(--muted)]">
+            {totalWithConcession} rider
+            {totalWithConcession === 1 ? " has" : "s have"} a transport
+            concession worth {formatInr(totalConcession)} a month.
+            {fullyDiscounted > 0 ? (
+              <>
+                {" "}
+                <strong className="text-[var(--ink)]">
+                  {fullyDiscounted} of them ride free by decision
+                </strong>{" "}
+                — a full discount, not a missing fee.
+              </>
+            ) : null}{" "}
+            The shortfall figures above compare the distance rule against the
+            fee before discount, so an approved concession never shows as a gap.
           </p>
         ) : null}
       </section>
@@ -257,6 +409,8 @@ export function FleetRosterPanel({
           onToggle={() =>
             setOpenRoute((cur) => (cur === roster.routeId ? null : roster.routeId))
           }
+          onRepair={onRepairStopLinks}
+          onRiderAction={onRiderAction}
         />
       ))}
     </div>
@@ -267,13 +421,19 @@ function RosterCard({
   roster,
   open,
   onToggle,
+  onRepair,
+  onRiderAction,
 }: {
   roster: FleetRosterRow;
   open: boolean;
   onToggle: () => void;
+  onRepair?: () => void;
+  onRiderAction?: (action: RiderAction, rider: FleetRiderRow, routeId: string) => void;
 }) {
-  const seatsLeft = Math.max(0, roster.seatCapacity - roster.riders.length);
-  const over = roster.riders.length > roster.seatCapacity;
+  // Staff occupy seats exactly as children do. Counting only the children
+  // reports room on a bus that is already full.
+  const seatsLeft = Math.max(0, roster.seatCapacity - roster.seatsUsed);
+  const over = roster.seatsUsed > roster.seatCapacity;
 
   // Default order is the stop sequence the list already arrives in — that is
   // how the conductor reads it. Sorting is opt-in per column from there.
@@ -283,13 +443,16 @@ function RosterCard({
       name: (r) => r.fullName,
       classLabel: (r) => r.classLabel,
       father: (r) => r.fatherName || null,
-      stop: (r) => r.stopName,
+      // A broken link sorts as unknown, not as an empty name at the top.
+      stop: (r) => (r.stopLinkBroken ? null : r.stopName),
       // Sort by the number behind the cell, never the rendered "4 km" string,
       // and let an unmeasured stop stay unknown rather than becoming 0.
       km: (r) => (r.distanceKm > 0 ? r.distanceKm : null),
       fee: (r) => r.monthlyFeePaise,
+      // No discount is a real zero here — it is known, not unknown.
+      concession: (r) => r.concessionPaise,
       // Unmeasured stops yield no benchmark, so they sort as unknown, not zero.
-      shortfall: (r) => (r.distanceKm > 0 ? r.shortfallPaise : null),
+      shortfall: (r) => (r.shortfallKnown ? r.shortfallPaise : null),
       from: (r) => r.effectiveFrom,
     },
     "stop",
@@ -320,18 +483,35 @@ function RosterCard({
                   : "font-semibold text-[var(--ink)]"
               }
             >
-              {roster.riders.length}/{roster.seatCapacity} seats
+              {roster.seatsUsed}/{roster.seatCapacity} seats
+              {roster.staffRiders.length > 0
+                ? ` (${roster.riders.length} students + ${roster.staffRiders.length} staff)`
+                : ""}
             </span>
             <span className="text-[var(--muted)]">
               {over
                 ? " — over capacity"
-                : ` · ${seatsLeft} free · ${formatInr(roster.monthlyTotalPaise)}/month`}
+                : ` · ${seatsLeft} free · ${
+                    roster.concessionTotalPaise > 0
+                      ? `${formatInr(roster.monthlyTotalPaise)} gross − ${formatInr(roster.concessionTotalPaise)} discount = ${formatInr(roster.netTotalPaise)}/month`
+                      : `${formatInr(roster.monthlyTotalPaise)}/month`
+                  }`}
             </span>
             {roster.shortfallTotalPaise > 0 ? (
               <span className="ml-2 font-bold text-[var(--danger)]">
                 {formatInr(roster.shortfallTotalPaise)}/month under the distance
                 rule across {roster.ridersWithShortfall} rider
                 {roster.ridersWithShortfall === 1 ? "" : "s"}
+              </span>
+            ) : null}
+            {roster.ridersUnknownShortfall > 0 ? (
+              // Without this the bus above reads "nothing under the rule",
+              // which is a claim. It is not one that can be made while any
+              // rider on it has no distance to price against.
+              <span className="ml-2 font-bold text-[var(--warning)]">
+                {roster.ridersUnknownShortfall} rider
+                {roster.ridersUnknownShortfall === 1 ? "" : "s"} cannot be
+                assessed
               </span>
             ) : null}
           </p>
@@ -344,6 +524,28 @@ function RosterCard({
           {open ? "Hide riders" : "Show riders"}
         </button>
       </div>
+
+      {roster.ridersBrokenLink > 0 ? (
+        <div className="border-t border-[var(--border)] bg-[color-mix(in_srgb,var(--warning)_12%,transparent)] px-4 py-2 text-[11px]">
+          <strong className="text-[var(--ink)]">
+            {roster.ridersBrokenLink} of {roster.riders.length} riders point at
+            a stop that no longer exists.
+          </strong>{" "}
+          <span className="text-[var(--muted)]">
+            Their fee, distance and the driver&rsquo;s list all fail together
+            until the link is restored.
+          </span>{" "}
+          {onRepair ? (
+            <button
+              type="button"
+              className="font-semibold text-[var(--brand-mid)] underline print:hidden"
+              onClick={onRepair}
+            >
+              Repair stop links
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="border-t border-[var(--border)] px-4 py-2 text-[11px] text-[var(--muted)]">
         {roster.stops.length === 0
@@ -358,6 +560,59 @@ function RosterCard({
           <span className="ml-2 text-[var(--danger)]">⚑ not pinned on the map</span>
         ) : null}
       </div>
+
+      {roster.staffRiders.length > 0 ? (
+        <div className="border-t border-[var(--border)] px-4 py-2">
+          <p className="text-[11px] font-bold text-[var(--brand-deep)]">
+            Staff on this bus ({roster.staffRiders.length})
+          </p>
+          <ul className="mt-1 space-y-1">
+            {roster.staffRiders.map((sr) => (
+              <li key={sr.id} className="text-[11px]">
+                <span className="font-semibold text-[var(--ink)]">
+                  {sr.fullName}
+                </span>
+                {sr.designation ? (
+                  <span className="text-[var(--muted)]"> · {sr.designation}</span>
+                ) : null}
+                <span className="text-[var(--muted)]">
+                  {" · "}
+                  {sr.stopLinkBroken ? (
+                    <span className="font-semibold text-[var(--warning)]">
+                      ⚠ stop link broken
+                    </span>
+                  ) : (
+                    sr.stopName || "no stop"
+                  )}
+                  {sr.serviceMode !== "both"
+                    ? ` · ${sr.serviceMode === "pickup" ? "pick-up only" : "drop only"}`
+                    : ""}
+                </span>
+                {sr.costMode === "free" ? (
+                  <span
+                    className="ml-1 rounded bg-[var(--surface-sunken)] px-1 text-[9px] font-bold uppercase text-[var(--muted)]"
+                    title={sr.note || "No reason recorded"}
+                  >
+                    free
+                  </span>
+                ) : (
+                  <span className="ml-1 font-semibold text-[var(--ink)]">
+                    {formatInr(sr.monthlyFeePaise)}/month
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+          {roster.staffRecoveryPaise > 0 ? (
+            // Said plainly, because nothing in this module deducts it. A
+            // figure shown without that sentence would be assumed collected.
+            <p className="mt-1 text-[10px] text-[var(--muted)]">
+              {formatInr(roster.staffRecoveryPaise)}/month to recover through
+              payroll — this is not deducted automatically.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       {open ? (
         <div className="overflow-x-auto border-t border-[var(--border)]">
@@ -377,11 +632,15 @@ function RosterCard({
                   <ErpSortTh sort={sort} field="fee" align="right">
                     Per month
                   </ErpSortTh>
+                  <ErpSortTh sort={sort} field="concession" align="right">
+                    Discount
+                  </ErpSortTh>
                   <ErpSortTh sort={sort} field="shortfall" align="right">
                     Shortfall
                   </ErpSortTh>
                   <ErpSortTh sort={sort} field="from">From</ErpSortTh>
                   <th className="px-3 py-2 font-bold">Today</th>
+                  <th className="px-3 py-2 font-bold print:hidden">Do</th>
                 </tr>
               </ErpTableHead>
               <ErpTableBody>
@@ -420,14 +679,35 @@ function RosterCard({
                     <td className="px-3 py-1.5 text-[var(--muted)]">
                       {r.fatherName || "—"}
                     </td>
-                    <td className="px-3 py-1.5">{r.stopName}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">
-                      {r.distanceKm > 0 ? r.distanceKm : "—"}
-                      {r.distanceSource === "manual" ? (
-                        <span title="Typed, not measured" className="text-[var(--muted)]">
-                          *
+                    <td className="px-3 py-1.5">
+                      {r.stopLinkBroken ? (
+                        <span
+                          className="font-semibold text-[var(--warning)]"
+                          title="This rider's assignment points at a stop that no longer exists on the route"
+                        >
+                          ⚠ link broken
                         </span>
-                      ) : null}
+                      ) : (
+                        r.stopName || "—"
+                      )}
+                    </td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">
+                      {r.stopLinkBroken ? (
+                        <span className="text-[var(--warning)]">?</span>
+                      ) : r.distanceKm > 0 ? (
+                        <>
+                          {r.distanceKm}
+                          {r.distanceSource === "manual" ? (
+                            <span title="Typed, not measured" className="text-[var(--muted)]">
+                              *
+                            </span>
+                          ) : null}
+                        </>
+                      ) : (
+                        <span title="Stop has never been measured" className="text-[var(--muted)]">
+                          —
+                        </span>
+                      )}
                     </td>
                     <td
                       className={`px-3 py-1.5 text-right font-semibold tabular-nums ${
@@ -442,9 +722,31 @@ function RosterCard({
                       ) : null}
                     </td>
                     <td className="px-3 py-1.5 text-right tabular-nums">
-                      {r.distanceKm <= 0 ? (
-                        <span className="text-[var(--muted)]" title="Stop not measured — no benchmark">
-                          —
+                      {r.concessionPaise > 0 ? (
+                        <span
+                          className="font-semibold text-[var(--brand-mid)]"
+                          title={`${r.concessionLabel} — billed ${formatInr(r.netFeePaise)}/month`}
+                        >
+                          −{formatInr(r.concessionPaise)}
+                          <span className="ml-1 block text-[9px] font-normal text-[var(--muted)]">
+                            net {formatInr(r.netFeePaise)}
+                          </span>
+                        </span>
+                      ) : (
+                        <span className="text-[var(--muted)]">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">
+                      {!r.shortfallKnown ? (
+                        <span
+                          className="font-semibold text-[var(--warning)]"
+                          title={
+                            r.stopLinkBroken
+                              ? "Cannot tell — this rider's stop link is broken, so there is no distance to price against"
+                              : "Cannot tell — this stop has never been measured"
+                          }
+                        >
+                          can&rsquo;t tell
                         </span>
                       ) : r.shortfallPaise > 0 ? (
                         <span
@@ -503,6 +805,60 @@ function RosterCard({
                         </span>
                       )}
                     </td>
+                    <td className="px-3 py-1.5 print:hidden">
+                      <div className="flex flex-wrap gap-1">
+                        {/*
+                          One editor, not three. Route, stop, fee and the month
+                          a change may land in all interact, so they are edited
+                          together in the amendment dialog. The label changes
+                          to name whatever is wrong with this row, so the
+                          office can see the problem and the fix in one place.
+                        */}
+                        <RiderBtn
+                          label={
+                            r.stopLinkBroken
+                              ? "Fix stop"
+                              : r.monthlyFeePaise <= 0
+                                ? "Set fee"
+                                : "Edit"
+                          }
+                          tone={
+                            r.stopLinkBroken || r.monthlyFeePaise <= 0
+                              ? "warn"
+                              : undefined
+                          }
+                          onClick={() =>
+                            onRiderAction?.(
+                              r.stopLinkBroken ? "change-stop" : "amend",
+                              r,
+                              roster.routeId,
+                            )
+                          }
+                        />
+                        <RiderBtn
+                          label={
+                            r.serviceMode === "both" ? "One way" : "Both ways"
+                          }
+                          onClick={() => onRiderAction?.("service-mode", r, roster.routeId)}
+                        />
+                        {r.boardingSuspended ? (
+                          <RiderBtn
+                            label="Resume"
+                            onClick={() => onRiderAction?.("resume", r, roster.routeId)}
+                          />
+                        ) : (
+                          <RiderBtn
+                            label="Suspend"
+                            onClick={() => onRiderAction?.("suspend", r, roster.routeId)}
+                          />
+                        )}
+                        <RiderBtn
+                          label="Off bus"
+                          tone="danger"
+                          onClick={() => onRiderAction?.("end", r, roster.routeId)}
+                        />
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </ErpTableBody>
@@ -511,5 +867,31 @@ function RosterCard({
         </div>
       ) : null}
     </section>
+  );
+}
+
+function RiderBtn({
+  label,
+  onClick,
+  tone,
+}: {
+  label: string;
+  onClick: () => void;
+  tone?: "warn" | "danger";
+}) {
+  const colour =
+    tone === "danger"
+      ? "border-[var(--danger)] text-[var(--danger)]"
+      : tone === "warn"
+        ? "border-[var(--warning)] text-[var(--warning)] font-bold"
+        : "border-[var(--border)] text-[var(--ink)]";
+  return (
+    <button
+      type="button"
+      className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold hover:bg-[var(--surface-sunken)] ${colour}`}
+      onClick={onClick}
+    >
+      {label}
+    </button>
   );
 }

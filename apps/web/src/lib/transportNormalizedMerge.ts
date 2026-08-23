@@ -57,5 +57,6 @@ export function mergeDbDeskIntoTransportState(
     repairRequests: mergeArray("repairRequests"),
     boardingEvents: mergeArray("boardingEvents"),
     gpsPings: mergeArray("gpsPings"),
+    staffRiders: mergeArray("staffRiders"),
   };
 }

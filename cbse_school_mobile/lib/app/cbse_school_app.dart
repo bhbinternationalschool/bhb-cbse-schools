@@ -73,8 +73,13 @@ class _CbseSchoolAppState extends State<CbseSchoolApp> {
 
   Future<String> _homePathForPersona() async {
     final persona = await _api.persona();
+    // "field" is honoured because the password login path still reads a
+    // stored persona, but nothing mints it today — so the crew check below
+    // is what actually gets a driver to the bus home. Without it they land
+    // on the teacher home and the route/boarding screens are unreachable.
     if (persona == "field") return "/driver";
     if (persona == "staff") {
+      if (await _api.isTransportCrew()) return "/driver";
       return await _api.isPrincipalLike() ? "/principal" : "/staff";
     }
     return "/home";

@@ -102,6 +102,15 @@ SELFTESTS=(
   test:transport-shortfall
   test:transport-afternoon-waves
   test:transport-boarding
+  test:transport-crew-access
+  test:transport-crew
+  test:transport-stop-links
+  test:transport-concession
+  test:transport-by-class
+  test:transport-staff-riders
+  test:fleet-edge-link
+  test:transport-parent-messages
+  test:ebook-access
 )
 
 bold "Verifying $(git rev-parse --short HEAD 2>/dev/null || echo 'working tree') on $(git branch --show-current 2>/dev/null || echo '?')"

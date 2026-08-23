@@ -117,6 +117,7 @@ export async function hydrateTransportDeskFromDb(
     repairRequests: [],
     boardingEvents: [],
     gpsPings: [],
+    staffRiders: [],
   };
   if (!isSupabaseConfigured()) return { bundle: empty, changed: false, ok: false };
   try {
@@ -162,6 +163,7 @@ export async function hydrateTransportDeskFromDb(
         ? body.boardingEvents
         : [],
       gpsPings: Array.isArray(body.gpsPings) ? body.gpsPings : [],
+      staffRiders: Array.isArray(body.staffRiders) ? body.staffRiders : [],
     };
     const meta = readMeta();
     const remoteRoutes = body.routeCount ?? bundle.routes.length;

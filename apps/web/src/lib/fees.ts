@@ -1819,6 +1819,30 @@ function concessionForHead(
   return { totalPaise: capped, details };
 }
 
+/**
+ * The transport discount a student actually gets on a given monthly fee.
+ *
+ * Exported so the riders-by-bus roster can show the same number the invoice
+ * charges. It deliberately calls the same `concessionForHead` the fee engine
+ * uses rather than reimplementing the rule resolution — a roster that
+ * computed discounts its own way would eventually disagree with the bill,
+ * and the office would have no way to tell which one was lying.
+ *
+ * Returns zero when no TRANSPORT fee head exists, which is the honest answer:
+ * without that head no transport concession can be applied to a bill either.
+ */
+export function transportConcessionForStudent(
+  masters: MastersState,
+  student: { id: string; admissionNo: string; academicYearCode?: string },
+  monthlyFeePaise: number,
+  asOf: string,
+): { totalPaise: number; details: FeeConcessionDetail[] } {
+  if (monthlyFeePaise <= 0) return { totalPaise: 0, details: [] };
+  const headId = masters.feeHeads.find((h) => h.code === "TRANSPORT")?.id ?? "";
+  if (!headId) return { totalPaise: 0, details: [] };
+  return concessionForHead(masters, student, headId, monthlyFeePaise, asOf);
+}
+
 export function formatConcessionDetailLine(d: FeeConcessionDetail): string {
   const bits = [d.name, d.rateLabel];
   if (d.siblingLabel) bits.push(d.siblingLabel);

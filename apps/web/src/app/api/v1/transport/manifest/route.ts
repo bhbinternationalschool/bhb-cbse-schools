@@ -1,5 +1,5 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
-import { resolveApiAuth } from "@/lib/api/v1/auth";
+import { assertPermission, resolveApiAuth } from "@/lib/api/v1/auth";
 import { fetchTransportDeskFromDb } from "@/lib/transportNormalized.server";
 import { fetchSisFromDb } from "@/lib/sisNormalized.server";
 import type { SisStudent } from "@/lib/sis";
@@ -12,16 +12,17 @@ export const runtime = "nodejs";
  * The list a driver or attendant works from: stops in boarding order, the
  * children due at each, and what has already been marked today.
  *
- * Staff and field only. Unlike /v1/transport/routes — which is route and stop
- * information a parent may reasonably see — this carries the names of other
- * people's children, so it is not open to the parent persona.
+ * Gated on the transport module, not on the persona. Every driver signs in
+ * through staff OTP and is minted `persona: "staff"`, exactly like a teacher —
+ * so a persona check would have let every teacher, accountant and gardener
+ * read the names of every child on every bus. `transport.view` is the line
+ * that actually separates them: drivers and transport staff hold it, teachers
+ * and parents hold no transport grant at all.
  */
 export async function GET(request: Request) {
   try {
     const ctx = await resolveApiAuth(request);
-    if (ctx.session.persona !== "staff" && ctx.session.persona !== "field") {
-      throw new ApiError("forbidden", "Driver or attendant sign-in required", 403);
-    }
+    assertPermission(ctx, "transport", "view");
 
     const url = new URL(request.url);
     const routeId = url.searchParams.get("routeId")?.trim() || "";

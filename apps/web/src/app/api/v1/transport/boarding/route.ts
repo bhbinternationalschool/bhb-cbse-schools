@@ -1,6 +1,13 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
-import { resolveApiAuth } from "@/lib/api/v1/auth";
-import { appendBoardingEventToDb } from "@/lib/transportNormalized.server";
+import { assertPermission, resolveApiAuth } from "@/lib/api/v1/auth";
+import {
+  appendBoardingEventToDb,
+  fetchTransportDeskFromDb,
+} from "@/lib/transportNormalized.server";
+import { fetchSisFromDb } from "@/lib/sisNormalized.server";
+import { notifyNotBoarded } from "@/lib/transportParentNotify.server";
+import type { SisState } from "@/lib/sis";
+import type { TransportState } from "@/lib/transport";
 import { TENANT } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -30,13 +37,22 @@ function haversineKm(aLat: number, aLng: number, bLat: number, bLng: number) {
  * it — a mark with no pin looks identical to one with a pin on the roster, and
  * the whole record would quietly become untrustworthy. "absent" needs no pin,
  * because nobody got on.
+ *
+ * Gated on `transport.view`, not `transport.create`. That looks lax for a
+ * write and is deliberate: the built-in Driver role is view-only on the
+ * transport desk ("Field / transport self-service"), so demanding `create`
+ * would 403 the exact people the feature exists for. Marking a child aboard
+ * is field self-service, not desk editing — anyone trusted to see the roster
+ * is trusted to mark it, and everyone else (teacher, parent) holds no
+ * transport grant at all. Tightening this to `create` means granting the
+ * Driver role `create` in Settings -> Roles first; the built-in default never
+ * reaches an already-persisted role, whose grants are merged by module and
+ * never by action.
  */
 export async function POST(request: Request) {
   try {
     const ctx = await resolveApiAuth(request);
-    if (ctx.session.persona !== "staff" && ctx.session.persona !== "field") {
-      throw new ApiError("forbidden", "Driver or attendant sign-in required", 403);
-    }
+    assertPermission(ctx, "transport", "view");
 
     let body: {
       routeId?: string;
@@ -121,7 +137,42 @@ export async function POST(request: Request) {
       throw new ApiError("server_error", result.error || "Could not save", 502);
     }
 
-    return apiOk({ saved: true, date, trip, studentId, kind });
+    // The mark is saved. Telling the parent is a courtesy on top of it, so a
+    // messaging failure is reported alongside the save and never replaces it —
+    // an attendant must not see "failed" and re-mark a child who is already
+    // recorded absent.
+    let notified: Awaited<ReturnType<typeof notifyNotBoarded>> | null = null;
+    if (kind === "absent") {
+      try {
+        const [{ bundle: tBundle }, sisRes] = await Promise.all([
+          fetchTransportDeskFromDb(),
+          fetchSisFromDb(),
+        ]);
+        notified = sisRes.ok
+          ? await notifyNotBoarded({
+              studentId,
+              routeId,
+              stopId:
+                tBundle.assignments.find(
+                  (a) => a.studentId === studentId && a.effectiveTo == null,
+                )?.stopId ?? "",
+              at: new Date().toISOString(),
+              transport: tBundle as unknown as TransportState,
+              sis: sisRes.bundle as unknown as SisState,
+            })
+          : { sent: false, skipped: "student roster unavailable" };
+      } catch (e) {
+        notified = {
+          sent: false,
+          error: e instanceof Error ? e.message : "notify failed",
+        };
+      }
+      if (notified && !notified.sent) {
+        console.warn("[transport/boarding] parent not notified", notified);
+      }
+    }
+
+    return apiOk({ saved: true, date, trip, studentId, kind, notified });
   } catch (e) {
     return apiErr(e);
   }

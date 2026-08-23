@@ -40,7 +40,7 @@ export async function POST(req: Request) {
 
   let body: Pick<
     LibraryState,
-    "titles" | "copies" | "issues" | "procurementDocs" | "settings"
+    "titles" | "ebooks" | "copies" | "issues" | "procurementDocs" | "settings"
   >;
   try {
     body = (await req.json()) as typeof body;
@@ -51,6 +51,7 @@ export async function POST(req: Request) {
   const result = await pushLibraryDeskToDb({
     version: 2,
     titles: body.titles ?? [],
+    ebooks: body.ebooks ?? [],
     copies: body.copies ?? [],
     issues: body.issues ?? [],
     procurementDocs: body.procurementDocs ?? [],
