@@ -30,6 +30,15 @@ import {
 } from "@/lib/ledger/ledger.server";
 import { ledgerReconciliation, projectAll } from "@/lib/ledger/project.server";
 import {
+  accountStatement,
+  balanceSheetReport,
+  caYearEndPack,
+  incomeExpenditureReport,
+  packToCsvBundle,
+  receiptsPaymentsReport,
+  trialBalanceReport,
+} from "@/lib/ledger/reports.server";
+import {
   applyManualMatch,
   autoMatchBank,
   bankReconciliationReport,
@@ -100,6 +109,12 @@ type PostBody =
       statementClosingPaise?: number | null;
     }
   | { action: "cheque-clearings"; bankSubledgerId: string; asOf?: string }
+  | { action: "trial-balance"; from: string; to: string }
+  | { action: "income-expenditure"; from: string; to: string }
+  | { action: "balance-sheet"; from: string; to: string }
+  | { action: "receipts-payments"; from: string; to: string }
+  | { action: "account-statement"; code: string; from: string; to: string }
+  | { action: "ca-pack"; fyCode: string; from: string; to: string; csv?: boolean }
   | { action: "parity"; deskRows: { code: string; balancePaise: number }[] };
 
 export async function POST(req: Request) {
@@ -120,10 +135,27 @@ export async function POST(req: Request) {
     // idempotent and safe to repeat, but it is still a bulk write to the book.
     body.action === "project";
 
+  // Reports read the book and change nothing, so they need only view rights —
+  // which is what makes a read-only auditor login possible at all. Requiring
+  // `edit` here would force anyone reviewing the accounts to hold rights to
+  // alter them.
+  const readOnly = new Set([
+    "trial-balance",
+    "income-expenditure",
+    "balance-sheet",
+    "receipts-payments",
+    "account-statement",
+    "ca-pack",
+    "reconcile",
+    "parity",
+    "bank-recon",
+    "cheque-clearings",
+  ]);
+
   const auth = await requireStaffPermission(
     req,
     "accounts",
-    needsApproval ? "approve" : "edit",
+    needsApproval ? "approve" : readOnly.has(body.action) ? "view" : "edit",
   );
   if (!auth.ok) return auth.response;
 
@@ -229,6 +261,39 @@ export async function POST(req: Request) {
         asOf: body.asOf,
       });
       return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    case "trial-balance": {
+      const res = await trialBalanceReport({ from: body.from, to: body.to });
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    case "income-expenditure": {
+      const res = await incomeExpenditureReport({ from: body.from, to: body.to });
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    case "balance-sheet": {
+      const res = await balanceSheetReport({ from: body.from, to: body.to });
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    case "receipts-payments": {
+      const res = await receiptsPaymentsReport({ from: body.from, to: body.to });
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    case "account-statement": {
+      const res = await accountStatement({ code: body.code, from: body.from, to: body.to });
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    case "ca-pack": {
+      const pack = await caYearEndPack({
+        fyCode: body.fyCode,
+        from: body.from,
+        to: body.to,
+      });
+      // `ok` here means the pack is fit to hand over, not that the request
+      // worked — an unready pack is still returned so the reasons can be read.
+      return NextResponse.json(
+        body.csv ? { ...pack, csv: packToCsvBundle(pack) } : pack,
+        { status: 200 },
+      );
     }
     case "parity": {
       const res = await ledgerParityAgainstDesk(body.deskRows ?? []);

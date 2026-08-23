@@ -24,6 +24,15 @@ import {
 } from "@/lib/ledger/mirror";
 import { defaultLedgerAccounts, isPostableLedgerCode } from "@/lib/ledger/coa";
 import {
+  allocateVoucherCash,
+  buildBalanceSheet,
+  buildIncomeExpenditure,
+  buildReceiptsPayments,
+  buildTrialBalance,
+  paiseToRupeeString,
+  type PeriodBalanceRow,
+} from "@/lib/ledger/reports";
+import {
   matchStatementToBook,
   parseAmountToPaise,
   parseBankStatementCsv,
@@ -628,6 +637,193 @@ function bookLine(o: Partial<{ ledgerLineId: string; voucherDate: string; signed
   });
   assert.equal(noStatement.reconciles, false, "with no closing balance it cannot claim to reconcile");
   console.log("  ok  the reconciliation identity holds, and refuses to claim success without the bank's figure");
+}
+
+
+/* ─── Statements ───────────────────────────────────────────── */
+
+function bal(o: Partial<PeriodBalanceRow> & { code: string; kind: PeriodBalanceRow["kind"] }): PeriodBalanceRow {
+  return {
+    accountId: o.code, code: o.code, name: o.name ?? o.code,
+    kind: o.kind, scheduleGroup: o.scheduleGroup ?? "Group", parentCode: "",
+    openingPaise: o.openingPaise ?? 0, debitPaise: o.debitPaise ?? 0,
+    creditPaise: o.creditPaise ?? 0, closingPaise: o.closingPaise ?? 0,
+  };
+}
+
+{
+  const rows = [
+    bal({ code: "1000", kind: "asset",     openingPaise: 50_000_00, debitPaise: 30_000_00, creditPaise: 10_000_00, closingPaise: 70_000_00 }),
+    bal({ code: "3000", kind: "equity",    openingPaise: 50_000_00, closingPaise: 50_000_00 }),
+    bal({ code: "4000", kind: "income",    creditPaise: 30_000_00, closingPaise: 30_000_00 }),
+    bal({ code: "5000", kind: "expense",   debitPaise: 10_000_00, closingPaise: 10_000_00 }),
+    bal({ code: "9999", kind: "asset" }),
+  ];
+
+  const tb = buildTrialBalance({ from: "2026-04-01", to: "2027-03-31", rows });
+  assert.equal(tb.rows.length, 4, "an account with nothing at all is left out");
+  assert.equal(tb.totals.debitPaise, 40_000_00);
+  assert.equal(tb.totals.creditPaise, 40_000_00);
+  assert.equal(tb.totals.closingDebitPaise, tb.totals.closingCreditPaise, "closing sides agree");
+  assert.equal(tb.balanced, true);
+
+  // A liability sitting in debit must appear on the debit side, not vanish.
+  const contrary = buildTrialBalance({
+    from: "2026-04-01", to: "2027-03-31",
+    rows: [bal({ code: "2000", kind: "liability", closingPaise: -5_000_00 })],
+  });
+  assert.equal(contrary.rows[0]!.closingDebitPaise, 5_000_00, "a liability in debit shows as a debit");
+  assert.equal(contrary.rows[0]!.closingCreditPaise, 0);
+  console.log("  ok  the trial balance carries opening, movement and closing, and ties");
+}
+
+{
+  // The rule that matters: a nominal account's brought-forward balance
+  // belongs to a year already reported on.
+  const rows = [
+    bal({ code: "4000", kind: "income",  scheduleGroup: "Income from fees", openingPaise: 900_000_00, creditPaise: 30_000_00 }),
+    bal({ code: "5000", kind: "expense", scheduleGroup: "Establishment",     openingPaise: 400_000_00, debitPaise: 12_000_00 }),
+    bal({ code: "5100", kind: "expense", scheduleGroup: "Establishment",     debitPaise: 3_000_00 }),
+  ];
+  const ie = buildIncomeExpenditure({ from: "2026-04-01", to: "2027-03-31", rows });
+
+  assert.equal(ie.totalIncomePaise, 30_000_00, "income is this year's movement, not since inception");
+  assert.equal(ie.totalExpenditurePaise, 15_000_00, "and so is expenditure");
+  assert.equal(ie.surplusPaise, 15_000_00, "the difference is the surplus");
+  assert.equal(ie.expenditure.length, 1, "the two establishment lines group together");
+  assert.equal(ie.expenditure[0]!.lines.length, 2);
+  assert.equal(ie.expenditure[0]!.totalPaise, 15_000_00);
+  console.log("  ok  income & expenditure reports the period only, never the brought-forward balance");
+}
+
+{
+  // While the year is open, income and expenditure have not been swept into
+  // corpus — so the surplus has to appear on the balance sheet or the sides
+  // differ by exactly it.
+  const rows = [
+    bal({ code: "1000", kind: "asset",     closingPaise: 65_000_00 }),
+    bal({ code: "3000", kind: "equity",    closingPaise: 50_000_00 }),
+    bal({ code: "4000", kind: "income",    creditPaise: 30_000_00, closingPaise: 30_000_00 }),
+    bal({ code: "5000", kind: "expense",   debitPaise: 15_000_00, closingPaise: 15_000_00 }),
+  ];
+  const ie = buildIncomeExpenditure({ from: "2026-04-01", to: "2027-03-31", rows });
+  const bs = buildBalanceSheet({ asOf: "2027-03-31", rows, surplusPaise: ie.surplusPaise });
+
+  assert.equal(ie.surplusPaise, 15_000_00);
+  assert.equal(bs.totalAssetsPaise, 65_000_00);
+  assert.equal(bs.totalLiabilitiesPaise, 50_000_00 + 15_000_00, "corpus plus the year's surplus");
+  assert.equal(bs.balanced, true, "and the sheet balances");
+  assert.equal(bs.differencePaise, 0);
+  console.log("  ok  the balance sheet balances with the open year's surplus carried to corpus");
+}
+
+/* ─── Receipts & Payments allocation ───────────────────────── */
+
+{
+  // A plain fee receipt: the whole of it against fee income.
+  const simple = allocateVoucherCash({
+    cashSignedPaise: 20_000_00,
+    heads: [{ code: "4000", name: "Fee Income", scheduleGroup: "Fees", signedPaise: 20_000_00 }],
+  });
+  assert.equal(simple.length, 1);
+  assert.equal(simple[0]!.amountPaise, 20_000_00);
+
+  // Fee plus a store portion: split as the voucher says.
+  const split = allocateVoucherCash({
+    cashSignedPaise: 20_000_00,
+    heads: [
+      { code: "4000", name: "Fee Income", scheduleGroup: "Fees", signedPaise: 17_000_00 },
+      { code: "1040", name: "Store Receivable", scheduleGroup: "Current assets", signedPaise: 3_000_00 },
+    ],
+  });
+  assert.equal(split.find((s) => s.code === "4000")!.amountPaise, 17_000_00);
+  assert.equal(split.find((s) => s.code === "1040")!.amountPaise, 3_000_00);
+  console.log("  ok  a receipt is attributed to the heads the voucher actually credited");
+}
+
+{
+  // The case that separates a correct R&P from a plausible one. An expense of
+  // 12,000 part-paid 5,000 in cash leaves 7,000 on credit. The payment is
+  // 5,000 against the EXPENSE — the payable leg is a liability created, not
+  // money paid, and attributing part of the cash to it would be wrong.
+  const partPaid = allocateVoucherCash({
+    cashSignedPaise: -5_000_00,
+    heads: [
+      { code: "5020", name: "Utilities", scheduleGroup: "Admin", signedPaise: -12_000_00 },
+      { code: "2000", name: "Accounts Payable", scheduleGroup: "Current liabilities", signedPaise: 7_000_00 },
+    ],
+  });
+  assert.equal(partPaid.length, 1, "only the head the cash actually went to");
+  assert.equal(partPaid[0]!.code, "5020");
+  assert.equal(partPaid[0]!.amountPaise, 5_000_00, "the whole payment, not a proportion of it");
+  console.log("  ok  a part-paid expense attributes the cash to the expense, not to the payable it created");
+}
+
+{
+  // Integer paise must not leak. Three equal heads against an amount that
+  // does not divide by three.
+  const rounded = allocateVoucherCash({
+    cashSignedPaise: 100_00,
+    heads: [
+      { code: "A", name: "A", scheduleGroup: "G", signedPaise: 1 },
+      { code: "B", name: "B", scheduleGroup: "G", signedPaise: 1 },
+      { code: "C", name: "C", scheduleGroup: "G", signedPaise: 1 },
+    ],
+  });
+  assert.equal(
+    rounded.reduce((n, r) => n + r.amountPaise, 0),
+    100_00,
+    "the parts sum to exactly the cash that moved",
+  );
+
+  const odd = allocateVoucherCash({
+    cashSignedPaise: 10_00,
+    heads: [
+      { code: "A", name: "A", scheduleGroup: "G", signedPaise: 700 },
+      { code: "B", name: "B", scheduleGroup: "G", signedPaise: 300 },
+    ],
+  });
+  assert.equal(odd.reduce((n, r) => n + r.amountPaise, 0), 10_00, "and again with uneven weights");
+  assert.equal(allocateVoucherCash({ cashSignedPaise: 0, heads: [] }).length, 0, "no cash, no allocation");
+  console.log("  ok  allocation never loses or invents a paisa to rounding");
+}
+
+{
+  const rp = buildReceiptsPayments({
+    from: "2026-08-01",
+    to: "2026-08-31",
+    openingCashPaise: 10_000_00,
+    closingCashPaise: 10_000_00 + 20_000_00 - 5_000_00,
+    movements: [
+      { voucherId: "v1", voucherDate: "2026-08-05", voucherNo: "RC/1", narration: "Fees",
+        cashSignedPaise: 20_000_00, headCode: "4000", headName: "Fee Income",
+        headScheduleGroup: "Income from fees", headKind: "income", headSignedPaise: 20_000_00 },
+      { voucherId: "v2", voucherDate: "2026-08-14", voucherNo: "PY/1", narration: "Power",
+        cashSignedPaise: -5_000_00, headCode: "5020", headName: "Utilities",
+        headScheduleGroup: "Administrative", headKind: "expense", headSignedPaise: -5_000_00 },
+    ],
+  });
+
+  assert.equal(rp.totalReceiptsPaise, 20_000_00);
+  assert.equal(rp.totalPaymentsPaise, 5_000_00);
+  assert.equal(rp.computedClosingPaise, 25_000_00);
+  assert.equal(rp.reconciles, true, "opening plus receipts less payments is the closing cash");
+
+  const broken = buildReceiptsPayments({
+    from: "2026-08-01", to: "2026-08-31",
+    openingCashPaise: 10_000_00, closingCashPaise: 99_999_00,
+    movements: [],
+  });
+  assert.equal(broken.reconciles, false, "and when it does not agree with the cash book, it says so");
+  console.log("  ok  receipts & payments reconciles to the actual cash and bank balances");
+}
+
+{
+  assert.equal(paiseToRupeeString(12_345_678), "123456.78");
+  assert.equal(paiseToRupeeString(7), "0.07", "small amounts keep their paise");
+  assert.equal(paiseToRupeeString(-50_050), "-500.50");
+  assert.equal(paiseToRupeeString(0), "0.00");
+  console.log("  ok  amounts export as rupees and paise without float drift");
 }
 
 /* ─── Live path ────────────────────────────────────────────── */

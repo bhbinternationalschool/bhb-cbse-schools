@@ -471,6 +471,32 @@ export function defaultBuiltInRoles(): RbacRole[] {
       ],
     },
     {
+      id: "role_auditor",
+      code: "auditor",
+      name: "Auditor (read-only)",
+      isBuiltIn: true,
+      isActive: true,
+      makerChecker: false,
+      note: "For the CA at year end — reads the books, changes nothing",
+      permissions: [
+        grant("home", ["view"]),
+        // Everything the year-end pack draws on, and nothing that writes.
+        // Reports need only `view` (see /api/ledger), so an auditor can pull
+        // the trial balance, I&E, balance sheet, receipts & payments, ledger
+        // statements and the reconciliation without holding any right that
+        // could alter what they are auditing.
+        grant("accounts", ["view", "export"]),
+        grant("fees", ["view", "export"]),
+        grant("payroll", ["view", "export"]),
+        grant("purchase", ["view", "export"]),
+        grant("store", ["view", "export"]),
+        grant("transport", ["view", "export"]),
+        grant("trust", ["view", "export"]),
+        grant("students", ["view"]),
+        grant("staff", ["view"]),
+      ],
+    },
+    {
       id: "role_accounts",
       code: "accounts",
       name: "Accounts",
@@ -1082,7 +1108,14 @@ export function inferRoleCodes(
   }
   if (/^admin$|administrator|registrar/.test(rc)) matched.push("admin");
   if (/office|front.?office/.test(rc)) matched.push("office");
-  if (/accounts|accountant|cashier|finance/.test(rc)) {
+  // Checked before the accounts branch, and it suppresses it. A role code like
+  // "audit accountant" matches both patterns, and where a code is ambiguous
+  // the read-only reading is the safe one: an auditor wrongly given write
+  // rights can alter the books they are checking, while an accountant wrongly
+  // read-only is merely inconvenienced and says so immediately.
+  const isAuditor = /auditor|chartered.?accountant/.test(rc);
+  if (isAuditor) matched.push("auditor");
+  if (!isAuditor && /accounts|accountant|cashier|finance/.test(rc)) {
     matched.push("accounts");
   }
   if (/clerk/.test(rc)) matched.push("office");

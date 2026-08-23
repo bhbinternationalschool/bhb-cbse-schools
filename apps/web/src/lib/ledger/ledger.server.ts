@@ -70,7 +70,22 @@ type RpcResult = {
 function toPostResult(data: unknown, rpcError?: string | null): LedgerPostResult {
   if (rpcError) return { ok: false, error: rpcError };
   const r = (data ?? {}) as RpcResult;
-  if (!r.ok) return { ok: false, error: r.error || "ledger refused the posting" };
+  if (!r.ok) {
+    const error = r.error || "ledger refused the posting";
+    // The chart lives in code but the accounts live in the database, so an
+    // account added to defaultLedgerAccounts() does not exist for posting
+    // until ensureLedgerMasters has run. The bare message names the missing
+    // code and leaves the reader to work out why a code they can see in the
+    // source is missing — which cost a colleague a debugging cycle on
+    // 2026-08-24. Say the next step instead.
+    if (/no ledger account with code/i.test(error)) {
+      return {
+        ok: false,
+        error: `${error} — if it was recently added to the chart, run the ensure-masters action to install it`,
+      };
+    }
+    return { ok: false, error };
+  }
   return {
     ok: true,
     created: r.created !== false,
@@ -198,9 +213,18 @@ export async function ledgerCloseFiscalYear(input: {
 /**
  * Install the chart of accounts, cost centres and one fiscal year.
  *
- * Idempotent by code, and it never overwrites a name the school has edited —
- * only missing rows are inserted. The desk's own COA codes keep their meaning,
- * so a journal mirrored from the desk maps straight across.
+ * Idempotent by code. Missing accounts are inserted; existing ones have their
+ * *structural* fields reconciled while their `name` is left alone.
+ *
+ * That split matters. A name is the school's to edit — "Mess Expenses" may
+ * well become "Kitchen & Mess" and nothing should undo that. But `kind`,
+ * `is_cash`, `is_bank`, `is_control`, `parent_code` and `schedule_group` are
+ * the system's classification of what the account *is*, and a wrong one fails
+ * silently in the worst possible way: a Receipts & Payments account is built
+ * by finding the accounts flagged as cash or bank, so a chart whose Cash in
+ * Hand lost that flag produces a statutory statement that is empty and looks
+ * merely quiet. Found exactly that way on 2026-08-24, on a chart seeded before
+ * the flags existed.
  */
 export async function ensureLedgerMasters(input?: {
   fyCode?: string;
@@ -218,7 +242,28 @@ export async function ensureLedgerMasters(input?: {
   if (readErr) return { ok: false, error: readErr.message, accountsAdded: 0 };
 
   const have = new Set((existing ?? []).map((r) => String((r as { code: string }).code)));
-  const missing = defaultLedgerAccounts().filter((a) => !have.has(a.code));
+  const defaults = defaultLedgerAccounts();
+  const missing = defaults.filter((a) => !have.has(a.code));
+
+  // Reconcile classification on accounts that already exist. Names are not
+  // touched — see the note above on which fields belong to whom.
+  const stale = defaults.filter((a) => have.has(a.code));
+  for (const a of stale) {
+    const { error } = await sb
+      .from("ledger_accounts")
+      .update({
+        kind: a.kind,
+        parent_code: a.parentCode ?? "",
+        schedule_group: a.scheduleGroup,
+        is_cash: !!a.isCash,
+        is_bank: !!a.isBank,
+        is_control: !!a.isControl,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("tenant_id", tenantId)
+      .eq("code", a.code);
+    if (error) return { ok: false, error: error.message, accountsAdded: 0 };
+  }
 
   if (missing.length > 0) {
     const { error } = await sb.from("ledger_accounts").insert(
