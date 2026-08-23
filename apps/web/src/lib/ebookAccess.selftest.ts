@@ -17,7 +17,13 @@
 import assert from "node:assert/strict";
 
 import { ebookAccess, keyForBook } from "./ebookAccess.server";
-import { normalizeEbook } from "./library";
+import {
+  bookcaseCode,
+  EBOOK_SHELF_SEED,
+  mergeEbookShelfSeed,
+  normalizeEbook,
+  type LibraryEbook,
+} from "./library";
 
 console.log("ebookAccess.selftest.ts");
 
@@ -139,5 +145,52 @@ assert.equal(row.isActive, true, "rows are active unless said otherwise");
 // The record itself must never carry a key — it syncs to every browser.
 assert.equal("passKey" in row, false);
 assert.equal(JSON.stringify(row).includes("pass"), false);
+
+/* ── the 20 shelves seed once and only once ─────────────────── */
+
+// The list supplied had one URL twice; the seed keeps 20 distinct shelves.
+assert.equal(EBOOK_SHELF_SEED.length, 20, "twenty distinct bookcases");
+const codes = EBOOK_SHELF_SEED.map(bookcaseCode);
+assert.equal(new Set(codes).size, 20, "no duplicate bookcase codes in the seed");
+assert.ok(codes.every((c) => /^[a-z0-9]+$/.test(c)), "every code parses");
+
+// A stable id from the URL, so re-importing matches rather than duplicates.
+assert.equal(bookcaseCode("https://fliphtml5.com/bookcase/ooiny/"), "ooiny");
+assert.equal(bookcaseCode("HTTPS://FLIPHTML5.COM/BOOKCASE/OOINY"), "ooiny", "case-insensitive");
+assert.equal(bookcaseCode("not a url"), "", "junk yields no code, not a guess");
+
+/* ── seeding an empty catalogue ─────────────────────────────── */
+
+const first = mergeEbookShelfSeed([]);
+assert.equal(first.added, 20);
+assert.equal(first.ebooks.length, 20);
+// Seeded shelves carry NO title — the office names them; nothing is invented.
+assert.ok(first.ebooks.every((e) => e.title === ""), "no title is fabricated");
+assert.ok(first.ebooks.every((e) => e.keyKind === "shelf"));
+assert.ok(first.ebooks.every((e) => e.isActive));
+
+/* ── THE protection: a second run adds nothing, and preserves names ── */
+
+// The office has titled one shelf. Re-importing must not wipe that title or
+// duplicate the shelf.
+const titled: LibraryEbook[] = first.ebooks.map((e) =>
+  bookcaseCode(e.url) === "ooiny"
+    ? { ...e, title: "Class 6 Science", subject: "Science", classLabels: ["VI"] }
+    : e,
+);
+const second = mergeEbookShelfSeed(titled);
+assert.equal(second.added, 0, "nothing new on a re-run");
+assert.equal(second.ebooks.length, 20, "no duplicate shelf");
+const ooiny = second.ebooks.find((e) => bookcaseCode(e.url) === "ooiny")!;
+assert.equal(ooiny.title, "Class 6 Science", "an office-set title survives re-import");
+assert.deepEqual(ooiny.classLabels, ["VI"]);
+
+/* ── a partial catalogue tops up the missing shelves only ───── */
+
+const partial = mergeEbookShelfSeed([
+  normalizeEbook({ id: "eb_ooiny", url: "https://fliphtml5.com/bookcase/ooiny/", title: "Kept" }),
+]);
+assert.equal(partial.added, 19, "the other nineteen are added");
+assert.equal(partial.ebooks.find((e) => bookcaseCode(e.url) === "ooiny")!.title, "Kept");
 
 console.log("  ok");

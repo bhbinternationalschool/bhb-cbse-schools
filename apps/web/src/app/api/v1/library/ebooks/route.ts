@@ -2,7 +2,7 @@ import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
 import { fetchDeskSliceFromDb } from "@/lib/deskSliceNormalized.server";
 import { ebookAccess, keyForBook } from "@/lib/ebookAccess.server";
-import { normalizeEbook, type LibraryEbook } from "@/lib/library";
+import { bookcaseCode, normalizeEbook, type LibraryEbook } from "@/lib/library";
 
 export const runtime = "nodejs";
 
@@ -45,9 +45,14 @@ export async function GET(request: Request) {
       .filter((b) => b.isActive)
       .map((b) => {
         const k = keyForBook(b.keyKind, access);
+        const code = bookcaseCode(b.url);
         return {
           id: b.id,
-          title: b.title,
+          // An untitled shelf shows its bookcase code, not a blank line the
+          // reader cannot tell apart from the next blank line. `needsTitle`
+          // lets the staff screen flag exactly these for naming.
+          title: b.title || `Untitled shelf (${code || "?"})`,
+          needsTitle: b.title.trim().length === 0,
           author: b.author,
           subject: b.subject,
           classLabels: b.classLabels,

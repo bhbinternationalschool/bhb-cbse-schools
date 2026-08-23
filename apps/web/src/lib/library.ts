@@ -364,6 +364,79 @@ export function emptyLibraryState(): LibraryState {
  * than "none", which would send a parent to a password box telling them no
  * password is required.
  */
+/**
+ * The school's FlipHTML5 bookcases, as supplied. Twenty distinct shelves
+ * (one URL was listed twice and is kept once). They share one shelf pass key
+ * and one book key, so the keys stay in the environment and only the links
+ * live here.
+ *
+ * No title, class or subject is assigned to any of them. The bookcase codes
+ * are opaque and the shelf pages are JavaScript-rendered, so what each shelf
+ * contains is not something this file can know — inventing "Class 6 Science"
+ * against the wrong code would be worse than a blank the office fills in. Each
+ * entry therefore carries only its link and its code, and reads as "needs a
+ * title" until someone names it.
+ */
+export const EBOOK_SHELF_SEED: string[] = [
+  "https://fliphtml5.com/bookcase/ooiny/",
+  "https://fliphtml5.com/bookcase/npwtl/",
+  "https://fliphtml5.com/bookcase/qtffd/",
+  "https://fliphtml5.com/bookcase/acdlv/",
+  "https://fliphtml5.com/bookcase/hpgcz/",
+  "https://fliphtml5.com/bookcase/oixkm/",
+  "https://fliphtml5.com/bookcase/pdelb/",
+  "https://fliphtml5.com/bookcase/fjhwd/",
+  "https://fliphtml5.com/bookcase/hvtxz/",
+  "https://fliphtml5.com/bookcase/pocjg/",
+  "https://fliphtml5.com/bookcase/fmgmo/",
+  "https://fliphtml5.com/bookcase/jsmnm/",
+  "https://fliphtml5.com/bookcase/fltsh/",
+  "https://fliphtml5.com/bookcase/vrsvv/",
+  "https://fliphtml5.com/bookcase/luqrl/",
+  "https://fliphtml5.com/bookcase/bilbd/",
+  "https://fliphtml5.com/bookcase/cbgnn/",
+  "https://fliphtml5.com/bookcase/feocx/",
+  "https://fliphtml5.com/bookcase/fxwtz/",
+  "https://fliphtml5.com/bookcase/gqxrr/",
+];
+
+/** The bookcase code from a FlipHTML5 shelf URL — the stable identity behind
+ *  an opaque link, used so re-importing does not duplicate a shelf. */
+export function bookcaseCode(url: string): string {
+  const m = /\/bookcase\/([a-z0-9]+)/i.exec(String(url || ""));
+  return m ? m[1].toLowerCase() : "";
+}
+
+/**
+ * Add any shelf from the seed that is not already catalogued, matched on
+ * bookcase code so a re-run adds nothing twice and never overwrites a title
+ * the office has already set. Returns the merged list and how many were new.
+ */
+export function mergeEbookShelfSeed(
+  existing: LibraryEbook[],
+  seedUrls: string[] = EBOOK_SHELF_SEED,
+  addedOn: string = new Date().toISOString().slice(0, 10),
+): { ebooks: LibraryEbook[]; added: number } {
+  const have = new Set(existing.map((e) => bookcaseCode(e.url)).filter(Boolean));
+  const additions: LibraryEbook[] = [];
+  for (const url of seedUrls) {
+    const code = bookcaseCode(url);
+    if (!code || have.has(code)) continue;
+    have.add(code);
+    additions.push(
+      normalizeEbook({
+        id: `eb_${code}`,
+        title: "",
+        url,
+        keyKind: "shelf",
+        addedOn,
+        isActive: true,
+      }),
+    );
+  }
+  return { ebooks: [...existing, ...additions], added: additions.length };
+}
+
 export function normalizeEbook(e: Partial<LibraryEbook>): LibraryEbook {
   const keyKind =
     e.keyKind === "book" || e.keyKind === "none" ? e.keyKind : "shelf";
