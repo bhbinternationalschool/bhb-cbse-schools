@@ -108,6 +108,8 @@ SELFTESTS=(
   test:transport-concession
   test:transport-by-class
   test:transport-staff-riders
+  test:fleet-edge-link
+  test:transport-parent-messages
 )
 
 bold "Verifying $(git rev-parse --short HEAD 2>/dev/null || echo 'working tree') on $(git branch --show-current 2>/dev/null || echo '?')"
