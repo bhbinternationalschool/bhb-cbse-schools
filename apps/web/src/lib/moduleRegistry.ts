@@ -375,16 +375,16 @@ export const REGISTRY_MODULES: RegistryModuleDef[] = [
   },
   {
     id: "store",
-    label: "Store",
-    blurb: "Stock master, sell/issue, returns and store accounts",
-    href: "/store",
+    label: "Store & purchase",
+    blurb: "Catalogue, vendors, pricing, kits, purchase and stock",
+    href: "/inventory",
     group: "finance",
     defaultEnabled: true,
   },
   {
     id: "purchase",
-    label: "Purchase",
-    blurb: "Indents, POs and GRN (also under Store)",
+    label: "Purchase (legacy)",
+    blurb: "Old indent/PO/GRN screens — folded into Store & purchase",
     href: "/store?tab=purchase",
     group: "finance",
     defaultEnabled: true,
@@ -637,6 +637,7 @@ export function registryModuleForHref(href: string): RegistryModuleId | null {
   }
   if (path === "/payroll" || path.startsWith("/payroll/")) return "payroll";
   if (path === "/reports" || path.startsWith("/reports/")) return "reports";
+  if (path === "/inventory" || path.startsWith("/inventory/")) return "store";
   if (path === "/purchase" || path.startsWith("/purchase/")) return "purchase";
   if (path === "/library" || path.startsWith("/library/")) return "library";
   if (path === "/store" || path.startsWith("/store/")) {
