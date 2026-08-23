@@ -17,6 +17,8 @@ import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import { CatalogueTab } from "@/components/inventory/CatalogueTab";
 import { CounterTab } from "@/components/inventory/CounterTab";
+import { ReportsTab } from "@/components/inventory/ReportsTab";
+import { StockTab } from "@/components/inventory/StockTab";
 import { InvAlert, InvSpinner } from "@/components/inventory/InvUi";
 import { KitsTab } from "@/components/inventory/KitsTab";
 import { MastersTab } from "@/components/inventory/MastersTab";
@@ -27,16 +29,26 @@ import { ensureMastersHydrated } from "@/lib/mastersPersistence";
 import { loadMasters } from "@/lib/masters";
 import { Button } from "@/components/ui/button";
 
-type Tab = "counter" | "catalogue" | "purchase" | "vendors" | "kits" | "masters";
+type Tab =
+  | "counter"
+  | "catalogue"
+  | "purchase"
+  | "stock"
+  | "reports"
+  | "vendors"
+  | "kits"
+  | "masters";
 
 const TABS: {
   id: Tab;
   label: string;
-  tone: "navy" | "sky" | "teal" | "violet" | "green" | "coral";
+  tone: "navy" | "sky" | "teal" | "violet" | "green" | "coral" | "amber";
 }[] = [
   { id: "counter", label: "Counter", tone: "coral" },
   { id: "catalogue", label: "Catalogue", tone: "navy" },
   { id: "purchase", label: "Purchase", tone: "green" },
+  { id: "stock", label: "Stock", tone: "amber" },
+  { id: "reports", label: "Reports", tone: "violet" },
   { id: "vendors", label: "Vendors", tone: "sky" },
   { id: "kits", label: "Kits by class", tone: "teal" },
   { id: "masters", label: "Setup", tone: "violet" },
@@ -104,6 +116,8 @@ export function InventoryWorkspace() {
             <CatalogueTab boot={boot.data} onChanged={boot.reload} />
           ) : null}
           {tab === "purchase" ? <PurchaseTab boot={boot.data} /> : null}
+          {tab === "stock" ? <StockTab boot={boot.data} /> : null}
+          {tab === "reports" ? <ReportsTab boot={boot.data} /> : null}
           {tab === "vendors" ? <VendorsTab onChanged={boot.reload} /> : null}
           {tab === "kits" ? (
             <KitsTab classes={classes} onChanged={boot.reload} />

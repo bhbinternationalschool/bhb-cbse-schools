@@ -803,3 +803,156 @@ export function saleLineAmounts(input: {
   );
   return { grossPaise, discountPaise, lineTotalPaise, taxPaise };
 }
+
+/* ─── Phase 4: assets, reports, dashboard ──────────────────── */
+
+export type InvAssetCondition = "new" | "good" | "fair" | "poor" | "scrapped";
+export type InvAssetStatus =
+  | "in_use"
+  | "in_store"
+  | "under_repair"
+  | "scrapped"
+  | "lost";
+
+export type InvAssetRow = {
+  id: string;
+  itemId: string;
+  itemName: string;
+  sku: string;
+  assetTag: string;
+  serialNo: string;
+  locationId: string;
+  locationName: string;
+  custodian: string;
+  department: string;
+  room: string;
+  condition: InvAssetCondition;
+  status: InvAssetStatus;
+  purchaseDate: string;
+  purchaseCostPaise: number;
+  warrantyUntil: string;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type InvAssetEventRow = {
+  id: string;
+  assetId: string;
+  at: string;
+  kind: string;
+  fromValue: string;
+  toValue: string;
+  note: string;
+  createdBy: string;
+};
+
+export type InvAssetSummary = {
+  total: number;
+  inUse: number;
+  inStore: number;
+  underRepair: number;
+  scrapped: number;
+  lost: number;
+  valuePaise: number;
+};
+
+export type InvStockReportRowData = {
+  itemId: string;
+  sku: string;
+  itemName: string;
+  categoryName: string;
+  uomName: string;
+  qtyOnHand: number;
+  avgCostPaise: number;
+  valuePaise: number;
+  reorderLevel: number;
+  belowReorder: boolean;
+  lastMoveAt: string;
+};
+
+export type InvMarginRowData = {
+  itemId: string;
+  sku: string;
+  itemName: string;
+  categoryName: string;
+  qtySold: number;
+  revenuePaise: number;
+  costPaise: number;
+  marginPaise: number;
+};
+
+export type InvDaybookRowData = {
+  saleId: string;
+  saleNo: string;
+  saleDate: string;
+  buyerName: string;
+  buyerKind: string;
+  itemCount: number;
+  totalPaise: number;
+  paidPaise: number;
+  balancePaise: number;
+  marginPaise: number;
+  status: string;
+  tenders: string;
+};
+
+export type InvPurchaseRowData = {
+  vendorId: string;
+  vendorName: string;
+  receiptCount: number;
+  goodsPaise: number;
+  taxPaise: number;
+  chargesPaise: number;
+  totalPaise: number;
+  returnedPaise: number;
+  billedPaise: number;
+  paidPaise: number;
+  outstandingPaise: number;
+};
+
+export type InvDashboardData = {
+  stockValuePaise: number;
+  lowStockCount: number;
+  itemCount: number;
+  assetCount: number;
+  assetValuePaise: number;
+  openOrders: number;
+  awaitingApproval: number;
+  pendingReceipt: number;
+  vendorOutstandingPaise: number;
+  vendorOverduePaise: number;
+  salesTodayPaise: number;
+  collectedTodayPaise: number;
+  marginTodayPaise: number;
+  studentOutstandingPaise: number;
+  monthSalesPaise: number;
+  monthMarginPaise: number;
+};
+
+export function assetStatusLabel(s: InvAssetStatus): string {
+  return {
+    in_use: "In use",
+    in_store: "In store",
+    under_repair: "Under repair",
+    scrapped: "Scrapped",
+    lost: "Lost",
+  }[s];
+}
+
+export function assetEventLabel(kind: string): string {
+  return (
+    {
+      registered: "Registered",
+      assigned: "Custodian changed",
+      moved: "Moved",
+      repair_in: "Sent for repair",
+      repair_out: "Back from repair",
+      condition: "Condition changed",
+      scrapped: "Scrapped",
+      lost: "Reported lost",
+      found: "Found",
+      note: "Updated",
+    }[kind] ?? kind
+  );
+}

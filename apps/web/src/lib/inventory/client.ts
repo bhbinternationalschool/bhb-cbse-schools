@@ -16,7 +16,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  InvAssetEventRow,
+  InvAssetRow,
+  InvAssetSummary,
   InvBootstrap,
+  InvDaybookRowData,
+  InvDashboardData,
+  InvMarginRowData,
+  InvPurchaseRowData,
+  InvStockReportRowData,
   InvBuyerKind,
   InvBuyerStudent,
   InvCounterSummary,
@@ -430,6 +438,78 @@ export const invApi = {
     req<{ returns: InvSaleReturn[] }>("/sales", {
       query: { view: "returns", saleId },
     }).then((r) => r.returns),
+
+  /* ─── Assets ─────────────────────────────────────────────── */
+
+  listAssets: (query: {
+    search?: string;
+    itemId?: string;
+    locationId?: string;
+    status?: string;
+  } = {}) =>
+    req<{ assets: InvAssetRow[] }>("/assets", { query }).then((r) => r.assets),
+
+  assetSummary: () =>
+    req<{ summary: InvAssetSummary }>("/assets", {
+      query: { view: "summary" },
+    }).then((r) => r.summary),
+
+  assetHistory: (assetId: string) =>
+    req<{ events: InvAssetEventRow[] }>("/assets", {
+      query: { view: "history", assetId },
+    }).then((r) => r.events),
+
+  saveAsset: (asset: Record<string, unknown>) =>
+    req<{ asset: InvAssetRow }>("/assets", {
+      method: "POST",
+      body: JSON.stringify(asset),
+    }).then((r) => r.asset),
+
+  bulkRegisterAssets: (input: Record<string, unknown>) =>
+    req<{ created: number; firstTag: string; lastTag: string }>("/assets", {
+      method: "POST",
+      body: JSON.stringify({ action: "bulk", ...input }),
+    }),
+
+  removeAsset: (id: string) =>
+    req<{ deleted: boolean; reason: string }>("/assets", {
+      method: "DELETE",
+      query: { id },
+    }),
+
+  /* ─── Reports ────────────────────────────────────────────── */
+
+  dashboard: () =>
+    req<{ dashboard: InvDashboardData }>("/reports").then((r) => r.dashboard),
+
+  stockReport: (locationId = "", lowOnly = false) =>
+    req<{
+      rows: InvStockReportRowData[];
+      totals: { valuePaise: number; lines: number; belowReorder: number };
+    }>("/reports", { query: { report: "stock", locationId, lowOnly } }),
+
+  marginReport: (from: string, to: string) =>
+    req<{
+      rows: InvMarginRowData[];
+      totals: { revenue: number; cost: number; margin: number };
+    }>("/reports", { query: { report: "margin", from, to } }),
+
+  daybookReport: (from: string, to: string) =>
+    req<{
+      rows: InvDaybookRowData[];
+      totals: {
+        billed: number;
+        collected: number;
+        outstanding: number;
+        margin: number;
+      };
+    }>("/reports", { query: { report: "daybook", from, to } }),
+
+  purchaseReport: (from: string, to: string) =>
+    req<{
+      rows: InvPurchaseRowData[];
+      totals: { total: number; outstanding: number };
+    }>("/reports", { query: { report: "purchases", from, to } }),
 };
 
 /* ─── Hooks ────────────────────────────────────────────────── */

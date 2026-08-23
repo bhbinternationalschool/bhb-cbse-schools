@@ -391,6 +391,42 @@ export function clampPct(v: unknown): number {
 }
 
 /**
+ * Insert a new row, or update an existing one by id.
+ *
+ * Deliberately not an upsert. PostgREST's upsert still has to parse a full
+ * INSERT, so any NOT NULL column without a default that the caller omitted —
+ * a document number, an item reference — fails validation even though the row
+ * already exists and already holds that value. Splitting the two paths means
+ * an edit sends only the fields it means to change.
+ */
+export async function insertOrUpdate(
+  sb: InvCtx["sb"],
+  table: string,
+  tenantId: string,
+  row: Record<string, unknown>,
+  select: string,
+  what: string,
+): Promise<Record<string, unknown>> {
+  const id = row.id;
+  if (id) {
+    const patch = { ...row };
+    delete patch.id;
+    delete patch.tenant_id;
+    return orThrow(
+      await sb
+        .from(table)
+        .update(patch)
+        .eq("tenant_id", tenantId)
+        .eq("id", id)
+        .select(select)
+        .single(),
+      what,
+    );
+  }
+  return orThrow(await sb.from(table).insert(row).select(select).single(), what);
+}
+
+/**
  * Throw the Supabase error as an InvError so routes map it to a status.
  *
  * Returns the row untyped on purpose — the caller passes it straight to its

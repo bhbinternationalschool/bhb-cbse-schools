@@ -10,11 +10,11 @@
 
 import {
   clampPct,
+  insertOrUpdate,
   INV_DEFAULT_SETTINGS,
   InvError,
   invCtx,
   nullable,
-  orThrow,
   type InvCtx,
 } from "@/lib/inventory/db.server";
 import {
@@ -210,8 +210,12 @@ export async function saveIndent(
     row.indent_no = await nextDocNo(ctx, "indent", academicYearCode, "IND");
   }
 
-  const saved = orThrow(
-    await sb.from("inv_indents").upsert(row, { onConflict: "id" }).select("*").single(),
+  const saved = await insertOrUpdate(
+    sb,
+    "inv_indents",
+    tenantId,
+    row,
+    "*",
     "Save indent",
   );
   const indentId = str(saved.id);
@@ -506,12 +510,12 @@ export async function savePurchaseOrder(
     row.po_no = await nextDocNo(ctx, "po", academicYearCode, "PO");
   }
 
-  const saved = orThrow(
-    await sb
-      .from("inv_purchase_orders")
-      .upsert(row, { onConflict: "id" })
-      .select("*, vendor:inv_vendors(name)")
-      .single(),
+  const saved = await insertOrUpdate(
+    sb,
+    "inv_purchase_orders",
+    tenantId,
+    row,
+    "*, vendor:inv_vendors(name)",
     "Save purchase order",
   );
   const poId = str(saved.id);
