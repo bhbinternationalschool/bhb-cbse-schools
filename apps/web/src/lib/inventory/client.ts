@@ -511,6 +511,7 @@ export const invApi = {
         stockValuePaise: number;
         ledgerValuePaise: number;
         differencePaise: number;
+        ledgerActive: boolean;
       };
     }>("/reports", { query: { report: "parity" } }).then((r) => r.parity),
 

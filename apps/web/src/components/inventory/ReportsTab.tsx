@@ -155,6 +155,10 @@ export function ReportsTab({ boot }: { boot: InvBootstrap }) {
 function InventoryParity() {
   const p = useAsync(() => invApi.inventoryParity(), []);
   const d = p.data;
+  // With no chart of accounts the books are empty on purpose — sales skip
+  // posting until the ledger is opened — so the whole stock value shows as a
+  // difference. That is the designed state, not a drift to chase.
+  const ledgerOff = d ? !d.ledgerActive : false;
   const agrees = d ? d.differencePaise === 0 : false;
 
   return (
@@ -170,13 +174,19 @@ function InventoryParity() {
         <StatTile
           label="Inventory in the books"
           value={d ? formatPaise(d.ledgerValuePaise) : "—"}
-          sub="account 1090"
+          sub={ledgerOff ? "ledger not opened yet" : "account 1090"}
         />
         <StatTile
           label="Difference"
           value={d ? formatPaise(d.differencePaise) : "—"}
-          tone={agrees ? "good" : "bad"}
-          sub={agrees ? "they agree" : "needs looking at"}
+          tone={ledgerOff ? "neutral" : agrees ? "good" : "bad"}
+          sub={
+            ledgerOff
+              ? "not a discrepancy — see below"
+              : agrees
+                ? "they agree"
+                : "needs looking at"
+          }
         />
       </div>
 
@@ -206,7 +216,16 @@ function InventoryParity() {
         </p>
       </div>
 
-      {!agrees && d ? (
+      {ledgerOff && d ? (
+        <div className="rounded-xl border px-3 py-2 text-xs text-muted-foreground">
+          The ledger has no chart of accounts yet, so nothing posts to account
+          1090 and the books read zero. The difference above is simply the stock
+          you hold, not a drift between two records. Open the ledger and seed its
+          accounts, and these two figures start moving together.
+        </div>
+      ) : null}
+
+      {!ledgerOff && !agrees && d ? (
         <div className="rounded-xl border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
           The shelf and the books disagree by {formatPaise(d.differencePaise)}.
           That means stock moved without its journal, or the reverse. Check the

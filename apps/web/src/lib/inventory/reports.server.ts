@@ -374,6 +374,12 @@ export type InvInventoryParity = {
   stockValuePaise: number;
   ledgerValuePaise: number;
   differencePaise: number;
+  /**
+   * False when no chart of accounts has been seeded. Postings are skipped in
+   * that state by design, so the books are empty and a difference is expected
+   * — not a fault to report.
+   */
+  ledgerActive: boolean;
 };
 
 /**
@@ -394,5 +400,6 @@ export async function inventoryParity(): Promise<InvInventoryParity> {
     stockValuePaise: int(out.stock_value_paise),
     ledgerValuePaise: int(out.ledger_value_paise),
     differencePaise: int(out.difference_paise),
+    ledgerActive: out.ledger_active === true,
   };
 }
