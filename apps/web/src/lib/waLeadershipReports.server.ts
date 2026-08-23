@@ -16,7 +16,6 @@ import { formatInr, loadFees } from "@/lib/fees";
 import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
 import { loadSis } from "@/lib/sis";
 import { loadStaffAttendance, summarizeStaffMarks } from "@/lib/staffAttendance";
-import { listLowStockItems, loadStore } from "@/lib/store";
 import { loadTransport } from "@/lib/transport";
 import { TENANT } from "@/lib/types";
 
@@ -25,7 +24,19 @@ function todayIso(): string {
 }
 
 /** Compact WhatsApp report for director / leadership. */
-export function composeLeadershipWhatsAppReport(): string {
+/**
+ * Low stock is an optional input, not a value this function fetches.
+ *
+ * The store's on-hand figures now live server-side and are read
+ * asynchronously, and this composer is synchronous with synchronous callers
+ * all the way up. Rather than make the whole chain async for one line — or
+ * print "0 low-stock SKUs" when the truth is "not looked up", which is the
+ * defect class this rebuild exists to remove — the line is simply omitted
+ * unless a caller supplies the number.
+ */
+export function composeLeadershipWhatsAppReport(
+  opts: { lowStockSkus?: number } = {},
+): string {
   const masters = loadMasters();
   const ay = currentAcademicYearCode(masters);
   const today = todayIso();
@@ -80,7 +91,7 @@ export function composeLeadershipWhatsAppReport(): string {
   const activeStaff = (masters.staff ?? []).filter((s) => s.status === "active")
     .length;
   const bankBal = totalBankBalancePaise(loadAccounts());
-  const lowStock = listLowStockItems(loadStore()).length;
+  const lowStock = opts.lowStockSkus;
   const transport = loadTransport();
   const activeRoutes = (transport.routes ?? []).filter((r) => r.isActive !== false)
     .length;
@@ -101,7 +112,9 @@ export function composeLeadershipWhatsAppReport(): string {
     `Enrolled ${funnel.enrolled || 0} · follow-ups due ${fu.overdue || 0}`,
     "",
     `*Transport* — ${activeRoutes} routes · ${activeBuses} buses`,
-    `*Store* — ${lowStock} low-stock SKUs`,
+    ...(typeof lowStock === "number"
+      ? [`*Store* — ${lowStock} low-stock SKUs`]
+      : []),
     `*Bank* — ${formatInr(bankBal)}`,
     "",
     "Reply *FEE* · *ADMISSIONS* · *STAFF* · *MENU*",

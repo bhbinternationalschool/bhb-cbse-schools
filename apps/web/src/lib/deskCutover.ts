@@ -25,14 +25,6 @@ import {
   libraryReadFromDbEnabled,
 } from "@/lib/libraryDbConfig";
 import {
-  storeDualWriteDbEnabled,
-  storeReadFromDbEnabled,
-} from "@/lib/storeDbConfig";
-import {
-  purchaseDualWriteDbEnabled,
-  purchaseReadFromDbEnabled,
-} from "@/lib/purchaseDbConfig";
-import {
   accountsDualWriteDbEnabled,
   accountsReadFromDbEnabled,
 } from "@/lib/accountsDbConfig";
@@ -106,8 +98,6 @@ export type DeskModuleId =
   | "student_leave"
   | "vault"
   | "library"
-  | "store"
-  | "purchase"
   | "accounts"
   | "payroll"
   | "wa_threads"
@@ -260,22 +250,9 @@ export const DESK_CUTOVER_MODULES: DeskCutoverModule[] = [
     readFromDbClient: () => publicEnvFlag("NEXT_PUBLIC_LIBRARY_READ_FROM_DB"),
     blobTable: "library_state",
   },
-  {
-    id: "store",
-    label: "Store / inventory",
-    dualWrite: storeDualWriteDbEnabled,
-    readFromDb: storeReadFromDbEnabled,
-    readFromDbClient: () => publicEnvFlag("NEXT_PUBLIC_STORE_READ_FROM_DB"),
-    blobTable: "store_state",
-  },
-  {
-    id: "purchase",
-    label: "Purchase (indent → PO → GRN)",
-    dualWrite: purchaseDualWriteDbEnabled,
-    readFromDb: purchaseReadFromDbEnabled,
-    readFromDbClient: () => publicEnvFlag("NEXT_PUBLIC_PURCHASE_READ_FROM_DB"),
-    blobTable: "purchase_state",
-  },
+  // Store and purchase are not listed here any more. They were rebuilt as a
+  // server-truth module (inv_*) with no blob, no dual-write and no hydrate
+  // step, so there is no cutover state left to report.
   {
     id: "accounts",
     label: "Accounts / finance",

@@ -80,10 +80,6 @@ export async function resetAllWorkspacePersistenceCaches(): Promise<void> {
     import("@/lib/schoolCommsPersistence").then((m) =>
       m.resetSchoolCommsPersistenceCache(),
     ),
-    import("@/lib/storePersistence").then((m) => m.resetStorePersistenceCache()),
-    import("@/lib/purchasePersistence").then((m) =>
-      m.resetPurchasePersistenceCache(),
-    ),
     import("@/lib/accountsPersistence").then((m) =>
       m.resetAccountsPersistenceCache(),
     ),

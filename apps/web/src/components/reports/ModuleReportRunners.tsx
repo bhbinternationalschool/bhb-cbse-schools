@@ -20,13 +20,6 @@ import {
 } from "@/lib/accountsStore";
 import type { AccountsState } from "@/lib/accountsTypes";
 import {
-  STORE_REPORT_CATEGORIES,
-  STORE_REPORTS,
-  runStoreReport,
-  type StoreReportFormat,
-  type StoreReportId,
-} from "@/lib/storeReportCatalog";
-import {
   TRANSPORT_REPORTS,
   runTransportReport,
   type TransportReportFormat,
@@ -83,79 +76,23 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
+/**
+ * Store reports moved into the module that owns the data.
+ *
+ * They used to be generated here from the browser-held register. They are now
+ * run server-side against the stock ledger and the sale documents, so this
+ * points at them rather than shipping a second, weaker copy.
+ */
 export function StoreReportsRunner() {
-  const [format, setFormat] = useState<StoreReportFormat>("excel");
-  const [date, setDate] = useState(todayIso);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  function run(id: StoreReportId) {
-    const r = runStoreReport(id, { date, format });
-    if (!r.ok) {
-      setError(r.error);
-      setNotice(null);
-      return;
-    }
-    setError(null);
-    setNotice(r.message);
-  }
-
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-end gap-2">
-        <label className="text-xs text-[var(--muted)]">
-          Date
-          <input
-            type="date"
-            className={`${field} mt-1 block`}
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-          />
-        </label>
-        <label className="text-xs text-[var(--muted)]">
-          Format
-          <select
-            className={`${field} mt-1 block`}
-            value={format}
-            onChange={(e) => setFormat(e.target.value as StoreReportFormat)}
-          >
-            <option value="excel">Excel</option>
-            <option value="pdf">PDF</option>
-          </select>
-        </label>
-        <Link href="/store?tab=reports" className={btnOutline}>
-          Open in Store
-        </Link>
-      </div>
-      {error ? <p className="text-sm text-[#b42318]">{error}</p> : null}
-      {notice ? <p className="text-sm text-[#0f7a4c]">{notice}</p> : null}
-      {STORE_REPORT_CATEGORIES.map((cat) => (
-        <div key={cat.id}>
-          <h3 className="mb-2 text-sm font-semibold text-[var(--brand-deep)]">
-            {cat.title}
-          </h3>
-          <ul className="space-y-1.5">
-            {STORE_REPORTS.filter((r) => r.category === cat.id).map((r) => (
-              <li
-                key={r.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.08)] bg-white px-3 py-2"
-              >
-                <div>
-                  <p className="text-sm font-medium text-[var(--brand-deep)]">
-                    {r.label}
-                  </p>
-                  {r.hint ? (
-                    <p className="text-xs text-[var(--muted)]">{r.hint}</p>
-                  ) : null}
-                </div>
-                <button type="button" className={btn} onClick={() => run(r.id)}>
-                  Export
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
+      <p className="text-sm text-[var(--muted)]">
+        Stock register, item margin, sales day book and purchases by vendor are
+        run inside Store &amp; purchase, against the live ledger.
+      </p>
+      <Link href="/inventory?tab=reports" className={btnOutline}>
+        Open store reports
+      </Link>
     </div>
   );
 }

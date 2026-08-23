@@ -55,14 +55,6 @@ import {
   stopFutureBlocks,
 } from "@/lib/feeAdjustments";
 import {
-  isStoreIssueDueOnFeeTake,
-  listStoreIssuesForStudent,
-  loadStore,
-  storeDueKey,
-  storeIssueNetBilledPaise,
-  type StoreIssueLine,
-} from "@/lib/store";
-import {
   computeTransportPeriodDues,
   loadTransport,
 } from "@/lib/transport";
@@ -1493,29 +1485,14 @@ function normalizeVoucherLine(l: Partial<VoucherLine>): VoucherLine {
                 : l.dueKey?.startsWith("cv:")
                   ? "voucher"
                   : "academic";
-  let storeItems = Array.isArray(l.storeItems) ? l.storeItems : [];
-  let storeIssueNo = l.storeIssueNo ?? "";
+  const storeItems = Array.isArray(l.storeItems) ? l.storeItems : [];
+  const storeIssueNo = l.storeIssueNo ?? "";
   const transportDetail = l.transport ?? null;
 
-  // Backfill item details for older store receipts from the issue register
-  if (kind === "store" && storeItems.length === 0 && l.dueKey) {
-    const parts = l.dueKey.split(":");
-    const issueId = parts[2];
-    if (issueId) {
-      const iss = loadStore().issues.find((i) => i.id === issueId);
-      if (iss) {
-        storeIssueNo = storeIssueNo || iss.issueNo;
-        storeItems = iss.lines.map((x) => ({
-          sku: x.sku,
-          name: x.name,
-          sizeLabel: x.sizeLabel,
-          qty: x.qty,
-          unitPricePaise: x.unitPricePaise,
-          linePaise: x.linePaise,
-        }));
-      }
-    }
-  }
+  // Older store receipts that were written without their item lines cannot be
+  // backfilled any more: the issue register they were read from is gone with
+  // the old module. The receipt still shows its amount; it simply lists no
+  // items, which is honest about what is known.
 
   const concessionDetails = Array.isArray(l.concessionDetails)
     ? l.concessionDetails.map((c) => ({
@@ -2118,65 +2095,13 @@ export function computeStudentDues(
     });
   }
 
-  const store = loadStore();
-  for (const iss of listStoreIssuesForStudent(student.id, store)) {
-    if (iss.academicYearCode !== (student.academicYearCode || DEFAULT_AY)) {
-      continue;
-    }
-    // Cash / already settled at counter — not a Fee Take due
-    if (
-      iss.paymentStatus === "paid" ||
-      iss.paymentStatus === "void" ||
-      iss.recipientKind === "staff" ||
-      !iss.studentId
-    ) {
-      continue;
-    }
-    if (!isStoreIssueDueOnFeeTake(iss)) {
-      continue;
-    }
-    if (!includeFuture && isAfterRunningSessionMonth(iss.issuedOn, asOf)) {
-      continue;
-    }
-    const dueKey = storeDueKey(student.id, iss.id);
-    const billed = storeIssueNetBilledPaise(iss);
-    const counterPaid = Math.max(0, iss.counterPaidPaise || 0);
-    const paid = (paidMap.get(dueKey) ?? 0) + counterPaid;
-    const balance = Math.max(0, billed - paid);
-    if (balance <= 0) {
-      if (!(includePaid && paid > 0)) continue;
-    }
-    const itemCount = iss.lines.reduce((s, l) => s + l.qty, 0);
-    lines.push({
-      dueKey,
-      kind: "store",
-      studentId: student.id,
-      feeHeadId: "",
-      feeHeadName: "Store",
-      installmentId: null,
-      installmentLabel: "Store",
-      specialFeeId: null,
-      structureLineId: null,
-      storeIssueId: iss.id,
-      storeIssueNo: iss.issueNo,
-      storeItems: iss.lines.map((l: StoreIssueLine) => ({
-        sku: l.sku,
-        name: l.name,
-        sizeLabel: l.sizeLabel,
-        qty: l.qty,
-        unitPricePaise: l.unitPricePaise,
-        linePaise: l.linePaise,
-      })),
-      transport: null,
-      dueOn: iss.issuedOn,
-      billedPaise: billed,
-      concessionPaise: 0,
-      concessionDetails: [],
-      paidPaise: paid,
-      balancePaise: balance,
-      label: `Store · ${iss.issueNo} · ${itemCount} item${itemCount === 1 ? "" : "s"}`,
-    });
-  }
+  // Store dues are no longer derived here.
+  //
+  // The store was rebuilt as a server-truth module (inv_*); a credit sale's
+  // balance lives on inv_sales.balance_paise and is collected in Store &
+  // purchase. Deriving dues from the old browser-held register would report
+  // whatever that empty cache happened to contain. Historical store lines
+  // already written onto vouchers still render — only the derivation is gone.
 
   const paidMapRaw = new Map<string, number>();
   for (const v of fees.vouchers) {
@@ -4241,16 +4166,7 @@ export function buildDayBook(
   modeTotals: DayCloseModeTotal[];
   /** Collected amount split by voucher line kind */
   kindTotals: { kind: DueKind; label: string; paise: number; lineCount: number }[];
-  /** Store credit issues raised on this calendar date (may still be unpaid) */
-  storeIssues: {
-    issueId: string;
-    issueNo: string;
-    studentId: string;
-    totalPaise: number;
-    itemCount: number;
-    voided: boolean;
-  }[];
-  storeIssuedPaise: number;
+  /** Collected against store dues, from the vouchers themselves. */
   storeCollectedPaise: number;
 } {
   const vouchers = vouchersForCollectionDate(closeDate, fees);
@@ -4322,22 +4238,9 @@ export function buildDayBook(
       };
     });
 
-  const store = loadStore();
-  const storeIssues = store.issues
-    .filter((i) => i.issuedOn === closeDate)
-    .map((i) => ({
-      issueId: i.id,
-      issueNo: i.issueNo,
-      studentId: i.studentId,
-      totalPaise: i.totalPaise,
-      itemCount: i.lines.reduce((s, l) => s + l.qty, 0),
-      voided: !!i.voidedAt,
-    }))
-    .sort((a, b) => a.issueNo.localeCompare(b.issueNo));
-
-  const storeIssuedPaise = storeIssues
-    .filter((i) => !i.voided)
-    .reduce((s, i) => s + i.totalPaise, 0);
+  // Store issues raised on the day are no longer listed here — they live in
+  // the Store & purchase day book now. Reporting an empty list would read as
+  // "no store sales today", which is not something this function can know.
   const storeCollectedPaise = byKind.get("store")?.paise ?? 0;
 
   const totalPaise = vouchers.reduce((s, v) => s + v.totalPaise, 0);
@@ -4349,8 +4252,6 @@ export function buildDayBook(
     cashPaise,
     modeTotals,
     kindTotals,
-    storeIssues,
-    storeIssuedPaise,
     storeCollectedPaise,
   };
 }
