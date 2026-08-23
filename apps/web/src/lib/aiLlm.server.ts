@@ -58,6 +58,15 @@ import {
   type LessonPlanDraft,
 } from "@/lib/lessonPlanAi";
 import {
+  buildLedgerBriefSystemPrompt,
+  buildLedgerBriefUserPrompt,
+  parseLedgerBriefJson,
+  LEDGER_BRIEF_PROMPT_VERSION,
+  type LedgerBriefDraft,
+  type LedgerBriefFacts,
+  type LedgerBriefLanguage,
+} from "@/lib/ledgerBriefAi";
+import {
   buildPtmBriefSystemPrompt,
   buildPtmBriefUserPrompt,
   parsePtmBriefJson,
@@ -1294,6 +1303,46 @@ export async function generateRiskNotesJson(opts: {
   );
   if (r.ok) return { ok: true, notes: r.data, engine: r.engine, generationId: r.generationId };
   return { ok: false, error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI notes", engine: r.engine };
+}
+
+/**
+ * The morning note on the books. Draft only, and nothing it says is saved.
+ *
+ * The findings are computed by the deterministic rules in lib/ledger/anomalies
+ * before this is called; the model orders them and writes the connecting
+ * prose. Its output is allow-listed to the codes supplied and rejected outright
+ * if it contains a digit — every figure the reader needs is rendered from the
+ * ledger, and a plausible invented amount in a set of accounts is worse than
+ * no sentence at all.
+ */
+export async function generateLedgerBriefJson(opts: {
+  facts: LedgerBriefFacts;
+  language: LedgerBriefLanguage;
+}): Promise<
+  | { ok: true; draft: LedgerBriefDraft; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const codes = opts.facts.findings.map((f) => f.code);
+  const r = await callLlmJson(
+    {
+      system: buildLedgerBriefSystemPrompt({
+        language: opts.language,
+        schoolName: opts.facts.schoolName,
+      }),
+      userMessage: buildLedgerBriefUserPrompt(opts.facts),
+      maxTokens: opts.language === "hi" ? 900 : 600,
+      temperature: 0.3,
+      geminiMaxTokens: 2048,
+      meta: { route: "ledger-morning-brief", promptVersion: LEDGER_BRIEF_PROMPT_VERSION },
+    },
+    (text) => parseLedgerBriefJson(text, codes),
+  );
+  if (r.ok) return { ok: true, draft: r.data, engine: r.engine, generationId: r.generationId };
+  return {
+    ok: false,
+    error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for the morning brief",
+    engine: r.engine,
+  };
 }
 
 /** Teaching moves from item-score roll-ups. Draft only. */

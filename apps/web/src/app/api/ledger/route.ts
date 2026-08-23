@@ -30,6 +30,12 @@ import {
 } from "@/lib/ledger/ledger.server";
 import { ledgerReconciliation, projectAll } from "@/lib/ledger/project.server";
 import {
+  ledgerAnomalies,
+  ledgerCockpit,
+  payablesAgeing,
+  receivablesAgeing,
+} from "@/lib/ledger/controls.server";
+import {
   accountStatement,
   balanceSheetReport,
   caYearEndPack,
@@ -115,6 +121,9 @@ type PostBody =
   | { action: "receipts-payments"; from: string; to: string }
   | { action: "account-statement"; code: string; from: string; to: string }
   | { action: "ca-pack"; fyCode: string; from: string; to: string; csv?: boolean }
+  | { action: "anomalies"; asOf: string }
+  | { action: "ageing"; asOf: string; side?: "payables" | "receivables" }
+  | { action: "cockpit"; asOf: string; fyFrom: string }
   | { action: "parity"; deskRows: { code: string; balancePaise: number }[] };
 
 export async function POST(req: Request) {
@@ -150,6 +159,9 @@ export async function POST(req: Request) {
     "parity",
     "bank-recon",
     "cheque-clearings",
+    "anomalies",
+    "ageing",
+    "cockpit",
   ]);
 
   const auth = await requireStaffPermission(
@@ -294,6 +306,21 @@ export async function POST(req: Request) {
         body.csv ? { ...pack, csv: packToCsvBundle(pack) } : pack,
         { status: 200 },
       );
+    }
+    case "anomalies": {
+      const res = await ledgerAnomalies({ asOf: body.asOf });
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    case "ageing": {
+      const report =
+        body.side === "receivables"
+          ? await receivablesAgeing(body.asOf)
+          : await payablesAgeing(body.asOf);
+      return NextResponse.json({ ok: true, side: body.side ?? "payables", report });
+    }
+    case "cockpit": {
+      const res = await ledgerCockpit({ asOf: body.asOf, fyFrom: body.fyFrom });
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
     }
     case "parity": {
       const res = await ledgerParityAgainstDesk(body.deskRows ?? []);

@@ -24,6 +24,16 @@ import {
 } from "@/lib/ledger/mirror";
 import { defaultLedgerAccounts, isPostableLedgerCode } from "@/lib/ledger/coa";
 import {
+  runAnomalyChecks,
+  summariseAnomalies,
+  type AnomalyFacts,
+} from "@/lib/ledger/anomalies";
+import { buildAgeing, bucketFor } from "@/lib/ledger/ageing";
+import {
+  buildLedgerBriefUserPrompt,
+  parseLedgerBriefJson,
+} from "@/lib/ledgerBriefAi";
+import {
   allocateVoucherCash,
   buildBalanceSheet,
   buildIncomeExpenditure,
@@ -824,6 +834,281 @@ function bal(o: Partial<PeriodBalanceRow> & { code: string; kind: PeriodBalanceR
   assert.equal(paiseToRupeeString(-50_050), "-500.50");
   assert.equal(paiseToRupeeString(0), "0.00");
   console.log("  ok  amounts export as rupees and paise without float drift");
+}
+
+
+/* ─── Controls ─────────────────────────────────────────────── */
+
+function facts(o: Partial<AnomalyFacts>): AnomalyFacts {
+  return {
+    asOf: "2026-08-31",
+    vouchers: o.vouchers ?? [],
+    lines: o.lines ?? [],
+    balances: o.balances ?? [],
+    unreconciled: o.unreconciled ?? [],
+    reopenedPeriods: o.reopenedPeriods ?? [],
+  };
+}
+function v(o: Partial<AnomalyFacts["vouchers"][number]> & { id: string }) {
+  return {
+    id: o.id, voucherNo: o.voucherNo ?? o.id, voucherType: o.voucherType ?? "payment",
+    date: o.date ?? "2026-08-01", createdAt: o.createdAt ?? "2026-08-01T00:00:00Z",
+    narration: "", sourceType: o.sourceType ?? "", sourceId: o.sourceId ?? "",
+    createdBy: "", reversed: o.reversed ?? false,
+  };
+}
+function ln(o: Partial<AnomalyFacts["lines"][number]> & { voucherId: string }) {
+  return {
+    voucherId: o.voucherId, accountCode: o.accountCode ?? "2000",
+    partyKey: o.partyKey ?? "", partyName: o.partyName ?? "",
+    debitPaise: o.debitPaise ?? 0, creditPaise: o.creditPaise ?? 0,
+    instrumentRef: "",
+  };
+}
+
+{
+  const f = facts({
+    vouchers: [
+      v({ id: "p1", voucherNo: "PY/1", date: "2026-08-01" }),
+      v({ id: "p2", voucherNo: "PY/2", date: "2026-08-09" }),
+      v({ id: "p3", voucherNo: "PY/3", date: "2026-08-10" }),
+    ],
+    lines: [
+      ln({ voucherId: "p1", partyKey: "vendor:v1", partyName: "Acme", debitPaise: 25_000_00 }),
+      ln({ voucherId: "p2", partyKey: "vendor:v1", partyName: "Acme", debitPaise: 25_000_00 }),
+      // Same amount, different supplier — routine, must not fire.
+      ln({ voucherId: "p3", partyKey: "vendor:v2", partyName: "Other", debitPaise: 25_000_00 }),
+    ],
+  });
+  const found = runAnomalyChecks(f).filter((a) => a.code === "duplicate_payment");
+  assert.equal(found.length, 1, "one duplicate, and only between the same supplier's two payments");
+  assert.deepEqual(found[0]!.references, ["PY/1", "PY/2"], "it names both vouchers to look at");
+  assert.equal(found[0]!.severity, "critical");
+
+  // Far enough apart is a second legitimate invoice, not a duplicate.
+  const spread = runAnomalyChecks(
+    facts({
+      vouchers: [v({ id: "a", date: "2026-06-01" }), v({ id: "b", date: "2026-08-01" })],
+      lines: [
+        ln({ voucherId: "a", partyKey: "vendor:v1", debitPaise: 25_000_00 }),
+        ln({ voucherId: "b", partyKey: "vendor:v1", debitPaise: 25_000_00 }),
+      ],
+    }),
+  ).filter((a) => a.code === "duplicate_payment");
+  assert.equal(spread.length, 0, "two months apart is a monthly bill, not a duplicate");
+
+  // A reversed payment is the system working.
+  const reversed = runAnomalyChecks(
+    facts({
+      vouchers: [v({ id: "a" }), v({ id: "b", date: "2026-08-02", reversed: true })],
+      lines: [
+        ln({ voucherId: "a", partyKey: "vendor:v1", debitPaise: 25_000_00 }),
+        ln({ voucherId: "b", partyKey: "vendor:v1", debitPaise: 25_000_00 }),
+      ],
+    }),
+  ).filter((a) => a.code === "duplicate_payment");
+  assert.equal(reversed.length, 0, "an already-reversed duplicate is not still a problem");
+  console.log("  ok  a supplier paid the same amount twice is caught; routine repeats are not");
+}
+
+{
+  const f = facts({
+    balances: [
+      { code: "1000", name: "Cash in Hand", kind: "asset", isCash: true, isBank: false, closingPaise: -300_00 },
+      { code: "1010", name: "Bank", kind: "asset", isCash: false, isBank: true, closingPaise: 5_000_00 },
+      // A liability in debit is odd but possible; only cash and bank are impossible.
+      { code: "2000", name: "Payables", kind: "liability", isCash: false, isBank: false, closingPaise: -1_000_00 },
+    ],
+  });
+  const found = runAnomalyChecks(f).filter((a) => a.code === "negative_cash");
+  assert.equal(found.length, 1, "only the cash account is flagged");
+  assert.equal(found[0]!.severity, "critical", "a drawer cannot hold minus three hundred rupees");
+  console.log("  ok  a negative cash or bank balance is flagged as impossible, not merely unusual");
+}
+
+{
+  const f = facts({
+    vouchers: [
+      v({ id: "acc", sourceType: "payroll_run", sourceId: "run_7", voucherType: "payroll" }),
+      v({ id: "pay", sourceType: "payroll_payment", sourceId: "run_7" }),
+      v({ id: "orphan", voucherNo: "PY/9", sourceType: "payroll_payment", sourceId: "run_8" }),
+    ],
+    lines: [ln({ voucherId: "orphan", debitPaise: 300_000_00 })],
+  });
+  const found = runAnomalyChecks(f).filter((a) => a.code === "payroll_paid_unaccrued");
+  assert.equal(found.length, 1, "only the run that was never posted");
+  assert.equal(found[0]!.references[0], "PY/9");
+  console.log("  ok  salary paid for a run nobody posted is caught");
+}
+
+{
+  const f = facts({
+    unreconciled: [
+      { side: "book", id: "b1", date: "2026-08-25", signedPaise: -5_000_00, narration: "Cheque 1234" },
+      { side: "book", id: "b2", date: "2026-05-01", signedPaise: -9_000_00, narration: "Cheque 1100" },
+      { side: "statement", id: "s1", date: "2026-05-02", signedPaise: -1_770, narration: "SMS CHRG" },
+    ],
+  });
+  const found = runAnomalyChecks(f).filter((a) => a.code.startsWith("stale_"));
+  assert.equal(found.length, 2, "recent items are money in transit; old ones are not");
+  assert.ok(found.some((a) => a.code === "stale_unpresented"), "the old cheque");
+  assert.ok(found.some((a) => a.code === "stale_unrecorded"), "and the charge the books never saw");
+  console.log("  ok  bank items stale for weeks are surfaced; recent ones are left alone");
+}
+
+{
+  const all = runAnomalyChecks(
+    facts({
+      balances: [{ code: "1000", name: "Cash", kind: "asset", isCash: true, isBank: false, closingPaise: -1_00 }],
+      reopenedPeriods: [{ period: "2026-07", status: "open" }, { period: "2026-06", status: "locked" }],
+      vouchers: [v({ id: "old", date: "2026-01-01", createdAt: "2026-08-01T00:00:00Z" })],
+      lines: [ln({ voucherId: "old", debitPaise: 100 })],
+    }),
+  );
+  assert.equal(all[0]!.severity, "critical", "the most serious finding sorts first");
+  assert.ok(all.some((a) => a.code === "period_reopened"), "a relocked month is surfaced");
+  assert.ok(!all.some((a) => a.code === "period_reopened" && a.references[0] === "2026-06"), "a still-locked month is not");
+  assert.ok(all.some((a) => a.code === "backdated_entry"), "an entry written months later is noted");
+
+  const s = summariseAnomalies(all);
+  assert.ok(s.critical >= 1);
+  assert.equal(runAnomalyChecks(facts({})).length, 0, "a clean book produces no findings at all");
+  console.log("  ok  findings sort by severity, and a clean book stays silent");
+}
+
+/* ─── Ageing ───────────────────────────────────────────────── */
+
+{
+  assert.equal(bucketFor(-5), "current", "not yet due");
+  assert.equal(bucketFor(1), "1_30");
+  assert.equal(bucketFor(30), "1_30");
+  assert.equal(bucketFor(31), "31_60");
+  assert.equal(bucketFor(91), "over_90");
+
+  const report = buildAgeing({
+    asOf: "2026-08-31",
+    items: [
+      { partyKey: "vendor:v1", partyName: "Acme", voucherNo: "PU/1", voucherDate: "2026-05-01", dueDate: "2026-05-31", outstandingPaise: 20_000_00 },
+      { partyKey: "vendor:v1", partyName: "Acme", voucherNo: "PU/2", voucherDate: "2026-08-20", dueDate: "2026-09-20", outstandingPaise: 5_000_00 },
+      { partyKey: "vendor:v2", partyName: "Bee", voucherNo: "PU/3", voucherDate: "2026-08-01", dueDate: null, outstandingPaise: 3_000_00 },
+    ],
+  });
+
+  const acme = report.rows.find((r) => r.partyKey === "vendor:v1");
+  assert.ok(acme, "Acme has outstanding items");
+  assert.equal(acme.buckets.over_90, 20_000_00, "the May bill is over ninety days past due");
+  assert.equal(acme.buckets.current, 5_000_00, "the September one is not due yet");
+  assert.equal(acme.agedFromVoucherDate, false, "Acme's items carry due dates");
+
+  const bee = report.rows.find((r) => r.partyKey === "vendor:v2");
+  assert.ok(bee, "Bee has an outstanding item");
+  assert.equal(bee.agedFromVoucherDate, true, "Bee's do not, and the row says so");
+  assert.equal(report.totalPaise, 28_000_00);
+  assert.equal(report.rows[0]!.partyKey, "vendor:v1", "the oldest debt sorts first");
+  console.log("  ok  payables age by due date, and say when they had to fall back on the invoice date");
+}
+
+{
+  // The ledger records that a supplier was billed and that they were paid, but
+  // not which bill a payment settled. Without applying one to the other, every
+  // bill stays outstanding for ever and the report tells you to pay again.
+  const paidOff = buildAgeing({
+    asOf: "2026-08-31",
+    items: [
+      { partyKey: "v", partyName: "Acme", voucherNo: "PU/1", voucherDate: "2026-05-01", dueDate: "2026-05-31", outstandingPaise: 25_000_00 },
+      { partyKey: "v", partyName: "Acme", voucherNo: "PY/1", voucherDate: "2026-07-05", dueDate: null, outstandingPaise: -25_000_00 },
+    ],
+  });
+  assert.equal(paidOff.totalPaise, 0, "a bill that was paid is not still owed");
+  assert.equal(paidOff.rows.length, 0, "and the supplier drops off the report entirely");
+
+  const overpaid = buildAgeing({
+    asOf: "2026-08-31",
+    items: [
+      { partyKey: "v", partyName: "Acme", voucherNo: "PU/1", voucherDate: "2026-05-01", dueDate: null, outstandingPaise: 25_000_00 },
+      { partyKey: "v", partyName: "Acme", voucherNo: "PY/1", voucherDate: "2026-07-05", dueDate: null, outstandingPaise: -50_000_00 },
+    ],
+  });
+  assert.equal(overpaid.totalPaise, 0, "an overpaid supplier is owed nothing, not a negative amount");
+
+  // Oldest first: a part payment must clear the oldest bill, not the newest.
+  const partial = buildAgeing({
+    asOf: "2026-08-31",
+    items: [
+      { partyKey: "v", partyName: "Acme", voucherNo: "PU/old", voucherDate: "2026-01-01", dueDate: "2026-01-31", outstandingPaise: 10_000_00 },
+      { partyKey: "v", partyName: "Acme", voucherNo: "PU/new", voucherDate: "2026-08-01", dueDate: "2026-08-31", outstandingPaise: 10_000_00 },
+      { partyKey: "v", partyName: "Acme", voucherNo: "PY/1", voucherDate: "2026-08-10", dueDate: null, outstandingPaise: -10_000_00 },
+    ],
+  });
+  assert.equal(partial.totalPaise, 10_000_00, "half the debt remains");
+  assert.equal(partial.rows[0]!.buckets.over_90, 0, "the January bill was settled first");
+  assert.equal(partial.rows[0]!.buckets.current, 10_000_00, "leaving only the one not yet due");
+  console.log("  ok  payments clear bills oldest-first, so a settled supplier stops being billed again");
+}
+
+/* ─── The AI brief: what the model may and may not do ──────── */
+
+{
+  const codes = ["duplicate_payment", "negative_cash"];
+
+  const good = parseLedgerBriefJson(
+    JSON.stringify({
+      headline: "One supplier appears to have been paid twice.",
+      priority: ["duplicate_payment", "negative_cash"],
+      note: "Both findings point at the same week. Check the supplier's invoices first.",
+    }),
+    codes,
+  );
+  assert.ok(good, "a clean draft parses");
+  assert.deepEqual(good.priority, codes);
+
+  // The invariant that makes this safe to show a director.
+  const withDigits = parseLedgerBriefJson(
+    JSON.stringify({
+      headline: "About 2 lakh is overdue.",
+      priority: ["duplicate_payment"],
+      note: "Nothing else to report.",
+    }),
+    codes,
+  );
+  assert.equal(withDigits, null, "a draft containing any digit is rejected outright");
+
+  const digitInNote = parseLedgerBriefJson(
+    JSON.stringify({ headline: "Two issues today.", priority: [], note: "The 90-day bucket has grown." }),
+    codes,
+  );
+  assert.equal(digitInNote, null, "including in the note");
+
+  // Invented findings are dropped, not passed through.
+  const invented = parseLedgerBriefJson(
+    JSON.stringify({
+      headline: "Something is wrong.",
+      priority: ["duplicate_payment", "gst_mismatch", "made_up"],
+      note: "Look at the supplier.",
+    }),
+    codes,
+  );
+  assert.ok(invented, "a draft naming an unknown code still parses");
+  assert.deepEqual(invented.priority, ["duplicate_payment"], "only codes that were actually supplied survive");
+
+  assert.equal(parseLedgerBriefJson("not json", codes), null);
+  assert.equal(parseLedgerBriefJson(JSON.stringify({ priority: [] }), codes), null, "a draft with no headline is not a draft");
+  console.log("  ok  the brief may not emit a digit or name a finding nobody computed");
+}
+
+{
+  // Absent must stay absent: with no statement imported the model is told so
+  // and told not to comment, rather than left to assume all is well.
+  const prompt = buildLedgerBriefUserPrompt({
+    schoolName: "Test School",
+    asOf: "2026-08-31",
+    position: { cash: "x", bank: "x", payables: "x", receivables: "x", surplusThisYear: "x" },
+    findings: [],
+  });
+  assert.match(prompt, /not available/i, "reconciliation status is stated as unavailable");
+  assert.match(prompt, /Do not comment/i, "and the model is told not to comment on it");
+  assert.match(prompt, /Findings: none/, "an empty finding list is stated plainly");
+  console.log("  ok  a missing reconciliation is passed as absent, never as agreed");
 }
 
 /* ─── Live path ────────────────────────────────────────────── */
