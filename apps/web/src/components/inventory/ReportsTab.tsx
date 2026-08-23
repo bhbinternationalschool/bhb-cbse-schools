@@ -25,7 +25,7 @@ import {
   Pill,
   StatTile,
 } from "@/components/inventory/InvUi";
-import { invApi, useAsync, useSaver } from "@/lib/inventory/client";
+import { invApi, useAsync } from "@/lib/inventory/client";
 import { downloadExcelCsv } from "@/lib/reportExport";
 import {
   formatPaise,
@@ -42,7 +42,7 @@ type ReportId =
   | "margin"
   | "daybook"
   | "purchases"
-  | "closing";
+  | "parity";
 
 const REPORTS: { id: ReportId; label: string }[] = [
   { id: "dashboard", label: "Overview" },
@@ -50,7 +50,7 @@ const REPORTS: { id: ReportId; label: string }[] = [
   { id: "margin", label: "Item margin" },
   { id: "daybook", label: "Sales day book" },
   { id: "purchases", label: "Purchases by vendor" },
-  { id: "closing", label: "Closing stock" },
+  { id: "parity", label: "Stock vs books" },
 ];
 
 function monthStart(): string {
@@ -85,7 +85,7 @@ export function ReportsTab({ boot }: { boot: InvBootstrap }) {
         ))}
       </div>
 
-      {report !== "dashboard" && report !== "stock" && report !== "closing" ? (
+      {report !== "dashboard" && report !== "stock" && report !== "parity" ? (
         <div className="flex flex-wrap items-end gap-2">
           <label className="text-xs">
             <span className="block text-muted-foreground">From</span>
@@ -130,7 +130,7 @@ export function ReportsTab({ boot }: { boot: InvBootstrap }) {
       {report === "margin" ? <MarginReport from={from} to={to} /> : null}
       {report === "daybook" ? <DayBook from={from} to={to} /> : null}
       {report === "purchases" ? <Purchases from={from} to={to} /> : null}
-      {report === "closing" ? <ClosingStock /> : null}
+      {report === "parity" ? <InventoryParity /> : null}
     </div>
   );
 }
@@ -144,102 +144,83 @@ export function ReportsTab({ boot }: { boot: InvBootstrap }) {
  * every stock adjustment posts to the books, and under this chart it must not.
  * Saying so plainly is what stops someone "fixing" it later.
  */
-function ClosingStock() {
-  const [asOf, setAsOf] = useState(today());
-  const value = useAsync(() => invApi.stockValueAsOf(asOf), [asOf]);
-  const saver = useSaver();
-
-  async function post() {
-    const res = await saver.run(() => invApi.postClosingStock(asOf));
-    if (res) {
-      saver.setNotice(
-        res.created
-          ? `${res.voucherNo} posted for ${formatPaise(res.valuePaise)}` +
-              (res.reversedVoucherNo
-                ? ` · previous entry reversed as ${res.reversedVoucherNo}`
-                : "")
-          : res.note || "Already posted for this date",
-      );
-      value.reload();
-    }
-  }
+/**
+ * Does the ledger's Inventory balance match the stock on the shelf?
+ *
+ * Under perpetual inventory these two must agree at all times, because every
+ * receipt, sale and write-off moves both together. A gap means an event moved
+ * one without the other, so this is the check that catches it early — and the
+ * screen says what to do rather than only showing a number.
+ */
+function InventoryParity() {
+  const p = useAsync(() => invApi.inventoryParity(), []);
+  const d = p.data;
+  const agrees = d ? d.differencePaise === 0 : false;
 
   return (
     <div className="space-y-4">
-      <InvAlert
-        error={value.error || saver.error}
-        notice={saver.notice}
-        onDismiss={() => {
-          saver.setError("");
-          saver.setNotice("");
-        }}
-      />
+      <InvAlert error={p.error} />
 
-      <div className="grid gap-2 sm:grid-cols-2">
+      <div className="grid gap-2 sm:grid-cols-3">
         <StatTile
-          label="Stock value at this date"
-          value={value.data === null ? "—" : formatPaise(value.data)}
-          sub="quantity on hand × average cost"
+          label="Stock on the shelf"
+          value={d ? formatPaise(d.stockValuePaise) : "—"}
+          sub="quantity × average cost"
         />
-        <div className="rounded-xl border bg-card px-3 py-2.5">
-          <label className="block text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-            Value as at
-          </label>
-          <input
-            type="date"
-            className={`${FIELD_CLASS} mt-1 w-full`}
-            value={asOf}
-            onChange={(e) => setAsOf(e.target.value)}
-          />
-        </div>
+        <StatTile
+          label="Inventory in the books"
+          value={d ? formatPaise(d.ledgerValuePaise) : "—"}
+          sub="account 1090"
+        />
+        <StatTile
+          label="Difference"
+          value={d ? formatPaise(d.differencePaise) : "—"}
+          tone={agrees ? "good" : "bad"}
+          sub={agrees ? "they agree" : "needs looking at"}
+        />
+      </div>
+
+      <div className="flex justify-end">
+        <Button variant="outline" size="sm" onClick={p.reload}>
+          <RefreshCw className="size-3.5" />
+          Re-check
+        </Button>
       </div>
 
       <div className="space-y-2 rounded-xl border p-3 text-sm">
-        <h3 className="font-semibold">What this posts</h3>
-        <p className="text-muted-foreground">
-          Goods are charged to <strong>Store Purchases</strong> the moment they
-          arrive. At a period end the stock still on the shelf has been paid for
-          but not used, so its value comes back onto the balance sheet:
-        </p>
-        <div className="rounded-lg bg-muted/50 px-3 py-2 font-mono text-xs">
-          Dr Closing Stock (1090)
-          {"    "}
-          {value.data ? formatPaise(value.data) : "—"}
+        <h3 className="font-semibold">How stock reaches the books</h3>
+        <div className="rounded-lg bg-muted/50 px-3 py-2 font-mono text-xs leading-relaxed">
+          receiving{"      "}Dr Inventory{"        "}Cr Accounts Payable
           <br />
-          Cr Store Purchases (5060)
-          {"  "}
-          {value.data ? formatPaise(value.data) : "—"}
+          selling{"        "}Dr Cost of Goods Sold{"  "}Cr Inventory
+          <br />
+          written off{"    "}Dr Stock Written Off{"  "}Cr Inventory
+          <br />
+          opening stock{"  "}Dr Inventory{"        "}Cr Corpus
         </div>
         <p className="text-muted-foreground">
-          The previous period&rsquo;s entry is reversed as part of this, so the
-          books never carry two closing-stock balances at once.
+          Goods are an asset from the moment they arrive until they are sold or
+          lost, so these two figures move together and should never drift. A
+          transfer between rooms posts nothing — value moving location is not an
+          accounting event.
         </p>
       </div>
 
-      <div className="space-y-2 rounded-xl border border-dashed p-3 text-xs text-muted-foreground">
-        <h3 className="text-sm font-semibold text-foreground">
-          Why adjustments do not post
-        </h3>
-        <p>
-          A shrinkage, damage or physical-count correction has already had its
-          cost charged to Store Purchases when the goods were bought. Writing it
-          off again would charge the same goods twice. It shows up here instead,
-          as less stock left to bring back — which is the correct effect.
-        </p>
-        <p>
-          A transfer between locations changes nothing the books care about, so
-          it posts nothing either.
-        </p>
-        <p>
-          Stock the school already owned before it started using this module
-          belongs in the ledger&rsquo;s own opening-balance entry, not here — its
-          cost sits in the previous year&rsquo;s accounts.
-        </p>
-      </div>
+      {!agrees && d ? (
+        <div className="rounded-xl border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+          The shelf and the books disagree by {formatPaise(d.differencePaise)}.
+          That means stock moved without its journal, or the reverse. Check the
+          stock history of anything changed recently, and whether a posting was
+          refused.
+        </div>
+      ) : null}
 
-      <Button size="sm" onClick={post} disabled={saver.saving || !value.data}>
-        {saver.saving ? "Posting…" : `Post closing stock as at ${asOf}`}
-      </Button>
+      <p className="rounded-lg bg-muted/50 px-3 py-2 text-[11px] text-muted-foreground">
+        Stock the school owned before it started using this module is entered
+        as opening stock in the Catalogue, which posts it here. It must not also
+        be entered on the ledger&rsquo;s own opening-balance screen, or the same
+        goods land twice.
+      </p>
     </div>
   );
 }

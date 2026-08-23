@@ -505,24 +505,14 @@ export const invApi = {
       };
     }>("/reports", { query: { report: "daybook", from, to } }),
 
-  stockValueAsOf: (asOf: string) =>
-    req<{ valuePaise: number }>("/reports", {
-      query: { report: "stock-value", asOf },
-    }).then((r) => r.valuePaise),
-
-  postClosingStock: (asOf: string) =>
+  inventoryParity: () =>
     req<{
-      closingStock: {
-        created: boolean;
-        valuePaise: number;
-        voucherNo: string;
-        reversedVoucherNo: string;
-        note: string;
+      parity: {
+        stockValuePaise: number;
+        ledgerValuePaise: number;
+        differencePaise: number;
       };
-    }>("/reports", {
-      method: "POST",
-      body: JSON.stringify({ asOf }),
-    }).then((r) => r.closingStock),
+    }>("/reports", { query: { report: "parity" } }).then((r) => r.parity),
 
   purchaseReport: (from: string, to: string) =>
     req<{

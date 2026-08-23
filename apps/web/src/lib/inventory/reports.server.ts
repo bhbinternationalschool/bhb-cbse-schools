@@ -368,63 +368,31 @@ export async function dashboard(): Promise<InvDashboard> {
 }
 
 
-/* ─── Closing stock ────────────────────────────────────────── */
+/* ─── Inventory parity ────────────────────────────────────── */
+
+export type InvInventoryParity = {
+  stockValuePaise: number;
+  ledgerValuePaise: number;
+  differencePaise: number;
+};
 
 /**
- * Bring the value still on the shelf back onto the balance sheet.
+ * Does the ledger's Inventory balance match the stock on the shelf?
  *
- * Purchases are expensed when goods arrive, so at a period end the goods not
- * yet consumed have to be recognised: Dr Closing Stock, Cr Store Purchases.
- * The previous period's entry is reversed on the way, so two closing-stock
- * balances never stand at once.
- *
- * Stock adjustments and transfers deliberately post nothing of their own —
- * their cost was already expensed at purchase, and this figure picks up the
- * result. Opening stock at go-live belongs in the ledger's own opening-balance
- * flow, not here.
+ * The check worth running regularly under perpetual inventory. Any gap means
+ * something moved stock without its journal, or the reverse — and the sooner
+ * it is seen the smaller it is.
  */
-export async function postClosingStock(
-  asOf: string,
-  actor: string,
-): Promise<InvClosingStockResult> {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(asOf))) {
-    throw new InvError("Choose the date to value the stock at", 400);
-  }
-
+export async function inventoryParity(): Promise<InvInventoryParity> {
   const { sb, tenantId } = await invCtx();
-  const { data, error } = await sb.rpc("inv_ledger_post_closing_stock", {
+  const { data, error } = await sb.rpc("inv_inventory_parity", {
     p_tenant_id: tenantId,
-    p_as_of: asOf,
-    p_actor: actor,
   });
-  if (error) {
-    throw new InvError(
-      String(error.message).replace(/^ERROR:\s*/i, "").split("CONTEXT:")[0].trim(),
-      409,
-    );
-  }
-
+  if (error) throw new InvError(`Inventory parity: ${error.message}`, 500);
   const out = (data ?? {}) as Row;
-  if (out.ok === false) {
-    throw new InvError(str(out.error) || "The closing stock entry was refused", 409);
-  }
   return {
-    created: out.created !== false,
-    valuePaise: int(out.value_paise),
-    voucherNo: str(out.voucher_no),
-    reversedVoucherNo: str(out.reversed_voucher_no),
-    note: str(out.note),
+    stockValuePaise: int(out.stock_value_paise),
+    ledgerValuePaise: int(out.ledger_value_paise),
+    differencePaise: int(out.difference_paise),
   };
-}
-
-/** What the stock was worth on a date, without posting anything. */
-export async function stockValueAsOf(asOf: string): Promise<number> {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(asOf))) return 0;
-  const { sb, tenantId } = await invCtx();
-  const { data, error } = await sb.rpc("inv_stock_value_as_of", {
-    p_tenant_id: tenantId,
-    p_as_of: asOf,
-  });
-  if (error) throw new InvError(`Stock value: ${error.message}`, 500);
-  return int(data);
 }

@@ -43,12 +43,16 @@ export const L_TDS_PAYABLE = "2310";
 export const L_PF_PAYABLE = "2320";
 export const L_ESI_PAYABLE = "2330";
 export const L_GST_INPUT = "1080";
-/** Stock on hand at a period end — see the closing-stock journal. */
-export const L_CLOSING_STOCK = "1090";
+/** Stock on hand. Perpetual: moved by every receipt, sale and write-off. */
+export const L_INVENTORY = "1090";
 /** GST charged on sales — owed to the government, not income. */
 export const L_GST_OUTPUT = "2340";
 export const L_FEE_CONCESSION = "5100";
 export const L_DEPRECIATION = "5200";
+/** What the goods sold actually cost — the other half of a sale. */
+export const L_COGS = "5065";
+/** Stock lost to damage, shrinkage or a corrected count. */
+export const L_STOCK_WRITTEN_OFF = "5066";
 
 export const SCHEDULE_GROUPS = {
   currentAssets: "Current assets",
@@ -82,11 +86,10 @@ export function defaultLedgerAccounts(): LedgerAccountSeed[] {
     { code: L_FEE_RECEIVABLE, name: "Fee Receivable", kind: "asset", parentCode: "1", scheduleGroup: G.currentAssets, isControl: true },
     { code: L_STAFF_ADVANCES, name: "Staff Advances", kind: "asset", parentCode: "1", scheduleGroup: G.currentAssets, isControl: true },
     { code: L_GST_INPUT, name: "GST Input Credit", kind: "asset", parentCode: "1", scheduleGroup: G.currentAssets },
-    // Purchases are expensed to 5060 when goods arrive, so stock is not an
-    // asset day to day. At a period end the value still on the shelf is
-    // brought back: Dr here, Cr Store Purchases, leaving the expense equal to
-    // what was actually consumed. Reversed at the start of the next period.
-    { code: L_CLOSING_STOCK, name: "Closing Stock", kind: "asset", parentCode: "1", scheduleGroup: G.currentAssets },
+    // Perpetual inventory: goods are capitalised here when received and
+    // relieved as they are sold or written off, so this balance tracks the
+    // store's own valuation continuously rather than only at a period end.
+    { code: L_INVENTORY, name: "Inventory", kind: "asset", parentCode: "1", scheduleGroup: G.currentAssets },
 
     { code: L_CWIP, name: "Capital Work in Progress", kind: "asset", parentCode: "1", scheduleGroup: G.fixedAssets },
     { code: L_FIXED_ASSETS, name: "Fixed Assets", kind: "asset", parentCode: "1", scheduleGroup: G.fixedAssets },
@@ -126,7 +129,12 @@ export function defaultLedgerAccounts(): LedgerAccountSeed[] {
     { code: "5030", name: "Transport Batta Expenses", kind: "expense", parentCode: "5", scheduleGroup: G.administrative },
     { code: "5040", name: "Office Expenses", kind: "expense", parentCode: "5", scheduleGroup: G.administrative },
     { code: "5050", name: "Academic Expenses", kind: "expense", parentCode: "5", scheduleGroup: G.academic },
+    // Store goods no longer land here — they are capitalised to Inventory and
+    // released through Cost of Goods Sold. Kept for expense vouchers coded to
+    // it by hand, and for history.
     { code: "5060", name: "Store Purchases", kind: "expense", parentCode: "5", scheduleGroup: G.administrative },
+    { code: L_COGS, name: "Cost of Goods Sold", kind: "expense", parentCode: "5", scheduleGroup: G.administrative },
+    { code: L_STOCK_WRITTEN_OFF, name: "Stock Written Off", kind: "expense", parentCode: "5", scheduleGroup: G.administrative },
     { code: "5070", name: "Salary & Wages", kind: "expense", parentCode: "5", scheduleGroup: G.establishment },
     { code: L_FEE_CONCESSION, name: "Fee Concessions & RTE", kind: "expense", parentCode: "5", scheduleGroup: G.feeIncome },
     { code: L_DEPRECIATION, name: "Depreciation", kind: "expense", parentCode: "5", scheduleGroup: G.depreciation },

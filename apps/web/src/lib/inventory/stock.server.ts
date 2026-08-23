@@ -20,6 +20,14 @@ import type {
   InvStockLedgerRow,
 } from "@/lib/inventory/types";
 
+/** Strip Postgres framing so the user reads the message, not the plumbing. */
+function cleanDbMessage(raw: string): string {
+  return String(raw ?? "")
+    .replace(/^ERROR:\s*/i, "")
+    .replace(/\s*CONTEXT:[\s\S]*$/i, "")
+    .trim();
+}
+
 export type StockCardRow = InvStockLedgerRow & {
   balance: number;
   locationName: string;
@@ -156,69 +164,33 @@ export async function setOpeningStock(
     note?: string;
   },
   actor: string,
-): Promise<{ qty: number }> {
+): Promise<{ qty: number; ledgerVoucherNo: string }> {
   if (!input.itemId) throw new InvError("Item is required", 400);
   const qty = Number(input.qty);
   if (!Number.isFinite(qty) || qty < 0) {
     throw new InvError("Opening quantity must be zero or more", 400);
   }
 
-  const ctx = await invCtx();
-  const { sb, tenantId } = ctx;
+  const { sb, tenantId } = await invCtx();
+  const { data, error } = await sb.rpc("inv_set_opening_stock", {
+    p_tenant_id: tenantId,
+    p_actor: actor,
+    p_payload: {
+      item_id: input.itemId,
+      location_id: input.locationId || null,
+      qty,
+      unit_cost_paise: Math.max(0, Math.trunc(input.unitCostPaise ?? 0) || 0),
+      at: input.at || null,
+      note: input.note ?? "Opening stock",
+    },
+  });
+  if (error) throw new InvError(cleanDbMessage(error.message), 409);
 
-  let del = sb
-    .from("inv_stock_ledger")
-    .delete()
-    .eq("tenant_id", tenantId)
-    .eq("item_id", input.itemId)
-    .eq("kind", "opening");
-  del = input.locationId
-    ? del.eq("location_id", input.locationId)
-    : del.is("location_id", null);
-  const { error: delError } = await del;
-  if (delError) {
-    throw new InvError(`Reset opening stock: ${delError.message}`, 500);
-  }
-
-  if (qty > 0) {
-    await postMovements(
-      [
-        {
-          itemId: input.itemId,
-          locationId: input.locationId,
-          qtyDelta: qty,
-          kind: "opening",
-          unitCostPaise: input.unitCostPaise,
-          at: input.at,
-          refType: "opening",
-          note: input.note ?? "Opening stock",
-        },
-      ],
-      actor,
-      ctx,
-    );
-
-    // Opening stock is also the first cost the school knows for the item, so
-    // it seeds the average cost when no purchase has set one yet.
-    const cost = Math.max(0, Math.trunc(input.unitCostPaise ?? 0) || 0);
-    if (cost > 0) {
-      const { data: item } = await sb
-        .from("inv_items")
-        .select("avg_cost_paise")
-        .eq("tenant_id", tenantId)
-        .eq("id", input.itemId)
-        .maybeSingle();
-      if (!item || Math.trunc(Number(item.avg_cost_paise) || 0) === 0) {
-        await sb
-          .from("inv_items")
-          .update({ avg_cost_paise: cost, updated_at: new Date().toISOString() })
-          .eq("tenant_id", tenantId)
-          .eq("id", input.itemId);
-      }
-    }
-  }
-
-  return { qty };
+  const out = (data ?? {}) as Record<string, unknown>;
+  return {
+    qty: Number(out.qty) || 0,
+    ledgerVoucherNo: String(out.ledger_voucher_no ?? ""),
+  };
 }
 
 /**
@@ -236,9 +208,13 @@ export async function adjustToCount(
     at?: string;
   },
   actor: string,
-): Promise<{ delta: number; before: number; after: number }> {
-  const reason = String(input.reason ?? "").trim();
-  if (!reason) {
+): Promise<{
+  delta: number;
+  before: number;
+  after: number;
+  ledgerVoucherNo: string;
+}> {
+  if (!String(input.reason ?? "").trim()) {
     throw new InvError("A reason is required for a stock adjustment", 400);
   }
   const counted = Number(input.countedQty);
@@ -246,33 +222,27 @@ export async function adjustToCount(
     throw new InvError("Counted quantity must be zero or more", 400);
   }
 
-  const ctx = await invCtx();
-  const current = await balances({
-    itemIds: [input.itemId],
-    locationId: input.locationId,
+  const { sb, tenantId } = await invCtx();
+  const { data, error } = await sb.rpc("inv_adjust_stock", {
+    p_tenant_id: tenantId,
+    p_actor: actor,
+    p_payload: {
+      item_id: input.itemId,
+      location_id: input.locationId || null,
+      counted_qty: counted,
+      reason: String(input.reason).trim(),
+      at: input.at || null,
+    },
   });
-  const before = current.reduce((s, b) => s + b.qtyOnHand, 0);
-  const delta = Math.round((counted - before) * 1000) / 1000;
+  if (error) throw new InvError(cleanDbMessage(error.message), 409);
 
-  if (delta !== 0) {
-    await postMovements(
-      [
-        {
-          itemId: input.itemId,
-          locationId: input.locationId,
-          qtyDelta: delta,
-          kind: delta > 0 ? "adjust_in" : "adjust_out",
-          at: input.at,
-          refType: "adjustment",
-          note: reason,
-        },
-      ],
-      actor,
-      ctx,
-    );
-  }
-
-  return { delta, before, after: counted };
+  const out = (data ?? {}) as Record<string, unknown>;
+  return {
+    delta: Number(out.delta) || 0,
+    before: Number(out.before) || 0,
+    after: Number(out.after) || 0,
+    ledgerVoucherNo: String(out.ledger_voucher_no ?? ""),
+  };
 }
 
 /** Move stock between locations — two rows, one atomic intent. */
