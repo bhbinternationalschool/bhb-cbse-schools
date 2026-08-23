@@ -29,6 +29,14 @@ import {
   ledgerTrialBalance,
 } from "@/lib/ledger/ledger.server";
 import { ledgerReconciliation, projectAll } from "@/lib/ledger/project.server";
+import {
+  applyManualMatch,
+  autoMatchBank,
+  bankReconciliationReport,
+  importBankStatementCsv,
+  proposeChequeClearings,
+  unmatch,
+} from "@/lib/ledger/reconcile.server";
 import type { LedgerVoucherInput } from "@/lib/ledger/types";
 
 export const runtime = "nodejs";
@@ -74,6 +82,24 @@ type PostBody =
   | { action: "ensure-masters" }
   | { action: "project"; limit?: number }
   | { action: "reconcile" }
+  | {
+      action: "import-statement";
+      bankSubledgerId: string;
+      statementRef?: string;
+      csv: string;
+      openingBalancePaise?: number | null;
+      closingBalancePaise?: number | null;
+    }
+  | { action: "auto-match"; bankSubledgerId: string; asOf?: string; applyAuto?: boolean }
+  | { action: "match"; statementLineId: string; ledgerLineId: string; note?: string }
+  | { action: "unmatch"; statementLineId: string }
+  | {
+      action: "bank-recon";
+      bankSubledgerId: string;
+      asOf: string;
+      statementClosingPaise?: number | null;
+    }
+  | { action: "cheque-clearings"; bankSubledgerId: string; asOf?: string }
   | { action: "parity"; deskRows: { code: string; balancePaise: number }[] };
 
 export async function POST(req: Request) {
@@ -155,6 +181,54 @@ export async function POST(req: Request) {
     case "reconcile": {
       const res = await ledgerReconciliation();
       return NextResponse.json(res, { status: res.ok ? 200 : 207 });
+    }
+    case "import-statement": {
+      const res = await importBankStatementCsv({
+        bankSubledgerId: body.bankSubledgerId,
+        statementRef: body.statementRef ?? "",
+        csv: body.csv,
+        openingBalancePaise: body.openingBalancePaise,
+        closingBalancePaise: body.closingBalancePaise,
+        importedBy: actor,
+      });
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    case "auto-match": {
+      const res = await autoMatchBank({
+        bankSubledgerId: body.bankSubledgerId,
+        asOf: body.asOf,
+        matchedBy: actor || "auto",
+        applyAuto: body.applyAuto,
+      });
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    case "match": {
+      const res = await applyManualMatch({
+        statementLineId: body.statementLineId,
+        ledgerLineId: body.ledgerLineId,
+        matchedBy: actor,
+        note: body.note,
+      });
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    case "unmatch": {
+      const res = await unmatch(body.statementLineId);
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    case "bank-recon": {
+      const res = await bankReconciliationReport({
+        bankSubledgerId: body.bankSubledgerId,
+        asOf: body.asOf,
+        statementClosingPaise: body.statementClosingPaise,
+      });
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    case "cheque-clearings": {
+      const res = await proposeChequeClearings({
+        bankSubledgerId: body.bankSubledgerId,
+        asOf: body.asOf,
+      });
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
     }
     case "parity": {
       const res = await ledgerParityAgainstDesk(body.deskRows ?? []);

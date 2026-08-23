@@ -24,6 +24,14 @@ import {
 } from "@/lib/ledger/mirror";
 import { defaultLedgerAccounts, isPostableLedgerCode } from "@/lib/ledger/coa";
 import {
+  matchStatementToBook,
+  parseAmountToPaise,
+  parseBankStatementCsv,
+  parseStatementDate,
+  statementRowHash,
+  summariseReconciliation,
+} from "@/lib/ledger/reconcile";
+import {
   buildExpenseVoucher,
   buildFeeReceiptVoucher,
   buildPayrollAccrualVoucher,
@@ -399,6 +407,227 @@ function shape(lines: { accountCode: string; debitPaise: number; creditPaise: nu
   assert.equal(by["1010"], -43_000_00, "and the money leaves the bank");
   assert.equal(pay.voucher.sourceType, "payroll_payment", "payment is its own event, keyed separately");
   console.log("  ok  paying a run clears the payable separately, on its own date");
+}
+
+
+/* ─── Bank statement parsing ───────────────────────────────── */
+
+{
+  assert.equal(parseAmountToPaise("1,23,456.78"), 12_345_678, "Indian digit grouping");
+  assert.equal(parseAmountToPaise("₹ 1,000.00"), 100_000, "currency symbol and spaces");
+  assert.equal(parseAmountToPaise("(500.50)"), -50_050, "parenthesised negatives");
+  assert.equal(parseAmountToPaise("1234.5 Cr"), 123_450, "a trailing Cr marker");
+  assert.equal(parseAmountToPaise(""), null, "an empty cell is not zero");
+  assert.equal(parseAmountToPaise("  "), null, "nor is whitespace");
+  assert.equal(parseAmountToPaise("abc"), null, "nor is text");
+  // 0.1 + 0.2 arithmetic must not leak into money.
+  assert.equal(parseAmountToPaise("0.07"), 7, "small amounts round exactly");
+  assert.equal(parseAmountToPaise("8.29"), 829, "and so do awkward ones");
+
+  assert.equal(parseStatementDate("2026-08-23"), "2026-08-23");
+  assert.equal(parseStatementDate("23/08/2026"), "2026-08-23", "dd/mm/yyyy, as Indian banks write it");
+  assert.equal(parseStatementDate("23-08-2026"), "2026-08-23");
+  assert.equal(parseStatementDate("23-Aug-26"), "2026-08-23", "dd-MMM-yy");
+  assert.equal(parseStatementDate("garbage"), null);
+  console.log("  ok  bank amounts and dates parse in the formats Indian banks actually emit");
+}
+
+{
+  // Header is not the first row: statements carry account preamble.
+  const csv = [
+    "Account Statement for 00000000",
+    "Period: 01-08-2026 to 31-08-2026",
+    "Txn Date,Value Date,Description,Chq/Ref Number,Withdrawal Amt,Deposit Amt,Closing Balance",
+    "10/08/2026,10/08/2026,UPI/CR/778899/FEE,UTR-77,,7000.00,57000.00",
+    "12/08/2026,12/08/2026,CHQ PAID 004521,004521,5000.00,,52000.00",
+    "15/08/2026,15/08/2026,SMS CHRG AUG,,17.70,,51982.30",
+    "Total,,,,5017.70,7000.00,",
+  ].join("\n");
+
+  const parsed = parseBankStatementCsv({ csv, bankSubledgerId: "bnk_1" });
+  assert.equal(parsed.lines.length, 3, "three real rows, preamble and totals ignored");
+
+  const [credit, cheque, charge] = parsed.lines;
+  assert.equal(credit.direction, "credit");
+  assert.equal(credit.amountPaise, 7_000_00);
+  assert.equal(credit.signedPaise, 7_000_00, "a bank credit is money INTO the book's bank account");
+  assert.equal(credit.ref, "UTR-77");
+  assert.equal(credit.txnDate, "2026-08-10");
+
+  assert.equal(cheque.direction, "debit");
+  assert.equal(cheque.signedPaise, -5_000_00, "a bank debit is money out");
+  assert.equal(charge.amountPaise, 17_70, "paise survive the round trip");
+
+  assert.ok(
+    parsed.skipped.some((s) => /no readable transaction date/.test(s.reason)),
+    "the totals row is reported as skipped, not silently dropped",
+  );
+  console.log("  ok  a statement parses past its preamble and reports what it could not read");
+}
+
+{
+  // Re-exporting an overlapping range is the normal case; the same line must
+  // hash the same, and a different amount must not.
+  const base = {
+    bankSubledgerId: "bnk_1", txnDate: "2026-08-10", amountPaise: 700000,
+    direction: "credit" as const, narration: "UPI/CR/778899", ref: "UTR-77",
+  };
+  assert.equal(statementRowHash(base), statementRowHash({ ...base }), "identical lines hash identically");
+  assert.equal(
+    statementRowHash(base),
+    statementRowHash({ ...base, narration: "  UPI/CR/778899  " }),
+    "whitespace differences do not defeat dedupe",
+  );
+  assert.notEqual(statementRowHash(base), statementRowHash({ ...base, amountPaise: 700001 }), "a paisa apart is a different line");
+  assert.notEqual(statementRowHash(base), statementRowHash({ ...base, direction: "debit" }), "direction is part of identity");
+  console.log("  ok  a re-imported statement line hashes to the same row, a changed one does not");
+}
+
+/* ─── Matching ─────────────────────────────────────────────── */
+
+function stmtLine(o: Partial<{ id: string; txnDate: string; signedPaise: number; ref: string; narration: string; lineNo: number }>) {
+  const signed = o.signedPaise ?? 0;
+  return {
+    id: o.id ?? "s1",
+    lineNo: o.lineNo ?? 1,
+    txnDate: o.txnDate ?? "2026-08-10",
+    valueDate: null,
+    amountPaise: Math.abs(signed),
+    direction: (signed >= 0 ? "credit" : "debit") as "credit" | "debit",
+    narration: o.narration ?? "",
+    ref: o.ref ?? "",
+    balancePaise: null,
+    rowHash: "",
+    signedPaise: signed,
+  };
+}
+
+function bookLine(o: Partial<{ ledgerLineId: string; voucherDate: string; signedPaise: number; instrumentRef: string }>) {
+  return {
+    ledgerLineId: o.ledgerLineId ?? "b1",
+    voucherDate: o.voucherDate ?? "2026-08-10",
+    voucherNo: "RC/FY2026-27/00001",
+    narration: "",
+    instrumentRef: o.instrumentRef ?? "",
+    instrumentMode: "",
+    signedPaise: o.signedPaise ?? 0,
+    alreadyMatched: false,
+  };
+}
+
+{
+  const r = matchStatementToBook({
+    statementLines: [stmtLine({ id: "s1", signedPaise: 700000, ref: "UTR-77" })],
+    bookLines: [
+      bookLine({ ledgerLineId: "b_far", voucherDate: "2026-08-01", signedPaise: 700000 }),
+      bookLine({ ledgerLineId: "b_ref", voucherDate: "2026-08-10", signedPaise: 700000, instrumentRef: "utr77" }),
+    ],
+  });
+  assert.equal(r.matches.length, 1);
+  assert.equal(r.matches[0]!.ledgerLineId, "b_ref", "the bank's own reference wins over a nearer date");
+  assert.equal(r.matches[0]!.confidence, "exact");
+  console.log("  ok  a matching bank reference beats every other signal");
+}
+
+{
+  // Amount must agree exactly; a rupee out is a different transaction.
+  const r = matchStatementToBook({
+    statementLines: [stmtLine({ id: "s1", signedPaise: 700000 })],
+    bookLines: [bookLine({ ledgerLineId: "b1", signedPaise: 700100 })],
+  });
+  assert.equal(r.matches.length, 0, "a near-miss amount is not a match");
+  assert.deepEqual(r.unmatchedStatement, ["s1"]);
+  assert.deepEqual(r.unmatchedBook, ["b1"]);
+
+  // Direction must agree too: money out cannot explain money in.
+  const opposite = matchStatementToBook({
+    statementLines: [stmtLine({ id: "s1", signedPaise: 700000 })],
+    bookLines: [bookLine({ ledgerLineId: "b1", signedPaise: -700000 })],
+  });
+  assert.equal(opposite.matches.length, 0, "an equal amount in the opposite direction is not a match");
+  console.log("  ok  amount and direction must agree exactly — near misses stay unmatched");
+}
+
+{
+  // Two identical amounts must pair in date order, not arbitrarily.
+  const r = matchStatementToBook({
+    statementLines: [
+      stmtLine({ id: "s_late", txnDate: "2026-08-20", signedPaise: 500000, lineNo: 2 }),
+      stmtLine({ id: "s_early", txnDate: "2026-08-10", signedPaise: 500000, lineNo: 1 }),
+    ],
+    bookLines: [
+      bookLine({ ledgerLineId: "b_late", voucherDate: "2026-08-19", signedPaise: 500000 }),
+      bookLine({ ledgerLineId: "b_early", voucherDate: "2026-08-09", signedPaise: 500000 }),
+    ],
+  });
+  assert.equal(r.matches.length, 2);
+  const pairs = Object.fromEntries(r.matches.map((m) => [m.statementLineId, m.ledgerLineId]));
+  assert.equal(pairs.s_early, "b_early", "the earlier statement line takes the earlier book entry");
+  assert.equal(pairs.s_late, "b_late");
+  console.log("  ok  identical amounts pair up in date order rather than by luck");
+}
+
+{
+  // A distant equal amount is proposed, never applied.
+  const r = matchStatementToBook({
+    statementLines: [stmtLine({ id: "s1", txnDate: "2026-08-20", signedPaise: 500000 })],
+    bookLines: [bookLine({ ledgerLineId: "b1", voucherDate: "2026-08-12", signedPaise: 500000 })],
+  });
+  assert.equal(r.matches[0]!.confidence, "weak", "eight days apart is a weak match");
+  assert.match(r.matches[0]!.reason, /confirm/, "and it says so");
+
+  const tooFar = matchStatementToBook({
+    statementLines: [stmtLine({ id: "s1", txnDate: "2026-09-20", signedPaise: 500000 })],
+    bookLines: [bookLine({ ledgerLineId: "b1", voucherDate: "2026-08-12", signedPaise: 500000 })],
+  });
+  assert.equal(tooFar.matches.length, 0, "beyond the window it is not proposed at all");
+
+  // An already-matched book line cannot be claimed twice.
+  const taken = matchStatementToBook({
+    statementLines: [stmtLine({ id: "s1", signedPaise: 500000 })],
+    bookLines: [{ ...bookLine({ ledgerLineId: "b1", signedPaise: 500000 }), alreadyMatched: true }],
+  });
+  assert.equal(taken.matches.length, 0, "a book line already reconciled is not offered again");
+  console.log("  ok  distant matches are proposed not applied, and nothing is matched twice");
+}
+
+/* ─── The reconciliation statement ─────────────────────────── */
+
+{
+  // The classic identity: book − unpresented + unrecorded = the bank.
+  const s = summariseReconciliation({
+    bankSubledgerId: "bnk_1",
+    asOf: "2026-08-31",
+    bookBalancePaise: 52_000_00,
+    statementClosingPaise: 51_982_30,
+    // A cheque we issued that has not been presented.
+    unmatchedBookSignedPaise: [-5_000_00],
+    // A bank charge we never recorded.
+    unmatchedStatementSignedPaise: [-17_70],
+  });
+  assert.equal(s.unpresentedPaise, -5_000_00);
+  assert.equal(s.unrecordedPaise, -17_70);
+  assert.equal(s.reconciledPaise, 52_000_00 + 5_000_00 - 17_70);
+  assert.equal(s.reconciledPaise, 56_982_30);
+  assert.equal(s.reconciles, false, "and when it does not tie, it says so");
+
+  const clean = summariseReconciliation({
+    bankSubledgerId: "bnk_1",
+    asOf: "2026-08-31",
+    bookBalancePaise: 52_000_00,
+    statementClosingPaise: 51_982_30,
+    unmatchedBookSignedPaise: [],
+    unmatchedStatementSignedPaise: [-17_70],
+  });
+  assert.equal(clean.reconciledPaise, 51_982_30, "book less nothing plus the unrecorded charge is the bank's figure");
+  assert.equal(clean.reconciles, true, "which reconciles");
+
+  const noStatement = summariseReconciliation({
+    bankSubledgerId: "bnk_1", asOf: "2026-08-31", bookBalancePaise: 100,
+    statementClosingPaise: null, unmatchedBookSignedPaise: [], unmatchedStatementSignedPaise: [],
+  });
+  assert.equal(noStatement.reconciles, false, "with no closing balance it cannot claim to reconcile");
+  console.log("  ok  the reconciliation identity holds, and refuses to claim success without the bank's figure");
 }
 
 /* ─── Live path ────────────────────────────────────────────── */
