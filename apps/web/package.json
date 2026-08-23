@@ -77,6 +77,7 @@
     "test:transport-staff-riders": "npx tsx src/lib/transportStaffRiders.selftest.ts",
     "test:fleet-edge-link": "npx tsx src/lib/fleetEdgeLink.selftest.ts",
     "test:transport-parent-messages": "npx tsx src/lib/transportParentMessages.selftest.ts",
+    "test:ebook-access": "npx tsx src/lib/ebookAccess.selftest.ts",
     "test:duty-roster": "npx tsx src/lib/dutyRoster.selftest.ts",
     "test:module-filters": "npx tsx src/lib/moduleFilters.selftest.ts",
     "test:report-export": "npx tsx src/lib/reportExport.selftest.ts",
