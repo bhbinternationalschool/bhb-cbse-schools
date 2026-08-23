@@ -33,42 +33,49 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Staff login required" }, { status: 401 });
   }
 
-  let body: { imageBase64?: string; mimeType?: string };
+  let body: { imageBase64?: string; mimeType?: string; text?: string };
   try {
     body = (await req.json()) as typeof body;
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
+  const pastedText = (body.text || "").trim();
   const imageBase64 = (body.imageBase64 || "").trim();
-  if (!imageBase64) {
-    return NextResponse.json({ error: "imageBase64 required" }, { status: 400 });
-  }
 
-  if (!visionConfigured()) {
+  // A pasted contents list — e.g. copied off an e-book page — needs no OCR
+  // and no Vision key. Only fall back to Vision when there is no text.
+  let sourceText: string;
+  if (pastedText) {
+    sourceText = pastedText;
+  } else if (imageBase64) {
+    if (!visionConfigured()) {
+      return NextResponse.json(
+        {
+          ok: false,
+          visionConfigured: false,
+          error:
+            "Google Vision not configured — paste the contents list instead, or set GOOGLE_VISION_API_KEY",
+        },
+        { status: 503 },
+      );
+    }
+    const vision = await visionExtractText({
+      imageBase64,
+      mimeType: body.mimeType,
+    });
+    if (!vision.ok) {
+      return NextResponse.json({ ok: false, error: vision.error }, { status: 400 });
+    }
+    sourceText = vision.text;
+  } else {
     return NextResponse.json(
-      {
-        ok: false,
-        visionConfigured: false,
-        error:
-          "Google Vision not configured — set GOOGLE_VISION_API_KEY or enable Cloud Vision API on your Maps key",
-      },
-      { status: 503 },
-    );
-  }
-
-  const vision = await visionExtractText({
-    imageBase64,
-    mimeType: body.mimeType,
-  });
-  if (!vision.ok) {
-    return NextResponse.json(
-      { ok: false, error: vision.error },
+      { error: "Paste the contents list, or send a photo of it" },
       { status: 400 },
     );
   }
 
-  const parsed = parseSyllabusFromText(vision.text);
+  const parsed = parseSyllabusFromText(sourceText);
   const quality = syllabusOcrQuality(parsed);
 
   return NextResponse.json({
@@ -76,7 +83,8 @@ export async function POST(req: Request) {
     chapters: parsed.chapters,
     ignored: parsed.ignored,
     quality,
+    source: pastedText ? "text" : "ocr",
     // Surfaced so a poor parse is still recoverable by hand.
-    rawText: vision.text,
+    rawText: sourceText,
   });
 }
