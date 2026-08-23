@@ -164,6 +164,9 @@ async function main() {
   }
 
   const byCode = new Map(rows.map((r) => [r.censusCode, r]));
+  const source = ["osm", "shrug", "manual", "import"].includes(args.source)
+    ? args.source
+    : "import";
   const updates: { id: string; latitude: number; longitude: number }[] = [];
   let alreadySet = 0;
   let noMatch = 0;
@@ -215,7 +218,11 @@ async function main() {
     for (const u of chunk) {
       const { error: upErr } = await ctx.sb
         .from("village_demographics")
-        .update({ latitude: u.latitude, longitude: u.longitude })
+        .update({
+          latitude: u.latitude,
+          longitude: u.longitude,
+          coordinate_source: source,
+        })
         .eq("tenant_id", ctx.tenantId)
         .eq("id", u.id);
       if (upErr) {
@@ -227,7 +234,7 @@ async function main() {
     console.info(`${LOG} ${written}/${updates.length}`);
   }
 
-  console.info(`${LOG} done: ${written} settlement(s) given coordinates from "${args.source}"`);
+  console.info(`${LOG} done: ${written} settlement(s) given coordinates, source="${source}"`);
   console.info(
     `${LOG} next: resolve travel times — they now cost one Distance Matrix call each, with no geocoding.`,
   );

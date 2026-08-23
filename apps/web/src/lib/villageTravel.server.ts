@@ -113,6 +113,7 @@ type Pending = {
   districtName: string;
   latitude: number | null;
   longitude: number | null;
+  coordinateSource: string;
 };
 
 /**
@@ -258,7 +259,7 @@ export async function resolveBlockTravel(input: {
 
   let q = sb
     .from("village_demographics")
-    .select("id, village_name, block_name, district_name, latitude, longitude")
+    .select("id, village_name, block_name, district_name, latitude, longitude, coordinate_source")
     .eq("tenant_id", tenantId)
     .order("estimated_current_child_pop", { ascending: false });
 
@@ -283,6 +284,7 @@ export async function resolveBlockTravel(input: {
     districtName: String(r.district_name ?? ""),
     latitude: typeof r.latitude === "number" ? r.latitude : null,
     longitude: typeof r.longitude === "number" ? r.longitude : null,
+    coordinateSource: String(r.coordinate_source ?? ""),
   }));
   if (!all.length) {
     throw new VillageTravelError("No settlements match that selection.", 404);
@@ -329,7 +331,15 @@ export async function resolveBlockTravel(input: {
     // A village that already carries OpenStreetMap coordinates needs no
     // geocode — that is a paid call saved on every OSM-matched village.
     if (typeof v.latitude === "number" && typeof v.longitude === "number") {
-      located.push({ ...v, lat: v.latitude, lon: v.longitude, confidence: "osm", address: "" });
+      // Carry the real provenance through. Calling a SHRUG polygon centroid
+      // "osm" would describe an imported estimate as a mapped place.
+      located.push({
+        ...v,
+        lat: v.latitude,
+        lon: v.longitude,
+        confidence: v.coordinateSource || "stored",
+        address: "",
+      });
       continue;
     }
     if (!apiKey) {
