@@ -5,6 +5,10 @@
 import type { SchoolCommsState } from "@/lib/schoolComms";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
+import {
+  recordDeskSyncFailure,
+  recordDeskSyncSuccess,
+} from "@/lib/deskSyncStatus";
 
 const META_KEY = "bhb_school_comms_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -78,7 +82,12 @@ async function pushSchoolCommsDeskApi(state: SchoolCommsState) {
         noticeCount: body.noticeCount ?? state.notices.length,
       });
     }
+    // Record whether this actually landed. A not-ok response is not
+    // thrown, so without this it slips past every branch in silence.
+    if (res.ok && body?.ok) recordDeskSyncSuccess("school_comms");
+    else recordDeskSyncFailure("school_comms", { status: res.status, error: body?.error });
   } catch (e) {
+    recordDeskSyncFailure("school_comms", { status: 0, error: e instanceof Error ? e.message : String(e) });
     console.warn("[school-comms-db] desk push error", e);
   }
 }

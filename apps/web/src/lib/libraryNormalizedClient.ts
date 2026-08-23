@@ -5,6 +5,10 @@
 import type { LibraryState } from "@/lib/library";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
+import {
+  recordDeskSyncFailure,
+  recordDeskSyncSuccess,
+} from "@/lib/deskSyncStatus";
 
 const META_KEY = "bhb_library_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -77,7 +81,12 @@ async function pushLibraryDeskApi(state: LibraryState) {
         titleCount: body.titleCount ?? state.titles.length,
       });
     }
+    // Record whether this actually landed. A not-ok response is not
+    // thrown, so without this it slips past every branch in silence.
+    if (res.ok && body?.ok) recordDeskSyncSuccess("library");
+    else recordDeskSyncFailure("library", { status: res.status, error: body?.error });
   } catch (e) {
+    recordDeskSyncFailure("library", { status: 0, error: e instanceof Error ? e.message : String(e) });
     console.warn("[library-db] desk push error", e);
   }
 }

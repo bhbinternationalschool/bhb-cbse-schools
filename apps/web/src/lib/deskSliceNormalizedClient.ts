@@ -6,6 +6,10 @@ import type { DeskModuleId } from "@/lib/deskCutover";
 import { deskSliceDef, deskSliceEnvReadFromDb } from "@/lib/deskSliceRegistry";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
+import {
+  recordDeskSyncFailure,
+  recordDeskSyncSuccess,
+} from "@/lib/deskSyncStatus";
 
 type DeskMeta = { updatedAt: string; rowCount: number };
 
@@ -107,7 +111,12 @@ async function pushDeskSliceApi(
       console.warn(`[${id}-db] desk push failed after 3 attempts`, reason);
       reportDeskPushFailure(id, reason);
     }
+    // Record whether this actually landed. A not-ok response is not
+    // thrown, so without this it slips past every branch in silence.
+    if (res.ok && body?.ok) recordDeskSyncSuccess("desk_slice");
+    else recordDeskSyncFailure("desk_slice", { status: res.status, error: body?.error });
   } catch (e) {
+    recordDeskSyncFailure("desk_slice", { status: 0, error: e instanceof Error ? e.message : String(e) });
     if (attempt < 3) {
       setTimeout(
         () => void pushDeskSliceApi(id, state, attempt + 1, generation),

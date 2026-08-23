@@ -9,6 +9,10 @@ import {
 import type { StaffAttendanceDeskAncillary } from "@/lib/staffAttendanceDeskAncillary.server";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
+import {
+  recordDeskSyncFailure,
+  recordDeskSyncSuccess,
+} from "@/lib/deskSyncStatus";
 
 const META_KEY = "bhb_staff_attendance_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -89,7 +93,12 @@ async function pushStaffAttendanceDeskApi(state: StaffAttendanceState) {
         body?.error || res.status,
       );
     }
+    // Record whether this actually landed. A not-ok response is not
+    // thrown, so without this it slips past every branch in silence.
+    if (res.ok && body?.ok) recordDeskSyncSuccess("staff_attendance");
+    else recordDeskSyncFailure("staff_attendance", { status: res.status, error: body?.error });
   } catch (e) {
+    recordDeskSyncFailure("staff_attendance", { status: 0, error: e instanceof Error ? e.message : String(e) });
     console.warn("[staff-attendance-db] desk push error", e);
   }
 }
