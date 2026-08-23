@@ -43,6 +43,8 @@ export const L_TDS_PAYABLE = "2310";
 export const L_PF_PAYABLE = "2320";
 export const L_ESI_PAYABLE = "2330";
 export const L_GST_INPUT = "1080";
+/** GST charged on sales — owed to the government, not income. */
+export const L_GST_OUTPUT = "2340";
 export const L_FEE_CONCESSION = "5100";
 export const L_DEPRECIATION = "5200";
 
@@ -92,6 +94,10 @@ export function defaultLedgerAccounts(): LedgerAccountSeed[] {
     { code: L_TDS_PAYABLE, name: "TDS Payable", kind: "liability", parentCode: L_STATUTORY_PAYABLE, scheduleGroup: G.currentLiabilities },
     { code: L_PF_PAYABLE, name: "Provident Fund Payable", kind: "liability", parentCode: L_STATUTORY_PAYABLE, scheduleGroup: G.currentLiabilities },
     { code: L_ESI_PAYABLE, name: "ESI Payable", kind: "liability", parentCode: L_STATUTORY_PAYABLE, scheduleGroup: G.currentLiabilities },
+    // GST collected on store sales sits beside TDS/PF/ESI: money held for the
+    // government, not the school's income. Added for the store rebuild's
+    // native posting; the input-credit side (1080) already existed.
+    { code: L_GST_OUTPUT, name: "GST Payable", kind: "liability", parentCode: L_STATUTORY_PAYABLE, scheduleGroup: G.currentLiabilities },
     { code: L_RETENTION_PAYABLE, name: "Retention Payable", kind: "liability", parentCode: "2", scheduleGroup: G.currentLiabilities },
     { code: L_OWNER_LOANS, name: "Owner / Trustee Loans", kind: "liability", parentCode: "2", scheduleGroup: G.loans, isControl: true },
 

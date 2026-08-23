@@ -292,6 +292,8 @@ export async function postSale(
   paidPaise: number;
   balancePaise: number;
   status: InvSaleStatus;
+  /** Empty when the server ledger is not in use for this school. */
+  ledgerVoucherNo: string;
 }> {
   const lines = (input.lines ?? []).filter((l) => l && l.itemId && Number(l.qty) > 0);
   if (lines.length === 0) {
@@ -347,6 +349,7 @@ export async function postSale(
     paidPaise: int(out.paid_paise),
     balancePaise: int(out.balance_paise),
     status: str(out.status) as InvSaleStatus,
+    ledgerVoucherNo: str(out.ledger_voucher_no),
   };
 }
 
@@ -355,6 +358,13 @@ export async function postSale(
  *
  * Refuses to take more than is owed — a sale showing more paid than it is
  * worth hides either a keying error or a duplicate receipt.
+ */
+/**
+ * Collect against an outstanding sale balance.
+ *
+ * Delegates to `inv_collect_on_sale`, so the payment row, the sale's new
+ * balance and the ledger receipt commit together. These used to be three
+ * separate requests, any of which could land without the others.
  */
 export async function collectOnSale(
   input: {
@@ -366,59 +376,37 @@ export async function collectOnSale(
     note?: string;
   },
   actor: string,
-): Promise<{ paidPaise: number; balancePaise: number; status: InvSaleStatus }> {
+): Promise<{
+  paidPaise: number;
+  balancePaise: number;
+  status: InvSaleStatus;
+  ledgerVoucherNo: string;
+}> {
   const amount = int(input.amountPaise);
   if (amount <= 0) throw new InvError("Amount must be more than zero", 400);
 
   const { sb, tenantId } = await invCtx();
-  const { data: sale } = await sb
-    .from("inv_sales")
-    .select("id, total_paise, paid_paise, balance_paise, status")
-    .eq("tenant_id", tenantId)
-    .eq("id", input.saleId)
-    .maybeSingle();
-  if (!sale) throw new InvError("Sale not found", 404);
-  if (str(sale.status) === "void") {
-    throw new InvError("That sale was cancelled", 409);
-  }
-
-  const balance = int(sale.balance_paise);
-  if (amount > balance) {
-    throw new InvError(
-      `Only ${(balance / 100).toFixed(2)} is outstanding on this sale`,
-      409,
-    );
-  }
-
-  const { error: payError } = await sb.from("inv_sale_payments").insert({
-    tenant_id: tenantId,
-    sale_id: input.saleId,
-    paid_on: input.paidOn || new Date().toISOString().slice(0, 10),
-    amount_paise: amount,
-    mode: input.mode || "cash",
-    reference: str(input.reference),
-    note: str(input.note),
-    created_by: actor,
+  const { data, error } = await sb.rpc("inv_collect_on_sale", {
+    p_tenant_id: tenantId,
+    p_actor: actor,
+    p_payload: {
+      sale_id: input.saleId,
+      amount_paise: amount,
+      mode: input.mode || "cash",
+      reference: str(input.reference),
+      paid_on: input.paidOn || null,
+      note: str(input.note),
+    },
   });
-  if (payError) throw new InvError(`Record payment: ${payError.message}`, 500);
+  if (error) throw new InvError(cleanDbMessage(error.message), 409);
 
-  const paid = int(sale.paid_paise) + amount;
-  const nextBalance = Math.max(0, balance - amount);
-  const status: InvSaleStatus = nextBalance <= 0 ? "paid" : "part_paid";
-
-  const { error } = await sb
-    .from("inv_sales")
-    .update({
-      paid_paise: paid,
-      balance_paise: nextBalance,
-      status,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("tenant_id", tenantId)
-    .eq("id", input.saleId);
-  if (error) throw new InvError(`Update sale: ${error.message}`, 500);
-
-  return { paidPaise: paid, balancePaise: nextBalance, status };
+  const out = (data ?? {}) as Row;
+  return {
+    paidPaise: int(out.paid_paise),
+    balancePaise: int(out.balance_paise),
+    status: str(out.status) as InvSaleStatus,
+    ledgerVoucherNo: str(out.ledger_voucher_no),
+  };
 }
 
 export async function postSaleReturn(
@@ -440,6 +428,8 @@ export async function postSaleReturn(
   totalPaise: number;
   refundedPaise: number;
   balanceReducedPaise: number;
+  /** Empty when the server ledger is not in use for this school. */
+  ledgerVoucherNo: string;
 }> {
   if (!String(input.reason ?? "").trim()) {
     throw new InvError("A reason is required for a sale return", 400);
@@ -477,6 +467,7 @@ export async function postSaleReturn(
     totalPaise: int(out.total_paise),
     refundedPaise: int(out.refunded_paise),
     balanceReducedPaise: int(out.balance_reduced_paise),
+    ledgerVoucherNo: str(out.ledger_voucher_no),
   };
 }
 
@@ -484,7 +475,7 @@ export async function voidSale(
   saleId: string,
   reason: string,
   actor: string,
-): Promise<{ saleNo: string; status: string }> {
+): Promise<{ saleNo: string; status: string; ledgerVoucherNo: string }> {
   if (!String(reason ?? "").trim()) {
     throw new InvError("A reason is required to cancel a sale", 400);
   }
@@ -497,7 +488,11 @@ export async function voidSale(
   });
   if (error) throw new InvError(cleanDbMessage(error.message), 409);
   const out = (data ?? {}) as Row;
-  return { saleNo: str(out.sale_no), status: str(out.status) };
+  return {
+    saleNo: str(out.sale_no),
+    status: str(out.status),
+    ledgerVoucherNo: str(out.ledger_voucher_no),
+  };
 }
 
 /* ─── Returns listing ──────────────────────────────────────── */
