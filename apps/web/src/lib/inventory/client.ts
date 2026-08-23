@@ -17,6 +17,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   InvBootstrap,
+  InvGrn,
+  InvIndent,
+  InvPendingPoLine,
+  InvPurchaseOrder,
+  InvPurchaseReturn,
+  InvVendorBill,
   InvItem,
   InvItemPage,
   InvItemQuery,
@@ -247,6 +253,94 @@ export const invApi = {
       method: "POST",
       body: JSON.stringify({ action: "transfer", ...input }),
     }),
+
+  /* ─── Procurement ────────────────────────────────────────── */
+
+  listIndents: (query: { status?: string } = {}) =>
+    req<{ indents: InvIndent[] }>("/indents", { query }).then((r) => r.indents),
+
+  saveIndent: (indent: Record<string, unknown>) =>
+    req<{ indent: InvIndent }>("/indents", {
+      method: "POST",
+      body: JSON.stringify(indent),
+    }).then((r) => r.indent),
+
+  decideIndent: (
+    id: string,
+    decision: "submit" | "approve" | "reject" | "cancel",
+    note?: string,
+  ) =>
+    req<{ status: string }>("/indents", {
+      method: "POST",
+      body: JSON.stringify({ action: "decide", id, decision, note }),
+    }),
+
+  listOrders: (query: { status?: string; vendorId?: string } = {}) =>
+    req<{ orders: InvPurchaseOrder[] }>("/orders", { query }).then((r) => r.orders),
+
+  saveOrder: (order: Record<string, unknown>) =>
+    req<{ order: InvPurchaseOrder }>("/orders", {
+      method: "POST",
+      body: JSON.stringify(order),
+    }).then((r) => r.order),
+
+  decideOrder: (
+    id: string,
+    decision: "submit" | "approve" | "reject" | "issue" | "cancel",
+    note?: string,
+  ) =>
+    req<{ status: string }>("/orders", {
+      method: "POST",
+      body: JSON.stringify({ action: "decide", id, decision, note }),
+    }),
+
+  pendingPoLines: (query: { vendorId?: string; poId?: string } = {}) =>
+    req<{ pendingLines: InvPendingPoLine[] }>("/orders", {
+      query: { ...query, view: "pending" },
+    }).then((r) => r.pendingLines),
+
+  listReceipts: (query: { vendorId?: string; poId?: string } = {}) =>
+    req<{ receipts: InvGrn[] }>("/receipts", { query }).then((r) => r.receipts),
+
+  postReceipt: (receipt: Record<string, unknown>) =>
+    req<{
+      receipt: {
+        grnId: string;
+        grnNo: string;
+        billId: string;
+        billNo: string;
+        totalPaise: number;
+      };
+    }>("/receipts", { method: "POST", body: JSON.stringify(receipt) }).then(
+      (r) => r.receipt,
+    ),
+
+  listBills: (query: { vendorId?: string; status?: string } = {}) =>
+    req<{ bills: InvVendorBill[] }>("/bills", { query }).then((r) => r.bills),
+
+  payBill: (input: {
+    billId: string;
+    amountPaise: number;
+    mode?: string;
+    paidOn?: string;
+    reference?: string;
+    note?: string;
+  }) =>
+    req<{ paidPaise: number; balancePaise: number; status: string }>("/bills", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  listPurchaseReturns: (query: { vendorId?: string } = {}) =>
+    req<{ returns: InvPurchaseReturn[] }>("/returns", { query }).then(
+      (r) => r.returns,
+    ),
+
+  postPurchaseReturn: (input: Record<string, unknown>) =>
+    req<{ return: { returnId: string; returnNo: string; totalPaise: number } }>(
+      "/returns",
+      { method: "POST", body: JSON.stringify(input) },
+    ).then((r) => r.return),
 };
 
 /* ─── Hooks ────────────────────────────────────────────────── */

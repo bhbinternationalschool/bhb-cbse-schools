@@ -152,12 +152,27 @@ async function seedPriceListIfEmpty(
   });
 }
 
+/**
+ * Make sure a settings row exists.
+ *
+ * An absent row is not the same as a configured value, and treating it as one
+ * is how a ₹2,25,000 purchase order was issued with no approval: the missing
+ * row read as a zero threshold, which the caller took to mean "never require
+ * approval". The row is created with the documented defaults instead.
+ */
+async function seedSettingsIfMissing(ctx: InvCtx): Promise<void> {
+  await ctx.sb
+    .from("inv_settings")
+    .upsert({ tenant_id: ctx.tenantId }, { onConflict: "tenant_id", ignoreDuplicates: true });
+}
+
 /* ─── Bootstrap ────────────────────────────────────────────── */
 
 export async function fetchBootstrap(
   academicYearCode: string,
 ): Promise<InvBootstrap> {
   const ctx = await invCtx();
+  await seedSettingsIfMissing(ctx);
   await seedMastersIfEmpty(ctx);
   await seedPriceListIfEmpty(ctx, academicYearCode);
   const { sb, tenantId } = ctx;

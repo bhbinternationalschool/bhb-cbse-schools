@@ -318,3 +318,290 @@ export function slugCode(text: string, fallback = ""): string {
     .slice(0, 32);
   return s || fallback;
 }
+
+/* ─── Phase 2: procurement ─────────────────────────────────── */
+
+export type InvIndentStatus =
+  | "draft"
+  | "submitted"
+  | "approved"
+  | "rejected"
+  | "converted"
+  | "cancelled";
+
+export type InvPoStatus =
+  | "draft"
+  | "pending_approval"
+  | "approved"
+  | "issued"
+  | "partial_grn"
+  | "closed"
+  | "cancelled";
+
+export type InvBillStatus = "open" | "part_paid" | "paid" | "cancelled";
+
+export type InvPaymentMode =
+  | "cash"
+  | "bank"
+  | "upi"
+  | "cheque"
+  | "neft"
+  | "rtgs"
+  | "imps"
+  | "card";
+
+export type InvIndentLine = {
+  id: string;
+  indentId: string;
+  itemId: string;
+  description: string;
+  qty: number;
+  uomId: string;
+  estRatePaise: number;
+  sortOrder: number;
+  /** Joined for display. */
+  itemName?: string;
+  sku?: string;
+};
+
+export type InvIndent = {
+  id: string;
+  indentNo: string;
+  academicYearCode: string;
+  requestedBy: string;
+  department: string;
+  urgency: "normal" | "urgent";
+  status: InvIndentStatus;
+  neededBy: string;
+  note: string;
+  decidedBy: string;
+  decidedAt: string;
+  decisionNote: string;
+  estimatedPaise: number;
+  createdBy: string;
+  createdAt: string;
+  lines: InvIndentLine[];
+};
+
+export type InvPoLine = {
+  id: string;
+  poId: string;
+  itemId: string;
+  description: string;
+  qty: number;
+  uomId: string;
+  ratePaise: number;
+  discountPct: number;
+  gstRate: number;
+  lineTotalPaise: number;
+  taxPaise: number;
+  qtyReceived: number;
+  sortOrder: number;
+  itemName?: string;
+  sku?: string;
+  uomName?: string;
+};
+
+export type InvPurchaseOrder = {
+  id: string;
+  poNo: string;
+  indentId: string;
+  vendorId: string;
+  vendorName: string;
+  academicYearCode: string;
+  status: InvPoStatus;
+  orderDate: string;
+  expectedDate: string;
+  subtotalPaise: number;
+  discountPaise: number;
+  taxPaise: number;
+  freightPaise: number;
+  totalPaise: number;
+  approvedBy: string;
+  approvedAt: string;
+  approvalNote: string;
+  issuedAt: string;
+  terms: string;
+  note: string;
+  createdBy: string;
+  createdAt: string;
+  lines: InvPoLine[];
+  /** True when the total is above the approval threshold. */
+  needsApproval?: boolean;
+};
+
+export type InvGrnLine = {
+  id: string;
+  grnId: string;
+  poLineId: string;
+  itemId: string;
+  qtyReceived: number;
+  qtyRejected: number;
+  rejectionReason: string;
+  ratePaise: number;
+  discountPct: number;
+  gstRate: number;
+  lineTotalPaise: number;
+  taxPaise: number;
+  landedUnitCostPaise: number;
+  batchNo: string;
+  expiryDate: string;
+  itemName?: string;
+  sku?: string;
+  /** Quantity already sent back on a purchase return. */
+  qtyReturned?: number;
+};
+
+export type InvGrn = {
+  id: string;
+  grnNo: string;
+  poId: string;
+  poNo: string;
+  vendorId: string;
+  vendorName: string;
+  locationId: string;
+  receiptDate: string;
+  supplierInvoiceNo: string;
+  supplierInvoiceDate: string;
+  subtotalPaise: number;
+  taxPaise: number;
+  freightPaise: number;
+  otherChargesPaise: number;
+  totalPaise: number;
+  billId: string;
+  billNo: string;
+  note: string;
+  createdBy: string;
+  createdAt: string;
+  lines: InvGrnLine[];
+};
+
+export type InvVendorBill = {
+  id: string;
+  billNo: string;
+  vendorId: string;
+  vendorName: string;
+  grnId: string;
+  grnNo: string;
+  supplierInvoiceNo: string;
+  billDate: string;
+  dueDate: string;
+  subtotalPaise: number;
+  taxPaise: number;
+  freightPaise: number;
+  totalPaise: number;
+  paidPaise: number;
+  balancePaise: number;
+  status: InvBillStatus;
+  postedToAccounts: boolean;
+  note: string;
+  createdAt: string;
+  /** Days past the due date; negative means not yet due. */
+  overdueDays: number;
+};
+
+export type InvVendorPayment = {
+  id: string;
+  paymentNo: string;
+  vendorId: string;
+  billId: string;
+  paidOn: string;
+  amountPaise: number;
+  mode: InvPaymentMode;
+  reference: string;
+  note: string;
+  createdBy: string;
+};
+
+export type InvPurchaseReturnLine = {
+  id: string;
+  returnId: string;
+  grnLineId: string;
+  itemId: string;
+  qty: number;
+  ratePaise: number;
+  amountPaise: number;
+  gstRate: number;
+  taxPaise: number;
+  itemName?: string;
+  sku?: string;
+};
+
+export type InvPurchaseReturn = {
+  id: string;
+  returnNo: string;
+  grnId: string;
+  grnNo: string;
+  vendorId: string;
+  vendorName: string;
+  returnDate: string;
+  locationId: string;
+  reason: string;
+  subtotalPaise: number;
+  taxPaise: number;
+  totalPaise: number;
+  note: string;
+  createdBy: string;
+  createdAt: string;
+  lines: InvPurchaseReturnLine[];
+};
+
+/** A PO line still awaiting delivery — what the receipt screen offers. */
+export type InvPendingPoLine = InvPoLine & {
+  poNo: string;
+  vendorId: string;
+  vendorName: string;
+  qtyPending: number;
+  orderDate: string;
+  expectedDate: string;
+};
+
+export function indentStatusLabel(s: InvIndentStatus): string {
+  return {
+    draft: "Draft",
+    submitted: "Awaiting approval",
+    approved: "Approved",
+    rejected: "Rejected",
+    converted: "Ordered",
+    cancelled: "Cancelled",
+  }[s];
+}
+
+export function poStatusLabel(s: InvPoStatus): string {
+  return {
+    draft: "Draft",
+    pending_approval: "Awaiting approval",
+    approved: "Approved",
+    issued: "Sent to vendor",
+    partial_grn: "Partly received",
+    closed: "Received",
+    cancelled: "Cancelled",
+  }[s];
+}
+
+export function billStatusLabel(s: InvBillStatus): string {
+  return {
+    open: "Unpaid",
+    part_paid: "Part paid",
+    paid: "Paid",
+    cancelled: "Cancelled",
+  }[s];
+}
+
+/** Line maths shared by the order and receipt forms, so both agree. */
+export function lineAmounts(input: {
+  qty: number;
+  ratePaise: number;
+  discountPct?: number;
+  gstRate?: number;
+}): { netRatePaise: number; lineTotalPaise: number; taxPaise: number } {
+  const qty = Number(input.qty) || 0;
+  const rate = Number(input.ratePaise) || 0;
+  const disc = Math.min(100, Math.max(0, Number(input.discountPct) || 0));
+  const netRatePaise = Math.round(rate * (1 - disc / 100));
+  const lineTotalPaise = Math.round(netRatePaise * qty);
+  const taxPaise = Math.round(
+    (lineTotalPaise * (Number(input.gstRate) || 0)) / 100,
+  );
+  return { netRatePaise, lineTotalPaise, taxPaise };
+}

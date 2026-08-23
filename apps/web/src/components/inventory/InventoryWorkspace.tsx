@@ -19,21 +19,26 @@ import { CatalogueTab } from "@/components/inventory/CatalogueTab";
 import { InvAlert, InvSpinner } from "@/components/inventory/InvUi";
 import { KitsTab } from "@/components/inventory/KitsTab";
 import { MastersTab } from "@/components/inventory/MastersTab";
+import { PurchaseTab } from "@/components/inventory/PurchaseTab";
 import { VendorsTab } from "@/components/inventory/VendorsTab";
 import { useInvBootstrap } from "@/lib/inventory/client";
 import { ensureMastersHydrated } from "@/lib/mastersPersistence";
 import { loadMasters } from "@/lib/masters";
 import { Button } from "@/components/ui/button";
 
-type Tab = "catalogue" | "vendors" | "kits" | "masters";
+type Tab = "catalogue" | "purchase" | "vendors" | "kits" | "masters";
 
-const TABS: { id: Tab; label: string; tone: "navy" | "sky" | "teal" | "violet" }[] =
-  [
-    { id: "catalogue", label: "Catalogue", tone: "navy" },
-    { id: "vendors", label: "Vendors", tone: "sky" },
-    { id: "kits", label: "Kits by class", tone: "teal" },
-    { id: "masters", label: "Setup", tone: "violet" },
-  ];
+const TABS: {
+  id: Tab;
+  label: string;
+  tone: "navy" | "sky" | "teal" | "violet" | "green";
+}[] = [
+  { id: "catalogue", label: "Catalogue", tone: "navy" },
+  { id: "purchase", label: "Purchase", tone: "green" },
+  { id: "vendors", label: "Vendors", tone: "sky" },
+  { id: "kits", label: "Kits by class", tone: "teal" },
+  { id: "masters", label: "Setup", tone: "violet" },
+];
 
 export function InventoryWorkspace() {
   const [tab, setTab] = useState<Tab>("catalogue");
@@ -93,6 +98,7 @@ export function InventoryWorkspace() {
           {tab === "catalogue" ? (
             <CatalogueTab boot={boot.data} onChanged={boot.reload} />
           ) : null}
+          {tab === "purchase" ? <PurchaseTab boot={boot.data} /> : null}
           {tab === "vendors" ? <VendorsTab onChanged={boot.reload} /> : null}
           {tab === "kits" ? (
             <KitsTab classes={classes} onChanged={boot.reload} />
