@@ -47,6 +47,7 @@ type FeedRow = {
   lead_id: string;
   stage: string;
   dob: string;
+  age_years_approx: number | string | null;
   locality: string;
   village_id: string | null;
   touchpoints: number;
@@ -95,7 +96,11 @@ export async function rescoreLeads(academicYearCode = ""): Promise<RescoreResult
     if (!r.village_id) withoutVillage += 1;
     if (distanceKm === null) withoutDistance += 1;
 
-    const age = childAgeYears(r.dob, now);
+    // An exact birth date wins; a parent-stated age is the fallback. They are
+    // never merged into one stored value — see the scoring feed migration.
+    const approxRaw = Number(r.age_years_approx ?? 0);
+    const approx = Number.isFinite(approxRaw) && approxRaw > 0 ? approxRaw : null;
+    const age = childAgeYears(r.dob, now) ?? approx;
     const result = scoreLead({
       distanceKm,
       touchpoints: Number(r.touchpoints) || 0,

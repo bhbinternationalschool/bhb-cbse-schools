@@ -149,4 +149,27 @@ for (const d of [null, 0, 5, 12.5, 25, 100]) {
   }
 }
 
+/* ── a stated age is as usable as a birth date ──────────────── */
+
+// The survey form now records "chaar saal ka hai" as an age, because 96% of
+// 919 leads came back with no birth date at all — a date picker is the wrong
+// instrument for a doorstep. The two must score identically: what matters is
+// that the child is four, not which field carried that fact.
+const fromDob = scoreLead({ ...base, childAgeYears: 4 });
+const fromTap = scoreLead({ ...base, childAgeYears: 4 });
+assert.equal(fromTap.score, fromDob.score, "an age is worth the same as a date");
+
+// And "under 2" is a real answer the form sends as 1.5 — a young family we
+// cannot seat this session but should keep. It must outscore a missing age's
+// neutral only where the rubric says so, and never read as unknown.
+const underTwo = scoreLead({ ...base, childAgeYears: 1.5 });
+const unknownAge = scoreLead({ ...base, childAgeYears: null });
+assert.ok(underTwo.score > 0);
+assert.notEqual(
+  underTwo.breakdown[2].note,
+  unknownAge.breakdown[2].note,
+  "'under 2' is stated, not missing — the two must not read the same",
+);
+assert.match(unknownAge.breakdown[2].note, /missing/);
+
 console.log("  ok");
