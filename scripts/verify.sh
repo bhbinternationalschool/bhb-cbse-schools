@@ -112,6 +112,7 @@ SELFTESTS=(
   test:transport-parent-messages
   test:ebook-access
   test:village-market
+  test:lead-score
 )
 
 bold "Verifying $(git rev-parse --short HEAD 2>/dev/null || echo 'working tree') on $(git branch --show-current 2>/dev/null || echo '?')"

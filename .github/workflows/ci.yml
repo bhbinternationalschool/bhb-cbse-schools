@@ -185,7 +185,9 @@ jobs:
 
       - name: Test — admissions village market
         working-directory: apps/web
-        run: npm run test:village-market
+        run: |
+          npm run test:village-market
+          npm run test:lead-score
 
   build:
     name: Production build
