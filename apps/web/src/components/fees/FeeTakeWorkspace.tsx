@@ -12,6 +12,8 @@ import {
 import {
   allocateCollectionToDues,
   collectPayment,
+  type InjectedStoreDue,
+  type VoucherLine,
   computeHouseholdDues,
   formatInr,
   householdSiblingIds,
@@ -373,6 +375,101 @@ export function FeeTakeWorkspace() {
     return sis.students.find((s) => s.id === selectedId) ?? null;
   }, [sis, selectedId]);
 
+  // Store credit sales for this household, read live from the store module.
+  // Not mirrored into the fee tables: the fees client rebuilds those wholesale
+  // and would delete anything it did not produce itself.
+  const [storeDues, setStoreDues] = useState<InjectedStoreDue[]>([]);
+  const [storeDuesError, setStoreDuesError] = useState("");
+  const [unsettledStore, setUnsettledStore] = useState<
+    { saleNo: string; saleId: string; amountPaise: number; receiptNo: string }[]
+  >([]);
+
+  useEffect(() => {
+    if (!sis || !selectedStudent) {
+      setStoreDues([]);
+      return;
+    }
+    const ids = householdSiblingIds(sis, selectedStudent).map((m) => m.id);
+    let alive = true;
+    void fetch(
+      `/api/inventory/sales?view=dues&studentIds=${encodeURIComponent(ids.join(","))}`,
+      { cache: "no-store" },
+    )
+      .then((r) => r.json())
+      .then((body: { ok?: boolean; dues?: InjectedStoreDue[]; error?: string }) => {
+        if (!alive) return;
+        if (body.ok === false) {
+          // Say the store could not be reached rather than showing no dues,
+          // which would read as "this family owes the store nothing".
+          setStoreDuesError(body.error || "Store dues could not be loaded");
+          setStoreDues([]);
+          return;
+        }
+        setStoreDuesError("");
+        setStoreDues(body.dues ?? []);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setStoreDuesError("Store dues could not be loaded");
+        setStoreDues([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [sis, selectedStudent, tick]);
+
+  /**
+   * Push the store portion of a receipt into the store.
+   *
+   * Anything that does not land is listed for the clerk to retry rather than
+   * logged and forgotten — an unsettled store line means the family is still
+   * shown as owing money they have already paid.
+   */
+  async function settleStoreLines(receiptNo: string, lines: VoucherLine[]) {
+    const storeLines = lines.filter((l) => l.kind === "store" && l.amountPaise > 0);
+    if (storeLines.length === 0) return;
+
+    const failures: {
+      saleNo: string;
+      saleId: string;
+      amountPaise: number;
+      receiptNo: string;
+    }[] = [];
+
+    for (const line of storeLines) {
+      const saleId = line.dueKey.split(":")[2] || "";
+      if (!saleId) continue;
+      try {
+        const res = await fetch("/api/inventory/sales", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "collect",
+            saleId,
+            amountPaise: line.amountPaise,
+            mode: "cash",
+            reference: receiptNo,
+            externalRef: receiptNo,
+          }),
+        });
+        const body = (await res.json()) as { ok?: boolean };
+        if (!res.ok || body.ok === false) throw new Error("refused");
+      } catch {
+        failures.push({
+          saleNo: line.storeIssueNo || saleId,
+          saleId,
+          amountPaise: line.amountPaise,
+          receiptNo,
+        });
+      }
+    }
+
+    if (failures.length > 0) {
+      setUnsettledStore((prev) => [...prev, ...failures]);
+    }
+    setTick((t) => t + 1);
+  }
+
   const householdBundle = useMemo(() => {
     if (!sis || !masters || !selectedStudent) return [];
     const fees = loadFees();
@@ -382,9 +479,9 @@ export function FeeTakeWorkspace() {
       sis,
       masters,
       fees,
-      { includeFuture, includePaid: true },
+      { includeFuture, includePaid: true, storeDues },
     ).filter((row) => members.some((m) => m.id === row.student.id));
-  }, [sis, masters, selectedStudent, includeFuture, tick]);
+  }, [sis, masters, selectedStudent, includeFuture, storeDues, tick]);
 
   const lastSessionPreviews = useMemo(() => {
     if (!sis || !masters || !selectedStudent) return [];
@@ -944,6 +1041,15 @@ export function FeeTakeWorkspace() {
       flash(result.error);
       return;
     }
+    // The receipt exists now, so any store portion is told to the store.
+    //
+    // Order matters. The receipt is written first: if the store call fails the
+    // money is still recorded and the parent has their receipt, and the store
+    // simply still shows the due. Doing it the other way round could take the
+    // money with nothing to show for it. The call carries the receipt number,
+    // and the store settles once per receipt, so a retry is safe.
+    void settleStoreLines(result.voucher.receiptNo, lines);
+
     setSelectedKeys(new Set());
     setCollectAmountRupees("");
     resetPaymentFields();
@@ -1294,6 +1400,59 @@ export function FeeTakeWorkspace() {
                     ))}
                   </ul>
                 )}
+              </div>
+            ) : null}
+
+            {storeDuesError && selectedStudent ? (
+              <p className="mt-3 rounded-lg border border-[var(--warning)] bg-[var(--warning-soft)] px-3 py-2 text-xs text-[var(--warning)]">
+                {storeDuesError}. Any store dues this family has are not shown
+                below — collect them in Store &amp; purchase until this clears.
+              </p>
+            ) : null}
+
+            {unsettledStore.length > 0 ? (
+              <div className="mt-3 rounded-lg border border-[var(--danger)] bg-[var(--danger-soft)] px-3 py-2 text-xs text-[var(--danger)]">
+                <p className="font-semibold">
+                  Collected on the receipt, but the store was not told
+                </p>
+                <ul className="mt-1 space-y-0.5">
+                  {unsettledStore.map((u) => (
+                    <li key={`${u.receiptNo}-${u.saleId}`}>
+                      {u.saleNo} · {formatInr(u.amountPaise)} · receipt{" "}
+                      {u.receiptNo}
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-1">
+                  The family has paid and has their receipt. Until this is
+                  retried the store still shows the amount owing — do not
+                  collect it again.
+                </p>
+                <button
+                  type="button"
+                  className="mt-1.5 rounded-md border border-[var(--danger)] px-2 py-1 font-semibold"
+                  onClick={() => {
+                    const pending = [...unsettledStore];
+                    setUnsettledStore([]);
+                    void Promise.all(
+                      pending.map((u) =>
+                        settleStoreLines(u.receiptNo, [
+                          {
+                            dueKey: `store:${selectedStudent?.id ?? ""}:${u.saleId}`,
+                            studentId: selectedStudent?.id ?? "",
+                            studentName: "",
+                            label: u.saleNo,
+                            kind: "store",
+                            amountPaise: u.amountPaise,
+                            storeIssueNo: u.saleNo,
+                          } as VoucherLine,
+                        ]),
+                      ),
+                    );
+                  }}
+                >
+                  Retry
+                </button>
               </div>
             ) : null}
 

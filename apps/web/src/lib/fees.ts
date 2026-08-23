@@ -228,6 +228,60 @@ export type FeeDueLine = {
   label: string;
 };
 
+/**
+ * A store credit sale, as the fee counter needs it.
+ *
+ * Passed in rather than derived: the store is a server-truth module and this
+ * function is synchronous. The caller fetches these once per household and
+ * hands them over, so no fee code reaches into the store's tables and the
+ * store's balance stays the only version of what is owed.
+ */
+export type InjectedStoreDue = {
+  saleId: string;
+  saleNo: string;
+  studentId: string;
+  saleDate: string;
+  balancePaise: number;
+  totalPaise: number;
+  paidPaise: number;
+  itemSummary: string;
+};
+
+/** The due key a store sale collects under. */
+export function storeSaleDueKey(studentId: string, saleId: string): string {
+  return `store:${studentId}:${saleId}`;
+}
+
+function storeDueToLine(d: InjectedStoreDue): FeeDueLine {
+  return {
+    dueKey: storeSaleDueKey(d.studentId, d.saleId),
+    kind: "store",
+    studentId: d.studentId,
+    feeHeadId: "",
+    feeHeadName: "Store",
+    installmentId: null,
+    installmentLabel: "Store",
+    specialFeeId: null,
+    structureLineId: null,
+    storeIssueId: d.saleId,
+    storeIssueNo: d.saleNo,
+    storeItems: [],
+    transport: null,
+    dueOn: d.saleDate,
+    billedPaise: d.totalPaise,
+    concessionPaise: 0,
+    concessionDetails: [],
+    // Straight from the store, not adjusted by this module's paid map: the
+    // store's own balance already accounts for every collection that reached
+    // it, including ones made here. A fee receipt whose store call has not
+    // landed yet leaves the due standing, which is the honest state and is
+    // what prompts the retry.
+    paidPaise: d.paidPaise,
+    balancePaise: d.balancePaise,
+    label: `Store · ${d.saleNo}${d.itemSummary ? ` · ${d.itemSummary}` : ""}`,
+  };
+}
+
 /** One approved grant applied to a due line. */
 export type FeeConcessionDetail = {
   grantId: string;
@@ -1880,6 +1934,11 @@ export function computeStudentDues(
     includePaid?: boolean;
     /** Include inactive students (inactive dues register). Default false. */
     includeInactive?: boolean;
+    /**
+     * Open store sales for this student, fetched by the caller. Omitted
+     * everywhere except the counter, so no other screen changes.
+     */
+    storeDues?: InjectedStoreDue[];
   },
 ): FeeDueLine[] {
   if (student.status !== "active" && !options?.includeInactive) return [];
@@ -2200,11 +2259,10 @@ export function computeStudentDues(
       asOf,
       includeFuture,
     });
-    return appendArrearsDues(
-      [...filtered, ...slices],
+    return appendStoreDues(
+      appendArrearsDues([...filtered, ...slices], student, fees, paidMap, includePaid),
       student,
-      fees,
-      paidMap,
+      options?.storeDues,
       includePaid,
     ).sort((a, b) =>
       a.dueOn === b.dueOn
@@ -2213,17 +2271,30 @@ export function computeStudentDues(
     );
   }
 
-  return appendArrearsDues(
-    adjusted,
+  return appendStoreDues(
+    appendArrearsDues(adjusted, student, fees, paidMap, includePaid),
     student,
-    fees,
-    paidMap,
+    options?.storeDues,
     includePaid,
   ).sort((a, b) =>
     a.dueOn === b.dueOn
       ? a.label.localeCompare(b.label)
       : a.dueOn.localeCompare(b.dueOn),
   );
+}
+
+function appendStoreDues(
+  lines: FeeDueLine[],
+  student: SisStudent,
+  storeDues: InjectedStoreDue[] | undefined,
+  includePaid: boolean,
+): FeeDueLine[] {
+  if (!storeDues?.length) return lines;
+  const mine = storeDues.filter(
+    (d) => d.studentId === student.id && (includePaid || d.balancePaise > 0),
+  );
+  if (mine.length === 0) return lines;
+  return [...lines, ...mine.map(storeDueToLine)];
 }
 
 /** Apply active late-fee rules to overdue open dues. */
@@ -2655,6 +2726,7 @@ export function computeHouseholdDues(
     asOf?: string;
     includeFuture?: boolean;
     includePaid?: boolean;
+    storeDues?: InjectedStoreDue[];
   },
 ): { student: SisStudent; dues: FeeDueLine[] }[] {
   const members = sis.students.filter(
