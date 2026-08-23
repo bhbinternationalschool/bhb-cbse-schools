@@ -169,9 +169,32 @@ if [[ "${SKIP_WA_SUBSCRIBE:-}" != "1" ]] && grep -q "WHATSAPP_TOKEN=." "$ENV_FIL
   (cd "$ROOT/apps/web" && npm run wa:subscribe) || echo "WABA subscribe warning — continue deploy"
 fi
 
+# Non-interactive auth via a deploy service-account key, when one is present.
+# The whole point is that a build no longer dies on an expired user token: a
+# key does not expire the way an interactive login does. The key is a
+# long-lived credential, so it lives OUTSIDE the repo (default below) and is
+# never committed — check DEPLOY_SA_KEY points somewhere git cannot see.
+#
+# Set DEPLOY_SA_KEY to override, or drop the key at the default path. With no
+# key present the script falls back to the interactive login exactly as before.
+DEPLOY_SA_KEY="${DEPLOY_SA_KEY:-$HOME/.config/bhb-deploy/deploy-sa.json}"
+if [[ -f "$DEPLOY_SA_KEY" ]]; then
+  case "$DEPLOY_SA_KEY" in
+    "$ROOT"/*)
+      echo "Refusing to use a deploy key inside the repo ($DEPLOY_SA_KEY)."
+      echo "Move it outside the working tree so it can never be committed or shipped."
+      exit 1
+      ;;
+  esac
+  echo "Authenticating with deploy service-account key…"
+  gcloud auth activate-service-account --key-file="$DEPLOY_SA_KEY" --project="$PROJECT_ID"     || { echo "Deploy key present but activation failed — is it valid?"; exit 1; }
+fi
+
 if ! gcloud auth print-access-token >/dev/null 2>&1; then
   echo ""
-  echo "gcloud auth expired. Run this in your terminal, then re-run deploy:"
+  echo "gcloud auth expired and no deploy key found at $DEPLOY_SA_KEY."
+  echo "Either drop the deploy service-account key there (see docs/DEPLOY_SERVICE_ACCOUNT.md),"
+  echo "or run an interactive login, then re-run deploy:"
   echo "  gcloud auth login director@bhbinternational.school --update-adc"
   echo "  gcloud config set project $PROJECT_ID"
   echo "  ./scripts/deploy-online.sh"
@@ -179,7 +202,10 @@ if ! gcloud auth print-access-token >/dev/null 2>&1; then
 fi
 
 gcloud config set project "$PROJECT_ID" >/dev/null
-gcloud config set account "${GCLOUD_ACCOUNT:-director@bhbinternational.school}" >/dev/null 2>&1 || true
+# Don't stomp the active account when a deploy key was activated above.
+if [[ ! -f "$DEPLOY_SA_KEY" ]]; then
+  gcloud config set account "${GCLOUD_ACCOUNT:-director@bhbinternational.school}" >/dev/null 2>&1 || true
+fi
 
 SUBSTITUTIONS="^@^"
 SUBSTITUTIONS+="_NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}"
