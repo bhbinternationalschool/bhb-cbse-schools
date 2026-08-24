@@ -2007,6 +2007,173 @@ export function ExpensesPanel({
   );
 }
 
+/* ─── Store vendor dues, straight from the ledger ──────────── */
+
+type StoreVendorDue = {
+  vendorId: string;
+  name: string;
+  gstin: string;
+  phone: string;
+  contactPerson: string;
+  paymentTermsDays: number;
+  ledgerDuePaise: number;
+  billsOpenPaise: number;
+  openBillCount: number;
+  oldestBillDate: string;
+};
+
+/**
+ * What the school owes its store suppliers, read from account 2000.
+ *
+ * Separate from "Unified payables" above on purpose. That list is built from
+ * the browser's own accounts state; this one is the ledger's answer, and the
+ * two are not the same source. Showing them apart means a supplier who appears
+ * in one and not the other is visible rather than quietly merged away.
+ *
+ * The store's own open-bill total is shown beside the ledger balance. They
+ * should agree to the paisa; when they do not, a bill moved on one side only,
+ * and that is worth a look rather than an average.
+ */
+function StoreVendorDues() {
+  const [rows, setRows] = useState<StoreVendorDue[] | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/ledger", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "vendor-dues" }),
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        dues?: StoreVendorDue[];
+        error?: string;
+      };
+      if (!res.ok || !json.ok) {
+        setError(json.error || "Could not read vendor dues");
+        setRows(null);
+      } else {
+        setError("");
+        setRows(json.dues ?? []);
+      }
+    } catch {
+      setError("Could not reach the server");
+      setRows(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const owing = (rows ?? []).filter((r) => r.ledgerDuePaise !== 0);
+  const totalPaise = owing.reduce((n, r) => n + r.ledgerDuePaise, 0);
+
+  return (
+    <section className={CARD}>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-bold text-[var(--brand-deep)]">
+            Store vendors
+          </h3>
+          <p className="text-[11px] text-[var(--muted)]">
+            From the ledger, account 2000 — the same figure as the trial balance
+          </p>
+        </div>
+        <button type="button" className={BTN_OUTLINE} onClick={() => void load()}>
+          Refresh
+        </button>
+      </div>
+
+      {error ? (
+        <p className="rounded-lg border border-[var(--danger)] bg-[var(--danger-soft)] px-3 py-2 text-xs text-[var(--danger)]">
+          {error}
+        </p>
+      ) : null}
+
+      {loading && !rows ? (
+        <p className="py-3 text-sm text-[var(--muted)]">Loading vendor dues…</p>
+      ) : null}
+
+      {rows && rows.length === 0 ? (
+        <p className="py-3 text-sm text-[var(--muted)]">
+          No store vendors yet. They are created in Store → Vendors, and appear
+          here as soon as a bill is raised against one.
+        </p>
+      ) : null}
+
+      {rows && rows.length > 0 ? (
+        <>
+          <ErpTable minWidth="min-w-full">
+            <ErpTableHead>
+              <tr>
+                <th className="pb-2 text-left">Vendor</th>
+                <th className="pb-2 text-left">Contact</th>
+                <th className="pb-2 text-left">GSTIN</th>
+                <th className="pb-2 text-right">Owed (books)</th>
+                <th className="pb-2 text-right">Open bills</th>
+                <th className="pb-2 text-left">Oldest</th>
+              </tr>
+            </ErpTableHead>
+            <ErpTableBody>
+              {rows.map((r) => {
+                const agrees = r.ledgerDuePaise === r.billsOpenPaise;
+                return (
+                  <tr key={r.vendorId}>
+                    <td className="py-2 font-semibold">
+                      {r.name}
+                      {r.paymentTermsDays > 0 ? (
+                        <span className="ml-1 text-[11px] font-normal text-[var(--muted)]">
+                          {r.paymentTermsDays}d terms
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="py-2 text-[var(--muted)]">
+                      {r.phone || r.contactPerson || "—"}
+                    </td>
+                    <td className="py-2 text-[var(--muted)]">{r.gstin || "—"}</td>
+                    <td className="py-2 text-right font-semibold">
+                      {formatInr(r.ledgerDuePaise)}
+                    </td>
+                    <td
+                      className={`py-2 text-right ${
+                        agrees ? "text-[var(--muted)]" : "text-[var(--danger)]"
+                      }`}
+                      title={
+                        agrees
+                          ? undefined
+                          : "The store's bills and the ledger disagree — a bill moved on one side only"
+                      }
+                    >
+                      {formatInr(r.billsOpenPaise)}
+                      {r.openBillCount > 0 ? (
+                        <span className="ml-1 text-[11px] text-[var(--muted)]">
+                          ({r.openBillCount})
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="py-2 text-[var(--muted)]">
+                      {r.oldestBillDate || "—"}
+                    </td>
+                  </tr>
+                );
+              })}
+            </ErpTableBody>
+          </ErpTable>
+          <p className="mt-2 text-right text-sm font-bold text-[var(--brand-deep)]">
+            Total owed: {formatInr(totalPaise)}
+          </p>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
 export function BillsPanel({
   state,
   onRefresh,
@@ -2414,6 +2581,8 @@ export function BillsPanel({
           </button>
         </div>
       </section>
+
+      <StoreVendorDues />
 
       <section className={CARD}>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">

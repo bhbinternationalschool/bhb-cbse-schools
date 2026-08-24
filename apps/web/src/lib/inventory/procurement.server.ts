@@ -1241,3 +1241,54 @@ export async function procurementSummary(): Promise<{
     overduePaise: overdue,
   };
 }
+
+/* ─── Vendor dues, for the Accounts screens ────────────────── */
+
+export type InvVendorDue = {
+  vendorId: string;
+  name: string;
+  gstin: string;
+  phone: string;
+  email: string;
+  contactPerson: string;
+  paymentTermsDays: number;
+  isActive: boolean;
+  /** The vendor's balance on account 2000. This is the authority. */
+  ledgerDuePaise: number;
+  /** What the store's own bill records still show open. */
+  billsOpenPaise: number;
+  openBillCount: number;
+  oldestBillDate: string;
+  lastBillDate: string;
+};
+
+/**
+ * Every store vendor with what the books say we owe them.
+ *
+ * The ledger figure and the store's own open-bill figure are returned side by
+ * side rather than reconciled into one number. They should agree; when they
+ * do not, something posted on one side and not the other, and a single
+ * blended figure would hide exactly the discrepancy worth seeing.
+ */
+export async function vendorDues(): Promise<InvVendorDue[]> {
+  const { sb, tenantId } = await invCtx();
+  const { data, error } = await sb.rpc("inv_vendor_dues", {
+    p_tenant_id: tenantId,
+  });
+  if (error) throw new InvError(`Vendor dues: ${error.message}`, 500);
+  return ((data ?? []) as Row[]).map((r) => ({
+    vendorId: str(r.vendor_id),
+    name: str(r.name),
+    gstin: str(r.gstin),
+    phone: str(r.phone),
+    email: str(r.email),
+    contactPerson: str(r.contact_person),
+    paymentTermsDays: int(r.payment_terms_days),
+    isActive: r.is_active === true,
+    ledgerDuePaise: int(r.ledger_due_paise),
+    billsOpenPaise: int(r.bills_open_paise),
+    openBillCount: int(r.open_bill_count),
+    oldestBillDate: str(r.oldest_bill_date),
+    lastBillDate: str(r.last_bill_date),
+  }));
+}
