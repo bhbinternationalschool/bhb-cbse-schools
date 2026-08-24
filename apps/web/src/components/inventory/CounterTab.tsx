@@ -59,6 +59,18 @@ import {
 
 type Section = "sell" | "sales" | "dues";
 
+type TenderRow = {
+  id: string;
+  mode: InvTenderMode;
+  amountInput: string;
+  reference: string;
+  /** Set once the clerk edits the amount, so auto-defaulting stops. */
+  touched?: boolean;
+};
+
+let tenderSeq = 0;
+const newTenderId = () => `t${++tenderSeq}`;
+
 type CartLine = {
   itemId: string;
   name: string;
@@ -209,9 +221,14 @@ function SellSection({
   const [kitId, setKitId] = useState("");
   const [note, setNote] = useState("");
 
-  const [tender, setTender] = useState<InvTenderMode>("cash");
-  const [tenderInput, setTenderInput] = useState("");
-  const [reference, setReference] = useState("");
+  /**
+   * One row per way the money arrived. A parent paying ₹800 cash and ₹1,200
+   * by UPI is one sale with two tenders, the same shape the fee counter uses,
+   * and the same shape inv_sale_payments has always stored.
+   */
+  const [tenders, setTenders] = useState<TenderRow[]>([
+    { id: newTenderId(), mode: "cash", amountInput: "", reference: "" },
+  ]);
   const [onAccount, setOnAccount] = useState(false);
 
   const itemsById = useMemo(() => {
@@ -289,15 +306,39 @@ function SellSection({
     return { gross, discount, tax, total, cost, margin: total - cost };
   }, [cart]);
 
-  // Default the tender to the full amount, until the clerk edits it or
-  // chooses to put the sale on account.
+  // Default the FIRST tender to the full amount, until the clerk edits it,
+  // splits the payment, or puts the sale on account. Only the first row is
+  // touched: once a second way of paying exists the clerk is driving.
   useEffect(() => {
     if (onAccount) return;
-    setTenderInput(totals.total > 0 ? paiseToInput(totals.total) : "");
+    setTenders((rows) => {
+      if (rows.length !== 1) return rows;
+      const only = rows[0]!;
+      if (only.touched) return rows;
+      return [
+        { ...only, amountInput: totals.total > 0 ? paiseToInput(totals.total) : "" },
+      ];
+    });
   }, [totals.total, onAccount]);
 
-  const tenderPaise = onAccount ? 0 : inputToPaise(tenderInput);
+  const tenderPaise = onAccount
+    ? 0
+    : tenders.reduce((n, t) => n + inputToPaise(t.amountInput), 0);
   const balancePaise = Math.max(0, totals.total - tenderPaise);
+
+  /**
+   * A payment that is not cash left a trail somewhere — a UPI reference, a
+   * cheque number, a card slip. Without it a disputed payment cannot be traced
+   * to the bank, so the counter refuses rather than recording money it cannot
+   * later prove arrived.
+   */
+  const missingRef = tenders.some(
+    (t) =>
+      !onAccount &&
+      t.mode !== "cash" &&
+      inputToPaise(t.amountInput) > 0 &&
+      t.reference.trim() === "",
+  );
 
   const buyerReady =
     buyerKind === "student"
@@ -318,13 +359,15 @@ function SellSection({
     setStaffName("");
     setBuyerSearch("");
     setNote("");
-    setTenderInput("");
-    setReference("");
+    setTenders([
+      { id: newTenderId(), mode: "cash", amountInput: "", reference: "" },
+    ]);
     setOnAccount(false);
   }
 
   async function sell() {
     if (!buyerReady || cart.length === 0 || capBreach || overTender) return;
+    if (missingRef) return;
 
     const res = await saver.run(() =>
       invApi.postSale({
@@ -338,6 +381,7 @@ function SellSection({
               : staffName.trim(),
         buyerPhone: buyerKind === "walkin" ? walkinPhone.trim() : (student?.phone ?? ""),
         classId: buyerKind === "student" ? (student?.classId ?? "") : "",
+        sectionId: buyerKind === "student" ? (student?.sectionId ?? "") : "",
         locationId,
         priceListId,
         kitId: kitId || undefined,
@@ -349,10 +393,15 @@ function SellSection({
           discountPct: l.discountPct,
           gstRate: l.gstRate,
         })),
-        payments:
-          tenderPaise > 0
-            ? [{ amountPaise: tenderPaise, mode: tender, reference }]
-            : [],
+        payments: onAccount
+          ? []
+          : tenders
+              .filter((t) => inputToPaise(t.amountInput) > 0)
+              .map((t) => ({
+                amountPaise: inputToPaise(t.amountInput),
+                mode: t.mode,
+                reference: t.reference.trim(),
+              })),
       }),
     );
 
@@ -664,54 +713,146 @@ function SellSection({
               disabled={!boot.settings.allowCreditSales}
               onChange={(e) => {
                 setOnAccount(e.target.checked);
-                if (e.target.checked) setTenderInput("");
+                // Putting it all on account clears the tenders, so a
+                // half-typed amount cannot survive as a phantom payment.
+                if (e.target.checked)
+                  setTenders([
+                    {
+                      id: newTenderId(),
+                      mode: "cash",
+                      amountInput: "",
+                      reference: "",
+                    },
+                  ]);
               }}
             />
             Put the whole amount on account
           </label>
 
           {!onAccount ? (
-            <>
-              <div className="flex flex-wrap gap-1">
-                {TENDERS.map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => setTender(t)}
-                    className={
-                      tender === t
-                        ? "rounded-md bg-foreground px-2 py-1 text-xs font-medium text-background"
-                        : "rounded-md border px-2 py-1 text-xs hover:bg-muted"
-                    }
+            <div className="space-y-3">
+              {tenders.map((row, idx) => {
+                const needsRef =
+                  row.mode !== "cash" &&
+                  inputToPaise(row.amountInput) > 0 &&
+                  row.reference.trim() === "";
+                const patch = (next: Partial<TenderRow>) =>
+                  setTenders((rows) =>
+                    rows.map((r) => (r.id === row.id ? { ...r, ...next } : r)),
+                  );
+                return (
+                  <div
+                    key={row.id}
+                    className="space-y-2 rounded-lg border p-2"
                   >
-                    {tenderLabel(t)}
-                  </button>
-                ))}
-              </div>
-              <MoneyField
-                label="Amount taken"
-                hint="Leave less than the total to bill the rest"
-                value={tenderInput}
-                onChange={setTenderInput}
-              />
-              {tender !== "cash" ? (
-                <TextField
-                  label="Reference"
-                  value={reference}
-                  onChange={setReference}
-                />
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex flex-wrap gap-1">
+                        {TENDERS.map((t) => (
+                          <button
+                            key={t}
+                            type="button"
+                            onClick={() => patch({ mode: t })}
+                            className={
+                              row.mode === t
+                                ? "rounded-md bg-foreground px-2 py-1 text-xs font-medium text-background"
+                                : "rounded-md border px-2 py-1 text-xs hover:bg-muted"
+                            }
+                          >
+                            {tenderLabel(t)}
+                          </button>
+                        ))}
+                      </div>
+                      {tenders.length > 1 ? (
+                        <button
+                          type="button"
+                          className="rounded-md border px-2 py-1 text-xs hover:bg-muted"
+                          onClick={() =>
+                            setTenders((rows) =>
+                              rows.filter((r) => r.id !== row.id),
+                            )
+                          }
+                        >
+                          Remove
+                        </button>
+                      ) : null}
+                    </div>
+
+                    <MoneyField
+                      label={
+                        tenders.length > 1
+                          ? `Amount by ${tenderLabel(row.mode)}`
+                          : "Amount taken"
+                      }
+                      hint={
+                        idx === 0 && tenders.length === 1
+                          ? "Leave less than the total to bill the rest"
+                          : undefined
+                      }
+                      value={row.amountInput}
+                      onChange={(v) => patch({ amountInput: v, touched: true })}
+                    />
+
+                    {row.mode !== "cash" ? (
+                      <>
+                        <TextField
+                          label="Transaction ID"
+                          value={row.reference}
+                          onChange={(v) => patch({ reference: v })}
+                        />
+                        {needsRef ? (
+                          <p className="text-xs text-destructive">
+                            A {tenderLabel(row.mode)} payment needs its
+                            transaction ID before this sale can be taken.
+                          </p>
+                        ) : null}
+                      </>
+                    ) : null}
+                  </div>
+                );
+              })}
+
+              <button
+                type="button"
+                className="rounded-md border px-2 py-1 text-xs hover:bg-muted"
+                onClick={() =>
+                  setTenders((rows) => [
+                    ...rows,
+                    {
+                      id: newTenderId(),
+                      mode: "cash",
+                      amountInput: "",
+                      reference: "",
+                      touched: true,
+                    },
+                  ])
+                }
+              >
+                Add another way of paying
+              </button>
+
+              {tenders.length > 1 ? (
+                <p className="text-xs text-muted-foreground">
+                  Taken in total: {formatPaise(tenderPaise)} of{" "}
+                  {formatPaise(totals.total)}
+                </p>
               ) : null}
-            </>
+            </div>
           ) : null}
 
           {balancePaise > 0 ? (
             <div className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
               {formatPaise(balancePaise)} will stay owing on this sale.
               <div className="mt-1 text-[11px] opacity-90">
-                Store dues are tracked here in the store, not on the fee
-                counter.
+                It will also appear on this child&rsquo;s fee counter card, and
+                can be settled with a fee receipt.
               </div>
             </div>
+          ) : null}
+
+          {missingRef ? (
+            <p className="text-xs text-destructive">
+              Add the transaction ID for every payment that is not cash.
+            </p>
           ) : null}
 
           {overTender ? (
@@ -742,7 +883,8 @@ function SellSection({
                 !buyerReady ||
                 cart.length === 0 ||
                 !!capBreach ||
-                overTender
+                overTender ||
+                missingRef
               }
             >
               {saver.saving ? "Saving…" : "Complete sale"}
