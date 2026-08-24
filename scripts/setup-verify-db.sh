@@ -25,12 +25,25 @@ PROD_REF="ymamhlcrjsuilzdonkzl"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# Fall back to the direct URL already sitting in .env.verify.local. Asking for
+# the same secret twice, in two places, is how one copy ends up pointing
+# somewhere else — and the refusals below apply however it arrived.
+ENV_VERIFY="${ROOT}/apps/web/.env.verify.local"
+if [[ -z "${VERIFY_DB_URL:-}" && -f "$ENV_VERIFY" ]]; then
+  CANDIDATE="$(sed -n 's/^DIRECT_URL=//p' "$ENV_VERIFY" | head -1 | tr -d '"'"'"'\047')"
+  if [[ -n "$CANDIDATE" && "$CANDIDATE" != *PASTE_* ]]; then
+    VERIFY_DB_URL="$CANDIDATE"
+    echo "Using DIRECT_URL from apps/web/.env.verify.local"
+  fi
+fi
+
 if [[ -z "${VERIFY_DB_URL:-}" ]]; then
-  echo "VERIFY_DB_URL is not set." >&2
+  echo "VERIFY_DB_URL is not set, and apps/web/.env.verify.local has no usable DIRECT_URL." >&2
   echo "" >&2
-  echo "  Supabase dashboard → BHB School — verification → Project Settings" >&2
-  echo "  → Database → Connection string → URI, then:" >&2
+  echo "  Fill the verification env in first:" >&2
+  echo "    bash scripts/set-verify-env.sh" >&2
   echo "" >&2
+  echo "  Or pass the URL directly:" >&2
   echo "    VERIFY_DB_URL='postgresql://...' bash scripts/setup-verify-db.sh" >&2
   exit 1
 fi
