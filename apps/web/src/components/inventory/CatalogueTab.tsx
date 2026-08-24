@@ -14,7 +14,14 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Plus, RefreshCw, Search } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  RefreshCw,
+  Search,
+  Upload,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   ErpTable,
@@ -54,6 +61,231 @@ type Draft = Partial<InvItem> & {
   openingCostInput?: string;
   openingLocationId?: string;
 };
+
+/* ─── Import a sheet ───────────────────────────────────────── */
+
+const IMPORT_COLUMNS = [
+  "sku",
+  "name",
+  "category",
+  "uom",
+  "hsn",
+  "gst",
+  "mrp",
+  "sale",
+  "maxdisc",
+  "reorder",
+] as const;
+
+const IMPORT_SAMPLE = [
+  "sku\tname\tcategory\tuom\thsn\tgst\tmrp\tsale\tmaxdisc\treorder",
+  "ENG-6\tEnglish Reader 6\tBooks\tNos\t4901\t5\t320\t300\t10\t20",
+  "UNI-SH-M\tShirt Medium\tUniform\tNos\t6205\t5\t450\t450\t0\t15",
+].join("\n");
+
+type ParsedRow = {
+  sku: string;
+  name: string;
+  category: string;
+  uom: string;
+  hsnCode: string;
+  gstRate: number;
+  mrpPaise: number;
+  salePaise: number;
+  maxDiscountPct: number;
+  reorderLevel: number;
+};
+
+const toPaise = (v: string): number => {
+  const n = Number(String(v).replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(n) ? Math.round(n * 100) : 0;
+};
+const toNum = (v: string): number => {
+  const n = Number(String(v).replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(n) ? n : 0;
+};
+
+/**
+ * Turn pasted text into rows.
+ *
+ * Tab-separated because that is what a spreadsheet puts on the clipboard;
+ * commas are accepted as a fallback for a saved CSV. A header line is used
+ * when present so column ORDER does not have to match, which is the difference
+ * between "paste your sheet" and "rebuild your sheet to our layout".
+ */
+function parseSheet(text: string): { rows: ParsedRow[]; problem: string } {
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  if (lines.length === 0) return { rows: [], problem: "" };
+
+  const split = (l: string) => (l.includes("\t") ? l.split("\t") : l.split(","));
+  const first = split(lines[0]!).map((c) => c.trim().toLowerCase());
+  const hasHeader = first.includes("sku") || first.includes("name");
+
+  let order: string[] = [...IMPORT_COLUMNS];
+  let body = lines;
+  if (hasHeader) {
+    order = first;
+    body = lines.slice(1);
+  }
+  const at = (cells: string[], key: string): string => {
+    const i = order.indexOf(key);
+    return i >= 0 && i < cells.length ? cells[i]!.trim() : "";
+  };
+
+  if (!order.includes("name")) {
+    return { rows: [], problem: 'The sheet needs a "name" column.' };
+  }
+
+  const rows = body.map((line) => {
+    const c = split(line);
+    return {
+      sku: at(c, "sku"),
+      name: at(c, "name"),
+      category: at(c, "category"),
+      uom: at(c, "uom"),
+      hsnCode: at(c, "hsn"),
+      gstRate: toNum(at(c, "gst")),
+      mrpPaise: toPaise(at(c, "mrp")),
+      salePaise: toPaise(at(c, "sale")),
+      maxDiscountPct: toNum(at(c, "maxdisc")),
+      reorderLevel: toNum(at(c, "reorder")),
+    };
+  });
+  return { rows, problem: "" };
+}
+
+type ImportResult = Awaited<ReturnType<typeof invApi.importItems>>;
+
+function ImportSheet({ onDone }: { onDone: () => void }) {
+  const [text, setText] = useState("");
+  const [preview, setPreview] = useState<ImportResult | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const parsed = useMemo(() => parseSheet(text), [text]);
+
+  // Any edit invalidates a preview: confirming a result that describes
+  // different text is how the wrong thing gets imported.
+  useEffect(() => {
+    setPreview(null);
+  }, [text]);
+
+  async function run(dryRun: boolean) {
+    if (parsed.problem) {
+      setError(parsed.problem);
+      return;
+    }
+    if (parsed.rows.length === 0) {
+      setError("Nothing to import yet — paste your sheet above.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const res = await invApi.importItems({ rows: parsed.rows, dryRun });
+      setPreview(res);
+      if (res.applied) {
+        setText("");
+        onDone();
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Import failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const bad = (preview?.rows ?? []).filter((r) => r.action === "error");
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-muted-foreground">
+        Copy the rows straight out of your supplier&rsquo;s quotation or last
+        year&rsquo;s sheet and paste them here. A header row is used if there is
+        one, so the column order does not have to match. Prices are in rupees.
+      </p>
+
+      <textarea
+        className={`${FIELD_CLASS} h-48 w-full font-mono text-xs`}
+        placeholder={IMPORT_SAMPLE}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+      />
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy || parsed.rows.length === 0}
+          onClick={() => void run(true)}
+        >
+          Check {parsed.rows.length > 0 ? `${parsed.rows.length} rows` : ""}
+        </Button>
+        <Button
+          size="sm"
+          disabled={busy || !preview || !preview.ok || preview.applied}
+          onClick={() => void run(false)}
+        >
+          Import
+        </Button>
+        {parsed.rows.length > 0 && !preview ? (
+          <span className="text-xs text-muted-foreground">
+            Check the sheet first — nothing is written until you do.
+          </span>
+        ) : null}
+      </div>
+
+      <InvAlert error={error} />
+
+      {preview ? (
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-2 text-xs">
+            <Pill tone="good">{preview.summary.create} new</Pill>
+            <Pill tone="neutral">{preview.summary.update} updated</Pill>
+            {preview.summary.error > 0 ? (
+              <Pill tone="bad">{preview.summary.error} to fix</Pill>
+            ) : null}
+          </div>
+
+          {preview.applied ? (
+            <p className="rounded-lg border border-[var(--success)] bg-[var(--success-soft)] px-3 py-2 text-xs text-[var(--success)]">
+              Imported. {preview.summary.create} item(s) created,{" "}
+              {preview.summary.update} updated.
+            </p>
+          ) : preview.ok ? (
+            <p className="rounded-lg border px-3 py-2 text-xs text-muted-foreground">
+              Nothing has been written yet. Press Import to apply exactly what
+              is listed above.
+            </p>
+          ) : (
+            <div className="rounded-lg border border-[var(--danger)] bg-[var(--danger-soft)] px-3 py-2 text-xs text-[var(--danger)]">
+              <p className="font-semibold">{preview.error}</p>
+              <p className="mt-1 opacity-90">
+                Nothing was imported. Fix these rows and check again — the whole
+                sheet goes in together, so you never have to work out which half
+                landed.
+              </p>
+              <ul className="mt-2 space-y-0.5">
+                {bad.slice(0, 25).map((r) => (
+                  <li key={r.row}>
+                    Row {r.row}
+                    {r.sku ? ` (${r.sku})` : ""}: {r.error}
+                  </li>
+                ))}
+              </ul>
+              {bad.length > 25 ? (
+                <p className="mt-1">…and {bad.length - 25} more.</p>
+              ) : null}
+            </div>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 export function CatalogueTab({
   boot,
@@ -101,6 +333,7 @@ export function CatalogueTab({
 
   const items = useInvItems(query);
   const saver = useSaver();
+  const [importing, setImporting] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
 
   const categoryOptions = boot.categories
@@ -314,6 +547,10 @@ export function CatalogueTab({
         <Button variant="outline" size="sm" onClick={() => items.reload()}>
           <RefreshCw className="size-3.5" />
         </Button>
+        <Button variant="outline" size="sm" onClick={() => setImporting(true)}>
+          <Upload className="size-3.5" />
+          Import sheet
+        </Button>
         <Button size="sm" onClick={openNew}>
           <Plus className="size-4" />
           New item
@@ -476,6 +713,20 @@ export function CatalogueTab({
           {total} item{total === 1 ? "" : "s"}.
         </p>
       ) : null}
+
+      <InvDrawer
+        open={importing}
+        wide
+        title="Import items from a sheet"
+        subtitle="Checked before anything is written; re-importing the same sheet updates rather than duplicates"
+        onClose={() => setImporting(false)}
+      >
+        <ImportSheet
+          onDone={() => {
+            items.reload();
+          }}
+        />
+      </InvDrawer>
 
       <InvDrawer
         open={!!draft}

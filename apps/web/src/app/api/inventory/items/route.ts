@@ -2,6 +2,7 @@
 
 import {
   bulkUpdateItems,
+  bulkUpsertItems,
   listItems,
   removeItem,
   saveItem,
@@ -45,10 +46,18 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   return invRoute(req, "edit", async ({ actor }) => {
     const body = await invBody<
-      (Partial<InvItem> & { bulk?: never }) | { bulk: Parameters<typeof bulkUpdateItems>[0] }
+      | (Partial<InvItem> & { bulk?: never; import?: never })
+      | { bulk: Parameters<typeof bulkUpdateItems>[0] }
+      | { import: Parameters<typeof bulkUpsertItems>[0] }
     >(req);
     if (body && typeof body === "object" && "bulk" in body && body.bulk) {
       return { updated: await bulkUpdateItems(body.bulk) };
+    }
+    // A pasted sheet. Validation and the write both live in one database
+    // call, so a preview and the real import cannot disagree.
+    if (body && typeof body === "object" && "import" in body) {
+      const imp = (body as { import: Parameters<typeof bulkUpsertItems>[0] }).import;
+      return { result: await bulkUpsertItems(imp) };
     }
     return { item: await saveItem(body as Partial<InvItem>, actor) };
   });

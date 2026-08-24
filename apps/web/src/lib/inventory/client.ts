@@ -143,6 +143,45 @@ export const invApi = {
       body: JSON.stringify(item),
     }).then((r) => r.item),
 
+  /** Paste-a-sheet import. dryRun previews; without it the write is all-or-nothing. */
+  importItems: (input: {
+    rows: {
+      sku: string;
+      name: string;
+      category?: string;
+      uom?: string;
+      itemKind?: string;
+      hsnCode?: string;
+      gstRate?: number;
+      reorderLevel?: number;
+      barcode?: string;
+      notes?: string;
+      mrpPaise?: number;
+      salePaise?: number;
+      maxDiscountPct?: number;
+    }[];
+    dryRun: boolean;
+    priceListId?: string;
+  }) =>
+    req<{
+      result: {
+        ok: boolean;
+        applied: boolean;
+        error: string;
+        summary: { create: number; update: number; error: number };
+        rows: {
+          row: number;
+          sku: string;
+          name: string;
+          action: "create" | "update" | "error";
+          error: string;
+        }[];
+      };
+    }>("/items", {
+      method: "POST",
+      body: JSON.stringify({ import: input }),
+    }).then((r) => r.result),
+
   bulkUpdateItems: (bulk: {
     itemIds: string[];
     isActive?: boolean;

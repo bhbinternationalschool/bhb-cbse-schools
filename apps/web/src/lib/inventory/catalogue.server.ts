@@ -903,3 +903,77 @@ export async function bulkUpdateItems(input: {
   if (error) throw new InvError(`Bulk update: ${error.message}`, 500);
   return (data ?? []).length;
 }
+
+/* ─── Bulk import ──────────────────────────────────────────── */
+
+export type InvBulkItemRow = {
+  sku: string;
+  name: string;
+  category?: string;
+  uom?: string;
+  itemKind?: string;
+  hsnCode?: string;
+  gstRate?: number;
+  reorderLevel?: number;
+  barcode?: string;
+  notes?: string;
+  mrpPaise?: number;
+  salePaise?: number;
+  maxDiscountPct?: number;
+};
+
+export type InvBulkItemResult = {
+  ok: boolean;
+  applied: boolean;
+  error: string;
+  summary: { create: number; update: number; error: number };
+  rows: {
+    row: number;
+    sku: string;
+    name: string;
+    action: "create" | "update" | "error";
+    error: string;
+  }[];
+};
+
+/**
+ * Create or update many items from one pasted sheet.
+ *
+ * `dryRun` validates and reports without writing, so the screen can show
+ * exactly what will happen and the clerk confirms a result they have already
+ * seen. With `dryRun` false the database still refuses to write anything
+ * unless every row is sound — a partial catalogue is worse than none, because
+ * nobody can tell what landed.
+ */
+export async function bulkUpsertItems(input: {
+  rows: InvBulkItemRow[];
+  dryRun: boolean;
+  priceListId?: string;
+}): Promise<InvBulkItemResult> {
+  const { sb, tenantId } = await invCtx();
+  const { data, error } = await sb.rpc("inv_bulk_upsert_items", {
+    p_tenant_id: tenantId,
+    p_actor: "office",
+    p_payload: {
+      dry_run: input.dryRun,
+      price_list_id: input.priceListId ?? "",
+      rows: input.rows.map((r) => ({
+        sku: r.sku,
+        name: r.name,
+        category: r.category ?? "",
+        uom: r.uom ?? "",
+        item_kind: r.itemKind ?? "consumable",
+        hsn_code: r.hsnCode ?? "",
+        gst_rate: r.gstRate ?? 0,
+        reorder_level: r.reorderLevel ?? 0,
+        barcode: r.barcode ?? "",
+        notes: r.notes ?? "",
+        mrp_paise: r.mrpPaise ?? 0,
+        sale_paise: r.salePaise ?? 0,
+        max_discount_pct: r.maxDiscountPct ?? 0,
+      })),
+    },
+  });
+  if (error) throw new InvError(`Bulk import: ${error.message}`, 500);
+  return data as unknown as InvBulkItemResult;
+}
