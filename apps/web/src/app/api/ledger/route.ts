@@ -28,6 +28,7 @@ import {
   ledgerSubledgerBalances,
   ledgerTrialBalance,
 } from "@/lib/ledger/ledger.server";
+import { vendorDues } from "@/lib/inventory/procurement.server";
 import { ledgerReconciliation, projectAll } from "@/lib/ledger/project.server";
 import {
   ledgerAnomalies,
@@ -124,7 +125,8 @@ type PostBody =
   | { action: "anomalies"; asOf: string }
   | { action: "ageing"; asOf: string; side?: "payables" | "receivables" }
   | { action: "cockpit"; asOf: string; fyFrom: string }
-  | { action: "parity"; deskRows: { code: string; balancePaise: number }[] };
+  | { action: "parity"; deskRows: { code: string; balancePaise: number }[] }
+  | { action: "vendor-dues" };
 
 export async function POST(req: Request) {
   let body: PostBody;
@@ -162,6 +164,7 @@ export async function POST(req: Request) {
     "anomalies",
     "ageing",
     "cockpit",
+    "vendor-dues",
   ]);
 
   const auth = await requireStaffPermission(
@@ -317,6 +320,14 @@ export async function POST(req: Request) {
           ? await receivablesAgeing(body.asOf)
           : await payablesAgeing(body.asOf);
       return NextResponse.json({ ok: true, side: body.side ?? "payables", report });
+    }
+    case "vendor-dues": {
+      // Vendors and their balances live in the store module, but this is the
+      // Accounts screen asking, so it is guarded by the accounts permission
+      // rather than store's. An accounts clerk who cannot open the store still
+      // needs to see who the school owes.
+      const dues = await vendorDues();
+      return NextResponse.json({ ok: true, dues });
     }
     case "cockpit": {
       const res = await ledgerCockpit({ asOf: body.asOf, fyFrom: body.fyFrom });

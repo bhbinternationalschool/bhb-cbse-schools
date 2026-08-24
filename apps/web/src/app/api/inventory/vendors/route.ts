@@ -5,6 +5,7 @@ import {
   removeVendor,
   saveVendor,
 } from "@/lib/inventory/catalogue.server";
+import { vendorDues } from "@/lib/inventory/procurement.server";
 import { invBody, invQuery, invRoute } from "@/lib/inventory/route.server";
 import type { InvVendor } from "@/lib/inventory/types";
 
@@ -14,6 +15,9 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   return invRoute(req, "view", async () => {
     const q = invQuery(req);
+    // The Accounts screens ask for dues: vendor detail beside the balance the
+    // ledger is authoritative for.
+    if (q.get("view") === "dues") return { dues: await vendorDues() };
     const status = q.get("status");
     return {
       vendors: await listVendors({

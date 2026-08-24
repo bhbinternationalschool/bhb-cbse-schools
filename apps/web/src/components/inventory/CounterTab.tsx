@@ -13,7 +13,7 @@
  * keystroke.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { RefreshCw, Search, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -58,6 +58,18 @@ import {
 } from "@/lib/inventory/types";
 
 type Section = "sell" | "sales" | "dues";
+
+type TenderRow = {
+  id: string;
+  mode: InvTenderMode;
+  amountInput: string;
+  reference: string;
+  /** Set once the clerk edits the amount, so auto-defaulting stops. */
+  touched?: boolean;
+};
+
+let tenderSeq = 0;
+const newTenderId = () => `t${++tenderSeq}`;
 
 type CartLine = {
   itemId: string;
@@ -205,13 +217,105 @@ function SellSection({
   );
   const kits = useAsync(() => invApi.listKits({ status: "active" }), []);
 
-  const [cart, setCart] = useState<CartLine[]>([]);
+  /**
+   * What this child already took this year. Fetched when they are chosen, so
+   * the clerk sees "already has this" while the cart is still open rather than
+   * after the receipt is printed.
+   */
+  const [alreadyBought, setAlreadyBought] = useState<
+    { itemId: string; itemName: string; totalQty: number; lastSaleDate: string; lastSaleNo: string }[]
+  >([]);
+
+  // Who else is in this family. Fetched alongside the purchase history so the
+  // clerk can serve all of them without searching for each child by name.
+  useEffect(() => {
+    const hh = buyerKind === "student" ? student?.householdId : "";
+    if (!hh) {
+      setSiblings([]);
+      setFamilyMode(false);
+      return;
+    }
+    let live = true;
+    void invApi
+      .householdSiblings(hh)
+      .then((rows) => {
+        if (live) setSiblings(rows);
+      })
+      .catch(() => {
+        if (live) setSiblings([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, [buyerKind, student?.id, student?.householdId]);
+
+  useEffect(() => {
+    const id = buyerKind === "student" ? student?.id : "";
+    if (!id) {
+      setAlreadyBought([]);
+      return;
+    }
+    let live = true;
+    void invApi
+      .studentPurchases(id)
+      .then((rows) => {
+        if (live) setAlreadyBought(rows);
+      })
+      // A failed lookup must not stop a sale. The warning is a courtesy; the
+      // "bought twice" report still catches whatever slips through.
+      .catch(() => {
+        if (live) setAlreadyBought([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, [buyerKind, student?.id]);
+
+  const [soloCart, setSoloCart] = useState<CartLine[]>([]);
+
+  /**
+   * Serving a whole family.
+   *
+   * One cart per child, because the sale posted for each of them is their own —
+   * their receipt, their dues line at the fee counter, their ledger party. Only
+   * the payment is shared. `cart` below is a facade over whichever child is in
+   * front of the clerk, so every existing cart action keeps working unchanged
+   * whether one child is being served or four.
+   */
+  const [familyMode, setFamilyMode] = useState(false);
+  const [siblings, setSiblings] = useState<InvBuyerStudent[]>([]);
+  const [carts, setCarts] = useState<Record<string, CartLine[]>>({});
+  const [activeChild, setActiveChild] = useState("");
+
+  const cart: CartLine[] = familyMode ? (carts[activeChild] ?? []) : soloCart;
+  const setCart = useCallback(
+    (next: CartLine[] | ((prev: CartLine[]) => CartLine[])) => {
+      if (!familyMode) {
+        setSoloCart(next as never);
+        return;
+      }
+      setCarts((prev) => {
+        const current = prev[activeChild] ?? [];
+        const value =
+          typeof next === "function"
+            ? (next as (p: CartLine[]) => CartLine[])(current)
+            : next;
+        return { ...prev, [activeChild]: value };
+      });
+    },
+    [familyMode, activeChild],
+  );
   const [kitId, setKitId] = useState("");
   const [note, setNote] = useState("");
 
-  const [tender, setTender] = useState<InvTenderMode>("cash");
-  const [tenderInput, setTenderInput] = useState("");
-  const [reference, setReference] = useState("");
+  /**
+   * One row per way the money arrived. A parent paying ₹800 cash and ₹1,200
+   * by UPI is one sale with two tenders, the same shape the fee counter uses,
+   * and the same shape inv_sale_payments has always stored.
+   */
+  const [tenders, setTenders] = useState<TenderRow[]>([
+    { id: newTenderId(), mode: "cash", amountInput: "", reference: "" },
+  ]);
   const [onAccount, setOnAccount] = useState(false);
 
   const itemsById = useMemo(() => {
@@ -289,15 +393,73 @@ function SellSection({
     return { gross, discount, tax, total, cost, margin: total - cost };
   }, [cart]);
 
-  // Default the tender to the full amount, until the clerk edits it or
-  // chooses to put the sale on account.
+  /** Per-child totals, so a chip can show what that child's books come to. */
+  const childTotals = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const [id, lines] of Object.entries(carts)) {
+      out[id] = lines.reduce((n, l) => {
+        const gross = l.qty * l.unitPricePaise;
+        const disc = Math.round((gross * l.discountPct) / 100);
+        const net = gross - disc;
+        return n + net + Math.round((net * l.gstRate) / 100);
+      }, 0);
+    }
+    return out;
+  }, [carts]);
+
+  const familyTotal = useMemo(
+    () => Object.values(childTotals).reduce((n, v) => n + v, 0),
+    [childTotals],
+  );
+
+  const familyChildrenWithItems = useMemo(
+    () => siblings.filter((c) => (carts[c.id] ?? []).length > 0),
+    [siblings, carts],
+  );
+
+  /**
+   * What the parent is actually paying for. In family mode that is every
+   * child's cart, not just the one on screen — tendering against the child in
+   * front of the clerk would refuse the family's own money as an overpayment.
+   */
+  const payableTotal = familyMode ? familyTotal : totals.total;
+
+  // Default the FIRST tender to the full amount, until the clerk edits it,
+  // splits the payment, or puts the sale on account. Only the first row is
+  // touched: once a second way of paying exists the clerk is driving.
   useEffect(() => {
     if (onAccount) return;
-    setTenderInput(totals.total > 0 ? paiseToInput(totals.total) : "");
-  }, [totals.total, onAccount]);
+    setTenders((rows) => {
+      if (rows.length !== 1) return rows;
+      const only = rows[0]!;
+      if (only.touched) return rows;
+      return [
+        {
+          ...only,
+          amountInput: payableTotal > 0 ? paiseToInput(payableTotal) : "",
+        },
+      ];
+    });
+  }, [payableTotal, onAccount]);
 
-  const tenderPaise = onAccount ? 0 : inputToPaise(tenderInput);
-  const balancePaise = Math.max(0, totals.total - tenderPaise);
+  const tenderPaise = onAccount
+    ? 0
+    : tenders.reduce((n, t) => n + inputToPaise(t.amountInput), 0);
+  const balancePaise = Math.max(0, payableTotal - tenderPaise);
+
+  /**
+   * A payment that is not cash left a trail somewhere — a UPI reference, a
+   * cheque number, a card slip. Without it a disputed payment cannot be traced
+   * to the bank, so the counter refuses rather than recording money it cannot
+   * later prove arrived.
+   */
+  const missingRef = tenders.some(
+    (t) =>
+      !onAccount &&
+      t.mode !== "cash" &&
+      inputToPaise(t.amountInput) > 0 &&
+      t.reference.trim() === "",
+  );
 
   const buyerReady =
     buyerKind === "student"
@@ -306,11 +468,30 @@ function SellSection({
         ? walkinName.trim().length > 0
         : staffName.trim().length > 0;
 
+  /**
+   * Items in the cart this child has already been sold this year. A warning,
+   * deliberately not a block — a replacement set in March is ordinary, and a
+   * counter that refuses honest work simply gets worked around.
+   */
+  const repeats = useMemo(() => {
+    if (alreadyBought.length === 0) return [];
+    const prior = new Map(alreadyBought.map((p) => [p.itemId, p]));
+    return cart
+      .map((l) => ({ line: l, prior: prior.get(l.itemId) }))
+      .filter((x): x is { line: CartLine; prior: NonNullable<typeof x.prior> } =>
+        Boolean(x.prior),
+      );
+  }, [cart, alreadyBought]);
+
   const capBreach = cart.find((l) => l.discountPct > l.maxDiscountPct);
-  const overTender = tenderPaise > totals.total;
+  const overTender = tenderPaise > payableTotal;
 
   function reset() {
-    setCart([]);
+    setSoloCart([]);
+    setCarts({});
+    setFamilyMode(false);
+    setActiveChild("");
+    setSiblings([]);
     setKitId("");
     setStudent(null);
     setWalkinName("");
@@ -318,13 +499,72 @@ function SellSection({
     setStaffName("");
     setBuyerSearch("");
     setNote("");
-    setTenderInput("");
-    setReference("");
+    setTenders([
+      { id: newTenderId(), mode: "cash", amountInput: "", reference: "" },
+    ]);
     setOnAccount(false);
   }
 
+  /** Serve every child who has something in their cart, on one payment. */
+  async function sellFamily() {
+    if (capBreach || overTender || missingRef) return;
+    if (familyChildrenWithItems.length === 0) return;
+
+    const res = await saver.run(() =>
+      invApi.postHouseholdSale({
+        sales: familyChildrenWithItems.map((child) => ({
+          sale_date: new Date().toISOString().slice(0, 10),
+          buyer_kind: "student",
+          student_id: child.id,
+          buyer_name: child.fullName,
+          buyer_phone: child.phone,
+          class_id: child.classId,
+          section_id: child.sectionId,
+          location_id: locationId,
+          price_list_id: priceListId,
+          note,
+          lines: (carts[child.id] ?? []).map((l) => ({
+            item_id: l.itemId,
+            qty: l.qty,
+            unit_price_paise: l.unitPricePaise,
+            discount_pct: l.discountPct,
+            gst_rate: l.gstRate,
+          })),
+        })),
+        payments: onAccount
+          ? []
+          : tenders
+              .filter((t) => inputToPaise(t.amountInput) > 0)
+              .map((t) => ({
+                amountPaise: inputToPaise(t.amountInput),
+                mode: t.mode,
+                reference: t.reference.trim(),
+              })),
+      }),
+    );
+
+    if (res) {
+      saver.setNotice(
+        `${res.sales.length} receipts — ${res.sales
+          .map((x) => `${x.buyerName} ${x.saleNo}`)
+          .join(", ")}${
+          res.balancePaise > 0
+            ? `. ${formatPaise(res.balancePaise)} left on account.`
+            : ". Paid in full."
+        }`,
+      );
+      reset();
+      onSold();
+    }
+  }
+
   async function sell() {
+    if (familyMode) {
+      await sellFamily();
+      return;
+    }
     if (!buyerReady || cart.length === 0 || capBreach || overTender) return;
+    if (missingRef) return;
 
     const res = await saver.run(() =>
       invApi.postSale({
@@ -338,6 +578,7 @@ function SellSection({
               : staffName.trim(),
         buyerPhone: buyerKind === "walkin" ? walkinPhone.trim() : (student?.phone ?? ""),
         classId: buyerKind === "student" ? (student?.classId ?? "") : "",
+        sectionId: buyerKind === "student" ? (student?.sectionId ?? "") : "",
         locationId,
         priceListId,
         kitId: kitId || undefined,
@@ -349,10 +590,15 @@ function SellSection({
           discountPct: l.discountPct,
           gstRate: l.gstRate,
         })),
-        payments:
-          tenderPaise > 0
-            ? [{ amountPaise: tenderPaise, mode: tender, reference }]
-            : [],
+        payments: onAccount
+          ? []
+          : tenders
+              .filter((t) => inputToPaise(t.amountInput) > 0)
+              .map((t) => ({
+                amountPaise: inputToPaise(t.amountInput),
+                mode: t.mode,
+                reference: t.reference.trim(),
+              })),
       }),
     );
 
@@ -552,9 +798,81 @@ function SellSection({
             />
           </div>
 
+          {/* Serving the family: one tab per child, each with their own cart. */}
+          {siblings.length > 1 && buyerKind === "student" ? (
+            <div className="space-y-2 rounded-lg border p-2">
+              <label className="flex items-center gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={familyMode}
+                  onChange={(e) => {
+                    const on = e.target.checked;
+                    setFamilyMode(on);
+                    if (on) {
+                      // Carry what is already in the cart over to the child it
+                      // was being built for, so switching mode never loses work.
+                      const id = student?.id ?? "";
+                      setActiveChild(id);
+                      setCarts((prev) =>
+                        soloCart.length > 0 && !prev[id]
+                          ? { ...prev, [id]: soloCart }
+                          : prev,
+                      );
+                    }
+                  }}
+                />
+                Serve all {siblings.length} children of this family on one
+                payment
+              </label>
+
+              {familyMode ? (
+                <>
+                  <div className="flex flex-wrap gap-1">
+                    {siblings.map((child) => {
+                      const lines = (carts[child.id] ?? []).length;
+                      const active = child.id === activeChild;
+                      return (
+                        <button
+                          key={child.id}
+                          type="button"
+                          onClick={() => setActiveChild(child.id)}
+                          className={
+                            active
+                              ? "rounded-md bg-foreground px-2 py-1 text-xs font-medium text-background"
+                              : "rounded-md border px-2 py-1 text-xs hover:bg-muted"
+                          }
+                        >
+                          {child.fullName}
+                          {child.classId ? (
+                            <span className="ml-1 opacity-70">
+                              {classLabel(child.classId)}
+                              {child.sectionId ? `-${child.sectionId}` : ""}
+                            </span>
+                          ) : null}
+                          {lines > 0 ? (
+                            <span className="ml-1 font-semibold">
+                              · {formatPaise(childTotals[child.id] ?? 0)}
+                            </span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Each child gets their own receipt and their own balance —
+                    only the payment is shared. Nothing is posted until every
+                    child&rsquo;s books go through together.
+                  </p>
+                </>
+              ) : null}
+            </div>
+          ) : null}
+
           {cart.length === 0 ? (
             <p className="py-6 text-center text-xs text-muted-foreground">
-              Nothing in the cart yet.
+              {familyMode
+                ? "Nothing for this child yet — add their items, or pick another child above."
+                : "Nothing in the cart yet."}
             </p>
           ) : (
             <div className="space-y-2">
@@ -646,9 +964,21 @@ function SellSection({
               <Row label="GST" value={formatPaise(totals.tax)} muted />
             ) : null}
             <div className="mt-1 flex justify-between border-t pt-1 text-base font-semibold">
-              <span>Total</span>
+              <span>{familyMode ? "This child" : "Total"}</span>
               <span className="tabular-nums">{formatPaise(totals.total)}</span>
             </div>
+            {familyMode ? (
+              <div className="flex justify-between border-t pt-1 text-base font-semibold">
+                <span>
+                  Family total
+                  <span className="ml-1 text-[11px] font-normal text-muted-foreground">
+                    {familyChildrenWithItems.length} child
+                    {familyChildrenWithItems.length === 1 ? "" : "ren"}
+                  </span>
+                </span>
+                <span className="tabular-nums">{formatPaise(familyTotal)}</span>
+              </div>
+            ) : null}
             {totals.total > 0 && totals.cost > 0 ? (
               <div className="text-[11px] text-muted-foreground">
                 Margin {formatPaise(totals.margin)} (
@@ -657,6 +987,27 @@ function SellSection({
             ) : null}
           </div>
 
+          {repeats.length > 0 ? (
+            <div className="rounded-lg border border-[var(--warning)] bg-[var(--warning-soft)] px-3 py-2 text-xs text-[var(--warning)]">
+              <p className="font-semibold">
+                {student?.fullName || "This student"} already has{" "}
+                {repeats.length === 1 ? "this" : "some of this"} year:
+              </p>
+              <ul className="mt-1 space-y-0.5">
+                {repeats.map(({ prior }) => (
+                  <li key={prior.itemId}>
+                    {prior.itemName} × {prior.totalQty} — last on{" "}
+                    {prior.lastSaleDate} ({prior.lastSaleNo})
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1 opacity-90">
+                Sell it again if it is a genuine replacement; check the earlier
+                receipt first if it is not.
+              </p>
+            </div>
+          ) : null}
+
           <label className="flex items-center gap-2 text-xs">
             <input
               type="checkbox"
@@ -664,54 +1015,146 @@ function SellSection({
               disabled={!boot.settings.allowCreditSales}
               onChange={(e) => {
                 setOnAccount(e.target.checked);
-                if (e.target.checked) setTenderInput("");
+                // Putting it all on account clears the tenders, so a
+                // half-typed amount cannot survive as a phantom payment.
+                if (e.target.checked)
+                  setTenders([
+                    {
+                      id: newTenderId(),
+                      mode: "cash",
+                      amountInput: "",
+                      reference: "",
+                    },
+                  ]);
               }}
             />
             Put the whole amount on account
           </label>
 
           {!onAccount ? (
-            <>
-              <div className="flex flex-wrap gap-1">
-                {TENDERS.map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => setTender(t)}
-                    className={
-                      tender === t
-                        ? "rounded-md bg-foreground px-2 py-1 text-xs font-medium text-background"
-                        : "rounded-md border px-2 py-1 text-xs hover:bg-muted"
-                    }
+            <div className="space-y-3">
+              {tenders.map((row, idx) => {
+                const needsRef =
+                  row.mode !== "cash" &&
+                  inputToPaise(row.amountInput) > 0 &&
+                  row.reference.trim() === "";
+                const patch = (next: Partial<TenderRow>) =>
+                  setTenders((rows) =>
+                    rows.map((r) => (r.id === row.id ? { ...r, ...next } : r)),
+                  );
+                return (
+                  <div
+                    key={row.id}
+                    className="space-y-2 rounded-lg border p-2"
                   >
-                    {tenderLabel(t)}
-                  </button>
-                ))}
-              </div>
-              <MoneyField
-                label="Amount taken"
-                hint="Leave less than the total to bill the rest"
-                value={tenderInput}
-                onChange={setTenderInput}
-              />
-              {tender !== "cash" ? (
-                <TextField
-                  label="Reference"
-                  value={reference}
-                  onChange={setReference}
-                />
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex flex-wrap gap-1">
+                        {TENDERS.map((t) => (
+                          <button
+                            key={t}
+                            type="button"
+                            onClick={() => patch({ mode: t })}
+                            className={
+                              row.mode === t
+                                ? "rounded-md bg-foreground px-2 py-1 text-xs font-medium text-background"
+                                : "rounded-md border px-2 py-1 text-xs hover:bg-muted"
+                            }
+                          >
+                            {tenderLabel(t)}
+                          </button>
+                        ))}
+                      </div>
+                      {tenders.length > 1 ? (
+                        <button
+                          type="button"
+                          className="rounded-md border px-2 py-1 text-xs hover:bg-muted"
+                          onClick={() =>
+                            setTenders((rows) =>
+                              rows.filter((r) => r.id !== row.id),
+                            )
+                          }
+                        >
+                          Remove
+                        </button>
+                      ) : null}
+                    </div>
+
+                    <MoneyField
+                      label={
+                        tenders.length > 1
+                          ? `Amount by ${tenderLabel(row.mode)}`
+                          : "Amount taken"
+                      }
+                      hint={
+                        idx === 0 && tenders.length === 1
+                          ? "Leave less than the total to bill the rest"
+                          : undefined
+                      }
+                      value={row.amountInput}
+                      onChange={(v) => patch({ amountInput: v, touched: true })}
+                    />
+
+                    {row.mode !== "cash" ? (
+                      <>
+                        <TextField
+                          label="Transaction ID"
+                          value={row.reference}
+                          onChange={(v) => patch({ reference: v })}
+                        />
+                        {needsRef ? (
+                          <p className="text-xs text-destructive">
+                            A {tenderLabel(row.mode)} payment needs its
+                            transaction ID before this sale can be taken.
+                          </p>
+                        ) : null}
+                      </>
+                    ) : null}
+                  </div>
+                );
+              })}
+
+              <button
+                type="button"
+                className="rounded-md border px-2 py-1 text-xs hover:bg-muted"
+                onClick={() =>
+                  setTenders((rows) => [
+                    ...rows,
+                    {
+                      id: newTenderId(),
+                      mode: "cash",
+                      amountInput: "",
+                      reference: "",
+                      touched: true,
+                    },
+                  ])
+                }
+              >
+                Add another way of paying
+              </button>
+
+              {tenders.length > 1 ? (
+                <p className="text-xs text-muted-foreground">
+                  Taken in total: {formatPaise(tenderPaise)} of{" "}
+                  {formatPaise(payableTotal)}
+                </p>
               ) : null}
-            </>
+            </div>
           ) : null}
 
           {balancePaise > 0 ? (
             <div className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
               {formatPaise(balancePaise)} will stay owing on this sale.
               <div className="mt-1 text-[11px] opacity-90">
-                Store dues are tracked here in the store, not on the fee
-                counter.
+                It will also appear on this child&rsquo;s fee counter card, and
+                can be settled with a fee receipt.
               </div>
             </div>
+          ) : null}
+
+          {missingRef ? (
+            <p className="text-xs text-destructive">
+              Add the transaction ID for every payment that is not cash.
+            </p>
           ) : null}
 
           {overTender ? (
@@ -740,12 +1183,21 @@ function SellSection({
               disabled={
                 saver.saving ||
                 !buyerReady ||
-                cart.length === 0 ||
+                (familyMode
+                  ? familyChildrenWithItems.length === 0
+                  : cart.length === 0) ||
                 !!capBreach ||
-                overTender
+                overTender ||
+                missingRef
               }
             >
-              {saver.saving ? "Saving…" : "Complete sale"}
+              {saver.saving
+                ? "Saving…"
+                : familyMode
+                  ? `Sell to ${familyChildrenWithItems.length} child${
+                      familyChildrenWithItems.length === 1 ? "" : "ren"
+                    }`
+                  : "Complete sale"}
             </Button>
           </div>
         </div>

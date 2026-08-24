@@ -7,6 +7,7 @@ import {
   marginReport,
   purchaseReport,
   stockReport,
+  repeatPurchases,
 } from "@/lib/inventory/reports.server";
 import { invQuery, invRoute } from "@/lib/inventory/route.server";
 
@@ -29,6 +30,8 @@ export async function GET(req: Request) {
       });
     }
     if (report === "parity") return { parity: await inventoryParity() };
+    if (report === "repeats")
+      return { repeats: await repeatPurchases(q.get("ay") ?? "") };
     return { dashboard: await dashboard() };
   });
 }

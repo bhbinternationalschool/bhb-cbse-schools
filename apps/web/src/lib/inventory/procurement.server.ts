@@ -779,6 +779,9 @@ export async function listGoodsReceipts(opts: {
       receiptDate: dateOnly(r.receipt_date),
       supplierInvoiceNo: str(r.supplier_invoice_no),
       supplierInvoiceDate: dateOnly(r.supplier_invoice_date),
+      status: str(r.status) || "posted",
+      voidReason: str(r.void_reason),
+      voidedBy: str(r.voided_by),
       subtotalPaise: int(r.subtotal_paise),
       taxPaise: int(r.tax_paise),
       freightPaise: int(r.freight_paise),
@@ -1240,4 +1243,125 @@ export async function procurementSummary(): Promise<{
     unpaidPaise: unpaid,
     overduePaise: overdue,
   };
+}
+
+/* ─── Vendor dues, for the Accounts screens ────────────────── */
+
+export type InvVendorDue = {
+  vendorId: string;
+  name: string;
+  gstin: string;
+  phone: string;
+  email: string;
+  contactPerson: string;
+  paymentTermsDays: number;
+  isActive: boolean;
+  /** The vendor's balance on account 2000. This is the authority. */
+  ledgerDuePaise: number;
+  /** What the store's own bill records still show open. */
+  billsOpenPaise: number;
+  openBillCount: number;
+  oldestBillDate: string;
+  lastBillDate: string;
+};
+
+/**
+ * Every store vendor with what the books say we owe them.
+ *
+ * The ledger figure and the store's own open-bill figure are returned side by
+ * side rather than reconciled into one number. They should agree; when they
+ * do not, something posted on one side and not the other, and a single
+ * blended figure would hide exactly the discrepancy worth seeing.
+ */
+export async function vendorDues(): Promise<InvVendorDue[]> {
+  const { sb, tenantId } = await invCtx();
+  const { data, error } = await sb.rpc("inv_vendor_dues", {
+    p_tenant_id: tenantId,
+  });
+  if (error) throw new InvError(`Vendor dues: ${error.message}`, 500);
+  return ((data ?? []) as Row[]).map((r) => ({
+    vendorId: str(r.vendor_id),
+    name: str(r.name),
+    gstin: str(r.gstin),
+    phone: str(r.phone),
+    email: str(r.email),
+    contactPerson: str(r.contact_person),
+    paymentTermsDays: int(r.payment_terms_days),
+    isActive: r.is_active === true,
+    ledgerDuePaise: int(r.ledger_due_paise),
+    billsOpenPaise: int(r.bills_open_paise),
+    openBillCount: int(r.open_bill_count),
+    oldestBillDate: str(r.oldest_bill_date),
+    lastBillDate: str(r.last_bill_date),
+  }));
+}
+
+/* ─── Correcting a receipt ─────────────────────────────────── */
+
+/**
+ * Cancel a goods receipt and everything it caused.
+ *
+ * Refuses rather than forces when the goods have gone out, the bill has been
+ * paid, a purchase return already exists, or the ledger will not take the
+ * reversal. Each of those would otherwise leave the books describing something
+ * that did not happen.
+ */
+export async function voidGoodsReceipt(
+  grnId: string,
+  reason: string,
+  actor: string,
+): Promise<{
+  grnId: string;
+  grnNo: string;
+  status: string;
+  reversalVoucherNo: string;
+}> {
+  const { sb, tenantId } = await invCtx();
+  const { data, error } = await sb.rpc("inv_void_grn", {
+    p_tenant_id: tenantId,
+    p_actor: actor,
+    p_grn_id: grnId,
+    p_reason: reason,
+  });
+  if (error) throw new InvError(error.message, 422);
+  const out = (data ?? {}) as Row;
+  return {
+    grnId: str(out.grn_id),
+    grnNo: str(out.grn_no),
+    status: str(out.status),
+    reversalVoucherNo: str(out.reversal_voucher_no),
+  };
+}
+
+/**
+ * Amend the descriptive parts of a receipt — the supplier's invoice number and
+ * date, and the note. Quantities and rates are deliberately not editable: they
+ * have already moved stock and money, so changing them is a void and a
+ * re-entry.
+ */
+export async function amendGoodsReceipt(
+  input: {
+    grnId: string;
+    supplierInvoiceNo?: string;
+    supplierInvoiceDate?: string;
+    note?: string;
+  },
+  actor: string,
+): Promise<{ grnId: string; amended: boolean }> {
+  const { sb, tenantId } = await invCtx();
+  const payload: Record<string, unknown> = { grn_id: input.grnId };
+  if (input.supplierInvoiceNo !== undefined)
+    payload.supplier_invoice_no = input.supplierInvoiceNo;
+  if (input.supplierInvoiceDate !== undefined)
+    payload.supplier_invoice_date = input.supplierInvoiceDate;
+  if (input.note !== undefined) payload.note = input.note;
+
+  const { data, error } = await sb.rpc("inv_amend_grn", {
+    p_tenant_id: tenantId,
+    p_actor: actor,
+    p_payload: payload,
+  });
+  if (error) throw new InvError(error.message, 422);
+  const out = (data ?? {}) as Row;
+  return { grnId: str(out.grn_id), amended: out.amended === true };
 }

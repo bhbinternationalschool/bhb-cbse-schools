@@ -10,6 +10,9 @@ import {
   postSaleReturn,
   storeDuesForStudents,
   voidSale,
+  studentPurchases,
+  householdSiblings,
+  postHouseholdSale,
 } from "@/lib/inventory/sales.server";
 import { invBody, invQuery, invRoute } from "@/lib/inventory/route.server";
 import type { InvBuyerKind, InvSaleQuery } from "@/lib/inventory/types";
@@ -26,6 +29,20 @@ export async function GET(req: Request) {
     if (view === "returns") {
       return { returns: await listSaleReturns({ saleId: q.get("saleId") ?? "" }) };
     }
+    if (view === "siblings")
+      return {
+        siblings: await householdSiblings(
+          q.get("householdId") ?? "",
+          q.get("ay") ?? "",
+        ),
+      };
+    if (view === "purchases")
+      return {
+        purchases: await studentPurchases(
+          q.get("studentId") ?? "",
+          q.get("ay") ?? "",
+        ),
+      };
     if (view === "dues") {
       return {
         dues: await storeDuesForStudents(
@@ -61,7 +78,8 @@ type Body =
   | ({ action?: "sell" } & Parameters<typeof postSale>[0])
   | ({ action: "collect" } & Parameters<typeof collectOnSale>[0])
   | ({ action: "return" } & Parameters<typeof postSaleReturn>[0])
-  | { action: "void"; saleId: string; reason: string };
+  | { action: "void"; saleId: string; reason: string }
+  | ({ action: "household" } & Parameters<typeof postHouseholdSale>[0]);
 
 export async function POST(req: Request) {
   const body = await invBody<Body>(req);
@@ -81,6 +99,14 @@ export async function POST(req: Request) {
           body as Parameters<typeof postSaleReturn>[0],
           actor,
           academicYearCode,
+        ),
+      };
+    }
+    if (action === "household") {
+      return {
+        household: await postHouseholdSale(
+          body as Parameters<typeof postHouseholdSale>[0],
+          actor,
         ),
       };
     }

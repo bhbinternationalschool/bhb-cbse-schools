@@ -143,6 +143,45 @@ export const invApi = {
       body: JSON.stringify(item),
     }).then((r) => r.item),
 
+  /** Paste-a-sheet import. dryRun previews; without it the write is all-or-nothing. */
+  importItems: (input: {
+    rows: {
+      sku: string;
+      name: string;
+      category?: string;
+      uom?: string;
+      itemKind?: string;
+      hsnCode?: string;
+      gstRate?: number;
+      reorderLevel?: number;
+      barcode?: string;
+      notes?: string;
+      mrpPaise?: number;
+      salePaise?: number;
+      maxDiscountPct?: number;
+    }[];
+    dryRun: boolean;
+    priceListId?: string;
+  }) =>
+    req<{
+      result: {
+        ok: boolean;
+        applied: boolean;
+        error: string;
+        summary: { create: number; update: number; error: number };
+        rows: {
+          row: number;
+          sku: string;
+          name: string;
+          action: "create" | "update" | "error";
+          error: string;
+        }[];
+      };
+    }>("/items", {
+      method: "POST",
+      body: JSON.stringify({ import: input }),
+    }).then((r) => r.result),
+
   bulkUpdateItems: (bulk: {
     itemIds: string[];
     isActive?: boolean;
@@ -330,6 +369,31 @@ export const invApi = {
       (r) => r.receipt,
     ),
 
+  /** Cancel a receipt and everything it caused. Refuses when it would lie. */
+  voidReceipt: (id: string, reason: string) =>
+    req<{
+      voided: {
+        grnId: string;
+        grnNo: string;
+        status: string;
+        reversalVoucherNo: string;
+      };
+    }>("/receipts", { method: "DELETE", query: { id, reason } }).then(
+      (r) => r.voided,
+    ),
+
+  /** Descriptive fields only — quantities and rates need a void and re-entry. */
+  amendReceipt: (amend: {
+    grnId: string;
+    supplierInvoiceNo?: string;
+    supplierInvoiceDate?: string;
+    note?: string;
+  }) =>
+    req<{ amended: { grnId: string; amended: boolean } }>("/receipts", {
+      method: "POST",
+      body: JSON.stringify({ amend }),
+    }).then((r) => r.amended),
+
   listBills: (query: { vendorId?: string; status?: string } = {}) =>
     req<{ bills: InvVendorBill[] }>("/bills", { query }).then((r) => r.bills),
 
@@ -374,6 +438,50 @@ export const invApi = {
     page?: number;
     pageSize?: number;
   } = {}) => req<InvSalePage>("/sales", { query }),
+
+  /** What this student already took this year — the counter's repeat warning. */
+  studentPurchases: (studentId: string, ay = "") =>
+    req<{
+      purchases: {
+        itemId: string;
+        itemName: string;
+        totalQty: number;
+        saleCount: number;
+        lastSaleDate: string;
+        lastSaleNo: string;
+      }[];
+    }>("/sales", { query: { view: "purchases", studentId, ay } }).then(
+      (r) => r.purchases,
+    ),
+
+  /** Several children, one payment. One sale each; all of them or none. */
+  postHouseholdSale: (input: {
+    sales: Record<string, unknown>[];
+    payments: { amountPaise: number; mode: string; reference: string }[];
+  }) =>
+    req<{
+      household: {
+        sales: {
+          saleId: string;
+          saleNo: string;
+          studentId: string;
+          buyerName: string;
+          totalPaise: number;
+        }[];
+        totalPaise: number;
+        tenderedPaise: number;
+        balancePaise: number;
+      };
+    }>("/sales", {
+      method: "POST",
+      body: JSON.stringify({ action: "household", ...input }),
+    }).then((r) => r.household),
+
+  /** The other children of one household, for serving a family in one go. */
+  householdSiblings: (householdId: string, ay = "") =>
+    req<{ siblings: InvBuyerStudent[] }>("/sales", {
+      query: { view: "siblings", householdId, ay },
+    }).then((r) => r.siblings),
 
   counterSummary: () =>
     req<{ summary: InvCounterSummary }>("/sales", {
@@ -514,6 +622,25 @@ export const invApi = {
         ledgerActive: boolean;
       };
     }>("/reports", { query: { report: "parity" } }).then((r) => r.parity),
+
+  repeatPurchases: (ay = "") =>
+    req<{
+      repeats: {
+        studentId: string;
+        buyerName: string;
+        classId: string;
+        sectionId: string;
+        itemId: string;
+        itemName: string;
+        saleCount: number;
+        totalQty: number;
+        totalPaise: number;
+        firstSaleDate: string;
+        lastSaleDate: string;
+        saleNos: string;
+        minutesApart: number;
+      }[];
+    }>("/reports", { query: { report: "repeats", ay } }).then((r) => r.repeats),
 
   purchaseReport: (from: string, to: string) =>
     req<{
