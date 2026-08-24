@@ -10,6 +10,8 @@ import {
   postSaleReturn,
   storeDuesForStudents,
   voidSale,
+  studentPurchases,
+  householdSiblings,
 } from "@/lib/inventory/sales.server";
 import { invBody, invQuery, invRoute } from "@/lib/inventory/route.server";
 import type { InvBuyerKind, InvSaleQuery } from "@/lib/inventory/types";
@@ -26,6 +28,20 @@ export async function GET(req: Request) {
     if (view === "returns") {
       return { returns: await listSaleReturns({ saleId: q.get("saleId") ?? "" }) };
     }
+    if (view === "siblings")
+      return {
+        siblings: await householdSiblings(
+          q.get("householdId") ?? "",
+          q.get("ay") ?? "",
+        ),
+      };
+    if (view === "purchases")
+      return {
+        purchases: await studentPurchases(
+          q.get("studentId") ?? "",
+          q.get("ay") ?? "",
+        ),
+      };
     if (view === "dues") {
       return {
         dues: await storeDuesForStudents(
