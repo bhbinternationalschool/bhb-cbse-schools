@@ -369,6 +369,31 @@ export const invApi = {
       (r) => r.receipt,
     ),
 
+  /** Cancel a receipt and everything it caused. Refuses when it would lie. */
+  voidReceipt: (id: string, reason: string) =>
+    req<{
+      voided: {
+        grnId: string;
+        grnNo: string;
+        status: string;
+        reversalVoucherNo: string;
+      };
+    }>("/receipts", { method: "DELETE", query: { id, reason } }).then(
+      (r) => r.voided,
+    ),
+
+  /** Descriptive fields only — quantities and rates need a void and re-entry. */
+  amendReceipt: (amend: {
+    grnId: string;
+    supplierInvoiceNo?: string;
+    supplierInvoiceDate?: string;
+    note?: string;
+  }) =>
+    req<{ amended: { grnId: string; amended: boolean } }>("/receipts", {
+      method: "POST",
+      body: JSON.stringify({ amend }),
+    }).then((r) => r.amended),
+
   listBills: (query: { vendorId?: string; status?: string } = {}) =>
     req<{ bills: InvVendorBill[] }>("/bills", { query }).then((r) => r.bills),
 

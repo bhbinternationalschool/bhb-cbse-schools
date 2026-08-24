@@ -588,6 +588,12 @@ function ReceiveSection({ boot }: { boot: InvBootstrap }) {
   const saver = useSaver();
 
   const [open, setOpen] = useState(false);
+  const [voiding, setVoiding] = useState<InvGrn | null>(null);
+  const [voidReason, setVoidReason] = useState("");
+  const [amending, setAmending] = useState<InvGrn | null>(null);
+  const [amendInv, setAmendInv] = useState("");
+  const [amendDate, setAmendDate] = useState("");
+  const [amendNote, setAmendNote] = useState("");
   const [poId, setPoId] = useState("");
   const [vendorId, setVendorId] = useState("");
   const [locationId, setLocationId] = useState(
@@ -798,46 +804,222 @@ function ReceiveSection({ boot }: { boot: InvBootstrap }) {
                 <th className="px-3 py-2 text-left font-medium">Items</th>
                 <th className="px-3 py-2 text-right font-medium">Value</th>
                 <th className="px-3 py-2 text-left font-medium">Bill</th>
+                <th className="px-3 py-2" />
               </tr>
             </ErpTableHead>
             <ErpTableBody hoverable>
-              {list.map((g: InvGrn) => (
-                <tr key={g.id}>
-                  <td className="px-3 py-2">
-                    <div className="font-mono text-xs">{g.grnNo}</div>
-                    <div className="text-[11px] text-muted-foreground">
-                      {g.receiptDate}
-                    </div>
-                  </td>
-                  <td className="px-3 py-2">{g.vendorName}</td>
-                  <td className="px-3 py-2 text-xs">
-                    {g.poNo || <span className="text-muted-foreground">Direct</span>}
-                    {g.supplierInvoiceNo ? (
+              {list.map((g: InvGrn) => {
+                const voided = g.status === "void";
+                return (
+                  <tr key={g.id} className={voided ? "opacity-60" : undefined}>
+                    <td className="px-3 py-2">
+                      <div className="font-mono text-xs">
+                        {g.grnNo}
+                        {voided ? (
+                          <span className="ml-1 rounded bg-[var(--danger-soft)] px-1.5 py-0.5 text-[10px] font-bold uppercase text-[var(--danger)]">
+                            cancelled
+                          </span>
+                        ) : null}
+                      </div>
                       <div className="text-[11px] text-muted-foreground">
-                        Inv {g.supplierInvoiceNo}
+                        {g.receiptDate}
                       </div>
-                    ) : null}
-                  </td>
-                  <td className="px-3 py-2 text-xs">
-                    {g.lines.map((l) => (
-                      <div key={l.id}>
-                        {l.itemName} × {l.qtyReceived}
-                        <span className="ml-1 text-muted-foreground">
-                          @ {formatPaise(l.landedUnitCostPaise)} landed
-                        </span>
-                      </div>
-                    ))}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums">
-                    {formatPaise(g.totalPaise)}
-                  </td>
-                  <td className="px-3 py-2 font-mono text-xs">{g.billNo || "—"}</td>
-                </tr>
-              ))}
+                      {voided && g.voidReason ? (
+                        <div className="text-[11px] text-[var(--danger)]">
+                          {g.voidReason}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td className="px-3 py-2">{g.vendorName}</td>
+                    <td className="px-3 py-2 text-xs">
+                      {g.poNo || <span className="text-muted-foreground">Direct</span>}
+                      {g.supplierInvoiceNo ? (
+                        <div className="text-[11px] text-muted-foreground">
+                          Inv {g.supplierInvoiceNo}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td className="px-3 py-2 text-xs">
+                      {g.lines.map((l) => (
+                        <div key={l.id} className="flex justify-between gap-3">
+                          <span>
+                            {l.itemName} × {l.qtyReceived}
+                            <span className="ml-1 text-muted-foreground">
+                              @ {formatPaise(l.landedUnitCostPaise)} landed
+                            </span>
+                          </span>
+                          {/* What this one item cost on this receipt, so a line
+                              can be checked against the supplier's invoice
+                              without adding it up by hand. */}
+                          <span className="shrink-0 tabular-nums text-muted-foreground">
+                            {formatPaise(l.lineTotalPaise + l.taxPaise)}
+                          </span>
+                        </div>
+                      ))}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {formatPaise(g.totalPaise)}
+                    </td>
+                    <td className="px-3 py-2 font-mono text-xs">{g.billNo || "—"}</td>
+                    <td className="px-3 py-2 text-right">
+                      {!voided ? (
+                        <div className="flex justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="xs"
+                            onClick={() => {
+                              setAmending(g);
+                              setAmendInv(g.supplierInvoiceNo);
+                              setAmendDate(g.supplierInvoiceDate);
+                              setAmendNote(g.note);
+                            }}
+                          >
+                            Amend
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="xs"
+                            onClick={() => setVoiding(g)}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      ) : null}
+                    </td>
+                  </tr>
+                );
+              })}
             </ErpTableBody>
           </ErpTable>
         </ErpTableShell>
       )}
+
+      <InvDrawer
+        open={!!voiding}
+        title={`Cancel ${voiding?.grnNo ?? ""}`}
+        subtitle="Takes the stock back out, reopens the order and reverses the bill"
+        onClose={() => {
+          setVoiding(null);
+          setVoidReason("");
+        }}
+        footer={
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setVoiding(null);
+                setVoidReason("");
+              }}
+            >
+              Keep it
+            </Button>
+            <Button
+              size="sm"
+              disabled={saver.saving || !voidReason.trim()}
+              onClick={async () => {
+                if (!voiding) return;
+                const res = await saver.run(() =>
+                  invApi.voidReceipt(voiding.id, voidReason.trim()),
+                );
+                if (res) {
+                  saver.setNotice(
+                    `${res.grnNo} cancelled${
+                      res.reversalVoucherNo
+                        ? ` — books reversed by ${res.reversalVoucherNo}`
+                        : ""
+                    }`,
+                  );
+                  setVoiding(null);
+                  setVoidReason("");
+                  receipts.reload();
+                  pending.reload();
+                }
+              }}
+            >
+              Cancel this receipt
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            The goods go back out of stock at the cost they came in at, the
+            average cost is rebuilt as though this receipt never happened, the
+            order gets its quantity back and the bill is reversed in the books.
+            The receipt itself is kept, marked cancelled, with your reason on it.
+          </p>
+          <p className="rounded-lg border border-[var(--warning)] bg-[var(--warning-soft)] px-3 py-2 text-xs text-[var(--warning)]">
+            This is refused if any of the goods have already been issued, or if
+            the bill has been paid. In those cases raise a purchase return
+            instead — the goods left the shelf, and pretending otherwise would
+            make the stock register wrong.
+          </p>
+          <TextField
+            label="Why is it being cancelled?"
+            value={voidReason}
+            onChange={setVoidReason}
+          />
+          <InvAlert error={saver.error} />
+        </div>
+      </InvDrawer>
+
+      <InvDrawer
+        open={!!amending}
+        title={`Amend ${amending?.grnNo ?? ""}`}
+        subtitle="Invoice details only — quantities and rates need a cancel and re-entry"
+        onClose={() => setAmending(null)}
+        footer={
+          <>
+            <Button variant="outline" size="sm" onClick={() => setAmending(null)}>
+              Close
+            </Button>
+            <Button
+              size="sm"
+              disabled={saver.saving}
+              onClick={async () => {
+                if (!amending) return;
+                const res = await saver.run(() =>
+                  invApi.amendReceipt({
+                    grnId: amending.id,
+                    supplierInvoiceNo: amendInv,
+                    supplierInvoiceDate: amendDate,
+                    note: amendNote,
+                  }),
+                );
+                if (res) {
+                  saver.setNotice(`${amending.grnNo} updated`);
+                  setAmending(null);
+                  receipts.reload();
+                }
+              }}
+            >
+              Save
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Only what the supplier called this delivery. Quantities, rates and
+            tax have already moved stock and money — to change those, cancel the
+            receipt and enter it again, so the correction leaves a trail.
+          </p>
+          <TextField
+            label="Supplier invoice no"
+            value={amendInv}
+            onChange={setAmendInv}
+          />
+          <TextField
+            label="Supplier invoice date"
+            type="date"
+            value={amendDate}
+            onChange={setAmendDate}
+          />
+          <TextField label="Note" value={amendNote} onChange={setAmendNote} />
+          <InvAlert error={saver.error} />
+        </div>
+      </InvDrawer>
 
       <InvDrawer
         open={open}

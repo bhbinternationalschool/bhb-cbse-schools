@@ -475,6 +475,10 @@ export type InvGrn = {
   billId: string;
   billNo: string;
   note: string;
+  /** 'posted' or 'void'. A cancelled receipt is kept, never deleted. */
+  status: string;
+  voidReason: string;
+  voidedBy: string;
   createdBy: string;
   createdAt: string;
   lines: InvGrnLine[];
