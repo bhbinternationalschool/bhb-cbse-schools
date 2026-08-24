@@ -5,6 +5,10 @@
 import type { PtmState } from "@/lib/ptm";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
+import {
+  recordDeskSyncFailure,
+  recordDeskSyncSuccess,
+} from "@/lib/deskSyncStatus";
 
 const META_KEY = "bhb_ptm_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -84,7 +88,12 @@ async function pushPtmDeskApi(state: PtmState) {
     } else if (!res.ok) {
       console.warn("[ptm-db] desk push failed", body?.error || res.status);
     }
+    // Record whether this actually landed. A not-ok response is not
+    // thrown, so without this it slips past every branch in silence.
+    if (res.ok && body?.ok) recordDeskSyncSuccess("ptm");
+    else recordDeskSyncFailure("ptm", { status: res.status, error: body?.error });
   } catch (e) {
+    recordDeskSyncFailure("ptm", { status: 0, error: e instanceof Error ? e.message : String(e) });
     console.warn("[ptm-db] desk push error", e);
   }
 }

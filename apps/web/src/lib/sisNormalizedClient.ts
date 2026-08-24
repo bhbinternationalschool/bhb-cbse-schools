@@ -6,6 +6,10 @@ import type { SisState } from "@/lib/sis";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
 import type { SisRemoteBundle } from "@/lib/sisNormalized.server";
+import {
+  recordDeskSyncFailure,
+  recordDeskSyncSuccess,
+} from "@/lib/deskSyncStatus";
 
 const META_KEY = "bhb_sis_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -300,6 +304,7 @@ async function pushSisDeskApi(
         window.dispatchEvent(
           new CustomEvent("bhb-desk-synced", { detail: { module: "sis" } }),
         );
+        recordDeskSyncSuccess("sis");
       }
     } else if (attempt < 3) {
       setTimeout(
@@ -310,6 +315,7 @@ async function pushSisDeskApi(
       const reason = body?.error || `HTTP ${res.status}`;
       console.warn("[sis-db] roster push failed after 3 attempts", reason);
       reportSisPushFailure(reason);
+      recordDeskSyncFailure("sis", { status: res.status, error: reason });
     }
   } catch (e) {
     if (attempt < 3) {
@@ -320,6 +326,10 @@ async function pushSisDeskApi(
     } else {
       console.warn("[sis-db] roster push error after 3 attempts", e);
       reportSisPushFailure(String(e));
+      recordDeskSyncFailure("sis", {
+        status: 0,
+        error: e instanceof Error ? e.message : String(e),
+      });
     }
   }
 }

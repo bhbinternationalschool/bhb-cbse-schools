@@ -33,6 +33,7 @@ import { StaffRiderPanel } from "@/components/transport/StaffRiderPanel";
 import { StopLinkRepairPanel } from "@/components/transport/StopLinkRepairPanel";
 import { TransportAmendDialog } from "@/components/transport/TransportAmendDialog";
 import { NearestStopPicker } from "@/components/transport/NearestStopPicker";
+import { StudentVillageStopPicker } from "@/components/transport/StudentVillageStopPicker";
 import { householdHasGeo } from "@/lib/mapsGeocode";
 import {
   checkTransportStartMonth,
@@ -613,6 +614,7 @@ export function TransportWorkspace() {
           ) : null}
           {tab === "riders" ? (
             <RidersPanel
+              canEdit={hasPermission(session, masters, "transport", "edit")}
               state={state}
               masters={masters}
               sis={sis}
@@ -855,6 +857,8 @@ type RidersPanelProps = {
   onRefresh: () => void;
   onFlash: (message: string) => void;
   onNotice: (message: string | null) => void;
+  /** Passed down rather than re-derived: `session` lives in the workspace. */
+  canEdit: boolean;
 };
 
 function RidersPanel(props: RidersPanelProps) {
@@ -1202,7 +1206,18 @@ function RidersPanel(props: RidersPanelProps) {
           ) : null}
 
           {selected ? (
-            <div className="mt-3">
+            <div className="mt-3 space-y-3">
+              {/*
+                The village comes from SIS, so arranging transport does not
+                begin by asking where the child lives when the office already
+                knows. The map opens ON that village, which is the difference
+                between moving a pin 200 m and hunting for Varanasi first.
+              */}
+              <StudentVillageStopPicker
+                studentId={selected.student.id}
+                studentLabel={selected.student.fullName}
+                canEdit={props.canEdit}
+              />
               <NearestStopPicker
                 state={state}
                 home={selectedHome}

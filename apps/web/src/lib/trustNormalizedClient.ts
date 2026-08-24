@@ -5,6 +5,10 @@
 import type { TrustState } from "@/lib/trust";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
+import {
+  recordDeskSyncFailure,
+  recordDeskSyncSuccess,
+} from "@/lib/deskSyncStatus";
 
 const META_KEY = "bhb_trust_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -65,7 +69,12 @@ async function pushTrustDeskApi(state: TrustState) {
         projectCount: body.projectCount ?? state.projects.length,
       });
     }
+    // Record whether this actually landed. A not-ok response is not
+    // thrown, so without this it slips past every branch in silence.
+    if (res.ok && body?.ok) recordDeskSyncSuccess("trust");
+    else recordDeskSyncFailure("trust", { status: res.status, error: body?.error });
   } catch (e) {
+    recordDeskSyncFailure("trust", { status: 0, error: e instanceof Error ? e.message : String(e) });
     console.warn("[trust-db] desk push error", e);
   }
 }

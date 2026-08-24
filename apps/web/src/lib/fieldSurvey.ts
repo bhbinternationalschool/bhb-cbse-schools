@@ -45,6 +45,17 @@ export type SurveyOfflineDraft = {
   beatId: string;
   beatName: string;
   childName: string;
+  /** Exact birth date when the parent knew it. */
+  dob: string;
+  /**
+   * Parent-stated age in years, when they did not.
+   *
+   * Carried through the offline queue because door-to-door survey work is
+   * mostly offline, and the queue previously dropped age entirely — every
+   * lead captured without signal arrived unscoreable on the one field the
+   * survey had just collected.
+   */
+  ageYearsApprox: number;
   guardianName: string;
   motherName: string;
   mobile: string;
@@ -395,6 +406,8 @@ export function flushOfflineSurveyQueue(
       {
         source: "field_survey",
         childName: item.childName,
+        dob: item.dob || "",
+        ageYearsApprox: item.ageYearsApprox || 0,
         guardianName: item.guardianName,
         motherName: item.motherName,
         mobile: item.mobile,

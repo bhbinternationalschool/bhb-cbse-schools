@@ -80,6 +80,11 @@ type ChildRow = {
   key: string;
   childName: string;
   dob: string;
+  /**
+   * Age in years the parent stated, when they do not know a birth date.
+   * Stored as its own field — never turned into a fabricated dob.
+   */
+  ageYears: string;
   gender: string;
   classSoughtId: string;
   transportInterest: TransportInterest;
@@ -91,6 +96,7 @@ function emptyChildRow(): ChildRow {
     key: `c_${Math.random().toString(36).slice(2, 9)}`,
     childName: "",
     dob: "",
+    ageYears: "",
     gender: "",
     classSoughtId: "",
     transportInterest: "undecided",
@@ -363,6 +369,18 @@ export function AdmissionFieldSurveyPanel({
       onCommit(state, "Class sought is required for the first child");
       return;
     }
+    // Age is what makes a lead scoreable, and it was optional until now —
+    // 96% of 919 surveyed leads came back with neither an age nor a date.
+    // One tap satisfies this, so it costs the agent a second at the door
+    // and stops the whole cohort arriving unusable.
+    const ageless = filled.find((c) => !c.dob && !c.ageYears);
+    if (ageless) {
+      onCommit(
+        state,
+        `Age is required for ${ageless.childName || "each child"} — tap a year, or enter the exact date if the parent knows it`,
+      );
+      return;
+    }
 
     const householdDraft = {
       ...draft,
@@ -386,6 +404,8 @@ export function AdmissionFieldSurveyPanel({
           beatId: beat.id,
           beatName: beat.name,
           childName: child.childName,
+          dob: child.dob,
+          ageYearsApprox: child.ageYears === "0" ? 1.5 : Number(child.ageYears) || 0,
           guardianName: draft.guardianName,
           motherName: draft.motherName,
           mobile: draft.mobile,
@@ -410,6 +430,9 @@ export function AdmissionFieldSurveyPanel({
         ...householdDraft,
         childName: first.childName,
         dob: first.dob,
+        // "under 2" is a real answer, not a missing one. It is sent as 1.5 so
+        // it scores as a young child rather than as unknown.
+        ageYearsApprox: first.ageYears === "0" ? 1.5 : Number(first.ageYears) || 0,
         gender: first.gender,
         classSoughtId: first.classSoughtId,
         transportInterest: first.transportInterest,
@@ -453,6 +476,7 @@ export function AdmissionFieldSurveyPanel({
         {
           childName: child.childName,
           dob: child.dob,
+          ageYearsApprox: child.ageYears === "0" ? 1.5 : Number(child.ageYears) || 0,
           gender: child.gender,
           classSoughtId: child.classSoughtId,
           source: "field_survey",
@@ -1120,7 +1144,67 @@ export function AdmissionFieldSurveyPanel({
                         }
                       />
                     </Field>
-                    <Field label="Date of birth">
+                    <Field label="Age *">
+                      {/*
+                        Age, not a date picker, is what a doorstep conversation
+                        produces: a parent says "chaar saal ka hai". The old
+                        form offered only <input type="date">, which opens on
+                        today's date and needs several scrolls back — and 96%
+                        of 919 surveyed leads came back with no birth date at
+                        all, which is why nothing could be scored on age.
+
+                        One tap records it. The exact date stays available
+                        below for the families who know it, and the two are
+                        never conflated: a tapped age is stored as an age.
+                      */}
+                      <div className="flex flex-wrap gap-1.5">
+                        {[2, 3, 4, 5, 6, 7, 8].map((yr) => {
+                          const active = row.ageYears === String(yr);
+                          return (
+                            <button
+                              key={yr}
+                              type="button"
+                              aria-pressed={active}
+                              className={`min-w-[2.75rem] rounded-xl border px-2 py-2 text-[13px] font-semibold ${
+                                active
+                                  ? "border-[var(--brand-deep)] bg-[var(--brand-deep)] text-white"
+                                  : "border-[rgba(32,48,80,0.18)] bg-white text-[var(--brand-deep)]"
+                              }`}
+                              onClick={() =>
+                                updateChildRow(row.key, {
+                                  ageYears: active ? "" : String(yr),
+                                })
+                              }
+                            >
+                              {yr}
+                            </button>
+                          );
+                        })}
+                        <button
+                          type="button"
+                          aria-pressed={row.ageYears === "0"}
+                          className={`rounded-xl border px-2 py-2 text-[12px] font-semibold ${
+                            row.ageYears === "0"
+                              ? "border-[var(--brand-deep)] bg-[var(--brand-deep)] text-white"
+                              : "border-[rgba(32,48,80,0.18)] bg-white text-[var(--brand-deep)]"
+                          }`}
+                          onClick={() =>
+                            updateChildRow(row.key, {
+                              ageYears: row.ageYears === "0" ? "" : "0",
+                            })
+                          }
+                        >
+                          under 2
+                        </button>
+                      </div>
+                      {row.ageYears && !row.dob ? (
+                        <p className="mt-1 text-[11px] text-[var(--muted)]">
+                          Recorded as an approximate age. Add the exact date
+                          below only if the parent knows it.
+                        </p>
+                      ) : null}
+                    </Field>
+                    <Field label="Date of birth (if known)">
                       <input
                         type="date"
                         className={inp}

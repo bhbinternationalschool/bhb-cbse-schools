@@ -150,6 +150,15 @@ export type AdmissionLead = {
   source: AdmissionSource;
   childName: string;
   dob: string;
+  /**
+   * Age in whole years as the parent stated it, when no birth date was given.
+   *
+   * Kept SEPARATE from `dob` and never converted into one. At a doorstep a
+   * parent says "chaar saal ka hai", not a date; deriving 2022-08-24 from
+   * that would turn an approximation into a fact the office would later read
+   * off a form as though the family had confirmed it. 0 means not stated.
+   */
+  ageYearsApprox: number;
   gender: string;
   classSoughtId: string;
   classAdmittedId: string;
@@ -729,6 +738,11 @@ export function emptyAdmissionLead(
     source: partial?.source || "walk_in",
     childName: cleanRepeatedName(partial?.childName || ""),
     dob: partial?.dob || "",
+    ageYearsApprox: (() => {
+      const n = Number(partial?.ageYearsApprox ?? 0);
+      // A child's stated age above 25 is a typo or the parent's own age.
+      return Number.isFinite(n) && n > 0 && n <= 25 ? Math.round(n * 10) / 10 : 0;
+    })(),
     gender: partial?.gender || "",
     classSoughtId: partial?.classSoughtId || "",
     classAdmittedId: partial?.classAdmittedId || "",
@@ -1843,6 +1857,8 @@ export function addSiblingEnquiry(
   child: {
     childName: string;
     dob?: string;
+    /** Parent-stated age in years when no birth date is known. */
+    ageYearsApprox?: number;
     gender?: string;
     classSoughtId: string;
     previousSchool?: string;
@@ -1875,6 +1891,7 @@ export function addSiblingEnquiry(
     source: child.source || "walk_in",
     childName,
     dob: child.dob || "",
+    ageYearsApprox: child.ageYearsApprox || 0,
     gender: child.gender || "",
     classSoughtId: child.classSoughtId,
     previousSchool: child.previousSchool || "",

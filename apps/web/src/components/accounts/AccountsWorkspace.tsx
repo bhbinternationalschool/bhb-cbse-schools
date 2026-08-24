@@ -6,6 +6,7 @@ import {
   AccountsMastersPanel,
 } from "@/components/accounts/AccountsMastersPanel";
 import { UnpostedEntriesBanner } from "@/components/accounts/UnpostedEntriesBanner";
+import { DeskSyncBanner } from "@/components/accounts/DeskSyncBanner";
 import {
   BanksPanel,
   BillsPanel,
@@ -162,6 +163,16 @@ export function AccountsWorkspace() {
         value={tab}
         onChange={(id) => setTab(id as AccountsTab)}
         aria-label="Accounts sections"
+      />
+
+      <DeskSyncBanner
+        onRetry={async () => {
+          const { retryAccountsDeskSync } = await import("@/lib/accountsNormalizedClient");
+          const { loadAccounts: load } = await import("@/lib/accountsStore");
+          const ok = await retryAccountsDeskSync(load());
+          refresh();
+          return ok;
+        }}
       />
 
       <UnpostedEntriesBanner onRefresh={refresh} />

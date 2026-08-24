@@ -7,6 +7,10 @@ import { emptyMastersShell } from "@/lib/masters";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { stripStaffFromMastersForBlob } from "@/lib/staffPersistence";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
+import {
+  recordDeskSyncFailure,
+  recordDeskSyncSuccess,
+} from "@/lib/deskSyncStatus";
 
 const META_KEY = "bhb_masters_desk_db_meta_v1";
 const LOCAL_EDIT_META_KEY = "bhb_masters_mirror_meta_v1";
@@ -273,7 +277,12 @@ async function pushMastersDeskApi(
             "Please try again.",
     );
     return { ok: false, reason: `http_${res.status}` };
+    // Record whether this actually landed. A not-ok response is not
+    // thrown, so without this it slips past every branch in silence.
+    if (res.ok && body?.ok) recordDeskSyncSuccess("masters");
+    else recordDeskSyncFailure("masters", { status: res.status, error: body?.error });
   } catch (e) {
+    recordDeskSyncFailure("masters", { status: 0, error: e instanceof Error ? e.message : String(e) });
     // A genuine network fault. Say that specifically — do NOT tell the user
     // to check their connection for a server-side failure, which is what the
     // generic loader message did and sent the director hunting a fine router.
