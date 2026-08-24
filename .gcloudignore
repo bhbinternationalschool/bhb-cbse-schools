@@ -11,3 +11,8 @@ apps/web/.env*
 .cursor
 cbse_school_mobile/
 assets/
+
+# Session worktrees: other Claude sessions check the repo out under here, so
+# this is several copies of the same source. 1,441 files and 42% of the upload
+# on 2026-08-24, none of it part of the image.
+.claude/worktrees
