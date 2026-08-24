@@ -800,3 +800,62 @@ export async function studentPurchases(
     lastSaleNo: str(r.last_sale_no),
   }));
 }
+
+/* ─── One payment, several children ────────────────────────── */
+
+export type InvHouseholdSaleResult = {
+  sales: {
+    saleId: string;
+    saleNo: string;
+    studentId: string;
+    buyerName: string;
+    totalPaise: number;
+  }[];
+  totalPaise: number;
+  tenderedPaise: number;
+  balancePaise: number;
+};
+
+/**
+ * Serve several children of one household against a single payment.
+ *
+ * One sale per child, so each keeps their own receipt, their own dues line at
+ * the fee counter and their own ledger party. Only the money is shared. It is
+ * one transaction in the database: every child gets their books and their
+ * receipt, or none do and the drawer is untouched.
+ */
+export async function postHouseholdSale(
+  input: {
+    sales: Record<string, unknown>[];
+    payments: { amountPaise: number; mode: string; reference: string }[];
+  },
+  actor: string,
+): Promise<InvHouseholdSaleResult> {
+  const { sb, tenantId } = await invCtx();
+  const { data, error } = await sb.rpc("inv_post_household_sale", {
+    p_tenant_id: tenantId,
+    p_actor: actor,
+    p_payload: {
+      sales: input.sales,
+      payments: input.payments.map((p) => ({
+        amount_paise: p.amountPaise,
+        mode: p.mode,
+        reference: p.reference,
+      })),
+    },
+  });
+  if (error) throw new InvError(error.message, 422);
+  const out = (data ?? {}) as Row;
+  return {
+    sales: ((out.sales ?? []) as Row[]).map((r) => ({
+      saleId: str(r.sale_id),
+      saleNo: str(r.sale_no),
+      studentId: str(r.student_id),
+      buyerName: str(r.buyer_name),
+      totalPaise: int(r.total_paise),
+    })),
+    totalPaise: int(out.total_paise),
+    tenderedPaise: int(out.tendered_paise),
+    balancePaise: int(out.balance_paise),
+  };
+}

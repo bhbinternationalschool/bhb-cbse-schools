@@ -13,7 +13,7 @@
  * keystroke.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { RefreshCw, Search, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -226,6 +226,29 @@ function SellSection({
     { itemId: string; itemName: string; totalQty: number; lastSaleDate: string; lastSaleNo: string }[]
   >([]);
 
+  // Who else is in this family. Fetched alongside the purchase history so the
+  // clerk can serve all of them without searching for each child by name.
+  useEffect(() => {
+    const hh = buyerKind === "student" ? student?.householdId : "";
+    if (!hh) {
+      setSiblings([]);
+      setFamilyMode(false);
+      return;
+    }
+    let live = true;
+    void invApi
+      .householdSiblings(hh)
+      .then((rows) => {
+        if (live) setSiblings(rows);
+      })
+      .catch(() => {
+        if (live) setSiblings([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, [buyerKind, student?.id, student?.householdId]);
+
   useEffect(() => {
     const id = buyerKind === "student" ? student?.id : "";
     if (!id) {
@@ -248,7 +271,40 @@ function SellSection({
     };
   }, [buyerKind, student?.id]);
 
-  const [cart, setCart] = useState<CartLine[]>([]);
+  const [soloCart, setSoloCart] = useState<CartLine[]>([]);
+
+  /**
+   * Serving a whole family.
+   *
+   * One cart per child, because the sale posted for each of them is their own —
+   * their receipt, their dues line at the fee counter, their ledger party. Only
+   * the payment is shared. `cart` below is a facade over whichever child is in
+   * front of the clerk, so every existing cart action keeps working unchanged
+   * whether one child is being served or four.
+   */
+  const [familyMode, setFamilyMode] = useState(false);
+  const [siblings, setSiblings] = useState<InvBuyerStudent[]>([]);
+  const [carts, setCarts] = useState<Record<string, CartLine[]>>({});
+  const [activeChild, setActiveChild] = useState("");
+
+  const cart: CartLine[] = familyMode ? (carts[activeChild] ?? []) : soloCart;
+  const setCart = useCallback(
+    (next: CartLine[] | ((prev: CartLine[]) => CartLine[])) => {
+      if (!familyMode) {
+        setSoloCart(next as never);
+        return;
+      }
+      setCarts((prev) => {
+        const current = prev[activeChild] ?? [];
+        const value =
+          typeof next === "function"
+            ? (next as (p: CartLine[]) => CartLine[])(current)
+            : next;
+        return { ...prev, [activeChild]: value };
+      });
+    },
+    [familyMode, activeChild],
+  );
   const [kitId, setKitId] = useState("");
   const [note, setNote] = useState("");
 
@@ -337,6 +393,37 @@ function SellSection({
     return { gross, discount, tax, total, cost, margin: total - cost };
   }, [cart]);
 
+  /** Per-child totals, so a chip can show what that child's books come to. */
+  const childTotals = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const [id, lines] of Object.entries(carts)) {
+      out[id] = lines.reduce((n, l) => {
+        const gross = l.qty * l.unitPricePaise;
+        const disc = Math.round((gross * l.discountPct) / 100);
+        const net = gross - disc;
+        return n + net + Math.round((net * l.gstRate) / 100);
+      }, 0);
+    }
+    return out;
+  }, [carts]);
+
+  const familyTotal = useMemo(
+    () => Object.values(childTotals).reduce((n, v) => n + v, 0),
+    [childTotals],
+  );
+
+  const familyChildrenWithItems = useMemo(
+    () => siblings.filter((c) => (carts[c.id] ?? []).length > 0),
+    [siblings, carts],
+  );
+
+  /**
+   * What the parent is actually paying for. In family mode that is every
+   * child's cart, not just the one on screen — tendering against the child in
+   * front of the clerk would refuse the family's own money as an overpayment.
+   */
+  const payableTotal = familyMode ? familyTotal : totals.total;
+
   // Default the FIRST tender to the full amount, until the clerk edits it,
   // splits the payment, or puts the sale on account. Only the first row is
   // touched: once a second way of paying exists the clerk is driving.
@@ -347,15 +434,18 @@ function SellSection({
       const only = rows[0]!;
       if (only.touched) return rows;
       return [
-        { ...only, amountInput: totals.total > 0 ? paiseToInput(totals.total) : "" },
+        {
+          ...only,
+          amountInput: payableTotal > 0 ? paiseToInput(payableTotal) : "",
+        },
       ];
     });
-  }, [totals.total, onAccount]);
+  }, [payableTotal, onAccount]);
 
   const tenderPaise = onAccount
     ? 0
     : tenders.reduce((n, t) => n + inputToPaise(t.amountInput), 0);
-  const balancePaise = Math.max(0, totals.total - tenderPaise);
+  const balancePaise = Math.max(0, payableTotal - tenderPaise);
 
   /**
    * A payment that is not cash left a trail somewhere — a UPI reference, a
@@ -394,10 +484,14 @@ function SellSection({
   }, [cart, alreadyBought]);
 
   const capBreach = cart.find((l) => l.discountPct > l.maxDiscountPct);
-  const overTender = tenderPaise > totals.total;
+  const overTender = tenderPaise > payableTotal;
 
   function reset() {
-    setCart([]);
+    setSoloCart([]);
+    setCarts({});
+    setFamilyMode(false);
+    setActiveChild("");
+    setSiblings([]);
     setKitId("");
     setStudent(null);
     setWalkinName("");
@@ -411,7 +505,64 @@ function SellSection({
     setOnAccount(false);
   }
 
+  /** Serve every child who has something in their cart, on one payment. */
+  async function sellFamily() {
+    if (capBreach || overTender || missingRef) return;
+    if (familyChildrenWithItems.length === 0) return;
+
+    const res = await saver.run(() =>
+      invApi.postHouseholdSale({
+        sales: familyChildrenWithItems.map((child) => ({
+          sale_date: new Date().toISOString().slice(0, 10),
+          buyer_kind: "student",
+          student_id: child.id,
+          buyer_name: child.fullName,
+          buyer_phone: child.phone,
+          class_id: child.classId,
+          section_id: child.sectionId,
+          location_id: locationId,
+          price_list_id: priceListId,
+          note,
+          lines: (carts[child.id] ?? []).map((l) => ({
+            item_id: l.itemId,
+            qty: l.qty,
+            unit_price_paise: l.unitPricePaise,
+            discount_pct: l.discountPct,
+            gst_rate: l.gstRate,
+          })),
+        })),
+        payments: onAccount
+          ? []
+          : tenders
+              .filter((t) => inputToPaise(t.amountInput) > 0)
+              .map((t) => ({
+                amountPaise: inputToPaise(t.amountInput),
+                mode: t.mode,
+                reference: t.reference.trim(),
+              })),
+      }),
+    );
+
+    if (res) {
+      saver.setNotice(
+        `${res.sales.length} receipts — ${res.sales
+          .map((x) => `${x.buyerName} ${x.saleNo}`)
+          .join(", ")}${
+          res.balancePaise > 0
+            ? `. ${formatPaise(res.balancePaise)} left on account.`
+            : ". Paid in full."
+        }`,
+      );
+      reset();
+      onSold();
+    }
+  }
+
   async function sell() {
+    if (familyMode) {
+      await sellFamily();
+      return;
+    }
     if (!buyerReady || cart.length === 0 || capBreach || overTender) return;
     if (missingRef) return;
 
@@ -647,9 +798,81 @@ function SellSection({
             />
           </div>
 
+          {/* Serving the family: one tab per child, each with their own cart. */}
+          {siblings.length > 1 && buyerKind === "student" ? (
+            <div className="space-y-2 rounded-lg border p-2">
+              <label className="flex items-center gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={familyMode}
+                  onChange={(e) => {
+                    const on = e.target.checked;
+                    setFamilyMode(on);
+                    if (on) {
+                      // Carry what is already in the cart over to the child it
+                      // was being built for, so switching mode never loses work.
+                      const id = student?.id ?? "";
+                      setActiveChild(id);
+                      setCarts((prev) =>
+                        soloCart.length > 0 && !prev[id]
+                          ? { ...prev, [id]: soloCart }
+                          : prev,
+                      );
+                    }
+                  }}
+                />
+                Serve all {siblings.length} children of this family on one
+                payment
+              </label>
+
+              {familyMode ? (
+                <>
+                  <div className="flex flex-wrap gap-1">
+                    {siblings.map((child) => {
+                      const lines = (carts[child.id] ?? []).length;
+                      const active = child.id === activeChild;
+                      return (
+                        <button
+                          key={child.id}
+                          type="button"
+                          onClick={() => setActiveChild(child.id)}
+                          className={
+                            active
+                              ? "rounded-md bg-foreground px-2 py-1 text-xs font-medium text-background"
+                              : "rounded-md border px-2 py-1 text-xs hover:bg-muted"
+                          }
+                        >
+                          {child.fullName}
+                          {child.classId ? (
+                            <span className="ml-1 opacity-70">
+                              {classLabel(child.classId)}
+                              {child.sectionId ? `-${child.sectionId}` : ""}
+                            </span>
+                          ) : null}
+                          {lines > 0 ? (
+                            <span className="ml-1 font-semibold">
+                              · {formatPaise(childTotals[child.id] ?? 0)}
+                            </span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Each child gets their own receipt and their own balance —
+                    only the payment is shared. Nothing is posted until every
+                    child&rsquo;s books go through together.
+                  </p>
+                </>
+              ) : null}
+            </div>
+          ) : null}
+
           {cart.length === 0 ? (
             <p className="py-6 text-center text-xs text-muted-foreground">
-              Nothing in the cart yet.
+              {familyMode
+                ? "Nothing for this child yet — add their items, or pick another child above."
+                : "Nothing in the cart yet."}
             </p>
           ) : (
             <div className="space-y-2">
@@ -741,9 +964,21 @@ function SellSection({
               <Row label="GST" value={formatPaise(totals.tax)} muted />
             ) : null}
             <div className="mt-1 flex justify-between border-t pt-1 text-base font-semibold">
-              <span>Total</span>
+              <span>{familyMode ? "This child" : "Total"}</span>
               <span className="tabular-nums">{formatPaise(totals.total)}</span>
             </div>
+            {familyMode ? (
+              <div className="flex justify-between border-t pt-1 text-base font-semibold">
+                <span>
+                  Family total
+                  <span className="ml-1 text-[11px] font-normal text-muted-foreground">
+                    {familyChildrenWithItems.length} child
+                    {familyChildrenWithItems.length === 1 ? "" : "ren"}
+                  </span>
+                </span>
+                <span className="tabular-nums">{formatPaise(familyTotal)}</span>
+              </div>
+            ) : null}
             {totals.total > 0 && totals.cost > 0 ? (
               <div className="text-[11px] text-muted-foreground">
                 Margin {formatPaise(totals.margin)} (
@@ -900,7 +1135,7 @@ function SellSection({
               {tenders.length > 1 ? (
                 <p className="text-xs text-muted-foreground">
                   Taken in total: {formatPaise(tenderPaise)} of{" "}
-                  {formatPaise(totals.total)}
+                  {formatPaise(payableTotal)}
                 </p>
               ) : null}
             </div>
@@ -948,13 +1183,21 @@ function SellSection({
               disabled={
                 saver.saving ||
                 !buyerReady ||
-                cart.length === 0 ||
+                (familyMode
+                  ? familyChildrenWithItems.length === 0
+                  : cart.length === 0) ||
                 !!capBreach ||
                 overTender ||
                 missingRef
               }
             >
-              {saver.saving ? "Saving…" : "Complete sale"}
+              {saver.saving
+                ? "Saving…"
+                : familyMode
+                  ? `Sell to ${familyChildrenWithItems.length} child${
+                      familyChildrenWithItems.length === 1 ? "" : "ren"
+                    }`
+                  : "Complete sale"}
             </Button>
           </div>
         </div>

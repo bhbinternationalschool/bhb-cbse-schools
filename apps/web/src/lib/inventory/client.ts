@@ -454,6 +454,35 @@ export const invApi = {
       (r) => r.purchases,
     ),
 
+  /** Several children, one payment. One sale each; all of them or none. */
+  postHouseholdSale: (input: {
+    sales: Record<string, unknown>[];
+    payments: { amountPaise: number; mode: string; reference: string }[];
+  }) =>
+    req<{
+      household: {
+        sales: {
+          saleId: string;
+          saleNo: string;
+          studentId: string;
+          buyerName: string;
+          totalPaise: number;
+        }[];
+        totalPaise: number;
+        tenderedPaise: number;
+        balancePaise: number;
+      };
+    }>("/sales", {
+      method: "POST",
+      body: JSON.stringify({ action: "household", ...input }),
+    }).then((r) => r.household),
+
+  /** The other children of one household, for serving a family in one go. */
+  householdSiblings: (householdId: string, ay = "") =>
+    req<{ siblings: InvBuyerStudent[] }>("/sales", {
+      query: { view: "siblings", householdId, ay },
+    }).then((r) => r.siblings),
+
   counterSummary: () =>
     req<{ summary: InvCounterSummary }>("/sales", {
       query: { view: "summary" },
