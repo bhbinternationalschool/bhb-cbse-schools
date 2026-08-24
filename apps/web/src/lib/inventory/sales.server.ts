@@ -107,6 +107,48 @@ export async function findStudents(
   }));
 }
 
+/**
+ * The other children of one household.
+ *
+ * A parent buying for three children should be served once, not three times.
+ * Reads `sis_students` directly for the same reason `findStudents` does: the
+ * counter has to work on a machine that has never opened the roster.
+ */
+export async function householdSiblings(
+  householdId: string,
+  academicYearCode: string,
+): Promise<InvBuyerStudent[]> {
+  if (!householdId) return [];
+
+  const { sb, tenantId } = await invCtx();
+  let q = sb
+    .from("sis_students")
+    .select(
+      "id, full_name, admission_no, class_id, section_id, roll_no, father_name," +
+        " father_mobile, mother_mobile, household_id, status, academic_year_code",
+    )
+    .eq("tenant_id", tenantId)
+    .eq("household_id", householdId);
+
+  if (academicYearCode) q = q.eq("academic_year_code", academicYearCode);
+
+  const { data, error } = await q.order("full_name").limit(20);
+  if (error) throw new InvError(`Household lookup: ${error.message}`, 500);
+
+  return ((data ?? []) as unknown as Row[]).map((r) => ({
+    id: str(r.id),
+    fullName: str(r.full_name),
+    admissionNo: str(r.admission_no),
+    classId: str(r.class_id),
+    sectionId: str(r.section_id),
+    rollNo: str(r.roll_no),
+    fatherName: str(r.father_name),
+    phone: str(r.father_mobile) || str(r.mother_mobile),
+    householdId: str(r.household_id),
+    status: str(r.status),
+  }));
+}
+
 /* ─── Reading sales ────────────────────────────────────────── */
 
 function rowToLine(r: Row): InvSaleLine {
@@ -715,5 +757,46 @@ export async function storeDuesForStudents(
     paidPaise: int(r.paid_paise),
     balancePaise: int(r.balance_paise),
     itemSummary: str(r.item_summary),
+  }));
+}
+
+/* ─── What a student already bought ────────────────────────── */
+
+export type InvStudentPurchase = {
+  itemId: string;
+  itemName: string;
+  totalQty: number;
+  saleCount: number;
+  lastSaleDate: string;
+  lastSaleNo: string;
+};
+
+/**
+ * What this student has already taken this academic year.
+ *
+ * The counter shows it while the cart is still open, so a clerk about to ring
+ * up a second set of the same books sees that the child already has them.
+ * A warning, never a block: a replacement set in March is ordinary, and a
+ * counter that refuses honest work gets worked around.
+ */
+export async function studentPurchases(
+  studentId: string,
+  academicYearCode = "",
+): Promise<InvStudentPurchase[]> {
+  if (!studentId) return [];
+  const { sb, tenantId } = await invCtx();
+  const { data, error } = await sb.rpc("inv_student_purchases", {
+    p_tenant_id: tenantId,
+    p_student_id: studentId,
+    p_academic_year_code: academicYearCode,
+  });
+  if (error) throw new InvError(`Student purchases: ${error.message}`, 500);
+  return ((data ?? []) as Row[]).map((r) => ({
+    itemId: str(r.item_id),
+    itemName: str(r.item_name),
+    totalQty: num(r.total_qty),
+    saleCount: int(r.sale_count),
+    lastSaleDate: str(r.last_sale_date),
+    lastSaleNo: str(r.last_sale_no),
   }));
 }

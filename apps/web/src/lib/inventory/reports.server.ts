@@ -403,3 +403,55 @@ export async function inventoryParity(): Promise<InvInventoryParity> {
     ledgerActive: out.ledger_active === true,
   };
 }
+
+/* ─── Bought twice ─────────────────────────────────────────── */
+
+export type InvRepeatPurchase = {
+  studentId: string;
+  buyerName: string;
+  classId: string;
+  sectionId: string;
+  itemId: string;
+  itemName: string;
+  saleCount: number;
+  totalQty: number;
+  totalPaise: number;
+  firstSaleDate: string;
+  lastSaleDate: string;
+  saleNos: string;
+  minutesApart: number;
+};
+
+/**
+ * Children with the same item on more than one sale this year.
+ *
+ * The counter warns before the fact; this catches what got past it. Sorted by
+ * how close together the two sales were, because that is what separates a
+ * keying mistake from a genuine second purchase — twelve minutes apart is an
+ * error, five months apart is a replacement.
+ */
+export async function repeatPurchases(
+  academicYearCode = "",
+): Promise<InvRepeatPurchase[]> {
+  const { sb, tenantId } = await invCtx();
+  const { data, error } = await sb.rpc("inv_report_repeat_purchases", {
+    p_tenant_id: tenantId,
+    p_academic_year_code: academicYearCode,
+  });
+  if (error) throw new InvError(`Repeat purchases: ${error.message}`, 500);
+  return ((data ?? []) as Row[]).map((r) => ({
+    studentId: str(r.student_id),
+    buyerName: str(r.buyer_name),
+    classId: str(r.class_id),
+    sectionId: str(r.section_id),
+    itemId: str(r.item_id),
+    itemName: str(r.item_name),
+    saleCount: int(r.sale_count),
+    totalQty: num(r.total_qty),
+    totalPaise: int(r.total_paise),
+    firstSaleDate: str(r.first_sale_date),
+    lastSaleDate: str(r.last_sale_date),
+    saleNos: str(r.sale_nos),
+    minutesApart: num(r.minutes_apart),
+  }));
+}

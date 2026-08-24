@@ -42,7 +42,8 @@ type ReportId =
   | "margin"
   | "daybook"
   | "purchases"
-  | "parity";
+  | "parity"
+  | "repeats";
 
 const REPORTS: { id: ReportId; label: string }[] = [
   { id: "dashboard", label: "Overview" },
@@ -51,6 +52,7 @@ const REPORTS: { id: ReportId; label: string }[] = [
   { id: "daybook", label: "Sales day book" },
   { id: "purchases", label: "Purchases by vendor" },
   { id: "parity", label: "Stock vs books" },
+  { id: "repeats", label: "Bought twice" },
 ];
 
 function monthStart(): string {
@@ -131,6 +133,7 @@ export function ReportsTab({ boot }: { boot: InvBootstrap }) {
       {report === "daybook" ? <DayBook from={from} to={to} /> : null}
       {report === "purchases" ? <Purchases from={from} to={to} /> : null}
       {report === "parity" ? <InventoryParity /> : null}
+      {report === "repeats" ? <RepeatPurchases /> : null}
     </div>
   );
 }
@@ -239,6 +242,90 @@ function InventoryParity() {
         as opening stock in the Catalogue, which posts it here. It must not also
         be entered on the ledger&rsquo;s own opening-balance screen, or the same
         goods land twice.
+      </p>
+    </div>
+  );
+}
+
+/* ─── Bought twice ─────────────────────────────────────────── */
+
+/**
+ * Children who have the same item on more than one receipt this year.
+ *
+ * The counter warns before the sale; this finds what got past it. Sorted by
+ * how close together the two sales were, because that is the thing that tells
+ * a keying mistake from a real second purchase — minutes apart is an error,
+ * months apart is a replacement.
+ */
+function RepeatPurchases() {
+  const r = useAsync(() => invApi.repeatPurchases(), []);
+  const rows = r.data ?? [];
+
+  if (r.loading) return <InvSpinner label="Looking for repeats" />;
+  if (r.error) return <InvAlert error={r.error} />;
+
+  return (
+    <div className="space-y-3">
+      {rows.length === 0 ? (
+        <p className="rounded-xl border p-3 text-sm text-muted-foreground">
+          Nothing sold twice to the same child this year.
+        </p>
+      ) : (
+        <ErpTableShell>
+          <ErpTable minWidth="min-w-full">
+            <ErpTableHead>
+              <tr>
+                <th className="pb-2 text-left">Student</th>
+                <th className="pb-2 text-left">Class</th>
+                <th className="pb-2 text-left">Item</th>
+                <th className="pb-2 text-right">Sales</th>
+                <th className="pb-2 text-right">Qty</th>
+                <th className="pb-2 text-right">Value</th>
+                <th className="pb-2 text-left">Receipts</th>
+                <th className="pb-2 text-left">Apart</th>
+              </tr>
+            </ErpTableHead>
+            <ErpTableBody>
+              {rows.map((row) => {
+                // Two sales inside an hour is almost never a real repeat.
+                const suspicious = row.minutesApart < 60;
+                return (
+                  <tr key={`${row.studentId}-${row.itemId}`}>
+                    <td className="py-2 font-medium">{row.buyerName}</td>
+                    <td className="py-2 text-muted-foreground">
+                      {row.classId}
+                      {row.sectionId ? `-${row.sectionId}` : ""}
+                    </td>
+                    <td className="py-2">{row.itemName}</td>
+                    <td className="py-2 text-right">{row.saleCount}</td>
+                    <td className="py-2 text-right">{row.totalQty}</td>
+                    <td className="py-2 text-right">
+                      {formatPaise(row.totalPaise)}
+                    </td>
+                    <td className="py-2 text-muted-foreground">{row.saleNos}</td>
+                    <td
+                      className={
+                        suspicious
+                          ? "py-2 font-semibold text-[var(--danger)]"
+                          : "py-2 text-muted-foreground"
+                      }
+                    >
+                      {row.minutesApart < 60
+                        ? `${row.minutesApart} min`
+                        : `${row.firstSaleDate} → ${row.lastSaleDate}`}
+                    </td>
+                  </tr>
+                );
+              })}
+            </ErpTableBody>
+          </ErpTable>
+        </ErpTableShell>
+      )}
+      <p className="rounded-lg bg-muted/50 px-3 py-2 text-[11px] text-muted-foreground">
+        Sales minutes apart are almost always the same purchase rung up twice —
+        void the later receipt rather than refunding, so the stock goes back at
+        the cost it left at. Sales months apart are usually a genuine
+        replacement.
       </p>
     </div>
   );

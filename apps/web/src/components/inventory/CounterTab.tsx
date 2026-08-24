@@ -217,6 +217,37 @@ function SellSection({
   );
   const kits = useAsync(() => invApi.listKits({ status: "active" }), []);
 
+  /**
+   * What this child already took this year. Fetched when they are chosen, so
+   * the clerk sees "already has this" while the cart is still open rather than
+   * after the receipt is printed.
+   */
+  const [alreadyBought, setAlreadyBought] = useState<
+    { itemId: string; itemName: string; totalQty: number; lastSaleDate: string; lastSaleNo: string }[]
+  >([]);
+
+  useEffect(() => {
+    const id = buyerKind === "student" ? student?.id : "";
+    if (!id) {
+      setAlreadyBought([]);
+      return;
+    }
+    let live = true;
+    void invApi
+      .studentPurchases(id)
+      .then((rows) => {
+        if (live) setAlreadyBought(rows);
+      })
+      // A failed lookup must not stop a sale. The warning is a courtesy; the
+      // "bought twice" report still catches whatever slips through.
+      .catch(() => {
+        if (live) setAlreadyBought([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, [buyerKind, student?.id]);
+
   const [cart, setCart] = useState<CartLine[]>([]);
   const [kitId, setKitId] = useState("");
   const [note, setNote] = useState("");
@@ -346,6 +377,21 @@ function SellSection({
       : buyerKind === "walkin"
         ? walkinName.trim().length > 0
         : staffName.trim().length > 0;
+
+  /**
+   * Items in the cart this child has already been sold this year. A warning,
+   * deliberately not a block — a replacement set in March is ordinary, and a
+   * counter that refuses honest work simply gets worked around.
+   */
+  const repeats = useMemo(() => {
+    if (alreadyBought.length === 0) return [];
+    const prior = new Map(alreadyBought.map((p) => [p.itemId, p]));
+    return cart
+      .map((l) => ({ line: l, prior: prior.get(l.itemId) }))
+      .filter((x): x is { line: CartLine; prior: NonNullable<typeof x.prior> } =>
+        Boolean(x.prior),
+      );
+  }, [cart, alreadyBought]);
 
   const capBreach = cart.find((l) => l.discountPct > l.maxDiscountPct);
   const overTender = tenderPaise > totals.total;
@@ -705,6 +751,27 @@ function SellSection({
               </div>
             ) : null}
           </div>
+
+          {repeats.length > 0 ? (
+            <div className="rounded-lg border border-[var(--warning)] bg-[var(--warning-soft)] px-3 py-2 text-xs text-[var(--warning)]">
+              <p className="font-semibold">
+                {student?.fullName || "This student"} already has{" "}
+                {repeats.length === 1 ? "this" : "some of this"} year:
+              </p>
+              <ul className="mt-1 space-y-0.5">
+                {repeats.map(({ prior }) => (
+                  <li key={prior.itemId}>
+                    {prior.itemName} × {prior.totalQty} — last on{" "}
+                    {prior.lastSaleDate} ({prior.lastSaleNo})
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1 opacity-90">
+                Sell it again if it is a genuine replacement; check the earlier
+                receipt first if it is not.
+              </p>
+            </div>
+          ) : null}
 
           <label className="flex items-center gap-2 text-xs">
             <input

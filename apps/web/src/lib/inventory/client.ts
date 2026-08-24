@@ -375,6 +375,21 @@ export const invApi = {
     pageSize?: number;
   } = {}) => req<InvSalePage>("/sales", { query }),
 
+  /** What this student already took this year — the counter's repeat warning. */
+  studentPurchases: (studentId: string, ay = "") =>
+    req<{
+      purchases: {
+        itemId: string;
+        itemName: string;
+        totalQty: number;
+        saleCount: number;
+        lastSaleDate: string;
+        lastSaleNo: string;
+      }[];
+    }>("/sales", { query: { view: "purchases", studentId, ay } }).then(
+      (r) => r.purchases,
+    ),
+
   counterSummary: () =>
     req<{ summary: InvCounterSummary }>("/sales", {
       query: { view: "summary" },
@@ -514,6 +529,25 @@ export const invApi = {
         ledgerActive: boolean;
       };
     }>("/reports", { query: { report: "parity" } }).then((r) => r.parity),
+
+  repeatPurchases: (ay = "") =>
+    req<{
+      repeats: {
+        studentId: string;
+        buyerName: string;
+        classId: string;
+        sectionId: string;
+        itemId: string;
+        itemName: string;
+        saleCount: number;
+        totalQty: number;
+        totalPaise: number;
+        firstSaleDate: string;
+        lastSaleDate: string;
+        saleNos: string;
+        minutesApart: number;
+      }[];
+    }>("/reports", { query: { report: "repeats", ay } }).then((r) => r.repeats),
 
   purchaseReport: (from: string, to: string) =>
     req<{
