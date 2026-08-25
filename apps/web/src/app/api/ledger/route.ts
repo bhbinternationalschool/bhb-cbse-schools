@@ -37,7 +37,12 @@ import {
 } from "@/lib/inventory/procurement.server";
 import { InvError } from "@/lib/inventory/db.server";
 import type { InvPaymentMode } from "@/lib/inventory/types";
-import { ledgerReconciliation, projectAll } from "@/lib/ledger/project.server";
+import {
+  feeAdvanceBalances,
+  ledgerReconciliation,
+  projectAll,
+  releaseFeeAdvances,
+} from "@/lib/ledger/project.server";
 import {
   ledgerAnomalies,
   ledgerCockpit,
@@ -136,6 +141,8 @@ type PostBody =
   | { action: "parity"; deskRows: { code: string; balancePaise: number }[] }
   | { action: "vendor-dues" }
   | { action: "accounts" }
+  | { action: "fee-advances" }
+  | { action: "release-fee-advances"; academicYearCode: string; date?: string }
   | { action: "find-voucher"; voucherNo: string }
   | { action: "vendor-bills"; vendorId?: string }
   | {
@@ -188,6 +195,7 @@ export async function POST(req: Request) {
     "vendor-bills",
     "accounts",
     "find-voucher",
+    "fee-advances",
   ]);
 
   const auth = await requireStaffPermission(
@@ -343,6 +351,20 @@ export async function POST(req: Request) {
           ? await receivablesAgeing(body.asOf)
           : await payablesAgeing(body.asOf);
       return NextResponse.json({ ok: true, side: body.side ?? "payables", report });
+    }
+    case "fee-advances": {
+      // What sits in Fees Received in Advance, per session.
+      const res = await feeAdvanceBalances();
+      return NextResponse.json(res, { status: res.ok ? 200 : 502 });
+    }
+    case "release-fee-advances": {
+      // Session start: the advance pile becomes income, as one visible journal.
+      const res = await releaseFeeAdvances({
+        academicYearCode: body.academicYearCode || "",
+        date: body.date || new Date().toISOString().slice(0, 10),
+        createdBy: actor,
+      });
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
     }
     case "accounts": {
       // The chart, for entry forms — postable accounts only.

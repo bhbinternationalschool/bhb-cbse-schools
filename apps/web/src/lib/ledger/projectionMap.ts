@@ -16,6 +16,7 @@ import {
   L_BANK,
   L_CASH,
   L_CHEQUES_IN_HAND,
+  L_FEE_ADVANCES,
   L_FEE_INCOME,
   L_SALARY_PAYABLE,
   L_STAFF_ADVANCES,
@@ -58,7 +59,23 @@ export type DeskFeeVoucher = {
   totalPaise: number;
   cashierName: string;
   voidedAt: string | null;
+  /** Session the money is FOR ("2026-27"). Absent on old rows — see below. */
+  academicYearCode?: string;
 };
+
+/**
+ * When a session's books open: 1 April of its starting year.
+ *
+ * "2026-27" → "2026-04-01". Null when the code cannot be read — and an
+ * unreadable session must NOT be treated as an advance: routing money to a
+ * liability on a guess would hide real income. Unknown stays income, which
+ * the receipt date at least makes defensible.
+ */
+export function sessionStartOf(code: string | undefined): string | null {
+  const m = /^\s*(\d{4})\s*[-/]\s*(\d{2}|\d{4})\s*$/.exec(code || "");
+  if (!m) return null;
+  return `${m[1]}-04-01`;
+}
 
 export type DeskFeeTender = {
   mode: string;
@@ -148,11 +165,22 @@ export function buildFeeReceiptVoucher(input: {
     });
   }
   if (feeShare > 0) {
+    // Money for a session that has not started is not income yet — it is a
+    // liability to teach. It sits in Fees Received in Advance, tagged with
+    // its session as a cost centre, until the session-start release journal
+    // recognises it. The store share above is untouched: goods already
+    // handed over are current, whatever session the fee is for.
+    const sessionStart = sessionStartOf(voucher.academicYearCode);
+    const isAdvance =
+      sessionStart !== null && voucher.collectionDate < sessionStart;
     out.push({
-      accountCode: L_FEE_INCOME,
+      accountCode: isAdvance ? L_FEE_ADVANCES : L_FEE_INCOME,
       debitPaise: 0,
       creditPaise: feeShare,
-      narration: `Fee receipt ${voucher.receiptNo || ""}`.trim(),
+      narration: isAdvance
+        ? `Advance for ${voucher.academicYearCode} — receipt ${voucher.receiptNo || ""}`.trim()
+        : `Fee receipt ${voucher.receiptNo || ""}`.trim(),
+      ...(isAdvance ? { costCentreCode: voucher.academicYearCode } : {}),
       ...(party ? { party } : {}),
     });
   }

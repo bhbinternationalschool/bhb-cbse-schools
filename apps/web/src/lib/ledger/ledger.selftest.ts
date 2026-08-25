@@ -53,6 +53,7 @@ import {
 import {
   buildExpenseVoucher,
   buildFeeReceiptVoucher,
+  sessionStartOf,
   buildPayrollAccrualVoucher,
   buildPayrollPaymentVoucher,
   buildVendorBillVoucher,
@@ -1220,3 +1221,72 @@ void live()
     console.error(e);
     process.exit(1);
   });
+
+{
+  // Session parsing: "2026-27" and "2026-2027" both open on 1 April 2026;
+  // an unreadable code is NULL — never a guessed advance.
+  assert.equal(sessionStartOf("2026-27"), "2026-04-01");
+  assert.equal(sessionStartOf("2026-2027"), "2026-04-01");
+  assert.equal(sessionStartOf("garbage"), null);
+  assert.equal(sessionStartOf(undefined), null);
+  console.log("  ok  session codes parse to their 1 April, unknown stays unknown");
+}
+
+{
+  // A registration fee taken in February for the April session is a
+  // LIABILITY (2400, tagged with its session), not income. The store share
+  // stays a current settlement — the goods were already handed over.
+  const built = buildFeeReceiptVoucher({
+    voucher: {
+      id: "vAdv", householdId: "hh_9", receiptNo: "RC-9",
+      collectionDate: "2026-02-10", totalPaise: 6_000_00,
+      cashierName: "Counter 1", voidedAt: null,
+      academicYearCode: "2026-27",
+    },
+    tenders: [{ mode: "cash", amountPaise: 6_000_00, ref: "", instrumentDate: null, bankAccountId: "" }],
+    lines: [
+      { kind: "academic", amountPaise: 5_000_00 },
+      { kind: "store", amountPaise: 1_000_00 },
+    ],
+  });
+  assert.ok(built.ok, "advance receipt must build");
+  const v = built.voucher;
+  const adv = v.lines.find((l) => l.accountCode === "2400");
+  assert.ok(adv, "the fee share goes to Fees Received in Advance");
+  assert.equal(adv.creditPaise, 5_000_00);
+  assert.equal(adv.costCentreCode, "2026-27", "the session tag is what the release keys on");
+  assert.ok(!v.lines.some((l) => l.accountCode === "4000"), "no income before the session starts");
+  assert.equal(
+    v.lines.find((l) => l.accountCode === "1040")?.creditPaise,
+    1_000_00,
+    "store dues settle now regardless of session",
+  );
+
+  // The same receipt ON 1 April is plain income — the session has begun.
+  const onDay = buildFeeReceiptVoucher({
+    voucher: {
+      id: "vDay", householdId: "hh_9", receiptNo: "RC-10",
+      collectionDate: "2026-04-01", totalPaise: 5_000_00,
+      cashierName: "", voidedAt: null, academicYearCode: "2026-27",
+    },
+    tenders: [{ mode: "cash", amountPaise: 5_000_00, ref: "", instrumentDate: null, bankAccountId: "" }],
+    lines: [{ kind: "academic", amountPaise: 5_000_00 }],
+  });
+  assert.ok(onDay.ok);
+  assert.ok(onDay.voucher.lines.some((l) => l.accountCode === "4000"), "1 April onward is income");
+
+  // No session code on the row: income, because an unknown session must not
+  // be routed to a liability on a guess.
+  const noYear = buildFeeReceiptVoucher({
+    voucher: {
+      id: "vNo", householdId: "hh_9", receiptNo: "RC-11",
+      collectionDate: "2026-02-10", totalPaise: 5_000_00,
+      cashierName: "", voidedAt: null,
+    },
+    tenders: [{ mode: "cash", amountPaise: 5_000_00, ref: "", instrumentDate: null, bankAccountId: "" }],
+    lines: [{ kind: "academic", amountPaise: 5_000_00 }],
+  });
+  assert.ok(noYear.ok);
+  assert.ok(noYear.voucher.lines.some((l) => l.accountCode === "4000"), "unknown session stays income");
+  console.log("  ok  early money is a liability with its session tag; on-time or unknown stays income");
+}

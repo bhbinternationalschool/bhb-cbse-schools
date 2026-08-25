@@ -358,6 +358,8 @@ export function LedgerBookPanel({ canApprove }: { canApprove: boolean }) {
         ) : null}
       </section>
 
+      <FeeAdvancesCard onChanged={() => void load()} />
+
       {/* Payables ageing */}
       {cockpit?.ok && cockpit.payablesAgeing.rows.length > 0 ? (
         <section className={CARD}>
@@ -552,6 +554,88 @@ export function LedgerBookPanel({ canApprove }: { canApprove: boolean }) {
         ) : null}
       </section>
     </div>
+  );
+}
+
+
+/**
+ * Fees collected before their session started, still waiting to become
+ * income. The release is one visible journal (Dr 2400 / Cr 4000) dated in
+ * the session — pressed by a person, never silent.
+ */
+function FeeAdvancesCard({ onChanged }: { onChanged?: () => void }) {
+  const [rows, setRows] = useState<{ academicYearCode: string; balancePaise: number }[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+
+  const load = useCallback(async () => {
+    const res = await ledgerApi<{ rows: { academicYearCode: string; balancePaise: number }[] }>({
+      action: "fee-advances",
+    });
+    if (res.ok) setRows(res.rows ?? []);
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  if (!rows || rows.length === 0) return null;
+
+  return (
+    <section className={CARD}>
+      <h4 className="text-sm font-bold text-[var(--brand-deep)]">
+        Fees received in advance
+      </h4>
+      <p className="text-[11px] text-[var(--muted)]">
+        Registration and admission money collected before its session began.
+        It becomes income on release — one journal, in the session it belongs
+        to.
+      </p>
+      {notice ? (
+        <p className="mt-2 rounded-lg border border-[var(--border)] bg-[var(--accent)] px-3 py-1.5 text-xs text-[var(--brand-deep)]">
+          {notice}
+        </p>
+      ) : null}
+      <ul className="mt-2 space-y-1.5">
+        {rows.map((r) => (
+          <li
+            key={r.academicYearCode}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2 text-sm"
+          >
+            <span className="font-semibold">Session {r.academicYearCode}</span>
+            <span className="font-bold tabular-nums">{formatInr(r.balancePaise)}</span>
+            <button
+              type="button"
+              className={BTN_OUTLINE}
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                setNotice("");
+                try {
+                  const res = await ledgerApi<{ voucherNo?: string; amountPaise?: number }>({
+                    action: "release-fee-advances",
+                    academicYearCode: r.academicYearCode,
+                  });
+                  setNotice(
+                    res.ok
+                      ? `Released ${formatInr(res.amountPaise ?? 0)} into fee income — ${res.voucherNo}`
+                      : res.error || "The book refused the release",
+                  );
+                  if (res.ok) {
+                    await load();
+                    onChanged?.();
+                  }
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              Release into income
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

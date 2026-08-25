@@ -41,8 +41,10 @@ import {
   buildPayrollPaymentVoucher,
   buildVendorBillVoucher,
   monthEndIso,
+  sessionStartOf,
   type BuildResult,
 } from "@/lib/ledger/projectionMap";
+import { L_FEE_ADVANCES, L_FEE_INCOME } from "@/lib/ledger/coa";
 import type { LedgerVoucherInput } from "@/lib/ledger/types";
 
 export type ProjectionOutcome = {
@@ -198,7 +200,7 @@ export async function projectFeeReceipts(opts?: {
   const { data: vouchers, error } = await ctx.sb
     .from("fee_desk_vouchers")
     .select(
-      "id, household_id, receipt_no, collection_date, total_paise, cashier_name, voided_at",
+      "id, household_id, receipt_no, collection_date, total_paise, cashier_name, voided_at, academic_year_code",
     )
     .eq("tenant_id", ctx.tenantId)
     .order("collection_date")
@@ -243,6 +245,31 @@ export async function projectFeeReceipts(opts?: {
     return outcome;
   }
 
+  // Advance receipts are tagged with their session as a cost centre, and
+  // ledger_post silently drops a cost centre it has never heard of — so the
+  // centres must exist BEFORE the vouchers post, or the tag (and with it any
+  // way to release the right session's pile) is lost.
+  const advanceYears = new Set<string>();
+  for (const row of rows) {
+    const year = String(row.academic_year_code ?? "");
+    const start = sessionStartOf(year);
+    if (start && String(row.collection_date ?? "") < start) advanceYears.add(year);
+  }
+  if (advanceYears.size > 0) {
+    const { error: ccErr } = await ctx.sb.from("ledger_cost_centres").upsert(
+      [...advanceYears].map((y) => ({
+        tenant_id: ctx.tenantId,
+        code: y,
+        name: `Session ${y}`,
+      })),
+      { onConflict: "tenant_id,code" },
+    );
+    if (ccErr) {
+      outcome.refused.push({ sourceId: "-", reason: `cost centres: ${ccErr.message}` });
+      return outcome;
+    }
+  }
+
   for (const row of rows) {
     const id = String(row.id);
     await applyRecord({
@@ -262,6 +289,7 @@ export async function projectFeeReceipts(opts?: {
             totalPaise: Number(row.total_paise ?? 0),
             cashierName: String(row.cashier_name ?? ""),
             voidedAt: row.voided_at ? String(row.voided_at) : null,
+            academicYearCode: String(row.academic_year_code ?? ""),
           },
           tenders: (tendersBy.get(id) ?? []).map((t) => {
             const j = (t.tender_json ?? {}) as Record<string, unknown>;
@@ -658,4 +686,103 @@ export async function ledgerReconciliation(): Promise<{
     ok: rows.every((r) => r.missingInLedger.length === 0 && r.orphanedInLedger.length === 0),
     rows,
   };
+}
+
+/* ─── Fees received in advance ─────────────────────────────── */
+
+/**
+ * What sits in Fees Received in Advance (2400), per session.
+ *
+ * The session tag is the cost centre the projection stamped on each advance
+ * line. A positive balance is money collected for a session that has not been
+ * recognised as income yet.
+ */
+export async function feeAdvanceBalances(): Promise<
+  { ok: boolean; error?: string; rows: { academicYearCode: string; balancePaise: number }[] }
+> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, error: "Supabase tenant not configured", rows: [] };
+
+  const { data, error } = await ctx.sb
+    .from("ledger_lines")
+    .select(
+      "debit_paise, credit_paise, account:ledger_accounts!inner(code), cc:ledger_cost_centres(code)",
+    )
+    .eq("tenant_id", ctx.tenantId)
+    .eq("account.code", L_FEE_ADVANCES);
+  if (error) return { ok: false, error: error.message, rows: [] };
+
+  const by = new Map<string, number>();
+  for (const r of (data ?? []) as Record<string, unknown>[]) {
+    const cc = (r.cc as { code?: string } | null)?.code ?? "";
+    const key = cc || "(untagged)";
+    by.set(key, (by.get(key) ?? 0) + Number(r.credit_paise ?? 0) - Number(r.debit_paise ?? 0));
+  }
+  return {
+    ok: true,
+    rows: [...by.entries()]
+      .map(([academicYearCode, balancePaise]) => ({ academicYearCode, balancePaise }))
+      .filter((r) => r.balancePaise !== 0)
+      .sort((a, b) => a.academicYearCode.localeCompare(b.academicYearCode)),
+  };
+}
+
+/**
+ * Recognise a session's advance fees as income.
+ *
+ * Posts Dr 2400 / Cr 4000 for the session's CURRENT advance balance, dated
+ * on or after the session start. Keyed on (session, date), so pressing the
+ * button twice on one day posts once; advances that arrive later (backdated
+ * receipts synced after the release) simply leave a new balance for a later
+ * release — nothing is lost, and each release states what it moved.
+ */
+export async function releaseFeeAdvances(input: {
+  academicYearCode: string;
+  date: string;
+  createdBy: string;
+}): Promise<{ ok: boolean; error?: string; voucherNo?: string; amountPaise?: number }> {
+  const year = input.academicYearCode.trim();
+  const start = sessionStartOf(year);
+  if (!start) return { ok: false, error: `"${year}" is not a session code (expected e.g. 2026-27)` };
+  if (input.date < start) {
+    return {
+      ok: false,
+      error: `The ${year} session starts ${start} — its advances become income on or after that day, not before`,
+    };
+  }
+
+  const balances = await feeAdvanceBalances();
+  if (!balances.ok) return { ok: false, error: balances.error };
+  const row = balances.rows.find((r) => r.academicYearCode === year);
+  const amount = row?.balancePaise ?? 0;
+  if (amount <= 0) {
+    return { ok: false, error: `Nothing to release — ${year} holds no advance balance` };
+  }
+
+  const res = await ledgerPost({
+    voucherType: "journal",
+    date: input.date,
+    narration: `Fees received in advance for ${year} recognised as income`,
+    sourceType: "fee_advance_release",
+    sourceId: `${year}@${input.date}`,
+    createdBy: input.createdBy,
+    lines: [
+      {
+        accountCode: L_FEE_ADVANCES,
+        debitPaise: amount,
+        creditPaise: 0,
+        costCentreCode: year,
+        narration: `Release advances of ${year}`,
+      },
+      {
+        accountCode: L_FEE_INCOME,
+        debitPaise: 0,
+        creditPaise: amount,
+        costCentreCode: year,
+        narration: `Session ${year} fees recognised`,
+      },
+    ],
+  });
+  if (!res.ok) return { ok: false, error: res.error };
+  return { ok: true, voucherNo: res.voucherNo, amountPaise: amount };
 }

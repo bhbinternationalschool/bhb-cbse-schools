@@ -28,6 +28,8 @@ export const L_CHEQUES_IN_HAND = "1050";
 export const L_ACCOUNTS_PAYABLE = "2000";
 export const L_OWNER_LOANS = "2100";
 export const L_RETENTION_PAYABLE = "2200";
+/** Fees collected before the session they belong to begins. */
+export const L_FEE_ADVANCES = "2400";
 export const L_CORPUS = "3000";
 export const L_FEE_INCOME = "4000";
 export const L_OTHER_INCOME = "4100";
@@ -99,6 +101,7 @@ export function defaultLedgerAccounts(): LedgerAccountSeed[] {
     { code: "2", name: "Liabilities", kind: "liability", scheduleGroup: "" },
 
     { code: L_ACCOUNTS_PAYABLE, name: "Accounts Payable", kind: "liability", parentCode: "2", scheduleGroup: G.currentLiabilities, isControl: true },
+    { code: L_FEE_ADVANCES, name: "Fees Received in Advance", kind: "liability", parentCode: "2", scheduleGroup: G.currentLiabilities },
     { code: L_SALARY_PAYABLE, name: "Salary Payable", kind: "liability", parentCode: "2", scheduleGroup: G.currentLiabilities, isControl: true },
     { code: L_STATUTORY_PAYABLE, name: "Statutory Dues", kind: "liability", parentCode: "2", scheduleGroup: G.currentLiabilities },
     { code: L_TDS_PAYABLE, name: "TDS Payable", kind: "liability", parentCode: L_STATUTORY_PAYABLE, scheduleGroup: G.currentLiabilities },
