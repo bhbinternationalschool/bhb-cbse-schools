@@ -83,6 +83,14 @@ if [[ -f "$ENV_VERIFY" ]]; then
   fi
 fi
 
+# A percent-encoded password in --db-url works. It did NOT work in the minutes
+# straight after a password rotation: the pooler kept rejecting it with 28P01
+# while psql, connecting directly with the identical string, succeeded. The
+# pooler caches credentials, so a freshly rotated password takes a short while
+# to be accepted there.
+#
+# If this fails with 28P01 right after a rotation, wait a minute and run it
+# again before changing anything.
 push_with() {
   npx --yes supabase@latest db push --db-url "$1" --include-all
 }
@@ -94,7 +102,16 @@ elif [[ -n "$SESSION_POOLER" ]]; then
   echo "Direct connection failed (Supabase serves that host over IPv6 only)."
   echo "Retrying through the session pooler, which is reachable over IPv4…"
   echo ""
-  push_with "$SESSION_POOLER"
+  if ! push_with "$SESSION_POOLER"; then
+    echo "" >&2
+    echo "If that failed on the PASSWORD (SQLSTATE 28P01) rather than the host, and you" >&2
+    echo "have just rotated it, wait a minute and try again — the pooler caches" >&2
+    echo "credentials and takes a short while to accept a new one." >&2
+    echo "" >&2
+    echo "If it still fails, check the URL is the pooler one (host *.pooler.supabase.com," >&2
+    echo "user postgres.<ref>) with:  bash scripts/set-verify-env.sh --urls-only" >&2
+    exit 4
+  fi
 else
   echo "" >&2
   echo "Could not reach the verification database, and no usable pooler URL was" >&2

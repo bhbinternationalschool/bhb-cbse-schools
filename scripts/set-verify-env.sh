@@ -21,6 +21,16 @@ PROD_REF="ymamhlcrjsuilzdonkzl"     # BHB School — PRODUCTION, must never appe
 
 [[ -f "$ENV_FILE" ]] || { echo "Missing $ENV_FILE"; exit 1; }
 
+# Rotating the DATABASE password does not change the service_role key — they
+# are separate credentials. Re-pasting the key after a rotation is pointless
+# work and one more chance to paste the production one by mistake.
+URLS_ONLY=0
+case "${1:-}" in
+  --urls-only) URLS_ONLY=1 ;;
+  "") ;;
+  *) echo "Usage: $0 [--urls-only]"; echo "  --urls-only  update just the two connection strings (after a password rotation)"; exit 1 ;;
+esac
+
 echo "Filling in $ENV_FILE"
 echo "Values are hidden as you type and are never echoed back."
 echo
@@ -68,6 +78,11 @@ count_occurrences() {
 fail() { echo; echo "REFUSED: $1"; echo "Nothing was written."; exit 1; }
 
 # ── service_role key ────────────────────────────────────────────
+if [[ "$URLS_ONLY" == "1" ]]; then
+  SR="$(sed -n 's/^SUPABASE_SERVICE_ROLE_KEY=//p' "$ENV_FILE" | head -1 | tr -d '"'"'"'\047')"
+  [[ -n "$SR" && "$SR" != *PASTE_* ]] || fail "--urls-only needs a key already in the file, and there is not one. Run without the flag."
+  echo "Keeping the service_role key already on file (a password rotation does not change it)."
+else
 ask "service_role key  (Project Settings -> API Keys -> service_role -> Reveal)" SR
 [[ -n "$SR" ]] || fail "no value given"
 no_whitespace "$SR" || fail "that value contains a space or newline — it looks like two things pasted together, or a partial copy"
@@ -99,6 +114,7 @@ KEY_ROLE="$(awk "{print \$2}" <<<"$CLAIMS")"
 [[ "$KEY_REF" == "$VERIFY_REF" ]] || fail "that key belongs to project '${KEY_REF:-unknown}', not the verification project ($VERIFY_REF)"
 [[ "$KEY_ROLE" == "service_role" ]] || fail "that is the '${KEY_ROLE:-unknown}' key, not service_role — the anon key cannot run migrations or seed data"
 echo "  ok: service_role key for $VERIFY_REF"
+fi
 
 # ── the two connection strings ──────────────────────────────────
 check_url() {
@@ -126,14 +142,27 @@ check_url() {
 }
 
 echo
-ask "Transaction pooler URL, port 6543  (Project Settings -> Database -> Connection string -> Transaction pooler)" DBU
+ask "POOLER URL  (Project Settings -> Database -> Connection string -> Session pooler, or Transaction pooler)" DBU
 check_url "$DBU" "pooler URL"
-[[ "$DBU" == *":6543"* ]] || echo "  note: that is not port 6543 — check you copied the pooler, not the direct connection"
+# The host is what matters, not the port. Editing the port on a direct
+# connection string does NOT turn it into a pooler URL — the two use different
+# hosts and different usernames — and the direct host is IPv6-only, so the
+# result silently cannot connect from most networks. Refuse it here rather than
+# let it fail later as an unreadable resolver error.
+if [[ "$DBU" != *"pooler.supabase.com"* ]]; then
+  fail "that is not a pooler URL — its host must be *.pooler.supabase.com (and its user postgres.$VERIFY_REF).
+         It looks like the DIRECT connection string, possibly with the port changed. Changing the port does not
+         make it a pooler URL, and the direct host is IPv6-only so it will not connect. In the dashboard, pick
+         the 'Session pooler' or 'Transaction pooler' tab rather than 'Direct connection'."
+fi
 echo "  ok: pooler URL for $VERIFY_REF"
 
 echo
-ask "Direct connection URL, port 5432  (same page -> Direct connection)" DIR
+ask "DIRECT connection URL, port 5432  (same page -> Direct connection)" DIR
 check_url "$DIR" "direct URL"
+if [[ "$DIR" == *"pooler.supabase.com"* ]]; then
+  fail "that is a pooler URL, not the direct connection — the direct one uses host db.$VERIFY_REF.supabase.co"
+fi
 [[ "$DIR" == *":5432"* ]] || echo "  note: that is not port 5432 — check you copied the direct connection"
 echo "  ok: direct URL for $VERIFY_REF"
 
