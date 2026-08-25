@@ -387,12 +387,24 @@ export const invApi = {
     grnId: string;
     supplierInvoiceNo?: string;
     supplierInvoiceDate?: string;
+    receiptDate?: string;
+    billDate?: string;
+    lines?: {
+      lineId: string;
+      qtyReceived?: number;
+      ratePaise?: number;
+      discountPct?: number;
+      gstRate?: number;
+    }[];
     note?: string;
   }) =>
-    req<{ amended: { grnId: string; amended: boolean } }>("/receipts", {
-      method: "POST",
-      body: JSON.stringify({ amend }),
-    }).then((r) => r.amended),
+    req<{ amended: { grnId: string; amended: boolean; ledgerVoucherNo?: string } }>(
+      "/receipts",
+      {
+        method: "POST",
+        body: JSON.stringify({ amend }),
+      },
+    ).then((r) => r.amended),
 
   listBills: (query: { vendorId?: string; status?: string } = {}) =>
     req<{ bills: InvVendorBill[] }>("/bills", { query }).then((r) => r.bills),
@@ -423,12 +435,13 @@ export const invApi = {
 
   /* ─── Counter sales ──────────────────────────────────────── */
 
-  findStudents: (search: string) =>
-    req<{ students: InvBuyerStudent[] }>("/buyers", { query: { search } }).then(
-      (r) => r.students,
-    ),
+  findStudents: (search: string, classId = "", sectionId = "") =>
+    req<{ students: InvBuyerStudent[] }>("/buyers", {
+      query: { search, classId, sectionId },
+    }).then((r) => r.students),
 
   listSales: (query: {
+    saleId?: string;
     search?: string;
     status?: string;
     buyerKind?: InvBuyerKind | "";
