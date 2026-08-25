@@ -340,6 +340,6 @@ begin
     'total_paise', v_total
   );
 end;
-$function$
+$function$;
 
 notify pgrst, 'reload schema';
