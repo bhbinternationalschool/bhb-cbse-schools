@@ -19,6 +19,8 @@ import {
 import {
   ensureLedgerMasters,
   ledgerCloseFiscalYear,
+  ledgerFindVoucher,
+  ledgerListAccounts,
   ledgerLockPeriod,
   ledgerOpenBalances,
   ledgerParityAgainstDesk,
@@ -133,6 +135,8 @@ type PostBody =
   | { action: "cockpit"; asOf: string; fyFrom: string }
   | { action: "parity"; deskRows: { code: string; balancePaise: number }[] }
   | { action: "vendor-dues" }
+  | { action: "accounts" }
+  | { action: "find-voucher"; voucherNo: string }
   | { action: "vendor-bills"; vendorId?: string }
   | {
       action: "pay-vendor-bill";
@@ -182,6 +186,8 @@ export async function POST(req: Request) {
     "cockpit",
     "vendor-dues",
     "vendor-bills",
+    "accounts",
+    "find-voucher",
   ]);
 
   const auth = await requireStaffPermission(
@@ -337,6 +343,18 @@ export async function POST(req: Request) {
           ? await receivablesAgeing(body.asOf)
           : await payablesAgeing(body.asOf);
       return NextResponse.json({ ok: true, side: body.side ?? "payables", report });
+    }
+    case "accounts": {
+      // The chart, for entry forms — postable accounts only.
+      return NextResponse.json({ ok: true, accounts: await ledgerListAccounts() });
+    }
+    case "find-voucher": {
+      // A reversal needs the id behind the number a statement line shows.
+      const voucher = await ledgerFindVoucher(body.voucherNo || "");
+      return NextResponse.json(
+        voucher ? { ok: true, voucher } : { ok: false, error: "No voucher with that number" },
+        { status: voucher ? 200 : 404 },
+      );
     }
     case "vendor-dues": {
       // Vendors and their balances live in the store module, but this is the

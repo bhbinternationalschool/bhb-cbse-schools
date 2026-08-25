@@ -13,6 +13,11 @@ import {
   LedgerReportsPanel,
 } from "@/components/accounts/LedgerPanels";
 import {
+  ChequesPanel,
+  LegacyBookNotice,
+  VoucherEntryPanel,
+} from "@/components/accounts/LedgerEntryPanels";
+import {
   BanksPanel,
   BillsPanel,
   BooksPanel,
@@ -39,6 +44,7 @@ import { dayCloseNeedsAttention } from "@/lib/fees";
 type AccountsTab =
   | "dashboard"
   | "book"
+  | "vouchers"
   | "bookreports"
   | "recon"
   | "daybook"
@@ -55,6 +61,7 @@ type AccountsTab =
 const TABS: ModuleTabItem[] = [
   { id: "dashboard", label: "Dashboard", tone: "navy" },
   { id: "book", label: "Server book", tone: "green" },
+  { id: "vouchers", label: "Vouchers", tone: "green" },
   { id: "bookreports", label: "Book reports", tone: "green" },
   { id: "recon", label: "Bank recon", tone: "green" },
   { id: "daybook", label: "Day book", tone: "teal" },
@@ -82,6 +89,7 @@ export function AccountsWorkspace() {
     const allowed: AccountsTab[] = [
       "dashboard",
       "book",
+      "vouchers",
       "bookreports",
       "recon",
       "daybook",
@@ -105,6 +113,7 @@ export function AccountsWorkspace() {
   const [tick, setTick] = useState(0);
 
   const actorName = session.fullName || "Accounts user";
+  const [entryTick, setEntryTick] = useState(0);
 
   function flash(message: string) {
     setNotice(message);
@@ -207,6 +216,23 @@ export function AccountsWorkspace() {
         />
       ) : tab === "book" ? (
         <LedgerBookPanel canApprove={canApprove} />
+      ) : tab === "vouchers" ? (
+        <div className="mt-4 space-y-4">
+          <VoucherEntryPanel
+            banks={(state.bankAccounts ?? [])
+              .filter((b) => b.isActive !== false)
+              .map((b) => ({ id: b.id, name: b.name }))}
+            actor={actorName}
+            onPosted={() => setEntryTick((n) => n + 1)}
+          />
+          <ChequesPanel
+            banks={(state.bankAccounts ?? [])
+              .filter((b) => b.isActive !== false)
+              .map((b) => ({ id: b.id, name: b.name }))}
+            actor={actorName}
+            refreshKey={entryTick}
+          />
+        </div>
       ) : tab === "bookreports" ? (
         <LedgerReportsPanel />
       ) : tab === "recon" ? (
@@ -216,7 +242,10 @@ export function AccountsWorkspace() {
             .map((b) => ({ id: b.id, name: b.name }))}
         />
       ) : tab === "daybook" ? (
-        <DayBookPanel {...panelProps} />
+        <>
+          <LegacyBookNotice tab="Day book" />
+          <DayBookPanel {...panelProps} />
+        </>
       ) : tab === "cash" ? (
         <CashBookPanel {...panelProps} />
       ) : tab === "banks" ? (
@@ -224,7 +253,10 @@ export function AccountsWorkspace() {
       ) : tab === "masters" ? (
         <AccountsMastersPanel {...panelProps} />
       ) : tab === "expenses" ? (
-        <ExpensesPanel {...panelProps} />
+        <>
+          <LegacyBookNotice tab="Expenses" />
+          <ExpensesPanel {...panelProps} />
+        </>
       ) : tab === "bills" ? (
         <BillsPanel {...panelProps} />
       ) : tab === "owner" ? (

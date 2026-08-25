@@ -384,6 +384,52 @@ export async function ledgerTrialBalance(): Promise<{
   return { ok: true, rows };
 }
 
+/** Every postable account, for entry forms. Group headings are excluded. */
+export async function ledgerListAccounts(): Promise<
+  { code: string; name: string; kind: string; isCash: boolean; isBank: boolean }[]
+> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return [];
+  const { data } = await ctx.sb
+    .from("ledger_accounts")
+    .select("code, name, kind, is_cash, is_bank")
+    .eq("tenant_id", ctx.tenantId)
+    .order("code", { ascending: true });
+  return ((data ?? []) as Record<string, unknown>[])
+    .filter((r) => isPostableLedgerCode(String(r.code)))
+    .map((r) => ({
+      code: String(r.code),
+      name: String(r.name),
+      kind: String(r.kind),
+      isCash: r.is_cash === true,
+      isBank: r.is_bank === true,
+    }));
+}
+
+/**
+ * Resolve a voucher number to its id — what a reversal needs when the caller
+ * only has the number a statement line shows.
+ */
+export async function ledgerFindVoucher(
+  voucherNo: string,
+): Promise<{ id: string; voucherNo: string; voucherType: string; date: string } | null> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return null;
+  const { data } = await ctx.sb
+    .from("ledger_vouchers")
+    .select("id, voucher_no, voucher_type, voucher_date")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("voucher_no", voucherNo.trim())
+    .maybeSingle();
+  if (!data) return null;
+  return {
+    id: String(data.id),
+    voucherNo: String(data.voucher_no),
+    voucherType: String(data.voucher_type),
+    date: String(data.voucher_date),
+  };
+}
+
 export async function ledgerSubledgerBalances(): Promise<
   { kind: string; subledgerId: string; balancePaise: number }[]
 > {
