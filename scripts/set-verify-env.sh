@@ -21,6 +21,16 @@ PROD_REF="ymamhlcrjsuilzdonkzl"     # BHB School — PRODUCTION, must never appe
 
 [[ -f "$ENV_FILE" ]] || { echo "Missing $ENV_FILE"; exit 1; }
 
+# Rotating the DATABASE password does not change the service_role key — they
+# are separate credentials. Re-pasting the key after a rotation is pointless
+# work and one more chance to paste the production one by mistake.
+URLS_ONLY=0
+case "${1:-}" in
+  --urls-only) URLS_ONLY=1 ;;
+  "") ;;
+  *) echo "Usage: $0 [--urls-only]"; echo "  --urls-only  update just the two connection strings (after a password rotation)"; exit 1 ;;
+esac
+
 echo "Filling in $ENV_FILE"
 echo "Values are hidden as you type and are never echoed back."
 echo
@@ -68,6 +78,11 @@ count_occurrences() {
 fail() { echo; echo "REFUSED: $1"; echo "Nothing was written."; exit 1; }
 
 # ── service_role key ────────────────────────────────────────────
+if [[ "$URLS_ONLY" == "1" ]]; then
+  SR="$(sed -n 's/^SUPABASE_SERVICE_ROLE_KEY=//p' "$ENV_FILE" | head -1 | tr -d '"'"'"'\047')"
+  [[ -n "$SR" && "$SR" != *PASTE_* ]] || fail "--urls-only needs a key already in the file, and there is not one. Run without the flag."
+  echo "Keeping the service_role key already on file (a password rotation does not change it)."
+else
 ask "service_role key  (Project Settings -> API Keys -> service_role -> Reveal)" SR
 [[ -n "$SR" ]] || fail "no value given"
 no_whitespace "$SR" || fail "that value contains a space or newline — it looks like two things pasted together, or a partial copy"
@@ -99,6 +114,7 @@ KEY_ROLE="$(awk "{print \$2}" <<<"$CLAIMS")"
 [[ "$KEY_REF" == "$VERIFY_REF" ]] || fail "that key belongs to project '${KEY_REF:-unknown}', not the verification project ($VERIFY_REF)"
 [[ "$KEY_ROLE" == "service_role" ]] || fail "that is the '${KEY_ROLE:-unknown}' key, not service_role — the anon key cannot run migrations or seed data"
 echo "  ok: service_role key for $VERIFY_REF"
+fi
 
 # ── the two connection strings ──────────────────────────────────
 check_url() {
