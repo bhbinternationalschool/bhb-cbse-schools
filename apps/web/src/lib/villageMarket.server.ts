@@ -60,10 +60,14 @@ export class VillageMarketError extends Error {
 
 /**
  * Mirrors, tried in order. The main endpoint rate-limits aggressively during
- * European daytime; kumi.systems is the usual fallback for bulk callers.
+ * European daytime; lz4/z are siblings on the same farm and often answer when
+ * the front door 504s; kumi.systems is a third-party mirror that is down as
+ * often as it is up (2026-08-25: plain 502), so it goes last.
  */
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
+  "https://lz4.overpass-api.de/api/interpreter",
+  "https://z.overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
 ];
 
@@ -162,16 +166,61 @@ async function postOverpass(endpoint: string, query: string): Promise<OverpassRe
   }
 }
 
-/** Query every mirror in turn; the last failure is what the caller sees. */
+type SbClient = NonNullable<ReturnType<typeof createServiceSupabase>>;
+
+/** Read the durable cache row for a key; null on miss or read failure. */
+async function readDbPlaceCache(
+  sb: SbClient,
+  key: string,
+): Promise<{ hit: OverpassHit; ageMs: number } | null> {
+  const { data, error } = await sb
+    .from("osm_place_cache")
+    .select("payload, endpoint, fetched_at")
+    .eq("cache_key", key)
+    .maybeSingle();
+  if (error || !data) {
+    if (error) console.warn(`${LOG} osm_place_cache read failed: ${error.message}`);
+    return null;
+  }
+  const elements = Array.isArray(data.payload) ? (data.payload as OverpassElement[]) : [];
+  const fetchedAt = String(data.fetched_at ?? "");
+  return {
+    hit: { elements, endpoint: String(data.endpoint ?? ""), fetchedAt },
+    ageMs: Date.now() - new Date(fetchedAt).getTime(),
+  };
+}
+
+/**
+ * Query every mirror in turn, backed by two cache layers.
+ *
+ * The in-process memo saves the round trip on a warm instance; the
+ * `osm_place_cache` table makes one success durable across instances and
+ * restarts — without it, every cold Cloud Run instance had to win the
+ * Overpass lottery again (2026-08-25: main endpoint ~20 s with frequent
+ * 504s, kumi mirror down), and the office saw errors instead of villages.
+ *
+ * Failure ladder: fresh memo → fresh DB row → live fetch → STALE memo →
+ * STALE DB row (any age, flagged so the caller can warn) → error.
+ */
 export async function fetchOverpassPlaces(
   lat: number,
   lon: number,
   radiusM: number,
-): Promise<{ hit: OverpassHit; cached: boolean }> {
+  sb: SbClient | null = null,
+): Promise<{ hit: OverpassHit; cached: boolean; stale?: boolean }> {
   const key = cacheKey(lat, lon, radiusM);
   const cached = overpassCache.get(key);
   if (cached && Date.now() - cached.at < OVERPASS_CACHE_TTL_MS) {
     return { hit: cached.hit, cached: true };
+  }
+
+  let dbRow: { hit: OverpassHit; ageMs: number } | null = null;
+  if (sb) {
+    dbRow = await readDbPlaceCache(sb, key);
+    if (dbRow && dbRow.ageMs < OVERPASS_CACHE_TTL_MS) {
+      overpassCache.set(key, { at: Date.now() - dbRow.ageMs, hit: dbRow.hit });
+      return { hit: dbRow.hit, cached: true };
+    }
   }
 
   const query = buildOverpassQuery(lat, lon, radiusM);
@@ -196,6 +245,16 @@ export async function fetchOverpassPlaces(
         remark: data.remark,
       };
       overpassCache.set(key, { at: Date.now(), hit });
+      if (sb) {
+        // Best-effort: a failed write must not fail a successful fetch.
+        const { error } = await sb.from("osm_place_cache").upsert({
+          cache_key: key,
+          payload: elements,
+          endpoint,
+          fetched_at: hit.fetchedAt,
+        });
+        if (error) console.warn(`${LOG} osm_place_cache write failed: ${error.message}`);
+      }
       return { hit, cached: false };
     } catch (e) {
       lastError = e;
@@ -204,11 +263,16 @@ export async function fetchOverpassPlaces(
     }
   }
 
-  // Serve a stale entry rather than failing the dashboard — census figures
-  // move once a decade, so yesterday's village list is still a good answer.
+  // Serve a stale entry rather than failing the dashboard — village nodes
+  // move essentially never, so yesterday's list is still a good answer.
   if (cached) {
-    console.warn(`${LOG} overpass unreachable, serving stale cache key=${key}`);
-    return { hit: cached.hit, cached: true };
+    console.warn(`${LOG} overpass unreachable, serving stale memo key=${key}`);
+    return { hit: cached.hit, cached: true, stale: true };
+  }
+  if (dbRow) {
+    console.warn(`${LOG} overpass unreachable, serving stale db row key=${key}`);
+    overpassCache.set(key, { at: Date.now() - dbRow.ageMs, hit: dbRow.hit });
+    return { hit: dbRow.hit, cached: true, stale: true };
   }
 
   if (lastError instanceof VillageMarketError) throw lastError;
@@ -491,24 +555,24 @@ async function fetchAvailableBlocks(
     .filter(Boolean);
 }
 
+const VILLAGE_COLUMNS =
+  "id, census_code, village_name, block_name, district_name, settlement_type, " +
+  "pop_total_2011, pop_male_2011, pop_female_2011, " +
+  "child_0_6_total_2011, child_0_6_male_2011, child_0_6_female_2011, " +
+  "households_2011, growth_multiplier, child_ratio, projection_target_year, " +
+  "estimated_current_total_pop, estimated_current_child_pop, latitude, longitude, osm_id";
+
 /** Census settlements matching the filters, largest child pool first. */
 async function fetchCensusVillagesByBlock(
   sb: NonNullable<ReturnType<typeof createServiceSupabase>>,
   tenantId: string,
   query: NearbyQuery,
 ): Promise<{ rows: VillageDemographicsRow[]; total: number }> {
-  const columns =
-    "id, census_code, village_name, block_name, district_name, settlement_type, " +
-    "pop_total_2011, pop_male_2011, pop_female_2011, " +
-    "child_0_6_total_2011, child_0_6_male_2011, child_0_6_female_2011, " +
-    "households_2011, growth_multiplier, child_ratio, projection_target_year, " +
-    "estimated_current_total_pop, estimated_current_child_pop, latitude, longitude, osm_id";
-
   // `count: "exact"` so the UI can say "24 of 169" rather than implying the
   // capped page is the whole answer.
   let q = sb
     .from("village_demographics")
-    .select(columns, { count: "exact" })
+    .select(VILLAGE_COLUMNS, { count: "exact" })
     .eq("tenant_id", tenantId);
 
   if (query.blocks.length) q = q.in("block_name", query.blocks);
@@ -537,6 +601,105 @@ async function fetchCensusVillagesByBlock(
   return {
     rows: (data as unknown as VillageDemographicsRow[] | null) ?? [],
     total: count ?? (data?.length ?? 0),
+  };
+}
+
+/**
+ * Census settlements within a radius of the school, nearest first.
+ *
+ * This is what makes "Near school" genuine: the settlements carry SHRUG
+ * centroids keyed by census code (1,291 of 1,430 rows), so the surrounding
+ * market comes from our own table — complete and instant — instead of from
+ * OpenStreetMap, which has mapped a handful of nodes here and whose public
+ * servers fail routinely. Distances are straight-line from the school pin;
+ * road distances live in village_travel and are shown separately.
+ *
+ * Returns null when NO settlement has coordinates at all (an unseeded
+ * tenant) so the caller can fall back to OpenStreetMap rather than showing
+ * an empty market that reads as "no villages nearby".
+ */
+async function fetchCensusVillagesByRadius(
+  sb: NonNullable<ReturnType<typeof createServiceSupabase>>,
+  tenantId: string,
+  query: NearbyQuery,
+): Promise<{
+  rows: VillageDemographicsRow[];
+  total: number;
+  /**
+   * Every block with at least one settlement inside the circle (before the
+   * block filter narrows further) — the block picker offers exactly these,
+   * so a 5 km radius does not list blocks that are 20 km away.
+   */
+  blocksInRange: string[];
+} | null> {
+  // Bounding box first — PostgREST can filter that; the exact circle is cut
+  // client-side. 1° latitude ≈ 111.32 km; longitude shrinks with latitude.
+  const dLat = query.radiusM / 111_320;
+  const dLon = query.radiusM / (111_320 * Math.cos((query.lat * Math.PI) / 180));
+
+  let q = sb
+    .from("village_demographics")
+    .select(VILLAGE_COLUMNS)
+    .eq("tenant_id", tenantId)
+    .not("latitude", "is", null)
+    .not("longitude", "is", null)
+    .gte("latitude", query.lat - dLat)
+    .lte("latitude", query.lat + dLat)
+    .gte("longitude", query.lon - dLon)
+    .lte("longitude", query.lon + dLon);
+
+  if (query.settlementType !== "all") q = q.eq("settlement_type", query.settlementType);
+  if (query.minChildPool > 0) q = q.gte("estimated_current_child_pop", query.minChildPool);
+  if (query.search) {
+    const safe = query.search.replace(/[%_,()]/g, " ").trim();
+    if (safe) q = q.ilike("village_name", `%${safe}%`);
+  }
+
+  const { data, error } = await q.range(0, 999);
+  if (error) {
+    throw new VillageMarketError(
+      `Could not read the census table: ${error.message}`,
+      502,
+      true,
+    );
+  }
+  const box = (data as unknown as VillageDemographicsRow[] | null) ?? [];
+
+  if (!box.length) {
+    // Nothing in the box — distinguish "radius too small" from "this tenant
+    // has no coordinates at all", which needs the OpenStreetMap fallback.
+    const { count, error: cErr } = await sb
+      .from("village_demographics")
+      .select("id", { count: "exact", head: true })
+      .eq("tenant_id", tenantId)
+      .not("latitude", "is", null);
+    if (cErr || !count) return null;
+  }
+
+  const radiusKm = query.radiusM / 1000;
+  const inCircle = box
+    .map((row) => ({
+      row,
+      km: haversineKm(
+        { lat: query.lat, lon: query.lon },
+        { lat: Number(row.latitude), lon: Number(row.longitude) },
+      ),
+    }))
+    .filter((x) => x.km <= radiusKm)
+    .sort((a, b) => a.km - b.km);
+
+  const blocksInRange = [...new Set(inCircle.map((x) => x.row.block_name))].sort();
+
+  // The block filter narrows within the circle; it must not shrink the
+  // "blocks in range" list itself, or the picker could never widen again.
+  const scoped = query.blocks.length
+    ? inCircle.filter((x) => query.blocks.includes(x.row.block_name))
+    : inCircle;
+
+  return {
+    rows: scoped.slice(0, MAX_CENSUS_VILLAGES).map((x) => x.row),
+    total: scoped.length,
+    blocksInRange,
   };
 }
 
@@ -629,16 +792,63 @@ export async function buildVillagesNearby(
   let cached = false;
   let remark: string | undefined;
 
-  if (query.mode === "radius") {
-    const { hit, cached: wasCached } = await fetchOverpassPlaces(
+  // "Near school" prefers our own census rows: 1,291 settlements carry SHRUG
+  // centroids keyed by census code, which beats OpenStreetMap's handful of
+  // nodes and its overloaded public servers. Overpass remains only as the
+  // fallback for a tenant with no coordinates seeded.
+  let censusNearby: Awaited<ReturnType<typeof fetchCensusVillagesByRadius>> = null;
+  if (query.mode === "radius" && tenant) {
+    censusNearby = await fetchCensusVillagesByRadius(tenant.sb, tenant.tenantId, query);
+  }
+
+  let radiusBlocks: string[] | null = null;
+
+  if (query.mode === "radius" && censusNearby) {
+    const rows = censusNearby.rows;
+    radiusBlocks = censusNearby.blocksInRange;
+    matchingFilter = censusNearby.total;
+    truncated = censusNearby.total > rows.length;
+    if (truncated) {
+      warnings.push(
+        `${censusNearby.total} settlements sit inside ${(query.radiusM / 1000).toFixed(0)} km; showing the ${rows.length} nearest. Reduce the radius or add a filter to see the rest.`,
+      );
+    }
+    candidates = rows.map((row) => {
+      const lat = Number(row.latitude);
+      const lon = Number(row.longitude);
+      return {
+        key: `census/${row.id}`,
+        name: row.village_name,
+        osmId: typeof row.osm_id === "number" ? row.osm_id : 0,
+        placeType: settlementTypeOf(row.settlement_type),
+        source: "census" as const,
+        lat,
+        lon,
+        distanceKm: haversineKm({ lat: query.lat, lon: query.lon }, { lat, lon }),
+        census: row,
+      };
+    });
+    if (!candidates.length) {
+      warnings.push(
+        `No settlement with coordinates sits inside ${(query.radiusM / 1000).toFixed(0)} km of this point. Widen the radius, or check the school pin.`,
+      );
+    }
+  } else if (query.mode === "radius") {
+    const { hit, cached: wasCached, stale } = await fetchOverpassPlaces(
       query.lat,
       query.lon,
       query.radiusM,
+      tenant?.sb ?? null,
     );
     overpassEndpoint = hit.endpoint;
     fetchedAt = hit.fetchedAt;
     cached = wasCached;
     remark = hit.remark;
+    if (stale) {
+      warnings.push(
+        `OpenStreetMap could not be refreshed (its servers are busy) — showing the map data fetched ${new Date(hit.fetchedAt).toLocaleString("en-IN")}. Villages move rarely, so this list is still usable.`,
+      );
+    }
 
     const places = toNearbyPlaces(hit.elements, { lat: query.lat, lon: query.lon });
     if (hit.elements.length > MAX_PLACES) {
@@ -920,7 +1130,9 @@ export async function buildVillagesNearby(
     ok: true,
     mode: query.mode,
     origin: { lat: query.lat, lon: query.lon, radiusM: query.radiusM },
-    blocks: { selected: query.blocks, available: availableBlocks },
+    // In distance mode the picker offers only the blocks that actually have
+    // a settlement inside the circle, not every block on file.
+    blocks: { selected: query.blocks, available: radiusBlocks ?? availableBlocks },
     blockMarket,
     filters: {
       search: query.search,

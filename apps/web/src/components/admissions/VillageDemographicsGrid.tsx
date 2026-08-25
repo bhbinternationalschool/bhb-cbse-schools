@@ -983,9 +983,19 @@ function VillageDemographicsGridInner({
 
   const sorted = useMemo(() => {
     if (!data) return [];
+    // In radius mode the server ignores the name filter (it filters census
+    // rows, and radius rows come from OpenStreetMap), so the search applies
+    // here instead — otherwise typing a name would visibly do nothing.
+    const q = search.trim().toLowerCase();
+    const named =
+      data.mode === "radius" && q
+        ? data.villages.filter((v) =>
+            (v.census?.villageName || v.osmName).toLowerCase().includes(q),
+          )
+        : data.villages;
     // Status depends on leads, which only the server can compute, so this one
     // filter is applied here rather than in SQL.
-    const rows = data.villages.filter((v) => {
+    const rows = named.filter((v) => {
       if (status === "all") return true;
       if (v.penetrationPct === null) return false;
       if (status === "untouched") return v.leads.total === 0;
@@ -1019,7 +1029,7 @@ function VillageDemographicsGridInner({
       default:
         return rows.sort((a, b) => opportunityScore(b) - opportunityScore(a));
     }
-  }, [data, sort, status]);
+  }, [data, sort, status, search]);
 
   const [exporting, setExporting] = useState<"targeting" | "audience" | null>(null);
   const [exportNote, setExportNote] = useState<string | null>(null);
@@ -1171,7 +1181,7 @@ function VillageDemographicsGridInner({
                 }}
               >
                 <option value="block">By block (census)</option>
-                <option value="radius">Near school (OpenStreetMap)</option>
+                <option value="radius">Near school (by distance)</option>
               </select>
             </label>
 
@@ -1314,7 +1324,7 @@ function VillageDemographicsGridInner({
           {mode === "block"
             ? `Census villages · ${blocks.length ? blocks.join(", ") : "all blocks"}`
             : `Origin ${lat.toFixed(4)}, ${lon.toFixed(4)} · radius ${(radius / 1000).toFixed(0)} km`}
-          {data && data.mode === "radius"
+          {data && data.mode === "radius" && data.source.overpassEndpoint
             ? ` · OpenStreetMap data ${data.source.cached ? "cached" : "fetched"} ${new Date(data.source.fetchedAt).toLocaleString("en-IN")}`
             : ""}
         </p>
@@ -1482,21 +1492,21 @@ function VillageDemographicsGridInner({
 
           <div className="erp-surface-sm space-y-2">
             <div className="flex flex-wrap items-end gap-2">
-              {mode === "block" ? (
-                <div className="min-w-[11rem]">
-                  <p className="text-micro text-[var(--muted)]">Block / city</p>
-                  <BlockFilterDropdown
-                    available={data.blocks.available}
-                    blockMarket={data.blockMarket}
-                    selected={blocks}
-                    disabled={busy}
-                    onChange={(next) => {
-                      setBlocks(next);
-                      reload({ blocks: next });
-                    }}
-                  />
-                </div>
-              ) : null}
+              <div className="min-w-[11rem]">
+                <p className="text-micro text-[var(--muted)]">
+                  {mode === "radius" ? "Block (in range)" : "Block / city"}
+                </p>
+                <BlockFilterDropdown
+                  available={data.blocks.available}
+                  blockMarket={data.blockMarket}
+                  selected={blocks}
+                  disabled={busy}
+                  onChange={(next) => {
+                    setBlocks(next);
+                    reload({ blocks: next });
+                  }}
+                />
+              </div>
               <label className="min-w-[10rem] text-micro text-[var(--muted)]">
                 Village / ward
                 <select
@@ -1538,44 +1548,46 @@ function VillageDemographicsGridInner({
                   }}
                 />
               </label>
-              <label className="text-micro text-[var(--muted)]">
-                Type
-                <select
-                  className={erpField}
-                  value={settlementType}
-                  disabled={busy}
-                  onChange={(e) => {
-                    const next = e.target.value as SettlementFilter;
-                    setSettlementType(next);
-                    reload({ settlementType: next });
-                  }}
-                >
-                  {TYPE_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="text-micro text-[var(--muted)]">
-                Minimum size
-                <select
-                  className={erpField}
-                  value={minChildPool}
-                  disabled={busy}
-                  onChange={(e) => {
-                    const next = Number(e.target.value);
-                    setMinChildPool(next);
-                    reload({ minChildPool: next });
-                  }}
-                >
-                  {POOL_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <>
+                  <label className="text-micro text-[var(--muted)]">
+                    Type
+                    <select
+                      className={erpField}
+                      value={settlementType}
+                      disabled={busy}
+                      onChange={(e) => {
+                        const next = e.target.value as SettlementFilter;
+                        setSettlementType(next);
+                        reload({ settlementType: next });
+                      }}
+                    >
+                      {TYPE_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-micro text-[var(--muted)]">
+                    Minimum size
+                    <select
+                      className={erpField}
+                      value={minChildPool}
+                      disabled={busy}
+                      onChange={(e) => {
+                        const next = Number(e.target.value);
+                        setMinChildPool(next);
+                        reload({ minChildPool: next });
+                      }}
+                    >
+                      {POOL_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </>
               <label className="text-micro text-[var(--muted)]">
                 Coverage
                 <select
@@ -1602,6 +1614,13 @@ function VillageDemographicsGridInner({
                   ? ` shown, ${formatIndianNumber(data.counts.matchingFilter)} match the filter`
                   : ""}
                 {blocks.length ? ` · block ${blocks.join(", ")}` : " · all blocks"}
+                {mode === "radius" ? ` · within ${(radius / 1000).toFixed(0)} km` : ""}
+                {mode === "radius" ? (
+                  <span className="ml-1 text-[var(--muted)]">
+                    — city wards carry no coordinates, so Varanasi City shows
+                    under &ldquo;By block&rdquo;, not by distance.
+                  </span>
+                ) : null}
               </p>
             ) : (
               <p className="text-micro text-[var(--muted)]">
@@ -1723,12 +1742,12 @@ function VillageDemographicsGridInner({
               <p className="text-sm font-medium text-[var(--brand-deep)]">
                 {mode === "block"
                   ? "No census villages on file for this selection"
-                  : `No villages or hamlets mapped inside ${(radius / 1000).toFixed(0)} km`}
+                  : `No settlements found inside ${(radius / 1000).toFixed(0)} km`}
               </p>
               <p className="mt-1 text-xs text-[var(--muted)]">
                 {mode === "block"
                   ? "Load the Census PCA rows with scripts/seed-census.ts, then pick a block."
-                  : "OpenStreetMap has no village node in this radius. Widen it, switch to By block, or check the school coordinates."}
+                  : "Widen the radius, clear the name/type/size filters, or check the school coordinates."}
               </p>
             </div>
           )}
