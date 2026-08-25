@@ -446,6 +446,32 @@ export function leadsPlacedBy(aliases: VillageAliasRow[]): number {
     .reduce((sum, a) => sum + (a.leadCountAtConfirm || 0), 0);
 }
 
+/* ─── City ward directory (2022 delimitation) ──────────────── */
+
+/**
+ * One Nagar Nigam ward from the official 2022 delimitation, with the
+ * mohallas/colonies its gazette extent names. A reference for planning and
+ * for reading a locality — NOT joined to the census-2011 wards that carry
+ * the population figures, because no official crosswalk exists.
+ */
+export type CityWardDirectoryWard = {
+  wardNo: number;
+  wardName: string;
+  wardNameHi: string;
+  localities: string[];
+};
+
+export type CityWardDirectoryResponse = {
+  ok: true;
+  wards: CityWardDirectoryWard[];
+  totalLocalities: number;
+  source: string;
+};
+
+export type CityWardDirectoryResult =
+  | CityWardDirectoryResponse
+  | { ok: false; error: string };
+
 /* ─── Ad-targeting export ──────────────────────────────────── */
 
 /** One settlement's contactable parents, fetched only on an explicit export. */

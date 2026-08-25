@@ -34,6 +34,8 @@ import { VillageAliasPanel } from "@/components/admissions/VillageAliasPanel";
 import { erpBtn, erpBtnOutline, erpField } from "@/components/ui/erp-ui";
 import {
   type BlockMarketRow,
+  type CityWardDirectoryResult,
+  type CityWardDirectoryWard,
   DEFAULT_ORIGIN,
   DEFAULT_RADIUS_M,
   buildMetaCustomAudienceCsv,
@@ -623,6 +625,117 @@ function BlockFilterDropdown({
   );
 }
 
+/**
+ * The official 2022 Nagar Nigam ward directory: every ward with the
+ * mohallas/colonies its gazetted extent names. This answers "which ward is
+ * Sigra in?" for planning — it is a reference list, NOT the census ward
+ * cards: the 2022 wards have no official crosswalk to the census-2011 wards
+ * that carry the child-pool figures, so the two are never joined.
+ */
+function CityWardDirectoryPanel() {
+  const [wards, setWards] = useState<CityWardDirectoryWard[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/admissions/city-wards", { cache: "no-store" });
+        const body = (await res.json()) as CityWardDirectoryResult;
+        if (cancelled) return;
+        if (!res.ok || !body.ok) {
+          setError("error" in body && body.error ? body.error : `Failed (${res.status})`);
+          return;
+        }
+        setWards(body.wards);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Network error");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const q = query.trim().toLowerCase();
+  const filtered = useMemo(() => {
+    if (!wards) return [];
+    if (!q) return wards;
+    return wards.filter(
+      (w) =>
+        String(w.wardNo) === q ||
+        w.wardName.toLowerCase().includes(q) ||
+        w.wardNameHi.includes(query.trim()) ||
+        w.localities.some((l) => l.toLowerCase().includes(q)),
+    );
+  }, [wards, q, query]);
+
+  return (
+    <details className="erp-surface-sm" open={false}>
+      <summary className="cursor-pointer text-xs font-semibold text-[var(--brand-deep)]">
+        Varanasi City ward directory — mohallas &amp; colonies (2022 delimitation)
+      </summary>
+      <div className="mt-2 space-y-2">
+        <p className="text-micro text-[var(--muted)]">
+          The Nagar Nigam&rsquo;s 100 current wards and the localities their
+          gazette extents name — use it to read where a lead&rsquo;s mohalla
+          falls. These are the 2022 wards; the population cards above are the
+          census-2011 wards, and there is no official mapping between the two.
+          Ramnagar, Gangapur, the Cantonment and Maruadih are separate bodies
+          outside this list.
+        </p>
+        <input
+          type="search"
+          className={erpField}
+          placeholder="search a ward, mohalla or colony — e.g. Sigra, Khojwa, Lanka"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        {error ? (
+          <p className="text-micro text-[var(--danger)]">{error}</p>
+        ) : !wards ? (
+          <div className="space-y-1.5">
+            <Skeleton className="h-4 w-2/3" />
+            <Skeleton className="h-4 w-1/2" />
+          </div>
+        ) : filtered.length ? (
+          <ul className="max-h-80 space-y-1.5 overflow-y-auto pr-1">
+            {filtered.map((w) => (
+              <li
+                key={w.wardNo}
+                className="rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-2.5 py-1.5"
+              >
+                <p className="text-xs font-semibold text-[var(--brand-deep)]">
+                  Ward {w.wardNo} · {w.wardName}
+                  {w.wardNameHi ? (
+                    <span className="ml-1.5 font-normal text-[var(--muted)]">
+                      {w.wardNameHi}
+                    </span>
+                  ) : null}
+                </p>
+                <p className="mt-0.5 text-micro text-[var(--muted)]">
+                  {w.localities.length ? w.localities.join(", ") : "—"}
+                </p>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-micro text-[var(--warning)]">
+            No ward or locality matches &ldquo;{query.trim()}&rdquo;. The
+            spelling queue can still map it by hand.
+          </p>
+        )}
+        {wards && q ? (
+          <p className="text-micro text-[var(--muted)]">
+            {filtered.length} of {wards.length} wards match.
+          </p>
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
 function SummaryTile({
   icon,
   label,
@@ -1017,6 +1130,18 @@ function VillageDemographicsGridInner({
   );
 
   const busy = state.status === "loading";
+
+  // The settlement cards render only once the office narrows down — 400
+  // unfiltered cards read as noise, and the block table above already answers
+  // "where overall". Radius mode is its own selection (a handful of mapped
+  // places), so it always shows.
+  const hasSelection =
+    mode === "radius" ||
+    blocks.length > 0 ||
+    search.trim() !== "" ||
+    settlementType !== "all" ||
+    minChildPool > 0 ||
+    status !== "all";
   const visible = sorted.slice(0, page * PAGE_SIZE);
   const hasMore = sorted.length > visible.length;
 
@@ -1355,93 +1480,6 @@ function VillageDemographicsGridInner({
             </ul>
           ) : null}
 
-          {data.mode === "block" ? (
-            <BlockMarketTable
-              rows={data.blockMarket}
-              selected={blocks}
-              onSelect={(b) => {
-                const next = !b
-                  ? []
-                  : blocks.includes(b)
-                    ? blocks.filter((x) => x !== b)
-                    : [...blocks, b];
-                setBlocks(next);
-                reload({ blocks: next });
-              }}
-            />
-          ) : null}
-
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <SummaryTile
-              icon={<MapPin className="size-3" aria-hidden />}
-              label="Villages found"
-              value={formatIndianNumber(data.counts.placesFound)}
-              hint={`${data.counts.censusMatched} sized · ${data.counts.censusUnmatched} unsized`}
-            />
-            <SummaryTile
-              icon={<Users className="size-3" aria-hidden />}
-              label={`Est. 0-6 pool ${data.assumptions.targetYear}`}
-              value={formatIndianNumber(data.totals.projectedChildPool)}
-              hint="Across sized villages only"
-            />
-            <SummaryTile
-              icon={<Target className="size-3" aria-hidden />}
-              label="Registered leads"
-              value={formatIndianNumber(data.totals.leads)}
-              hint={`${formatIndianNumber(data.totals.enrolled)} enrolled`}
-            />
-            <SummaryTile
-              icon={<TrendingUp className="size-3" aria-hidden />}
-              label="Overall penetration"
-              value={formatPct(data.totals.penetrationPct)}
-              hint={
-                data.leadCoverage && data.leadCoverage.unmatchedLeads > 0
-                  ? "At least this — unplaced leads not counted"
-                  : "Leads ÷ estimated child pool"
-              }
-            />
-          </div>
-
-          {data.leadCoverage && data.leadCoverage.unmatchedLeads > 0 ? (
-            <details className="erp-surface-sm">
-              <summary className="cursor-pointer text-xs font-semibold text-[var(--brand-deep)]">
-                {formatIndianNumber(data.leadCoverage.unmatchedLeads)} of{" "}
-                {formatIndianNumber(data.leadCoverage.totalLeads)} leads sit on a
-                village the census cannot size — penetration below is understated
-              </summary>
-              <p className="mt-2 text-micro text-[var(--muted)]">
-                These leads are real; only the village spelling is unrecognised, so
-                they are counted in no card below. Correcting the locality on the
-                lead is the fix — matching them automatically would risk crediting
-                them to the wrong village.
-                {data.leadCoverage.blankLocality > 0
-                  ? ` ${formatIndianNumber(data.leadCoverage.blankLocality)} lead${data.leadCoverage.blankLocality === 1 ? " has" : "s have"} no locality at all.`
-                  : ""}
-              </p>
-              <ul className="mt-2 flex flex-wrap gap-1.5">
-                {data.leadCoverage.topUnmatched.map((u) => (
-                  <li
-                    key={u.locality}
-                    className="rounded-full border border-[var(--border)] bg-[var(--surface-sunken)] px-2 py-0.5 text-micro text-[var(--muted)]"
-                  >
-                    {u.locality}
-                    <span className="ml-1 font-semibold text-[var(--brand-deep)]">
-                      {u.leads}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-
-              <div className="mt-3 border-t border-[var(--border)] pt-3">
-                <VillageAliasPanel
-                  academicYearCode={academicYearCode}
-                  canEdit={canEdit}
-                  onChanged={() => reload()}
-                />
-              </div>
-            </details>
-          ) : null}
-
           <div className="erp-surface-sm space-y-2">
             <div className="flex flex-wrap items-end gap-2">
               {mode === "block" ? (
@@ -1556,17 +1594,113 @@ function VillageDemographicsGridInner({
                 </select>
               </label>
             </div>
-            <p className="text-micro text-[var(--muted)]">
-              Showing <strong>{formatIndianNumber(visible.length)}</strong> of{" "}
-              {formatIndianNumber(sorted.length)}
-              {data.counts.truncated
-                ? ` shown, ${formatIndianNumber(data.counts.matchingFilter)} match the filter`
-                : ""}
-              {blocks.length ? ` · block ${blocks.join(", ")}` : " · all blocks"}
-            </p>
+            {hasSelection ? (
+              <p className="text-micro text-[var(--muted)]">
+                Showing <strong>{formatIndianNumber(visible.length)}</strong> of{" "}
+                {formatIndianNumber(sorted.length)}
+                {data.counts.truncated
+                  ? ` shown, ${formatIndianNumber(data.counts.matchingFilter)} match the filter`
+                  : ""}
+                {blocks.length ? ` · block ${blocks.join(", ")}` : " · all blocks"}
+              </p>
+            ) : (
+              <p className="text-micro text-[var(--muted)]">
+                Pick a block, a village/ward, or type a name — the settlement
+                cards stay hidden until you narrow down.
+              </p>
+            )}
           </div>
 
-          {sorted.length ? (
+          {data.mode === "block" ? (
+            <BlockMarketTable
+              rows={data.blockMarket}
+              selected={blocks}
+              onSelect={(b) => {
+                const next = !b
+                  ? []
+                  : blocks.includes(b)
+                    ? blocks.filter((x) => x !== b)
+                    : [...blocks, b];
+                setBlocks(next);
+                reload({ blocks: next });
+              }}
+            />
+          ) : null}
+
+          {data.mode === "block" ? <CityWardDirectoryPanel /> : null}
+
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <SummaryTile
+              icon={<MapPin className="size-3" aria-hidden />}
+              label="Villages found"
+              value={formatIndianNumber(data.counts.placesFound)}
+              hint={`${data.counts.censusMatched} sized · ${data.counts.censusUnmatched} unsized`}
+            />
+            <SummaryTile
+              icon={<Users className="size-3" aria-hidden />}
+              label={`Est. 0-6 pool ${data.assumptions.targetYear}`}
+              value={formatIndianNumber(data.totals.projectedChildPool)}
+              hint="Across sized villages only"
+            />
+            <SummaryTile
+              icon={<Target className="size-3" aria-hidden />}
+              label="Registered leads"
+              value={formatIndianNumber(data.totals.leads)}
+              hint={`${formatIndianNumber(data.totals.enrolled)} enrolled`}
+            />
+            <SummaryTile
+              icon={<TrendingUp className="size-3" aria-hidden />}
+              label="Overall penetration"
+              value={formatPct(data.totals.penetrationPct)}
+              hint={
+                data.leadCoverage && data.leadCoverage.unmatchedLeads > 0
+                  ? "At least this — unplaced leads not counted"
+                  : "Leads ÷ estimated child pool"
+              }
+            />
+          </div>
+
+          {data.leadCoverage && data.leadCoverage.unmatchedLeads > 0 ? (
+            <details className="erp-surface-sm">
+              <summary className="cursor-pointer text-xs font-semibold text-[var(--brand-deep)]">
+                {formatIndianNumber(data.leadCoverage.unmatchedLeads)} of{" "}
+                {formatIndianNumber(data.leadCoverage.totalLeads)} leads sit on a
+                village the census cannot size — penetration below is understated
+              </summary>
+              <p className="mt-2 text-micro text-[var(--muted)]">
+                These leads are real; only the village spelling is unrecognised, so
+                they are counted in no card below. Correcting the locality on the
+                lead is the fix — matching them automatically would risk crediting
+                them to the wrong village.
+                {data.leadCoverage.blankLocality > 0
+                  ? ` ${formatIndianNumber(data.leadCoverage.blankLocality)} lead${data.leadCoverage.blankLocality === 1 ? " has" : "s have"} no locality at all.`
+                  : ""}
+              </p>
+              <ul className="mt-2 flex flex-wrap gap-1.5">
+                {data.leadCoverage.topUnmatched.map((u) => (
+                  <li
+                    key={u.locality}
+                    className="rounded-full border border-[var(--border)] bg-[var(--surface-sunken)] px-2 py-0.5 text-micro text-[var(--muted)]"
+                  >
+                    {u.locality}
+                    <span className="ml-1 font-semibold text-[var(--brand-deep)]">
+                      {u.leads}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+
+              <div className="mt-3 border-t border-[var(--border)] pt-3">
+                <VillageAliasPanel
+                  academicYearCode={academicYearCode}
+                  canEdit={canEdit}
+                  onChanged={() => reload()}
+                />
+              </div>
+            </details>
+          ) : null}
+
+          {!hasSelection ? null : sorted.length ? (
             <>
               <div className="grid gap-3 lg:grid-cols-2">
                 {visible.map((row) => (
