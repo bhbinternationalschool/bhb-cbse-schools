@@ -651,11 +651,16 @@ export async function counterSummary(): Promise<InvCounterSummary> {
       .select("balance_paise")
       .eq("tenant_id", tenantId)
       .in("status", ["open", "part_paid"]),
+    // Payments on a sale that was later CANCELLED do not count as money
+    // taken: the void hands the money back and reverses the receipt in the
+    // books, but the payment row stays as history — so the summary must
+    // exclude it, the same way "Sold today" already excludes void sales.
     sb
       .from("inv_sale_payments")
-      .select("amount_paise")
+      .select("amount_paise, sale:inv_sales!inner(status)")
       .eq("tenant_id", tenantId)
-      .eq("paid_on", today),
+      .eq("paid_on", today)
+      .neq("sale.status", "void"),
   ]);
 
   const todayRows = (todayRes.data ?? []) as Row[];
