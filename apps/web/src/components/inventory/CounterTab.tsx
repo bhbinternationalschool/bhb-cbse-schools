@@ -1255,6 +1255,8 @@ function SalesSection({
 
   const [ret, setRet] = useState<InvSale | null>(null);
   const [retReason, setRetReason] = useState("");
+  const [retRefundMode, setRetRefundMode] = useState<InvTenderMode>("cash");
+  const [retRefundRef, setRetRefundRef] = useState("");
   const [retSettlement, setRetSettlement] = useState<"reduce_balance" | "refund">(
     "reduce_balance",
   );
@@ -1288,8 +1290,19 @@ function SalesSection({
     }
   }
 
+  /**
+   * Money going back out needs the same trail as money coming in. A refund by
+   * UPI or cheque with no reference cannot be matched to the bank later, and
+   * an unexplained payment OUT is the harder one to answer for.
+   */
+  const retNeedsRef =
+    retSettlement === "refund" &&
+    retRefundMode !== "cash" &&
+    retRefundRef.trim() === "";
+
   async function submitReturn() {
     if (!ret || !retReason.trim()) return;
+    if (retNeedsRef) return;
     const lines = ret.lines
       .map((l) => ({ saleLineId: l.id, qty: Number(retQty[l.id]) || 0 }))
       .filter((l) => l.qty > 0);
@@ -1300,6 +1313,9 @@ function SalesSection({
         saleId: ret.id,
         reason: retReason.trim(),
         settlement: retSettlement,
+        refundMode: retSettlement === "refund" ? retRefundMode : "cash",
+        refundReference:
+          retSettlement === "refund" ? retRefundRef.trim() : "",
         restock: retRestock,
         lines,
       }),
@@ -1308,11 +1324,15 @@ function SalesSection({
       saver.setNotice(
         `${res.returnNo} — ${formatPaise(res.totalPaise)} credited` +
           (res.refundedPaise > 0
-            ? `, ${formatPaise(res.refundedPaise)} refunded`
+            ? `, ${formatPaise(res.refundedPaise)} refunded by ${tenderLabel(
+                retRefundMode,
+              )}${res.refundReference ? ` (${res.refundReference})` : ""}`
             : ""),
       );
       setRet(null);
       setRetReason("");
+      setRetRefundMode("cash");
+      setRetRefundRef("");
       setRetQty({});
       sales.reload();
       onChanged();
@@ -1535,7 +1555,7 @@ function SalesSection({
             <Button
               size="sm"
               onClick={submitReturn}
-              disabled={saver.saving || !retReason.trim()}
+              disabled={saver.saving || !retReason.trim() || retNeedsRef}
             >
               {saver.saving ? "Saving…" : "Post return"}
             </Button>
@@ -1574,6 +1594,53 @@ function SalesSection({
                 Put the goods back in stock
               </label>
             </div>
+
+            {/* How the money actually leaves. Recorded because the books post
+                the refund to the account it went out of — cash out of the
+                drawer, UPI out of the bank — and a wrong one leaves the day's
+                cash count short with nothing to explain it. */}
+            {retSettlement === "refund" ? (
+              <div className="space-y-2 rounded-lg border p-3">
+                <p className="text-xs font-medium text-muted-foreground">
+                  How is the money going back?
+                </p>
+                <div className="flex flex-wrap gap-1">
+                  {TENDERS.map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setRetRefundMode(t)}
+                      className={
+                        retRefundMode === t
+                          ? "rounded-md bg-foreground px-2 py-1 text-xs font-medium text-background"
+                          : "rounded-md border px-2 py-1 text-xs hover:bg-muted"
+                      }
+                    >
+                      {tenderLabel(t)}
+                    </button>
+                  ))}
+                </div>
+                {retRefundMode !== "cash" ? (
+                  <>
+                    <TextField
+                      label="Transaction ID"
+                      value={retRefundRef}
+                      onChange={setRetRefundRef}
+                    />
+                    {retNeedsRef ? (
+                      <p className="text-xs text-destructive">
+                        A {tenderLabel(retRefundMode)} refund needs its
+                        transaction ID before it can be paid out.
+                      </p>
+                    ) : null}
+                  </>
+                ) : null}
+                <p className="text-[11px] text-muted-foreground">
+                  Only what they actually paid can come back — anything beyond
+                  that reduces what they still owe instead.
+                </p>
+              </div>
+            ) : null}
 
             <fieldset className="space-y-2 rounded-lg border p-3">
               <legend className="px-1 text-xs font-medium text-muted-foreground">

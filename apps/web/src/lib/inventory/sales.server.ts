@@ -468,6 +468,8 @@ export async function postSaleReturn(
     reason: string;
     settlement?: "reduce_balance" | "refund";
     refundMode?: string;
+    /** Required for a non-cash refund: money out must be traceable. */
+    refundReference?: string;
     restock?: boolean;
     returnDate?: string;
     note?: string;
@@ -483,6 +485,8 @@ export async function postSaleReturn(
   balanceReducedPaise: number;
   /** Empty when the server ledger is not in use for this school. */
   ledgerVoucherNo: string;
+  /** Echoed back so a receipt can quote it. Empty when no money moved. */
+  refundReference: string;
 }> {
   if (!String(input.reason ?? "").trim()) {
     throw new InvError("A reason is required for a sale return", 400);
@@ -502,6 +506,7 @@ export async function postSaleReturn(
       reason: String(input.reason).trim(),
       settlement: input.settlement || "reduce_balance",
       refund_mode: str(input.refundMode) || "cash",
+      refund_reference: str(input.refundReference).trim(),
       restock: input.restock !== false,
       return_date: input.returnDate || null,
       note: str(input.note),
@@ -521,6 +526,7 @@ export async function postSaleReturn(
     refundedPaise: int(out.refunded_paise),
     balanceReducedPaise: int(out.balance_reduced_paise),
     ledgerVoucherNo: str(out.ledger_voucher_no),
+    refundReference: str(out.refund_reference),
   };
 }
 

@@ -530,6 +530,8 @@ export const invApi = {
         totalPaise: number;
         refundedPaise: number;
         balanceReducedPaise: number;
+        /** Empty unless money actually went back out. */
+        refundReference: string;
       };
     }>("/sales", {
       method: "POST",
