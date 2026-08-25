@@ -28,7 +28,13 @@ import {
   ledgerSubledgerBalances,
   ledgerTrialBalance,
 } from "@/lib/ledger/ledger.server";
-import { vendorDues } from "@/lib/inventory/procurement.server";
+import {
+  listVendorBills,
+  recordVendorPayment,
+  vendorDues,
+} from "@/lib/inventory/procurement.server";
+import { InvError } from "@/lib/inventory/db.server";
+import type { InvPaymentMode } from "@/lib/inventory/types";
 import { ledgerReconciliation, projectAll } from "@/lib/ledger/project.server";
 import {
   ledgerAnomalies,
@@ -126,7 +132,17 @@ type PostBody =
   | { action: "ageing"; asOf: string; side?: "payables" | "receivables" }
   | { action: "cockpit"; asOf: string; fyFrom: string }
   | { action: "parity"; deskRows: { code: string; balancePaise: number }[] }
-  | { action: "vendor-dues" };
+  | { action: "vendor-dues" }
+  | { action: "vendor-bills"; vendorId?: string }
+  | {
+      action: "pay-vendor-bill";
+      billId: string;
+      amountPaise: number;
+      mode?: string;
+      reference?: string;
+      note?: string;
+      paidOn?: string;
+    };
 
 export async function POST(req: Request) {
   let body: PostBody;
@@ -165,6 +181,7 @@ export async function POST(req: Request) {
     "ageing",
     "cockpit",
     "vendor-dues",
+    "vendor-bills",
   ]);
 
   const auth = await requireStaffPermission(
@@ -328,6 +345,49 @@ export async function POST(req: Request) {
       // needs to see who the school owes.
       const dues = await vendorDues();
       return NextResponse.json({ ok: true, dues });
+    }
+    case "vendor-bills": {
+      // The open bills behind a vendor's balance — what a payment settles.
+      // Same store data, same accounts guard as vendor-dues.
+      try {
+        const bills = await listVendorBills({
+          vendorId: body.vendorId,
+          status: "unpaid",
+        });
+        return NextResponse.json({ ok: true, bills });
+      } catch (e) {
+        const status = e instanceof InvError ? e.status : 500;
+        return NextResponse.json(
+          { ok: false, error: e instanceof Error ? e.message : "Failed" },
+          { status },
+        );
+      }
+    }
+    case "pay-vendor-bill": {
+      // Paying from Accounts uses the SAME server function the store uses:
+      // the payment row, the bill's balance and the ledger entry
+      // (Dr 2000 Accounts Payable / Cr tender) commit in one transaction, so
+      // the two modules cannot drift apart. Over-payment is refused there.
+      try {
+        const res = await recordVendorPayment(
+          {
+            billId: body.billId,
+            amountPaise: body.amountPaise,
+            mode: body.mode as InvPaymentMode | undefined,
+            reference: body.reference,
+            note: body.note,
+            paidOn: body.paidOn,
+          },
+          actor,
+        );
+        return NextResponse.json({ ok: true, ...res });
+      } catch (e) {
+        const status = e instanceof InvError ? e.status : 500;
+        return NextResponse.json(
+          { ok: false, error: e instanceof Error ? e.message : "Payment failed" },
+          { status },
+        );
+      }
     }
     case "cockpit": {
       const res = await ledgerCockpit({ asOf: body.asOf, fyFrom: body.fyFrom });
