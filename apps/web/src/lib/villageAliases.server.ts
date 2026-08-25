@@ -15,12 +15,13 @@
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { fetchLeadCoverage } from "@/lib/villageMarket.server";
-import type {
-  VillageAliasCandidate,
-  VillageAliasRow,
-  VillageAliasStatus,
-  VillageAliasSuggestion,
-  VillageAliasesResponse,
+import {
+  settlementTypeOf,
+  type VillageAliasCandidate,
+  type VillageAliasRow,
+  type VillageAliasStatus,
+  type VillageAliasSuggestion,
+  type VillageAliasesResponse,
 } from "@/lib/villageMarket";
 
 const LOG = "[villageAliases]";
@@ -58,7 +59,7 @@ function toSuggestions(raw: unknown): VillageAliasSuggestion[] {
       villageId: String(o.villageId ?? ""),
       villageName: String(o.villageName ?? ""),
       blockName: String(o.blockName ?? ""),
-      settlementType: o.settlementType === "town" ? "town" : "village",
+      settlementType: settlementTypeOf(String(o.settlementType ?? "")),
       childPool: Number(o.childPool) || 0,
       score: Number(o.score) || 0,
       // Load-bearing for the UI: a skeleton hit is preselected even when its
@@ -68,13 +69,79 @@ function toSuggestions(raw: unknown): VillageAliasSuggestion[] {
   });
 }
 
+/**
+ * The city holding settlement — where a confirmed Varanasi City locality
+ * lands. Population zero by design: it puts the lead in the city block
+ * without inventing a ward-level pool. Null when the row is not seeded,
+ * in which case city suggestions are simply not offered.
+ */
+async function fetchCityHoldingSettlement(
+  sb: Sb,
+  tenantId: string,
+): Promise<{ id: string; villageName: string; blockName: string } | null> {
+  const { data, error } = await sb
+    .from("village_demographics")
+    .select("id, village_name, block_name")
+    .eq("tenant_id", tenantId)
+    .eq("census_code", "VNN-PENDING")
+    .maybeSingle();
+  if (error || !data) {
+    if (error) console.warn(`${LOG} city holding row lookup failed: ${error.message}`);
+    return null;
+  }
+  return {
+    id: String(data.id),
+    villageName: String(data.village_name),
+    blockName: String(data.block_name),
+  };
+}
+
+/**
+ * Check unresolved spellings against the official 2022 Nagar Nigam locality
+ * directory. A hit means "this is a city mohalla" — the one suggestion the
+ * census candidates can never provide, because mohallas are not census
+ * settlements. Failure here degrades to no city suggestions, never an error:
+ * the census suggestions still render.
+ */
+async function fetchCityWardMatches(
+  sb: Sb,
+  tenantId: string,
+  localities: string[],
+): Promise<Map<string, { wardNo: number | null; wardName: string; matchedLocality: string; score: number }>> {
+  const out = new Map<
+    string,
+    { wardNo: number | null; wardName: string; matchedLocality: string; score: number }
+  >();
+  if (!localities.length) return out;
+
+  const { data, error } = await sb.rpc("city_ward_directory_match", {
+    p_tenant_id: tenantId,
+    p_localities: localities,
+  });
+  if (error) {
+    console.warn(`${LOG} city_ward_directory_match failed: ${error.message}`);
+    return out;
+  }
+  for (const r of (data as Record<string, unknown>[] | null) ?? []) {
+    const ambiguous = (Number(r.ambiguous_wards) || 0) > 1;
+    out.set(String(r.locality ?? ""), {
+      // Several wards share this locality name — naming one would be a guess.
+      wardNo: ambiguous ? null : Number(r.ward_no) || null,
+      wardName: ambiguous ? "" : String(r.ward_name ?? ""),
+      matchedLocality: String(r.matched_locality ?? ""),
+      score: Number(r.score) || 0,
+    });
+  }
+  return out;
+}
+
 /** The review queue plus the decisions already taken. */
 export async function loadAliasWorkspace(
   academicYearCode: string,
 ): Promise<VillageAliasesResponse> {
   const { sb, tenantId } = await tenant();
 
-  const [candidatesRes, aliasesRes, coverage] = await Promise.all([
+  const [candidatesRes, aliasesRes, coverage, cityHolding] = await Promise.all([
     sb.rpc("village_alias_candidates", {
       p_tenant_id: tenantId,
       p_academic_year_code: academicYearCode || null,
@@ -82,6 +149,7 @@ export async function loadAliasWorkspace(
     }),
     sb.rpc("village_alias_list", { p_tenant_id: tenantId }),
     fetchLeadCoverage(sb, tenantId, academicYearCode),
+    fetchCityHoldingSettlement(sb, tenantId),
   ]);
 
   if (candidatesRes.error) {
@@ -104,6 +172,37 @@ export async function loadAliasWorkspace(
     enrolledCount: Number(r.enrolled_count) || 0,
     suggestions: toSuggestions(r.suggestions),
   }));
+
+  // The queue only holds spellings NO census settlement matched, so a
+  // directory hit is the strongest signal on the row — it goes first and is
+  // what the row preselects.
+  if (cityHolding && candidates.length) {
+    const matches = await fetchCityWardMatches(
+      sb,
+      tenantId,
+      candidates.map((c) => c.locality),
+    );
+    for (const c of candidates) {
+      const m = matches.get(c.locality);
+      if (!m) continue;
+      c.suggestions = [
+        {
+          villageId: cityHolding.id,
+          villageName: cityHolding.villageName,
+          blockName: cityHolding.blockName,
+          settlementType: "ward",
+          childPool: 0,
+          score: m.score,
+          cityWard: {
+            wardNo: m.wardNo,
+            wardName: m.wardName,
+            matchedLocality: m.matchedLocality,
+          },
+        },
+        ...c.suggestions,
+      ];
+    }
+  }
 
   const aliases: VillageAliasRow[] = (
     (aliasesRes.data as Record<string, unknown>[] | null) ?? []
@@ -158,7 +257,7 @@ export async function searchVillages(
     villageId: String(r.village_id ?? ""),
     villageName: String(r.village_name ?? ""),
     blockName: String(r.block_name ?? ""),
-    settlementType: r.settlement_type === "town" ? "town" : "village",
+    settlementType: settlementTypeOf(String(r.settlement_type ?? "")),
     childPool: Number(r.child_pool) || 0,
     score: Number(r.score) || 0,
   }));

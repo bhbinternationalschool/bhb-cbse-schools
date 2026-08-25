@@ -40,6 +40,33 @@ type State =
 /** A suggestion this weak is shown but never preselected. */
 const WEAK_SCORE = 0.3;
 
+/** Option text for one suggestion — city directory hits read differently. */
+function suggestionLabel(s: VillageAliasSuggestion): string {
+  if (s.cityWard) {
+    const ward = s.cityWard.wardNo
+      ? `Ward ${s.cityWard.wardNo} ${s.cityWard.wardName}`.trim()
+      : "several wards share this name";
+    return (
+      `Varanasi City — city locality (${ward})` +
+      ` — matched "${s.cityWard.matchedLocality}" at ${Math.round(s.score * 100)}%`
+    );
+  }
+  return (
+    `${s.villageName}${s.blockName ? ` · ${s.blockName}` : ""}` +
+    (s.settlementType === "town" ? " (town)" : "") +
+    (s.skeletonMatch ? " — same consonants" : ` — ${Math.round(s.score * 100)}% match`) +
+    `, ${formatIndianNumber(s.childPool)} children`
+  );
+}
+
+/** The note a city confirmation records, so the ward survives on the alias. */
+function cityNote(s: VillageAliasSuggestion): string {
+  if (!s.cityWard) return "";
+  return s.cityWard.wardNo
+    ? `VNN 2022 Ward ${s.cityWard.wardNo} (${s.cityWard.wardName}) — matched "${s.cityWard.matchedLocality}"`
+    : `VNN 2022 city locality "${s.cityWard.matchedLocality}" — name exists in several wards`;
+}
+
 function CandidateRow({
   row,
   busy,
@@ -48,7 +75,7 @@ function CandidateRow({
 }: {
   row: VillageAliasCandidate;
   busy: boolean;
-  onConfirm: (villageId: string) => void;
+  onConfirm: (villageId: string, note: string) => void;
   onIgnore: () => void;
 }) {
   const best = row.suggestions[0];
@@ -133,13 +160,7 @@ function CandidateRow({
               <option value="">Choose a village…</option>
               {options.map((s) => (
                 <option key={s.villageId} value={s.villageId}>
-                  {s.villageName}
-                  {s.blockName ? ` · ${s.blockName}` : ""}
-                  {s.settlementType === "town" ? " (town)" : ""}
-                  {s.skeletonMatch
-                    ? " — same consonants"
-                    : ` — ${Math.round(s.score * 100)}% match`}
-                  {`, ${formatIndianNumber(s.childPool)} children`}
+                  {suggestionLabel(s)}
                 </option>
               ))}
             </select>
@@ -148,7 +169,11 @@ function CandidateRow({
             type="button"
             className={erpBtn}
             disabled={busy || !choice}
-            onClick={() => choice && onConfirm(choice)}
+            onClick={() => {
+              if (!choice) return;
+              const picked = options.find((o) => o.villageId === choice);
+              onConfirm(choice, picked ? cityNote(picked) : "");
+            }}
           >
             <Check className="size-3.5" aria-hidden />
             Confirm
@@ -227,6 +252,7 @@ function DecidedRow({
             {row.leadCountAtConfirm > 0
               ? ` · ${formatIndianNumber(row.leadCountAtConfirm)} leads placed`
               : ""}
+            {row.note ? ` · ${row.note}` : ""}
           </>
         ) : (
           " → not a village"
@@ -411,7 +437,7 @@ export function VillageAliasPanel({
                   key={c.locality}
                   row={c}
                   busy={busy || !canEdit}
-                  onConfirm={(villageId) =>
+                  onConfirm={(villageId, note) =>
                     void mutate(
                       () =>
                         fetch("/api/admissions/village-aliases", {
@@ -422,6 +448,7 @@ export function VillageAliasPanel({
                             status: "confirmed",
                             villageId,
                             leadCount: c.leadCount,
+                            ...(note ? { note } : {}),
                           }),
                         }),
                       `"${c.locality}" confirmed — ${c.leadCount} lead${c.leadCount === 1 ? "" : "s"} placed`,

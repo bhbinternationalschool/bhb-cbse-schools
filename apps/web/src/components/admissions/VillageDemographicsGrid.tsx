@@ -70,9 +70,10 @@ const POOL_OPTIONS = [
 ];
 
 const TYPE_OPTIONS: { value: SettlementFilter; label: string }[] = [
-  { value: "all", label: "Villages & towns" },
+  { value: "all", label: "All settlements" },
   { value: "village", label: "Villages only" },
   { value: "town", label: "Census towns only" },
+  { value: "ward", label: "City wards only" },
 ];
 
 /** Client-side view filter — depends on leads, which only the server knows. */
@@ -266,7 +267,11 @@ function VillageCard({ row }: { row: VillageMarketRow }) {
               {census?.villageName || row.osmName}
             </h3>
             <p className="truncate text-micro text-[var(--muted)]">
-              {census?.blockName ? `Block ${census.blockName}` : "Block unknown"}
+              {census?.blockName
+                ? census.settlementType === "ward"
+                  ? census.blockName
+                  : `Block ${census.blockName}`
+                : "Block unknown"}
               {census?.districtName ? ` · ${census.districtName}` : ""}
               {` · ${row.placeType}`}
             </p>
@@ -454,7 +459,7 @@ function BlockMarketTable({
     <div className="erp-surface space-y-2">
       <div className="flex items-baseline justify-between gap-2">
         <h3 className="text-sm font-semibold text-[var(--brand-deep)]">
-          Blocks — weakest coverage first
+          Blocks &amp; city — weakest coverage first
         </h3>
         {selected.length ? (
           <button
@@ -473,7 +478,7 @@ function BlockMarketTable({
             <li key={b.blockName}>
               <button
                 type="button"
-                onClick={() => onSelect(active ? "" : b.blockName)}
+                onClick={() => onSelect(b.blockName)}
                 aria-pressed={active}
                 className={`w-full rounded-lg border px-2.5 py-2 text-left transition-colors ${
                   active
@@ -484,10 +489,18 @@ function BlockMarketTable({
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
                   <span className="text-sm font-semibold text-[var(--brand-deep)]">
                     {b.blockName}
+                    {b.wards > 0 ? (
+                      <span className="ml-1.5 rounded-full border border-[var(--info)]/25 bg-[var(--info-soft)] px-1.5 py-px text-micro font-semibold text-[var(--info)]">
+                        City
+                      </span>
+                    ) : null}
                   </span>
                   <span className="text-micro text-[var(--muted)]">
-                    {formatIndianNumber(b.settlements)} settlements
-                    {b.towns > 0 ? ` (${b.towns} town${b.towns === 1 ? "" : "s"})` : ""}
+                    {b.wards > 0
+                      ? `${formatIndianNumber(b.wards)} wards`
+                      : `${formatIndianNumber(b.settlements)} settlements${
+                          b.towns > 0 ? ` (${b.towns} town${b.towns === 1 ? "" : "s"})` : ""
+                        }`}
                     {" · "}
                     {formatIndianNumber(b.projectedChildPop)} children 0-6 est.
                   </span>
@@ -511,10 +524,102 @@ function BlockMarketTable({
         })}
       </ul>
       <p className="text-micro text-[var(--muted)]">
-        Bar length is the size of the block&rsquo;s estimated 0-6 pool. Click a block
-        to filter the settlements below.
+        Bar length is the size of the block&rsquo;s estimated 0-6 pool. Click blocks
+        to filter the settlements below — clicking again deselects.
       </p>
     </div>
+  );
+}
+
+/**
+ * The real block filter: a checkbox dropdown over every block on file,
+ * grouped into rural CD blocks and urban bodies (whose settlements are city
+ * wards). Multi-select, because a camp is often planned for two adjacent
+ * blocks at once.
+ */
+function BlockFilterDropdown({
+  available,
+  blockMarket,
+  selected,
+  disabled,
+  onChange,
+}: {
+  available: string[];
+  blockMarket: BlockMarketRow[];
+  selected: string[];
+  disabled: boolean;
+  onChange: (blocks: string[]) => void;
+}) {
+  const cityBlocks = useMemo(
+    () => new Set(blockMarket.filter((b) => b.wards > 0).map((b) => b.blockName)),
+    [blockMarket],
+  );
+  const groups = useMemo(
+    () => [
+      { label: "Rural blocks", names: available.filter((b) => !cityBlocks.has(b)) },
+      { label: "Varanasi city & towns", names: available.filter((b) => cityBlocks.has(b)) },
+    ],
+    [available, cityBlocks],
+  );
+
+  const toggle = (name: string) => {
+    onChange(
+      selected.includes(name)
+        ? selected.filter((b) => b !== name)
+        : [...selected, name],
+    );
+  };
+
+  const summary =
+    selected.length === 0
+      ? "All blocks"
+      : selected.length === 1
+        ? selected[0]
+        : `${selected.length} blocks`;
+
+  return (
+    <details className="relative text-micro text-[var(--muted)]">
+      <summary
+        className={`${erpField} flex cursor-pointer select-none list-none items-center justify-between gap-2 ${
+          disabled ? "pointer-events-none opacity-60" : ""
+        }`}
+      >
+        <span className="truncate font-medium text-[var(--brand-deep)]">{summary}</span>
+        <span aria-hidden>▾</span>
+      </summary>
+      <div className="absolute left-0 z-20 mt-1 max-h-72 w-64 overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--card)] p-2 shadow-lg">
+        <button
+          type="button"
+          className="mb-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-2 py-1 text-left text-micro font-semibold text-[var(--brand-deep)] hover:border-[var(--brand-mid)]"
+          onClick={() => onChange([])}
+        >
+          All blocks{selected.length ? " (clear selection)" : ""}
+        </button>
+        {groups.map((g) =>
+          g.names.length ? (
+            <div key={g.label} className="mt-1">
+              <p className="px-1 py-0.5 text-micro font-semibold uppercase tracking-wide text-[var(--muted)]">
+                {g.label}
+              </p>
+              {g.names.map((name) => (
+                <label
+                  key={name}
+                  className="flex cursor-pointer items-center gap-2 rounded-lg px-1.5 py-1 hover:bg-[var(--surface-sunken)]"
+                >
+                  <input
+                    type="checkbox"
+                    className="accent-[var(--brand-mid)]"
+                    checked={selected.includes(name)}
+                    onChange={() => toggle(name)}
+                  />
+                  <span className="text-xs text-[var(--brand-deep)]">{name}</span>
+                </label>
+              ))}
+            </div>
+          ) : null,
+        )}
+      </div>
+    </details>
   );
 }
 
@@ -752,6 +857,16 @@ function VillageDemographicsGridInner({
   );
 
   const data = state.status === "ready" ? state.data : null;
+
+  // Options for the village/ward dropdown — the settlements the server
+  // returned for the current block selection. Numeric compare so Ward 2
+  // sorts before Ward 10.
+  const villageNames = useMemo(() => {
+    if (!data) return [] as string[];
+    const names = new Set<string>();
+    for (const v of data.villages) names.add(v.census?.villageName || v.osmName);
+    return [...names].sort((a, b) => a.localeCompare(b, "en-IN", { numeric: true }));
+  }, [data]);
 
   const sorted = useMemo(() => {
     if (!data) return [];
@@ -1245,7 +1360,11 @@ function VillageDemographicsGridInner({
               rows={data.blockMarket}
               selected={blocks}
               onSelect={(b) => {
-                const next = b ? [b] : [];
+                const next = !b
+                  ? []
+                  : blocks.includes(b)
+                    ? blocks.filter((x) => x !== b)
+                    : [...blocks, b];
                 setBlocks(next);
                 reload({ blocks: next });
               }}
@@ -1325,13 +1444,51 @@ function VillageDemographicsGridInner({
 
           <div className="erp-surface-sm space-y-2">
             <div className="flex flex-wrap items-end gap-2">
+              {mode === "block" ? (
+                <div className="min-w-[11rem]">
+                  <p className="text-micro text-[var(--muted)]">Block / city</p>
+                  <BlockFilterDropdown
+                    available={data.blocks.available}
+                    blockMarket={data.blockMarket}
+                    selected={blocks}
+                    disabled={busy}
+                    onChange={(next) => {
+                      setBlocks(next);
+                      reload({ blocks: next });
+                    }}
+                  />
+                </div>
+              ) : null}
+              <label className="min-w-[10rem] text-micro text-[var(--muted)]">
+                Village / ward
+                <select
+                  className={erpField}
+                  disabled={busy}
+                  value={villageNames.includes(search) ? search : ""}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setSearch(next);
+                    if (searchDebounce.current) window.clearTimeout(searchDebounce.current);
+                    reload({ search: next });
+                  }}
+                >
+                  <option value="">
+                    {blocks.length ? "All in selected blocks" : "All settlements"}
+                  </option>
+                  {villageNames.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <label className="min-w-[10rem] flex-1 text-micro text-[var(--muted)]">
-                Village or town name
+                Search by name
                 <input
                   type="search"
                   className={erpField}
-                  placeholder="e.g. Ayar, Puari"
-                  defaultValue={search}
+                  placeholder="e.g. Ayar, Puari, Ward 12"
+                  value={search}
                   onChange={(e) => {
                     const next = e.target.value;
                     setSearch(next);

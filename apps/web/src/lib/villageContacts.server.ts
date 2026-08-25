@@ -27,7 +27,7 @@ export class VillageContactsError extends Error {
 
 export type ContactsQuery = {
   blocks: string[];
-  settlementType: "all" | "village" | "town";
+  settlementType: "all" | "village" | "town" | "ward";
   minChildPool: number;
   /** Skip settlements with no reachable parent — they add empty rows. */
   onlyWithContacts: boolean;
@@ -36,8 +36,8 @@ export type ContactsQuery = {
 
 export function parseContactsQuery(params: URLSearchParams): ContactsQuery {
   const rawType = (params.get("settlementType") || "all").trim().toLowerCase();
-  if (rawType !== "all" && rawType !== "village" && rawType !== "town") {
-    throw new VillageContactsError("settlementType must be all, village or town");
+  if (rawType !== "all" && rawType !== "village" && rawType !== "town" && rawType !== "ward") {
+    throw new VillageContactsError("settlementType must be all, village, town or ward");
   }
   const minRaw = Number(params.get("minChildPool") || 0);
   if (!Number.isFinite(minRaw) || minRaw < 0) {

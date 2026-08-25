@@ -25,6 +25,7 @@ import {
   opportunityScore,
   penetrationBand,
   penetrationPct,
+  settlementTypeOf,
   toNumber,
   type NearbyPlace,
   type OverpassElement,
@@ -445,8 +446,8 @@ export function parseNearbyQuery(params: URLSearchParams, fallback: {
   }
 
   const rawType = (params.get("settlementType") || "all").trim().toLowerCase();
-  if (rawType !== "all" && rawType !== "village" && rawType !== "town") {
-    throw new VillageMarketError("settlementType must be all, village or town", 400);
+  if (rawType !== "all" && rawType !== "village" && rawType !== "town" && rawType !== "ward") {
+    throw new VillageMarketError("settlementType must be all, village, town or ward", 400);
   }
 
   return {
@@ -564,6 +565,7 @@ async function fetchBlockMarket(
       settlements: Number(r.settlements) || 0,
       villages: Number(r.villages) || 0,
       towns: Number(r.towns) || 0,
+      wards: Number(r.wards) || 0,
       pop2011: Number(r.pop_2011) || 0,
       projectedPop: Number(r.projected_pop) || 0,
       projectedChildPop,
@@ -713,7 +715,7 @@ export async function buildVillagesNearby(
         key: `census/${row.id}`,
         name: row.village_name,
         osmId: typeof row.osm_id === "number" ? row.osm_id : 0,
-        placeType: row.settlement_type === "town" ? "town" : "village",
+        placeType: settlementTypeOf(row.settlement_type),
         source: "census" as const,
         lat,
         lon,
@@ -852,7 +854,7 @@ export async function buildVillagesNearby(
             blockName: row.block_name,
             districtName: row.district_name,
             matchScore: Math.round((row.match_score ?? 1) * 100) / 100,
-            settlementType: row.settlement_type === "town" ? "town" : "village",
+            settlementType: settlementTypeOf(row.settlement_type),
             baseline: {
               year: CENSUS_BASELINE_YEAR,
               popTotal: toNumber(row.pop_total_2011),

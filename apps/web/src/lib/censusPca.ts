@@ -88,6 +88,9 @@ const COLUMN_ALIASES = {
   // lines in one sheet. Without this we would seed a block's 232,759 people
   // as a single village.
   level: ["level", "reclevel", "recordlevel"],
+  // PCA-TV exports carry the ward number in its own column; the Town/Village
+  // column on a WARD row holds the TOWN's code, shared by every ward in it.
+  wardCode: ["ward", "wardno", "wardcode"],
   tru: ["tru", "ruralurban"],
   households: ["nohh", "households", "totalhouseholds", "hh"],
   popTotal: ["totp", "totalpopulationperson", "totalpopulation", "poptotal", "totalp"],
@@ -159,6 +162,42 @@ export function cleanVillageName(raw: string): string {
     .trim();
 }
 
+/**
+ * A ward's "block" is the urban body it belongs to, renamed the way the
+ * office says it: "Varanasi (M Corp.)" is spoken as "Varanasi City", and the
+ * cantonment must NOT collapse into plain "Varanasi" (which cleanVillageName
+ * would do by stripping "(CB)") — that would merge two different bodies into
+ * one block.
+ */
+export function cityBlockName(rawTownName: string): string {
+  const raw = rawTownName.replace(/\s+/g, " ").trim();
+  const mcorp = raw.match(/^(.*?)\s*\(M\s*Corp\.?\)$/i);
+  if (mcorp) return `${mcorp[1].trim()} City`;
+  const cantt = raw.match(/^(.*?)\s*\(CB\)$/i);
+  if (cantt) return `${cantt[1].trim()} Cantt`;
+  const town = raw.match(/^(.*?)\s*\((?:NPP|NP|NA|M|MB)\)$/i);
+  if (town) return `${town[1].trim()} Town`;
+  // "(ITS)" and anything unrecognised: keep the name, drop only the bracket.
+  return raw.replace(/\s*\([A-Z.\s]+\)$/i, "").trim() || raw;
+}
+
+/**
+ * "Varanasi (M Corp.) WARD NO.-0001" → 1. The census names city wards by
+ * number only; returning the number lets the seeder store "Ward 1" instead of
+ * that whole string. Null when the cell carries no ward number.
+ */
+export function parseWardNumber(raw: string | undefined): number | null {
+  const v = (raw ?? "").trim();
+  if (!v) return null;
+  const fromName = v.match(/ward\s*no\.?\s*-?\s*0*(\d+)/i);
+  if (fromName) return Number(fromName[1]);
+  if (/^\d+$/.test(v)) {
+    const n = Number(v);
+    return n > 0 ? n : null;
+  }
+  return null;
+}
+
 /* ─── Row build ────────────────────────────────────────────── */
 
 /** Exactly the payload `village_demographics_upsert` expects. */
@@ -168,8 +207,8 @@ export type CensusSeedRow = {
   block_name: string;
   district_name: string;
   state_name: string;
-  /** Census towns are a real market but must stay distinguishable. */
-  settlement_type: "village" | "town";
+  /** Census towns and city wards are real markets but must stay distinguishable. */
+  settlement_type: "village" | "town" | "ward";
   pop_total_2011: number;
   pop_male_2011: number;
   pop_female_2011: number;
@@ -225,11 +264,12 @@ const BLOCK_LEVELS = new Set([
 const DEFAULT_LEVELS = ["village"];
 
 /** Levels that are settlements rather than aggregates, and what to call them. */
-const SETTLEMENT_TYPE: Record<string, "village" | "town"> = {
+const SETTLEMENT_TYPE: Record<string, "village" | "town" | "ward"> = {
   village: "village",
   town: "town",
   ct: "town",
   censustown: "town",
+  ward: "ward",
 };
 
 /** A village's own 0-6 share is only trusted inside a plausible range. */
@@ -307,6 +347,7 @@ export function buildCensusRowsFromTable(
     const raw = table[r];
 
     const level = (at(raw, "level") || "").trim().toLowerCase().replace(/[^a-z]/g, "");
+    const seedingWards = wantedLevels.has("ward");
     if (hasLevels) {
       if (BLOCK_LEVELS.has(level) || BLOCK_LEVELS.has(level.replace(/\s/g, ""))) {
         // Remember it, then skip: a block line is the sum of its villages.
@@ -315,13 +356,40 @@ export function buildCensusRowsFromTable(
         skip("aggregate line (block total)");
         continue;
       }
+      // When seeding wards, a TOWN line is the aggregate above its wards —
+      // it becomes the wards' "block", the way a CD BLOCK line does for
+      // villages. When seeding towns themselves, it stays a leaf.
+      if (seedingWards && level === "town" && !wantedLevels.has("town")) {
+        const townName = nameCell(at(raw, "areaName"));
+        if (townName) {
+          carriedBlock = /\(ct\)/i.test(townName) ? "" : cityBlockName(townName);
+        }
+        skip("aggregate line (town total)");
+        continue;
+      }
       if (!wantedLevels.has(level)) {
         skip(`level "${level || "blank"}" is not a village`);
         continue;
       }
     }
 
-    const villageName = cleanVillageName(nameCell(at(raw, "areaName")));
+    // A census town's single "ward" IS the town, which the CDB seed already
+    // loaded under its CD block — seeding it again would double count.
+    if (level === "ward" && !carriedBlock) {
+      skip("census-town ward (duplicate of the town itself)");
+      continue;
+    }
+
+    let villageName = cleanVillageName(nameCell(at(raw, "areaName")));
+    if (level === "ward") {
+      const wardNo =
+        parseWardNumber(at(raw, "wardCode")) ?? parseWardNumber(at(raw, "areaName"));
+      if (wardNo === null) {
+        skip("ward row without a ward number");
+        continue;
+      }
+      villageName = `Ward ${wardNo}`;
+    }
     if (!villageName) {
       skip("no village name");
       continue;
@@ -369,7 +437,14 @@ export function buildCensusRowsFromTable(
     // A code that is all zeroes is a placeholder on an aggregate line, not an
     // identity — treat it as absent so it cannot collide with another.
     const rawCode = (at(raw, "censusCode") || "").trim();
-    const censusCode = /^0+$/.test(rawCode) ? "" : rawCode;
+    let censusCode = /^0+$/.test(rawCode) ? "" : rawCode;
+    if (level === "ward") {
+      // On a WARD row the Town/Village column holds the TOWN's code, shared
+      // by every ward in the town — used bare it would dedupe 90 wards into
+      // one row. Combine it with the ward number for a stable identity.
+      const rawWard = (at(raw, "wardCode") || "").trim();
+      censusCode = censusCode && rawWard ? `${censusCode}W${rawWard}` : "";
+    }
 
     const dedupeKey = censusCode
       ? `code:${censusCode}`
