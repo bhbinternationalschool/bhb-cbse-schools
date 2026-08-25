@@ -2065,6 +2065,7 @@ function StoreVendorDues() {
     balancePaise: number;
     amount: string;
     mode: string;
+    paidOn: string;
     reference: string;
   } | null>(null);
   const [paying, setPaying] = useState(false);
@@ -2154,6 +2155,7 @@ function StoreVendorDues() {
           billId: pay.billId,
           amountPaise,
           mode: pay.mode,
+          paidOn: pay.paidOn || undefined,
           reference: pay.reference.trim(),
         }),
       });
@@ -2356,6 +2358,9 @@ function StoreVendorDues() {
                                               balancePaise: b.balancePaise,
                                               amount: (b.balancePaise / 100).toFixed(2),
                                               mode: "bank",
+                                              paidOn: new Date()
+                                                .toISOString()
+                                                .slice(0, 10),
                                               reference: "",
                                             })
                                           }
@@ -2373,6 +2378,17 @@ function StoreVendorDues() {
                                             value={pay.amount}
                                             onChange={(e) =>
                                               setPay({ ...pay, amount: e.target.value })
+                                            }
+                                          />
+                                        </label>
+                                        <label className="text-[11px] text-[var(--muted)]">
+                                          Paid on
+                                          <input
+                                            type="date"
+                                            className={FIELD}
+                                            value={pay.paidOn}
+                                            onChange={(e) =>
+                                              setPay({ ...pay, paidOn: e.target.value })
                                             }
                                           />
                                         </label>

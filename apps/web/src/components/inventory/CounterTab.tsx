@@ -1520,9 +1520,11 @@ function SalesSection({
   const [collect, setCollect] = useState<InvSale | null>(null);
   const [collectInput, setCollectInput] = useState("");
   const [collectMode, setCollectMode] = useState<InvTenderMode>("cash");
+  const [collectOn, setCollectOn] = useState("");
 
   const [ret, setRet] = useState<InvSale | null>(null);
   const [retReason, setRetReason] = useState("");
+  const [retOn, setRetOn] = useState("");
   const [retRefundMode, setRetRefundMode] = useState<InvTenderMode>("cash");
   const [retRefundRef, setRetRefundRef] = useState("");
   const [retSettlement, setRetSettlement] = useState<"reduce_balance" | "refund">(
@@ -1551,7 +1553,12 @@ function SalesSection({
     const amount = inputToPaise(collectInput);
     if (amount <= 0) return;
     const res = await saver.run(() =>
-      invApi.collectOnSale({ saleId: collect.id, amountPaise: amount, mode: collectMode }),
+      invApi.collectOnSale({
+        saleId: collect.id,
+        amountPaise: amount,
+        mode: collectMode,
+        paidOn: collectOn || undefined,
+      }),
     );
     if (res) {
       saver.setNotice(
@@ -1587,6 +1594,7 @@ function SalesSection({
       invApi.postSaleReturn({
         saleId: ret.id,
         reason: retReason.trim(),
+        returnDate: retOn || undefined,
         settlement: retSettlement,
         refundMode: retSettlement === "refund" ? retRefundMode : "cash",
         refundReference:
@@ -1747,6 +1755,7 @@ function SalesSection({
                         onClick={() => {
                           setCollect(s);
                           setCollectInput(paiseToInput(s.balancePaise));
+                          setCollectOn(new Date().toISOString().slice(0, 10));
                         }}
                       >
                         Collect
@@ -1760,6 +1769,7 @@ function SalesSection({
                           setRet(s);
                           setRetQty({});
                           setRetReason("");
+                          setRetOn(new Date().toISOString().slice(0, 10));
                         }}
                       >
                         Return
@@ -1854,6 +1864,12 @@ function SalesSection({
               value={collectInput}
               onChange={setCollectInput}
             />
+            <TextField
+              label="Received on"
+              type="date"
+              value={collectOn}
+              onChange={setCollectOn}
+            />
             <SelectField
               label="Taken by"
               value={collectMode}
@@ -1890,13 +1906,21 @@ function SalesSection({
         {ret ? (
           <div className="space-y-3">
             <InvAlert error={saver.error} />
-            <TextField
-              label="Reason"
-              required
-              value={retReason}
-              onChange={setRetReason}
-              placeholder="e.g. Wrong size"
-            />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <TextField
+                label="Reason"
+                required
+                value={retReason}
+                onChange={setRetReason}
+                placeholder="e.g. Wrong size"
+              />
+              <TextField
+                label="Returned on"
+                type="date"
+                value={retOn}
+                onChange={setRetOn}
+              />
+            </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <SelectField
                 label="Settle by"

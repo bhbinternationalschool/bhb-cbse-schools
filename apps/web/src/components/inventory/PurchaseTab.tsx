@@ -107,6 +107,7 @@ function OrdersSection({ boot }: { boot: InvBootstrap }) {
   const [draft, setDraft] = useState<{
     id?: string;
     vendorId: string;
+    orderDate: string;
     expectedDate: string;
     freightInput: string;
     note: string;
@@ -126,6 +127,7 @@ function OrdersSection({ boot }: { boot: InvBootstrap }) {
   function openNew() {
     setDraft({
       vendorId: "",
+      orderDate: new Date().toISOString().slice(0, 10),
       expectedDate: "",
       freightInput: "",
       note: "",
@@ -137,6 +139,7 @@ function OrdersSection({ boot }: { boot: InvBootstrap }) {
     setDraft({
       id: o.id,
       vendorId: o.vendorId,
+      orderDate: o.orderDate,
       expectedDate: o.expectedDate,
       freightInput: paiseToInput(o.freightPaise),
       note: o.note,
@@ -199,6 +202,7 @@ function OrdersSection({ boot }: { boot: InvBootstrap }) {
         invApi.saveOrder({
           id: draft.id,
           vendorId: draft.vendorId,
+          orderDate: draft.orderDate || undefined,
           expectedDate: draft.expectedDate || undefined,
           freightPaise: inputToPaise(draft.freightInput),
           note: draft.note,
@@ -403,6 +407,12 @@ function OrdersSection({ boot }: { boot: InvBootstrap }) {
                 value={draft.vendorId}
                 options={vendorOptions}
                 onChange={(v) => setDraft((d) => (d ? { ...d, vendorId: v } : d))}
+              />
+              <TextField
+                label="Order date"
+                type="date"
+                value={draft.orderDate}
+                onChange={(v) => setDraft((d) => (d ? { ...d, orderDate: v } : d))}
               />
               <TextField
                 label="Expected delivery"
@@ -1438,6 +1448,7 @@ function BillsSection() {
     balancePaise: number;
     amountInput: string;
     mode: string;
+    paidOn: string;
     reference: string;
   } | null>(null);
 
@@ -1471,6 +1482,7 @@ function BillsSection() {
         billId: pay.billId,
         amountPaise: amount,
         mode: pay.mode,
+        paidOn: pay.paidOn || undefined,
         reference: pay.reference,
       }),
     );
@@ -1594,6 +1606,7 @@ function BillsSection() {
                             balancePaise: b.balancePaise,
                             amountInput: paiseToInput(b.balancePaise),
                             mode: "bank",
+                            paidOn: new Date().toISOString().slice(0, 10),
                             reference: "",
                           })
                         }
@@ -1671,6 +1684,12 @@ function BillsSection() {
               value={pay.amountInput}
               onChange={(v) => setPay((p) => (p ? { ...p, amountInput: v } : p))}
             />
+            <TextField
+              label="Paid on"
+              type="date"
+              value={pay.paidOn}
+              onChange={(v) => setPay((p) => (p ? { ...p, paidOn: v } : p))}
+            />
             <SelectField
               label="Paid by"
               value={pay.mode}
@@ -1694,8 +1713,9 @@ function BillsSection() {
               onChange={(v) => setPay((p) => (p ? { ...p, reference: v } : p))}
             />
             <p className="rounded-lg bg-muted/50 px-3 py-2 text-[11px] text-muted-foreground">
-              Payments are recorded against the bill here. They do not yet post
-              into the Accounts ledger — that arrives with the ledger rebuild.
+              The payment, the bill&rsquo;s balance and the ledger entry post
+              together — a backdated date books it on that day, in that
+              financial year.
             </p>
           </div>
         ) : null}
@@ -1713,6 +1733,7 @@ function ReturnsSection({ boot }: { boot: InvBootstrap }) {
 
   const [grnId, setGrnId] = useState("");
   const [reason, setReason] = useState("");
+  const [retOn, setRetOn] = useState(() => new Date().toISOString().slice(0, 10));
   const [qtyByLine, setQtyByLine] = useState<Record<string, string>>({});
   const [open, setOpen] = useState(false);
 
@@ -1746,6 +1767,7 @@ function ReturnsSection({ boot }: { boot: InvBootstrap }) {
         vendorId: grn.vendorId,
         locationId: grn.locationId || boot.settings.defaultLocationId,
         reason: reason.trim(),
+        returnDate: retOn || undefined,
         lines,
       }),
     );
@@ -1867,6 +1889,12 @@ function ReturnsSection({ boot }: { boot: InvBootstrap }) {
             }}
           />
 
+          <TextField
+            label="Return date"
+            type="date"
+            value={retOn}
+            onChange={setRetOn}
+          />
           <TextField
             label="Reason"
             required

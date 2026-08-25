@@ -278,6 +278,7 @@ export const invApi = {
     locationId: string;
     qty: number;
     unitCostPaise?: number;
+    at?: string;
     note?: string;
   }) =>
     req<{ qty: number }>("/stock", {
@@ -290,6 +291,7 @@ export const invApi = {
     locationId: string;
     countedQty: number;
     reason: string;
+    at?: string;
   }) =>
     req<{ delta: number; before: number; after: number }>("/stock", {
       method: "POST",
@@ -302,6 +304,7 @@ export const invApi = {
     toLocationId: string;
     qty: number;
     note?: string;
+    at?: string;
   }) =>
     req<{ qty: number }>("/stock", {
       method: "POST",
@@ -530,6 +533,7 @@ export const invApi = {
     amountPaise: number;
     mode?: InvTenderMode;
     reference?: string;
+    paidOn?: string;
   }) =>
     req<{ paidPaise: number; balancePaise: number; status: InvSaleStatus }>(
       "/sales",

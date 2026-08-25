@@ -408,6 +408,9 @@ function TransferDrawer({
   const [fromId, setFromId] = useState("");
   const [toId, setToId] = useState("");
   const [qty, setQty] = useState("");
+  const [movedOn, setMovedOn] = useState(() =>
+    new Date().toISOString().slice(0, 10),
+  );
   const [note, setNote] = useState("");
 
   const options = boot.locations
@@ -422,6 +425,7 @@ function TransferDrawer({
         fromLocationId: fromId,
         toLocationId: toId,
         qty: Number(qty) || 0,
+        at: movedOn || undefined,
         note,
       }),
     );
@@ -475,6 +479,12 @@ function TransferDrawer({
           />
         </div>
         <NumberField label="Quantity" value={qty} onChange={setQty} />
+        <TextField
+          label="Moved on"
+          type="date"
+          value={movedOn}
+          onChange={setMovedOn}
+        />
         <TextField label="Note" value={note} onChange={setNote} />
         <p className="rounded-lg bg-muted/50 px-3 py-2 text-[11px] text-muted-foreground">
           A move is recorded as two ledger entries — out of one location, into
@@ -504,6 +514,9 @@ function CountDrawer({
   );
   const [counted, setCounted] = useState("");
   const [reason, setReason] = useState("");
+  const [countedOn, setCountedOn] = useState(() =>
+    new Date().toISOString().slice(0, 10),
+  );
 
   const delta =
     item && counted !== "" ? (Number(counted) || 0) - item.qtyOnHand : 0;
@@ -516,6 +529,7 @@ function CountDrawer({
         locationId,
         countedQty: Number(counted) || 0,
         reason: reason.trim(),
+        at: countedOn || undefined,
       }),
     );
     if (res) {
@@ -565,6 +579,12 @@ function CountDrawer({
           label="Counted quantity"
           value={counted}
           onChange={setCounted}
+        />
+        <TextField
+          label="Counted on"
+          type="date"
+          value={countedOn}
+          onChange={setCountedOn}
         />
         {counted !== "" && delta !== 0 ? (
           <p
