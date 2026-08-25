@@ -61,6 +61,7 @@ export async function GET(req: Request) {
 
     const status = q.get("status");
     const query: InvSaleQuery = {
+      saleId: q.get("saleId") ?? "",
       search: q.get("search") ?? "",
       buyerKind: (q.get("buyerKind") as InvBuyerKind | null) ?? "",
       status: (status as InvSaleQuery["status"]) ?? "all",

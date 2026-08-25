@@ -68,9 +68,13 @@ function sanitizeSearch(raw: unknown): string {
 export async function findStudents(
   search: string,
   academicYearCode: string,
+  classId = "",
+  sectionId = "",
 ): Promise<InvBuyerStudent[]> {
   const term = sanitizeSearch(search);
-  if (term.length < 2) return [];
+  // With a class chosen the counter is browsing a roster, not searching —
+  // an empty term then means "everyone in this class".
+  if (term.length < 2 && !classId) return [];
 
   const { sb, tenantId } = await invCtx();
   let q = sb
@@ -79,15 +83,20 @@ export async function findStudents(
       "id, full_name, admission_no, class_id, section_id, roll_no, father_name," +
         " father_mobile, mother_mobile, household_id, status, academic_year_code",
     )
-    .eq("tenant_id", tenantId)
-    .or(
+    .eq("tenant_id", tenantId);
+
+  if (term.length >= 2) {
+    q = q.or(
       `full_name.ilike.%${term}%,admission_no.ilike.%${term}%,` +
         `roll_no.ilike.%${term}%,father_mobile.ilike.%${term}%`,
     );
+  }
+  if (classId) q = q.eq("class_id", classId);
+  if (sectionId) q = q.eq("section_id", sectionId);
 
   if (academicYearCode) q = q.eq("academic_year_code", academicYearCode);
 
-  const { data, error } = await q.order("full_name").limit(30);
+  const { data, error } = await q.order("full_name").limit(classId ? 80 : 30);
   if (error) throw new InvError(`Student search: ${error.message}`, 500);
 
   // sis_students is outside this module's generated types, so the row shape
@@ -194,6 +203,7 @@ export async function listSales(query: InvSaleQuery): Promise<InvSalePage> {
     .select("*", { count: "exact" })
     .eq("tenant_id", tenantId);
 
+  if (query.saleId) q = q.eq("id", query.saleId);
   if (query.status === "unpaid") q = q.in("status", ["open", "part_paid"]);
   else if (query.status && query.status !== "all") q = q.eq("status", query.status);
   if (query.buyerKind) q = q.eq("buyer_kind", query.buyerKind);
@@ -276,6 +286,7 @@ export async function listSales(query: InvSaleQuery): Promise<InvSalePage> {
         buyerName: str(r.buyer_name),
         buyerPhone: str(r.buyer_phone),
         classId: str(r.class_id),
+        sectionId: str(r.section_id),
         locationId: str(r.location_id),
         priceListId: str(r.price_list_id),
         kitId: str(r.kit_id),
@@ -314,6 +325,7 @@ export async function postSale(
     buyerName?: string;
     buyerPhone?: string;
     classId?: string;
+    sectionId?: string;
     locationId?: string;
     priceListId?: string;
     kitId?: string;
@@ -363,6 +375,7 @@ export async function postSale(
       buyer_name: str(input.buyerName),
       buyer_phone: str(input.buyerPhone),
       class_id: str(input.classId),
+      section_id: str(input.sectionId),
       location_id: input.locationId || null,
       price_list_id: input.priceListId || null,
       kit_id: input.kitId || null,

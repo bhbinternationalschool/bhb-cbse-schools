@@ -73,6 +73,9 @@ export function InventoryWorkspace() {
   // Class names come from masters, which is still a localStorage-backed
   // module. Only the labels are used here — kit assignments store class ids.
   const [classes, setClasses] = useState<{ id: string; label: string }[]>([]);
+  const [sections, setSections] = useState<
+    { id: string; classId: string; label: string }[]
+  >([]);
   useEffect(() => {
     let alive = true;
     void ensureMastersHydrated()
@@ -85,6 +88,11 @@ export function InventoryWorkspace() {
             .filter((c) => c.isActive !== false)
             .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
             .map((c) => ({ id: c.id, label: c.name })),
+        );
+        setSections(
+          (m.sections ?? [])
+            .filter((s) => s.isActive !== false)
+            .map((s) => ({ id: s.id, classId: s.classId, label: s.name })),
         );
       });
     return () => {
@@ -122,7 +130,7 @@ export function InventoryWorkspace() {
       ) : (
         <div className="pt-1">
           {tab === "counter" ? (
-            <CounterTab boot={boot.data} classes={classes} />
+            <CounterTab boot={boot.data} classes={classes} sections={sections} />
           ) : null}
           {tab === "catalogue" ? (
             <CatalogueTab boot={boot.data} onChanged={boot.reload} />

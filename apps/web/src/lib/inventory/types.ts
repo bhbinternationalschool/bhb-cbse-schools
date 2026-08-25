@@ -670,6 +670,7 @@ export type InvSale = {
   buyerName: string;
   buyerPhone: string;
   classId: string;
+  sectionId: string;
   locationId: string;
   priceListId: string;
   kitId: string;
@@ -735,6 +736,7 @@ export type InvBuyerStudent = {
 };
 
 export type InvSaleQuery = {
+  saleId?: string;
   search?: string;
   buyerKind?: InvBuyerKind | "";
   status?: InvSaleStatus | "unpaid" | "all";
