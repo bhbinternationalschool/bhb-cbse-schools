@@ -24,6 +24,10 @@ PROD_REF="ymamhlcrjsuilzdonkzl"     # BHB School — PRODUCTION, must never appe
 echo "Filling in $ENV_FILE"
 echo "Values are hidden as you type and are never echoed back."
 echo
+echo "NOTHING WILL APPEAR as you paste. That is deliberate, not a hang."
+echo "Paste ONCE and press Enter — pasting twice silently doubles the value,"
+echo "and the character count printed after each entry tells you it worked."
+echo
 echo "All three come from the Supabase dashboard for the VERIFICATION project:"
 echo "  https://supabase.com/dashboard/project/${VERIFY_REF}"
 echo
@@ -33,8 +37,32 @@ ask() {
   local prompt="$1" __var="$2" value=""
   printf "%s\n  > " "$prompt"
   read -rs value
-  printf "\n"
+  # Confirm something landed, without revealing any of it. A silent prompt is
+  # exactly why the value gets pasted twice.
+  printf "\n  (read %s characters)\n" "${#value}"
   printf -v "$__var" '%s' "$value"
+}
+
+# A pasted-twice value passes every content check — it still starts with the
+# right prefix, still names the right project, still has no placeholder left in
+# it. It has to be caught structurally instead.
+no_whitespace() {
+  case "$1" in
+    *[[:space:]]*) return 1 ;;
+  esac
+  return 0
+}
+
+count_occurrences() {
+  # rest is assigned on its own line: inside a single `local`, $haystack is not
+  # yet visible, and `set -u` turns that into "unbound variable".
+  local haystack="$1" needle="$2" n=0 rest
+  rest="$haystack"
+  while [[ "$rest" == *"$needle"* ]]; do
+    rest="${rest#*"$needle"}"
+    n=$((n + 1))
+  done
+  printf '%s' "$n"
 }
 
 fail() { echo; echo "REFUSED: $1"; echo "Nothing was written."; exit 1; }
@@ -42,7 +70,14 @@ fail() { echo; echo "REFUSED: $1"; echo "Nothing was written."; exit 1; }
 # ── service_role key ────────────────────────────────────────────
 ask "service_role key  (Project Settings -> API Keys -> service_role -> Reveal)" SR
 [[ -n "$SR" ]] || fail "no value given"
+no_whitespace "$SR" || fail "that value contains a space or newline — it looks like two things pasted together, or a partial copy"
 [[ "$SR" == eyJ* ]] || fail "that does not look like a Supabase key (expected it to start with eyJ)"
+# A JWT is exactly three dot-separated parts. Two keys pasted back to back give
+# five, and would otherwise sail through every check below: cut -d. -f2 still
+# finds a decodable segment in the middle of the wreckage.
+SR_DOTS="$(count_occurrences "$SR" ".")"
+[[ "$SR_DOTS" == "2" ]] || fail "that is not one key — a Supabase key has 3 dot-separated parts and this has $((SR_DOTS + 1)). Did it get pasted twice? Paste once; the character count after the prompt confirms it."
+[[ "$(count_occurrences "$SR" "eyJ")" -le 2 ]] || fail "that looks like more than one key pasted together"
 
 # A Supabase key is a JWT: its middle segment names the project and the role.
 # Decoding it locally is what lets this refuse a production key instead of
@@ -69,7 +104,21 @@ echo "  ok: service_role key for $VERIFY_REF"
 check_url() {
   local url="$1" label="$2"
   [[ -n "$url" ]] || fail "no $label given"
+  no_whitespace "$url" || fail "that $label contains a space or newline — it looks like two things pasted together, or a partial copy"
   [[ "$url" == postgresql://* || "$url" == postgres://* ]] || fail "$label should start with postgresql://"
+  # One URL carries exactly one scheme. "postgresql://" does NOT contain
+  # "postgres://" — after "postgres" comes "q", not ":" — so these two counts do
+  # not overlap and a single URL totals 1 whichever form it uses.
+  local schemes
+  schemes=$(( $(count_occurrences "$url" "postgresql://") + $(count_occurrences "$url" "postgres://") ))
+  [[ "$schemes" -le 1 ]] || fail "that $label contains $schemes connection strings, not one. Did it get pasted twice? Paste once; the character count after the prompt confirms it."
+  # NOT a refusal: a password may legitimately contain '@', and libpq splits on
+  # the LAST one, so such a URL does work. Worth flagging though, because some
+  # clients split on the first '@' instead and then fail confusingly.
+  if [[ "$(count_occurrences "$url" "@")" != "1" ]]; then
+    echo "  note: that $label has more than one '@', so the password probably contains one."
+    echo "        It works here, but if another tool rejects it, encode '@' as %40."
+  fi
   [[ "$url" == *"$PROD_REF"* ]] && fail "that $label points at PRODUCTION ($PROD_REF)"
   [[ "$url" == *"$VERIFY_REF"* ]] || fail "that $label does not mention the verification project ($VERIFY_REF)"
   [[ "$url" == *"[YOUR-PASSWORD]"* || "$url" == *"YOUR-PASSWORD"* ]] && fail "$label still has the placeholder password in it — replace [YOUR-PASSWORD] with the real one"
