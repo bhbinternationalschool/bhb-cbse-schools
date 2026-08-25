@@ -8,6 +8,11 @@ import {
 import { UnpostedEntriesBanner } from "@/components/accounts/UnpostedEntriesBanner";
 import { DeskSyncBanner } from "@/components/accounts/DeskSyncBanner";
 import {
+  BankReconPanel,
+  LedgerBookPanel,
+  LedgerReportsPanel,
+} from "@/components/accounts/LedgerPanels";
+import {
   BanksPanel,
   BillsPanel,
   BooksPanel,
@@ -19,6 +24,7 @@ import {
   ReportsPanel,
 } from "@/components/accounts/AccountsPanels";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { hasPermission } from "@/lib/rbac";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { SkeletonModulePage } from "@/components/ui/skeleton";
@@ -32,6 +38,9 @@ import { dayCloseNeedsAttention } from "@/lib/fees";
 
 type AccountsTab =
   | "dashboard"
+  | "book"
+  | "bookreports"
+  | "recon"
   | "daybook"
   | "cash"
   | "banks"
@@ -45,6 +54,9 @@ type AccountsTab =
 
 const TABS: ModuleTabItem[] = [
   { id: "dashboard", label: "Dashboard", tone: "navy" },
+  { id: "book", label: "Server book", tone: "green" },
+  { id: "bookreports", label: "Book reports", tone: "green" },
+  { id: "recon", label: "Bank recon", tone: "green" },
   { id: "daybook", label: "Day book", tone: "teal" },
   { id: "cash", label: "Cash", tone: "green" },
   { id: "banks", label: "Banks", tone: "sky" },
@@ -59,6 +71,9 @@ const TABS: ModuleTabItem[] = [
 
 export function AccountsWorkspace() {
   const session = useDemoSession();
+  // Running the projection is a bulk write to the book; the button only
+  // renders for someone the API would let through anyway.
+  const canApprove = hasPermission(session, null, "accounts", "approve");
   const [tab, setTab] = useState<AccountsTab>("dashboard");
 
   useEffect(() => {
@@ -66,6 +81,9 @@ export function AccountsWorkspace() {
     const raw = new URLSearchParams(window.location.search).get("tab");
     const allowed: AccountsTab[] = [
       "dashboard",
+      "book",
+      "bookreports",
+      "recon",
       "daybook",
       "cash",
       "banks",
@@ -186,6 +204,16 @@ export function AccountsWorkspace() {
           moduleId="accounts"
           refreshKey={tick}
           onNavigateTab={(t) => setTab(t as AccountsTab)}
+        />
+      ) : tab === "book" ? (
+        <LedgerBookPanel canApprove={canApprove} />
+      ) : tab === "bookreports" ? (
+        <LedgerReportsPanel />
+      ) : tab === "recon" ? (
+        <BankReconPanel
+          banks={(state.bankAccounts ?? [])
+            .filter((b) => b.isActive !== false)
+            .map((b) => ({ id: b.id, name: b.name }))}
         />
       ) : tab === "daybook" ? (
         <DayBookPanel {...panelProps} />
