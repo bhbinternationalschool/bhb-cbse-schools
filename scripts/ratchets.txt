@@ -60,6 +60,17 @@ dynamic_public_env|0|Dynamic process.env[...NEXT_PUBLIC...] reads (always undefi
 # (…215000 / …225000), verified by applying the whole set to an empty database
 # in filename order. The remaining 1 is 20260814170000 (chat_messages +
 # fleet_edge_events), long since committed and both applied — harmless where it
-# sits, not worth rewriting history for. Target is 0 if that pair is ever
-# renumbered; it must never go up.
-duplicate_migration_versions|1|Migration files sharing one version prefix
+# sits, not worth rewriting history for.
+#
+# That last sentence was WRONG, and 2026-08-25 proved it. `version` is the
+# PRIMARY KEY of supabase_migrations.schema_migrations, so a colliding pair
+# makes a fresh `supabase db push` impossible: the first file of the pair is
+# recorded, the second dies on a duplicate key, and the apply stops there —
+# 156 of 222 migrations in, on the verification project. It is invisible on any
+# database where the migrations have already run, and invisible to a raw
+# `psql -f` rehearsal, which never touches the history table at all.
+#
+# fleet_edge_events was renumbered to 20260814171000 (the two files are
+# independent, so the order between them carries no meaning). Budget is now 0
+# and must stay there.
+duplicate_migration_versions|0|Migration files sharing one version prefix

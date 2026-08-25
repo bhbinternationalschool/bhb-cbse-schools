@@ -1,6 +1,21 @@
-{
-  "project_id": "bhb-international",
-  "db": {
-    "major_version": 15
-  }
-}
+# Supabase CLI config.
+#
+# This file must be TOML. It was committed as JSON in the initial commit, which
+# made every `supabase` CLI command fail before it did anything:
+#
+#   failed to load config: Invalid TOML document: incomplete key-value
+#
+# That is almost certainly why the verification project was never populated —
+# `supabase db push` could not start, so migrations only ever ran against
+# production by hand.
+#
+# major_version was also wrong: it said 15, while both the production and
+# verification projects run Postgres 17. The CLI uses it to decide which
+# Postgres image local development runs and which server it expects, so a
+# mismatch means rehearsing migrations against a different engine than the one
+# that will actually run them.
+
+project_id = "bhb-international"
+
+[db]
+major_version = 17
