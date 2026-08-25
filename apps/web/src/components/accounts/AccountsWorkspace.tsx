@@ -18,15 +18,9 @@ import {
   VoucherEntryPanel,
 } from "@/components/accounts/LedgerEntryPanels";
 import {
-  BanksPanel,
   BillsPanel,
-  BooksPanel,
-  CashBookPanel,
-  DayBookPanel,
   DayCloseAccountsPanel,
-  ExpensesPanel,
   OwnerLoansPanel,
-  ReportsPanel,
 } from "@/components/accounts/AccountsPanels";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { hasPermission } from "@/lib/rbac";
@@ -47,16 +41,24 @@ type AccountsTab =
   | "vouchers"
   | "bookreports"
   | "recon"
-  | "daybook"
-  | "cash"
-  | "banks"
   | "masters"
-  | "expenses"
   | "bills"
   | "owner"
-  | "books"
-  | "dayclose"
-  | "reports";
+  | "dayclose";
+
+/**
+ * Where a retired browser-book tab now lives in the server book. Deep links
+ * and dashboard cards still point at the old ids; they land on the
+ * replacement instead of a dead tab.
+ */
+const LEGACY_TAB_MAP: Record<string, AccountsTab> = {
+  daybook: "vouchers",
+  cash: "bookreports",
+  banks: "bookreports",
+  expenses: "vouchers",
+  books: "bookreports",
+  reports: "bookreports",
+};
 
 const TABS: ModuleTabItem[] = [
   { id: "dashboard", label: "Dashboard", tone: "navy" },
@@ -64,16 +66,10 @@ const TABS: ModuleTabItem[] = [
   { id: "vouchers", label: "Vouchers", tone: "green" },
   { id: "bookreports", label: "Book reports", tone: "green" },
   { id: "recon", label: "Bank recon", tone: "green" },
-  { id: "daybook", label: "Day book", tone: "teal" },
-  { id: "cash", label: "Cash", tone: "green" },
-  { id: "banks", label: "Banks", tone: "sky" },
   { id: "masters", label: "Masters", tone: "violet" },
-  { id: "expenses", label: "Expenses", tone: "amber" },
   { id: "bills", label: "Bills & AP", tone: "violet" },
   { id: "owner", label: "Owner loans", tone: "coral" },
-  { id: "books", label: "Books", tone: "slate" },
   { id: "dayclose", label: "Day close", tone: "rose" },
-  { id: "reports", label: "Reports", tone: "navy" },
 ];
 
 export function AccountsWorkspace() {
@@ -92,18 +88,13 @@ export function AccountsWorkspace() {
       "vouchers",
       "bookreports",
       "recon",
-      "daybook",
-      "cash",
-      "banks",
       "masters",
-      "expenses",
       "bills",
       "owner",
-      "books",
       "dayclose",
-      "reports",
     ];
     if (raw && (allowed as string[]).includes(raw)) setTab(raw as AccountsTab);
+    else if (raw && LEGACY_TAB_MAP[raw]) setTab(LEGACY_TAB_MAP[raw]);
   }, []);
   const [state, setState] = useState<AccountsState | null>(() =>
     typeof window !== "undefined" ? seedAccountsIfEmpty() : null,
@@ -212,7 +203,9 @@ export function AccountsWorkspace() {
         <ModuleDashboardHost
           moduleId="accounts"
           refreshKey={tick}
-          onNavigateTab={(t) => setTab(t as AccountsTab)}
+          // Dashboard cards still name retired tabs; land them on the
+          // server-book replacement instead of a blank screen.
+          onNavigateTab={(t) => setTab(LEGACY_TAB_MAP[t] ?? (t as AccountsTab))}
         />
       ) : tab === "book" ? (
         <LedgerBookPanel canApprove={canApprove} />
@@ -241,32 +234,17 @@ export function AccountsWorkspace() {
             .filter((b) => b.isActive !== false)
             .map((b) => ({ id: b.id, name: b.name }))}
         />
-      ) : tab === "daybook" ? (
-        <>
-          <LegacyBookNotice tab="Day book" />
-          <DayBookPanel {...panelProps} />
-        </>
-      ) : tab === "cash" ? (
-        <CashBookPanel {...panelProps} />
-      ) : tab === "banks" ? (
-        <BanksPanel {...panelProps} />
       ) : tab === "masters" ? (
         <AccountsMastersPanel {...panelProps} />
-      ) : tab === "expenses" ? (
-        <>
-          <LegacyBookNotice tab="Expenses" />
-          <ExpensesPanel {...panelProps} />
-        </>
       ) : tab === "bills" ? (
         <BillsPanel {...panelProps} />
       ) : tab === "owner" ? (
-        <OwnerLoansPanel {...panelProps} />
-      ) : tab === "books" ? (
-        <BooksPanel {...panelProps} />
+        <>
+          <LegacyBookNotice tab="Owner loans — use the owner-loan presets in Vouchers" />
+          <OwnerLoansPanel {...panelProps} />
+        </>
       ) : tab === "dayclose" ? (
         <DayCloseAccountsPanel {...panelProps} />
-      ) : tab === "reports" ? (
-        <ReportsPanel {...panelProps} />
       ) : null}
     </ErpWorkspaceShell>
   );

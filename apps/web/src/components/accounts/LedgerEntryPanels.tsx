@@ -133,6 +133,8 @@ const PRESETS: {
   label: string;
   kind: VoucherKind;
   hint: string;
+  /** Party classification the preset implies; "other" unless it matters. */
+  partyKind?: "trustee" | "staff" | "other";
   lines: () => EntryLine[];
 }[] = [
   {
@@ -166,6 +168,28 @@ const PRESETS: {
     ],
   },
   {
+    id: "loan-in",
+    label: "Owner loan received",
+    kind: "receipt",
+    hint: "Money a trustee lends the school: debit cash/bank, credit 2100 under their name",
+    partyKind: "trustee",
+    lines: () => [
+      { accountCode: "1000", debit: "", credit: "", bankId: "" },
+      { accountCode: "2100", debit: "", credit: "", bankId: "" },
+    ],
+  },
+  {
+    id: "loan-out",
+    label: "Owner loan repaid",
+    kind: "payment",
+    hint: "Repaying a trustee: debit 2100 under their name, credit cash/bank",
+    partyKind: "trustee",
+    lines: () => [
+      { accountCode: "2100", debit: "", credit: "", bankId: "" },
+      { accountCode: "1000", debit: "", credit: "", bankId: "" },
+    ],
+  },
+  {
     id: "journal",
     label: "Blank journal",
     kind: "journal",
@@ -191,6 +215,7 @@ export function VoucherEntryPanel({
   const [date, setDate] = useState(todayIso());
   const [narration, setNarration] = useState("");
   const [partyName, setPartyName] = useState("");
+  const [partyKind, setPartyKind] = useState<"trustee" | "staff" | "other">("other");
   const [instrumentMode, setInstrumentMode] = useState("");
   const [instrumentRef, setInstrumentRef] = useState("");
   const [lines, setLines] = useState<EntryLine[]>(PRESETS[0].lines());
@@ -210,11 +235,20 @@ export function VoucherEntryPanel({
     if (!p) return;
     setKind(p.kind);
     setLines(p.lines());
+    setPartyKind(p.partyKind ?? "other");
     setNotice(null);
   };
 
   const setLine = (i: number, patch: Partial<EntryLine>) =>
     setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+
+  // 2100 is a control account: a loan without a lender is not a fact the
+  // book can hold — the trustee's name is what makes it a sub-ledger.
+  const missingParty =
+    !partyName.trim() &&
+    lines.some(
+      (l) => l.accountCode === "2100" && (paiseFromRupees(l.debit) > 0 || paiseFromRupees(l.credit) > 0),
+    );
 
   const missingBank = lines.some(
     (l) =>
@@ -228,7 +262,8 @@ export function VoucherEntryPanel({
     totals.dr > 0 &&
     totals.dr === totals.cr &&
     lines.filter((l) => l.accountCode && (paiseFromRupees(l.debit) > 0 || paiseFromRupees(l.credit) > 0)).length >= 2 &&
-    !missingBank;
+    !missingBank &&
+    !missingParty;
 
   const post = async () => {
     if (!postable || busy) return;
@@ -237,7 +272,7 @@ export function VoucherEntryPanel({
     try {
       const party = partyName.trim()
         ? {
-            kind: "other" as const,
+            kind: partyKind,
             externalId: `manual:${partyName.trim().toLowerCase().replace(/\s+/g, "-")}`,
             name: partyName.trim(),
           }
@@ -449,6 +484,11 @@ export function VoucherEntryPanel({
           {missingBank ? (
             <span className="ml-2 font-bold text-[var(--warning)]">
               say which bank — the reconciliation depends on it
+            </span>
+          ) : null}
+          {missingParty ? (
+            <span className="ml-2 font-bold text-[var(--warning)]">
+              a loan needs the trustee&rsquo;s name in Party
             </span>
           ) : null}
         </p>
