@@ -83,18 +83,14 @@ if [[ -f "$ENV_VERIFY" ]]; then
   fi
 fi
 
-# NOTE ON PASSWORDS. The CLI cannot handle a database password containing
-# characters that need percent-encoding in a URL:
+# A percent-encoded password in --db-url works. It did NOT work in the minutes
+# straight after a password rotation: the pooler kept rejecting it with 28P01
+# while psql, connecting directly with the identical string, succeeded. The
+# pooler caches credentials, so a freshly rotated password takes a short while
+# to be accepted there.
 #
-#   * encoded in the URL  -> it re-parses and authenticates as "postgres"
-#                            instead of "postgres.<ref>", failing 28P01, even
-#                            though psql connects with the identical string
-#   * decoded in the URL  -> the URL no longer parses
-#   * SUPABASE_DB_PASSWORD -> ignored when --db-url is passed
-#
-# So the database password for the verification project should be letters and
-# digits only. That is not a workaround for a bug in this script; it removes a
-# whole class of tool-specific parsing difference in one step.
+# If this fails with 28P01 right after a rotation, wait a minute and run it
+# again before changing anything.
 push_with() {
   npx --yes supabase@latest db push --db-url "$1" --include-all
 }
@@ -108,12 +104,12 @@ elif [[ -n "$SESSION_POOLER" ]]; then
   echo ""
   if ! push_with "$SESSION_POOLER"; then
     echo "" >&2
-    echo "If that failed on the PASSWORD (SQLSTATE 28P01) rather than the host, the" >&2
-    echo "cause is almost certainly special characters in it. The Supabase CLI cannot" >&2
-    echo "read a password that needs percent-encoding in a URL, even when psql can." >&2
+    echo "If that failed on the PASSWORD (SQLSTATE 28P01) rather than the host, and you" >&2
+    echo "have just rotated it, wait a minute and try again — the pooler caches" >&2
+    echo "credentials and takes a short while to accept a new one." >&2
     echo "" >&2
-    echo "  Reset the verification project's database password to letters and digits" >&2
-    echo "  only, then:  bash scripts/set-verify-env.sh --urls-only" >&2
+    echo "If it still fails, check the URL is the pooler one (host *.pooler.supabase.com," >&2
+    echo "user postgres.<ref>) with:  bash scripts/set-verify-env.sh --urls-only" >&2
     exit 4
   fi
 else
