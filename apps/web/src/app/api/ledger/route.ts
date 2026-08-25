@@ -21,6 +21,12 @@ import {
   ledgerCloseFiscalYear,
   ledgerFindVoucher,
   ledgerListAccounts,
+  ledgerSaveExpenseHead,
+  ledgerRemoveExpenseHead,
+  ledgerListCostCentres,
+  ledgerSaveCostCentre,
+  ledgerRemoveCostCentre,
+  ledgerSpendByCentre,
   ledgerLockPeriod,
   ledgerOpenBalances,
   ledgerParityAgainstDesk,
@@ -141,6 +147,12 @@ type PostBody =
   | { action: "parity"; deskRows: { code: string; balancePaise: number }[] }
   | { action: "vendor-dues" }
   | { action: "accounts" }
+  | { action: "save-expense-head"; code?: string; name: string; parentCode?: string }
+  | { action: "remove-expense-head"; code: string }
+  | { action: "cost-centres" }
+  | { action: "save-cost-centre"; code?: string; name: string }
+  | { action: "remove-cost-centre"; code: string }
+  | { action: "spend-by-centre"; fromDate: string; toDate: string }
   | { action: "fee-advances" }
   | { action: "release-fee-advances"; academicYearCode: string; date?: string }
   | { action: "find-voucher"; voucherNo: string }
@@ -196,6 +208,8 @@ export async function POST(req: Request) {
     "accounts",
     "find-voucher",
     "fee-advances",
+    "cost-centres",
+    "spend-by-centre",
   ]);
 
   const auth = await requireStaffPermission(
@@ -369,6 +383,40 @@ export async function POST(req: Request) {
     case "accounts": {
       // The chart, for entry forms — postable accounts only.
       return NextResponse.json({ ok: true, accounts: await ledgerListAccounts() });
+    }
+    case "save-expense-head": {
+      // Category → sub-head structure for expenses, kept in the chart itself
+      // so entries, statements and the CA pack all roll up the same way.
+      const res = await ledgerSaveExpenseHead({
+        code: body.code,
+        name: body.name,
+        parentCode: body.parentCode,
+      });
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    case "remove-expense-head": {
+      const res = await ledgerRemoveExpenseHead(body.code);
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    case "cost-centres": {
+      return NextResponse.json({ ok: true, centres: await ledgerListCostCentres() });
+    }
+    case "save-cost-centre": {
+      const res = await ledgerSaveCostCentre({ code: body.code, name: body.name });
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    case "remove-cost-centre": {
+      const res = await ledgerRemoveCostCentre(body.code);
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    case "spend-by-centre": {
+      // Expense debits net of credits, tag × head — how much Bus-1 took in
+      // fuel, EMI and service over a period.
+      const rows = await ledgerSpendByCentre({
+        fromDate: body.fromDate,
+        toDate: body.toDate,
+      });
+      return NextResponse.json({ ok: true, rows });
     }
     case "find-voucher": {
       // A reversal needs the id behind the number a statement line shows.

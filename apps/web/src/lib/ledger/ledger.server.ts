@@ -384,26 +384,369 @@ export async function ledgerTrialBalance(): Promise<{
   return { ok: true, rows };
 }
 
-/** Every postable account, for entry forms. Group headings are excluded. */
+/**
+ * Every postable account, for entry forms. Group headings are excluded, and a
+ * category that has sub-heads is marked so the forms offer only its sub-heads.
+ * The book itself still accepts a heading (deliberately: reversing an old
+ * voucher must be able to touch the account it was posted to) — the guard
+ * lives in what the forms offer, not in what the book refuses.
+ */
 export async function ledgerListAccounts(): Promise<
-  { code: string; name: string; kind: string; isCash: boolean; isBank: boolean }[]
+  {
+    code: string;
+    name: string;
+    kind: string;
+    parentCode: string;
+    hasChildren: boolean;
+    isCash: boolean;
+    isBank: boolean;
+  }[]
 > {
   const ctx = await getServerTenantContext();
   if (!ctx) return [];
   const { data } = await ctx.sb
     .from("ledger_accounts")
-    .select("code, name, kind, is_cash, is_bank")
+    .select("code, name, kind, parent_code, is_cash, is_bank, is_active")
     .eq("tenant_id", ctx.tenantId)
     .order("code", { ascending: true });
-  return ((data ?? []) as Record<string, unknown>[])
+  const rows = ((data ?? []) as Record<string, unknown>[]).filter(
+    (r) => r.is_active !== false,
+  );
+  const parents = new Set(rows.map((r) => String(r.parent_code ?? "")));
+  return rows
     .filter((r) => isPostableLedgerCode(String(r.code)))
     .map((r) => ({
       code: String(r.code),
       name: String(r.name),
       kind: String(r.kind),
+      parentCode: String(r.parent_code ?? ""),
+      hasChildren: parents.has(String(r.code)),
       isCash: r.is_cash === true,
       isBank: r.is_bank === true,
     }));
+}
+
+/* ─── Expense heads: category → sub-heads ──────────────────── */
+
+/**
+ * Codes the system posts to automatically — the store's COGS, write-offs,
+ * concession projection. Giving one of these sub-heads would turn it into a
+ * heading the entry forms hide, while the automation kept posting to it: two
+ * views of one account. So they stay leaves.
+ */
+const RESERVED_EXPENSE_CODES = new Set(["5060", "5065", "5066", "5100"]);
+
+/**
+ * Create or rename an expense head.
+ *
+ * Two levels only, mirroring how the office thinks: a CATEGORY (Utilities)
+ * holds SUB-HEADS (Electricity, Diesel, Water). Categories get the next free
+ * 53xx-58xx code; sub-heads get `<category>.NN`, which sorts under their
+ * category in every report without a mapping table. A category that gains its
+ * first sub-head stops being offered on entry forms — its history stays put.
+ */
+export async function ledgerSaveExpenseHead(input: {
+  /** Present = rename that account; absent = create. */
+  code?: string;
+  name: string;
+  /** For a new sub-head: the category's code. Absent = new category. */
+  parentCode?: string;
+}): Promise<{ ok: boolean; error?: string; code?: string }> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
+  const { sb, tenantId } = ctx;
+  const name = String(input.name ?? "").trim();
+  if (!name) return { ok: false, error: "The head needs a name" };
+
+  if (input.code) {
+    const code = String(input.code).trim();
+    if (RESERVED_EXPENSE_CODES.has(code)) {
+      return { ok: false, error: "That head is posted by the system and cannot be renamed" };
+    }
+    const { data: acc } = await sb
+      .from("ledger_accounts")
+      .select("id, kind")
+      .eq("tenant_id", tenantId)
+      .eq("code", code)
+      .maybeSingle();
+    if (!acc || String(acc.kind) !== "expense") {
+      return { ok: false, error: "No expense head with that code" };
+    }
+    const { error } = await sb
+      .from("ledger_accounts")
+      .update({ name, updated_at: new Date().toISOString() })
+      .eq("tenant_id", tenantId)
+      .eq("code", code);
+    if (error) return { ok: false, error: error.message };
+    return { ok: true, code };
+  }
+
+  const { data: all } = await sb
+    .from("ledger_accounts")
+    .select("code, name, kind, parent_code, schedule_group")
+    .eq("tenant_id", tenantId);
+  const rows = (all ?? []) as Record<string, unknown>[];
+  const codes = new Set(rows.map((r) => String(r.code)));
+
+  if (input.parentCode) {
+    const parentCode = String(input.parentCode).trim();
+    const parent = rows.find((r) => String(r.code) === parentCode);
+    if (!parent || String(parent.kind) !== "expense") {
+      return { ok: false, error: "Pick an expense category to put this under" };
+    }
+    if (String(parent.parent_code) !== "5") {
+      return { ok: false, error: "Sub-heads sit one level under a category — pick the category itself" };
+    }
+    if (RESERVED_EXPENSE_CODES.has(parentCode)) {
+      return { ok: false, error: "That category is posted by the system and cannot take sub-heads" };
+    }
+    let n = 1;
+    while (codes.has(`${parentCode}.${String(n).padStart(2, "0")}`)) n += 1;
+    if (n > 99) return { ok: false, error: "That category already has 99 sub-heads" };
+    const code = `${parentCode}.${String(n).padStart(2, "0")}`;
+    const { error } = await sb.from("ledger_accounts").insert({
+      tenant_id: tenantId,
+      code,
+      name,
+      parent_code: parentCode,
+      kind: "expense",
+      schedule_group: String(parent.schedule_group ?? ""),
+    });
+    if (error) return { ok: false, error: error.message };
+    return { ok: true, code };
+  }
+
+  // New category: the next free 10-step code between 5300 and 5890 — clear of
+  // the seeded 50xx-52xx defaults and of 5900 Other Expenses.
+  let candidate = 0;
+  for (let c = 5300; c <= 5890; c += 10) {
+    if (!codes.has(String(c))) {
+      candidate = c;
+      break;
+    }
+  }
+  if (!candidate) return { ok: false, error: "No free category codes left" };
+  const { error } = await sb.from("ledger_accounts").insert({
+    tenant_id: tenantId,
+    code: String(candidate),
+    name,
+    parent_code: "5",
+    kind: "expense",
+    schedule_group: "Administrative expenses",
+  });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, code: String(candidate) };
+}
+
+/* ─── Cost centres: the "spent on" tag (Bus-1, Hostel…) ───── */
+
+export async function ledgerListCostCentres(): Promise<
+  { code: string; name: string }[]
+> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return [];
+  const { data } = await ctx.sb
+    .from("ledger_cost_centres")
+    .select("code, name")
+    .eq("tenant_id", ctx.tenantId)
+    .order("name");
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    code: String(r.code),
+    name: String(r.name),
+  }));
+}
+
+/**
+ * Create or rename a cost centre. The code is a slug of the first name it was
+ * given ("Bus-1" → "bus-1") and never changes — ledger lines point at it.
+ * IMPORTANT: ledger_post silently drops an unknown cost-centre code, so the
+ * centre must exist BEFORE anything posts against it — which is exactly why
+ * this management screen exists.
+ */
+export async function ledgerSaveCostCentre(input: {
+  code?: string;
+  name: string;
+}): Promise<{ ok: boolean; error?: string; code?: string }> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
+  const { sb, tenantId } = ctx;
+  const name = String(input.name ?? "").trim();
+  if (!name) return { ok: false, error: "The tag needs a name" };
+
+  if (input.code) {
+    const { error } = await sb
+      .from("ledger_cost_centres")
+      .update({ name })
+      .eq("tenant_id", tenantId)
+      .eq("code", String(input.code).trim());
+    if (error) return { ok: false, error: error.message };
+    return { ok: true, code: String(input.code).trim() };
+  }
+
+  const code = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+  if (!code) return { ok: false, error: "The name needs at least one letter or digit" };
+  const { data: exists } = await sb
+    .from("ledger_cost_centres")
+    .select("code")
+    .eq("tenant_id", tenantId)
+    .eq("code", code)
+    .maybeSingle();
+  if (exists) return { ok: false, error: `A tag with code ${code} already exists` };
+  const { error } = await sb
+    .from("ledger_cost_centres")
+    .insert({ tenant_id: tenantId, code, name });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, code };
+}
+
+export async function ledgerRemoveCostCentre(
+  code: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
+  const { sb, tenantId } = ctx;
+  const clean = String(code ?? "").trim();
+  const { data: cc } = await sb
+    .from("ledger_cost_centres")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("code", clean)
+    .maybeSingle();
+  if (!cc) return { ok: false, error: "No tag with that code" };
+  const { count } = await sb
+    .from("ledger_lines")
+    .select("id", { count: "exact", head: true })
+    .eq("tenant_id", tenantId)
+    .eq("cost_centre_id", String(cc.id));
+  if ((count ?? 0) > 0) {
+    return { ok: false, error: "Entries carry this tag — it stays. Rename it instead." };
+  }
+  const { error } = await sb
+    .from("ledger_cost_centres")
+    .delete()
+    .eq("tenant_id", tenantId)
+    .eq("code", clean);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+/**
+ * Where the money went, per tag: expense debits net of credits (so a
+ * reversal cancels its original), grouped tag × head, for a date range.
+ */
+export async function ledgerSpendByCentre(input: {
+  fromDate: string;
+  toDate: string;
+}): Promise<
+  {
+    centreCode: string;
+    centreName: string;
+    accountCode: string;
+    accountName: string;
+    amountPaise: number;
+  }[]
+> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return [];
+  const { sb, tenantId } = ctx;
+  const { data } = await sb
+    .from("ledger_lines")
+    .select(
+      "debit_paise, credit_paise," +
+        " centre:ledger_cost_centres!inner(code, name)," +
+        " account:ledger_accounts!inner(code, name, kind)," +
+        " voucher:ledger_vouchers!inner(voucher_date)",
+    )
+    .eq("tenant_id", tenantId)
+    .eq("account.kind", "expense")
+    .gte("voucher.voucher_date", input.fromDate)
+    .lte("voucher.voucher_date", input.toDate)
+    .limit(20000);
+  const agg = new Map<
+    string,
+    {
+      centreCode: string;
+      centreName: string;
+      accountCode: string;
+      accountName: string;
+      amountPaise: number;
+    }
+  >();
+  for (const raw of (data ?? []) as unknown as Record<string, unknown>[]) {
+    const centre = raw.centre as { code?: unknown; name?: unknown } | null;
+    const account = raw.account as { code?: unknown; name?: unknown } | null;
+    if (!centre || !account) continue;
+    const key = `${centre.code}|${account.code}`;
+    const cur = agg.get(key) ?? {
+      centreCode: String(centre.code),
+      centreName: String(centre.name),
+      accountCode: String(account.code),
+      accountName: String(account.name),
+      amountPaise: 0,
+    };
+    cur.amountPaise += Number(raw.debit_paise ?? 0) - Number(raw.credit_paise ?? 0);
+    agg.set(key, cur);
+  }
+  return [...agg.values()]
+    .filter((r) => r.amountPaise !== 0)
+    .sort((a, b) =>
+      a.centreName === b.centreName
+        ? a.accountCode.localeCompare(b.accountCode)
+        : a.centreName.localeCompare(b.centreName),
+    );
+}
+
+/**
+ * Remove an expense head — only one nothing ever touched. A head with
+ * postings is history and history does not get deleted; a category with
+ * sub-heads goes only after its sub-heads do.
+ */
+export async function ledgerRemoveExpenseHead(
+  code: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
+  const { sb, tenantId } = ctx;
+  const clean = String(code ?? "").trim();
+  if (RESERVED_EXPENSE_CODES.has(clean)) {
+    return { ok: false, error: "That head is posted by the system" };
+  }
+  const { data: acc } = await sb
+    .from("ledger_accounts")
+    .select("id, kind")
+    .eq("tenant_id", tenantId)
+    .eq("code", clean)
+    .maybeSingle();
+  if (!acc || String(acc.kind) !== "expense") {
+    return { ok: false, error: "No expense head with that code" };
+  }
+  const { count: kids } = await sb
+    .from("ledger_accounts")
+    .select("id", { count: "exact", head: true })
+    .eq("tenant_id", tenantId)
+    .eq("parent_code", clean);
+  if ((kids ?? 0) > 0) {
+    return { ok: false, error: "Remove its sub-heads first" };
+  }
+  const { count: lines } = await sb
+    .from("ledger_lines")
+    .select("id", { count: "exact", head: true })
+    .eq("tenant_id", tenantId)
+    .eq("account_id", String(acc.id));
+  if ((lines ?? 0) > 0) {
+    return { ok: false, error: "This head has entries in the book — it stays. Rename it instead." };
+  }
+  const { error } = await sb
+    .from("ledger_accounts")
+    .delete()
+    .eq("tenant_id", tenantId)
+    .eq("code", clean);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
 }
 
 /**

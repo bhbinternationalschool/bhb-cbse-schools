@@ -5,6 +5,10 @@ import { Landmark } from "lucide-react";
 import {
   AccountsMastersPanel,
 } from "@/components/accounts/AccountsMastersPanel";
+import {
+  ExpenseHeadsPanel,
+  SpendTagsPanel,
+} from "@/components/accounts/LedgerEntryPanels";
 import { UnpostedEntriesBanner } from "@/components/accounts/UnpostedEntriesBanner";
 import { DeskSyncBanner } from "@/components/accounts/DeskSyncBanner";
 import {
@@ -235,7 +239,11 @@ export function AccountsWorkspace() {
             .map((b) => ({ id: b.id, name: b.name }))}
         />
       ) : tab === "masters" ? (
-        <AccountsMastersPanel {...panelProps} />
+        <div className="space-y-4">
+          <ExpenseHeadsPanel />
+          <SpendTagsPanel />
+          <AccountsMastersPanel {...panelProps} />
+        </div>
       ) : tab === "bills" ? (
         <BillsPanel {...panelProps} />
       ) : tab === "owner" ? (

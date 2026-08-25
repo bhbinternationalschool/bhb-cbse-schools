@@ -60,7 +60,15 @@ async function ledgerApi<T>(body: Record<string, unknown>): Promise<T & { ok?: b
   return (await res.json()) as T & { ok?: boolean; error?: string };
 }
 
-type CoaAccount = { code: string; name: string; kind: string; isCash: boolean; isBank: boolean };
+type CoaAccount = {
+  code: string;
+  name: string;
+  kind: string;
+  parentCode?: string;
+  hasChildren?: boolean;
+  isCash: boolean;
+  isBank: boolean;
+};
 
 function useChart(): CoaAccount[] {
   const [accounts, setAccounts] = useState<CoaAccount[]>([]);
@@ -92,14 +100,28 @@ function AccountSelect({
   onChange: (code: string) => void;
   disabled?: boolean;
 }) {
-  const grouped = useMemo(() => {
+  // A category that has sub-heads is a heading: it is never offered — its
+  // sub-heads are, grouped under the category's name so the clerk picks
+  // "Utilities → Electricity", not a flat code from a long list.
+  const { grouped, expenseGroups } = useMemo(() => {
+    const byCode = new Map(accounts.map((a) => [a.code, a]));
     const g = new Map<string, CoaAccount[]>();
+    const eg: { label: string; children: CoaAccount[] }[] = [];
     for (const a of accounts) {
+      if (a.hasChildren) continue;
+      const parent = a.parentCode ? byCode.get(a.parentCode) : undefined;
+      if (a.kind === "expense" && parent && parent.hasChildren) {
+        const label = `${parent.name}`;
+        const bucket = eg.find((x) => x.label === label);
+        if (bucket) bucket.children.push(a);
+        else eg.push({ label, children: [a] });
+        continue;
+      }
       const k = g.get(a.kind) ?? [];
       k.push(a);
       g.set(a.kind, k);
     }
-    return g;
+    return { grouped: g, expenseGroups: eg };
   }, [accounts]);
   return (
     <select className={FIELD} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
@@ -107,6 +129,15 @@ function AccountSelect({
       {KIND_ORDER.filter((k) => grouped.has(k)).map((k) => (
         <optgroup key={k} label={KIND_LABEL[k] ?? k}>
           {grouped.get(k)!.map((a) => (
+            <option key={a.code} value={a.code}>
+              {a.code} · {a.name}
+            </option>
+          ))}
+        </optgroup>
+      ))}
+      {expenseGroups.map((x) => (
+        <optgroup key={x.label} label={`Expenses — ${x.label}`}>
+          {x.children.map((a) => (
             <option key={a.code} value={a.code}>
               {a.code} · {a.name}
             </option>
@@ -219,6 +250,17 @@ export function VoucherEntryPanel({
   const [instrumentMode, setInstrumentMode] = useState("");
   const [instrumentRef, setInstrumentRef] = useState("");
   const [lines, setLines] = useState<EntryLine[]>(PRESETS[0].lines());
+  // The "spent on" tag — Bus-1, Hostel, a specific event. One per voucher,
+  // stamped onto every line, so "what did Bus-1 cost us" is one report away.
+  const [centres, setCentres] = useState<{ code: string; name: string }[]>([]);
+  const [spentOn, setSpentOn] = useState("");
+  useEffect(() => {
+    void ledgerApi<{ centres: { code: string; name: string }[] }>({
+      action: "cost-centres",
+    }).then((r) => {
+      if (r.ok && r.centres) setCentres(r.centres);
+    });
+  }, []);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
 
@@ -297,6 +339,7 @@ export function VoucherEntryPanel({
                 accountCode: l.accountCode,
                 debitPaise: paiseFromRupees(l.debit),
                 creditPaise: paiseFromRupees(l.credit),
+                ...(spentOn ? { costCentreCode: spentOn } : {}),
                 ...(acc?.isBank && l.bankId
                   ? { subledgerKind: "bank_account", subledgerId: l.bankId }
                   : {}),
@@ -365,6 +408,21 @@ export function VoucherEntryPanel({
         <label className="text-[11px] font-bold text-[var(--muted)]">
           Date
           <input type="date" className={FIELD} value={date} onChange={(e) => setDate(e.target.value)} />
+        </label>
+        <label className="text-[11px] font-bold text-[var(--muted)]">
+          Spent on (optional)
+          <select
+            className={FIELD}
+            value={spentOn}
+            onChange={(e) => setSpentOn(e.target.value)}
+          >
+            <option value="">No tag</option>
+            {centres.map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.name}
+              </option>
+            ))}
+          </select>
         </label>
         <label className="min-w-[14rem] flex-1 text-[11px] font-bold text-[var(--muted)]">
           Narration
@@ -799,6 +857,504 @@ export function ChequesPanel({
  * should go — a silent dual-book period is how two versions of the truth
  * happen.
  */
+/* ═══ Expense heads: category → sub-heads ══════════════════ */
+
+/**
+ * The expense chart the office actually thinks in: a CATEGORY (Utilities)
+ * holding SUB-HEADS (Electricity, Diesel…). Lives in `ledger_accounts`
+ * itself — the same structure the entry form offers and every statement
+ * rolls up — not in a separate master that could drift from the book.
+ */
+export function ExpenseHeadsPanel() {
+  const [accounts, setAccounts] = useState<CoaAccount[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const [newCat, setNewCat] = useState("");
+  /** Which category has its "add sub-head" input open, and its draft name. */
+  const [subFor, setSubFor] = useState("");
+  const [subName, setSubName] = useState("");
+  const [renaming, setRenaming] = useState("");
+  const [renameTo, setRenameTo] = useState("");
+
+  const load = useCallback(() => {
+    void ledgerApi<{ accounts: CoaAccount[] }>({ action: "accounts" }).then((r) => {
+      if (r.ok && r.accounts) setAccounts(r.accounts);
+    });
+  }, []);
+  useEffect(load, [load]);
+
+  const categories = useMemo(
+    () =>
+      accounts
+        .filter((a) => a.kind === "expense" && a.parentCode === "5")
+        .map((c) => ({
+          ...c,
+          children: accounts.filter((a) => a.parentCode === c.code),
+        })),
+    [accounts],
+  );
+
+  async function run(body: Record<string, unknown>, done: string) {
+    setBusy(true);
+    setError("");
+    try {
+      const r = await ledgerApi<{ code?: string }>(body);
+      if (r.ok) {
+        setNotice(done + (r.code ? ` (${r.code})` : ""));
+        setNewCat("");
+        setSubFor("");
+        setSubName("");
+        setRenaming("");
+        load();
+      } else {
+        setError(r.error || "Could not save");
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className={CARD}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-bold text-[var(--brand-deep)]">Expense heads</h3>
+          <p className="text-xs text-[var(--muted)]">
+            One category, many sub-heads. Entry forms offer the sub-heads;
+            reports roll them up under the category.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            className={FIELD}
+            style={{ width: 220 }}
+            placeholder="New category, e.g. Utilities"
+            value={newCat}
+            onChange={(e) => setNewCat(e.target.value)}
+          />
+          <button
+            type="button"
+            className={BTN}
+            disabled={busy || !newCat.trim()}
+            onClick={() => void run({ action: "save-expense-head", name: newCat.trim() }, "Category added")}
+          >
+            Add
+          </button>
+        </div>
+      </div>
+
+      {notice ? (
+        <p className="mt-2 rounded-lg bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-700">{notice}</p>
+      ) : null}
+      {error ? (
+        <p className="mt-2 rounded-lg bg-red-500/10 px-3 py-1.5 text-xs text-red-700">{error}</p>
+      ) : null}
+
+      <div className="mt-3 space-y-2">
+        {categories.map((c) => (
+          <div key={c.code} className="rounded-xl border border-[var(--border)] p-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                {renaming === c.code ? (
+                  <>
+                    <input
+                      className={FIELD}
+                      style={{ width: 200 }}
+                      value={renameTo}
+                      onChange={(e) => setRenameTo(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className={BTN_OUTLINE}
+                      disabled={busy || !renameTo.trim()}
+                      onClick={() =>
+                        void run(
+                          { action: "save-expense-head", code: c.code, name: renameTo.trim() },
+                          "Renamed",
+                        )
+                      }
+                    >
+                      Save
+                    </button>
+                    <button type="button" className={BTN_OUTLINE} onClick={() => setRenaming("")}>
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-sm font-semibold text-[var(--brand-deep)]">
+                      {c.name}
+                    </span>
+                    <span className="font-mono text-[11px] text-[var(--muted)]">{c.code}</span>
+                    {c.children.length === 0 ? (
+                      <span className="text-[11px] text-[var(--muted)]">
+                        · posts directly until it has sub-heads
+                      </span>
+                    ) : null}
+                  </>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className={BTN_OUTLINE}
+                  onClick={() => {
+                    setRenaming(c.code);
+                    setRenameTo(c.name);
+                  }}
+                >
+                  Rename
+                </button>
+                <button
+                  type="button"
+                  className={BTN_OUTLINE}
+                  onClick={() => {
+                    setSubFor(subFor === c.code ? "" : c.code);
+                    setSubName("");
+                  }}
+                >
+                  + Sub-head
+                </button>
+                {c.children.length === 0 ? (
+                  <button
+                    type="button"
+                    className={BTN_OUTLINE}
+                    disabled={busy}
+                    onClick={() =>
+                      void run({ action: "remove-expense-head", code: c.code }, "Removed")
+                    }
+                  >
+                    Remove
+                  </button>
+                ) : null}
+              </div>
+            </div>
+
+            {subFor === c.code ? (
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  className={FIELD}
+                  style={{ width: 220 }}
+                  placeholder={`New sub-head under ${c.name}`}
+                  value={subName}
+                  onChange={(e) => setSubName(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className={BTN}
+                  disabled={busy || !subName.trim()}
+                  onClick={() =>
+                    void run(
+                      { action: "save-expense-head", name: subName.trim(), parentCode: c.code },
+                      "Sub-head added",
+                    )
+                  }
+                >
+                  Add
+                </button>
+              </div>
+            ) : null}
+
+            {c.children.length > 0 ? (
+              <ul className="mt-2 space-y-1 border-l-2 border-[var(--border)] pl-3">
+                {c.children.map((s) => (
+                  <li key={s.code} className="flex flex-wrap items-center justify-between gap-2">
+                    {renaming === s.code ? (
+                      <span className="flex items-center gap-2">
+                        <input
+                          className={FIELD}
+                          style={{ width: 200 }}
+                          value={renameTo}
+                          onChange={(e) => setRenameTo(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          className={BTN_OUTLINE}
+                          disabled={busy || !renameTo.trim()}
+                          onClick={() =>
+                            void run(
+                              { action: "save-expense-head", code: s.code, name: renameTo.trim() },
+                              "Renamed",
+                            )
+                          }
+                        >
+                          Save
+                        </button>
+                        <button type="button" className={BTN_OUTLINE} onClick={() => setRenaming("")}>
+                          Cancel
+                        </button>
+                      </span>
+                    ) : (
+                      <span className="text-sm">
+                        {s.name}{" "}
+                        <span className="font-mono text-[11px] text-[var(--muted)]">{s.code}</span>
+                      </span>
+                    )}
+                    <span className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className={BTN_OUTLINE}
+                        onClick={() => {
+                          setRenaming(s.code);
+                          setRenameTo(s.name);
+                        }}
+                      >
+                        Rename
+                      </button>
+                      <button
+                        type="button"
+                        className={BTN_OUTLINE}
+                        disabled={busy}
+                        onClick={() =>
+                          void run({ action: "remove-expense-head", code: s.code }, "Removed")
+                        }
+                      >
+                        Remove
+                      </button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ))}
+      </div>
+      <p className="mt-3 text-[11px] text-[var(--muted)]">
+        A head that already has entries cannot be removed — rename it instead,
+        the history follows the name. System heads (store purchases, cost of
+        goods, concessions) stay as they are.
+      </p>
+    </section>
+  );
+}
+
+/* ═══ Spent-on tags (cost centres) ═════════════════════════ */
+
+/**
+ * The second axis of an expense: WHAT it was (the head) × what it was FOR
+ * (the tag) — Bus-1, Hostel, Annual Function. Tags are ledger cost centres;
+ * every voucher can carry one, and the report below answers "what did Bus-1
+ * cost us, split by fuel / EMI / service" without inventing new heads per
+ * vehicle.
+ */
+export function SpendTagsPanel() {
+  const [centres, setCentres] = useState<{ code: string; name: string }[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const [newTag, setNewTag] = useState("");
+  const [renaming, setRenaming] = useState("");
+  const [renameTo, setRenameTo] = useState("");
+
+  const [from, setFrom] = useState(fyStart());
+  const [to, setTo] = useState(todayIso());
+  const [rows, setRows] = useState<
+    {
+      centreCode: string;
+      centreName: string;
+      accountCode: string;
+      accountName: string;
+      amountPaise: number;
+    }[]
+  >([]);
+  const [reportBusy, setReportBusy] = useState(false);
+
+  const load = useCallback(() => {
+    void ledgerApi<{ centres: { code: string; name: string }[] }>({
+      action: "cost-centres",
+    }).then((r) => {
+      if (r.ok && r.centres) setCentres(r.centres);
+    });
+  }, []);
+  useEffect(load, [load]);
+
+  async function run(body: Record<string, unknown>, done: string) {
+    setBusy(true);
+    setError("");
+    try {
+      const r = await ledgerApi<{ code?: string }>(body);
+      if (r.ok) {
+        setNotice(done);
+        setNewTag("");
+        setRenaming("");
+        load();
+      } else {
+        setError(r.error || "Could not save");
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function loadReport() {
+    setReportBusy(true);
+    try {
+      const r = await ledgerApi<{ rows: typeof rows }>({
+        action: "spend-by-centre",
+        fromDate: from,
+        toDate: to,
+      });
+      if (r.ok && r.rows) setRows(r.rows);
+    } finally {
+      setReportBusy(false);
+    }
+  }
+
+  const byCentre = useMemo(() => {
+    const g = new Map<string, { name: string; rows: typeof rows; total: number }>();
+    for (const r of rows) {
+      const cur = g.get(r.centreCode) ?? { name: r.centreName, rows: [], total: 0 };
+      cur.rows.push(r);
+      cur.total += r.amountPaise;
+      g.set(r.centreCode, cur);
+    }
+    return [...g.entries()];
+  }, [rows]);
+
+  return (
+    <section className={CARD}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-bold text-[var(--brand-deep)]">
+            Spent-on tags
+          </h3>
+          <p className="text-xs text-[var(--muted)]">
+            Bus-1, Hostel, Annual Function… Pick a tag while entering a
+            voucher, and its whole cost — fuel, EMI, service, anything —
+            gathers under it here.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            className={FIELD}
+            style={{ width: 200 }}
+            placeholder="New tag, e.g. Bus-1"
+            value={newTag}
+            onChange={(e) => setNewTag(e.target.value)}
+          />
+          <button
+            type="button"
+            className={BTN}
+            disabled={busy || !newTag.trim()}
+            onClick={() => void run({ action: "save-cost-centre", name: newTag.trim() }, "Tag added")}
+          >
+            Add
+          </button>
+        </div>
+      </div>
+
+      {notice ? (
+        <p className="mt-2 rounded-lg bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-700">{notice}</p>
+      ) : null}
+      {error ? (
+        <p className="mt-2 rounded-lg bg-red-500/10 px-3 py-1.5 text-xs text-red-700">{error}</p>
+      ) : null}
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {centres.map((c) => (
+          <span
+            key={c.code}
+            className="flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1 text-xs"
+          >
+            {renaming === c.code ? (
+              <>
+                <input
+                  className="w-28 rounded border border-[var(--border)] px-1.5 py-0.5 text-xs"
+                  value={renameTo}
+                  onChange={(e) => setRenameTo(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="font-semibold"
+                  disabled={busy || !renameTo.trim()}
+                  onClick={() =>
+                    void run(
+                      { action: "save-cost-centre", code: c.code, name: renameTo.trim() },
+                      "Renamed",
+                    )
+                  }
+                >
+                  ✓
+                </button>
+                <button type="button" onClick={() => setRenaming("")}>✕</button>
+              </>
+            ) : (
+              <>
+                <span className="font-medium">{c.name}</span>
+                <button
+                  type="button"
+                  className="text-[var(--muted)] hover:text-[var(--brand-deep)]"
+                  title="Rename"
+                  onClick={() => {
+                    setRenaming(c.code);
+                    setRenameTo(c.name);
+                  }}
+                >
+                  ✎
+                </button>
+                <button
+                  type="button"
+                  className="text-[var(--muted)] hover:text-red-600"
+                  title="Remove (only if unused)"
+                  disabled={busy}
+                  onClick={() => void run({ action: "remove-cost-centre", code: c.code }, "Removed")}
+                >
+                  ✕
+                </button>
+              </>
+            )}
+          </span>
+        ))}
+      </div>
+
+      <div className="mt-4 border-t border-[var(--border)] pt-3">
+        <div className="flex flex-wrap items-end gap-2">
+          <p className="mr-2 text-xs font-bold text-[var(--brand-deep)]">
+            Where the money went, by tag
+          </p>
+          <label className="text-[11px] text-[var(--muted)]">
+            From
+            <input type="date" className={FIELD} value={from} onChange={(e) => setFrom(e.target.value)} />
+          </label>
+          <label className="text-[11px] text-[var(--muted)]">
+            To
+            <input type="date" className={FIELD} value={to} onChange={(e) => setTo(e.target.value)} />
+          </label>
+          <button type="button" className={BTN_OUTLINE} disabled={reportBusy} onClick={() => void loadReport()}>
+            {reportBusy ? "Loading…" : "Show"}
+          </button>
+        </div>
+        {byCentre.length === 0 ? (
+          <p className="mt-2 text-xs text-[var(--muted)]">
+            Nothing tagged in this range yet — tags apply from the voucher
+            entry&rsquo;s &ldquo;Spent on&rdquo; picker.
+          </p>
+        ) : (
+          <div className="mt-2 grid gap-3 md:grid-cols-2">
+            {byCentre.map(([code, g]) => (
+              <div key={code} className="rounded-xl border border-[var(--border)] p-2.5">
+                <div className="flex justify-between text-sm font-semibold text-[var(--brand-deep)]">
+                  <span>{g.name}</span>
+                  <span className="tabular-nums">{formatInr(g.total)}</span>
+                </div>
+                <ul className="mt-1 space-y-0.5 text-xs">
+                  {g.rows.map((r) => (
+                    <li key={r.accountCode} className="flex justify-between">
+                      <span>{r.accountName}</span>
+                      <span className="tabular-nums">{formatInr(r.amountPaise)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 export function LegacyBookNotice({ tab }: { tab: string }) {
   return (
     <p className="mt-4 rounded-xl border border-[var(--warning)]/30 bg-[var(--warning-soft)] px-3 py-2 text-xs text-[var(--warning)]">
