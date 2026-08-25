@@ -132,3 +132,37 @@ If your organisation blocks service-account key creation
 (`iam.disableServiceAccountKeyCreation`), the keyless alternative is Workload
 Identity Federation — more setup, no long-lived secret. Ask and it can be
 wired instead.
+
+## Status on this org (discovered 2026-08-25)
+
+**Key creation IS blocked here.** `gcloud iam service-accounts keys create`
+fails with `constraints/iam.disableServiceAccountKeyCreation` — Google's
+secure-by-default enforcement on the organisation. This is also the root
+cause of the 2026-08-23 zero-byte-key trap: gcloud creates the local file
+first, the policy then rejects the mint, and an empty file is left behind
+(the script now detects and ignores an empty/invalid key file instead of
+hard-exiting on it).
+
+Everything else is already in place and stays useful the moment a key can be
+minted: the `bhb-deploy` service account exists with all four grants
+(builds.editor, conditioned run.admin on school-erp-web, actAs on the runtime
+SA, objectAdmin on the build bucket). Two dangling keys from the failed
+2026-08-23 mint attempts are listed on the SA; their private material was
+never saved anywhere, so they are unusable — delete them at leisure.
+
+Choices, both org-admin decisions (run in your own session, not the
+assistant's):
+
+1. **Keep the policy** (recommended default) and accept the occasional
+   `gcloud auth login director@bhbinternational.school --update-adc`. If the
+   login expires annoyingly often, the knob is Google Workspace Admin →
+   Security → Google Cloud session control — the default is 16 hours, which
+   matches how often deploys have been stalling.
+2. **Exempt this project** from the constraint (weakens the org's security
+   posture for this project — your call):
+   ```bash
+   gcloud services enable orgpolicy.googleapis.com --project=school-erp-prod-493619
+   printf 'name: projects/school-erp-prod-493619/policies/iam.disableServiceAccountKeyCreation\nspec:\n  rules:\n  - enforce: false\n' > /tmp/allow-sa-keys.yaml
+   gcloud org-policies set-policy /tmp/allow-sa-keys.yaml
+   ```
+   then re-run the mint from "One-time setup" step 3.

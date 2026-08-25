@@ -178,6 +178,18 @@ fi
 # Set DEPLOY_SA_KEY to override, or drop the key at the default path. With no
 # key present the script falls back to the interactive login exactly as before.
 DEPLOY_SA_KEY="${DEPLOY_SA_KEY:-$HOME/.config/bhb-deploy/deploy-sa.json}"
+# "File exists" is not "file is a key". A failed `keys create` (the org policy
+# iam.disableServiceAccountKeyCreation blocks minting — discovered 2026-08-25,
+# and the cause of the 2026-08-23 zero-byte trap) leaves an EMPTY file behind,
+# and hard-exiting on it turned every later deploy into a silent failure. An
+# empty or non-JSON file now falls back to the interactive login with a
+# warning instead.
+if [[ -f "$DEPLOY_SA_KEY" ]] && ! python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$DEPLOY_SA_KEY" 2>/dev/null; then
+  echo "WARNING: $DEPLOY_SA_KEY exists but is empty or not valid JSON — ignoring it."
+  echo "         (Key minting is blocked by org policy iam.disableServiceAccountKeyCreation;"
+  echo "          see docs/DEPLOY_SERVICE_ACCOUNT.md. Falling back to interactive login.)"
+  DEPLOY_SA_KEY="/nonexistent-deploy-key"
+fi
 if [[ -f "$DEPLOY_SA_KEY" ]]; then
   case "$DEPLOY_SA_KEY" in
     "$ROOT"/*)
