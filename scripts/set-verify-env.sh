@@ -142,14 +142,27 @@ check_url() {
 }
 
 echo
-ask "Transaction pooler URL, port 6543  (Project Settings -> Database -> Connection string -> Transaction pooler)" DBU
+ask "POOLER URL  (Project Settings -> Database -> Connection string -> Session pooler, or Transaction pooler)" DBU
 check_url "$DBU" "pooler URL"
-[[ "$DBU" == *":6543"* ]] || echo "  note: that is not port 6543 — check you copied the pooler, not the direct connection"
+# The host is what matters, not the port. Editing the port on a direct
+# connection string does NOT turn it into a pooler URL — the two use different
+# hosts and different usernames — and the direct host is IPv6-only, so the
+# result silently cannot connect from most networks. Refuse it here rather than
+# let it fail later as an unreadable resolver error.
+if [[ "$DBU" != *"pooler.supabase.com"* ]]; then
+  fail "that is not a pooler URL — its host must be *.pooler.supabase.com (and its user postgres.$VERIFY_REF).
+         It looks like the DIRECT connection string, possibly with the port changed. Changing the port does not
+         make it a pooler URL, and the direct host is IPv6-only so it will not connect. In the dashboard, pick
+         the 'Session pooler' or 'Transaction pooler' tab rather than 'Direct connection'."
+fi
 echo "  ok: pooler URL for $VERIFY_REF"
 
 echo
-ask "Direct connection URL, port 5432  (same page -> Direct connection)" DIR
+ask "DIRECT connection URL, port 5432  (same page -> Direct connection)" DIR
 check_url "$DIR" "direct URL"
+if [[ "$DIR" == *"pooler.supabase.com"* ]]; then
+  fail "that is a pooler URL, not the direct connection — the direct one uses host db.$VERIFY_REF.supabase.co"
+fi
 [[ "$DIR" == *":5432"* ]] || echo "  note: that is not port 5432 — check you copied the direct connection"
 echo "  ok: direct URL for $VERIFY_REF"
 
