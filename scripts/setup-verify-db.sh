@@ -83,6 +83,18 @@ if [[ -f "$ENV_VERIFY" ]]; then
   fi
 fi
 
+# NOTE ON PASSWORDS. The CLI cannot handle a database password containing
+# characters that need percent-encoding in a URL:
+#
+#   * encoded in the URL  -> it re-parses and authenticates as "postgres"
+#                            instead of "postgres.<ref>", failing 28P01, even
+#                            though psql connects with the identical string
+#   * decoded in the URL  -> the URL no longer parses
+#   * SUPABASE_DB_PASSWORD -> ignored when --db-url is passed
+#
+# So the database password for the verification project should be letters and
+# digits only. That is not a workaround for a bug in this script; it removes a
+# whole class of tool-specific parsing difference in one step.
 push_with() {
   npx --yes supabase@latest db push --db-url "$1" --include-all
 }
@@ -94,7 +106,16 @@ elif [[ -n "$SESSION_POOLER" ]]; then
   echo "Direct connection failed (Supabase serves that host over IPv6 only)."
   echo "Retrying through the session pooler, which is reachable over IPv4…"
   echo ""
-  push_with "$SESSION_POOLER"
+  if ! push_with "$SESSION_POOLER"; then
+    echo "" >&2
+    echo "If that failed on the PASSWORD (SQLSTATE 28P01) rather than the host, the" >&2
+    echo "cause is almost certainly special characters in it. The Supabase CLI cannot" >&2
+    echo "read a password that needs percent-encoding in a URL, even when psql can." >&2
+    echo "" >&2
+    echo "  Reset the verification project's database password to letters and digits" >&2
+    echo "  only, then:  bash scripts/set-verify-env.sh --urls-only" >&2
+    exit 4
+  fi
 else
   echo "" >&2
   echo "Could not reach the verification database, and no usable pooler URL was" >&2
