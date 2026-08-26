@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { IndianRupee } from "lucide-react";
 import { PaymentChannelSelect } from "@/components/accounts/PaymentChannelSelect";
+import type { AccountsState } from "@/lib/accountsTypes";
 import {
   decodeTenderChannel,
   encodeTenderChannel,
@@ -63,10 +64,12 @@ import {
   FEE_ADJUST_AUTO_LIMIT_PAISE,
   postCounterDiscountWaivers,
   type CounterDiscountSlice,
+
 } from "@/lib/feeAdjustments";
 import { FutureConcessionModal } from "@/components/fees/FutureConcessionModal";
 import {
   applyFutureConcessionsFromCounter,
+  isRecurringAcademicFeeHead,
   listFutureConcessionCandidates,
   type FutureConcessionCandidate,
 } from "@/lib/counterConcession";
@@ -224,6 +227,49 @@ export function FeeTakeWorkspace() {
   const [tenderLines, setTenderLines] = useState<TenderLine[]>([]);
   const [composer, setComposer] = useState<TenderComposer>(emptyComposer);
   const [collectionDate, setCollectionDate] = useState(todayIso);
+  /**
+   * Accounts desk state, HYDRATED here rather than assumed. The payment-mode
+   * dropdown is built from the bank accounts, and this browser only has them
+   * after a pull from the server — which used to happen only when the
+   * Accounts (or Transport) module was opened first, so a counter machine
+   * that went straight to Fee Take offered nothing but cash.
+   */
+  const [accountsState, setAccountsState] = useState<AccountsState | null>(
+    null,
+  );
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      try {
+        const { ensureAccountsHydrated } = await import(
+          "@/lib/accountsPersistence"
+        );
+        await ensureAccountsHydrated();
+      } catch {
+        // Offline or first load — fall through to whatever is cached locally.
+      }
+      const { loadAccounts } = await import("@/lib/accountsStore");
+      if (live) setAccountsState(loadAccounts());
+      // ensureAccountsHydrated marks the module hydrated the moment the FIRST
+      // caller enters it, so when the app shell kicked hydration off just
+      // before us, our call returns while that pull is still in flight — and
+      // a single read here would freeze an empty store into the dropdown
+      // (observed live: bank in localStorage at 6s, dropdown stuck on cash).
+      // Re-read on a short ladder until the store shows substance.
+      for (const delay of [1500, 3500, 8000, 15000]) {
+        await new Promise((r) => setTimeout(r, delay));
+        if (!live) return;
+        const next = loadAccounts();
+        if (next.bankAccounts.length > 0 || next.coaAccounts.length > 0) {
+          setAccountsState(next);
+          if (next.bankAccounts.length > 0) break;
+        }
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, []);
   const [schoolReceiptNo, setSchoolReceiptNo] = useState("");
   const [note, setNote] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
@@ -337,18 +383,30 @@ export function FeeTakeWorkspace() {
     return () => clearTimeout(timer);
   }, [query]);
 
+  // The fees blob is a multi-megabyte localStorage parse — doing it PER
+  // KEYSTROKE is what made the search feel hung. Parse once per data tick.
+  const feesForSearch = useMemo(() => {
+    void tick;
+    return loadFees();
+  }, [tick]);
+
   useEffect(() => {
     if (!sis || !masters) return;
-    const fees = loadFees();
+    // One letter matches half the roster and costs a full scan — wait for
+    // two, unless a class filter narrows the field.
+    if (debouncedQuery.trim().length < 2 && !classId) {
+      setHits([]);
+      return;
+    }
     setHits(
-      searchFeeStudents(debouncedQuery, sis, masters, fees, {
+      searchFeeStudents(debouncedQuery, sis, masters, feesForSearch, {
         classId,
         sectionId,
         academicYearCode: ay,
         includeFuture,
       }),
     );
-  }, [debouncedQuery, classId, sectionId, sis, masters, tick, ay, includeFuture]);
+  }, [debouncedQuery, classId, sectionId, sis, masters, feesForSearch, ay, includeFuture]);
 
   const classOptions = useMemo(() => {
     if (!masters) return [];
@@ -1054,6 +1112,11 @@ export function FeeTakeWorkspace() {
     setCollectAmountRupees("");
     resetPaymentFields();
     refresh();
+    // The receipt just posted into the accounts desk — re-read it so the
+    // payment-mode dropdown never goes stale for the next student.
+    void import("@/lib/accountsStore").then(({ loadAccounts }) =>
+      setAccountsState(loadAccounts()),
+    );
     flash(
       (counterDiscountPaise > 0
         ? isPartialCollect
@@ -1574,6 +1637,7 @@ export function FeeTakeWorkspace() {
               collectTotal={collectTotal}
               counterDiscountPaise={counterDiscountPaise}
               discountSlices={discountSlices}
+              accountsState={accountsState}
               netAfterDiscount={netAfterDiscount}
               lineDiscountRupees={lineDiscountRupees}
               onLineDiscount={(dueKey, rupees) => {
@@ -1828,6 +1892,7 @@ function CollectPanel({
   collectTotal,
   counterDiscountPaise,
   discountSlices,
+  accountsState,
   netAfterDiscount,
   lineDiscountRupees,
   onLineDiscount,
@@ -1887,6 +1952,7 @@ function CollectPanel({
   collectTotal: number;
   counterDiscountPaise: number;
   discountSlices: CounterDiscountSlice[];
+  accountsState: AccountsState | null;
   netAfterDiscount: number;
   lineDiscountRupees: Record<string, string>;
   onLineDiscount: (dueKey: string, rupees: string) => void;
@@ -2183,6 +2249,11 @@ function CollectPanel({
                   (s, d) => s + d.balancePaise,
                   0,
                 );
+                const pickedDiscount = discountSlices.reduce(
+                  (s, x) => (x.studentId === row.student.id ? s + x.amountPaise : s),
+                  0,
+                );
+                const pickedNet = Math.max(0, pickedPaise - pickedDiscount);
                 return (
                   <button
                     key={row.student.id}
@@ -2240,7 +2311,10 @@ function CollectPanel({
                       </span>
                       {pickedPaise > 0 ? (
                         <span className="rounded-full bg-[var(--success-soft)] px-2 py-0.5 text-[10px] font-bold text-[var(--success)]">
-                          ticked {formatInr(pickedPaise)}
+                          ticked {formatInr(pickedNet)}
+                          {pickedDiscount > 0
+                            ? ` (−${formatInr(pickedDiscount)})`
+                            : ""}
                         </span>
                       ) : null}
                     </div>
@@ -2302,6 +2376,12 @@ function CollectPanel({
                   (s, d) => s + d.balancePaise,
                   0,
                 );
+                const rowDiscount = discountSlices.reduce(
+                  (s, x) =>
+                    x.studentId === row.student.id ? s + x.amountPaise : s,
+                  0,
+                );
+                const rowSelectedNet = Math.max(0, rowSelected - rowDiscount);
                 const hasOverdue = openDues.some((d) => d.dueOn <= today);
 
                 return (
@@ -2359,7 +2439,10 @@ function CollectPanel({
                           }`}
                         >
                           {selectedForStudent.length}/{openDues.length} open ·{" "}
-                          {formatInr(rowSelected)}
+                          {formatInr(rowSelectedNet)}
+                          {rowDiscount > 0
+                            ? ` (−${formatInr(rowDiscount)})`
+                            : ""}
                         </div>
                       </div>
                     </div>
@@ -2488,17 +2571,52 @@ function CollectPanel({
                     Head-wise discount summary
                   </p>
                   <ul className="mt-2 space-y-1 text-xs text-white/90">
-                    {discountSlices.map((s) => (
-                      <li
-                        key={s.dueKey}
-                        className="flex justify-between gap-2 rounded-md bg-white/5 px-2 py-1"
-                      >
-                        <span className="min-w-0 truncate">{s.label}</span>
-                        <span className="shrink-0 font-bold text-[#f0d878]">
-                          −{formatInr(s.amountPaise)}
-                        </span>
-                      </li>
-                    ))}
+                    {discountSlices.map((s) => {
+                      const due = allHouseholdDues.find(
+                        (d) => d.dueKey === s.dueKey,
+                      );
+                      const student = householdBundle.find(
+                        (r) => r.student.id === s.studentId,
+                      )?.student;
+                      // Where this discount can go beyond this month, say so
+                      // — and when it cannot, say WHY, so the office is never
+                      // left wondering why no future-months question came.
+                      const futureHint =
+                        due?.kind === "academic" &&
+                        due.feeHeadId &&
+                        masters &&
+                        student &&
+                        isRecurringAcademicFeeHead(
+                          masters,
+                          student,
+                          due.feeHeadId,
+                          student.academicYearCode || "",
+                        )
+                          ? "future months offered on Collect"
+                          : due?.kind === "transport"
+                            ? "for future months, set a transport discount on the Transport roster"
+                            : due?.kind === "academic"
+                              ? "one-time head — nothing to extend"
+                              : "";
+                      return (
+                        <li
+                          key={s.dueKey}
+                          className="rounded-md bg-white/5 px-2 py-1"
+                        >
+                          <div className="flex justify-between gap-2">
+                            <span className="min-w-0 truncate">{s.label}</span>
+                            <span className="shrink-0 font-bold text-[#f0d878]">
+                              −{formatInr(s.amountPaise)}
+                            </span>
+                          </div>
+                          {futureHint ? (
+                            <div className="text-[10px] text-white/60">
+                              {futureHint}
+                            </div>
+                          ) : null}
+                        </li>
+                      );
+                    })}
                   </ul>
                   <label className="mt-3 block text-xs">
                     <span className="mb-1 block text-xs font-medium text-white/75">
@@ -2612,6 +2730,7 @@ function CollectPanel({
                       <PaymentChannelSelect
                         className="field !border-[rgba(32,48,80,0.18)] !py-1.5 !text-xs"
                         variant="tender"
+                        accounts={accountsState ?? undefined}
                         value={composer.channel}
                         onChange={(channel) =>
                           onPatchComposer({
