@@ -2539,7 +2539,7 @@ function CollectPanel({
                     Collection date
                   </span>
                   <input
-                    className="field !border-white/20 !bg-white/95 !py-1.5 !text-xs !text-[#203050]"
+                    className="field !border-white/20 !bg-white/95 !py-1.5 !text-xs !text-[#203050] dark:!bg-[#05080f] dark:!text-white dark:!font-bold dark:!border-white/30 dark:placeholder:!text-white/40"
                     type="date"
                     value={collectionDate}
                     onChange={(e) => onCollectionDate(e.target.value)}
@@ -2556,7 +2556,7 @@ function CollectPanel({
                     School receipt no.
                   </span>
                   <input
-                    className="field !border-white/20 !bg-white/95 !py-1.5 !text-xs !text-[#203050]"
+                    className="field !border-white/20 !bg-white/95 !py-1.5 !text-xs !text-[#203050] dark:!bg-[#05080f] dark:!text-white dark:!font-bold dark:!border-white/30 dark:placeholder:!text-white/40"
                     value={schoolReceiptNo}
                     onChange={(e) => onSchoolReceiptNo(e.target.value)}
                     placeholder="Optional · e.g. FEE-BOOK-A/4521"
@@ -2623,7 +2623,7 @@ function CollectPanel({
                       Reason for discount
                     </span>
                     <input
-                      className="field w-full !border-white/25 !bg-white !py-2 !text-xs !text-[#203050]"
+                      className="field w-full !border-white/25 !bg-white !py-2 !text-xs !text-[#203050] dark:!bg-[#05080f] dark:!text-white dark:!font-bold dark:!border-white/30 dark:placeholder:!text-white/40"
                       value={counterDiscountReason}
                       onChange={(e) => onCounterDiscountReason(e.target.value)}
                       placeholder="e.g. Security deposit relaxed on management approval"
@@ -2652,7 +2652,7 @@ function CollectPanel({
                           min={0}
                           step="0.01"
                           max={netAfterDiscount / 100}
-                          className="field w-full !border-white/25 !bg-white !py-2 !text-xl !font-bold !text-[#203050]"
+                          className="field w-full !border-white/25 !bg-white !py-2 !text-xl !font-bold !text-[#203050] dark:!bg-[#05080f] dark:!text-white dark:!border-white/30 dark:placeholder:!text-white/40"
                           value={collectAmountRupees}
                           onChange={(e) => onCollectAmount(e.target.value)}
                           placeholder="0"
