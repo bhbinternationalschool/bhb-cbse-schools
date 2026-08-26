@@ -430,26 +430,43 @@ export async function pushAdmissionDeskToDb(
   );
   if (!r.ok) return r;
 
-  await Promise.all([
-    deleteStale(
-      sb,
-      tenantId,
-      "admission_desk_households",
-      new Set(households.map((h) => h.id)),
-    ),
-    deleteStale(
-      sb,
-      tenantId,
-      "admission_desk_leads",
-      new Set(leads.map((l) => l.id)),
-    ),
-    deleteStale(
-      sb,
-      tenantId,
-      "admission_desk_registration_payments",
-      new Set(payments.map((p) => p.id)),
-    ),
-  ]);
+  // Registration payments are MONEY and append-only — a payment the pushing
+  // client does not hold means an unhydrated client, never a deletion. Same
+  // rule (and same 2026-08-26 lesson) as fee receipts: the server keeps them.
+  // Leads carrying a payment or an enrolment are protected for the same
+  // reason — pruning them would orphan money and admission records; only
+  // plain unpaid leads still follow the client's snapshot.
+  {
+    const { data: paidRows } = await sb
+      .from("admission_desk_registration_payments")
+      .select("lead_id")
+      .eq("tenant_id", tenantId);
+    const paidLeadIds = new Set(
+      (paidRows ?? []).map((r) => String((r as { lead_id: string }).lead_id)),
+    );
+    const { data: linkedRows } = await sb
+      .from("admission_desk_leads")
+      .select("id, sis_student_id")
+      .eq("tenant_id", tenantId);
+    const keepLeads = new Set(leads.map((l) => l.id));
+    for (const r of (linkedRows ?? []) as { id: string; sis_student_id: string | null }[]) {
+      if (paidLeadIds.has(r.id) || (r.sis_student_id ?? "") !== "") {
+        keepLeads.add(String(r.id));
+      }
+    }
+    await deleteStale(sb, tenantId, "admission_desk_leads", keepLeads);
+
+    // Households referenced by any surviving lead stay too.
+    const { data: leadHh } = await sb
+      .from("admission_desk_leads")
+      .select("household_id")
+      .eq("tenant_id", tenantId);
+    const keepHh = new Set(households.map((h) => h.id));
+    for (const r of (leadHh ?? []) as { household_id: string | null }[]) {
+      if (r.household_id) keepHh.add(String(r.household_id));
+    }
+    await deleteStale(sb, tenantId, "admission_desk_households", keepHh);
+  }
 
   const ops = fieldOpsFromState(normalized);
   await sb.from("admission_desk_field_ops").upsert({

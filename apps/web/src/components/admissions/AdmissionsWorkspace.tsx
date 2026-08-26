@@ -275,6 +275,17 @@ export function AdmissionsWorkspace() {
         if (cancelled) return;
         const next = loadAdmissions();
         setState(next);
+        // The Registration tab lists this session's ADMITTED students, which
+        // come from the SIS roster — pulled here rather than trusted to the
+        // background sweep, and re-read once it lands, so a fresh login does
+        // not render the card empty (found exactly that way on 2026-08-26).
+        try {
+          const { ensureSisHydrated } = await import("@/lib/sisPersistence");
+          const sisPulled = await ensureSisHydrated();
+          if (!cancelled && sisPulled) setSis(loadSis());
+        } catch {
+          // Offline — the mount-time copy stands.
+        }
         if (pulled && next.leads.length > 0) {
           setNotice(`Synced ${next.leads.length} lead(s) from Supabase.`);
           window.setTimeout(() => setNotice(null), 6000);
@@ -288,7 +299,10 @@ export function AdmissionsWorkspace() {
       }
     })();
 
-    const refresh = () => setState(loadAdmissions());
+    const refresh = () => {
+      setState(loadAdmissions());
+      setSis(loadSis());
+    };
     const onHydrated = () => refresh();
     window.addEventListener("storage", refresh);
     window.addEventListener("focus", refresh);
@@ -1651,6 +1665,7 @@ export function AdmissionsWorkspace() {
         <AdmissionRegistrationPanel
           state={state}
           masters={masters}
+          sis={sis}
           by={session.fullName}
           canEdit={canCreate}
           onCommit={commit}
