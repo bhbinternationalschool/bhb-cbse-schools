@@ -4,7 +4,6 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
-    "dev:verify": "npx --yes dotenv-cli -e .env.verify.local -o -- next dev --turbopack",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -53,7 +52,6 @@
     "test:accounts": "npx tsx src/lib/accounts.selftest.ts",
     "test:desk-sync-status": "npx tsx src/lib/deskSyncStatus.selftest.ts",
     "test:ledger": "npx tsx src/lib/ledger/ledger.selftest.ts",
-    "test:ledger:live": "npx --yes dotenv-cli -e .env.verify.local -o -- npx tsx src/lib/ledger/ledger.selftest.ts",
     "test:wa-templates-automation": "npx tsx src/lib/waTemplatesAutomation.selftest.ts",
     "test:rbac-scope": "npx tsx src/lib/rbacScope.selftest.ts",
     "test:rbac-infer": "npx tsx src/lib/rbacInfer.selftest.ts",
