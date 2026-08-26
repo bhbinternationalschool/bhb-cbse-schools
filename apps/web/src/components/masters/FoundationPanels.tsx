@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import {
   BOARD_MODES,
@@ -34,6 +34,11 @@ import {
   type SubjectCategory,
 } from "@/lib/foundationMasters";
 import { formatSeriesNumber } from "@/lib/numberSeries";
+import {
+  UP_HOLIDAY_CALENDAR,
+  UP_HOLIDAY_CALENDAR_SESSION,
+  type UpCalendarEntry,
+} from "@/lib/upHolidayCalendar";
 import {
   appliesToIncludesNonTeaching,
   appliesToIncludesStudents,
@@ -2338,6 +2343,72 @@ export function HolidaysPanel({
   const published = sessionHolidays.filter((h) => h.isPublished);
   const drafts = sessionHolidays.filter((h) => !h.isPublished);
 
+  /**
+   * The UP government calendar, offered for one-click approval. An entry is
+   * hidden once ANY existing one-off holiday already covers its start date —
+   * matching by date, not by name, so "Deepawali" typed by hand still
+   * suppresses the suggestion.
+   */
+  const upSuggestions = useMemo(() => {
+    if (sessionAy !== UP_HOLIDAY_CALENDAR_SESSION) return [];
+    const covered = (d: string) =>
+      sessionHolidays.some(
+        (h) =>
+          h.mode === "one_off" &&
+          !h.workingOverride &&
+          h.startsOn <= d &&
+          d <= (h.endsOn || h.startsOn),
+      );
+    return UP_HOLIDAY_CALENDAR.filter(
+      (e) =>
+        e.date >= ayBounds.startsOn &&
+        e.date <= ayBounds.endsOn &&
+        !covered(e.date),
+    );
+  }, [sessionAy, sessionHolidays, ayBounds.startsOn, ayBounds.endsOn]);
+
+  const approveUpEntries = useCallback(
+    (entries: UpCalendarEntry[]) => {
+      if (entries.length === 0) return;
+      const now = new Date().toISOString();
+      const rows = entries.map((e) =>
+        normalizeHoliday({
+          id: newFoundationId("hol"),
+          academicYearCode: sessionAy,
+          title: e.title,
+          startsOn: e.date,
+          endsOn: e.endDate || e.date,
+          kind: e.kind === "national" ? "national" : e.kind,
+          scope: "school",
+          appliesTo: "everyone",
+          mode: "one_off",
+          weekday: null,
+          dayType: "full",
+          paidForStaff: true,
+          exceptionDates: [],
+          workingOverride: false,
+          isPublished: true,
+          publishedAt: now,
+          publishedBy: "Principal",
+          note: [
+            "UP govt calendar",
+            e.tentative ? "tentative — confirm on notification" : "",
+            e.note || "",
+          ]
+            .filter(Boolean)
+            .join(" · "),
+        }),
+      );
+      commit(
+        { ...state, holidays: [...state.holidays, ...rows] },
+        rows.length === 1
+          ? `${rows[0].title} approved from the UP calendar`
+          : `${rows.length} holidays approved from the UP calendar`,
+      );
+    },
+    [sessionAy, state, commit],
+  );
+
   const matrixGroups = CLASS_GROUPS;
   const matrixMonth = useMemo(() => {
     const start = ayBounds.startsOn.slice(0, 10);
@@ -2370,6 +2441,83 @@ export function HolidaysPanel({
       intro={`Holiday policy for session ${sessionAy}: lists and matrix follow the header session selector. Choose who it applies to (students / teachers / non-teaching / both), then school or class-group scope · one-off or weekly · publish to apply on attendance.`}
       tables={
         <>
+          {upSuggestions.length > 0 ? (
+            <MastersTableCard
+              title={`UP government calendar ${UP_HOLIDAY_CALENDAR_SESSION} (${upSuggestions.length} pending)`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] px-4 py-2.5">
+                <p className="text-xs text-[var(--muted)]">
+                  Verified against the UP list — approve a row and it lands
+                  published, straight onto attendance. Moon-dependent dates
+                  are marked and worth a re-check when the official
+                  notification arrives.
+                </p>
+                <button
+                  type="button"
+                  className="rounded-lg bg-[var(--primary)] px-3 py-1.5 text-[11px] font-semibold text-[var(--primary-foreground)]"
+                  onClick={() =>
+                    approveUpEntries(
+                      upSuggestions.filter((e) => e.kind !== "restricted"),
+                    )
+                  }
+                  disabled={
+                    upSuggestions.filter((e) => e.kind !== "restricted")
+                      .length === 0
+                  }
+                >
+                  Approve all gazetted & national (
+                  {upSuggestions.filter((e) => e.kind !== "restricted").length}
+                  )
+                </button>
+              </div>
+              <ul className="divide-y divide-[var(--border)]">
+                {upSuggestions.map((e) => (
+                  <li
+                    key={e.date + e.title}
+                    className="flex flex-wrap items-center justify-between gap-2 px-4 py-2"
+                  >
+                    <div>
+                      <span className="text-sm font-medium">{e.title}</span>
+                      <span className="ml-2 text-xs text-[var(--muted)]">
+                        {e.date}
+                        {e.endDate && e.endDate !== e.date
+                          ? ` → ${e.endDate}`
+                          : ""}
+                      </span>
+                      <span
+                        className={`ml-2 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                          e.kind === "restricted"
+                            ? "bg-amber-500/15 text-amber-700"
+                            : e.kind === "national"
+                              ? "bg-sky-500/15 text-sky-700"
+                              : "bg-emerald-500/15 text-emerald-700"
+                        }`}
+                      >
+                        {e.kind}
+                      </span>
+                      {e.tentative ? (
+                        <span className="ml-1.5 rounded-full bg-violet-500/15 px-2 py-0.5 text-[10px] font-semibold text-violet-700">
+                          tentative
+                        </span>
+                      ) : null}
+                      {e.note ? (
+                        <div className="text-[11px] text-[var(--muted)]">
+                          {e.note}
+                        </div>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold hover:bg-[var(--muted-bg,rgba(0,0,0,0.04))]"
+                      onClick={() => approveUpEntries([e])}
+                    >
+                      Approve
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </MastersTableCard>
+          ) : null}
           <MastersTablesRow>
             <MastersTableCard title={`Published (${published.length})`}>
               <ul className="divide-y divide-[var(--border)]">
