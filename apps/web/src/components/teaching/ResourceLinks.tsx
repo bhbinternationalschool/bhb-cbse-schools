@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { BookOpen, FileText, Link2, PlayCircle, Trash2 } from "lucide-react";
 import type { ResourceKind, ResourceLink } from "@/lib/teaching";
+import { bookcaseCode } from "@/lib/library";
 
 const KIND_ICON = {
   ebook: BookOpen,
@@ -89,6 +90,50 @@ export function AddResourceForm({
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
   const [locator, setLocator] = useState("");
+  /**
+   * The school's own shelf, offered as a picker so a teacher attaches the
+   * class e-book without hunting for its link. Read from the library desk
+   * (hydrated on demand) rather than the keyed reader API: the picker needs
+   * titles and links, never the pass keys. Books whose reading link is the
+   * shelf front page (blank url) are skipped — there is nothing chapter-
+   * specific to attach for those.
+   */
+  const [shelf, setShelf] = useState<
+    { id: string; title: string; subject: string; classLabels: string[]; url: string }[]
+  >([]);
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    void (async () => {
+      try {
+        const { ensureLibraryHydrated } = await import("@/lib/libraryPersistence");
+        await ensureLibraryHydrated();
+      } catch {
+        // Fall through to whatever is cached.
+      }
+      const { loadLibrary } = await import("@/lib/library");
+      if (!live) return;
+      setShelf(
+        loadLibrary()
+          .ebooks.filter((b) => b.isActive && b.url.trim() !== "")
+          .map((b) => ({
+            id: b.id,
+            title: b.title,
+            subject: b.subject,
+            classLabels: b.classLabels,
+            url: b.url,
+          }))
+          .sort(
+            (a, b) =>
+              a.subject.localeCompare(b.subject) ||
+              a.title.localeCompare(b.title),
+          ),
+      );
+    })();
+    return () => {
+      live = false;
+    };
+  }, [open]);
 
   if (!open) {
     return (
@@ -129,6 +174,30 @@ export function AddResourceForm({
           <option value="link">Link</option>
         </select>
       </label>
+      {kind === "ebook" && shelf.length > 0 ? (
+        <label className="text-[11px] font-semibold text-[var(--muted)]">
+          From school shelf
+          <select
+            value=""
+            onChange={(e) => {
+              const b = shelf.find((x) => x.id === e.target.value);
+              if (!b) return;
+              setTitle(b.title || `Shelf ${bookcaseCode(b.url)}`);
+              setUrl(b.url);
+            }}
+            className="mt-1 block w-56 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-xs"
+          >
+            <option value="">Pick a book…</option>
+            {shelf.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.title || `Untitled shelf (${bookcaseCode(b.url) || "?"})`}
+                {b.classLabels.length > 0 ? ` (${b.classLabels.join(", ")})` : ""}
+                {b.subject ? ` · ${b.subject}` : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       <label className="text-[11px] font-semibold text-[var(--muted)]">
         Title
         <input

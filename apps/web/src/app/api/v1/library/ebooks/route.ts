@@ -1,8 +1,13 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
-import { fetchDeskSliceFromDb } from "@/lib/deskSliceNormalized.server";
+import { fetchServerBlob } from "@/lib/serverBlob";
 import { ebookAccess, keyForBook } from "@/lib/ebookAccess.server";
-import { bookcaseCode, normalizeEbook, type LibraryEbook } from "@/lib/library";
+import {
+  bookcaseCode,
+  normalizeEbook,
+  type LibraryEbook,
+  type LibraryState,
+} from "@/lib/library";
 
 export const runtime = "nodejs";
 
@@ -38,8 +43,11 @@ export async function GET(request: Request) {
       });
     }
 
-    const { bundle } = await fetchDeskSliceFromDb("library");
-    const raw = Array.isArray(bundle.ebooks) ? bundle.ebooks : [];
+    // The catalogue lives on the library blob (library_state). This used to
+    // read a "library" desk slice — a module that was never registered, so
+    // the shelf came back empty no matter what the office catalogued.
+    const remote = await fetchServerBlob<LibraryState>("library_state");
+    const raw = Array.isArray(remote.state?.ebooks) ? remote.state.ebooks : [];
     const books = (raw as Partial<LibraryEbook>[])
       .map(normalizeEbook)
       .filter((b) => b.isActive)
