@@ -188,6 +188,9 @@ export function AdmissionRegistrationPanel({
   const [amountInr, setAmountInr] = useState("500");
   const [collectInr, setCollectInr] = useState("");
   const [collectMode, setCollectMode] = useState<TenderMode>("cash");
+  const [collectOn, setCollectOn] = useState(() =>
+    new Date().toISOString().slice(0, 10),
+  );
   const [collectRef, setCollectRef] = useState("");
   const [collectBank, setCollectBank] = useState("");
   const [qrUrl, setQrUrl] = useState<string | null>(null);
@@ -347,13 +350,14 @@ export function AdmissionRegistrationPanel({
     }
     const r = takeRegistrationPayment(next, selected.id, by, {
       amountPaise: paise,
+      paidOn: collectOn || undefined,
       tenders: [
         {
           mode: collectMode,
           amountPaise: paise,
           ref: collectRef.trim(),
           bankName: collectBank.trim(),
-          instrumentDate: new Date().toISOString().slice(0, 10),
+          instrumentDate: collectOn || new Date().toISOString().slice(0, 10),
         },
       ],
     });
@@ -1215,6 +1219,15 @@ export function AdmissionRegistrationPanel({
                       </option>
                     ))}
                   </select>
+                </label>
+                <label className="text-[11px] font-semibold text-[var(--muted)]">
+                  Received on
+                  <input
+                    type="date"
+                    className={`${inp} mt-1`}
+                    value={collectOn}
+                    onChange={(e) => setCollectOn(e.target.value)}
+                  />
                 </label>
                 <label className="text-[11px] font-semibold text-[var(--muted)]">
                   {modeMeta?.refLabel || "Ref"}

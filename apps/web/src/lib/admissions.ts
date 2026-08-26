@@ -3739,6 +3739,8 @@ export function takeRegistrationPayment(
       bankName?: string;
       instrumentDate?: string;
     }[];
+    /** The date the money was actually received; today when absent. */
+    paidOn?: string;
     note?: string;
     feeHeadName?: string;
   },
@@ -3814,7 +3816,9 @@ export function takeRegistrationPayment(
     mobile: lead.mobile,
     childName: lead.childName,
     createdBy: by,
-    paidAt: new Date().toISOString(),
+    paidAt: input.paidOn
+      ? new Date(`${input.paidOn}T12:00:00`).toISOString()
+      : new Date().toISOString(),
     upiRef:
       refs ||
       `${primary.mode.toUpperCase()}-${Date.now().toString(36).toUpperCase()}`,
