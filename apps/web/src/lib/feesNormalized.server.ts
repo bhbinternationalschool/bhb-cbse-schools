@@ -239,8 +239,16 @@ export async function pushFeeVouchersToDb(
   const staleIds = (existingHeaders ?? [])
     .map((r) => String(r.id))
     .filter((id) => !idSet.has(id));
+  // NEVER deleted. A fee receipt is append-only — voiding keeps the row — so
+  // a server voucher the pushing browser doesn't know can only mean that
+  // browser is unhydrated or partially hydrated. Deleting here is how eight
+  // receipts (RCV-00001..08) vanished on 2026-08-26: a freshly-logged-in
+  // browser holding two receipts pushed, and the prune took the rest with
+  // it. The server keeps everything; hydration merges the union back down.
   if (staleIds.length > 0) {
-    await sb.from("fee_desk_vouchers").delete().in("id", staleIds);
+    console.warn(
+      `[fees-desk] push omitted ${staleIds.length} voucher(s) the server holds — keeping them (append-only receipts)`,
+    );
   }
 
   if (ids.length > 0) {
