@@ -3128,6 +3128,32 @@ function ReceiptPreviewModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  /**
+   * The office prints with Cmd+P / File → Print as often as with the Print
+   * button — and browser print applies none of the isolation classes, so the
+   * whole Fee Take page went to paper (seen in the wild: an 11-page PDF for
+   * one receipt). While THIS modal is open, any print — button or browser —
+   * isolates the receipt sheet: `beforeprint` fires for both paths.
+   */
+  useEffect(() => {
+    const target = () => document.getElementById(`receipt-${voucher.id}`);
+    const isolate = () => {
+      document.body.classList.add("printing-fee-receipt");
+      target()?.classList.add("print-target");
+    };
+    const release = () => {
+      document.body.classList.remove("printing-fee-receipt");
+      target()?.classList.remove("print-target");
+    };
+    window.addEventListener("beforeprint", isolate);
+    window.addEventListener("afterprint", release);
+    return () => {
+      release();
+      window.removeEventListener("beforeprint", isolate);
+      window.removeEventListener("afterprint", release);
+    };
+  }, [voucher.id]);
+
   useEffect(() => {
     let cancelled = false;
     async function buildRemainQr() {
