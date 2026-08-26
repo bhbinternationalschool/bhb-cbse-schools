@@ -122,7 +122,10 @@ const riderCache: { at: number; ids: Set<string> } = { at: 0, ids: new Set() };
 
 function activeTransportRiders(): Set<string> {
   if (typeof window === "undefined") return riderCache.ids;
-  if (Date.now() - riderCache.at > 30_000) {
+  // An empty snapshot is usually "built before transport hydrated", not
+  // "no riders" — retry quickly until something arrives, then settle to 30s.
+  const ttl = riderCache.ids.size > 0 ? 30_000 : 3_000;
+  if (Date.now() - riderCache.at > ttl) {
     try {
       const t = loadTransport();
       const today = new Date().toISOString().slice(0, 10);
