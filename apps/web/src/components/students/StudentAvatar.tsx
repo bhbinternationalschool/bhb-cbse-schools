@@ -1,6 +1,8 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useSyncExternalStore, type ReactNode } from "react";
+import { Bus } from "lucide-react";
+import { loadTransport } from "@/lib/transport";
 import type { FeeStudentType } from "@/lib/masters";
 import {
   avatarTone,
@@ -106,6 +108,39 @@ export function StudentTagsBadge({
 /**
  * Type badge + tags + name — use everywhere a student is listed.
  */
+/* ─── Transport rider marker ───────────────────────────────── */
+
+/**
+ * Which students currently ride a bus — cached for 30s because this label
+ * renders in rosters hundreds of rows long and loadTransport() is a full
+ * localStorage parse. Client-only by construction: the server render shows
+ * no icon and the first client pass adds it after mount, which is why the
+ * component gates on useSyncExternalStore below instead of reading here
+ * during hydration.
+ */
+const riderCache: { at: number; ids: Set<string> } = { at: 0, ids: new Set() };
+
+function activeTransportRiders(): Set<string> {
+  if (typeof window === "undefined") return riderCache.ids;
+  if (Date.now() - riderCache.at > 30_000) {
+    try {
+      const t = loadTransport();
+      const today = new Date().toISOString().slice(0, 10);
+      riderCache.ids = new Set(
+        t.assignments
+          .filter((a) => !a.effectiveTo || a.effectiveTo >= today)
+          .map((a) => a.studentId),
+      );
+    } catch {
+      // Keep whatever we had; an icon is never worth breaking a roster.
+    }
+    riderCache.at = Date.now();
+  }
+  return riderCache.ids;
+}
+
+const subscribeNoop = () => () => {};
+
 export function StudentNameLabel({
   student,
   sis,
@@ -113,12 +148,23 @@ export function StudentNameLabel({
   children,
 }: {
   student: Pick<SisStudent, "fullName" | "studentType"> &
-    Partial<Pick<SisStudent, "tagIds" | "udiseInboundTransferPending" | "pen">>;
+    Partial<
+      Pick<SisStudent, "id" | "tagIds" | "udiseInboundTransferPending" | "pen">
+    >;
   sis?: SisState;
   className?: string;
   /** Extra content after the name (status chips, etc.) */
   children?: ReactNode;
 }) {
+  // false on the server and on the hydration pass, true after mount — so the
+  // transport marker can come from localStorage without a hydration mismatch.
+  const isClient = useSyncExternalStore(
+    subscribeNoop,
+    () => true,
+    () => false,
+  );
+  const ridesTransport =
+    isClient && student.id ? activeTransportRiders().has(student.id) : false;
   return (
     <span className={className}>
       <StudentTypeBadge type={student.studentType} />
@@ -132,6 +178,14 @@ export function StudentNameLabel({
           title="Import from UDISE+ Drop Box or ask previous school to release on portal"
         >
           Drop Box
+        </span>
+      ) : null}
+      {ridesTransport ? (
+        <span
+          title="Transport assigned"
+          className="mr-1 inline-flex align-middle text-[#b8860b]"
+        >
+          <Bus className="size-3" aria-label="Transport assigned" />
         </span>
       ) : null}
       {student.fullName}

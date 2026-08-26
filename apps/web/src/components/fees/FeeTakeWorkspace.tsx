@@ -248,6 +248,19 @@ export function FeeTakeWorkspace() {
       } catch {
         // Offline or first load — fall through to whatever is cached locally.
       }
+      // Transport dues are billed HERE, on the counter — so the counter pulls
+      // the transport desk itself instead of trusting some other module to
+      // have done it. A changed pull re-ticks the dues so a student already
+      // on screen gains their transport line.
+      try {
+        const { ensureTransportHydrated } = await import(
+          "@/lib/transportPersistence"
+        );
+        const changed = await ensureTransportHydrated();
+        if (live && changed) refresh();
+      } catch {
+        // Same fallback as accounts.
+      }
       const { loadAccounts } = await import("@/lib/accountsStore");
       if (live) setAccountsState(loadAccounts());
       // ensureAccountsHydrated marks the module hydrated the moment the FIRST
