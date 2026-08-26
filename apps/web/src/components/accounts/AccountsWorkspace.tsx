@@ -23,6 +23,7 @@ import {
   VoucherEntryPanel,
 } from "@/components/accounts/LedgerEntryPanels";
 import {
+  BanksPanel,
   BillsPanel,
   DayCloseAccountsPanel,
   OwnerLoansPanel,
@@ -248,6 +249,7 @@ export function AccountsWorkspace() {
         />
       ) : tab === "masters" ? (
         <div className="space-y-4">
+          <BanksPanel {...panelProps} />
           <ExpenseHeadsPanel />
           <SpendTagsPanel />
           <AccountsMastersPanel {...panelProps} />
