@@ -857,6 +857,301 @@ export function ChequesPanel({
  * should go — a silent dual-book period is how two versions of the truth
  * happen.
  */
+/* ═══ Quick expense ════════════════════════════════════════ */
+
+const QUICK_PAY_MODES = [
+  { id: "cash", label: "Cash" },
+  { id: "upi", label: "UPI" },
+  { id: "bank", label: "Bank transfer" },
+  { id: "cheque", label: "Cheque" },
+] as const;
+
+/**
+ * The office's expense entry: head → sub-head → tag, amount, paid by, done.
+ * Builds the balanced two-sided voucher behind the curtain (Dr the expense
+ * sub-head, Cr cash or the bank) and posts through the same `ledger_post` as
+ * the full voucher screen — same numbering, same rails: nothing posts
+ * unbalanced, non-cash refuses without its transaction ID, and a posted
+ * entry can only be reversed, never edited.
+ */
+export function QuickExpensePanel({
+  banks,
+  actor,
+  onPosted,
+}: {
+  banks: { id: string; name: string }[];
+  actor: string;
+  onPosted?: () => void;
+}) {
+  const accounts = useChart();
+  const [centres, setCentres] = useState<{ code: string; name: string }[]>([]);
+  useEffect(() => {
+    void ledgerApi<{ centres: { code: string; name: string }[] }>({
+      action: "cost-centres",
+    }).then((r) => {
+      if (r.ok && r.centres) setCentres(r.centres);
+    });
+  }, []);
+
+  const [category, setCategory] = useState("");
+  const [subHead, setSubHead] = useState("");
+  const [amount, setAmount] = useState("");
+  const [payMode, setPayMode] = useState<(typeof QUICK_PAY_MODES)[number]["id"]>("cash");
+  const [bankId, setBankId] = useState("");
+  const [ref, setRef] = useState("");
+  const [date, setDate] = useState(todayIso());
+  const [tag, setTag] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
+
+  // Heads = expense categories; a category with sub-heads opens the second
+  // select, one without posts directly.
+  // The store's automation owns these — COGS, write-offs, store purchases,
+  // concessions. Money never goes to them by hand, so the quick form does
+  // not offer them; the full voucher screen still can when a correction
+  // genuinely needs it.
+  const SYSTEM_HEADS = useMemo(() => new Set(["5060", "5065", "5066", "5100"]), []);
+  const heads = useMemo(
+    () =>
+      accounts.filter(
+        (a) =>
+          a.kind === "expense" &&
+          a.parentCode === "5" &&
+          !SYSTEM_HEADS.has(a.code),
+      ),
+    [accounts, SYSTEM_HEADS],
+  );
+  const subHeads = useMemo(
+    () => accounts.filter((a) => a.parentCode === category),
+    [accounts, category],
+  );
+  const chosenHead = useMemo(() => {
+    const cat = accounts.find((a) => a.code === category);
+    if (!cat) return undefined;
+    if (cat.hasChildren) return accounts.find((a) => a.code === subHead);
+    return cat;
+  }, [accounts, category, subHead]);
+
+  const amountPaise = paiseFromRupees(amount);
+  const needsBank = payMode !== "cash";
+  const canPost =
+    !!chosenHead &&
+    amountPaise > 0 &&
+    !!date &&
+    (!needsBank || (!!bankId && ref.trim() !== ""));
+
+  async function post() {
+    if (!canPost || !chosenHead) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const tagName = centres.find((c) => c.code === tag)?.name ?? "";
+      const payLine =
+        payMode === "cash"
+          ? { accountCode: "1000" }
+          : {
+              accountCode: "1010",
+              subledgerKind: "bank_account",
+              subledgerId: bankId,
+              instrument: { mode: payMode, ref: ref.trim(), date },
+            };
+      const res = await ledgerApi<{ voucherNo?: string }>({
+        action: "post",
+        voucher: {
+          voucherType: "payment",
+          date,
+          narration:
+            note.trim() ||
+            `${chosenHead.name}${tagName ? ` — ${tagName}` : ""}`,
+          createdBy: actor,
+          lines: [
+            {
+              accountCode: chosenHead.code,
+              debitPaise: amountPaise,
+              creditPaise: 0,
+              ...(tag ? { costCentreCode: tag } : {}),
+            },
+            {
+              ...payLine,
+              debitPaise: 0,
+              creditPaise: amountPaise,
+              ...(tag ? { costCentreCode: tag } : {}),
+            },
+          ],
+        },
+      });
+      if (res.ok) {
+        setNotice({
+          tone: "ok",
+          text: `${res.voucherNo ?? "Posted"} — ${formatInr(amountPaise)} ${chosenHead.name}${tagName ? ` (${tagName})` : ""}`,
+        });
+        // Head, date, tag and paid-by stay put for the next entry in the
+        // pile; only what must differ per entry clears.
+        setAmount("");
+        setRef("");
+        setNote("");
+        onPosted?.();
+      } else {
+        setNotice({ tone: "bad", text: res.error || "The book refused this entry" });
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className={CARD}>
+      <h4 className="text-sm font-bold text-[var(--brand-deep)]">Quick expense</h4>
+      <p className="text-[11px] text-[var(--muted)]">
+        Head, amount, paid by — the balanced voucher is written for you. For
+        anything unusual, the full voucher screen below still does everything.
+      </p>
+
+      {notice ? (
+        <p
+          className={`mt-2 rounded-lg px-3 py-1.5 text-xs ${
+            notice.tone === "ok"
+              ? "bg-emerald-500/10 text-emerald-700"
+              : "bg-red-500/10 text-red-700"
+          }`}
+        >
+          {notice.text}
+        </p>
+      ) : null}
+
+      <div className="mt-3 flex flex-wrap items-end gap-2">
+        <label className="text-[11px] font-bold text-[var(--muted)]">
+          Head
+          <select
+            className={FIELD}
+            value={category}
+            onChange={(e) => {
+              setCategory(e.target.value);
+              setSubHead("");
+            }}
+          >
+            <option value="">Choose…</option>
+            {heads.map((h) => (
+              <option key={h.code} value={h.code}>
+                {h.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        {subHeads.length > 0 ? (
+          <label className="text-[11px] font-bold text-[var(--muted)]">
+            Sub-head
+            <select
+              className={FIELD}
+              value={subHead}
+              onChange={(e) => setSubHead(e.target.value)}
+            >
+              <option value="">Choose…</option>
+              {subHeads.map((s) => (
+                <option key={s.code} value={s.code}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+        <label className="text-[11px] font-bold text-[var(--muted)]">
+          Spent on
+          <select className={FIELD} value={tag} onChange={(e) => setTag(e.target.value)}>
+            <option value="">No tag</option>
+            {centres.map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-[11px] font-bold text-[var(--muted)]">
+          Amount (₹)
+          <input
+            className={FIELD}
+            style={{ width: 110 }}
+            inputMode="decimal"
+            placeholder="0.00"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+          />
+        </label>
+        <label className="text-[11px] font-bold text-[var(--muted)]">
+          Date
+          <input type="date" className={FIELD} value={date} onChange={(e) => setDate(e.target.value)} />
+        </label>
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-end gap-2">
+        <div className="text-[11px] font-bold text-[var(--muted)]">
+          Paid by
+          <div className="mt-1 flex gap-1">
+            {QUICK_PAY_MODES.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => setPayMode(m.id)}
+                className={
+                  payMode === m.id
+                    ? "rounded-lg bg-[var(--primary)] px-2.5 py-1.5 text-xs font-semibold text-[var(--primary-foreground)]"
+                    : "rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-xs"
+                }
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {needsBank ? (
+          <>
+            <label className="text-[11px] font-bold text-[var(--muted)]">
+              Which bank
+              <select className={FIELD} value={bankId} onChange={(e) => setBankId(e.target.value)}>
+                <option value="">Choose…</option>
+                {banks.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-[11px] font-bold text-[var(--muted)]">
+              Transaction ID
+              <input
+                className={FIELD}
+                style={{ width: 160 }}
+                placeholder="UTR / cheque no."
+                value={ref}
+                onChange={(e) => setRef(e.target.value)}
+              />
+            </label>
+          </>
+        ) : null}
+        <label className="min-w-[12rem] flex-1 text-[11px] font-bold text-[var(--muted)]">
+          Note (optional)
+          <input
+            className={FIELD}
+            placeholder="what this was for"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+        </label>
+        <button type="button" className={BTN} disabled={busy || !canPost} onClick={() => void post()}>
+          {busy ? "Posting…" : "Save expense"}
+        </button>
+      </div>
+      {needsBank && (!bankId || !ref.trim()) ? (
+        <p className="mt-1 text-[11px] text-[var(--muted)]">
+          A payment that is not cash needs its bank and transaction ID before
+          it can post — that is what ties it to the bank statement later.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
 /* ═══ Expense heads: category → sub-heads ══════════════════ */
 
 /**

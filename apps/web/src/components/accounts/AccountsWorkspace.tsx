@@ -19,6 +19,7 @@ import {
 import {
   ChequesPanel,
   LegacyBookNotice,
+  QuickExpensePanel,
   VoucherEntryPanel,
 } from "@/components/accounts/LedgerEntryPanels";
 import {
@@ -215,6 +216,13 @@ export function AccountsWorkspace() {
         <LedgerBookPanel canApprove={canApprove} />
       ) : tab === "vouchers" ? (
         <div className="mt-4 space-y-4">
+          <QuickExpensePanel
+            banks={(state.bankAccounts ?? [])
+              .filter((b) => b.isActive !== false)
+              .map((b) => ({ id: b.id, name: b.name }))}
+            actor={actorName}
+            onPosted={() => setEntryTick((n) => n + 1)}
+          />
           <VoucherEntryPanel
             banks={(state.bankAccounts ?? [])
               .filter((b) => b.isActive !== false)
