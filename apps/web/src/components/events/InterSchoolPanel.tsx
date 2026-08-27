@@ -8,6 +8,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import QRCode from "qrcode";
+import { EventPublicity } from "@/components/events/EventPublicity";
 import { formatInr, loadMasters, type MastersState } from "@/lib/masters";
 import { loadSis, type SisState } from "@/lib/sis";
 import { TENANT } from "@/lib/types";
@@ -109,7 +111,7 @@ export function InterSchoolPanel({
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [section, setSection] = useState<
-    "setup" | "participants" | "results" | "certificates"
+    "setup" | "participants" | "results" | "certificates" | "publicity"
   >("setup");
 
   // Setup form
@@ -378,6 +380,7 @@ export function InterSchoolPanel({
                 ["participants", `Participants (${participants.length})`],
                 ["results", "Results"],
                 ["certificates", `Certificates (${certificates.length})`],
+                ["publicity", "Publicity"],
               ] as const
             ).map(([id, label]) => (
               <button
@@ -791,6 +794,19 @@ export function InterSchoolPanel({
               }}
             />
           ) : null}
+
+          {/* ── Publicity ── */}
+          {section === "publicity" && selected ? (
+            selected.status === "draft" ? (
+              <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 text-sm text-[var(--muted)]">
+                Set the event status to <span className="font-bold">Open</span> first —
+                publicity links point at the public page, which stays hidden while the
+                event is a draft.
+              </p>
+            ) : (
+              <EventPublicity event={selected} readOnly={readOnly} />
+            )
+          ) : null}
         </div>
       </div>
     </div>
@@ -854,6 +870,27 @@ function CertificatesSection({
   const winners = certificates.filter((c) => c.kind === "winner").length;
   const participation = certificates.filter((c) => c.kind === "participation").length;
   const origin = `https://${TENANT.publicPortal}`;
+  const [qrById, setQrById] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all(
+      certificates.map(async (c) => {
+        const url = await QRCode.toDataURL(`${origin}/fest/verify/${c.id}`, {
+          width: 160,
+          margin: 0,
+          errorCorrectionLevel: "M",
+          color: { dark: "#203050", light: "#ffffff" },
+        });
+        return [c.id, url] as const;
+      }),
+    ).then((pairs) => {
+      if (!cancelled) setQrById(Object.fromEntries(pairs));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [certificates, origin]);
 
   function printAll() {
     document.body.classList.add("printing-evt-certs");
@@ -925,7 +962,12 @@ function CertificatesSection({
               <div className="mt-8 flex items-end justify-between text-[9px] text-[#5a6a8a]">
                 <div className="w-28 border-t border-[#203050]/40 pt-1 text-left">Coordinator</div>
                 <div className="text-center">
-                  <div className="mx-auto flex h-10 w-10 items-center justify-center rounded border border-[#203050]/30 text-[6px]">QR</div>
+                  {qrById[c.id] ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img src={qrById[c.id]} alt="Verify QR" className="mx-auto h-12 w-12" />
+                  ) : (
+                    <div className="mx-auto h-12 w-12 rounded border border-[#203050]/30" />
+                  )}
                   <div className="mt-0.5 max-w-[180px] break-all">{verifyUrl}</div>
                 </div>
                 <div className="w-28 border-t border-[#203050]/40 pt-1 text-right">Principal</div>
