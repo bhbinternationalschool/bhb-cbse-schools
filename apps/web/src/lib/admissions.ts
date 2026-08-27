@@ -4095,6 +4095,48 @@ export function waiveRegistrationFee(
   return out;
 }
 
+/**
+ * Fee Take voided an R-series receipt — the CRM must stop saying "paid".
+ * Looks the payment up by its posted fee voucher id; reopens it and
+ * refreshes the lead's registration status. Safe to call for any voided
+ * voucher: a non-registration receipt simply finds no payment.
+ */
+export function revertRegistrationPaymentForVoidedReceipt(
+  feeVoucherId: string,
+): boolean {
+  if (!feeVoucherId) return false;
+  const state = loadAdmissions();
+  const payment = (state.registrationPayments || []).find(
+    (p) => p.feeVoucherId === feeVoucherId && p.status === "paid",
+  );
+  if (!payment) return false;
+  let next: AdmissionsState = {
+    ...state,
+    registrationPayments: (state.registrationPayments || []).map((p) =>
+      p.id === payment.id
+        ? {
+            ...p,
+            status: "open" as const,
+            paidAt: "",
+            note: [
+              p.note,
+              `R receipt ${p.feeReceiptNo || ""} voided at Fee Take`.trim(),
+            ]
+              .filter(Boolean)
+              .join(" · "),
+          }
+        : p,
+    ),
+  };
+  next = refreshLeadRegistrationPaymentStatus(
+    next,
+    payment.leadId,
+    `R receipt ${payment.feeReceiptNo || payment.code} voided — balance reopened`,
+  );
+  saveAdmissions(next);
+  return true;
+}
+
 export type RegistrationPaySharePayload = {
   v: 1;
   paymentId: string;

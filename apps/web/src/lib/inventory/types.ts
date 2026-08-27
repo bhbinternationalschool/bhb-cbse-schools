@@ -691,6 +691,8 @@ export type InvSale = {
   payments: InvSalePayment[];
   /** totalPaise − costPaise. What the school actually made on this sale. */
   marginPaise: number;
+  /** School books voucher no (SL/FY…) — the official receipt number. */
+  ledgerVoucherNo: string;
 };
 
 export type InvSaleReturn = {

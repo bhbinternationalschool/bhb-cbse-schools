@@ -94,6 +94,11 @@ export function StoreReceiptSheet({
       <div className="mt-1.5 flex justify-between text-[10px]">
         <div>
           <p className="font-mono font-semibold">{sale.saleNo}</p>
+          {sale.ledgerVoucherNo ? (
+            <p className="font-mono text-[#5a6a8a]">
+              Receipt {sale.ledgerVoucherNo}
+            </p>
+          ) : null}
           <p className="text-[#5a6a8a]">{formatDisplayDate(sale.saleDate)}</p>
         </div>
         <div className="text-right">

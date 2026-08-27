@@ -227,7 +227,7 @@ export async function listSales(query: InvSaleQuery): Promise<InvSalePage> {
   }
 
   const saleIds = rows.map((r) => str(r.id));
-  const [lineRes, payRes, retRes] = await Promise.all([
+  const [lineRes, payRes, retRes, voucherRes] = await Promise.all([
     sb
       .from("inv_sale_lines")
       .select("*")
@@ -244,7 +244,20 @@ export async function listSales(query: InvSaleQuery): Promise<InvSalePage> {
       .from("inv_sale_return_lines")
       .select("sale_line_id, qty")
       .eq("tenant_id", tenantId),
+    // The school books voucher for each sale — the official receipt number
+    // the office quotes, alongside the store's own sale number.
+    sb
+      .from("ledger_vouchers")
+      .select("source_id, voucher_no")
+      .eq("tenant_id", tenantId)
+      .eq("source_type", "inv_sale")
+      .in("source_id", saleIds),
   ]);
+
+  const voucherBySale = new Map<string, string>();
+  for (const v of (voucherRes.data ?? []) as Row[]) {
+    voucherBySale.set(str(v.source_id), str(v.voucher_no));
+  }
 
   const returnedByLine = new Map<string, number>();
   for (const r of (retRes.data ?? []) as Row[]) {
@@ -307,6 +320,7 @@ export async function listSales(query: InvSaleQuery): Promise<InvSalePage> {
         payments: paysBySale.get(id) ?? [],
         // A cancelled sale earned nothing, whatever its line values say.
         marginPaise: str(r.status) === "void" ? 0 : total - cost,
+        ledgerVoucherNo: voucherBySale.get(id) ?? "",
       };
     }),
     total: count ?? rows.length,

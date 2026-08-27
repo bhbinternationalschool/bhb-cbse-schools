@@ -3284,6 +3284,15 @@ export function voidVoucher(voucherId: string): boolean {
   // this the money stayed on the books for good — cash in hand and fee income
   // were overstated by every voided receipt (audit 2026-08-23, L1).
   reverseFeeCollectionInBooks(voucher, "Fee receipt voided");
+
+  // An R-series receipt is an admissions registration payment — reopen it in
+  // the CRM, or the lead keeps saying "paid" for money the void returned.
+  // (No-op for ordinary fee receipts: nothing links to this voucher id.)
+  void import("@/lib/admissions")
+    .then(({ revertRegistrationPaymentForVoidedReceipt }) => {
+      revertRegistrationPaymentForVoidedReceipt(voucher.id);
+    })
+    .catch(() => {});
   return true;
 }
 
