@@ -94,6 +94,11 @@ export function StoreReceiptSheet({
       <div className="mt-1.5 flex justify-between text-[10px]">
         <div>
           <p className="font-mono font-semibold">{sale.saleNo}</p>
+          {sale.manualReceiptNo ? (
+            <p className="font-mono font-semibold">
+              Book receipt {sale.manualReceiptNo}
+            </p>
+          ) : null}
           {sale.ledgerVoucherNo ? (
             <p className="font-mono text-[#5a6a8a]">
               Receipt {sale.ledgerVoucherNo}

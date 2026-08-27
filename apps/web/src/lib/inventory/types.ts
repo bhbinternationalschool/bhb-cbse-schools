@@ -693,6 +693,8 @@ export type InvSale = {
   marginPaise: number;
   /** School books voucher no (SL/FY…) — the official receipt number. */
   ledgerVoucherNo: string;
+  /** Paper receipt-book number the clerk wrote by hand, when one was. */
+  manualReceiptNo: string;
 };
 
 export type InvSaleReturn = {

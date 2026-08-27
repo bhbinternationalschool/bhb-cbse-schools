@@ -358,6 +358,7 @@ function SellSection({
   );
   const [kitId, setKitId] = useState("");
   const [note, setNote] = useState("");
+  const [manualReceiptNo, setManualReceiptNo] = useState("");
   const [saleDate, setSaleDate] = useState(() =>
     new Date().toISOString().slice(0, 10),
   );
@@ -587,6 +588,7 @@ function SellSection({
     setBrowseClass("");
     setBrowseSection("");
     setNote("");
+    setManualReceiptNo("");
     setSaleDate(new Date().toISOString().slice(0, 10));
     setTenders([
       { id: newTenderId(), mode: "cash", amountInput: "", reference: "" },
@@ -630,6 +632,7 @@ function SellSection({
                 reference: t.reference.trim(),
                 paidOn: saleDate,
               })),
+        manualReceiptNo: manualReceiptNo.trim() || undefined,
       }),
     );
 
@@ -684,6 +687,7 @@ function SellSection({
         priceListId,
         kitId: kitId || undefined,
         saleDate,
+        manualReceiptNo: manualReceiptNo.trim() || undefined,
         note,
         lines: cart.map((l) => ({
           itemId: l.itemId,
@@ -1390,6 +1394,11 @@ function SellSection({
             type="date"
             value={saleDate}
             onChange={setSaleDate}
+          />
+          <TextField
+            label="Book receipt no (manual)"
+            value={manualReceiptNo}
+            onChange={setManualReceiptNo}
           />
           <TextField label="Note" value={note} onChange={setNote} />
 

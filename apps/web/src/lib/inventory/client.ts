@@ -479,6 +479,7 @@ export const invApi = {
       reference: string;
       paidOn?: string;
     }[];
+    manualReceiptNo?: string;
   }) =>
     req<{
       household: {

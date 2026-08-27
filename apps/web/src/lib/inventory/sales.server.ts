@@ -321,6 +321,7 @@ export async function listSales(query: InvSaleQuery): Promise<InvSalePage> {
         // A cancelled sale earned nothing, whatever its line values say.
         marginPaise: str(r.status) === "void" ? 0 : total - cost,
         ledgerVoucherNo: voucherBySale.get(id) ?? "",
+        manualReceiptNo: str(r.manual_receipt_no),
       };
     }),
     total: count ?? rows.length,
@@ -344,6 +345,7 @@ export async function postSale(
     priceListId?: string;
     kitId?: string;
     saleDate?: string;
+    manualReceiptNo?: string;
     note?: string;
     lines: {
       itemId: string;
@@ -414,6 +416,19 @@ export async function postSale(
   if (error) throw new InvError(cleanDbMessage(error.message), 409);
 
   const out = (data ?? {}) as Row;
+
+  // Post-insert metadata: the paper receipt-book number the clerk copied
+  // from the manual book. Kept out of the posting RPC on purpose — it is
+  // reference data, not money, and must never fail a sale.
+  const manualNo = str(input.manualReceiptNo).trim().slice(0, 40);
+  if (manualNo && out.sale_id) {
+    await sb
+      .from("inv_sales")
+      .update({ manual_receipt_no: manualNo })
+      .eq("tenant_id", tenantId)
+      .eq("id", str(out.sale_id));
+  }
+
   return {
     saleId: str(out.sale_id),
     saleNo: str(out.sale_no),
@@ -871,6 +886,8 @@ export async function postHouseholdSale(
       reference: string;
       paidOn?: string;
     }[];
+    /** Paper receipt-book number — one payment, so one number for all children. */
+    manualReceiptNo?: string;
   },
   actor: string,
   academicYearCode: string,
@@ -897,6 +914,19 @@ export async function postHouseholdSale(
   });
   if (error) throw new InvError(error.message, 422);
   const out = (data ?? {}) as Row;
+
+  const manualNo = str(input.manualReceiptNo).trim().slice(0, 40);
+  const saleIds = ((out.sales ?? []) as Row[])
+    .map((r) => str(r.sale_id))
+    .filter(Boolean);
+  if (manualNo && saleIds.length > 0) {
+    await sb
+      .from("inv_sales")
+      .update({ manual_receipt_no: manualNo })
+      .eq("tenant_id", tenantId)
+      .in("id", saleIds);
+  }
+
   return {
     sales: ((out.sales ?? []) as Row[]).map((r) => ({
       saleId: str(r.sale_id),

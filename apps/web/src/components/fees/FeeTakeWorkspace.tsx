@@ -2254,15 +2254,14 @@ function CollectPanel({
         ) : null}
       </div>
 
-      {/* ── Counter layout ────────────────────────────────────────────────
-             LEFT   = who is paying (every child of the family, side by side)
-             RIGHT  = what they are paying (that child's fees, group-wise)
-             BELOW  = the money (full width, always the last thing on screen)
-             The old household-information card is gone: guardian name and
-             WhatsApp sit on the search line, one glance away, and the space
-             it used belongs to the fees.
+      {/* ── Counter layout, store-counter style ──────────────────────────
+             LEFT   = who + what: the family's children, then their fees
+             RIGHT  = the money: a sticky payment column, always in view
+             (approved design 2026-08-27 — mirrors the store counter's
+             1fr/right-aside shape; phones still get the sticky bottom bar)
       ── */}
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,0.62fr)_minmax(0,1.38fr)] items-start">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(360px,420px)] items-start">
+        <div className="min-w-0 space-y-4">
         {/* ── LEFT COLUMN: children of this family ── */}
         <div className="space-y-3 min-w-0">
           <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-sm">
@@ -2283,7 +2282,7 @@ function CollectPanel({
               ) : null}
             </div>
 
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1 2xl:grid-cols-2">
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
               {householdBundle.map((row) => {
                 const openDs = openFeeDues(row.dues);
                 const rDue = openDs.reduce((s, d) => s + d.balancePaise, 0);
@@ -2533,10 +2532,10 @@ function CollectPanel({
             )}
           </div>
         </div>
-      </div>
+        </div>
 
-      {/* ── THE MONEY: full width, under both columns ── */}
-      <div className="mt-4 space-y-4">
+        {/* ── THE MONEY: sticky right column ── */}
+        <aside className="min-w-0 space-y-4 lg:sticky lg:top-3">
           <div
             className="relative overflow-hidden rounded-2xl border border-[var(--border)] shadow-[0_12px_40px_rgba(32,48,80,0.1)]"
             style={{
@@ -2969,7 +2968,8 @@ function CollectPanel({
           </ul>
         )}
       </div>
-    </div>
+        </aside>
+      </div>
 
       {/* ── Sticky collect bar, phones only ──────────────────────────────
           The page stacks on a phone: sibling tabs, then every month's dues,
