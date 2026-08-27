@@ -26,6 +26,7 @@ import {
   createPaymentLink,
 } from "@/lib/payments";
 import { loadSis, type Household, type SisStudent } from "@/lib/sis";
+import { getPaymentGatewayConfig } from "@/lib/paymentGateway";
 import { StudentNameLabel } from "@/components/students/StudentAvatar";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import { FilterExportButtons } from "@/components/reports/FilterExportButtons";
@@ -149,6 +150,36 @@ export function ParentFeesPortal({
     }
     setPaying(true);
     try {
+      // Live gateway: the server recomputes the dues, creates the link, and
+      // attaches the hosted checkout. The demo instant-settle below must
+      // never run when real money is being collected.
+      if (getPaymentGatewayConfig().mode !== "demo") {
+        try {
+          const res = await fetch("/api/payments/parent-checkout", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              dueKeys: [...selected],
+              studentId: activeStudentId,
+            }),
+          });
+          const json = (await res.json().catch(() => ({}))) as {
+            ok?: boolean;
+            checkoutUrl?: string | null;
+            shareUrl?: string;
+            error?: string;
+          };
+          if (res.ok && json.ok && (json.checkoutUrl || json.shareUrl)) {
+            window.location.href = json.checkoutUrl || json.shareUrl!;
+            return;
+          }
+          flash(json.error || "Could not start payment — try again");
+        } catch {
+          flash("Could not start payment — check connection and try again");
+        }
+        return;
+      }
+
       const masters = loadMasters();
       const primary =
         bundle.find((r) => r.student.id === activeStudentId)?.student ??
