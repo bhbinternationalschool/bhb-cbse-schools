@@ -21,7 +21,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
-  return invRoute(req, "view", async () => {
+  return invRoute(req, "view", async ({ academicYearCode }) => {
     const q = invQuery(req);
     const view = q.get("view") ?? "list";
 
@@ -31,16 +31,18 @@ export async function GET(req: Request) {
     }
     if (view === "siblings")
       return {
+        // Default to the session's academic year — without it a family that
+        // has been here three sessions shows every child three times.
         siblings: await householdSiblings(
           q.get("householdId") ?? "",
-          q.get("ay") ?? "",
+          q.get("ay") || academicYearCode,
         ),
       };
     if (view === "purchases")
       return {
         purchases: await studentPurchases(
           q.get("studentId") ?? "",
-          q.get("ay") ?? "",
+          q.get("ay") || academicYearCode,
         ),
       };
     if (view === "dues") {

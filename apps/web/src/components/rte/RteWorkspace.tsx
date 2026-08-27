@@ -21,6 +21,7 @@ import {
 import {
   applicationStatusLabel,
   assignLotteryNumbers,
+  assignRteToStudent,
   deleteQuotaApplication,
   deleteQuotaSeat,
   formatPortalDob,
@@ -32,8 +33,11 @@ import {
   matrixFromGovtAllottedSeatFile,
   quotaTypeLabel,
   registrationFeeLabel,
+  removeRteFromStudent,
   RTE_REPORTS,
+  rteWaivedHeadIds,
   runRteReport,
+  setRteHeadWaiver,
   saveRteSettings,
   seedQuotaSeatsFromStrength,
   seedRteIfEmpty,
@@ -106,6 +110,11 @@ export function RteWorkspace({
   const [govtImportRaw, setGovtImportRaw] = useState("");
   const [defaultRegFeeRs, setDefaultRegFeeRs] = useState("500");
 
+  const [assignClassId, setAssignClassId] = useState("");
+  const [assignSectionId, setAssignSectionId] = useState("");
+  const [assignStudentId, setAssignStudentId] = useState("");
+  const [expandedStudentId, setExpandedStudentId] = useState("");
+
   const [mandatedPct, setMandatedPct] = useState(25);
   const [autoWaiver, setAutoWaiver] = useState(true);
   const [reportFormat, setReportFormat] = useState<"excel" | "pdf">("excel");
@@ -165,6 +174,29 @@ export function RteWorkspace({
   }, [state, ay]);
 
   const enrolled = useMemo(() => listEnrolledRteStudents(sis ?? undefined), [sis]);
+
+  const activeFeeHeads = useMemo(
+    () =>
+      (masters?.feeHeads ?? [])
+        .filter((h) => h.isActive !== false)
+        .slice()
+        .sort((a, b) => a.sortOrder - b.sortOrder || a.nameEn.localeCompare(b.nameEn)),
+    [masters],
+  );
+
+  const assignableStudents = useMemo(() => {
+    if (!sis || !assignClassId) return [];
+    return sis.students
+      .filter(
+        (s) =>
+          s.status === "active" &&
+          s.classId === assignClassId &&
+          (!assignSectionId || s.sectionId === assignSectionId) &&
+          s.studentType !== "RTE" &&
+          (s.academicYearCode || ay) === ay,
+      )
+      .sort((a, b) => a.fullName.localeCompare(b.fullName));
+  }, [sis, assignClassId, assignSectionId, ay]);
 
   const fillSummary = useMemo(() => {
     const total = seatRows.reduce((s, r) => s + r.total, 0);
@@ -750,35 +782,207 @@ export function RteWorkspace({
       ) : null}
 
       {tab === "enrolled" ? (
-        <section className="mt-4">
-          <p className="mb-2 text-sm text-[var(--muted)]">
-            Active SIS students with fee type RTE or category EWS (from
-            Admissions / Students).
+        <section className="mt-4 space-y-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+            <h3 className="text-sm font-bold text-[var(--brand-deep)]">
+              Assign RTE to an existing SIS student
+            </h3>
+            <p className="mt-0.5 text-xs text-[var(--muted)]">
+              Filter by class &amp; section, pick the student — fee type
+              becomes RTE, the RTE tag is added, and the RTE fee group applies.
+            </p>
+            <div className="mt-3 flex flex-wrap items-end gap-2">
+              <label className="block text-xs text-[var(--muted)]">
+                Class
+                <select
+                  className={`${field} mt-1 block w-36`}
+                  value={assignClassId}
+                  onChange={(e) => {
+                    setAssignClassId(e.target.value);
+                    setAssignSectionId("");
+                    setAssignStudentId("");
+                  }}
+                >
+                  <option value="">Select class</option>
+                  {classes.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-xs text-[var(--muted)]">
+                Section
+                <select
+                  className={`${field} mt-1 block w-32`}
+                  value={assignSectionId}
+                  onChange={(e) => {
+                    setAssignSectionId(e.target.value);
+                    setAssignStudentId("");
+                  }}
+                >
+                  <option value="">All sections</option>
+                  {(masters.sections ?? [])
+                    .filter(
+                      (s) => s.classId === assignClassId && s.isActive !== false,
+                    )
+                    .map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <label className="block text-xs text-[var(--muted)]">
+                Student
+                <select
+                  className={`${field} mt-1 block w-64`}
+                  value={assignStudentId}
+                  onChange={(e) => setAssignStudentId(e.target.value)}
+                >
+                  <option value="">
+                    {assignClassId ? "Select student" : "Choose class first"}
+                  </option>
+                  {assignableStudents.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.fullName} · {s.admissionNo}
+                      {s.fatherName ? ` · ${s.fatherName}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                className={btn}
+                disabled={!assignStudentId}
+                onClick={() => {
+                  const r = assignRteToStudent({
+                    studentId: assignStudentId,
+                    by: session.fullName,
+                  });
+                  if (!r.ok) {
+                    setError(r.error);
+                    return;
+                  }
+                  setAssignStudentId("");
+                  refresh();
+                  flash(`${r.student.fullName} is now RTE`);
+                }}
+              >
+                Assign RTE
+              </button>
+            </div>
+          </div>
+
+          <p className="text-sm text-[var(--muted)]">
+            Active SIS students with fee type RTE or category EWS. Tick the fee
+            heads the school will still charge — an unticked head is waived
+            100% for that student (applied automatically at Fee Take).
           </p>
           <ul className="space-y-2">
             {enrolled.length === 0 ? (
               <li className="text-sm text-[var(--muted)]">
-                None yet — enroll with RTE flag in Admissions.
+                None yet — assign above or enroll with RTE flag in Admissions.
               </li>
             ) : (
-              enrolled.map((s) => (
-                <li
-                  key={s.id}
-                  className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm"
-                >
-                  <span className="font-semibold text-[var(--brand-deep)]">
-                    {s.fullName}
-                  </span>
-                  <span className="text-[var(--muted)]">
-                    {" "}
-                    ·{" "}
-                    {masters.classes.find((c) => c.id === s.classId)?.name ||
-                      "—"}{" "}
-                    · {s.studentType}
-                    {s.category ? ` · ${s.category}` : ""}
-                  </span>
-                </li>
-              ))
+              enrolled.map((s) => {
+                const waived = rteWaivedHeadIds(masters, s.id);
+                const open = expandedStudentId === s.id;
+                return (
+                  <li
+                    key={s.id}
+                    className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <span className="font-semibold text-[var(--brand-deep)]">
+                          {s.fullName}
+                        </span>
+                        <span className="text-[var(--muted)]">
+                          {" "}
+                          ·{" "}
+                          {masters.classes.find((c) => c.id === s.classId)
+                            ?.name || "—"}{" "}
+                          · {s.studentType}
+                          {s.category ? ` · ${s.category}` : ""}
+                          {waived.size > 0
+                            ? ` · ${waived.size} head${waived.size === 1 ? "" : "s"} waived`
+                            : ""}
+                        </span>
+                      </div>
+                      <div className="flex gap-1.5">
+                        <button
+                          type="button"
+                          className={btnOutline}
+                          onClick={() =>
+                            setExpandedStudentId(open ? "" : s.id)
+                          }
+                        >
+                          {open ? "Hide fee heads" : "Fee heads"}
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-[#dc2626] hover:bg-[#dc2626]/10"
+                          onClick={() => {
+                            if (
+                              !window.confirm(
+                                `Remove RTE from ${s.fullName}? Fee type reverts and all RTE head waivers are dropped.`,
+                              )
+                            ) {
+                              return;
+                            }
+                            const r = removeRteFromStudent({
+                              studentId: s.id,
+                              by: session.fullName,
+                            });
+                            if (!r.ok) {
+                              setError(r.error);
+                              return;
+                            }
+                            refresh();
+                            flash(`RTE removed from ${s.fullName}`);
+                          }}
+                        >
+                          Remove RTE
+                        </button>
+                      </div>
+                    </div>
+                    {open ? (
+                      <div className="mt-3 grid grid-cols-1 gap-1.5 border-t border-[var(--border)] pt-3 sm:grid-cols-2 lg:grid-cols-3">
+                        {activeFeeHeads.map((h) => {
+                          const charged = !waived.has(h.id);
+                          return (
+                            <label
+                              key={h.id}
+                              className="flex items-center gap-2 text-sm text-[var(--brand-deep)]"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={charged}
+                                onChange={(e) => {
+                                  void setRteHeadWaiver({
+                                    studentId: s.id,
+                                    feeHeadId: h.id,
+                                    waived: !e.target.checked,
+                                    by: session.fullName,
+                                    academicYearCode: ay,
+                                  }).then((r) => {
+                                    if (!r.ok) setError(r.error);
+                                    refresh();
+                                  });
+                                }}
+                              />
+                              <span className={charged ? "" : "line-through opacity-60"}>
+                                {h.nameEn}
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </li>
+                );
+              })
             )}
           </ul>
         </section>

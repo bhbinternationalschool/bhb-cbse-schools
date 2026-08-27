@@ -467,10 +467,7 @@ export function DueBreakupPicker({
                               ₹
                             </span>
                             <input
-                              type="number"
-                              min={0}
-                              step="0.01"
-                              max={d.balancePaise / 100}
+                              inputMode="decimal"
                               className="field w-28 !py-1.5 !text-base !font-semibold"
                               value={lineDiscountRupees?.[d.dueKey] ?? ""}
                               onChange={(e) =>

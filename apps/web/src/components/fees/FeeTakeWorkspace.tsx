@@ -863,6 +863,27 @@ export function FeeTakeWorkspace() {
 
   function patchComposer(patch: Partial<TenderComposer>) {
     setComposer((prev) => ({ ...prev, ...patch }));
+    // Split-tender rebalance: typing a later mode's amount pulls that much
+    // out of the FIRST added line, so the total tracks the collect target
+    // (e.g. ₹1000 cash auto-filled, type ₹300 UPI → cash becomes ₹700).
+    if (patch.amount !== undefined && tenderLines.length > 0) {
+      const typedPaise = Math.round((Number(patch.amount) || 0) * 100);
+      setTenderLines((prev) => {
+        if (prev.length === 0) return prev;
+        const othersPaise = prev
+          .slice(1)
+          .reduce((s, t) => s + Math.round((Number(t.amount) || 0) * 100), 0);
+        const firstPaise = Math.max(
+          0,
+          collectTarget - othersPaise - typedPaise,
+        );
+        const firstAmount = String(firstPaise / 100);
+        if (prev[0]!.amount === firstAmount) return prev;
+        return prev.map((t, i) =>
+          i === 0 ? { ...t, amount: firstAmount } : t,
+        );
+      });
+    }
   }
 
   function addTenderLine() {
@@ -1545,6 +1566,15 @@ export function FeeTakeWorkspace() {
                     </span>
                     <span className="text-[var(--muted)]">
                       {" "}
+                      {(() => {
+                        const parent =
+                          selectedStudent.fatherName ||
+                          sis?.households.find(
+                            (h) => h.id === selectedStudent.householdId,
+                          )?.guardianName ||
+                          "";
+                        return parent ? `· ${parent} ` : "";
+                      })()}
                       · {selectedStudent.admissionNo} · household open
                       {householdBundle.length > 1
                         ? ` · ${householdBundle.length} siblings`
@@ -2722,7 +2752,7 @@ function CollectPanel({
                 </ul>
               ) : null}
 
-              {remainingPaise > 0 ? (
+              {collectTarget > 0 ? (
                 <div className="mt-4 rounded-xl border border-[rgba(197,160,40,0.35)] bg-[rgba(248,248,240,0.97)] p-3 shadow-sm">
                   <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                     <div className="text-xs font-extrabold uppercase tracking-wider text-[var(--brand-deep)]">
@@ -2745,7 +2775,7 @@ function CollectPanel({
                         Mode & account
                       </span>
                       <PaymentChannelSelect
-                        className="field !border-[rgba(32,48,80,0.18)] !py-1.5 !text-xs"
+                        className="field !border-[rgba(32,48,80,0.18)] !bg-white !py-1.5 !text-xs !text-[#203050]"
                         variant="tender"
                         accounts={accountsState ?? undefined}
                         value={composer.channel}
@@ -2754,7 +2784,12 @@ function CollectPanel({
                             channel,
                             ref: "",
                             bankName: "",
-                            amount: "",
+                            // First mode auto-fills the full collect amount;
+                            // later modes auto-fill whatever is still uncovered.
+                            amount:
+                              remainingPaise > 0
+                                ? String(remainingPaise / 100)
+                                : "",
                             instrumentDate: collectionDate || todayIso(),
                           })
                         }
@@ -2769,7 +2804,7 @@ function CollectPanel({
                               {modeMeta.refLabel}
                             </span>
                             <input
-                              className="field !py-1.5 !text-xs"
+                              className="field !bg-white !py-1.5 !text-xs !text-[#203050] placeholder:!text-[#20305066]"
                               value={composer.ref}
                               onChange={(e) =>
                                 onPatchComposer({ ref: e.target.value })
@@ -2785,7 +2820,7 @@ function CollectPanel({
                             Amount (₹)
                           </span>
                           <input
-                            className="field !border-[rgba(197,160,40,0.45)] !bg-[rgba(197,160,40,0.08)] !py-1.5 !text-xs font-bold"
+                            className="field !border-[rgba(197,160,40,0.45)] !bg-white !py-1.5 !text-xs font-bold !text-[#203050] placeholder:!text-[#20305066]"
                             inputMode="decimal"
                             value={composer.amount}
                             onChange={(e) =>
