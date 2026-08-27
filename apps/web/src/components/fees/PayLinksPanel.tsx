@@ -11,6 +11,7 @@ import {
   listPaymentLinks,
   loadPayments,
   openPaymentLinkCount,
+  patchPaymentLink,
   whatsAppPaymentLinkUrl,
   type PaymentLink,
 } from "@/lib/payments";
@@ -62,7 +63,50 @@ export function PayLinksPanel({
     window.setTimeout(() => setNotice(null), 2800);
   }
 
-  function copyLink(link: PaymentLink) {
+  /**
+   * Attach the live gateway checkout (server holds the keys) before sharing.
+   * Falls back to the plain UPI share page when no gateway is live or the
+   * attach fails (e.g. household has no mobile).
+   */
+  async function ensureGateway(link: PaymentLink): Promise<PaymentLink> {
+    if (
+      pg.mode === "demo" ||
+      link.status !== "open" ||
+      link.gatewayCheckoutUrl
+    ) {
+      return link;
+    }
+    try {
+      const res = await fetch("/api/payments/attach-gateway", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ link }),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        gatewayMode?: PaymentLink["gatewayMode"];
+        checkoutUrl?: string;
+        externalId?: string;
+        error?: string;
+      };
+      if (res.ok && json.ok && json.checkoutUrl) {
+        const patched = patchPaymentLink(link.id, {
+          gatewayMode: json.gatewayMode,
+          gatewayCheckoutUrl: json.checkoutUrl,
+          gatewayExternalId: json.externalId,
+        });
+        refresh();
+        return patched ?? { ...link, gatewayCheckoutUrl: json.checkoutUrl };
+      }
+      flash(json.error ? `UPI link (no checkout: ${json.error})` : "UPI link");
+    } catch {
+      flash("UPI link (gateway unreachable)");
+    }
+    return link;
+  }
+
+  async function copyLink(rawLink: PaymentLink) {
+    const link = await ensureGateway(rawLink);
     const payload = buildEnrichedPaymentSharePayload(link, TENANT.nameDisplay);
     const url = buildPaymentShareUrl(payload);
     void navigator.clipboard.writeText(url).then(
@@ -71,19 +115,21 @@ export function PayLinksPanel({
     );
   }
 
-  function shareWhatsApp(link: PaymentLink) {
-    const hh = sis?.households.find((h) => h.id === link.householdId);
+  async function shareWhatsApp(rawLink: PaymentLink) {
+    const hh = sis?.households.find((h) => h.id === rawLink.householdId);
     const mobile = householdWhatsApp(hh);
     if (!mobile) {
       setError("No WhatsApp number on this household — set it on Fee Take");
       return;
     }
+    const link = await ensureGateway(rawLink);
     const payload = buildEnrichedPaymentSharePayload(link, TENANT.nameDisplay);
     const url = buildPaymentShareUrl(payload);
     const msg = composeWhatsAppPaymentLinkMessage(
       link,
       url,
       TENANT.nameDisplay,
+      !!link.gatewayCheckoutUrl,
     );
     window.open(whatsAppPaymentLinkUrl(mobile, msg), "_blank", "noopener");
     flash(`WhatsApp opened for ${mobile}`);
@@ -187,6 +233,11 @@ export function PayLinksPanel({
                     {link.code}
                   </span>
                   <StatusPill status={link.status} />
+                  {link.gatewayCheckoutUrl ? (
+                    <span className="rounded bg-[rgba(22,163,74,0.12)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#15803d]">
+                      {link.gatewayMode === "razorpay" ? "Razorpay" : "Cashfree"}
+                    </span>
+                  ) : null}
                   <span className="text-sm font-bold tabular-nums text-[var(--brand-deep)]">
                     {formatInr(link.amountPaise)}
                   </span>
@@ -209,14 +260,14 @@ export function PayLinksPanel({
                     <button
                       type="button"
                       className="rounded-lg border border-[rgba(32,48,80,0.15)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)]"
-                      onClick={() => copyLink(link)}
+                      onClick={() => void copyLink(link)}
                     >
                       Copy link
                     </button>
                     <button
                       type="button"
                       className="rounded-lg bg-[#128C7E] px-2.5 py-1 text-[11px] font-bold text-white"
-                      onClick={() => shareWhatsApp(link)}
+                      onClick={() => void shareWhatsApp(link)}
                     >
                       WhatsApp
                     </button>

@@ -624,6 +624,7 @@ export function composeWhatsAppPaymentLinkMessage(
   link: PaymentLink,
   payUrl: string,
   schoolName: string,
+  autoSettle = false,
 ): string {
   const lines = [
     `*${schoolName}*`,
@@ -633,11 +634,15 @@ export function composeWhatsAppPaymentLinkMessage(
     `Amount: *${formatInr(link.amountPaise)}*`,
     `Valid till: ${link.expiresOn}`,
     "",
-    "Pay with GPay / UPI:",
+    autoSettle ? "Pay securely (UPI / card / netbanking):" : "Pay with GPay / UPI:",
     payUrl,
     "",
-    "1️⃣ Open link → pay in Google Pay / UPI",
-    "2️⃣ Tap *Confirm paid* on the page for receipt",
+    ...(autoSettle
+      ? ["Receipt comes automatically on WhatsApp after payment."]
+      : [
+          "1️⃣ Open link → pay in Google Pay / UPI",
+          "2️⃣ Tap *Confirm paid* on the page for receipt",
+        ]),
     "",
     "Or pay at school counter and share UTR.",
   ];
