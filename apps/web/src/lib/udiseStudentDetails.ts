@@ -1084,6 +1084,69 @@ export function previewUdiseStudentDetailsSync(
  * Apply UDISE+ Students_Details sync: update PEN / APAAR / Aadhaar last-4 on matched SIS students.
  * Does not create new students.
  */
+/**
+ * Identity facts are about the CHILD, not the session. When UDISE+ corrects a
+ * name, parent name, DOB or a govt id on the current session's record, every
+ * other session's record for the same admission number must say the same
+ * thing — otherwise history drifts apart again (the 2026-08-27 audit removed
+ * ~40 such cross-session drifts). Class and section deliberately stay
+ * session-local: UDISE never patches them, and a class belongs to one year.
+ */
+function propagateIdentityAcrossSessions(
+  students: SisStudent[],
+  source: SisStudent,
+  stamp: string,
+): number {
+  const adm = (source.admissionNo || "").trim();
+  if (!adm) return 0;
+  let changed = 0;
+  for (let i = 0; i < students.length; i++) {
+    const s = students[i]!;
+    if (s.id === source.id || (s.admissionNo || "").trim() !== adm) continue;
+    // DOB follows the same fill-only rule as the matched row: never blank an
+    // existing value, never overwrite a differing one silently.
+    const dob = s.dob || source.dob;
+    if (
+      s.fullName === source.fullName &&
+      s.fatherName === source.fatherName &&
+      s.motherName === source.motherName &&
+      s.gender === source.gender &&
+      s.category === source.category &&
+      s.dob === dob &&
+      s.pen === source.pen &&
+      s.apaarId === source.apaarId &&
+      s.aadhaarLast4 === source.aadhaarLast4 &&
+      s.aadhaarVerification === source.aadhaarVerification
+    ) {
+      continue;
+    }
+    students[i] = normalizeStudent({
+      ...s,
+      fullName: source.fullName,
+      fatherName: source.fatherName,
+      motherName: source.motherName,
+      gender: source.gender,
+      category: source.category,
+      dob,
+      pen: source.pen,
+      penStatus: source.penStatus,
+      apaarId: source.apaarId,
+      aadhaarLast4: source.aadhaarLast4,
+      aadhaarNumber:
+        source.aadhaarVerification === "verified_udise" ? "" : s.aadhaarNumber,
+      aadhaarVerification: source.aadhaarVerification,
+      notes: [
+        s.notes,
+        `Identity aligned with UDISE+ sync ${stamp} (from current session)`,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+    });
+    changed += 1;
+  }
+  return changed;
+}
+
 export function applyUdiseStudentDetailsSync(
   matrix: unknown[][],
   sis?: SisState,
@@ -1190,6 +1253,11 @@ export function applyUdiseStudentDetailsSync(
     students[idx] = next;
     touched.add(p.studentId);
     updated += 1;
+    propagateIdentityAcrossSessions(
+      students,
+      next,
+      new Date().toISOString().slice(0, 10),
+    );
   }
 
   // Also clear inbound pending when PEN appears in file even if name match failed earlier —
@@ -1391,6 +1459,7 @@ export function applyUdiseRowToStudent(input: {
       .filter(Boolean)
       .join(" · "),
   });
+  propagateIdentityAcrossSessions(students, students[idx]!, stamp);
   const nextState: SisState = { ...state, students };
   saveSis(nextState);
   return { ok: true, state: nextState, student: students[idx]!, fields };
