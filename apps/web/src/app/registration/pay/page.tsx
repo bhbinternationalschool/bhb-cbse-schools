@@ -18,8 +18,12 @@ export default function RegistrationPayPage() {
   );
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  const [gatewayReturn, setGatewayReturn] = useState(false);
 
   useEffect(() => {
+    setGatewayReturn(
+      new URLSearchParams(window.location.search).get("cf") === "1",
+    );
     const raw = window.location.hash.replace(/^#/, "");
     if (!raw) {
       setError("This payment link is incomplete.");
@@ -64,6 +68,21 @@ export default function RegistrationPayPage() {
     return (
       <main className="mx-auto max-w-lg px-4 py-16 text-center text-sm text-[var(--muted)]">
         Opening payment…
+      </main>
+    );
+  }
+
+  if (gatewayReturn) {
+    return (
+      <main className="mx-auto max-w-lg px-4 py-16 text-center">
+        <p className="text-sm font-semibold text-[#15803d]">Thank you</p>
+        <p className="mt-2 font-mono text-lg text-[var(--brand-deep)]">
+          {payload.code}
+        </p>
+        <p className="mt-2 text-[13px] text-[var(--muted)]">
+          If your payment went through, the school records it automatically —
+          no further step needed. The school will confirm your registration.
+        </p>
       </main>
     );
   }

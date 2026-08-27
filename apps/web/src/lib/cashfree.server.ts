@@ -57,12 +57,18 @@ type CashfreeLinkResponse = {
   code?: string;
 };
 
-export async function createCashfreePaymentLink(opts: {
-  link: PaymentLink;
+/** Generic Payment Link create — shared by fee pay-links and registration. */
+export async function createCashfreeLink(opts: {
+  linkId: string;
+  amountPaise: number;
+  purpose: string;
   customerName: string;
   customerMobile: string;
-  callbackUrl: string;
+  /** ISO date (YYYY-MM-DD); link expires end of that day IST. */
+  expiresOn?: string;
+  returnUrl: string;
   webhookUrl: string;
+  notes?: Record<string, string>;
 }): Promise<CashfreeCreateResult> {
   if (!cashfreeKeysPresent()) {
     return { ok: false, error: "Cashfree keys not configured" };
@@ -75,31 +81,26 @@ export async function createCashfreePaymentLink(opts: {
   }
 
   const body = {
-    link_id: opts.link.id,
-    link_amount: Number((opts.link.amountPaise / 100).toFixed(2)),
+    link_id: opts.linkId,
+    link_amount: Number((opts.amountPaise / 100).toFixed(2)),
     link_currency: "INR",
-    link_purpose: `School fees ${opts.link.code} — ${opts.link.studentName}`.slice(
-      0,
-      500,
-    ),
+    link_purpose: opts.purpose.slice(0, 500),
     customer_details: {
       customer_name: (opts.customerName || "Parent").slice(0, 120),
       customer_phone: contact,
     },
-    link_expiry_time: `${opts.link.expiresOn}T23:59:59+05:30`,
+    ...(opts.expiresOn
+      ? { link_expiry_time: `${opts.expiresOn}T23:59:59+05:30` }
+      : {}),
     link_partial_payments: false,
     link_auto_reminders: false,
     link_notify: { send_sms: false, send_email: false },
     link_meta: {
-      return_url: opts.callbackUrl,
+      return_url: opts.returnUrl,
       notify_url: opts.webhookUrl,
       upi_intent: "true",
     },
-    link_notes: {
-      linkId: opts.link.id,
-      code: opts.link.code,
-      householdId: opts.link.householdId,
-    },
+    link_notes: opts.notes ?? {},
   };
 
   const res = await fetch(`${cashfreeBaseUrl()}/links`, {
@@ -113,7 +114,7 @@ export async function createCashfreePaymentLink(opts: {
   // link_id reuse (retry after a lost response) — fetch the existing link.
   if (res.status === 409) {
     const existing = await fetch(
-      `${cashfreeBaseUrl()}/links/${encodeURIComponent(opts.link.id)}`,
+      `${cashfreeBaseUrl()}/links/${encodeURIComponent(opts.linkId)}`,
       { headers: cashfreeAuthHeaders() },
     );
     data = (await existing.json().catch(() => ({}))) as CashfreeLinkResponse;
@@ -129,7 +130,7 @@ export async function createCashfreePaymentLink(opts: {
     return {
       ok: true,
       linkUrl: data.link_url,
-      id: String(data.link_id || opts.link.id),
+      id: String(data.link_id || opts.linkId),
     };
   }
 
@@ -143,8 +144,32 @@ export async function createCashfreePaymentLink(opts: {
   return {
     ok: true,
     linkUrl: data.link_url,
-    id: String(data.link_id || opts.link.id),
+    id: String(data.link_id || opts.linkId),
   };
+}
+
+export async function createCashfreePaymentLink(opts: {
+  link: PaymentLink;
+  customerName: string;
+  customerMobile: string;
+  callbackUrl: string;
+  webhookUrl: string;
+}): Promise<CashfreeCreateResult> {
+  return createCashfreeLink({
+    linkId: opts.link.id,
+    amountPaise: opts.link.amountPaise,
+    purpose: `School fees ${opts.link.code} — ${opts.link.studentName}`,
+    customerName: opts.customerName,
+    customerMobile: opts.customerMobile,
+    expiresOn: opts.link.expiresOn,
+    returnUrl: opts.callbackUrl,
+    webhookUrl: opts.webhookUrl,
+    notes: {
+      linkId: opts.link.id,
+      code: opts.link.code,
+      householdId: opts.link.householdId,
+    },
+  });
 }
 
 /** Authoritative status check before/after settling (never trust payload alone). */

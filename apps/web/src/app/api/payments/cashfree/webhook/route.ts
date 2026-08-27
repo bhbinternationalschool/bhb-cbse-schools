@@ -17,6 +17,11 @@ import {
   loadPayments,
 } from "@/lib/payments";
 import { cashfreeKeysPresent, fetchCashfreeLinkStatus } from "@/lib/cashfree.server";
+import {
+  captureRegistrationPayment,
+  loadAdmissions,
+  saveAdmissions,
+} from "@/lib/admissions";
 import { settlePaymentLinkWithWhatsApp } from "@/lib/paymentSettlement.server";
 import { ensureSchoolMirrorLoaded } from "@/lib/schoolDataMirror.server";
 import { recordPaymentGatewayEvent } from "@/lib/paymentsNormalized.server";
@@ -47,6 +52,7 @@ function extractLinkRef(payload: Record<string, unknown>): {
   code?: string;
   paymentId?: string;
   linkStatus?: string;
+  registrationPaymentId?: string;
 } {
   const data = (payload.data || {}) as Record<string, unknown>;
 
@@ -59,6 +65,10 @@ function extractLinkRef(payload: Record<string, unknown>): {
       code: notes.code || notes.pay_link_code,
       paymentId: String(order.transaction_id || data.cf_link_id || ""),
       linkStatus: String(data.link_status || ""),
+      registrationPaymentId:
+        notes.kind === "registration"
+          ? notes.registrationPaymentId || String(data.link_id || "")
+          : undefined,
     };
   }
 
@@ -71,6 +81,93 @@ function extractLinkRef(payload: Record<string, unknown>): {
     code: tags.code,
     paymentId: String(payment.cf_payment_id || order.order_id || ""),
   };
+}
+
+async function settleRegistrationPayment(opts: {
+  registrationPaymentId: string;
+  eventType: string;
+  paymentId: string;
+  event: Record<string, unknown>;
+}) {
+  const { registrationPaymentId, eventType, paymentId, event } = opts;
+  const state = loadAdmissions();
+  const payment = (state.registrationPayments || []).find(
+    (p) => p.id === registrationPaymentId,
+  );
+
+  if (!payment) {
+    await recordPaymentGatewayEvent({
+      provider: "cashfree",
+      eventType,
+      externalPaymentId: paymentId,
+      settlementStatus: "failed",
+      eventJson: { error: "No matching registration payment", raw: event },
+    });
+    return NextResponse.json(
+      { ok: false, error: "No matching registration payment" },
+      { status: 404 },
+    );
+  }
+  if (payment.status === "paid") {
+    await recordPaymentGatewayEvent({
+      provider: "cashfree",
+      eventType: "registration.already_paid",
+      externalPaymentId: paymentId,
+      amountPaise: payment.amountPaise,
+      settlementStatus: "ignored",
+      eventJson: event,
+    });
+    return NextResponse.json({ ok: true, alreadyPaid: true, code: payment.code });
+  }
+
+  // Authoritative re-verify — never fulfil on the webhook payload alone.
+  const live = await fetchCashfreeLinkStatus(payment.id);
+  if (!live.ok || live.status !== "PAID") {
+    await recordPaymentGatewayEvent({
+      provider: "cashfree",
+      eventType: "registration.verification_mismatch",
+      externalPaymentId: paymentId,
+      amountPaise: payment.amountPaise,
+      settlementStatus: "failed",
+      eventJson: {
+        error: live.ok ? `Link status is ${live.status}` : live.error,
+        raw: event,
+      },
+    });
+    return NextResponse.json(
+      { error: "Cashfree link not verifiably PAID" },
+      { status: 400 },
+    );
+  }
+
+  const captured = captureRegistrationPayment(
+    state,
+    payment.id,
+    paymentId || `CF-${payment.code}`,
+  );
+  if (!captured.ok) {
+    await recordPaymentGatewayEvent({
+      provider: "cashfree",
+      eventType: "registration.settlement_failed",
+      externalPaymentId: paymentId,
+      amountPaise: payment.amountPaise,
+      settlementStatus: "failed",
+      eventJson: { error: captured.reason, raw: event },
+    });
+    return NextResponse.json({ error: captured.reason }, { status: 400 });
+  }
+  saveAdmissions(captured.state);
+
+  await recordPaymentGatewayEvent({
+    provider: "cashfree",
+    eventType: "registration.settled",
+    externalPaymentId: paymentId,
+    amountPaise: payment.amountPaise,
+    settlementStatus: "settled",
+    receiptNo: payment.code,
+    eventJson: event,
+  });
+  return NextResponse.json({ ok: true, code: payment.code });
 }
 
 export async function GET() {
@@ -111,7 +208,8 @@ export async function POST(req: Request) {
   }
 
   const eventType = String(event.type || "");
-  const { linkId, code, paymentId, linkStatus } = extractLinkRef(event);
+  const { linkId, code, paymentId, linkStatus, registrationPaymentId } =
+    extractLinkRef(event);
 
   // Settlement fires only on the link reaching PAID. Order-level success
   // webhooks for the same payment are recorded and left to the link event;
@@ -130,6 +228,18 @@ export async function POST(req: Request) {
   }
 
   await ensureSchoolMirrorLoaded();
+
+  // Registration-fee links (admissions CRM) settle into AdmissionsState,
+  // not the fee pay-link store.
+  if (registrationPaymentId) {
+    return settleRegistrationPayment({
+      registrationPaymentId,
+      eventType,
+      paymentId: paymentId || "",
+      event,
+    });
+  }
+
   const state = loadPayments();
   const link =
     (linkId && getPaymentLink(linkId, state)) ||

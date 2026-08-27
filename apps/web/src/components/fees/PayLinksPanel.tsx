@@ -11,10 +11,10 @@ import {
   listPaymentLinks,
   loadPayments,
   openPaymentLinkCount,
-  patchPaymentLink,
   whatsAppPaymentLinkUrl,
   type PaymentLink,
 } from "@/lib/payments";
+import { attachGatewayCheckout } from "@/lib/paymentGatewayClient";
 import { householdWhatsApp, loadSis, type SisState } from "@/lib/sis";
 import { TENANT } from "@/lib/types";
 import {
@@ -63,46 +63,12 @@ export function PayLinksPanel({
     window.setTimeout(() => setNotice(null), 2800);
   }
 
-  /**
-   * Attach the live gateway checkout (server holds the keys) before sharing.
-   * Falls back to the plain UPI share page when no gateway is live or the
-   * attach fails (e.g. household has no mobile).
-   */
+  /** Attach live gateway checkout before sharing; UPI share on failure. */
   async function ensureGateway(link: PaymentLink): Promise<PaymentLink> {
-    if (
-      pg.mode === "demo" ||
-      link.status !== "open" ||
-      link.gatewayCheckoutUrl
-    ) {
-      return link;
-    }
-    try {
-      const res = await fetch("/api/payments/attach-gateway", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ link }),
-      });
-      const json = (await res.json().catch(() => ({}))) as {
-        ok?: boolean;
-        gatewayMode?: PaymentLink["gatewayMode"];
-        checkoutUrl?: string;
-        externalId?: string;
-        error?: string;
-      };
-      if (res.ok && json.ok && json.checkoutUrl) {
-        const patched = patchPaymentLink(link.id, {
-          gatewayMode: json.gatewayMode,
-          gatewayCheckoutUrl: json.checkoutUrl,
-          gatewayExternalId: json.externalId,
-        });
-        refresh();
-        return patched ?? { ...link, gatewayCheckoutUrl: json.checkoutUrl };
-      }
-      flash(json.error ? `UPI link (no checkout: ${json.error})` : "UPI link");
-    } catch {
-      flash("UPI link (gateway unreachable)");
-    }
-    return link;
+    const result = await attachGatewayCheckout(link);
+    if (result.attached && !link.gatewayCheckoutUrl) refresh();
+    else if (result.error) flash(`UPI link (no checkout: ${result.error})`);
+    return result.link;
   }
 
   async function copyLink(rawLink: PaymentLink) {

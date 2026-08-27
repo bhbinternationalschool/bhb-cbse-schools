@@ -18,6 +18,9 @@ import {
   registrationCollectedPaise,
   registrationFeeHeads,
   registrationPayAbsoluteUrl,
+} from "@/lib/admissions";
+import { fetchRegistrationCheckoutUrl } from "@/lib/paymentGatewayClient";
+import {
   setLeadRegistrationFee,
   takeRegistrationPayment,
   waiveRegistrationFee,
@@ -300,16 +303,23 @@ export function AdmissionRegistrationPanel({
       return;
     }
     const portal = `https://${TENANT.publicPortal}`;
-    const url = registrationPayAbsoluteUrl(portal, openPayment);
-    setLastPayUrl(url);
+    const fallbackUrl = registrationPayAbsoluteUrl(portal, openPayment);
     let cancelled = false;
-    void QRCode.toDataURL(url, {
-      width: 180,
-      margin: 1,
-      color: { dark: "#203050", light: "#ffffff" },
-    }).then((d) => {
+    async function resolveUrl() {
+      // Prefer the live gateway checkout (auto-captures on payment);
+      // fall back to the demo pay page when no gateway is configured.
+      const checkout = await fetchRegistrationCheckoutUrl(openPayment!.id);
+      const url = checkout || fallbackUrl;
+      if (cancelled) return;
+      setLastPayUrl(url);
+      const d = await QRCode.toDataURL(url, {
+        width: 180,
+        margin: 1,
+        color: { dark: "#203050", light: "#ffffff" },
+      });
       if (!cancelled) setQrUrl(d);
-    });
+    }
+    void resolveUrl();
     return () => {
       cancelled = true;
     };

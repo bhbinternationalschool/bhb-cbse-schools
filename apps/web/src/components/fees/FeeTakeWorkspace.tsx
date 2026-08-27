@@ -83,6 +83,7 @@ import {
   openPaymentLinkCount,
   whatsAppPaymentLinkUrl,
 } from "@/lib/payments";
+import { attachGatewayCheckout } from "@/lib/paymentGatewayClient";
 import {
   scheduleClientSchoolMirrorSync,
 } from "@/lib/schoolDataMirror";
@@ -1142,7 +1143,7 @@ export function FeeTakeWorkspace() {
     setPreviewReceiptId(result.voucher.id);
   }
 
-  function onSendUpiLink() {
+  async function onSendUpiLink() {
     if (!selectedStudent || !sis || !masters) return;
     const selectedDues = householdBundle.flatMap((b) =>
       b.dues.filter((d) => selectedKeys.has(d.dueKey)),
@@ -1176,8 +1177,10 @@ export function FeeTakeWorkspace() {
       return;
     }
 
+    const attached = await attachGatewayCheckout(created.link);
+    const link = attached.link;
     const payload = buildEnrichedPaymentSharePayload(
-      created.link,
+      link,
       TENANT.nameDisplay,
       masters,
     );
@@ -1188,21 +1191,22 @@ export function FeeTakeWorkspace() {
     const mobile = householdWhatsApp(hh);
     if (mobile && isValidMobile(mobile)) {
       const msg = composeWhatsAppPaymentLinkMessage(
-        created.link,
+        link,
         url,
         TENANT.nameDisplay,
+        attached.attached,
       );
       window.open(whatsAppPaymentLinkUrl(mobile, msg), "_blank", "noopener");
       flash(
-        `UPI link ${created.link.code} · ${formatInr(created.link.amountPaise)} — WhatsApp opened`,
+        `${attached.attached ? "Checkout" : "UPI"} link ${link.code} · ${formatInr(link.amountPaise)} — WhatsApp opened`,
       );
     } else {
       void navigator.clipboard.writeText(url).then(
         () =>
           flash(
-            `UPI link ${created.link.code} copied — set WhatsApp on household to send`,
+            `${attached.attached ? "Checkout" : "UPI"} link ${link.code} copied — set WhatsApp on household to send`,
           ),
-        () => flash(`Created ${created.link.code}: ${url}`),
+        () => flash(`Created ${link.code}: ${url}`),
       );
     }
     setSelectedKeys(new Set());
@@ -1693,7 +1697,7 @@ export function FeeTakeWorkspace() {
               onSchoolReceiptNo={setSchoolReceiptNo}
               onNote={setNote}
               onCollect={onCollect}
-              onSendUpiLink={onSendUpiLink}
+              onSendUpiLink={() => void onSendUpiLink()}
               masters={masters}
               cashierName={session.fullName}
               priorReceipts={householdReceipts}

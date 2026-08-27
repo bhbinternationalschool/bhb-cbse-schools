@@ -20,6 +20,7 @@ import {
   createPaymentLink,
   whatsAppPaymentLinkUrl,
 } from "@/lib/payments";
+import { attachGatewayCheckout } from "@/lib/paymentGatewayClient";
 import { loadMasters, type MastersState } from "@/lib/masters";
 import {
   householdOf,
@@ -270,31 +271,31 @@ export function DefaultersPlaybook() {
     });
   }
 
-  function sendPayLink(row: LiveDefaulter) {
+  async function sendPayLink(row: LiveDefaulter) {
     const created = createLinkForRow(row);
     if (!created.ok) {
       setError(created.error);
       return;
     }
-    const payload = buildPaymentSharePayload(
-      created.link,
-      TENANT.nameDisplay,
-    );
+    const attached = await attachGatewayCheckout(created.link);
+    const link = attached.link;
+    const payload = buildPaymentSharePayload(link, TENANT.nameDisplay);
     const url = buildPaymentShareUrl(payload);
     const mobile = guardianMobile(row);
     if (mobile && isValidMobile(mobile)) {
       const msg = composeWhatsAppPaymentLinkMessage(
-        created.link,
+        link,
         url,
         TENANT.nameDisplay,
+        attached.attached,
       );
       window.open(whatsAppPaymentLinkUrl(mobile, msg), "_blank", "noopener");
-      flash(`UPI link ${created.link.code} — WhatsApp opened`);
+      flash(`${attached.attached ? "Checkout" : "UPI"} link ${link.code} — WhatsApp opened`);
     } else {
       void navigator.clipboard.writeText(url).then(
         () =>
           flash(
-            `UPI link ${created.link.code} copied — set WhatsApp on household`,
+            `${attached.attached ? "Checkout" : "UPI"} link ${link.code} copied — set WhatsApp on household`,
           ),
         () => flash(url),
       );
@@ -367,7 +368,7 @@ export function DefaultersPlaybook() {
   function onAction(actionId: string, row: LiveDefaulter) {
     setError(null);
     if (actionId === "paylink" || actionId === "remind") {
-      sendPayLink(row);
+      void sendPayLink(row);
       return;
     }
     if (actionId === "whatsapp") {
