@@ -628,6 +628,7 @@ function SellSection({
                 amountPaise: inputToPaise(t.amountInput),
                 mode: t.mode,
                 reference: t.reference.trim(),
+                paidOn: saleDate,
               })),
       }),
     );

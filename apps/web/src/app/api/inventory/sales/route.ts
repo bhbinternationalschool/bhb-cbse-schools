@@ -110,6 +110,7 @@ export async function POST(req: Request) {
         household: await postHouseholdSale(
           body as Parameters<typeof postHouseholdSale>[0],
           actor,
+          academicYearCode,
         ),
       };
     }

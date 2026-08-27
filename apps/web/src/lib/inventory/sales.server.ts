@@ -851,20 +851,33 @@ export type InvHouseholdSaleResult = {
 export async function postHouseholdSale(
   input: {
     sales: Record<string, unknown>[];
-    payments: { amountPaise: number; mode: string; reference: string }[];
+    payments: {
+      amountPaise: number;
+      mode: string;
+      reference: string;
+      paidOn?: string;
+    }[];
   },
   actor: string,
+  academicYearCode: string,
 ): Promise<InvHouseholdSaleResult> {
   const { sb, tenantId } = await invCtx();
   const { data, error } = await sb.rpc("inv_post_household_sale", {
     p_tenant_id: tenantId,
     p_actor: actor,
     p_payload: {
-      sales: input.sales,
+      // inv_post_sale numbers each receipt from academic_year_code — without
+      // it the household path fell into a separate "SL/0001" series.
+      sales: input.sales.map((s) => ({
+        academic_year_code: academicYearCode,
+        ...s,
+      })),
       payments: input.payments.map((p) => ({
         amount_paise: p.amountPaise,
         mode: p.mode,
         reference: p.reference,
+        // Collection date — falls back to the first sale's sale_date in SQL.
+        paid_on: p.paidOn || "",
       })),
     },
   });

@@ -473,7 +473,12 @@ export const invApi = {
   /** Several children, one payment. One sale each; all of them or none. */
   postHouseholdSale: (input: {
     sales: Record<string, unknown>[];
-    payments: { amountPaise: number; mode: string; reference: string }[];
+    payments: {
+      amountPaise: number;
+      mode: string;
+      reference: string;
+      paidOn?: string;
+    }[];
   }) =>
     req<{
       household: {
