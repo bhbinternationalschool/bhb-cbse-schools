@@ -53,6 +53,7 @@ function extractLinkRef(payload: Record<string, unknown>): {
   paymentId?: string;
   linkStatus?: string;
   registrationPaymentId?: string;
+  eventParticipantId?: string;
 } {
   const data = (payload.data || {}) as Record<string, unknown>;
 
@@ -68,6 +69,11 @@ function extractLinkRef(payload: Record<string, unknown>): {
       registrationPaymentId:
         notes.kind === "registration"
           ? notes.registrationPaymentId || String(data.link_id || "")
+          : undefined,
+      eventParticipantId:
+        notes.kind === "event_fee"
+          ? notes.participantId ||
+            String(data.link_id || "").replace(/^evtp_/, "")
           : undefined,
     };
   }
@@ -208,8 +214,14 @@ export async function POST(req: Request) {
   }
 
   const eventType = String(event.type || "");
-  const { linkId, code, paymentId, linkStatus, registrationPaymentId } =
-    extractLinkRef(event);
+  const {
+    linkId,
+    code,
+    paymentId,
+    linkStatus,
+    registrationPaymentId,
+    eventParticipantId,
+  } = extractLinkRef(event);
 
   // Settlement fires only on the link reaching PAID. Order-level success
   // webhooks for the same payment are recorded and left to the link event;
@@ -228,6 +240,25 @@ export async function POST(req: Request) {
   }
 
   await ensureSchoolMirrorLoaded();
+
+  // Inter-school event entry fees settle onto the participant row.
+  if (eventParticipantId) {
+    const { settleEventFee } = await import("@/lib/events/interschool.server");
+    const res = await settleEventFee({
+      participantId: eventParticipantId,
+      paymentRef: paymentId || "",
+    });
+    await recordPaymentGatewayEvent({
+      provider: "cashfree",
+      eventType: res.ok ? "event_fee.settled" : "event_fee.failed",
+      externalPaymentId: paymentId || "",
+      settlementStatus: res.ok ? "settled" : "failed",
+      eventJson: res.ok ? event : { error: res.error, raw: event },
+    });
+    return res.ok
+      ? NextResponse.json({ ok: true, eventParticipantId })
+      : NextResponse.json({ error: res.error }, { status: 400 });
+  }
 
   // Registration-fee links (admissions CRM) settle into AdmissionsState,
   // not the fee pay-link store.

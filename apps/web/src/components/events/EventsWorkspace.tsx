@@ -10,7 +10,9 @@ import {
   LayoutDashboard,
   ListChecks,
   Send,
+  Trophy,
 } from "lucide-react";
+import { InterSchoolPanel } from "@/components/events/InterSchoolPanel";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
@@ -57,13 +59,14 @@ import {
   type SchoolEvent,
 } from "@/lib/events";
 
-type EventsTab = "dashboard" | "calendar" | "events" | "rsvps";
+type EventsTab = "dashboard" | "calendar" | "events" | "rsvps" | "interschool";
 
 const TAB_ITEMS: WorkspaceTabItem[] = [
   { id: "dashboard", label: "Dashboard", tone: "navy", icon: <LayoutDashboard /> },
   { id: "calendar", label: "Calendar", tone: "amber", icon: <CalendarDays /> },
   { id: "events", label: "Events", tone: "violet", icon: <CalendarHeart /> },
   { id: "rsvps", label: "RSVPs", tone: "teal", icon: <ListChecks /> },
+  { id: "interschool", label: "Inter-school", tone: "green", icon: <Trophy /> },
 ];
 
 function todayIso(): string {
@@ -99,6 +102,7 @@ export function EventsWorkspace() {
     "calendar",
     "events",
     "rsvps",
+    "interschool",
   ]);
 
   const [masters, setMasters] = useState<MastersState | null>(null);
@@ -704,6 +708,10 @@ export function EventsWorkspace() {
               </div>
             </>
           )}
+        </TabsContent>
+
+        <TabsContent value="interschool" className="space-y-4">
+          <InterSchoolPanel readOnly={readOnly} cashierName={session.fullName} />
         </TabsContent>
       </WorkspaceTabs>
     </ErpWorkspaceShell>
