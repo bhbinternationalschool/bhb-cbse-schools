@@ -44,7 +44,10 @@ export function paymentGatewayModeLabel(mode: PaymentGatewayMode): string {
         ? "Razorpay"
         : "Razorpay (keys pending)";
     case "cashfree":
-      return "Cashfree (stub)";
+      return process.env.CASHFREE_APP_ID ||
+        process.env.NEXT_PUBLIC_PAYMENT_GATEWAY_KEY
+        ? "Cashfree"
+        : "Cashfree (keys pending)";
     default:
       return "Demo UPI link";
   }
@@ -95,7 +98,15 @@ export function gatewayCheckoutHint(mode: PaymentGatewayMode): string {
   if (mode === "razorpay") {
     return "Razorpay — create orders with notes.linkId; webhook /api/payments/razorpay/webhook settles the link.";
   }
-  return `${paymentGatewayModeLabel(mode)} — connect merchant keys to replace demo confirm with webhook settlement.`;
+  return "Cashfree — payment links carry link_notes.linkId; webhook /api/payments/cashfree/webhook settles the link.";
+}
+
+/** True when Cashfree server secrets are present (webhook can settle). */
+export function cashfreeWebhookConfigured(): boolean {
+  return !!(
+    process.env.CASHFREE_APP_ID?.trim() &&
+    process.env.CASHFREE_SECRET_KEY?.trim()
+  );
 }
 
 /** True when Razorpay server secrets are present (webhook can settle). */

@@ -42,6 +42,10 @@ import {
   type SisBotDueLine,
 } from "@/lib/sisParentBotEngine";
 import { attachRazorpayToPaymentLink } from "@/lib/razorpay.server";
+import {
+  attachCashfreeToPaymentLink,
+  shouldUseCashfreeCheckout,
+} from "@/lib/cashfree.server";
 import { loadSis, householdWhatsApp, type Household, type SisStudent } from "@/lib/sis";
 import { TENANT } from "@/lib/types";
 import {
@@ -423,15 +427,18 @@ async function buildPayLinkReply(
   const mobile10 =
     householdWhatsApp(hh) || hh.mobile || hh.whatsappMobile || "";
 
-  const rz = await attachRazorpayToPaymentLink({
+  const attachOpts = {
     link,
     customerName: hh.guardianName || payLabel.studentName,
     customerMobile: mobile10,
     appOrigin: publicAppOrigin(),
-  });
-  if (rz.ok) {
-    link = rz.link;
-    payUrl = rz.checkoutUrl;
+  };
+  const gw = shouldUseCashfreeCheckout()
+    ? await attachCashfreeToPaymentLink(attachOpts)
+    : await attachRazorpayToPaymentLink(attachOpts);
+  if (gw.ok) {
+    link = gw.link;
+    payUrl = gw.checkoutUrl;
     autoSettle = true;
   } else {
     const upi = resolveSchoolCollectionsUpi(masters);

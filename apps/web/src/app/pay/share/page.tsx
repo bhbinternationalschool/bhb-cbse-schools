@@ -64,7 +64,13 @@ export default function PaySharePage() {
     upiRef: string;
   } | null>(null);
 
-  const razorpayMode = !!serverLink?.gatewayCheckoutUrl;
+  const gatewayCheckoutMode = !!serverLink?.gatewayCheckoutUrl;
+  const gatewayName =
+    serverLink?.gatewayMode === "cashfree"
+      ? "Cashfree"
+      : serverLink?.gatewayMode === "razorpay"
+        ? "Razorpay"
+        : "secure checkout";
 
   const refreshPaidStatus = useCallback(async (linkId: string, code?: string) => {
     const q = new URLSearchParams({ linkId });
@@ -160,7 +166,7 @@ export default function PaySharePage() {
   }, [refreshPaidStatus]);
 
   useEffect(() => {
-    if (!payload || done || razorpayMode) {
+    if (!payload || done || gatewayCheckoutMode) {
       setQrDataUrl(null);
       return;
     }
@@ -185,15 +191,15 @@ export default function PaySharePage() {
     return () => {
       cancelled = true;
     };
-  }, [payload, done, razorpayMode]);
+  }, [payload, done, gatewayCheckoutMode]);
 
   useEffect(() => {
-    if (!payload || done || !razorpayMode) return;
+    if (!payload || done || !gatewayCheckoutMode) return;
     const id = window.setInterval(() => {
       void refreshPaidStatus(payload.linkId);
     }, 4000);
     return () => window.clearInterval(id);
-  }, [payload, done, razorpayMode, refreshPaidStatus]);
+  }, [payload, done, gatewayCheckoutMode, refreshPaidStatus]);
 
   const expired = useMemo(() => {
     if (!payload) return false;
@@ -300,7 +306,7 @@ export default function PaySharePage() {
           </p>
           <p className="mt-1 text-[11px] text-[var(--muted)]">
             Valid till {payload.expiresOn}
-            {razorpayMode ? " · Razorpay auto-receipt" : ""}
+            {gatewayCheckoutMode ? ` · ${gatewayName} auto-receipt` : ""}
           </p>
         </div>
 
@@ -341,13 +347,13 @@ export default function PaySharePage() {
           </div>
         ) : (
           <>
-            {razorpayMode && serverLink?.gatewayCheckoutUrl ? (
+            {gatewayCheckoutMode && serverLink?.gatewayCheckoutUrl ? (
               <div className="mt-5 space-y-3">
                 <a
                   href={serverLink.gatewayCheckoutUrl}
                   className="btn-accent flex w-full items-center justify-center rounded-xl px-4 py-3.5 text-sm font-extrabold"
                 >
-                  Pay {formatInr(payload.amountPaise)} via Razorpay
+                  Pay {formatInr(payload.amountPaise)} via {gatewayName}
                 </a>
                 <p className="text-center text-[10px] leading-relaxed text-[var(--muted)]">
                   UPI / card / netbanking. Ledger &amp; WhatsApp receipt update
