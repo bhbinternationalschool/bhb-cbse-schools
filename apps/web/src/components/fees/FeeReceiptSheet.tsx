@@ -13,7 +13,13 @@ import {
 } from "@/lib/fees";
 import { type MastersState } from "@/lib/masters";
 import { type SisState } from "@/lib/sis";
+import { referralCodeFor } from "@/lib/referrals";
 import { TENANT } from "@/lib/types";
+import {
+  schoolAddressLine,
+  schoolContactLine,
+  schoolStatutoryLine,
+} from "@/lib/schoolIdentity";
 
 function formatDisplayDate(isoDate: string) {
   if (!isoDate) return "—";
@@ -276,6 +282,9 @@ function FeeReceiptCopy({
   remainingPayQrDataUrl,
   remainingPayAmountPaise,
   remainingPayUrl,
+  referralCode,
+  referralUrl,
+  referralQrDataUrl,
 }: {
   copyLabel: "Parent copy" | "Office copy";
   voucher: CollectionVoucher;
@@ -289,6 +298,9 @@ function FeeReceiptCopy({
   remainingPayQrDataUrl?: string | null;
   remainingPayAmountPaise?: number;
   remainingPayUrl?: string | null;
+  referralCode?: string;
+  referralUrl?: string;
+  referralQrDataUrl?: string | null;
 }) {
   const discountTotal = voucher.lines.reduce(
     (s, l) => s + (l.concessionPaise ?? 0),
@@ -343,11 +355,13 @@ function FeeReceiptCopy({
                 {TENANT.tagline}
               </p>
               <p className="mt-0.5 text-[7.5px] leading-snug text-[var(--muted)]">
-                {TENANT.schoolAddress}
+                {schoolAddressLine()}
               </p>
               <p className="text-[7.5px] leading-snug text-[var(--muted)]">
-                {TENANT.schoolStatus} · Affiliation {TENANT.affiliationNo} ·
-                School code {TENANT.schoolCode} · {TENANT.domain}
+                {TENANT.schoolStatus} · {schoolStatutoryLine()}
+              </p>
+              <p className="text-[7.5px] leading-snug text-[var(--muted)]">
+                {schoolContactLine()}
               </p>
             </div>
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -565,6 +579,46 @@ function FeeReceiptCopy({
             </div>
           ) : null}
 
+          {/* Refer a family — parent copy only, and never on a void. */}
+          {copyLabel === "Parent copy" && !voided && referralCode ? (
+            <div className="mt-1 flex shrink-0 items-center gap-2 rounded border border-[rgba(197,160,40,0.5)] bg-[rgba(197,160,40,0.08)] px-1.5 py-1">
+              {referralQrDataUrl ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                  src={referralQrDataUrl}
+                  alt="Refer a family — registration QR"
+                  className="h-16 w-16 shrink-0 rounded border border-white bg-white p-0.5"
+                />
+              ) : null}
+              <div className="min-w-0 text-[7px] leading-snug text-[var(--brand-deep)]">
+                <p className="text-[8px] font-bold uppercase tracking-wide text-[#8a6d12]">
+                  Refer a family · earn a fee discount
+                </p>
+                <p className="mt-0.5">
+                  Know a family looking for a school? Let them scan this code
+                  to register. When a child you refer takes admission, a
+                  discount is applied to your own ward&apos;s tuition fee —
+                  as per the school&apos;s referral policy.
+                </p>
+                <p className="mt-0.5">
+                  किसी परिचित परिवार को विद्यालय की तलाश है? उन्हें यह QR स्कैन
+                  करके पंजीकरण कराने को कहें। आपके द्वारा भेजे गए बच्चे का
+                  प्रवेश होने पर, विद्यालय की रेफ़रल नीति के अनुसार आपके अपने
+                  बच्चे की ट्यूशन फ़ीस में छूट दी जाएगी।
+                </p>
+                <p className="mt-0.5 font-bold">
+                  Your referral code:{" "}
+                  <span className="font-mono">{referralCode}</span>
+                </p>
+                {referralUrl ? (
+                  <p className="break-all text-[6px] text-[#8a6d12]">
+                    {referralUrl}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
           <div className="mt-1.5 grid shrink-0 grid-cols-2 gap-3 text-[8px] text-[var(--brand-deep)]">
             <div className="border-t border-[rgba(32,48,80,0.35)] pt-0.5">
               Parent / payer
@@ -609,6 +663,7 @@ export function FeeReceiptSheet({
   remainingPayQrDataUrl,
   remainingPayAmountPaise,
   remainingPayUrl,
+  referralQrDataUrl,
 }: {
   voucher: CollectionVoucher;
   householdHint?: string;
@@ -618,6 +673,8 @@ export function FeeReceiptSheet({
   remainingPayQrDataUrl?: string | null;
   remainingPayAmountPaise?: number;
   remainingPayUrl?: string | null;
+  /** QR of this household's referral link; rendered on the parent copy. */
+  referralQrDataUrl?: string | null;
 }) {
   const voided = !!voucher.voidedAt;
   const stc = voucherHasUnclearedCheque(voucher);
@@ -625,6 +682,16 @@ export function FeeReceiptSheet({
     studentsProp ?? receiptStudentRows(voucher, sis, masters);
   const studentGroups = groupVoucherLinesByStudent(voucher, studentRows);
   const multiSibling = studentGroups.length > 1;
+
+  // The parent's own referral code and link, printed on their copy: the
+  // receipt is the one piece of school paper every family keeps, so it is
+  // where the refer-a-family offer belongs. The code identifies THIS
+  // household, so an enquiry scanned from it is attributed to them.
+  const household = sis?.households.find((h) => h.id === voucher.householdId);
+  const referralCode = household ? referralCodeFor(household) : "";
+  const referralUrl = referralCode
+    ? `https://${TENANT.publicPortal}/apply?ref=${encodeURIComponent(referralCode)}`
+    : "";
 
   const copyProps = {
     voucher,
@@ -637,6 +704,9 @@ export function FeeReceiptSheet({
     remainingPayQrDataUrl,
     remainingPayAmountPaise,
     remainingPayUrl,
+    referralCode,
+    referralUrl,
+    referralQrDataUrl,
   };
 
   return (

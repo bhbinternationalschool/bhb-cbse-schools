@@ -56,6 +56,12 @@ export type ReferralsState = {
   testimonials: Testimonial[];
   /** Reward policy text shown to staff (e.g. "₹1,000 fee credit per enrolment") — informational */
   rewardNote: string;
+  /**
+   * The structured reward policy (lib/referralRewards.ts owns its shape and
+   * defaults). Kept as an opaque record here so this module stays free of
+   * the fee/masters imports the award engine needs.
+   */
+  rewardPolicy?: Record<string, unknown>;
   updatedAt: string;
 };
 
@@ -108,7 +114,18 @@ export function normalizeReferrals(raw: unknown): ReferralsState {
       updatedBy: str(x.updatedBy, 120),
     });
   }
-  return { version: 1, invites, testimonials, rewardNote: str(r.rewardNote, 300), updatedAt: str(r.updatedAt, 40) };
+  const rewardPolicy =
+    r.rewardPolicy && typeof r.rewardPolicy === "object"
+      ? (r.rewardPolicy as Record<string, unknown>)
+      : undefined;
+  return {
+    version: 1,
+    invites,
+    testimonials,
+    rewardNote: str(r.rewardNote, 300),
+    ...(rewardPolicy ? { rewardPolicy } : {}),
+    updatedAt: str(r.updatedAt, 40),
+  };
 }
 
 export function loadReferrals(): ReferralsState {

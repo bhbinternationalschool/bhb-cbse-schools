@@ -13,6 +13,11 @@
 import { amountInWordsPaise } from "@/lib/fees";
 import { TENANT } from "@/lib/types";
 import {
+  schoolAddressLine,
+  schoolContactLine,
+  schoolStatutoryLine,
+} from "@/lib/schoolIdentity";
+import {
   formatPaise,
   saleStatusLabel,
   tenderLabel,
@@ -158,11 +163,13 @@ export function StoreReceiptSheet({
             {TENANT.tagline}
           </p>
           <p className="mt-0.5 text-[7px] leading-snug text-[#5a6a8a]">
-            {TENANT.schoolAddress}
+            {schoolAddressLine()}
           </p>
           <p className="text-[7px] leading-snug text-[#5a6a8a]">
-            Affiliation {TENANT.affiliationNo} · School code {TENANT.schoolCode}{" "}
-            · {TENANT.domain}
+            {schoolStatutoryLine()}
+          </p>
+          <p className="text-[7px] leading-snug text-[#5a6a8a]">
+            {schoolContactLine()}
           </p>
         </div>
         {/* eslint-disable-next-line @next/next/no-img-element */}

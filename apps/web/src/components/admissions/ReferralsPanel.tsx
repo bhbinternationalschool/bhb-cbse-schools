@@ -15,6 +15,7 @@ import { useMemo, useState } from "react";
 import { Sparkles } from "lucide-react";
 import type { AdmissionsState } from "@/lib/admissions";
 import type { SisState } from "@/lib/sis";
+import { ReferralPolicyEditor } from "@/components/admissions/ReferralPolicyEditor";
 import {
   approvedTestimonialLines,
   loadReferrals,
@@ -179,6 +180,10 @@ export function ReferralsPanel({ admissions, sis, canEdit, by }: { admissions: A
               </button>
             </div>
           </div>
+        ) : null}
+
+        {canEdit ? (
+          <ReferralPolicyEditor leads={admissions.leads} sis={sis} by={by} />
         ) : null}
         <div className="mt-2">
           <ErpTableShell>

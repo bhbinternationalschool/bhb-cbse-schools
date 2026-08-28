@@ -3387,6 +3387,36 @@ function ReceiptPreviewModal({
     };
   }, [voucher.id, voucher.householdId, voucher.receiptNo, sis, masters]);
 
+  // The parent's referral QR — their own code, so an enquiry scanned from
+  // this receipt is attributed back to them.
+  const [referralQr, setReferralQr] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    async function buildReferralQr() {
+      const hh = sis?.households.find((h) => h.id === voucher.householdId);
+      if (!hh) {
+        setReferralQr(null);
+        return;
+      }
+      const { referralCodeFor } = await import("@/lib/referrals");
+      const QRCode = (await import("qrcode")).default;
+      const url = `https://${TENANT.publicPortal}/apply?ref=${encodeURIComponent(
+        referralCodeFor(hh),
+      )}`;
+      const dataUrl = await QRCode.toDataURL(url, {
+        width: 180,
+        margin: 0,
+        errorCorrectionLevel: "M",
+        color: { dark: "#203050", light: "#ffffff" },
+      });
+      if (!cancelled) setReferralQr(dataUrl);
+    }
+    void buildReferralQr();
+    return () => {
+      cancelled = true;
+    };
+  }, [voucher.householdId, sis]);
+
   async function sendWhatsApp() {
     setWaError(null);
     setWaNotice(null);
@@ -3521,6 +3551,7 @@ function ReceiptPreviewModal({
           sis={sis}
           masters={masters}
           remainingPayQrDataUrl={remainQr}
+          referralQrDataUrl={referralQr}
           remainingPayAmountPaise={remainAmt}
           remainingPayUrl={remainUrl}
         />

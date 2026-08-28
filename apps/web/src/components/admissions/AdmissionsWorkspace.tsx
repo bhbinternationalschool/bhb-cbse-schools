@@ -3288,13 +3288,41 @@ function LeadDetail({
               }}
             />
             {lead.referredByHouseholdId ? (
-              <p className="mt-0.5 text-[10px] text-[var(--muted)]">
-                → {sis.households.find((h) => h.id === lead.referredByHouseholdId)?.guardianName || lead.referredByHouseholdId}
-                {(() => {
-                  const h = sis.households.find((x) => x.id === lead.referredByHouseholdId);
-                  return h ? ` (${referralCodeFor(h)})` : "";
-                })()}
-              </p>
+              (() => {
+                const h = sis.households.find(
+                  (x) => x.id === lead.referredByHouseholdId,
+                );
+                const kids = sis.students.filter(
+                  (s) =>
+                    s.householdId === lead.referredByHouseholdId &&
+                    s.status === "active",
+                );
+                return (
+                  <p className="mt-0.5 text-[10px] text-[var(--muted)]">
+                    → <span className="font-semibold text-[var(--brand-deep)]">
+                      {h?.guardianName || lead.referredByHouseholdId}
+                    </span>
+                    {h ? ` · ${referralCodeFor(h)}` : ""}
+                    {h?.mobile ? ` · ${h.mobile}` : ""}
+                    {kids.length > 0 ? (
+                      <>
+                        <br />
+                        Their ward{kids.length > 1 ? "s" : ""}:{" "}
+                        {kids
+                          .map(
+                            (k) =>
+                              `${k.fullName} (${
+                                masters?.classes.find((c) => c.id === k.classId)
+                                  ?.name ?? "—"
+                              }, ${k.admissionNo})`,
+                          )
+                          .join(" · ")}{" "}
+                        — the referral discount lands on this child&apos;s fees.
+                      </>
+                    ) : null}
+                  </p>
+                );
+              })()
             ) : lead.referralCode ? (
               <p className="mt-0.5 text-[10px] text-[var(--warning)]">Code not matched to an enrolled household yet.</p>
             ) : null}
