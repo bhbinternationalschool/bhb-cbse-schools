@@ -1,5 +1,9 @@
 import { formatInr, type MpdFeeGroupRow } from "@/lib/feeFinance";
-import { TENANT } from "@/lib/types";
+import {
+  schoolAddressLine,
+  schoolPrintName,
+  schoolStatutoryLine,
+} from "@/lib/schoolIdentity";
 
 /**
  * Mandatory Public Disclosure — fee structure (CBSE / state MPD style).
@@ -23,11 +27,12 @@ export function MpdFeeDisclosurePage({
             Mandatory public disclosure · Fee structure
           </p>
           <h1 className="mt-1 text-2xl font-semibold sm:text-3xl">
-            {TENANT.nameDisplay}
+            {schoolPrintName()}
           </h1>
           <p className="mt-2 text-sm text-[var(--muted)]">
-            {TENANT.schoolAddress} · Affiliation {TENANT.affiliationNo} · School
-            code {TENANT.schoolCode}
+            {[schoolAddressLine(), schoolStatutoryLine()]
+              .filter(Boolean)
+              .join(" · ")}
             {ay ? ` · Academic year ${ay}` : ""}
           </p>
         </div>

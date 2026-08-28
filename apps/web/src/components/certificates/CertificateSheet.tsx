@@ -9,6 +9,14 @@ import {
   type TcDetails,
 } from "@/lib/certificates";
 import { amountInWordsPaise, formatInr } from "@/lib/fees";
+import {
+  schoolAddressLine,
+  schoolCityLine,
+  schoolPrintName,
+  schoolShortName,
+  schoolStatutoryLine,
+  schoolTagline,
+} from "@/lib/schoolIdentity";
 import { TENANT } from "@/lib/types";
 
 export function printCertificate(issueId: string) {
@@ -42,7 +50,7 @@ export function CertificateSheet({ issue }: { issue: CertificateIssue }) {
     >
       <div className="certificate-watermark pointer-events-none absolute inset-0 flex items-center justify-center">
         <span className="select-none text-5xl font-bold uppercase tracking-[0.2em] text-[rgba(32,48,80,0.06)] sm:text-6xl">
-          {voided ? "VOID" : TENANT.shortName}
+          {voided ? "VOID" : schoolShortName()}
         </span>
       </div>
 
@@ -57,12 +65,12 @@ export function CertificateSheet({ issue }: { issue: CertificateIssue }) {
           <>
             <header className="border-b-2 border-[var(--brand-gold)] pb-3 text-center">
               <p className="font-brand-name text-sm tracking-[0.12em] text-[var(--brand-deep)] sm:text-base">
-                {TENANT.nameDisplay}
+                {schoolPrintName()}
               </p>
               <p className="mt-0.5 text-[11px] text-[var(--muted)]">
-                {TENANT.city}, {TENANT.state}
+                {schoolCityLine()}
               </p>
-              <p className="font-tagline mt-1 text-sm">{TENANT.tagline}</p>
+              <p className="font-tagline mt-1 text-sm">{schoolTagline()}</p>
             </header>
 
             <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
@@ -148,18 +156,19 @@ function TcSheet({
     <>
       <header className="border-b-2 border-[var(--brand-deep)] pb-3 text-center">
         <p className="font-brand-name text-[13px] tracking-[0.1em] text-[var(--brand-deep)] sm:text-base">
-          {TENANT.nameDisplay}
+          {schoolPrintName()}
         </p>
         <p className="mt-0.5 text-[10px] text-[var(--muted)]">
-          {TENANT.schoolAddress || `${TENANT.city}, ${TENANT.state}`}
+          {schoolAddressLine() || schoolCityLine()}
         </p>
         <p className="mt-1 text-[10px] font-bold uppercase tracking-wide text-[var(--brand-deep)]">
           Affiliated to the Central Board of Secondary Education
         </p>
-        <p className="mt-1 text-[10px] text-[var(--muted)]">
-          Affiliation No. {TENANT.affiliationNo} · School Code{" "}
-          {TENANT.schoolCode} · Status: {TENANT.schoolStatus}
-        </p>
+        {schoolStatutoryLine() ? (
+          <p className="mt-1 text-[10px] text-[var(--muted)]">
+            {schoolStatutoryLine()} · Status: {TENANT.schoolStatus}
+          </p>
+        ) : null}
         <p className="mt-2 text-sm font-bold uppercase tracking-[0.18em] text-[var(--brand-deep)]">
           Transfer Certificate
           {voided ? " (VOID)" : ""}

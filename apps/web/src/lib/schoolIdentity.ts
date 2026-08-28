@@ -116,3 +116,50 @@ export function schoolPrintName(masters?: MastersState | null): string {
   const p = schoolIdentity(masters);
   return real(p.displayName) || real(p.legalName) || TENANT.nameDisplay;
 }
+
+/** The legal name — for anything the school signs or certifies. */
+export function schoolLegalName(masters?: MastersState | null): string {
+  const p = schoolIdentity(masters);
+  return real(p.legalName) || real(p.displayName) || TENANT.name;
+}
+
+/**
+ * Watermark / seal initials. Offices often type the full name into the short
+ * name field; that is fine as a label but ruins a page-wide watermark set in
+ * 5xl with wide tracking, so anything long falls back to the initials.
+ */
+export function schoolShortName(masters?: MastersState | null): string {
+  const short = real(schoolIdentity(masters).shortName);
+  if (short && short.length <= 12) return short;
+  const initials = (short || schoolPrintName(masters))
+    .split(/\s+/)
+    .map((w) => w[0])
+    .filter((c) => c && /[A-Za-z]/.test(c))
+    .join("")
+    .toUpperCase();
+  return initials.slice(0, 6) || TENANT.shortName;
+}
+
+export function schoolTagline(masters?: MastersState | null): string {
+  return real(schoolIdentity(masters).tagline) || TENANT.tagline;
+}
+
+/** Full logo (with name) — letterheads. */
+export function schoolLogoUrl(masters?: MastersState | null): string {
+  return real(schoolIdentity(masters).logoUrl) || TENANT.logoUrl;
+}
+
+/** Crest only — seals, watermarks, tab icon. Masters keeps one logo field, so
+ *  an uploaded logo stands in for the crest rather than printing the old one
+ *  beside a school's new mark. */
+export function schoolCrestUrl(masters?: MastersState | null): string {
+  const logo = real(schoolIdentity(masters).logoUrl);
+  return logo || TENANT.logoCrestUrl;
+}
+
+/** "Varanasi, Uttar Pradesh" — the short place line under a certificate. */
+export function schoolCityLine(masters?: MastersState | null): string {
+  const p = schoolIdentity(masters);
+  const line = [real(p.city), real(p.state)].filter(Boolean).join(", ");
+  return line || [TENANT.city, TENANT.state].filter(Boolean).join(", ");
+}
