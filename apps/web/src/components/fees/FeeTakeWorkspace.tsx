@@ -1045,46 +1045,53 @@ export function FeeTakeWorkspace() {
         return;
       }
 
-      if (applyFutureKeys.size > 0 && masters) {
-        const candidates = listFutureConcessionCandidates(
-          discountSlices,
-          selectedDues,
-          masters,
-          householdBundle.map((r) => r.student),
-          ay,
-        );
-        const futureResult = applyFutureConcessionsFromCounter({
-          candidates,
-          applyKeys: applyFutureKeys,
-          reason: counterDiscountReason.trim() || "Counter concession",
-          academicYearCode: ay,
-        });
-        if (!futureResult.ok) {
-          flash(futureResult.error);
-          return;
-        }
-        const bits: string[] = [];
-        if (futureResult.granted > 0) {
-          bits.push(
-            `${futureResult.granted} future grant${futureResult.granted === 1 ? "" : "s"} approved`,
-          );
-        }
-        if (futureResult.pending > 0) {
-          bits.push(
-            `${futureResult.pending} pending Principal in Concessions`,
-          );
-        }
-        if (futureResult.skipped > 0) {
-          bits.push(`${futureResult.skipped} already on file`);
-        }
-        if (bits.length > 0) futureConcessionMsg = ` · ${bits.join(" · ")}`;
-      }
-
       refresh();
     }
 
+    // Future-month grants apply AFTER the receipt exists (paid path), so
+    // each grant carries its source receipt and dies with it on void. The
+    // discount-only path has no receipt — grants apply immediately there.
+    const applyFutureGrants = (voucher?: { id: string; receiptNo: string }) => {
+      if (applyFutureKeys.size === 0 || !masters || counterDiscountPaise <= 0) {
+        return;
+      }
+      const candidates = listFutureConcessionCandidates(
+        discountSlices,
+        selectedDues,
+        masters,
+        householdBundle.map((r) => r.student),
+        ay,
+      );
+      const futureResult = applyFutureConcessionsFromCounter({
+        candidates,
+        applyKeys: applyFutureKeys,
+        reason: counterDiscountReason.trim() || "Counter concession",
+        academicYearCode: ay,
+        sourceVoucherId: voucher?.id,
+        sourceReceiptNo: voucher?.receiptNo,
+      });
+      if (!futureResult.ok) {
+        futureConcessionMsg = ` · future grants failed: ${futureResult.error}`;
+        return;
+      }
+      const bits: string[] = [];
+      if (futureResult.granted > 0) {
+        bits.push(
+          `${futureResult.granted} future grant${futureResult.granted === 1 ? "" : "s"} approved`,
+        );
+      }
+      if (futureResult.pending > 0) {
+        bits.push(`${futureResult.pending} pending Principal in Concessions`);
+      }
+      if (futureResult.skipped > 0) {
+        bits.push(`${futureResult.skipped} already on file`);
+      }
+      if (bits.length > 0) futureConcessionMsg = ` · ${bits.join(" · ")}`;
+    };
+
     if (collectTarget <= 0) {
       if (counterDiscountPaise > 0) {
+        applyFutureGrants();
         setSelectedKeys(new Set());
         setCollectAmountRupees("");
         setLineDiscountRupees({});
@@ -1164,6 +1171,11 @@ export function FeeTakeWorkspace() {
     // money with nothing to show for it. The call carries the receipt number,
     // and the store settles once per receipt, so a retry is safe.
     void settleStoreLines(result.voucher.receiptNo, lines);
+
+    applyFutureGrants({
+      id: result.voucher.id,
+      receiptNo: result.voucher.receiptNo,
+    });
 
     setSelectedKeys(new Set());
     setCollectAmountRupees("");

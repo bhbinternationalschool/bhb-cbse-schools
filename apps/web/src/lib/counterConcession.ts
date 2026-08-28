@@ -242,6 +242,13 @@ export function applyFutureConcessionsFromCounter(input: {
   applyKeys: Set<string>;
   reason: string;
   academicYearCode: string;
+  /**
+   * The receipt this discount rode in on. Stamped into each grant's reason
+   * (`[v:<voucherId>]`) so voiding that receipt can auto-revoke the grants
+   * it created — a dead receipt must not leave its concession running.
+   */
+  sourceVoucherId?: string;
+  sourceReceiptNo?: string;
 }):
   | {
       ok: true;
@@ -293,7 +300,11 @@ export function applyFutureConcessionsFromCounter(input: {
       concessionId: rule.id,
       studentId: item.studentId,
       status: needsPrincipal ? "pending" : "approved",
-      reason: `Fee Take · ${reason} · from ${item.dueLabel}`,
+      reason:
+        `Fee Take · ${reason} · from ${item.dueLabel}` +
+        (input.sourceReceiptNo
+          ? ` · receipt ${input.sourceReceiptNo} [v:${input.sourceVoucherId ?? ""}]`
+          : ""),
       effectiveFrom: item.futureEffectiveFrom,
       effectiveTo: null,
       createdAt: now,

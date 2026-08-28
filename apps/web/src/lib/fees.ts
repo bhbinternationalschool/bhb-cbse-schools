@@ -29,6 +29,7 @@ import {
   resolveStudentFeeGroupId,
   resolveStructureLinesForClass,
   resolveSiblingTierValue,
+  saveMasters,
   shouldBillMidYearLine,
   concessionAmountFromValue,
   type MastersState,
@@ -1783,6 +1784,33 @@ export function syncAllStudentFeeGroups(options?: {
   return { updated, skipped };
 }
 
+/**
+ * All row ids the same child holds across sessions (memoized ~5s): grants
+ * key on a session row id, but the concession belongs to the CHILD — after
+ * promotion the new row must still see last session's grant.
+ */
+let grantAliasMemo: { at: number; map: Map<string, string[]> } | null = null;
+function grantAliasIdsFor(student: {
+  id: string;
+  admissionNo: string;
+}): string[] {
+  const adm = (student.admissionNo || "").trim().toUpperCase();
+  if (!adm) return [];
+  const now = Date.now();
+  if (!grantAliasMemo || now - grantAliasMemo.at > 5000) {
+    const map = new Map<string, string[]>();
+    for (const s of loadSis().students) {
+      const k = (s.admissionNo || "").trim().toUpperCase();
+      if (!k) continue;
+      const list = map.get(k) ?? [];
+      list.push(s.id);
+      map.set(k, list);
+    }
+    grantAliasMemo = { at: now, map };
+  }
+  return (grantAliasMemo.map.get(adm) ?? []).filter((id) => id !== student.id);
+}
+
 function concessionForHead(
   masters: MastersState,
   student: { id: string; admissionNo: string; academicYearCode?: string },
@@ -1795,6 +1823,7 @@ function concessionForHead(
     mastersWithRules,
     student,
     asOf,
+    grantAliasIdsFor(student),
   );
   const details: FeeConcessionDetail[] = [];
   let total = 0;
@@ -3293,7 +3322,36 @@ export function voidVoucher(voucherId: string): boolean {
       revertRegistrationPaymentForVoidedReceipt(voucher.id);
     })
     .catch(() => {});
+
+  // Future-month grants born from this receipt's counter discount die with
+  // it — a voided receipt must not leave its concession running in Masters.
+  revokeGrantsFromVoidedReceipt(voucher);
   return true;
+}
+
+/**
+ * Reject every Masters concession grant stamped with this voucher's marker
+ * (`[v:<id>]`, written when the counter's "save for future months" applied).
+ * Rejection, not deletion: the grant stays on file with the void note, so
+ * Concessions shows why the discount stopped.
+ */
+function revokeGrantsFromVoidedReceipt(voucher: CollectionVoucher): void {
+  const masters = loadMasters();
+  const marker = `[v:${voucher.id}]`;
+  const grants = masters.concessionGrants ?? [];
+  let changed = false;
+  const next = grants.map((g) => {
+    if (g.status === "rejected" || !g.reason.includes(marker)) return g;
+    changed = true;
+    return {
+      ...g,
+      status: "rejected" as const,
+      reason: `${g.reason} · auto-revoked — receipt ${voucher.receiptNo} voided ${new Date().toISOString().slice(0, 10)}`,
+    };
+  });
+  if (changed) {
+    void saveMasters({ ...masters, concessionGrants: next });
+  }
 }
 
 /**
