@@ -15,6 +15,7 @@ import { TENANT } from "@/lib/types";
 import {
   schoolAddressLine,
   schoolContactLine,
+  schoolPrintName,
   schoolStatutoryLine,
 } from "@/lib/schoolIdentity";
 import {
@@ -157,7 +158,7 @@ export function StoreReceiptSheet({
         />
         <div className="min-w-0 flex-1 text-center">
           <p className="text-[13px] font-bold uppercase leading-tight tracking-wide">
-            {TENANT.nameDisplay}
+            {schoolPrintName()}
           </p>
           <p className="text-[7px] font-semibold uppercase tracking-[0.16em] text-[#c5a028]">
             {TENANT.tagline}

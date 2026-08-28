@@ -108,6 +108,7 @@ import {
   salarySetupCompleteness,
 } from "@/lib/salarySetup";
 import { completeMastersSetup } from "@/lib/mastersCompleteSetup";
+import { forgetSchoolIdentity } from "@/lib/schoolIdentity";
 
 type Commit = (s: MastersState, msg?: string) => void;
 
@@ -518,12 +519,15 @@ export function SchoolProfilePanel({
             <button
               type="button"
               className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-[var(--primary-foreground)]"
-              onClick={() =>
+              onClick={() => {
+                // Receipts memoise the printed identity — drop it so the very
+                // next receipt shows what was just saved.
+                forgetSchoolIdentity();
                 commit(
                   { ...state, schoolProfile: draft },
                   "School profile saved",
-                )
-              }
+                );
+              }}
             >
               Save profile
             </button>

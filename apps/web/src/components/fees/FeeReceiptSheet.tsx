@@ -18,6 +18,7 @@ import { TENANT } from "@/lib/types";
 import {
   schoolAddressLine,
   schoolContactLine,
+  schoolPrintName,
   schoolStatutoryLine,
 } from "@/lib/schoolIdentity";
 
@@ -349,7 +350,7 @@ function FeeReceiptCopy({
             />
             <div className="min-w-0 flex-1 text-center">
               <p className="font-brand-name text-[15px] font-bold leading-tight text-[var(--brand-deep)]">
-                {TENANT.nameDisplay}
+                {schoolPrintName()}
               </p>
               <p className="text-[8px] font-semibold uppercase tracking-[0.16em] text-[var(--brand-gold)]">
                 {TENANT.tagline}
