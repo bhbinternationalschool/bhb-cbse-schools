@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { startTransition, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { IndianRupee } from "lucide-react";
 import { PaymentChannelSelect } from "@/components/accounts/PaymentChannelSelect";
@@ -107,6 +107,37 @@ import { FeeAdjustmentsPanel } from "@/components/fees/FeeAdjustmentsPanel";
 import { FeeReportsPanel } from "@/components/fees/FeeFinancePanels";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { TransportRiderChip } from "@/components/transport/TransportRiderChip";
+
+/**
+ * The search box owns its keystrokes. Typing re-renders ONLY this input;
+ * the workspace re-renders once per debounce tick instead of per key —
+ * the difference between this feeling like the store counter's search
+ * and feeling stuck.
+ */
+function FeeSearchInput({
+  onDebounced,
+  autoFocus,
+}: {
+  onDebounced: (q: string) => void;
+  autoFocus?: boolean;
+}) {
+  const [value, setValue] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => onDebounced(value), 200);
+    return () => clearTimeout(t);
+  }, [value, onDebounced]);
+  return (
+    <input
+      className="field"
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      placeholder="Child, father, mother, mobile, adm no, class…"
+      autoComplete="off"
+      autoFocus={autoFocus}
+    />
+  );
+}
+
 const ChargeVouchersPanel = lazyNamedTabPanel(
   () => import("@/components/fees/ChargeVouchersPanel"),
   "ChargeVouchersPanel",
@@ -198,7 +229,11 @@ export function FeeTakeWorkspace() {
   const [tab, setTab] = useState<Tab>("dashboard");
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [sis, setSis] = useState<SisState | null>(null);
-  const [query, setQuery] = useState("");
+  // The search box owns its keystrokes (FeeSearchInput above) — only the
+  // debounced value lives here, so typing never re-renders this whole
+  // workspace. That per-key full re-render is what made Find student feel
+  // slow next to the store counter's search.
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [classId, setClassId] = useState("");
   const [sectionId, setSectionId] = useState("");
   const [hits, setHits] = useState<StudentSearchHit[]>([]);
@@ -301,7 +336,7 @@ export function FeeTakeWorkspace() {
     setMasters(m);
     setSis(s);
     setHits(
-      searchFeeStudents(query, s, m, f, {
+      searchFeeStudents(debouncedQuery, s, m, f, {
         classId,
         sectionId,
         academicYearCode: ay,
@@ -388,15 +423,6 @@ export function FeeTakeWorkspace() {
     }
   }, []);
 
-  const [debouncedQuery, setDebouncedQuery] = useState(query);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedQuery(query);
-    }, 200);
-    return () => clearTimeout(timer);
-  }, [query]);
-
   // The fees blob is a multi-megabyte localStorage parse — doing it PER
   // KEYSTROKE is what made the search feel hung. Parse once per data tick.
   const feesForSearch = useMemo(() => {
@@ -412,14 +438,17 @@ export function FeeTakeWorkspace() {
       setHits([]);
       return;
     }
-    setHits(
-      searchFeeStudents(debouncedQuery, sis, masters, feesForSearch, {
-        classId,
-        sectionId,
-        academicYearCode: ay,
-        includeFuture,
-      }),
-    );
+    // Transition: the roster scan may take a frame — never block a keystroke.
+    startTransition(() => {
+      setHits(
+        searchFeeStudents(debouncedQuery, sis, masters, feesForSearch, {
+          classId,
+          sectionId,
+          academicYearCode: ay,
+          includeFuture,
+        }),
+      );
+    });
   }, [debouncedQuery, classId, sectionId, sis, masters, feesForSearch, ay, includeFuture]);
 
   const classOptions = useMemo(() => {
@@ -1360,12 +1389,8 @@ export function FeeTakeWorkspace() {
                 <span className="mb-1.5 block text-[var(--muted)]">
                   Find student
                 </span>
-                <input
-                  className="field"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Child, father, mother, mobile, adm no, class…"
-                  autoComplete="off"
+                <FeeSearchInput
+                  onDebounced={setDebouncedQuery}
                   autoFocus={mounted}
                 />
               </label>
@@ -1421,7 +1446,7 @@ export function FeeTakeWorkspace() {
                   sectionOptions.find((s) => s.id === sectionId)?.name
                     ? `Sec ${sectionOptions.find((s) => s.id === sectionId)?.name}`
                     : "",
-                  query.trim() ? `Search “${query.trim()}”` : "",
+                  debouncedQuery.trim() ? `Search “${debouncedQuery.trim()}”` : "",
                 ])}
                 fileBaseName="fee_take_students"
                 columns={[
@@ -1450,7 +1475,7 @@ export function FeeTakeWorkspace() {
             </div>
 
             {/* Compact match strip — replaces left list */}
-            {(query.trim() || classId || sectionId) && !selectedStudent ? (
+            {(debouncedQuery.trim() || classId || sectionId) && !selectedStudent ? (
               <div className="mt-3">
                 <p className="mb-2 text-[11px] text-[var(--muted)]">
                   {hits.length} match{hits.length === 1 ? "" : "es"} — pick one
