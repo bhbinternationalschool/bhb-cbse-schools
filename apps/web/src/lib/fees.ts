@@ -2206,25 +2206,16 @@ export function computeStudentDues(
   // Apply stop-future + waivers to lines collected via raw push (transport/special/store)
   const adjusted = lines
     .filter((l) => !stopFutureBlocks(student.id, l.dueOn))
-    .map((l) => {
-      const waived = waiverMap.get(l.dueKey) ?? 0;
-      if (waived <= 0) return l;
-      const balance = Math.max(0, l.balancePaise - waived);
-      return {
-        ...l,
-        concessionPaise: l.concessionPaise + waived,
-        balancePaise: balance,
-        label:
-          balance <= 0
-            ? `${l.label} · waived`
-            : `${l.label} · −${formatInr(waived)} waived`,
-      };
-    })
+    .map((l) => applyPostedWaiver(l, waiverMap))
     .filter(
       (l) =>
         l.balancePaise > 0 ||
         (includePaid && (l.paidPaise > 0 || (waiverMap.get(l.dueKey) ?? 0) > 0)),
     );
+  // Everything waived above is done; the tail lines (arrears, charge
+  // vouchers, ad-hoc, late fees, store) are appended after this point and
+  // get the same treatment at the end — see waiveTailLines below.
+  const waiverDone = new Set(adjusted.map((l) => l.dueKey));
 
   // Late fee on overdue academic/special balances
   for (const late of computeLateFeeDues(
@@ -2280,6 +2271,26 @@ export function computeStudentDues(
     }
   }
 
+  /**
+   * A counter discount on a tail line (arrears, charge voucher, ad-hoc, late
+   * fee, store) posts a waiver like any other, but those lines are built
+   * AFTER the waiver pass above — so the discount reduced what was collected
+   * while the line kept its full balance, and the difference sat on screen as
+   * a phantom due for ever. Found 2026-08-29 on an arrear discounted ₹200:
+   * ₹1,600 billed, ₹1,400 collected, ₹200 "still due".
+   */
+  const waiveTailLines = (all: FeeDueLine[]): FeeDueLine[] =>
+    all
+      .map((l) =>
+        waiverDone.has(l.dueKey) ? l : applyPostedWaiver(l, waiverMap),
+      )
+      .filter(
+        (l) =>
+          l.balancePaise > 0 ||
+          l.paidPaise > 0 ||
+          (waiverMap.get(l.dueKey) ?? 0) > 0,
+      );
+
   if (plan) {
     const covered = coveredDueKeySet(plan);
     const filtered = adjusted.filter((l) => !covered.has(l.dueKey));
@@ -2288,11 +2299,19 @@ export function computeStudentDues(
       asOf,
       includeFuture,
     });
-    return appendStoreDues(
-      appendArrearsDues([...filtered, ...slices], student, fees, paidMap, includePaid),
-      student,
-      options?.storeDues,
-      includePaid,
+    return waiveTailLines(
+      appendStoreDues(
+        appendArrearsDues(
+          [...filtered, ...slices],
+          student,
+          fees,
+          paidMap,
+          includePaid,
+        ),
+        student,
+        options?.storeDues,
+        includePaid,
+      ),
     ).sort((a, b) =>
       a.dueOn === b.dueOn
         ? a.label.localeCompare(b.label)
@@ -2300,16 +2319,37 @@ export function computeStudentDues(
     );
   }
 
-  return appendStoreDues(
-    appendArrearsDues(adjusted, student, fees, paidMap, includePaid),
-    student,
-    options?.storeDues,
-    includePaid,
+  return waiveTailLines(
+    appendStoreDues(
+      appendArrearsDues(adjusted, student, fees, paidMap, includePaid),
+      student,
+      options?.storeDues,
+      includePaid,
+    ),
   ).sort((a, b) =>
     a.dueOn === b.dueOn
       ? a.label.localeCompare(b.label)
       : a.dueOn.localeCompare(b.dueOn),
   );
+}
+
+/** Subtract a posted waiver from one due line, stamping the label. */
+function applyPostedWaiver(
+  l: FeeDueLine,
+  waiverMap: Map<string, number>,
+): FeeDueLine {
+  const waived = waiverMap.get(l.dueKey) ?? 0;
+  if (waived <= 0) return l;
+  const balance = Math.max(0, l.balancePaise - waived);
+  return {
+    ...l,
+    concessionPaise: l.concessionPaise + waived,
+    balancePaise: balance,
+    label:
+      balance <= 0
+        ? `${l.label} · waived`
+        : `${l.label} · −${formatInr(waived)} waived`,
+  };
 }
 
 function appendStoreDues(
@@ -3326,6 +3366,15 @@ export function voidVoucher(voucherId: string): boolean {
   // Future-month grants born from this receipt's counter discount die with
   // it — a voided receipt must not leave its concession running in Masters.
   revokeGrantsFromVoidedReceipt(voucher);
+
+  // So do the counter waivers it carried: otherwise the discount outlives
+  // the receipt and each retry stacks another waiver on the same line.
+  void import("@/lib/feeAdjustments").then(({ cancelAdjustmentsForVoucher }) => {
+    cancelAdjustmentsForVoucher({
+      voucherId: voucher.id,
+      receiptNo: voucher.receiptNo,
+    });
+  });
   return true;
 }
 

@@ -32,6 +32,19 @@ export type FutureConcessionCandidate = {
   currentDueOn: string;
   futureEffectiveFrom: string;
   dueLabel: string;
+  /**
+   * Standing Masters concessions this student ALREADY holds on this head.
+   * The office must see these before adding another — two concessions on
+   * one head stack, and a clerk who cannot see the first will not expect
+   * the second to double the discount from next month on.
+   */
+  existing: {
+    grantId: string;
+    ruleName: string;
+    rateLabel: string;
+    /** What this rule takes off THIS line today, for a concrete comparison. */
+    currentAmountPaise: number;
+  }[];
 };
 
 function candidateKey(
@@ -124,6 +137,15 @@ export function listFutureConcessionCandidates(
     const key = candidateKey(slice.studentId, due.feeHeadId, slice.amountPaise);
     if (seen.has(key)) continue;
 
+    // Only RECURRING heads may become a standing concession. A one-time or
+    // as-needed head (admission fee, security deposit, a single event
+    // charge) is discounted once and must never leave a rule behind that
+    // silently discounts some future charge nobody was thinking about.
+    const head = masters.feeHeads.find((h) => h.id === due.feeHeadId);
+    if (head && (head.frequency === "one_time" || head.frequency === "as_needed")) {
+      continue;
+    }
+
     const installmentCount = structureLineCountForHead(
       masters,
       student.feeGroupId,
@@ -151,9 +173,29 @@ export function listFutureConcessionCandidates(
         due.dueOn,
       ),
       dueLabel: due.label,
+      existing: existingHeadConcessions(masters, due),
     });
   }
   return out;
+}
+
+/**
+ * What this line's own concession detail already says — the dues engine has
+ * done the resolution, so the modal can name the rules and amounts exactly
+ * as Fee Take is charging them today.
+ */
+function existingHeadConcessions(
+  masters: MastersState,
+  due: FeeDueLine,
+): FutureConcessionCandidate["existing"] {
+  return (due.concessionDetails ?? [])
+    .filter((d) => d.amountPaise > 0)
+    .map((d) => ({
+      grantId: d.grantId,
+      ruleName: d.name || d.code || "Concession",
+      rateLabel: d.rateLabel || formatInr(d.amountPaise),
+      currentAmountPaise: d.amountPaise,
+    }));
 }
 
 function counterRuleCode(feeHeadCode: string, discountPaise: number): string {

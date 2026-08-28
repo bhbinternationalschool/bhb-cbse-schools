@@ -66,6 +66,15 @@ export type FeeAdjustment = {
   decidedAt: string | null;
   decidedBy: string;
   decisionNote: string;
+  /**
+   * The receipt this adjustment was posted with, when it came from a counter
+   * discount. Voiding that receipt cancels the waiver too — without this the
+   * discount survived its own receipt and every retry stacked another one
+   * (found 2026-08-29: one arrear carried four ₹200 waivers from three
+   * voided attempts, so the line read as over-waived and even showed a
+   * phantom refund).
+   */
+  sourceVoucherId: string;
 };
 
 /** Accounts may post without Principal up to this (₹10,000). */
@@ -129,6 +138,7 @@ function normalizeAdjustment(a: Partial<FeeAdjustment>): FeeAdjustment {
     decidedAt: a.decidedAt ?? null,
     decidedBy: a.decidedBy || "",
     decisionNote: a.decisionNote || "",
+    sourceVoucherId: a.sourceVoucherId || "",
   };
 }
 
@@ -301,6 +311,7 @@ export function createFeeAdjustment(input: {
     decidedAt: pending ? null : new Date().toISOString(),
     decidedBy: pending ? "" : input.createdBy,
     decisionNote: pending ? "" : "Auto-posted within Accounts limit",
+    sourceVoucherId: "",
   };
 
   const rows = loadFeeAdjustments();
@@ -352,10 +363,10 @@ export function postCounterDiscountWaivers(input: {
   createdBy: string;
   academicYearCode: string;
 }):
-  | { ok: true; totalPaise: number }
+  | { ok: true; totalPaise: number; adjustmentIds: string[] }
   | { ok: false; error: string } {
   if (input.slices.length === 0) {
-    return { ok: true, totalPaise: 0 };
+    return { ok: true, totalPaise: 0, adjustmentIds: [] };
   }
   const reason = input.reason.trim();
   if (!reason) {
@@ -370,6 +381,7 @@ export function postCounterDiscountWaivers(input: {
     }
   }
   let total = 0;
+  const adjustmentIds: string[] = [];
   for (const slice of input.slices) {
     const result = createFeeAdjustment({
       studentId: slice.studentId,
@@ -392,8 +404,57 @@ export function postCounterDiscountWaivers(input: {
       };
     }
     total += slice.amountPaise;
+    adjustmentIds.push(result.adjustment.id);
   }
-  return { ok: true, totalPaise: total };
+  return { ok: true, totalPaise: total, adjustmentIds };
+}
+
+/**
+ * Tie counter waivers to the receipt they were given with, so voiding it
+ * takes the discount back too.
+ */
+export function linkAdjustmentsToVoucher(
+  adjustmentIds: string[],
+  voucherId: string,
+): void {
+  if (adjustmentIds.length === 0 || !voucherId) return;
+  const ids = new Set(adjustmentIds);
+  const rows = loadFeeAdjustments();
+  let changed = false;
+  const next = rows.map((r) => {
+    if (!ids.has(r.id) || r.sourceVoucherId === voucherId) return r;
+    changed = true;
+    return { ...r, sourceVoucherId: voucherId };
+  });
+  if (changed) saveFeeAdjustments(next);
+}
+
+/**
+ * Cancel the counter waivers a now-voided receipt carried. Cancelled, not
+ * deleted: the row stays visible in Adjustments with why it went.
+ */
+export function cancelAdjustmentsForVoucher(input: {
+  voucherId: string;
+  receiptNo: string;
+}): number {
+  const rows = loadFeeAdjustments();
+  let count = 0;
+  const stamp = new Date().toISOString();
+  const next = rows.map((r) => {
+    if (r.sourceVoucherId !== input.voucherId || r.status === "voided") {
+      return r;
+    }
+    count += 1;
+    return {
+      ...r,
+      status: "voided" as FeeAdjustmentStatus,
+      decidedAt: stamp,
+      decisionNote:
+        `Auto-voided — receipt ${input.receiptNo} voided ${stamp.slice(0, 10)}`,
+    };
+  });
+  if (count > 0) saveFeeAdjustments(next);
+  return count;
 }
 
 function applyChangeGroup(student: SisStudent, toFeeGroupId: string) {

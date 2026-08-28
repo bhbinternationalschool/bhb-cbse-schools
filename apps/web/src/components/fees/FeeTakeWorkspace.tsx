@@ -62,6 +62,7 @@ import { FeeAdjustmentsBadge } from "@/components/fees/FeeAdjustmentsPanel";
 import {
   buildPerLineDiscountSlices,
   FEE_ADJUST_AUTO_LIMIT_PAISE,
+  linkAdjustmentsToVoucher,
   postCounterDiscountWaivers,
   type CounterDiscountSlice,
 
@@ -1018,7 +1019,12 @@ export function FeeTakeWorkspace() {
       if (candidates.length > 0 && !futureConcessionPrompt) {
         setFutureConcessionPrompt({
           candidates,
-          selected: new Set(candidates.map((c) => c.key)),
+          // A head that already carries a Masters concession starts
+          // UNTICKED: stacking a second discount on it must be a deliberate
+          // tick after reading what it does, never the default.
+          selected: new Set(
+            candidates.filter((c) => c.existing.length === 0).map((c) => c.key),
+          ),
         });
         return;
       }
@@ -1032,6 +1038,7 @@ export function FeeTakeWorkspace() {
     setFutureConcessionPrompt(null);
 
     let futureConcessionMsg = "";
+    let waiverAdjustmentIds: string[] = [];
 
     if (counterDiscountPaise > 0) {
       const waiverResult = postCounterDiscountWaivers({
@@ -1044,6 +1051,7 @@ export function FeeTakeWorkspace() {
         flash(waiverResult.error);
         return;
       }
+      waiverAdjustmentIds = waiverResult.adjustmentIds;
 
       refresh();
     }
@@ -1171,6 +1179,9 @@ export function FeeTakeWorkspace() {
     // money with nothing to show for it. The call carries the receipt number,
     // and the store settles once per receipt, so a retry is safe.
     void settleStoreLines(result.voucher.receiptNo, lines);
+
+    // Bind this receipt's counter waivers to it, so voiding takes them back.
+    linkAdjustmentsToVoucher(waiverAdjustmentIds, result.voucher.id);
 
     applyFutureGrants({
       id: result.voucher.id,

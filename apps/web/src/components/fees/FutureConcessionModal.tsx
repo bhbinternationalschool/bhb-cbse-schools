@@ -43,9 +43,10 @@ export function FutureConcessionModal({
             Apply discount on future payments?
           </h2>
           <p className="mt-1 text-sm text-[var(--muted)]">
-            This fee head repeats across the session. You can add a standing
-            concession in Masters so future months get the same discount
-            automatically.
+            Only heads that repeat across the session are offered here — a
+            one-time charge is discounted on this receipt alone. Ticking a
+            head adds a standing concession in Masters so future months get
+            the discount automatically.
           </p>
         </div>
 
@@ -73,6 +74,73 @@ export function FutureConcessionModal({
                       Future concession from {c.futureEffectiveFrom} · listed
                       under Masters → Concessions
                     </div>
+
+                    {c.existing.length > 0 ? (
+                      <div className="mt-2 rounded-lg border border-[#f59e0b]/45 bg-[#fef3c7] px-3 py-2 text-[13px] text-[#92400e]">
+                        <div className="font-bold">
+                          This student already has a concession on{" "}
+                          {c.feeHeadName}
+                        </div>
+                        <ul className="mt-1 space-y-0.5">
+                          {c.existing.map((e) => (
+                            <li key={e.grantId}>
+                              • {e.ruleName} ({e.rateLabel}) — taking off{" "}
+                              {formatInr(e.currentAmountPaise)} this month
+                            </li>
+                          ))}
+                        </ul>
+                        <div className="mt-1.5 border-t border-[#f59e0b]/40 pt-1.5">
+                          {(() => {
+                            const existingTotal = c.existing.reduce(
+                              (s, e) => s + e.currentAmountPaise,
+                              0,
+                            );
+                            const after = existingTotal + c.discountPaise;
+                            return (
+                              <>
+                                <div>
+                                  <span className="font-bold">If you tick this:</span>{" "}
+                                  the two <em>stack</em> — from{" "}
+                                  {c.futureEffectiveFrom} this head is discounted{" "}
+                                  <span className="font-bold">
+                                    {formatInr(existingTotal)} +{" "}
+                                    {formatInr(c.discountPaise)} ={" "}
+                                    {formatInr(after)}
+                                  </span>{" "}
+                                  every month
+                                  {c.billedPaise > 0 ? (
+                                    <>
+                                      , so ₹
+                                      {Math.max(
+                                        0,
+                                        c.billedPaise - after,
+                                      ) / 100}{" "}
+                                      of {formatInr(c.billedPaise)} is billed
+                                    </>
+                                  ) : null}
+                                  .
+                                </div>
+                                <div className="mt-1">
+                                  <span className="font-bold">
+                                    If you leave it unticked:
+                                  </span>{" "}
+                                  today&apos;s{" "}
+                                  {formatInr(c.discountPaise)} applies to this
+                                  receipt only, and the existing{" "}
+                                  {formatInr(existingTotal)} continues
+                                  unchanged.
+                                </div>
+                                <div className="mt-1 opacity-90">
+                                  To change the amount instead of adding to it,
+                                  edit the existing rule in Masters →
+                                  Concessions.
+                                </div>
+                              </>
+                            );
+                          })()}
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 </label>
               </li>
