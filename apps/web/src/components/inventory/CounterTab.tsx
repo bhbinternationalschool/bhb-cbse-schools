@@ -42,7 +42,7 @@ import {
 } from "@/lib/inventory/client";
 import {
   printStoreReceipt,
-  StoreReceiptSheet,
+  StoreReceiptDual,
 } from "@/components/inventory/StoreReceiptSheet";
 import {
   formatPaise,
@@ -1568,7 +1568,7 @@ function SellSection({
       >
         <div id="counter-receipt-print" className="store-receipt-sheet space-y-3">
           {(receiptSales ?? []).map((x) => (
-            <StoreReceiptSheet
+            <StoreReceiptDual
               key={x.id}
               sale={x}
               classSection={classSectionOf(x.classId, x.sectionId)}
@@ -1927,7 +1927,7 @@ function SalesSection({
       >
         <div id="sales-receipt-print" className="store-receipt-sheet">
           {receiptOf ? (
-            <StoreReceiptSheet
+            <StoreReceiptDual
               sale={receiptOf}
               classSection={
                 receiptOf.buyerKind === "student"

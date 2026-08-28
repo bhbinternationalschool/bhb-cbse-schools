@@ -809,36 +809,43 @@ h3,
     overflow: visible !important;
   }
 
+  /* One copy per page.
+     Two copies used to be squeezed onto one A4 at half height with
+     overflow:hidden — any receipt with more than a handful of lines was
+     silently CUT OFF in print and PDF. A receipt that hides what was paid
+     for is worse than a second sheet of paper, so each copy now gets a full
+     page: page 1 Parent copy, page 2 Office copy. */
   body.printing-fee-receipt .fee-receipt-dual-a4,
   body:has(.fee-receipt-sheet.print-target) .fee-receipt-dual-a4 {
-    display: flex !important;
-    flex-direction: column !important;
-    height: 285mm !important;
-    max-height: 285mm !important;
+    display: block !important;
+    height: auto !important;
+    max-height: none !important;
     padding: 0 !important;
     gap: 0 !important;
-    page-break-inside: avoid !important;
   }
 
   body.printing-fee-receipt .fee-receipt-copy,
   body:has(.fee-receipt-sheet.print-target) .fee-receipt-copy {
-    flex: 1 1 0 !important;
-    min-height: 0 !important;
-    max-height: calc(50% - 4mm) !important;
-    overflow: hidden !important;
-    page-break-inside: avoid !important;
+    display: flex !important;
+    flex-direction: column !important;
+    height: auto !important;
+    min-height: 272mm !important;
+    max-height: none !important;
+    overflow: visible !important;
+    page-break-inside: auto !important;
+    break-inside: auto !important;
   }
 
+  body.printing-fee-receipt .fee-receipt-copy:not(:last-of-type),
+  body:has(.fee-receipt-sheet.print-target) .fee-receipt-copy:not(:last-of-type) {
+    page-break-after: always !important;
+    break-after: page !important;
+  }
+
+  /* The tear line belonged to the two-per-page layout. */
   body.printing-fee-receipt .fee-receipt-perforation,
   body:has(.fee-receipt-sheet.print-target) .fee-receipt-perforation {
-    flex: 0 0 4mm !important;
-    margin: 0 !important;
-    padding: 0.5mm 0 !important;
-    border-top: 2px dashed rgba(32, 48, 80, 0.55) !important;
-    border-bottom: 2px dashed rgba(32, 48, 80, 0.55) !important;
-    background: white !important;
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
+    display: none !important;
   }
 
   body.printing-fee-receipt .fee-receipt-sheet .print-hide,
@@ -1410,6 +1417,25 @@ h3,
   }
   body.printing-evt-poster .evt-poster-page {
     page-break-after: always;
+    border: none !important;
+    box-shadow: none !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
+
+/* Store slip — parent copy and office copy, one per page. */
+@media print {
+  body.printing-store-receipt .store-receipt-copy {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  body.printing-store-receipt .store-receipt-copy:not(:last-child) {
+    page-break-after: always;
+    break-after: page;
+  }
+  body.printing-store-receipt .store-receipt-page {
+    max-width: 100% !important;
     border: none !important;
     box-shadow: none !important;
     -webkit-print-color-adjust: exact;

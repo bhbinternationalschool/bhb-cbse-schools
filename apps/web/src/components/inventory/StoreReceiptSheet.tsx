@@ -82,10 +82,13 @@ function watermark(sale: InvSale): { text: string; color: string } | null {
 export function StoreReceiptSheet({
   sale,
   classSection,
+  copyLabel,
 }: {
   sale: InvSale;
   /** "5-B" — resolved by the caller, which holds the masters labels. */
   classSection?: string;
+  /** Set when this slip is one of the parent/office pair. */
+  copyLabel?: "Parent copy" | "Office copy";
 }) {
   const verdict = settlementLine(sale);
   const voided = sale.status === "void";
@@ -126,15 +129,54 @@ export function StoreReceiptSheet({
           </div>
         );
       })()}
-      {/* Header */}
-      <div className="border-b border-[rgba(32,48,80,0.3)] pb-1.5 text-center">
-        <p className="text-sm font-bold uppercase tracking-wide">
-          {TENANT.nameDisplay}
-        </p>
-        <p className="text-[9px] text-[#5a6a8a]">
-          {TENANT.city}, {TENANT.state} · School store
-        </p>
+      {copyLabel ? (
+        <div className="relative z-10 mb-1 flex items-center justify-between border-b border-[rgba(32,48,80,0.25)] pb-1">
+          <span className="rounded bg-[#203050] px-2 py-0.5 text-[8px] font-bold uppercase tracking-[0.14em] text-white">
+            {copyLabel}
+          </span>
+          <span className="font-mono text-[8px] font-bold uppercase tracking-[0.12em] text-[#5a6a8a]">
+            {sale.saleNo}
+          </span>
+        </div>
+      ) : null}
+
+      {/* Letterhead — the slip identifies the school on its own. */}
+      <div className="relative z-10 flex items-center gap-2 border-b-2 border-[#203050] pb-1.5">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={TENANT.logoUrl}
+          alt=""
+          width={40}
+          height={40}
+          className="h-10 w-10 shrink-0 object-contain"
+        />
+        <div className="min-w-0 flex-1 text-center">
+          <p className="text-[13px] font-bold uppercase leading-tight tracking-wide">
+            {TENANT.nameDisplay}
+          </p>
+          <p className="text-[7px] font-semibold uppercase tracking-[0.16em] text-[#c5a028]">
+            {TENANT.tagline}
+          </p>
+          <p className="mt-0.5 text-[7px] leading-snug text-[#5a6a8a]">
+            {TENANT.schoolAddress}
+          </p>
+          <p className="text-[7px] leading-snug text-[#5a6a8a]">
+            Affiliation {TENANT.affiliationNo} · School code {TENANT.schoolCode}{" "}
+            · {TENANT.domain}
+          </p>
+        </div>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={TENANT.logoCrestUrl}
+          alt=""
+          width={34}
+          height={34}
+          className="h-[34px] w-[34px] shrink-0 object-contain opacity-90"
+        />
       </div>
+      <p className="relative z-10 mt-0.5 text-center text-[8px] font-bold uppercase tracking-[0.18em] text-[#5a6a8a]">
+        School store — sale slip
+      </p>
 
       <div className="mt-1.5 flex justify-between text-[10px]">
         <div>
@@ -289,6 +331,38 @@ export function StoreReceiptSheet({
       <p className="print-hide mt-2 text-center text-[9px] text-[#5a6a8a]">
         {saleStatusLabel(sale.status)} · computer-generated receipt
       </p>
+    </div>
+  );
+}
+
+/**
+ * The pair the counter actually hands out: parent's slip and the office's
+ * file copy, identical but for the label — printed one per page so a long
+ * item list is never cut in half.
+ */
+export function StoreReceiptDual({
+  sale,
+  classSection,
+}: {
+  sale: InvSale;
+  classSection?: string;
+}) {
+  return (
+    <div className="store-receipt-dual space-y-4">
+      <div className="store-receipt-copy">
+        <StoreReceiptSheet
+          sale={sale}
+          classSection={classSection}
+          copyLabel="Parent copy"
+        />
+      </div>
+      <div className="store-receipt-copy">
+        <StoreReceiptSheet
+          sale={sale}
+          classSection={classSection}
+          copyLabel="Office copy"
+        />
+      </div>
     </div>
   );
 }

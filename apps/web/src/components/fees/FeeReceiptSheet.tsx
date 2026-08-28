@@ -324,22 +324,40 @@ function FeeReceiptCopy({
             </span>
           </div>
 
-          <header className="flex items-start gap-2 border-b border-[rgba(32,48,80,0.15)] pb-1.5">
+          {/* Letterhead — the sheet must identify the school on its own, in
+              a parent's file or an auditor's folder, without the app. */}
+          <header className="flex items-center gap-2.5 border-b-2 border-[var(--brand-deep)] pb-1.5">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={TENANT.logoUrl}
               alt=""
-              width={40}
-              height={40}
-              className="h-10 w-10 shrink-0 object-contain"
+              width={52}
+              height={52}
+              className="h-[52px] w-[52px] shrink-0 object-contain"
             />
             <div className="min-w-0 flex-1 text-center">
-              <p className="font-brand-name text-[11px] leading-tight text-[var(--brand-deep)]">
+              <p className="font-brand-name text-[15px] font-bold leading-tight text-[var(--brand-deep)]">
                 {TENANT.nameDisplay}
               </p>
-              <p className="text-[8px] text-[var(--brand-gold)]">{TENANT.tagline}</p>
+              <p className="text-[8px] font-semibold uppercase tracking-[0.16em] text-[var(--brand-gold)]">
+                {TENANT.tagline}
+              </p>
+              <p className="mt-0.5 text-[7.5px] leading-snug text-[var(--muted)]">
+                {TENANT.schoolAddress}
+              </p>
+              <p className="text-[7.5px] leading-snug text-[var(--muted)]">
+                {TENANT.schoolStatus} · Affiliation {TENANT.affiliationNo} ·
+                School code {TENANT.schoolCode} · {TENANT.domain}
+              </p>
             </div>
-            <div className="w-10 shrink-0" aria-hidden />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={TENANT.logoCrestUrl}
+              alt=""
+              width={44}
+              height={44}
+              className="h-11 w-11 shrink-0 object-contain opacity-90"
+            />
           </header>
 
           <div className="mt-1 flex flex-wrap items-center justify-between gap-1 text-[8px]">
@@ -649,7 +667,7 @@ export function FeeReceiptSheet({
       </div>
 
       <p className="print-hide px-3 pb-3 text-center text-[9px] text-[var(--muted)]">
-        Dual copy · Parent (top) + Office (bottom) · fits one A4 when printed
+        Prints two pages — page 1 Parent copy, page 2 Office copy
         {multiSibling
           ? ` · ${studentGroups.length} students on this receipt`
           : ""}

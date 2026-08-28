@@ -15,7 +15,7 @@ import { useEffect, useState } from "react";
 import { invApi } from "@/lib/inventory/client";
 import type { InvSale } from "@/lib/inventory/types";
 import { formatInr } from "@/lib/masters";
-import { StoreReceiptSheet, printStoreReceipt } from "@/components/inventory/StoreReceiptSheet";
+import { StoreReceiptDual, printStoreReceipt } from "@/components/inventory/StoreReceiptSheet";
 
 function statusChip(sale: InvSale): { label: string; cls: string } {
   if (sale.status === "void") {
@@ -170,7 +170,7 @@ export function StorePurchasesPanel({
             </button>
           </div>
           <div id="fee-store-slip-print" className="store-receipt-sheet">
-            <StoreReceiptSheet sale={open} />
+            <StoreReceiptDual sale={open} />
           </div>
         </div>
       ) : null}
