@@ -65,6 +65,20 @@ function settlementLine(sale: InvSale): { label: string; tone: string } {
   };
 }
 
+/**
+ * The stamp across the slip. It is computed from the sale's live state, not
+ * stored on the paper: a slip issued on account reads ISSUED, and the moment
+ * the fee counter takes the money the same slip reads PAID — and back to
+ * ISSUED if that receipt is later voided. Whatever the school reprints is
+ * the truth as of now.
+ */
+function watermark(sale: InvSale): { text: string; color: string } | null {
+  if (sale.status === "void") return { text: "CANCELLED", color: "#b43c3c" };
+  if (sale.balancePaise <= 0) return { text: "PAID", color: "#0f766e" };
+  if (sale.paidPaise > 0) return { text: "PART PAID", color: "#b45309" };
+  return { text: "ISSUED", color: "#b45309" };
+}
+
 export function StoreReceiptSheet({
   sale,
   classSection,
@@ -80,7 +94,38 @@ export function StoreReceiptSheet({
     <div
       className="store-receipt-page mx-auto w-full max-w-[420px] rounded-lg border border-[rgba(32,48,80,0.2)] bg-white p-3 text-[#203050]"
       data-voided={voided ? "true" : "false"}
+      style={{ position: "relative" }}
     >
+      {(() => {
+        const wm = watermark(sale);
+        if (!wm) return null;
+        return (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden"
+            style={{ zIndex: 0 }}
+          >
+            <span
+              style={{
+                transform: "rotate(-24deg)",
+                color: wm.color,
+                opacity: 0.13,
+                fontSize: "clamp(38px, 17vw, 84px)",
+                fontWeight: 800,
+                letterSpacing: "0.08em",
+                whiteSpace: "nowrap",
+                border: `4px solid ${wm.color}`,
+                borderRadius: 12,
+                padding: "4px 20px",
+                WebkitPrintColorAdjust: "exact",
+                printColorAdjust: "exact",
+              }}
+            >
+              {wm.text}
+            </span>
+          </div>
+        );
+      })()}
       {/* Header */}
       <div className="border-b border-[rgba(32,48,80,0.3)] pb-1.5 text-center">
         <p className="text-sm font-bold uppercase tracking-wide">

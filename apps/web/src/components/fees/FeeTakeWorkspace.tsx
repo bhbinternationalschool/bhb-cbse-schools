@@ -86,6 +86,7 @@ import {
 } from "@/lib/payments";
 import { attachGatewayCheckout } from "@/lib/paymentGatewayClient";
 import { StoreSellInline } from "@/components/fees/StoreSellInline";
+import { StorePurchasesPanel } from "@/components/fees/StorePurchasesPanel";
 import {
   scheduleClientSchoolMirrorSync,
 } from "@/lib/schoolDataMirror";
@@ -530,6 +531,45 @@ export function FeeTakeWorkspace() {
    * logged and forgotten — an unsettled store line means the family is still
    * shown as owing money they have already paid.
    */
+  /**
+   * A voided fee receipt gives the store its due back: the collections it
+   * made are reversed, the slip stops saying PAID, and the family sees the
+   * store line owing again. Without this the store kept the money on paper
+   * while the parent had it in hand.
+   */
+  async function reverseStoreLinesForReceipt(receiptNo: string) {
+    try {
+      const res = await fetch("/api/inventory/sales", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "reverse-collect",
+          receiptNo,
+          reason: `Fee receipt ${receiptNo} voided`,
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        reversal?: { reversed: number; amountPaise: number };
+        error?: string;
+      };
+      if (!res.ok || body.ok === false) {
+        throw new Error(body.error || "Store refused the reversal");
+      }
+      const n = body.reversal?.reversed ?? 0;
+      if (n > 0) {
+        flash(
+          `Store collection returned — ${n} sale${n === 1 ? "" : "s"} back to unpaid`,
+        );
+      }
+    } catch (e) {
+      flash(
+        `Receipt voided, but the store collection could not be returned (${e instanceof Error ? e.message : "error"}) — fix it on the Store counter`,
+      );
+    }
+    setTick((t) => t + 1);
+  }
+
   async function settleStoreLines(receiptNo: string, lines: VoucherLine[]) {
     const storeLines = lines.filter((l) => l.kind === "store" && l.amountPaise > 0);
     if (storeLines.length === 0) return;
@@ -1282,9 +1322,24 @@ export function FeeTakeWorkspace() {
   }
 
   function onVoid(id: string) {
-    if (!window.confirm("Void this receipt? Dues will reopen.")) return;
+    const voucher = receipts.find((v) => v.id === id);
+    const hadStore = !!voucher?.lines.some((l) => l.kind === "store");
+    if (
+      !window.confirm(
+        hadStore
+          ? "Void this receipt? Dues will reopen and the store items on it go back to ISSUED (unpaid)."
+          : "Void this receipt? Dues will reopen.",
+      )
+    ) {
+      return;
+    }
     voidVoucher(id);
     if (previewReceiptId === id) setPreviewReceiptId(null);
+    // The store took this money on the strength of the receipt; the receipt
+    // is gone, so the money goes back and the slip returns to ISSUED.
+    if (hadStore && voucher) {
+      void reverseStoreLinesForReceipt(voucher.receiptNo);
+    }
     refresh();
     flash("Receipt voided");
   }
@@ -1773,6 +1828,7 @@ export function FeeTakeWorkspace() {
               masters={masters}
               cashierName={session.fullName}
               priorReceipts={householdReceipts}
+              storeTick={tick}
               readOnly={readOnly}
               onOpenReceipt={setPreviewReceiptId}
               transferPreviews={lastSessionPreviews}
@@ -2019,6 +2075,7 @@ function CollectPanel({
   masters,
   cashierName,
   priorReceipts,
+  storeTick,
   onOpenReceipt,
   transferPreviews,
   onTransferLastSession,
@@ -2081,6 +2138,7 @@ function CollectPanel({
   masters: MastersState | null;
   cashierName: string;
   priorReceipts: CollectionVoucher[];
+  storeTick: number;
   onOpenReceipt: (id: string) => void;
   transferPreviews: LastSessionTransferPreview[];
   onTransferLastSession: () => void;
@@ -2958,6 +3016,19 @@ function CollectPanel({
               </p>
             </div>
           </div>
+
+          {/* Store purchases — issued vs paid, in the fee record */}
+          <StorePurchasesPanel
+            studentIds={householdBundle.map((r) => r.student.id)}
+            nameById={
+              new Map(
+                householdBundle.map(
+                  (r) => [r.student.id, r.student.fullName] as const,
+                ),
+              )
+            }
+            tick={storeTick}
+          />
 
           {/* Earlier receipts */}
           <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)]">

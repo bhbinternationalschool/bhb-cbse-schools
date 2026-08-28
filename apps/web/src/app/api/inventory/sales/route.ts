@@ -8,6 +8,7 @@ import {
   listSales,
   postSale,
   postSaleReturn,
+  reverseCollectionByReceipt,
   storeDuesForStudents,
   voidSale,
   studentPurchases,
@@ -82,6 +83,7 @@ type Body =
   | ({ action: "collect" } & Parameters<typeof collectOnSale>[0])
   | ({ action: "return" } & Parameters<typeof postSaleReturn>[0])
   | { action: "void"; saleId: string; reason: string }
+  | { action: "reverse-collect"; receiptNo: string; reason?: string }
   | ({ action: "household" } & Parameters<typeof postHouseholdSale>[0]);
 
 export async function POST(req: Request) {
@@ -117,6 +119,16 @@ export async function POST(req: Request) {
     if (action === "void") {
       const v = body as { saleId: string; reason: string };
       return voidSale(v.saleId, v.reason, actor);
+    }
+    if (action === "reverse-collect") {
+      const r = body as { receiptNo: string; reason?: string };
+      return {
+        reversal: await reverseCollectionByReceipt({
+          receiptNo: r.receiptNo,
+          actor,
+          reason: r.reason,
+        }),
+      };
     }
     return {
       sale: await postSale(

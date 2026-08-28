@@ -662,6 +662,42 @@ export async function listSaleReturns(opts: {
   });
 }
 
+/**
+ * Give a store collection back when the fee receipt that paid it is voided.
+ *
+ * Keyed on the fee receipt number the collection was stamped with, so one
+ * call undoes every store line that receipt settled. Idempotent: a payment
+ * already reversed is skipped, so a retry cannot double-credit.
+ */
+export async function reverseCollectionByReceipt(input: {
+  receiptNo: string;
+  actor: string;
+  reason?: string;
+}): Promise<{
+  reversed: number;
+  amountPaise: number;
+  sales: { saleNo: string; status: string; amountPaise: number }[];
+}> {
+  const { sb, tenantId } = await invCtx();
+  const { data, error } = await sb.rpc("inv_reverse_collection", {
+    p_tenant_id: tenantId,
+    p_actor: input.actor,
+    p_external_ref: input.receiptNo,
+    p_reason: input.reason ?? "Fee receipt voided",
+  });
+  if (error) throw new InvError(cleanDbMessage(error.message), 422);
+  const out = (data ?? {}) as Row;
+  return {
+    reversed: int(out.reversed),
+    amountPaise: int(out.amount_paise),
+    sales: ((out.sales ?? []) as Row[]).map((r) => ({
+      saleNo: str(r.sale_no),
+      status: str(r.status),
+      amountPaise: int(r.amount_paise),
+    })),
+  };
+}
+
 /* ─── Counter summary ──────────────────────────────────────── */
 
 export async function counterSummary(): Promise<InvCounterSummary> {
