@@ -239,10 +239,12 @@ export function FeeTakeWorkspace() {
   const [hits, setHits] = useState<StudentSearchHit[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   /**
-   * Which children of the household are open on the counter. Picking a
-   * student seeds this with just that child; tapping a sibling card adds
-   * them. Only these children's fees are shown and collectable — a child
-   * who is not on the counter can never contribute a rupee to the receipt.
+   * Which children's fee DETAILS are on screen — one at a time by default:
+   * tapping a sibling card switches the visible list to that child. Ticks
+   * are family-wide and SURVIVE the switch: every child's card shows their
+   * ticked total, the collect summary counts them all, and the receipt
+   * lists every line — nothing ticked is ever invisible, just collapsed.
+   * "Open all" widens the view to every child when the office wants it.
    */
   const [activeStudentIds, setActiveStudentIds] = useState<Set<string>>(
     new Set(),
@@ -611,10 +613,14 @@ export function FeeTakeWorkspace() {
     return householdBundle.filter((row) => row.student.id === selectedId);
   }, [householdBundle, activeStudentIds, selectedId]);
 
-  /** Dues that can be ticked — only from children open on the counter. */
+  /**
+   * The SELECTION domain — every child of the family. A tick keeps counting
+   * whichever child's list happens to be open on screen; the visible list
+   * (activeBundle) only decides what is displayed, never what is collected.
+   */
   const allDues = useMemo(
-    () => activeBundle.flatMap((row) => row.dues),
-    [activeBundle],
+    () => householdBundle.flatMap((row) => row.dues),
+    [householdBundle],
   );
 
   const selectedDues = useMemo(
@@ -641,18 +647,9 @@ export function FeeTakeWorkspace() {
 
   const netAfterDiscount = Math.max(0, collectTotal - counterDiscountPaise);
 
-  const lineDiscountsKey = useMemo(
-    () =>
-      Object.entries(lineDiscountRupees)
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([k, v]) => `${k}:${v}`)
-        .join("|"),
-    [lineDiscountRupees],
-  );
-
   useEffect(() => {
-    setTenderLines([]);
-    setComposer(emptyComposer());
+    // Selection changed: prune discounts down to what is still ticked, and a
+    // fresh selection restarts the discount reason.
     setLineDiscountRupees((prev) => {
       const next: Record<string, string> = {};
       for (const key of selectedKeys) {
@@ -662,19 +659,22 @@ export function FeeTakeWorkspace() {
     });
     setCounterDiscountReason("");
     setFutureConcessionPrompt(null);
-    if (collectTotal > 0) {
-      setCollectAmountRupees(String(collectTotal / 100));
-    } else {
-      setCollectAmountRupees("");
-    }
-  }, [selectionKey, collectTotal]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectionKey]);
 
   useEffect(() => {
-    if (collectTotal <= 0) return;
-    setCollectAmountRupees(String(netAfterDiscount / 100));
+    // ONE rule for the amount box: it always restates the NET of what is
+    // ticked. It used to be two effects — gross on selection change, net on
+    // discount change — so reselecting heads while discounts stood left the
+    // box on the gross figure while the banner showed net. Banner right,
+    // box wrong: the exact bug the counter kept hitting.
     setTenderLines([]);
     setComposer(emptyComposer());
-  }, [lineDiscountsKey]);
+    setCollectAmountRupees(
+      netAfterDiscount > 0 ? String(netAfterDiscount / 100) : "",
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectionKey, netAfterDiscount]);
 
   const collectTarget = useMemo(() => {
     if (netAfterDiscount <= 0) return 0;
@@ -775,17 +775,10 @@ export function FeeTakeWorkspace() {
    * a student whose fees are no longer on screen.
    */
   function toggleActiveStudent(studentId: string) {
-    setActiveStudentIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(studentId)) {
-        if (next.size === 1) return prev; // never leave the counter empty
-        next.delete(studentId);
-        clearStudentDues(studentId);
-      } else {
-        next.add(studentId);
-      }
-      return next;
-    });
+    // Switch, don't accumulate: one child's details at a time. The previous
+    // child's ticks stay selected — their card badge and the collect summary
+    // keep showing them ("Open all" restores the everyone-at-once view).
+    setActiveStudentIds(new Set([studentId]));
   }
 
   function toggleDue(due: FeeDueLine) {
@@ -2396,8 +2389,9 @@ function CollectPanel({
 
             {siblingCount > 1 ? (
               <p className="mt-2.5 border-t border-dashed border-[var(--border)] pt-2 text-[11px] leading-snug text-[var(--muted)]">
-                Tap a child to put their fees on the counter. Closing a child
-                also un-ticks their fees, so nothing hidden is ever collected.
+                Tap a child to see their fees — one at a time. Ticks are
+                remembered when you switch: each card&apos;s green badge shows
+                what stays selected, and the total collects them all.
               </p>
             ) : null}
           </div>
