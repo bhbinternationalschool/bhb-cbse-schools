@@ -276,6 +276,12 @@ function SellSection({
   const [alreadyBought, setAlreadyBought] = useState<
     { itemId: string; itemName: string; totalQty: number; lastSaleDate: string; lastSaleNo: string }[]
   >([]);
+  /**
+   * This student's sales THIS session, shown under the buyer the moment they
+   * are picked — the clerk sees what the child already took (and can open the
+   * receipt) before ringing anything up, instead of finding out afterwards.
+   */
+  const [priorSales, setPriorSales] = useState<InvSale[]>([]);
 
   // Who else is in this family. Fetched alongside the purchase history so the
   // clerk can serve all of them without searching for each child by name.
@@ -299,6 +305,26 @@ function SellSection({
       live = false;
     };
   }, [buyerKind, student?.id, student?.householdId]);
+
+  useEffect(() => {
+    const id = buyerKind === "student" ? student?.id : "";
+    if (!id) {
+      setPriorSales([]);
+      return;
+    }
+    let live = true;
+    void invApi
+      .listSales({ studentId: id, status: "all", pageSize: 50 })
+      .then((page) => {
+        if (live) setPriorSales(page.rows.filter((s) => s.status !== "void"));
+      })
+      .catch(() => {
+        if (live) setPriorSales([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, [buyerKind, student?.id]);
 
   useEffect(() => {
     const id = buyerKind === "student" ? student?.id : "";
@@ -408,6 +434,22 @@ function SellSection({
   function addItem(itemId: string) {
     const item = itemsById.get(itemId);
     if (!item) return;
+    // Already taken this session? Ask before it goes in the cart — the clerk
+    // decides with the earlier receipt in front of them, rather than
+    // discovering the repeat after the money is taken.
+    const prior = alreadyBought.find((p) => p.itemId === itemId);
+    const inCart = cart.some((l) => l.itemId === itemId);
+    if (prior && !inCart) {
+      const ok = window.confirm(
+        `${student?.fullName ?? "This student"} already took ${prior.itemName}` +
+          ` × ${prior.totalQty} this session` +
+          (prior.lastSaleNo
+            ? ` (last on ${prior.lastSaleDate}, receipt ${prior.lastSaleNo})`
+            : "") +
+          `.\n\nSell it again — a replacement or an extra copy?`,
+      );
+      if (!ok) return;
+    }
     setCart((c) =>
       c.some((l) => l.itemId === itemId)
         ? c.map((l) => (l.itemId === itemId ? { ...l, qty: l.qty + 1 } : l))
@@ -791,11 +833,20 @@ function SellSection({
             student ? (
               <div className="flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2">
                 <div>
-                  <div className="font-medium">{student.fullName}</div>
+                  <div className="font-medium">
+                    {student.fullName}
+                    {student.fatherName ? (
+                      <span className="font-normal text-muted-foreground">
+                        {" "}
+                        · {student.fatherName}
+                      </span>
+                    ) : null}
+                  </div>
                   <div className="text-xs text-muted-foreground">
                     {classSectionOf(student.classId, student.sectionId)}
                     {student.rollNo ? ` · Roll ${student.rollNo}` : ""}
                     {student.admissionNo ? ` · Adm ${student.admissionNo}` : ""}
+                    {student.phone ? ` · ${student.phone}` : ""}
                   </div>
                 </div>
                 <Button variant="ghost" size="xs" onClick={() => setStudent(null)}>
@@ -891,6 +942,53 @@ function SellSection({
               onChange={setStaffName}
             />
           )}
+
+          {/* What this child already took this session — with their receipts */}
+          {buyerKind === "student" && student && priorSales.length > 0 ? (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-2.5">
+              <p className="text-xs font-semibold">
+                {student.fullName.split(" ")[0]} already bought{" "}
+                {priorSales.length} time{priorSales.length === 1 ? "" : "s"} this
+                session
+              </p>
+              <ul className="mt-1.5 space-y-1">
+                {priorSales.slice(0, 6).map((s) => (
+                  <li
+                    key={s.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-background/70 px-2 py-1.5 text-xs"
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="font-semibold">{s.saleNo}</span>
+                      <span className="text-muted-foreground">
+                        {" "}
+                        · {s.saleDate} ·{" "}
+                        {s.lines
+                          .map((l) => `${l.itemName}${l.qty > 1 ? ` ×${l.qty}` : ""}`)
+                          .join(", ")}
+                      </span>
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <span className="font-semibold tabular-nums">
+                        {formatPaise(s.totalPaise)}
+                      </span>
+                      {s.balancePaise > 0 ? (
+                        <span className="rounded bg-amber-500/20 px-1.5 py-0.5 font-semibold text-amber-700 dark:text-amber-400">
+                          {formatPaise(s.balancePaise)} due
+                        </span>
+                      ) : null}
+                      <Button
+                        variant="outline"
+                        size="xs"
+                        onClick={() => setReceiptSales([s])}
+                      >
+                        Receipt
+                      </Button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </section>
 
         {/* Kit suggestion */}

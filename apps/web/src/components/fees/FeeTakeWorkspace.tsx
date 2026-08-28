@@ -85,6 +85,7 @@ import {
   whatsAppPaymentLinkUrl,
 } from "@/lib/payments";
 import { attachGatewayCheckout } from "@/lib/paymentGatewayClient";
+import { StoreSellInline } from "@/components/fees/StoreSellInline";
 import {
   scheduleClientSchoolMirrorSync,
 } from "@/lib/schoolDataMirror";
@@ -1784,6 +1785,14 @@ export function FeeTakeWorkspace() {
                   new Set(householdBundle.map((r) => r.student.id)),
                 )
               }
+              onStoreSold={(saleNo, totalPaise) => {
+                // refresh() re-reads store dues (the loader keys on tick), so
+                // the new due appears in the fee lines ready to be ticked.
+                refresh();
+                flash(
+                  `Store sale ${saleNo} · ${formatInr(totalPaise)} added — tick it below to collect with the fees`,
+                );
+              }}
             />
           )}
         </div>
@@ -2018,6 +2027,7 @@ function CollectPanel({
   activeStudentIds,
   onToggleActiveStudent,
   onOpenAllSiblings,
+  onStoreSold,
 }: {
   student: SisStudent;
   householdBundle: { student: SisStudent; dues: FeeDueLine[] }[];
@@ -2026,6 +2036,7 @@ function CollectPanel({
   activeStudentIds: Set<string>;
   onToggleActiveStudent: (studentId: string) => void;
   onOpenAllSiblings: () => void;
+  onStoreSold: (saleNo: string, totalPaise: number) => void;
   selectedKeys: Set<string>;
   includeFuture: boolean;
   onIncludeFuture: (v: boolean) => void;
@@ -2430,6 +2441,21 @@ function CollectPanel({
             <MiniBtn onClick={onSelectOverdue}>Tick overdue</MiniBtn>
             <MiniBtn onClick={onClear}>Clear all</MiniBtn>
           </div>
+
+          {/* Sell store items to the child on the counter — the due joins
+              these fee lines and is paid on the same receipt. */}
+          <StoreSellInline
+            studentId={
+              activeBundle[0]?.student.id ?? student.id
+            }
+            studentName={
+              activeBundle[0]?.student.fullName ?? student.fullName
+            }
+            classId={activeBundle[0]?.student.classId ?? student.classId}
+            sectionId={activeBundle[0]?.student.sectionId ?? student.sectionId}
+            readOnly={readOnly}
+            onSold={onStoreSold}
+          />
         </div>
 
         {/* ── RIGHT COLUMN: fees of the children on the counter ── */}
