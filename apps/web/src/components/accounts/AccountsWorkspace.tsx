@@ -13,6 +13,7 @@ import { UnpostedEntriesBanner } from "@/components/accounts/UnpostedEntriesBann
 import { DeskSyncBanner } from "@/components/accounts/DeskSyncBanner";
 import {
   BankReconPanel,
+  GatewaySettlementPanel,
   LedgerBookPanel,
   LedgerReportsPanel,
 } from "@/components/accounts/LedgerPanels";
@@ -242,11 +243,17 @@ export function AccountsWorkspace() {
       ) : tab === "bookreports" ? (
         <LedgerReportsPanel />
       ) : tab === "recon" ? (
-        <BankReconPanel
-          banks={(state.bankAccounts ?? [])
-            .filter((b) => b.isActive !== false)
-            .map((b) => ({ id: b.id, name: b.name }))}
-        />
+        <>
+          <BankReconPanel
+            banks={(state.bankAccounts ?? [])
+              .filter((b) => b.isActive !== false)
+              .map((b) => ({ id: b.id, name: b.name }))}
+          />
+          {/* Same job, one step earlier: the gateway's settlements are what
+              the bank credits will turn out to be, so they belong beside the
+              statement rather than in a tab of their own. */}
+          <GatewaySettlementPanel />
+        </>
       ) : tab === "masters" ? (
         <div className="space-y-4">
           <BanksPanel {...panelProps} />

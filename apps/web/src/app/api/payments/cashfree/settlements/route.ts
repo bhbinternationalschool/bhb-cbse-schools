@@ -12,17 +12,24 @@
  * pull can tell the difference, which is why this is the authority and the
  * webhook is only the fast path.
  *
- * Guard: CRON_SECRET. Default window is the last 7 days, which covers a T+2
- * cycle plus a long weekend of bank holidays.
+ * Guard: the scheduler presents CRON_SECRET; a person on the accounts desk
+ * presents their session and `accounts:edit`. Both reach the same idempotent
+ * sweep, so a clerk pressing "Pull now" cannot do anything the nightly run
+ * would not have done anyway. Default window is the last 7 days, which covers
+ * a T+2 cycle plus a long weekend of bank holidays.
  *
  * GET returns the recon board for the window — every settlement and whether
- * it is explained — and is the read the accounts desk uses.
+ * it is explained — and needs `accounts:view`.
  */
 
 import { NextResponse } from "next/server";
-import { requireJobSecret } from "@/lib/apiRouteAuth.server";
+import {
+  requireJobSecret,
+  requireStaffPermission,
+} from "@/lib/apiRouteAuth.server";
 import {
   listSettlementRecon,
+  pgClearingBalancePaise,
   syncCashfreeSettlements,
 } from "@/lib/ledger/pgSettlement.server";
 import { cashfreeKeysPresent } from "@/lib/cashfree.server";
@@ -44,6 +51,9 @@ function window(req: Request): { from: string; to: string } {
 }
 
 export async function GET(req: Request) {
+  const auth = await requireStaffPermission(req, "accounts", "view");
+  if (!auth.ok) return auth.response;
+
   if (!cashfreeKeysPresent()) {
     return NextResponse.json(
       { service: "cashfree-settlements", configured: false },
@@ -63,13 +73,20 @@ export async function GET(req: Request) {
     ...range,
     count: res.rows.length,
     breakCount: breaks.length,
+    clearingPaise: await pgClearingBalancePaise(),
     rows: res.rows,
   });
 }
 
 export async function POST(req: Request) {
+  let actor = "settlement sweep";
   if (!requireJobSecret(req, ["CRON_SECRET"], ["x-cron-secret"])) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const auth = await requireStaffPermission(req, "accounts", "edit");
+    if (!auth.ok) return auth.response;
+    actor =
+      auth.ctx.session.fullName ||
+      auth.ctx.session.email ||
+      "accounts desk";
   }
   if (!cashfreeKeysPresent()) {
     return NextResponse.json(
@@ -79,7 +96,7 @@ export async function POST(req: Request) {
   }
 
   const range = window(req);
-  const outcome = await syncCashfreeSettlements({ ...range, actor: "settlement sweep" });
+  const outcome = await syncCashfreeSettlements({ ...range, actor });
   // Errors are reported, not thrown: a partial sweep that stored eight of ten
   // settlements has done real work, and the next run retries the rest.
   return NextResponse.json({ ok: outcome.errors.length === 0, ...range, ...outcome });

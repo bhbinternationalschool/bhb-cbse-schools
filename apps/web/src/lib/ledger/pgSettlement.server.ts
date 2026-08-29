@@ -23,7 +23,7 @@ import {
   settlementFromWebhook,
   type PgSettlement,
 } from "@/lib/cashfreeSettlements.server";
-import { L_BANK } from "@/lib/ledger/coa";
+import { L_BANK, L_PG_CLEARING } from "@/lib/ledger/coa";
 import { ledgerPost, ledgerReverse } from "@/lib/ledger/ledger.server";
 import { buildPgSettlementVoucher } from "@/lib/ledger/projectionMap";
 import { getServerTenantContext } from "@/lib/serverTenant";
@@ -431,6 +431,31 @@ export type SettlementReconRow = {
   reconState: string;
   postError: string;
 };
+
+/**
+ * What is sitting in clearing right now — captured from parents, not yet paid
+ * out by the gateway.
+ *
+ * This is the number that says whether the pipeline is healthy without reading
+ * a single row. It should be about one settlement cycle of online collections.
+ * Persistently large means settlements are not being ingested; negative means
+ * settlements are being posted for captures that never went through clearing,
+ * which is the one failure that quietly overstates the bank.
+ */
+export async function pgClearingBalancePaise(): Promise<number | null> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return null;
+  const { data, error } = await ctx.sb
+    .from("ledger_v_account_balance")
+    .select("balance_paise")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("code", L_PG_CLEARING)
+    .maybeSingle();
+  // Null, not zero: an account with no postings and an account we could not
+  // read are different facts, and only one of them means "nothing in transit".
+  if (error || !data) return null;
+  return Number(data.balance_paise ?? 0);
+}
 
 /** The recon board: every settlement in a window and whether it is explained. */
 export async function listSettlementRecon(range: {

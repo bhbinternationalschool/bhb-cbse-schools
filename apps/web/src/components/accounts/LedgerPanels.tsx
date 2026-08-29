@@ -1322,3 +1322,369 @@ export function BankReconPanel({
     </div>
   );
 }
+
+/* ═══ 4. Gateway settlements — what Cashfree actually paid ══ */
+
+type SettlementRow = {
+  cfSettlementId: string;
+  utr: string;
+  status: string;
+  settledOn: string;
+  amountSettledPaise: number;
+  paymentAmountPaise: number;
+  feePaise: number;
+  adjustmentPaise: number;
+  eventCount: number;
+  eventsTotalPaise: number;
+  derivedNetPaise: number;
+  voucherNo: string;
+  reconState: string;
+  postError: string;
+};
+
+type SettlementBoard = {
+  ok?: boolean;
+  configured?: boolean;
+  error?: string;
+  from?: string;
+  to?: string;
+  count?: number;
+  breakCount?: number;
+  clearingPaise?: number | null;
+  rows?: SettlementRow[];
+};
+
+/**
+ * How each recon state reads to a person, and whether it needs anybody.
+ *
+ * `pending` is not a problem — the gateway has told us about a transfer it has
+ * not completed. Everything between that and `explained` is a break, and the
+ * label says what to do rather than what is wrong, because "events_disagree"
+ * tells a clerk nothing they can act on.
+ */
+const SETTLEMENT_STATES: Record<
+  string,
+  { label: string; hint: string; tone: "ok" | "wait" | "bad" }
+> = {
+  explained: {
+    label: "Explained",
+    hint: "Gateway, its own breakdown and the book all agree",
+    tone: "ok",
+  },
+  pending: {
+    label: "In flight",
+    hint: "The gateway has started the transfer but not completed it",
+    tone: "wait",
+  },
+  events_not_pulled: {
+    label: "Breakdown missing",
+    hint: "The next sweep will fetch it",
+    tone: "wait",
+  },
+  not_posted: {
+    label: "Not in the book",
+    hint: "Settled but no voucher — press Pull now, then check the reason",
+    tone: "bad",
+  },
+  amounts_disagree: {
+    label: "Gateway numbers do not add up",
+    hint: "Gross less fees does not equal the net it says it paid — raise it with Cashfree",
+    tone: "bad",
+  },
+  events_disagree: {
+    label: "Breakdown does not add up",
+    hint: "The events do not sum to the net settled — a page of them is missing",
+    tone: "bad",
+  },
+};
+
+export function GatewaySettlementPanel() {
+  const [from, setFrom] = useState(() => {
+    const d = new Date(Date.now() - 30 * 86400 * 1000);
+    return d.toISOString().slice(0, 10);
+  });
+  const [to, setTo] = useState(todayIso());
+  const [board, setBoard] = useState<SettlementBoard | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+
+  /**
+   * `keepNotice` matters: Pull now reports what the sweep did and then reloads
+   * the board, and a reload that cleared the notice would throw that report
+   * away in the same tick it was written — the clerk presses the button and
+   * sees nothing happen.
+   */
+  const load = useCallback(async (keepNotice = false) => {
+    setBusy(true);
+    if (!keepNotice) setNotice("");
+    try {
+      const res = await fetch(
+        `/api/payments/cashfree/settlements?from=${from}&to=${to}`,
+      );
+      setBoard((await res.json()) as SettlementBoard);
+    } catch {
+      setBoard({ error: "Could not reach the settlement board" });
+    } finally {
+      setBusy(false);
+    }
+  }, [from, to]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  /**
+   * Pull now runs the same sweep the scheduler runs nightly. It is idempotent,
+   * so this cannot post anything twice — it only closes the gap between the
+   * last nightly run and now.
+   */
+  const pull = async () => {
+    setBusy(true);
+    setNotice("");
+    try {
+      const res = await fetch(
+        `/api/payments/cashfree/settlements?from=${from}&to=${to}`,
+        { method: "POST" },
+      );
+      const out = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        seen?: number;
+        posted?: number;
+        eventsStored?: number;
+        errors?: string[];
+      };
+      if (!res.ok) {
+        setNotice(out.error || "The sweep was refused");
+      } else {
+        setNotice(
+          `${out.seen ?? 0} settlement(s) seen · ${out.posted ?? 0} newly posted · ${out.eventsStored ?? 0} event rows` +
+            (out.errors?.length ? ` · ${out.errors.length} error(s)` : ""),
+        );
+      }
+      await load(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const rows = board?.rows ?? [];
+  const totals = rows.reduce(
+    (acc, r) => ({
+      gross: acc.gross + r.paymentAmountPaise,
+      fee: acc.fee + r.feePaise,
+      net: acc.net + r.amountSettledPaise,
+    }),
+    { gross: 0, fee: 0, net: 0 },
+  );
+
+  return (
+    <section className={`${CARD} mt-4`}>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h4 className="text-sm font-bold text-[var(--brand-deep)]">
+            Gateway settlements
+          </h4>
+          <p className="text-[11px] text-[var(--muted)]">
+            What Cashfree actually paid into the bank, and whether the book
+            agrees. Each settlement is one bank credit with one UTR — the same
+            UTR the statement line carries, so bank reconciliation above can
+            pair them without anybody reading two screens.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="text-[11px] font-bold text-[var(--muted)]">
+            From
+            <input
+              type="date"
+              className={FIELD}
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+            />
+          </label>
+          <label className="text-[11px] font-bold text-[var(--muted)]">
+            To
+            <input
+              type="date"
+              className={FIELD}
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            className={BTN_OUTLINE}
+            disabled={busy}
+            onClick={() => void load()}
+          >
+            <RefreshCw className="mr-1 inline size-3" aria-hidden />
+            Refresh
+          </button>
+          <button
+            type="button"
+            className={BTN}
+            disabled={busy}
+            onClick={() => void pull()}
+          >
+            Pull now
+          </button>
+        </div>
+      </div>
+
+      {notice ? (
+        <p className="mt-2 rounded-lg border border-[var(--border)] bg-[var(--accent)] px-3 py-1.5 text-xs text-[var(--brand-deep)]">
+          {notice}
+        </p>
+      ) : null}
+
+      {board?.configured === false ? (
+        <p className="mt-3 rounded-lg border border-[var(--warning)]/30 bg-[var(--warning-soft)] px-3 py-2 text-xs text-[var(--warning)]">
+          Cashfree keys are not configured on this server, so there is nothing
+          to fetch. This is not &ldquo;no settlements&rdquo; — it is not asked.
+        </p>
+      ) : board?.error ? (
+        <p className="mt-3 rounded-lg border border-[var(--danger)]/30 bg-[var(--danger-soft)] px-3 py-2 text-xs text-[var(--danger)]">
+          {board.error}
+        </p>
+      ) : (
+        <>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <Tile
+              label="In clearing now"
+              value={
+                board?.clearingPaise === null || board?.clearingPaise === undefined
+                  ? "Not known"
+                  : formatInr(board.clearingPaise)
+              }
+              hint={
+                board?.clearingPaise === null || board?.clearingPaise === undefined
+                  ? "The book could not be read"
+                  : board.clearingPaise < 0
+                    ? "Negative — settlements posted for captures that never went through clearing"
+                    : "Captured from parents, not yet paid out"
+              }
+              tone={
+                board?.clearingPaise !== null &&
+                board?.clearingPaise !== undefined &&
+                board.clearingPaise < 0
+                  ? "bad"
+                  : undefined
+              }
+            />
+            <Tile
+              label="Gross collected"
+              value={formatInr(totals.gross)}
+              hint={`${rows.length} settlement(s) in this window`}
+            />
+            <Tile
+              label="Gateway fee + GST"
+              value={formatInr(totals.fee)}
+              hint="Booked to 5080, its GST to 1080 input credit"
+            />
+            <Tile
+              label="Reached the bank"
+              value={formatInr(totals.net)}
+              hint="What the statement should show for this window"
+              tone={board?.breakCount ? "warn" : undefined}
+            />
+          </div>
+
+          {rows.length === 0 ? (
+            <p className="mt-3 rounded-lg border border-[var(--border)] px-3 py-3 text-xs text-[var(--muted)]">
+              No settlements in this window. The gateway settles a cycle after
+              a payment is captured, so an empty window means either nothing
+              was collected online or nothing has settled yet — not that
+              anything is wrong.
+            </p>
+          ) : (
+            <div className="mt-3 overflow-x-auto">
+              <ErpTable>
+                <ErpTableHead>
+                  <tr>
+                    <th className="px-2 pb-2 text-left">Settled on</th>
+                    <th className="px-2 pb-2 text-left">UTR</th>
+                    <th className="px-2 pb-2 text-right">Gross</th>
+                    <th className="px-2 pb-2 text-right">Fee + GST</th>
+                    <th className="px-2 pb-2 text-right">Net to bank</th>
+                    <th className="px-2 pb-2 text-right">Events</th>
+                    <th className="px-2 pb-2 text-left">Voucher</th>
+                    <th className="px-2 pb-2 text-left">State</th>
+                  </tr>
+                </ErpTableHead>
+                <ErpTableBody>
+                  {rows.map((r) => {
+                    const st =
+                      SETTLEMENT_STATES[r.reconState] ?? {
+                        label: r.reconState,
+                        hint: "",
+                        tone: "bad" as const,
+                      };
+                    return (
+                      <tr
+                        key={r.cfSettlementId}
+                        className="border-b border-[var(--border)]"
+                      >
+                        <td className="px-2 py-1.5 text-xs">{r.settledOn}</td>
+                        <td className="px-2 py-1.5 font-mono text-[11px]">
+                          {r.utr || (
+                            <span className="text-[var(--muted)]">
+                              not issued yet
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-2 py-1.5 text-right text-xs tabular-nums">
+                          {formatInr(r.paymentAmountPaise)}
+                        </td>
+                        <td className="px-2 py-1.5 text-right text-xs tabular-nums">
+                          {formatInr(r.feePaise)}
+                        </td>
+                        <td className="px-2 py-1.5 text-right text-xs font-semibold tabular-nums">
+                          {formatInr(r.amountSettledPaise)}
+                        </td>
+                        <td className="px-2 py-1.5 text-right text-xs tabular-nums">
+                          {r.eventCount || "—"}
+                        </td>
+                        <td className="px-2 py-1.5 text-xs">
+                          {r.voucherNo || (
+                            <span className="text-[var(--muted)]">—</span>
+                          )}
+                        </td>
+                        <td className="px-2 py-1.5 text-xs">
+                          <span
+                            className={
+                              st.tone === "ok"
+                                ? "font-semibold text-[var(--success)]"
+                                : st.tone === "wait"
+                                  ? "text-[var(--muted)]"
+                                  : "font-semibold text-[var(--danger)]"
+                            }
+                            title={st.hint}
+                          >
+                            {st.label}
+                          </span>
+                          {r.postError ? (
+                            <p className="text-[10px] text-[var(--danger)]">
+                              {r.postError}
+                            </p>
+                          ) : null}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </ErpTableBody>
+              </ErpTable>
+            </div>
+          )}
+        </>
+      )}
+
+      <p className="mt-3 flex items-start gap-1.5 text-[11px] text-[var(--muted)]">
+        <AlertTriangle className="mt-0.5 size-3 shrink-0" aria-hidden />
+        A settlement is only called explained when three separately-derived
+        numbers agree: what the gateway says it paid, what its own event
+        breakdown sums to, and what the book holds. Two out of three is a break
+        with a plausible cover story, so it is shown as a break.
+      </p>
+    </section>
+  );
+}
