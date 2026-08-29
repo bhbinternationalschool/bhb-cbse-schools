@@ -691,6 +691,35 @@ export function formatManualBookRef(seriesCode: string, leaf: string): string {
 }
 
 /**
+ * The paper number written on a receipt, whichever way it was recorded — the
+ * manual-book path stores SERIES/LEAF, the counter stores a free-text school
+ * receipt no.
+ */
+export function paperRefOf(v: {
+  manualBookSeries?: string;
+  manualBookLeaf?: string;
+  schoolReceiptNo?: string;
+}): string {
+  const manual = formatManualBookRef(
+    v.manualBookSeries ?? "",
+    v.manualBookLeaf ?? "",
+  );
+  return manual || (v.schoolReceiptNo ?? "").trim();
+}
+
+/**
+ * Trailing digits of a book stub, so a serial range sorts 9 before 10 rather
+ * than as text, where "9" would fall after "10" and hide a whole page of the
+ * book from a range filter.
+ */
+export function leafNumber(ref: string): number | null {
+  const m = ref.trim().match(/(\d+)\s*$/);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
  * True if this school/paper receipt ref is already used on a live voucher of
  * ANOTHER family.
  *

@@ -23,7 +23,10 @@ import {
   dayCloseNeedsAttention,
   openFeeDues,
   openChargeVoucherCount,
+  formatManualBookRef,
   isCollectionDateLocked,
+  leafNumber,
+  paperRefOf,
   deliverWhatsAppFeeReceipt,
   previewLastSessionTransfer,
   searchFeeStudents,
@@ -3149,11 +3152,26 @@ function CollectPanel({
                           Paid
                         </span>
                       )}
-                      {v.schoolReceiptNo ? (
-                        <span className="text-[11px] text-[var(--muted)]">
-                          Book {v.schoolReceiptNo}
+                      {paperRefOf(v) ? (
+                        <span className="rounded bg-[rgba(197,160,40,0.16)] px-1.5 py-0.5 text-[11px] font-semibold text-[var(--brand-deep)]">
+                          Book {paperRefOf(v)}
                         </span>
                       ) : null}
+                      {/* The UTR is what a parent quotes from their bank app,
+                          so it belongs on the row that a UTR search returns. */}
+                      {v.tenders
+                        .map((t) => t.ref?.trim())
+                        .filter(Boolean)
+                        .slice(0, 2)
+                        .map((ref) => (
+                          <span
+                            key={ref}
+                            className="font-mono text-[10px] text-[var(--muted)]"
+                            title="Transaction reference"
+                          >
+                            {ref}
+                          </span>
+                        ))}
                       {v.whatsappSentAt && !voided ? (
                         <span className="rounded bg-[#128C7E]/12 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#128C7E]">
                           WA
@@ -3656,6 +3674,18 @@ function ReceiptsPanel({
   const [modeFilter, setModeFilter] = useState<"" | TenderMode>("");
   const [concessionFilter, setConcessionFilter] = useState<"" | "with" | "without">("");
   const [collectorQ, setCollectorQ] = useState("");
+  /**
+   * One box for every number a receipt can be found by: our receipt no., the
+   * paper book number written on it, the UTR / UPI ref of any tender, and the
+   * transaction id. The counter is usually holding exactly one of these — a
+   * parent quoting a UTR from their bank app, or a paper stub — and had no way
+   * to get from it to the receipt.
+   */
+  const [refQ, setRefQ] = useState("");
+  /** Paper-book register: only receipts carrying a book number. */
+  const [paperOnly, setPaperOnly] = useState(false);
+  const [leafFrom, setLeafFrom] = useState("");
+  const [leafTo, setLeafTo] = useState("");
 
   const guardianOf = (householdId: string) =>
     sis?.households.find((h) => h.id === householdId)?.guardianName ?? "";
@@ -3736,6 +3766,41 @@ function ReceiptsPanel({
         return false;
       }
 
+      const paperNo = paperRefOf(v);
+
+      if (paperOnly && !paperNo) return false;
+
+      // Serial range over the book. Compared numerically when both ends and
+      // the stub are numbers — "9" must not sort after "10" — and as text
+      // otherwise, so lettered series still filter sensibly.
+      if (leafFrom || leafTo) {
+        if (!paperNo) return false;
+        const n = leafNumber(paperNo);
+        const a = leafNumber(leafFrom);
+        const b = leafNumber(leafTo);
+        if (n != null && (a != null || b != null)) {
+          if (a != null && n < a) return false;
+          if (b != null && n > b) return false;
+        } else {
+          const key = paperNo.toUpperCase();
+          if (leafFrom && key < leafFrom.toUpperCase()) return false;
+          if (leafTo && key > leafTo.toUpperCase()) return false;
+        }
+      }
+
+      const rq = refQ.trim().toLowerCase();
+      if (rq) {
+        const haystack = [
+          v.receiptNo,
+          paperNo,
+          v.transactionId ?? "",
+          ...v.tenders.map((t) => t.ref ?? ""),
+        ]
+          .join(" ")
+          .toLowerCase();
+        if (!haystack.includes(rq)) return false;
+      }
+
       return true;
     });
   }, [
@@ -3749,6 +3814,10 @@ function ReceiptsPanel({
     modeFilter,
     concessionFilter,
     collectorQ,
+    refQ,
+    paperOnly,
+    leafFrom,
+    leafTo,
     sis,
   ]);
 
@@ -3770,6 +3839,9 @@ function ReceiptsPanel({
         ? "No concession"
         : "",
     collectorQ.trim() ? `Collector “${collectorQ.trim()}”` : "",
+    refQ.trim() ? `Ref “${refQ.trim()}”` : "",
+    paperOnly ? "Paper book only" : "",
+    leafFrom || leafTo ? `Serial ${leafFrom || "…"}–${leafTo || "…"}` : "",
   ]);
 
   function clearFilters() {
@@ -3782,6 +3854,10 @@ function ReceiptsPanel({
     setModeFilter("");
     setConcessionFilter("");
     setCollectorQ("");
+    setRefQ("");
+    setPaperOnly(false);
+    setLeafFrom("");
+    setLeafTo("");
   }
 
   const hasFilters =
@@ -3793,7 +3869,11 @@ function ReceiptsPanel({
     sectionId ||
     modeFilter ||
     concessionFilter ||
-    collectorQ;
+    collectorQ ||
+    refQ ||
+    paperOnly ||
+    leafFrom ||
+    leafTo;
 
   if (receipts.length === 0) {
     return (
@@ -3953,6 +4033,64 @@ function ReceiptsPanel({
               className="mt-1 w-full rounded-lg border border-[var(--border)] px-2.5 py-2 text-sm"
             />
           </label>
+          <label className="block text-xs font-semibold text-[var(--muted)] sm:col-span-2">
+            Receipt no. / UTR / paper book no.
+            <input
+              type="search"
+              value={refQ}
+              onChange={(e) => setRefQ(e.target.value)}
+              placeholder="RCV-00118 · UTR / UPI ref · 1376 · FEE-BOOK-A/4521"
+              className="mt-1 w-full rounded-lg border border-[var(--border)] px-2.5 py-2 text-sm"
+            />
+          </label>
+        </div>
+
+        {/* Paper-book register: the office reconciles the printed book against
+            what the system holds, so it needs the book's own view — stubs only,
+            in serial order, over a date range. */}
+        <div className="mt-2 flex flex-wrap items-end gap-2 rounded-lg border border-[rgba(197,160,40,0.35)] bg-[rgba(197,160,40,0.06)] px-2.5 py-2">
+          <label className="flex items-center gap-1.5 text-xs font-semibold text-[var(--brand-deep)]">
+            <input
+              type="checkbox"
+              checked={paperOnly}
+              onChange={(e) => setPaperOnly(e.target.checked)}
+            />
+            Paper book only
+          </label>
+          <label className="block text-[11px] font-semibold text-[var(--muted)]">
+            Serial from
+            <input
+              value={leafFrom}
+              onChange={(e) => setLeafFrom(e.target.value)}
+              placeholder="1370"
+              className="mt-0.5 w-24 rounded-lg border border-[var(--border)] px-2 py-1 text-sm"
+            />
+          </label>
+          <label className="block text-[11px] font-semibold text-[var(--muted)]">
+            to
+            <input
+              value={leafTo}
+              onChange={(e) => setLeafTo(e.target.value)}
+              placeholder="1399"
+              className="mt-0.5 w-24 rounded-lg border border-[var(--border)] px-2 py-1 text-sm"
+            />
+          </label>
+          {paperOnly || leafFrom || leafTo ? (
+            <button
+              type="button"
+              className="rounded-lg border border-[var(--border)] px-2 py-1 text-[11px] font-semibold"
+              onClick={() => {
+                setPaperOnly(false);
+                setLeafFrom("");
+                setLeafTo("");
+              }}
+            >
+              Clear book filter
+            </button>
+          ) : null}
+          <span className="text-[11px] text-[var(--muted)]">
+            Missing stubs in a range are the ones to chase in the book.
+          </span>
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[var(--muted)]">
