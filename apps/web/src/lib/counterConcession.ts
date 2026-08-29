@@ -3,7 +3,10 @@
  * a Masters concession rule + student grant for future installments.
  */
 
-import { isStudentAlreadyGranted } from "@/lib/concessionSuggest";
+import {
+  activeGrantOnHead,
+  isStudentAlreadyGranted,
+} from "@/lib/concessionSuggest";
 import type { CounterDiscountSlice } from "@/lib/feeAdjustments";
 import { FEE_ADJUST_AUTO_LIMIT_PAISE } from "@/lib/feeAdjustments";
 import type { FeeDueLine } from "@/lib/fees";
@@ -298,10 +301,14 @@ export function applyFutureConcessionsFromCounter(input: {
       skipped: number;
       pending: number;
       ruleLabels: string[];
+      /** Heads refused because a discount is already on them. */
+      blocked: string[];
     }
   | { ok: false; error: string } {
   if (input.applyKeys.size === 0) {
-    return { ok: true, granted: 0, skipped: 0, pending: 0, ruleLabels: [] };
+    return {
+      ok: true, granted: 0, skipped: 0, pending: 0, ruleLabels: [], blocked: [],
+    };
   }
 
   let masters = loadMasters();
@@ -311,6 +318,7 @@ export function applyFutureConcessionsFromCounter(input: {
   let skipped = 0;
   let pending = 0;
   const ruleLabels: string[] = [];
+  const blocked: string[] = [];
 
   for (const item of input.candidates) {
     if (!input.applyKeys.has(item.key)) continue;
@@ -331,6 +339,22 @@ export function applyFutureConcessionsFromCounter(input: {
     }
 
     if (isStudentAlreadyGranted(item.studentId, rule, grants, masters)) {
+      skipped += 1;
+      continue;
+    }
+
+    // One discount per head. A second rule on the same head stacks silently —
+    // an imported ₹150 off tuition and a counter ₹150 off tuition both apply
+    // and the parent is charged ₹300 less than the school believes. The
+    // office's rule is that the first discount must be removed before a new
+    // one is given, so this refuses rather than adds, and names what is
+    // already there so the clerk can go and remove it.
+    const clash = activeGrantOnHead(masters, item.studentId, item.feeHeadId, grants);
+    if (clash) {
+      blocked.push(
+        `${item.studentName} · ${item.feeHeadName} already has ${clash.rule.name}` +
+          ` — remove it in Masters → Concessions before granting another`,
+      );
       skipped += 1;
       continue;
     }
@@ -359,5 +383,5 @@ export function applyFutureConcessionsFromCounter(input: {
 
   saveMasters({ ...masters, concessionGrants: grants });
 
-  return { ok: true, granted, skipped, pending, ruleLabels };
+  return { ok: true, granted, skipped, pending, ruleLabels, blocked };
 }

@@ -1870,12 +1870,26 @@ function concessionForHead(
   feeHeadId: string,
   billedPaise: number,
   asOf: string,
+  /**
+   * The date THIS due falls on. A grant is judged against the month it is
+   * being applied to, not against today.
+   *
+   * Without this a discount granted in August discounted April as well: the
+   * only question asked was whether the grant is live now. That is how a
+   * ₹150 counter discount showed as ₹300 on the month it was given — the
+   * one-off waiver for that month, plus a recurring grant dated to the NEXT
+   * installment which nothing stopped from reaching backwards.
+   *
+   * Omitted, it falls back to asOf, which is the old behaviour — used by
+   * callers that have no single due in hand.
+   */
+  effectiveOn?: string,
 ): { totalPaise: number; details: FeeConcessionDetail[] } {
   const mastersWithRules = mergeDiscountRulesFromSeed(masters);
   const grants = resolvedConcessionGrantsForStudent(
     mastersWithRules,
     student,
-    asOf,
+    effectiveOn || asOf,
     grantAliasIdsFor(student),
   );
   const details: FeeConcessionDetail[] = [];
@@ -2078,6 +2092,7 @@ export function computeStudentDues(
         sl.feeHeadId,
         billed,
         asOf,
+        dueOn,
       );
       const paid = paidMap.get(dueKey) ?? 0;
       const balance = Math.max(0, billed - concession.totalPaise - paid);
@@ -2134,7 +2149,14 @@ export function computeStudentDues(
     const transportHeadId =
       masters.feeHeads.find((h) => h.code === "TRANSPORT")?.id ?? "";
     const transportConcession = transportHeadId
-      ? concessionForHead(masters, student, transportHeadId, td.amountPaise, asOf)
+      ? concessionForHead(
+          masters,
+          student,
+          transportHeadId,
+          td.amountPaise,
+          asOf,
+          td.dueOn,
+        )
       : { totalPaise: 0, details: [] as FeeConcessionDetail[] };
     const balance = Math.max(
       0,
@@ -2205,6 +2227,7 @@ export function computeStudentDues(
       sf.feeHeadId,
       billed,
       asOf,
+      sf.dueOn,
     );
     const paid = paidMap.get(dueKey) ?? 0;
     const balance = Math.max(0, billed - concession.totalPaise - paid);
