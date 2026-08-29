@@ -2420,6 +2420,27 @@ function applyPostedWaiver(
   return {
     ...l,
     concessionPaise: l.concessionPaise + waived,
+    // Name it in the same list Masters concessions appear in.
+    //
+    // A waiver used to change only concessionPaise and the label suffix, so
+    // the head's discount breakdown listed the standing concessions and said
+    // nothing about the waiver — the total was right while the itemisation
+    // was short by exactly the counter discount. Asked where the money had
+    // gone, the screen could not say. It is a different KIND of discount from
+    // a standing rule, and says so, but it is not invisible.
+    concessionDetails: [
+      ...(l.concessionDetails ?? []),
+      {
+        grantId: "",
+        concessionId: "",
+        code: "COUNTER",
+        name: "Counter discount · this month only",
+        kind: "waiver",
+        rateLabel: formatInr(waived),
+        siblingLabel: "",
+        amountPaise: waived,
+      },
+    ],
     balancePaise: balance,
     label:
       balance <= 0
