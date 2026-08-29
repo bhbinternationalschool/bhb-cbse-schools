@@ -299,6 +299,7 @@ export async function projectFeeReceipts(opts?: {
               ref: String(t.ref ?? ""),
               instrumentDate: t.instrument_date ? String(t.instrument_date) : null,
               bankAccountId: String(j.bankAccountId ?? ""),
+              gatewayProvider: String(j.gatewayProvider ?? ""),
             };
           }),
           lines: (linesBy.get(id) ?? []).map((l) => ({

@@ -451,6 +451,15 @@ export type VoucherTender = {
   /** School bank account that received / will receive this tender. */
   bankAccountId?: string;
   /**
+   * The payment gateway that captured this money, when one did ("cashfree",
+   * "razorpay"). Gateway money is not in a bank account yet: it settles a
+   * cycle later, net of fees, so the book holds it in clearing until the
+   * settlement says which bank got how much. Empty for counter tenders —
+   * including a UPI paid into the school's own QR, which really is in the
+   * bank the same day.
+   */
+  gatewayProvider?: string;
+  /**
    * Cheque (and similar) — receipt issued but bank clearance pending.
    * Non-cheque modes are always "cleared".
    */
@@ -1656,6 +1665,7 @@ function normalizeVoucher(v: Partial<CollectionVoucher>): CollectionVoucher {
       instrumentDate: t.instrumentDate ?? "",
       bankName: t.bankName ?? "",
       bankAccountId: t.bankAccountId ?? "",
+      gatewayProvider: t.gatewayProvider ?? "",
       realisation:
         t.realisation ??
         (t.mode === "cheque" ? "subject_to_clearance" : "cleared"),

@@ -55,6 +55,15 @@ export const L_DEPRECIATION = "5200";
 export const L_COGS = "5065";
 /** Stock lost to damage, shrinkage or a corrected count. */
 export const L_STOCK_WRITTEN_OFF = "5066";
+/**
+ * Money a payment gateway has captured from parents but not yet settled to
+ * the school's bank. Not a bank account: the school cannot draw on it, and
+ * what eventually arrives is net of fees. Its balance is one settlement cycle
+ * of online collections — anything else is a break worth chasing.
+ */
+export const L_PG_CLEARING = "1100";
+/** The gateway's own fee. GST on it goes to 1080 and is claimable. */
+export const L_PG_CHARGES = "5080";
 
 export const SCHEDULE_GROUPS = {
   currentAssets: "Current assets",
@@ -88,6 +97,7 @@ export function defaultLedgerAccounts(): LedgerAccountSeed[] {
     { code: L_FEE_RECEIVABLE, name: "Fee Receivable", kind: "asset", parentCode: "1", scheduleGroup: G.currentAssets, isControl: true },
     { code: L_STAFF_ADVANCES, name: "Staff Advances", kind: "asset", parentCode: "1", scheduleGroup: G.currentAssets, isControl: true },
     { code: L_GST_INPUT, name: "GST Input Credit", kind: "asset", parentCode: "1", scheduleGroup: G.currentAssets },
+    { code: L_PG_CLEARING, name: "Payment Gateway Clearing", kind: "asset", parentCode: "1", scheduleGroup: G.currentAssets },
     // Perpetual inventory: goods are capitalised here when received and
     // relieved as they are sold or written off, so this balance tracks the
     // store's own valuation continuously rather than only at a period end.
@@ -139,6 +149,7 @@ export function defaultLedgerAccounts(): LedgerAccountSeed[] {
     { code: L_COGS, name: "Cost of Goods Sold", kind: "expense", parentCode: "5", scheduleGroup: G.administrative },
     { code: L_STOCK_WRITTEN_OFF, name: "Stock Written Off", kind: "expense", parentCode: "5", scheduleGroup: G.administrative },
     { code: "5070", name: "Salary & Wages", kind: "expense", parentCode: "5", scheduleGroup: G.establishment },
+    { code: L_PG_CHARGES, name: "Payment Gateway Charges", kind: "expense", parentCode: "5", scheduleGroup: G.administrative },
     { code: L_FEE_CONCESSION, name: "Fee Concessions & RTE", kind: "expense", parentCode: "5", scheduleGroup: G.feeIncome },
     { code: L_DEPRECIATION, name: "Depreciation", kind: "expense", parentCode: "5", scheduleGroup: G.depreciation },
     { code: "5900", name: "Other Expenses", kind: "expense", parentCode: "5", scheduleGroup: G.administrative },

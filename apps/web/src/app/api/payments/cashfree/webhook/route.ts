@@ -6,6 +6,11 @@
  * Signature: x-webhook-signature = base64(HMAC-SHA256(timestamp + rawBody,
  * CASHFREE_SECRET_KEY)) — the API secret, no separate webhook secret.
  *
+ * Also handles SETTLEMENT_* — the gateway telling us it has paid money into
+ * the school's bank. That is a different event about the same rupees: the link
+ * event says a parent paid, the settlement event says the money arrived, net
+ * of fees, a cycle later. See lib/ledger/pgSettlement.server.ts.
+ *
  * Env: CASHFREE_APP_ID, CASHFREE_SECRET_KEY, CASHFREE_ENV
  */
 
@@ -25,6 +30,7 @@ import {
 import { settlePaymentLinkWithWhatsApp } from "@/lib/paymentSettlement.server";
 import { ensureSchoolMirrorLoaded } from "@/lib/schoolDataMirror.server";
 import { recordPaymentGatewayEvent } from "@/lib/paymentsNormalized.server";
+import { ingestSettlementWebhook } from "@/lib/ledger/pgSettlement.server";
 
 export const runtime = "nodejs";
 
@@ -182,7 +188,7 @@ export async function GET() {
     service: "cashfree-webhook",
     configured,
     note: configured
-      ? "POST PAYMENT_LINK_EVENT (version 2025-01-01) here"
+      ? "POST PAYMENT_LINK_EVENT / SETTLEMENT_* (version 2025-01-01) here"
       : "Set CASHFREE_APP_ID, CASHFREE_SECRET_KEY (CASHFREE_ENV=sandbox|production)",
   });
 }
@@ -214,6 +220,27 @@ export async function POST(req: Request) {
   }
 
   const eventType = String(event.type || "");
+
+  // Settlement events carry no link reference — they are about a bank
+  // transfer, not a payment — so they are handled before any link lookup.
+  if (eventType.startsWith("SETTLEMENT_")) {
+    const data = (event.data ?? {}) as Record<string, unknown>;
+    const res = await ingestSettlementWebhook(data);
+    await recordPaymentGatewayEvent({
+      provider: "cashfree",
+      eventType,
+      externalPaymentId: "",
+      settlementStatus: res.ok ? "settled" : "failed",
+      eventJson: res.ok ? event : { error: res.error, raw: event },
+    });
+    // Always 200 on a stored-but-unposted settlement: the nightly sweep will
+    // post it, and a non-2xx would have the gateway redeliver an event that
+    // was received correctly.
+    return res.ok
+      ? NextResponse.json({ ok: true, settlement: true, posted: !!res.posted })
+      : NextResponse.json({ ok: false, error: res.error }, { status: 400 });
+  }
+
   const {
     linkId,
     code,

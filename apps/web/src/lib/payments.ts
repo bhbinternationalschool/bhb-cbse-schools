@@ -451,6 +451,13 @@ export function applyPaymentLink(input: {
         ref: upiRef,
         instrumentDate: collectionDate,
         bankName: "",
+        // A real gateway holds this money until it settles, so the book puts
+        // it in clearing rather than in a bank it has not reached. Demo links
+        // carry no provider: nothing was captured, so nothing is in transit.
+        gatewayProvider:
+          link.gatewayMode === "cashfree" || link.gatewayMode === "razorpay"
+            ? link.gatewayMode
+            : "",
         realisation: "cleared",
       },
     ],

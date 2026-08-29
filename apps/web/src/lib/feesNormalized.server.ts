@@ -113,6 +113,7 @@ function voucherToRows(
     realisation: t.realisation || "cleared",
     tender_json: {
       bankAccountId: t.bankAccountId,
+      gatewayProvider: t.gatewayProvider || "",
     },
   }));
 
@@ -160,6 +161,7 @@ function rowToVoucher(
         instrumentDate: String(row.instrument_date || "").slice(0, 10),
         bankName: String(row.bank_name || ""),
         bankAccountId: tj.bankAccountId as string | undefined,
+        gatewayProvider: (tj.gatewayProvider as string | undefined) || "",
         realisation:
           (row.realisation as VoucherTender["realisation"]) || "cleared",
       };

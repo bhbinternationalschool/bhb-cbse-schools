@@ -18,6 +18,9 @@ import {
   L_CHEQUES_IN_HAND,
   L_FEE_ADVANCES,
   L_FEE_INCOME,
+  L_GST_INPUT,
+  L_PG_CHARGES,
+  L_PG_CLEARING,
   L_SALARY_PAYABLE,
   L_STAFF_ADVANCES,
   L_STATUTORY_PAYABLE,
@@ -83,6 +86,14 @@ export type DeskFeeTender = {
   ref: string;
   instrumentDate: string | null;
   bankAccountId: string;
+  /**
+   * Set when the money was captured by a payment gateway rather than arriving
+   * in a school bank account. Empty for a parent who paid at the counter,
+   * including by UPI into the school's own QR — that money really is in the
+   * bank the same day, and routing it through clearing would be as wrong as
+   * the reverse.
+   */
+  gatewayProvider?: string;
 };
 
 export type DeskFeeLine = { kind: string; amountPaise: number };
@@ -92,6 +103,7 @@ export type DeskFeeLine = { kind: string; amountPaise: number };
  *
  *   cash            Dr Cash in Hand
  *   cheque / DD     Dr Cheques in Hand   (not bank money until it clears)
+ *   via a gateway   Dr Payment Gateway Clearing  (captured, not yet settled)
  *   everything else Dr Bank Accounts
  *   store portion   Cr Store Receivable, the balance Cr Fee Income
  *
@@ -129,8 +141,20 @@ export function buildFeeReceiptVoucher(input: {
   const out: LedgerLineInput[] = [];
   for (const t of live) {
     const mode = (t.mode || "").toLowerCase();
+    // Gateway money is not in any bank yet. It is held by the gateway, it
+    // arrives net of fees, and it arrives lumped with every other payment of
+    // the same cycle — so debiting a bank account here would state a balance
+    // the bank will never show. The settlement journal moves it out of
+    // clearing and into the bank that actually received it.
+    const viaGateway = (t.gatewayProvider || "").trim() !== "";
     const accountCode =
-      mode === "cash" ? L_CASH : mode === "cheque" || mode === "dd" ? L_CHEQUES_IN_HAND : L_BANK;
+      mode === "cash"
+        ? L_CASH
+        : mode === "cheque" || mode === "dd"
+          ? L_CHEQUES_IN_HAND
+          : viaGateway
+            ? L_PG_CLEARING
+            : L_BANK;
     out.push({
       accountCode,
       debitPaise: Math.round(t.amountPaise),
@@ -479,4 +503,124 @@ export function monthEndIso(month: string): string {
   const [y, m] = month.split("-").map(Number);
   if (!y || !m) return "";
   return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+}
+
+/* ─── Gateway settlements ───────────────────────────────────── */
+
+export type DeskPgSettlement = {
+  cfSettlementId: string;
+  utr: string;
+  settledOn: string;
+  settlementType: string;
+  paymentAmountPaise: number;
+  amountSettledPaise: number;
+  serviceChargePaise: number;
+  serviceTaxPaise: number;
+  settlementChargePaise: number;
+  settlementTaxPaise: number;
+  adjustmentPaise: number;
+};
+
+/**
+ * One settlement — the gateway paying the school.
+ *
+ *   Dr Bank (the account that got it)   amount_settled
+ *   Dr Payment Gateway Charges          service + settlement charge
+ *   Dr GST Input Credit                 the GST on those charges
+ *     Cr Payment Gateway Clearing         payment_amount + adjustment
+ *
+ * The bank line carries the UTR as its instrument reference, which is the
+ * whole point: the bank statement line for this credit carries the same UTR,
+ * so the reconciliation matcher pairs them `exact` without a human reading
+ * two screens side by side.
+ *
+ * `adjustment` is signed and routinely negative — a refund or a dispute from
+ * an earlier cycle, deducted from this one. It reduces the credit to clearing
+ * because that is where the money it reverses has been sitting. A large enough
+ * negative makes the clearing line a debit instead, which is why the lines are
+ * built as signed amounts and given a side at the end rather than being
+ * hard-coded to one.
+ *
+ * The GST on the gateway's fee goes to input credit, not to expense: a
+ * GST-registered trust can claim it, and burying it in the fee makes that
+ * quietly impossible.
+ */
+export function buildPgSettlementVoucher(input: {
+  settlement: DeskPgSettlement;
+  /** Ledger code of the bank that received it — 1010 when unmapped. */
+  bankAccountCode: string;
+  /** Desk bank-account id for the sub-ledger, empty when unmapped. */
+  bankAccountId: string;
+  provider: string;
+}): BuildResult {
+  const s = input.settlement;
+  const label = `settlement ${s.cfSettlementId}`;
+
+  if (!s.settledOn) {
+    return { ok: false, reason: `${label} has no settlement date` };
+  }
+  if (!s.utr) {
+    // Without a UTR there is nothing for the bank statement to match, and a
+    // settlement that has not been paid out has no business in the book.
+    return { ok: false, reason: `${label} has no UTR yet` };
+  }
+
+  const charges = Math.round(s.serviceChargePaise) + Math.round(s.settlementChargePaise);
+  const taxes = Math.round(s.serviceTaxPaise) + Math.round(s.settlementTaxPaise);
+  const settled = Math.round(s.amountSettledPaise);
+  const clearing = Math.round(s.paymentAmountPaise) + Math.round(s.adjustmentPaise);
+
+  // The gateway's own arithmetic, restated. If it does not hold, the numbers
+  // are not understood well enough to post — say so and let it show up as a
+  // break, rather than plugging the difference into a suspense line.
+  if (settled + charges + taxes !== clearing) {
+    return {
+      ok: false,
+      reason:
+        `${label}: net ${settled} + charges ${charges} + tax ${taxes} ` +
+        `does not equal gross ${clearing}`,
+    };
+  }
+
+  const signed: { accountCode: string; paise: number; narration: string; bank?: boolean }[] = [
+    { accountCode: input.bankAccountCode, paise: settled, narration: `Settled ${s.utr}`, bank: true },
+    { accountCode: L_PG_CHARGES, paise: charges, narration: "Gateway fee" },
+    { accountCode: L_GST_INPUT, paise: taxes, narration: "GST on gateway fee" },
+    { accountCode: L_PG_CLEARING, paise: -clearing, narration: "Cleared to bank" },
+  ];
+
+  const out: LedgerLineInput[] = [];
+  for (const row of signed) {
+    if (row.paise === 0) continue;
+    out.push({
+      accountCode: row.accountCode,
+      debitPaise: row.paise > 0 ? row.paise : 0,
+      creditPaise: row.paise < 0 ? -row.paise : 0,
+      narration: row.narration,
+      ...(row.bank && input.bankAccountId
+        ? { subledgerKind: "bank_account" as const, subledgerId: input.bankAccountId }
+        : {}),
+      ...(row.bank
+        ? { instrument: { mode: "neft", ref: s.utr, date: s.settledOn } }
+        : {}),
+    });
+  }
+
+  if (out.length === 0) {
+    return { ok: false, reason: `${label} settles nothing` };
+  }
+
+  return {
+    ok: true,
+    voucher: {
+      voucherType: "journal",
+      date: s.settledOn,
+      narration:
+        `${input.provider} settlement ${s.cfSettlementId} · UTR ${s.utr}` +
+        (s.settlementType && s.settlementType !== "STANDARD" ? ` · ${s.settlementType}` : ""),
+      sourceType: "pg_settlement",
+      sourceId: `${input.provider}:${s.cfSettlementId}`,
+      lines: out,
+    },
+  };
 }
