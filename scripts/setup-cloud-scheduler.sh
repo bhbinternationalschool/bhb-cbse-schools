@@ -54,6 +54,10 @@ create_job() {
   local schedule="$2"
   local uri="$3"
   local tz="${4:-}"
+  # "paused" => pause the job right after CREATING it. Deliberately not applied
+  # on update: if someone has resumed the job on purpose, re-running this script
+  # must not switch it back off.
+  local start_state="${5:-}"
   if gcloud scheduler jobs describe "$name" --location="$REGION" >/dev/null 2>&1; then
     echo "Updating ${name}..."
     if [[ -n "$tz" ]]; then
@@ -98,6 +102,10 @@ create_job() {
         --attempt-deadline=120s \
         --quiet
     fi
+    if [[ "$start_state" == "paused" ]]; then
+      echo "  ...pausing ${name} (feature is off; resume when enabling it)"
+      gcloud scheduler jobs pause "$name" --location="$REGION" --quiet
+    fi
   fi
 }
 
@@ -118,11 +126,20 @@ create_job "bhb-birthday-tick" "5 * * * *" \
   "${APP_URL}/api/birthday/tick" \
   "Asia/Kolkata"
 
-# Staff GPS presence: evaluates geofence/staleness and alerts on state
-# changes; no-op outside school timing and when the feature is off.
-create_job "bhb-staff-geo-tick" "*/5 * * * *" \
+# Staff GPS presence: evaluates geofence/staleness and alerts on state changes.
+#
+# PAUSED as of 2026-08-29 — the geo-fence is switched off in Staff → GPS and no
+# staff have consented, so every tick was a cold start that did nothing. Resume
+# it when the feature is turned on:
+#   gcloud scheduler jobs resume bhb-staff-geo-tick --location=asia-southeast1
+#
+# The window is the configured school day (08:00-14:30 Mon-Sat) plus an hour of
+# margin either side, to cover the grace and staleness settings. It ran */5 all
+# day, every day, which is 288 ticks for a 6.5-hour feature.
+create_job "bhb-staff-geo-tick" "*/5 7-15 * * 1-6" \
   "${APP_URL}/api/staff-geo/tick" \
-  "Asia/Kolkata"
+  "Asia/Kolkata" \
+  "paused"
 
 echo ""
 echo "Done. Jobs in $REGION:"
