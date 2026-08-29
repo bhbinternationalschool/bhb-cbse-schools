@@ -24,6 +24,10 @@
 --    gap invites someone to bridge them and book every fee twice, so that row
 --    was removed rather than left to tempt.
 --
+-- Superseded by 20260829660000, which adds the expense / transport / trust
+-- rows once those bridges exist. This file is kept as written so the sequence
+-- reads in order.
+--
 -- A drift report that cries wolf is worse than none: the one real gap gets
 -- ignored among the false ones.
 
