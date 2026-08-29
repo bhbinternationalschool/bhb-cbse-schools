@@ -187,6 +187,7 @@ function rowToPayment(r: Row): InvSalePayment {
     amountPaise: int(r.amount_paise),
     mode: str(r.mode) as InvTenderMode,
     reference: str(r.reference),
+    bankAccountId: str(r.bank_account_id),
     note: str(r.note),
     createdBy: str(r.created_by),
   };
@@ -459,6 +460,8 @@ export async function collectOnSale(
     amountPaise: number;
     mode?: InvTenderMode;
     reference?: string;
+    /** Bank account that received it — empty for cash. */
+    bankAccountId?: string;
     paidOn?: string;
     note?: string;
     /**
@@ -487,6 +490,7 @@ export async function collectOnSale(
       amount_paise: amount,
       mode: input.mode || "cash",
       reference: str(input.reference),
+      bank_account_id: str(input.bankAccountId),
       paid_on: input.paidOn || null,
       note: str(input.note),
       external_ref: str(input.externalRef),

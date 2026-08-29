@@ -655,6 +655,13 @@ export type InvSalePayment = {
   amountPaise: number;
   mode: InvTenderMode;
   reference: string;
+  /**
+   * Accounts-desk bank account that received this money. Empty for cash, and
+   * for payments taken before this was captured — a store UPI collection used
+   * to record the mode but not the destination, so it could not be matched to
+   * any statement.
+   */
+  bankAccountId: string;
   note: string;
   createdBy: string;
 };

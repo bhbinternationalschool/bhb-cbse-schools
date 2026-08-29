@@ -15,6 +15,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { RefreshCw, Search, Trash2 } from "lucide-react";
+import { loadAccounts } from "@/lib/accountsStore";
+import type { AccountsState } from "@/lib/accountsTypes";
+import {
+  buildPaymentChannelGroups,
+  decodePaymentChannel,
+} from "@/lib/paymentChannels";
 import { Button } from "@/components/ui/button";
 import {
   ErpTable,
@@ -1629,6 +1635,58 @@ function SalesSection({
   const [collectInput, setCollectInput] = useState("");
   const [collectMode, setCollectMode] = useState<InvTenderMode>("cash");
   const [collectOn, setCollectOn] = useState("");
+  /**
+   * Mode AND the account that receives it, as one choice — "upi:<bankId>".
+   *
+   * The store used to record only the mode, so a UPI collection was known to
+   * be UPI but not which of the school's accounts it landed in, and could not
+   * be matched against any statement. Fee Take has asked mode + account since
+   * the payment-channel work; this is the same picker, same encoding.
+   */
+  const [collectChannel, setCollectChannel] = useState("cash");
+  /** UTR / UPI ref / auth no. — required for anything that is not cash. */
+  const [collectRef, setCollectRef] = useState("");
+  const [accountsState, setAccountsState] = useState<AccountsState | null>(
+    null,
+  );
+  // The bank list only exists in this browser after the accounts desk has been
+  // pulled, which used to happen only if someone opened Accounts (or Transport)
+  // first. A store machine that went straight to the counter saw cash and
+  // nothing else — and would have been told, wrongly, that no bank takes UPI.
+  // Same hydrate-then-re-read ladder Fee Take uses: hydration can return while
+  // the first caller's pull is still in flight, so one read can freeze an empty
+  // store into the dropdown.
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      try {
+        const { ensureAccountsHydrated } = await import(
+          "@/lib/accountsPersistence"
+        );
+        await ensureAccountsHydrated();
+      } catch {
+        // Offline or first load — fall through to whatever is cached locally.
+      }
+      if (live) setAccountsState(loadAccounts());
+      for (const delay of [1500, 3500, 8000]) {
+        await new Promise((r) => setTimeout(r, delay));
+        if (!live) return;
+        const next = loadAccounts();
+        if (next.bankAccounts.length > 0) {
+          setAccountsState(next);
+          break;
+        }
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, []);
+  const channelGroups = useMemo(
+    () => buildPaymentChannelGroups(accountsState ?? undefined),
+    [accountsState],
+  );
+  const collectNeedsRef = collectChannel !== "cash" && !collectRef.trim();
 
   const [ret, setRet] = useState<InvSale | null>(null);
   const [retReason, setRetReason] = useState("");
@@ -1664,7 +1722,9 @@ function SalesSection({
       invApi.collectOnSale({
         saleId: collect.id,
         amountPaise: amount,
-        mode: collectMode,
+        mode: decodePaymentChannel(collectChannel).mode as InvTenderMode,
+        bankAccountId: decodePaymentChannel(collectChannel).bankId,
+        reference: collectRef.trim(),
         paidOn: collectOn || undefined,
       }),
     );
@@ -1862,6 +1922,8 @@ function SalesSection({
                         size="xs"
                         onClick={() => {
                           setCollect(s);
+                          setCollectChannel("cash");
+                          setCollectRef("");
                           setCollectInput(paiseToInput(s.balancePaise));
                           setCollectOn(new Date().toISOString().slice(0, 10));
                         }}
@@ -1958,8 +2020,16 @@ function SalesSection({
             <Button variant="outline" size="sm" onClick={() => setCollect(null)}>
               Cancel
             </Button>
-            <Button size="sm" onClick={submitCollect} disabled={saver.saving}>
-              {saver.saving ? "Saving…" : "Record"}
+            <Button
+              size="sm"
+              onClick={submitCollect}
+              disabled={saver.saving || collectNeedsRef}
+            >
+              {saver.saving
+                ? "Saving…"
+                : collectNeedsRef
+                  ? "Enter UTR / reference"
+                  : "Record"}
             </Button>
           </>
         }
@@ -1978,13 +2048,41 @@ function SalesSection({
               value={collectOn}
               onChange={setCollectOn}
             />
-            <SelectField
-              label="Taken by"
-              value={collectMode}
-              placeholder="Cash"
-              options={TENDERS.map((t) => ({ value: t, label: tenderLabel(t) }))}
-              onChange={(v) => setCollectMode(v as InvTenderMode)}
-            />
+            {/* Mode AND destination account together: "UPI" alone cannot be
+                reconciled against a statement. Same picker as Fee Take. */}
+            <label className="block text-xs">
+              <span className="mb-1 block text-[11px] font-medium text-[var(--muted)]">
+                Taken by · which account
+              </span>
+              <select
+                className="field w-full"
+                value={collectChannel}
+                onChange={(e) => setCollectChannel(e.target.value)}
+              >
+                {channelGroups.map((g) => (
+                  <optgroup key={g.modeLabel} label={g.modeLabel}>
+                    {g.options.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+              {channelGroups.length <= 1 ? (
+                <span className="mt-1 block text-[11px] leading-snug text-[var(--danger)]">
+                  No bank account accepts non-cash yet — add one under Accounts
+                  → Masters → Banks, or this money cannot be traced.
+                </span>
+              ) : null}
+            </label>
+            {collectChannel !== "cash" ? (
+              <TextField
+                label="UTR / reference no."
+                value={collectRef}
+                onChange={setCollectRef}
+              />
+            ) : null}
           </div>
         ) : null}
       </InvDrawer>

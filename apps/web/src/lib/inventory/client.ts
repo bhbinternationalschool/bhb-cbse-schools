@@ -539,6 +539,8 @@ export const invApi = {
     amountPaise: number;
     mode?: InvTenderMode;
     reference?: string;
+    /** Which bank account received it — empty for cash. */
+    bankAccountId?: string;
     paidOn?: string;
   }) =>
     req<{ paidPaise: number; balancePaise: number; status: InvSaleStatus }>(
