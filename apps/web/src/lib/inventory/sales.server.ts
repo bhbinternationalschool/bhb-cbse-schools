@@ -355,7 +355,13 @@ export async function postSale(
       discountPct?: number;
       gstRate?: number;
     }[];
-    payments?: { amountPaise: number; mode?: InvTenderMode; reference?: string }[];
+    payments?: {
+      amountPaise: number;
+      mode?: InvTenderMode;
+      reference?: string;
+      /** Bank account that receives it — empty for cash. */
+      bankAccountId?: string;
+    }[];
   },
   actor: string,
   academicYearCode: string,
@@ -411,6 +417,7 @@ export async function postSale(
           amount_paise: int(p.amountPaise),
           mode: p.mode || "cash",
           reference: str(p.reference),
+          bank_account_id: str(p.bankAccountId),
         })),
     },
   });
@@ -924,6 +931,7 @@ export async function postHouseholdSale(
       amountPaise: number;
       mode: string;
       reference: string;
+      bankAccountId?: string;
       paidOn?: string;
     }[];
     /** Paper receipt-book number — one payment, so one number for all children. */
@@ -947,6 +955,7 @@ export async function postHouseholdSale(
         amount_paise: p.amountPaise,
         mode: p.mode,
         reference: p.reference,
+        bank_account_id: p.bankAccountId ?? "",
         // Collection date — falls back to the first sale's sale_date in SQL.
         paid_on: p.paidOn || "",
       })),

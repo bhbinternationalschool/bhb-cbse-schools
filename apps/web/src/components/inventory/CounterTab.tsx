@@ -15,11 +15,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { RefreshCw, Search, Trash2 } from "lucide-react";
-import { loadAccounts } from "@/lib/accountsStore";
-import type { AccountsState } from "@/lib/accountsTypes";
+import { useAccountsDesk } from "@/lib/useAccountsDesk";
 import {
   buildPaymentChannelGroups,
+  channelsForPaymentMode,
   decodePaymentChannel,
+  encodePaymentChannel,
+  paymentModeForTender,
 } from "@/lib/paymentChannels";
 import { Button } from "@/components/ui/button";
 import {
@@ -74,6 +76,8 @@ type TenderRow = {
   mode: InvTenderMode;
   amountInput: string;
   reference: string;
+  /** Which bank account receives it. Empty for cash. */
+  bankAccountId?: string;
   /** Set once the clerk edits the amount, so auto-defaulting stops. */
   touched?: boolean;
 };
@@ -231,6 +235,7 @@ function SellSection({
   onSold: () => void;
 }) {
   const saver = useSaver();
+  const accountsState = useAccountsDesk();
 
   const [buyerKind, setBuyerKind] = useState<InvBuyerKind>("student");
   const [student, setStudent] = useState<InvBuyerStudent | null>(null);
@@ -678,6 +683,7 @@ function SellSection({
                 amountPaise: inputToPaise(t.amountInput),
                 mode: t.mode,
                 reference: t.reference.trim(),
+                bankAccountId: t.bankAccountId ?? "",
                 paidOn: saleDate,
               })),
         manualReceiptNo: manualReceiptNo.trim() || undefined,
@@ -752,6 +758,7 @@ function SellSection({
                 amountPaise: inputToPaise(t.amountInput),
                 mode: t.mode,
                 reference: t.reference.trim(),
+                bankAccountId: t.bankAccountId ?? "",
               })),
       }),
     );
@@ -1402,6 +1409,59 @@ function SellSection({
                       ) : null}
                     </div>
 
+                    {row.mode !== "cash" ? (
+                      // Which account receives it. Without this the sale knows
+                      // the money came by UPI but not where it landed, so it
+                      // cannot be matched to a bank statement.
+                      (() => {
+                        const groups = channelsForPaymentMode(
+                          paymentModeForTender(row.mode),
+                          accountsState ?? undefined,
+                        );
+                        const options = groups.flatMap((g) => g.options);
+                        if (options.length === 0) {
+                          return (
+                            <p className="text-[11px] leading-snug text-[var(--danger)]">
+                              No bank account accepts{" "}
+                              {tenderLabel(row.mode)} — add one under Accounts →
+                              Masters → Banks, or this money cannot be traced.
+                            </p>
+                          );
+                        }
+                        return (
+                          <label className="block text-xs">
+                            <span className="mb-1 block text-[11px] font-medium text-[var(--muted)]">
+                              Into which account
+                            </span>
+                            <select
+                              className="field w-full"
+                              value={
+                                row.bankAccountId
+                                  ? encodePaymentChannel(
+                                      paymentModeForTender(row.mode),
+                                      row.bankAccountId,
+                                    )
+                                  : options[0]?.value
+                              }
+                              onChange={(e) =>
+                                patch({
+                                  bankAccountId: decodePaymentChannel(
+                                    e.target.value,
+                                  ).bankId,
+                                })
+                              }
+                            >
+                              {options.map((o) => (
+                                <option key={o.value} value={o.value}>
+                                  {o.label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        );
+                      })()
+                    ) : null}
+
                     <MoneyField
                       label={
                         tenders.length > 1
@@ -1646,42 +1706,7 @@ function SalesSection({
   const [collectChannel, setCollectChannel] = useState("cash");
   /** UTR / UPI ref / auth no. — required for anything that is not cash. */
   const [collectRef, setCollectRef] = useState("");
-  const [accountsState, setAccountsState] = useState<AccountsState | null>(
-    null,
-  );
-  // The bank list only exists in this browser after the accounts desk has been
-  // pulled, which used to happen only if someone opened Accounts (or Transport)
-  // first. A store machine that went straight to the counter saw cash and
-  // nothing else — and would have been told, wrongly, that no bank takes UPI.
-  // Same hydrate-then-re-read ladder Fee Take uses: hydration can return while
-  // the first caller's pull is still in flight, so one read can freeze an empty
-  // store into the dropdown.
-  useEffect(() => {
-    let live = true;
-    void (async () => {
-      try {
-        const { ensureAccountsHydrated } = await import(
-          "@/lib/accountsPersistence"
-        );
-        await ensureAccountsHydrated();
-      } catch {
-        // Offline or first load — fall through to whatever is cached locally.
-      }
-      if (live) setAccountsState(loadAccounts());
-      for (const delay of [1500, 3500, 8000]) {
-        await new Promise((r) => setTimeout(r, delay));
-        if (!live) return;
-        const next = loadAccounts();
-        if (next.bankAccounts.length > 0) {
-          setAccountsState(next);
-          break;
-        }
-      }
-    })();
-    return () => {
-      live = false;
-    };
-  }, []);
+  const accountsState = useAccountsDesk();
   const channelGroups = useMemo(
     () => buildPaymentChannelGroups(accountsState ?? undefined),
     [accountsState],

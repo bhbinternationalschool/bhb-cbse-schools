@@ -28,6 +28,13 @@ import {
   type RegistrationFeePayment,
 } from "@/lib/admissions";
 import { formatInr, TENDER_MODES, type TenderMode } from "@/lib/fees";
+import {
+  channelsForPaymentMode,
+  decodePaymentChannel,
+  encodePaymentChannel,
+  paymentModeForTender,
+} from "@/lib/paymentChannels";
+import { useAccountsDesk } from "@/lib/useAccountsDesk";
 import { type MastersState } from "@/lib/masters";
 import { type SisState, type SisStudent } from "@/lib/sis";
 import { useDemoSession } from "@/components/shell/SessionContext";
