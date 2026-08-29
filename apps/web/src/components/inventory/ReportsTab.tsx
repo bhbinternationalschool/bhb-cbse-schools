@@ -9,8 +9,12 @@
  * disagree with the stock card.
  */
 
-import { useState } from "react";
-import { Download, RefreshCw } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Download, Printer, RefreshCw } from "lucide-react";
+import {
+  printStoreDayBook,
+  StoreDayBookSheet,
+} from "@/components/inventory/StoreDayBookSheet";
 import { Button } from "@/components/ui/button";
 import {
   ErpTable,
@@ -62,6 +66,19 @@ function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+/**
+ * Quick ranges the counter actually asks for. Week runs Monday to today,
+ * which is how the school talks about "this week" — not the JS default of
+ * Sunday, and not a rolling seven days, because a day book is read against
+ * the calendar it was written in.
+ */
+function weekStart(): string {
+  const d = new Date();
+  const dow = (d.getDay() + 6) % 7; // Mon = 0
+  d.setDate(d.getDate() - dow);
+  return d.toISOString().slice(0, 10);
+}
+
 export function ReportsTab({ boot }: { boot: InvBootstrap }) {
   const [report, setReport] = useState<ReportId>("dashboard");
   const [from, setFrom] = useState(monthStart());
@@ -107,6 +124,34 @@ export function ReportsTab({ boot }: { boot: InvBootstrap }) {
               onChange={(e) => setTo(e.target.value)}
             />
           </label>
+          <div className="flex flex-wrap gap-1">
+            {(
+              [
+                ["Today", today(), today()],
+                ["This week", weekStart(), today()],
+                ["This month", monthStart(), today()],
+              ] as const
+            ).map(([label, f, t]) => {
+              const active = from === f && to === t;
+              return (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => {
+                    setFrom(f);
+                    setTo(t);
+                  }}
+                  className={
+                    active
+                      ? "rounded-md bg-foreground px-2.5 py-1.5 text-xs font-semibold text-background"
+                      : "rounded-md border px-2.5 py-1.5 text-xs hover:bg-muted"
+                  }
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
         </div>
       ) : null}
 
@@ -636,7 +681,31 @@ function MarginReport({ from, to }: { from: string; to: string }) {
 
 function DayBook({ from, to }: { from: string; to: string }) {
   const r = useAsync(() => invApi.daybookReport(from, to), [from, to]);
-  const rows = r.data?.rows ?? [];
+  const all = r.data?.rows ?? [];
+  /**
+   * How the money came in. The report already carries the tender labels per
+   * sale as text, so "show me only the UPI ones" is a filter over that rather
+   * than another round trip — and it matches what the counter is reconciling:
+   * the cash drawer against the cash rows, the bank against the rest.
+   */
+  const [tender, setTender] = useState("");
+  const rows = useMemo(
+    () =>
+      tender
+        ? all.filter((x) =>
+            x.tenders.toLowerCase().includes(tender.toLowerCase()),
+          )
+        : all,
+    [all, tender],
+  );
+  const shown = {
+    billed: rows
+      .filter((x) => x.status !== "void")
+      .reduce((n, x) => n + x.totalPaise, 0),
+    collected: rows
+      .filter((x) => x.status !== "void")
+      .reduce((n, x) => n + x.paidPaise, 0),
+  };
 
   return (
     <ReportShell
@@ -678,7 +747,10 @@ function DayBook({ from, to }: { from: string; to: string }) {
       summary={
         r.data ? (
           <>
-            <StatTile label="Billed" value={formatPaise(r.data.totals.billed)} />
+            <StatTile
+              label={tender ? `Billed · ${tender}` : "Billed"}
+              value={formatPaise(tender ? shown.billed : r.data.totals.billed)}
+            />
             <StatTile
               label="Collected"
               value={formatPaise(r.data.totals.collected)}
@@ -698,6 +770,45 @@ function DayBook({ from, to }: { from: string; to: string }) {
         ) : null
       }
     >
+      <div className="mb-2 flex flex-wrap items-center gap-2 print:hidden">
+        <span className="text-xs text-muted-foreground">Paid by</span>
+        {["", "Cash", "UPI", "Card", "Cheque", "Bank"].map((t) => (
+          <button
+            key={t || "all"}
+            type="button"
+            onClick={() => setTender(t)}
+            className={
+              tender === t
+                ? "rounded-md bg-foreground px-2.5 py-1 text-xs font-semibold text-background"
+                : "rounded-md border px-2.5 py-1 text-xs hover:bg-muted"
+            }
+          >
+            {t || "All"}
+          </button>
+        ))}
+        <span className="text-xs text-muted-foreground">
+          {rows.length} of {all.length} sales
+          {tender ? ` · collected ${formatPaise(shown.collected)}` : ""}
+        </span>
+        <Button
+          size="sm"
+          variant="outline"
+          className="ml-auto"
+          onClick={() => printStoreDayBook()}
+        >
+          <Printer className="mr-1 size-3.5" /> Print
+        </Button>
+      </div>
+
+      <StoreDayBookSheet
+        from={from}
+        to={to}
+        tender={tender}
+        rows={rows}
+        billedPaise={shown.billed}
+        collectedPaise={shown.collected}
+      />
+
       <ErpTable minWidth="min-w-[900px]">
         <ErpTableHead>
           <tr>

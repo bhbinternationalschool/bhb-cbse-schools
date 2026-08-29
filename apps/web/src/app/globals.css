@@ -1376,6 +1376,47 @@ h3,
 
 /* Inter-school event certificates — print one per page, nothing else. */
 @media print {
+  /* Store sales day book — the storekeeper's handover sheet. */
+  body.printing-store-daybook * {
+    visibility: hidden !important;
+  }
+  body.printing-store-daybook .store-daybook-sheet.print-target,
+  body.printing-store-daybook .store-daybook-sheet.print-target * {
+    visibility: visible !important;
+  }
+  body.printing-store-daybook .store-daybook-sheet.print-target {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+  }
+
+  /* Counter day close — one A4 to sign and file. */
+  body.printing-day-close * {
+    visibility: hidden !important;
+  }
+  body.printing-day-close .day-close-sheet.print-target,
+  body.printing-day-close .day-close-sheet.print-target * {
+    visibility: visible !important;
+  }
+  body.printing-day-close .day-close-sheet.print-target {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+  }
+  body.printing-day-close .print-hide {
+    display: none !important;
+  }
+
   body.printing-evt-certs * {
     visibility: hidden !important;
   }
