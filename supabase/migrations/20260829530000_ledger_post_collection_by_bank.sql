@@ -88,3 +88,15 @@ begin
   return v_result->>'voucher_no';
 end;
 $function$;
+
+-- Note for anyone reading the books later, not executable here:
+--
+-- The balance that had accumulated on 1010 before this change (₹51,084.94 net
+-- — ₹3,06,784.94 of store collections less ₹2,50,000 of Peerson Books vendor
+-- payments and ₹5,700 of reversals) was moved to 1012 by a single journal
+-- voucher, JV/FY2026-27/00001, on 2026-08-29. The vendor payments were
+-- confirmed by the Director as having left UBI-Main.
+--
+-- It is a reclassification, not a correction: no earlier voucher was altered
+-- or reversed, which is why 1010 shows equal debits and credits and a nil
+-- balance rather than an empty history.
