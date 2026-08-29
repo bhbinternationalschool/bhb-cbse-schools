@@ -2151,6 +2151,29 @@ function CollectPanel({
   const modeMeta = TENDER_MODES.find((m) => m.value === composerMode);
   const hasUncleared = tenderLines.some((t) => t.mode === "cheque");
   const siblingCount = householdBundle.length;
+
+  /**
+   * Children who are ticked but NOT on screen.
+   *
+   * Ticks are family-wide while the fee list shows one child at a time, so a
+   * sibling's ticks keep counting from behind a collapsed card. The office
+   * then types the visible child's amount, it does not match the family total,
+   * and the collect button sits there disabled saying "Still need ..." — which
+   * reads as "the button is broken for this child". Only families with more
+   * than one child can hit it, which is why it looks student-specific.
+   */
+  const offScreenTicked = useMemo(() => {
+    if (siblingCount <= 1) return [];
+    return householdBundle
+      .filter((row) => !activeStudentIds.has(row.student.id))
+      .map((row) => ({
+        student: row.student,
+        paise: row.dues
+          .filter((d) => selectedKeys.has(d.dueKey))
+          .reduce((sum, d) => sum + d.balancePaise, 0),
+      }))
+      .filter((r) => r.paise > 0);
+  }, [householdBundle, activeStudentIds, selectedKeys, siblingCount]);
   const allHouseholdDues = householdBundle.flatMap((r) => r.dues);
 
   const feeSummary = useMemo(() => {
@@ -2705,6 +2728,30 @@ function CollectPanel({
                       </span>
                     )}
                   </div>
+                  {offScreenTicked.length > 0 ? (
+                    <div className="mt-1.5 rounded-lg bg-[rgba(197,160,40,0.22)] px-2 py-1.5 text-[11px] leading-snug text-white">
+                      Includes{" "}
+                      {offScreenTicked.map((r, i) => (
+                        <span key={r.student.id}>
+                          {i > 0 ? " · " : ""}
+                          <strong>{formatInr(r.paise)}</strong> ticked for{" "}
+                          {r.student.fullName}
+                        </span>
+                      ))}{" "}
+                      — not on screen.
+                      <button
+                        type="button"
+                        className="ml-1 rounded bg-white/90 px-1.5 py-0.5 text-[10px] font-bold text-[#1a2740] hover:bg-white"
+                        onClick={() =>
+                          offScreenTicked.forEach((r) =>
+                            onClearStudent(r.student.id),
+                          )
+                        }
+                      >
+                        Untick them
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
                 <label className="block text-xs">
                   <span className="mb-1 block text-xs font-medium text-white/75">
