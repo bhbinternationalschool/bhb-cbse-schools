@@ -1175,7 +1175,66 @@ export function computeTransportPeriodDues(
     }
   }
 
-  return out.sort((a, b) => a.dueOn.localeCompare(b.dueOn));
+  // One month, one transport charge. Overlapping assignments for the same
+  // student are a data fault, not a reason to bill a family twice: it happens
+  // whenever a re-assignment is back-dated to before the assignment it
+  // replaces, because assignTransport's close-the-previous-row step declines
+  // to set an effectiveTo earlier than that row's own effectiveFrom and leaves
+  // it open. Twelve riders were double-billed for Apr-Aug 2026 that way.
+  //
+  // The winner is the most recently created assignment covering the period —
+  // the latest decision the office made about that rider. Ties fall back to
+  // the assignment id so the choice is stable between renders rather than
+  // depending on array order.
+  const byPeriod = new Map<string, TransportPeriodDue>();
+  const createdAt = new Map(
+    assignments.map((a) => [a.id, a.createdAt ?? ""] as const),
+  );
+  for (const due of out) {
+    const prev = byPeriod.get(due.periodKey);
+    if (!prev) {
+      byPeriod.set(due.periodKey, due);
+      continue;
+    }
+    const a = createdAt.get(due.assignmentId) ?? "";
+    const b = createdAt.get(prev.assignmentId) ?? "";
+    const newer =
+      a !== b ? a > b : due.assignmentId > prev.assignmentId;
+    if (newer) byPeriod.set(due.periodKey, due);
+  }
+
+  return [...byPeriod.values()].sort((a, b) => a.dueOn.localeCompare(b.dueOn));
+}
+
+/**
+ * Assignments for a student that overlap each other — a data fault the roster
+ * should surface. Billing already de-duplicates (see above), so this is for
+ * showing the office what needs correcting, not for protecting the invoice.
+ */
+export function overlappingAssignments(
+  studentId: string,
+  options?: { academicYearCode?: string; state?: TransportState },
+): TransportAssignment[][] {
+  const s = options?.state ?? loadTransport();
+  const ay = options?.academicYearCode ?? DEFAULT_AY;
+  const rows = s.assignments.filter(
+    (a) => a.studentId === studentId && a.academicYearCode === ay,
+  );
+  const END = "9999-12-31";
+  const clashes: TransportAssignment[][] = [];
+  for (let i = 0; i < rows.length; i += 1) {
+    for (let j = i + 1; j < rows.length; j += 1) {
+      const x = rows[i];
+      const y = rows[j];
+      if (
+        x.effectiveFrom <= (y.effectiveTo || END) &&
+        y.effectiveFrom <= (x.effectiveTo || END)
+      ) {
+        clashes.push([x, y]);
+      }
+    }
+  }
+  return clashes;
 }
 
 /* ─── Fee policy ───────────────────────────────────────────── */
@@ -1355,6 +1414,12 @@ export function assignStudentToRoute(input: {
     };
   }
 
+  // Close whatever the rider was on before. The end date is the day before the
+  // new assignment starts — but never earlier than the old row's own start, or
+  // the row would end before it began. That case (a re-assignment back-dated
+  // to on/before the row it replaces) used to leave the old row OPEN, so both
+  // billed and the family was charged twice a month; it is now closed to a
+  // zero-length row, which covers no period and bills nothing.
   const nextAssignments = state.assignments.map((a) => {
     if (
       a.studentId === input.studentId &&
@@ -1364,9 +1429,7 @@ export function assignStudentToRoute(input: {
       const dayBefore = new Date(`${input.effectiveFrom}T12:00:00`);
       dayBefore.setDate(dayBefore.getDate() - 1);
       const end = dayBefore.toISOString().slice(0, 10);
-      if (end >= a.effectiveFrom) {
-        return { ...a, effectiveTo: end };
-      }
+      return { ...a, effectiveTo: end >= a.effectiveFrom ? end : a.effectiveFrom };
     }
     return a;
   });

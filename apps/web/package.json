@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
+    "test:transport-overlap-billing": "npx tsx src/lib/transportOverlapBilling.selftest.ts",
     "test:playbook": "npx tsx src/lib/playbook.selftest.ts",
     "test:report-remark-ai": "npx tsx src/lib/reportRemarkAi.selftest.ts",
     "test:lesson-plan-ai": "npx tsx src/lib/lessonPlanAi.selftest.ts",
