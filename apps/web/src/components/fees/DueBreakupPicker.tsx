@@ -36,6 +36,8 @@ export function DueBreakupPicker({
   recurringEligible,
   recurringChosen,
   onToggleRecurring,
+  discountOnlyKeys,
+  onToggleDiscountOnly,
 }: {
   dues: FeeDueLine[];
   selectedKeys: Set<string>;
@@ -50,6 +52,9 @@ export function DueBreakupPicker({
   /** Dues the clerk has chosen to make recurring. */
   recurringChosen?: Set<string>;
   onToggleRecurring?: (dueKey: string, on: boolean) => void;
+  /** Lines discounted but not collected today. */
+  discountOnlyKeys?: Set<string>;
+  onToggleDiscountOnly?: (dueKey: string, on: boolean) => void;
 }) {
   const groups = useMemo(() => groupDuesByMonth(dues), [dues]);
   const currentMonthKey = today.slice(0, 7);
@@ -566,6 +571,24 @@ export function DueBreakupPicker({
                               now, before the money is taken, and it starts
                               OFF: a discount is for the month in hand unless
                               someone says otherwise. */}
+                          {/* Discount this head without taking money for it
+                              today — ₹100 off transport while only tuition is
+                              collected. The line keeps its discount and stays
+                              off the receipt and out of the amount due. */}
+                          {discountPaise > 0 && onToggleDiscountOnly ? (
+                            <label className="flex items-center gap-1.5 text-sm text-[var(--brand-deep)]">
+                              <input
+                                type="checkbox"
+                                checked={discountOnlyKeys?.has(d.dueKey) ?? false}
+                                onChange={(e) =>
+                                  onToggleDiscountOnly(d.dueKey, e.target.checked)
+                                }
+                              />
+                              {discountOnlyKeys?.has(d.dueKey)
+                                ? "Discount only — not collecting this today"
+                                : "Collecting this today"}
+                            </label>
+                          ) : null}
                           {discountPaise > 0 &&
                           recurringEligible?.has(d.dueKey) &&
                           onToggleRecurring ? (

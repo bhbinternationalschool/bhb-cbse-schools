@@ -275,6 +275,21 @@ export function FeeTakeWorkspace() {
   const [recurringDueKeys, setRecurringDueKeys] = useState<Set<string>>(
     new Set(),
   );
+  /**
+   * Lines ticked to be DISCOUNTED but not collected today.
+   *
+   * The counter often settles one head while agreeing a reduction on another
+   * the parent is not paying for yet — ₹100 off August transport while only
+   * tuition is taken. Without this a discount could only go on a head being
+   * collected, so the clerk had to either take money they were not given or
+   * leave Fee Take and edit Masters.
+   *
+   * These lines contribute their discount and nothing else: they are out of
+   * the collect total, out of the allocation, and off the receipt.
+   */
+  const [discountOnlyKeys, setDiscountOnlyKeys] = useState<Set<string>>(
+    new Set(),
+  );
   const [futureConcessionPrompt, setFutureConcessionPrompt] = useState<{
     candidates: FutureConcessionCandidate[];
     selected: Set<string>;
@@ -690,7 +705,10 @@ export function FeeTakeWorkspace() {
     [selectedKeys],
   );
 
-  const collectTotal = selectedDues.reduce((s, d) => s + d.balancePaise, 0);
+  const collectTotal = selectedDues.reduce(
+    (s, d) => (discountOnlyKeys.has(d.dueKey) ? s : s + d.balancePaise),
+    0,
+  );
 
   const discountSlices = useMemo(
     () => buildPerLineDiscountSlices(selectedDues, lineDiscountRupees),
@@ -1223,7 +1241,9 @@ export function FeeTakeWorkspace() {
     const nameById = new Map(
       sis.students.map((s) => [s.id, s.fullName] as const),
     );
-    const duesForCollect = freshSelectedDues();
+    const duesForCollect = freshSelectedDues().filter(
+      (d) => !discountOnlyKeys.has(d.dueKey),
+    );
     const alloc = allocateCollectionToDues(
       duesForCollect,
       tenderSum,
@@ -1299,6 +1319,7 @@ export function FeeTakeWorkspace() {
     setSelectedKeys(new Set());
     setCollectAmountRupees("");
     setRecurringDueKeys(new Set());
+    setDiscountOnlyKeys(new Set());
     resetPaymentFields();
     refresh();
     // The receipt just posted into the accounts desk — re-read it so the
@@ -1854,6 +1875,15 @@ export function FeeTakeWorkspace() {
               lineDiscountRupees={lineDiscountRupees}
               recurringEligible={recurringEligible}
               recurringChosen={recurringDueKeys}
+              discountOnlyKeys={discountOnlyKeys}
+              onToggleDiscountOnly={(dueKey, on) =>
+                setDiscountOnlyKeys((prev) => {
+                  const next = new Set(prev);
+                  if (on) next.add(dueKey);
+                  else next.delete(dueKey);
+                  return next;
+                })
+              }
               onToggleRecurring={(dueKey, on) =>
                 setRecurringDueKeys((prev) => {
                   const next = new Set(prev);
@@ -2131,6 +2161,8 @@ function CollectPanel({
   recurringEligible,
   recurringChosen,
   onToggleRecurring,
+  discountOnlyKeys,
+  onToggleDiscountOnly,
   counterDiscountReason,
   onCounterDiscountReason,
   collectTarget,
@@ -2198,6 +2230,8 @@ function CollectPanel({
   recurringEligible: Set<string>;
   recurringChosen: Set<string>;
   onToggleRecurring: (dueKey: string, on: boolean) => void;
+  discountOnlyKeys: Set<string>;
+  onToggleDiscountOnly: (dueKey: string, on: boolean) => void;
   counterDiscountReason: string;
   onCounterDiscountReason: (v: string) => void;
   collectTarget: number;
@@ -2763,6 +2797,8 @@ function CollectPanel({
                         recurringEligible={recurringEligible}
                         recurringChosen={recurringChosen}
                         onToggleRecurring={onToggleRecurring}
+                        discountOnlyKeys={discountOnlyKeys}
+                        onToggleDiscountOnly={onToggleDiscountOnly}
                         onLineDiscount={onLineDiscount}
                       />
                     )}

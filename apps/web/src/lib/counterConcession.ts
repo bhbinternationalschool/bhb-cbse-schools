@@ -385,3 +385,117 @@ export function applyFutureConcessionsFromCounter(input: {
 
   return { ok: true, granted, skipped, pending, ruleLabels, blocked };
 }
+
+/**
+ * Change a standing discount from the counter, taking effect this month.
+ *
+ * The office reads a discount on the head in Fee Take and wants to change it
+ * there, not go hunting in Masters. What must NOT happen is a silent rewrite
+ * of history: months already billed and collected at the old rate stay at the
+ * old rate, or every paid receipt in the session quietly disagrees with the
+ * money that was taken.
+ *
+ * So the old grant is ENDED the day before the new rate starts and a new one
+ * begins — two grants, each true for its own months, which is also what makes
+ * the change legible later. Nothing is edited in place.
+ *
+ * `fromDueOn` is the due date of the month the change takes effect from, which
+ * the caller reads off the line the clerk is looking at.
+ */
+export function changeStandingDiscount(input: {
+  studentId: string;
+  studentName: string;
+  feeHeadId: string;
+  feeHeadName: string;
+  newDiscountPaise: number;
+  fromDueOn: string;
+  academicYearCode: string;
+  reason: string;
+  by: string;
+}):
+  | { ok: true; endedGrantId: string | null; newGrantId: string | null }
+  | { ok: false; error: string } {
+  if (!input.fromDueOn) {
+    return { ok: false, error: "No month to start the change from" };
+  }
+  if (input.newDiscountPaise < 0) {
+    return { ok: false, error: "A discount cannot be negative" };
+  }
+
+  let masters = loadMasters();
+  const grants = [...(masters.concessionGrants ?? [])];
+
+  // The grant currently standing on this head, whatever created it.
+  const currentIndex = grants.findIndex((g) => {
+    if (g.studentId !== input.studentId) return false;
+    if (g.status === "rejected") return false;
+    const rule = (masters.concessions ?? []).find((c) => c.id === g.concessionId);
+    if (!rule || !rule.isActive || rule.kind === "rte") return false;
+    return (
+      rule.feeHeadIds.length === 0 || rule.feeHeadIds.includes(input.feeHeadId)
+    );
+  });
+
+  // End it the day before the new rate starts, so the months it covered keep
+  // covering them.
+  let endedGrantId: string | null = null;
+  if (currentIndex >= 0) {
+    const dayBefore = new Date(`${input.fromDueOn}T12:00:00`);
+    dayBefore.setDate(dayBefore.getDate() - 1);
+    const endOn = dayBefore.toISOString().slice(0, 10);
+    const current = grants[currentIndex]!;
+    if (endOn < current.effectiveFrom) {
+      // The change starts before the grant did: there is no history to keep,
+      // so retire it outright rather than leaving a backwards date behind.
+      grants[currentIndex] = {
+        ...current,
+        status: "rejected",
+        reason: `${current.reason} · replaced from ${input.fromDueOn} by ${input.by}`,
+      };
+    } else {
+      grants[currentIndex] = {
+        ...current,
+        effectiveTo: endOn,
+        reason: `${current.reason} · ended ${endOn}, replaced from ${input.fromDueOn} by ${input.by}`,
+      };
+    }
+    endedGrantId = current.id;
+  }
+
+  // Zero means "remove the discount" — the old grant is closed and nothing
+  // replaces it.
+  if (input.newDiscountPaise === 0) {
+    saveMasters({ ...masters, concessionGrants: grants });
+    return { ok: true, endedGrantId, newGrantId: null };
+  }
+
+  const head = masters.feeHeads.find((h) => h.id === input.feeHeadId);
+  const ensured = ensureCounterConcessionRule(masters, {
+    academicYearCode: input.academicYearCode,
+    feeHeadId: input.feeHeadId,
+    feeHeadCode: head?.code ?? input.feeHeadName,
+    feeHeadName: input.feeHeadName,
+    discountPaise: input.newDiscountPaise,
+    reason: input.reason,
+  });
+  masters = ensured.state;
+
+  const row: ConcessionGrant = {
+    id: newId("cg"),
+    concessionId: ensured.rule.id,
+    studentId: input.studentId,
+    status: "approved",
+    reason:
+      `Fee Take · discount changed to ${formatInr(input.newDiscountPaise)} ` +
+      `on ${input.feeHeadName} from ${input.fromDueOn} by ${input.by}` +
+      (input.reason ? ` · ${input.reason}` : ""),
+    effectiveFrom: input.fromDueOn,
+    effectiveTo: null,
+    createdAt: new Date().toISOString(),
+    siblingChildNo: null,
+  };
+  grants.push(row);
+
+  saveMasters({ ...masters, concessionGrants: grants });
+  return { ok: true, endedGrantId, newGrantId: row.id };
+}
