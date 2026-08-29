@@ -49,59 +49,43 @@ fi
 
 gcloud config set project "$PROJECT_ID" >/dev/null
 
+# create_job NAME SCHEDULE URI [TZ] [DEADLINE] [START_STATE]
+#
+# TZ defaults to Asia/Kolkata: every schedule here is expressed in school time,
+# and a job left on UTC silently runs 5h30m out when its schedule gains an
+# hour-of-day restriction. DEADLINE used to be implied by whether a timezone
+# was passed, which coupled two unrelated things — a */5 job that gained a
+# timezone also jumped to a 300s deadline, long enough to overlap its own next
+# tick. It is now explicit and defaults to 120s.
 create_job() {
   local name="$1"
   local schedule="$2"
   local uri="$3"
-  local tz="${4:-}"
+  local tz="${4:-Asia/Kolkata}"
+  local deadline="${5:-120s}"
   # "paused" => pause the job right after CREATING it. Deliberately not applied
   # on update: if someone has resumed the job on purpose, re-running this script
   # must not switch it back off.
-  local start_state="${5:-}"
+  local start_state="${6:-}"
+
+  local -a flags=(
+    --location="$REGION"
+    --schedule="$schedule"
+    --time-zone="$tz"
+    --uri="$uri"
+    --http-method=POST
+    --attempt-deadline="$deadline"
+    --quiet
+  )
+
   if gcloud scheduler jobs describe "$name" --location="$REGION" >/dev/null 2>&1; then
     echo "Updating ${name}..."
-    if [[ -n "$tz" ]]; then
-      gcloud scheduler jobs update http "$name" \
-        --location="$REGION" \
-        --schedule="$schedule" \
-        --time-zone="$tz" \
-        --uri="$uri" \
-        --http-method=POST \
-        --update-headers="x-cron-secret=${CRON_SECRET}" \
-        --attempt-deadline=300s \
-        --quiet
-    else
-      gcloud scheduler jobs update http "$name" \
-        --location="$REGION" \
-        --schedule="$schedule" \
-        --uri="$uri" \
-        --http-method=POST \
-        --update-headers="x-cron-secret=${CRON_SECRET}" \
-        --attempt-deadline=120s \
-        --quiet
-    fi
+    gcloud scheduler jobs update http "$name" \
+      "${flags[@]}" --update-headers="x-cron-secret=${CRON_SECRET}"
   else
     echo "Creating ${name}..."
-    if [[ -n "$tz" ]]; then
-      gcloud scheduler jobs create http "$name" \
-        --location="$REGION" \
-        --schedule="$schedule" \
-        --time-zone="$tz" \
-        --uri="$uri" \
-        --http-method=POST \
-        --headers="x-cron-secret=${CRON_SECRET}" \
-        --attempt-deadline=300s \
-        --quiet
-    else
-      gcloud scheduler jobs create http "$name" \
-        --location="$REGION" \
-        --schedule="$schedule" \
-        --uri="$uri" \
-        --http-method=POST \
-        --headers="x-cron-secret=${CRON_SECRET}" \
-        --attempt-deadline=120s \
-        --quiet
-    fi
+    gcloud scheduler jobs create http "$name" \
+      "${flags[@]}" --headers="x-cron-secret=${CRON_SECRET}"
     if [[ "$start_state" == "paused" ]]; then
       echo "  ...pausing ${name} (feature is off; resume when enabling it)"
       gcloud scheduler jobs pause "$name" --location="$REGION" --quiet
@@ -110,21 +94,23 @@ create_job() {
 }
 
 create_job "bhb-comms-scheduled-publish" "*/5 * * * *" \
-  "${APP_URL}/api/comms/scheduled-publish/tick"
+  "${APP_URL}/api/comms/scheduled-publish/tick" \
+  "Asia/Kolkata" "120s"
 
 create_job "bhb-wa-automation-tick" "*/15 * * * *" \
-  "${APP_URL}/api/wa/automation/tick"
+  "${APP_URL}/api/wa/automation/tick" \
+  "Asia/Kolkata" "120s"
 
 create_job "bhb-bigquery-nightly-sync" "0 2 * * *" \
   "${APP_URL}/api/analytics/bigquery-sync/tick" \
-  "Asia/Kolkata"
+  "Asia/Kolkata" "300s"
 
 # Birthday greetings: the tick sends once the IST clock passes the hour set in
 # Students → Birthdays (and auto-send is on); it is idempotent, so hourly is safe
 # and also retries quiet-hours deferrals.
 create_job "bhb-birthday-tick" "5 * * * *" \
   "${APP_URL}/api/birthday/tick" \
-  "Asia/Kolkata"
+  "Asia/Kolkata" "300s"
 
 # Staff GPS presence: evaluates geofence/staleness and alerts on state changes.
 #
@@ -138,8 +124,7 @@ create_job "bhb-birthday-tick" "5 * * * *" \
 # day, every day, which is 288 ticks for a 6.5-hour feature.
 create_job "bhb-staff-geo-tick" "*/5 7-15 * * 1-6" \
   "${APP_URL}/api/staff-geo/tick" \
-  "Asia/Kolkata" \
-  "paused"
+  "Asia/Kolkata" "300s" "paused"
 
 echo ""
 echo "Done. Jobs in $REGION:"
