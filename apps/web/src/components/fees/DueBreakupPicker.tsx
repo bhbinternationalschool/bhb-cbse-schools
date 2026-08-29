@@ -38,6 +38,7 @@ export function DueBreakupPicker({
   onToggleRecurring,
   discountOnlyKeys,
   onToggleDiscountOnly,
+  onChangeHeadDiscount,
 }: {
   dues: FeeDueLine[];
   selectedKeys: Set<string>;
@@ -55,12 +56,17 @@ export function DueBreakupPicker({
   /** Lines discounted but not collected today. */
   discountOnlyKeys?: Set<string>;
   onToggleDiscountOnly?: (dueKey: string, on: boolean) => void;
+  /** Change the standing Masters discount on this head, from this month on. */
+  onChangeHeadDiscount?: (due: FeeDueLine, rupees: string) => void;
 }) {
   const groups = useMemo(() => groupDuesByMonth(dues), [dues]);
   const currentMonthKey = today.slice(0, 7);
   // Which lines take their discount as a percentage; the % typed per line.
   // The pipeline stays rupees-only — % just computes them from the balance.
   const [pctMode, setPctMode] = useState<Set<string>>(new Set());
+  /** Which head's standing discount is being edited, and to what. */
+  const [editingHead, setEditingHead] = useState<string | null>(null);
+  const [editingValue, setEditingValue] = useState("");
   const [pctValue, setPctValue] = useState<Record<string, string>>({});
   const [expanded, setExpanded] = useState<Set<string>>(
     () => new Set([currentMonthKey]),
@@ -440,6 +446,76 @@ export function DueBreakupPicker({
                                   {d.concessionPaise
                                     ? ` − ${formatInr(d.concessionPaise)} = ${formatInr(d.billedPaise - d.concessionPaise)}`
                                     : ""}
+                                </li>
+                              ) : null}
+                              {/* Change the standing rate without leaving the
+                                  counter. Only offered where a Masters grant
+                                  is what is discounting the head — a counter
+                                  waiver has no rule to change, and RTE is not
+                                  the counter's to edit. */}
+                              {onChangeHeadDiscount &&
+                              d.concessionDetails?.some((c) => c.grantId) ? (
+                                <li>
+                                  {editingHead === d.dueKey ? (
+                                    <span className="flex flex-wrap items-center gap-1.5">
+                                      <span className="text-[var(--muted)]">
+                                        New amount ₹
+                                      </span>
+                                      <input
+                                        autoFocus
+                                        className="w-20 rounded border border-[var(--border)] px-1.5 py-0.5 text-sm"
+                                        value={editingValue}
+                                        onChange={(e) =>
+                                          setEditingValue(e.target.value)
+                                        }
+                                        placeholder="0"
+                                      />
+                                      <button
+                                        type="button"
+                                        className="rounded bg-[var(--brand-deep)] px-2 py-0.5 text-xs font-bold text-white"
+                                        onClick={() => {
+                                          onChangeHeadDiscount(d, editingValue);
+                                          setEditingHead(null);
+                                          setEditingValue("");
+                                        }}
+                                      >
+                                        Save
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="rounded border px-2 py-0.5 text-xs"
+                                        onClick={() => setEditingHead(null)}
+                                      >
+                                        Cancel
+                                      </button>
+                                      <span className="text-[11px] text-[var(--muted)]">
+                                        applies from this month · 0 removes it ·
+                                        earlier months keep what they were billed
+                                      </span>
+                                    </span>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className="text-xs font-semibold text-[var(--brand-mid)] underline"
+                                      onClick={() => {
+                                        setEditingHead(d.dueKey);
+                                        setEditingValue(
+                                          String(
+                                            Math.round(
+                                              (d.concessionDetails ?? [])
+                                                .filter((c) => c.grantId)
+                                                .reduce(
+                                                  (n, c) => n + c.amountPaise,
+                                                  0,
+                                                ) / 100,
+                                            ),
+                                          ),
+                                        );
+                                      }}
+                                    >
+                                      Change this discount
+                                    </button>
+                                  )}
                                 </li>
                               ) : null}
                             </ul>

@@ -425,41 +425,54 @@ export function changeStandingDiscount(input: {
   let masters = loadMasters();
   const grants = [...(masters.concessionGrants ?? [])];
 
-  // The grant currently standing on this head, whatever created it.
-  const currentIndex = grants.findIndex((g) => {
-    if (g.studentId !== input.studentId) return false;
-    if (g.status === "rejected") return false;
-    const rule = (masters.concessions ?? []).find((c) => c.id === g.concessionId);
-    if (!rule || !rule.isActive || rule.kind === "rte") return false;
-    return (
-      rule.feeHeadIds.length === 0 || rule.feeHeadIds.includes(input.feeHeadId)
-    );
-  });
+  // Every grant still in force on or after the month we are changing from —
+  // not merely the first one found.
+  //
+  // Taking only the first is how a second change stacked: after ₹150 was
+  // changed to ₹200, the ₹150 row (already ended) still matched the search,
+  // so it was "ended" a second time while the live ₹200 was left untouched.
+  // Changing back to ₹150 then left ₹200 AND ₹150 both running from the same
+  // month — ₹350 off a head that should have had ₹150.
+  //
+  // A grant already ended before this month is history and must not be
+  // touched; the months it covered keep the rate they were billed at.
+  const dayBefore = new Date(`${input.fromDueOn}T12:00:00`);
+  dayBefore.setDate(dayBefore.getDate() - 1);
+  const endOn = dayBefore.toISOString().slice(0, 10);
 
-  // End it the day before the new rate starts, so the months it covered keep
-  // covering them.
+  const inForce = grants
+    .map((g, i) => ({ g, i }))
+    .filter(({ g }) => {
+      if (g.studentId !== input.studentId) return false;
+      if (g.status === "rejected") return false;
+      if (g.effectiveTo != null && g.effectiveTo < input.fromDueOn) return false;
+      const rule = (masters.concessions ?? []).find(
+        (c) => c.id === g.concessionId,
+      );
+      if (!rule || !rule.isActive || rule.kind === "rte") return false;
+      return (
+        rule.feeHeadIds.length === 0 || rule.feeHeadIds.includes(input.feeHeadId)
+      );
+    });
+
   let endedGrantId: string | null = null;
-  if (currentIndex >= 0) {
-    const dayBefore = new Date(`${input.fromDueOn}T12:00:00`);
-    dayBefore.setDate(dayBefore.getDate() - 1);
-    const endOn = dayBefore.toISOString().slice(0, 10);
-    const current = grants[currentIndex]!;
-    if (endOn < current.effectiveFrom) {
-      // The change starts before the grant did: there is no history to keep,
-      // so retire it outright rather than leaving a backwards date behind.
-      grants[currentIndex] = {
-        ...current,
+  for (const { g, i } of inForce) {
+    if (endOn < g.effectiveFrom) {
+      // The change starts before this grant did: it never covered a month
+      // that survives, so retire it rather than leave a backwards date.
+      grants[i] = {
+        ...g,
         status: "rejected",
-        reason: `${current.reason} · replaced from ${input.fromDueOn} by ${input.by}`,
+        reason: `${g.reason} · replaced from ${input.fromDueOn} by ${input.by}`,
       };
     } else {
-      grants[currentIndex] = {
-        ...current,
+      grants[i] = {
+        ...g,
         effectiveTo: endOn,
-        reason: `${current.reason} · ended ${endOn}, replaced from ${input.fromDueOn} by ${input.by}`,
+        reason: `${g.reason} · ended ${endOn}, replaced from ${input.fromDueOn} by ${input.by}`,
       };
     }
-    endedGrantId = current.id;
+    endedGrantId = g.id;
   }
 
   // Zero means "remove the discount" — the old grant is closed and nothing

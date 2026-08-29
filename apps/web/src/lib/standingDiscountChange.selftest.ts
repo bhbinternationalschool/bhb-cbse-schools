@@ -77,4 +77,46 @@ assert.equal(
   "but August, already billed, is untouched",
 );
 
+/* ── Changing twice must not leave two rates running ──
+ *
+ * The regression that testing caught: after ₹150 → ₹200, changing back to
+ * ₹150 from the same month ended the ALREADY-ended ₹150 row again and left
+ * the live ₹200 alone, so August carried ₹200 and ₹150 both — ₹350 off a
+ * head that should have had ₹150. Only grants still in force may be ended.
+ */
+const afterTwoChanges = {
+  ...masters,
+  concessions: [
+    ...(masters.concessions as unknown[]),
+    { id: "cnc_150b", code: "C150B", name: "₹150 off", kind: "other",
+      mode: "fixed", value: 15000, feeHeadIds: ["fh_t"], isActive: true,
+      academicYearCode: "2026-27", siblingTiers: [], incompatibleCodes: [] },
+  ],
+  concessionGrants: [
+    // history, already closed — must be left alone
+    { id: "cg_old", concessionId: "cnc_150", studentId: "stu_1",
+      status: "approved", reason: "", effectiveFrom: "2026-04-01",
+      effectiveTo: "2026-09-09", createdAt: "", siblingChildNo: null },
+    // the ₹200 that was live, now correctly closed by the second change
+    { id: "cg_200", concessionId: "cnc_200", studentId: "stu_1",
+      status: "approved", reason: "", effectiveFrom: "2026-09-10",
+      effectiveTo: "2026-09-09", createdAt: "", siblingChildNo: null },
+    // and the ₹150 that replaced it
+    { id: "cg_150b", concessionId: "cnc_150b", studentId: "stu_1",
+      status: "approved", reason: "", effectiveFrom: "2026-09-10",
+      effectiveTo: null, createdAt: "", siblingChildNo: null },
+  ],
+} as unknown as MastersState;
+
+const sept = resolvedConcessionGrantsForStudent(
+  afterTwoChanges, STUDENT, "2026-09-10",
+);
+assert.equal(sept.length, 1, "September resolves ONE rate after two changes");
+assert.equal(sept[0]!.id, "cg_150b", "and it is the one most recently set");
+assert.equal(
+  resolvedConcessionGrantsForStudent(afterTwoChanges, STUDENT, "2026-08-10")[0]!.id,
+  "cg_old",
+  "August still holds the rate it was billed at",
+);
+
 console.log("OK — standingDiscountChange.selftest.ts");

@@ -73,6 +73,7 @@ import {
 import { FutureConcessionModal } from "@/components/fees/FutureConcessionModal";
 import {
   applyFutureConcessionsFromCounter,
+  changeStandingDiscount,
   isRecurringAcademicFeeHead,
   listFutureConcessionCandidates,
   type FutureConcessionCandidate,
@@ -849,6 +850,54 @@ export function FeeTakeWorkspace() {
     setNote("");
     setLineDiscountRupees({});
     setCounterDiscountReason("");
+  }
+
+  /**
+   * Change the standing discount on a head, from this month onward.
+   *
+   * "This month" is the first due of that head that has not gone past — not
+   * the line the clerk happens to be looking at. Clicking Change while
+   * scrolled to April must not reprice April: that month is billed, often
+   * collected, and its receipt would stop matching the money taken.
+   */
+  function changeHeadDiscount(due: FeeDueLine, rupees: string) {
+    if (!masters || !sis) return;
+    const student = sis.students.find((st) => st.id === due.studentId);
+    if (!student || !due.feeHeadId) return;
+
+    const monthStart = `${todayIso().slice(0, 7)}-01`;
+    const sameHead = allDues
+      .filter((d) => d.studentId === due.studentId && d.feeHeadId === due.feeHeadId)
+      .map((d) => d.dueOn)
+      .filter(Boolean)
+      .sort();
+    const fromDueOn =
+      sameHead.find((dueOn) => dueOn >= monthStart) ??
+      sameHead[sameHead.length - 1] ??
+      todayIso();
+
+    const paise = Math.round((Number(rupees.replace(/[^\d.]/g, "")) || 0) * 100);
+    const res = changeStandingDiscount({
+      studentId: due.studentId,
+      studentName: student.fullName,
+      feeHeadId: due.feeHeadId,
+      feeHeadName: due.feeHeadName || "this head",
+      newDiscountPaise: paise,
+      fromDueOn,
+      academicYearCode: ay,
+      reason: counterDiscountReason.trim(),
+      by: session.fullName,
+    });
+    if (!res.ok) {
+      flash(res.error);
+      return;
+    }
+    refresh();
+    flash(
+      paise > 0
+        ? `${due.feeHeadName} discount is ${formatInr(paise)} from ${fromDueOn} — earlier months keep what they were billed`
+        : `${due.feeHeadName} discount removed from ${fromDueOn} — earlier months unchanged`,
+    );
   }
 
   function freshSelectedDues() {
@@ -1875,6 +1924,7 @@ export function FeeTakeWorkspace() {
               lineDiscountRupees={lineDiscountRupees}
               recurringEligible={recurringEligible}
               recurringChosen={recurringDueKeys}
+              onChangeHeadDiscount={changeHeadDiscount}
               discountOnlyKeys={discountOnlyKeys}
               onToggleDiscountOnly={(dueKey, on) =>
                 setDiscountOnlyKeys((prev) => {
@@ -2163,6 +2213,7 @@ function CollectPanel({
   onToggleRecurring,
   discountOnlyKeys,
   onToggleDiscountOnly,
+  onChangeHeadDiscount,
   counterDiscountReason,
   onCounterDiscountReason,
   collectTarget,
@@ -2232,6 +2283,7 @@ function CollectPanel({
   onToggleRecurring: (dueKey: string, on: boolean) => void;
   discountOnlyKeys: Set<string>;
   onToggleDiscountOnly: (dueKey: string, on: boolean) => void;
+  onChangeHeadDiscount: (due: FeeDueLine, rupees: string) => void;
   counterDiscountReason: string;
   onCounterDiscountReason: (v: string) => void;
   collectTarget: number;
@@ -2799,6 +2851,7 @@ function CollectPanel({
                         onToggleRecurring={onToggleRecurring}
                         discountOnlyKeys={discountOnlyKeys}
                         onToggleDiscountOnly={onToggleDiscountOnly}
+                        onChangeHeadDiscount={onChangeHeadDiscount}
                         onLineDiscount={onLineDiscount}
                       />
                     )}
