@@ -7,6 +7,7 @@ import {
   accountsStateIsEmpty,
   loadAccounts,
   writeAccountsLocalRaw,
+  repairOrphanCashLedger,
 } from "@/lib/accountsStore";
 import type { AccountsState } from "@/lib/accountsTypes";
 import {
@@ -59,6 +60,15 @@ export const ensureAccountsHydrated = async () => {
     );
     normChanged = true;
   }
+  // Hydration is exactly when pool ids can go stale: the ledger arrives from
+  // the server while the pools are whatever this browser happens to hold. Heal
+  // before anyone reads a cash balance, or the money reads as zero.
+  const healed = repairOrphanCashLedger(loadAccounts());
+  if (healed !== loadAccounts()) {
+    writeAccountsLocalRaw(healed);
+    normChanged = true;
+  }
+
   // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
   if (normChanged && !readFromDb) scheduleAccountsSync(loadAccounts());
   return blobChanged || normChanged;

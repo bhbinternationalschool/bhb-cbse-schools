@@ -126,6 +126,18 @@ create_job "bhb-staff-geo-tick" "*/5 7-15 * * 1-6" \
   "${APP_URL}/api/staff-geo/tick" \
   "Asia/Kolkata" "300s" "paused"
 
+# Cashfree settlement sweep: pulls what the gateway actually paid into the
+# bank, with its event-level breakdown, and posts it to the ledger.
+#
+# Daily rather than hourly: a T+1 cycle settles once, in the morning, and the
+# sweep asks for a rolling 7-day window so a missed run, a bank holiday
+# weekend, or a webhook that never arrived is picked up by the next one
+# without anybody noticing it was needed. It is idempotent, so a re-run costs
+# nothing but the request.
+create_job "bhb-cashfree-settlement-sweep" "30 7 * * *" \
+  "${APP_URL}/api/payments/cashfree/settlements" \
+  "Asia/Kolkata" "300s"
+
 echo ""
 echo "Done. Jobs in $REGION:"
 gcloud scheduler jobs list --location="$REGION" --format="table(name,schedule,state)"

@@ -86,8 +86,10 @@ create table if not exists public.ledger_pg_settlements (
   -- Event-level breakdown state.
   events_pulled_at timestamptz,
   event_count integer not null default 0,
-  -- Signed sum of the events: credits positive, debits negative. Must equal
-  -- amount_settled_paise + the fees. Where it does not, the recon view says so.
+  -- Signed sum of the events' settlement contributions: credits positive,
+  -- debits negative. Each event reports both a gross amount and the net it
+  -- contributes after its own fees; it is the net that adds up to
+  -- amount_settled_paise. Where it does not, the recon view says so.
   events_total_paise bigint not null default 0,
 
   raw jsonb not null default '{}'::jsonb,
@@ -123,13 +125,20 @@ create table if not exists public.ledger_pg_settlement_events (
   -- CREDIT (into the settlement) or DEBIT (out of it).
   sale_type text not null default '',
   event_status text not null default '',
-  -- Always positive, as the gateway reports it.
+  -- The event's gross amount, always positive as the gateway reports it. This
+  -- is the figure that ties back to what a family actually paid.
   event_amount_paise bigint not null default 0,
-  -- The same amount in the book's own sign convention: positive is money
-  -- arriving. Carried as a column rather than derived at read time so that a
-  -- SUM() reconciles without every caller having to re-derive the sign — the
-  -- single most common place a reconciliation goes quietly wrong.
+  -- What this event contributed to the settlement, net of its own fees. The
+  -- sum of these is amount_settled — the gross is not, and reconciling on the
+  -- gross is the mistake that makes every settlement look like a break.
+  event_settlement_paise bigint not null default 0,
+  -- Both amounts in the book's sign convention: positive is money arriving,
+  -- so a refund or chargeback is negative. Carried as columns rather than
+  -- derived at read time so a SUM() reconciles without every caller having to
+  -- re-decide the sign — the single most common place a reconciliation goes
+  -- quietly wrong.
   signed_paise bigint not null default 0,
+  signed_settlement_paise bigint not null default 0,
 
   -- What it was for. Our order/link id travels here, which is what lets a
   -- settlement line be traced back to the family that paid it.
@@ -155,11 +164,13 @@ create index if not exists ledger_pg_settlement_events_order_idx
 -- The finance query, as a view so nobody has to remember it.
 --
 -- Three independent numbers have to agree, and each catches a different
--- failure. `amount_settled` is what the gateway says it paid. The signed sum
--- of the events is what the gateway's own breakdown adds up to — if that
--- differs, pagination was cut short or an event is missing. The posted
--- voucher is what the book believes — if that differs, the journal was built
--- from a settlement that has since been restated.
+-- failure. The settlement's own arithmetic — gross less fees plus adjustment
+-- — must produce the net it claims to have paid. The signed sum of the
+-- events' settlement contributions must produce that same net; if it does
+-- not, pagination was cut short or an event is missing. And the book must
+-- hold a voucher for it. Note the events reconcile on their NET contribution,
+-- not their gross: summing the gross and comparing it to amount_settled makes
+-- every settlement look broken by exactly the fee.
 create or replace view public.ledger_v_pg_settlement_recon as
 select
   s.tenant_id,
@@ -192,7 +203,7 @@ select
             - s.settlement_charge_paise - s.settlement_tax_paise
             + s.adjustment_paise) <> s.amount_settled_paise then 'amounts_disagree'
     when s.events_pulled_at is null then 'events_not_pulled'
-    when s.events_total_paise <> s.payment_amount_paise + s.adjustment_paise then 'events_disagree'
+    when s.events_total_paise <> s.amount_settled_paise then 'events_disagree'
     when s.voucher_id is null then 'not_posted'
     else 'explained'
   end as recon_state

@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
+    "test:cash-pool-orphans": "npx tsx src/lib/cashPoolOrphans.selftest.ts",
     "test:receipt-lookup": "npx tsx src/lib/receiptLookup.selftest.ts",
     "test:school-receipt-no": "npx tsx src/lib/schoolReceiptNo.selftest.ts",
     "test:transport-overlap-billing": "npx tsx src/lib/transportOverlapBilling.selftest.ts",

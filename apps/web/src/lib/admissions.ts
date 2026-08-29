@@ -375,6 +375,12 @@ export type RegistrationTender = {
   ref: string;
   bankName: string;
   instrumentDate: string;
+  /**
+   * Set only when a payment gateway captured this money. It settles a cycle
+   * later, net of fees, so the ledger holds it in clearing rather than
+   * claiming a bank balance that does not exist yet.
+   */
+  gatewayProvider?: string;
 };
 
 export type RegistrationFeePayment = {
@@ -3986,6 +3992,13 @@ export function captureRegistrationPayment(
   state: AdmissionsState,
   paymentId: string,
   upiRef: string,
+  /**
+   * The gateway that captured it, when one did. Most callers are counter
+   * collection — a clerk taking cash or a UPI into the school's own QR — and
+   * that money really is in the bank, so the default is empty and only the
+   * gateway webhook passes a provider.
+   */
+  gatewayProvider = "",
 ):
   | { ok: true; state: AdmissionsState; payment: RegistrationFeePayment }
   | { ok: false; reason: string } {
@@ -4007,14 +4020,18 @@ export function captureRegistrationPayment(
           mode: (t.mode || "upi") as TenderMode,
           ref: t.ref || ref,
           instrumentDate: t.instrumentDate || new Date().toISOString().slice(0, 10),
+          gatewayProvider: gatewayProvider || t.gatewayProvider || "",
         }))
       : [
-          normalizeRegistrationTender({
-            mode: "upi",
-            amountPaise: payment.amountPaise,
-            ref,
-            instrumentDate: new Date().toISOString().slice(0, 10),
-          }),
+          {
+            ...normalizeRegistrationTender({
+              mode: "upi",
+              amountPaise: payment.amountPaise,
+              ref,
+              instrumentDate: new Date().toISOString().slice(0, 10),
+            }),
+            gatewayProvider,
+          },
         ];
   const updated: RegistrationFeePayment = {
     ...payment,

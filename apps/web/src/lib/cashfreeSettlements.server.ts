@@ -87,9 +87,17 @@ export type PgSettlementEvent = {
   eventType: string;
   saleType: string;
   eventStatus: string;
+  /** The event's gross — what the family paid, what the refund returned. */
   eventAmountPaise: number;
-  /** Book convention: positive is money into the settlement. */
+  /**
+   * What the event contributed to the settlement, net of its own fees. These
+   * are the amounts that sum to `amount_settled`; the gross ones do not, and
+   * reconciling on the gross makes every settlement look short by the fee.
+   */
+  eventSettlementPaise: number;
+  /** Both in book convention: positive is money into the settlement. */
   signedPaise: number;
+  signedSettlementPaise: number;
   orderId: string;
   cfPaymentId: string;
   refundId: string;
@@ -304,7 +312,13 @@ export async function fetchCashfreeSettlementRecon(
       if (!eventId || !settlementId) continue;
 
       const amount = rupeesToPaise(ev.event_amount);
+      // The net sits on settlement_details for the recon row, and falls back
+      // to the event's own field where the response carries it there.
+      const net = rupeesToPaise(
+        sd.amount_settled ?? ev.event_settlement_amount ?? ev.event_amount,
+      );
       const saleType = str(ev.sale_type).toUpperCase();
+      const sign = saleType === "DEBIT" ? -1 : 1;
       events.push({
         cfSettlementId: settlementId,
         eventId,
@@ -312,7 +326,13 @@ export async function fetchCashfreeSettlementRecon(
         saleType,
         eventStatus: str(ev.event_status).toUpperCase(),
         eventAmountPaise: amount,
-        signedPaise: saleType === "DEBIT" ? -amount : amount,
+        eventSettlementPaise: net,
+        signedPaise: sign * amount,
+        // A net that already carries its own sign is left alone: the API
+        // reports a debit's contribution as negative in some responses and as
+        // a positive magnitude in others, and doubling the negation would
+        // turn a refund into income.
+        signedSettlementPaise: net < 0 ? net : sign * net,
         orderId: str(od.order_id),
         cfPaymentId: str(pd.cf_payment_id),
         refundId: str(rd.refund_id),

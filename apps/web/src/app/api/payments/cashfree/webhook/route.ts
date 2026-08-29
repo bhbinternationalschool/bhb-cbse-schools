@@ -156,6 +156,8 @@ async function settleRegistrationPayment(opts: {
     state,
     payment.id,
     paymentId || `CF-${payment.code}`,
+    // Gateway money: it waits in clearing until the settlement moves it.
+    "cashfree",
   );
   if (!captured.ok) {
     await recordPaymentGatewayEvent({

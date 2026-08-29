@@ -157,7 +157,9 @@ export async function pullSettlementEvents(
         sale_type: e.saleType,
         event_status: e.eventStatus,
         event_amount_paise: e.eventAmountPaise,
+        event_settlement_paise: e.eventSettlementPaise,
         signed_paise: e.signedPaise,
+        signed_settlement_paise: e.signedSettlementPaise,
         order_id: e.orderId,
         cf_payment_id: e.cfPaymentId,
         refund_id: e.refundId,
@@ -176,7 +178,7 @@ export async function pullSettlementEvents(
   for (const id of cfSettlementIds) {
     const { data: rows } = await ctx.sb
       .from("ledger_pg_settlement_events")
-      .select("signed_paise")
+      .select("signed_settlement_paise")
       .eq("tenant_id", ctx.tenantId)
       .eq("provider", PROVIDER)
       .eq("cf_settlement_id", id);
@@ -187,8 +189,9 @@ export async function pullSettlementEvents(
       .update({
         events_pulled_at: pulledAt,
         event_count: list.length,
+        // The net contributions, which are what add up to amount_settled.
         events_total_paise: list.reduce(
-          (n, r) => n + Number(r.signed_paise ?? 0),
+          (n, r) => n + Number(r.signed_settlement_paise ?? 0),
           0,
         ),
         updated_at: pulledAt,
