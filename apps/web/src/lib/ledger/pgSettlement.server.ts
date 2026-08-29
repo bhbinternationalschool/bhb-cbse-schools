@@ -54,17 +54,25 @@ function emptyOutcome(): SettlementSyncOutcome {
  *
  * Matching on the last four digits is what the gateway gives us, and on a
  * school with two accounts it is unambiguous. Where it is not — no match, or
- * more than one — the posting falls back to the 1010 group rather than
- * guessing, exactly as inv_ledger_tender_account does for a store tender. A
- * receipt that cannot be filed precisely still has to be filed; what it must
- * not do is claim a precision it does not have.
+ * more than one — we fall back to the account the school has NAMED as its
+ * settlement bank (Accounts → settings), and only if that is unset do we land
+ * on the 1010 group.
+ *
+ * The order matters. What the gateway tells us beats what we were told, since
+ * a payload that names an account is evidence and a setting is only a
+ * standing instruction. But a standing instruction still beats the group: the
+ * school knows Cashfree settles to one account, so filing a settlement there
+ * is a recorded fact, not a guess. What we must never do is claim a precision
+ * we do not have — hence the group when nothing is known.
  */
 async function resolveBank(
   last4: string,
 ): Promise<{ code: string; bankAccountId: string }> {
-  const fallback = { code: L_BANK, bankAccountId: "" };
   const ctx = await getServerTenantContext();
-  if (!ctx || !last4) return fallback;
+  if (!ctx) return { code: L_BANK, bankAccountId: "" };
+
+  const fallback = await configuredSettlementBank(ctx);
+  if (!last4) return fallback;
 
   const { data: banks } = await ctx.sb
     .from("accounts_desk_bank_accounts")
@@ -78,6 +86,37 @@ async function resolveBank(
   if (hits.length !== 1) return fallback;
 
   const bankAccountId = String(hits[0].id);
+  const { data: acct } = await ctx.sb
+    .from("ledger_accounts")
+    .select("code")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("bank_account_id", bankAccountId)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  return acct?.code
+    ? { code: String(acct.code), bankAccountId }
+    : { code: L_BANK, bankAccountId };
+}
+
+/**
+ * The account the school says the gateway settles into, resolved to its
+ * ledger code. Empty setting means we genuinely do not know, and the caller
+ * falls back to the 1010 group.
+ */
+async function configuredSettlementBank(
+  ctx: NonNullable<Awaited<ReturnType<typeof getServerTenantContext>>>,
+): Promise<{ code: string; bankAccountId: string }> {
+  const none = { code: L_BANK, bankAccountId: "" };
+  const { data: settings } = await ctx.sb
+    .from("accounts_desk_settings")
+    .select("pg_settlement_bank_account_id")
+    .eq("tenant_id", ctx.tenantId)
+    .maybeSingle();
+
+  const bankAccountId = String(settings?.pg_settlement_bank_account_id ?? "");
+  if (!bankAccountId) return none;
+
   const { data: acct } = await ctx.sb
     .from("ledger_accounts")
     .select("code")
