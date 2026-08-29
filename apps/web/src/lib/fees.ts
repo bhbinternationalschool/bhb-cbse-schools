@@ -690,11 +690,24 @@ export function formatManualBookRef(seriesCode: string, leaf: string): string {
   return `${s}/${n}`;
 }
 
-/** True if this school/paper receipt ref is already used on a live voucher. */
+/**
+ * True if this school/paper receipt ref is already used on a live voucher of
+ * ANOTHER family.
+ *
+ * The paper book is written one leaf per family visit, not one leaf per
+ * system receipt: collect for two siblings and both receipts legitimately
+ * carry the same number. Blocking that made the counter clear the field to
+ * get past it, which left receipts with no link to the book at all — worse
+ * for reconciliation than the duplicate the rule was guarding against.
+ *
+ * Reuse across a DIFFERENT household is still refused. That is the case the
+ * rule exists for: one family's leaf recorded against another family's money.
+ */
 export function isSchoolReceiptNoTaken(
   schoolReceiptNo: string,
   fees?: FeesState,
   exceptVoucherId?: string,
+  sameHouseholdId?: string,
 ): boolean {
   const key = schoolReceiptNo.trim().toUpperCase();
   if (!key) return false;
@@ -702,6 +715,7 @@ export function isSchoolReceiptNoTaken(
   return f.vouchers.some((v) => {
     if (v.voidedAt) return false;
     if (exceptVoucherId && v.id === exceptVoucherId) return false;
+    if (sameHouseholdId && v.householdId === sameHouseholdId) return false;
     if ((v.schoolReceiptNo ?? "").trim().toUpperCase() === key) return true;
     if (
       v.source === "manual_book" &&
@@ -3072,13 +3086,17 @@ export function collectPayment(input: {
     };
   }
 
-  if (manualRef && isSchoolReceiptNoTaken(manualRef, fees)) {
+  if (
+    manualRef &&
+    isSchoolReceiptNoTaken(manualRef, fees, undefined, input.householdId)
+  ) {
     // Name the receipt that holds it. "Already used" sends the counter
     // hunting through the book; "used on RCV-00118 (04-May-2026, ₹4,000)"
     // is either recognised as their own earlier entry or found in seconds.
     const clash = fees.vouchers.find(
       (v) =>
         !v.voidedAt &&
+        v.householdId !== input.householdId &&
         ((v.schoolReceiptNo ?? "").trim().toUpperCase() ===
           manualRef.toUpperCase() ||
           (v.source === "manual_book" &&
