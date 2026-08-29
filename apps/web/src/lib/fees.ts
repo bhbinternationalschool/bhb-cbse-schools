@@ -3073,9 +3073,25 @@ export function collectPayment(input: {
   }
 
   if (manualRef && isSchoolReceiptNoTaken(manualRef, fees)) {
+    // Name the receipt that holds it. "Already used" sends the counter
+    // hunting through the book; "used on RCV-00118 (04-May-2026, ₹4,000)"
+    // is either recognised as their own earlier entry or found in seconds.
+    const clash = fees.vouchers.find(
+      (v) =>
+        !v.voidedAt &&
+        ((v.schoolReceiptNo ?? "").trim().toUpperCase() ===
+          manualRef.toUpperCase() ||
+          (v.source === "manual_book" &&
+            formatManualBookRef(
+              v.manualBookSeries,
+              v.manualBookLeaf,
+            ).toUpperCase() === manualRef.toUpperCase())),
+    );
     return {
       ok: false,
-      error: `School / paper receipt no. "${manualRef}" is already used on another receipt`,
+      error: clash
+        ? `School / paper receipt no. "${manualRef}" is already on receipt ${clash.receiptNo} (${clash.collectionDate}, ${formatInr(clash.totalPaise)}) — use the next number in the book`
+        : `School / paper receipt no. "${manualRef}" is already used on another receipt`,
       code: "manual_no",
     };
   }

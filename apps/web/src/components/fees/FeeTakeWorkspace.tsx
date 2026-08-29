@@ -327,6 +327,7 @@ export function FeeTakeWorkspace() {
   const [schoolReceiptNo, setSchoolReceiptNo] = useState("");
   const [note, setNote] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
+  const [collectError, setCollectError] = useState<string | null>(null);
   const [receipts, setReceipts] = useState<CollectionVoucher[]>([]);
   const [previewReceiptId, setPreviewReceiptId] = useState<string | null>(
     null,
@@ -778,6 +779,21 @@ export function FeeTakeWorkspace() {
     window.setTimeout(() => setNotice(null), 2800);
   }
 
+  /**
+   * A refused collection, said where the money is.
+   *
+   * flash() puts the reason in the workspace header pill and clears it after
+   * 2.8s. The collect button sits at the bottom of a long scrolled page, so a
+   * refusal — a duplicate school receipt no., a day-closed date — appeared
+   * off-screen and was gone before the counter could scroll to it. The button
+   * looked dead instead of refusing for a stated reason. This one stays until
+   * the next attempt.
+   */
+  function failCollect(msg: string) {
+    setCollectError(msg);
+    flash(msg);
+  }
+
   function resetPaymentFields() {
     setTenderLines([]);
     setComposer(emptyComposer());
@@ -1020,7 +1036,7 @@ export function FeeTakeWorkspace() {
       toAy,
     });
     if (!result.ok) {
-      flash(result.error);
+      failCollect(result.error);
       return;
     }
     setSis(loadSis());
@@ -1033,15 +1049,16 @@ export function FeeTakeWorkspace() {
 
   function onCollect() {
     if (!selectedStudent || !sis || !masters) return;
+    setCollectError(null);
 
     const discountOnly = collectTarget <= 0 && counterDiscountPaise > 0;
 
     if (collectTarget <= 0 && !discountOnly) {
-      flash("Enter a collection amount");
+      failCollect("Enter a collection amount");
       return;
     }
     if (!discountOnly && tenderSum !== collectTarget) {
-      flash(
+      failCollect(
         isPartialCollect
           ? `Payments must equal partial amount (${formatInr(collectTarget)})`
           : `Payments must equal selected dues (${formatInr(collectTarget)})`,
@@ -1089,7 +1106,7 @@ export function FeeTakeWorkspace() {
         academicYearCode: ay,
       });
       if (!waiverResult.ok) {
-        flash(waiverResult.error);
+        failCollect(waiverResult.error);
         return;
       }
       waiverAdjustmentIds = waiverResult.adjustmentIds;
@@ -1163,7 +1180,7 @@ export function FeeTakeWorkspace() {
       (id) => nameById.get(id) ?? "Student",
     );
     if (!alloc.ok) {
-      flash(alloc.error);
+      failCollect(alloc.error);
       return;
     }
     const lines = alloc.lines;
@@ -1824,6 +1841,7 @@ export function FeeTakeWorkspace() {
               onSchoolReceiptNo={setSchoolReceiptNo}
               onNote={setNote}
               onCollect={onCollect}
+              collectError={collectError}
               onSendUpiLink={() => void onSendUpiLink()}
               masters={masters}
               cashierName={session.fullName}
@@ -2071,6 +2089,7 @@ function CollectPanel({
   onSchoolReceiptNo,
   onNote,
   onCollect,
+  collectError,
   onSendUpiLink,
   masters,
   cashierName,
@@ -2134,6 +2153,8 @@ function CollectPanel({
   onSchoolReceiptNo: (v: string) => void;
   onNote: (v: string) => void;
   onCollect: () => void;
+  /** Why the last collection attempt was refused — shown at the button. */
+  collectError: string | null;
   onSendUpiLink: () => void;
   masters: MastersState | null;
   cashierName: string;
@@ -3013,6 +3034,12 @@ function CollectPanel({
                     ) : null}
                   </div>
                 </div>
+              ) : null}
+
+              {collectError ? (
+                <p className="mt-3 rounded-lg border border-[#fca5a5] bg-[rgba(239,68,68,0.15)] px-3 py-2 text-[11px] font-semibold leading-snug text-[#fecaca]">
+                  {collectError}
+                </p>
               ) : null}
 
               {(() => {
