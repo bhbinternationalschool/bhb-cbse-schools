@@ -60,6 +60,7 @@ import {
   assignStudentToRoute,
   computeTransportPeriodDues,
   endTransportAssignment,
+  overlappingAssignments,
   setAssignmentServiceMode,
   setBoardingSuspended,
   type TransportAssignment,
@@ -1484,6 +1485,19 @@ function RidersPanel(props: RidersPanelProps) {
                         {assignment.route?.code} · {assignment.route?.busNo} ·{" "}
                         {assignment.stopName} · from {assignment.effectiveFrom}
                       </div>
+                      {/* An overlapping row means this rider has more than one
+                          assignment covering the same months. Billing keeps only
+                          the newest, so the family is not charged twice — but the
+                          extra row is a data fault the office should clear. */}
+                      {overlappingAssignments(assignment.studentId, {
+                        academicYearCode,
+                        state: props.state,
+                      }).length > 0 ? (
+                        <div className="mt-0.5 inline-block rounded bg-[rgba(197,160,40,0.16)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--brand-deep)]">
+                          Overlapping assignment — only the newest is billed; end
+                          or correct the older one
+                        </div>
+                      ) : null}
                       <div className="text-[10px] text-[var(--muted)]">
                         {formatInr(applyServiceMode(fee, assignment.serviceMode))}/month
                         {assignment.serviceMode &&
