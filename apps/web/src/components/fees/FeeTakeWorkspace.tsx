@@ -1101,9 +1101,44 @@ export function FeeTakeWorkspace() {
     let futureConcessionMsg = "";
     let waiverAdjustmentIds: string[] = [];
 
-    if (counterDiscountPaise > 0) {
+    // A head that is becoming a standing concession must NOT also get a
+    // one-off waiver for the month being collected.
+    //
+    // The counter used to post both: a waiver on this month's due, and a
+    // recurring grant dated from the next installment. The grant's date says
+    // "from next month", but the dues engine only asks whether a grant is
+    // live TODAY — it has no notion of which month a due belongs to — so the
+    // grant discounts every month including the one just waived, and the head
+    // shows twice the discount that was typed. Priyanshi's April tuition read
+    // ₹300 off after a ₹150 counter discount.
+    //
+    // Date-gating grants per due would fix it in theory and break it in
+    // practice: all 85 approved grants carry an effective_from later than
+    // April's due date, an artefact of how they were imported, so gating
+    // would silently strip a month of discount from every one of them.
+    //
+    // So the rule is one artefact per head. Take the recurring grant and it
+    // covers this month too; decline it and the waiver handles this month
+    // alone. Either way the office sees the number it typed.
+    const headsBecomingRecurring = new Set(
+      (futureConcessionPrompt?.candidates ?? [])
+        .filter((c) => applyFutureKeys.has(c.key))
+        .map((c) => `${c.studentId}:${c.feeHeadId}`),
+    );
+    const waiverSlices =
+      headsBecomingRecurring.size === 0
+        ? discountSlices
+        : discountSlices.filter((slice) => {
+            const due = selectedDues.find((d) => d.dueKey === slice.dueKey);
+            if (!due?.feeHeadId) return true;
+            return !headsBecomingRecurring.has(
+              `${slice.studentId}:${due.feeHeadId}`,
+            );
+          });
+
+    if (counterDiscountPaise > 0 && waiverSlices.length > 0) {
       const waiverResult = postCounterDiscountWaivers({
-        slices: discountSlices,
+        slices: waiverSlices,
         reason: counterDiscountReason.trim() || "Counter concession",
         createdBy: session.fullName,
         academicYearCode: ay,
