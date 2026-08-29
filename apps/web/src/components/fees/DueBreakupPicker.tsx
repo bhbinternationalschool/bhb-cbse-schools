@@ -33,6 +33,9 @@ export function DueBreakupPicker({
   onToggleMonth,
   lineDiscountRupees,
   onLineDiscount,
+  recurringEligible,
+  recurringChosen,
+  onToggleRecurring,
 }: {
   dues: FeeDueLine[];
   selectedKeys: Set<string>;
@@ -42,6 +45,11 @@ export function DueBreakupPicker({
   /** Per dueKey counter discount (₹) — only on selected heads */
   lineDiscountRupees?: Record<string, string>;
   onLineDiscount?: (dueKey: string, rupees: string) => void;
+  /** Dues whose head repeats monthly, so a discount on it could recur. */
+  recurringEligible?: Set<string>;
+  /** Dues the clerk has chosen to make recurring. */
+  recurringChosen?: Set<string>;
+  onToggleRecurring?: (dueKey: string, on: boolean) => void;
 }) {
   const groups = useMemo(() => groupDuesByMonth(dues), [dues]);
   const currentMonthKey = today.slice(0, 7);
@@ -549,12 +557,31 @@ export function DueBreakupPicker({
                                 : ""}{" "}
                               · collect {formatInr(netPaise)}
                             </span>
-                          ) : (
-                            <span className="text-sm text-[var(--muted)]">
-                              Recurring heads can be saved for future months at
-                              collect
-                            </span>
-                          )}
+                          ) : null}
+                          {/* The decision that used to be made for the clerk.
+                              A counter discount was silently saved as a
+                              standing Masters rule — the modal after collect
+                              arrived pre-ticked — so one month's discount
+                              quietly became every month's. It is asked here
+                              now, before the money is taken, and it starts
+                              OFF: a discount is for the month in hand unless
+                              someone says otherwise. */}
+                          {discountPaise > 0 &&
+                          recurringEligible?.has(d.dueKey) &&
+                          onToggleRecurring ? (
+                            <label className="flex items-center gap-1.5 text-sm text-[var(--brand-deep)]">
+                              <input
+                                type="checkbox"
+                                checked={recurringChosen?.has(d.dueKey) ?? false}
+                                onChange={(e) =>
+                                  onToggleRecurring(d.dueKey, e.target.checked)
+                                }
+                              />
+                              {recurringChosen?.has(d.dueKey)
+                                ? "Every remaining month — saved to Masters"
+                                : "This month only"}
+                            </label>
+                          ) : null}
                         </div>
                       ) : null}
                     </li>

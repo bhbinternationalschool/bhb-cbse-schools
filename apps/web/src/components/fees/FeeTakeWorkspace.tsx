@@ -264,6 +264,17 @@ export function FeeTakeWorkspace() {
     Record<string, string>
   >({});
   const [counterDiscountReason, setCounterDiscountReason] = useState("");
+  /**
+   * Dues whose discount the clerk has chosen to make recurring.
+   *
+   * Starts empty and stays empty unless someone ticks: a discount belongs to
+   * the month in hand until the office says it repeats. The old flow inferred
+   * this from a pre-ticked modal AFTER collect, which is how a single month's
+   * discount became a standing Masters rule nobody chose.
+   */
+  const [recurringDueKeys, setRecurringDueKeys] = useState<Set<string>>(
+    new Set(),
+  );
   const [futureConcessionPrompt, setFutureConcessionPrompt] = useState<{
     candidates: FutureConcessionCandidate[];
     selected: Set<string>;
@@ -686,6 +697,21 @@ export function FeeTakeWorkspace() {
     [selectedDues, lineDiscountRupees],
   );
 
+  // Only heads that actually repeat can be offered as recurring — the same
+  // test collect uses, so the tick never promises something collect refuses.
+  const recurringEligible = useMemo(() => {
+    if (!masters || !sis) return new Set<string>();
+    return new Set(
+      listFutureConcessionCandidates(
+        discountSlices,
+        selectedDues,
+        masters,
+        householdBundle.map((r) => r.student),
+        ay,
+      ).map((c) => c.dueKey),
+    );
+  }, [discountSlices, selectedDues, masters, sis, householdBundle, ay]);
+
   const counterDiscountPaise = discountSlices.reduce(
     (s, x) => s + x.amountPaise,
     0,
@@ -1077,16 +1103,24 @@ export function FeeTakeWorkspace() {
         householdBundle.map((r) => r.student),
         ay,
       );
-      if (candidates.length > 0 && !futureConcessionPrompt) {
+      // The clerk has already answered this on the line itself. The prompt is
+      // only for candidates that CLASH — a head that already carries a
+      // Masters concession — because that is the case which needs explaining
+      // before it is stacked. Everything else follows the tick, and an
+      // unticked line simply does not recur.
+      const chosen = candidates.filter((c) => recurringDueKeys.has(c.dueKey));
+      const clashing = chosen.filter((c) => c.existing.length > 0);
+      if (clashing.length > 0 && !futureConcessionPrompt) {
         setFutureConcessionPrompt({
-          candidates,
-          // A head that already carries a Masters concession starts
-          // UNTICKED: stacking a second discount on it must be a deliberate
-          // tick after reading what it does, never the default.
-          selected: new Set(
-            candidates.filter((c) => c.existing.length === 0).map((c) => c.key),
-          ),
+          candidates: clashing,
+          // Never pre-ticked: stacking onto a head that already has a
+          // discount must be a deliberate act after reading what it does.
+          selected: new Set(),
         });
+        return;
+      }
+      if (chosen.length > 0) {
+        executeCollect(new Set(chosen.map((c) => c.key)));
         return;
       }
     }
@@ -1264,6 +1298,7 @@ export function FeeTakeWorkspace() {
 
     setSelectedKeys(new Set());
     setCollectAmountRupees("");
+    setRecurringDueKeys(new Set());
     resetPaymentFields();
     refresh();
     // The receipt just posted into the accounts desk — re-read it so the
@@ -1817,6 +1852,16 @@ export function FeeTakeWorkspace() {
               accountsState={accountsState}
               netAfterDiscount={netAfterDiscount}
               lineDiscountRupees={lineDiscountRupees}
+              recurringEligible={recurringEligible}
+              recurringChosen={recurringDueKeys}
+              onToggleRecurring={(dueKey, on) =>
+                setRecurringDueKeys((prev) => {
+                  const next = new Set(prev);
+                  if (on) next.add(dueKey);
+                  else next.delete(dueKey);
+                  return next;
+                })
+              }
               onLineDiscount={(dueKey, rupees) => {
                 setLineDiscountRupees((prev) => {
                   const next = { ...prev };
@@ -2083,6 +2128,9 @@ function CollectPanel({
   netAfterDiscount,
   lineDiscountRupees,
   onLineDiscount,
+  recurringEligible,
+  recurringChosen,
+  onToggleRecurring,
   counterDiscountReason,
   onCounterDiscountReason,
   collectTarget,
@@ -2147,6 +2195,9 @@ function CollectPanel({
   netAfterDiscount: number;
   lineDiscountRupees: Record<string, string>;
   onLineDiscount: (dueKey: string, rupees: string) => void;
+  recurringEligible: Set<string>;
+  recurringChosen: Set<string>;
+  onToggleRecurring: (dueKey: string, on: boolean) => void;
   counterDiscountReason: string;
   onCounterDiscountReason: (v: string) => void;
   collectTarget: number;
@@ -2709,6 +2760,9 @@ function CollectPanel({
                         onToggle={onToggle}
                         onToggleMonth={onToggleMonth}
                         lineDiscountRupees={lineDiscountRupees}
+                        recurringEligible={recurringEligible}
+                        recurringChosen={recurringChosen}
+                        onToggleRecurring={onToggleRecurring}
                         onLineDiscount={onLineDiscount}
                       />
                     )}
