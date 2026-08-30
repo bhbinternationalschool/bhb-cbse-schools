@@ -68,7 +68,6 @@ import {
   linkAdjustmentsToVoucher,
   postCounterDiscountWaivers,
   type CounterDiscountSlice,
-
 } from "@/lib/feeAdjustments";
 import { FutureConcessionModal } from "@/components/fees/FutureConcessionModal";
 import {
@@ -79,7 +78,10 @@ import {
   type FutureConcessionCandidate,
 } from "@/lib/counterConcession";
 import { lazyNamedTabPanel } from "@/components/ui/lazyTabPanel";
-import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
+import {
+  useDemoSession,
+  useSessionReadOnly,
+} from "@/components/shell/SessionContext";
 import {
   buildEnrichedPaymentSharePayload,
   buildPaymentShareUrl,
@@ -91,16 +93,12 @@ import {
 import { attachGatewayCheckout } from "@/lib/paymentGatewayClient";
 import { StoreSellInline } from "@/components/fees/StoreSellInline";
 import { StorePurchasesPanel } from "@/components/fees/StorePurchasesPanel";
-import {
-  scheduleClientSchoolMirrorSync,
-} from "@/lib/schoolDataMirror";
+import { scheduleClientSchoolMirrorSync } from "@/lib/schoolDataMirror";
 import {
   buildFeeAgreementDoc,
   downloadFeeAgreementPdf,
 } from "@/lib/feeAgreementPdf";
-import {
-  ModuleTabButton,
-} from "@/components/ui/ModuleTabs";
+import { ModuleTabButton } from "@/components/ui/ModuleTabs";
 import { MODULE_TAB_CONTAINER_CLASS } from "@/components/ui/modern-tab-bar";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ErpPanel, ErpTableShell } from "@/components/ui/erp-roster";
@@ -312,9 +310,8 @@ export function FeeTakeWorkspace() {
     let live = true;
     void (async () => {
       try {
-        const { ensureAccountsHydrated } = await import(
-          "@/lib/accountsPersistence"
-        );
+        const { ensureAccountsHydrated } =
+          await import("@/lib/accountsPersistence");
         await ensureAccountsHydrated();
       } catch {
         // Offline or first load — fall through to whatever is cached locally.
@@ -324,9 +321,8 @@ export function FeeTakeWorkspace() {
       // have done it. A changed pull re-ticks the dues so a student already
       // on screen gains their transport line.
       try {
-        const { ensureTransportHydrated } = await import(
-          "@/lib/transportPersistence"
-        );
+        const { ensureTransportHydrated } =
+          await import("@/lib/transportPersistence");
         const changed = await ensureTransportHydrated();
         if (live && changed) refresh();
       } catch {
@@ -359,9 +355,7 @@ export function FeeTakeWorkspace() {
   const [notice, setNotice] = useState<string | null>(null);
   const [collectError, setCollectError] = useState<string | null>(null);
   const [receipts, setReceipts] = useState<CollectionVoucher[]>([]);
-  const [previewReceiptId, setPreviewReceiptId] = useState<string | null>(
-    null,
-  );
+  const [previewReceiptId, setPreviewReceiptId] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const [mounted, setMounted] = useState(false);
 
@@ -398,9 +392,8 @@ export function FeeTakeWorkspace() {
       const { ensureSisHydrated } = await import("@/lib/sisPersistence");
       const { ensureFeesHydrated } = await import("@/lib/feesPersistence");
       const { hydrateFeesStore } = await import("@/lib/fees");
-      const { ensurePaymentsHydrated } = await import(
-        "@/lib/paymentsPersistence"
-      );
+      const { ensurePaymentsHydrated } =
+        await import("@/lib/paymentsPersistence");
       const { withHydrationSlot } = await import("@/lib/deskHydrateGuard");
       await Promise.all([
         withHydrationSlot(() => ensureSisHydrated()),
@@ -408,18 +401,16 @@ export function FeeTakeWorkspace() {
         withHydrationSlot(() => ensurePaymentsHydrated()),
       ]);
       await hydrateFeesStore();
-      const { applyCollectionWipeSignalIfNeeded } = await import(
-        "@/lib/feeCollectionWipe"
-      );
+      const { applyCollectionWipeSignalIfNeeded } =
+        await import("@/lib/feeCollectionWipe");
       const wipe = await applyCollectionWipeSignalIfNeeded();
       if (wipe.wiped) {
         flash(
           `Cleared ${wipe.removedVouchers} local receipt(s) — ready for re-import`,
         );
       }
-      const { applyFeeDiscountSeedNow } = await import(
-        "@/lib/feeDiscountImportHydrate"
-      );
+      const { applyFeeDiscountSeedNow } =
+        await import("@/lib/feeDiscountImportHydrate");
       const discount = applyFeeDiscountSeedNow();
       if (discount.applied > 0) {
         flash(
@@ -485,7 +476,16 @@ export function FeeTakeWorkspace() {
         }),
       );
     });
-  }, [debouncedQuery, classId, sectionId, sis, masters, feesForSearch, ay, includeFuture]);
+  }, [
+    debouncedQuery,
+    classId,
+    sectionId,
+    sis,
+    masters,
+    feesForSearch,
+    ay,
+    includeFuture,
+  ]);
 
   const classOptions = useMemo(() => {
     if (!masters) return [];
@@ -533,18 +533,20 @@ export function FeeTakeWorkspace() {
       { cache: "no-store" },
     )
       .then((r) => r.json())
-      .then((body: { ok?: boolean; dues?: InjectedStoreDue[]; error?: string }) => {
-        if (!alive) return;
-        if (body.ok === false) {
-          // Say the store could not be reached rather than showing no dues,
-          // which would read as "this family owes the store nothing".
-          setStoreDuesError(body.error || "Store dues could not be loaded");
-          setStoreDues([]);
-          return;
-        }
-        setStoreDuesError("");
-        setStoreDues(body.dues ?? []);
-      })
+      .then(
+        (body: { ok?: boolean; dues?: InjectedStoreDue[]; error?: string }) => {
+          if (!alive) return;
+          if (body.ok === false) {
+            // Say the store could not be reached rather than showing no dues,
+            // which would read as "this family owes the store nothing".
+            setStoreDuesError(body.error || "Store dues could not be loaded");
+            setStoreDues([]);
+            return;
+          }
+          setStoreDuesError("");
+          setStoreDues(body.dues ?? []);
+        },
+      )
       .catch(() => {
         if (!alive) return;
         setStoreDuesError("Store dues could not be loaded");
@@ -602,7 +604,9 @@ export function FeeTakeWorkspace() {
   }
 
   async function settleStoreLines(receiptNo: string, lines: VoucherLine[]) {
-    const storeLines = lines.filter((l) => l.kind === "store" && l.amountPaise > 0);
+    const storeLines = lines.filter(
+      (l) => l.kind === "store" && l.amountPaise > 0,
+    );
     if (storeLines.length === 0) return;
 
     const failures: {
@@ -867,7 +871,9 @@ export function FeeTakeWorkspace() {
 
     const monthStart = `${todayIso().slice(0, 7)}-01`;
     const sameHead = allDues
-      .filter((d) => d.studentId === due.studentId && d.feeHeadId === due.feeHeadId)
+      .filter(
+        (d) => d.studentId === due.studentId && d.feeHeadId === due.feeHeadId,
+      )
       .map((d) => d.dueOn)
       .filter(Boolean)
       .sort();
@@ -876,7 +882,9 @@ export function FeeTakeWorkspace() {
       sameHead[sameHead.length - 1] ??
       todayIso();
 
-    const paise = Math.round((Number(rupees.replace(/[^\d.]/g, "")) || 0) * 100);
+    const paise = Math.round(
+      (Number(rupees.replace(/[^\d.]/g, "")) || 0) * 100,
+    );
     const res = changeStandingDiscount({
       studentId: due.studentId,
       studentName: student.fullName,
@@ -1310,8 +1318,7 @@ export function FeeTakeWorkspace() {
       instrumentDate: t.instrumentDate,
       bankName: t.bankName,
       bankAccountId: t.bankAccountId || undefined,
-      realisation:
-        t.mode === "cheque" ? "subject_to_clearance" : "cleared",
+      realisation: t.mode === "cheque" ? "subject_to_clearance" : "cleared",
     }));
 
     const primaryTxn =
@@ -1397,22 +1404,53 @@ export function FeeTakeWorkspace() {
       flash("Select dues to include on the payment link");
       return;
     }
+
+    // The link must ask for what the COUNTER is showing, not the gross
+    // balance of the ticked heads. A discount entered here, or an amount
+    // typed into the collect box, used to be ignored entirely: the clerk
+    // granted the discount, sent the link, and the parent was billed the
+    // undiscounted figure.
+    const discountByKey = new Map(
+      discountSlices.map((x) => [x.dueKey, x.amountPaise]),
+    );
+    const linkDues = selectedDues
+      // A head ticked for discount only is not being collected at all, so
+      // it has no place on a payment request.
+      .filter((d) => !discountOnlyKeys.has(d.dueKey))
+      .map((d) => ({
+        ...d,
+        balancePaise: Math.max(
+          0,
+          d.balancePaise - (discountByKey.get(d.dueKey) ?? 0),
+        ),
+      }))
+      .filter((d) => d.balancePaise > 0);
+
+    if (linkDues.length === 0) {
+      flash("Nothing left to pay on the selected heads");
+      return;
+    }
+
+    // collectTarget is the box; it falls back to the full net when blank.
+    const targetPaise = collectTarget > 0 ? collectTarget : netAfterDiscount;
+    if (targetPaise <= 0) {
+      flash("Nothing left to pay on the selected heads");
+      return;
+    }
     const className =
-      masters.classes.find((c) => c.id === selectedStudent.classId)?.name ??
-      "";
+      masters.classes.find((c) => c.id === selectedStudent.classId)?.name ?? "";
     const sectionName =
-      masters.sections.find((s) => s.id === selectedStudent.sectionId)
-        ?.name ?? "";
-    const classLabel = sectionName
-      ? `${className}-${sectionName}`
-      : className;
+      masters.sections.find((s) => s.id === selectedStudent.sectionId)?.name ??
+      "";
+    const classLabel = sectionName ? `${className}-${sectionName}` : className;
 
     const created = createPaymentLink({
       householdId: selectedStudent.householdId,
       studentId: selectedStudent.id,
       studentName: selectedStudent.fullName,
       classLabel,
-      dues: selectedDues,
+      dues: linkDues,
+      targetPaise,
       createdBy: session.fullName,
       academicYearCode: selectedStudent.academicYearCode || ay,
       note: note.trim(),
@@ -1430,9 +1468,7 @@ export function FeeTakeWorkspace() {
       masters,
     );
     const url = buildPaymentShareUrl(payload);
-    const hh = sis.households.find(
-      (h) => h.id === selectedStudent.householdId,
-    );
+    const hh = sis.households.find((h) => h.id === selectedStudent.householdId);
     const mobile = householdWhatsApp(hh);
     if (mobile && isValidMobile(mobile)) {
       const msg = composeWhatsAppPaymentLinkMessage(
@@ -1623,7 +1659,9 @@ export function FeeTakeWorkspace() {
                 </select>
               </label>
               <label className="block text-sm">
-                <span className="mb-1.5 block text-[var(--muted)]">Section</span>
+                <span className="mb-1.5 block text-[var(--muted)]">
+                  Section
+                </span>
                 <select
                   className="field"
                   value={sectionId}
@@ -1656,7 +1694,9 @@ export function FeeTakeWorkspace() {
                   sectionOptions.find((s) => s.id === sectionId)?.name
                     ? `Sec ${sectionOptions.find((s) => s.id === sectionId)?.name}`
                     : "",
-                  debouncedQuery.trim() ? `Search “${debouncedQuery.trim()}”` : "",
+                  debouncedQuery.trim()
+                    ? `Search “${debouncedQuery.trim()}”`
+                    : "",
                 ])}
                 fileBaseName="fee_take_students"
                 columns={[
@@ -1685,7 +1725,8 @@ export function FeeTakeWorkspace() {
             </div>
 
             {/* Compact match strip — replaces left list */}
-            {(debouncedQuery.trim() || classId || sectionId) && !selectedStudent ? (
+            {(debouncedQuery.trim() || classId || sectionId) &&
+            !selectedStudent ? (
               <div className="mt-3">
                 <p className="mb-2 text-[11px] text-[var(--muted)]">
                   {hits.length} match{hits.length === 1 ? "" : "es"} — pick one
@@ -2177,7 +2218,9 @@ function FeeSummaryChip({
   const s = styles[tone];
   return (
     <div className={`rounded-lg border px-2.5 py-1.5 ${s.box}`}>
-      <div className={`text-[10px] font-bold uppercase tracking-wide ${s.label}`}>
+      <div
+        className={`text-[10px] font-bold uppercase tracking-wide ${s.label}`}
+      >
         {label}
       </div>
       <div className={`mt-0.5 text-sm font-bold tabular-nums ${s.value}`}>
@@ -2466,7 +2509,9 @@ function CollectPanel({
               selected{" "}
               <span
                 className={`font-semibold ${
-                  collectTarget > 0 ? "text-[var(--success)]" : "text-[var(--muted)]"
+                  collectTarget > 0
+                    ? "text-[var(--success)]"
+                    : "text-[var(--muted)]"
                 }`}
               >
                 {formatInr(collectTarget)}
@@ -2569,298 +2614,303 @@ function CollectPanel({
       ── */}
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(360px,420px)] items-start">
         <div className="min-w-0 space-y-4">
-        {/* ── LEFT COLUMN: children of this family ── */}
-        <div className="space-y-3 min-w-0">
-          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-sm">
-            <div className="mb-2.5 flex items-center justify-between gap-2 border-b border-[var(--border)] pb-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-[var(--brand-deep)]">
-                {siblingCount > 1
-                  ? `Children in this family (${siblingCount})`
-                  : "Student"}
-              </span>
+          {/* ── LEFT COLUMN: children of this family ── */}
+          <div className="space-y-3 min-w-0">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-sm">
+              <div className="mb-2.5 flex items-center justify-between gap-2 border-b border-[var(--border)] pb-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-[var(--brand-deep)]">
+                  {siblingCount > 1
+                    ? `Children in this family (${siblingCount})`
+                    : "Student"}
+                </span>
+                {siblingCount > 1 ? (
+                  <button
+                    type="button"
+                    className="text-xs font-semibold text-[var(--brand-mid)] hover:underline"
+                    onClick={onOpenAllSiblings}
+                  >
+                    Open all
+                  </button>
+                ) : null}
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+                {householdBundle.map((row) => {
+                  const openDs = openFeeDues(row.dues);
+                  const rDue = openDs.reduce((s, d) => s + d.balancePaise, 0);
+                  const rOver = openDs.some((d) => d.dueOn <= today);
+                  const on = activeStudentIds.has(row.student.id);
+                  const pickedForStudent = openDs.filter((d) =>
+                    selectedKeys.has(d.dueKey),
+                  );
+                  const pickedPaise = pickedForStudent.reduce(
+                    (s, d) => s + d.balancePaise,
+                    0,
+                  );
+                  const pickedDiscount = discountSlices.reduce(
+                    (s, x) =>
+                      x.studentId === row.student.id ? s + x.amountPaise : s,
+                    0,
+                  );
+                  const pickedNet = Math.max(0, pickedPaise - pickedDiscount);
+                  return (
+                    <button
+                      key={row.student.id}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => onToggleActiveStudent(row.student.id)}
+                      className={`relative rounded-xl border-2 p-2.5 text-left transition active:scale-[0.99] ${
+                        on
+                          ? "border-[var(--brand-gold)] bg-[rgba(197,160,40,0.08)]"
+                          : "border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[rgba(197,160,40,0.45)]"
+                      }`}
+                    >
+                      <span
+                        className={`absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full border text-[11px] font-bold ${
+                          on
+                            ? "border-[var(--brand-gold)] bg-[var(--brand-gold)] text-white"
+                            : "border-[var(--border)] bg-[var(--card)] text-transparent"
+                        }`}
+                        aria-hidden
+                      >
+                        ✓
+                      </span>
+                      <div className="pr-6 text-sm font-bold text-[var(--brand-deep)]">
+                        <StudentNameLabel student={row.student} />
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-[var(--muted)]">
+                        {classLabel(row.student)} · {row.student.admissionNo}
+                      </div>
+                      <div
+                        className={`mt-1.5 text-base font-bold tabular-nums ${
+                          rOver
+                            ? "text-[var(--danger)]"
+                            : rDue > 0
+                              ? "text-[var(--brand-deep)]"
+                              : "text-[var(--success)]"
+                        }`}
+                      >
+                        {formatInr(rDue)}
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                            rOver
+                              ? "bg-[var(--danger-soft)] text-[var(--danger)]"
+                              : rDue > 0
+                                ? "bg-[rgba(197,160,40,0.18)] text-[var(--brand-deep)]"
+                                : "bg-[var(--success-soft)] text-[var(--success)]"
+                          }`}
+                        >
+                          {rOver
+                            ? "Overdue"
+                            : rDue > 0
+                              ? `${openDs.length} open`
+                              : "All clear"}
+                        </span>
+                        {pickedPaise > 0 ? (
+                          <span className="rounded-full bg-[var(--success-soft)] px-2 py-0.5 text-[10px] font-bold text-[var(--success)]">
+                            ticked {formatInr(pickedNet)}
+                            {pickedDiscount > 0
+                              ? ` (−${formatInr(pickedDiscount)})`
+                              : ""}
+                          </span>
+                        ) : null}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
               {siblingCount > 1 ? (
-                <button
-                  type="button"
-                  className="text-xs font-semibold text-[var(--brand-mid)] hover:underline"
-                  onClick={onOpenAllSiblings}
-                >
-                  Open all
-                </button>
+                <p className="mt-2.5 border-t border-dashed border-[var(--border)] pt-2 text-[11px] leading-snug text-[var(--muted)]">
+                  Tap a child to see their fees — one at a time. Ticks are
+                  remembered when you switch: each card&apos;s green badge shows
+                  what stays selected, and the total collects them all.
+                </p>
               ) : null}
             </div>
 
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-              {householdBundle.map((row) => {
-                const openDs = openFeeDues(row.dues);
-                const rDue = openDs.reduce((s, d) => s + d.balancePaise, 0);
-                const rOver = openDs.some((d) => d.dueOn <= today);
-                const on = activeStudentIds.has(row.student.id);
-                const pickedForStudent = openDs.filter((d) =>
-                  selectedKeys.has(d.dueKey),
-                );
-                const pickedPaise = pickedForStudent.reduce(
-                  (s, d) => s + d.balancePaise,
-                  0,
-                );
-                const pickedDiscount = discountSlices.reduce(
-                  (s, x) => (x.studentId === row.student.id ? s + x.amountPaise : s),
-                  0,
-                );
-                const pickedNet = Math.max(0, pickedPaise - pickedDiscount);
-                return (
-                  <button
-                    key={row.student.id}
-                    type="button"
-                    aria-pressed={on}
-                    onClick={() => onToggleActiveStudent(row.student.id)}
-                    className={`relative rounded-xl border-2 p-2.5 text-left transition active:scale-[0.99] ${
-                      on
-                        ? "border-[var(--brand-gold)] bg-[rgba(197,160,40,0.08)]"
-                        : "border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[rgba(197,160,40,0.45)]"
-                    }`}
-                  >
-                    <span
-                      className={`absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full border text-[11px] font-bold ${
-                        on
-                          ? "border-[var(--brand-gold)] bg-[var(--brand-gold)] text-white"
-                          : "border-[var(--border)] bg-[var(--card)] text-transparent"
-                      }`}
-                      aria-hidden
-                    >
-                      ✓
-                    </span>
-                    <div className="pr-6 text-sm font-bold text-[var(--brand-deep)]">
-                      <StudentNameLabel student={row.student} />
-                    </div>
-                    <div className="mt-0.5 text-[11px] text-[var(--muted)]">
-                      {classLabel(row.student)} · {row.student.admissionNo}
-                    </div>
-                    <div
-                      className={`mt-1.5 text-base font-bold tabular-nums ${
-                        rOver
-                          ? "text-[var(--danger)]"
-                          : rDue > 0
-                            ? "text-[var(--brand-deep)]"
-                            : "text-[var(--success)]"
-                      }`}
-                    >
-                      {formatInr(rDue)}
-                    </div>
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                          rOver
-                            ? "bg-[var(--danger-soft)] text-[var(--danger)]"
-                            : rDue > 0
-                              ? "bg-[rgba(197,160,40,0.18)] text-[var(--brand-deep)]"
-                              : "bg-[var(--success-soft)] text-[var(--success)]"
-                        }`}
-                      >
-                        {rOver
-                          ? "Overdue"
-                          : rDue > 0
-                            ? `${openDs.length} open`
-                            : "All clear"}
-                      </span>
-                      {pickedPaise > 0 ? (
-                        <span className="rounded-full bg-[var(--success-soft)] px-2 py-0.5 text-[10px] font-bold text-[var(--success)]">
-                          ticked {formatInr(pickedNet)}
-                          {pickedDiscount > 0
-                            ? ` (−${formatInr(pickedDiscount)})`
-                            : ""}
-                        </span>
-                      ) : null}
-                    </div>
-                  </button>
-                );
-              })}
+            <div className="flex flex-wrap gap-1.5">
+              {siblingCount > 1 ? (
+                <MiniBtn onClick={onSelectAllSiblings}>
+                  Tick all open fees
+                </MiniBtn>
+              ) : (
+                <MiniBtn onClick={onSelectAllSiblings}>Select all dues</MiniBtn>
+              )}
+              <MiniBtn onClick={onSelectOverdue}>Tick overdue</MiniBtn>
+              <MiniBtn onClick={onClear}>Clear all</MiniBtn>
             </div>
 
-            {siblingCount > 1 ? (
-              <p className="mt-2.5 border-t border-dashed border-[var(--border)] pt-2 text-[11px] leading-snug text-[var(--muted)]">
-                Tap a child to see their fees — one at a time. Ticks are
-                remembered when you switch: each card&apos;s green badge shows
-                what stays selected, and the total collects them all.
-              </p>
-            ) : null}
-          </div>
-
-          <div className="flex flex-wrap gap-1.5">
-            {siblingCount > 1 ? (
-              <MiniBtn onClick={onSelectAllSiblings}>
-                Tick all open fees
-              </MiniBtn>
-            ) : (
-              <MiniBtn onClick={onSelectAllSiblings}>Select all dues</MiniBtn>
-            )}
-            <MiniBtn onClick={onSelectOverdue}>Tick overdue</MiniBtn>
-            <MiniBtn onClick={onClear}>Clear all</MiniBtn>
-          </div>
-
-          {/* Sell store items to the child on the counter — the due joins
+            {/* Sell store items to the child on the counter — the due joins
               these fee lines and is paid on the same receipt. */}
-          <StoreSellInline
-            studentId={
-              activeBundle[0]?.student.id ?? student.id
-            }
-            studentName={
-              activeBundle[0]?.student.fullName ?? student.fullName
-            }
-            classId={activeBundle[0]?.student.classId ?? student.classId}
-            sectionId={activeBundle[0]?.student.sectionId ?? student.sectionId}
-            readOnly={readOnly}
-            onSold={onStoreSold}
-          />
-        </div>
-
-        {/* ── RIGHT COLUMN: fees of the children on the counter ── */}
-        <div className="space-y-3 min-w-0">
-          <div className="max-h-[min(70vh,44rem)] space-y-3 overflow-y-auto pr-1">
-            {activeBundle.every((r) => openFeeDues(r.dues).length === 0) &&
-            activeBundle.every((r) => r.dues.length === 0) ? (
-              <p className="text-xs text-[var(--muted)]">
-                No open dues
-                {!student.feeGroupId
-                  ? " — assign a fee group on the student profile"
-                  : ""}
-                .
-              </p>
-            ) : (
-              activeBundle.map((row) => {
-                const openDues = openFeeDues(row.dues);
-                const dueKeys = openDues.map((d) => d.dueKey);
-                const selectedForStudent = openDues.filter((d) =>
-                  selectedKeys.has(d.dueKey),
-                );
-                const allSelected =
-                  dueKeys.length > 0 &&
-                  dueKeys.every((k) => selectedKeys.has(k));
-                const someSelected =
-                  !allSelected && selectedForStudent.length > 0;
-                const rowTotal = openDues.reduce(
-                  (s, d) => s + d.balancePaise,
-                  0,
-                );
-                const rowSelected = selectedForStudent.reduce(
-                  (s, d) => s + d.balancePaise,
-                  0,
-                );
-                const rowDiscount = discountSlices.reduce(
-                  (s, x) =>
-                    x.studentId === row.student.id ? s + x.amountPaise : s,
-                  0,
-                );
-                const rowSelectedNet = Math.max(0, rowSelected - rowDiscount);
-                const hasOverdue = openDues.some((d) => d.dueOn <= today);
-
-                return (
-                  <div
-                    key={row.student.id}
-                    className="flex min-h-0 flex-col rounded-xl border border-[rgba(197,160,40,0.45)] bg-[var(--card)] p-3"
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-2 border-b border-[var(--border)] pb-2">
-                      <div className="flex min-w-0 flex-col items-start gap-1">
-                        <label className="flex min-w-0 cursor-pointer items-start gap-2.5">
-                          <input
-                            type="checkbox"
-                            className="mt-1"
-                            checked={allSelected}
-                            ref={(el) => {
-                              if (el) el.indeterminate = someSelected;
-                            }}
-                            onChange={() => onToggleStudentAll(row.student.id)}
-                            disabled={openDues.length === 0}
-                          />
-                          <div className="min-w-0">
-                            <div className="text-sm font-bold text-[var(--brand-deep)]">
-                              <StudentNameLabel student={row.student} />
-                            </div>
-                            <div className="mt-0.5 text-[11px] text-[var(--muted)]">
-                              {classLabel(row.student)} ·{" "}
-                              {row.student.admissionNo} ·{" "}
-                              {feeGroupLabel(row.student)}
-                            </div>
-                          </div>
-                        </label>
-                        <TransportRiderChip
-                          studentId={row.student.id}
-                          academicYearCode={row.student.academicYearCode}
-                          dues={row.dues}
-                        />
-                      </div>
-                      <div className="text-right">
-                        <div
-                          className={`text-sm font-bold ${
-                            hasOverdue
-                              ? "text-[var(--danger)]"
-                              : rowTotal === 0 && row.dues.length > 0
-                                ? "text-[var(--success)]"
-                                : "text-[var(--brand-deep)]"
-                          }`}
-                        >
-                          {formatInr(rowTotal)}
-                        </div>
-                        <div
-                          className={`text-xs font-semibold ${
-                            rowSelected > 0
-                              ? "text-[var(--success)]"
-                              : "text-[var(--muted)]"
-                          }`}
-                        >
-                          {selectedForStudent.length}/{openDues.length} open ·{" "}
-                          {formatInr(rowSelectedNet)}
-                          {rowDiscount > 0
-                            ? ` (−${formatInr(rowDiscount)})`
-                            : ""}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      <MiniBtn
-                        onClick={() => onToggleStudentAll(row.student.id)}
-                      >
-                        {allSelected ? "Unselect" : "Select child"}
-                      </MiniBtn>
-                      <MiniBtn
-                        onClick={() => onSelectStudentOverdue(row.student.id)}
-                      >
-                        Overdue
-                      </MiniBtn>
-                      {someSelected || allSelected ? (
-                        <MiniBtn onClick={() => onClearStudent(row.student.id)}>
-                          Clear
-                        </MiniBtn>
-                      ) : null}
-                    </div>
-
-                    {row.dues.length === 0 ? (
-                      <p className="mt-2 text-xs text-[var(--muted)]">
-                        No fee lines for this student
-                      </p>
-                    ) : (
-                      <DueBreakupPicker
-                        dues={row.dues}
-                        selectedKeys={selectedKeys}
-                        today={today}
-                        onToggle={onToggle}
-                        onToggleMonth={onToggleMonth}
-                        lineDiscountRupees={lineDiscountRupees}
-                        recurringEligible={recurringEligible}
-                        recurringChosen={recurringChosen}
-                        onToggleRecurring={onToggleRecurring}
-                        discountOnlyKeys={discountOnlyKeys}
-                        onToggleDiscountOnly={onToggleDiscountOnly}
-                        onChangeHeadDiscount={onChangeHeadDiscount}
-                        onLineDiscount={onLineDiscount}
-                      />
-                    )}
-                  </div>
-                );
-              })
-            )}
+            <StoreSellInline
+              studentId={activeBundle[0]?.student.id ?? student.id}
+              studentName={
+                activeBundle[0]?.student.fullName ?? student.fullName
+              }
+              classId={activeBundle[0]?.student.classId ?? student.classId}
+              sectionId={
+                activeBundle[0]?.student.sectionId ?? student.sectionId
+              }
+              readOnly={readOnly}
+              onSold={onStoreSold}
+            />
           </div>
-        </div>
+
+          {/* ── RIGHT COLUMN: fees of the children on the counter ── */}
+          <div className="space-y-3 min-w-0">
+            <div className="max-h-[min(70vh,44rem)] space-y-3 overflow-y-auto pr-1">
+              {activeBundle.every((r) => openFeeDues(r.dues).length === 0) &&
+              activeBundle.every((r) => r.dues.length === 0) ? (
+                <p className="text-xs text-[var(--muted)]">
+                  No open dues
+                  {!student.feeGroupId
+                    ? " — assign a fee group on the student profile"
+                    : ""}
+                  .
+                </p>
+              ) : (
+                activeBundle.map((row) => {
+                  const openDues = openFeeDues(row.dues);
+                  const dueKeys = openDues.map((d) => d.dueKey);
+                  const selectedForStudent = openDues.filter((d) =>
+                    selectedKeys.has(d.dueKey),
+                  );
+                  const allSelected =
+                    dueKeys.length > 0 &&
+                    dueKeys.every((k) => selectedKeys.has(k));
+                  const someSelected =
+                    !allSelected && selectedForStudent.length > 0;
+                  const rowTotal = openDues.reduce(
+                    (s, d) => s + d.balancePaise,
+                    0,
+                  );
+                  const rowSelected = selectedForStudent.reduce(
+                    (s, d) => s + d.balancePaise,
+                    0,
+                  );
+                  const rowDiscount = discountSlices.reduce(
+                    (s, x) =>
+                      x.studentId === row.student.id ? s + x.amountPaise : s,
+                    0,
+                  );
+                  const rowSelectedNet = Math.max(0, rowSelected - rowDiscount);
+                  const hasOverdue = openDues.some((d) => d.dueOn <= today);
+
+                  return (
+                    <div
+                      key={row.student.id}
+                      className="flex min-h-0 flex-col rounded-xl border border-[rgba(197,160,40,0.45)] bg-[var(--card)] p-3"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2 border-b border-[var(--border)] pb-2">
+                        <div className="flex min-w-0 flex-col items-start gap-1">
+                          <label className="flex min-w-0 cursor-pointer items-start gap-2.5">
+                            <input
+                              type="checkbox"
+                              className="mt-1"
+                              checked={allSelected}
+                              ref={(el) => {
+                                if (el) el.indeterminate = someSelected;
+                              }}
+                              onChange={() =>
+                                onToggleStudentAll(row.student.id)
+                              }
+                              disabled={openDues.length === 0}
+                            />
+                            <div className="min-w-0">
+                              <div className="text-sm font-bold text-[var(--brand-deep)]">
+                                <StudentNameLabel student={row.student} />
+                              </div>
+                              <div className="mt-0.5 text-[11px] text-[var(--muted)]">
+                                {classLabel(row.student)} ·{" "}
+                                {row.student.admissionNo} ·{" "}
+                                {feeGroupLabel(row.student)}
+                              </div>
+                            </div>
+                          </label>
+                          <TransportRiderChip
+                            studentId={row.student.id}
+                            academicYearCode={row.student.academicYearCode}
+                            dues={row.dues}
+                          />
+                        </div>
+                        <div className="text-right">
+                          <div
+                            className={`text-sm font-bold ${
+                              hasOverdue
+                                ? "text-[var(--danger)]"
+                                : rowTotal === 0 && row.dues.length > 0
+                                  ? "text-[var(--success)]"
+                                  : "text-[var(--brand-deep)]"
+                            }`}
+                          >
+                            {formatInr(rowTotal)}
+                          </div>
+                          <div
+                            className={`text-xs font-semibold ${
+                              rowSelected > 0
+                                ? "text-[var(--success)]"
+                                : "text-[var(--muted)]"
+                            }`}
+                          >
+                            {selectedForStudent.length}/{openDues.length} open ·{" "}
+                            {formatInr(rowSelectedNet)}
+                            {rowDiscount > 0
+                              ? ` (−${formatInr(rowDiscount)})`
+                              : ""}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        <MiniBtn
+                          onClick={() => onToggleStudentAll(row.student.id)}
+                        >
+                          {allSelected ? "Unselect" : "Select child"}
+                        </MiniBtn>
+                        <MiniBtn
+                          onClick={() => onSelectStudentOverdue(row.student.id)}
+                        >
+                          Overdue
+                        </MiniBtn>
+                        {someSelected || allSelected ? (
+                          <MiniBtn
+                            onClick={() => onClearStudent(row.student.id)}
+                          >
+                            Clear
+                          </MiniBtn>
+                        ) : null}
+                      </div>
+
+                      {row.dues.length === 0 ? (
+                        <p className="mt-2 text-xs text-[var(--muted)]">
+                          No fee lines for this student
+                        </p>
+                      ) : (
+                        <DueBreakupPicker
+                          dues={row.dues}
+                          selectedKeys={selectedKeys}
+                          today={today}
+                          onToggle={onToggle}
+                          onToggleMonth={onToggleMonth}
+                          lineDiscountRupees={lineDiscountRupees}
+                          recurringEligible={recurringEligible}
+                          recurringChosen={recurringChosen}
+                          onToggleRecurring={onToggleRecurring}
+                          discountOnlyKeys={discountOnlyKeys}
+                          onToggleDiscountOnly={onToggleDiscountOnly}
+                          onChangeHeadDiscount={onChangeHeadDiscount}
+                          onLineDiscount={onLineDiscount}
+                        />
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
         </div>
 
         {/* ── THE MONEY: sticky right column ── */}
@@ -2946,7 +2996,8 @@ function CollectPanel({
                   />
                   {isCollectionDateLocked(collectionDate) ? (
                     <span className="mt-1 block text-[11px] font-semibold leading-snug text-[#fca5a5]">
-                      This date is day-closed — pick another date or reject handover
+                      This date is day-closed — pick another date or reject
+                      handover
                     </span>
                   ) : null}
                 </label>
@@ -3045,7 +3096,9 @@ function CollectPanel({
                         ) : null}
                       </span>
                       <div className="flex items-center gap-2">
-                        <span className="text-xl font-bold text-white/80">₹</span>
+                        <span className="text-xl font-bold text-white/80">
+                          ₹
+                        </span>
                         <input
                           type="number"
                           min={0}
@@ -3245,7 +3298,9 @@ function CollectPanel({
               </button>
               <p className="mt-2 text-center text-xs text-white/75">
                 Collecting as{" "}
-                <span className="font-semibold text-[#f0d878]">{cashierName}</span>
+                <span className="font-semibold text-[#f0d878]">
+                  {cashierName}
+                </span>
               </p>
             </div>
           </div>
@@ -3278,83 +3333,83 @@ function CollectPanel({
                 No earlier receipts for this household yet.
               </p>
             ) : (
-          <ul className="max-h-64 divide-y divide-[var(--border)] overflow-y-auto">
-            {priorReceipts.map((v) => {
-              const voided = !!v.voidedAt;
-              const names = Array.from(
-                new Set(v.lines.map((l) => l.studentName)),
-              );
-              const modes = Array.from(
-                new Set(v.tenders.map((t) => tenderModeLabel(t.mode))),
-              );
-              return (
-                <li
-                  key={v.id}
-                  className={`flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 ${
-                    voided ? "opacity-60" : ""
-                  }`}
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-bold text-[var(--brand-deep)]">
-                        {v.receiptNo}
-                      </span>
-                      {voided ? (
-                        <span className="rounded bg-[rgba(180,60,60,0.12)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--danger)]">
-                          Void
-                        </span>
-                      ) : (
-                        <span className="rounded bg-[rgba(15,122,76,0.12)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--ok)]">
-                          Paid
-                        </span>
-                      )}
-                      {paperRefOf(v) ? (
-                        <span className="rounded bg-[rgba(197,160,40,0.16)] px-1.5 py-0.5 text-[11px] font-semibold text-[var(--brand-deep)]">
-                          Book {paperRefOf(v)}
-                        </span>
-                      ) : null}
-                      {/* The UTR is what a parent quotes from their bank app,
-                          so it belongs on the row that a UTR search returns. */}
-                      {v.tenders
-                        .map((t) => t.ref?.trim())
-                        .filter(Boolean)
-                        .slice(0, 2)
-                        .map((ref) => (
-                          <span
-                            key={ref}
-                            className="font-mono text-[10px] text-[var(--muted)]"
-                            title="Transaction reference"
-                          >
-                            {ref}
+              <ul className="max-h-64 divide-y divide-[var(--border)] overflow-y-auto">
+                {priorReceipts.map((v) => {
+                  const voided = !!v.voidedAt;
+                  const names = Array.from(
+                    new Set(v.lines.map((l) => l.studentName)),
+                  );
+                  const modes = Array.from(
+                    new Set(v.tenders.map((t) => tenderModeLabel(t.mode))),
+                  );
+                  return (
+                    <li
+                      key={v.id}
+                      className={`flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 ${
+                        voided ? "opacity-60" : ""
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-bold text-[var(--brand-deep)]">
+                            {v.receiptNo}
                           </span>
-                        ))}
-                      {v.whatsappSentAt && !voided ? (
-                        <span className="rounded bg-[#128C7E]/12 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#128C7E]">
-                          WA
-                        </span>
-                      ) : null}
-                    </div>
-                    <p className="mt-0.5 truncate text-xs text-[var(--muted)]">
-                      {v.collectionDate} · {names.join(", ")} ·{" "}
-                      {modes.join(" + ")} · by {v.cashierName}
-                    </p>
-                  </div>
-                  <div className="text-sm font-bold tabular-nums text-[var(--brand-deep)]">
-                    {formatInr(v.totalPaise)}
-                  </div>
-                  <button
-                    type="button"
-                    className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
-                    onClick={() => onOpenReceipt(v.id)}
-                  >
-                    Open
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </div>
+                          {voided ? (
+                            <span className="rounded bg-[rgba(180,60,60,0.12)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--danger)]">
+                              Void
+                            </span>
+                          ) : (
+                            <span className="rounded bg-[rgba(15,122,76,0.12)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--ok)]">
+                              Paid
+                            </span>
+                          )}
+                          {paperRefOf(v) ? (
+                            <span className="rounded bg-[rgba(197,160,40,0.16)] px-1.5 py-0.5 text-[11px] font-semibold text-[var(--brand-deep)]">
+                              Book {paperRefOf(v)}
+                            </span>
+                          ) : null}
+                          {/* The UTR is what a parent quotes from their bank app,
+                          so it belongs on the row that a UTR search returns. */}
+                          {v.tenders
+                            .map((t) => t.ref?.trim())
+                            .filter(Boolean)
+                            .slice(0, 2)
+                            .map((ref) => (
+                              <span
+                                key={ref}
+                                className="font-mono text-[10px] text-[var(--muted)]"
+                                title="Transaction reference"
+                              >
+                                {ref}
+                              </span>
+                            ))}
+                          {v.whatsappSentAt && !voided ? (
+                            <span className="rounded bg-[#128C7E]/12 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#128C7E]">
+                              WA
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="mt-0.5 truncate text-xs text-[var(--muted)]">
+                          {v.collectionDate} · {names.join(", ")} ·{" "}
+                          {modes.join(" + ")} · by {v.cashierName}
+                        </p>
+                      </div>
+                      <div className="text-sm font-bold tabular-nums text-[var(--brand-deep)]">
+                        {formatInr(v.totalPaise)}
+                      </div>
+                      <button
+                        type="button"
+                        className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
+                        onClick={() => onOpenReceipt(v.id)}
+                      >
+                        Open
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
         </aside>
       </div>
 
@@ -3399,7 +3454,7 @@ function CollectPanel({
           </button>
         </div>
       </div>
-</div>
+    </div>
   );
 }
 
@@ -3772,9 +3827,7 @@ function ReceiptPreviewModal({
                   className="field !py-1.5"
                   inputMode="numeric"
                   value={waDraft}
-                  onChange={(e) =>
-                    setWaDraft(normalizeMobile(e.target.value))
-                  }
+                  onChange={(e) => setWaDraft(normalizeMobile(e.target.value))}
                   placeholder="10-digit mobile"
                   maxLength={10}
                 />
@@ -3787,7 +3840,9 @@ function ReceiptPreviewModal({
           ) : null}
 
           {waError ? (
-            <p className="text-xs font-semibold text-[var(--danger)]">{waError}</p>
+            <p className="text-xs font-semibold text-[var(--danger)]">
+              {waError}
+            </p>
           ) : null}
           {waNotice ? (
             <p className="text-xs font-semibold text-[#128C7E]">{waNotice}</p>
@@ -3828,7 +3883,9 @@ function ReceiptsPanel({
   const [classId, setClassId] = useState("");
   const [sectionId, setSectionId] = useState("");
   const [modeFilter, setModeFilter] = useState<"" | TenderMode>("");
-  const [concessionFilter, setConcessionFilter] = useState<"" | "with" | "without">("");
+  const [concessionFilter, setConcessionFilter] = useState<
+    "" | "with" | "without"
+  >("");
   const [collectorQ, setCollectorQ] = useState("");
   /**
    * One box for every number a receipt can be found by: our receipt no., the
@@ -3908,9 +3965,7 @@ function ReceiptsPanel({
       }
 
       if (concessionFilter) {
-        const hasConcession = v.lines.some(
-          (l) => (l.concessionPaise ?? 0) > 0,
-        );
+        const hasConcession = v.lines.some((l) => (l.concessionPaise ?? 0) > 0);
         if (concessionFilter === "with" && !hasConcession) return false;
         if (concessionFilter === "without" && hasConcession) return false;
       }
@@ -4061,9 +4116,7 @@ function ReceiptsPanel({
             rows={filtered.map((v) => {
               const students = [...new Set(v.lines.map((l) => l.studentName))];
               const modes = [
-                ...new Set(
-                  v.tenders.map((t) => tenderModeLabel(t.mode)),
-                ),
+                ...new Set(v.tenders.map((t) => tenderModeLabel(t.mode))),
               ];
               return {
                 receipt: v.receiptNo || v.id,

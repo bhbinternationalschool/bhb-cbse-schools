@@ -2035,13 +2035,25 @@ export function computeStudentDues(
      * everywhere except the counter, so no other screen changes.
      */
     storeDues?: InjectedStoreDue[];
+    /**
+     * The paid-by-due-key map, when the caller is already looping students.
+     *
+     * It is built from the whole voucher history and does not vary by
+     * student, so computing it inside this function meant a full scan of
+     * every voucher ONCE PER STUDENT — the fee counter's search does this
+     * for up to 80 students per keystroke. Passed in, it is built once.
+     *
+     * Omit it and the behaviour is exactly as before; there is no cache and
+     * therefore nothing that can go stale.
+     */
+    paidMap?: Map<string, number>;
   },
 ): FeeDueLine[] {
   if (student.status !== "active" && !options?.includeInactive) return [];
   const asOf = options?.asOf ?? new Date().toISOString().slice(0, 10);
   const includeFuture = options?.includeFuture ?? true;
   const includePaid = options?.includePaid ?? true;
-  const paidMap = paidByDueKey(fees);
+  const paidMap = options?.paidMap ?? paidByDueKey(fees);
   const waiverMap = postedWaiversByDueKey(student.id);
   const lines: FeeDueLine[] = [];
   const midYearPolicy = normalizeMidYearFeePolicy(masters.midYearFeePolicy);
@@ -4340,11 +4352,17 @@ export function searchFeeStudents(
     });
   }
 
+  // Built once for the whole result set rather than once per student: it
+  // is the same map every time, and rebuilding it per hit was the bulk of
+  // what made typing in the counter feel stuck.
+  const paidMap = paidByDueKey(f);
+
   return list
     .slice(0, classId || sectionId ? 80 : 40)
     .map((student) => {
       const dues = computeStudentDues(student, m, f, {
         includeFuture: filters?.includeFuture ?? false,
+        paidMap,
       });
       const balancePaise = openFeeDues(dues).reduce(
         (sum, d) => sum + d.balancePaise,

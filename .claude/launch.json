@@ -49,6 +49,21 @@
         "cd /private/tmp/claude-501/-Users-ashishsingh-CBSE-Schools/2e28970a-75cd-4f5f-a296-6196658b04b5/scratchpad/test-wt2 && npm exec -w web -- next start -p 3100"
       ],
       "port": 3100
+    },
+    {
+      "name": "web-prod-3200",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "exec",
+        "-w",
+        "web",
+        "--",
+        "next",
+        "start",
+        "-p",
+        "3200"
+      ],
+      "port": 3200
     }
   ]
 }

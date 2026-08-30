@@ -91,6 +91,7 @@ SELFTESTS=(
   test:erp-chat
   test:wa-templates-automation
   test:fee-student-search
+  test:payment-link-amount
   test:substitution-auto
   test:timetable-substitution
   test:transport-sibling-gaps

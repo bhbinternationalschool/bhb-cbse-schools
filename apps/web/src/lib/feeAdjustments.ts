@@ -86,13 +86,32 @@ function id(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
+/**
+ * Parsed adjustments, keyed by the exact text they were parsed from.
+ *
+ * `loadFeeAdjustments` is called far more often than it looks: once per
+ * student for the waiver map, and once per DUE LINE inside
+ * `stopFutureBlocks` — so building one fee counter search re-parsed this
+ * blob several hundred times. The parse and the normalise pass were the
+ * whole cost; the read itself is nothing.
+ *
+ * The cache key IS the stored string, so this cannot serve stale data: any
+ * write changes the text, which misses the cache. That makes it a pure
+ * speed-up with no staleness window — deliberately not a timed cache,
+ * because a counter that shows yesterday's waiver is worse than a slow one.
+ */
+let adjustCache: { raw: string; rows: FeeAdjustment[] } | null = null;
+
 export function loadFeeAdjustments(): FeeAdjustment[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(ADJUST_KEY);
     if (!raw) return [];
+    if (adjustCache && adjustCache.raw === raw) return adjustCache.rows;
     const parsed = JSON.parse(raw) as FeeAdjustment[];
-    return Array.isArray(parsed) ? parsed.map(normalizeAdjustment) : [];
+    const rows = Array.isArray(parsed) ? parsed.map(normalizeAdjustment) : [];
+    adjustCache = { raw, rows };
+    return rows;
   } catch {
     return [];
   }
