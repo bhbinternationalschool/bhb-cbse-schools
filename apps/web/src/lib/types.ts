@@ -19,7 +19,7 @@ export const TENANT = {
   city: "Varanasi",
   state: "Uttar Pradesh",
   logoUrl: "/logo.png?v=2",
-  logoCrestUrl: "/logo-crest.png?v=1",
+  logoCrestUrl: "/logo-crest.png?v=2",
   primaryColor: "#203050",
   primaryMid: "#384870",
   accentColor: "#C5A028",

@@ -149,12 +149,23 @@ export function schoolLogoUrl(masters?: MastersState | null): string {
   return real(schoolIdentity(masters).logoUrl) || TENANT.logoUrl;
 }
 
-/** Crest only — seals, watermarks, tab icon. Masters keeps one logo field, so
- *  an uploaded logo stands in for the crest rather than printing the old one
- *  beside a school's new mark. */
+/**
+ * Crest only — seals, watermarks, the day-close header, exam papers.
+ *
+ * These are square slots, some as small as 38px. The full logo is a lockup:
+ * shield, school name and tagline stacked. Squeezed into 38 pixels that is an
+ * illegible smudge, which is what these surfaces were printing, because this
+ * used to prefer the uploaded logo over the bundled crest — a sensible guard
+ * back when the bundled crest was an older mark than the school's current one.
+ *
+ * It no longer is, so the order is now what the slot actually wants: the
+ * school's own favicon, which is by definition the square mark; then the
+ * bundled crest; and only as a last resort the full logo, for a school that
+ * has uploaded one but has no crest at all.
+ */
 export function schoolCrestUrl(masters?: MastersState | null): string {
-  const logo = real(schoolIdentity(masters).logoUrl);
-  return logo || TENANT.logoCrestUrl;
+  const p = schoolIdentity(masters);
+  return real(p.faviconUrl) || TENANT.logoCrestUrl || real(p.logoUrl);
 }
 
 /**

@@ -1,6 +1,6 @@
 /* BHB School PWAs — parent, staff ERP, field (offline shell). */
 
-const CACHE = "bhb-school-pwa-v4";
+const CACHE = "bhb-school-pwa-v5";
 const SHELL = [
   "/login",
   "/parent",
