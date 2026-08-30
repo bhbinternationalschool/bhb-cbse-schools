@@ -5,6 +5,7 @@
  */
 
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { sanitizeStoredMediaUrl } from "@/lib/media";
 import { normalizeHouseholdLanguage } from "@/lib/householdPrefs";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import {
@@ -1457,16 +1458,8 @@ export function mergeProjectedLead(
 }
 
 export function sanitizeSurveyPhotoUrl(value?: string | null): string {
-  const url = (value ?? "").trim();
-  if (!url) return "";
-  if (/^data:/i.test(url)) {
-    console.warn(
-      "[admissions] refusing to store a data: URL as a survey photo " +
-        `(${Math.round(url.length / 1024)} KB). Upload it and store the URL.`,
-    );
-    return "";
-  }
-  return url;
+  // One rule for every stored image in the app; see lib/media.ts.
+  return sanitizeStoredMediaUrl(value, "admissions survey photo");
 }
 
 export function saveAdmissions(state: AdmissionsState): void {

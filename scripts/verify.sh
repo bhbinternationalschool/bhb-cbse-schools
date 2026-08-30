@@ -71,6 +71,7 @@ SELFTESTS=(
   test:projection
   test:read-client
   test:survey-photo
+  test:media-contract
   test:partial-lead
   test:wire-payload
   test:projected-lead-write

@@ -1,32 +1,76 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-
-const MAX_BYTES = 800_000;
+import { acceptFor, bucketFor, type MediaVisibility } from "@/lib/media";
+import { uploadMedia } from "@/lib/mediaUpload";
 
 type Props = {
   label: string;
+  /** The stored URL. Legacy records may still hold a data: URL; those render. */
   value: string;
-  onChange: (dataUrl: string) => void;
+  onChange: (url: string) => void;
   onError?: (message: string) => void;
   aspect?: "square" | "wide";
   hint?: string;
+  /**
+   * Who may fetch the result. `public` puts it in the website bucket — right
+   * for the crest and the favicon, wrong for a signature or a face.
+   */
+  visibility: MediaVisibility;
+  /** Folder in the bucket, e.g. `brand` or `staff/BHB001`. */
+  pathPrefix: string;
 };
 
-/** Photo or signature capture / upload (data URL stored on staff record). */
+/**
+ * Pick or capture an image, store it, and keep the URL.
+ *
+ * This used to hand `onChange` a base64 `data:` URL — the file itself, capped
+ * at 800 KB, written into whatever record the form saved. That is why the
+ * storage bucket held nothing and the school's favicon lives in the masters
+ * row as 45 kB of text. It now uploads, and an upload that fails says so
+ * instead of quietly succeeding with the picture in place of a link.
+ */
 export function StaffImageField({
   label,
   value,
   onChange,
   onError,
   aspect = "square",
-  hint = "Camera or file · under 800 KB",
+  hint,
+  visibility,
+  pathPrefix,
 }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [camOpen, setCamOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const bucket = bucketFor(visibility);
+  const defaultHint =
+    visibility === "public"
+      ? "Camera or file · published on the website"
+      : "Camera or file · visible to staff only";
+
+  async function store(file: File, alreadySized = false) {
+    setBusy(true);
+    try {
+      const res = await uploadMedia({
+        file,
+        visibility,
+        pathPrefix,
+        verbatim: alreadySized,
+      });
+      if (!res.ok) {
+        onError?.(res.error);
+        return;
+      }
+      onChange(res.url);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   function acceptFile(file: File | null) {
     if (!file) return;
@@ -34,15 +78,7 @@ export function StaffImageField({
       onError?.("Choose an image file");
       return;
     }
-    if (file.size > MAX_BYTES) {
-      onError?.("Image must be under 800 KB");
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") onChange(reader.result);
-    };
-    reader.readAsDataURL(file);
+    void store(file);
   }
 
   function stopStream() {
@@ -98,18 +134,23 @@ export function StaffImageField({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.drawImage(video, 0, 0, w, h);
-    let quality = 0.85;
-    let data = canvas.toDataURL("image/jpeg", quality);
-    while (data.length > MAX_BYTES * 1.37 && quality > 0.4) {
-      quality -= 0.1;
-      data = canvas.toDataURL("image/jpeg", quality);
-    }
-    if (data.length > MAX_BYTES * 1.37) {
-      onError?.("Captured image is too large");
-      return;
-    }
-    onChange(data);
     closeCam();
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          onError?.("Could not read the camera image");
+          return;
+        }
+        void store(
+          new File([blob], `${label.toLowerCase().replace(/\W+/g, "-")}.jpg`, {
+            type: "image/jpeg",
+          }),
+          true,
+        );
+      },
+      "image/jpeg",
+      0.85,
+    );
   }
 
   const box =
@@ -125,7 +166,7 @@ export function StaffImageField({
           <img src={value} alt={label} className="h-full w-full object-cover" />
         ) : (
           <div className="flex h-full items-center justify-center px-2 text-center text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
-            {label}
+            {busy ? "Saving…" : label}
           </div>
         )}
       </div>
@@ -136,19 +177,21 @@ export function StaffImageField({
         <div className="mt-1.5 flex flex-wrap gap-2">
           <button
             type="button"
-            className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-xs font-semibold text-white"
+            className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+            disabled={busy}
             onClick={() => void openWebcam()}
           >
             Camera
           </button>
           <button
             type="button"
-            className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-semibold text-[var(--brand-deep)]"
+            className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-semibold text-[var(--brand-deep)] disabled:opacity-60"
+            disabled={busy}
             onClick={() => fileRef.current?.click()}
           >
-            Upload
+            {busy ? "Uploading…" : "Upload"}
           </button>
-          {value ? (
+          {value && !busy ? (
             <button
               type="button"
               className="rounded-lg px-3 py-2 text-xs font-medium text-[var(--danger)]"
@@ -158,11 +201,13 @@ export function StaffImageField({
             </button>
           ) : null}
         </div>
-        <p className="mt-1.5 text-[11px] text-[var(--muted)]">{hint}</p>
+        <p className="mt-1.5 text-[11px] text-[var(--muted)]">
+          {hint ?? defaultHint}
+        </p>
         <input
           ref={fileRef}
           type="file"
-          accept="image/*"
+          accept={acceptFor(bucket, "image")}
           className="hidden"
           onChange={(e) => {
             acceptFile(e.target.files?.[0] ?? null);

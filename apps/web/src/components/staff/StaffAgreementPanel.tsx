@@ -476,11 +476,13 @@ export function StaffAgreementPanel({
 
             <StaffImageField
               label="Your signature"
+              visibility="private"
+              pathPrefix={`staff/${sessionStaff?.id || "unknown"}/signature`}
               value={signatureUrl}
               onChange={setSignatureUrl}
               onError={(m) => flash(m, true)}
               aspect="wide"
-              hint="Draw or upload signature · under 800 KB"
+              hint="Draw on paper and photograph it, or upload"
             />
 
             <button

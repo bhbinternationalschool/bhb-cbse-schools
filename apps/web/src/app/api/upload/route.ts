@@ -1,39 +1,36 @@
 import { NextResponse } from "next/server";
 import { requireStaffApi } from "@/lib/apiRouteAuth.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import {
+  MEDIA_BUCKETS,
+  type MediaBucket,
+  contentTypeFor,
+  describeLimit,
+  maxBytesFor,
+  privateMediaUrl,
+  publicMediaUrl,
+  sanitizeMediaPath,
+} from "@/lib/media";
 
 export const runtime = "nodejs";
 
-const MAX_UPLOAD_BYTES = 15 * 1024 * 1024; // 15MB
+/**
+ * Take a file and hand back a URL that will still work tomorrow.
+ *
+ * This route used to return `getPublicUrl()` for a bucket that is private,
+ * which 403s for everyone — so every upload appeared to succeed and produced
+ * a dead link, and the pickers fell back to writing base64 into the database.
+ * The two things it now gets right:
+ *
+ *   - it uploads into the bucket that matches the file's audience, and
+ *   - it returns the URL that bucket is actually served from — Supabase's
+ *     public URL for `site-media`, our own `/api/file` path for
+ *     `school-files`, never an expiring signed URL.
+ */
 
-/** extension -> safe content-type; anything not listed is rejected. */
-const ALLOWED_TYPES: Record<string, string> = {
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  png: "image/png",
-  webp: "image/webp",
-  gif: "image/gif",
-  pdf: "application/pdf",
-  doc: "application/msword",
-  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  xls: "application/vnd.ms-excel",
-  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  csv: "text/csv",
-  txt: "text/plain",
-  mp3: "audio/mpeg",
-  wav: "audio/wav",
-};
-
-function sanitizePath(path: string): string {
-  return path
-    .replace(/^\/+/, "")
-    .replace(/\.\./g, "")
-    .replace(/[^a-zA-Z0-9._\-/]/g, "_");
-}
-
-function extensionOf(path: string): string {
-  const dot = path.lastIndexOf(".");
-  return dot === -1 ? "" : path.slice(dot + 1).toLowerCase();
+function bucketFromRequest(raw: string | null): MediaBucket | null {
+  if (!raw) return "school-files"; // the historical default
+  return raw === "site-media" || raw === "school-files" ? raw : null;
 }
 
 export async function POST(req: Request) {
@@ -51,51 +48,83 @@ export async function POST(req: Request) {
   try {
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
-    const rawPath = (formData.get("path") as string) || "";
-    const path = sanitizePath(rawPath || (file ? file.name : "upload.bin"));
-
     if (!file) {
       return NextResponse.json({ error: "Missing file" }, { status: 400 });
     }
-    if (file.size > MAX_UPLOAD_BYTES) {
-      return NextResponse.json(
-        { error: `File exceeds ${MAX_UPLOAD_BYTES / (1024 * 1024)}MB limit` },
-        { status: 413 },
-      );
+
+    const bucket = bucketFromRequest(formData.get("bucket") as string | null);
+    if (!bucket) {
+      return NextResponse.json({ error: "Unknown bucket" }, { status: 400 });
     }
-    const ext = extensionOf(path);
-    const safeContentType = ALLOWED_TYPES[ext];
-    if (!safeContentType) {
+
+    const rawPath = (formData.get("path") as string) || file.name || "upload.bin";
+    const path = sanitizeMediaPath(rawPath);
+    if (!path || path.endsWith("/")) {
+      return NextResponse.json({ error: "Invalid path" }, { status: 400 });
+    }
+
+    const contentType = contentTypeFor(bucket, path);
+    if (!contentType) {
+      const allowed = Object.keys(MEDIA_BUCKETS[bucket].types).join(", ");
       return NextResponse.json(
-        { error: `File type .${ext || "?"} is not allowed` },
+        {
+          error: `Cannot store a .${path.split(".").pop() || "?"} file here. Allowed: ${allowed}.`,
+        },
         { status: 415 },
       );
     }
-    const bytes = await file.arrayBuffer();
-    const buffer = Buffer.from(bytes);
+
+    const limit = maxBytesFor(bucket, contentType);
+    if (limit === 0) {
+      return NextResponse.json(
+        { error: "Video is not allowed in this bucket" },
+        { status: 415 },
+      );
+    }
+    if (file.size > limit) {
+      return NextResponse.json(
+        {
+          error: `File is ${describeLimit(file.size)} — the limit here is ${describeLimit(limit)}.`,
+        },
+        { status: 413 },
+      );
+    }
+
+    const buffer = Buffer.from(await file.arrayBuffer());
 
     const { error: uploadErr } = await ctx.sb.storage
-      .from("school-files")
+      .from(bucket)
       .upload(path, buffer, {
-        contentType: safeContentType,
+        contentType,
         upsert: true,
+        // A year. Callers version the filename when the content changes, so a
+        // stale copy is never the answer to a request for the new one.
+        cacheControl: "31536000",
       });
 
     if (uploadErr) {
-      console.warn("[api/upload] Supabase upload failed:", uploadErr.message);
+      console.warn("[api/upload] storage rejected the file:", uploadErr.message);
       return NextResponse.json(
         { error: uploadErr.message || "Storage upload failed" },
         { status: 500 },
       );
     }
 
-    const { data } = ctx.sb.storage.from("school-files").getPublicUrl(path);
+    const url =
+      MEDIA_BUCKETS[bucket].visibility === "public"
+        ? publicMediaUrl(
+            process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
+            path,
+          )
+        : privateMediaUrl(path);
 
     return NextResponse.json({
       ok: true,
-      url: data.publicUrl,
-      mode: "supabase",
+      url,
+      bucket,
       path,
+      contentType,
+      bytes: file.size,
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Upload error";
