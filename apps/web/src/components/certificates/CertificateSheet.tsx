@@ -13,6 +13,7 @@ import {
   schoolAddressLine,
   schoolCityLine,
   schoolPrintName,
+  schoolRecognitionLine,
   schoolShortName,
   schoolStatutoryLine,
   schoolTagline,
@@ -161,9 +162,11 @@ function TcSheet({
         <p className="mt-0.5 text-[10px] text-[var(--muted)]">
           {schoolAddressLine() || schoolCityLine()}
         </p>
-        <p className="mt-1 text-[10px] font-bold uppercase tracking-wide text-[var(--brand-deep)]">
-          Affiliated to the Central Board of Secondary Education
-        </p>
+        {schoolRecognitionLine() ? (
+          <p className="mt-1 text-[10px] font-bold uppercase tracking-wide text-[var(--brand-deep)]">
+            {schoolRecognitionLine()}
+          </p>
+        ) : null}
         {schoolStatutoryLine() ? (
           <p className="mt-1 text-[10px] text-[var(--muted)]">
             {schoolStatutoryLine()} · Status: {TENANT.schoolStatus}

@@ -157,6 +157,42 @@ export function schoolCrestUrl(masters?: MastersState | null): string {
   return logo || TENANT.logoCrestUrl;
 }
 
+/**
+ * The recognition line for a certificate — or nothing.
+ *
+ * This used to be the words "Affiliated to the Central Board of Secondary
+ * Education", hardcoded onto every transfer certificate. A TC is a legal
+ * document a parent carries to the next school, and a school recognised by
+ * its state government for Nursery–VIII is not CBSE-affiliated: printing
+ * that claims an affiliation the school does not hold.
+ *
+ * So it follows Masters → School profile, and says nothing at all unless the
+ * board is set AND a real affiliation number backs it. Silence is correct
+ * here; an invented affiliation is not.
+ */
+export function schoolRecognitionLine(masters?: MastersState | null): string {
+  const p = schoolIdentity(masters);
+  const affiliation = real(p.affiliationNo) || real(TENANT.affiliationNo);
+  const state = real(p.state) || TENANT.state;
+
+  switch (p.boardMode) {
+    case "CBSE":
+      return affiliation
+        ? "Affiliated to the Central Board of Secondary Education"
+        : "";
+    case "DUAL":
+      return affiliation
+        ? "Affiliated to the Central Board of Secondary Education"
+        : state
+          ? `Recognised by the Government of ${state}`
+          : "";
+    case "UP_STATE":
+      return state ? `Recognised by the Government of ${state}` : "";
+    default:
+      return "";
+  }
+}
+
 /** "Varanasi, Uttar Pradesh" — the short place line under a certificate. */
 export function schoolCityLine(masters?: MastersState | null): string {
   const p = schoolIdentity(masters);
