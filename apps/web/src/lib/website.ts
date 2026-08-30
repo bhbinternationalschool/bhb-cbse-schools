@@ -18,9 +18,25 @@ import { asRevision, type Revision } from "@/lib/data/types";
 export type PageStatus = "draft" | "scheduled" | "published" | "archived";
 export type NavGroup = "" | "header" | "footer";
 
+/**
+ * The site ships English only; the structure for Hindi is in place so that
+ * adding it later is content entry rather than a migration.
+ *
+ * A translation is a separate page row sharing its twin's slug — (en,'about')
+ * at /about and (hi,'about') at /hi/about — so the two are linked by the
+ * address they already share and cannot drift apart.
+ */
+export type SiteLang = "en" | "hi";
+
+export const LANGUAGES: { id: SiteLang; label: string; pathPrefix: string }[] = [
+  { id: "en", label: "English", pathPrefix: "" },
+  { id: "hi", label: "हिन्दी", pathPrefix: "hi" },
+];
+
 export type SitePage = {
   id: string;
   slug: string;
+  lang: SiteLang;
   title: string;
   navGroup: NavGroup;
   navOrder: number;
@@ -87,9 +103,15 @@ export type SiteMedia = {
   consentHouseholdId: string;
   consentNote: string;
   contentHash: string;
+  /** The name the file arrived with. Storage keys are generated, so this is
+   * the only record of it — and the only thing the alt-text guard can
+   * compare against. */
+  originalFilename: string;
   uploadedBy: string;
   createdAt: string;
-  updatedAt: string;
+  /** Branded for the same reason as the page revision. See `SitePage`. */
+  updatedAt: Revision;
+  deletedAt: string | null;
 };
 
 /* ─── The block palette ───────────────────────────────────────────────── */
@@ -176,14 +198,23 @@ export function normalizeSlug(input: string): string {
  */
 export function slugProblem(
   slug: string,
-  opts: { existingSlugs?: readonly string[]; selfId?: string } = {},
+  opts: {
+    existingSlugs?: readonly string[];
+    selfId?: string;
+    /** Compared against pages in the SAME language; /hi/about and /about
+     * are different addresses and may share a slug. */
+    lang?: SiteLang;
+  } = {},
 ): string | null {
   const s = normalizeSlug(slug);
   if (!s) return "Give the page an address, for example about-us.";
   if (s.length > 120) return "That address is too long — keep it under 120 characters.";
 
   const [head] = s.split("/");
-  if (RESERVED_SLUGS.includes(s) || RESERVED_SLUGS.includes(head)) {
+  // Only root-level pages can be shadowed by a real app route. A Hindi page
+  // sits behind /hi, where nothing of ours answers, so `fees` is free there.
+  const canBeShadowed = (opts.lang ?? "en") === "en";
+  if (canBeShadowed && (RESERVED_SLUGS.includes(s) || RESERVED_SLUGS.includes(head))) {
     return `“${head}” is already used by another part of the site, so a page there would never be reached. Choose a different address.`;
   }
   if (opts.existingSlugs?.some((other) => normalizeSlug(other) === s)) {
@@ -192,10 +223,18 @@ export function slugProblem(
   return null;
 }
 
-/** The URL a published page is reachable at. */
-export function publicPathFor(slug: string): string {
+/**
+ * The URL a published page is reachable at.
+ *
+ * English sits at the root and Hindi under /hi, so the English address never
+ * changes when a translation is added — a link printed on a prospectus or
+ * given to Cashfree stays valid.
+ */
+export function publicPathFor(slug: string, lang: SiteLang = "en"): string {
   const s = normalizeSlug(slug);
-  return s ? `/${s}` : "/";
+  const prefix = LANGUAGES.find((l) => l.id === lang)?.pathPrefix ?? "";
+  if (!prefix) return s ? `/${s}` : "/";
+  return s ? `/${prefix}/${s}` : `/${prefix}`;
 }
 
 /* ─── Status ──────────────────────────────────────────────────────────── */
@@ -270,6 +309,7 @@ export function rowToPage(row: Row): SitePage {
   return {
     id: str(row.id),
     slug: str(row.slug),
+    lang: (str(row.lang, "en") === "hi" ? "hi" : "en") as SiteLang,
     title: str(row.title),
     navGroup: (navGroup === "header" || navGroup === "footer" ? navGroup : "") as NavGroup,
     navOrder: num(row.nav_order),
@@ -293,6 +333,7 @@ export function rowToPage(row: Row): SitePage {
 export function pageToRow(page: Partial<SitePage>): Row {
   const row: Row = {};
   if (page.slug !== undefined) row.slug = normalizeSlug(page.slug);
+  if (page.lang !== undefined) row.lang = page.lang;
   if (page.title !== undefined) row.title = page.title;
   if (page.navGroup !== undefined) row.nav_group = page.navGroup;
   if (page.navOrder !== undefined) row.nav_order = page.navOrder;
@@ -315,4 +356,167 @@ export function newSiteId(prefix: string): string {
   const stamp = Date.now().toString(36);
   const rand = Math.random().toString(36).slice(2, 8);
   return `${prefix}_${stamp}${rand}`;
+}
+
+/* ─── Media ───────────────────────────────────────────────────────────── */
+
+export const CONSENT_STATUSES: {
+  id: ConsentStatus;
+  label: string;
+  blurb: string;
+}[] = [
+  {
+    id: "not_required",
+    label: "No one in it",
+    blurb: "A building, a crest, a certificate — nobody identifiable",
+  },
+  {
+    id: "granted",
+    label: "Covered by admission terms",
+    blurb: "The normal case for a photograph of pupils",
+  },
+  {
+    id: "withdrawn",
+    label: "Family has objected",
+    blurb: "Never shown publicly, anywhere it appears",
+  },
+  {
+    id: "pending",
+    label: "Not yet decided",
+    blurb: "Held back until someone chooses",
+  },
+];
+
+export function consentLabel(status: ConsentStatus): string {
+  return CONSENT_STATUSES.find((c) => c.id === status)?.label ?? status;
+}
+
+/**
+ * Alt text is what a blind visitor hears and what a search engine reads, so
+ * an image without it is refused a place on a page — not merely flagged.
+ *
+ * The filename is rejected too. "IMG_2049.JPG" as alt text is worse than
+ * nothing: it passes an automated check while telling a screen-reader user
+ * precisely nothing.
+ */
+export function altProblem(alt: string, filename = ""): string | null {
+  const a = alt.trim();
+  if (!a) return "Describe the picture, so a blind visitor knows what is in it.";
+  if (a.length < 4) return "That is too short to describe the picture.";
+  if (a.length > 300) return "Keep the description under 300 characters.";
+
+  // Compare loosely. Someone retyping the file name rarely reproduces its
+  // punctuation — "prize day", "prize-day" and "prize_day" are the same
+  // non-description, and an exact match would catch none of them.
+  const loosen = (v: string) =>
+    v
+      .replace(/\.[^.]+$/, "")
+      .toLowerCase()
+      .replace(/[\s_+-]+/g, " ")
+      .trim();
+
+  const bare = loosen(filename);
+  if (bare && loosen(a) === bare) {
+    return "That is the file name, not a description. Say what is in the picture.";
+  }
+  if (/^(img|dsc|dscn|pxl|screenshot|photo|image)[\s_-]*\d*$/i.test(a)) {
+    return "That is a camera file name, not a description.";
+  }
+  return null;
+}
+
+/** Everything that must be true before an image may be placed on a page. */
+export function mediaReadyForPage(
+  media: Pick<SiteMedia, "consentStatus" | "alt" | "mime">,
+): { ready: boolean; reason: string | null } {
+  if (!mayPublishMedia(media)) {
+    return {
+      ready: false,
+      reason:
+        media.consentStatus === "withdrawn"
+          ? "The family has objected to this picture being shown."
+          : "Consent for this picture has not been settled.",
+    };
+  }
+  if (media.mime.startsWith("image/") && altProblem(media.alt)) {
+    return { ready: false, reason: "It still needs a description." };
+  }
+  return { ready: true, reason: null };
+}
+
+export function describeBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * A fingerprint of the file the office chose, used to catch the same
+ * photograph being uploaded twice.
+ *
+ * Deliberately hashes the ORIGINAL bytes rather than what we store. The
+ * upload path re-encodes large images through a canvas, and two browsers do
+ * not produce byte-identical output from one photograph — so hashing the
+ * stored copy would let the same picture in twice from two machines, which
+ * is exactly the case this is meant to catch.
+ */
+export async function sha256Hex(file: Blob): Promise<string> {
+  const buf = await file.arrayBuffer();
+  const digest = await crypto.subtle.digest("SHA-256", buf);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+export function rowToMedia(row: Row): SiteMedia {
+  const consent = str(row.consent_status, "not_required");
+  return {
+    id: str(row.id),
+    bucket: str(row.bucket, "site-media"),
+    storagePath: str(row.storage_path),
+    url: str(row.url),
+    mime: str(row.mime),
+    bytes: num(row.bytes),
+    width: num(row.width),
+    height: num(row.height),
+    alt: str(row.alt),
+    caption: str(row.caption),
+    credit: str(row.credit),
+    consentStatus: (CONSENT_STATUSES.some((c) => c.id === consent)
+      ? consent
+      : "not_required") as ConsentStatus,
+    consentHouseholdId: str(row.consent_household_id),
+    consentNote: str(row.consent_note),
+    contentHash: str(row.content_hash),
+    originalFilename: str(row.original_filename),
+    uploadedBy: str(row.uploaded_by),
+    createdAt: str(row.created_at),
+    updatedAt: asRevision(str(row.updated_at)),
+    deletedAt: nullableStr(row.deleted_at),
+  };
+}
+
+/** The columns a media write sends. Absent keys keep their stored value. */
+export function mediaToRow(media: Partial<SiteMedia>): Row {
+  const row: Row = {};
+  if (media.bucket !== undefined) row.bucket = media.bucket;
+  if (media.storagePath !== undefined) row.storage_path = media.storagePath;
+  if (media.url !== undefined) row.url = media.url;
+  if (media.mime !== undefined) row.mime = media.mime;
+  if (media.bytes !== undefined) row.bytes = media.bytes;
+  if (media.width !== undefined) row.width = media.width;
+  if (media.height !== undefined) row.height = media.height;
+  if (media.alt !== undefined) row.alt = media.alt;
+  if (media.caption !== undefined) row.caption = media.caption;
+  if (media.credit !== undefined) row.credit = media.credit;
+  if (media.consentStatus !== undefined) row.consent_status = media.consentStatus;
+  if (media.consentHouseholdId !== undefined)
+    row.consent_household_id = media.consentHouseholdId;
+  if (media.consentNote !== undefined) row.consent_note = media.consentNote;
+  if (media.contentHash !== undefined) row.content_hash = media.contentHash;
+  if (media.originalFilename !== undefined)
+    row.original_filename = media.originalFilename;
+  if (media.uploadedBy !== undefined) row.uploaded_by = media.uploadedBy;
+  // updated_at is the server's to stamp. See `pageToRow`.
+  return row;
 }

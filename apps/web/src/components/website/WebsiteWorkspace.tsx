@@ -14,9 +14,10 @@
  * and removed, and only staff whose role includes Website can do it.
  */
 
-import { Globe, Plus, Trash2 } from "lucide-react";
+import { Globe, Image as ImageIcon, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
+import { MediaLibrary } from "@/components/website/MediaLibrary";
 import {
   ErpTable,
   ErpTableBody,
@@ -27,6 +28,7 @@ import { readAll } from "@/lib/data/client/query";
 import { writeRecords } from "@/lib/data/client/mutate";
 import { getSessionActor } from "@/lib/sessionActor";
 import {
+  LANGUAGES,
   PAGE_STATUSES,
   newSiteId,
   normalizeSlug,
@@ -36,10 +38,12 @@ import {
   rowToPage,
   slugProblem,
   type PageStatus,
+  type SiteLang,
   type SitePage,
 } from "@/lib/website";
 
 type Filter = PageStatus | "all";
+type Tab = "pages" | "media";
 
 const STATUS_TONE: Record<PageStatus, string> = {
   draft: "bg-[var(--surface-sunken)] text-[var(--muted)]",
@@ -54,7 +58,12 @@ export function WebsiteWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
+  const [tab, setTab] = useState<Tab>("pages");
   const [busy, setBusy] = useState(false);
+
+  // The site ships English; the picker exists so a Hindi twin can be made
+  // the day the office wants one, without a migration.
+  const [lang, setLang] = useState<SiteLang>("en");
 
   const [newTitle, setNewTitle] = useState("");
   const [newSlug, setNewSlug] = useState("");
@@ -90,11 +99,16 @@ export function WebsiteWorkspace() {
     void load();
   }, [load]);
 
-  const liveSlugs = useMemo(() => pages.map((p) => p.slug), [pages]);
+  // Only pages in the SAME language can clash: /about and /hi/about are
+  // different addresses, and refusing the second would be a bug.
+  const liveSlugs = useMemo(
+    () => pages.filter((p) => p.lang === lang).map((p) => p.slug),
+    [pages, lang],
+  );
   const suggestedSlug = slugTouched ? newSlug : normalizeSlug(newTitle);
   const newSlugProblem =
     newTitle.trim() || suggestedSlug
-      ? slugProblem(suggestedSlug, { existingSlugs: liveSlugs })
+      ? slugProblem(suggestedSlug, { existingSlugs: liveSlugs, lang })
       : null;
 
   const shown = useMemo(
@@ -116,7 +130,7 @@ export function WebsiteWorkspace() {
   async function createPage() {
     const title = newTitle.trim();
     const slug = normalizeSlug(suggestedSlug);
-    const problem = slugProblem(slug, { existingSlugs: liveSlugs });
+    const problem = slugProblem(slug, { existingSlugs: liveSlugs, lang });
     if (!title) {
       setError("Give the page a title.");
       return;
@@ -137,6 +151,7 @@ export function WebsiteWorkspace() {
         base: null,
         row: pageToRow({
           slug,
+          lang,
           title,
           status: "draft",
           navGroup: "",
@@ -191,148 +206,197 @@ export function WebsiteWorkspace() {
       error={error}
       notice={notice}
     >
-      <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[var(--shadow-1)]">
-        <h2 className="text-sm font-bold text-[var(--brand-deep)]">
-          Add a page
-        </h2>
-        <p className="mt-1 text-[11px] text-[var(--muted)]">
-          New pages start as drafts. Nothing is public until it is published.
-        </p>
-        <div className="mt-3 flex flex-wrap items-end gap-3">
-          <label className="min-w-[14rem] flex-1 text-[11px] text-[var(--muted)]">
-            Page title
-            <input
-              className="mt-0.5 w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-2 text-sm text-[var(--brand-deep)]"
-              value={newTitle}
-              placeholder="Admissions"
-              onChange={(e) => setNewTitle(e.target.value)}
-            />
-          </label>
-          <label className="min-w-[14rem] flex-1 text-[11px] text-[var(--muted)]">
-            Address
-            <div className="mt-0.5 flex items-center rounded-lg border border-[var(--border)] bg-[var(--card)] pl-2.5">
-              <span className="shrink-0 text-xs text-[var(--muted)]">
-                bhbinternational.school/
-              </span>
-              <input
-                className="w-full bg-transparent px-1 py-2 text-sm text-[var(--brand-deep)] outline-none"
-                value={suggestedSlug}
-                placeholder="admissions"
-                onChange={(e) => {
-                  setSlugTouched(true);
-                  setNewSlug(e.target.value);
-                }}
-              />
-            </div>
-          </label>
-          <button
-            type="button"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--brand-deep)] px-3.5 py-2 text-xs font-bold text-white disabled:opacity-60"
-            disabled={busy || !newTitle.trim() || !!newSlugProblem}
-            onClick={() => void createPage()}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            {busy ? "Saving…" : "Add page"}
-          </button>
-        </div>
-        {newSlugProblem ? (
-          <p className="mt-2 text-[11px] font-semibold text-[var(--danger)]">
-            {newSlugProblem}
-          </p>
-        ) : null}
-      </section>
-
-      <div className="flex flex-wrap gap-2">
-        {(["all", ...PAGE_STATUSES.map((s) => s.id)] as Filter[]).map((id) => (
+      <div className="flex gap-2 border-b border-[var(--border)]">
+        {(
+          [
+            { id: "pages", label: "Pages", icon: Globe },
+            { id: "media", label: "Pictures & files", icon: ImageIcon },
+          ] as const
+        ).map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             type="button"
-            onClick={() => setFilter(id)}
-            className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
-              filter === id
-                ? "bg-[var(--brand-deep)] text-white"
-                : "border border-[var(--border)] text-[var(--muted)]"
+            onClick={() => setTab(id)}
+            className={`-mb-px inline-flex items-center gap-1.5 border-b-2 px-3 py-2 text-xs font-semibold ${
+              tab === id
+                ? "border-[var(--brand-deep)] text-[var(--brand-deep)]"
+                : "border-transparent text-[var(--muted)]"
             }`}
           >
-            {id === "all" ? "All" : pageStatusLabel(id as PageStatus)}
-            <span className="ml-1.5 opacity-70">{counts.get(id) ?? 0}</span>
+            <Icon className="h-3.5 w-3.5" />
+            {label}
           </button>
         ))}
       </div>
 
-      <ErpTableShell>
-        {loading ? (
-          <p className="p-6 text-sm text-[var(--muted)]">Loading pages…</p>
-        ) : shown.length === 0 ? (
-          <div className="p-8 text-center">
-            <p className="text-sm font-semibold text-[var(--brand-deep)]">
-              {pages.length === 0
-                ? "No pages yet"
-                : "No pages with that status"}
+      {tab === "media" ? (
+        <MediaLibrary onError={setError} onNotice={setNotice} />
+      ) : (
+        <div className="space-y-4">
+          <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[var(--shadow-1)]">
+            <h2 className="text-sm font-bold text-[var(--brand-deep)]">
+              Add a page
+            </h2>
+            <p className="mt-1 text-[11px] text-[var(--muted)]">
+              New pages start as drafts. Nothing is public until it is
+              published.
             </p>
-            <p className="mx-auto mt-1 max-w-md text-xs text-[var(--muted)]">
-              {pages.length === 0
-                ? "Add the first one above. Home, About, Academics and Admissions are the four most parents look for."
-                : "Change the filter to see the rest."}
-            </p>
-          </div>
-        ) : (
-          <ErpTable minWidth="min-w-[640px]">
-            <ErpTableHead>
-              <tr>
-                <th className="px-4 py-2.5 font-semibold">Page</th>
-                <th className="px-4 py-2.5 font-semibold">Address</th>
-                <th className="px-4 py-2.5 font-semibold">In menu</th>
-                <th className="px-4 py-2.5 font-semibold">Status</th>
-                <th className="px-4 py-2.5" />
-              </tr>
-            </ErpTableHead>
-            <ErpTableBody hoverable>
-              {shown.map((page) => (
-                <tr key={page.id}>
-                  <td className="px-4 py-2.5 font-semibold text-[var(--brand-deep)]">
-                    {page.title || "Untitled"}
-                  </td>
-                  <td className="px-4 py-2.5 font-mono text-xs text-[var(--muted)]">
-                    {publicPathFor(page.slug)}
-                  </td>
-                  <td className="px-4 py-2.5 text-xs text-[var(--muted)]">
-                    {page.navGroup === "header"
-                      ? "Top menu"
-                      : page.navGroup === "footer"
-                        ? "Footer"
-                        : "Not listed"}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <span
-                      className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${STATUS_TONE[page.status]}`}
-                    >
-                      {pageStatusLabel(page.status)}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2.5 text-right">
-                    <button
-                      type="button"
-                      className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold text-[var(--danger)] disabled:opacity-50"
-                      disabled={busy}
-                      onClick={() => void removePage(page)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </ErpTableBody>
-          </ErpTable>
-        )}
-      </ErpTableShell>
+            <div className="mt-3 flex flex-wrap items-end gap-3">
+              <label className="min-w-[14rem] flex-1 text-[11px] text-[var(--muted)]">
+                Page title
+                <input
+                  className="mt-0.5 w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-2 text-sm text-[var(--brand-deep)]"
+                  value={newTitle}
+                  placeholder="Admissions"
+                  onChange={(e) => setNewTitle(e.target.value)}
+                />
+              </label>
+              <label className="min-w-[14rem] flex-1 text-[11px] text-[var(--muted)]">
+                Address
+                <div className="mt-0.5 flex items-center rounded-lg border border-[var(--border)] bg-[var(--card)] pl-2.5">
+                  <span className="shrink-0 text-xs text-[var(--muted)]">
+                    bhbinternational.school{lang === "en" ? "/" : "/hi/"}
+                  </span>
+                  <input
+                    className="w-full bg-transparent px-1 py-2 text-sm text-[var(--brand-deep)] outline-none"
+                    value={suggestedSlug}
+                    placeholder="admissions"
+                    onChange={(e) => {
+                      setSlugTouched(true);
+                      setNewSlug(e.target.value);
+                    }}
+                  />
+                </div>
+              </label>
+              <label className="text-[11px] text-[var(--muted)]">
+                Language
+                <select
+                  className="mt-0.5 block rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-2 text-sm text-[var(--brand-deep)]"
+                  value={lang}
+                  onChange={(e) => setLang(e.target.value as SiteLang)}
+                >
+                  {LANGUAGES.map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--brand-deep)] px-3.5 py-2 text-xs font-bold text-white disabled:opacity-60"
+                disabled={busy || !newTitle.trim() || !!newSlugProblem}
+                onClick={() => void createPage()}
+              >
+                <Plus className="h-3.5 w-3.5" />
+                {busy ? "Saving…" : "Add page"}
+              </button>
+            </div>
+            {newSlugProblem ? (
+              <p className="mt-2 text-[11px] font-semibold text-[var(--danger)]">
+                {newSlugProblem}
+              </p>
+            ) : null}
+          </section>
 
-      <p className="text-[11px] leading-relaxed text-[var(--muted)]">
-        Addresses are shown, not linked: the public site does not render these
-        pages yet. Writing the content and putting it live is the next phase —
-        until then a page here is a placeholder with a reserved address.
-      </p>
+          <div className="flex flex-wrap gap-2">
+            {(["all", ...PAGE_STATUSES.map((s) => s.id)] as Filter[]).map(
+              (id) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setFilter(id)}
+                  className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+                    filter === id
+                      ? "bg-[var(--brand-deep)] text-white"
+                      : "border border-[var(--border)] text-[var(--muted)]"
+                  }`}
+                >
+                  {id === "all" ? "All" : pageStatusLabel(id as PageStatus)}
+                  <span className="ml-1.5 opacity-70">
+                    {counts.get(id) ?? 0}
+                  </span>
+                </button>
+              ),
+            )}
+          </div>
+
+          <ErpTableShell>
+            {loading ? (
+              <p className="p-6 text-sm text-[var(--muted)]">Loading pages…</p>
+            ) : shown.length === 0 ? (
+              <div className="p-8 text-center">
+                <p className="text-sm font-semibold text-[var(--brand-deep)]">
+                  {pages.length === 0
+                    ? "No pages yet"
+                    : "No pages with that status"}
+                </p>
+                <p className="mx-auto mt-1 max-w-md text-xs text-[var(--muted)]">
+                  {pages.length === 0
+                    ? "Add the first one above. Home, About, Academics and Admissions are the four most parents look for."
+                    : "Change the filter to see the rest."}
+                </p>
+              </div>
+            ) : (
+              <ErpTable minWidth="min-w-[640px]">
+                <ErpTableHead>
+                  <tr>
+                    <th className="px-4 py-2.5 font-semibold">Page</th>
+                    <th className="px-4 py-2.5 font-semibold">Address</th>
+                    <th className="px-4 py-2.5 font-semibold">In menu</th>
+                    <th className="px-4 py-2.5 font-semibold">Status</th>
+                    <th className="px-4 py-2.5" />
+                  </tr>
+                </ErpTableHead>
+                <ErpTableBody hoverable>
+                  {shown.map((page) => (
+                    <tr key={page.id}>
+                      <td className="px-4 py-2.5 font-semibold text-[var(--brand-deep)]">
+                        {page.title || "Untitled"}
+                      </td>
+                      <td className="px-4 py-2.5 font-mono text-xs text-[var(--muted)]">
+                        {publicPathFor(page.slug, page.lang)}
+                      </td>
+                      <td className="px-4 py-2.5 text-xs text-[var(--muted)]">
+                        {page.navGroup === "header"
+                          ? "Top menu"
+                          : page.navGroup === "footer"
+                            ? "Footer"
+                            : "Not listed"}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <span
+                          className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${STATUS_TONE[page.status]}`}
+                        >
+                          {pageStatusLabel(page.status)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5 text-right">
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold text-[var(--danger)] disabled:opacity-50"
+                          disabled={busy}
+                          onClick={() => void removePage(page)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Remove
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </ErpTableBody>
+              </ErpTable>
+            )}
+          </ErpTableShell>
+
+          <p className="text-[11px] leading-relaxed text-[var(--muted)]">
+            Addresses are shown, not linked: the public site does not render
+            these pages yet. Writing the content and putting it live is the next
+            phase — until then a page here is a placeholder with a reserved
+            address.
+          </p>
+        </div>
+      )}
     </ErpWorkspaceShell>
   );
 }

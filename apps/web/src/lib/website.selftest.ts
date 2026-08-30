@@ -21,15 +21,21 @@
 import assert from "node:assert/strict";
 import {
   BLOCK_KINDS,
+  CONSENT_STATUSES,
+  LANGUAGES,
   PAGE_STATUSES,
   RESERVED_SLUGS,
+  altProblem,
   isPageLive,
   mayPublishMedia,
+  mediaReadyForPage,
+  mediaToRow,
   newSiteId,
   normalizeSlug,
   pageToRow,
   publicPathFor,
   slugProblem,
+  type ConsentStatus,
   type PageStatus,
 } from "./website";
 
@@ -259,6 +265,163 @@ import {
         "would never match and would not protect the route",
     );
   }
+}
+
+// ── Hindi is a different address, not a different page ───────────────────
+{
+  // The whole point of the language column: the twins may share a slug.
+  assert.equal(publicPathFor("about", "en"), "/about");
+  assert.equal(publicPathFor("about", "hi"), "/hi/about");
+  assert.equal(publicPathFor("", "en"), "/");
+  assert.equal(publicPathFor("", "hi"), "/hi");
+
+  // English defaults, so every existing call site keeps its meaning.
+  assert.equal(publicPathFor("about"), publicPathFor("about", "en"));
+
+  // A reserved route can only shadow a page that sits at the root. Behind
+  // /hi nothing of ours answers, so `fees` is a legal Hindi address — and
+  // refusing it there would be a bug the office could not explain.
+  assert.ok(slugProblem("fees", { lang: "en" }), "fees must be refused at root");
+  assert.equal(
+    slugProblem("fees", { lang: "hi" }),
+    null,
+    "/hi/fees collides with nothing, so it must be allowed",
+  );
+
+  assert.equal(
+    LANGUAGES.find((l) => l.id === "en")?.pathPrefix,
+    "",
+    "English must stay at the root — printed links depend on it",
+  );
+}
+
+// ── Alt text: the checks that stop a useless description passing ─────────
+{
+  assert.ok(altProblem(""), "empty alt must be refused");
+  assert.ok(altProblem("  "), "whitespace is not a description");
+  assert.ok(altProblem("x"), "too short to describe anything");
+
+  // The case that matters. A filename passes a naive "is it non-empty"
+  // check while telling a screen-reader user nothing at all.
+  assert.ok(
+    altProblem("IMG_2049", "IMG_2049.JPG"),
+    "the file name is not a description",
+  );
+  assert.ok(altProblem("DSC 1123"), "a camera name is not a description");
+
+  // The defect this guard actually had in production: it compared against
+  // the generated STORAGE KEY (site/2026-08-30-a1b2c3.png), which can never
+  // equal anything a person types, so it passed everything. The original
+  // name is now kept on the row precisely so this comparison can work.
+  assert.ok(
+    altProblem("prize day 2026", "prize day 2026.jpg"),
+    "the name the file arrived with is not a description",
+  );
+
+  // And loosely, because nobody retypes punctuation the same way.
+  for (const typed of ["prize-day", "prize_day", "Prize Day", "prize  day"]) {
+    assert.ok(
+      altProblem(typed, "prize-day.png"),
+      `"${typed}" is the file name in another costume`,
+    );
+  }
+
+  // The guard must not become so eager it refuses a real description that
+  // merely begins with the same words.
+  assert.equal(
+    altProblem("Prize day 2026 — the head girl receiving her award", "prize-day.png"),
+    null,
+    "a real sentence must survive, even sharing words with the file name",
+  );
+
+  assert.equal(
+    altProblem("Class VI pupils planting saplings on the school field"),
+    null,
+    "a real description must pass",
+  );
+}
+
+// ── Consent, under blanket admission terms ───────────────────────────────
+{
+  // The director chose blanket consent, so a pupil photograph is normally
+  // 'granted'. What must survive that decision is the family override: a
+  // withdrawal has to block the picture everywhere, or the school has no
+  // way to honour an objection.
+  assert.equal(mayPublishMedia({ consentStatus: "granted" }), true);
+  assert.equal(mayPublishMedia({ consentStatus: "not_required" }), true);
+  assert.equal(
+    mayPublishMedia({ consentStatus: "withdrawn" }),
+    false,
+    "a family objection must block publication",
+  );
+  assert.equal(
+    mayPublishMedia({ consentStatus: "pending" }),
+    false,
+    "undecided is not consent",
+  );
+
+  // Every status the database allows must be answerable by the desk, or a
+  // row would render with no label.
+  for (const c of CONSENT_STATUSES) {
+    assert.ok(c.label && c.blurb, `${c.id} needs a label the office reads`);
+  }
+  const dbStatuses: ConsentStatus[] = [
+    "not_required",
+    "pending",
+    "granted",
+    "withdrawn",
+  ];
+  assert.equal(
+    CONSENT_STATUSES.length,
+    dbStatuses.length,
+    "the desk's list and the CHECK constraint have drifted apart",
+  );
+}
+
+// ── An image needs BOTH consent and a description to reach a page ────────
+{
+  const ok = mediaReadyForPage({
+    consentStatus: "granted",
+    alt: "The school building seen from the gate",
+    mime: "image/jpeg",
+  });
+  assert.equal(ok.ready, true);
+
+  const noAlt = mediaReadyForPage({
+    consentStatus: "granted",
+    alt: "",
+    mime: "image/jpeg",
+  });
+  assert.equal(noAlt.ready, false, "consent alone is not enough");
+  assert.ok(noAlt.reason, "the office must be told which of the two is missing");
+
+  const objected = mediaReadyForPage({
+    consentStatus: "withdrawn",
+    alt: "A perfectly good description",
+    mime: "image/jpeg",
+  });
+  assert.equal(objected.ready, false, "a description cannot override consent");
+
+  // A PDF prospectus has nothing to describe visually; requiring alt text
+  // there would block a legitimate download for no accessibility gain.
+  const pdf = mediaReadyForPage({
+    consentStatus: "not_required",
+    alt: "",
+    mime: "application/pdf",
+  });
+  assert.equal(pdf.ready, true, "alt text is an image rule, not a file rule");
+}
+
+// ── A client can never mint its own media revision ───────────────────────
+{
+  const row = mediaToRow({ alt: "x", consentStatus: "granted" });
+  assert.ok(!("updated_at" in row), "the server stamps the revision, not us");
+  assert.ok(!("id" in row), "the id is the op's business, not the row's");
+
+  // The guard is only as good as the column that feeds it: if the original
+  // name stops being written, the alt-text check quietly dies again.
+  const named = mediaToRow({ originalFilename: "prize-day.png" });
+  assert.equal(named.original_filename, "prize-day.png");
 }
 
 console.log("website.selftest: all assertions passed");
