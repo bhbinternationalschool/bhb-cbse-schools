@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cachedDeskJson, deskJsonResponse } from "@/lib/deskProbeCache.server";
-import { stripEmptyList } from "@/lib/wirePayload";
+import { stripEmptyDocsList, stripEmptyList } from "@/lib/wirePayload";
 import {
   authorizeSchoolDataDesk,
   SCHOOL_DATA_DESK_RBAC,
@@ -36,14 +36,23 @@ export async function GET(req: Request) {
         // fields to "" exactly as an empty value would. See lib/wirePayload.ts.
         const lean = process.env.LEAN_WIRE_PAYLOAD?.trim().toLowerCase();
         const leanOn = lean === "true" || lean === "1";
+
+        // The empty document skeleton is stripped unconditionally, not
+        // behind the flag. It is 40% of this payload — 4,991 slots across
+        // 713 students, every one of them empty — and `loadSis()` normalises
+        // every student on every read, so the browser rebuilds it exactly.
+        // `sisWirePayload.selftest` asserts that round trip against the real
+        // normaliser, which is why this does not need a flag to hide behind.
+        const students = stripEmptyDocsList(
+          bundle.students as unknown as Record<string, unknown>[],
+        );
+
         return {
           ok: true,
           households: leanOn
             ? stripEmptyList(bundle.households as unknown as Record<string, unknown>[])
             : bundle.households,
-          students: leanOn
-            ? stripEmptyList(bundle.students as unknown as Record<string, unknown>[])
-            : bundle.students,
+          students: leanOn ? stripEmptyList(students) : students,
           householdCount: bundle.households.length,
           studentCount: bundle.students.length,
           // Unknown meta is reported as "", not as "now" (see desk-slice route).

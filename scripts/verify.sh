@@ -92,6 +92,7 @@ SELFTESTS=(
   test:wa-templates-automation
   test:fee-student-search
   test:payment-link-amount
+  test:sis-wire-payload
   test:substitution-auto
   test:timetable-substitution
   test:transport-sibling-gaps
