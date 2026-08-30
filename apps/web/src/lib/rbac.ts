@@ -58,7 +58,8 @@ export type RbacModule =
   | "opex_budget"
   | "scholarships"
   | "question_bank"
-  | "cbse_loc";
+  | "cbse_loc"
+  | "website";
 
 export type RbacAction =
   | "view"
@@ -170,6 +171,7 @@ export const RBAC_MODULES: {
   { id: "notices", label: "Notices / circulars", href: "/comms?tab=notices" },
   { id: "news", label: "News", href: "/comms?tab=news" },
   { id: "gallery", label: "Gallery", href: "/comms?tab=gallery" },
+  { id: "website", label: "Website", href: "/website" },
   { id: "notifications", label: "Notifications", href: "/comms?tab=inbox" },
   {
     id: "wa_templates",
@@ -412,6 +414,7 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("notices", ops),
         grant("news", ops),
         grant("gallery", ops),
+        grant("website", ops),
         grant("notifications", ["view", "edit"]),
         grant("wa_templates", ops),
         grant("wa_automation", [...ops, "approve"]),
@@ -462,6 +465,7 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("notices", ops),
         grant("news", ops),
         grant("gallery", ops),
+        grant("website", ops),
         grant("notifications", ["view"]),
         grant("wa_templates", ["view", "create", "edit", "export"]),
         grant("wa_automation", ["view", "create", "edit", "approve", "export"]),
@@ -514,6 +518,7 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("notices", ["view"]),
         grant("news", ["view"]),
         grant("gallery", ["view"]),
+        grant("website", ["view"]),
         grant("notifications", ["view"]),
         grant("staff_advances", ["view", "create", "edit", "export"]),
         grant("store", ["view", "export"]),
@@ -576,6 +581,7 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("notices", ["view"]),
         grant("news", ["view"]),
         grant("gallery", ["view"]),
+        grant("website", ["view"]),
         grant("notifications", ["view"]),
       ],
     },
@@ -1064,6 +1070,7 @@ export function moduleForHref(href: string): RbacModule | null {
   if (path.startsWith("/scholarships")) return "scholarships";
   if (path.startsWith("/question-bank")) return "question_bank";
   if (path.startsWith("/cbse-loc")) return "cbse_loc";
+  if (path.startsWith("/website")) return "website";
   if (path.startsWith("/comms") || path.startsWith("/notices") || path.startsWith("/news") || path.startsWith("/gallery")) {
     const tab = params.get("tab");
     if (tab === "news" || path.startsWith("/news")) return "news";

@@ -9,6 +9,7 @@ import {
   ClipboardCheck,
   DoorOpen,
   FileBarChart2,
+  Globe,
   GraduationCap,
   HardHat,
   IndianRupee,
@@ -291,6 +292,14 @@ export const HUB_GROUPS: HubGroup[] = [
         detail: "Unified this-week/this-month view across events, holidays, exams, PTM and fee dues, with WhatsApp RSVP.",
         icon: CalendarHeart,
         tone: "gold",
+      },
+      {
+        href: "/website",
+        title: "Website",
+        blurb: "Pages · media",
+        detail: "The public site: pages, photographs and video, and what goes live on bhbinternational.school.",
+        icon: Globe,
+        tone: "sky",
       },
       {
         href: "/certificates",

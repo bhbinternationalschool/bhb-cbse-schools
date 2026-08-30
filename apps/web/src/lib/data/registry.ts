@@ -176,6 +176,72 @@ export const COLLECTIONS: readonly CollectionDef[] = [
       list: { sortColumn, defaultLimit: 500, maxLimit: 1000 },
     }),
   ),
+  // ── Website (Phase 1) ──────────────────────────────────────────────────
+  // Server-authoritative from the first commit, unlike most desks here. A
+  // parent, a search engine and an admissions enquiry all read the public
+  // page and none of them has a localStorage — and a stale tab pushing an
+  // empty state is what emptied the Transport desk on 2026-08-21.
+  //
+  // Tenant-scoped only: a website is not a thing that belongs to an academic
+  // session. Scoping by year would hide last year's About page every April.
+  {
+    id: "site.pages",
+    module: "website",
+    table: "site_pages",
+    rbac: { view: "website", edit: "website" },
+    scope: ["tenant_id"],
+    // "Someone deleted the About page" has to be answerable, so the row
+    // stays and Phase 7 restores from it.
+    softDelete: true,
+    // Sorted by slug rather than title: the slug is unique among live pages,
+    // which is what keyset paging needs, and two pages may share a title.
+    list: { sortColumn: "slug", defaultLimit: 200, maxLimit: 500 },
+  },
+  {
+    id: "site.blocks",
+    module: "website",
+    table: "site_blocks",
+    rbac: { view: "website", edit: "website" },
+    scope: ["tenant_id"],
+    softDelete: true,
+    // A long page is perhaps 30 blocks. The ceiling is the registry's own
+    // maximum, not a guess at how big the site might get — a page size with
+    // no real bound is how the admissions payload reached 2.37 MB.
+    list: { sortColumn: "id", defaultLimit: 500, maxLimit: 1000 },
+  },
+  {
+    id: "site.media",
+    module: "website",
+    table: "site_media",
+    rbac: { view: "website", edit: "website" },
+    scope: ["tenant_id"],
+    // A media row may still be referenced by a block on a live page, so
+    // removing it must not orphan that block silently.
+    softDelete: true,
+    list: { sortColumn: "id", defaultLimit: 200, maxLimit: 1000 },
+  },
+  {
+    id: "site.menu",
+    module: "website",
+    table: "site_menu",
+    rbac: { view: "website", edit: "website" },
+    scope: ["tenant_id"],
+    // A menu entry carries nothing of its own; deleting one loses no record.
+    softDelete: false,
+    list: { sortColumn: "id", defaultLimit: 100, maxLimit: 200 },
+  },
+  {
+    id: "site.publications",
+    module: "website",
+    table: "site_publications",
+    rbac: { view: "website", edit: "website" },
+    scope: ["tenant_id"],
+    // Unpublishing is a status change, not a deletion — the decision to have
+    // shown something publicly is itself worth keeping.
+    softDelete: false,
+    list: { sortColumn: "id", defaultLimit: 200, maxLimit: 1000 },
+  },
+
   {
     // Stage 6. The table that made the case for projections: 919 leads,
     // 2.37 MB, of which lead_json is 1.82 MB that no list screen reads.
