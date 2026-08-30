@@ -25,8 +25,14 @@ import {
   LANGUAGES,
   PAGE_STATUSES,
   RESERVED_SLUGS,
+  BLOCK_SHAPES,
   altProblem,
+  blockProblem,
+  emptyPayload,
+  isBuildableKind,
   isPageLive,
+  parseProse,
+  youtubeId,
   mayPublishMedia,
   mediaReadyForPage,
   mediaToRow,
@@ -422,6 +428,130 @@ import {
   // name stops being written, the alt-text check quietly dies again.
   const named = mediaToRow({ originalFilename: "prize-day.png" });
   assert.equal(named.original_filename, "prize-day.png");
+}
+
+// ── Only blocks that store their own content are buildable yet ──────────
+{
+  // The split is not arbitrary: a block marked `live` reads from another
+  // desk, and wiring those is Phase 4. If the two lists ever disagree, the
+  // editor offers a block the renderer cannot draw.
+  for (const k of BLOCK_KINDS) {
+    assert.equal(
+      isBuildableKind(k.id),
+      !k.live,
+      `${k.id}: BLOCK_SHAPES and the live flag disagree`,
+    );
+  }
+}
+
+// ── YouTube addresses, in the forms people actually paste ───────────────
+{
+  const id = "dQw4w9WgXcQ";
+  for (const form of [
+    id,
+    `https://www.youtube.com/watch?v=${id}`,
+    `https://youtube.com/watch?v=${id}&t=42s`,
+    `https://m.youtube.com/watch?v=${id}`,
+    `https://youtu.be/${id}`,
+    `https://youtu.be/${id}?t=42`,
+    `https://www.youtube.com/embed/${id}`,
+    `https://www.youtube.com/shorts/${id}`,
+    `youtube.com/watch?v=${id}`,
+  ]) {
+    assert.equal(youtubeId(form), id, `did not recognise: ${form}`);
+  }
+
+  // Refusing is the point. A wrong id renders a grey box with no error —
+  // a failure nobody reports because nothing looks broken.
+  for (const bad of [
+    "",
+    "   ",
+    "https://vimeo.com/123456",
+    "https://www.youtube.com/watch?v=tooshort",
+    "https://example.com/watch?v=dQw4w9WgXcQ",
+    "not a url at all",
+  ]) {
+    assert.equal(youtubeId(bad), null, `should have refused: ${bad}`);
+  }
+}
+
+// ── Plain text to paragraphs and bullets, never HTML ────────────────────
+{
+  const nodes = parseProse(
+    "The school was founded in 1998.\n\nWe teach:\n- Nursery to Class VIII\n- State recognised\n\nVisit us.",
+  );
+  assert.deepEqual(nodes, [
+    { type: "p", text: "The school was founded in 1998." },
+    { type: "p", text: "We teach:" },
+    { type: "ul", items: ["Nursery to Class VIII", "State recognised"] },
+    { type: "p", text: "Visit us." },
+  ]);
+
+  // A trailing bullet run must still be emitted — the flush at the end is
+  // easy to forget and silently drops the last list on the page.
+  const trailing = parseProse("Facilities:\n- Library\n- Science lab");
+  assert.equal(trailing.length, 2);
+  assert.deepEqual((trailing[1] as { items: string[] }).items, [
+    "Library",
+    "Science lab",
+  ]);
+
+  assert.deepEqual(parseProse(""), [], "empty text makes no nodes");
+
+  // Markup is content, not markup. It must survive as literal text rather
+  // than becoming an element.
+  const html = parseProse("<script>alert(1)</script>");
+  assert.deepEqual(html, [{ type: "p", text: "<script>alert(1)</script>" }]);
+}
+
+// ── A block cannot reach the public half-filled ─────────────────────────
+{
+  assert.ok(blockProblem({ kind: "prose", payload: {} }), "empty prose");
+  assert.equal(
+    blockProblem({ kind: "prose", payload: { body: "Some words here" } }),
+    null,
+    "heading is optional, body is not",
+  );
+
+  assert.ok(
+    blockProblem({ kind: "video", payload: { youtube: "https://vimeo.com/1" } }),
+    "a non-YouTube link must be refused, not embedded",
+  );
+
+  // The list rules: at least one item, and no item half-filled.
+  assert.ok(blockProblem({ kind: "stats", payload: { items: [] } }));
+  assert.ok(
+    blockProblem({ kind: "stats", payload: { items: [{ value: "480", label: "" }] } }),
+    "a figure with no label says nothing",
+  );
+  assert.equal(
+    blockProblem({ kind: "stats", payload: { items: [{ value: "480", label: "Pupils" }] } }),
+    null,
+  );
+
+  // A live block has no shape yet and must say so rather than render blank.
+  assert.ok(blockProblem({ kind: "feed", payload: {} }));
+}
+
+// ── A new block starts with every field present ─────────────────────────
+{
+  // An undefined reaching a controlled input turns it uncontrolled, and
+  // React then warns and loses the first keystroke.
+  for (const kind of Object.keys(BLOCK_SHAPES) as (keyof typeof BLOCK_SHAPES)[]) {
+    const shape = BLOCK_SHAPES[kind];
+    if (!shape) continue;
+    const payload = emptyPayload(kind);
+    for (const f of shape.fields) {
+      assert.equal(typeof payload[f.key], "string", `${kind}.${f.key}`);
+    }
+    if (shape.list) {
+      const items = payload[shape.list.key] as Record<string, unknown>[];
+      assert.equal(items.length, 1, `${kind} should start with one row`);
+      for (const f of shape.list.fields) {
+        assert.equal(typeof items[0][f.key], "string", `${kind}.${f.key}`);
+      }
+    }
+  }
 }
 
 console.log("website.selftest: all assertions passed");

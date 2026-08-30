@@ -82,7 +82,9 @@ export type SiteBlock = {
   kind: BlockKind;
   payload: Record<string, unknown>;
   createdAt: string;
-  updatedAt: string;
+  /** Branded for the same reason as the page revision. See `SitePage`. */
+  updatedAt: Revision;
+  deletedAt: string | null;
 };
 
 export type ConsentStatus = "not_required" | "pending" | "granted" | "withdrawn";
@@ -204,10 +206,22 @@ export function slugProblem(
     /** Compared against pages in the SAME language; /hi/about and /about
      * are different addresses and may share a slug. */
     lang?: SiteLang;
+    /** Permit the empty slug, which addresses the front page itself.
+     * Off by default so a page cannot become the home page by accident. */
+    allowHome?: boolean;
   } = {},
 ): string | null {
   const s = normalizeSlug(slug);
-  if (!s) return "Give the page an address, for example about-us.";
+  if (!s) {
+    // The empty slug IS the front page. The unique index on (tenant, lang,
+    // slug) already guarantees there can only be one of them per language.
+    if (opts.allowHome) {
+      return opts.existingSlugs?.some((other) => normalizeSlug(other) === "")
+        ? "There is already a front page in this language."
+        : null;
+    }
+    return "Give the page an address, for example about-us.";
+  }
   if (s.length > 120) return "That address is too long — keep it under 120 characters.";
 
   const [head] = s.split("/");
@@ -236,6 +250,9 @@ export function publicPathFor(slug: string, lang: SiteLang = "en"): string {
   if (!prefix) return s ? `/${s}` : "/";
   return s ? `/${prefix}/${s}` : `/${prefix}`;
 }
+
+/** The front page's slug. Empty is not a missing value here; it is the address. */
+export const HOME_SLUG = "";
 
 /* ─── Status ──────────────────────────────────────────────────────────── */
 
@@ -517,6 +534,266 @@ export function mediaToRow(media: Partial<SiteMedia>): Row {
   if (media.originalFilename !== undefined)
     row.original_filename = media.originalFilename;
   if (media.uploadedBy !== undefined) row.uploaded_by = media.uploadedBy;
+  // updated_at is the server's to stamp. See `pageToRow`.
+  return row;
+}
+
+/* ─── Block content ───────────────────────────────────────────────────────
+ *
+ * Every block that stores its own content is described here once, and both
+ * the editor and the renderer read that description. A new field is added in
+ * one place, not three, and the two can never disagree about what a block
+ * holds.
+ *
+ * Blocks marked `live` in BLOCK_KINDS are absent on purpose: they read from
+ * another desk rather than storing a copy, and wiring them is Phase 4.
+ */
+
+export type FieldType = "line" | "text" | "media" | "url" | "youtube";
+
+export type BlockField = {
+  key: string;
+  label: string;
+  type: FieldType;
+  help?: string;
+  optional?: boolean;
+  placeholder?: string;
+};
+
+/** A block kind whose content is a repeating list of small records. */
+export type BlockList = {
+  key: string;
+  /** Singular, for the "Add another ___" button. */
+  noun: string;
+  fields: BlockField[];
+  min: number;
+  max: number;
+};
+
+export type BlockShape = {
+  fields: BlockField[];
+  list?: BlockList;
+};
+
+export const BLOCK_SHAPES: Partial<Record<BlockKind, BlockShape>> = {
+  prose: {
+    fields: [
+      { key: "heading", label: "Heading", type: "line", optional: true },
+      {
+        key: "body",
+        label: "Text",
+        type: "text",
+        help: "A blank line starts a new paragraph. A line beginning with - becomes a bullet.",
+        placeholder:
+          "The school was founded in 1998...\n\n- Nursery to Class VIII\n- State recognised",
+      },
+    ],
+  },
+  image: {
+    fields: [
+      { key: "mediaId", label: "Picture", type: "media" },
+      { key: "caption", label: "Caption", type: "line", optional: true },
+    ],
+  },
+  video: {
+    fields: [
+      {
+        key: "youtube",
+        label: "YouTube link",
+        type: "youtube",
+        help: "Paste the address from the browser. Videos are embedded, never uploaded — a 50 MB clip watched 500 times would cost 25 GB of traffic and would stutter on a village connection.",
+        placeholder: "https://www.youtube.com/watch?v=...",
+      },
+      { key: "title", label: "Title", type: "line", optional: true },
+    ],
+  },
+  cards: {
+    fields: [{ key: "heading", label: "Heading", type: "line", optional: true }],
+    list: {
+      key: "items",
+      noun: "card",
+      min: 1,
+      max: 8,
+      fields: [
+        { key: "title", label: "Title", type: "line" },
+        { key: "body", label: "Text", type: "text", optional: true },
+        { key: "href", label: "Links to", type: "url", optional: true },
+      ],
+    },
+  },
+  stats: {
+    fields: [{ key: "heading", label: "Heading", type: "line", optional: true }],
+    list: {
+      key: "items",
+      noun: "figure",
+      min: 1,
+      max: 6,
+      fields: [
+        { key: "value", label: "Figure", type: "line", placeholder: "480" },
+        { key: "label", label: "What it counts", type: "line", placeholder: "Pupils" },
+      ],
+    },
+  },
+  faq: {
+    fields: [{ key: "heading", label: "Heading", type: "line", optional: true }],
+    list: {
+      key: "items",
+      noun: "question",
+      min: 1,
+      max: 30,
+      fields: [
+        { key: "q", label: "Question", type: "line" },
+        { key: "a", label: "Answer", type: "text" },
+      ],
+    },
+  },
+};
+
+/** Kinds this phase can actually put on a page. */
+export function isBuildableKind(kind: BlockKind): boolean {
+  return BLOCK_SHAPES[kind] !== undefined;
+}
+
+/**
+ * The video id from anything the office is likely to paste.
+ *
+ * Returns null rather than guessing. A wrong id renders a grey box with no
+ * error, which is the kind of failure nobody reports and nobody notices.
+ */
+export function youtubeId(input: string): string | null {
+  const v = input.trim();
+  if (!v) return null;
+  // A bare id, already extracted.
+  if (/^[\w-]{11}$/.test(v)) return v;
+  let url: URL;
+  try {
+    url = new URL(v.startsWith("http") ? v : `https://${v}`);
+  } catch {
+    return null;
+  }
+  const host = url.hostname.replace(/^www\./, "");
+  if (host === "youtu.be") {
+    const id = url.pathname.slice(1).split("/")[0];
+    return /^[\w-]{11}$/.test(id) ? id : null;
+  }
+  if (host !== "youtube.com" && host !== "m.youtube.com") return null;
+  const q = url.searchParams.get("v");
+  if (q && /^[\w-]{11}$/.test(q)) return q;
+  // /embed/ID and /shorts/ID
+  const m = url.pathname.match(/^\/(embed|shorts|v)\/([\w-]{11})/);
+  return m ? m[2] : null;
+}
+
+/** What is still missing before this block can be shown to the public. */
+export function blockProblem(block: Pick<SiteBlock, "kind" | "payload">): string | null {
+  const shape = BLOCK_SHAPES[block.kind];
+  if (!shape) return "This kind of block is not ready yet.";
+  const p = block.payload;
+
+  for (const f of shape.fields) {
+    const raw = typeof p[f.key] === "string" ? (p[f.key] as string).trim() : "";
+    if (!raw) {
+      if (f.optional) continue;
+      return `${f.label} is empty.`;
+    }
+    if (f.type === "youtube" && !youtubeId(raw)) {
+      return "That is not a YouTube address I recognise.";
+    }
+  }
+
+  if (shape.list) {
+    const items = Array.isArray(p[shape.list.key])
+      ? (p[shape.list.key] as Record<string, unknown>[])
+      : [];
+    if (items.length < shape.list.min) {
+      return `Add at least one ${shape.list.noun}.`;
+    }
+    for (const [i, item] of items.entries()) {
+      for (const f of shape.list.fields) {
+        if (f.optional) continue;
+        const raw = typeof item[f.key] === "string" ? (item[f.key] as string).trim() : "";
+        if (!raw) return `${shape.list.noun} ${i + 1}: ${f.label} is empty.`;
+      }
+    }
+  }
+  return null;
+}
+
+/** A fresh payload with every field present, so the editor has no undefineds. */
+export function emptyPayload(kind: BlockKind): Record<string, unknown> {
+  const shape = BLOCK_SHAPES[kind];
+  if (!shape) return {};
+  const out: Record<string, unknown> = {};
+  for (const f of shape.fields) out[f.key] = "";
+  if (shape.list) {
+    const row: Record<string, unknown> = {};
+    for (const f of shape.list.fields) row[f.key] = "";
+    out[shape.list.key] = [row];
+  }
+  return out;
+}
+
+/**
+ * Plain text to paragraphs and bullet runs.
+ *
+ * The store is deliberately not HTML — the office cannot paste in broken
+ * markup or a tracking pixel, and every page inherits the site's typography
+ * whatever was typed.
+ */
+export type ProseNode =
+  | { type: "p"; text: string }
+  | { type: "ul"; items: string[] };
+
+export function parseProse(body: string): ProseNode[] {
+  const out: ProseNode[] = [];
+  let bullets: string[] = [];
+  const flush = () => {
+    if (bullets.length) {
+      out.push({ type: "ul", items: bullets });
+      bullets = [];
+    }
+  };
+  for (const rawLine of body.replace(/\r\n/g, "\n").split("\n")) {
+    const line = rawLine.trim();
+    if (!line) {
+      flush();
+      continue;
+    }
+    const bullet = line.match(/^[-•*]\s+(.*)$/);
+    if (bullet) {
+      bullets.push(bullet[1].trim());
+      continue;
+    }
+    flush();
+    out.push({ type: "p", text: line });
+  }
+  flush();
+  return out;
+}
+
+export function rowToBlock(row: Row): SiteBlock {
+  const kind = str(row.kind, "prose");
+  return {
+    id: str(row.id),
+    pageId: str(row.page_id),
+    ord: num(row.ord),
+    kind: (BLOCK_KINDS.some((k) => k.id === kind) ? kind : "prose") as BlockKind,
+    payload:
+      row.payload && typeof row.payload === "object" && !Array.isArray(row.payload)
+        ? (row.payload as Record<string, unknown>)
+        : {},
+    createdAt: str(row.created_at),
+    updatedAt: asRevision(str(row.updated_at)),
+    deletedAt: nullableStr(row.deleted_at),
+  };
+}
+
+export function blockToRow(block: Partial<SiteBlock>): Row {
+  const row: Row = {};
+  if (block.pageId !== undefined) row.page_id = block.pageId;
+  if (block.ord !== undefined) row.ord = block.ord;
+  if (block.kind !== undefined) row.kind = block.kind;
+  if (block.payload !== undefined) row.payload = block.payload;
   // updated_at is the server's to stamp. See `pageToRow`.
   return row;
 }

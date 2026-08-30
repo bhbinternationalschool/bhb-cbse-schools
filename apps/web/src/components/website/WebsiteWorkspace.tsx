@@ -14,10 +14,11 @@
  * and removed, and only staff whose role includes Website can do it.
  */
 
-import { Globe, Image as ImageIcon, Plus, Trash2 } from "lucide-react";
+import { Globe, Image as ImageIcon, Pencil, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { MediaLibrary } from "@/components/website/MediaLibrary";
+import { PageEditor } from "@/components/website/PageEditor";
 import {
   ErpTable,
   ErpTableBody,
@@ -28,6 +29,7 @@ import { readAll } from "@/lib/data/client/query";
 import { writeRecords } from "@/lib/data/client/mutate";
 import { getSessionActor } from "@/lib/sessionActor";
 import {
+  HOME_SLUG,
   LANGUAGES,
   PAGE_STATUSES,
   newSiteId,
@@ -64,6 +66,13 @@ export function WebsiteWorkspace() {
   // The site ships English; the picker exists so a Hindi twin can be made
   // the day the office wants one, without a migration.
   const [lang, setLang] = useState<SiteLang>("en");
+
+  // Which page is open in the block editor, if any.
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  // The front page is addressed by the empty slug, so it has to be chosen
+  // deliberately rather than reached by clearing the address field.
+  const [isHome, setIsHome] = useState(false);
 
   const [newTitle, setNewTitle] = useState("");
   const [newSlug, setNewSlug] = useState("");
@@ -105,10 +114,18 @@ export function WebsiteWorkspace() {
     () => pages.filter((p) => p.lang === lang).map((p) => p.slug),
     [pages, lang],
   );
-  const suggestedSlug = slugTouched ? newSlug : normalizeSlug(newTitle);
+  const suggestedSlug = isHome
+    ? HOME_SLUG
+    : slugTouched
+      ? newSlug
+      : normalizeSlug(newTitle);
   const newSlugProblem =
-    newTitle.trim() || suggestedSlug
-      ? slugProblem(suggestedSlug, { existingSlugs: liveSlugs, lang })
+    newTitle.trim() || suggestedSlug || isHome
+      ? slugProblem(suggestedSlug, {
+          existingSlugs: liveSlugs,
+          lang,
+          allowHome: isHome,
+        })
       : null;
 
   const shown = useMemo(
@@ -117,6 +134,11 @@ export function WebsiteWorkspace() {
         .filter((p) => filter === "all" || p.status === filter)
         .sort((a, b) => a.slug.localeCompare(b.slug)),
     [pages, filter],
+  );
+
+  const editingPage = useMemo(
+    () => pages.find((p) => p.id === editingId) ?? null,
+    [pages, editingId],
   );
 
   const counts = useMemo(() => {
@@ -129,8 +151,12 @@ export function WebsiteWorkspace() {
 
   async function createPage() {
     const title = newTitle.trim();
-    const slug = normalizeSlug(suggestedSlug);
-    const problem = slugProblem(slug, { existingSlugs: liveSlugs, lang });
+    const slug = isHome ? HOME_SLUG : normalizeSlug(suggestedSlug);
+    const problem = slugProblem(slug, {
+      existingSlugs: liveSlugs,
+      lang,
+      allowHome: isHome,
+    });
     if (!title) {
       setError("Give the page a title.");
       return;
@@ -173,6 +199,7 @@ export function WebsiteWorkspace() {
     setNewTitle("");
     setNewSlug("");
     setSlugTouched(false);
+    setIsHome(false);
     setNotice(`“${title}” created as a draft.`);
     await load();
   }
@@ -231,6 +258,14 @@ export function WebsiteWorkspace() {
 
       {tab === "media" ? (
         <MediaLibrary onError={setError} onNotice={setNotice} />
+      ) : editingPage ? (
+        <PageEditor
+          page={editingPage}
+          onClose={() => setEditingId(null)}
+          onChanged={() => void load()}
+          onError={setError}
+          onNotice={setNotice}
+        />
       ) : (
         <div className="space-y-4">
           <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[var(--shadow-1)]">
@@ -260,13 +295,24 @@ export function WebsiteWorkspace() {
                   <input
                     className="w-full bg-transparent px-1 py-2 text-sm text-[var(--brand-deep)] outline-none"
                     value={suggestedSlug}
-                    placeholder="admissions"
+                    disabled={isHome}
+                    placeholder={
+                      isHome ? "the front page itself" : "admissions"
+                    }
                     onChange={(e) => {
                       setSlugTouched(true);
                       setNewSlug(e.target.value);
                     }}
                   />
                 </div>
+              </label>
+              <label className="flex items-center gap-1.5 pb-2 text-[11px] text-[var(--muted)]">
+                <input
+                  type="checkbox"
+                  checked={isHome}
+                  onChange={(e) => setIsHome(e.target.checked)}
+                />
+                Front page
               </label>
               <label className="text-[11px] text-[var(--muted)]">
                 Language
@@ -374,6 +420,14 @@ export function WebsiteWorkspace() {
                       <td className="px-4 py-2.5 text-right">
                         <button
                           type="button"
+                          className="mr-1 inline-flex items-center gap-1 rounded-lg border border-[var(--border)] px-2 py-1 text-[11px] font-semibold text-[var(--brand-deep)]"
+                          onClick={() => setEditingId(page.id)}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                          Edit
+                        </button>
+                        <button
+                          type="button"
                           className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold text-[var(--danger)] disabled:opacity-50"
                           disabled={busy}
                           onClick={() => void removePage(page)}
@@ -390,10 +444,9 @@ export function WebsiteWorkspace() {
           </ErpTableShell>
 
           <p className="text-[11px] leading-relaxed text-[var(--muted)]">
-            Addresses are shown, not linked: the public site does not render
-            these pages yet. Writing the content and putting it live is the next
-            phase — until then a page here is a placeholder with a reserved
-            address.
+            Edit a page to build it out of blocks, then publish it. A published
+            page is live immediately at the address shown; a draft is not
+            readable by anyone, even with the address.
           </p>
         </div>
       )}
