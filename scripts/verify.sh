@@ -94,6 +94,7 @@ SELFTESTS=(
   test:payment-link-amount
   test:sis-wire-payload
   test:print-palette
+  test:receipt-head-grouping
   test:substitution-auto
   test:timetable-substitution
   test:transport-sibling-gaps

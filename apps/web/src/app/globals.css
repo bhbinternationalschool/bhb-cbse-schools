@@ -1516,6 +1516,9 @@ h3,
     --brand-gold: #c5a028;
     --muted: #5c6478;
     --surface-sunken: #efeee7;
+    /* The receipt's discount figures. Dark mode's #3dd68c is a bright mint
+     * that prints as a pale smudge on white. */
+    --success: #0f7a4c;
   }
 
   /* The sheets are documents, not screens: dark on white, whatever the

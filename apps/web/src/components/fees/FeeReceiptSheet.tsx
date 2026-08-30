@@ -143,6 +143,106 @@ function groupVoucherLinesByStudent(
   });
 }
 
+/**
+ * One row per fee head, with its months gathered into a single cell.
+ *
+ * A term's tuition used to be three rows — "Tuition Fee · May", "· June",
+ * "· July" — each repeating the head and each carrying its own discount. A
+ * sibling pair on a quarter therefore filled most of the sheet with the
+ * words "Tuition Fee". Collapsed to one row per head, the same receipt says
+ * more in a quarter of the space, which is what buys the larger type.
+ *
+ * Labels are `Head · Period`; anything without a separator is a head with no
+ * period and keeps its own row. Grouping is by head AND kind, so a head that
+ * somehow appears under two sections is never silently merged across them.
+ *
+ * Store and transport lines keep their own detail — the item breakup and the
+ * route — because that detail is the point of those lines. They are grouped
+ * too, but the details of every line in the group are still rendered.
+ */
+export type FeeHeadGroup = {
+  key: string;
+  kind: string;
+  head: string;
+  periods: string[];
+  amountPaise: number;
+  concessionPaise: number;
+  billedPaise: number;
+  lines: VoucherLine[];
+};
+
+/**
+ * Session order: April first, March last.
+ *
+ * Lines arrive in whatever order the due keys sorted into, which put a
+ * term's tuition on the receipt as "June, July, May". A parent reading that
+ * cannot tell whether it is a list or a mistake. The school year runs
+ * April–March, so that is the order the months are printed in — not
+ * January-first, which would put March before April.
+ *
+ * A span is ranked by the month it STARTS in, so a transport period of
+ * "Apr · Jun" sits with April, where a reader expects it. Anything with no
+ * month at all — "Full year", a one-off label — keeps the order it arrived
+ * in and follows the months, rather than being placed on a guess.
+ */
+const SESSION_MONTHS = [
+  "apr", "may", "jun", "jul", "aug", "sep",
+  "oct", "nov", "dec", "jan", "feb", "mar",
+];
+
+function monthRank(period: string): number {
+  const key = period.trim().slice(0, 3).toLowerCase();
+  const i = SESSION_MONTHS.indexOf(key);
+  return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+}
+
+/** Chronological where it can be known, stable where it cannot. */
+export function orderPeriods(periods: readonly string[]): string[] {
+  return periods
+    .map((p, i) => ({ p, i, rank: monthRank(p) }))
+    .sort((a, b) => (a.rank !== b.rank ? a.rank - b.rank : a.i - b.i))
+    .map((x) => x.p);
+}
+
+export function groupLinesByHead(lines: VoucherLine[]): FeeHeadGroup[] {
+  const out: FeeHeadGroup[] = [];
+  const byKey = new Map<string, FeeHeadGroup>();
+
+  for (const line of lines) {
+    // Split on the first separator only: a period may itself contain one.
+    const sep = line.label.indexOf(" · ");
+    const head =
+      sep === -1 ? line.label.trim() : line.label.slice(0, sep).trim();
+    const period = sep === -1 ? "" : line.label.slice(sep + 3).trim();
+    const key = `${line.kind}||${head}`;
+
+    let group = byKey.get(key);
+    if (!group) {
+      group = {
+        key,
+        kind: line.kind,
+        head: head || "Fee",
+        periods: [],
+        amountPaise: 0,
+        concessionPaise: 0,
+        billedPaise: 0,
+        lines: [],
+      };
+      byKey.set(key, group);
+      // Insertion order, so the sheet keeps the order collect built.
+      out.push(group);
+    }
+    if (period && !group.periods.includes(period)) group.periods.push(period);
+    group.amountPaise += line.amountPaise;
+    group.concessionPaise += line.concessionPaise ?? 0;
+    group.billedPaise += line.billedPaise ?? line.amountPaise;
+    group.lines.push(line);
+  }
+
+  for (const group of out) group.periods = orderPeriods(group.periods);
+  return out;
+}
+
 function FeeLineParticulars({ line }: { line: VoucherLine }) {
   const issueRef =
     line.kind === "store"
@@ -159,7 +259,9 @@ function FeeLineParticulars({ line }: { line: VoucherLine }) {
   return (
     <div>
       <span className="font-semibold">{headLabel}</span>
-      {line.kind === "store" && line.storeItems && line.storeItems.length > 0 ? (
+      {line.kind === "store" &&
+      line.storeItems &&
+      line.storeItems.length > 0 ? (
         <ul className="mt-0.5 space-y-0.5 text-[9px] leading-snug text-[var(--brand-deep)]">
           {line.storeItems.map((it, idx) => (
             <li
@@ -212,58 +314,93 @@ function FeeLineParticulars({ line }: { line: VoucherLine }) {
   );
 }
 
-function renderStudentFeeRows(lines: VoucherLine[], keyPrefix: string): ReactNode[] {
+/** One grouped row: head · periods · discount · amount. */
+function FeeHeadRow({
+  group,
+  rowKey,
+}: {
+  group: FeeHeadGroup;
+  rowKey: string;
+}) {
+  // Only the kinds whose detail carries information the head row cannot.
+  const detailLines = group.lines.filter(
+    (l) =>
+      (l.kind === "store" && (l.storeItems?.length ?? 0) > 0) ||
+      (l.kind === "transport" && !!l.transport),
+  );
+
+  return (
+    <tr key={rowKey} className="border-b border-[rgba(32,48,80,0.1)]">
+      <td className="px-1.5 py-1 align-top font-semibold text-[var(--brand-deep)]">
+        {group.head}
+        {detailLines.length > 0 ? (
+          <div className="mt-0.5 font-normal">
+            {detailLines.map((l, i) => (
+              <FeeLineParticulars key={`${rowKey}-d-${i}`} line={l} />
+            ))}
+          </div>
+        ) : null}
+      </td>
+      <td className="px-1.5 py-1 align-top leading-snug text-[var(--muted)]">
+        {group.periods.join(", ") || "—"}
+      </td>
+      <td className="w-14 px-1.5 py-1 text-right align-top tabular-nums text-[var(--success)]">
+        {group.concessionPaise > 0 ? `−${inrCell(group.concessionPaise)}` : "—"}
+      </td>
+      <td className="w-16 px-1.5 py-1 text-right align-top font-semibold tabular-nums text-[var(--brand-deep)]">
+        {inrCell(group.amountPaise)}
+      </td>
+    </tr>
+  );
+}
+
+function renderStudentFeeRows(
+  lines: VoucherLine[],
+  keyPrefix: string,
+): ReactNode[] {
   const rows: ReactNode[] = [];
-  let n = 0;
   const known = new Set<string>(KIND_ORDER);
 
-  for (const kind of KIND_ORDER) {
-    const chunk = lines.filter((l) => l.kind === kind);
-    if (chunk.length === 0) continue;
+  const section = (kind: string, chunk: VoucherLine[]) => {
+    if (chunk.length === 0) return;
     rows.push(
       <tr key={`${keyPrefix}-sec-${kind}`} className="bg-[rgba(32,48,80,0.06)]">
         <td
-          colSpan={3}
-          className="px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-[var(--brand-deep)]"
+          colSpan={4}
+          className="px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[var(--brand-deep)]"
         >
-          {sectionTitle(kind)}
+          {sectionTitle(kind as FeeKind)}
         </td>
       </tr>,
     );
-    for (const l of chunk) {
-      n += 1;
+    for (const group of groupLinesByHead(chunk)) {
       rows.push(
-        <tr
-          key={`${keyPrefix}-${l.dueKey}-${n}`}
-          className="border-b border-[rgba(32,48,80,0.1)]"
-        >
-          <td className="w-6 px-1 py-0.5 align-top text-[var(--muted)]">{n}</td>
-          <td className="px-1 py-0.5 text-[var(--brand-deep)]">
-            <FeeLineParticulars line={l} />
-          </td>
-          <td className="w-16 px-1 py-0.5 align-top text-right font-semibold tabular-nums">
-            {inrCell(l.amountPaise)}
-          </td>
-        </tr>,
+        <FeeHeadRow
+          key={`${keyPrefix}-${group.key}`}
+          rowKey={`${keyPrefix}-${group.key}`}
+          group={group}
+        />,
       );
     }
+  };
+
+  for (const kind of KIND_ORDER) {
+    section(
+      kind,
+      lines.filter((l) => l.kind === kind),
+    );
   }
 
-  for (const l of lines.filter((x) => !known.has(x.kind as FeeKind))) {
-    n += 1;
+  // Anything with a kind the section list does not know about still has to
+  // appear — a receipt that quietly drops a paid line is the worst outcome.
+  const rest = lines.filter((x) => !known.has(x.kind as FeeKind));
+  for (const group of groupLinesByHead(rest)) {
     rows.push(
-      <tr
-        key={`${keyPrefix}-${l.dueKey}-x-${n}`}
-        className="border-b border-[rgba(32,48,80,0.1)]"
-      >
-        <td className="w-6 px-1 py-0.5 text-[var(--muted)]">{n}</td>
-        <td className="px-1 py-0.5 text-[var(--brand-deep)]">
-          <FeeLineParticulars line={l} />
-        </td>
-        <td className="w-16 px-1 py-0.5 text-right font-semibold tabular-nums">
-          {inrCell(l.amountPaise)}
-        </td>
-      </tr>,
+      <FeeHeadRow
+        key={`${keyPrefix}-x-${group.key}`}
+        rowKey={`${keyPrefix}-x-${group.key}`}
+        group={group}
+      />,
     );
   }
 
@@ -461,18 +598,24 @@ function FeeReceiptCopy({
           <div className="mt-1.5 min-h-0 flex-1 space-y-1.5">
             {studentGroups.map((group) => (
               <div key={`${copyLabel}-${group.student.studentId}`}>
-                <p className="mb-0.5 text-[7px] font-bold uppercase tracking-[0.1em] text-[var(--brand-deep)]">
+                <p className="mb-0.5 text-[8px] font-bold uppercase tracking-[0.1em] text-[var(--brand-deep)]">
                   {multiSibling
                     ? `Fee particulars — ${group.student.fullName} (${group.student.classSection}) · Reg. ${group.student.admissionNo}`
                     : "Fee particulars"}
                 </p>
-                <table className="w-full border-collapse text-[8px]">
+                {/* Grouped one row per head, so the type can be bigger:
+                    8px → 10px, which is the difference between a receipt a
+                    parent squints at and one they can read. */}
+                <table className="w-full border-collapse text-[10px]">
                   <thead>
                     <tr className="bg-[var(--brand-deep)] text-left text-white">
-                      <th className="w-6 px-1 py-0.5 font-semibold">#</th>
-                      <th className="px-1 py-0.5 font-semibold">Fee head</th>
-                      <th className="w-16 px-1 py-0.5 text-right font-semibold">
-                        ₹
+                      <th className="px-1.5 py-1 font-semibold">Fee head</th>
+                      <th className="px-1.5 py-1 font-semibold">Period</th>
+                      <th className="w-14 px-1.5 py-1 text-right font-semibold">
+                        Discount
+                      </th>
+                      <th className="w-16 px-1.5 py-1 text-right font-semibold">
+                        Amount ₹
                       </th>
                     </tr>
                   </thead>
@@ -483,10 +626,10 @@ function FeeReceiptCopy({
                     )}
                     {multiSibling ? (
                       <tr className="bg-[rgba(32,48,80,0.05)] font-bold">
-                        <td colSpan={2} className="px-1 py-0.5 text-right">
+                        <td colSpan={3} className="px-1.5 py-1 text-right">
                           {group.student.fullName} subtotal
                         </td>
-                        <td className="px-1 py-0.5 text-right tabular-nums">
+                        <td className="px-1.5 py-1 text-right tabular-nums">
                           {inrCell(group.subtotalPaise)}
                         </td>
                       </tr>
@@ -499,19 +642,23 @@ function FeeReceiptCopy({
 
           <div className="mt-1.5 shrink-0">
             {discountTotal > 0 ? (
-              <div className="flex justify-between text-[8px] font-semibold text-[#0f7a4c]">
+              <div className="flex justify-between text-[9px] font-semibold text-[var(--success)]">
                 <span>Total discount</span>
                 <span>−{formatInr(discountTotal)}</span>
               </div>
             ) : null}
-            <div className="flex justify-between rounded bg-[rgba(197,160,40,0.15)] px-1.5 py-0.5 text-[9px] font-extrabold text-[var(--brand-deep)]">
+            <div className="flex justify-between rounded bg-[rgba(197,160,40,0.15)] px-1.5 py-1 text-[11px] font-extrabold text-[var(--brand-deep)]">
               <span className="uppercase tracking-wide">
                 {multiSibling ? "Grand total received" : "Total received"}
               </span>
-              <span className="tabular-nums">{formatInr(voucher.totalPaise)}</span>
+              <span className="tabular-nums">
+                {formatInr(voucher.totalPaise)}
+              </span>
             </div>
-            <p className="mt-0.5 text-[7px] leading-snug text-[var(--brand-deep)]">
-              <span className="font-semibold text-[var(--muted)]">In words: </span>
+            <p className="mt-0.5 text-[8px] leading-snug text-[var(--brand-deep)]">
+              <span className="font-semibold text-[var(--muted)]">
+                In words:{" "}
+              </span>
               {amountInWordsPaise(voucher.totalPaise)}
             </p>
           </div>
@@ -596,10 +743,10 @@ function FeeReceiptCopy({
                   Refer a family · earn a fee discount
                 </p>
                 <p className="mt-0.5">
-                  Know a family looking for a school? Let them scan this code
-                  to register. When a child you refer takes admission, a
-                  discount is applied to your own ward&apos;s tuition fee —
-                  as per the school&apos;s referral policy.
+                  Know a family looking for a school? Let them scan this code to
+                  register. When a child you refer takes admission, a discount
+                  is applied to your own ward&apos;s tuition fee — as per the
+                  school&apos;s referral policy.
                 </p>
                 <p className="mt-0.5">
                   किसी परिचित परिवार को विद्यालय की तलाश है? उन्हें यह QR स्कैन
@@ -690,8 +837,7 @@ export function FeeReceiptSheet({
 }) {
   const voided = !!voucher.voidedAt;
   const stc = voucherHasUnclearedCheque(voucher);
-  const studentRows =
-    studentsProp ?? receiptStudentRows(voucher, sis, masters);
+  const studentRows = studentsProp ?? receiptStudentRows(voucher, sis, masters);
   const studentGroups = groupVoucherLinesByStudent(voucher, studentRows);
   const multiSibling = studentGroups.length > 1;
 
@@ -733,7 +879,11 @@ export function FeeReceiptSheet({
       }`}
     >
       <div className="fee-receipt-dual-a4 flex flex-col p-2 sm:p-3">
-        <FeeReceiptCopy copyLabel="Parent copy" showRemainingPayQr {...copyProps} />
+        <FeeReceiptCopy
+          copyLabel="Parent copy"
+          showRemainingPayQr
+          {...copyProps}
+        />
 
         <div
           className="fee-receipt-perforation my-2 flex shrink-0 items-center justify-center gap-2 py-1"
@@ -746,7 +896,11 @@ export function FeeReceiptSheet({
           <span className="text-[var(--muted)]">✂</span>
         </div>
 
-        <FeeReceiptCopy copyLabel="Office copy" showRemainingPayQr={false} {...copyProps} />
+        <FeeReceiptCopy
+          copyLabel="Office copy"
+          showRemainingPayQr={false}
+          {...copyProps}
+        />
       </div>
 
       <p className="print-hide px-3 pb-3 text-center text-[9px] text-[var(--muted)]">
