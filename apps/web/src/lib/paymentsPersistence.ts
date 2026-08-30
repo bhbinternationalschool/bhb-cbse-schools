@@ -16,11 +16,7 @@ import {
 import { mergeDbDeskIntoPaymentsState } from "@/lib/paymentsNormalizedMerge";
 import { paymentsReadFromDbEnabled } from "@/lib/paymentsDbConfig";
 import { deskSkipBlobHydrateClient, deskSkipBlobPushClient } from "@/lib/deskCutover";
-import {
-  isDeskHydrated,
-  markDeskHydrated,
-  resetDeskHydrated,
-} from "@/lib/deskHydrateGuard";
+import { dedupeHydration, isDeskHydrated, markDeskHydrated, resetDeskHydrated } from "@/lib/deskHydrateGuard";
 
 const MODULE = "payments";
 
@@ -77,6 +73,11 @@ export async function pushPaymentsRemoteServer(
  */
 export async function ensurePaymentsHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
+  // Same collapse as fees and sis: concurrent callers share one fetch.
+  return dedupeHydration(MODULE, hydratePaymentsOnce);
+}
+
+async function hydratePaymentsOnce(): Promise<boolean> {
 
   const readFromDb = paymentsReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("payments")

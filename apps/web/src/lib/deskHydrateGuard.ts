@@ -19,6 +19,40 @@ export function markDeskHydrated(module: string): void {
 export function resetDeskHydrated(module?: string): void {
   if (module) hydrated.delete(module);
   else hydrated.clear();
+  inFlight.clear();
+}
+
+/**
+ * One hydration per module at a time, however many callers ask for it.
+ *
+ * `isDeskHydrated` is only true AFTER a hydration finishes, so every caller
+ * arriving while one is still in flight passed the check and started its
+ * own. On the fee counter — where the workspace, the app shell, the
+ * notification bell and the comms strip all mount together — that meant the
+ * same desk being fetched three and four times per page load.
+ *
+ * `withHydrationSlot` below caps how many run at once, but capping
+ * duplicates only makes the queue longer: the extra copies still occupy
+ * slots that the desks nobody has fetched yet are waiting for. Collapsing
+ * them here is what actually shortens the queue.
+ *
+ * Callers share one promise, so they all see the same result at the same
+ * time. The entry is cleared when it settles, so the 15s TTL still governs
+ * when a genuinely fresh read happens.
+ */
+const inFlight = new Map<string, Promise<unknown>>();
+
+export function dedupeHydration<T>(
+  module: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const running = inFlight.get(module) as Promise<T> | undefined;
+  if (running) return running;
+  const started = (async () => fn())().finally(() => {
+    inFlight.delete(module);
+  });
+  inFlight.set(module, started);
+  return started;
 }
 
 /**
