@@ -665,6 +665,7 @@ export function FeeReceiptSheet({
   remainingPayAmountPaise,
   remainingPayUrl,
   referralQrDataUrl,
+  referralCodeProp,
 }: {
   voucher: CollectionVoucher;
   householdHint?: string;
@@ -676,6 +677,16 @@ export function FeeReceiptSheet({
   remainingPayUrl?: string | null;
   /** QR of this household's referral link; rendered on the parent copy. */
   referralQrDataUrl?: string | null;
+  /**
+   * The household's referral code, when the caller already knows it.
+   *
+   * The shared copy — the one a parent actually keeps — is rendered by a
+   * public page that has no SIS roster and must not be given one. Without
+   * this the lookup below returned nothing, the code came back empty, and
+   * the whole refer-a-family panel silently vanished from every receipt
+   * sent over WhatsApp. The desk still derives it from the roster.
+   */
+  referralCodeProp?: string;
 }) {
   const voided = !!voucher.voidedAt;
   const stc = voucherHasUnclearedCheque(voucher);
@@ -689,7 +700,8 @@ export function FeeReceiptSheet({
   // where the refer-a-family offer belongs. The code identifies THIS
   // household, so an enquiry scanned from it is attributed to them.
   const household = sis?.households.find((h) => h.id === voucher.householdId);
-  const referralCode = household ? referralCodeFor(household) : "";
+  const referralCode =
+    referralCodeProp || (household ? referralCodeFor(household) : "");
   const referralUrl = referralCode
     ? `https://${TENANT.publicPortal}/apply?ref=${encodeURIComponent(referralCode)}`
     : "";

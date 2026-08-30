@@ -3,6 +3,7 @@
  */
 
 import html2canvas from "html2canvas";
+import { referralCodeFor } from "@/lib/referrals";
 import {
   amountInWordsPaise,
   formatConcessionDetailLine,
@@ -27,6 +28,20 @@ export type ReceiptSharePayload = {
   voucher: CollectionVoucher;
   householdHint: string;
   students: ReceiptShareStudent[];
+  /**
+   * The household's referral code, carried so the shared copy can show the
+   * refer-a-family panel.
+   *
+   * The desk derives this from the SIS roster, which the share page does not
+   * have and must never be given — it is a public page opened from a
+   * WhatsApp link. So the code travels with the receipt instead. It is the
+   * QR's whole content, and the page regenerates the image from it rather
+   * than carrying a PNG in a URL.
+   *
+   * Optional: links shared before this existed still decode, and simply show
+   * the receipt without the panel.
+   */
+  referralCode?: string;
 };
 
 function buildStudents(
@@ -61,11 +76,14 @@ export function buildReceiptSharePayload(
   masters?: MastersState | null,
   householdHint?: string,
 ): ReceiptSharePayload {
+  const household = sis?.households.find((h) => h.id === voucher.householdId);
   return {
     v: 1,
     voucher,
     householdHint: householdHint ?? "",
     students: buildStudents(voucher, sis, masters),
+    // Resolved here, where the roster is in hand. The share page has no SIS.
+    referralCode: household ? referralCodeFor(household) : undefined,
   };
 }
 
