@@ -2,6 +2,7 @@ import Link from "next/link";
 import { PublicChrome } from "@/components/public/PublicChrome";
 import {
   ADDRESS_ONE_LINE,
+  CLASS_RANGE,
   CONTACT,
   PUBLIC_SERVICES,
   TRADING_NAME,
@@ -14,15 +15,16 @@ export function PublicHome() {
     <PublicChrome>
       <section className="mx-auto max-w-5xl px-6 py-16">
         <p className="text-sm font-medium uppercase tracking-wide text-slate-500">
-          CBSE curriculum · Varanasi, Uttar Pradesh
+          NCERT / CBSE curriculum framework · Varanasi, Uttar Pradesh
         </p>
         <h1 className="mt-3 text-4xl font-bold leading-tight text-slate-900">
           {TRADING_NAME}
         </h1>
         <p className="mt-4 max-w-2xl text-lg leading-8 text-slate-600">
-          A co-educational English-medium school from Nursery to Class X.
-          Parents pay session fees, transport and examination charges online
-          and download receipts from the parent portal.
+          A co-educational English-medium school, {CLASS_RANGE}, recognised by
+          the State Government of Uttar Pradesh. Parents pay session fees,
+          transport and examination charges online and download receipts from
+          the parent portal.
         </p>
         <p className="mt-4 max-w-2xl text-sm leading-6 text-slate-500">
           Operated by {displayLegalName()}, {ADDRESS_ONE_LINE}.
@@ -88,7 +90,10 @@ export function PublicHome() {
           {ADDRESS_ONE_LINE}
           <br />
           Email:{" "}
-          <a className="text-blue-700 underline" href={`mailto:${CONTACT.email}`}>
+          <a
+            className="text-blue-700 underline"
+            href={`mailto:${CONTACT.email}`}
+          >
             {CONTACT.email}
           </a>
           <br />

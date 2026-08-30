@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { PublicChrome } from "@/components/public/PublicChrome";
 import {
   ADDRESS_ONE_LINE,
+  CLASS_RANGE,
   CONTACT,
   ENTITY_TYPE,
   LEGAL_ADDRESS,
@@ -60,8 +61,7 @@ export default function AboutPage() {
           ) : null}
         </p>
         <p className="mt-3">
-          Fees paid through this website are collected by{" "}
-          {displayLegalName()}
+          Fees paid through this website are collected by {displayLegalName()}
           {SETTLEMENT_ACCOUNT_NAME !== displayLegalName() ? (
             <>
               {" "}
@@ -135,13 +135,13 @@ export default function AboutPage() {
           Nature of business
         </h2>
         <p className="mt-3">
-          {TRADING_NAME} is a co-educational English-medium school following
-          the CBSE curriculum, offering classes from Nursery to Class X at{" "}
-          {ADDRESS_ONE_LINE}. Payments accepted through this website are
-          academic fees and related school charges billed to enrolled students
-          and to applicants for admission — session fees, transport, and
-          examination and amenity charges. The school does not sell physical
-          goods online.
+          {TRADING_NAME} is a co-educational English-medium school recognised by
+          the State Government of Uttar Pradesh, offering {CLASS_RANGE} at{" "}
+          {ADDRESS_ONE_LINE} and following the standard NCERT/CBSE curriculum
+          framework. Payments accepted through this website are academic fees
+          and related school charges billed to enrolled students and to
+          applicants for admission — session fees, transport, and examination
+          and amenity charges. The school does not sell physical goods online.
         </p>
 
         <h2 className="mt-8 text-lg font-semibold text-slate-900">
@@ -149,14 +149,20 @@ export default function AboutPage() {
         </h2>
         <p className="mt-3">
           Email:{" "}
-          <a className="text-blue-700 underline" href={`mailto:${CONTACT.email}`}>
+          <a
+            className="text-blue-700 underline"
+            href={`mailto:${CONTACT.email}`}
+          >
             {CONTACT.email}
           </a>
           {CONTACT.phone ? (
             <>
               <br />
               Phone:{" "}
-              <a className="text-blue-700 underline" href={`tel:${CONTACT.phone}`}>
+              <a
+                className="text-blue-700 underline"
+                href={`tel:${CONTACT.phone}`}
+              >
                 {CONTACT.phone}
               </a>
             </>

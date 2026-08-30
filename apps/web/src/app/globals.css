@@ -1331,7 +1331,12 @@ h3,
 .dark .bg-\[\#f3f4f6\],
 .dark .bg-\[\#f8faf8\],
 .dark .bg-\[\#f5f8fb\] { background-color: var(--surface-sunken); }
-.dark .border-slate-200 { border-color: var(--border); }
+.dark .border-slate-200,
+.dark .border-slate-300 { border-color: var(--border); }
+/* `border-slate-900` is the accent rule on the legal pages' callouts — a
+   near-black line that disappears against the dark page. Flip it to the
+   foreground colour so the emphasis survives the theme. */
+.dark .border-slate-900 { border-color: var(--foreground); }
 /* `text-blue-700` inline links on the public/legal pages (privacy, terms,
    refund, about): a 700-weight blue on the near-black dark background lands
    around 2.4:1. Lift it to the light-blue ramp so the links stay legible. */

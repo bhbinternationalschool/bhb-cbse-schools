@@ -1,7 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { PublicChrome } from "@/components/public/PublicChrome";
-import { CONTACT, PUBLIC_SERVICES, displayLegalName } from "@/lib/publicOrgProfile";
+import {
+  CLASS_RANGE,
+  CONTACT,
+  PUBLIC_SERVICES,
+  RECOGNITION_STATEMENT,
+  displayLegalName,
+} from "@/lib/publicOrgProfile";
 
 export const metadata: Metadata = {
   title: "Fees & services",
@@ -19,13 +25,16 @@ export default function FeesPage() {
   return (
     <PublicChrome>
       <div className="mx-auto max-w-4xl px-6 py-14 text-[15px] leading-7">
-        <h1 className="text-3xl font-bold text-slate-900">Fees &amp; services</h1>
+        <h1 className="text-3xl font-bold text-slate-900">
+          Fees &amp; services
+        </h1>
         <p className="mt-3 text-slate-600">
           Published charges for the 2026-27 academic session (April 2026 to
-          March 2027). All amounts are in Indian Rupees and include all
-          applicable taxes. Education services provided by a school up to
-          higher secondary level are exempt from GST.
+          March 2027), for {CLASS_RANGE}. All amounts are in Indian Rupees and
+          include all applicable taxes; education services provided by a school
+          are exempt from GST.
         </p>
+        <p className="mt-3 text-sm text-slate-500">{RECOGNITION_STATEMENT}</p>
 
         <div className="mt-10 space-y-6">
           {PUBLIC_SERVICES.map((service) => (
@@ -60,8 +69,8 @@ export default function FeesPage() {
               parent portal
             </Link>{" "}
             with their registered mobile number, open the Fees section, and pay
-            the outstanding instalment by UPI, net banking, debit card or
-            credit card.
+            the outstanding instalment by UPI, net banking, debit card or credit
+            card.
           </li>
           <li>
             A receipt is generated immediately on successful payment and stays
@@ -88,8 +97,8 @@ export default function FeesPage() {
           These are education services delivered at the school campus over the
           academic session. Nothing is shipped. Payment is credited to the
           student&rsquo;s fee ledger immediately on confirmation from the
-          payment gateway, and the corresponding service — tuition, transport
-          or examination — is delivered on the school calendar for the session.
+          payment gateway, and the corresponding service — tuition, transport or
+          examination — is delivered on the school calendar for the session.
         </p>
 
         <h2 className="mt-10 text-lg font-semibold text-slate-900">
@@ -97,7 +106,10 @@ export default function FeesPage() {
         </h2>
         <p className="mt-3">
           Write to{" "}
-          <a className="text-blue-700 underline" href={`mailto:${CONTACT.email}`}>
+          <a
+            className="text-blue-700 underline"
+            href={`mailto:${CONTACT.email}`}
+          >
             {CONTACT.email}
           </a>{" "}
           or visit the accounts office. Refunds and cancellations are governed

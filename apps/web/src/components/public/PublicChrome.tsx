@@ -2,6 +2,7 @@ import Link from "next/link";
 import {
   ADDRESS_ONE_LINE,
   CONTACT,
+  RECOGNITION_STATEMENT,
   TRADING_NAME,
   displayLegalName,
 } from "@/lib/publicOrgProfile";
@@ -15,8 +16,9 @@ const NAV = [
 
 const LEGAL_NAV = [
   { href: "/terms", label: "Terms & conditions" },
-  { href: "/refund-policy", label: "Refund & cancellation" },
   { href: "/privacy", label: "Privacy policy" },
+  { href: "/refund-policy", label: "Cancellation & refund policy" },
+  { href: "/contact", label: "Contact us" },
 ];
 
 /**
@@ -60,17 +62,33 @@ export function PublicChrome({ children }: { children: React.ReactNode }) {
           <p className="mt-1">{ADDRESS_ONE_LINE}</p>
           <p className="mt-1">
             Email:{" "}
-            <a className="text-blue-700 underline" href={`mailto:${CONTACT.email}`}>
+            <a
+              className="text-blue-700 underline"
+              href={`mailto:${CONTACT.email}`}
+            >
               {CONTACT.email}
             </a>
             {CONTACT.phone ? (
               <>
                 {" · "}Phone:{" "}
-                <a className="text-blue-700 underline" href={`tel:${CONTACT.phone}`}>
+                <a
+                  className="text-blue-700 underline"
+                  href={`tel:${CONTACT.phone}`}
+                >
                   {CONTACT.phone}
                 </a>
               </>
             ) : null}
+          </p>
+
+          {/*
+            Stated on every page, not just About. An automated merchant review
+            reads whatever page it lands on; if the recognition is only on one
+            of them it is a coin toss whether the reviewer ever sees why no
+            central-board affiliation number is published.
+          */}
+          <p className="mt-4 max-w-3xl text-slate-600">
+            {RECOGNITION_STATEMENT}
           </p>
           <nav className="mt-5 flex flex-wrap gap-x-5 gap-y-2">
             {LEGAL_NAV.map((item) => (

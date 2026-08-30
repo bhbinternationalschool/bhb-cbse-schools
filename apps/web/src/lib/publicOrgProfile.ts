@@ -60,11 +60,37 @@ export const REGISTRATION_DETAILS: { label: string; value: string }[] = [
     label: "Registration no.",
     value: "158 of 2008 (Book 4, Volume 23, pages 177–220)",
   },
-  // CBSE affiliation no. can go here. Do NOT add the trust's PAN — the
-  // gateway takes it through KYC, it has no business on a public page.
+  {
+    label: "Recognition",
+    value:
+      "Recognised by the State Government of Uttar Pradesh for Nursery to Class VIII",
+  },
+  // No central-board affiliation number is held, so none is listed. Do NOT add
+  // the trust's PAN either — the gateway takes it through KYC, it has no
+  // business on a public page.
 ];
 
 export const TRADING_NAME = "BHB International School";
+
+/**
+ * The school's recognition, in the words published on every public page.
+ *
+ * The school is recognised by the State Government of Uttar Pradesh for
+ * Nursery to Class VIII and holds no central-board affiliation number. Saying
+ * so plainly, in the footer of every page, is what stops an automated merchant
+ * review from classifying the site as a CBSE high school and then demanding an
+ * affiliation letter that does not exist.
+ *
+ * Do not describe the school as CBSE-affiliated anywhere on the public site
+ * unless and until an affiliation number is actually held; "follows the
+ * NCERT/CBSE curriculum framework" is a statement about syllabus, which is
+ * true, and is as far as this may go.
+ */
+export const RECOGNITION_STATEMENT =
+  "BHB International School is recognized by the State Government of Uttar Pradesh (Nursery to Class VIII) and follows the standard NCERT/CBSE curriculum framework.";
+
+/** The class range the school is authorised to run, for public copy. */
+export const CLASS_RANGE = "Nursery to Class VIII";
 
 /**
  * Name on the bank account the payment gateway settles into, which is also
@@ -136,10 +162,18 @@ export const LEGAL_ADDRESS_ONE_LINE = addressOneLine(LEGAL_ADDRESS);
 
 export const CONTACT = {
   email: "director@bhbinternational.school",
-  /** Office line published for customers. Set to the number you actually answer. */
-  phone: null as string | null,
+  /**
+   * Office line published for customers.
+   *
+   * This is the school's verified WhatsApp Business number, which is the line
+   * parents already use and the office actually answers. A payment gateway's
+   * risk review requires a reachable phone number on the Contact page, so it
+   * is published rather than held back.
+   */
+  phone: "+91 94519 38805" as string | null,
   /** Office hours shown on the Contact page. */
-  hours: "Monday to Saturday, 8:00 am – 3:00 pm IST (excluding school holidays)",
+  hours:
+    "Monday to Saturday, 8:00 am – 3:00 pm IST (excluding school holidays)",
   website: "https://bhbinternational.school",
 } as const;
 
@@ -203,16 +237,6 @@ export const PUBLIC_SERVICES: PublicService[] = [
       "New admission ₹32,300 for the session, which includes a refundable security deposit. Students continuing from the previous session pay ₹27,300. Payable in full or in monthly instalments from April to March.",
   },
   {
-    code: "SECONDARY",
-    name: "Secondary programme — Classes IX and X",
-    summary:
-      "Full-session secondary education preparing students for the CBSE Class X board examination.",
-    price: formatInr(39400),
-    cadence: "per academic session (2026-27), new admission",
-    detail:
-      "New admission ₹39,400 for the session, which includes a refundable security deposit. Students continuing from the previous session pay ₹33,400. Payable in full or in monthly instalments from April to March.",
-  },
-  {
     code: "TRANSPORT",
     name: "School bus transport",
     summary:
@@ -229,20 +253,20 @@ export const PUBLIC_SERVICES: PublicService[] = [
     name: "Examination fee",
     summary:
       "Conduct of the half-yearly and annual examinations, including question papers, answer books and reporting.",
-    price: `${formatInr(500)} – ${formatInr(1000)}`,
+    price: formatInr(500),
     cadence: "per examination cycle",
     detail:
-      "₹500 per cycle for Nursery to Class V and ₹1,000 per cycle for Classes VI to X, charged in September and February. Already counted inside the session fee shown above; listed separately because it appears as its own line on the fee receipt.",
+      "₹500 per cycle for every class from Nursery to Class VIII, charged in September and February. Already counted inside the session fee shown above; listed separately because it appears as its own line on the fee receipt.",
   },
   {
     code: "AMENITY",
     name: "Annual amenities charge",
     summary:
       "Upkeep of laboratories, library, sports facilities, ICT equipment and campus utilities for the session.",
-    price: `${formatInr(1000)} – ${formatInr(3500)}`,
+    price: `${formatInr(1000)} – ${formatInr(2000)}`,
     cadence: "once per academic session, in April",
     detail:
-      "₹1,500 for Foundation and ₹3,500 for Classes IX–X on new admission, with lower rates for students continuing from the previous session. Already counted inside the session fee shown above; listed separately because it appears as its own line on the fee receipt.",
+      "₹1,500 for Foundation and Primary and ₹2,000 for Classes VI to VIII on new admission, with a lower rate for Foundation students continuing from the previous session. Already counted inside the session fee shown above; listed separately because it appears as its own line on the fee receipt.",
   },
 ];
 
