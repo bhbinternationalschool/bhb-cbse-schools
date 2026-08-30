@@ -1488,3 +1488,53 @@ h3,
     print-color-adjust: exact;
   }
 }
+
+/* ─── Paper is white ──────────────────────────────────────────────────────
+ *
+ * Every print sheet in the app — fee receipts, day close, payslips, report
+ * cards, certificates, ID cards, visitor passes, the store day book —
+ * colours its text with design tokens. In dark mode those tokens hold light
+ * values: `--brand-deep` is #e4eaf7 and `--muted` is #96a0ba, both nearly
+ * white. The print rules already force a white background, so a receipt
+ * printed from a browser in dark mode came out white text on white paper:
+ * a page that looks blank, wastes a sheet, and hands a parent nothing.
+ *
+ * Reported from the counter on 2026-08-30 against fee receipts; it was never
+ * specific to them. The condition is "the browser is in dark mode when
+ * someone presses print", so the fix belongs to printing, not to receipts.
+ *
+ * Restated here rather than duplicating the whole palette: these four are
+ * every token the printable sheets actually use, counted across all nine of
+ * them (--muted 125 uses, --brand-deep 68, --brand-gold 8, --surface-sunken
+ * 1). `:root.dark` outranks `.dark`, so this holds wherever it sits in the
+ * file. Add a token to a print sheet and it belongs in this list.
+ */
+@media print {
+  :root,
+  :root.dark {
+    --brand-deep: #203050;
+    --brand-gold: #c5a028;
+    --muted: #5c6478;
+    --surface-sunken: #efeee7;
+  }
+
+  /* The sheets are documents, not screens: dark on white, whatever the
+   * browser was showing. */
+  body[class*="printing-"] .print-target {
+    color: #203050;
+    background: #fff;
+  }
+
+  /* Some labels are deliberately WHITE on a navy block — the copy header
+   * ("Parent copy" / "Office copy") and the fee table's header row, 14
+   * elements in all on a two-copy receipt. Those are only legible if the
+   * navy actually prints; drop the background and they become the same
+   * invisible text this whole block exists to prevent, just by a different
+   * route. Asked for on the sheet itself rather than relying on the body
+   * rule alone, so it cannot be lost to a selector change upstream. */
+  body[class*="printing-"] .print-target,
+  body[class*="printing-"] .print-target * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
