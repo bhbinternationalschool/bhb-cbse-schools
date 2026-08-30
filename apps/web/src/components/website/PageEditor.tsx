@@ -37,12 +37,14 @@ import {
   blockToRow,
   emptyPayload,
   isBuildableKind,
+  isPublicationLive,
   mediaReadyForPage,
   newSiteId,
   pageToRow,
   publicPathFor,
   rowToBlock,
   rowToMedia,
+  rowToPublication,
   type BlockField,
   type BlockKind,
   type SiteBlock,
@@ -81,6 +83,10 @@ export function PageEditor({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState<Set<string>>(new Set());
+  /** Albums already ticked on in Show on website — the only ones a gallery
+   * block may point at, so the editor cannot offer a private album. */
+  const [albums, setAlbums] = useState<{ id: string; title: string }[]>([]);
+  const [staff, setStaff] = useState<{ id: string; name: string }[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -101,6 +107,51 @@ export function PageEditor({
     );
     if (mediaRes.ok) {
       setMedia(mediaRes.rows.map(rowToMedia).filter((m) => !m.deletedAt));
+    }
+
+    // Pickers. A failure here leaves the picker empty with an explanation
+    // rather than failing the whole editor — the other blocks still work.
+    const [candRes, pubRes, staffRes] = await Promise.all([
+      fetch("/api/website/publishable", { credentials: "same-origin" })
+        .then((r) => r.json())
+        .catch(() => null),
+      readAll<Record<string, unknown>>("site.publications", { maxPages: 5 }),
+      fetch("/api/school-data/staff-roster", { credentials: "same-origin" })
+        .then((r) => r.json())
+        .catch(() => null),
+    ]);
+
+    if (candRes?.ok && pubRes.ok) {
+      const live = new Set(
+        pubRes.rows
+          .map(rowToPublication)
+          .filter((p) => p.sourceKind === "album" && isPublicationLive(p))
+          .map((p) => p.sourceId),
+      );
+      setAlbums(
+        (candRes.items as { kind: string; id: string; title: string }[])
+          .filter((c) => c.kind === "album" && live.has(c.id))
+          .map((c) => ({ id: c.id, title: c.title })),
+      );
+    }
+
+    const roster = staffRes?.bundle?.staff ?? staffRes?.staff ?? [];
+    if (Array.isArray(roster)) {
+      setStaff(
+        roster
+          .filter(
+            (r: Record<string, unknown>) =>
+              (r.status ?? "active") !== "inactive",
+          )
+          .map((r: Record<string, unknown>) => ({
+            id: String(r.id ?? ""),
+            name: String(r.fullName ?? r.full_name ?? ""),
+          }))
+          .filter((r: { id: string; name: string }) => r.id && r.name)
+          .sort((a: { name: string }, b: { name: string }) =>
+            a.name.localeCompare(b.name),
+          ),
+      );
     }
     setDirty(new Set());
     setLoading(false);
@@ -348,6 +399,88 @@ export function PageEditor({
     );
     const common =
       "mt-0.5 w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-2 text-sm text-[var(--brand-deep)]";
+
+    if (
+      field.type === "album" ||
+      field.type === "staff" ||
+      field.type === "choice" ||
+      field.type === "file"
+    ) {
+      const options =
+        field.type === "choice"
+          ? (field.options ?? []).map((o) => ({
+              value: o.value,
+              label: o.label,
+            }))
+          : field.type === "album"
+            ? albums.map((a) => ({ value: a.id, label: a.title }))
+            : field.type === "staff"
+              ? staff.map((p) => ({ value: p.id, label: p.name }))
+              : // A download is a file, not a picture — offering photographs
+                // here would only invite someone to "download" a JPEG.
+                media
+                  .filter((m) => !m.mime.startsWith("image/"))
+                  .map((m) => ({
+                    value: m.id,
+                    label: m.originalFilename || m.alt || m.id,
+                  }));
+
+      const emptyHint =
+        field.type === "album"
+          ? "No album is on the website yet. Tick one on under Show on website first."
+          : field.type === "staff"
+            ? "No staff found."
+            : "No files in the library yet — upload a PDF under Pictures & files.";
+
+      return (
+        <label key={field.key} className="block">
+          {label}
+          <select
+            className={common}
+            value={value}
+            onChange={(e) => set(e.target.value)}
+          >
+            <option value="">Choose…</option>
+            {options.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          {field.type !== "choice" && options.length === 0 && (
+            <span className="mt-1 block text-[10px] text-[var(--muted)]">
+              {emptyHint}
+            </span>
+          )}
+          {field.help && (
+            <span className="mt-1 block text-[10px] leading-relaxed text-[var(--muted)]">
+              {field.help}
+            </span>
+          )}
+        </label>
+      );
+    }
+
+    if (field.type === "number") {
+      return (
+        <label key={field.key} className="block">
+          {label}
+          <input
+            type="number"
+            className={common}
+            value={value}
+            min={field.min}
+            max={field.max}
+            onChange={(e) => set(e.target.value)}
+          />
+          {field.help && (
+            <span className="mt-1 block text-[10px] leading-relaxed text-[var(--muted)]">
+              {field.help}
+            </span>
+          )}
+        </label>
+      );
+    }
 
     if (field.type === "media") {
       return (
@@ -659,9 +792,10 @@ export function PageEditor({
                 </button>
               ))}
             </div>
-            <p className="mt-2 text-[10px] text-[var(--muted)]">
-              Galleries, news, the calendar, staff lists and the enquiry form
-              read from the other desks and are wired up in the next phase.
+            <p className="mt-2 text-[10px] leading-relaxed text-[var(--muted)]">
+              News, the calendar and galleries read live from the other desks —
+              they show whatever is ticked on under Show on website, so you
+              never have to come back and edit this page.
             </p>
           </section>
         </div>

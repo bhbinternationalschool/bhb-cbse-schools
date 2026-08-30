@@ -549,7 +549,20 @@ export function mediaToRow(media: Partial<SiteMedia>): Row {
  * another desk rather than storing a copy, and wiring them is Phase 4.
  */
 
-export type FieldType = "line" | "text" | "media" | "url" | "youtube";
+export type FieldType =
+  | "line"
+  | "text"
+  | "media"
+  | "url"
+  | "youtube"
+  | "number"
+  | "choice"
+  /** Points at a Gallery album; the photos are read live at render. */
+  | "album"
+  /** Points at one member of staff, chosen deliberately, never "all staff". */
+  | "staff"
+  /** A non-image file in the media library — a prospectus, a form. */
+  | "file";
 
 export type BlockField = {
   key: string;
@@ -558,6 +571,13 @@ export type BlockField = {
   help?: string;
   optional?: boolean;
   placeholder?: string;
+  /** For `choice`. */
+  options?: { value: string; label: string }[];
+  /** Starting value for a new block. Numbers and choices need a real one —
+   * an empty string in a number field is not a sane default. */
+  default?: string;
+  min?: number;
+  max?: number;
 };
 
 /** A block kind whose content is a repeating list of small records. */
@@ -647,6 +667,111 @@ export const BLOCK_SHAPES: Partial<Record<BlockKind, BlockShape>> = {
       ],
     },
   },
+
+  /* ── The live blocks. These store a POINTER and a few display choices;
+   *    the content itself is read from the desk that owns it at render
+   *    time, so a notice corrected in Comms is corrected on the website
+   *    too, with nothing to copy across and nothing to go stale.
+   *
+   *    What appears is never "everything in that desk". A notice, news
+   *    item, album or event reaches the public only once someone ticks
+   *    it on in Show on website — `site_publications` is that decision,
+   *    recorded per item. ── */
+
+  feed: {
+    fields: [
+      { key: "heading", label: "Heading", type: "line", optional: true },
+      {
+        key: "show",
+        label: "Show",
+        type: "choice",
+        default: "both",
+        options: [
+          { value: "both", label: "News and notices" },
+          { value: "news", label: "News only" },
+          { value: "notices", label: "Notices only" },
+        ],
+      },
+      {
+        key: "limit",
+        label: "How many",
+        type: "number",
+        default: "3",
+        min: 1,
+        max: 12,
+      },
+    ],
+  },
+  calendar: {
+    fields: [
+      { key: "heading", label: "Heading", type: "line", optional: true },
+      {
+        key: "limit",
+        label: "How many",
+        type: "number",
+        default: "5",
+        min: 1,
+        max: 20,
+        help: "Only events still to come are shown, soonest first.",
+      },
+    ],
+  },
+  gallery: {
+    fields: [
+      { key: "heading", label: "Heading", type: "line", optional: true },
+      {
+        key: "albumId",
+        label: "Album",
+        type: "album",
+        help: "Only albums ticked on in Show on website can be chosen.",
+      },
+    ],
+  },
+  downloads: {
+    fields: [{ key: "heading", label: "Heading", type: "line", optional: true }],
+    list: {
+      key: "items",
+      noun: "file",
+      min: 1,
+      max: 20,
+      fields: [
+        { key: "mediaId", label: "File", type: "file" },
+        { key: "label", label: "Shown as", type: "line" },
+      ],
+    },
+  },
+  people: {
+    fields: [{ key: "heading", label: "Heading", type: "line", optional: true }],
+    list: {
+      key: "items",
+      noun: "person",
+      min: 1,
+      max: 40,
+      fields: [
+        { key: "staffId", label: "Member of staff", type: "staff" },
+        {
+          key: "role",
+          label: "Shown as",
+          type: "line",
+          optional: true,
+          help: "Leave blank to use their designation.",
+        },
+      ],
+    },
+  },
+  enquiry: {
+    fields: [
+      { key: "heading", label: "Heading", type: "line", optional: true },
+      {
+        key: "intro",
+        label: "Text above the form",
+        type: "text",
+        optional: true,
+        placeholder:
+          "Leave your number and we will call you back about admission.",
+      },
+    ],
+  },
 };
 
 /** Kinds this phase can actually put on a page. */
@@ -699,6 +824,21 @@ export function blockProblem(block: Pick<SiteBlock, "kind" | "payload">): string
     if (f.type === "youtube" && !youtubeId(raw)) {
       return "That is not a YouTube address I recognise.";
     }
+    if (f.type === "number") {
+      const n = Number(raw);
+      if (!Number.isFinite(n) || !Number.isInteger(n)) {
+        return `${f.label} must be a whole number.`;
+      }
+      if (f.min !== undefined && n < f.min) {
+        return `${f.label} must be at least ${f.min}.`;
+      }
+      if (f.max !== undefined && n > f.max) {
+        return `${f.label} cannot be more than ${f.max}.`;
+      }
+    }
+    if (f.type === "choice" && !f.options?.some((o) => o.value === raw)) {
+      return `${f.label} is not one of the choices.`;
+    }
   }
 
   if (shape.list) {
@@ -724,10 +864,10 @@ export function emptyPayload(kind: BlockKind): Record<string, unknown> {
   const shape = BLOCK_SHAPES[kind];
   if (!shape) return {};
   const out: Record<string, unknown> = {};
-  for (const f of shape.fields) out[f.key] = "";
+  for (const f of shape.fields) out[f.key] = f.default ?? "";
   if (shape.list) {
     const row: Record<string, unknown> = {};
-    for (const f of shape.list.fields) row[f.key] = "";
+    for (const f of shape.list.fields) row[f.key] = f.default ?? "";
     out[shape.list.key] = [row];
   }
   return out;
@@ -795,5 +935,93 @@ export function blockToRow(block: Partial<SiteBlock>): Row {
   if (block.kind !== undefined) row.kind = block.kind;
   if (block.payload !== undefined) row.payload = block.payload;
   // updated_at is the server's to stamp. See `pageToRow`.
+  return row;
+}
+
+/* ─── Publications: the "show on website" decision ────────────────────── */
+
+export type PublicationKind = "notice" | "news" | "album" | "event";
+
+export type SitePublication = {
+  id: string;
+  sourceKind: PublicationKind;
+  sourceId: string;
+  status: PageStatus;
+  scheduledPublishAt: string | null;
+  publishedAt: string | null;
+  unpublishedAt: string | null;
+  createdBy: string;
+  updatedAt: Revision;
+};
+
+/**
+ * Is this item on the public website right now?
+ *
+ * Deliberately the same rule as `isPageLive`, plus one extra: an explicit
+ * `unpublishedAt` wins over everything. Taking something off the site has
+ * to be final and immediate — if a notice is withdrawn because it was
+ * wrong, "it is still scheduled" must not put it back up.
+ */
+export function isPublicationLive(
+  pub: Pick<
+    SitePublication,
+    "status" | "publishedAt" | "scheduledPublishAt" | "unpublishedAt"
+  >,
+  now: Date = new Date(),
+): boolean {
+  if (pub.unpublishedAt) return false;
+  return isPageLive(
+    {
+      status: pub.status,
+      publishedAt: pub.publishedAt,
+      scheduledPublishAt: pub.scheduledPublishAt,
+      deletedAt: null,
+    },
+    now,
+  );
+}
+
+export const PUBLICATION_KINDS: {
+  id: PublicationKind;
+  label: string;
+  plural: string;
+  desk: string;
+}[] = [
+  { id: "notice", label: "Notice", plural: "Notices", desk: "Notices" },
+  { id: "news", label: "News item", plural: "News", desk: "News" },
+  { id: "album", label: "Album", plural: "Albums", desk: "Gallery" },
+  { id: "event", label: "Event", plural: "Events", desk: "Events & calendar" },
+];
+
+export function rowToPublication(row: Row): SitePublication {
+  const kind = str(row.source_kind, "notice");
+  const status = str(row.status, "draft");
+  return {
+    id: str(row.id),
+    sourceKind: (PUBLICATION_KINDS.some((k) => k.id === kind)
+      ? kind
+      : "notice") as PublicationKind,
+    sourceId: str(row.source_id),
+    status: (PAGE_STATUSES.some((s) => s.id === status)
+      ? status
+      : "draft") as PageStatus,
+    scheduledPublishAt: nullableStr(row.scheduled_publish_at),
+    publishedAt: nullableStr(row.published_at),
+    unpublishedAt: nullableStr(row.unpublished_at),
+    createdBy: str(row.created_by),
+    updatedAt: asRevision(str(row.updated_at)),
+  };
+}
+
+export function publicationToRow(pub: Partial<SitePublication>): Row {
+  const row: Row = {};
+  if (pub.sourceKind !== undefined) row.source_kind = pub.sourceKind;
+  if (pub.sourceId !== undefined) row.source_id = pub.sourceId;
+  if (pub.status !== undefined) row.status = pub.status;
+  if (pub.scheduledPublishAt !== undefined)
+    row.scheduled_publish_at = pub.scheduledPublishAt;
+  if (pub.publishedAt !== undefined) row.published_at = pub.publishedAt;
+  if (pub.unpublishedAt !== undefined) row.unpublished_at = pub.unpublishedAt;
+  if (pub.createdBy !== undefined) row.created_by = pub.createdBy;
   return row;
 }

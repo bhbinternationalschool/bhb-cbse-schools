@@ -1,5 +1,8 @@
 import Link from "next/link";
+import { EnquiryForm } from "@/components/public/EnquiryForm";
+import type { LiveContent } from "@/lib/website.server";
 import {
+  describeBytes,
   parseProse,
   youtubeId,
   type SiteBlock,
@@ -227,6 +230,270 @@ function Faq({ heading, items }: { heading?: string; items: FaqItem[] }) {
   );
 }
 
+function SectionHeading({ children }: { children?: string }) {
+  if (!children) return null;
+  return (
+    <h2 className="mb-6 text-2xl font-bold tracking-tight text-slate-900">
+      {children}
+    </h2>
+  );
+}
+
+/** A date a parent reads, not an ISO string. */
+function readableDate(iso: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+}
+
+function Feed({
+  heading,
+  items,
+}: {
+  heading?: string;
+  items: LiveContent["feed"];
+}) {
+  // Nothing has been ticked on yet. An empty heading over blank space looks
+  // broken; no section at all simply looks like a page without news.
+  if (!items || items.length === 0) return null;
+  return (
+    <section className="mx-auto max-w-5xl px-6">
+      <SectionHeading>{heading}</SectionHeading>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {items.map((item) => (
+          <article
+            key={item.id}
+            className="overflow-hidden rounded-xl border border-slate-200 bg-white"
+          >
+            {item.coverUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={item.coverUrl}
+                alt=""
+                className="h-40 w-full object-cover"
+                loading="lazy"
+              />
+            ) : null}
+            <div className="p-5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {item.kind === "news" ? "News" : "Notice"}
+                {readableDate(item.publishedAt)
+                  ? ` · ${readableDate(item.publishedAt)}`
+                  : ""}
+              </p>
+              <h3 className="mt-1.5 text-base font-semibold text-slate-900">
+                {item.title}
+              </h3>
+              {item.summary ? (
+                <p className="mt-1.5 text-sm leading-6 text-slate-600">
+                  {item.summary}
+                </p>
+              ) : null}
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function Calendar({
+  heading,
+  items,
+}: {
+  heading?: string;
+  items: LiveContent["events"];
+}) {
+  if (!items || items.length === 0) return null;
+  return (
+    <section className="mx-auto max-w-3xl px-6">
+      <SectionHeading>{heading}</SectionHeading>
+      <ul className="divide-y divide-slate-200 border-y border-slate-200">
+        {items.map((event) => (
+          <li key={event.id} className="flex gap-4 py-4">
+            <div className="w-28 shrink-0 text-sm font-semibold text-slate-900">
+              {readableDate(event.startsOn)}
+              {event.startTime ? (
+                <span className="block font-normal text-slate-500">
+                  {event.startTime}
+                </span>
+              ) : null}
+            </div>
+            <div>
+              <p className="text-base font-semibold text-slate-900">
+                {event.title}
+              </p>
+              {event.location ? (
+                <p className="text-sm text-slate-500">{event.location}</p>
+              ) : null}
+              {event.description ? (
+                <p className="mt-1 text-sm leading-6 text-slate-600">
+                  {event.description}
+                </p>
+              ) : null}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function Gallery({
+  heading,
+  album,
+}: {
+  heading?: string;
+  album: LiveContent["album"];
+}) {
+  // Null when the album was never ticked on, or was taken off the site
+  // after this block was placed. Both mean: show nothing.
+  if (!album || album.photos.length === 0) return null;
+  return (
+    <section className="mx-auto max-w-5xl px-6">
+      <SectionHeading>{heading || album.title}</SectionHeading>
+      {album.description ? (
+        <p className="-mt-4 mb-6 text-[15px] leading-7 text-slate-600">
+          {album.description}
+        </p>
+      ) : null}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        {album.photos.map((photo) => (
+          <figure key={photo.id}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={photo.url}
+              alt={photo.caption || album.title}
+              className="aspect-square w-full rounded-lg border border-slate-200 object-cover"
+              loading="lazy"
+            />
+            {photo.caption ? (
+              <figcaption className="mt-1 text-xs text-slate-500">
+                {photo.caption}
+              </figcaption>
+            ) : null}
+          </figure>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function Downloads({
+  heading,
+  items,
+  files,
+}: {
+  heading?: string;
+  items: { mediaId?: string; label?: string }[];
+  files: LiveContent["files"];
+}) {
+  const usable = items.filter((i) => i.mediaId && files?.[i.mediaId]);
+  if (usable.length === 0) return null;
+  return (
+    <section className="mx-auto max-w-3xl px-6">
+      <SectionHeading>{heading}</SectionHeading>
+      <ul className="divide-y divide-slate-200 border-y border-slate-200">
+        {usable.map((item, i) => {
+          const file = files![item.mediaId as string];
+          return (
+            <li key={i} className="py-3">
+              <a
+                href={file.url}
+                className="flex items-baseline justify-between gap-4 text-[15px] font-medium text-slate-900 underline-offset-2 hover:underline"
+                // Opens rather than navigating away from the page the
+                // parent was reading.
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <span>{item.label || file.alt || file.originalFilename}</span>
+                <span className="shrink-0 text-xs font-normal text-slate-500">
+                  {describeBytes(file.bytes)}
+                </span>
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+function People({
+  heading,
+  items,
+  people,
+}: {
+  heading?: string;
+  items: { staffId?: string; role?: string }[];
+  people: LiveContent["people"];
+}) {
+  // Somebody who has left the school drops out here without anyone having
+  // to remember to edit the page.
+  const usable = items.filter((i) => i.staffId && people?.[i.staffId]);
+  if (usable.length === 0) return null;
+  return (
+    <section className="mx-auto max-w-5xl px-6">
+      <SectionHeading>{heading}</SectionHeading>
+      <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {usable.map((item, i) => {
+          const person = people![item.staffId as string];
+          return (
+            <li
+              key={i}
+              className="rounded-xl border border-slate-200 bg-white p-5"
+            >
+              <p className="text-base font-semibold text-slate-900">
+                {person.name}
+              </p>
+              {item.role || person.role ? (
+                <p className="mt-0.5 text-sm text-slate-600">
+                  {item.role || person.role}
+                </p>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+function Enquiry({ heading, intro }: { heading?: string; intro?: string }) {
+  return (
+    <section className="mx-auto max-w-3xl px-6">
+      <SectionHeading>{heading || "Ask about admission"}</SectionHeading>
+      {intro ? (
+        <p className="-mt-4 mb-5 text-[15px] leading-7 text-slate-600">
+          {intro}
+        </p>
+      ) : null}
+      <EnquiryForm classes={ENQUIRY_CLASSES} />
+    </section>
+  );
+}
+
+/** The classes the school actually admits to. Nursery to Class VIII —
+ * the site must not offer a class the school does not run. */
+const ENQUIRY_CLASSES = [
+  "Nursery",
+  "LKG",
+  "UKG",
+  "Class I",
+  "Class II",
+  "Class III",
+  "Class IV",
+  "Class V",
+  "Class VI",
+  "Class VII",
+  "Class VIII",
+];
+
 const asList = (v: unknown): Record<string, unknown>[] =>
   Array.isArray(v) ? (v as Record<string, unknown>[]) : [];
 const asStr = (v: unknown): string => (typeof v === "string" ? v : "");
@@ -234,9 +501,12 @@ const asStr = (v: unknown): string => (typeof v === "string" ? v : "");
 export function SiteBlocks({
   blocks,
   media,
+  live,
 }: {
   blocks: SiteBlock[];
   media: Record<string, SiteMedia>;
+  /** What each live block's pointer resolved to, keyed by block id. */
+  live?: Record<string, LiveContent>;
 }) {
   return (
     <div className="space-y-14 py-14">
@@ -291,9 +561,57 @@ export function SiteBlocks({
                 items={asList(p.items) as FaqItem[]}
               />
             );
+          case "feed":
+            return (
+              <Feed
+                key={block.id}
+                heading={asStr(p.heading)}
+                items={live?.[block.id]?.feed}
+              />
+            );
+          case "calendar":
+            return (
+              <Calendar
+                key={block.id}
+                heading={asStr(p.heading)}
+                items={live?.[block.id]?.events}
+              />
+            );
+          case "gallery":
+            return (
+              <Gallery
+                key={block.id}
+                heading={asStr(p.heading)}
+                album={live?.[block.id]?.album}
+              />
+            );
+          case "downloads":
+            return (
+              <Downloads
+                key={block.id}
+                heading={asStr(p.heading)}
+                items={asList(p.items)}
+                files={live?.[block.id]?.files}
+              />
+            );
+          case "people":
+            return (
+              <People
+                key={block.id}
+                heading={asStr(p.heading)}
+                items={asList(p.items)}
+                people={live?.[block.id]?.people}
+              />
+            );
+          case "enquiry":
+            return (
+              <Enquiry
+                key={block.id}
+                heading={asStr(p.heading)}
+                intro={asStr(p.intro)}
+              />
+            );
           default:
-            // A block that reads from another desk. Wiring these is Phase 4;
-            // until then it leaves a gap rather than an error.
             return null;
         }
       })}

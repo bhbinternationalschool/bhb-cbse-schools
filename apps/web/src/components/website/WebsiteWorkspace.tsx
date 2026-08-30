@@ -14,11 +14,19 @@
  * and removed, and only staff whose role includes Website can do it.
  */
 
-import { Globe, Image as ImageIcon, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  Globe,
+  Globe2,
+  Image as ImageIcon,
+  Pencil,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { MediaLibrary } from "@/components/website/MediaLibrary";
 import { PageEditor } from "@/components/website/PageEditor";
+import { Publications } from "@/components/website/Publications";
 import {
   ErpTable,
   ErpTableBody,
@@ -45,7 +53,7 @@ import {
 } from "@/lib/website";
 
 type Filter = PageStatus | "all";
-type Tab = "pages" | "media";
+type Tab = "pages" | "media" | "publish";
 
 const STATUS_TONE: Record<PageStatus, string> = {
   draft: "bg-[var(--surface-sunken)] text-[var(--muted)]",
@@ -238,6 +246,7 @@ export function WebsiteWorkspace() {
           [
             { id: "pages", label: "Pages", icon: Globe },
             { id: "media", label: "Pictures & files", icon: ImageIcon },
+            { id: "publish", label: "Show on website", icon: Globe2 },
           ] as const
         ).map(({ id, label, icon: Icon }) => (
           <button
@@ -258,6 +267,8 @@ export function WebsiteWorkspace() {
 
       {tab === "media" ? (
         <MediaLibrary onError={setError} onNotice={setNotice} />
+      ) : tab === "publish" ? (
+        <Publications onError={setError} onNotice={setNotice} />
       ) : editingPage ? (
         <PageEditor
           page={editingPage}

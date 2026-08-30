@@ -32,7 +32,11 @@ export default async function RootPage() {
                 {built.page.title}
               </h1>
             </header>
-            <SiteBlocks blocks={built.blocks} media={built.media} />
+            <SiteBlocks
+              blocks={built.blocks}
+              media={built.media}
+              live={built.live}
+            />
           </article>
         </PublicChrome>
       );

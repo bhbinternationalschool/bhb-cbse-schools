@@ -76,7 +76,11 @@ export default async function SitePage({
             {bundle.page.title}
           </h1>
         </header>
-        <SiteBlocks blocks={bundle.blocks} media={bundle.media} />
+        <SiteBlocks
+          blocks={bundle.blocks}
+          media={bundle.media}
+          live={bundle.live}
+        />
       </article>
     </PublicChrome>
   );

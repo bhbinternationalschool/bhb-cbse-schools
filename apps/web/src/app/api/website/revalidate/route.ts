@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireStaffApi } from "@/lib/apiRouteAuth.server";
 import { LANGUAGES, type SiteLang } from "@/lib/website";
-import { revalidateSite } from "@/lib/website.server";
+import { revalidateSite, revalidateSiteContent } from "@/lib/website.server";
 
 export const runtime = "nodejs";
 
@@ -22,11 +22,18 @@ export async function POST(req: Request) {
   const auth = await requireStaffApi(req);
   if (!auth.ok) return auth.response;
 
-  let body: { lang?: string; slug?: string };
+  let body: { lang?: string; slug?: string; content?: boolean };
   try {
     body = (await req.json()) as typeof body;
   } catch {
     return NextResponse.json({ error: "Expected JSON" }, { status: 400 });
+  }
+
+  // Ticking an item on in Show on website changes every page that carries
+  // a news, calendar or gallery block — there is no single page to name.
+  if (body.content) {
+    revalidateSiteContent();
+    return NextResponse.json({ ok: true });
   }
 
   const lang = LANGUAGES.find((l) => l.id === body.lang)?.id as

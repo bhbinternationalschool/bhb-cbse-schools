@@ -3,6 +3,18 @@ import "server-only";
 import { unstable_cache, revalidateTag } from "next/cache";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import {
+  CONTENT_TAG,
+  getAlbum,
+  getFeed,
+  getFiles,
+  getPeople,
+  getUpcomingEvents,
+  type AlbumItem,
+  type EventItem,
+  type FeedItem,
+  type PersonItem,
+} from "@/lib/websiteContent.server";
+import {
   isPageLive,
   mayPublishMedia,
   rowToBlock,
@@ -54,10 +66,38 @@ export function revalidateSite(lang: SiteLang, slug: string): void {
   revalidateTag(NAV_TAG);
 }
 
+/**
+ * Something from another desk was ticked on or off.
+ *
+ * There is no one page to invalidate — a notice can appear in a feed block
+ * on any number of pages — so this drops the content tag, which every page
+ * carries.
+ */
+export function revalidateSiteContent(): void {
+  revalidateTag(CONTENT_TAG);
+}
+
+/**
+ * What a live block resolved to, keyed by the block's own id.
+ *
+ * Resolved here rather than inside the renderer so the renderer stays a
+ * plain function of its inputs — it can be reasoned about, and a block
+ * whose desk content has vanished renders as a gap rather than throwing
+ * halfway down the school's front page.
+ */
+export type LiveContent = {
+  feed?: FeedItem[];
+  events?: EventItem[];
+  album?: AlbumItem | null;
+  files?: Record<string, SiteMedia>;
+  people?: Record<string, PersonItem>;
+};
+
 type PageBundle = {
   page: SitePage;
   blocks: SiteBlock[];
   media: Record<string, SiteMedia>;
+  live: Record<string, LiveContent>;
 };
 
 async function loadPage(
@@ -122,7 +162,64 @@ async function loadPage(
     }
   }
 
-  return { page, blocks, media };
+  return { page, blocks, media, live: await resolveLive(blocks) };
+}
+
+const asStr = (v: unknown) => (typeof v === "string" ? v : "");
+const asList = (v: unknown) =>
+  Array.isArray(v) ? (v as Record<string, unknown>[]) : [];
+
+/** Fetch what each live block points at. */
+async function resolveLive(
+  blocks: SiteBlock[],
+): Promise<Record<string, LiveContent>> {
+  const out: Record<string, LiveContent> = {};
+
+  await Promise.all(
+    blocks.map(async (block) => {
+      const p = block.payload;
+      switch (block.kind) {
+        case "feed": {
+          const show = asStr(p.show);
+          out[block.id] = {
+            feed: await getFeed(
+              show === "news" || show === "notices" ? show : "both",
+              Number(asStr(p.limit)) || 3,
+            ),
+          };
+          break;
+        }
+        case "calendar": {
+          out[block.id] = {
+            events: await getUpcomingEvents(Number(asStr(p.limit)) || 5),
+          };
+          break;
+        }
+        case "gallery": {
+          out[block.id] = { album: await getAlbum(asStr(p.albumId)) };
+          break;
+        }
+        case "downloads": {
+          const ids = asList(p.items)
+            .map((i) => asStr(i.mediaId))
+            .filter(Boolean);
+          out[block.id] = { files: await getFiles(ids) };
+          break;
+        }
+        case "people": {
+          const ids = asList(p.items)
+            .map((i) => asStr(i.staffId))
+            .filter(Boolean);
+          out[block.id] = { people: await getPeople(ids) };
+          break;
+        }
+        default:
+          break;
+      }
+    }),
+  );
+
+  return out;
 }
 
 export async function getPublishedPage(
@@ -132,7 +229,13 @@ export async function getPublishedPage(
   const cached = unstable_cache(
     () => loadPage(lang, slug),
     ["site-page", lang, slug],
-    { tags: [pageTag(lang, slug), NAV_TAG], revalidate: REVALIDATE_SECONDS },
+    {
+      // CONTENT_TAG as well: a notice ticked on in Show on website changes
+      // what every page carrying a feed block displays, not just the page
+      // someone happened to edit.
+      tags: [pageTag(lang, slug), NAV_TAG, CONTENT_TAG],
+      revalidate: REVALIDATE_SECONDS,
+    },
   );
   return cached();
 }

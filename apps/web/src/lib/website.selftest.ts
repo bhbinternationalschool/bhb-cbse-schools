@@ -430,18 +430,92 @@ import {
   assert.equal(named.original_filename, "prize-day.png");
 }
 
-// ── Only blocks that store their own content are buildable yet ──────────
+// ── Every kind in the palette must be buildable ─────────────────────────
 {
-  // The split is not arbitrary: a block marked `live` reads from another
-  // desk, and wiring those is Phase 4. If the two lists ever disagree, the
-  // editor offers a block the renderer cannot draw.
+  // Phase 3 shipped only the blocks that store their own content; Phase 4
+  // wired the six that read from another desk. Every kind therefore has a
+  // shape now, and this assertion is what stops a kind being added to the
+  // palette without one — which would offer the office a block the
+  // renderer cannot draw.
   for (const k of BLOCK_KINDS) {
-    assert.equal(
+    assert.ok(
       isBuildableKind(k.id),
-      !k.live,
-      `${k.id}: BLOCK_SHAPES and the live flag disagree`,
+      `${k.id} is in the palette with no shape in BLOCK_SHAPES`,
     );
   }
+
+  // A live block stores a pointer and display choices, never a copy of the
+  // content. If one ever gains a `text` field it has started duplicating
+  // the desk that owns it, and the two will drift.
+  for (const k of BLOCK_KINDS.filter((k) => k.live)) {
+    const shape = BLOCK_SHAPES[k.id];
+    const copies = shape?.fields.filter(
+      (f) => f.type === "text" && f.key !== "intro",
+    );
+    assert.equal(
+      copies?.length ?? 0,
+      0,
+      `${k.id} stores its own prose; live blocks must point, not copy`,
+    );
+  }
+}
+
+// ── The new field types validate, rather than accepting anything ────────
+{
+  // "How many" is a number field; an empty or silly value must be caught
+  // in the desk, not produce an empty section on the public page.
+  assert.ok(blockProblem({ kind: "feed", payload: { show: "both", limit: "" } }));
+  assert.ok(blockProblem({ kind: "feed", payload: { show: "both", limit: "3.5" } }));
+  assert.ok(blockProblem({ kind: "feed", payload: { show: "both", limit: "0" } }));
+  assert.ok(blockProblem({ kind: "feed", payload: { show: "both", limit: "99" } }));
+  assert.equal(
+    blockProblem({ kind: "feed", payload: { show: "both", limit: "3" } }),
+    null,
+  );
+
+  // A choice must be one of the offered values.
+  assert.ok(
+    blockProblem({ kind: "feed", payload: { show: "everything", limit: "3" } }),
+    "an unknown choice must be refused",
+  );
+
+  // A gallery block with no album chosen would render nothing at all.
+  assert.ok(blockProblem({ kind: "gallery", payload: { albumId: "" } }));
+  assert.equal(
+    blockProblem({ kind: "gallery", payload: { albumId: "alb_1" } }),
+    null,
+  );
+
+  // People are chosen one at a time. An empty pick is a half-filled block.
+  assert.ok(
+    blockProblem({ kind: "people", payload: { items: [{ staffId: "" }] } }),
+  );
+  assert.equal(
+    blockProblem({ kind: "people", payload: { items: [{ staffId: "stf_1" }] } }),
+    null,
+    "the role is optional; the person is not",
+  );
+}
+
+// ── A new live block starts usable, not empty ───────────────────────────
+{
+  // A number field defaulting to "" would show the office an invalid block
+  // the moment they added it, for no reason.
+  const feed = emptyPayload("feed");
+  assert.equal(feed.limit, "3");
+  assert.equal(feed.show, "both");
+  assert.equal(
+    blockProblem({ kind: "feed", payload: feed }),
+    null,
+    "a freshly added feed block should already be publishable",
+  );
+
+  const calendar = emptyPayload("calendar");
+  assert.equal(
+    blockProblem({ kind: "calendar", payload: calendar }),
+    null,
+    "a freshly added calendar block should already be publishable",
+  );
 }
 
 // ── YouTube addresses, in the forms people actually paste ───────────────
