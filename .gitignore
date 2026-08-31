@@ -58,3 +58,6 @@ supabase/.temp/
 # ever dropped in the tree by mistake.
 **/deploy-sa*.json
 **/bhb-deploy*.json
+
+# Reviewed-and-acted-on exports of live student/fee data — never committed.
+open-ended-counter-discounts.csv

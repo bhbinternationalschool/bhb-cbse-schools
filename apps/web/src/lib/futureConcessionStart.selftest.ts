@@ -3,7 +3,11 @@ import {
   laterSameHeadDueKeys,
   listFutureConcessionCandidates,
 } from "./counterConcession";
-import { emptyMastersShell, type MastersState } from "./masters";
+import {
+  academicYearEndOn,
+  emptyMastersShell,
+  type MastersState,
+} from "./masters";
 import type { SisStudent } from "./sis";
 import type { FeeDueLine } from "./fees";
 import type { CounterDiscountSlice } from "./feeAdjustments";
@@ -223,6 +227,33 @@ const slice = (dueKey: string): CounterDiscountSlice =>
 
   // An unknown line spreads nowhere rather than throwing.
   assert.deepEqual(laterSameHeadDueKeys(dues, "nope"), []);
+}
+
+// ── A counter discount ends with the session ────────────────────────────
+{
+  /**
+   * These grants were open-ended, and an open-ended grant never expires: a
+   * hardship discount given in July 2026 kept coming off the bill in
+   * 2027-28 and every year after. Production held 105 such grants, 69 of
+   * them from the counter. They end on 31 March now, so the office
+   * re-decides each year rather than the money leaving quietly.
+   */
+  assert.equal(academicYearEndOn("2026-27"), "2027-03-31");
+  assert.equal(academicYearEndOn("2027-28"), "2028-03-31");
+  assert.equal(academicYearEndOn("2026-2027"), "2027-03-31", "long form too");
+  assert.equal(academicYearEndOn(" 2026-27 "), "2027-03-31", "trimmed");
+
+  // Anything it cannot read with certainty returns null and the grant stays
+  // as it was. A wrong end date cuts a family's discount off early.
+  assert.equal(academicYearEndOn(""), null);
+  assert.equal(academicYearEndOn("2026"), null);
+  assert.equal(academicYearEndOn("not-a-year"), null);
+  assert.equal(
+    academicYearEndOn("2026-29"),
+    null,
+    "the closing year must be the one that follows, not any two digits",
+  );
+  assert.equal(academicYearEndOn("2026-26"), null);
 }
 
 console.log("futureConcessionStart.selftest: all assertions passed");

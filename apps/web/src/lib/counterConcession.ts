@@ -11,6 +11,7 @@ import type { CounterDiscountSlice } from "@/lib/feeAdjustments";
 import { FEE_ADJUST_AUTO_LIMIT_PAISE } from "@/lib/feeAdjustments";
 import type { FeeDueLine } from "@/lib/fees";
 import {
+  academicYearEndOn,
   formatInr,
   loadMasters,
   newId,
@@ -470,7 +471,21 @@ export function applyFutureConcessionsFromCounter(input: {
           ? ` · receipt ${input.sourceReceiptNo} [v:${input.sourceVoucherId ?? ""}]`
           : ""),
       effectiveFrom: item.futureEffectiveFrom,
-      effectiveTo: null,
+      /**
+       * Ends with the session — 31 March.
+       *
+       * These were open-ended, and an open-ended grant never expires: a
+       * hardship discount given at the counter in July 2026 kept coming off
+       * that family's bill in 2027-28 and every year after, with nothing on
+       * any screen saying so. The rule resolver even carries it into the
+       * next session by policy CODE when the year's own rule goes inactive,
+       * so changing sessions did not stop it either.
+       *
+       * A discount given for this year's circumstances should be re-decided
+       * next year. Null when the session code cannot be read — an end date
+       * guessed wrong would cut a family off early.
+       */
+      effectiveTo: academicYearEndOn(input.academicYearCode),
       createdAt: now,
       siblingChildNo: null,
     };
