@@ -12,7 +12,11 @@ import {
   type CollectionVoucher,
   type FeeDueLine,
 } from "@/lib/fees";
-import { DEFAULT_AY, loadMasters } from "@/lib/masters";
+import {
+  DEFAULT_AY,
+  currentAcademicYearCode,
+  loadMasters,
+} from "@/lib/masters";
 import {
   classLabelForStudent,
   formatParentDueHint,
@@ -73,9 +77,14 @@ export function ParentFeesPortal({
       setReceipts([]);
       return;
     }
+    // Scoped to the running session. A promoted child keeps one student
+    // row per academic year, all of them still "active", so without this
+    // the parent sees each of their children listed once per year they
+    // have attended and a family balance several times the real one.
     const rows = computeHouseholdDues(hh.id, sis, masters, fees, {
       includeFuture: true,
       includePaid: true,
+      academicYearCode: currentAcademicYearCode(masters),
     });
     setBundle(rows);
     setReceipts(householdReceipts(hh.id, fees));
@@ -248,7 +257,11 @@ export function ParentFeesPortal({
           No household linked for this parent demo. Open staff portal and check
           SIS households.
         </p>
-        <button type="button" className="mt-4 text-sm underline" onClick={onSignOut}>
+        <button
+          type="button"
+          className="mt-4 text-sm underline"
+          onClick={onSignOut}
+        >
           Sign out
         </button>
       </div>

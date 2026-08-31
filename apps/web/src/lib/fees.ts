@@ -2905,11 +2905,38 @@ export function computeHouseholdDues(
     includeFuture?: boolean;
     includePaid?: boolean;
     storeDues?: InjectedStoreDue[];
+    /**
+     * Scope the household to ONE session's student records.
+     *
+     * A child promoted across years has one `students` row per year, all of
+     * them `status: "active"` — on this data 679 active rows were only ~236
+     * real children, and 157 of 189 households spanned more than one year.
+     * Summing the bundle without this adds last year's child to this year's
+     * child and reports several times the true balance (seen in the wild: a
+     * "pay remaining dues" QR for 62,050 on a household that owed 10,500).
+     *
+     * `searchFeeStudents` has always scoped this way — that is why the
+     * counter's own numbers were right while the receipt's were not.
+     *
+     * Omit it and nothing changes: callers that resolve specific dueKeys
+     * (pay links, parent checkout, the per-student ledger) must keep seeing
+     * every record, or a key belonging to an older row stops resolving.
+     */
+    academicYearCode?: string;
   },
 ): { student: SisStudent; dues: FeeDueLine[] }[] {
-  const members = sis.students.filter(
+  let members = sis.students.filter(
     (s) => s.householdId === householdId && s.status === "active",
   );
+  if (options?.academicYearCode) {
+    const scope = normAyCode(options.academicYearCode);
+    const scoped = members.filter(
+      (s) => normAyCode(s.academicYearCode) === scope,
+    );
+    // Fall back to every record when the scope matches nothing, so a family
+    // with only older rows still shows a balance instead of a silent zero.
+    if (scoped.length) members = scoped;
+  }
   return members.map((student) => ({
     student,
     dues: computeStudentDues(student, masters, fees, options),

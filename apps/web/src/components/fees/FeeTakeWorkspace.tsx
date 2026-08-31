@@ -42,7 +42,11 @@ import {
   type TenderMode,
   type VoucherTender,
 } from "@/lib/fees";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import {
+  loadMasters,
+  currentAcademicYearCode,
+  type MastersState,
+} from "@/lib/masters";
 import {
   householdWhatsApp,
   isValidMobile,
@@ -124,11 +128,21 @@ import { TransportRiderChip } from "@/components/transport/TransportRiderChip";
 function FeeSearchInput({
   onDebounced,
   autoFocus,
+  resetSignal = 0,
 }: {
   onDebounced: (q: string) => void;
   autoFocus?: boolean;
+  /**
+   * Bumped by the parent when a student is picked, so the box empties and
+   * the match list collapses. The box owns its own text (that is the whole
+   * point of this component), so the parent cannot clear it directly.
+   */
+  resetSignal?: number;
 }) {
   const [value, setValue] = useState("");
+  useEffect(() => {
+    if (resetSignal > 0) setValue("");
+  }, [resetSignal]);
   useEffect(() => {
     const t = setTimeout(() => onDebounced(value), 200);
     return () => clearTimeout(t);
@@ -256,6 +270,7 @@ export function FeeTakeWorkspace() {
   const [classId, setClassId] = useState("");
   const [sectionId, setSectionId] = useState("");
   const [hits, setHits] = useState<StudentSearchHit[]>([]);
+  const [searchResetSignal, setSearchResetSignal] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   /**
    * Which children's fee DETAILS are on screen — one at a time by default:
@@ -313,7 +328,7 @@ export function FeeTakeWorkspace() {
    * These lines contribute their discount and nothing else: they are out of
    * the collect total, out of the allocation, and off the receipt.
    */
-// Per-line "discount only" was removed with its checkbox: a discount now
+  // Per-line "discount only" was removed with its checkbox: a discount now
   // always belongs to the line it is typed on. Recording a discount without
   // collecting is still possible — set the amount to zero and post it.
 
@@ -738,10 +753,7 @@ export function FeeTakeWorkspace() {
     [selectedKeys],
   );
 
-  const collectTotal = selectedDues.reduce(
-    (s, d) => s + d.balancePaise,
-    0,
-  );
+  const collectTotal = selectedDues.reduce((s, d) => s + d.balancePaise, 0);
 
   const discountSlices = useMemo(
     () => buildPerLineDiscountSlices(selectedDues, lineDiscountRupees),
@@ -1028,6 +1040,11 @@ export function FeeTakeWorkspace() {
     setActiveStudentIds(new Set([hit.student.id]));
     setSelectedKeys(new Set());
     resetPaymentFields();
+    // Empty the search box and hide the match list straight away, rather
+    // than after the 200ms debounce — the list is no longer hidden by the
+    // selection itself, so it must be cleared explicitly.
+    setDebouncedQuery("");
+    setSearchResetSignal((n) => n + 1);
   }
 
   /**
@@ -1735,6 +1752,7 @@ export function FeeTakeWorkspace() {
                 <FeeSearchInput
                   onDebounced={setDebouncedQuery}
                   autoFocus={mounted}
+                  resetSignal={searchResetSignal}
                 />
               </label>
               <label className="block text-sm">
@@ -1821,9 +1839,13 @@ export function FeeTakeWorkspace() {
               />
             </div>
 
-            {/* Compact match strip — replaces left list */}
-            {(debouncedQuery.trim() || classId || sectionId) &&
-            !selectedStudent ? (
+            {/* Compact match strip — replaces left list.
+                Deliberately NOT gated on `!selectedStudent`: it used to be,
+                which meant that once a child was open the counter had to
+                press "Change student" before a search would show anything.
+                Picking a student clears the box (see pickStudent), so this
+                only reappears when the clerk actually types again. */}
+            {debouncedQuery.trim() || classId || sectionId ? (
               <div className="mt-3">
                 <p className="mb-2 text-[11px] text-[var(--muted)]">
                   {hits.length} match{hits.length === 1 ? "" : "es"} — pick one
@@ -1849,6 +1871,17 @@ export function FeeTakeWorkspace() {
                           <span className="text-[11px] text-[var(--muted)]">
                             {h.classLabel} · {h.student.admissionNo}
                           </span>
+                          {/* Father's name on EVERY row. Two children of the
+                              same class share a first name often enough that
+                              the class and admission number alone do not tell
+                              the counter which one is standing there; the
+                              match-reason chip below only appears when the
+                              father is why the row matched. */}
+                          {h.student.fatherName ? (
+                            <span className="text-[11px] font-medium text-[var(--brand-mid)]">
+                              s/o d/o {h.student.fatherName}
+                            </span>
+                          ) : null}
                           {/* Why this row is here — a hit on the mother's
                               name or a sibling's mobile is not obvious from
                               the child's name alone. */}
@@ -3756,7 +3789,13 @@ function ReceiptPreviewModal({
         sis,
         masters,
         loadFees(),
-        { includeFuture: false },
+        // Scoped to the running session: without it the household's older
+        // student records are summed in too, and the QR asks for years the
+        // family has already left behind.
+        {
+          includeFuture: false,
+          academicYearCode: currentAcademicYearCode(masters),
+        },
       );
       const open = openFeeDues(rows.flatMap((r) => r.dues)).filter(
         (d) => d.balancePaise > 0,

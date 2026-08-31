@@ -91,6 +91,7 @@ SELFTESTS=(
   test:erp-chat
   test:wa-templates-automation
   test:fee-student-search
+  test:household-dues-ay
   test:payment-link-amount
   test:sis-wire-payload
   test:print-palette

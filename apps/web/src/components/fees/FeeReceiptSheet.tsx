@@ -971,7 +971,8 @@ export function FeeReceiptSheet({
       </div>
 
       <p className="print-hide px-3 pb-3 text-center text-[9px] text-[var(--muted)]">
-        Prints two pages — page 1 Parent copy, page 2 Office copy
+        Prints on one sheet when both copies fit; a long receipt puts the office
+        copy on a second sheet, never splitting a copy
         {multiSibling
           ? ` · ${studentGroups.length} students on this receipt`
           : ""}

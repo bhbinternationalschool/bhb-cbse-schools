@@ -812,12 +812,17 @@ h3,
     overflow: visible !important;
   }
 
-  /* One copy per page.
-     Two copies used to be squeezed onto one A4 at half height with
-     overflow:hidden — any receipt with more than a handful of lines was
-     silently CUT OFF in print and PDF. A receipt that hides what was paid
-     for is worse than a second sheet of paper, so each copy now gets a full
-     page: page 1 Parent copy, page 2 Office copy. */
+  /* Let the content decide the page count.
+     Two copies were once squeezed onto one A4 with overflow:hidden and any
+     longer receipt was silently CUT OFF — so each copy was given a forced
+     full page instead (min-height 272mm + page-break-after). That fixed the
+     truncation but made EVERY receipt two sheets, even a one-child receipt
+     whose two copies measure 120mm and 100mm and would sit on one page with
+     room to spare (measured on RCV-00262: 168mm parent, 145mm office).
+     Now: no forced height and no forced break, but a copy may never be
+     split across a page boundary. Small receipts print on one sheet with
+     the tear line; long ones fall onto a second sheet whole. Nothing is
+     hidden either way. */
   body.printing-fee-receipt .fee-receipt-dual-a4,
   body:has(.fee-receipt-sheet.print-target) .fee-receipt-dual-a4 {
     display: block !important;
@@ -832,24 +837,30 @@ h3,
     display: flex !important;
     flex-direction: column !important;
     height: auto !important;
-    min-height: 272mm !important;
+    min-height: 0 !important;
     max-height: none !important;
     overflow: visible !important;
-    page-break-inside: auto !important;
-    break-inside: auto !important;
+    /* A copy is the unit that must stay whole — this is what stops the
+       lines below the tear line landing on the next page mid-copy. */
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
 
+  /* No forced break between the copies: they share a sheet when they fit.
+     `break-inside: avoid` above is what pushes the office copy onto its own
+     sheet when it does not, so the split still never lands mid-copy. */
   body.printing-fee-receipt .fee-receipt-copy:not(:last-of-type),
   body:has(.fee-receipt-sheet.print-target)
     .fee-receipt-copy:not(:last-of-type) {
-    page-break-after: always !important;
-    break-after: page !important;
+    page-break-after: auto !important;
+    break-after: auto !important;
+    margin-bottom: 6mm !important;
   }
 
-  /* The tear line belonged to the two-per-page layout. */
+  /* The tear line is meaningful again whenever both copies share the sheet. */
   body.printing-fee-receipt .fee-receipt-perforation,
   body:has(.fee-receipt-sheet.print-target) .fee-receipt-perforation {
-    display: none !important;
+    display: flex !important;
   }
 
   body.printing-fee-receipt .fee-receipt-sheet .print-hide,

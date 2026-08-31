@@ -17,7 +17,7 @@ import {
   openFeeDues,
   type FeeDueLine,
 } from "@/lib/fees";
-import { loadMasters } from "@/lib/masters";
+import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
 import {
   buildPaymentSharePayload,
   buildPaymentShareUrlAbsolute,
@@ -180,12 +180,19 @@ function flattenOpenDues(
   hhId: string,
   studentId?: string,
 ): FeeDueLine[] {
+  const masters = loadMasters();
+  // Scoped to the running session: this flattens the WHOLE household, so
+  // older student rows of the same children would otherwise be added in and
+  // the bot would quote a parent several times what they owe.
   const rows = computeHouseholdDues(
     hhId,
     loadSis(),
-    loadMasters(),
+    masters,
     loadFees(),
-    { includeFuture: false },
+    {
+      includeFuture: false,
+      academicYearCode: currentAcademicYearCode(masters),
+    },
   );
   let dues = openFeeDues(rows.flatMap((r) => r.dues)).filter(
     (d) => d.balancePaise > 0,
