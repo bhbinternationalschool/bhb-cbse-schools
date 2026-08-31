@@ -1,4 +1,9 @@
 "use client";
+import {
+  canApproveConcession,
+  canGrantConcession,
+  concessionGrantStatus,
+} from "@/lib/rbac";
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Printer, X } from "lucide-react";
@@ -985,6 +990,20 @@ function GrantStudentsCard({
 }) {
   const sis = useMemo(() => loadSis(), [grants.length, state.concessionGrants]);
   const ay = useSetupAy(state);
+  const session = useDemoSessionOptional();
+  /**
+   * Who may do what with a concession. Recording one and making it effective
+   * are separate acts: an assigned user can prepare the discount a parent is
+   * asking for, but only owner / admin / principal can hand it over.
+   */
+  const mayApprove = useMemo(
+    () => (session ? canApproveConcession(session, state) : false),
+    [session, state],
+  );
+  const mayGrant = useMemo(
+    () => (session ? canGrantConcession(session, state) : false),
+    [session, state],
+  );
   const [selectMode, setSelectMode] = useState<"single" | "multiple">(
     concession.kind === "sibling" ? "multiple" : "single",
   );
@@ -1182,8 +1201,12 @@ function GrantStudentsCard({
     const effectiveFrom = /^\d{4}-\d{2}$/.test(fromMonth)
       ? `${fromMonth}-01`
       : new Date().toISOString().slice(0, 10);
-    const shouldAuto = autoApprove && concession.autoApproveMaxPaise != null;
-    const status = (shouldAuto ? "approved" : "pending") as
+    // The money test as before — and then WHO. An assigned user's grant
+    // stays pending however small it is; approval is not something the
+    // person asking for it can give themselves.
+    const amountAllowsAuto =
+      autoApprove && concession.autoApproveMaxPaise != null;
+    const status = concessionGrantStatus(mayApprove, amountAllowsAuto) as
       "pending" | "approved" | "rejected";
     const now = new Date().toISOString();
     const rows = selectedIds
@@ -1220,9 +1243,12 @@ function GrantStudentsCard({
         ...state,
         concessionGrants: [...(state.concessionGrants ?? []), ...rows],
       },
-      shouldAuto
+      status === "approved"
         ? `Granted & approved for ${rows.length} student${rows.length === 1 ? "" : "s"}`
-        : `Granted (pending) for ${rows.length} student${rows.length === 1 ? "" : "s"}`,
+        : mayApprove
+          ? `Granted (pending) for ${rows.length} student${rows.length === 1 ? "" : "s"}`
+          : `Sent for approval — ${rows.length} student${rows.length === 1 ? "" : "s"}. ` +
+            "A principal, admin or owner must approve it before it applies.",
     );
     clearSelection();
     setReason("");
@@ -1232,6 +1258,12 @@ function GrantStudentsCard({
     grantId: string,
     status: "approved" | "rejected" | "pending",
   ) {
+    // Approving and rejecting ARE the approval. An assigned user reaching
+    // this would be approving their own grant.
+    if (!mayApprove) {
+      commit(state, "Only a principal, admin or owner can approve or reject");
+      return;
+    }
     commit(
       {
         ...state,
@@ -1248,6 +1280,12 @@ function GrantStudentsCard({
   }
 
   function removeGrant(grantId: string) {
+    // Removing an approved grant is a change to what a family is charged,
+    // so it sits on the same side of the line as approving one.
+    if (!mayApprove) {
+      commit(state, "Only a principal, admin or owner can remove a grant");
+      return;
+    }
     commit(
       {
         ...state,
@@ -1510,7 +1548,22 @@ function GrantStudentsCard({
         </div>
       ) : null}
 
-      <form onSubmit={grant} className="mt-3 grid gap-2 sm:grid-cols-2">
+      {!mayGrant ? (
+        <p className="mt-3 rounded-xl border border-dashed border-[var(--border)] bg-[var(--card)]/70 px-4 py-6 text-center text-sm text-[var(--muted)]">
+          Your role cannot grant concessions. A principal, admin or owner — or a
+          user given the fees module — can record one here.
+        </p>
+      ) : null}
+      {!mayApprove && mayGrant ? (
+        <p className="mt-3 rounded-xl border border-[rgba(197,160,40,0.4)] bg-[rgba(197,160,40,0.08)] px-3 py-2 text-[11px] leading-relaxed text-[var(--brand-deep)]">
+          Anything you grant here is saved as <strong>pending</strong> and does
+          not reduce a bill until a principal, admin or owner approves it.
+        </p>
+      ) : null}
+      <form
+        onSubmit={grant}
+        className={`mt-3 grid gap-2 sm:grid-cols-2 ${mayGrant ? "" : "hidden"}`}
+      >
         <label className="block text-sm">
           <span className="mb-1 block text-[11px] text-[var(--muted)]">
             Class

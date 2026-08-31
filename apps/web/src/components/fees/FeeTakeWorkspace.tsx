@@ -5,6 +5,7 @@ import Link from "next/link";
 import { IndianRupee } from "lucide-react";
 import { PaymentChannelSelect } from "@/components/accounts/PaymentChannelSelect";
 import type { AccountsState } from "@/lib/accountsTypes";
+import { canApproveConcession } from "@/lib/rbac";
 import {
   decodeTenderChannel,
   encodeTenderChannel,
@@ -240,6 +241,18 @@ export function FeeTakeWorkspace() {
   // workspace. That per-key full re-render is what made Find student feel
   // slow next to the store counter's search.
   const [debouncedQuery, setDebouncedQuery] = useState("");
+
+  /**
+   * May the person at this counter make a concession effective?
+   *
+   * Only owner / admin / principal. Anyone else may still tick "also apply
+   * to future months" — the grant is simply recorded pending, and shows on
+   * the parent's next bill only once it has been approved.
+   */
+  const mayApproveConcession = useMemo(
+    () => (session ? canApproveConcession(session, masters) : false),
+    [session, masters],
+  );
   const [classId, setClassId] = useState("");
   const [sectionId, setSectionId] = useState("");
   const [hits, setHits] = useState<StudentSearchHit[]>([]);
@@ -1338,6 +1351,9 @@ export function FeeTakeWorkspace() {
         academicYearCode: ay,
         sourceVoucherId: voucher?.id,
         sourceReceiptNo: voucher?.receiptNo,
+        // Same rule as Masters: a clerk who cannot approve a grant there
+        // must not be able to approve one by ticking a box here.
+        canApprove: mayApproveConcession,
       });
       if (!futureResult.ok) {
         futureConcessionMsg = ` · future grants failed: ${futureResult.error}`;

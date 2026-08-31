@@ -375,6 +375,19 @@ export function applyFutureConcessionsFromCounter(input: {
    */
   sourceVoucherId?: string;
   sourceReceiptNo?: string;
+  /**
+   * Whether the person at the counter may approve a concession.
+   *
+   * The fee counter creates standing grants exactly like Masters does, so
+   * the same rule has to hold here: an assigned user's recurring discount is
+   * PENDING until owner, admin or principal approves it. Without this a
+   * clerk who cannot approve a ₹500 grant in Masters could approve the same
+   * ₹500 by ticking a box at the counter.
+   *
+   * Defaults to false — the safe reading. A caller that does not say who is
+   * collecting gets a grant that must be approved.
+   */
+  canApprove?: boolean;
 }):
   | {
       ok: true;
@@ -440,7 +453,11 @@ export function applyFutureConcessionsFromCounter(input: {
       continue;
     }
 
-    const needsPrincipal = grantNeedsPrincipal(rule, item.discountPaise);
+    // The amount can only keep it pending; it can never approve one for
+    // somebody without the authority.
+    const needsPrincipal =
+      input.canApprove === false ||
+      grantNeedsPrincipal(rule, item.discountPaise);
     const now = new Date().toISOString();
     const row: ConcessionGrant = {
       id: newId("cg"),

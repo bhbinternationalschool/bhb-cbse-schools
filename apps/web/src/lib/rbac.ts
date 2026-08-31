@@ -1459,6 +1459,72 @@ export function canAccessHref(
   return canAccessModuleHref(href);
 }
 
+/* ─── Concessions: who may give one, and who may let it stand ────────────
+ *
+ * A concession is money the school agrees not to collect, so the two
+ * questions are kept apart:
+ *
+ *   GRANT   — may this person record a discount at all?
+ *   APPROVE — may this person make it effective?
+ *
+ * Owner, admin and principal can do both. Anyone else who has been given the
+ * fees module — the "assigned user" — may record one, but it stays PENDING
+ * until one of those three approves it. That is the whole point of splitting
+ * the two: a clerk can prepare the discount a parent is asking for without
+ * being able to hand it over.
+ *
+ * The check is not a UI courtesy. `grant()` and the fee counter both force
+ * the status, so hiding or not hiding a button changes nothing about what
+ * gets saved.
+ */
+
+/** Owner, admin, principal — or anyone explicitly given fees:approve. */
+export function canApproveConcession(
+  session: SessionLike,
+  masters?: MastersState | null,
+  rbac?: RbacState,
+): boolean {
+  if (isProtectedSuperAdminEmail(session.email)) return true;
+  if (hasPermission(session, masters ?? null, "fees", "approve", rbac)) {
+    return true;
+  }
+  const codes = inferRoleCodes(session, masters);
+  return codes.some((c) => c === "owner" || c === "principal" || c === "admin");
+}
+
+/**
+ * May this person record a concession at all?
+ *
+ * Anyone who can approve one can obviously record one. Beyond that it takes
+ * an explicit assignment: edit rights on the fees module. Someone who merely
+ * VIEWS fees cannot give money away.
+ */
+export function canGrantConcession(
+  session: SessionLike,
+  masters?: MastersState | null,
+  rbac?: RbacState,
+): boolean {
+  if (canApproveConcession(session, masters, rbac)) return true;
+  return hasPermission(session, masters ?? null, "fees", "edit", rbac);
+}
+
+/**
+ * The status a newly recorded concession must take.
+ *
+ * `amountAllowsAuto` is the existing money test — the policy's
+ * auto-approve ceiling. It can only ever KEEP a grant pending; it can never
+ * approve one for somebody who lacks the authority, which is the rule this
+ * adds. Approval used to depend on the amount alone, so an assigned user
+ * granting ₹500 under a ₹5,000 ceiling approved it themselves.
+ */
+export function concessionGrantStatus(
+  canApprove: boolean,
+  amountAllowsAuto: boolean,
+): "approved" | "pending" {
+  if (!canApprove) return "pending";
+  return amountAllowsAuto ? "approved" : "pending";
+}
+
 /** Who may edit Roles & Permissions matrix */
 export function canConfigureRbac(
   session: SessionLike,

@@ -97,6 +97,7 @@ SELFTESTS=(
   test:receipt-head-grouping
   test:concession-student-list
   test:future-concession-start
+  test:concession-authority
   test:substitution-auto
   test:timetable-substitution
   test:transport-sibling-gaps
