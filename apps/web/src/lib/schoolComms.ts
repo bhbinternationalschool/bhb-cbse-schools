@@ -201,7 +201,12 @@ export function emptySchoolComms(): SchoolCommsState {
       {
         id: "ntc_admissions_open",
         title: "Admissions Open for Academic Session 2026-27",
-        body: "Registration forms for Pre-Nursery to Grade IX and Grade XI (Science/Commerce/Humanities) are available online on the school portal and at the reception desk.",
+        // The school is recognised by the State Government of UP for Nursery
+        // to Class VIII. This sample text advertised Grade IX and Grade XI
+        // with streams — the same overclaim that had Cashfree demanding an
+        // affiliation letter the school cannot produce. Sample data ends up
+        // in production and on screens; it does not get to invent classes.
+        body: "Registration forms for Nursery to Class VIII are available online on the school portal and at the reception desk.",
         audience: "parents",
         status: "published",
         pinned: false,
@@ -213,22 +218,23 @@ export function emptySchoolComms(): SchoolCommsState {
         updatedAt: d,
       },
     ],
-    news: [
-      {
-        id: "news_science_award",
-        title: "BHB International Wins Regional Science & Robotics Award",
-        summary: "Our Grade 10 students secured 1st position at the CBSE Regional Science Exhibition for their AI-driven water purification prototype.",
-        body: "BHB International School students won top honors at the Regional Science Exhibition. The team presented an innovative smart sensor system designed to monitor water purity in real time.",
-        coverUrl: "/brand/logo.png",
-        status: "published",
-        academicYearCode: DEFAULT_AY,
-        publishedAt: d,
-        scheduledPublishAt: "",
-        createdAt: d,
-        createdBy: "Media Cell",
-        updatedAt: d,
-      },
-    ],
+    /**
+     * No sample news.
+     *
+     * This used to seed a won award: "Our Grade 10 students secured 1st
+     * position at the CBSE Regional Science Exhibition". Three things were
+     * wrong with it. The school teaches Nursery to Class VIII, so it has no
+     * Grade 10. It is state-recognised and not CBSE-affiliated, so it does
+     * not enter CBSE events — the exact claim that had a payment gateway
+     * asking for an affiliation letter. And the award never happened at all.
+     *
+     * It was published, so it ran in the LIVE ticker on every screen in the
+     * school for weeks, and would have gone onto the public website the
+     * moment anyone ticked it on. A seed that invents an achievement is a
+     * seed that puts a lie on the school's own noticeboard; the fix is not a
+     * better fake, it is none.
+     */
+    news: [],
     albums: [
       {
         id: "alb_annual_day",
