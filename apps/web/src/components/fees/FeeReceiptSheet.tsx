@@ -186,8 +186,18 @@ export type FeeHeadGroup = {
  * in and follows the months, rather than being placed on a guess.
  */
 const SESSION_MONTHS = [
-  "apr", "may", "jun", "jul", "aug", "sep",
-  "oct", "nov", "dec", "jan", "feb", "mar",
+  "apr",
+  "may",
+  "jun",
+  "jul",
+  "aug",
+  "sep",
+  "oct",
+  "nov",
+  "dec",
+  "jan",
+  "feb",
+  "mar",
 ];
 
 function monthRank(period: string): number {
@@ -315,6 +325,51 @@ function FeeLineParticulars({ line }: { line: VoucherLine }) {
 }
 
 /** One grouped row: head · periods · discount · amount. */
+/**
+ * What a line adds beyond its head name: the bus and stop, the items issued.
+ *
+ * Split out of `FeeLineParticulars` so a grouped row can show the detail
+ * without repeating the head it is already printed under.
+ */
+function FeeLineDetail({ line }: { line: VoucherLine }) {
+  if (line.kind === "store" && line.storeItems && line.storeItems.length > 0) {
+    return (
+      <ul className="space-y-0.5 text-[9px] leading-snug text-[var(--brand-deep)]">
+        {line.storeItems.map((it, idx) => (
+          <li
+            key={`${line.dueKey}-it-${idx}`}
+            className="flex justify-between gap-2"
+          >
+            <span>
+              <span className="text-[var(--muted)]">{it.sku}</span>
+              {" · "}
+              {it.name}
+              {it.sizeLabel ? ` (${it.sizeLabel})` : ""}
+              {" ×"}
+              {it.qty} @ {inrCell(it.unitPricePaise)}
+            </span>
+            <span className="shrink-0 tabular-nums font-semibold">
+              {inrCell(it.linePaise)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    );
+  }
+  if (line.kind === "transport" && line.transport) {
+    return (
+      <div className="text-[9px] leading-snug text-[var(--muted)]">
+        {line.transport.routeCode} · {line.transport.routeName} ·{" "}
+        {line.transport.busNo}
+        {line.transport.vehicleReg ? ` (${line.transport.vehicleReg})` : ""}
+        {" · Stop "}
+        {line.transport.stopName}
+      </div>
+    );
+  }
+  return null;
+}
+
 function FeeHeadRow({
   group,
   rowKey,
@@ -331,23 +386,27 @@ function FeeHeadRow({
 
   return (
     <tr key={rowKey} className="border-b border-[rgba(32,48,80,0.1)]">
-      <td className="px-1.5 py-1 align-top font-semibold text-[var(--brand-deep)]">
+      <td className="px-1.5 py-0.5 align-top font-semibold text-[var(--brand-deep)]">
         {group.head}
         {detailLines.length > 0 ? (
           <div className="mt-0.5 font-normal">
             {detailLines.map((l, i) => (
-              <FeeLineParticulars key={`${rowKey}-d-${i}`} line={l} />
+              // The DETAIL only — the route, the item list. Rendering the
+              // whole particulars here printed the head twice: "Transport"
+              // as the row's own name, then "Transport · Apr" again beneath
+              // it, which read as two charges for one bus.
+              <FeeLineDetail key={`${rowKey}-d-${i}`} line={l} />
             ))}
           </div>
         ) : null}
       </td>
-      <td className="px-1.5 py-1 align-top leading-snug text-[var(--muted)]">
+      <td className="px-1.5 py-0.5 align-top leading-snug text-[var(--muted)]">
         {group.periods.join(", ") || "—"}
       </td>
-      <td className="w-14 px-1.5 py-1 text-right align-top tabular-nums text-[var(--success)]">
+      <td className="w-14 px-1.5 py-0.5 text-right align-top tabular-nums text-[var(--success)]">
         {group.concessionPaise > 0 ? `−${inrCell(group.concessionPaise)}` : "—"}
       </td>
-      <td className="w-16 px-1.5 py-1 text-right align-top font-semibold tabular-nums text-[var(--brand-deep)]">
+      <td className="w-16 px-1.5 py-0.5 text-right align-top font-semibold tabular-nums text-[var(--brand-deep)]">
         {inrCell(group.amountPaise)}
       </td>
     </tr>
@@ -595,7 +654,7 @@ function FeeReceiptCopy({
             </table>
           </div>
 
-          <div className="mt-1.5 min-h-0 flex-1 space-y-1.5">
+          <div className="mt-1 min-h-0 flex-1 space-y-1">
             {studentGroups.map((group) => (
               <div key={`${copyLabel}-${group.student.studentId}`}>
                 <p className="mb-0.5 text-[8px] font-bold uppercase tracking-[0.1em] text-[var(--brand-deep)]">
@@ -609,12 +668,12 @@ function FeeReceiptCopy({
                 <table className="w-full border-collapse text-[10px]">
                   <thead>
                     <tr className="bg-[var(--brand-deep)] text-left text-white">
-                      <th className="px-1.5 py-1 font-semibold">Fee head</th>
-                      <th className="px-1.5 py-1 font-semibold">Period</th>
-                      <th className="w-14 px-1.5 py-1 text-right font-semibold">
+                      <th className="px-1.5 py-0.5 font-semibold">Fee head</th>
+                      <th className="px-1.5 py-0.5 font-semibold">Period</th>
+                      <th className="w-14 px-1.5 py-0.5 text-right font-semibold">
                         Discount
                       </th>
-                      <th className="w-16 px-1.5 py-1 text-right font-semibold">
+                      <th className="w-16 px-1.5 py-0.5 text-right font-semibold">
                         Amount ₹
                       </th>
                     </tr>
@@ -626,10 +685,10 @@ function FeeReceiptCopy({
                     )}
                     {multiSibling ? (
                       <tr className="bg-[rgba(32,48,80,0.05)] font-bold">
-                        <td colSpan={3} className="px-1.5 py-1 text-right">
+                        <td colSpan={3} className="px-1.5 py-0.5 text-right">
                           {group.student.fullName} subtotal
                         </td>
-                        <td className="px-1.5 py-1 text-right tabular-nums">
+                        <td className="px-1.5 py-0.5 text-right tabular-nums">
                           {inrCell(group.subtotalPaise)}
                         </td>
                       </tr>
@@ -640,7 +699,7 @@ function FeeReceiptCopy({
             ))}
           </div>
 
-          <div className="mt-1.5 shrink-0">
+          <div className="mt-1 shrink-0">
             {discountTotal > 0 ? (
               <div className="flex justify-between text-[9px] font-semibold text-[var(--success)]">
                 <span>Total discount</span>
@@ -700,74 +759,82 @@ function FeeReceiptCopy({
             </table>
           </div>
 
-          {showRemainingPayQr &&
-          !voided &&
-          remainingPayQrDataUrl &&
-          (remainingPayAmountPaise || 0) > 0 ? (
-            <div className="mt-1 flex shrink-0 items-center gap-2 rounded border border-[rgba(15,118,110,0.25)] bg-[rgba(15,118,110,0.06)] px-1.5 py-1">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={remainingPayQrDataUrl}
-                alt="UPI QR for remaining dues"
-                className="h-14 w-14 shrink-0 rounded border border-white bg-white p-0.5"
-              />
-              <div className="min-w-0 text-[7px] leading-snug text-[var(--brand-deep)]">
-                <p className="font-bold uppercase text-[#0f766e]">
-                  Pay remaining dues
-                </p>
-                <p className="font-semibold tabular-nums">
-                  {formatInr(remainingPayAmountPaise || 0)}
-                </p>
-                {remainingPayUrl ? (
-                  <p className="mt-0.5 break-all text-[6px] text-[#0f766e]">
-                    {remainingPayUrl}
-                  </p>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
-
-          {/* Refer a family — parent copy only, and never on a void. */}
-          {copyLabel === "Parent copy" && !voided && referralCode ? (
-            <div className="mt-1 flex shrink-0 items-center gap-2 rounded border border-[rgba(197,160,40,0.5)] bg-[rgba(197,160,40,0.08)] px-1.5 py-1">
-              {referralQrDataUrl ? (
-                /* eslint-disable-next-line @next/next/no-img-element */
+          {/* The two parent-copy panels sit SIDE BY SIDE.
+              Stacked, they were 37mm of a 285mm page, and a receipt for
+              three children then ran onto a second sheet. Side by side they
+              cost about half that and use the full width the page already
+              has. The office copy carries neither, which is why only the
+              parent copy ever overflowed. */}
+          <div className="mt-1 grid shrink-0 grid-cols-2 gap-1.5">
+            {showRemainingPayQr &&
+            !voided &&
+            remainingPayQrDataUrl &&
+            (remainingPayAmountPaise || 0) > 0 ? (
+              <div className="flex items-center gap-2 rounded border border-[rgba(15,118,110,0.25)] bg-[rgba(15,118,110,0.06)] px-1.5 py-0.5">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={referralQrDataUrl}
-                  alt="Refer a family — registration QR"
-                  className="h-16 w-16 shrink-0 rounded border border-white bg-white p-0.5"
+                  src={remainingPayQrDataUrl}
+                  alt="UPI QR for remaining dues"
+                  className="h-14 w-14 shrink-0 rounded border border-white bg-white p-0.5"
                 />
-              ) : null}
-              <div className="min-w-0 text-[7px] leading-snug text-[var(--brand-deep)]">
-                <p className="text-[8px] font-bold uppercase tracking-wide text-[#8a6d12]">
-                  Refer a family · earn a fee discount
-                </p>
-                <p className="mt-0.5">
-                  Know a family looking for a school? Let them scan this code to
-                  register. When a child you refer takes admission, a discount
-                  is applied to your own ward&apos;s tuition fee — as per the
-                  school&apos;s referral policy.
-                </p>
-                <p className="mt-0.5">
-                  किसी परिचित परिवार को विद्यालय की तलाश है? उन्हें यह QR स्कैन
-                  करके पंजीकरण कराने को कहें। आपके द्वारा भेजे गए बच्चे का
-                  प्रवेश होने पर, विद्यालय की रेफ़रल नीति के अनुसार आपके अपने
-                  बच्चे की ट्यूशन फ़ीस में छूट दी जाएगी।
-                </p>
-                <p className="mt-0.5 font-bold">
-                  Your referral code:{" "}
-                  <span className="font-mono">{referralCode}</span>
-                </p>
-                {referralUrl ? (
-                  <p className="break-all text-[6px] text-[#8a6d12]">
-                    {referralUrl}
+                <div className="min-w-0 text-[7px] leading-snug text-[var(--brand-deep)]">
+                  <p className="font-bold uppercase text-[#0f766e]">
+                    Pay remaining dues
                   </p>
-                ) : null}
+                  <p className="font-semibold tabular-nums">
+                    {formatInr(remainingPayAmountPaise || 0)}
+                  </p>
+                  {remainingPayUrl ? (
+                    <p className="mt-0.5 break-all text-[6px] text-[#0f766e]">
+                      {remainingPayUrl}
+                    </p>
+                  ) : null}
+                </div>
               </div>
-            </div>
-          ) : null}
+            ) : null}
 
-          <div className="mt-1.5 grid shrink-0 grid-cols-2 gap-3 text-[8px] text-[var(--brand-deep)]">
+            {/* Refer a family — parent copy only, and never on a void. */}
+            {copyLabel === "Parent copy" && !voided && referralCode ? (
+              <div className="flex items-center gap-2 rounded border border-[rgba(197,160,40,0.5)] bg-[rgba(197,160,40,0.08)] px-1.5 py-0.5">
+                {referralQrDataUrl ? (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img
+                    src={referralQrDataUrl}
+                    alt="Refer a family — registration QR"
+                    className="h-16 w-16 shrink-0 rounded border border-white bg-white p-0.5"
+                  />
+                ) : null}
+                <div className="min-w-0 text-[7px] leading-snug text-[var(--brand-deep)]">
+                  <p className="text-[8px] font-bold uppercase tracking-wide text-[#8a6d12]">
+                    Refer a family · earn a fee discount
+                  </p>
+                  <p className="mt-0.5">
+                    Know a family looking for a school? Let them scan this code
+                    to register. When a child you refer takes admission, a
+                    discount is applied to your own ward&apos;s tuition fee — as
+                    per the school&apos;s referral policy.
+                  </p>
+                  <p className="mt-0.5">
+                    किसी परिचित परिवार को विद्यालय की तलाश है? उन्हें यह QR
+                    स्कैन करके पंजीकरण कराने को कहें। आपके द्वारा भेजे गए बच्चे
+                    का प्रवेश होने पर, विद्यालय की रेफ़रल नीति के अनुसार आपके
+                    अपने बच्चे की ट्यूशन फ़ीस में छूट दी जाएगी।
+                  </p>
+                  <p className="mt-0.5 font-bold">
+                    Your referral code:{" "}
+                    <span className="font-mono">{referralCode}</span>
+                  </p>
+                  {referralUrl ? (
+                    <p className="break-all text-[6px] text-[#8a6d12]">
+                      {referralUrl}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="mt-1 grid shrink-0 grid-cols-2 gap-3 text-[8px] text-[var(--brand-deep)]">
             <div className="border-t border-[rgba(32,48,80,0.35)] pt-0.5">
               Parent / payer
             </div>
