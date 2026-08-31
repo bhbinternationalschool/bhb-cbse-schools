@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { PublicChrome } from "@/components/public/PublicChrome";
 import {
   ADDRESS_ONE_LINE,
-  CLASS_RANGE,
   CONTACT,
   ENTITY_TYPE,
   LEGAL_ADDRESS,
@@ -136,12 +135,12 @@ export default function AboutPage() {
         </h2>
         <p className="mt-3">
           {TRADING_NAME} is a co-educational English-medium school recognised by
-          the State Government of Uttar Pradesh, offering {CLASS_RANGE} at{" "}
-          {ADDRESS_ONE_LINE} and following the standard NCERT/CBSE curriculum
-          framework. Payments accepted through this website are academic fees
-          and related school charges billed to enrolled students and to
-          applicants for admission — session fees, transport, and examination
-          and amenity charges. The school does not sell physical goods online.
+          the State Government of Uttar Pradesh, operating at {ADDRESS_ONE_LINE}{" "}
+          and following the standard NCERT/CBSE curriculum framework. Payments
+          accepted through this website are academic fees and related school
+          charges billed to enrolled students and to applicants for admission —
+          session fees, transport, and examination and amenity charges. The
+          school does not sell physical goods online.
         </p>
 
         <h2 className="mt-8 text-lg font-semibold text-slate-900">

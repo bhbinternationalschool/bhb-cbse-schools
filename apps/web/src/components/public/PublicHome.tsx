@@ -2,7 +2,6 @@ import Link from "next/link";
 import { PublicChrome } from "@/components/public/PublicChrome";
 import {
   ADDRESS_ONE_LINE,
-  CLASS_RANGE,
   CONTACT,
   PUBLIC_SERVICES,
   TRADING_NAME,
@@ -21,10 +20,10 @@ export function PublicHome() {
           {TRADING_NAME}
         </h1>
         <p className="mt-4 max-w-2xl text-lg leading-8 text-slate-600">
-          A co-educational English-medium school, {CLASS_RANGE}, recognised by
-          the State Government of Uttar Pradesh. Parents pay session fees,
-          transport and examination charges online and download receipts from
-          the parent portal.
+          A co-educational English-medium school recognised by the State
+          Government of Uttar Pradesh. Parents pay session fees, transport and
+          examination charges online and download receipts from the parent
+          portal.
         </p>
         <p className="mt-4 max-w-2xl text-sm leading-6 text-slate-500">
           Operated by {displayLegalName()}, {ADDRESS_ONE_LINE}.

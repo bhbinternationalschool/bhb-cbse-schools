@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { PublicChrome } from "@/components/public/PublicChrome";
 import {
-  CLASS_RANGE,
   CONTACT,
   PUBLIC_SERVICES,
   RECOGNITION_STATEMENT,
@@ -30,9 +29,9 @@ export default function FeesPage() {
         </h1>
         <p className="mt-3 text-slate-600">
           Published charges for the 2026-27 academic session (April 2026 to
-          March 2027), for {CLASS_RANGE}. All amounts are in Indian Rupees and
-          include all applicable taxes; education services provided by a school
-          are exempt from GST.
+          March 2027). All amounts are in Indian Rupees and include all
+          applicable taxes; education services provided by a school are exempt
+          from GST.
         </p>
         <p className="mt-3 text-sm text-slate-500">{RECOGNITION_STATEMENT}</p>
 
