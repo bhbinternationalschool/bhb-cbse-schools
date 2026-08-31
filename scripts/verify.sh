@@ -95,6 +95,7 @@ SELFTESTS=(
   test:sis-wire-payload
   test:print-palette
   test:receipt-head-grouping
+  test:concession-student-list
   test:substitution-auto
   test:timetable-substitution
   test:transport-sibling-gaps
