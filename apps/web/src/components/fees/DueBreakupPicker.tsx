@@ -36,8 +36,6 @@ export function DueBreakupPicker({
   recurringEligible,
   recurringChosen,
   onToggleRecurring,
-  discountOnlyKeys,
-  onToggleDiscountOnly,
   onChangeHeadDiscount,
 }: {
   dues: FeeDueLine[];
@@ -54,8 +52,6 @@ export function DueBreakupPicker({
   recurringChosen?: Set<string>;
   onToggleRecurring?: (dueKey: string, on: boolean) => void;
   /** Lines discounted but not collected today. */
-  discountOnlyKeys?: Set<string>;
-  onToggleDiscountOnly?: (dueKey: string, on: boolean) => void;
   /** Change the standing Masters discount on this head, from this month on. */
   onChangeHeadDiscount?: (due: FeeDueLine, rupees: string) => void;
 }) {
@@ -639,32 +635,18 @@ export function DueBreakupPicker({
                               · collect {formatInr(netPaise)}
                             </span>
                           ) : null}
-                          {/* The decision that used to be made for the clerk.
-                              A counter discount was silently saved as a
-                              standing Masters rule — the modal after collect
-                              arrived pre-ticked — so one month's discount
-                              quietly became every month's. It is asked here
-                              now, before the money is taken, and it starts
-                              OFF: a discount is for the month in hand unless
-                              someone says otherwise. */}
-                          {/* Discount this head without taking money for it
-                              today — ₹100 off transport while only tuition is
-                              collected. The line keeps its discount and stays
-                              off the receipt and out of the amount due. */}
-                          {discountPaise > 0 && onToggleDiscountOnly ? (
-                            <label className="flex items-center gap-1.5 text-sm text-[var(--brand-deep)]">
-                              <input
-                                type="checkbox"
-                                checked={discountOnlyKeys?.has(d.dueKey) ?? false}
-                                onChange={(e) =>
-                                  onToggleDiscountOnly(d.dueKey, e.target.checked)
-                                }
-                              />
-                              {discountOnlyKeys?.has(d.dueKey)
-                                ? "Discount only — not collecting this today"
-                                : "Collecting this today"}
-                            </label>
-                          ) : null}
+                          {/* ONE decision per discounted line.
+                              There used to be two ticks here — "collecting
+                              this today" and "this month only" — and between
+                              them the clerk had to work out which combination
+                              meant what, on the screen where money is taken.
+                              Off is the safe reading and the common case: the
+                              discount is for the month in hand. On extends it
+                              forward, fills the later months already on
+                              screen, and saves the rate to Masters.
+                              The label does not change with the state; the
+                              tick carries that, and a caption that rewords
+                              itself made the two look like four. */}
                           {discountPaise > 0 &&
                           recurringEligible?.has(d.dueKey) &&
                           onToggleRecurring ? (
@@ -676,9 +658,7 @@ export function DueBreakupPicker({
                                   onToggleRecurring(d.dueKey, e.target.checked)
                                 }
                               />
-                              {recurringChosen?.has(d.dueKey)
-                                ? "Every remaining month — saved to Masters"
-                                : "This month only"}
+                              Also apply to future months
                             </label>
                           ) : null}
                         </div>
