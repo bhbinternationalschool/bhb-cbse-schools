@@ -74,6 +74,7 @@ import {
   applyFutureConcessionsFromCounter,
   changeStandingDiscount,
   isRecurringAcademicFeeHead,
+  laterSameHeadDueKeys,
   listFutureConcessionCandidates,
   type FutureConcessionCandidate,
 } from "@/lib/counterConcession";
@@ -271,6 +272,19 @@ export function FeeTakeWorkspace() {
    * this from a pre-ticked modal AFTER collect, which is how a single month's
    * discount became a standing Masters rule nobody chose.
    */
+  /**
+   * Lines this screen filled in by itself, keyed by the line that caused it.
+   *
+   * Ticking "make recurring" on April copies April's discount onto the later
+   * months of the same head already in the basket — otherwise the clerk sees
+   * May at full price, discounts it by hand, and ends up with two discounts
+   * on one month. Remembering what was auto-filled is what lets unticking
+   * take it back out again without touching a figure the clerk typed.
+   */
+  const [autoFilledBy, setAutoFilledBy] = useState<
+    Record<string, { value: string; keys: string[] }>
+  >({});
+
   const [recurringDueKeys, setRecurringDueKeys] = useState<Set<string>>(
     new Set(),
   );
@@ -752,6 +766,7 @@ export function FeeTakeWorkspace() {
       }
       return next;
     });
+    setAutoFilledBy({});
     setCounterDiscountReason("");
     setFutureConcessionPrompt(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -770,6 +785,64 @@ export function FeeTakeWorkspace() {
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectionKey, netAfterDiscount]);
+
+  /**
+   * The later months of the same head, for the same child, already in this
+   * basket — the lines a recurring discount should fill in.
+   *
+   * Later only: a discount the clerk is making recurring from April is a
+   * statement about April onward, and quietly rewriting a March line sitting
+   * in the same basket would be a different decision than the one they made.
+   */
+  /** Copy a line's discount onto the basket's later months of the same head. */
+  function spreadRecurringDiscount(sourceDueKey: string, rupees: string) {
+    const value = rupees.trim();
+    if (!value) return;
+    const targets = laterSameHeadDueKeys(selectedDues, sourceDueKey);
+    if (targets.length === 0) return;
+
+    // Worked out BEFORE the updater rather than inside it: a state updater
+    // may be called more than once for one event, and appending to a list
+    // from in there would record the same line twice.
+    const filled = targets.filter(
+      // Never overwrite a figure the clerk typed themselves.
+      (key) => !lineDiscountRupees[key]?.trim(),
+    );
+    if (filled.length === 0) return;
+
+    setLineDiscountRupees((prev) => {
+      const next = { ...prev };
+      for (const key of filled) next[key] = value;
+      return next;
+    });
+    // The value is remembered too, so undoing can tell an untouched
+    // auto-filled line from one the clerk has since edited.
+    setAutoFilledBy((prev) => ({
+      ...prev,
+      [sourceDueKey]: { value, keys: filled },
+    }));
+  }
+
+  /** Take back exactly what this line put in, and nothing else. */
+  function unspreadRecurringDiscount(sourceDueKey: string) {
+    const filled = autoFilledBy[sourceDueKey];
+    if (!filled || filled.keys.length === 0) return;
+    setLineDiscountRupees((prev) => {
+      const next = { ...prev };
+      for (const key of filled.keys) {
+        // Only take back what is still exactly what was put there. Once the
+        // clerk changes a figure it is theirs, and unticking the line it came
+        // from must not quietly delete their number.
+        if (next[key] === filled.value) delete next[key];
+      }
+      return next;
+    });
+    setAutoFilledBy((prev) => {
+      const next = { ...prev };
+      delete next[sourceDueKey];
+      return next;
+    });
+  }
 
   const collectTarget = useMemo(() => {
     if (netAfterDiscount <= 0) return 0;
@@ -1986,14 +2059,22 @@ export function FeeTakeWorkspace() {
                   return next;
                 })
               }
-              onToggleRecurring={(dueKey, on) =>
+              onToggleRecurring={(dueKey, on) => {
                 setRecurringDueKeys((prev) => {
                   const next = new Set(prev);
                   if (on) next.add(dueKey);
                   else next.delete(dueKey);
                   return next;
-                })
-              }
+                });
+                // The months already on screen follow the tick immediately,
+                // rather than waiting for the next billing to show it.
+                if (on)
+                  spreadRecurringDiscount(
+                    dueKey,
+                    lineDiscountRupees[dueKey] ?? "",
+                  );
+                else unspreadRecurringDiscount(dueKey);
+              }}
               onLineDiscount={(dueKey, rupees) => {
                 setLineDiscountRupees((prev) => {
                   const next = { ...prev };
@@ -2001,6 +2082,12 @@ export function FeeTakeWorkspace() {
                   else next[dueKey] = rupees;
                   return next;
                 });
+                // Ticking first and typing second must behave the same as
+                // typing first and ticking second.
+                if (recurringDueKeys.has(dueKey)) {
+                  if (rupees.trim()) spreadRecurringDiscount(dueKey, rupees);
+                  else unspreadRecurringDiscount(dueKey);
+                }
               }}
               counterDiscountReason={counterDiscountReason}
               onCounterDiscountReason={setCounterDiscountReason}

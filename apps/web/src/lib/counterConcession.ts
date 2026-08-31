@@ -593,3 +593,35 @@ export function changeStandingDiscount(input: {
   saveMasters({ ...masters, concessionGrants: grants });
   return { ok: true, endedGrantId, newGrantId: row.id };
 }
+
+/**
+ * The lines a recurring discount should fill in, within the same basket.
+ *
+ * Ticking "include future months" on April used to change nothing on screen:
+ * May sat in the same basket at full price, so the clerk discounted it by
+ * hand, and that month then carried both the counter waiver and the standing
+ * grant. Filling those lines in at the moment of the tick is what stops the
+ * second entry being made at all.
+ *
+ * LATER months only, and the same head for the same child. A discount made
+ * recurring from April is a statement about April onward; quietly rewriting a
+ * March line in the same basket would be a different decision from the one
+ * the clerk made.
+ */
+export function laterSameHeadDueKeys(
+  dues: readonly FeeDueLine[],
+  sourceDueKey: string,
+): string[] {
+  const source = dues.find((d) => d.dueKey === sourceDueKey);
+  if (!source) return [];
+  return dues
+    .filter(
+      (d) =>
+        d.dueKey !== source.dueKey &&
+        d.studentId === source.studentId &&
+        d.kind === source.kind &&
+        d.feeHeadId === source.feeHeadId &&
+        d.dueOn > source.dueOn,
+    )
+    .map((d) => d.dueKey);
+}

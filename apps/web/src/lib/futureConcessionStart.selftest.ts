@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { listFutureConcessionCandidates } from "./counterConcession";
+import {
+  laterSameHeadDueKeys,
+  listFutureConcessionCandidates,
+} from "./counterConcession";
 import { emptyMastersShell, type MastersState } from "./masters";
 import type { SisStudent } from "./sis";
 import type { FeeDueLine } from "./fees";
@@ -169,6 +172,57 @@ const slice = (dueKey: string): CounterDiscountSlice =>
     [tDue("2026-12-10", "tdec")], masters, [student], AY,
   );
   assert.equal(dec[0].futureEffectiveFrom, "2027-01-01");
+}
+
+// ── The discount spreads across the basket, so it is never typed twice ──
+{
+  /**
+   * The other half of the same fix. Making April's discount recurring used
+   * to leave May on screen at full price, which is what prompted the clerk
+   * to discount May by hand — the entry that then double-counted. Filling
+   * those lines at the moment of the tick removes the reason to type it.
+   */
+  const dues = [
+    due("2026-04-10", "apr"),
+    due("2026-05-10", "may"),
+    due("2026-06-10", "jun"),
+  ];
+  assert.deepEqual(
+    laterSameHeadDueKeys(dues, "apr"),
+    ["may", "jun"],
+    "April spreads forward to May and June",
+  );
+
+  // Later ONLY. A discount made recurring from June says nothing about April.
+  assert.deepEqual(laterSameHeadDueKeys(dues, "jun"), []);
+  assert.deepEqual(laterSameHeadDueKeys(dues, "may"), ["jun"]);
+
+  // A different head is a different discount.
+  const mixed = [
+    due("2026-04-10", "tuit_apr"),
+    { ...due("2026-05-10", "comp_may"), feeHeadId: "fh_computer" } as FeeDueLine,
+  ];
+  assert.deepEqual(
+    laterSameHeadDueKeys(mixed, "tuit_apr"),
+    [],
+    "tuition must not spread onto the computer fee",
+  );
+
+  // A sibling's months are their own.
+  const sibs = [
+    due("2026-04-10", "a_apr"),
+    { ...due("2026-05-10", "b_may"), studentId: "st2" } as FeeDueLine,
+  ];
+  assert.deepEqual(laterSameHeadDueKeys(sibs, "a_apr"), []);
+
+  // Transport spreads across transport, not across academic.
+  const t = (dueOn: string, key: string) =>
+    ({ ...due(dueOn, key), kind: "transport", feeHeadId: "fh_transport" }) as FeeDueLine;
+  const withTransport = [t("2026-04-10", "t_apr"), t("2026-05-10", "t_may"), due("2026-05-10", "may")];
+  assert.deepEqual(laterSameHeadDueKeys(withTransport, "t_apr"), ["t_may"]);
+
+  // An unknown line spreads nowhere rather than throwing.
+  assert.deepEqual(laterSameHeadDueKeys(dues, "nope"), []);
 }
 
 console.log("futureConcessionStart.selftest: all assertions passed");
