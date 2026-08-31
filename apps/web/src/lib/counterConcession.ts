@@ -119,6 +119,39 @@ function nextInstallmentDueOn(
   return `${y}-12-31`;
 }
 
+/**
+ * The latest due date for this student+head that the current transaction is
+ * already dealing with. Falls back to the clicked line when it is the only one.
+ */
+function lastHandledDueOnFor(
+  dues: FeeDueLine[],
+  studentId: string,
+  feeHeadId: string,
+  fallbackDueOn: string,
+  isTransport = false,
+): string {
+  let latest = fallbackDueOn;
+  for (const d of dues) {
+    if (d.studentId !== studentId) continue;
+    if (isTransport) {
+      if (d.kind !== "transport") continue;
+    } else if (d.kind !== "academic" || d.feeHeadId !== feeHeadId) {
+      continue;
+    }
+    if (d.dueOn > latest) latest = d.dueOn;
+  }
+  return latest;
+}
+
+/** First of the month after `dueOn` — transport is billed by the month. */
+function firstOfNextMonth(dueOn: string): string {
+  const [y, m] = dueOn.split("-").map(Number);
+  if (!y || !m) return dueOn;
+  const year = m === 12 ? y + 1 : y;
+  const month = m === 12 ? 1 : m + 1;
+  return `${year}-${String(month).padStart(2, "0")}-01`;
+}
+
 export function listFutureConcessionCandidates(
   slices: CounterDiscountSlice[],
   dues: FeeDueLine[],
@@ -133,7 +166,12 @@ export function listFutureConcessionCandidates(
 
   for (const slice of slices) {
     const due = dueByKey.get(slice.dueKey);
-    if (!due || due.kind !== "academic" || !due.feeHeadId) continue;
+    // Transport joins academic here. A route is billed every month it runs,
+    // so a discount on it is exactly the kind that should be able to stand —
+    // the office was granting one month at a time and re-entering it.
+    if (!due || (due.kind !== "academic" && due.kind !== "transport")) continue;
+    if (!due.feeHeadId) continue;
+    const isTransport = due.kind === "transport";
     const student = studentById.get(slice.studentId);
     if (!student) continue;
 
@@ -145,17 +183,35 @@ export function listFutureConcessionCandidates(
     // charge) is discounted once and must never leave a rule behind that
     // silently discounts some future charge nobody was thinking about.
     const head = masters.feeHeads.find((h) => h.id === due.feeHeadId);
-    if (head && (head.frequency === "one_time" || head.frequency === "as_needed")) {
+    if (
+      !isTransport &&
+      head &&
+      (head.frequency === "one_time" || head.frequency === "as_needed")
+    ) {
       continue;
     }
 
-    const installmentCount = structureLineCountForHead(
-      masters,
-      student.feeGroupId,
-      due.feeHeadId,
-      academicYearCode,
-    );
-    if (installmentCount < 2) continue;
+    /**
+     * Recurrence, per kind.
+     *
+     * An academic head is recurring when the fee structure bills it more
+     * than once. Transport has no structure lines at all — it is priced off
+     * the route — so that test returns 0 and would refuse every transport
+     * discount. A route is recurring by nature, so it qualifies on its own
+     * terms, and the count shown is the transport months this receipt can
+     * actually see rather than a structure figure that does not exist.
+     */
+    const installmentCount = isTransport
+      ? dues.filter(
+          (d) => d.kind === "transport" && d.studentId === slice.studentId,
+        ).length
+      : structureLineCountForHead(
+          masters,
+          student.feeGroupId,
+          due.feeHeadId,
+          academicYearCode,
+        );
+    if (!isTransport && installmentCount < 2) continue;
 
     seen.add(key);
     out.push({
@@ -169,12 +225,37 @@ export function listFutureConcessionCandidates(
       billedPaise: due.billedPaise,
       installmentCount,
       currentDueOn: due.dueOn,
-      futureEffectiveFrom: nextInstallmentDueOn(
-        masters,
-        student,
-        due.feeHeadId,
-        due.dueOn,
-      ),
+      /**
+       * Starts after the LAST month this transaction already handles for
+       * this student and head — not after the line the clerk happened to
+       * click.
+       *
+       * The counter takes April and May together, the clerk discounts April
+       * and ticks "apply to future months". Keyed off April alone, the
+       * standing grant began in May — the very month sitting in the same
+       * basket. May was then discounted by hand as well, because on screen
+       * it still showed the full amount, and at the next billing May carried
+       * BOTH: the counter waiver and the standing grant, double the discount
+       * anyone intended. `applyPostedWaiver` subtracts the waiver on top of
+       * whatever `concessionForHead` already took off, so nothing downstream
+       * catches it.
+       *
+       * Basing it on the last month in the basket means the standing
+       * discount can never overlap a month this receipt has already dealt
+       * with. April and May on the receipt → the grant runs from June.
+       */
+      futureEffectiveFrom: (() => {
+        const lastHandled = lastHandledDueOnFor(
+          dues,
+          slice.studentId,
+          due.feeHeadId,
+          due.dueOn,
+          isTransport,
+        );
+        return isTransport
+          ? firstOfNextMonth(lastHandled)
+          : nextInstallmentDueOn(masters, student, due.feeHeadId, lastHandled);
+      })(),
       dueLabel: due.label,
       existing: existingHeadConcessions(masters, due),
     });

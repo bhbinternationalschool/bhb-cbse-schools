@@ -779,6 +779,18 @@ export function FeeTakeWorkspace() {
   }, [collectAmountRupees, netAfterDiscount]);
   const isPartialCollect =
     collectTarget > 0 && collectTarget < netAfterDiscount;
+
+  /**
+   * What a payment link would ask the parent for.
+   *
+   * The button and the handler MUST read the same figure. They did not: the
+   * caption said `collectTotal`, the gross of the ticked heads, while the
+   * link itself carried the discounted amount — so a counter showing a
+   * ₹3,000 discount offered to "Send UPI link · ₹8,000" and then sent one
+   * for ₹5,000. Both numbers were defensible on their own; together they
+   * were a receipt waiting to be disputed.
+   */
+  const payLinkPaise = collectTarget > 0 ? collectTarget : netAfterDiscount;
   const tenderSum = tenderLines.reduce(
     (sum, t) => sum + Math.round((Number(t.amount) || 0) * 100),
     0,
@@ -1431,8 +1443,7 @@ export function FeeTakeWorkspace() {
       return;
     }
 
-    // collectTarget is the box; it falls back to the full net when blank.
-    const targetPaise = collectTarget > 0 ? collectTarget : netAfterDiscount;
+    const targetPaise = payLinkPaise;
     if (targetPaise <= 0) {
       flash("Nothing left to pay on the selected heads");
       return;
@@ -2466,6 +2477,8 @@ function CollectPanel({
   // have had to restate the expression, and two independent definitions of
   // "is this payment complete" is how they drift apart. One value, one rule.
   const discountOnly = collectTarget <= 0 && counterDiscountPaise > 0;
+  /** Must match `payLinkPaise` in the workspace — same rule, same inputs. */
+  const linkAmountPaise = collectTarget > 0 ? collectTarget : netAfterDiscount;
   const matched =
     discountOnly ||
     (collectTarget > 0 && tenderSum === collectTarget && tenderSum > 0);
@@ -3289,11 +3302,11 @@ function CollectPanel({
               <button
                 type="button"
                 className="mt-2 w-full rounded-xl border-2 border-[#128C7E] bg-[#128C7E]/15 px-4 py-2.5 text-xs font-bold text-[#0f766e] hover:bg-[#128C7E]/25 disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={collectTotal <= 0 || readOnly}
+                disabled={linkAmountPaise <= 0 || readOnly}
                 onClick={onSendUpiLink}
               >
-                {collectTotal > 0
-                  ? `Send UPI link · ${formatInr(collectTotal)}`
+                {linkAmountPaise > 0
+                  ? `Send UPI link · ${formatInr(linkAmountPaise)}`
                   : "Select dues for UPI link"}
               </button>
               <p className="mt-2 text-center text-xs text-white/75">
@@ -3644,12 +3657,21 @@ function ReceiptPreviewModal({
         setRemainUrl(null);
         return;
       }
+      // Dues UP TO the running month, not the whole session.
+      //
+      // With includeFuture the QR asked for every month the year will ever
+      // bill — ₹1,38,525 on a receipt for ₹5,000 — which is not a bill the
+      // school has issued and not a sum any parent owes today. The figure a
+      // "pay remaining dues" code should carry is what is outstanding NOW.
+      //
+      // Concessions and counter waivers are already off: `balancePaise` is
+      // what `computeStudentDues` arrives at after both.
       const rows = computeHouseholdDues(
         voucher.householdId,
         sis,
         masters,
         loadFees(),
-        { includeFuture: true },
+        { includeFuture: false },
       );
       const open = openFeeDues(rows.flatMap((r) => r.dues)).filter(
         (d) => d.balancePaise > 0,
