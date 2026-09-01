@@ -68,6 +68,8 @@ type CoaAccount = {
   hasChildren?: boolean;
   isCash: boolean;
   isBank: boolean;
+  /** Set when this account IS one desk bank, so the form need not ask again. */
+  bankAccountId?: string;
 };
 
 function useChart(): CoaAccount[] {
@@ -295,6 +297,9 @@ export function VoucherEntryPanel({
   const missingBank = lines.some(
     (l) =>
       byCode.get(l.accountCode)?.isBank &&
+      // A per-bank account carries its own bank; only the generic ones,
+      // which no longer appear in the picker, could still be unanswered.
+      !byCode.get(l.accountCode)?.bankAccountId &&
       banks.length > 0 &&
       !l.bankId &&
       (paiseFromRupees(l.debit) > 0 || paiseFromRupees(l.credit) > 0),
@@ -504,10 +509,19 @@ export function VoucherEntryPanel({
                 <AccountSelect
                   accounts={accounts}
                   value={l.accountCode}
-                  onChange={(code) => setLine(i, { accountCode: code })}
+                  onChange={(code) =>
+                    setLine(i, {
+                      accountCode: code,
+                      // A per-bank account IS the bank — answer the question
+                      // rather than asking it again. Cleared when moving to an
+                      // account that names no bank, so a stale id cannot ride
+                      // along on the next line.
+                      bankId: byCode.get(code)?.bankAccountId ?? "",
+                    })
+                  }
                 />
               </div>
-              {acc?.isBank && banks.length > 0 ? (
+              {acc?.isBank && !acc.bankAccountId && banks.length > 0 ? (
                 <select
                   className={`${FIELD} max-w-[12rem]`}
                   value={l.bankId}

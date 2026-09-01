@@ -538,13 +538,21 @@ export async function ledgerListAccounts(): Promise<
     hasChildren: boolean;
     isCash: boolean;
     isBank: boolean;
+    /**
+     * The desk bank this account IS, when it is a per-bank account.
+     *
+     * Entry forms asked "which bank?" after the operator had already chosen
+     * "1012 · UBI -Main · Union Bank of India" — the same question twice.
+     * Carried here so the form can answer it itself.
+     */
+    bankAccountId: string;
   }[]
 > {
   const ctx = await getServerTenantContext();
   if (!ctx) return [];
   const { data } = await ctx.sb
     .from("ledger_accounts")
-    .select("code, name, kind, parent_code, is_cash, is_bank, is_active")
+    .select("code, name, kind, parent_code, is_cash, is_bank, is_active, bank_account_id")
     .eq("tenant_id", ctx.tenantId)
     .order("code", { ascending: true });
   const rows = ((data ?? []) as Record<string, unknown>[]).filter(
@@ -561,6 +569,7 @@ export async function ledgerListAccounts(): Promise<
       hasChildren: parents.has(String(r.code)),
       isCash: r.is_cash === true,
       isBank: r.is_bank === true,
+      bankAccountId: String(r.bank_account_id ?? ""),
     }));
 }
 
