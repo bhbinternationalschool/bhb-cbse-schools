@@ -273,7 +273,7 @@ function StatCard({
   );
 }
 
-export function DashboardPanel({ state, onRefresh }: AccountsPanelProps) {
+export function DashboardPanel({ state, onRefresh, tick }: AccountsPanelProps) {
   void onRefresh;
   const snap = dashboardSnapshot(state);
   const dayClosePending = dayCloseNeedsAttention();
@@ -314,7 +314,18 @@ export function DashboardPanel({ state, onRefresh }: AccountsPanelProps) {
       setBackfillBusy(false);
     }
   };
-  const todayBook = useMemo(() => buildDayBook(todayIso()), []);
+  // Recompute when the desk changes, not once at mount.
+  //
+  // The dependency list was empty, so this froze at whatever it read when the
+  // panel first rendered. buildDayBook already drops voided receipts — it
+  // filters on `!v.voidedAt` — but a receipt voided after the panel mounted
+  // kept showing in today's collection until the page was reloaded, which
+  // reads as the void not having worked.
+  //
+  // `tick` is the workspace's refresh counter and `state` changes when the
+  // void posts its reversal to accounts; either one is enough on its own, and
+  // both together mean no route in leaves it stale.
+  const todayBook = useMemo(() => buildDayBook(todayIso()), [tick, state]);
   const openApCount = listUnifiedPayables(state).length;
   const ownerDueCount = listOwnerLoanDue(todayIso(), state).length;
 

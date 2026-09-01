@@ -95,6 +95,7 @@ SELFTESTS=(
   test:refreshment-chart
   test:vendor-payment-bank
   test:store-bank-backfill
+  test:daybook-voided
   test:payment-link-amount
   test:sis-wire-payload
   test:print-palette
