@@ -278,6 +278,42 @@ export function DashboardPanel({ state, onRefresh }: AccountsPanelProps) {
   const snap = dashboardSnapshot(state);
   const dayClosePending = dayCloseNeedsAttention();
   const bankTotal = totalBankBalancePaise(state);
+  const [backfillBusy, setBackfillBusy] = useState(false);
+  const [backfillNote, setBackfillNote] = useState<string | null>(null);
+
+  const doStoreBankBackfill = async () => {
+    if (backfillBusy) return;
+    setBackfillBusy(true);
+    setBackfillNote(null);
+    try {
+      const { runStoreBankBackfill } = await import(
+        "@/lib/accountsStoreBankBackfill"
+      );
+      const out = await runStoreBankBackfill();
+      if (!out.ok) {
+        setBackfillNote(out.error);
+        return;
+      }
+      const r = out.result;
+      const parts: string[] = [];
+      parts.push(
+        r.applied === 0
+          ? "Nothing new to bring in."
+          : `${r.applied} store movement(s) added — ${formatInr(Math.abs(r.appliedPaise))} ${r.appliedPaise < 0 ? "out of" : "into"} the bank book.`,
+      );
+      if (r.skippedExisting > 0)
+        parts.push(`${r.skippedExisting} already there.`);
+      if (r.unknownBank > 0)
+        parts.push(`${r.unknownBank} name a bank this desk does not have.`);
+      if (r.failed.length > 0)
+        parts.push(`${r.failed.length} could not be written (${r.failed[0]!.reason}).`);
+      setBackfillNote([...parts, ...out.notes].join(" "));
+    } catch {
+      setBackfillNote("Could not bring in the store's bank history.");
+    } finally {
+      setBackfillBusy(false);
+    }
+  };
   const todayBook = useMemo(() => buildDayBook(todayIso()), []);
   const openApCount = listUnifiedPayables(state).length;
   const ownerDueCount = listOwnerLoanDue(todayIso(), state).length;
@@ -317,6 +353,27 @@ export function DashboardPanel({ state, onRefresh }: AccountsPanelProps) {
           <div className="text-xs text-[var(--muted)]">
             {state.bankAccounts.filter((b) => b.isActive).length} active account(s)
           </div>
+          {/* Store banked and paid through the server module, which never
+              wrote the desk bank book, so this tile counted fee receipts
+              coming in and nothing going out. New payments mirror themselves;
+              this brings over the history. Safe to press twice — every
+              movement is keyed by its store payment row and one already here
+              is skipped. */}
+          <button
+            type="button"
+            className="mt-2 text-[11px] font-semibold text-[var(--brand-mid)] underline decoration-dotted underline-offset-2 disabled:opacity-60"
+            disabled={backfillBusy}
+            onClick={() => void doStoreBankBackfill()}
+          >
+            {backfillBusy
+              ? "Bringing store payments in…"
+              : "Bring in store bank payments"}
+          </button>
+          {backfillNote ? (
+            <p className="mt-1 max-w-md text-[11px] text-[var(--muted)]">
+              {backfillNote}
+            </p>
+          ) : null}
         </div>
         {dayClosePending ? (
           <span className="rounded-lg bg-[rgba(197,160,40,0.2)] px-3 py-1.5 text-xs font-bold text-[#8a6d12]">

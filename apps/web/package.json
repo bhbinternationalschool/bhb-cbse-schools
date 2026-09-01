@@ -112,6 +112,7 @@
     "test:household-dues-ay": "npx tsx src/lib/householdDuesAcademicYear.selftest.ts",
     "test:refreshment-chart": "npx tsx src/lib/refreshmentChartMigration.selftest.ts",
     "test:vendor-payment-bank": "npx tsx src/lib/vendorPaymentBankBook.selftest.ts",
+    "test:store-bank-backfill": "npx tsx src/lib/storeBankBackfill.selftest.ts",
     "test:payment-link-amount": "npx tsx src/lib/paymentLinkAmount.selftest.ts",
     "test:sis-wire-payload": "npx tsx src/lib/sisWirePayload.selftest.ts",
     "test:print-palette": "npx tsx src/lib/printPalette.selftest.ts",
