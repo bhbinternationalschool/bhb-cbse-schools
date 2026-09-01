@@ -101,6 +101,7 @@ SELFTESTS=(
   test:vehicle-fuel
   test:expense-voucher-draft
   test:fee-push-line-safety
+  test:receipt-repair
   test:payment-link-amount
   test:sis-wire-payload
   test:print-palette

@@ -118,6 +118,7 @@ import { FeeAdjustmentsPanel } from "@/components/fees/FeeAdjustmentsPanel";
 import { FeeReportsPanel } from "@/components/fees/FeeFinancePanels";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { TransportRiderChip } from "@/components/transport/TransportRiderChip";
+import { ReceiptRepairDialog } from "@/components/fees/ReceiptRepairDialog";
 
 /**
  * The search box owns its keystrokes. Typing re-renders ONLY this input;
@@ -4043,6 +4044,23 @@ function ReceiptsPanel({
   const [refQ, setRefQ] = useState("");
   /** Paper-book register: only receipts carrying a book number. */
   const [paperOnly, setPaperOnly] = useState(false);
+  /** The receipt being re-attached, when one is. */
+  const [repairing, setRepairing] = useState<string | null>(null);
+
+  /**
+   * A receipt that cannot say what it settled.
+   *
+   * Either it has no lines — it clears nothing, and every month it paid reads
+   * unpaid — or its lines do not add up to the money collected, which means
+   * some of them were lost. Both are repairable; a receipt that ties is left
+   * alone.
+   */
+  function needsRepair(v: CollectionVoucher): boolean {
+    if (v.voidedAt) return false;
+    if (v.totalPaise <= 0) return false;
+    if (v.lines.length === 0) return true;
+    return v.lines.reduce((n, l) => n + l.amountPaise, 0) !== v.totalPaise;
+  }
   const [leafFrom, setLeafFrom] = useState("");
   const [leafTo, setLeafTo] = useState("");
 
@@ -4527,7 +4545,27 @@ function ReceiptsPanel({
                     </div>
                   </button>
                   {!voided ? (
-                    <div className="flex justify-end gap-2 border-t border-[var(--border)] px-4 py-2">
+                    <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--border)] px-4 py-2">
+                      {/* Only where the receipt cannot say what it settled:
+                          no lines at all, or lines that do not add up to the
+                          money collected. Everywhere else this button would
+                          be an invitation to rewrite a correct receipt. */}
+                      {needsRepair(v) ? (
+                        <>
+                          <span className="mr-auto text-[11px] font-semibold text-[var(--warning)]">
+                            {v.lines.length === 0
+                              ? "No months attached — this receipt clears nothing"
+                              : `Lines add to ${formatInr(v.lines.reduce((n, l) => n + l.amountPaise, 0))}, not ${formatInr(v.totalPaise)}`}
+                          </span>
+                          <button
+                            type="button"
+                            className="rounded-lg border border-[var(--warning)] px-3 py-1.5 text-xs font-semibold text-[var(--warning)]"
+                            onClick={() => setRepairing(v.id)}
+                          >
+                            Re-attach
+                          </button>
+                        </>
+                      ) : null}
                       <button
                         type="button"
                         className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
@@ -4550,6 +4588,25 @@ function ReceiptsPanel({
           </ul>
         )}
       </ErpTableShell>
+
+      {repairing
+        ? (() => {
+            const v = receipts.find((r) => r.id === repairing);
+            if (!v) return null;
+            return (
+              <ReceiptRepairDialog
+                voucher={v}
+                sis={sis}
+                masters={masters}
+                onClose={() => setRepairing(null)}
+                onRepaired={(m) => {
+                  setRepairing(null);
+                  window.alert(m);
+                }}
+              />
+            );
+          })()
+        : null}
     </div>
   );
 }
