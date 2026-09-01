@@ -300,12 +300,39 @@ export function VoucherEntryPanel({
       (paiseFromRupees(l.debit) > 0 || paiseFromRupees(l.credit) > 0),
   );
 
+  /**
+   * The instrument has to agree with the account the money moved through.
+   *
+   * The Instrument dropdown is metadata beside the lines, not part of them,
+   * so "UPI" could be recorded against Cash in Hand and "Cash" against a
+   * bank — the voucher then says the money moved a way it did not, and the
+   * bank reconciliation looks for an entry that is not in the bank.
+   *
+   * The bank itself is never ambiguous here: 1010 is not selectable, only
+   * the per-bank accounts under it, so choosing the account IS choosing the
+   * bank. What was missing is that nothing checked the two agreed.
+   */
+  const BANK_INSTRUMENTS = new Set(["upi", "bank", "neft", "rtgs", "cheque"]);
+  const moneyLines = lines.filter(
+    (l) =>
+      (byCode.get(l.accountCode)?.isBank || byCode.get(l.accountCode)?.isCash) &&
+      (paiseFromRupees(l.debit) > 0 || paiseFromRupees(l.credit) > 0),
+  );
+  const instrumentWantsBank = BANK_INSTRUMENTS.has(instrumentMode);
+  const instrumentMismatch =
+    moneyLines.length > 0 &&
+    ((instrumentWantsBank &&
+      !moneyLines.some((l) => byCode.get(l.accountCode)?.isBank)) ||
+      (instrumentMode === "cash" &&
+        !moneyLines.some((l) => byCode.get(l.accountCode)?.isCash)));
+
   const postable =
     totals.dr > 0 &&
     totals.dr === totals.cr &&
     lines.filter((l) => l.accountCode && (paiseFromRupees(l.debit) > 0 || paiseFromRupees(l.credit) > 0)).length >= 2 &&
     !missingBank &&
-    !missingParty;
+    !missingParty &&
+    !instrumentMismatch;
 
   const post = async () => {
     if (!postable || busy) return;
@@ -542,6 +569,13 @@ export function VoucherEntryPanel({
           {missingBank ? (
             <span className="ml-2 font-bold text-[var(--warning)]">
               say which bank — the reconciliation depends on it
+            </span>
+          ) : null}
+          {instrumentMismatch ? (
+            <span className="ml-2 font-bold text-[var(--warning)]">
+              {instrumentWantsBank
+                ? "pick the bank account the money moved through — a bank instrument cannot settle to cash"
+                : "cash does not move through a bank account — pick Cash in Hand, or change the instrument"}
             </span>
           ) : null}
           {missingParty ? (
