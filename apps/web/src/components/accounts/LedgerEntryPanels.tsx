@@ -21,6 +21,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, FileText, Plus, Trash2, Undo2 } from "lucide-react";
 import { formatInr } from "@/lib/fees";
+import { spreadExpenseOverWorkingDays } from "@/lib/expenseSpread";
+import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
+import { isPublishedHoliday } from "@/lib/foundationMasters";
 import {
   ErpTable,
   ErpTableBody,
@@ -952,6 +955,9 @@ export function QuickExpensePanel({
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
+  /** Spread one amount across the working days between `date` and `toDate`. */
+  const [spread, setSpread] = useState(false);
+  const [toDate, setToDate] = useState(todayIso());
 
   // Heads = expense categories; a category with sub-heads opens the second
   // select, one without posts directly.
@@ -983,10 +989,36 @@ export function QuickExpensePanel({
 
   const amountPaise = paiseFromRupees(amount);
   const needsBank = payMode !== "cash";
+
+  /**
+   * The days this amount actually lands on.
+   *
+   * The office buys milk every school day and settles it weekly. Entered by
+   * hand that is seven vouchers, so it went in as one lump on one date —
+   * which reads as a week's milk bought on a Tuesday and hides the day the
+   * school was shut. The school's own holiday calendar decides which days
+   * are billable, so a Sunday or a gazetted holiday drops out by itself.
+   */
+  const plan = useMemo(() => {
+    if (!spread) return null;
+    const masters = loadMasters();
+    // The holiday list is per academic year, and the library default is a
+    // past one — ask about the running session.
+    const ay = currentAcademicYearCode(masters);
+    return spreadExpenseOverWorkingDays({
+      totalPaise: amountPaise,
+      from: date,
+      to: toDate,
+      holidayReason: (d: string) =>
+        isPublishedHoliday(masters, d, ay)?.title ?? null,
+    });
+  }, [spread, amountPaise, date, toDate]);
+
   const canPost =
     !!chosenHead &&
     amountPaise > 0 &&
     !!date &&
+    (!spread || (plan?.ok ?? false)) &&
     (!needsBank || (!!bankId && ref.trim() !== ""));
 
   async function post() {
@@ -1004,35 +1036,71 @@ export function QuickExpensePanel({
               subledgerId: bankId,
               instrument: { mode: payMode, ref: ref.trim(), date },
             };
-      const res = await ledgerApi<{ voucherNo?: string }>({
-        action: "post",
-        voucher: {
-          voucherType: "payment",
-          date,
-          narration:
-            note.trim() ||
-            `${chosenHead.name}${tagName ? ` — ${tagName}` : ""}`,
-          createdBy: actor,
-          lines: [
-            {
-              accountCode: chosenHead.code,
-              debitPaise: amountPaise,
-              creditPaise: 0,
-              ...(tag ? { costCentreCode: tag } : {}),
-            },
-            {
-              ...payLine,
-              debitPaise: 0,
-              creditPaise: amountPaise,
-              ...(tag ? { costCentreCode: tag } : {}),
-            },
-          ],
-        },
-      });
+      // One voucher per day when spreading, one on `date` otherwise. Each day
+      // is posted separately so a refusal on one — a locked period, say —
+      // does not silently take the rest of the week with it.
+      const days =
+        plan && plan.ok
+          ? plan.days
+          : [{ date, amountPaise }];
+
+      let posted = 0;
+      let lastNo = "";
+      let firstError = "";
+      for (const day of days) {
+        const res = await ledgerApi<{ voucherNo?: string }>({
+          action: "post",
+          voucher: {
+            voucherType: "payment",
+            date: day.date,
+            narration:
+              (note.trim() ||
+                `${chosenHead.name}${tagName ? ` — ${tagName}` : ""}`) +
+              (days.length > 1 ? ` · ${day.date}` : ""),
+            createdBy: actor,
+            lines: [
+              {
+                accountCode: chosenHead.code,
+                debitPaise: day.amountPaise,
+                creditPaise: 0,
+                ...(tag ? { costCentreCode: tag } : {}),
+              },
+              {
+                ...payLine,
+                ...(payMode !== "cash"
+                  ? { instrument: { mode: payMode, ref: ref.trim(), date: day.date } }
+                  : {}),
+                debitPaise: 0,
+                creditPaise: day.amountPaise,
+                ...(tag ? { costCentreCode: tag } : {}),
+              },
+            ],
+          },
+        });
+        if (res.ok) {
+          posted += 1;
+          lastNo = res.voucherNo ?? lastNo;
+        } else if (!firstError) {
+          firstError = res.error || "The book refused this entry";
+        }
+      }
+
+      const res = {
+        ok: posted > 0,
+        voucherNo: lastNo,
+        error: firstError,
+      };
       if (res.ok) {
+        const totalPosted = days
+          .slice(0, posted)
+          .reduce((n: number, d: { amountPaise: number }) => n + d.amountPaise, 0);
         setNotice({
           tone: "ok",
-          text: `${res.voucherNo ?? "Posted"} — ${formatInr(amountPaise)} ${chosenHead.name}${tagName ? ` (${tagName})` : ""}`,
+          text:
+            days.length > 1
+              ? `${posted} voucher(s) — ${formatInr(totalPosted)} ${chosenHead.name}${tagName ? ` (${tagName})` : ""}` +
+                (firstError ? ` · 1 or more refused: ${firstError}` : "")
+              : `${res.voucherNo || "Posted"} — ${formatInr(amountPaise)} ${chosenHead.name}${tagName ? ` (${tagName})` : ""}`,
         });
         // Head, date, tag and paid-by stay put for the next entry in the
         // pile; only what must differ per entry clears.
@@ -1055,6 +1123,70 @@ export function QuickExpensePanel({
         Head, amount, paid by — the balanced voucher is written for you. For
         anything unusual, the full voucher screen below still does everything.
       </p>
+
+      {/* The repeating daily expense — milk, newspapers — is the one the
+          office most often shortcuts into a single lump on one date. */}
+      <label className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-[var(--brand-deep)]">
+        <input
+          type="checkbox"
+          checked={spread}
+          onChange={(e) => {
+            setSpread(e.target.checked);
+            if (e.target.checked && toDate < date) setToDate(date);
+          }}
+        />
+        Spread over a date range — a week of milk in one go
+        {spread ? (
+          <span className="font-normal text-[var(--muted)]">
+            · the amount is the total for the whole period
+          </span>
+        ) : null}
+      </label>
+
+      {spread ? (
+        <div className="mt-2 flex flex-wrap items-end gap-2">
+          <label className="text-[11px] font-bold text-[var(--muted)]">
+            Up to
+            <input
+              type="date"
+              className={FIELD}
+              value={toDate}
+              min={date}
+              onChange={(e) => setToDate(e.target.value)}
+            />
+          </label>
+          {/* Show what is about to be written, including the days it is NOT
+              writing and why — that is the whole value of checking holidays. */}
+          <p className="flex-1 rounded-lg bg-[var(--surface-sunken)] px-3 py-1.5 text-[11px]">
+            {!plan ? null : !plan.ok ? (
+              <span className="font-semibold text-[var(--warning)]">
+                {plan.error}
+              </span>
+            ) : (
+              <span>
+                <span className="font-bold text-[var(--brand-deep)]">
+                  {plan.days.length} voucher(s) · {formatInr(plan.perDayPaise)} a
+                  day
+                </span>
+                {plan.skipped.length > 0 ? (
+                  <span className="text-[var(--muted)]">
+                    {" "}
+                    · leaving out{" "}
+                    {plan.skipped
+                      .map((sk) => `${sk.date} (${sk.reason})`)
+                      .join(", ")}
+                  </span>
+                ) : (
+                  <span className="text-[var(--muted)]">
+                    {" "}
+                    · no school holidays in this range
+                  </span>
+                )}
+              </span>
+            )}
+          </p>
+        </div>
+      ) : null}
 
       {notice ? (
         <p

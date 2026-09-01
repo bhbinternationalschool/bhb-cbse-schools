@@ -97,6 +97,7 @@ SELFTESTS=(
   test:store-bank-backfill
   test:daybook-voided
   test:controls-noise
+  test:expense-spread
   test:payment-link-amount
   test:sis-wire-payload
   test:print-palette
