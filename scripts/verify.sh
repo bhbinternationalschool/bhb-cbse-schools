@@ -100,6 +100,7 @@ SELFTESTS=(
   test:expense-spread
   test:vehicle-fuel
   test:expense-voucher-draft
+  test:fee-push-line-safety
   test:payment-link-amount
   test:sis-wire-payload
   test:print-palette

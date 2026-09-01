@@ -217,6 +217,35 @@ async function resolveCtx(): Promise<{
   return getServerTenantContext();
 }
 
+/**
+ * The vouchers a push may safely REPLACE the lines of.
+ *
+ * Only those it actually carries lines for. A push that says nothing about a
+ * voucher's lines is a browser that does not know them — unhydrated, or
+ * hydrated with headers before lines arrived — not a receipt that has none.
+ *
+ * Exported so the rule can be tested. It is one `.filter`, but it is the one
+ * that cost 134 receipts their lines on 2026-09-01: 5,80,543 of collections
+ * showing a guardian and an amount with no student, no head and no month,
+ * and every month those families had paid reading unpaid again.
+ */
+export function voucherIdsCarryingLines(
+  vouchers: Pick<CollectionVoucher, "id" | "lines">[],
+): string[] {
+  return vouchers
+    .filter((v) => Array.isArray(v.lines) && v.lines.length > 0)
+    .map((v) => v.id);
+}
+
+/** The same rule for tenders — a push without them must not erase them. */
+export function voucherIdsCarryingTenders(
+  vouchers: Pick<CollectionVoucher, "id" | "tenders">[],
+): string[] {
+  return vouchers
+    .filter((v) => Array.isArray(v.tenders) && v.tenders.length > 0)
+    .map((v) => v.id);
+}
+
 /** Upsert all vouchers (full desk snapshot). */
 export async function pushFeeVouchersToDb(
   vouchers: CollectionVoucher[],
@@ -253,20 +282,44 @@ export async function pushFeeVouchersToDb(
     );
   }
 
-  if (ids.length > 0) {
+  // Replace the lines only of vouchers the push actually CARRIES lines for.
+  //
+  // The delete used to cover every pushed id, so a browser holding a voucher
+  // header with an empty `lines` array wiped the real lines and put nothing
+  // back. That is how 134 receipts — RCV-00001..00227, 5,80,543 — ended up on
+  // 2026-09-01 showing a guardian and an amount with no student, no head and
+  // no month, while every month they had paid still read unpaid: the dues
+  // clear from the lines, and the lines were gone.
+  //
+  // It is the same lesson as the header prune above, one level down. A
+  // receipt is append-only; a push that says nothing about a voucher's lines
+  // is a browser that does not know them, not a receipt that has none.
+  const idsWithLines = voucherIdsCarryingLines(active);
+  const idsWithTenders = voucherIdsCarryingTenders(active);
+
+  const omittedLines = ids.length - idsWithLines.length;
+  if (omittedLines > 0) {
+    console.warn(
+      `[fees-desk] push carried ${omittedLines} voucher(s) with no lines — keeping the server's (a receipt without lines clears no dues)`,
+    );
+  }
+
+  if (idsWithLines.length > 0) {
     const { error: delLines } = await sb
       .from("fee_desk_voucher_lines")
       .delete()
       .eq("tenant_id", tenantId)
-      .in("voucher_id", ids);
+      .in("voucher_id", idsWithLines);
     if (delLines) {
       return { ok: false, count: 0, error: delLines.message };
     }
+  }
+  if (idsWithTenders.length > 0) {
     const { error: delTenders } = await sb
       .from("fee_desk_voucher_tenders")
       .delete()
       .eq("tenant_id", tenantId)
-      .in("voucher_id", ids);
+      .in("voucher_id", idsWithTenders);
     if (delTenders) {
       return { ok: false, count: 0, error: delTenders.message };
     }
