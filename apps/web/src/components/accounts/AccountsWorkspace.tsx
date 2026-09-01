@@ -20,6 +20,7 @@ import {
 import {
   ChequesPanel,
   LegacyBookNotice,
+  MultiLineExpensePanel,
   QuickExpensePanel,
   VoucherEntryPanel,
 } from "@/components/accounts/LedgerEntryPanels";
@@ -219,6 +220,15 @@ export function AccountsWorkspace() {
       ) : tab === "vouchers" ? (
         <div className="mt-4 space-y-4">
           <QuickExpensePanel
+            banks={(state.bankAccounts ?? [])
+              .filter((b) => b.isActive !== false)
+              .map((b) => ({ id: b.id, name: b.name }))}
+            actor={actorName}
+            onPosted={() => setEntryTick((n) => n + 1)}
+          />
+          {/* Between the one-head quick form and the raw double-entry
+              screen: the everyday pile of expenses from one trip. */}
+          <MultiLineExpensePanel
             banks={(state.bankAccounts ?? [])
               .filter((b) => b.isActive !== false)
               .map((b) => ({ id: b.id, name: b.name }))}

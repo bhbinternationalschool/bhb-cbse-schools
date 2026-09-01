@@ -25,6 +25,10 @@ import {
   enumerateExpenseDays,
   expenseTotalPaise,
 } from "@/lib/expenseSpread";
+import {
+  allocateExpensePayment,
+  buildExpenseVoucherLines,
+} from "@/lib/expenseVoucherDraft";
 import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
 import { isPublishedHoliday } from "@/lib/foundationMasters";
 import {
@@ -2008,5 +2012,449 @@ export function LegacyBookNotice({ tab }: { tab: string }) {
       server book that the reports and the CA pack read. Anything entered
       here will need re-entry there{tab ? ` (${tab})` : ""}.
     </p>
+  );
+}
+
+/* ═══ Multi-line expense voucher ═══════════════════════════ */
+
+/**
+ * One trip to the market, one voucher.
+ *
+ * A printer cartridge and a tank of CNG are two heads, two vendors and often
+ * one payment that covers only part of it. Quick expense above handles the
+ * single-head case in three fields; this is for the pile.
+ *
+ * Thin on purpose: every rupee decision — how a part payment splits, where
+ * tax goes, which vendor is owed what — lives in expenseVoucherDraft and is
+ * tested there.
+ */
+export function MultiLineExpensePanel({
+  banks,
+  actor,
+  onPosted,
+}: {
+  banks: { id: string; name: string }[];
+  actor: string;
+  onPosted?: () => void;
+}) {
+  const accounts = useChart();
+  const [centres, setCentres] = useState<{ code: string; name: string }[]>([]);
+  useEffect(() => {
+    void ledgerApi<{ centres: { code: string; name: string }[] }>({
+      action: "cost-centres",
+    }).then((r) => {
+      if (r.ok && r.centres) setCentres(r.centres);
+    });
+  }, []);
+
+  type Row = {
+    id: string;
+    head: string;
+    subHead: string;
+    vendorName: string;
+    tag: string;
+    description: string;
+    amount: string;
+    tax: string;
+  };
+  const blankRow = (): Row => ({
+    id: `r${Math.random().toString(36).slice(2, 8)}`,
+    head: "",
+    subHead: "",
+    vendorName: "",
+    tag: "",
+    description: "",
+    amount: "",
+    tax: "",
+  });
+
+  const [rows, setRows] = useState<Row[]>([blankRow()]);
+  const [date, setDate] = useState(todayIso());
+  const [note, setNote] = useState("");
+  const [payMode, setPayMode] = useState("cash");
+  const [bankId, setBankId] = useState("");
+  const [ref, setRef] = useState("");
+  /** Blank means "pay it all"; a figure means a part payment. */
+  const [payNow, setPayNow] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
+
+  // Same rule as Quick expense: the store's automation owns these codes, so
+  // money never goes to them by hand.
+  const SYSTEM_HEADS = useMemo(() => new Set(["5060", "5065", "5066", "5100"]), []);
+  const heads = useMemo(
+    () =>
+      accounts.filter(
+        (a) => a.kind === "expense" && a.parentCode === "5" && !SYSTEM_HEADS.has(a.code),
+      ),
+    [accounts, SYSTEM_HEADS],
+  );
+  const subHeadsOf = (head: string) => accounts.filter((a) => a.parentCode === head);
+  const accountOf = (r: Row) => {
+    const head = accounts.find((a) => a.code === r.head);
+    if (!head) return undefined;
+    return head.hasChildren ? accounts.find((a) => a.code === r.subHead) : head;
+  };
+
+  const setRow = (id: string, patch: Partial<Row>) =>
+    setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+
+  const draftLines = useMemo(
+    () =>
+      rows.map((r) => ({
+        id: r.id,
+        accountCode: accountOf(r)?.code ?? "",
+        tag: r.tag,
+        vendorName: r.vendorName,
+        description: r.description,
+        amountPaise: paiseFromRupees(r.amount),
+        taxPaise: paiseFromRupees(r.tax),
+      })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rows, accounts],
+  );
+
+  const grandTotal = draftLines.reduce(
+    (n, l) => n + Math.max(0, l.amountPaise) + Math.max(0, l.taxPaise),
+    0,
+  );
+  // An empty box means the whole voucher is being paid, which is the common
+  // case; typing a figure makes it a part payment.
+  const paidPaise = payNow.trim() === "" ? grandTotal : paiseFromRupees(payNow);
+  const totals = useMemo(
+    () => allocateExpensePayment(draftLines, paidPaise),
+    [draftLines, paidPaise],
+  );
+
+  const needsBank = payMode !== "cash";
+  const canPost =
+    totals.grandTotalPaise > 0 &&
+    draftLines.every((l) => !l.accountCode === !(l.amountPaise + l.taxPaise) || l.accountCode) &&
+    rows.every((r) => {
+      const t = paiseFromRupees(r.amount) + paiseFromRupees(r.tax);
+      return t === 0 || !!accountOf(r);
+    }) &&
+    (totals.paidPaise === 0 || !needsBank || (!!bankId && ref.trim() !== ""));
+
+  async function post() {
+    if (!canPost || busy) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const bankAccount = accounts.find(
+        (a) => a.isBank && a.bankAccountId === bankId,
+      );
+      const lines = buildExpenseVoucherLines({
+        totals,
+        gstInputCode: "1080",
+        payableCode: "2000",
+        payment:
+          payMode === "cash"
+            ? { kind: "cash", accountCode: "1000" }
+            : {
+                kind: "bank",
+                // Prefer the per-bank account when the chart has one; 1010 is
+                // the generic fallback the quick form also uses.
+                accountCode: bankAccount?.code ?? "1010",
+                bankId,
+                mode: payMode,
+                ref: ref.trim(),
+                date,
+              },
+      });
+      const res = await ledgerApi<{ voucherNo?: string }>({
+        action: "post",
+        voucher: {
+          voucherType: "payment",
+          date,
+          narration: note.trim() || `Expenses — ${totals.lines.length} item(s)`,
+          createdBy: actor,
+          lines,
+        },
+      });
+      if (res.ok) {
+        setNotice({
+          tone: "ok",
+          text:
+            `${res.voucherNo ?? "Posted"} — ${formatInr(totals.grandTotalPaise)}` +
+            (totals.duePaise > 0
+              ? ` · ${formatInr(totals.duePaise)} left owing`
+              : " · paid in full"),
+        });
+        setRows([blankRow()]);
+        setNote("");
+        setRef("");
+        setPayNow("");
+        onPosted?.();
+      } else {
+        setNotice({ tone: "bad", text: res.error || "The book refused this voucher" });
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className={CARD}>
+      <h4 className="text-sm font-bold text-[var(--brand-deep)]">
+        Expense voucher — several heads at once
+      </h4>
+      <p className="text-[11px] text-[var(--muted)]">
+        One trip, one voucher: a head and sub-head per line, with its own
+        vendor and tag. Pay all of it or part — whatever is left stays owing to
+        the vendor it belongs to.
+      </p>
+
+      {notice ? (
+        <p
+          className={`mt-2 rounded-lg px-3 py-1.5 text-xs ${
+            notice.tone === "ok"
+              ? "bg-emerald-500/10 text-emerald-700"
+              : "bg-red-500/10 text-red-700"
+          }`}
+        >
+          {notice.text}
+        </p>
+      ) : null}
+
+      <div className="mt-3 flex flex-wrap items-end gap-2">
+        <label className="text-[11px] font-bold text-[var(--muted)]">
+          Date
+          <input
+            type="date"
+            className={FIELD}
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+          />
+        </label>
+        <label className="min-w-[14rem] flex-1 text-[11px] font-bold text-[var(--muted)]">
+          Note
+          <input
+            className={FIELD}
+            placeholder="what this trip was for"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+        </label>
+      </div>
+
+      <div className="mt-3 space-y-2">
+        {rows.map((r) => {
+          const subs = subHeadsOf(r.head);
+          const rowTotal = paiseFromRupees(r.amount) + paiseFromRupees(r.tax);
+          return (
+            <div
+              key={r.id}
+              className="rounded-xl border border-[var(--border)] p-2"
+            >
+              <div className="flex flex-wrap items-end gap-2">
+                <label className="min-w-[10rem] flex-1 text-[10px] font-bold text-[var(--muted)]">
+                  Head
+                  <select
+                    className={FIELD}
+                    value={r.head}
+                    onChange={(e) => setRow(r.id, { head: e.target.value, subHead: "" })}
+                  >
+                    <option value="">Choose…</option>
+                    {heads.map((h) => (
+                      <option key={h.code} value={h.code}>
+                        {h.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {subs.length > 0 ? (
+                  <label className="min-w-[10rem] flex-1 text-[10px] font-bold text-[var(--muted)]">
+                    Sub-head
+                    <select
+                      className={FIELD}
+                      value={r.subHead}
+                      onChange={(e) => setRow(r.id, { subHead: e.target.value })}
+                    >
+                      <option value="">Choose…</option>
+                      {subs.map((sh) => (
+                        <option key={sh.code} value={sh.code}>
+                          {sh.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+                <label className="min-w-[9rem] flex-1 text-[10px] font-bold text-[var(--muted)]">
+                  Vendor
+                  <input
+                    className={FIELD}
+                    placeholder="who was paid"
+                    value={r.vendorName}
+                    onChange={(e) => setRow(r.id, { vendorName: e.target.value })}
+                  />
+                </label>
+                <label className="text-[10px] font-bold text-[var(--muted)]">
+                  Tag
+                  <select
+                    className={FIELD}
+                    value={r.tag}
+                    onChange={(e) => setRow(r.id, { tag: e.target.value })}
+                  >
+                    <option value="">No tag</option>
+                    {centres.map((c) => (
+                      <option key={c.code} value={c.code}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div className="mt-2 flex flex-wrap items-end gap-2">
+                <label className="min-w-[12rem] flex-1 text-[10px] font-bold text-[var(--muted)]">
+                  Description
+                  <input
+                    className={FIELD}
+                    placeholder="e.g. printer cartridge"
+                    value={r.description}
+                    onChange={(e) => setRow(r.id, { description: e.target.value })}
+                  />
+                </label>
+                <label className="text-[10px] font-bold text-[var(--muted)]">
+                  Amount ₹
+                  <input
+                    className={`${FIELD} max-w-[7rem] text-right`}
+                    inputMode="decimal"
+                    placeholder="0.00"
+                    value={r.amount}
+                    onChange={(e) => setRow(r.id, { amount: e.target.value })}
+                  />
+                </label>
+                <label className="text-[10px] font-bold text-[var(--muted)]">
+                  Tax ₹
+                  <input
+                    className={`${FIELD} max-w-[6rem] text-right`}
+                    inputMode="decimal"
+                    placeholder="0.00"
+                    value={r.tax}
+                    onChange={(e) => setRow(r.id, { tax: e.target.value })}
+                  />
+                </label>
+                <span className="min-w-[6rem] text-right text-[11px] font-bold tabular-nums text-[var(--brand-deep)]">
+                  {formatInr(rowTotal)}
+                </span>
+                <button
+                  type="button"
+                  className="rounded-lg p-1.5 text-[var(--danger)] disabled:opacity-30"
+                  disabled={rows.length === 1}
+                  onClick={() => setRows((rs) => rs.filter((x) => x.id !== r.id))}
+                  aria-label="Remove line"
+                >
+                  <Trash2 className="size-3.5" aria-hidden />
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <button
+        type="button"
+        className={`${BTN_OUTLINE} mt-2`}
+        onClick={() => setRows((rs) => [...rs, blankRow()])}
+      >
+        <Plus className="size-3.5" aria-hidden /> Add line
+      </button>
+
+      <div className="mt-3 rounded-xl bg-[var(--surface-sunken)] p-3">
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="text-[11px] font-bold text-[var(--muted)]">
+            Paid by
+            <select
+              className={FIELD}
+              value={payMode}
+              onChange={(e) => setPayMode(e.target.value)}
+            >
+              {QUICK_PAY_MODES.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {needsBank ? (
+            <>
+              <label className="text-[11px] font-bold text-[var(--muted)]">
+                Bank
+                <select
+                  className={FIELD}
+                  value={bankId}
+                  onChange={(e) => setBankId(e.target.value)}
+                >
+                  <option value="">Which bank…</option>
+                  {banks.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-[11px] font-bold text-[var(--muted)]">
+                Reference
+                <input
+                  className={FIELD}
+                  placeholder="UTR / cheque no."
+                  value={ref}
+                  onChange={(e) => setRef(e.target.value)}
+                />
+              </label>
+            </>
+          ) : null}
+          <label className="text-[11px] font-bold text-[var(--muted)]">
+            Paying now ₹
+            <input
+              className={`${FIELD} max-w-[8rem] text-right`}
+              inputMode="decimal"
+              placeholder={formatInr(grandTotal).replace("₹", "")}
+              value={payNow}
+              onChange={(e) => setPayNow(e.target.value)}
+            />
+          </label>
+        </div>
+
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
+          <span className="font-bold text-[var(--brand-deep)]">
+            Total {formatInr(totals.grandTotalPaise)}
+          </span>
+          <span className="text-[var(--muted)]">
+            of which tax {formatInr(totals.taxPaise)}
+          </span>
+          <span className="font-bold text-[var(--success)]">
+            Paying today {formatInr(totals.paidPaise)}
+          </span>
+          <span
+            className={`font-bold ${
+              totals.duePaise > 0 ? "text-[var(--warning)]" : "text-[var(--muted)]"
+            }`}
+          >
+            Left owing {formatInr(totals.duePaise)}
+          </span>
+        </div>
+
+        {totals.duesByVendor.length > 0 ? (
+          <p className="mt-1 text-[11px] text-[var(--muted)]">
+            Owed after this voucher —{" "}
+            {totals.duesByVendor
+              .map((d) => `${d.vendorName}: ${formatInr(d.duePaise)}`)
+              .join(" · ")}
+          </p>
+        ) : null}
+      </div>
+
+      <button
+        type="button"
+        className={`${BTN} mt-3`}
+        disabled={!canPost || busy}
+        onClick={() => void post()}
+      >
+        <Check className="size-3.5" aria-hidden />
+        {busy ? "Posting…" : "Post voucher"}
+      </button>
+    </section>
   );
 }
