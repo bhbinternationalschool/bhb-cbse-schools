@@ -34,6 +34,7 @@ import {
   defaultSettings,
   emptyAccounts,
   ensureConstructionCoaAccounts,
+  migrateRefreshmentSubHead,
   ensureStoreCoaAccounts,
   normalizeBank,
   normalizeBankLedger,
@@ -229,6 +230,7 @@ export function seedAccountsIfEmpty(): AccountsState {
   if (state.coaAccounts.length > 0 || state.cashPools.length > 0) {
     state = ensureConstructionCoaAccounts(state);
     state = ensureStoreCoaAccounts(state);
+    state = migrateRefreshmentSubHead(state);
     state = repairOrphanCashLedger(state);
     saveAccounts(state);
     return state;
@@ -252,7 +254,7 @@ export function seedAccountsIfEmpty(): AccountsState {
   const bankAccounts: BankAccount[] = [];
 
   const expenseCategories: ExpenseCategory[] = [
-    normalizeExpenseCategory({ name: "Mess", coaCode: COA_EXP_MESS }),
+    normalizeExpenseCategory({ name: "Refreshment", coaCode: COA_EXP_MESS }),
     normalizeExpenseCategory({ name: "Milk", coaCode: COA_EXP_MILK }),
     normalizeExpenseCategory({ name: "Utilities", coaCode: COA_EXP_UTILITIES }),
     normalizeExpenseCategory({

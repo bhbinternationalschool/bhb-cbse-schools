@@ -136,8 +136,10 @@ export function defaultLedgerAccounts(): LedgerAccountSeed[] {
 
     /* ─── Expenses ───────────────────────────────────────── */
     { code: "5", name: "Expenditure", kind: "expense", scheduleGroup: "" },
-    { code: "5000", name: "Mess Expenses", kind: "expense", parentCode: "5", scheduleGroup: G.administrative },
-    { code: "5010", name: "Milk Expenses", kind: "expense", parentCode: "5", scheduleGroup: G.administrative },
+    { code: "5000", name: "Refreshment", kind: "expense", parentCode: "5", scheduleGroup: G.administrative },
+    // Milk hangs UNDER Refreshment. Keep it a child of 5000, not of 5, or the
+    // desk and the book disagree about where a milk expense belongs.
+    { code: "5000.01", name: "Milk Expenses", kind: "expense", parentCode: "5000", scheduleGroup: G.administrative },
     { code: "5020", name: "Utilities Expenses", kind: "expense", parentCode: "5", scheduleGroup: G.administrative },
     { code: "5030", name: "Transport Batta Expenses", kind: "expense", parentCode: "5", scheduleGroup: G.administrative },
     { code: "5040", name: "Office Expenses", kind: "expense", parentCode: "5", scheduleGroup: G.administrative },

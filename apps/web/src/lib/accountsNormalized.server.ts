@@ -1178,6 +1178,29 @@ export async function pushAccountsDeskToDb(
     if (at && (!lastVoucherAt || at > lastVoucherAt)) lastVoucherAt = at;
   }
 
+  // Any head or sub-head the school just added must be postable straight
+  // away. The desk chart is the school's to edit, so the server book follows
+  // it here rather than waiting for someone to edit a seed in the repo — the
+  // hand-kept version of this is what let "5010 Milk Expenses" exist on the
+  // desk while the book had never heard of it.
+  //
+  // Additive and idempotent, so a push that changes nothing installs nothing.
+  // Never allowed to fail the desk save: the chart is already stored, and a
+  // books problem must not cost the office its work.
+  try {
+    const { syncDeskChartToLedger } = await import("@/lib/ledger/ledger.server");
+    const synced = await syncDeskChartToLedger();
+    if (synced.ok && synced.accountsAdded > 0) {
+      console.log(
+        `[accounts] installed ${synced.accountsAdded} desk account(s) into the server book: ${synced.added.join(", ")}`,
+      );
+    } else if (!synced.ok) {
+      console.error(`[accounts] desk chart -> ledger sync failed: ${synced.error}`);
+    }
+  } catch (e) {
+    console.error("[accounts] desk chart -> ledger sync threw", e);
+  }
+
   await sb.from("accounts_desk_sync_meta").upsert(
     {
       tenant_id: tenantId,

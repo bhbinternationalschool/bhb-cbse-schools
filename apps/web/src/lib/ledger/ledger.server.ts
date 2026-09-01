@@ -16,11 +16,13 @@
 
 import { getServerTenantContext } from "@/lib/serverTenant";
 import {
+  SCHEDULE_GROUPS,
   defaultCostCentres,
   defaultLedgerAccounts,
   isPostableLedgerCode,
 } from "@/lib/ledger/coa";
 import type {
+  LedgerAccountKind,
   LedgerPeriodStatus,
   LedgerPostResult,
   LedgerTrialBalanceRow,
@@ -226,6 +228,134 @@ export async function ledgerCloseFiscalYear(input: {
  * merely quiet. Found exactly that way on 2026-08-24, on a chart seeded before
  * the flags existed.
  */
+/**
+ * Install every desk chart account that the server book does not have yet.
+ *
+ * The desk chart is the school's to edit — a head or sub-head added in
+ * Accounts must be postable immediately, without anyone editing a seed in
+ * this repo. Until this existed the two charts were kept in step BY HAND, so
+ * the desk shipped "5010 Milk Expenses" that the book had never heard of and
+ * every milk expense was refused with `no ledger account with code 5010` and
+ * queued as unposted.
+ *
+ * Only ADDS. A code the book already has is left alone: names and
+ * classification there may have been deliberately reorganised, and this must
+ * not undo that.
+ *
+ * Parent is derived from the code itself, so "5000.01" hangs under "5000"
+ * and a flat "5070" hangs under its kind's top-level group.
+ */
+export async function syncDeskChartToLedger(): Promise<{
+  ok: boolean;
+  error?: string;
+  accountsAdded: number;
+  added: string[];
+}> {
+  const ctx = await getServerTenantContext();
+  if (!ctx)
+    return {
+      ok: false,
+      error: "Supabase tenant not configured",
+      accountsAdded: 0,
+      added: [],
+    };
+  const { sb, tenantId } = ctx;
+
+  const [deskRes, bookRes] = await Promise.all([
+    sb
+      .from("accounts_desk_coa_accounts")
+      .select("code,name,coa_group,is_active")
+      .eq("tenant_id", tenantId),
+    sb.from("ledger_accounts").select("code").eq("tenant_id", tenantId),
+  ]);
+  if (deskRes.error)
+    return { ok: false, error: deskRes.error.message, accountsAdded: 0, added: [] };
+  if (bookRes.error)
+    return { ok: false, error: bookRes.error.message, accountsAdded: 0, added: [] };
+
+  const have = new Set(
+    (bookRes.data ?? []).map((r) => String((r as { code: string }).code)),
+  );
+
+  const KIND: Record<string, LedgerAccountKind> = {
+    assets: "asset",
+    liabilities: "liability",
+    equity: "equity",
+    income: "income",
+    expense: "expense",
+  };
+  // The top-level group each kind rolls up into, matching defaultLedgerAccounts().
+  const ROOT: Record<LedgerAccountKind, string> = {
+    asset: "1",
+    liability: "2",
+    equity: "3",
+    income: "4",
+    expense: "5",
+  };
+  const SCHEDULE: Record<LedgerAccountKind, string> = {
+    asset: SCHEDULE_GROUPS.currentAssets,
+    liability: SCHEDULE_GROUPS.currentLiabilities,
+    equity: SCHEDULE_GROUPS.corpus,
+    income: SCHEDULE_GROUPS.otherIncome,
+    expense: SCHEDULE_GROUPS.administrative,
+  };
+
+  const rows: {
+    tenant_id: string;
+    code: string;
+    name: string;
+    parent_code: string;
+    kind: LedgerAccountKind;
+    schedule_group: string;
+  }[] = [];
+
+  for (const raw of deskRes.data ?? []) {
+    const r = raw as {
+      code: string;
+      name: string;
+      coa_group: string;
+      is_active: boolean;
+    };
+    const code = String(r.code ?? "").trim();
+    if (!code || have.has(code)) continue;
+    // A head the school has retired must not be resurrected in the book.
+    if (r.is_active === false) continue;
+    // A group heading is never postable, so installing one would only create
+    // an account nothing may use.
+    if (!isPostableLedgerCode(code)) continue;
+    const kind = KIND[String(r.coa_group ?? "").trim()];
+    if (!kind) continue;
+
+    // "5000.01" belongs under "5000" when that exists; otherwise fall back to
+    // the kind's root so the roll-up still has a parent.
+    const dot = code.lastIndexOf(".");
+    const prefix = dot > 0 ? code.slice(0, dot) : "";
+    const parent = prefix && have.has(prefix) ? prefix : ROOT[kind];
+
+    rows.push({
+      tenant_id: tenantId,
+      code,
+      name: String(r.name ?? "").trim() || code,
+      parent_code: parent,
+      kind,
+      schedule_group: SCHEDULE[kind],
+    });
+    have.add(code);
+  }
+
+  if (rows.length === 0) return { ok: true, accountsAdded: 0, added: [] };
+
+  const { error } = await sb.from("ledger_accounts").insert(rows);
+  if (error)
+    return { ok: false, error: error.message, accountsAdded: 0, added: [] };
+
+  return {
+    ok: true,
+    accountsAdded: rows.length,
+    added: rows.map((r) => `${r.code} ${r.name}`),
+  };
+}
+
 export async function ensureLedgerMasters(input?: {
   fyCode?: string;
   fyStartDate?: string;
@@ -282,6 +412,13 @@ export async function ensureLedgerMasters(input?: {
     if (error) return { ok: false, error: error.message, accountsAdded: 0 };
   }
 
+  // The school's own heads and sub-heads, not just the shipped defaults —
+  // otherwise ensure-masters "fixes" the chart and still leaves a desk
+  // account unpostable.
+  const deskSync = await syncDeskChartToLedger();
+  if (!deskSync.ok)
+    return { ok: false, error: deskSync.error, accountsAdded: missing.length };
+
   await sb.from("ledger_cost_centres").upsert(
     defaultCostCentres().map((c) => ({
       tenant_id: tenantId,
@@ -304,7 +441,8 @@ export async function ensureLedgerMasters(input?: {
     { onConflict: "tenant_id,code", ignoreDuplicates: true },
   );
 
-  return { ok: true, accountsAdded: missing.length };
+  // Count both, so the caller is told the whole truth about what installed.
+  return { ok: true, accountsAdded: missing.length + deskSync.accountsAdded };
 }
 
 /** Indian fiscal year (April–March) for a date. */

@@ -17,6 +17,7 @@
  * Run: npx tsx src/lib/ledger/ledger.selftest.ts
  */
 import assert from "node:assert/strict";
+import { defaultCoaAccounts } from "@/lib/accountsNormalize";
 
 import {
   deskJournalToLedgerVoucher,
@@ -127,12 +128,16 @@ function journal(patch: Partial<JournalEntry>): JournalEntry {
 
   // Every desk code the posting paths resolve by string must survive into v2,
   // or a mirrored journal lands nowhere.
-  for (const code of [
-    "1000", "1010", "1020", "1030", "1040", "1050",
-    "2000", "2100", "2200", "3000", "4000", "4100", "4200",
-    "5000", "5010", "5020", "5030", "5040", "5050", "5060", "5900",
-  ]) {
-    assert.ok(codes.includes(code), `v2 chart must keep desk code ${code}`);
+  //
+  // Read from the desk seed rather than a hand-kept list: the list was the
+  // reason the two charts could drift. The desk shipped 5010 "Milk Expenses"
+  // while the live book had no such account, so every milk expense was
+  // refused with "no ledger account with code 5010" and queued as unposted.
+  for (const acc of defaultCoaAccounts()) {
+    assert.ok(
+      codes.includes(acc.code),
+      `v2 chart must keep desk code ${acc.code} (${acc.name}) — a desk account with no ledger account cannot be posted`,
+    );
   }
 
   // Parents must exist, or the roll-up to a statement line breaks.

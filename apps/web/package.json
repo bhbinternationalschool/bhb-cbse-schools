@@ -110,6 +110,7 @@
     "test:email": "npx tsx src/lib/email.selftest.ts",
     "test:fee-student-search": "npx tsx src/lib/feeStudentSearch.selftest.ts",
     "test:household-dues-ay": "npx tsx src/lib/householdDuesAcademicYear.selftest.ts",
+    "test:refreshment-chart": "npx tsx src/lib/refreshmentChartMigration.selftest.ts",
     "test:payment-link-amount": "npx tsx src/lib/paymentLinkAmount.selftest.ts",
     "test:sis-wire-payload": "npx tsx src/lib/sisWirePayload.selftest.ts",
     "test:print-palette": "npx tsx src/lib/printPalette.selftest.ts",

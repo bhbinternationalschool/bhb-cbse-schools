@@ -110,7 +110,7 @@ export function defaultCoaAccounts(): CoaAccount[] {
     row(COA_FEE_INCOME, "Fee Income", "income"),
     row(COA_OTHER_INCOME, "Other Income", "income"),
     row(COA_STORE_SALES, "Store Sales Income", "income"),
-    row(COA_EXP_MESS, "Mess Expenses", "expense"),
+    row(COA_EXP_MESS, "Refreshment", "expense"),
     row(COA_EXP_MILK, "Milk Expenses", "expense"),
     row(COA_EXP_UTILITIES, "Utilities Expenses", "expense"),
     row(COA_EXP_TRANSPORT_BATTA, "Transport Batta Expenses", "expense"),
@@ -666,6 +666,67 @@ export function repairOrphanedCancelledVoucherLedger(
 
   if (!changed) return state;
   return { ...state, cashPools, cashLedger, bankLedger, journalEntries };
+}
+
+/**
+ * 2026-09-01 — the school reorganised refreshments.
+ *
+ * "Mess Expenses" (5000) became **Refreshment**, and milk became a sub-head
+ * of it, **5000.01**, replacing the old flat 5010. 5010 was seeded on the
+ * desk but had never existed in the server book, so every milk expense was
+ * refused with `no ledger account with code 5010` and queued as unposted.
+ *
+ * This runs on load rather than as a one-off write to the database, because
+ * the desk is localStorage-first: a browser still holding the old chart would
+ * push it back and delete the change. Applied in each browser, it converges.
+ *
+ * Conservative on purpose:
+ *  - 5000 is renamed ONLY if it still carries the shipped name, so a school
+ *    that renamed it to something else of their own keeps their name.
+ *  - 5010 is DEACTIVATED, never deleted — any history pointing at it stays
+ *    readable, and it can be switched back on.
+ */
+/** The flat milk code this install used before milk became a sub-head. */
+const LEGACY_FLAT_MILK_CODE = "5010";
+
+export function migrateRefreshmentSubHead(state: AccountsState): AccountsState {
+  let coaAccounts = [...state.coaAccounts];
+  let expenseCategories = [...state.expenseCategories];
+  let changed = false;
+
+  const mess = coaAccounts.find((c) => c.code === COA_EXP_MESS);
+  if (mess && mess.name.trim().toLowerCase() === "mess expenses") {
+    coaAccounts = coaAccounts.map((c) =>
+      c.code === COA_EXP_MESS ? { ...c, name: "Refreshment" } : c,
+    );
+    changed = true;
+  }
+
+  if (!coaAccounts.some((c) => c.code === COA_EXP_MILK)) {
+    coaAccounts = [
+      ...coaAccounts,
+      normalizeCoa({ code: COA_EXP_MILK, name: "Milk Expenses", group: "expense" }),
+    ];
+    changed = true;
+  }
+
+  if (coaAccounts.some((c) => c.code === LEGACY_FLAT_MILK_CODE && c.isActive)) {
+    coaAccounts = coaAccounts.map((c) =>
+      c.code === LEGACY_FLAT_MILK_CODE ? { ...c, isActive: false } : c,
+    );
+    changed = true;
+  }
+
+  // Any expense category still pointed at the retired flat code follows the
+  // account, or entry would keep booking to an account the book will refuse.
+  if (expenseCategories.some((c) => c.coaCode === LEGACY_FLAT_MILK_CODE)) {
+    expenseCategories = expenseCategories.map((c) =>
+      c.coaCode === LEGACY_FLAT_MILK_CODE ? { ...c, coaCode: COA_EXP_MILK } : c,
+    );
+    changed = true;
+  }
+
+  return changed ? { ...state, coaAccounts, expenseCategories } : state;
 }
 
 /** Merge CWIP / fixed asset / retention COA rows for existing installs. */

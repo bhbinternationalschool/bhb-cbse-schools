@@ -475,7 +475,13 @@ export const COA_OTHER_INCOME = "4100";
 /** Store / books / uniform sales income. */
 export const COA_STORE_SALES = "4200";
 export const COA_EXP_MESS = "5000";
-export const COA_EXP_MILK = "5010";
+/*
+ * Milk is a sub-head OF Refreshment (5000), not a sibling of it — the
+ * school reorganised the chart this way on 2026-09-01. The old flat "5010"
+ * was seeded on the desk but never existed in the server book, so every
+ * milk expense was refused with "no ledger account with code 5010".
+ */
+export const COA_EXP_MILK = "5000.01";
 export const COA_EXP_UTILITIES = "5020";
 export const COA_EXP_TRANSPORT_BATTA = "5030";
 export const COA_EXP_OFFICE = "5040";
