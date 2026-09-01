@@ -246,6 +246,51 @@ export function voucherIdsCarryingTenders(
     .map((v) => v.id);
 }
 
+/**
+ * Every row, not the first thousand.
+ *
+ * PostgREST caps an unbounded select at its configured maximum — 1000 here —
+ * and returns the truncation as a perfectly ordinary success. Reading fee
+ * lines that way meant receipts beyond the cap hydrated with NO LINES, and a
+ * browser holding that state then pushed it back: on 2026-09-01, with 1048
+ * lines in the table, 134 receipts lost theirs outright.
+ *
+ * The push no longer deletes what it was not given, so the damage is stopped.
+ * This stops the CAUSE: a desk that never sees a receipt's lines shows it as
+ * settling nothing, whatever the database holds.
+ *
+ * Paged rather than given a bigger number, because a bigger number is the
+ * same bug with a later date on it.
+ */
+async function fetchAllRows(
+  sb: Awaited<ReturnType<typeof resolveCtx>> extends infer C ? (C extends { sb: infer S } ? S : never) : never,
+  table: string,
+  tenantId: string,
+  voucherIds: string[],
+): Promise<{ data: Record<string, unknown>[] | null; error: { message: string } | null }> {
+  const PAGE = 1000;
+  const out: Record<string, unknown>[] = [];
+  // Chunk the id filter too: a URL carrying 400+ ids is its own limit.
+  for (let i = 0; i < voucherIds.length; i += 200) {
+    const idChunk = voucherIds.slice(i, i + 200);
+    let from = 0;
+    for (;;) {
+      const { data, error } = await sb
+        .from(table)
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .in("voucher_id", idChunk)
+        .range(from, from + PAGE - 1);
+      if (error) return { data: null, error };
+      const rows = (data ?? []) as Record<string, unknown>[];
+      out.push(...rows);
+      if (rows.length < PAGE) break;
+      from += PAGE;
+    }
+  }
+  return { data: out, error: null };
+}
+
 /** Upsert all vouchers (full desk snapshot). */
 export async function pushFeeVouchersToDb(
   vouchers: CollectionVoucher[],
@@ -422,16 +467,8 @@ export async function fetchFeeVouchersFromDb(): Promise<{
     { data: tenderRows, error: tErr },
     { data: metaRow, error: metaErr },
   ] = await Promise.all([
-    sb
-      .from("fee_desk_voucher_lines")
-      .select("*")
-      .eq("tenant_id", tenantId)
-      .in("voucher_id", ids),
-    sb
-      .from("fee_desk_voucher_tenders")
-      .select("*")
-      .eq("tenant_id", tenantId)
-      .in("voucher_id", ids),
+    fetchAllRows(sb, "fee_desk_voucher_lines", tenantId, ids),
+    fetchAllRows(sb, "fee_desk_voucher_tenders", tenantId, ids),
     sb
       .from("fee_desk_sync_meta")
       .select(FEE_DESK_META_SELECT)
