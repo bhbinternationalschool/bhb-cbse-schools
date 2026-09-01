@@ -5,6 +5,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import { DayClosePanel } from "@/components/fees/DayClosePanel";
 import {
   bankBalancePaise,
+  bankMovementExists,
   cashInHandPaise,
   deleteBankAccount,
   postBankMovement,
@@ -42,6 +43,7 @@ import {
   listLinkedVendorsForExpense,
   listRootExpenseCategories,
   nextExpenseVoucherNo,
+  resolveBankForPaymentMode,
 } from "@/lib/accountsLookups";
 import {
   isExpenseVoucherCancelled,
@@ -2170,10 +2172,56 @@ function StoreVendorDues() {
         setNotice(json.error || "Payment failed");
         return;
       }
+      // Mirror the payment into the DESK bank book.
+      //
+      // The store pays through inv_pay_vendor_bill, which writes the server
+      // book (Dr 2000 / Cr tender) and nothing else. The desk's own bank
+      // ledger never saw a store payment, so the Accounts dashboard's "Bank
+      // balances" counted fee receipts coming IN and not one rupee going OUT
+      // — 170 debits, zero credits, while the book carried 3.06 lakh of bank
+      // payments the desk had never heard of.
+      //
+      // Written here rather than in the RPC on purpose: a desk push deletes
+      // accounts_desk_bank_ledger rows whose ids it does not carry, so a row
+      // inserted server-side would be destroyed by the next browser sync.
+      //
+      // Never allowed to disturb the payment itself — that has already
+      // committed on the server, and a desk-side problem must not report a
+      // successful payment as failed.
+      let deskNote = "";
+      if (pay.mode !== "cash") {
+        try {
+          const source = json.paymentNo || `${pay.billId}:${amountPaise}`;
+          if (!bankMovementExists("inv_vendor_payment", source)) {
+            const bankId = resolveBankForPaymentMode(pay.mode as PaymentMode);
+            if (bankId) {
+              const moved = postBankMovement({
+                bankId,
+                date: pay.paidOn || undefined,
+                direction: "cr",
+                amountPaise,
+                mode: pay.mode as PaymentMode,
+                sourceType: "inv_vendor_payment",
+                sourceId: source,
+                narration: `Vendor payment · ${pay.billNo}`,
+                transactionRef: pay.reference.trim(),
+              });
+              if (!moved.ok) deskNote = ` · bank book not updated: ${moved.error}`;
+            } else {
+              deskNote =
+                ` · no bank is set up for ${pay.mode}, so the desk bank book was not updated`;
+            }
+          }
+        } catch {
+          deskNote = " · the desk bank book could not be updated";
+        }
+      }
+
       setNotice(
         `Paid ${formatInr(amountPaise)} against ${pay.billNo} — ` +
           `${formatInr(json.balancePaise ?? 0)} still outstanding` +
-          (json.ledgerVoucherNo ? ` · voucher ${json.ledgerVoucherNo}` : ""),
+          (json.ledgerVoucherNo ? ` · voucher ${json.ledgerVoucherNo}` : "") +
+          deskNote,
       );
       const vendorId = pay.vendorId;
       setPay(null);

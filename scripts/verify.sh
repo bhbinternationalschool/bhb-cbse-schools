@@ -93,6 +93,7 @@ SELFTESTS=(
   test:fee-student-search
   test:household-dues-ay
   test:refreshment-chart
+  test:vendor-payment-bank
   test:payment-link-amount
   test:sis-wire-payload
   test:print-palette
