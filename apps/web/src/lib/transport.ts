@@ -192,6 +192,15 @@ export type FleetVehicle = {
   type: VehicleType;
   fuelType: FuelType;
   fuelUnit: FuelUnit;
+  /**
+   * The second fuel a bi-fuel vehicle actually runs on.
+   *
+   * Four of this fleet are CNG with a petrol tank. One value could not say
+   * that, so they were recorded as whichever fuel someone thought of first,
+   * and a petrol fill on a CNG bus had nowhere to go. Empty for a
+   * single-fuel vehicle, which is most of them.
+   */
+  secondaryFuelType?: FuelType | "";
   tankCapacity: number;
   odometerKm: number;
   avgMileage: number;
@@ -535,6 +544,27 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
+/**
+ * The fuels a vehicle can be filled with, each with the unit it is sold in.
+ *
+ * One entry for a single-fuel vehicle, two for a bi-fuel one — and the units
+ * differ between them, which is the whole point: a CNG+petrol bus takes kg of
+ * CNG and litres of petrol, at different rates. Anything pricing a fill has
+ * to ask this rather than assume the vehicle has one rate.
+ */
+export function vehicleFuelOptions(
+  v: Pick<FleetVehicle, "fuelType" | "secondaryFuelType">,
+): { fuelType: FuelType; unit: FuelUnit }[] {
+  const out: { fuelType: FuelType; unit: FuelUnit }[] = [
+    { fuelType: v.fuelType, unit: fuelUnitFor(v.fuelType) },
+  ];
+  const second = v.secondaryFuelType || "";
+  if (second && second !== v.fuelType) {
+    out.push({ fuelType: second as FuelType, unit: fuelUnitFor(second as FuelType) });
+  }
+  return out;
+}
+
 function fuelUnitFor(ft: FuelType): FuelUnit {
   if (ft === "cng") return "kg";
   if (ft === "electric") return "kwh";
@@ -702,15 +732,22 @@ function normalizeAssignment(
   };
 }
 
-function normalizeVehicle(v: Partial<FleetVehicle>): FleetVehicle {
+export function normalizeVehicle(v: Partial<FleetVehicle>): FleetVehicle {
   const fuelType = (v.fuelType as FuelType) || "diesel";
+  // A secondary fuel that repeats the primary says nothing, so it is dropped.
+  const secondary = (v.secondaryFuelType as FuelType | "") || "";
   return {
     id: v.id ?? id("veh"),
     registrationNo: (v.registrationNo ?? "").trim().toUpperCase() || "TBD",
     name: v.name ?? v.registrationNo ?? "Bus",
     type: (v.type as VehicleType) || "bus",
     fuelType,
-    fuelUnit: v.fuelUnit || fuelUnitFor(fuelType),
+    // The unit is a FACT ABOUT THE FUEL, not a preference: CNG is sold by the
+    // kilogram, diesel and petrol by the litre, electricity by the kWh. A
+    // stored unit that contradicts its fuel is a data error — production had
+    // a CNG bus recorded in litres — so it is corrected rather than kept.
+    fuelUnit: fuelUnitFor(fuelType),
+    secondaryFuelType: secondary && secondary !== fuelType ? secondary : "",
     tankCapacity: Math.max(0, Number(v.tankCapacity) || 0),
     odometerKm: Math.max(0, Number(v.odometerKm) || 0),
     avgMileage: Math.max(0, Number(v.avgMileage) || 0),

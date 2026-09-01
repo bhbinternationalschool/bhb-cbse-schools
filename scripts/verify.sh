@@ -98,6 +98,7 @@ SELFTESTS=(
   test:daybook-voided
   test:controls-noise
   test:expense-spread
+  test:vehicle-fuel
   test:payment-link-amount
   test:sis-wire-payload
   test:print-palette

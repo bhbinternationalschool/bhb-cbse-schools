@@ -116,6 +116,7 @@
     "test:daybook-voided": "npx tsx src/lib/dayBookVoided.selftest.ts",
     "test:controls-noise": "npx tsx src/lib/ledger/controlsNoise.selftest.ts",
     "test:expense-spread": "npx tsx src/lib/expenseSpread.selftest.ts",
+    "test:vehicle-fuel": "npx tsx src/lib/vehicleFuel.selftest.ts",
     "test:payment-link-amount": "npx tsx src/lib/paymentLinkAmount.selftest.ts",
     "test:sis-wire-payload": "npx tsx src/lib/sisWirePayload.selftest.ts",
     "test:print-palette": "npx tsx src/lib/printPalette.selftest.ts",
