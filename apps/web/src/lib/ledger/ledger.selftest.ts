@@ -969,14 +969,19 @@ function ln(o: Partial<AnomalyFacts["lines"][number]> & { voucherId: string }) {
     facts({
       balances: [{ code: "1000", name: "Cash", kind: "asset", isCash: true, isBank: false, closingPaise: -1_00 }],
       reopenedPeriods: [{ period: "2026-07", status: "open" }, { period: "2026-06", status: "locked" }],
-      vouchers: [v({ id: "old", date: "2026-01-01", createdAt: "2026-08-01T00:00:00Z" })],
+      // Dated inside the LOCKED month, written two months later: backdating
+      // is only reported when the period it lands in is actually shut. Into
+      // an open month it is ordinary late entry, which is what a school
+      // keying this year's history into a mid-year system does to almost
+      // every voucher — 648 of 721 on production, burying everything else.
+      vouchers: [v({ id: "old", date: "2026-06-01", createdAt: "2026-08-01T00:00:00Z" })],
       lines: [ln({ voucherId: "old", debitPaise: 100 })],
     }),
   );
   assert.equal(all[0]!.severity, "critical", "the most serious finding sorts first");
   assert.ok(all.some((a) => a.code === "period_reopened"), "a relocked month is surfaced");
   assert.ok(!all.some((a) => a.code === "period_reopened" && a.references[0] === "2026-06"), "a still-locked month is not");
-  assert.ok(all.some((a) => a.code === "backdated_entry"), "an entry written months later is noted");
+  assert.ok(all.some((a) => a.code === "backdated_entry"), "an entry written months later INTO A SHUT MONTH is noted");
 
   const s = summariseAnomalies(all);
   assert.ok(s.critical >= 1);
