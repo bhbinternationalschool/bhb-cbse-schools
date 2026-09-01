@@ -1032,6 +1032,54 @@ export function QuickExpensePanel({
 
   const spreadTotalPaise = expenseTotalPaise(amountPaise, selectedDates);
 
+  /**
+   * The calendar, month by month.
+   *
+   * A whole month is the common case — milk for September — and a range that
+   * crosses a month boundary was otherwise an unbroken run of numbers with
+   * two 1sts in it and nothing to say which was which. Each month gets its
+   * own caption and its own leading blanks, so it reads like a calendar.
+   */
+  const months = useMemo(() => {
+    if (!plan || !plan.ok) return [];
+    const out: { key: string; label: string; days: typeof plan.days }[] = [];
+    for (const d of plan.days) {
+      const key = d.date.slice(0, 7);
+      const last = out[out.length - 1];
+      if (last && last.key === key) last.days.push(d);
+      else
+        out.push({
+          key,
+          label: new Date(`${d.date}T12:00:00`).toLocaleDateString("en-IN", {
+            month: "long",
+            year: "numeric",
+          }),
+          days: [d],
+        });
+    }
+    return out;
+  }, [plan]);
+
+  /** Set the range to one whole calendar month, from its own month input. */
+  const pickWholeMonth = (yyyymm: string) => {
+    if (!/^\d{4}-\d{2}$/.test(yyyymm)) return;
+    const [y, m] = yyyymm.split("-").map(Number);
+    // Day 0 of the NEXT month is the last day of this one, so February and
+    // leap years need no special case.
+    const lastDay = new Date(Date.UTC(y!, m!, 0)).getUTCDate();
+    setDate(`${yyyymm}-01`);
+    setToDate(`${yyyymm}-${String(lastDay).padStart(2, "0")}`);
+    setPicked(null);
+  };
+
+  /** Bulk helpers — a month of milk is 26 clicks otherwise. */
+  const selectAllWorking = () => setPicked(null);
+  const selectEveryDay = () => {
+    if (!plan || !plan.ok) return;
+    setPicked(new Set(plan.days.map((d) => d.date)));
+  };
+  const selectNone = () => setPicked(new Set());
+
   const toggleDay = (iso: string) => {
     if (!plan || !plan.ok) return;
     const base =
@@ -1159,7 +1207,12 @@ export function QuickExpensePanel({
           checked={spread}
           onChange={(e) => {
             setSpread(e.target.checked);
-            if (e.target.checked && toDate < date) setToDate(date);
+            // Default to the WHOLE month the date sits in. A month is the
+            // common case, and starting at today–today meant the month picker
+            // did nothing when the office chose the month it was already in —
+            // the input already read that month, so nothing changed and the
+            // range stayed one day.
+            if (e.target.checked) pickWholeMonth(date.slice(0, 7));
           }}
         />
         Bill a daily rate over a range — a week of milk in one go
@@ -1185,6 +1238,19 @@ export function QuickExpensePanel({
                   // The old picks belonged to the old range.
                   setPicked(null);
                 }}
+              />
+            </label>
+            {/* A whole month is the common case — milk for September — and
+                setting the 1st and the 30th by hand every time, remembering
+                which months have 30, is the sort of thing a computer should
+                do. */}
+            <label className="text-[11px] font-bold text-[var(--muted)]">
+              Or a whole month
+              <input
+                type="month"
+                className={FIELD}
+                value={date.slice(0, 7)}
+                onChange={(e) => pickWholeMonth(e.target.value)}
               />
             </label>
             <p className="flex-1 rounded-lg bg-[var(--surface-sunken)] px-3 py-1.5 text-[11px]">
@@ -1214,42 +1280,75 @@ export function QuickExpensePanel({
               simply not offered. */}
           {plan && plan.ok ? (
             <div className="rounded-xl border border-[var(--border)] p-2">
-              <div className="mb-1 grid grid-cols-7 gap-1 text-center text-[9px] font-bold uppercase text-[var(--muted)]">
-                {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d) => (
-                  <span key={d}>{d}</span>
-                ))}
+              <div className="mb-2 flex flex-wrap items-center gap-2 text-[10px]">
+                <span className="font-bold text-[var(--muted)]">Tick</span>
+                <button
+                  type="button"
+                  className="rounded-lg bg-[var(--surface-sunken)] px-2 py-1 font-semibold"
+                  onClick={selectAllWorking}
+                >
+                  Working days
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg bg-[var(--surface-sunken)] px-2 py-1 font-semibold"
+                  onClick={selectEveryDay}
+                >
+                  Every day
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg bg-[var(--surface-sunken)] px-2 py-1 font-semibold"
+                  onClick={selectNone}
+                >
+                  None
+                </button>
               </div>
-              <div className="grid grid-cols-7 gap-1">
-                {/* Blank cells so the first day sits under its weekday. */}
-                {Array.from({ length: plan.days[0]?.weekday ?? 0 }).map((_, i) => (
-                  <span key={`pad-${i}`} />
-                ))}
-                {plan.days.map((d) => {
-                  const on = selectedDates.includes(d.date);
-                  const holiday = d.holidayReason !== null;
-                  return (
-                    <button
-                      key={d.date}
-                      type="button"
-                      title={
-                        holiday
-                          ? `${d.date} — ${d.holidayReason} (tick it if the school worked)`
-                          : d.date
-                      }
-                      onClick={() => toggleDay(d.date)}
-                      className={`rounded-lg px-1 py-1.5 text-[11px] font-bold transition ${
-                        on
-                          ? "bg-[var(--brand-deep)] text-white"
-                          : holiday
-                            ? "bg-[var(--warning-soft)] text-[var(--warning)] line-through"
-                            : "bg-[var(--surface-sunken)] text-[var(--muted)]"
-                      }`}
-                    >
-                      {Number(d.date.slice(8, 10))}
-                    </button>
-                  );
-                })}
-              </div>
+
+              {months.map((month) => (
+                <div key={month.key} className="mb-2 last:mb-0">
+                  <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-[var(--brand-deep)]">
+                    {month.label}
+                  </p>
+                  <div className="mb-1 grid grid-cols-7 gap-1 text-center text-[9px] font-bold uppercase text-[var(--muted)]">
+                    {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d) => (
+                      <span key={d}>{d}</span>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-7 gap-1">
+                    {/* Blanks so each month's first day sits under its weekday. */}
+                    {Array.from({ length: month.days[0]?.weekday ?? 0 }).map((_, i) => (
+                      <span key={`pad-${month.key}-${i}`} />
+                    ))}
+                    {month.days.map((d) => {
+                      const on = selectedDates.includes(d.date);
+                      const holiday = d.holidayReason !== null;
+                      return (
+                        <button
+                          key={d.date}
+                          type="button"
+                          title={
+                            holiday
+                              ? `${d.date} — ${d.holidayReason} (tick it if the school worked)`
+                              : d.date
+                          }
+                          onClick={() => toggleDay(d.date)}
+                          className={`rounded-lg px-1 py-1.5 text-[11px] font-bold transition ${
+                            on
+                              ? "bg-[var(--brand-deep)] text-white"
+                              : holiday
+                                ? "bg-[var(--warning-soft)] text-[var(--warning)] line-through"
+                                : "bg-[var(--surface-sunken)] text-[var(--muted)]"
+                          }`}
+                        >
+                          {Number(d.date.slice(8, 10))}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+
               <p className="mt-1 text-[10px] text-[var(--muted)]">
                 Struck days are school holidays and are not billed — click one
                 to include it if the school worked that day.
