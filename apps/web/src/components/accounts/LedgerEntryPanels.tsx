@@ -181,16 +181,6 @@ const PRESETS: {
   lines: () => EntryLine[];
 }[] = [
   {
-    id: "expense",
-    label: "Record an expense",
-    kind: "payment",
-    hint: "Debit the expense head, credit how it was paid",
-    lines: () => [
-      { accountCode: "", debit: "", credit: "", bankId: "" },
-      { accountCode: "1000", debit: "", credit: "", bankId: "" },
-    ],
-  },
-  {
     id: "receipt",
     label: "Record money in",
     kind: "receipt",
@@ -414,10 +404,12 @@ export function VoucherEntryPanel({
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h4 className="flex items-center gap-1.5 text-sm font-bold text-[var(--brand-deep)]">
-            <FileText className="size-4" aria-hidden /> New voucher
+            <FileText className="size-4" aria-hidden /> Internal accounting
           </h4>
           <p className="text-[11px] text-[var(--muted)]">
-            Posts straight into the server book. Nothing posts until debits
+            Transfers, adjustments and corrections — the entries that are not
+            day-to-day spending. For expenses use the two forms above, which
+            write the debits and credits for you. Nothing posts until debits
             equal credits, and a posted voucher can only be reversed, never
             edited.
           </p>
@@ -2039,11 +2031,26 @@ export function MultiLineExpensePanel({
 }) {
   const accounts = useChart();
   const [centres, setCentres] = useState<{ code: string; name: string }[]>([]);
+  /**
+   * The tag each head was last booked to.
+   *
+   * Fuel is always Transport, the printer is always School — typing it every
+   * time is how tags stop being used at all. Read from the book rather than
+   * remembered in this browser, so it is the same on whichever machine the
+   * office is sitting at, and it is a SUGGESTION: it fills an untouched row
+   * and never overrides a choice already made.
+   */
+  const [recentTags, setRecentTags] = useState<Record<string, string>>({});
   useEffect(() => {
     void ledgerApi<{ centres: { code: string; name: string }[] }>({
       action: "cost-centres",
     }).then((r) => {
       if (r.ok && r.centres) setCentres(r.centres);
+    });
+    void ledgerApi<{ tags: Record<string, string> }>({
+      action: "recent-tags",
+    }).then((r) => {
+      if (r.ok && r.tags) setRecentTags(r.tags);
     });
   }, []);
 
@@ -2056,6 +2063,8 @@ export function MultiLineExpensePanel({
     description: string;
     amount: string;
     tax: string;
+    /** True once a person picks the tag, so a suggestion never overwrites it. */
+    tagTouched: boolean;
   };
   const blankRow = (): Row => ({
     id: `r${Math.random().toString(36).slice(2, 8)}`,
@@ -2066,6 +2075,7 @@ export function MultiLineExpensePanel({
     description: "",
     amount: "",
     tax: "",
+    tagTouched: false,
   });
 
   const [rows, setRows] = useState<Row[]>([blankRow()]);
@@ -2098,6 +2108,20 @@ export function MultiLineExpensePanel({
 
   const setRow = (id: string, patch: Partial<Row>) =>
     setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+
+  /**
+   * The tag this head was last booked to, offered only into an untouched row.
+   * Returns nothing when the row already has a tag someone chose, when the
+   * head has no history, or when the remembered centre no longer exists.
+   */
+  function suggestTag(row: Row, head: string, subHead?: string): Partial<Row> {
+    if (row.tagTouched) return {};
+    const code = subHead || (accounts.find((a) => a.code === head)?.hasChildren ? "" : head);
+    if (!code) return {};
+    const remembered = recentTags[code];
+    if (!remembered || !centres.some((c) => c.code === remembered)) return {};
+    return { tag: remembered };
+  }
 
   const draftLines = useMemo(
     () =>
@@ -2253,7 +2277,13 @@ export function MultiLineExpensePanel({
                   <select
                     className={FIELD}
                     value={r.head}
-                    onChange={(e) => setRow(r.id, { head: e.target.value, subHead: "" })}
+                    onChange={(e) =>
+                      setRow(r.id, {
+                        head: e.target.value,
+                        subHead: "",
+                        ...suggestTag(r, e.target.value),
+                      })
+                    }
                   >
                     <option value="">Choose…</option>
                     {heads.map((h) => (
@@ -2269,7 +2299,12 @@ export function MultiLineExpensePanel({
                     <select
                       className={FIELD}
                       value={r.subHead}
-                      onChange={(e) => setRow(r.id, { subHead: e.target.value })}
+                      onChange={(e) =>
+                        setRow(r.id, {
+                          subHead: e.target.value,
+                          ...suggestTag(r, r.head, e.target.value),
+                        })
+                      }
                     >
                       <option value="">Choose…</option>
                       {subs.map((sh) => (
@@ -2294,7 +2329,9 @@ export function MultiLineExpensePanel({
                   <select
                     className={FIELD}
                     value={r.tag}
-                    onChange={(e) => setRow(r.id, { tag: e.target.value })}
+                    onChange={(e) =>
+                      setRow(r.id, { tag: e.target.value, tagTouched: true })
+                    }
                   >
                     <option value="">No tag</option>
                     {centres.map((c) => (

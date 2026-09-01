@@ -356,6 +356,59 @@ export async function syncDeskChartToLedger(): Promise<{
   };
 }
 
+/**
+ * The tag each expense head was last posted with.
+ *
+ * Read from what was actually booked rather than remembered somewhere: the
+ * cost centre is already on every line, so history IS the memory. Nothing new
+ * to store, nothing to fall out of step, and it works on whichever machine
+ * the office happens to be sitting at — a preference saved in one browser
+ * would not.
+ *
+ * Most recent wins. A head that has moved from one centre to another should
+ * suggest where it went, not where it started.
+ */
+export async function ledgerRecentTagsByAccount(): Promise<
+  Record<string, string>
+> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return {};
+  const { sb, tenantId } = ctx;
+
+  const { data, error } = await sb
+    .from("ledger_lines")
+    .select(
+      "cost_centre_id, ledger_accounts!inner(code), ledger_cost_centres!inner(code), ledger_vouchers!inner(voucher_date, created_at)",
+    )
+    .eq("tenant_id", tenantId)
+    .not("cost_centre_id", "is", null)
+    .order("created_at", { referencedTable: "ledger_vouchers", ascending: false })
+    .limit(2000);
+  if (error) {
+    // An empty result is the normal state until something is tagged, so a
+    // silent {} here would make a broken query look like a school that has
+    // never used cost centres. Say which it is.
+    console.error(`[ledger] recent-tags query failed: ${error.message}`);
+    return {};
+  }
+  if (!data) return {};
+
+  const out: Record<string, string> = {};
+  for (const raw of data) {
+    const row = raw as unknown as {
+      ledger_accounts: { code: string } | null;
+      ledger_cost_centres: { code: string } | null;
+    };
+    const account = row.ledger_accounts?.code;
+    const centre = row.ledger_cost_centres?.code;
+    if (!account || !centre) continue;
+    // The rows arrive newest first, so the first sighting of an account is
+    // its latest tag; later ones are older and must not overwrite it.
+    if (out[account] === undefined) out[account] = centre;
+  }
+  return out;
+}
+
 export async function ensureLedgerMasters(input?: {
   fyCode?: string;
   fyStartDate?: string;

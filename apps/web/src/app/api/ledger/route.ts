@@ -21,6 +21,7 @@ import {
   ledgerCloseFiscalYear,
   ledgerFindVoucher,
   ledgerListAccounts,
+  ledgerRecentTagsByAccount,
   ledgerSaveExpenseHead,
   ledgerRemoveExpenseHead,
   ledgerListCostCentres,
@@ -150,6 +151,7 @@ type PostBody =
   | { action: "save-expense-head"; code?: string; name: string; parentCode?: string }
   | { action: "remove-expense-head"; code: string }
   | { action: "cost-centres" }
+  | { action: "recent-tags" }
   | { action: "save-cost-centre"; code?: string; name: string }
   | { action: "remove-cost-centre"; code: string }
   | { action: "spend-by-centre"; fromDate: string; toDate: string }
@@ -209,6 +211,7 @@ export async function POST(req: Request) {
     "find-voucher",
     "fee-advances",
     "cost-centres",
+    "recent-tags",
     "spend-by-centre",
   ]);
 
@@ -379,6 +382,11 @@ export async function POST(req: Request) {
         createdBy: actor,
       });
       return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    case "recent-tags": {
+      // Which cost centre each head was last booked to, so the entry form can
+      // suggest it. Read-only: it only reports what is already in the book.
+      return NextResponse.json({ ok: true, tags: await ledgerRecentTagsByAccount() });
     }
     case "accounts": {
       // The chart, for entry forms — postable accounts only.
