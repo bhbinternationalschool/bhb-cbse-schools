@@ -162,7 +162,71 @@ export async function ledgerAnomalies(input: {
     ...DEFAULT_ANOMALY_THRESHOLDS,
     ...(input.thresholds ?? {}),
   });
-  return { ok: true, anomalies, summary: summariseAnomalies(anomalies) };
+  const all = [...(await feeReceiptsWithoutLines()), ...anomalies];
+  return { ok: true, anomalies: all, summary: summariseAnomalies(all) };
+}
+
+/**
+ * Live fee receipts that hold money but name nothing.
+ *
+ * A receipt clears its dues THROUGH its lines, so one without them takes the
+ * money and leaves every month it paid still reading unpaid — while showing
+ * the family a guardian name and an amount and nothing else. On 2026-09-01 a
+ * single desk push left 134 receipts in exactly that state, worth 5,80,543,
+ * and it was noticed only because a parent's fee page looked wrong.
+ *
+ * The push that caused it is fixed. This is here so that if the state ever
+ * arises again — by that route or another — it is reported the same day
+ * rather than found weeks later. It reads the fee desk directly: the ledger
+ * cannot see it, because the ledger voucher for such a receipt is perfectly
+ * balanced and says nothing about which due was paid.
+ */
+async function feeReceiptsWithoutLines(): Promise<Anomaly[]> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return [];
+  const { sb, tenantId } = ctx;
+
+  const [{ data: vouchers, error: vErr }, { data: lines, error: lErr }] =
+    await Promise.all([
+      sb
+        .from("fee_desk_vouchers")
+        .select("id, receipt_no, total_paise")
+        .eq("tenant_id", tenantId)
+        .is("voided_at", null),
+      sb.from("fee_desk_voucher_lines").select("voucher_id").eq("tenant_id", tenantId),
+    ]);
+  if (vErr || lErr || !vouchers) return [];
+
+  const withLines = new Set(
+    (lines ?? []).map((l) => String((l as { voucher_id: string }).voucher_id)),
+  );
+  const orphans = (vouchers as { id: string; receipt_no: string; total_paise: number }[])
+    .filter((v) => !withLines.has(v.id));
+  if (orphans.length === 0) return [];
+
+  const amountPaise = orphans.reduce((n, v) => n + Number(v.total_paise || 0), 0);
+  const receipts = orphans
+    .map((v) => v.receipt_no)
+    .sort()
+    .slice(0, 12);
+  return [
+    {
+      code: "fee_receipt_without_lines",
+      severity: "critical",
+      title: "Fee receipts that name no student, head or month",
+      detail:
+        `${orphans.length} live receipt(s) worth ${rupeesFromPaise(amountPaise)} hold money but have no lines. ` +
+        "A receipt clears its dues through its lines, so every month these paid still reads unpaid.",
+      references: receipts,
+      amountPaise,
+      suggestedAction:
+        "Do not re-collect from these families until the lines are restored — the money was taken.",
+    },
+  ];
+}
+
+function rupeesFromPaise(paise: number): string {
+  return `₹${(paise / 100).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 }
 
 /* ─── Ageing ───────────────────────────────────────────────── */
