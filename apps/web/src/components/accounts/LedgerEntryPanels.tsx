@@ -21,7 +21,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, FileText, Plus, Trash2, Undo2 } from "lucide-react";
 import { formatInr } from "@/lib/fees";
-import { spreadExpenseOverWorkingDays } from "@/lib/expenseSpread";
+import {
+  enumerateExpenseDays,
+  expenseTotalPaise,
+} from "@/lib/expenseSpread";
 import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
 import { isPublishedHoliday } from "@/lib/foundationMasters";
 import {
@@ -955,9 +958,15 @@ export function QuickExpensePanel({
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
-  /** Spread one amount across the working days between `date` and `toDate`. */
+  /** Bill a daily rate across the days picked between `date` and `toDate`. */
   const [spread, setSpread] = useState(false);
   const [toDate, setToDate] = useState(todayIso());
+  /**
+   * The days actually ticked. Null means "not touched yet", so the plan's
+   * own default (every working day) stands; once the office clicks a day this
+   * holds their choice and is not silently overwritten.
+   */
+  const [picked, setPicked] = useState<Set<string> | null>(null);
 
   // Heads = expense categories; a category with sub-heads opens the second
   // select, one without posts directly.
@@ -1005,20 +1014,40 @@ export function QuickExpensePanel({
     // The holiday list is per academic year, and the library default is a
     // past one — ask about the running session.
     const ay = currentAcademicYearCode(masters);
-    return spreadExpenseOverWorkingDays({
-      totalPaise: amountPaise,
+    return enumerateExpenseDays({
       from: date,
       to: toDate,
       holidayReason: (d: string) =>
         isPublishedHoliday(masters, d, ay)?.title ?? null,
     });
-  }, [spread, amountPaise, date, toDate]);
+  }, [spread, date, toDate]);
+
+  // Which days are billed: the office's picks once they have clicked, the
+  // working days until then.
+  const selectedDates = useMemo(() => {
+    if (!plan || !plan.ok) return [] as string[];
+    if (picked) return plan.days.filter((d) => picked.has(d.date)).map((d) => d.date);
+    return plan.days.filter((d) => d.selectedByDefault).map((d) => d.date);
+  }, [plan, picked]);
+
+  const spreadTotalPaise = expenseTotalPaise(amountPaise, selectedDates);
+
+  const toggleDay = (iso: string) => {
+    if (!plan || !plan.ok) return;
+    const base =
+      picked ??
+      new Set(plan.days.filter((d) => d.selectedByDefault).map((d) => d.date));
+    const next = new Set(base);
+    if (next.has(iso)) next.delete(iso);
+    else next.add(iso);
+    setPicked(next);
+  };
 
   const canPost =
     !!chosenHead &&
     amountPaise > 0 &&
     !!date &&
-    (!spread || (plan?.ok ?? false)) &&
+    (!spread || ((plan?.ok ?? false) && selectedDates.length > 0)) &&
     (!needsBank || (!!bankId && ref.trim() !== ""));
 
   async function post() {
@@ -1041,7 +1070,7 @@ export function QuickExpensePanel({
       // does not silently take the rest of the week with it.
       const days =
         plan && plan.ok
-          ? plan.days
+          ? selectedDates.map((d) => ({ date: d, amountPaise }))
           : [{ date, amountPaise }];
 
       let posted = 0;
@@ -1091,9 +1120,7 @@ export function QuickExpensePanel({
         error: firstError,
       };
       if (res.ok) {
-        const totalPosted = days
-          .slice(0, posted)
-          .reduce((n: number, d: { amountPaise: number }) => n + d.amountPaise, 0);
+        const totalPosted = amountPaise * posted;
         setNotice({
           tone: "ok",
           text:
@@ -1135,56 +1162,100 @@ export function QuickExpensePanel({
             if (e.target.checked && toDate < date) setToDate(date);
           }}
         />
-        Spread over a date range — a week of milk in one go
+        Bill a daily rate over a range — a week of milk in one go
         {spread ? (
           <span className="font-normal text-[var(--muted)]">
-            · the amount is the total for the whole period
+            · the amount above is the rate for ONE day
           </span>
         ) : null}
       </label>
 
       {spread ? (
-        <div className="mt-2 flex flex-wrap items-end gap-2">
-          <label className="text-[11px] font-bold text-[var(--muted)]">
-            Up to
-            <input
-              type="date"
-              className={FIELD}
-              value={toDate}
-              min={date}
-              onChange={(e) => setToDate(e.target.value)}
-            />
-          </label>
-          {/* Show what is about to be written, including the days it is NOT
-              writing and why — that is the whole value of checking holidays. */}
-          <p className="flex-1 rounded-lg bg-[var(--surface-sunken)] px-3 py-1.5 text-[11px]">
-            {!plan ? null : !plan.ok ? (
-              <span className="font-semibold text-[var(--warning)]">
-                {plan.error}
-              </span>
-            ) : (
-              <span>
-                <span className="font-bold text-[var(--brand-deep)]">
-                  {plan.days.length} voucher(s) · {formatInr(plan.perDayPaise)} a
-                  day
+        <div className="mt-2 space-y-2">
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="text-[11px] font-bold text-[var(--muted)]">
+              Up to
+              <input
+                type="date"
+                className={FIELD}
+                value={toDate}
+                min={date}
+                onChange={(e) => {
+                  setToDate(e.target.value);
+                  // The old picks belonged to the old range.
+                  setPicked(null);
+                }}
+              />
+            </label>
+            <p className="flex-1 rounded-lg bg-[var(--surface-sunken)] px-3 py-1.5 text-[11px]">
+              {!plan ? null : !plan.ok ? (
+                <span className="font-semibold text-[var(--warning)]">
+                  {plan.error}
                 </span>
-                {plan.skipped.length > 0 ? (
-                  <span className="text-[var(--muted)]">
-                    {" "}
-                    · leaving out{" "}
-                    {plan.skipped
-                      .map((sk) => `${sk.date} (${sk.reason})`)
-                      .join(", ")}
-                  </span>
-                ) : (
-                  <span className="text-[var(--muted)]">
-                    {" "}
-                    · no school holidays in this range
-                  </span>
-                )}
-              </span>
-            )}
-          </p>
+              ) : (
+                <span className="font-bold text-[var(--brand-deep)]">
+                  {selectedDates.length} day(s) × {formatInr(amountPaise)} ={" "}
+                  {formatInr(spreadTotalPaise)}
+                  {plan.holidayCount > 0 ? (
+                    <span className="font-normal text-[var(--muted)]">
+                      {" "}
+                      · {plan.holidayCount} holiday(s) in range, left out
+                    </span>
+                  ) : null}
+                </span>
+              )}
+            </p>
+          </div>
+
+          {/* Click the days.
+              Holidays are marked and unticked but NOT locked: the school opens
+              the odd Sunday, and locking would mean editing the school
+              calendar just to book a day of milk. Days outside the range are
+              simply not offered. */}
+          {plan && plan.ok ? (
+            <div className="rounded-xl border border-[var(--border)] p-2">
+              <div className="mb-1 grid grid-cols-7 gap-1 text-center text-[9px] font-bold uppercase text-[var(--muted)]">
+                {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d) => (
+                  <span key={d}>{d}</span>
+                ))}
+              </div>
+              <div className="grid grid-cols-7 gap-1">
+                {/* Blank cells so the first day sits under its weekday. */}
+                {Array.from({ length: plan.days[0]?.weekday ?? 0 }).map((_, i) => (
+                  <span key={`pad-${i}`} />
+                ))}
+                {plan.days.map((d) => {
+                  const on = selectedDates.includes(d.date);
+                  const holiday = d.holidayReason !== null;
+                  return (
+                    <button
+                      key={d.date}
+                      type="button"
+                      title={
+                        holiday
+                          ? `${d.date} — ${d.holidayReason} (tick it if the school worked)`
+                          : d.date
+                      }
+                      onClick={() => toggleDay(d.date)}
+                      className={`rounded-lg px-1 py-1.5 text-[11px] font-bold transition ${
+                        on
+                          ? "bg-[var(--brand-deep)] text-white"
+                          : holiday
+                            ? "bg-[var(--warning-soft)] text-[var(--warning)] line-through"
+                            : "bg-[var(--surface-sunken)] text-[var(--muted)]"
+                      }`}
+                    >
+                      {Number(d.date.slice(8, 10))}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-1 text-[10px] text-[var(--muted)]">
+                Struck days are school holidays and are not billed — click one
+                to include it if the school worked that day.
+              </p>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -1248,7 +1319,7 @@ export function QuickExpensePanel({
           </select>
         </label>
         <label className="text-[11px] font-bold text-[var(--muted)]">
-          Amount (₹)
+          {spread ? "Rate per day (₹)" : "Amount (₹)"}
           <input
             className={FIELD}
             style={{ width: 110 }}

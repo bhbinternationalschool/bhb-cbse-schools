@@ -1,113 +1,98 @@
 /**
- * Self-test: spreading one expense across the working days in a range.
+ * Self-test: the days a repeating expense lands on.
  *
- * The office books a week of milk in one go. The parts must add back to
- * exactly the amount entered — a books figure that does not tie to the bill
- * is worse than an uneven day — and holidays must come out.
+ * A daily rate times the days chosen — the office knows what a day of milk
+ * costs, and multiplying cannot drift the way dividing a total does.
+ * Holidays are MARKED, not forbidden: the school opens the odd Sunday, and
+ * locking the day would mean editing the school calendar to book milk.
  */
 
 import assert from "node:assert/strict";
 
-import { spreadExpenseOverWorkingDays, MAX_SPREAD_DAYS } from "./expenseSpread";
+import {
+  enumerateExpenseDays,
+  expenseTotalPaise,
+  weekdayOf,
+  MAX_SPREAD_DAYS,
+} from "./expenseSpread";
 
 console.log("expenseSpread.selftest.ts");
 
-const noHolidays = () => null;
-/** Sunday, as the school's weekly rule has it. */
-const sundays = (d: string) =>
-  new Date(`${d}T12:00:00`).getDay() === 0 ? "Sunday Holiday" : null;
+const none = () => null;
+const sundays = (d: string) => (weekdayOf(d) === 0 ? "Sunday Holiday" : null);
 
-const ok = (r: ReturnType<typeof spreadExpenseOverWorkingDays>) => {
-  assert.ok(r.ok, "ok" in r && !r.ok ? r.error : "expected ok");
+const ok = (r: ReturnType<typeof enumerateExpenseDays>) => {
+  assert.ok(r.ok, r.ok ? "" : r.error);
   return r as Extract<typeof r, { ok: true }>;
 };
 
-/* An even split. */
+/* Every day in the range is offered, in order, once. */
 {
-  const r = ok(spreadExpenseOverWorkingDays({
-    totalPaise: 700_00, from: "2026-09-07", to: "2026-09-11", holidayReason: noHolidays,
-  }));
-  assert.equal(r.days.length, 5, "Mon–Fri is five days");
-  assert.ok(r.days.every((d) => d.amountPaise === 140_00), "140 each");
-  assert.equal(r.totalPaise, 700_00, "and they add back to the total");
-}
-
-/* An amount that does not divide: the parts must STILL add to the total. */
-{
-  const r = ok(spreadExpenseOverWorkingDays({
-    totalPaise: 1000_00, from: "2026-09-07", to: "2026-09-12", holidayReason: noHolidays,
-  }));
-  assert.equal(r.days.length, 6);
-  assert.equal(
-    r.days.reduce((n, d) => n + d.amountPaise, 0),
-    1000_00,
-    "1000 over 6 days ties exactly — no paise lost to rounding",
+  const r = ok(enumerateExpenseDays({ from: "2026-08-30", to: "2026-09-05", holidayReason: none }));
+  assert.deepEqual(
+    r.days.map((d) => d.date),
+    ["2026-08-30","2026-08-31","2026-09-01","2026-09-02","2026-09-03","2026-09-04","2026-09-05"],
+    "the month boundary is walked exactly once",
   );
-  assert.equal(r.perDayPaise, 16666, "the even share is 166.66");
-  assert.equal(r.days[0]!.amountPaise, 16667, "the earliest day carries the extra paisa");
-  assert.equal(r.days[5]!.amountPaise, 16666, "the last day does not");
-  const distinct = new Set(r.days.map((d) => d.amountPaise));
-  assert.equal(distinct.size, 2, "at most a paisa apart, never a rupee");
+  assert.equal(r.workingCount, 7);
+  assert.equal(r.holidayCount, 0);
 }
 
-/* Holidays come out, and are reported rather than silently dropped. */
+/* A holiday is marked and unticked — but still present, so it can be ticked. */
 {
-  const r = ok(spreadExpenseOverWorkingDays({
-    totalPaise: 600_00, from: "2026-09-06", to: "2026-09-12", // Sun..Sat
-    holidayReason: sundays,
-  }));
-  assert.equal(r.days.length, 6, "the Sunday is not billed");
-  assert.deepEqual(r.skipped.map((s) => s.date), ["2026-09-06"], "and is listed");
-  assert.equal(r.skipped[0]!.reason, "Sunday Holiday", "with the reason to show the office");
-  assert.ok(!r.days.some((d) => d.date === "2026-09-06"), "no voucher lands on it");
-  assert.equal(r.totalPaise, 600_00, "the whole amount still lands, over fewer days");
+  const r = ok(enumerateExpenseDays({ from: "2026-08-30", to: "2026-09-05", holidayReason: sundays }));
+  const sun = r.days.find((d) => d.date === "2026-08-30")!;
+  assert.equal(sun.holidayReason, "Sunday Holiday", "named, so the office sees why");
+  assert.equal(sun.selectedByDefault, false, "not billed unless someone says so");
+  assert.ok(
+    r.days.some((d) => d.date === "2026-08-30"),
+    "the day is STILL OFFERED — the school opens the odd Sunday and must be able to bill it",
+  );
+  assert.equal(r.workingCount, 6);
+  assert.equal(r.holidayCount, 1);
+}
+
+/* Weekday is carried so a calendar can lay the month out. */
+{
+  const r = ok(enumerateExpenseDays({ from: "2026-08-30", to: "2026-08-31", holidayReason: none }));
+  assert.equal(r.days[0]!.weekday, 0, "30 Aug 2026 is a Sunday");
+  assert.equal(r.days[1]!.weekday, 1, "31 Aug 2026 is a Monday");
+}
+
+/* Rate times days — no division, so nothing to round. */
+{
+  assert.equal(expenseTotalPaise(200_00, ["a", "b", "c"]), 600_00, "rate times three days");
+  assert.equal(expenseTotalPaise(16667, ["a", "b", "c"]), 50001, "an odd rate stays exact");
+  assert.equal(expenseTotalPaise(200_00, []), 0, "no days chosen is no money");
+  assert.equal(expenseTotalPaise(0, ["a"]), 0, "no rate is no money");
+  assert.equal(expenseTotalPaise(-5, ["a"]), 0, "a negative rate books nothing");
+}
+
+/* Refusals say what to fix rather than guessing. */
+{
+  const bad = (r: ReturnType<typeof enumerateExpenseDays>) => {
+    assert.equal(r.ok, false);
+    return (r as Extract<typeof r, { ok: false }>).error;
+  };
+  assert.match(bad(enumerateExpenseDays({ from: "2026-09-11", to: "2026-09-07", holidayReason: none })), /end date is before/);
+  assert.match(bad(enumerateExpenseDays({ from: "", to: "2026-09-07", holidayReason: none })), /Pick both dates/);
+  assert.match(
+    bad(enumerateExpenseDays({ from: "2026-04-01", to: "2027-03-31", holidayReason: none })),
+    new RegExp(`longer than ${MAX_SPREAD_DAYS} days`),
+  );
 }
 
 /* A single day is a valid range. */
 {
-  const r = ok(spreadExpenseOverWorkingDays({
-    totalPaise: 250_00, from: "2026-09-07", to: "2026-09-07", holidayReason: noHolidays,
-  }));
-  assert.deepEqual(r.days, [{ date: "2026-09-07", amountPaise: 250_00 }]);
+  const r = ok(enumerateExpenseDays({ from: "2026-09-07", to: "2026-09-07", holidayReason: none }));
+  assert.equal(r.days.length, 1);
 }
 
-/* Refusals — each says what to fix rather than booking something wrong. */
+/* Every day a holiday is allowed — the office may still tick one. */
 {
-  const bad = (r: ReturnType<typeof spreadExpenseOverWorkingDays>) => {
-    assert.equal(r.ok, false);
-    return (r as Extract<typeof r, { ok: false }>).error;
-  };
-  assert.match(bad(spreadExpenseOverWorkingDays({
-    totalPaise: 0, from: "2026-09-07", to: "2026-09-11", holidayReason: noHolidays,
-  })), /greater than zero/);
-
-  assert.match(bad(spreadExpenseOverWorkingDays({
-    totalPaise: 100, from: "2026-09-11", to: "2026-09-07", holidayReason: noHolidays,
-  })), /end date is before/);
-
-  assert.match(bad(spreadExpenseOverWorkingDays({
-    totalPaise: 100, from: "2026-09-06", to: "2026-09-06", holidayReason: sundays,
-  })), /Every day in that range is a holiday/);
-
-  assert.match(bad(spreadExpenseOverWorkingDays({
-    totalPaise: 100, from: "2026-04-01", to: "2027-03-31", holidayReason: noHolidays,
-  })), new RegExp(`longer than ${MAX_SPREAD_DAYS} days`));
-
-  assert.match(bad(spreadExpenseOverWorkingDays({
-    totalPaise: 100, from: "", to: "2026-09-11", holidayReason: noHolidays,
-  })), /Pick both dates/);
+  const r = ok(enumerateExpenseDays({ from: "2026-08-30", to: "2026-08-30", holidayReason: sundays }));
+  assert.equal(r.workingCount, 0, "nothing is ticked for them");
+  assert.equal(r.days.length, 1, "but the day is offered rather than the range refused");
 }
 
-/* Crossing a month and a DST-free boundary must not lose or repeat a day. */
-{
-  const r = ok(spreadExpenseOverWorkingDays({
-    totalPaise: 3100_00, from: "2026-08-30", to: "2026-09-02", holidayReason: noHolidays,
-  }));
-  assert.deepEqual(
-    r.days.map((d) => d.date),
-    ["2026-08-30", "2026-08-31", "2026-09-01", "2026-09-02"],
-    "the month boundary is walked exactly once",
-  );
-}
-
-console.log("  ok — even where it can be, exact where it must be, holidays out");
+console.log("  ok — every day offered, holidays marked not locked, rate times days");

@@ -1,43 +1,42 @@
 /**
- * Spread one expense evenly across the working days in a date range.
+ * The days a repeating expense lands on.
  *
- * The office buys milk every school day and books it once a week. Entering
- * that as seven vouchers by hand is slow and gets skipped, so it ends up as
- * one lump on one date — which then reads as if a week's milk was bought on
- * a Tuesday, and the day a holiday is missed nobody notices.
+ * The office buys milk every school day and settles it weekly. Entering that
+ * by hand is seven vouchers, so it went in as one lump on one date — which
+ * reads as a week's milk bought on a Tuesday, and hides the day the school
+ * was shut.
  *
- * Pure on purpose. It is handed the holiday test rather than reaching for the
- * calendar itself, so the same function serves the counter, a test, and any
- * later caller that knows a different definition of "working day".
+ * A DAILY RATE times the days chosen, not a total divided by them. The office
+ * knows what a day of milk costs; it does not know what six days of milk cost
+ * until something has divided for it, and a division leaves a remainder to
+ * argue about. Multiplying cannot drift.
+ *
+ * Holidays are marked, not forbidden. The school does open on the odd Sunday,
+ * and the person booking the expense knows whether it did — so a holiday is
+ * unticked by default and can still be ticked. Locking it would mean editing
+ * the school calendar to book a day of milk.
+ *
+ * Pure: it is handed the holiday test rather than reaching for the calendar,
+ * so the same function serves the counter and a test.
  */
 
-export type SpreadDay = {
+export type ExpenseDay = {
   date: string;
-  amountPaise: number;
+  /** Weekday 0=Sun … 6=Sat, so a grid can lay the month out. */
+  weekday: number;
+  /** The holiday's name when the school calendar says this day is off. */
+  holidayReason: string | null;
+  /** Ticked when the plan is first built — every working day. */
+  selectedByDefault: boolean;
 };
 
-export type SpreadSkip = {
-  date: string;
-  /** Why it was skipped, in words the office would use. */
-  reason: string;
-};
-
-export type SpreadResult =
-  | {
-      ok: true;
-      days: SpreadDay[];
-      skipped: SpreadSkip[];
-      /** Always equals the requested total — see the remainder note below. */
-      totalPaise: number;
-      /** The even share before the remainder is handed out, for display. */
-      perDayPaise: number;
-    }
+export type ExpenseDayPlan =
+  | { ok: true; days: ExpenseDay[]; workingCount: number; holidayCount: number }
   | { ok: false; error: string };
 
 /**
  * A range longer than this is almost certainly a typo in a date box, and
- * would otherwise write a voucher a day for months. A term of milk is about
- * three months, so that is the ceiling.
+ * would otherwise offer a voucher a day for months. A term is about three.
  */
 export const MAX_SPREAD_DAYS = 92;
 
@@ -51,17 +50,17 @@ function addDays(iso: string, n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-export function spreadExpenseOverWorkingDays(input: {
-  totalPaise: number;
+/** 0=Sun … 6=Sat, read at midday so no timezone can shift the day. */
+export function weekdayOf(iso: string): number {
+  return new Date(`${iso}T12:00:00`).getDay();
+}
+
+export function enumerateExpenseDays(input: {
   from: string;
   to: string;
-  /** Return a reason to skip the date, or null to bill it. */
+  /** Return the holiday's name to mark the date, or null for a working day. */
   holidayReason: (isoDate: string) => string | null;
-}): SpreadResult {
-  const total = Math.round(input.totalPaise);
-  if (!Number.isFinite(total) || total <= 0) {
-    return { ok: false, error: "Enter an amount greater than zero" };
-  }
+}): ExpenseDayPlan {
   if (!isIsoDate(input.from) || !isIsoDate(input.to)) {
     return { ok: false, error: "Pick both dates" };
   }
@@ -69,50 +68,42 @@ export function spreadExpenseOverWorkingDays(input: {
     return { ok: false, error: "The end date is before the start date" };
   }
 
-  const dates: string[] = [];
+  const days: ExpenseDay[] = [];
   for (let d = input.from; d <= input.to; d = addDays(d, 1)) {
-    dates.push(d);
-    if (dates.length > MAX_SPREAD_DAYS) {
+    if (days.length >= MAX_SPREAD_DAYS) {
       return {
         ok: false,
-        error: `That range is longer than ${MAX_SPREAD_DAYS} days — split it into shorter periods`,
+        error: `That range is longer than ${MAX_SPREAD_DAYS} days — book it in shorter periods`,
       };
     }
-  }
-
-  const skipped: SpreadSkip[] = [];
-  const working: string[] = [];
-  for (const d of dates) {
     const reason = input.holidayReason(d);
-    if (reason) skipped.push({ date: d, reason });
-    else working.push(d);
+    days.push({
+      date: d,
+      weekday: weekdayOf(d),
+      holidayReason: reason,
+      selectedByDefault: reason === null,
+    });
   }
-
-  if (working.length === 0) {
-    return {
-      ok: false,
-      error: "Every day in that range is a holiday — nothing to book",
-    };
-  }
-
-  // The remainder is handed out a paisa at a time to the earliest days, so
-  // the parts add back to exactly what was entered. Rounding each day to the
-  // nearest paisa instead would leave the vouchers short or over by a few
-  // paise, and a books figure that does not tie to the bill is worse than an
-  // uneven day.
-  const base = Math.floor(total / working.length);
-  let remainder = total - base * working.length;
-  const days: SpreadDay[] = working.map((date) => {
-    const extra = remainder > 0 ? 1 : 0;
-    remainder -= extra;
-    return { date, amountPaise: base + extra };
-  });
 
   return {
     ok: true,
     days,
-    skipped,
-    totalPaise: days.reduce((n, d) => n + d.amountPaise, 0),
-    perDayPaise: base,
+    workingCount: days.filter((d) => d.selectedByDefault).length,
+    holidayCount: days.filter((d) => d.holidayReason !== null).length,
   };
+}
+
+/**
+ * What the chosen days come to.
+ *
+ * Kept beside the enumeration so the preview and the posting cannot disagree
+ * about the arithmetic.
+ */
+export function expenseTotalPaise(
+  dailyRatePaise: number,
+  selectedDates: readonly string[],
+): number {
+  const rate = Math.round(dailyRatePaise);
+  if (!Number.isFinite(rate) || rate <= 0) return 0;
+  return rate * selectedDates.length;
 }
