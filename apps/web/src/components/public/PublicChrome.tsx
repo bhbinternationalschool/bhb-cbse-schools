@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SiteJsonLd } from "@/components/public/SiteJsonLd";
 import {
   ADDRESS_ONE_LINE,
   CONTACT,
@@ -29,6 +30,8 @@ const LEGAL_NAV = [
 export function PublicChrome({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen flex-col bg-white text-slate-800">
+      {/* Once, on every public page — the chrome is what they all share. */}
+      <SiteJsonLd />
       <header className="border-b border-slate-200">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-6 gap-y-3 px-6 py-4">
           <Link href="/" className="font-semibold text-slate-900">

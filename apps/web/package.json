@@ -124,6 +124,7 @@
     "test:holiday-import": "npx tsx src/lib/holidayImport.selftest.ts",
     "test:fuel-expense-line": "npx tsx src/lib/fuelExpenseLine.selftest.ts",
     "test:vendor-history": "npx tsx src/lib/ledger/vendorHistory.selftest.ts",
+    "test:site-seo": "npx tsx src/lib/siteSeo.selftest.ts",
     "test:payment-link-amount": "npx tsx src/lib/paymentLinkAmount.selftest.ts",
     "test:sis-wire-payload": "npx tsx src/lib/sisWirePayload.selftest.ts",
     "test:print-palette": "npx tsx src/lib/printPalette.selftest.ts",

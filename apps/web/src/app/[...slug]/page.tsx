@@ -4,6 +4,7 @@ import { PublicChrome } from "@/components/public/PublicChrome";
 import { SiteBlocks } from "@/components/public/SiteBlocks";
 import { getPublishedPage } from "@/lib/website.server";
 import { LANGUAGES, type SiteLang } from "@/lib/website";
+import { languageAlternates } from "@/lib/siteSeo";
 
 /**
  * Every page the office builds, served from the database.
@@ -47,10 +48,25 @@ export async function generateMetadata({
       ? firstProse.payload.body.replace(/\s+/g, " ").trim().slice(0, 160)
       : undefined;
 
+  // Which languages this slug actually exists in. An hreflang pointing at a
+  // page nobody translated sends the reader to a 404, so the set is measured
+  // rather than assumed from LANGUAGES.
+  const available: SiteLang[] = [];
+  for (const l of LANGUAGES) {
+    if (l.id === lang) {
+      available.push(l.id);
+      continue;
+    }
+    if (await getPublishedPage(l.id, slug)) available.push(l.id);
+  }
+
   return {
     title: page.seoTitle || page.title,
     description: page.seoDescription || fallbackDescription,
-    alternates: { canonical: slug ? `/${slug}` : "/" },
+    // The canonical MUST carry the language prefix. Dropping it told Google
+    // the Hindi page was the English one, which is how a translation stops
+    // being indexed at all.
+    alternates: languageAlternates({ lang, slug, available }),
   };
 }
 
