@@ -57,6 +57,8 @@ import {
   receivablesAgeing,
 } from "@/lib/ledger/controls.server";
 import {
+  ledgerVendors,
+  ledgerVendorStatement,
   accountStatement,
   balanceSheetReport,
   caYearEndPack,
@@ -146,6 +148,8 @@ type PostBody =
   | { action: "ageing"; asOf: string; side?: "payables" | "receivables" }
   | { action: "cockpit"; asOf: string; fyFrom: string }
   | { action: "parity"; deskRows: { code: string; balancePaise: number }[] }
+  | { action: "vendor-accounts" }
+  | { action: "vendor-statement"; partyKey: string; asOf?: string }
   | { action: "vendor-dues" }
   | { action: "accounts" }
   | { action: "save-expense-head"; code?: string; name: string; parentCode?: string }
@@ -433,6 +437,20 @@ export async function POST(req: Request) {
         voucher ? { ok: true, voucher } : { ok: false, error: "No voucher with that number" },
         { status: voucher ? 200 : 404 },
       );
+    }
+    case "vendor-accounts": {
+      // The EXPENSE book's vendors, which are not the store's: these are the
+      // parties created by expense vouchers, keyed by name. A vendor can
+      // appear in both, and the two balances answer different questions.
+      const res = await ledgerVendors();
+      return NextResponse.json(res, { status: res.ok ? 200 : 502 });
+    }
+    case "vendor-statement": {
+      const res = await ledgerVendorStatement({
+        partyKey: String(body.partyKey ?? ""),
+        asOf: body.asOf,
+      });
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
     }
     case "vendor-dues": {
       // Vendors and their balances live in the store module, but this is the

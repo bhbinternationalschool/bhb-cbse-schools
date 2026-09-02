@@ -17,6 +17,7 @@ import {
   LedgerBookPanel,
   LedgerReportsPanel,
 } from "@/components/accounts/LedgerPanels";
+import { VendorHistoryPanel } from "@/components/accounts/VendorHistoryPanel";
 import {
   ChequesPanel,
   LegacyBookNotice,
@@ -272,7 +273,13 @@ export function AccountsWorkspace() {
           <AccountsMastersPanel {...panelProps} />
         </div>
       ) : tab === "bills" ? (
-        <BillsPanel {...panelProps} />
+        <>
+          <BillsPanel {...panelProps} />
+          {/* The store's bills and the expense book's vendors are different
+              sets — a fuel dealer never raises a purchase order. Both belong
+              on the payables tab. */}
+          <VendorHistoryPanel />
+        </>
       ) : tab === "owner" ? (
         <>
           <LegacyBookNotice tab="Owner loans — use the owner-loan presets in Vouchers" />

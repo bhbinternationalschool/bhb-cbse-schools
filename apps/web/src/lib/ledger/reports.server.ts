@@ -21,6 +21,12 @@ import {
   type TrialBalanceReport,
 } from "@/lib/ledger/reports";
 import type { LedgerAccountKind } from "@/lib/ledger/types";
+import { L_ACCOUNTS_PAYABLE } from "@/lib/ledger/coa";
+import {
+  buildVendorStatement,
+  type VendorLine,
+  type VendorStatement,
+} from "@/lib/ledger/vendorHistory";
 
 /* ─── Source data ──────────────────────────────────────────── */
 
@@ -403,4 +409,142 @@ export function packToCsvBundle(pack: CaPack): Record<string, string> {
     ].join("\n");
   }
   return out;
+}
+
+/* ─── Vendor history ───────────────────────────────────────── */
+
+/**
+ * Every vendor the expense book knows, with what is owed to each.
+ *
+ * Paged rather than fetched in one call: PostgREST caps a request at 1,000
+ * rows and reports the truncation as success, which has already cost this
+ * system a day's worth of receipt lines. A vendor list is small today and will
+ * not stay small.
+ */
+export async function ledgerVendors(): Promise<{
+  ok: boolean;
+  error?: string;
+  vendors: { partyKey: string; name: string; outstandingPaise: number; lastActivityOn: string }[];
+}> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, error: "Supabase tenant not configured", vendors: [] };
+
+  const { data: parties, error: pErr } = await ctx.sb
+    .from("ledger_parties")
+    .select("id, external_id, name")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("kind", "vendor");
+  if (pErr) return { ok: false, error: pErr.message, vendors: [] };
+
+  const rows = (parties ?? []) as { id: string; external_id: string; name: string }[];
+  if (rows.length === 0) return { ok: true, vendors: [] };
+
+  const lines = await fetchVendorLines(ctx.sb, ctx.tenantId, rows.map((r) => r.id));
+  const byParty = new Map<string, { due: number; last: string }>();
+  for (const l of lines) {
+    const cur = byParty.get(l.partyId) ?? { due: 0, last: "" };
+    if (l.isPayable) cur.due += l.creditPaise - l.debitPaise;
+    if (l.date > cur.last) cur.last = l.date;
+    byParty.set(l.partyId, cur);
+  }
+
+  return {
+    ok: true,
+    vendors: rows
+      .map((r) => ({
+        partyKey: r.external_id,
+        name: r.name,
+        outstandingPaise: byParty.get(r.id)?.due ?? 0,
+        lastActivityOn: byParty.get(r.id)?.last ?? "",
+      }))
+      .sort(
+        (a, b) =>
+          b.outstandingPaise - a.outstandingPaise || a.name.localeCompare(b.name),
+      ),
+  };
+}
+
+type RawVendorLine = VendorLine & { partyId: string };
+
+/** Paged read of every ledger line carrying one of these vendor parties. */
+async function fetchVendorLines(
+  sb: NonNullable<Awaited<ReturnType<typeof getServerTenantContext>>>["sb"],
+  tenantId: string,
+  partyIds: string[],
+): Promise<RawVendorLine[]> {
+  const out: RawVendorLine[] = [];
+  // Chunked so the `in` filter cannot outgrow the URL length PostgREST accepts.
+  for (let i = 0; i < partyIds.length; i += 100) {
+    const chunk = partyIds.slice(i, i + 100);
+    const page = 1000;
+    for (let from = 0; ; from += page) {
+      const { data, error } = await sb
+        .from("ledger_lines")
+        .select(
+          "party_id, debit_paise, credit_paise, narration, instrument_ref, ledger_accounts!inner(code, name), ledger_vouchers!inner(voucher_no, voucher_type, voucher_date, reversed_at)",
+        )
+        .eq("tenant_id", tenantId)
+        .in("party_id", chunk)
+        .order("id", { ascending: true })
+        .range(from, from + page - 1);
+      if (error) throw new Error(error.message);
+      const rows = (data ?? []) as Record<string, unknown>[];
+      for (const r of rows) {
+        const acct = r.ledger_accounts as { code?: string; name?: string } | null;
+        const vch = r.ledger_vouchers as
+          | { voucher_no?: string; voucher_type?: string; voucher_date?: string; reversed_at?: string | null }
+          | null;
+        // A reversed voucher settles and owes nothing; leaving it in would
+        // report a debt that was cancelled.
+        if (vch?.reversed_at) continue;
+        const code = String(acct?.code ?? "");
+        out.push({
+          partyId: String(r.party_id ?? ""),
+          date: String(vch?.voucher_date ?? ""),
+          voucherNo: String(vch?.voucher_no ?? ""),
+          voucherType: String(vch?.voucher_type ?? ""),
+          accountCode: code,
+          accountName: String(acct?.name ?? ""),
+          narration: String(r.narration ?? ""),
+          instrumentRef: String(r.instrument_ref ?? ""),
+          debitPaise: Number(r.debit_paise ?? 0),
+          creditPaise: Number(r.credit_paise ?? 0),
+          isPayable: code === L_ACCOUNTS_PAYABLE,
+        });
+      }
+      if (rows.length < page) break;
+    }
+  }
+  return out;
+}
+
+/** One vendor's full history, with a running balance of what is owed. */
+export async function ledgerVendorStatement(input: {
+  partyKey: string;
+  asOf?: string;
+}): Promise<{ ok: boolean; error?: string; statement?: VendorStatement }> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
+
+  const { data: party, error: pErr } = await ctx.sb
+    .from("ledger_parties")
+    .select("id, external_id, name")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("kind", "vendor")
+    .eq("external_id", input.partyKey)
+    .maybeSingle();
+  if (pErr) return { ok: false, error: pErr.message };
+  if (!party) return { ok: false, error: "No such vendor in the book" };
+
+  const p = party as { id: string; external_id: string; name: string };
+  const lines = await fetchVendorLines(ctx.sb, ctx.tenantId, [p.id]);
+  return {
+    ok: true,
+    statement: buildVendorStatement({
+      partyKey: p.external_id,
+      name: p.name,
+      lines,
+      asOf: input.asOf || new Date().toISOString().slice(0, 10),
+    }),
+  };
 }
