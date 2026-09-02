@@ -191,6 +191,7 @@ jobs:
           npm run test:fuel-expense-line
           npm run test:vendor-history
           npm run test:site-seo
+          npm run test:approval-gate
           npm run test:cash-pool-orphans
           npm run test:academic-risk
           npm run test:admissions-ai

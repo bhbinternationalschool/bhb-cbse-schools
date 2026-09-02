@@ -138,6 +138,7 @@ SELFTESTS=(
   test:fuel-expense-line
   test:vendor-history
   test:site-seo
+  test:approval-gate
   test:cash-pool-orphans
   test:academic-risk
   test:admissions-ai

@@ -19,6 +19,7 @@
  */
 
 import type { RbacModule } from "@/lib/rbac";
+import type { ApprovalRule } from "@/lib/data/approvalGate";
 
 /** Scope filters the repo will refuse to build a query without. */
 export type ScopeKey = "tenant_id" | "academic_year_code";
@@ -37,6 +38,12 @@ export type CollectionDef = {
    * silently authorising nothing — or, worse, defaulting to something.
    */
   readonly rbac: { readonly view: RbacModule; readonly edit: RbacModule };
+  /**
+   * Writes that are a DECISION rather than data entry, and need `approve` on
+   * top of `edit`. Enforced in the write route, so hiding a button is not
+   * mistaken for a rule. See lib/data/approvalGate.ts.
+   */
+  readonly approval?: ApprovalRule;
   /**
    * Filters that MUST be present on every query. `tenant_id` is always
    * required; `academic_year_code` is required wherever records belong to a
@@ -189,6 +196,18 @@ export const COLLECTIONS: readonly CollectionDef[] = [
     module: "website",
     table: "site_pages",
     rbac: { view: "website", edit: "website" },
+    // Author drafts, director approves — the decision taken on 2026-08-30.
+    // Saving a draft stays ordinary work; putting a page in front of the
+    // public, now or on a schedule, is the decision. Scheduling counts: it is
+    // publishing with a delay, and the delay is not what makes it safe.
+    // Taking a page DOWN needs no approval, deliberately.
+    approval: {
+      module: "website",
+      whenEquals: { status: ["published", "scheduled"] },
+      whenSet: ["published_at", "scheduled_publish_at"],
+      message:
+        "Only the director can publish a page to the website. Save it as a draft and ask for it to be approved.",
+    },
     scope: ["tenant_id"],
     // "Someone deleted the About page" has to be answerable, so the row
     // stays and Phase 7 restores from it.

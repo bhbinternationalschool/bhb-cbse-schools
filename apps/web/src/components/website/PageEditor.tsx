@@ -67,12 +67,15 @@ function listOf(
 
 export function PageEditor({
   page,
+  canPublish,
   onClose,
   onChanged,
   onError,
   onNotice,
 }: {
   page: SitePage;
+  /** False for an author: the Publish button is replaced by why it is absent. */
+  canPublish: boolean;
   onClose: () => void;
   onChanged: () => void;
   onError: (msg: string | null) => void;
@@ -578,7 +581,7 @@ export function PageEditor({
             >
               Take off the site
             </button>
-          ) : (
+          ) : canPublish ? (
             <button
               type="button"
               disabled={busy || blocks.length === 0}
@@ -587,6 +590,15 @@ export function PageEditor({
             >
               Publish
             </button>
+          ) : (
+            // Said rather than hidden. A missing button reads as a bug; this
+            // reads as a rule, and names who can lift it.
+            <span
+              className="rounded-lg border border-dashed border-[var(--border)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--muted)]"
+              title="Saving a draft is yours to do; putting it in front of the public is the director's."
+            >
+              Ready for the director to publish
+            </span>
           )}
           <button
             type="button"

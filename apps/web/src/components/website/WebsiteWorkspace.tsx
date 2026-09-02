@@ -36,6 +36,8 @@ import {
 import { readAll } from "@/lib/data/client/query";
 import { writeRecords } from "@/lib/data/client/mutate";
 import { getSessionActor } from "@/lib/sessionActor";
+import { hasPermission } from "@/lib/rbac";
+import { useDemoSession } from "@/components/shell/SessionContext";
 import {
   HOME_SLUG,
   LANGUAGES,
@@ -65,6 +67,14 @@ const STATUS_TONE: Record<PageStatus, string> = {
 export function WebsiteWorkspace() {
   const [pages, setPages] = useState<SitePage[]>([]);
   const [loading, setLoading] = useState(true);
+  /**
+   * Author drafts, director approves. The server refuses a publish without
+   * `website:approve` regardless of what this says — this only decides
+   * whether someone is shown a button that would fail, or told why.
+   */
+  const session = useDemoSession();
+  const canPublish = hasPermission(session, null, "website", "approve");
+
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
@@ -272,6 +282,7 @@ export function WebsiteWorkspace() {
       ) : editingPage ? (
         <PageEditor
           page={editingPage}
+          canPublish={canPublish}
           onClose={() => setEditingId(null)}
           onChanged={() => void load()}
           onError={setError}
