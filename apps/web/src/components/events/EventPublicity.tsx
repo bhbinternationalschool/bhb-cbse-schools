@@ -387,8 +387,8 @@ export function EventPublicity({
       {/* Print target: A4 poster then square graphic */}
       <div className="evt-poster-sheet print-target space-y-6">
         {/* A4 poster */}
-        <div className="evt-poster-page relative mx-auto w-full max-w-[794px] overflow-hidden rounded-lg border border-[var(--border)] bg-[#f6f5ef] p-10 text-center text-[#203050]" style={{ aspectRatio: "794/1123" }}>
-          <p className="text-[13px] font-extrabold tracking-[0.3em] text-[#c5a028]">
+        <div className="evt-poster-page relative mx-auto w-full max-w-[794px] overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface)] p-10 text-center text-[var(--brand-deep)]" style={{ aspectRatio: "794/1123" }}>
+          <p className="text-[13px] font-extrabold tracking-[0.3em] text-[var(--brand-accent)]">
             {TENANT.nameDisplay.toUpperCase()}
           </p>
           <p className="mt-1 text-[10px] tracking-[0.14em] text-[#5a6a8a]">
@@ -404,10 +404,10 @@ export function EventPublicity({
 
           <div className="mx-auto mt-8 grid max-w-[560px] grid-cols-2 gap-3">
             {event.categories.slice(0, 6).map((c) => (
-              <div key={c.id} className="rounded-xl border-2 border-[#c5a028] bg-white p-3">
+              <div key={c.id} className="rounded-xl border-2 border-[var(--brand-accent)] bg-white p-3">
                 <div className="text-base font-extrabold">{c.name}</div>
                 <div className="text-[11px] text-[#5a6a8a]">{c.classBand}</div>
-                <div className="mt-1 text-sm font-bold text-[#b45309]">
+                <div className="mt-1 text-sm font-bold text-[var(--warning)]">
                   1st {inr(c.prize1Paise)}{c.prizeNotes ? ` ${c.prizeNotes}` : ""}
                 </div>
               </div>
@@ -432,7 +432,7 @@ export function EventPublicity({
               <p className="mt-2 text-[10px] text-[#5a6a8a]">
                 Rules · participants · results · accounts — all public at
                 <br />
-                <span className="font-semibold text-[#203050]">{publicUrl}</span>
+                <span className="font-semibold text-[var(--brand-deep)]">{publicUrl}</span>
               </p>
             </div>
           </div>
@@ -448,7 +448,7 @@ export function EventPublicity({
           <p className="mt-3 text-xs text-white/85">
             {event.categories.map((c) => c.name).join(" · ")}
           </p>
-          <div className="mx-auto mt-4 inline-block rounded-full bg-[#c5a028] px-4 py-1.5 text-[11px] font-extrabold uppercase tracking-widest text-[#1a2740]">
+          <div className="mx-auto mt-4 inline-block rounded-full bg-[var(--brand-accent)] px-4 py-1.5 text-[11px] font-extrabold uppercase tracking-widest text-[#1a2740]">
             Open to all schools
           </div>
           <p className="mt-3 text-xs font-bold">

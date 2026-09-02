@@ -89,7 +89,7 @@ function kindBadgeTone(kind: CalendarItem["kind"]): string {
     case "ptm":
       return "bg-[rgba(2,132,199,0.12)] text-[#0369a1]";
     default:
-      return "bg-[rgba(180,35,24,0.1)] text-[#b42318]";
+      return "bg-[rgba(180,35,24,0.1)] text-[var(--danger)]";
   }
 }
 

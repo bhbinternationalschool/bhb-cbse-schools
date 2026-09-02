@@ -208,8 +208,8 @@ export function AccountsReportsRunner() {
           Open in Accounts
         </Link>
       </div>
-      {error ? <p className="text-sm text-[#b42318]">{error}</p> : null}
-      {notice ? <p className="text-sm text-[#0f7a4c]">{notice}</p> : null}
+      {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
+      {notice ? <p className="text-sm text-[var(--success)]">{notice}</p> : null}
       <ul className="space-y-1.5">
         {ACCOUNTS_REPORTS.map((r) => (
           <li
@@ -289,8 +289,8 @@ export function TransportReportsRunner() {
           Open in Transport
         </Link>
       </div>
-      {error ? <p className="text-sm text-[#b42318]">{error}</p> : null}
-      {notice ? <p className="text-sm text-[#0f7a4c]">{notice}</p> : null}
+      {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
+      {notice ? <p className="text-sm text-[var(--success)]">{notice}</p> : null}
       <ul className="space-y-1.5">
         {TRANSPORT_REPORTS.map((r) => (
           <li
@@ -376,8 +376,8 @@ export function TrustReportsRunner() {
           Open in Trust
         </Link>
       </div>
-      {error ? <p className="text-sm text-[#b42318]">{error}</p> : null}
-      {notice ? <p className="text-sm text-[#0f7a4c]">{notice}</p> : null}
+      {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
+      {notice ? <p className="text-sm text-[var(--success)]">{notice}</p> : null}
       <ul className="space-y-1.5">
         {TRUST_REPORTS.map((r) => (
           <li
@@ -461,8 +461,8 @@ export function HomeworkReportsRunner({ ay }: { ay: string }) {
           Open in Homework
         </Link>
       </div>
-      {error ? <p className="text-sm text-[#b42318]">{error}</p> : null}
-      {notice ? <p className="text-sm text-[#0f7a4c]">{notice}</p> : null}
+      {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
+      {notice ? <p className="text-sm text-[var(--success)]">{notice}</p> : null}
       <ul className="space-y-1.5">
         {HOMEWORK_REPORTS.map((r) => (
           <li
@@ -582,8 +582,8 @@ export function ExamReportsRunner({ ay }: { ay: string }) {
           Open in Exams
         </Link>
       </div>
-      {error ? <p className="text-sm text-[#b42318]">{error}</p> : null}
-      {notice ? <p className="text-sm text-[#0f7a4c]">{notice}</p> : null}
+      {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
+      {notice ? <p className="text-sm text-[var(--success)]">{notice}</p> : null}
       <ul className="space-y-1.5">
         {EXAM_REPORTS.map((r) => (
           <li
@@ -678,8 +678,8 @@ export function LibraryReportsRunner() {
           Open in Library
         </Link>
       </div>
-      {error ? <p className="text-sm text-[#b42318]">{error}</p> : null}
-      {notice ? <p className="text-sm text-[#0f7a4c]">{notice}</p> : null}
+      {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
+      {notice ? <p className="text-sm text-[var(--success)]">{notice}</p> : null}
       {LIBRARY_REPORT_GROUPS.map((g) => (
         <div key={g.category} className="space-y-1.5">
           <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
@@ -790,8 +790,8 @@ export function CertificatesReportsRunner() {
           Open in Certificates
         </Link>
       </div>
-      {error ? <p className="text-sm text-[#b42318]">{error}</p> : null}
-      {notice ? <p className="text-sm text-[#0f7a4c]">{notice}</p> : null}
+      {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
+      {notice ? <p className="text-sm text-[var(--success)]">{notice}</p> : null}
       <ul className="space-y-1.5">
         {CERTIFICATES_REPORTS.map((r) => (
           <li
@@ -890,8 +890,8 @@ export function CommsReportsRunner() {
           Open in Comms
         </Link>
       </div>
-      {error ? <p className="text-sm text-[#b42318]">{error}</p> : null}
-      {notice ? <p className="text-sm text-[#0f7a4c]">{notice}</p> : null}
+      {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
+      {notice ? <p className="text-sm text-[var(--success)]">{notice}</p> : null}
       <ul className="space-y-1.5">
         {COMMS_REPORTS.map((r) => (
           <li
@@ -992,8 +992,8 @@ export function TimetableReportsRunner({ ay }: { ay: string }) {
           Open in Timetable
         </Link>
       </div>
-      {error ? <p className="text-sm text-[#b42318]">{error}</p> : null}
-      {notice ? <p className="text-sm text-[#0f7a4c]">{notice}</p> : null}
+      {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
+      {notice ? <p className="text-sm text-[var(--success)]">{notice}</p> : null}
       <ul className="space-y-1.5">
         {TIMETABLE_REPORTS.map((r) => (
           <li

@@ -494,7 +494,7 @@ export function UdiseComplianceWorkspace({
       </div>
 
       {notice ? (
-        <p className="rounded-lg bg-[rgba(15,122,76,0.1)] px-3 py-2 text-sm text-[#0f7a4c]">
+        <p className="rounded-lg bg-[rgba(15,122,76,0.1)] px-3 py-2 text-sm text-[var(--success)]">
           {notice}
         </p>
       ) : null}
@@ -537,7 +537,7 @@ export function UdiseComplianceWorkspace({
           type="button"
           className={`rounded-lg px-3 py-1.5 text-xs font-medium ${
             view === "call"
-              ? "bg-[#0f7a4c] text-white"
+              ? "bg-[var(--success)] text-white"
               : "border border-[var(--border)] bg-[var(--card)] text-[var(--brand-deep)]"
           }`}
           onClick={() => {
@@ -593,7 +593,7 @@ export function UdiseComplianceWorkspace({
         </button>
         <button
           type="button"
-          className="rounded-lg border border-[#0f7a4c] bg-[var(--card)] px-3 py-1.5 text-xs font-medium text-[#0f7a4c]"
+          className="rounded-lg border border-[var(--success)] bg-[var(--card)] px-3 py-1.5 text-xs font-medium text-[var(--success)]"
           onClick={exportCallListCsv}
         >
           {view === "unregistered"
@@ -796,7 +796,7 @@ export function UdiseComplianceWorkspace({
                 kpi.tone === "amber"
                   ? "text-[#8a5a10]"
                   : kpi.tone === "green"
-                    ? "text-[#0f7a4c]"
+                    ? "text-[var(--success)]"
                     : "text-[var(--brand-deep)]"
               }`}
             >
@@ -936,7 +936,7 @@ export function UdiseComplianceWorkspace({
                 ? id === "mbu_age_below_class"
                   ? "bg-[var(--danger)] text-white"
                   : id === "call"
-                    ? "bg-[#0f7a4c] text-white"
+                    ? "bg-[var(--success)] text-white"
                     : id === "unregistered"
                       ? "bg-[#8a5a10] text-white"
                       : "bg-[var(--primary)] text-[var(--primary-foreground)]"
@@ -1030,7 +1030,7 @@ export function UdiseComplianceWorkspace({
                           {row.primaryCallTelHref ? (
                             <a
                               href={row.primaryCallTelHref}
-                              className="rounded-lg bg-[#0f7a4c] px-2 py-1 text-center text-[11px] font-semibold text-white"
+                              className="rounded-lg bg-[var(--success)] px-2 py-1 text-center text-[11px] font-semibold text-white"
                             >
                               Call {row.callContacts[0]?.label ?? ""}
                             </a>
@@ -1109,7 +1109,7 @@ export function UdiseComplianceWorkspace({
                       {primary?.telHref ? (
                         <a
                           href={primary.telHref}
-                          className="shrink-0 rounded-lg bg-[#0f7a4c] px-3 py-1.5 text-[12px] font-semibold text-white"
+                          className="shrink-0 rounded-lg bg-[var(--success)] px-3 py-1.5 text-[12px] font-semibold text-white"
                         >
                           Call
                         </a>
@@ -1283,7 +1283,7 @@ export function UdiseComplianceWorkspace({
                       {row.primaryCallTelHref ? (
                         <a
                           href={row.primaryCallTelHref}
-                          className="rounded-lg bg-[#0f7a4c] px-2 py-1 text-center text-[11px] font-semibold text-white"
+                          className="rounded-lg bg-[var(--success)] px-2 py-1 text-center text-[11px] font-semibold text-white"
                         >
                           Call {row.callContacts[0]?.label ?? ""}
                         </a>

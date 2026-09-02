@@ -2332,7 +2332,7 @@ function FeeSummaryChip({
     },
     current: {
       box: "border-[#fcd34d] bg-[#fffbeb]",
-      label: "text-[#b45309]",
+      label: "text-[var(--warning)]",
       value: "text-[#92400e]",
     },
     total: {
@@ -3081,7 +3081,7 @@ function CollectPanel({
                         after {formatInr(counterDiscountPaise)} discount
                       </span>
                     ) : siblingCount > 1 ? (
-                      <span className="rounded-full bg-[#c5a028] px-2 py-0.5 text-[11px] font-bold text-[#1a2740]">
+                      <span className="rounded-full bg-[var(--brand-accent)] px-2 py-0.5 text-[11px] font-bold text-[#1a2740]">
                         Household · {siblingCount} students
                       </span>
                     ) : (
@@ -3120,7 +3120,7 @@ function CollectPanel({
                     Collection date
                   </span>
                   <input
-                    className="field !border-white/20 !bg-white/95 !py-1.5 !text-xs !text-[#203050] dark:!bg-[#05080f] dark:!text-white dark:!font-bold dark:!border-white/30 dark:placeholder:!text-white/40"
+                    className="field !border-white/20 !bg-white/95 !py-1.5 !text-xs !text-[var(--brand-deep)] dark:!bg-[#05080f] dark:!text-white dark:!font-bold dark:!border-white/30 dark:placeholder:!text-white/40"
                     type="date"
                     value={collectionDate}
                     onChange={(e) => onCollectionDate(e.target.value)}
@@ -3138,7 +3138,7 @@ function CollectPanel({
                     School receipt no.
                   </span>
                   <input
-                    className="field !border-white/20 !bg-white/95 !py-1.5 !text-xs !text-[#203050] dark:!bg-[#05080f] dark:!text-white dark:!font-bold dark:!border-white/30 dark:placeholder:!text-white/40"
+                    className="field !border-white/20 !bg-white/95 !py-1.5 !text-xs !text-[var(--brand-deep)] dark:!bg-[#05080f] dark:!text-white dark:!font-bold dark:!border-white/30 dark:placeholder:!text-white/40"
                     value={schoolReceiptNo}
                     onChange={(e) => onSchoolReceiptNo(e.target.value)}
                     placeholder="Optional · e.g. FEE-BOOK-A/4521"
@@ -3205,7 +3205,7 @@ function CollectPanel({
                       Reason for discount
                     </span>
                     <input
-                      className="field w-full !border-white/25 !bg-white !py-2 !text-xs !text-[#203050] dark:!bg-[#05080f] dark:!text-white dark:!font-bold dark:!border-white/30 dark:placeholder:!text-white/40"
+                      className="field w-full !border-white/25 !bg-white !py-2 !text-xs !text-[var(--brand-deep)] dark:!bg-[#05080f] dark:!text-white dark:!font-bold dark:!border-white/30 dark:placeholder:!text-white/40"
                       value={counterDiscountReason}
                       onChange={(e) => onCounterDiscountReason(e.target.value)}
                       placeholder="e.g. Security deposit relaxed on management approval"
@@ -3222,7 +3222,7 @@ function CollectPanel({
                       <span className="mb-1 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.12em] text-[#f0d878]">
                         Amount to collect
                         {isPartialCollect ? (
-                          <span className="rounded-full bg-[#c5a028] px-2 py-0.5 text-[10px] font-extrabold text-[#1a2740]">
+                          <span className="rounded-full bg-[var(--brand-accent)] px-2 py-0.5 text-[10px] font-extrabold text-[#1a2740]">
                             Partial
                           </span>
                         ) : null}
@@ -3236,7 +3236,7 @@ function CollectPanel({
                           min={0}
                           step="0.01"
                           max={netAfterDiscount / 100}
-                          className="field w-full !border-white/25 !bg-white !py-2 !text-xl !font-bold !text-[#203050] dark:!bg-[#05080f] dark:!text-white dark:!border-white/30 dark:placeholder:!text-white/40"
+                          className="field w-full !border-white/25 !bg-white !py-2 !text-xl !font-bold !text-[var(--brand-deep)] dark:!bg-[#05080f] dark:!text-white dark:!border-white/30 dark:placeholder:!text-white/40"
                           value={collectAmountRupees}
                           onChange={(e) => onCollectAmount(e.target.value)}
                           placeholder="0"
@@ -3312,7 +3312,7 @@ function CollectPanel({
                         Mode & account
                       </span>
                       <PaymentChannelSelect
-                        className="field !border-[rgba(32,48,80,0.18)] !bg-white !py-1.5 !text-xs !text-[#203050]"
+                        className="field !border-[rgba(32,48,80,0.18)] !bg-white !py-1.5 !text-xs !text-[var(--brand-deep)]"
                         variant="tender"
                         accounts={accountsState ?? undefined}
                         value={composer.channel}
@@ -3341,7 +3341,7 @@ function CollectPanel({
                               {modeMeta.refLabel}
                             </span>
                             <input
-                              className="field !bg-white !py-1.5 !text-xs !text-[#203050] placeholder:!text-[#20305066]"
+                              className="field !bg-white !py-1.5 !text-xs !text-[var(--brand-deep)] placeholder:!text-[#20305066]"
                               value={composer.ref}
                               onChange={(e) =>
                                 onPatchComposer({ ref: e.target.value })
@@ -3357,7 +3357,7 @@ function CollectPanel({
                             Amount (₹)
                           </span>
                           <input
-                            className="field !border-[rgba(197,160,40,0.45)] !bg-white !py-1.5 !text-xs font-bold !text-[#203050] placeholder:!text-[#20305066]"
+                            className="field !border-[rgba(197,160,40,0.45)] !bg-white !py-1.5 !text-xs font-bold !text-[var(--brand-deep)] placeholder:!text-[#20305066]"
                             inputMode="decimal"
                             value={composer.amount}
                             onChange={(e) =>

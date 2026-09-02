@@ -19,9 +19,9 @@ const METRIC_TONES: Record<
 > = {
   green: { title: METRIC_TITLE_CLASS, icon: "bg-[#dcfce7] text-[#15803d]" },
   rose: { title: METRIC_TITLE_CLASS, icon: "bg-[#fee2e2] text-[#b91c1c]" },
-  sky: { title: METRIC_TITLE_CLASS, icon: "bg-[#dbeafe] text-[#1d4ed8]" },
+  sky: { title: METRIC_TITLE_CLASS, icon: "bg-[var(--info-soft)] text-[var(--info)]" },
   violet: { title: METRIC_TITLE_CLASS, icon: "bg-[#ede9fe] text-[#6d28d9]" },
-  amber: { title: METRIC_TITLE_CLASS, icon: "bg-[#fef3c7] text-[#b45309]" },
+  amber: { title: METRIC_TITLE_CLASS, icon: "bg-[var(--warning-soft)] text-[var(--warning)]" },
   navy: { title: METRIC_TITLE_CLASS, icon: "bg-[rgba(32,48,80,0.1)] text-[var(--brand-deep)]" },
 };
 

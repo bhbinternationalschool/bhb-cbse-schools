@@ -1121,7 +1121,7 @@ export function AdmissionFieldSurveyPanel({
                     {childrenRows.length > 1 ? (
                       <button
                         type="button"
-                        className="text-[11px] font-semibold text-[#b42318]"
+                        className="text-[11px] font-semibold text-[var(--danger)]"
                         onClick={() =>
                           setChildrenRows((rows) =>
                             rows.filter((r) => r.key !== row.key),

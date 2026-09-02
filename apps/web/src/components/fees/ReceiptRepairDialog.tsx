@@ -1,6 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+} from "@/components/ui/erp-roster";
 import { Check, Wrench, X } from "lucide-react";
 
 import {
@@ -181,16 +186,16 @@ export function ReceiptRepairDialog({
               receipt.
             </p>
           ) : (
-            <table className="w-full text-left text-[11px]">
-              <thead className="sticky top-0 bg-[var(--surface-sunken)]">
+            <ErpTable minWidth="min-w-0" className="text-[11px]">
+              <ErpTableHead sticky>
                 <tr>
                   <th className="px-2 py-1.5">Student</th>
                   <th className="px-2 py-1.5">Head / month</th>
                   <th className="px-2 py-1.5 text-right">Outstanding</th>
                   <th className="px-2 py-1.5 text-right">Attach ₹</th>
                 </tr>
-              </thead>
-              <tbody>
+              </ErpTableHead>
+              <ErpTableBody>
                 {dues.map((d) => (
                   <tr key={d.dueKey} className="border-t border-[var(--border)]">
                     <td className="px-2 py-1">{nameOf(d.studentId)}</td>
@@ -211,8 +216,8 @@ export function ReceiptRepairDialog({
                     </td>
                   </tr>
                 ))}
-              </tbody>
-            </table>
+              </ErpTableBody>
+            </ErpTable>
           )}
         </div>
 

@@ -1,5 +1,9 @@
 "use client";
 
+/* ratchet-allow: raw_table — printed document: ErpTableShell brings a card shadow, rounded border, hover
+ * tint and theme-aware colours, all of which are wrong on paper — a sheet that
+ * followed dark mode would print white ink on white stock. */
+
 /**
  * Store counter receipt — printable, one A5-ish slip per sale.
  *

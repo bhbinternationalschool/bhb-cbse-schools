@@ -1,3 +1,4 @@
+/* ratchet-allow: raw_table — matches <table> while PARSING imported HTML; this module renders nothing */
 /**
  * RTE / EWS / scholarship seats (§21c).
  * Demo store: localStorage `bhb_rte_ews_v1`.

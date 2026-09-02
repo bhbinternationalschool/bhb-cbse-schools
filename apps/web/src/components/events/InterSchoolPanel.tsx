@@ -8,6 +8,11 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+} from "@/components/ui/erp-roster";
 import QRCode from "qrcode";
 import { EventPublicity } from "@/components/events/EventPublicity";
 import { formatInr, loadMasters, type MastersState } from "@/lib/masters";
@@ -389,7 +394,7 @@ export function InterSchoolPanel({
                 onClick={() => setSection(id)}
                 className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
                   section === id
-                    ? "bg-[var(--brand-deep)] text-white"
+                    ? "bg-[#203050] text-white"
                     : "border border-[var(--border)] bg-[var(--card)] text-[var(--brand-deep)]"
                 }`}
               >
@@ -588,8 +593,8 @@ export function InterSchoolPanel({
               </div>
 
               <div className="overflow-x-auto rounded-xl border border-[var(--border)] bg-[var(--card)]">
-                <table className="w-full text-sm">
-                  <thead>
+                <ErpTable minWidth="min-w-0" className="text-sm">
+                  <ErpTableHead>
                     <tr className="text-left text-[10px] uppercase text-[var(--muted)]">
                       <th className="px-3 py-2">Student</th>
                       <th className="px-3 py-2">School</th>
@@ -598,8 +603,8 @@ export function InterSchoolPanel({
                       <th className="px-3 py-2">Status</th>
                       <th className="px-3 py-2"></th>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[var(--border)]">
+                  </ErpTableHead>
+                  <ErpTableBody>
                     {participants.map((p) => {
                       const cat = selected.categories.find((c) => c.id === p.categoryId);
                       return (
@@ -660,8 +665,8 @@ export function InterSchoolPanel({
                     {participants.length === 0 ? (
                       <tr><td colSpan={6} className="px-3 py-6 text-center text-xs text-[var(--muted)]">No registrations yet — share the public link.</td></tr>
                     ) : null}
-                  </tbody>
-                </table>
+                  </ErpTableBody>
+                </ErpTable>
               </div>
             </div>
           ) : null}
@@ -929,9 +934,9 @@ function CertificatesSection({
           const place =
             c.rank === 1 ? "FIRST PLACE" : c.rank === 2 ? "SECOND PLACE" : c.rank === 3 ? "THIRD PLACE" : "";
           return (
-            <div key={c.id} className="evt-cert-page relative mx-auto w-full max-w-[760px] rounded border-4 border-double border-[#c5a028] bg-white p-8 text-center text-[#203050]">
-              <div className="pointer-events-none absolute inset-2 rounded border border-[#c5a028]/50" aria-hidden />
-              <p className="text-[12px] font-extrabold tracking-[0.28em] text-[#c5a028]">
+            <div key={c.id} className="evt-cert-page relative mx-auto w-full max-w-[760px] rounded border-4 border-double border-[var(--brand-accent)] bg-white p-8 text-center text-[var(--brand-deep)]">
+              <div className="pointer-events-none absolute inset-2 rounded border border-[var(--brand-accent)]/50" aria-hidden />
+              <p className="text-[12px] font-extrabold tracking-[0.28em] text-[var(--brand-accent)]">
                 {TENANT.nameDisplay.toUpperCase()}
               </p>
               <p className="mt-0.5 text-[10px] tracking-[0.12em] text-[#5a6a8a]">
@@ -945,13 +950,13 @@ function CertificatesSection({
                 {p.studentName}
               </p>
               <p className="mt-2 text-xs text-[#5a6a8a]">
-                of <span className="font-bold text-[#203050]">{p.schoolName}</span>{" "}
+                of <span className="font-bold text-[var(--brand-deep)]">{p.schoolName}</span>{" "}
                 {c.kind === "winner" ? (
-                  <>secured <span className="font-extrabold text-[#b45309]">{place}</span> in</>
+                  <>secured <span className="font-extrabold text-[var(--warning)]">{place}</span> in</>
                 ) : (
                   <>participated in</>
                 )}{" "}
-                <span className="font-bold text-[#203050]">
+                <span className="font-bold text-[var(--brand-deep)]">
                   {cat?.name}
                   {cat?.classBand ? ` (${cat.classBand})` : ""}
                 </span>

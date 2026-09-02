@@ -655,10 +655,10 @@ function SectionTable({ sections, totalLabel, totalPaise }: { sections: ReportSe
       {sections.map((s) => (
         <div key={s.title}>
           <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--muted)]">{s.title}</p>
-          <table className="w-full text-sm">
-            <tbody>
+          <ErpTable minWidth="min-w-0" className="text-sm">
+            <ErpTableBody>
               {s.lines.map((l) => (
-                <tr key={l.code} className="border-b border-[var(--border)]">
+                <tr key={l.code}>
                   <td className="py-1 font-mono text-xs text-[var(--muted)]">{l.code}</td>
                   <td className="py-1">{l.name}</td>
                   <td className="py-1 text-right tabular-nums">{formatInr(l.amountPaise)}</td>
@@ -668,8 +668,8 @@ function SectionTable({ sections, totalLabel, totalPaise }: { sections: ReportSe
                 <td colSpan={2} className="py-1 text-right text-xs font-bold">{s.title}</td>
                 <td className="py-1 text-right font-bold tabular-nums">{formatInr(s.totalPaise)}</td>
               </tr>
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
         </div>
       ))}
       <p className="text-right text-sm font-bold text-[var(--brand-deep)]">

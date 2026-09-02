@@ -1393,7 +1393,7 @@ function RosterSubmitTable({
                 return (
                   <td key={p.id} className="px-3 py-2 text-xs">
                     {sub ? (
-                      <span className="text-[#0f7a4c]">
+                      <span className="text-[var(--success)]">
                         Submitted
                         {sub.teacherAckAt ? " · ack" : ""}
                       </span>

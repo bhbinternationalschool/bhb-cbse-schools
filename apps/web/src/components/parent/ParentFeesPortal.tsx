@@ -310,7 +310,7 @@ export function ParentFeesPortal({
             <div className="text-[10px] uppercase tracking-wide text-[var(--muted)]">
               Discount
             </div>
-            <div className="text-sm font-bold tabular-nums text-[#0f7a4c]">
+            <div className="text-sm font-bold tabular-nums text-[var(--success)]">
               {householdTotals.concessionPaise > 0
                 ? `−${formatInr(householdTotals.concessionPaise)}`
                 : "—"}
@@ -490,7 +490,7 @@ export function ParentFeesPortal({
                                 <div className="text-sm font-medium text-[var(--brand-deep)]">
                                   {d.feeHeadName || d.label}
                                   {paid ? (
-                                    <span className="ml-1.5 text-[10px] font-semibold uppercase text-[#0f7a4c]">
+                                    <span className="ml-1.5 text-[10px] font-semibold uppercase text-[var(--success)]">
                                       Paid
                                     </span>
                                   ) : null}
@@ -499,7 +499,7 @@ export function ParentFeesPortal({
                                   {formatParentDueHint(d)}
                                 </div>
                                 {d.concessionDetails?.length ? (
-                                  <ul className="mt-1 space-y-0.5 text-[10px] text-[#0f7a4c]">
+                                  <ul className="mt-1 space-y-0.5 text-[10px] text-[var(--success)]">
                                     {d.concessionDetails.map((c) => (
                                       <li key={`${d.dueKey}-${c.grantId}`}>
                                         Discount ·{" "}
@@ -512,7 +512,7 @@ export function ParentFeesPortal({
                               <div
                                 className={`shrink-0 text-sm font-bold tabular-nums ${
                                   paid
-                                    ? "text-[#0f7a4c]"
+                                    ? "text-[var(--success)]"
                                     : "text-[var(--brand-deep)]"
                                 }`}
                               >
@@ -571,7 +571,7 @@ export function ParentFeesPortal({
                       <li>+{v.lines.length - 6} more</li>
                     ) : null}
                     {v.lines.some((l) => (l.concessionPaise ?? 0) > 0) ? (
-                      <li className="font-medium text-[#0f7a4c]">
+                      <li className="font-medium text-[var(--success)]">
                         Includes approved discounts on collected heads
                       </li>
                     ) : null}

@@ -126,7 +126,7 @@ export function ModulesWorkspace() {
                         <span
                           className={
                             on
-                              ? "font-semibold text-[#0f7a4c]"
+                              ? "font-semibold text-[var(--success)]"
                               : "font-semibold text-[var(--warning)]"
                           }
                         >

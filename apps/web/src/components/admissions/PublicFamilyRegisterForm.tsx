@@ -497,7 +497,7 @@ export function PublicFamilyRegisterForm({
           </div>
         ) : null}
         {error ? (
-          <p className="text-sm font-medium text-[#b42318]">{error}</p>
+          <p className="text-sm font-medium text-[var(--danger)]">{error}</p>
         ) : null}
         {upiQr ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -701,7 +701,7 @@ export function PublicFamilyRegisterForm({
         </label>
 
         {error ? (
-          <p className="text-sm font-medium text-[#b42318]">{error}</p>
+          <p className="text-sm font-medium text-[var(--danger)]">{error}</p>
         ) : null}
 
         <button

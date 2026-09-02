@@ -191,12 +191,12 @@ export function ParentPtmPortal({
   return (
     <div className="px-4 pb-8 pt-3">
       {error ? (
-        <p className="mb-3 rounded-lg bg-[rgba(180,35,24,0.08)] px-3 py-2 text-sm text-[#b42318]">
+        <p className="mb-3 rounded-lg bg-[rgba(180,35,24,0.08)] px-3 py-2 text-sm text-[var(--danger)]">
           {error}
         </p>
       ) : null}
       {notice ? (
-        <p className="mb-3 rounded-lg bg-[rgba(15,122,76,0.1)] px-3 py-2 text-sm text-[#0f7a4c]">
+        <p className="mb-3 rounded-lg bg-[rgba(15,122,76,0.1)] px-3 py-2 text-sm text-[var(--success)]">
           {notice}
         </p>
       ) : null}
@@ -275,7 +275,7 @@ export function ParentPtmPortal({
                 {booking.status === "booked" ? (
                   <button
                     type="button"
-                    className="text-xs text-[#b42318] underline"
+                    className="text-xs text-[var(--danger)] underline"
                     onClick={cancelBooking}
                   >
                     Cancel booking

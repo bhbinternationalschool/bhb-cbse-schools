@@ -295,7 +295,7 @@ export function AdmissionImportPanel({
         </button>
       </div>
       {error ? (
-        <p className="text-sm font-medium text-[#b42318]">{error}</p>
+        <p className="text-sm font-medium text-[var(--danger)]">{error}</p>
       ) : null}
     </div>
   );

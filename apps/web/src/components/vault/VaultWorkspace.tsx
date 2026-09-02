@@ -50,7 +50,7 @@ function statusLabel(status: ReturnType<typeof vaultExpiryStatus>): string {
 function statusTone(status: ReturnType<typeof vaultExpiryStatus>): string {
   if (status === "expired") return "text-[var(--danger)]";
   if (status === "due_soon") return "text-[var(--warning)]";
-  if (status === "ok") return "text-[#0f7a4c]";
+  if (status === "ok") return "text-[var(--success)]";
   return "text-[var(--muted)]";
 }
 

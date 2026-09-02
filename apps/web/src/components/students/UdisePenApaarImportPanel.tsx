@@ -58,12 +58,12 @@ const TONE_ROW: Record<UdiseRowTone, string> = {
 
 const TONE_BADGE: Record<UdiseRowTone, string> = {
   fill: "bg-[rgba(14,90,140,0.2)] text-[#0a4a73]",
-  ok: "bg-[rgba(15,122,76,0.2)] text-[#0f7a4c]",
+  ok: "bg-[rgba(15,122,76,0.2)] text-[var(--success)]",
   verify: "bg-[rgba(180,120,24,0.25)] text-[#8a5a10]",
   suspect: "bg-[rgba(180,35,24,0.2)] text-[#8b1a12]",
   ambiguous: "bg-[rgba(100,60,140,0.2)] text-[#5a2a7a]",
   inactive: "bg-[rgba(60,60,60,0.25)] text-[#333]",
-  mbu_age: "bg-[#b42318] text-white",
+  mbu_age: "bg-[var(--danger)] text-white",
 };
 
 const TONE_LABEL: Record<UdiseRowTone, string> = {
@@ -125,7 +125,7 @@ function MbuAgeActions({
 
   return (
     <div className="mt-1 rounded-md border border-[rgba(180,35,24,0.3)] bg-[rgba(180,35,24,0.05)] p-1.5">
-      <p className="text-[10px] font-semibold text-[#b42318]">
+      <p className="text-[10px] font-semibold text-[var(--danger)]">
         Age below class ({className}) — govt MBU
       </p>
       {student.promotionLocked ? (
@@ -150,7 +150,7 @@ function MbuAgeActions({
           <button
             type="button"
             disabled={!target}
-            className="rounded bg-[#b42318] px-2 py-0.5 text-[10px] font-semibold text-white disabled:opacity-40"
+            className="rounded bg-[var(--danger)] px-2 py-0.5 text-[10px] font-semibold text-white disabled:opacity-40"
             onClick={() => onReassign(student.id, student.fullName, target)}
             title="De-nominate from current class and re-assign to the age-correct lower class"
           >
@@ -169,7 +169,7 @@ function MbuAgeActions({
         {student.promotionLocked ? (
           <button
             type="button"
-            className="rounded border border-[#0f7a4c] px-2 py-0.5 text-[10px] font-semibold text-[#0f7a4c]"
+            className="rounded border border-[var(--success)] px-2 py-0.5 text-[10px] font-semibold text-[var(--success)]"
             onClick={() => onLock(student.id, student.fullName, false)}
           >
             Unlock promotion
@@ -773,12 +773,12 @@ export function UdisePenApaarImportPanel({
             <p className="text-[11px] text-[var(--muted)]">File: {fileName}</p>
           ) : null}
           {!formatOk ? (
-            <p className="text-xs text-[#b42318]">
+            <p className="text-xs text-[var(--danger)]">
               Header row not recognised — use UDISE+ “List of All Students” export.
             </p>
           ) : null}
           {error ? (
-            <p className="rounded-lg bg-[rgba(180,35,24,0.08)] px-3 py-2 text-sm text-[#b42318]">
+            <p className="rounded-lg bg-[rgba(180,35,24,0.08)] px-3 py-2 text-sm text-[var(--danger)]">
               {error}
             </p>
           ) : null}
@@ -851,13 +851,13 @@ export function UdisePenApaarImportPanel({
               <span className="text-[#0a4a73]">Fill {stats.fill}</span>
               <span className="text-[#8a5a10]">Verify {stats.verify}</span>
               <span className="text-[#8b1a12]">Suspect {stats.suspect}</span>
-              <span className="font-semibold text-[#b42318]">
+              <span className="font-semibold text-[var(--danger)]">
                 MBU age {stats.mbuAge}
               </span>
               <span className="text-[#8a5a10]">
                 Class≠UDISE {stats.classMismatch}
               </span>
-              <span className="text-[#0f7a4c]">OK {stats.ok}</span>
+              <span className="text-[var(--success)]">OK {stats.ok}</span>
               {stats.ambiguous ? (
                 <span className="text-[#5a2a7a]">Ambiguous {stats.ambiguous}</span>
               ) : null}
@@ -881,7 +881,7 @@ export function UdisePenApaarImportPanel({
                     ? ` (${reconciliation.duplicateFilePens} duplicate PEN row${reconciliation.duplicateFilePens === 1 ? "" : "s"})`
                     : ""}
                 </span>
-                <span className="text-[#0f7a4c]">
+                <span className="text-[var(--success)]">
                   On UDISE+ now (this year):{" "}
                   <strong>{reconciliation.onUdiseSelectedYear}</strong>
                 </span>
@@ -986,7 +986,7 @@ export function UdisePenApaarImportPanel({
               </div>
 
               {applyResult ? (
-                <p className="rounded-lg bg-[rgba(15,122,76,0.1)] px-3 py-2 text-xs text-[#0f7a4c]">
+                <p className="rounded-lg bg-[rgba(15,122,76,0.1)] px-3 py-2 text-xs text-[var(--success)]">
                   {applyResult}
                 </p>
               ) : null}
@@ -1158,7 +1158,7 @@ export function UdisePenApaarImportPanel({
                             </span>
                           ) : null}
                           {p.mbuAgeAlert ? (
-                            <span className="mt-1 block text-[10px] font-bold text-[#b42318]">
+                            <span className="mt-1 block text-[10px] font-bold text-[var(--danger)]">
                               Notify: age below for class (govt MBU)
                             </span>
                           ) : null}
@@ -1203,9 +1203,9 @@ export function UdisePenApaarImportPanel({
                             <span
                               className={
                                 /^verified$/i.test(p.aadhaarValidationStatus)
-                                  ? "font-semibold text-[#0f7a4c]"
+                                  ? "font-semibold text-[var(--success)]"
                                   : /fail/i.test(p.aadhaarValidationStatus)
-                                    ? "font-semibold text-[#b42318]"
+                                    ? "font-semibold text-[var(--danger)]"
                                     : ""
                               }
                             >
@@ -1217,7 +1217,7 @@ export function UdisePenApaarImportPanel({
                             <span
                               className={
                                 p.mbuAgeAlert
-                                  ? "font-bold text-[#b42318]"
+                                  ? "font-bold text-[var(--danger)]"
                                   : ""
                               }
                             >
@@ -1228,7 +1228,7 @@ export function UdisePenApaarImportPanel({
                             <div
                               className={
                                 p.dobMismatch
-                                  ? "mt-1 font-semibold text-[#b42318]"
+                                  ? "mt-1 font-semibold text-[var(--danger)]"
                                   : "mt-1"
                               }
                             >
@@ -1267,7 +1267,7 @@ export function UdisePenApaarImportPanel({
                                   className={
                                     p.sisInactive
                                       ? "font-semibold text-[#8b1a12]"
-                                      : "text-[#0f7a4c]"
+                                      : "text-[var(--success)]"
                                   }
                                 >
                                   {p.sisStatus || "—"}
@@ -1318,7 +1318,7 @@ export function UdisePenApaarImportPanel({
                                     <span
                                       className={`text-[9px] font-semibold ${
                                         c.student.status === "active"
-                                          ? "text-[#0f7a4c]"
+                                          ? "text-[var(--success)]"
                                           : "text-[#8b1a12]"
                                       }`}
                                     >
@@ -1368,7 +1368,7 @@ export function UdisePenApaarImportPanel({
                                     ) : (
                                       <button
                                         type="button"
-                                        className="rounded border border-[#0f7a4c] px-2 py-0.5 text-[10px] font-semibold text-[#0f7a4c]"
+                                        className="rounded border border-[var(--success)] px-2 py-0.5 text-[10px] font-semibold text-[var(--success)]"
                                         onClick={() =>
                                           setStudentStatus(
                                             c.student.id,
@@ -1503,7 +1503,7 @@ export function UdisePenApaarImportPanel({
                               p.tone === "mbu_age") ? (
                               <button
                                 type="button"
-                                className="rounded-lg border border-[rgba(15,122,76,0.4)] bg-white px-2 py-1 text-[11px] font-medium text-[#0f7a4c]"
+                                className="rounded-lg border border-[rgba(15,122,76,0.4)] bg-white px-2 py-1 text-[11px] font-medium text-[var(--success)]"
                                 onClick={() => tickVerified(p)}
                               >
                                 ✓ Tick verified
@@ -1522,7 +1522,7 @@ export function UdisePenApaarImportPanel({
                               p.sisInactive ? (
                                 <button
                                   type="button"
-                                  className="rounded-lg border border-[#0f7a4c] px-2 py-1 text-[11px] font-semibold text-[#0f7a4c]"
+                                  className="rounded-lg border border-[var(--success)] px-2 py-1 text-[11px] font-semibold text-[var(--success)]"
                                   onClick={() =>
                                     setStudentStatus(
                                       p.studentId!,

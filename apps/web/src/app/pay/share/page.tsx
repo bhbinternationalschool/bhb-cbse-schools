@@ -400,7 +400,7 @@ export default function PaySharePage() {
                   </p>
                 ) : null}
                 {expired ? (
-                  <p className="mt-3 text-center text-sm text-[#b45309]">
+                  <p className="mt-3 text-center text-sm text-[var(--warning)]">
                     This link has expired. Ask the school for a new one.
                   </p>
                 ) : (

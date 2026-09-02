@@ -123,7 +123,7 @@ export default function RegistrationPayPage() {
         {formatInr(payload.amountPaise)}
       </p>
       {error ? (
-        <p className="mt-3 text-sm font-medium text-[#b42318]">{error}</p>
+        <p className="mt-3 text-sm font-medium text-[var(--danger)]">{error}</p>
       ) : null}
       <button
         type="button"

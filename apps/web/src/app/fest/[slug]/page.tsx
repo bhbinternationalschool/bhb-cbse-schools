@@ -7,6 +7,11 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+} from "@/components/ui/erp-roster";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { TENANT } from "@/lib/types";
@@ -169,15 +174,15 @@ export default function FestPublicPage() {
 
         {tab === "participants" ? (
           <div className="overflow-x-auto rounded-xl border border-[var(--border)] bg-[var(--card)]">
-            <table className="w-full text-sm">
-              <thead>
+            <ErpTable minWidth="min-w-0" className="text-sm">
+              <ErpTableHead>
                 <tr className="text-left text-[10px] uppercase text-[var(--muted)]">
                   <th className="px-4 py-2.5">Student</th>
                   <th className="px-4 py-2.5">School</th>
                   <th className="px-4 py-2.5">Competition</th>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-[var(--border)]">
+              </ErpTableHead>
+              <ErpTableBody>
                 {view.participants.map((p, i) => (
                   <tr key={i}>
                     <td className="px-4 py-2 font-semibold text-[var(--brand-deep)]">
@@ -191,8 +196,8 @@ export default function FestPublicPage() {
                 {view.participants.length === 0 ? (
                   <tr><td colSpan={3} className="px-4 py-8 text-center text-xs text-[var(--muted)]">Approved participants appear here.</td></tr>
                 ) : null}
-              </tbody>
-            </table>
+              </ErpTableBody>
+            </ErpTable>
           </div>
         ) : null}
 
@@ -218,13 +223,13 @@ export default function FestPublicPage() {
                     )}
                   </div>
                   {r ? (
-                    <table className="mt-2 w-full text-sm">
-                      <tbody className="divide-y divide-[var(--border)]">
+                    <ErpTable minWidth="min-w-0" className="mt-2 text-sm">
+                      <ErpTableBody>
                         {r.rows.map((row, i) => (
                           <tr key={i} className={row.rank != null && row.rank <= 3 ? "font-semibold" : ""}>
                             <td className="w-12 px-2 py-1.5">
                               {row.rank != null ? (
-                                <span className={`inline-block rounded px-1.5 py-0.5 text-[11px] font-extrabold text-white ${row.rank === 1 ? "bg-[var(--brand-gold)]" : row.rank === 2 ? "bg-[#5c6478]" : row.rank === 3 ? "bg-[#92400e]" : "bg-[rgba(32,48,80,0.3)]"}`}>
+                                <span className={`inline-block rounded px-1.5 py-0.5 text-[11px] font-extrabold text-white ${row.rank === 1 ? "bg-[var(--brand-gold)]" : row.rank === 2 ? "bg-[var(--muted)]" : row.rank === 3 ? "bg-[#92400e]" : "bg-[rgba(32,48,80,0.3)]"}`}>
                                   {row.rank}
                                 </span>
                               ) : (
@@ -242,8 +247,8 @@ export default function FestPublicPage() {
                             </td>
                           </tr>
                         ))}
-                      </tbody>
-                    </table>
+                      </ErpTableBody>
+                    </ErpTable>
                   ) : (
                     <p className="mt-2 text-xs text-[var(--muted)]">
                       The full scoreboard — every entrant&apos;s score — appears here the moment results are locked.
@@ -283,7 +288,7 @@ export default function FestPublicPage() {
                 <div className="text-lg font-extrabold">{inr(view.accounts.otherCostsPaise)}</div>
                 <div className="mt-0.5 text-[10px] text-white/75">Trophies &amp; printing</div>
               </div>
-              <div className="rounded-lg border border-[#c5a028]/60 bg-[#c5a028]/25 p-3 text-center">
+              <div className="rounded-lg border border-[var(--brand-accent)]/60 bg-[var(--brand-accent)]/25 p-3 text-center">
                 <div className="text-lg font-extrabold text-[#f0d878]">{inr(view.accounts.schoolContributionPaise)}</div>
                 <div className="mt-0.5 text-[10px] text-white/85">Contributed by {TENANT.shortName}</div>
               </div>

@@ -778,7 +778,7 @@ export function AttendanceWorkspace() {
 
                 {teacherLocked && canOverrideLock ? (
                   <label className="mt-3 block text-sm">
-                    <span className="mb-1 block text-[11px] font-semibold text-[#b45309]">
+                    <span className="mb-1 block text-[11px] font-semibold text-[var(--warning)]">
                       Office override note (required)
                     </span>
                     <input
@@ -909,7 +909,7 @@ export function AttendanceWorkspace() {
                       {!readOnly ? (
                         <button
                           type="button"
-                          className="shrink-0 px-2 text-[10px] font-semibold text-[#b42318]"
+                          className="shrink-0 px-2 text-[10px] font-semibold text-[var(--danger)]"
                           title="Delete register"
                           onClick={() => {
                             if (

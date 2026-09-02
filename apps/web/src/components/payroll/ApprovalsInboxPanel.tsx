@@ -216,7 +216,7 @@ export function ApprovalsInboxPanel({
           </p>
         ) : null}
         {error ? (
-          <p className="mt-2 text-sm font-medium text-[#b42318]">{error}</p>
+          <p className="mt-2 text-sm font-medium text-[var(--danger)]">{error}</p>
         ) : null}
 
         <div className="mt-3 flex flex-wrap gap-3 text-xs">
@@ -322,7 +322,7 @@ export function ApprovalsInboxPanel({
                     </button>
                     <button
                       type="button"
-                      className="rounded-lg border border-[#b42318]/40] px-3 py-1.5 text-xs font-semibold text-[#b42318] disabled:opacity-40"
+                      className="rounded-lg border border-[var(--danger)]/40] px-3 py-1.5 text-xs font-semibold text-[var(--danger)] disabled:opacity-40"
                       disabled={!isApprover}
                       onClick={() => onRejectPayroll(run)}
                     >
@@ -395,7 +395,7 @@ export function ApprovalsInboxPanel({
                     </button>
                     <button
                       type="button"
-                      className="rounded-lg border border-[#b42318]/40] px-3 py-1.5 text-xs font-semibold text-[#b42318] disabled:opacity-40"
+                      className="rounded-lg border border-[var(--danger)]/40] px-3 py-1.5 text-xs font-semibold text-[var(--danger)] disabled:opacity-40"
                       disabled={!isApprover}
                       onClick={() => onRejectIncrement(batch)}
                     >

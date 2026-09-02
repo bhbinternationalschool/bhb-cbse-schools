@@ -453,7 +453,7 @@ export function DayClosePanel({
                     variance === 0
                       ? "text-[#15803d]"
                       : variance > 0
-                        ? "text-[#b45309]"
+                        ? "text-[var(--warning)]"
                         : "text-[#dc2626]"
                   }`}
                 >
@@ -784,7 +784,7 @@ function Kpi({
       : accent === "short"
         ? "text-[#dc2626]"
         : accent === "excess"
-          ? "text-[#b45309]"
+          ? "text-[var(--warning)]"
           : accent === "cash"
             ? "text-[#16a34a]"
             : "text-[var(--brand-deep)]";

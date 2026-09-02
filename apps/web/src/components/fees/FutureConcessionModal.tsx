@@ -76,7 +76,7 @@ export function FutureConcessionModal({
                     </div>
 
                     {c.existing.length > 0 ? (
-                      <div className="mt-2 rounded-lg border border-[#f59e0b]/45 bg-[#fef3c7] px-3 py-2 text-[13px] text-[#92400e]">
+                      <div className="mt-2 rounded-lg border border-[#f59e0b]/45 bg-[var(--warning-soft)] px-3 py-2 text-[13px] text-[#92400e]">
                         <div className="font-bold">
                           This student already has a concession on{" "}
                           {c.feeHeadName}

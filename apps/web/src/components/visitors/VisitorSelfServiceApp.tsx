@@ -1,5 +1,18 @@
 "use client";
 
+/*
+ * ratchet-allow: raw_hex — this screen is a LIGHT ISLAND and its colours are
+ * deliberately literal.
+ *
+ * globals.css pins `.dark .theme-light-island .text-[#203050]` back to navy,
+ * overriding the global dark-mode rescue one rule above it. That selector
+ * matches the CLASS NAME, so rewriting these literals to `text-[var(--...)]`
+ * silently unpins them: the token resolves to near-white in dark mode and the
+ * text disappears against this screen's white card. A visitor-facing kiosk
+ * must look the same whatever the device theme is, so the literals stay, the
+ * same way a printed receipt keeps its own ink.
+ */
+
 /**
  * Public gate flow at /visit (behind the printed gate QR). No ERP shell, no
  * login; large touch targets; Hindi/English toggle remembered on the phone.

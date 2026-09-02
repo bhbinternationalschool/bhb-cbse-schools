@@ -20,7 +20,7 @@ export function TransportBusBadge({
 
   return (
     <div
-      className="relative shrink-0 overflow-hidden rounded-xl border-2 border-[#c5a028] shadow-[0_4px_14px_rgba(32,48,80,0.18)]"
+      className="relative shrink-0 overflow-hidden rounded-xl border-2 border-[var(--brand-accent)] shadow-[0_4px_14px_rgba(32,48,80,0.18)]"
       style={{ width: dim.w, height: dim.h }}
       aria-hidden
     >
@@ -66,7 +66,7 @@ export function TransportBusBadge({
         </text>
       </svg>
       <div
-        className={`absolute bottom-1 left-0 right-0 text-center font-extrabold uppercase tracking-wide text-[#203050] ${dim.text}`}
+        className={`absolute bottom-1 left-0 right-0 text-center font-extrabold uppercase tracking-wide text-[var(--brand-deep)] ${dim.text}`}
       >
         {label.length > 10 ? `${label.slice(0, 9)}…` : label}
       </div>

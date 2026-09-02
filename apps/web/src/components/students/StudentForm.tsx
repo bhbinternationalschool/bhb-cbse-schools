@@ -2320,7 +2320,7 @@ export function StudentForm({
               APAAR ID is filled.
             </p>
             {aadhaarVerification === "verified_udise" ? (
-              <p className="mb-3 rounded-lg bg-[rgba(15,122,76,0.1)] px-3 py-2 text-xs text-[#0f7a4c]">
+              <p className="mb-3 rounded-lg bg-[rgba(15,122,76,0.1)] px-3 py-2 text-xs text-[var(--success)]">
                 Student Aadhaar verified by UDISE+
                 {pen.trim()
                   ? " — PEN is read-only."
@@ -2331,7 +2331,7 @@ export function StudentForm({
               </p>
             ) : null}
             {udiseAgeBelowClassAlert ? (
-              <p className="mb-3 rounded-lg border border-[#b42318] bg-[rgba(180,35,24,0.12)] px-3 py-2 text-xs font-semibold text-[#b42318]">
+              <p className="mb-3 rounded-lg border border-[var(--danger)] bg-[rgba(180,35,24,0.12)] px-3 py-2 text-xs font-semibold text-[var(--danger)]">
                 Notify school: student age is below for this class (govt MBU
                 Pending). MBU: {udiseMbuStatus || "Pending"}.
                 {udisePortalClassHint

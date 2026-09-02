@@ -455,7 +455,7 @@ export function stageTagClass(stage: AdmissionStage): string {
     case "enrolled":
       return "bg-[rgba(21,128,61,0.22)] text-[#166534]";
     case "lost":
-      return "bg-[rgba(180,35,24,0.12)] text-[#b42318]";
+      return "bg-[rgba(180,35,24,0.12)] text-[var(--danger)]";
     default:
       return "bg-[rgba(32,48,80,0.08)] text-[var(--brand-deep)]";
   }
@@ -561,7 +561,7 @@ export function leadFollowUpBucket(lead: AdmissionLead): LeadFollowUpBucket {
 export function followUpBucketClass(bucket: LeadFollowUpBucket): string {
   switch (bucket) {
     case "overdue":
-      return "bg-[rgba(180,35,24,0.12)] text-[#b42318]";
+      return "bg-[rgba(180,35,24,0.12)] text-[var(--danger)]";
     case "due_today":
       return "bg-[rgba(180,83,9,0.14)] text-[#9a3412]";
     case "scheduled":

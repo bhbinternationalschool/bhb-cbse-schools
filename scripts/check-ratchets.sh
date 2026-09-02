@@ -64,8 +64,22 @@ count_metric() {
     raw_table)
       # Hand-rolled <table> instead of ui/erp-roster.tsx's ErpTableShell —
       # no shared sticky header, zebra, density, or empty/skeleton states.
+      #
+      # Counts SCREEN tables only. Two kinds of file are exempt and must say so
+      # with a `ratchet-allow: raw_table — <reason>` comment:
+      #
+      #   printed documents — ErpTableShell is theme-aware, and a receipt that
+      #     followed dark mode would print white ink on white paper;
+      #   files that never render a table — an HTML string written into a print
+      #     popup, or a parser matching <table> in imported HTML.
+      #
+      # Without the exemption the target of 0 was unreachable by construction,
+      # so the budget got raised instead of the pattern being removed. The
+      # marker keeps every exemption greppable and justified at the site.
       grep -rl '<table' "$SRC" 2>/dev/null \
-        | grep -vE 'ui/(erp-roster|data-table)\.tsx' | wc -l ;;
+        | grep -vE 'ui/(erp-roster|data-table)\.tsx' \
+        | xargs -I{} grep -L 'ratchet-allow: raw_table' "{}" 2>/dev/null \
+        | wc -l ;;
     duplicate_migration_versions)
       # Two migration files sharing one numeric prefix. The prefix IS the
       # migration version: Supabase keys supabase_migrations.schema_migrations

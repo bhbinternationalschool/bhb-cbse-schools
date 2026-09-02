@@ -1038,7 +1038,7 @@ export function AdmissionsWorkspace() {
                     setFilter("overdue");
                     setTab("leads");
                   }}
-                  className="rounded-lg border border-[rgba(180,35,24,0.3)] bg-[rgba(180,35,24,0.06)] px-2.5 py-1.5 font-medium text-[#b42318]"
+                  className="rounded-lg border border-[rgba(180,35,24,0.3)] bg-[rgba(180,35,24,0.06)] px-2.5 py-1.5 font-medium text-[var(--danger)]"
                 >
                   Overdue{" "}
                   <span className="opacity-80">{fuCounts.overdue}</span>
@@ -1222,7 +1222,7 @@ export function AdmissionsWorkspace() {
                 localityQ.trim() ? (
                   <button
                     type="button"
-                    className="text-[10px] font-semibold text-[#b42318] underline"
+                    className="text-[10px] font-semibold text-[var(--danger)] underline"
                     onClick={() => {
                       setFilter("open");
                       setCaptureYearFilter("all");
@@ -1328,7 +1328,7 @@ export function AdmissionsWorkspace() {
                         filter === id
                           ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
                           : id === "overdue"
-                            ? "bg-[rgba(180,35,24,0.12)] text-[#b42318]"
+                            ? "bg-[rgba(180,35,24,0.12)] text-[var(--danger)]"
                             : id === "due_today"
                               ? "bg-[rgba(180,83,9,0.14)] text-[#9a3412]"
                               : "bg-[var(--surface-sunken)] text-[var(--muted)]"
@@ -1994,7 +1994,7 @@ export function AdmissionsWorkspace() {
                         {childrenRows.length > 1 ? (
                           <button
                             type="button"
-                            className="text-[11px] font-semibold text-[#b42318]"
+                            className="text-[11px] font-semibold text-[var(--danger)]"
                             onClick={() =>
                               setChildrenRows((rows) =>
                                 rows.filter((r) => r.key !== row.key),
@@ -2472,7 +2472,7 @@ function LeadDetail({
               ) : null}
               <button
                 type="button"
-                className="rounded-lg border border-[rgba(180,35,24,0.35)] px-3 py-1.5 text-[11px] font-semibold text-[#b42318]"
+                className="rounded-lg border border-[rgba(180,35,24,0.35)] px-3 py-1.5 text-[11px] font-semibold text-[var(--danger)]"
                 onClick={onLost}
               >
                 Mark lost

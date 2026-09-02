@@ -623,7 +623,7 @@ export function StaffInternalChatButton() {
                   </button>
                   <button
                     type="button"
-                    className="rounded-md bg-[#e7f0f8] px-2 py-1 text-[10px] font-bold text-[#203050]"
+                    className="rounded-md bg-[#e7f0f8] px-2 py-1 text-[10px] font-bold text-[var(--brand-deep)]"
                     onClick={() => setComposer("new-announcement")}
                   >
                     + Class announce

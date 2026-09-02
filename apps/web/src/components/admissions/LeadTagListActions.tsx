@@ -24,7 +24,7 @@ function btn(
   teal?: boolean,
 ): string {
   if (danger) {
-    return "rounded-lg border border-[rgba(180,35,24,0.35)] bg-white px-2 py-1 text-[10px] font-semibold text-[#b42318] hover:bg-[rgba(180,35,24,0.06)]";
+    return "rounded-lg border border-[rgba(180,35,24,0.35)] bg-white px-2 py-1 text-[10px] font-semibold text-[var(--danger)] hover:bg-[rgba(180,35,24,0.06)]";
   }
   if (teal) {
     return "rounded-lg bg-[#0f766e] px-2 py-1 text-[10px] font-semibold text-white hover:brightness-110";

@@ -150,7 +150,7 @@ export function CrmParentChatWidget({
               }
             />
             {error ? (
-              <p className="text-[11px] font-medium text-[#b42318]">{error}</p>
+              <p className="text-[11px] font-medium text-[var(--danger)]">{error}</p>
             ) : null}
             <button
               type="button"
@@ -226,7 +226,7 @@ export function CrmParentChatWidget({
               </button>
             </form>
             {error ? (
-              <p className="px-2 pb-2 text-[11px] text-[#b42318]">{error}</p>
+              <p className="px-2 pb-2 text-[11px] text-[var(--danger)]">{error}</p>
             ) : null}
             {thread.status === "needs_staff" ? (
               <p className="bg-[rgba(154,52,18,0.1)] px-2 py-1 text-[10px] font-semibold text-[#9a3412]">

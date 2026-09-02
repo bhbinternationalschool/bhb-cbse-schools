@@ -272,10 +272,10 @@ export function PayLinksPanel({
 
 function StatusPill({ status }: { status: PaymentLink["status"] }) {
   const map: Record<PaymentLink["status"], string> = {
-    open: "bg-[rgba(37,99,235,0.12)] text-[#1d4ed8]",
+    open: "bg-[rgba(37,99,235,0.12)] text-[var(--info)]",
     paid: "bg-[rgba(22,163,74,0.12)] text-[#15803d]",
     cancelled: "bg-[rgba(32,48,80,0.08)] text-[var(--muted)]",
-    expired: "bg-[rgba(217,119,6,0.12)] text-[#b45309]",
+    expired: "bg-[rgba(217,119,6,0.12)] text-[var(--warning)]",
   };
   return (
     <span

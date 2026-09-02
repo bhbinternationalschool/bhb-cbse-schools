@@ -1141,8 +1141,8 @@ function ReceiveSection({ boot }: { boot: InvBootstrap }) {
                 re-entry.
               </p>
               <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead>
+                <ErpTable minWidth="min-w-0" className="text-xs">
+                  <ErpTableHead>
                     <tr className="text-left text-muted-foreground">
                       <th className="py-1 pr-2 font-medium">Item</th>
                       <th className="py-1 pr-2 font-medium">Qty</th>
@@ -1150,8 +1150,8 @@ function ReceiveSection({ boot }: { boot: InvBootstrap }) {
                       <th className="py-1 pr-2 font-medium">Disc %</th>
                       <th className="py-1 font-medium">GST %</th>
                     </tr>
-                  </thead>
-                  <tbody>
+                  </ErpTableHead>
+                  <ErpTableBody>
                     {amendLines.map((al, i) => (
                       <tr key={al.lineId}>
                         <td className="py-1 pr-2">{al.itemName}</td>
@@ -1205,8 +1205,8 @@ function ReceiveSection({ boot }: { boot: InvBootstrap }) {
                         </td>
                       </tr>
                     ))}
-                  </tbody>
-                </table>
+                  </ErpTableBody>
+                </ErpTable>
               </div>
             </div>
           ) : null}

@@ -244,7 +244,7 @@ export function LeadMobileWaCheckPanel({
         id: "invalid",
         label: "Invalid / missing mobile",
         n: report.invalid.length,
-        tone: "bg-[rgba(180,35,24,0.1)] text-[#b42318]",
+        tone: "bg-[rgba(180,35,24,0.1)] text-[var(--danger)]",
       },
       {
         id: "wa_diff",
@@ -274,7 +274,7 @@ export function LeadMobileWaCheckPanel({
         id: "not_on_wa",
         label: "Not on WhatsApp (API)",
         n: report.notOnWa.length,
-        tone: "bg-[rgba(180,35,24,0.1)] text-[#b42318]",
+        tone: "bg-[rgba(180,35,24,0.1)] text-[var(--danger)]",
       },
       {
         id: "wa_unknown",
@@ -402,7 +402,7 @@ export function LeadMobileWaCheckPanel({
           leads={report.invalid}
           actions={actions}
           detail={(l) => (
-            <span className="text-[#b42318]">
+            <span className="text-[var(--danger)]">
               {!l.mobile
                 ? "No mobile"
                 : l.mobile.length !== 10
@@ -544,7 +544,7 @@ export function LeadMobileWaCheckPanel({
                           apiByMobile[number]!.status === "on_whatsapp"
                             ? "bg-[rgba(21,128,61,0.14)] text-[#166534]"
                             : apiByMobile[number]!.status === "not_on_whatsapp"
-                              ? "bg-[rgba(180,35,24,0.1)] text-[#b42318]"
+                              ? "bg-[rgba(180,35,24,0.1)] text-[var(--danger)]"
                               : "bg-[rgba(71,85,105,0.12)] text-[#334155]"
                         }`}
                       >
@@ -609,7 +609,7 @@ export function LeadMobileWaCheckPanel({
             const wa = waNumberOf(l);
             const hit = apiByMobile[wa];
             return (
-              <span className="text-[#b42318]">
+              <span className="text-[var(--danger)]">
                 {wa} — not registered on WhatsApp
                 {hit?.detail ? ` (${hit.detail})` : ""}
               </span>

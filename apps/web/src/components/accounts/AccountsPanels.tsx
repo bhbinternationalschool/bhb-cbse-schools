@@ -1,5 +1,7 @@
 "use client";
 
+/* ratchet-allow: raw_table — the <table> here is inside an HTML string written into a print popup, not JSX — there is no component to shell */
+
 import Link from "next/link";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { DayClosePanel } from "@/components/fees/DayClosePanel";
