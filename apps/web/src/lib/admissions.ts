@@ -5,6 +5,11 @@
  */
 
 import { assertModulePermission } from "@/lib/rbacGuard";
+import {
+  carryOverFromSibling,
+  carryOverHousehold,
+  carryOverNote,
+} from "@/lib/siblingCarryOver";
 import { normalizePhotoConsent, type PhotoConsent } from "@/lib/photoConsent";
 import { sanitizeStoredMediaUrl } from "@/lib/media";
 import { normalizeHouseholdLanguage } from "@/lib/householdPrefs";
@@ -2644,7 +2649,29 @@ export function enrollLead(
       // the SIS household, not this one.
       photoConsent: normalizePhotoConsent(admHh?.photoConsent),
     });
-    households = [...households, hh];
+
+    // A brand-new household, but the parents may already be known to the
+    // school under a different mobile. Where BOTH parent names match a family
+    // on roll, take their address and email rather than leaving the office to
+    // type it again. Contact NUMBERS are never copied: the mobile is how a
+    // household is identified here, so sharing one would merge two families
+    // and send another household's fee reminders to the wrong phone.
+    const twinHh = (() => {
+      const f = normParentName(lead.guardianName || "");
+      const m = normParentName(lead.motherName || "");
+      if (f.length < 3 || m.length < 3) return undefined;
+      const twin = sis.students.find(
+        (s2) =>
+          s2.status === "active" &&
+          normParentName(s2.fatherName) === f &&
+          normParentName(s2.motherName) === m,
+      );
+      return twin
+        ? households.find((h) => h.id === twin.householdId)
+        : undefined;
+    })();
+    const filled = carryOverHousehold({ household: hh, donor: twinHh });
+    households = [...households, filled.household];
     sisHouseholdId = hh.id;
   }
 
@@ -2695,10 +2722,56 @@ export function enrollLead(
       : "",
   });
 
+  /*
+   * A second child of the same family should not need the parents' details
+   * typed again. The trustworthy signal is the household: by this point the
+   * school has already decided this child belongs to an existing family, via
+   * a sibling link or a matching mobile. Where that decision was made only on
+   * the parents' NAMES, identity numbers are held back — two families in one
+   * village really can share both names, and a wrong Aadhaar travels into
+   * UDISE where nobody would catch it.
+   *
+   * Only blanks are filled: whatever the office typed on this child's form is
+   * what they meant.
+   */
+  const familySiblings = sis.students
+    .filter(
+      (s2) =>
+        s2.status === "active" &&
+        s2.householdId &&
+        s2.householdId === sisHouseholdId,
+    )
+    // Most recently joined first: the newest sibling's record is the one the
+    // office filled in most lately, and so the likeliest to be current.
+    .sort((a, b) => String(b.joinedOn ?? "").localeCompare(String(a.joinedOn ?? "")));
+
+  const nameTwins =
+    familySiblings.length === 0 && student.fatherName && student.motherName
+      ? sis.students.filter(
+          (s2) =>
+            s2.status === "active" &&
+            normParentName(s2.fatherName) === normParentName(student.fatherName) &&
+            normParentName(s2.motherName) === normParentName(student.motherName),
+        )
+      : [];
+
+  const carry = carryOverFromSibling({
+    student,
+    siblings: familySiblings.length ? familySiblings : nameTwins,
+    confidence: familySiblings.length ? "household" : "names_only",
+  });
+  const note = carryOverNote(carry);
+  const enrolledStudent = note
+    ? {
+        ...carry.student,
+        notes: [carry.student.notes, note].filter(Boolean).join(" · "),
+      }
+    : carry.student;
+
   saveSis({
     ...sis,
     households,
-    students: [...sis.students, student],
+    students: [...sis.students, enrolledStudent],
   });
 
   let next = state;
