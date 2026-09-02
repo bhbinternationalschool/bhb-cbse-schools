@@ -26,6 +26,19 @@ import {
   expenseTotalPaise,
 } from "@/lib/expenseSpread";
 import {
+  buildFuelRefill,
+  checkFuelLine,
+  fuelAmountPaise,
+  fuelNarration,
+  isFuelAccount,
+} from "@/lib/fuelExpenseLine";
+import {
+  loadTransport,
+  recordFuelRefill,
+  vehicleFuelOptions,
+  type FleetVehicle,
+} from "@/lib/transport";
+import {
   allocateExpensePayment,
   buildExpenseVoucherLines,
 } from "@/lib/expenseVoucherDraft";
@@ -2065,6 +2078,13 @@ export function MultiLineExpensePanel({
     tax: string;
     /** True once a person picks the tag, so a suggestion never overwrites it. */
     tagTouched: boolean;
+    /** Present only on a fuel head: the fill behind the amount. */
+    vehicleId: string;
+    fuelType: string;
+    fuelUnit: string;
+    fuelRate: string;
+    fuelQty: string;
+    odometer: string;
   };
   const blankRow = (): Row => ({
     id: `r${Math.random().toString(36).slice(2, 8)}`,
@@ -2076,6 +2096,12 @@ export function MultiLineExpensePanel({
     amount: "",
     tax: "",
     tagTouched: false,
+    vehicleId: "",
+    fuelType: "",
+    fuelUnit: "",
+    fuelRate: "",
+    fuelQty: "",
+    odometer: "",
   });
 
   const [rows, setRows] = useState<Row[]>([blankRow()]);
@@ -2110,6 +2136,41 @@ export function MultiLineExpensePanel({
     setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
 
   /**
+   * The fleet, read from the Transport desk rather than the chart.
+   *
+   * Vehicles are not sub-heads: the fleet changes when one is sold, and a
+   * chart of accounts that grows an account per number plate is a chart
+   * nobody can read. The vehicle is recorded on the line and in Transport's
+   * own fuel log, which is where per-vehicle mileage already lives.
+   */
+  const [fleet, setFleet] = useState<FleetVehicle[]>([]);
+  useEffect(() => {
+    try {
+      const t = loadTransport();
+      setFleet(t.vehicles ?? []);
+    } catch {
+      // Transport not opened in this browser yet — the fuel strip simply does
+      // not appear, and the expense can still be booked as a plain amount.
+      setFleet([]);
+    }
+  }, []);
+
+  const isFuelRow = (r: Row) => {
+    const a = accountOf(r);
+    return !!a && isFuelAccount({ code: a.code, name: a.name });
+  };
+  const vehicleOf = (r: Row) => fleet.find((v) => v.id === r.vehicleId);
+  const fuelsOf = (r: Row) => {
+    const v = vehicleOf(r);
+    return v ? vehicleFuelOptions(v) : [];
+  };
+  /** On a fuel row the amount is rate × quantity, never a typed figure. */
+  const rowAmountPaise = (r: Row) =>
+    isFuelRow(r)
+      ? fuelAmountPaise(paiseFromRupees(r.fuelRate), Number(r.fuelQty) || 0)
+      : paiseFromRupees(r.amount);
+
+  /**
    * The tag this head was last booked to, offered only into an untouched row.
    * Returns nothing when the row already has a tag someone chose, when the
    * head has no history, or when the remembered centre no longer exists.
@@ -2130,12 +2191,23 @@ export function MultiLineExpensePanel({
         accountCode: accountOf(r)?.code ?? "",
         tag: r.tag,
         vendorName: r.vendorName,
-        description: r.description,
-        amountPaise: paiseFromRupees(r.amount),
+        description: isFuelRow(r)
+          ? fuelNarration({
+              vehicleNo: vehicleOf(r)?.registrationNo ?? "",
+              pick: {
+                fuelType: r.fuelType,
+                unit: r.fuelUnit,
+                qty: Number(r.fuelQty) || 0,
+                ratePaisePerUnit: paiseFromRupees(r.fuelRate),
+                odometerKm: Number(r.odometer) || 0,
+              },
+            }) + (r.description.trim() ? ` · ${r.description.trim()}` : "")
+          : r.description,
+        amountPaise: rowAmountPaise(r),
         taxPaise: paiseFromRupees(r.tax),
       })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rows, accounts],
+    [rows, accounts, fleet],
   );
 
   const grandTotal = draftLines.reduce(
@@ -2150,15 +2222,48 @@ export function MultiLineExpensePanel({
     [draftLines, paidPaise],
   );
 
+  /**
+   * Every fuel row's own checks, surfaced before the voucher can be posted.
+   *
+   * A fuel line that will not produce a valid refill must not post at all: the
+   * money would be in the book with no litres against it, and nobody would
+   * ever notice the mileage record was missing.
+   */
+  const fuelIssues = useMemo(() => {
+    const problems: string[] = [];
+    const warnings: string[] = [];
+    for (const r of rows) {
+      if (!isFuelRow(r)) continue;
+      const v = vehicleOf(r);
+      const res = checkFuelLine({
+        pick: {
+          vehicleId: r.vehicleId,
+          fuelType: r.fuelType,
+          unit: r.fuelUnit,
+          ratePaisePerUnit: paiseFromRupees(r.fuelRate),
+          qty: Number(r.fuelQty) || 0,
+          odometerKm: Number(r.odometer) || 0,
+        },
+        allowedFuels: fuelsOf(r),
+        lastOdometerKm: v?.odometerKm,
+      });
+      problems.push(...res.problems);
+      warnings.push(...res.warnings);
+    }
+    return { problems, warnings };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, accounts, fleet]);
+
   const needsBank = payMode !== "cash";
   const canPost =
     totals.grandTotalPaise > 0 &&
     draftLines.every((l) => !l.accountCode === !(l.amountPaise + l.taxPaise) || l.accountCode) &&
     rows.every((r) => {
-      const t = paiseFromRupees(r.amount) + paiseFromRupees(r.tax);
+      const t = rowAmountPaise(r) + paiseFromRupees(r.tax);
       return t === 0 || !!accountOf(r);
     }) &&
-    (totals.paidPaise === 0 || !needsBank || (!!bankId && ref.trim() !== ""));
+    (totals.paidPaise === 0 || !needsBank || (!!bankId && ref.trim() !== "")) &&
+    fuelIssues.problems.length === 0;
 
   async function post() {
     if (!canPost || busy) return;
@@ -2197,13 +2302,59 @@ export function MultiLineExpensePanel({
         },
       });
       if (res.ok) {
+        // The book has the money; Transport gets the litres. Written only
+        // AFTER the voucher posts, so a refused voucher cannot leave a fuel
+        // log behind claiming a fill that was never paid for. If a refill is
+        // rejected here the voucher still stands — it is real money — and the
+        // failure is said out loud rather than swallowed, because a silent
+        // miss is a mileage figure that is quietly wrong from then on.
+        const fuelRows = rows.filter((r) => isFuelRow(r));
+        const refillErrors: string[] = [];
+        for (const r of fuelRows) {
+          try {
+            const out = recordFuelRefill(
+              buildFuelRefill({
+                pick: {
+                  vehicleId: r.vehicleId,
+                  fuelType: r.fuelType,
+                  unit: r.fuelUnit,
+                  ratePaisePerUnit: paiseFromRupees(r.fuelRate),
+                  qty: Number(r.fuelQty) || 0,
+                  odometerKm: Number(r.odometer) || 0,
+                },
+                vendorName: r.vendorName,
+                billNo: ref.trim(),
+                filledAt: `${date}T12:00:00.000Z`,
+                paidInFull: totals.duePaise === 0,
+              }),
+            );
+            if (!out.ok) {
+              refillErrors.push(
+                `${vehicleOf(r)?.registrationNo ?? "vehicle"}: ${out.error}`,
+              );
+            }
+          } catch (e) {
+            refillErrors.push(
+              `${vehicleOf(r)?.registrationNo ?? "vehicle"}: ${
+                e instanceof Error ? e.message : "could not record the fill"
+              }`,
+            );
+          }
+        }
+
         setNotice({
-          tone: "ok",
+          tone: refillErrors.length ? "bad" : "ok",
           text:
             `${res.voucherNo ?? "Posted"} — ${formatInr(totals.grandTotalPaise)}` +
             (totals.duePaise > 0
               ? ` · ${formatInr(totals.duePaise)} left owing`
-              : " · paid in full"),
+              : " · paid in full") +
+            (fuelRows.length && !refillErrors.length
+              ? ` · ${fuelRows.length} fill(s) logged in Transport`
+              : "") +
+            (refillErrors.length
+              ? ` · POSTED, but the fuel log was NOT written (${refillErrors.join("; ")}) — record it in Transport by hand`
+              : ""),
         });
         setRows([blankRow()]);
         setNote("");
@@ -2265,7 +2416,9 @@ export function MultiLineExpensePanel({
       <div className="mt-3 space-y-2">
         {rows.map((r) => {
           const subs = subHeadsOf(r.head);
-          const rowTotal = paiseFromRupees(r.amount) + paiseFromRupees(r.tax);
+          const fuelRow = isFuelRow(r);
+          const fuels = fuelsOf(r);
+          const rowTotal = rowAmountPaise(r) + paiseFromRupees(r.tax);
           return (
             <div
               key={r.id}
@@ -2352,16 +2505,28 @@ export function MultiLineExpensePanel({
                     onChange={(e) => setRow(r.id, { description: e.target.value })}
                   />
                 </label>
-                <label className="text-[10px] font-bold text-[var(--muted)]">
-                  Amount ₹
-                  <input
-                    className={`${FIELD} max-w-[7rem] text-right`}
-                    inputMode="decimal"
-                    placeholder="0.00"
-                    value={r.amount}
-                    onChange={(e) => setRow(r.id, { amount: e.target.value })}
-                  />
-                </label>
+                {fuelRow ? (
+                  <span className="text-[10px] font-bold text-[var(--muted)]">
+                    Amount ₹
+                    <span
+                      className={`${FIELD} block max-w-[7rem] bg-[var(--surface-2)] text-right tabular-nums`}
+                      title="Rate × quantity — enter those below"
+                    >
+                      {(rowAmountPaise(r) / 100).toFixed(2)}
+                    </span>
+                  </span>
+                ) : (
+                  <label className="text-[10px] font-bold text-[var(--muted)]">
+                    Amount ₹
+                    <input
+                      className={`${FIELD} max-w-[7rem] text-right`}
+                      inputMode="decimal"
+                      placeholder="0.00"
+                      value={r.amount}
+                      onChange={(e) => setRow(r.id, { amount: e.target.value })}
+                    />
+                  </label>
+                )}
                 <label className="text-[10px] font-bold text-[var(--muted)]">
                   Tax ₹
                   <input
@@ -2385,6 +2550,106 @@ export function MultiLineExpensePanel({
                   <Trash2 className="size-3.5" aria-hidden />
                 </button>
               </div>
+
+              {/* Only on a fuel head, and only when Transport has a fleet to
+                  choose from — every other expense stays a plain amount. */}
+              {fuelRow ? (
+                fleet.length === 0 ? (
+                  <p className="mt-2 rounded-lg bg-amber-500/10 px-2 py-1 text-[10px] text-amber-700">
+                    This is a fuel head, but no vehicles have loaded in this
+                    browser. Open Transport once, then come back — otherwise
+                    the fill cannot be logged against a vehicle.
+                  </p>
+                ) : (
+                  <div className="mt-2 flex flex-wrap items-end gap-2 rounded-lg bg-[var(--surface-2)] p-2">
+                    <label className="min-w-[9rem] flex-1 text-[10px] font-bold text-[var(--muted)]">
+                      Vehicle
+                      <select
+                        className={FIELD}
+                        value={r.vehicleId}
+                        onChange={(e) => {
+                          const v = fleet.find((x) => x.id === e.target.value);
+                          const opts = v ? vehicleFuelOptions(v) : [];
+                          // The fuel and its unit follow the vehicle: a
+                          // CNG+Petrol bus offers both, everything else is
+                          // settled the moment the vehicle is chosen.
+                          setRow(r.id, {
+                            vehicleId: e.target.value,
+                            fuelType: opts[0]?.fuelType ?? "",
+                            fuelUnit: opts[0]?.unit ?? "",
+                            odometer: v?.odometerKm ? String(v.odometerKm) : "",
+                          });
+                        }}
+                      >
+                        <option value="">Choose…</option>
+                        {fleet.map((v) => (
+                          <option key={v.id} value={v.id}>
+                            {v.registrationNo} — {v.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    {fuels.length > 1 ? (
+                      <label className="text-[10px] font-bold text-[var(--muted)]">
+                        Fuel
+                        <select
+                          className={FIELD}
+                          value={r.fuelType}
+                          onChange={(e) => {
+                            const f = fuels.find((x) => x.fuelType === e.target.value);
+                            setRow(r.id, {
+                              fuelType: e.target.value,
+                              fuelUnit: f?.unit ?? "",
+                            });
+                          }}
+                        >
+                          {fuels.map((f) => (
+                            <option key={f.fuelType} value={f.fuelType}>
+                              {f.fuelType} ({f.unit})
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : fuels.length === 1 ? (
+                      <span className="rounded-lg bg-[var(--brand-deep)]/10 px-2 py-1 text-[10px] font-bold text-[var(--brand-deep)]">
+                        {fuels[0].fuelType} · {fuels[0].unit}
+                      </span>
+                    ) : null}
+
+                    <label className="text-[10px] font-bold text-[var(--muted)]">
+                      Rate ₹/{r.fuelUnit || "unit"}
+                      <input
+                        className={`${FIELD} max-w-[6rem] text-right`}
+                        inputMode="decimal"
+                        placeholder="0.00"
+                        value={r.fuelRate}
+                        onChange={(e) => setRow(r.id, { fuelRate: e.target.value })}
+                      />
+                    </label>
+                    <label className="text-[10px] font-bold text-[var(--muted)]">
+                      {r.fuelUnit ? r.fuelUnit.charAt(0).toUpperCase() + r.fuelUnit.slice(1) : "Qty"}
+                      <input
+                        className={`${FIELD} max-w-[5.5rem] text-right`}
+                        inputMode="decimal"
+                        placeholder="0.00"
+                        value={r.fuelQty}
+                        onChange={(e) => setRow(r.id, { fuelQty: e.target.value })}
+                      />
+                    </label>
+                    <label className="text-[10px] font-bold text-[var(--muted)]">
+                      Odometer km
+                      <input
+                        className={`${FIELD} max-w-[7rem] text-right`}
+                        inputMode="numeric"
+                        placeholder="0"
+                        value={r.odometer}
+                        onChange={(e) => setRow(r.id, { odometer: e.target.value })}
+                      />
+                    </label>
+                  </div>
+                )
+              ) : null}
             </div>
           );
         })}
@@ -2397,6 +2662,21 @@ export function MultiLineExpensePanel({
       >
         <Plus className="size-3.5" aria-hidden /> Add line
       </button>
+
+      {fuelIssues.problems.length ? (
+        <ul className="mt-2 space-y-0.5 rounded-lg bg-red-500/10 px-3 py-1.5 text-[11px] text-red-700">
+          {fuelIssues.problems.map((m) => (
+            <li key={m}>{m}</li>
+          ))}
+        </ul>
+      ) : null}
+      {fuelIssues.warnings.length ? (
+        <ul className="mt-2 space-y-0.5 rounded-lg bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-700">
+          {fuelIssues.warnings.map((m) => (
+            <li key={m}>{m}</li>
+          ))}
+        </ul>
+      ) : null}
 
       <div className="mt-3 rounded-xl bg-[var(--surface-sunken)] p-3">
         <div className="flex flex-wrap items-end gap-2">
