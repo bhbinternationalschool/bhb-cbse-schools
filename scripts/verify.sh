@@ -103,6 +103,7 @@ SELFTESTS=(
   test:fee-push-line-safety
   test:receipt-repair
   test:projection-double-post
+  test:holiday-import
   test:payment-link-amount
   test:sis-wire-payload
   test:print-palette
