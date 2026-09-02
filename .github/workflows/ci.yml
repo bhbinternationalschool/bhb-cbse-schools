@@ -188,6 +188,53 @@ jobs:
         run: |
           npm run test:village-market
           npm run test:lead-score
+          npm run test:fuel-expense-line
+          npm run test:vendor-history
+          npm run test:site-seo
+          npm run test:cash-pool-orphans
+          npm run test:academic-risk
+          npm run test:admissions-ai
+          npm run test:admissions-enquiry-form
+          npm run test:admissions-kb
+          npm run test:birthday-cards
+          npm run test:collections-ai
+          npm run test:concession-per-due
+          npm run test:desk-sync-status
+          npm run test:duty-roster
+          npm run test:email
+          npm run test:exam-invigilation
+          npm run test:exams
+          npm run test:household-prefs
+          npm run test:item-analytics
+          npm run test:item-score-import
+          npm run test:lead-extract-ai
+          npm run test:lead-followup-ai
+          npm run test:lead-quality
+          npm run test:lead-timeline
+          npm run test:ledger
+          npm run test:lesson-plan-ai
+          npm run test:marketing-content-ai
+          npm run test:module-filters
+          npm run test:payroll-register
+          npm run test:ptm-brief-ai
+          npm run test:question-bank
+          npm run test:rbac-infer
+          npm run test:rbac-scope
+          npm run test:receipt-lookup
+          npm run test:referrals
+          npm run test:report-export
+          npm run test:report-remark-ai
+          npm run test:salary-additional
+          npm run test:school-receipt-no
+          npm run test:session-cookie-edge
+          npm run test:staff-geo
+          npm run test:standing-discount-change
+          npm run test:syllabus-outcomes-import
+          npm run test:transport-overlap-billing
+          npm run test:wa-contact-state
+          npm run test:wa-delivery-log
+          npm run test:wa-sequences
+          npm run test:wa-staff-att-bot
 
   build:
     name: Production build
