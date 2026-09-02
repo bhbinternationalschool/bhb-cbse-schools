@@ -21,6 +21,12 @@
  */
 
 import { AlertTriangle, ImageOff, Trash2, Upload } from "lucide-react";
+import { loadSis } from "@/lib/sis";
+import {
+  mediaConsentForHousehold,
+  normalizePhotoConsent,
+  photoConsentLabel,
+} from "@/lib/photoConsent";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ErpTableShell } from "@/components/ui/erp-roster";
 import { readAll } from "@/lib/data/client/query";
@@ -151,10 +157,14 @@ export function MediaLibrary({
             width: size.w,
             height: size.h,
             alt: "",
-            // Blanket consent through the admission terms is the school's
-            // standing position, so this is the honest default. A family
-            // objection is one click away and overrides it everywhere.
-            consentStatus: "granted",
+            // Silence is not consent. The school asks each family with a
+            // separate, optional tick on the registration form, so a freshly
+            // uploaded picture starts as PENDING and cannot be published
+            // until someone says whose it is (and that family said yes) or
+            // marks it as having nobody in it. The old default was `granted`
+            // on the strength of a blanket term — which is the thing that
+            // changed. See lib/photoConsent.ts.
+            consentStatus: "pending",
             contentHash: hash,
             originalFilename: file.name,
             uploadedBy: actor?.fullName || "",
@@ -207,6 +217,69 @@ export function MediaLibrary({
       return;
     }
     onError(null);
+    await load();
+  }
+
+  /**
+   * Attach the picture to a family, and take the consent from THEIR answer.
+   *
+   * The status is derived, not chosen, so the office cannot mark a picture
+   * publishable for a family that declined — the point of asking is lost the
+   * moment someone can overrule it here. Clearing the family leaves the
+   * status alone: a picture with nobody in it is marked "not required" on its
+   * own, and is not a family question at all.
+   */
+  /**
+   * The families, for the picker. Read from SIS because that is where the
+   * answer lives once a child is enrolled; the registration form writes it
+   * onto the admission household and enrolment carries it across.
+   */
+  const [households, setHouseholds] = useState<
+    { id: string; code: string; guardianName: string; photoConsent?: string }[]
+  >([]);
+  useEffect(() => {
+    try {
+      const sis = loadSis();
+      setHouseholds(
+        (sis.households ?? []).map((h) => ({
+          id: h.id,
+          code: h.code,
+          guardianName: h.guardianName,
+          photoConsent: h.photoConsent,
+        })),
+      );
+    } catch {
+      // No SIS in this browser yet: the picker is empty and consent stays a
+      // manual decision, which is the safe direction to fail in.
+      setHouseholds([]);
+    }
+  }, []);
+
+  async function setHousehold(item: SiteMedia, householdId: string) {
+    const family = households.find((h) => h.id === householdId);
+    setBusy(item.id);
+    const res = await writeRecords("site.media", [
+      {
+        op: "upsert",
+        id: item.id,
+        base: item.updatedAt,
+        row: mediaToRow({
+          consentHouseholdId: householdId,
+          ...(family
+            ? {
+                consentStatus: mediaConsentForHousehold(
+                  normalizePhotoConsent(family.photoConsent),
+                ),
+              }
+            : {}),
+        }),
+      },
+    ]);
+    setBusy(null);
+    if (!res.ok) {
+      onError(`The family was not recorded: ${res.message}`);
+      return;
+    }
     await load();
   }
 
@@ -364,6 +437,32 @@ export function MediaLibrary({
                     )}
 
                     <div className="flex flex-wrap items-center gap-2">
+                      {/* Whose child is this? Choosing the family sets the
+                          consent from what THEY said on the registration
+                          form, rather than from what the office assumes.
+                          Until this session nothing ever wrote
+                          consent_household_id, so the column existed and the
+                          family's answer had no reader. */}
+                      <label className="text-[11px] text-[var(--muted)]">
+                        Family
+                        <select
+                          className="ml-1.5 max-w-[13rem] rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-[11px] text-[var(--brand-deep)]"
+                          value={item.consentHouseholdId}
+                          onChange={(e) => void setHousehold(item, e.target.value)}
+                        >
+                          <option value="">
+                            {item.consentStatus === "not_required"
+                              ? "Nobody in this picture"
+                              : "Say whose child this is…"}
+                          </option>
+                          {households.map((h) => (
+                            <option key={h.id} value={h.id}>
+                              {h.guardianName || h.code} —{" "}
+                              {photoConsentLabel(normalizePhotoConsent(h.photoConsent))}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
                       <label className="text-[11px] text-[var(--muted)]">
                         Consent
                         <select

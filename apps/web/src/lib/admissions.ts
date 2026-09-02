@@ -5,6 +5,7 @@
  */
 
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { normalizePhotoConsent, type PhotoConsent } from "@/lib/photoConsent";
 import { sanitizeStoredMediaUrl } from "@/lib/media";
 import { normalizeHouseholdLanguage } from "@/lib/householdPrefs";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
@@ -101,6 +102,11 @@ export type AdmissionHousehold = {
   guardians: AdmissionGuardian[];
   /** Set on first child enroll — siblings reuse this SIS household */
   sisHouseholdId: string;
+  /**
+   * Whether this family agreed to photographs being published.
+   * "" = never asked, which is NOT agreement. See lib/photoConsent.ts.
+   */
+  photoConsent?: PhotoConsent;
   note: string;
   createdAt: string;
   updatedAt: string;
@@ -2569,6 +2575,11 @@ export function enrollLead(
       pincode: lead.pincode || admHh?.pincode || "",
       altMobile:
         admHh?.guardians.find((g) => !g.isPrimary && g.mobile)?.mobile || "",
+      // Carried across from registration, where the family was actually
+      // asked. Losing it here would silently downgrade a "yes" to
+      // "never asked" the moment the child enrolled — and the website reads
+      // the SIS household, not this one.
+      photoConsent: normalizePhotoConsent(admHh?.photoConsent),
     });
     households = [...households, hh];
     sisHouseholdId = hh.id;
@@ -3625,6 +3636,12 @@ export function createFamilyRegistrationsFromPublic(
     campaignSrc?: string;
     /** Parent ticked the DPDP consent box */
     consent?: boolean;
+    /**
+     * Parent ticked the SEPARATE, optional photographs box. `false` here is a
+     * real answer — they were asked and declined — and is recorded as such,
+     * not left blank. Blank is reserved for families nobody has asked.
+     */
+    photoConsent?: boolean;
     preferredLanguage?: string;
   },
   by = "Parent self-register",
@@ -3674,6 +3691,22 @@ export function createFamilyRegistrationsFromPublic(
       ...(input.preferredLanguage ? { preferredLanguage: input.preferredLanguage } : {}),
     });
   }
+  // The family was asked, so their answer is recorded either way — a tick is
+  // "granted", an untouched box is "refused". Neither is left blank: blank
+  // means nobody asked, and that distinction is the whole point of opt-in.
+  next = {
+    ...next,
+    households: next.households.map((h) =>
+      h.id === r.householdId
+        ? {
+            ...h,
+            photoConsent: (input.photoConsent ? "granted" : "refused") as PhotoConsent,
+            updatedAt: new Date().toISOString(),
+          }
+        : h,
+    ),
+  };
+
   return {
     ok: true,
     state: next,

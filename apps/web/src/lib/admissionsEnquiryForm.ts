@@ -63,46 +63,32 @@ export function dpdpNoticeText(schoolName: string): string {
 }
 
 /**
- * Photography and video — the wording the blanket consent actually rests on.
+ * Photography and video — the wording beside its own, optional tick.
  *
- * The decision taken on 2026-08-30 was a BLANKET consent through the
- * admission terms rather than a tick per child, and the code already acts on
- * it: a pupil photograph defaults to `granted`, and `withdrawn` is the
- * per-family override that blocks it everywhere. Until now the terms did not
- * say any of that, so the school was publishing on the strength of a consent
- * it had never actually asked for. This is that missing half.
+ * This began as a blanket consent inside the mandatory admission terms. It is
+ * now a SEPARATE box a family can simply leave alone, because consent under
+ * the DPDP Act 2023 must be free, specific and unambiguous, and for a child it
+ * comes from the parent — and a tick you cannot register without is hard to
+ * call free.
  *
- * Written to be usable as consent rather than as cover:
- *  - it says WHAT (photographs and video taken at school),
- *  - WHERE they may appear (the school's own website and printed material),
- *  - what will NOT happen (no sale, no advertising network, no naming a child
- *    without asking) — DPDP s.9 forbids targeted advertising to children, and
- *    a notice that stays silent on it invites the assumption,
- *  - and that a parent may refuse at any time, in one sentence, with no
- *    reason required and no effect on the child's place.
+ * So this is phrased as a request, not a notice. It says what is taken, where
+ * it may appear, what will NOT happen (DPDP s.9 forbids targeted advertising
+ * to children; silence on that invites the assumption), and — the sentence
+ * doing the real work — that leaving it unticked costs the child nothing.
  *
- * Deliberately NOT added to the enquiry form. An enquiry is a family asking
- * about admission; no child is enrolled and no photograph will be taken, so
- * consent collected there would be for something that is not going to happen.
- *
- * NOTE FOR WHOEVER REVIEWS THIS: consent under the DPDP Act 2023 must be
- * free, specific, informed and unambiguous, and for a child it must come from
- * the parent. Bundling photography into the same mandatory tick as the
- * registration data makes it harder to call "free", because the family cannot
- * register without it. The wording below therefore states the refusal right
- * explicitly and promises it costs the child nothing — which is the strongest
- * form the blanket decision can take. A separate, genuinely optional tick
- * would be stronger still.
+ * Deliberately NOT on the enquiry form. An enquiry is a family asking about
+ * admission: nobody is enrolled and no photograph will be taken, so consent
+ * collected there would be for something that is not going to happen.
  */
 export function photographyNoticeText(schoolName: string): string {
   return (
-    `Photographs and video: ${schoolName} takes photographs and video at school ` +
-    `activities and may use them on the school's own website, notice boards, ` +
+    `I agree that ${schoolName} may use photographs and video of my child, ` +
+    `taken at school activities, on the school's own website, notice boards, ` +
     `prospectus and printed material. They are not sold, not given to ` +
-    `advertisers, and a child is not named alongside a picture without asking ` +
-    `you first. If you would rather your child did not appear, tell the school ` +
-    `office at any time — you need not give a reason, it will be applied to ` +
-    `pictures already published as well as new ones, and it makes no ` +
-    `difference to your child's place at the school.`
+    `advertisers, and my child is not named beside a picture without being ` +
+    `asked first. I can change my mind at any time by telling the school ` +
+    `office — it will be applied to pictures already published as well as new ` +
+    `ones. Leaving this box unticked is completely fine and makes no ` +
+    `difference to my child's place at the school.`
   );
 }

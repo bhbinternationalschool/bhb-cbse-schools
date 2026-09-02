@@ -237,6 +237,12 @@ export function PublicFamilyRegisterForm({
   }
 
   const [consent, setConsent] = useState(false);
+  /**
+   * Photographs — its own answer, and NOT required. The form submits whether
+   * it was ticked; leaving it alone is a real answer ("no"), not a missing
+   * one, because the family was asked.
+   */
+  const [photoConsent, setPhotoConsent] = useState(false);
   const [preferredLanguage, setPreferredLanguage] = useState("");
 
   async function onSubmit(e: React.FormEvent) {
@@ -272,6 +278,7 @@ export function PublicFamilyRegisterForm({
             feeAmountPaise: Math.max(0, Math.round(Number(c.feeInr) * 100) || 0),
           })),
           consent,
+          photoConsent,
           preferredLanguage,
         }),
       });
@@ -299,6 +306,7 @@ export function PublicFamilyRegisterForm({
         mobile,
         campaignSrc: initialSrc || "website",
         consent,
+        photoConsent,
         preferredLanguage,
         feeHeadName: feeHead?.name || "Registration fee",
         children: children.map((c) => ({
@@ -697,15 +705,25 @@ export function PublicFamilyRegisterForm({
         </label>
         <label className="flex items-start gap-2 rounded-xl bg-[rgba(32,48,80,0.05)] p-3 text-[11px] text-[var(--muted)]">
           <input type="checkbox" className="mt-0.5" checked={consent} onChange={(e) => setConsent(e.target.checked)} required />
+          <span>{dpdpNoticeText(TENANT.nameDisplay)}</span>
+        </label>
+
+        {/* Its own box, and deliberately NOT `required`. Bundling this into
+            the tick above would mean a family could not register without
+            agreeing to photographs, which is exactly what makes consent
+            unfree under the DPDP Act. Leaving it alone must cost nothing. */}
+        <label className="flex items-start gap-2 rounded-xl border border-dashed border-[var(--border)] p-3 text-[11px] text-[var(--muted)]">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={photoConsent}
+            onChange={(e) => setPhotoConsent(e.target.checked)}
+          />
           <span>
-            {dpdpNoticeText(TENANT.nameDisplay)}
-            {/* The half the website's blanket photo consent rests on. Shown
-                as its own paragraph rather than run into the sentence above,
-                so a parent can actually see what they are agreeing to — and
-                so the refusal right is legible rather than buried. */}
-            <span className="mt-2 block">
-              {photographyNoticeText(TENANT.nameDisplay)}
-            </span>
+            <strong className="block text-[var(--brand-deep)]">
+              Photographs (optional)
+            </strong>
+            {photographyNoticeText(TENANT.nameDisplay)}
           </span>
         </label>
 

@@ -139,7 +139,7 @@ SELFTESTS=(
   test:vendor-history
   test:site-seo
   test:approval-gate
-  test:photography-notice
+  test:photo-consent
   test:cash-pool-orphans
   test:academic-risk
   test:admissions-ai

@@ -37,6 +37,8 @@ type RegisterBody = {
   feeHeadName?: string;
   children?: { childName?: string; classSoughtId?: string; feeAmountPaise?: number }[];
   consent?: boolean;
+  /** The separate, optional photographs tick. */
+  photoConsent?: boolean;
   preferredLanguage?: string;
 };
 
@@ -92,6 +94,7 @@ export async function POST(req: Request) {
     feeHeadName: (body.feeHeadName || "Registration fee").trim(),
     children,
     consent: body.consent === true,
+    photoConsent: body.photoConsent === true,
     preferredLanguage: String(body.preferredLanguage || "").trim().slice(0, 10),
   });
   if (!r.ok) {

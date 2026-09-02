@@ -192,7 +192,7 @@ jobs:
           npm run test:vendor-history
           npm run test:site-seo
           npm run test:approval-gate
-          npm run test:photography-notice
+          npm run test:photo-consent
           npm run test:cash-pool-orphans
           npm run test:academic-risk
           npm run test:admissions-ai
