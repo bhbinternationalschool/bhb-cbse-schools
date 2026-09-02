@@ -61,3 +61,48 @@ export function enquiryQuestionsFor(className: string): {
 export function dpdpNoticeText(schoolName: string): string {
   return `I agree that ${schoolName} may store these details and contact me about this admission enquiry (phone, WhatsApp, SMS). The details are used only for admissions and are not shared outside the school. I can ask the school office to correct or delete them at any time.`;
 }
+
+/**
+ * Photography and video — the wording the blanket consent actually rests on.
+ *
+ * The decision taken on 2026-08-30 was a BLANKET consent through the
+ * admission terms rather than a tick per child, and the code already acts on
+ * it: a pupil photograph defaults to `granted`, and `withdrawn` is the
+ * per-family override that blocks it everywhere. Until now the terms did not
+ * say any of that, so the school was publishing on the strength of a consent
+ * it had never actually asked for. This is that missing half.
+ *
+ * Written to be usable as consent rather than as cover:
+ *  - it says WHAT (photographs and video taken at school),
+ *  - WHERE they may appear (the school's own website and printed material),
+ *  - what will NOT happen (no sale, no advertising network, no naming a child
+ *    without asking) — DPDP s.9 forbids targeted advertising to children, and
+ *    a notice that stays silent on it invites the assumption,
+ *  - and that a parent may refuse at any time, in one sentence, with no
+ *    reason required and no effect on the child's place.
+ *
+ * Deliberately NOT added to the enquiry form. An enquiry is a family asking
+ * about admission; no child is enrolled and no photograph will be taken, so
+ * consent collected there would be for something that is not going to happen.
+ *
+ * NOTE FOR WHOEVER REVIEWS THIS: consent under the DPDP Act 2023 must be
+ * free, specific, informed and unambiguous, and for a child it must come from
+ * the parent. Bundling photography into the same mandatory tick as the
+ * registration data makes it harder to call "free", because the family cannot
+ * register without it. The wording below therefore states the refusal right
+ * explicitly and promises it costs the child nothing — which is the strongest
+ * form the blanket decision can take. A separate, genuinely optional tick
+ * would be stronger still.
+ */
+export function photographyNoticeText(schoolName: string): string {
+  return (
+    `Photographs and video: ${schoolName} takes photographs and video at school ` +
+    `activities and may use them on the school's own website, notice boards, ` +
+    `prospectus and printed material. They are not sold, not given to ` +
+    `advertisers, and a child is not named alongside a picture without asking ` +
+    `you first. If you would rather your child did not appear, tell the school ` +
+    `office at any time — you need not give a reason, it will be applied to ` +
+    `pictures already published as well as new ones, and it makes no ` +
+    `difference to your child's place at the school.`
+  );
+}

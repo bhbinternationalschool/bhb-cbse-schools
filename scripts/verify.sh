@@ -139,6 +139,7 @@ SELFTESTS=(
   test:vendor-history
   test:site-seo
   test:approval-gate
+  test:photography-notice
   test:cash-pool-orphans
   test:academic-risk
   test:admissions-ai

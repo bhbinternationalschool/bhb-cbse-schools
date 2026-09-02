@@ -18,7 +18,7 @@ import {
 import { formatInr } from "@/lib/fees";
 import type { PublicRegistrationConfig } from "@/lib/publicRegistration";
 import { HOUSEHOLD_LANGUAGES } from "@/lib/householdPrefs";
-import { dpdpNoticeText } from "@/lib/admissionsEnquiryForm";
+import { dpdpNoticeText, photographyNoticeText } from "@/lib/admissionsEnquiryForm";
 import { TENANT } from "@/lib/types";
 
 const inp =
@@ -697,7 +697,16 @@ export function PublicFamilyRegisterForm({
         </label>
         <label className="flex items-start gap-2 rounded-xl bg-[rgba(32,48,80,0.05)] p-3 text-[11px] text-[var(--muted)]">
           <input type="checkbox" className="mt-0.5" checked={consent} onChange={(e) => setConsent(e.target.checked)} required />
-          <span>{dpdpNoticeText(TENANT.nameDisplay)}</span>
+          <span>
+            {dpdpNoticeText(TENANT.nameDisplay)}
+            {/* The half the website's blanket photo consent rests on. Shown
+                as its own paragraph rather than run into the sentence above,
+                so a parent can actually see what they are agreeing to — and
+                so the refusal right is legible rather than buried. */}
+            <span className="mt-2 block">
+              {photographyNoticeText(TENANT.nameDisplay)}
+            </span>
+          </span>
         </label>
 
         {error ? (
