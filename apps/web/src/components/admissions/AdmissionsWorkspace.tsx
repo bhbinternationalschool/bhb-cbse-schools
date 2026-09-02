@@ -73,6 +73,7 @@ import { canAccessModule, hasPermission, loadRbac } from "@/lib/rbac";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
+import { FollowUpDialog } from "@/components/admissions/FollowUpDialog";
 import {
   ErpTable,
   ErpTableBody,
@@ -136,7 +137,20 @@ type AdmTab =
   | "referrals"
   | "reports";
 
-export function AdmissionsWorkspace() {
+export function AdmissionsWorkspace({
+  soloLeadId,
+}: {
+  /**
+   * Render ONE lead and nothing else — the whole page is that lead's steps.
+   *
+   * The list and the lead were competing for the same screen: the table is a
+   * call list you run down, the lead is a form you work through, and putting
+   * them together meant scrolling past 859 rows to reach the form. The list
+   * now opens each lead in its own tab, so a counsellor can keep the list
+   * open and work several families without losing their place in it.
+   */
+  soloLeadId?: string;
+} = {}) {
   const session = useDemoSession();
   const sessionReadOnly = useSessionReadOnly();
   const [masters, setMasters] = useState<MastersState | null>(() =>
@@ -185,6 +199,24 @@ export function AdmissionsWorkspace() {
     if (openLeadId) openLead(openLeadId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // A solo page IS one lead: select it as soon as the desk has loaded, and
+  // keep selecting it if the state reloads underneath.
+  useEffect(() => {
+    if (!soloLeadId || !state) return;
+    setSelectedId(soloLeadId);
+    setTab("leads");
+  }, [soloLeadId, state]);
+
+  /**
+   * The lead a follow-up is being logged against, and how it was reached.
+   * Set from the list's own action buttons, so a call can be written up
+   * without leaving the call list.
+   */
+  const [followUpFor, setFollowUpFor] = useState<{
+    lead: AdmissionLead;
+    channel: FollowUpChannel;
+  } | null>(null);
 
   const [captureYearFilter, setCaptureYearFilter] = useState<string>("all");
   const [filter, setFilter] = useState<
@@ -1082,6 +1114,7 @@ export function AdmissionsWorkspace() {
         ) : null
       }
     >
+      {soloLeadId ? null : (
       <ModuleTabs
         aria-label="Admissions"
         value={tab}
@@ -1130,6 +1163,7 @@ export function AdmissionsWorkspace() {
             : []),
         ]}
       />
+      )}
 
       {!canBrowseLeadLists ? (
         <p className="rounded-lg border border-[rgba(154,52,18,0.25)] bg-[rgba(154,52,18,0.08)] px-3 py-2 text-[12px] text-[var(--brand-deep)]">
@@ -1428,6 +1462,7 @@ export function AdmissionsWorkspace() {
             ) : null}
           </div>
 
+          {soloLeadId ? null : (
           <MastersTableCard title="Leads">
             {filtered.length === 0 ? (
               <MastersEmptyRow label="No leads in this view — use New enquiry to capture." />
@@ -1450,6 +1485,9 @@ export function AdmissionsWorkspace() {
                     <ErpSortTh sort={leadSort} field="followUp">
                       Next follow-up
                     </ErpSortTh>
+                    <th className="px-3 py-2 text-left text-[11px] font-bold uppercase">
+                      Do
+                    </th>
                   </tr>
                 </ErpTableHead>
                 <ErpTableBody>
@@ -1620,6 +1658,85 @@ export function AdmissionsWorkspace() {
                             </span>
                           )}
                         </td>
+                        {/* What the office actually DOES to a lead, on the
+                            row itself. Working a call list means ringing the
+                            next family, not opening each one to find the
+                            buttons. Every action stops the row's own click,
+                            which opens the lead. */}
+                        <td
+                          className="px-3 py-2"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {showOnly ? (
+                            <span className="text-[10px] text-[var(--muted)]">
+                              admitted
+                            </span>
+                          ) : (
+                            <div className="flex flex-wrap gap-1">
+                              {canCreate && l.mobile ? (
+                                <button
+                                  type="button"
+                                  title={`Call ${l.mobile} and write it up`}
+                                  className="rounded-lg bg-[var(--success)] px-2 py-1 text-[10px] font-bold text-white"
+                                  onClick={() =>
+                                    setFollowUpFor({ lead: l, channel: "call" })
+                                  }
+                                >
+                                  Call
+                                </button>
+                              ) : null}
+                              {canCreate ? (
+                                <button
+                                  type="button"
+                                  title="Log a follow-up without calling"
+                                  className="rounded-lg border border-[var(--border)] px-2 py-1 text-[10px] font-semibold text-[var(--brand-deep)]"
+                                  onClick={() =>
+                                    setFollowUpFor({
+                                      lead: l,
+                                      channel: "whatsapp",
+                                    })
+                                  }
+                                >
+                                  Follow-up
+                                </button>
+                              ) : null}
+                              {canCreate && l.stage === "enquiry" ? (
+                                (() => {
+                                  const blocked = registrationBlockers(
+                                    state,
+                                    l.id,
+                                  );
+                                  return (
+                                    <button
+                                      type="button"
+                                      disabled={blocked.length > 0}
+                                      title={
+                                        blocked.length
+                                          ? `Still needed: ${blocked.map((b) => b.message).join(" ")}`
+                                          : "Move this enquiry to Registered"
+                                      }
+                                      className="rounded-lg bg-[var(--brand-deep)] px-2 py-1 text-[10px] font-bold text-white disabled:opacity-40"
+                                      onClick={() => doRegisterLead(l.id)}
+                                    >
+                                      Register
+                                    </button>
+                                  );
+                                })()
+                              ) : null}
+                              {/* A real link, so it can be middle-clicked,
+                                  bookmarked, and kept open beside the list. */}
+                              <a
+                                href={`/admissions/lead/${l.id}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title="Open this lead's steps in a new tab"
+                                className="rounded-lg border border-[var(--border)] px-2 py-1 text-[10px] font-semibold text-[var(--muted)]"
+                              >
+                                Open ↗
+                              </a>
+                            </div>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
@@ -1627,6 +1744,7 @@ export function AdmissionsWorkspace() {
               </ErpTable>
             )}
           </MastersTableCard>
+          )}
 
           {!selected ? (
             <p className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--card)] px-4 py-6 text-center text-sm text-[var(--muted)]">
@@ -2175,6 +2293,30 @@ export function AdmissionsWorkspace() {
             );
           })()
         : null}
+      {followUpFor ? (
+        <FollowUpDialog
+          lead={{
+            id: followUpFor.lead.id,
+            enquiryNo: followUpFor.lead.enquiryNo,
+            childName: followUpFor.lead.childName,
+            guardianName: followUpFor.lead.guardianName,
+            mobile: followUpFor.lead.mobile,
+          }}
+          channel={followUpFor.channel}
+          onClose={() => setFollowUpFor(null)}
+          onSave={(draft) => {
+            const cur = loadAdmissions();
+            const r = logFollowUp(cur, followUpFor.lead.id, draft, session.fullName);
+            if (!r.ok) {
+              setNotice(r.reason);
+              window.setTimeout(() => setNotice(null), 3200);
+              return;
+            }
+            commit(r.state, "Follow-up saved");
+            setFollowUpFor(null);
+          }}
+        />
+      ) : null}
     </ErpWorkspaceShell>
   );
 }
