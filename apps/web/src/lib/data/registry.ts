@@ -191,6 +191,35 @@ export const COLLECTIONS: readonly CollectionDef[] = [
   //
   // Tenant-scoped only: a website is not a thing that belongs to an academic
   // session. Scoping by year would hide last year's About page every April.
+  // ── UDISE+ working sheet ─────────────────────────────────────────────
+  // Reconciling a UDISE+ export takes days, and the sheet must follow the
+  // login rather than one browser. Rows are stored AS UPLOADED; the matched
+  // table the office sees is derived from them against SIS every time, so a
+  // child settled since the upload reports itself settled instead of being
+  // shown again.
+  {
+    id: "udise.sheets",
+    module: "students",
+    table: "udise_upload_sheets",
+    rbac: { view: "students", edit: "students" },
+    scope: ["tenant_id"],
+    // "Start a fresh sheet" must be undoable — a day's reconciliation is not
+    // something to lose to a misclick.
+    softDelete: true,
+    list: { sortColumn: "id", defaultLimit: 20, maxLimit: 50 },
+  },
+  {
+    id: "udise.rows",
+    module: "students",
+    table: "udise_upload_rows",
+    rbac: { view: "students", edit: "students" },
+    scope: ["tenant_id"],
+    softDelete: true,
+    // A UDISE+ export runs to the whole school. The ceiling is the registry's
+    // own maximum, and the reader pages to it rather than asking for
+    // everything — PostgREST truncates at 1000 and calls it success.
+    list: { sortColumn: "id", defaultLimit: 1000, maxLimit: 1000 },
+  },
   {
     id: "site.pages",
     module: "website",

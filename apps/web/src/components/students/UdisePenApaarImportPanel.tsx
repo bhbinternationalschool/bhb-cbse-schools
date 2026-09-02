@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { getSessionActor } from "@/lib/sessionActor";
 import Link from "next/link";
 import {
   STUDENT_TYPES,
@@ -39,6 +40,11 @@ import {
   mergeUdiseMatrices,
   saveUdiseUpload,
 } from "@/lib/udiseUploadStore";
+import {
+  clearServerSheet,
+  loadServerSheet,
+  saveServerSheet,
+} from "@/lib/udiseUploadServer";
 import {
   ErpTable,
   ErpTableBody,
@@ -351,6 +357,8 @@ export function UdisePenApaarImportPanel({
   const [storedInfo, setStoredInfo] = useState<{
     files: { name: string; at: string; rows: number }[];
     updatedAt: string;
+    /** Which copy is on screen — it changes what the office can rely on. */
+    where: "server" | "browser";
   } | null>(null);
 
   /**
@@ -362,25 +370,60 @@ export function UdisePenApaarImportPanel({
    * showing the same names for ever.
    */
   useEffect(() => {
-    const stored = loadUdiseUpload();
-    if (!stored || !stored.matrix?.length) return;
-    try {
+    let cancelled = false;
+
+    function show(
+      matrix: unknown[][],
+      files: { name: string; at: string; rows: number }[],
+      updatedAt: string,
+      where: "server" | "browser",
+    ) {
       const { preview: p, formatOk: ok } = previewUdiseStudentDetailsSync(
-        stored.matrix,
+        matrix,
         sis,
         masters,
         matchOpts,
         academicYearCode,
       );
-      setMatrix(stored.matrix);
+      if (cancelled) return;
+      setMatrix(matrix);
       setPreview(p);
       setFormatOk(ok);
-      setStoredInfo({ files: stored.files ?? [], updatedAt: stored.updatedAt });
-      setFileName(stored.files?.[stored.files.length - 1]?.name ?? "");
-    } catch {
-      // A stored sheet that no longer parses is not worth a broken panel.
-      clearUdiseUpload();
+      setStoredInfo({ files, updatedAt, where });
+      setFileName(files[files.length - 1]?.name ?? "");
     }
+
+    void (async () => {
+      // The server first, because that is the copy that follows the login.
+      try {
+        const res = await loadServerSheet(academicYearCode ?? "");
+        if (!cancelled && res.ok && res.sheet?.matrix?.length) {
+          show(
+            res.sheet.matrix,
+            res.sheet.sheet.files,
+            res.sheet.sheet.updatedAt,
+            "server",
+          );
+          return;
+        }
+      } catch {
+        // Offline, or the read failed. Fall through to this browser's copy
+        // rather than showing nothing — a counsellor mid-reconciliation
+        // should not lose the sheet because the network dropped.
+      }
+
+      const stored = loadUdiseUpload();
+      if (!stored || !stored.matrix?.length) return;
+      try {
+        show(stored.matrix, stored.files ?? [], stored.updatedAt, "browser");
+      } catch {
+        clearUdiseUpload();
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
     // Restores once, when the panel opens.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -429,32 +472,62 @@ export function UdisePenApaarImportPanel({
       setPreview(p);
       setFormatOk(ok);
 
-      if (ok) {
+      if (ok && head) {
+        const at = new Date().toISOString();
         const files = [
           ...(stored?.files ?? []),
           {
             name: file.name,
-            at: new Date().toISOString(),
-            rows: Math.max(0, incoming.length - (head?.headerRow ?? 0) - 1),
+            at,
+            rows: Math.max(0, incoming.length - head.headerRow - 1),
           },
         ].slice(-10);
-        const kept = saveUdiseUpload({
+
+        // The browser copy first: it is instant, and it is what keeps the
+        // sheet if the network is down. The server copy is what makes it
+        // follow the login to another machine.
+        const keptLocal = saveUdiseUpload({
           version: 1,
           academicYearCode: academicYearCode ?? "",
           files,
           matrix: mat,
-          updatedAt: new Date().toISOString(),
+          updatedAt: at,
         });
-        setStoredInfo({ files, updatedAt: new Date().toISOString() });
-        if (stored?.matrix?.length) {
-          setApplyResult(
-            `Merged into the sheet already open: ${merged.added} new row(s), ` +
-              `${merged.updated} changed, ${merged.unchanged} unchanged.` +
-              (kept ? "" : " (Could not save the working file — it will be lost on reload.)"),
-          );
-        } else if (!kept) {
+
+        const cols = {
+          pen: head.col.pen ?? -1,
+          apaar: head.col.apaar ?? -1,
+          name: head.col.name ?? -1,
+          dob: head.col.dob ?? -1,
+        };
+        const saved = await saveServerSheet({
+          academicYearCode: academicYearCode ?? "",
+          head: mat.slice(0, head.headerRow + 1),
+          headerRowIndex: head.headerRow,
+          body: mat.slice(head.headerRow + 1),
+          files,
+          cols,
+          actor: getSessionActor()?.fullName ?? "",
+        });
+
+        setStoredInfo({
+          files,
+          updatedAt: at,
+          where: saved.ok ? "server" : "browser",
+        });
+
+        const mergeLine = stored?.matrix?.length
+          ? `Merged into the sheet already open: ${merged.added} new row(s), ` +
+            `${merged.updated} changed, ${merged.unchanged} unchanged.`
+          : "";
+        setApplyResult(mergeLine || null);
+
+        // Said out loud rather than swallowed: the office needs to know
+        // whether the sheet will be on the other machine tomorrow.
+        if (!saved.ok) {
           setError(
-            "The sheet loaded but could not be saved — it will be lost when you leave this page.",
+            `Saved in this browser only — it will not appear on another machine. ${saved.error}` +
+              (keptLocal ? "" : " It could not be saved here either, so it will be lost on reload."),
           );
         }
       }
@@ -1043,7 +1116,9 @@ export function UdisePenApaarImportPanel({
             <>
               {storedInfo ? (
                 <p className="mb-2 rounded-lg bg-[var(--surface-sunken)] px-3 py-1.5 text-[11px] text-[var(--muted)]">
-                  Working file kept in this browser ·{" "}
+                  {storedInfo.where === "server"
+                    ? "Working sheet saved on the server — it follows your login to any machine · "
+                    : "Working sheet in THIS BROWSER only — it will not be on another machine · "}
                   {storedInfo.files.length === 1
                     ? storedInfo.files[0]!.name
                     : `${storedInfo.files.length} uploads merged, latest ${
@@ -1057,6 +1132,7 @@ export function UdisePenApaarImportPanel({
                     className="underline decoration-dotted underline-offset-2"
                     onClick={() => {
                       clearUdiseUpload();
+                      void clearServerSheet(academicYearCode ?? "");
                       setStoredInfo(null);
                       setMatrix(null);
                       setPreview(null);
