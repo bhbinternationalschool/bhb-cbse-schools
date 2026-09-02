@@ -123,4 +123,41 @@ const facts = (p: Partial<AnomalyFacts>): AnomalyFacts => ({
   assert.equal(real[0]!.severity, "critical");
 }
 
+/* ── 4. A reversed bill and its reversal cancel — they are not an overpayment ── */
+{
+  // Exactly Gyan Sindhu's shape: a bill, its reversal, and a live bill.
+  // Counting only the reversal left a one-sided debit and reported the
+  // supplier as ₹1,11,233.15 overpaid, every day, while the school still owed
+  // them ₹31,310.03.
+  const reversedBill = voucher({ id: "b1", voucherType: "purchase", reversed: true });
+  const itsReversal = voucher({ id: "r1", voucherType: "reversal" });
+  const liveBill = voucher({ id: "b2", voucherType: "purchase" });
+
+  const found = findOverpaidParties(
+    facts({
+      vouchers: [reversedBill, itsReversal, liveBill],
+      lines: [
+        line({ voucherId: "b1", partyKey: "vendor:gs", partyName: "Gyan Sindhu", creditPaise: 71271_59 }),
+        line({ voucherId: "r1", partyKey: "vendor:gs", partyName: "Gyan Sindhu", debitPaise: 71271_59 }),
+        line({ voucherId: "b2", partyKey: "vendor:gs", partyName: "Gyan Sindhu", creditPaise: 52290_00 }),
+      ],
+    }),
+  );
+  assert.deepEqual(
+    found,
+    [],
+    "a correction is not an overpayment — the reversal pair cancels and the supplier is owed money",
+  );
+
+  // And a supplier genuinely holding our money is still reported.
+  const real = findOverpaidParties(
+    facts({
+      vouchers: [voucher({ id: "p1", voucherType: "payment" })],
+      lines: [line({ voucherId: "p1", partyKey: "vendor:acme", partyName: "Acme", debitPaise: 5000_00 })],
+    }),
+  );
+  assert.equal(real.length, 1, "a real debit balance on a supplier still fires");
+  assert.equal(real[0]!.code, "party_overpaid");
+}
+
 console.log("  ok — noise gone, the real findings still fire");

@@ -163,18 +163,14 @@ export function findDuplicatePayments(
   // holding money they were never billed for, which is a debit balance — so
   // that, not the repeated amount alone, is the thing worth waking someone
   // for. `party_overpaid` still reports the debit balance itself.
-  const netByParty = new Map<string, number>();
-  for (const l of facts.lines) {
-    if (!live.has(l.voucherId) || !l.partyKey) continue;
-    netByParty.set(
-      l.partyKey,
-      (netByParty.get(l.partyKey) ?? 0) + l.debitPaise - l.creditPaise,
-    );
-  }
+  // Same net, same reason: a reversed bill and its reversal cancel, and
+  // counting only one of them would make a settled supplier look overpaid and
+  // so turn every instalment into a "duplicate payment".
+  const partyNet = netByParty(facts);
 
   const grouped = new Map<string, typeof payments>();
   for (const p of payments) {
-    if ((netByParty.get(p.partyKey) ?? 0) <= 0) continue;
+    if ((partyNet.get(p.partyKey)?.paise ?? 0) <= 0) continue;
     const key = `${p.partyKey}|${p.amountPaise}`;
     const list = grouped.get(key);
     if (list) list.push(p);
@@ -209,16 +205,34 @@ export function findDuplicatePayments(
  * that is a genuine advance, which is why it is a warning rather than a
  * critical — but it is never something to discover at year end.
  */
-export function findOverpaidParties(facts: AnomalyFacts): Anomaly[] {
-  const live = new Set(facts.vouchers.filter((v) => !v.reversed).map((v) => v.id));
+/**
+ * What each party's account nets to, counting EVERY line.
+ *
+ * Reversals are not filtered out, and that is the point. A reversal is posted
+ * as an equal and opposite entry, so the pair cancels on its own. Dropping the
+ * reversed voucher while keeping its reversal — which is what this used to
+ * do — leaves the reversing debit standing alone and makes the party look
+ * overpaid by exactly the reversed amount.
+ *
+ * On this data Gyan Sindhu had two bills reversed (a receipt amended, a bill
+ * date corrected). The control reported them as ₹1,11,233.15 overpaid, every
+ * single day, when the school in fact still owed them ₹31,310.03. Two
+ * ordinary corrections, reported as a warning about money.
+ */
+function netByParty(facts: AnomalyFacts): Map<string, { name: string; paise: number }> {
   const net = new Map<string, { name: string; paise: number }>();
   for (const l of facts.lines) {
-    if (!live.has(l.voucherId) || !l.partyKey) continue;
+    if (!l.partyKey) continue;
     const cur = net.get(l.partyKey) ?? { name: l.partyName, paise: 0 };
     cur.paise += l.debitPaise - l.creditPaise;
     if (l.partyName) cur.name = l.partyName;
     net.set(l.partyKey, cur);
   }
+  return net;
+}
+
+export function findOverpaidParties(facts: AnomalyFacts): Anomaly[] {
+  const net = netByParty(facts);
 
   const out: Anomaly[] = [];
   for (const [key, v] of net) {
