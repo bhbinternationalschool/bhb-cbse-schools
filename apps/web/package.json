@@ -120,6 +120,7 @@
     "test:expense-voucher-draft": "npx tsx src/lib/expenseVoucherDraft.selftest.ts",
     "test:fee-push-line-safety": "npx tsx src/lib/feePushLineSafety.selftest.ts",
     "test:receipt-repair": "npx tsx src/lib/receiptRepair.selftest.ts",
+    "test:projection-double-post": "npx tsx src/lib/ledger/projectionDoublePost.selftest.ts",
     "test:payment-link-amount": "npx tsx src/lib/paymentLinkAmount.selftest.ts",
     "test:sis-wire-payload": "npx tsx src/lib/sisWirePayload.selftest.ts",
     "test:print-palette": "npx tsx src/lib/printPalette.selftest.ts",

@@ -102,6 +102,7 @@ SELFTESTS=(
   test:expense-voucher-draft
   test:fee-push-line-safety
   test:receipt-repair
+  test:projection-double-post
   test:payment-link-amount
   test:sis-wire-payload
   test:print-palette

@@ -83,14 +83,28 @@ async function existingBySource(
   const ctx = await getServerTenantContext();
   if (!ctx) return { ok: false, map: new Map(), error: "Supabase tenant not configured" };
 
-  const { data, error } = await ctx.sb
-    .from("ledger_vouchers")
-    .select("id, source_type, source_id")
-    .eq("tenant_id", ctx.tenantId)
-    .in("source_type", sourceTypes);
-  if (error) return { ok: false, map: new Map(), error: error.message };
-
-  const rows = (data ?? []) as { id: string; source_type: string; source_id: string }[];
+  // Paged: an unbounded select stops at PostgREST's maximum and reports the
+  // truncation as success. A projector that cannot see the vouchers already
+  // posted will post them all again — which is exactly what happened on
+  // 2026-09-01, 360 fee receipts booked a second time.
+  const rows: { id: string; source_type: string; source_id: string }[] = [];
+  {
+    const PAGE = 1000;
+    let from = 0;
+    for (;;) {
+      const { data, error } = await ctx.sb
+        .from("ledger_vouchers")
+        .select("id, source_type, source_id")
+        .eq("tenant_id", ctx.tenantId)
+        .in("source_type", sourceTypes)
+        .range(from, from + PAGE - 1);
+      if (error) return { ok: false, map: new Map(), error: error.message };
+      const page = (data ?? []) as { id: string; source_type: string; source_id: string }[];
+      rows.push(...page);
+      if (page.length < PAGE) break;
+      from += PAGE;
+    }
+  }
   const ids = rows.map((r) => r.id);
 
   const reversed = new Set<string>();
@@ -123,8 +137,44 @@ async function existingBySource(
  * Everything a projector needs to decide is here: post it, reverse it, leave
  * it alone, or refuse it with a reason somebody can act on.
  */
+/**
+ * Is this desk record already in the book — under ANY of its labels?
+ *
+ * One record can be posted by more than one path, and each path knows it by
+ * its own source type. A fee receipt is booked live by the counter as
+ * `fee_voucher`; the projection knows the same receipt as `fee_receipt`.
+ * Asking only under one's own label is how the projection posted 360 receipts
+ * a second time on 2026-09-01 and doubled fee income: neither side's
+ * idempotency check could see the other's work.
+ *
+ * A reversed prior still counts as found — the caller decides what to do
+ * about it — because "posted then reversed" is not the same as "never posted".
+ */
+export function findPriorPosting(
+  existing: Existing,
+  key: string,
+  alsoKeys?: string[],
+): { voucherId: string; reversed: boolean } | undefined {
+  const hit = existing.get(key);
+  if (hit) return hit;
+  for (const k of alsoKeys ?? []) {
+    const alt = existing.get(k);
+    if (alt) return alt;
+  }
+  return undefined;
+}
+
 async function applyRecord(opts: {
   key: string;
+  /**
+   * Other source types that mean THE SAME desk record is already booked.
+   *
+   * A fee receipt is posted live by the counter as `fee_voucher`; the
+   * projection knows it as `fee_receipt`. Looking only under its own label,
+   * the projection saw nothing and posted all 360 again — income doubled and
+   * neither side's idempotency check could see the other's work.
+   */
+  alsoKeys?: string[];
   existing: Existing;
   cancelled: boolean;
   cancelReason: string;
@@ -133,7 +183,7 @@ async function applyRecord(opts: {
   sourceId: string;
 }): Promise<void> {
   const { key, existing, cancelled, build, outcome, sourceId } = opts;
-  const prior = existing.get(key);
+  const prior = findPriorPosting(existing, key, opts.alsoKeys);
 
   if (cancelled) {
     if (!prior) {
@@ -239,7 +289,10 @@ export async function projectFeeReceipts(opts?: {
     (linesBy.get(k) ?? linesBy.set(k, []).get(k)!).push(l);
   }
 
-  const existing = await existingBySource(["fee_receipt"]);
+  // Both labels: the counter posts a receipt live as `fee_voucher` through the
+  // fee_desk_vouchers trigger, and this projector would otherwise post the
+  // very same receipt again as `fee_receipt`.
+  const existing = await existingBySource(["fee_receipt", "fee_voucher"]);
   if (!existing.ok) {
     outcome.refused.push({ sourceId: "-", reason: existing.error ?? "read failed" });
     return outcome;
@@ -274,6 +327,7 @@ export async function projectFeeReceipts(opts?: {
     const id = String(row.id);
     await applyRecord({
       key: `fee_receipt:${id}`,
+      alsoKeys: [`fee_voucher:${id}`],
       existing: existing.map,
       cancelled: !!row.voided_at,
       cancelReason: "Fee receipt voided",
