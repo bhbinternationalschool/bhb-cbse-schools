@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   STUDENT_TYPES,
@@ -25,6 +25,7 @@ import {
   setUdiseStudentStatus,
   migrateUdiseRowToSis,
   previewUdiseStudentDetailsSync,
+  findUdiseHeaderRow,
   promoteUdiseRowToSession,
   reconcileUdisePortalUpload,
   type UdiseMatchOptions,
@@ -32,6 +33,12 @@ import {
   type UdiseRowTone,
   type UdiseStudentRow,
 } from "@/lib/udiseStudentDetails";
+import {
+  clearUdiseUpload,
+  loadUdiseUpload,
+  mergeUdiseMatrices,
+  saveUdiseUpload,
+} from "@/lib/udiseUploadStore";
 import {
   ErpTable,
   ErpTableBody,
@@ -77,6 +84,9 @@ const TONE_LABEL: Record<UdiseRowTone, string> = {
 };
 
 type FilterTone =
+  /** Everything still needing attention — the default, and the point of the
+   *  screen. A row settled in SIS drops out of it on its own. */
+  | "todo"
   | "all"
   | "fill"
   | "verify"
@@ -215,7 +225,15 @@ export function UdisePenApaarImportPanel({
   const [error, setError] = useState<string | null>(null);
   const [applyResult, setApplyResult] = useState<string | null>(null);
   const [justApplied, setJustApplied] = useState(false);
-  const [filter, setFilter] = useState<FilterTone>("all");
+  /**
+   * Opens on what is left to do, not on everything.
+   *
+   * The list is recomputed against SIS each time, so a child already verified
+   * reports itself in sync and disappears from this view without anyone
+   * ticking anything off. "All" is one click away when the whole sheet is
+   * wanted.
+   */
+  const [filter, setFilter] = useState<FilterTone>("todo");
   const [migrateType, setMigrateType] = useState<FeeStudentType>("RTE");
   const [migrateFeeGroupId, setMigrateFeeGroupId] = useState("");
   const [fallbackClassId, setFallbackClassId] = useState("");
@@ -288,6 +306,7 @@ export function UdisePenApaarImportPanel({
 
   const visible = useMemo(() => {
     if (!preview) return [];
+    if (filter === "todo") return preview.filter((p) => p.tone !== "ok");
     if (filter === "changes") return preview.filter((p) => p.fillLabels.length);
     if (filter === "class_mismatch")
       return preview.filter((p) => p.classMismatch);
@@ -328,6 +347,44 @@ export function UdisePenApaarImportPanel({
     }
   }
 
+  /** How this working set was built, for the line above the table. */
+  const [storedInfo, setStoredInfo] = useState<{
+    files: { name: string; at: string; rows: number }[];
+    updatedAt: string;
+  } | null>(null);
+
+  /**
+   * Bring back the sheet the office was working through.
+   *
+   * Only the ROWS were kept; the table is recomputed against SIS as it stands
+   * now. So a child whose PEN has been written since the upload comes back
+   * already settled, and the list shrinks as the work gets done rather than
+   * showing the same names for ever.
+   */
+  useEffect(() => {
+    const stored = loadUdiseUpload();
+    if (!stored || !stored.matrix?.length) return;
+    try {
+      const { preview: p, formatOk: ok } = previewUdiseStudentDetailsSync(
+        stored.matrix,
+        sis,
+        masters,
+        matchOpts,
+        academicYearCode,
+      );
+      setMatrix(stored.matrix);
+      setPreview(p);
+      setFormatOk(ok);
+      setStoredInfo({ files: stored.files ?? [], updatedAt: stored.updatedAt });
+      setFileName(stored.files?.[stored.files.length - 1]?.name ?? "");
+    } catch {
+      // A stored sheet that no longer parses is not worth a broken panel.
+      clearUdiseUpload();
+    }
+    // Restores once, when the panel opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function onFile(file: File | null) {
     if (!file) return;
     setFileName(file.name);
@@ -335,7 +392,32 @@ export function UdisePenApaarImportPanel({
     setBusy(true);
     try {
       const buf = await file.arrayBuffer();
-      const mat = await matrixFromUdiseStudentsFile(buf);
+      const incoming = await matrixFromUdiseStudentsFile(buf);
+
+      /*
+       * Fold this sheet into the one already being worked, rather than
+       * replacing it. UDISE+ exports come out class by class and month by
+       * month; replacing would discard the rows the office had already
+       * reconciled from an earlier file, and re-uploading everything to get
+       * them back is the loop this is meant to end.
+       */
+      const head = findUdiseHeaderRow(incoming);
+      const stored = loadUdiseUpload();
+      const merged = head
+        ? mergeUdiseMatrices({
+            existing: stored?.matrix ?? null,
+            incoming,
+            headerRowIndex: head.headerRow,
+            cols: {
+              pen: head.col.pen ?? -1,
+              apaar: head.col.apaar ?? -1,
+              name: head.col.name ?? -1,
+              dob: head.col.dob ?? -1,
+            },
+          })
+        : { matrix: incoming, added: 0, updated: 0, unchanged: 0 };
+      const mat = merged.matrix;
+
       const { preview: p, formatOk: ok } = previewUdiseStudentDetailsSync(
         mat,
         sis,
@@ -346,6 +428,36 @@ export function UdisePenApaarImportPanel({
       setMatrix(mat);
       setPreview(p);
       setFormatOk(ok);
+
+      if (ok) {
+        const files = [
+          ...(stored?.files ?? []),
+          {
+            name: file.name,
+            at: new Date().toISOString(),
+            rows: Math.max(0, incoming.length - (head?.headerRow ?? 0) - 1),
+          },
+        ].slice(-10);
+        const kept = saveUdiseUpload({
+          version: 1,
+          academicYearCode: academicYearCode ?? "",
+          files,
+          matrix: mat,
+          updatedAt: new Date().toISOString(),
+        });
+        setStoredInfo({ files, updatedAt: new Date().toISOString() });
+        if (stored?.matrix?.length) {
+          setApplyResult(
+            `Merged into the sheet already open: ${merged.added} new row(s), ` +
+              `${merged.updated} changed, ${merged.unchanged} unchanged.` +
+              (kept ? "" : " (Could not save the working file — it will be lost on reload.)"),
+          );
+        } else if (!kept) {
+          setError(
+            "The sheet loaded but could not be saved — it will be lost when you leave this page.",
+          );
+        }
+      }
       setJustApplied(false);
       setApplyResult(null);
       setOpen(true);
@@ -929,10 +1041,41 @@ export function UdisePenApaarImportPanel({
 
           {preview ? (
             <>
+              {storedInfo ? (
+                <p className="mb-2 rounded-lg bg-[var(--surface-sunken)] px-3 py-1.5 text-[11px] text-[var(--muted)]">
+                  Working file kept in this browser ·{" "}
+                  {storedInfo.files.length === 1
+                    ? storedInfo.files[0]!.name
+                    : `${storedInfo.files.length} uploads merged, latest ${
+                        storedInfo.files[storedInfo.files.length - 1]?.name ?? ""
+                      }`}{" "}
+                  · saved {storedInfo.updatedAt.slice(0, 16).replace("T", " ")}.
+                  The list is re-checked against Students each time it opens, so
+                  anything settled since drops out on its own.{" "}
+                  <button
+                    type="button"
+                    className="underline decoration-dotted underline-offset-2"
+                    onClick={() => {
+                      clearUdiseUpload();
+                      setStoredInfo(null);
+                      setMatrix(null);
+                      setPreview(null);
+                      setFileName("");
+                      setApplyResult(null);
+                    }}
+                  >
+                    Start a fresh sheet
+                  </button>
+                </p>
+              ) : null}
               <div className="flex flex-wrap items-end gap-2">
                 {(
                   [
-                    ["all", "All"],
+                    [
+                      "todo",
+                      `Still to do (${preview ? preview.filter((p) => p.tone !== "ok").length : 0})`,
+                    ],
+                    ["all", `All (${preview?.length ?? 0})`],
                     ["fill", "To fill"],
                     ["verify", "Verify"],
                     ["suspect", "Suspect / not in SIS"],

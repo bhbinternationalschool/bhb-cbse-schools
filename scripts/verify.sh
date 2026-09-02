@@ -142,6 +142,7 @@ SELFTESTS=(
   test:photo-consent
   test:registration-blockers
   test:sibling-carry-over
+  test:udise-upload-store
   test:cash-pool-orphans
   test:academic-risk
   test:admissions-ai
