@@ -35,6 +35,7 @@ import {
   markLost,
   markVerified,
   promoteToRegistration,
+  registrationBlockers,
   publicRegisterAbsoluteUrl,
   relationLabel,
   saveAdmissions,
@@ -2196,6 +2197,20 @@ function Field({
   );
 }
 
+/**
+ * The lead's journey, as the office actually walks it: who the child is, who
+ * the family is, then what is needed to register and admit. The order is the
+ * order of the work, not the order the fields happened to be written in.
+ */
+type LeadStep = "child" | "family" | "registration" | "followup";
+
+const LEAD_STEPS: { id: LeadStep; label: string }[] = [
+  { id: "child", label: "1 · Child" },
+  { id: "family", label: "2 · Family" },
+  { id: "registration", label: "3 · Registration" },
+  { id: "followup", label: "4 · Follow-up" },
+];
+
 function LeadDetail({
   lead,
   state,
@@ -2278,6 +2293,22 @@ function LeadDetail({
       setAiSuggestion({ ...aiSuggestion, generationId: undefined });
     }
   }
+  /**
+   * Which step of the lead's journey is on screen.
+   *
+   * This panel was ~1,300 lines in one scroll, so the registration checklist
+   * — the thing that unblocks the Register button — was a thousand lines
+   * below the button itself. Tabs put each decision where its step is, and
+   * the blocker list above links straight to the right one.
+   */
+  const [step, setStep] = useState<LeadStep>("child");
+
+  /** The same rule the guard uses, so the screen cannot promise differently. */
+  const regBlockers = useMemo(
+    () => (lead.stage === "enquiry" ? registrationBlockers(state, lead.id) : []),
+    [state, lead.id, lead.stage],
+  );
+
   const [aiSuggestionLoading, setAiSuggestionLoading] = useState(false);
   const [aiSuggestionError, setAiSuggestionError] = useState<string | null>(
     null,
@@ -2446,7 +2477,13 @@ function LeadDetail({
               {lead.stage === "enquiry" ? (
                 <button
                   type="button"
-                  className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-[11px] font-semibold text-white"
+                  disabled={regBlockers.length > 0}
+                  title={
+                    regBlockers.length
+                      ? `Still needed: ${regBlockers.map((b) => b.message).join(" ")}`
+                      : "Move this enquiry to Registered"
+                  }
+                  className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-40"
                   onClick={onRegister}
                 >
                   → Register
@@ -2534,6 +2571,32 @@ function LeadDetail({
           </div>
         </div>
 
+        {/* Why the button is off, said in full and kept on screen. It used to
+            be a three-second flash from the click handler, while the ticks
+            that would clear it sat a thousand lines further down the panel —
+            so a walk-in lead read as a broken button. Each line moves to the
+            step that holds the fix. */}
+        {canEdit && !locked && lead.stage === "enquiry" && regBlockers.length ? (
+          <div className="mt-3 rounded-xl border border-[var(--warning)]/40 bg-[var(--warning-soft)] px-3 py-2">
+            <p className="text-[11px] font-bold text-[var(--warning)]">
+              Before this enquiry can be registered
+            </p>
+            <ul className="mt-1 space-y-0.5">
+              {regBlockers.map((b, i) => (
+                <li key={i} className="text-[11px] text-[var(--brand-deep)]">
+                  <button
+                    type="button"
+                    className="text-left underline decoration-dotted underline-offset-2"
+                    onClick={() => setStep(b.where === "family" ? "family" : b.where === "checklist" ? "registration" : "child")}
+                  >
+                    {b.message}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
         {!locked ? (
           <div className="mt-3">
             <SisParentMatchBanner
@@ -2597,6 +2660,47 @@ function LeadDetail({
         ) : null}
       </div>
 
+      {/* One row of steps instead of one very long scroll. A step carrying an
+          unfinished blocker is marked, so nobody has to open all four to find
+          the one that is holding registration up. */}
+      <div className="flex flex-wrap gap-1.5">
+        {LEAD_STEPS.map((t) => {
+          const pending = regBlockers.filter(
+            (b) => (b.where === "checklist" ? "registration" : b.where) === t.id,
+          ).length;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setStep(t.id)}
+              className={`rounded-lg px-3 py-1.5 text-[11px] font-bold ${
+                step === t.id
+                  ? "bg-[var(--brand-deep)] text-white"
+                  : "border border-[var(--border)] text-[var(--muted)]"
+              }`}
+            >
+              {t.label}
+              {pending ? (
+                <span
+                  className={`ml-1.5 rounded-full px-1.5 ${
+                    step === t.id
+                      ? "bg-white/25"
+                      : "bg-[var(--warning-soft)] text-[var(--warning)]"
+                  }`}
+                  title={`${pending} thing(s) still needed here`}
+                >
+                  {pending}
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Two columns from `lg` up: these cards are narrow and were stacking
+          into a scroll several screens long on a desk monitor. */}
+      <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
+      {step === "followup" ? (
       <MastersWorkCard
         title="Counsellor / calling agent"
         hint="Assign ownership, log every call or WhatsApp attempt, and set the next follow-up date. Use Due today / Overdue filters in the list."
@@ -2872,8 +2976,9 @@ function LeadDetail({
 
         <LeadTimeline lead={lead} onEvents={setTimelineEvents} />
       </MastersWorkCard>
+      ) : null}
 
-      {hh ? (
+      {hh && step === "family" ? (
         <MastersWorkCard
           title={`Household ${hh.code}`}
           hint="One family card — many guardians, many child enquiries. Enroll shares one SIS household."
@@ -3066,6 +3171,7 @@ function LeadDetail({
         </MastersWorkCard>
       ) : null}
 
+      {step === "child" ? (
       <MastersWorkCard title="Child & class">
         {!locked && canEdit ? (
           <div className="mb-3">
@@ -3212,7 +3318,9 @@ function LeadDetail({
           </Field>
         </div>
       </MastersWorkCard>
+      ) : null}
 
+      {step === "child" ? (
       <MastersWorkCard title="Family preferences & attribution">
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Language for school messages">
@@ -3336,7 +3444,9 @@ function LeadDetail({
           </Field>
         </div>
       </MastersWorkCard>
+      ) : null}
 
+      {step === "family" ? (
       <MastersWorkCard title="Parents & address (synced from household)">
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Primary guardian / father">
@@ -3421,7 +3531,9 @@ function LeadDetail({
           </Field>
         </div>
       </MastersWorkCard>
+      ) : null}
 
+      {step === "registration" ? (
       <MastersWorkCard
         title="Registration checklist"
         hint="Required before moving enquiry → Registered"
@@ -3485,6 +3597,8 @@ function LeadDetail({
           />
         </Field>
       </MastersWorkCard>
+      ) : null}
+      </div>
     </div>
   );
 }

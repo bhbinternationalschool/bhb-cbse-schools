@@ -2109,35 +2109,98 @@ export function followUpCounts(state: AdmissionsState): {
   return { overdue, dueToday, unassigned };
 }
 
-export function promoteToRegistration(
+/**
+ * What is still stopping this lead moving to Registered.
+ *
+ * Exported so the SCREEN and the GUARD read the same rule. Before this, the
+ * button called promoteToRegistration, got a refusal, and flashed it for
+ * three seconds — while the tick that would fix it sat a thousand lines
+ * further down the panel. A walk-in lead therefore looked like a broken
+ * button rather than an unfinished checklist.
+ *
+ * Each blocker names the field it is about, so the screen can send someone
+ * straight to it instead of asking them to hunt.
+ */
+export type RegistrationBlocker = {
+  /** The lead field to fix, when there is one. */
+  field?: keyof AdmissionLead;
+  /** Which step of the panel holds the fix. */
+  where: "child" | "family" | "checklist";
+  message: string;
+};
+
+export function registrationBlockers(
   state: AdmissionsState,
   leadId: string,
-): { ok: true; state: AdmissionsState } | { ok: false; reason: string } {
+): RegistrationBlocker[] {
   const lead = state.leads.find((l) => l.id === leadId);
-  if (!lead) return { ok: false, reason: "Lead not found" };
+  if (!lead) return [{ where: "child", message: "Lead not found" }];
+
+  const out: RegistrationBlocker[] = [];
   if (lead.stage !== "enquiry" && lead.stage !== "applied") {
-    return { ok: false, reason: "Only enquiry can move to registration" };
+    out.push({
+      where: "child",
+      // enquiry and applied are the only stages before registration; a lead
+      // past them has already been through it.
+      message: `This lead is already at “${lead.stage}” — registration is behind it.`,
+    });
+    // Nothing below is worth listing: the stage alone settles it.
+    return out;
   }
+
   const hh = householdOf(state, lead.householdId);
   const mother =
     lead.motherName.trim() ||
     motherFromHousehold(hh || emptyAdmissionHousehold())?.fullName ||
     "";
   if (!mother.trim()) {
-    return {
-      ok: false,
-      reason: "Add mother (or mother-relation guardian) on the household before registration",
-    };
+    out.push({
+      field: "motherName",
+      where: "family",
+      message: "Add the mother’s name (or a mother-relation guardian on the household).",
+    });
   }
   if (!lead.declarationAccepted) {
-    return { ok: false, reason: "Parent declaration must be accepted" };
+    out.push({
+      field: "declarationAccepted",
+      where: "checklist",
+      message: "Tick “Parent declaration accepted”.",
+    });
   }
-  if (!lead.docsBirthCert || !lead.docsPhoto) {
-    return {
-      ok: false,
-      reason: "Birth certificate and photo checklist must be marked",
-    };
+  if (!lead.docsBirthCert) {
+    out.push({
+      field: "docsBirthCert",
+      where: "checklist",
+      message: "Tick “Birth certificate”.",
+    });
   }
+  if (!lead.docsPhoto) {
+    out.push({
+      field: "docsPhoto",
+      where: "checklist",
+      message: "Tick “Passport photo”.",
+    });
+  }
+  return out;
+}
+
+export function promoteToRegistration(
+  state: AdmissionsState,
+  leadId: string,
+): { ok: true; state: AdmissionsState } | { ok: false; reason: string } {
+  const lead = state.leads.find((l) => l.id === leadId);
+  if (!lead) return { ok: false, reason: "Lead not found" };
+  // Same rule the screen shows, so the two can never drift apart.
+  const blockers = registrationBlockers(state, leadId);
+  if (blockers.length) {
+    return { ok: false, reason: blockers.map((b) => b.message).join(" ") };
+  }
+
+  const hh = householdOf(state, lead.householdId);
+  const mother =
+    lead.motherName.trim() ||
+    motherFromHousehold(hh || emptyAdmissionHousehold())?.fullName ||
+    "";
 
   let nextState = state;
   let applicationNo = lead.applicationNo;

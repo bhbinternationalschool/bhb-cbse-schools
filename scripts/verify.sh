@@ -140,6 +140,7 @@ SELFTESTS=(
   test:site-seo
   test:approval-gate
   test:photo-consent
+  test:registration-blockers
   test:cash-pool-orphans
   test:academic-risk
   test:admissions-ai

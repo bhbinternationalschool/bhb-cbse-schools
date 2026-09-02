@@ -127,6 +127,7 @@
     "test:site-seo": "npx tsx src/lib/siteSeo.selftest.ts",
     "test:approval-gate": "npx tsx src/lib/data/approvalGate.selftest.ts",
     "test:photo-consent": "npx tsx src/lib/photoConsent.selftest.ts",
+    "test:registration-blockers": "npx tsx src/lib/registrationBlockers.selftest.ts",
     "test:payment-link-amount": "npx tsx src/lib/paymentLinkAmount.selftest.ts",
     "test:sis-wire-payload": "npx tsx src/lib/sisWirePayload.selftest.ts",
     "test:print-palette": "npx tsx src/lib/printPalette.selftest.ts",

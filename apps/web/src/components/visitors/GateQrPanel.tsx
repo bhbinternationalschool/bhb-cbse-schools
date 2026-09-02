@@ -6,9 +6,12 @@
  *
  * globals.css pins `.dark .theme-light-island .text-[#203050]` back to navy,
  * overriding the global dark-mode rescue one rule above it. That selector
- * matches the CLASS NAME, so rewriting these literals to `text-[var(--...)]`
- * silently unpins them: the token resolves to near-white in dark mode and the
- * text disappears against this screen's white card. A visitor-facing kiosk
+ * matches the CLASS NAME, so rewriting these literals into a design-token
+ * class silently unpins them: the token resolves to near-white in dark mode
+ * and the text disappears against this screen's white card. (Do not spell such
+ * a class out here even as an example — Tailwind v4 scans comments for class
+ * names too, and a placeholder written in one compiled to an invalid rule that
+ * took the whole stylesheet down.) A visitor-facing kiosk
  * must look the same whatever the device theme is, so the literals stay, the
  * same way a printed receipt keeps its own ink.
  */

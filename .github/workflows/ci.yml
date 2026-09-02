@@ -193,6 +193,7 @@ jobs:
           npm run test:site-seo
           npm run test:approval-gate
           npm run test:photo-consent
+          npm run test:registration-blockers
           npm run test:cash-pool-orphans
           npm run test:academic-risk
           npm run test:admissions-ai
