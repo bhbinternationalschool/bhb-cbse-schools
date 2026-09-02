@@ -3120,7 +3120,7 @@ function CollectPanel({
                     Collection date
                   </span>
                   <input
-                    className="field !border-white/20 !bg-white/95 !py-1.5 !text-xs !text-[var(--brand-deep)] dark:!bg-[#05080f] dark:!text-white dark:!font-bold dark:!border-white/30 dark:placeholder:!text-white/40"
+                    className={COLLECT_FIELD}
                     type="date"
                     value={collectionDate}
                     onChange={(e) => onCollectionDate(e.target.value)}
@@ -3138,7 +3138,7 @@ function CollectPanel({
                     School receipt no.
                   </span>
                   <input
-                    className="field !border-white/20 !bg-white/95 !py-1.5 !text-xs !text-[var(--brand-deep)] dark:!bg-[#05080f] dark:!text-white dark:!font-bold dark:!border-white/30 dark:placeholder:!text-white/40"
+                    className={COLLECT_FIELD}
                     value={schoolReceiptNo}
                     onChange={(e) => onSchoolReceiptNo(e.target.value)}
                     placeholder="Optional · e.g. FEE-BOOK-A/4521"
@@ -3146,6 +3146,39 @@ function CollectPanel({
                   />
                 </label>
               </div>
+
+              <label className="mt-3 block text-xs">
+                <span className="mb-1 flex flex-wrap items-baseline gap-x-2 text-xs font-medium text-white/75">
+                  Note
+                  <span className="text-[11px] font-normal text-white/50">
+                    optional · kept with the receipt, not printed on it
+                  </span>
+                </span>
+                <textarea
+                  className={COLLECT_FIELD}
+                  rows={2}
+                  value={note}
+                  onChange={(e) => onNote(e.target.value)}
+                  placeholder="e.g. paid by uncle · balance promised by the 10th"
+                  autoComplete="off"
+                  /*
+                   * Capped so a long note can never push out what the system
+                   * appends after it. The stored note is
+                   * `note · Counter discount … · Cheque realisation subject to
+                   * clearance` (~91 characters), and compactFeesForStorage
+                   * truncates the whole field at 280 when localStorage is under
+                   * pressure — from the END. A cheque warning cut in half is
+                   * worse than no note at all, so the free text is bounded
+                   * where the two together always fit.
+                   */
+                  maxLength={180}
+                />
+                {note.length > 150 ? (
+                  <span className="mt-1 block text-[11px] text-white/60">
+                    {180 - note.length} characters left
+                  </span>
+                ) : null}
+              </label>
 
               {collectTotal > 0 && counterDiscountPaise > 0 ? (
                 <div className="mt-4 rounded-xl border border-[rgba(197,160,40,0.35)] bg-[rgba(255,255,255,0.06)] px-3 py-3 backdrop-blur-sm sm:px-4">
@@ -3205,7 +3238,7 @@ function CollectPanel({
                       Reason for discount
                     </span>
                     <input
-                      className="field w-full !border-white/25 !bg-white !py-2 !text-xs !text-[var(--brand-deep)] dark:!bg-[#05080f] dark:!text-white dark:!font-bold dark:!border-white/30 dark:placeholder:!text-white/40"
+                      className={`${COLLECT_FIELD} w-full !border-white/25 !bg-white !py-2`}
                       value={counterDiscountReason}
                       onChange={(e) => onCounterDiscountReason(e.target.value)}
                       placeholder="e.g. Security deposit relaxed on management approval"
@@ -3236,7 +3269,7 @@ function CollectPanel({
                           min={0}
                           step="0.01"
                           max={netAfterDiscount / 100}
-                          className="field w-full !border-white/25 !bg-white !py-2 !text-xl !font-bold !text-[var(--brand-deep)] dark:!bg-[#05080f] dark:!text-white dark:!border-white/30 dark:placeholder:!text-white/40"
+                          className={`${COLLECT_FIELD} w-full !border-white/25 !bg-white !py-2 !text-xl !font-bold`}
                           value={collectAmountRupees}
                           onChange={(e) => onCollectAmount(e.target.value)}
                           placeholder="0"
@@ -3703,6 +3736,18 @@ function WhatsAppInline({
   );
 }
 
+/**
+ * The collect card's fields, which live on a navy panel rather than on the
+ * page background — so they override the shared `field` styles.
+ *
+ * Written once because it appeared five times. The dark-mode `#05080f` has no
+ * design token: it is the near-black these controls sit on inside the card,
+ * and substituting --surface would lighten all five at once. One literal in
+ * one place is the honest version of five copies.
+ */
+const COLLECT_FIELD =
+  "field !border-white/20 !bg-white/95 !py-1.5 !text-xs !text-[var(--brand-deep)] dark:!bg-[#05080f] dark:!text-white dark:!font-bold dark:!border-white/30 dark:placeholder:!text-white/40";
+
 function ReceiptPreviewModal({
   voucher,
   sis,
@@ -3937,6 +3982,14 @@ function ReceiptPreviewModal({
                   </span>
                 ) : null}
               </p>
+              {/* Inside the print-hide card on purpose: the counter's own
+                  remark is for the office, and the family's printed copy
+                  should not carry it. */}
+              {voucher.note ? (
+                <p className="mt-1 max-w-prose text-xs italic text-[var(--muted)]">
+                  {voucher.note}
+                </p>
+              ) : null}
             </div>
             <div className="flex flex-wrap gap-2">
               <button
