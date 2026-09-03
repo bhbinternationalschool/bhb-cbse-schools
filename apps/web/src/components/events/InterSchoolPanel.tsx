@@ -934,7 +934,7 @@ function CertificatesSection({
           const place =
             c.rank === 1 ? "FIRST PLACE" : c.rank === 2 ? "SECOND PLACE" : c.rank === 3 ? "THIRD PLACE" : "";
           return (
-            <div key={c.id} className="evt-cert-page relative mx-auto w-full max-w-[760px] rounded border-4 border-double border-[var(--brand-accent)] bg-white p-8 text-center text-[var(--brand-deep)]">
+            <div key={c.id} className="evt-cert-page relative mx-auto w-full max-w-[760px] rounded border-4 border-double border-[var(--brand-accent)] bg-white p-8 text-center text-[#203050]">
               <div className="pointer-events-none absolute inset-2 rounded border border-[var(--brand-accent)]/50" aria-hidden />
               <p className="text-[12px] font-extrabold tracking-[0.28em] text-[var(--brand-accent)]">
                 {TENANT.nameDisplay.toUpperCase()}

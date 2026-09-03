@@ -3345,7 +3345,7 @@ function CollectPanel({
                         Mode & account
                       </span>
                       <PaymentChannelSelect
-                        className="field !border-[rgba(32,48,80,0.18)] !bg-white !py-1.5 !text-xs !text-[var(--brand-deep)]"
+                        className="field !border-[rgba(32,48,80,0.18)] !bg-white !py-1.5 !text-xs !text-[#203050]"
                         variant="tender"
                         accounts={accountsState ?? undefined}
                         value={composer.channel}
@@ -3374,7 +3374,7 @@ function CollectPanel({
                               {modeMeta.refLabel}
                             </span>
                             <input
-                              className="field !bg-white !py-1.5 !text-xs !text-[var(--brand-deep)] placeholder:!text-[#20305066]"
+                              className="field !bg-white !py-1.5 !text-xs !text-[#203050] placeholder:!text-[#20305066]"
                               value={composer.ref}
                               onChange={(e) =>
                                 onPatchComposer({ ref: e.target.value })
@@ -3390,7 +3390,7 @@ function CollectPanel({
                             Amount (₹)
                           </span>
                           <input
-                            className="field !border-[rgba(197,160,40,0.45)] !bg-white !py-1.5 !text-xs font-bold !text-[var(--brand-deep)] placeholder:!text-[#20305066]"
+                            className="field !border-[rgba(197,160,40,0.45)] !bg-white !py-1.5 !text-xs font-bold !text-[#203050] placeholder:!text-[#20305066]"
                             inputMode="decimal"
                             value={composer.amount}
                             onChange={(e) =>
