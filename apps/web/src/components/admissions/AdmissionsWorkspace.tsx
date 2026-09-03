@@ -74,6 +74,7 @@ import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionCo
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { FollowUpDialog } from "@/components/admissions/FollowUpDialog";
+import { LeadWorklistPanel } from "@/components/admissions/LeadWorklistPanel";
 import {
   ErpTable,
   ErpTableBody,
@@ -137,20 +138,7 @@ type AdmTab =
   | "referrals"
   | "reports";
 
-export function AdmissionsWorkspace({
-  soloLeadId,
-}: {
-  /**
-   * Render ONE lead and nothing else — the whole page is that lead's steps.
-   *
-   * The list and the lead were competing for the same screen: the table is a
-   * call list you run down, the lead is a form you work through, and putting
-   * them together meant scrolling past 859 rows to reach the form. The list
-   * now opens each lead in its own tab, so a counsellor can keep the list
-   * open and work several families without losing their place in it.
-   */
-  soloLeadId?: string;
-} = {}) {
+export function AdmissionsWorkspace() {
   const session = useDemoSession();
   const sessionReadOnly = useSessionReadOnly();
   const [masters, setMasters] = useState<MastersState | null>(() =>
@@ -200,13 +188,6 @@ export function AdmissionsWorkspace({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // A solo page IS one lead: select it as soon as the desk has loaded, and
-  // keep selecting it if the state reloads underneath.
-  useEffect(() => {
-    if (!soloLeadId || !state) return;
-    setSelectedId(soloLeadId);
-    setTab("leads");
-  }, [soloLeadId, state]);
 
   /**
    * The lead a follow-up is being logged against, and how it was reached.
@@ -1114,7 +1095,6 @@ export function AdmissionsWorkspace({
         ) : null
       }
     >
-      {soloLeadId ? null : (
       <ModuleTabs
         aria-label="Admissions"
         value={tab}
@@ -1163,7 +1143,6 @@ export function AdmissionsWorkspace({
             : []),
         ]}
       />
-      )}
 
       {!canBrowseLeadLists ? (
         <p className="rounded-lg border border-[rgba(154,52,18,0.25)] bg-[rgba(154,52,18,0.08)] px-3 py-2 text-[12px] text-[var(--brand-deep)]">
@@ -1198,6 +1177,20 @@ export function AdmissionsWorkspace({
 
       {tab === "leads" ? (
         <div className="space-y-4">
+          {/* Before the table: the instruction. The table is a reference you
+              search; this says which leads need something and what that
+              something is. Hidden on a solo lead page, which is one lead. */}
+          {state ? (
+            <LeadWorklistPanel
+              leads={state.leads}
+              today={todayYmd()}
+              onOpenLead={(id) => openLead(id)}
+              onCall={(id) => {
+                const lead = state.leads.find((l) => l.id === id);
+                if (lead) setFollowUpFor({ lead, channel: "call" });
+              }}
+            />
+          ) : null}
           <div className="space-y-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-2">
@@ -1462,7 +1455,6 @@ export function AdmissionsWorkspace({
             ) : null}
           </div>
 
-          {soloLeadId ? null : (
           <MastersTableCard title="Leads">
             {filtered.length === 0 ? (
               <MastersEmptyRow label="No leads in this view — use New enquiry to capture." />
@@ -1723,17 +1715,17 @@ export function AdmissionsWorkspace({
                                   );
                                 })()
                               ) : null}
-                              {/* A real link, so it can be middle-clicked,
-                                  bookmarked, and kept open beside the list. */}
-                              <a
-                                href={`/admissions/lead/${l.id}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title="Open this lead's steps in a new tab"
+                              {/* Opens in place. This was a new browser tab
+                                  for one build; in use it just left a trail of
+                                  tabs to close, so it opens the lead below the
+                                  list where it always did. */}
+                              <button
+                                type="button"
+                                onClick={() => openLead(l.id)}
                                 className="rounded-lg border border-[var(--border)] px-2 py-1 text-[10px] font-semibold text-[var(--muted)]"
                               >
-                                Open ↗
-                              </a>
+                                Open
+                              </button>
                             </div>
                           )}
                         </td>
@@ -1744,7 +1736,6 @@ export function AdmissionsWorkspace({
               </ErpTable>
             )}
           </MastersTableCard>
-          )}
 
           {!selected ? (
             <p className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--card)] px-4 py-6 text-center text-sm text-[var(--muted)]">

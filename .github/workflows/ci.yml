@@ -196,6 +196,7 @@ jobs:
           npm run test:registration-blockers
           npm run test:sibling-carry-over
           npm run test:udise-upload-store
+          npm run test:lead-worklist
           npm run test:cash-pool-orphans
           npm run test:academic-risk
           npm run test:admissions-ai
