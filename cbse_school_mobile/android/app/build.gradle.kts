@@ -27,14 +27,44 @@ android {
         isCoreLibraryDesugaringEnabled = true
     }
 
+    buildFeatures {
+        // The flavours set android:label through resValue("string", "app_label").
+        // AGP 8 turns generated resource values off unless asked.
+        resValues = true
+    }
+
     defaultConfig {
-        applicationId = "school.bhbinternational.cbse_school_mobile"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
+        // No applicationId here — each flavour sets its own. See below.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+    }
+
+    // Two apps out of one codebase, split so the parent build can ship without
+    // the restricted permissions the staff features need. The Dart side is
+    // split to match — lib/main_parent.dart and lib/main_staff.dart — and a
+    // build must name both, e.g.
+    //
+    //   flutter build appbundle --release --flavor parent -t lib/main_parent.dart
+    //
+    // Mismatching them produces an app whose manifest and code disagree.
+    flavorDimensions += "audience"
+    productFlavors {
+        create("parent") {
+            dimension = "audience"
+            // A new identity: parents install this fresh from Play.
+            applicationId = "school.bhbinternational.parent"
+            resValue("string", "app_label", "BHB School — Parents")
+        }
+        create("staff") {
+            dimension = "audience"
+            // KEEP the original id. Staff already run this app from the APK on
+            // the download page; changing it would orphan every install and
+            // they would have to uninstall and re-install by hand.
+            applicationId = "school.bhbinternational.cbse_school_mobile"
+            resValue("string", "app_label", "BHB School — Staff")
+        }
     }
 
     signingConfigs {
