@@ -42,6 +42,7 @@ export function tutorRequesterKey(householdId: string): string {
 export type TutorPassOrder = {
   id: string;
   householdId: string;
+  studentId: string;
   planCode: string;
   days: number;
   amountPaise: number;
@@ -57,6 +58,7 @@ function rowToOrder(r: Record<string, unknown>): TutorPassOrder {
   return {
     id: String(r.id),
     householdId: String(r.household_id),
+    studentId: String(r.student_id ?? ""),
     planCode: String(r.plan_code),
     days: Number(r.days),
     amountPaise: Number(r.amount_paise),
@@ -73,8 +75,12 @@ function planLabelFor(code: string, days: number): string {
   return tutorPlans().find((p) => p.code === code)?.label ?? `${days} days`;
 }
 
-/** The paid pass with the latest end, if it has not run out. */
-export async function currentTutorPass(householdId: string, now = new Date()): Promise<TutorPass | null> {
+/** This child's paid pass with the latest end, if it has not run out. */
+export async function currentTutorPass(
+  householdId: string,
+  studentId: string,
+  now = new Date(),
+): Promise<TutorPass | null> {
   const ctx = await getServerTenantContext();
   if (!ctx) return null;
   const { data } = await ctx.sb
@@ -82,6 +88,7 @@ export async function currentTutorPass(householdId: string, now = new Date()): P
     .select("*")
     .eq("tenant_id", ctx.tenantId)
     .eq("household_id", householdId)
+    .eq("student_id", studentId)
     .eq("status", "paid")
     .gt("ends_at", now.toISOString())
     .order("ends_at", { ascending: false })
@@ -97,19 +104,31 @@ export async function currentTutorPass(householdId: string, now = new Date()): P
   };
 }
 
-export async function tutorAllowance(householdId: string): Promise<TutorAllowance> {
+/**
+ * The allowance for one child. Free hints are the household's (shared by
+ * siblings); the pass and its fair-use count are the child's own.
+ */
+export async function tutorAllowance(
+  householdId: string,
+  student: { id: string; name: string; classLabel: string },
+): Promise<TutorAllowance> {
   const ctx = await getServerTenantContext();
   const cap = freeHintsPerDay();
   const ceiling = passMessagesPerDay();
-  if (!ctx) {
-    return { freeHintsPerDay: cap, freeUsedToday: 0, pass: null, passMessagesPerDay: ceiling, passUsedToday: 0 };
-  }
+  const base = {
+    studentId: student.id,
+    studentName: student.name,
+    classLabel: student.classLabel,
+    freeHintsPerDay: cap,
+    passMessagesPerDay: ceiling,
+  };
+  if (!ctx) return { ...base, freeUsedToday: 0, pass: null, passUsedToday: 0 };
   const since = istDayStartIso();
   const [pass, usage] = await Promise.all([
-    currentTutorPass(householdId),
+    currentTutorPass(householdId, student.id),
     ctx.sb
       .from("tutor_usage")
-      .select("kind")
+      .select("kind, student_id")
       .eq("tenant_id", ctx.tenantId)
       .eq("household_id", householdId)
       .gte("created_at", since),
@@ -122,12 +141,12 @@ export async function tutorAllowance(householdId: string): Promise<TutorAllowanc
     console.error("[tutor-passes] usage read failed:", usage.error.message);
     freeUsedToday = cap;
   } else {
-    for (const r of (usage.data ?? []) as { kind: string }[]) {
+    for (const r of (usage.data ?? []) as { kind: string; student_id: string }[]) {
       if (r.kind === "free") freeUsedToday += 1;
-      else passUsedToday += 1;
+      else if (r.student_id === student.id) passUsedToday += 1;
     }
   }
-  return { freeHintsPerDay: cap, freeUsedToday, pass, passMessagesPerDay: ceiling, passUsedToday };
+  return { ...base, freeUsedToday, pass, passUsedToday };
 }
 
 /** Record one answered message against the free allowance or the pass. */
@@ -159,6 +178,7 @@ export function newTutorOrderId(): string {
 export async function insertTutorPassOrder(opts: {
   id: string;
   householdId: string;
+  studentId: string;
   plan: TutorPlan;
   createdBy: string;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -168,6 +188,7 @@ export async function insertTutorPassOrder(opts: {
     id: opts.id,
     tenant_id: ctx.tenantId,
     household_id: opts.householdId,
+    student_id: opts.studentId,
     plan_code: opts.plan.code,
     days: opts.plan.days,
     amount_paise: opts.plan.pricePaise,
@@ -231,7 +252,7 @@ export async function activateTutorPassOrder(opts: {
   if (order.status === "paid") {
     return { ok: true, alreadyPaid: true, endsAt: order.endsAt ?? "" };
   }
-  const current = await currentTutorPass(order.householdId);
+  const current = await currentTutorPass(order.householdId, order.studentId);
   const window = passWindow(order.days, current?.endsAt ?? null);
   // The status filter makes the flip atomic: two webhook deliveries racing
   // here can only have one of them see "pending".

@@ -3,25 +3,29 @@ import { resolveApiAuth } from "@/lib/api/v1/auth";
 import { requireParentHousehold } from "@/lib/api/v1/household";
 import { llmStatus } from "@/lib/aiLlm.server";
 import { listTutorPassOrders, tutorAllowance, tutorPlans } from "@/lib/tutorPasses.server";
+import { resolveTutorStudent } from "@/lib/tutorApi.server";
 import { formatPaise, passValidLabel, TUTOR_MODES } from "@/lib/tutorPlans";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/v1/tutor/status — what the parent app shows before the first
- * question: the modes and which need a pass, today's free hints left, the
- * pass in force ("Valid till 12 Sep"), the passes on sale, and the
- * household's recent orders.
+ * GET /api/v1/tutor/status?studentId= — what the parent app shows before
+ * the first question, for one child: the modes and which need a pass,
+ * today's free hints left, that child's pass ("Valid till 12 Sep"), the
+ * passes on sale, and the child's recent orders.
  */
 export async function GET(request: Request) {
   try {
     const ctx = await resolveApiAuth(request);
     const householdId = requireParentHousehold(ctx);
-    const [allowance, orders] = await Promise.all([
-      tutorAllowance(householdId),
-      listTutorPassOrders(householdId, 10),
+    const studentId = new URL(request.url).searchParams.get("studentId") ?? "";
+    const student = await resolveTutorStudent(householdId, studentId);
+    const [allowance, allOrders] = await Promise.all([
+      tutorAllowance(householdId, student),
+      listTutorPassOrders(householdId, 30),
     ]);
+    const orders = allOrders.filter((o) => o.studentId === student.id).slice(0, 10);
     const status = llmStatus();
     return apiOk({
       configured: status.tutorEngine !== "none",
@@ -52,7 +56,7 @@ export async function GET(request: Request) {
         validLabel: o.endsAt ? passValidLabel(o.endsAt) : "",
       })),
       note:
-        "Hints are free within the daily allowance and never give the final answer. The full tutor — teaching, worked examples, practice, checking answers, homework help, exam preparation — is open for the length of a pass: a day, a week or a month.",
+        `Hints are free within the family's daily allowance and never give the final answer. The full tutor — teaching, worked examples, practice, checking answers, homework help, exam preparation — is open for the length of a pass: a day, a week or a month. A pass is for one child and covers ${student.name}'s class (${student.classLabel}) only; a brother or sister needs their own.`,
     });
   } catch (e) {
     return apiErr(e);

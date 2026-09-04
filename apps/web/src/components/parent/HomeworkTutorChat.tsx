@@ -10,9 +10,12 @@ type Turn = { role: "user" | "assistant"; content: string };
 
 export function HomeworkTutorChat({
   context,
+  studentId,
   onError,
 }: {
   context: HomeworkTutorContext;
+  /** The child this panel is for — the tutor is pinned to their class and pass. */
+  studentId?: string;
   onError?: (msg: string) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -50,6 +53,7 @@ export function HomeworkTutorChat({
           message,
           history: nextHistory.slice(0, -1),
           context,
+          studentId,
         }),
       });
       // The reply grows in place as the tutor writes it; the final event

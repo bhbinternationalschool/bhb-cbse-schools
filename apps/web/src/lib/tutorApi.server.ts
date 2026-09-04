@@ -6,6 +6,11 @@
 import "server-only";
 import { aiStreamResponse } from "@/lib/aiStream.server";
 import { startLlmPrecheck } from "@/lib/aiLlm.server";
+import { ApiError } from "@/lib/api/v1/errors";
+import { childOfHousehold } from "@/lib/api/v1/household";
+import { loadMasters } from "@/lib/masters";
+import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
+import { loadSis } from "@/lib/sis";
 import { replyHomeworkTutor } from "@/lib/homeworkTutor.server";
 import type { OpenAiChatTurn } from "@/lib/openAi.server";
 import {
@@ -70,16 +75,27 @@ export const TUTOR_MESSAGE_MAX = 3000;
  * Response: a stream when asked for, JSON otherwise, and a 402 with
  * `needsPass` when the allowance is spent so the client can offer passes.
  */
+export type TutorStudent = { id: string; name: string; classLabel: string };
+
 export async function answerParentTutor(opts: {
   householdId: string;
+  /** The child, from the school's record — never from the client. */
+  student: TutorStudent;
   ask: ReturnType<typeof parseTutorAsk>;
   stream: boolean;
 }): Promise<Response> {
-  const { householdId, ask, stream } = opts;
+  const { householdId, student, stream } = opts;
+  // The prompt is pinned to this child's class; the client keeps only the
+  // assignment context it was opened from.
+  const ask = {
+    ...opts.ask,
+    studentId: student.id,
+    context: { ...opts.ask.context, childName: student.name, className: student.classLabel },
+  };
   const requester = tutorRequesterKey(householdId);
-  // Both lookups overlap: the budget scan and the household's pass + usage.
+  // Both lookups overlap: the budget scan and the child's pass + usage.
   const precheck = startLlmPrecheck({ requester });
-  const allowance = await tutorAllowance(householdId);
+  const allowance = await tutorAllowance(householdId, student);
   const verdict = tutorVerdict(ask.mode, allowance);
   if (!verdict.allowed) {
     return Response.json(
@@ -137,4 +153,22 @@ export async function answerParentTutor(opts: {
     ok: true,
     data: { engine: r.engine, reply: r.text, mode: ask.mode, charge: verdict.charge, allowance: after },
   });
+}
+
+/**
+ * The child a parent is asking for, checked against the household and
+ * labelled from Masters. Throws the API errors the v1 routes expect.
+ */
+export async function resolveTutorStudent(householdId: string, studentId: string): Promise<TutorStudent> {
+  if (!studentId) throw new ApiError("bad_request", "Choose which child this is for", 400);
+  await ensureSchoolMirrorHydrated();
+  const student = childOfHousehold(loadSis(), studentId, householdId);
+  const masters = loadMasters();
+  const className = masters.classes.find((c) => c.id === student.classId)?.name ?? "";
+  const sectionName = masters.sections.find((x) => x.id === student.sectionId)?.name ?? "";
+  return {
+    id: student.id,
+    name: student.fullName,
+    classLabel: [className, sectionName].filter(Boolean).join(" ") || "their class",
+  };
 }

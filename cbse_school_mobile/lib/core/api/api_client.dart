@@ -2575,15 +2575,27 @@ class ApiClient {
 
   /* ─── AI tutor (parent) ─────────────────────────────────────────── */
 
-  Future<TutorStatus> fetchTutorStatus() async =>
-      TutorStatus.fromJson(await _getData("/api/v1/tutor/status"));
-
-  /// Starts buying a pass; the returned checkout URL opens in the browser
-  /// and the pass switches on by itself once the bank confirms.
-  Future<TutorBuyResult> buyTutorPass(String planCode) async =>
-      TutorBuyResult.fromJson(
-        await _postData("/api/v1/tutor/buy", {"planCode": planCode}),
+  /// The tutor's state for one child — a pass is per child, and the
+  /// tutor is pinned to that child's class by the school's record.
+  Future<TutorStatus> fetchTutorStatus(String studentId) async =>
+      TutorStatus.fromJson(
+        await _getData(
+          "/api/v1/tutor/status?studentId=${Uri.encodeQueryComponent(studentId)}",
+        ),
       );
+
+  /// Starts buying a pass for one child; the returned checkout URL opens
+  /// in the browser and the pass switches on by itself once the bank
+  /// confirms.
+  Future<TutorBuyResult> buyTutorPass({
+    required String planCode,
+    required String studentId,
+  }) async => TutorBuyResult.fromJson(
+    await _postData("/api/v1/tutor/buy", {
+      "planCode": planCode,
+      "studentId": studentId,
+    }),
+  );
 
   /// Asks the tutor and yields the reply as it is written: [TutorDelta]s
   /// carry text slices, one [TutorDone] closes the reply. A refusal (the
@@ -3291,6 +3303,8 @@ class TutorRefused implements Exception {
 
 class TutorAllowance {
   const TutorAllowance({
+    required this.studentName,
+    required this.classLabel,
     required this.freeHintsPerDay,
     required this.freeUsedToday,
     required this.passValidLabel,
@@ -3305,6 +3319,8 @@ class TutorAllowance {
         ? Map<String, dynamic>.from(j["pass"] as Map)
         : null;
     return TutorAllowance(
+      studentName: (j["studentName"] as String?) ?? "",
+      classLabel: (j["classLabel"] as String?) ?? "",
       freeHintsPerDay: (j["freeHintsPerDay"] as num?)?.toInt() ?? 0,
       freeUsedToday: (j["freeUsedToday"] as num?)?.toInt() ?? 0,
       passValidLabel: (j["passValidLabel"] as String?) ?? "",
@@ -3315,6 +3331,8 @@ class TutorAllowance {
     );
   }
 
+  final String studentName;
+  final String classLabel;
   final int freeHintsPerDay;
   final int freeUsedToday;
   final String passValidLabel;
@@ -3322,6 +3340,9 @@ class TutorAllowance {
   final String passEndsAt;
   final int passMessagesPerDay;
   final int passUsedToday;
+
+  String get studentFirstName =>
+      studentName.isEmpty ? "this child" : studentName.split(" ").first;
 
   bool get hasPass =>
       passEndsAt.isNotEmpty &&

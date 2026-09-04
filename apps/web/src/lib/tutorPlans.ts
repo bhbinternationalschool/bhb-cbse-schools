@@ -150,6 +150,10 @@ export type TutorPass = {
 };
 
 export type TutorAllowance = {
+  /** The child this allowance is for — a pass is per child. */
+  studentId: string;
+  studentName: string;
+  classLabel: string;
   freeHintsPerDay: number;
   /** Hints used inside today's free allowance. */
   freeUsedToday: number;
@@ -237,7 +241,11 @@ export function formatPaise(paise: number): string {
   return p ? `₹${rupees.toLocaleString("en-IN")}.${String(p).padStart(2, "0")}` : `₹${rupees.toLocaleString("en-IN")}`;
 }
 
-/** Context the client sends about the child and the assignment. */
+/**
+ * Context for a tutor call. childName / className come from the school's
+ * own record of the child (the server fills them in); the client only adds
+ * the assignment it was opened from.
+ */
 export type TutorContext = {
   childName?: string;
   className?: string;
@@ -245,6 +253,30 @@ export type TutorContext = {
   homeworkTitle?: string;
   homeworkBody?: string;
 };
+
+/**
+ * What a child at this class level studies, in the school's Nursery–VIII
+ * range on the CBSE pattern. Given to the model so "is this question for
+ * this class?" has something concrete to judge against; a parent whose
+ * pass is for the LKG child cannot use it for the Class II sibling's work.
+ */
+export function classLevelGuide(className: string): string {
+  const n = (className || "").trim().toLowerCase();
+  const pre = /nur|play|pre|lkg|ukg|\bkg\b|kinder/.test(n);
+  const roman: Record<string, number> = { i: 1, ii: 2, iii: 3, iv: 4, v: 5, vi: 6, vii: 7, viii: 8 };
+  const m = n.match(/\b(?:class|std|grade)?\s*(\d{1,2}|i{1,3}|iv|v|vi{1,3}|viii)\b/);
+  const num = pre ? 0 : m ? (Number(m[1]) || roman[m[1]] || 0) : 0;
+  if (pre || (!m && !num)) {
+    return "Pre-primary (Nursery/LKG/UKG): letters and their sounds, tracing and writing, numbers up to 20–100, counting, shapes and colours, rhymes and simple words, Hindi varnamala, everyday awareness of family, animals, seasons. No formal arithmetic beyond simple counting and one-digit addition with objects.";
+  }
+  if (num <= 2) {
+    return "Classes I–II: reading short sentences, simple spellings and grammar (naming words, action words), numbers to 100–1000, place value of two- and three-digit numbers, addition and subtraction, introductory multiplication tables, shapes and patterns, EVS about home, plants, animals and weather, Hindi matras and short words.";
+  }
+  if (num <= 5) {
+    return "Classes III–V: multiplication and division, fractions and decimals, place value up to lakhs, time, money and measurement, simple geometry (angles, perimeter, area), paragraph writing and grammar (tenses, parts of speech), EVS/Science topics such as plants, animals, water, food, the human body, and Social topics such as maps, community and India's states, Hindi reading and writing.";
+  }
+  return "Classes VI–VIII: integers, fractions and decimals in depth, ratio and percentage, basic algebra and linear equations, geometry and mensuration, data handling; Science as physics, chemistry and biology topics (motion, light, matter, cells, nutrition); Social Science as history, geography and civics; English and Hindi grammar, comprehension and essay writing.";
+}
 
 function cleanCtx(ctx: TutorContext): string[] {
   return [
@@ -267,9 +299,13 @@ export function buildTutorSystemPrompt(
   ctx: TutorContext,
   schoolName: string,
 ): string {
+  const child = ctx.childName || "the child";
+  const cls = ctx.className || "their class";
   const common = [
     `You are a tutor for families of ${schoolName}, an Indian school following the CBSE pattern.`,
     "Match the parent's language (Hindi, English or Hinglish) and pitch everything at the child's class level.",
+    `You are set up for ${child}, who is in ${cls}. Help ONLY with what a ${cls} child studies. Level guide: ${classLevelGuide(ctx.className || "")}`,
+    `If a question is clearly above or below that level, or is another child's work, do not answer it — say in one or two lines that this tutor is set for ${child}'s class (${cls}), and that the parent can open the tutor for the other child, who needs their own pass. Never stretch an answer up to a higher class.`,
     "Schoolwork only: if the question is not about the child's learning, politely redirect.",
     "Never invent facts about the school, its timetable, fees or teachers — you do not have them.",
     "Use plain text with short paragraphs or numbered steps; no tables.",

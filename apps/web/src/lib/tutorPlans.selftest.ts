@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import {
   buildTutorSystemPrompt,
+  classLevelGuide,
   DEFAULT_TUTOR_PLANS,
   formatPaise,
   parseCount,
@@ -19,6 +20,9 @@ import {
 
 const now = new Date("2026-09-05T10:00:00.000Z");
 const base: TutorAllowance = {
+  studentId: "stu_1",
+  studentName: "Amay",
+  classLabel: "LKG A",
   freeHintsPerDay: 20,
   freeUsedToday: 0,
   pass: null,
@@ -89,11 +93,28 @@ const dead = { ...live, endsAt: "2026-09-04T18:29:59.999Z" };
   assert.equal(passValidLabel("2026-12-31T18:29:59.999Z"), "Valid till 31 Dec");
 }
 
+// --- class level guide
+{
+  assert.ok(classLevelGuide("LKG A").startsWith("Pre-primary"));
+  assert.ok(classLevelGuide("Nursery").startsWith("Pre-primary"));
+  assert.ok(classLevelGuide("II A").startsWith("Classes I–II"));
+  assert.ok(classLevelGuide("Class 2").startsWith("Classes I–II"));
+  assert.ok(classLevelGuide("IV").startsWith("Classes III–V"));
+  assert.ok(classLevelGuide("VIII B").startsWith("Classes VI–VIII"));
+  assert.ok(classLevelGuide("7").startsWith("Classes VI–VIII"));
+  assert.ok(classLevelGuide("").startsWith("Pre-primary"), "unknown falls to the lowest level, never a higher one");
+}
+
 // --- prompts
 {
   const hint = buildTutorSystemPrompt("hint", { childName: "Amay", className: "LKG A" }, "BHB");
   assert.ok(hint.includes("HINTS, not answers"));
   assert.ok(hint.includes("Child: Amay."));
+  assert.ok(hint.includes("set up for Amay, who is in LKG A"), "the prompt is pinned to the child's class");
+  assert.ok(hint.includes("Pre-primary"), "and carries that class's level guide");
+  assert.ok(hint.includes("needs their own pass"), "siblings are sent to their own tutor");
+  const two = buildTutorSystemPrompt("teach", { childName: "Dipti", className: "II A" }, "BHB");
+  assert.ok(two.includes("Classes I–II") && !two.includes("Pre-primary"));
   assert.ok(!hint.includes("Subject:"), "absent context is absent, not 'undefined'");
   const teach = buildTutorSystemPrompt("teach", {}, "BHB");
   assert.ok(teach.includes("short lesson"));

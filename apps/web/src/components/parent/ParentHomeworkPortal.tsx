@@ -249,6 +249,7 @@ export function ParentHomeworkPortal({
                   )}
                 </div>
                 <HomeworkTutorChat
+                  studentId={child.id}
                   context={{
                     childName: child.fullName,
                     className:

@@ -88,7 +88,7 @@ class _TutorScreenState extends State<TutorScreen> {
   Future<void> _load() async {
     setState(() => _error = null);
     try {
-      final s = await widget.api.fetchTutorStatus();
+      final s = await widget.api.fetchTutorStatus(widget.context.child.id);
       if (!mounted) return;
       setState(() => _status = s);
     } on ApiException catch (e) {
@@ -131,7 +131,7 @@ class _TutorScreenState extends State<TutorScreen> {
       Haptics.warning();
       _showPasses(
         reason:
-            "${mode.label} is part of the full tutor. Get a pass — a day, a week or a month — to unlock it.",
+            "${mode.label} is part of the full tutor. Get a pass for ${widget.context.child.fullName.split(" ").first} — a day, a week or a month — to unlock it.",
       );
       return;
     }
@@ -222,8 +222,12 @@ class _TutorScreenState extends State<TutorScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (context) =>
-          _PassSheet(api: widget.api, status: status, reason: reason),
+      builder: (context) => _PassSheet(
+        api: widget.api,
+        status: status,
+        child: widget.context.child,
+        reason: reason,
+      ),
     );
     if (bought == true) await _load();
   }
@@ -433,7 +437,7 @@ class _AllowanceStrip extends StatelessWidget {
     final String text;
     if (allowance.hasPass) {
       text =
-          "Full tutor on · ${allowance.validLabel}"
+          "Full tutor on for ${allowance.studentFirstName} · ${allowance.validLabel}"
           "${allowance.passUsedToday >= allowance.passMessagesPerDay ? " · today's limit reached" : ""}";
     } else if (mode != null && mode!.paid) {
       text = "${mode!.label} needs a pass — hints stay free";
@@ -684,10 +688,16 @@ class _Composer extends StatelessWidget {
 /// The passes on sale. Buying opens the school's payment page; the pass
 /// switches on by itself once the bank confirms.
 class _PassSheet extends StatefulWidget {
-  const _PassSheet({required this.api, required this.status, this.reason});
+  const _PassSheet({
+    required this.api,
+    required this.status,
+    required this.child,
+    this.reason,
+  });
 
   final ApiClient api;
   final TutorStatus status;
+  final ParentChild child;
   final String? reason;
 
   @override
@@ -701,7 +711,10 @@ class _PassSheetState extends State<_PassSheet> {
     if (_buying != null) return;
     setState(() => _buying = plan.code);
     try {
-      final r = await widget.api.buyTutorPass(plan.code);
+      final r = await widget.api.buyTutorPass(
+        planCode: plan.code,
+        studentId: widget.child.id,
+      );
       final uri = Uri.tryParse(r.checkoutUrl);
       if (uri == null) {
         throw ApiException("Could not open the payment page", 502);
@@ -733,6 +746,11 @@ class _PassSheetState extends State<_PassSheet> {
   @override
   Widget build(BuildContext context) {
     final a = widget.status.allowance;
+    final first = widget.child.fullName.split(" ").first;
+    final classLabel = [
+      widget.child.className,
+      if (widget.child.sectionName.isNotEmpty) widget.child.sectionName,
+    ].join(" ");
     final pending = widget.status.orders
         .where((o) => o.status == "pending")
         .toList();
@@ -743,9 +761,9 @@ class _PassSheetState extends State<_PassSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              "Tutor pass",
-              style: TextStyle(
+            Text(
+              "Tutor pass for $first",
+              style: const TextStyle(
                 fontSize: 17,
                 fontWeight: FontWeight.w700,
                 color: AppColors.ink,
@@ -754,7 +772,7 @@ class _PassSheetState extends State<_PassSheet> {
             const SizedBox(height: Space.xs),
             Text(
               widget.reason ??
-                  "Unlock the full tutor for your whole family — teaching, worked examples, practice questions, answer checking, homework help and exam preparation.",
+                  "Unlock the full tutor for $first — teaching, worked examples, practice questions, answer checking, homework help and exam preparation, all at the $classLabel level.",
               style: const TextStyle(
                 fontSize: 13,
                 color: AppColors.ink,
@@ -803,9 +821,9 @@ class _PassSheetState extends State<_PassSheet> {
               ),
             ],
             const SizedBox(height: Space.sm),
-            const Text(
-              "Fair use: up to 60 tutor messages a day on a pass. Hints stay free every day.",
-              style: TextStyle(
+            Text(
+              "A pass is for one child and covers $first's class ($classLabel) only — a brother or sister needs their own pass. Fair use: up to 60 tutor messages a day. Hints stay free every day.",
+              style: const TextStyle(
                 fontSize: 11.5,
                 color: AppColors.muted,
                 height: 1.4,

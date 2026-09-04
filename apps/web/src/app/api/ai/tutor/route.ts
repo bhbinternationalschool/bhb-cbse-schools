@@ -7,7 +7,7 @@ import {
 import type { HomeworkTutorContext } from "@/lib/homeworkTutor.types";
 import type { OpenAiChatTurn } from "@/lib/openAi.server";
 import { aiStreamResponse, wantsAiStream } from "@/lib/aiStream.server";
-import { answerParentTutor, parseTutorAsk, TUTOR_MESSAGE_MAX } from "@/lib/tutorApi.server";
+import { answerParentTutor, parseTutorAsk, resolveTutorStudent, TUTOR_MESSAGE_MAX } from "@/lib/tutorApi.server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -70,11 +70,18 @@ export async function POST(req: Request) {
     if (ask.message.length > TUTOR_MESSAGE_MAX) {
       return NextResponse.json({ error: "message too long" }, { status: 400 });
     }
-    return answerParentTutor({
-      householdId: session.householdId,
-      ask,
-      stream: wantsAiStream(req),
-    });
+    try {
+      const student = await resolveTutorStudent(session.householdId, ask.studentId);
+      return await answerParentTutor({
+        householdId: session.householdId,
+        student,
+        ask,
+        stream: wantsAiStream(req),
+      });
+    } catch (e) {
+      const status = e instanceof Error && "status" in e ? Number((e as { status: number }).status) : 400;
+      return NextResponse.json({ error: e instanceof Error ? e.message : "bad request" }, { status });
+    }
   }
 
   // Streaming callers (the portal's tutor panel) get the reply as it is
