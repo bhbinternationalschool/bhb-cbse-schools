@@ -2572,6 +2572,102 @@ class ApiClient {
     if (res.statusCode != 200) _throwFrom(res);
   }
 
+
+  /* ─── AI tutor (parent) ─────────────────────────────────────────── */
+
+  Future<TutorStatus> fetchTutorStatus() async =>
+      TutorStatus.fromJson(await _getData("/api/v1/tutor/status"));
+
+  /// Starts buying a pass; the returned checkout URL opens in the browser
+  /// and the pass switches on by itself once the bank confirms.
+  Future<TutorBuyResult> buyTutorPass(String planCode) async =>
+      TutorBuyResult.fromJson(
+        await _postData("/api/v1/tutor/buy", {"planCode": planCode}),
+      );
+
+  /// Asks the tutor and yields the reply as it is written: [TutorDelta]s
+  /// carry text slices, one [TutorDone] closes the reply. A refusal (the
+  /// allowance is spent) surfaces as a [TutorRefused] exception so the
+  /// screen can offer passes; anything else is an [ApiException].
+  Stream<TutorEvent> askTutorStream({
+    required String message,
+    required String mode,
+    required List<TutorTurn> history,
+    required Map<String, String> context,
+    String? studentId,
+  }) async* {
+    final client = http.Client();
+    try {
+      final req = http.Request("POST", _uri("/api/v1/tutor/ask"))
+        ..headers.addAll(await _authHeaders())
+        ..headers["Accept"] = "text/event-stream"
+        ..body = jsonEncode({
+          "message": message,
+          "mode": mode,
+          "history": [
+            for (final t in history) {"role": t.role, "content": t.content},
+          ],
+          "context": context,
+          "studentId": ?studentId,
+        });
+      final res = await client.send(req);
+      if (res.statusCode != 200) {
+        final body = await res.stream.bytesToString();
+        Map<String, dynamic> j = const {};
+        try {
+          j = jsonDecode(body) as Map<String, dynamic>;
+        } catch (_) {
+          /* not JSON */
+        }
+        final err = j["error"];
+        final message = err is String
+            ? err
+            : err is Map && err["message"] is String
+            ? err["message"] as String
+            : "Tutor unavailable (${res.statusCode})";
+        if (res.statusCode == 402) {
+          throw TutorRefused(
+            message,
+            needsPass: j["needsPass"] == true,
+            allowance: j["allowance"] is Map
+                ? TutorAllowance.fromJson(
+                    Map<String, dynamic>.from(j["allowance"] as Map),
+                  )
+                : null,
+          );
+        }
+        throw ApiException(message, res.statusCode);
+      }
+      // One event per "data:" line; our server never splits an event
+      // across lines, so a line splitter is the whole parser.
+      await for (final line
+          in res.stream.transform(utf8.decoder).transform(const LineSplitter())) {
+        if (!line.startsWith("data:")) continue;
+        final payload = line.substring(5).trim();
+        if (payload.isEmpty) continue;
+        final j = jsonDecode(payload) as Map<String, dynamic>;
+        switch (j["type"]) {
+          case "delta":
+            yield TutorDelta((j["text"] as String?) ?? "");
+          case "done":
+            yield TutorDone(
+              reply: (j["reply"] as String?) ?? "",
+              charge: (j["charge"] as String?) ?? "",
+              allowance: j["allowance"] is Map
+                  ? TutorAllowance.fromJson(
+                      Map<String, dynamic>.from(j["allowance"] as Map),
+                    )
+                  : null,
+            );
+          case "error":
+            throw ApiException((j["error"] as String?) ?? "Tutor failed", 503);
+        }
+      }
+    } finally {
+      client.close();
+    }
+  }
+
   /* ─── Principal / owner ─────────────────────────────────────────── */
 
   Future<DefaultersList> fetchDefaulters() async => DefaultersList.fromJson(
@@ -3146,4 +3242,234 @@ class ApiClient {
     );
     if (res.statusCode != 200) _throwFrom(res);
   }
+}
+
+
+/* ─── AI tutor models ──────────────────────────────────────────────── */
+
+class TutorTurn {
+  const TutorTurn(this.role, this.content);
+
+  final String role; // user | assistant
+  final String content;
+}
+
+sealed class TutorEvent {
+  const TutorEvent();
+}
+
+class TutorDelta extends TutorEvent {
+  const TutorDelta(this.text);
+
+  final String text;
+}
+
+class TutorDone extends TutorEvent {
+  const TutorDone({
+    required this.reply,
+    required this.charge,
+    required this.allowance,
+  });
+
+  final String reply;
+  final String charge; // free | pass
+  final TutorAllowance? allowance;
+}
+
+/// The server said no — the free hints are used up, or the mode needs a
+/// pass. Carries the fresh allowance so the screen can explain.
+class TutorRefused implements Exception {
+  TutorRefused(this.message, {required this.needsPass, this.allowance});
+
+  final String message;
+  final bool needsPass;
+  final TutorAllowance? allowance;
+
+  @override
+  String toString() => message;
+}
+
+class TutorAllowance {
+  const TutorAllowance({
+    required this.freeHintsPerDay,
+    required this.freeUsedToday,
+    required this.passValidLabel,
+    required this.passPlanLabel,
+    required this.passEndsAt,
+    required this.passMessagesPerDay,
+    required this.passUsedToday,
+  });
+
+  factory TutorAllowance.fromJson(Map<String, dynamic> j) {
+    final pass = j["pass"] is Map
+        ? Map<String, dynamic>.from(j["pass"] as Map)
+        : null;
+    return TutorAllowance(
+      freeHintsPerDay: (j["freeHintsPerDay"] as num?)?.toInt() ?? 0,
+      freeUsedToday: (j["freeUsedToday"] as num?)?.toInt() ?? 0,
+      passValidLabel: (j["passValidLabel"] as String?) ?? "",
+      passPlanLabel: (pass?["planLabel"] as String?) ?? "",
+      passEndsAt: (pass?["endsAt"] as String?) ?? "",
+      passMessagesPerDay: (j["passMessagesPerDay"] as num?)?.toInt() ?? 0,
+      passUsedToday: (j["passUsedToday"] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  final int freeHintsPerDay;
+  final int freeUsedToday;
+  final String passValidLabel;
+  final String passPlanLabel;
+  final String passEndsAt;
+  final int passMessagesPerDay;
+  final int passUsedToday;
+
+  bool get hasPass =>
+      passEndsAt.isNotEmpty &&
+      (DateTime.tryParse(passEndsAt)?.isAfter(DateTime.now()) ?? false);
+  int get freeLeft => (freeHintsPerDay - freeUsedToday).clamp(0, 1 << 30);
+
+  /// "Valid till 12 Sep" from the end date when the server label is absent
+  /// (a streamed allowance carries the pass, not the label).
+  String get validLabel {
+    if (passValidLabel.isNotEmpty) return passValidLabel;
+    final d = DateTime.tryParse(passEndsAt);
+    if (d == null) return "";
+    final ist = d.toUtc().add(const Duration(hours: 5, minutes: 30));
+    const months = [
+      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    return "Valid till ${ist.day} ${months[ist.month - 1]}";
+  }
+}
+
+class TutorModeInfo {
+  const TutorModeInfo({
+    required this.code,
+    required this.label,
+    required this.blurb,
+    required this.paid,
+    required this.prompt,
+  });
+
+  factory TutorModeInfo.fromJson(Map<String, dynamic> j) => TutorModeInfo(
+    code: (j["code"] as String?) ?? "hint",
+    label: (j["label"] as String?) ?? "",
+    blurb: (j["blurb"] as String?) ?? "",
+    paid: j["paid"] == true,
+    prompt: (j["prompt"] as String?) ?? "",
+  );
+
+  final String code;
+  final String label;
+  final String blurb;
+  final bool paid;
+  final String prompt;
+}
+
+class TutorPlanInfo {
+  const TutorPlanInfo({
+    required this.code,
+    required this.label,
+    required this.days,
+    required this.priceLabel,
+  });
+
+  factory TutorPlanInfo.fromJson(Map<String, dynamic> j) => TutorPlanInfo(
+    code: (j["code"] as String?) ?? "",
+    label: (j["label"] as String?) ?? "",
+    days: (j["days"] as num?)?.toInt() ?? 0,
+    priceLabel: (j["priceLabel"] as String?) ?? "",
+  );
+
+  final String code;
+  final String label;
+  final int days;
+  final String priceLabel;
+}
+
+class TutorOrderInfo {
+  const TutorOrderInfo({
+    required this.id,
+    required this.days,
+    required this.amountLabel,
+    required this.status,
+    required this.checkoutUrl,
+    required this.validLabel,
+  });
+
+  factory TutorOrderInfo.fromJson(Map<String, dynamic> j) => TutorOrderInfo(
+    id: (j["id"] as String?) ?? "",
+    days: (j["days"] as num?)?.toInt() ?? 0,
+    amountLabel: (j["amountLabel"] as String?) ?? "",
+    status: (j["status"] as String?) ?? "",
+    checkoutUrl: (j["checkoutUrl"] as String?) ?? "",
+    validLabel: (j["validLabel"] as String?) ?? "",
+  );
+
+  final String id;
+  final int days;
+  final String amountLabel;
+  final String status;
+  final String checkoutUrl;
+  final String validLabel;
+}
+
+class TutorStatus {
+  const TutorStatus({
+    required this.configured,
+    required this.modes,
+    required this.allowance,
+    required this.plans,
+    required this.orders,
+    required this.note,
+  });
+
+  factory TutorStatus.fromJson(Map<String, dynamic> j) => TutorStatus(
+    configured: j["configured"] == true,
+    modes: [
+      for (final m in (j["modes"] as List? ?? const []))
+        TutorModeInfo.fromJson(Map<String, dynamic>.from(m as Map)),
+    ],
+    allowance: TutorAllowance.fromJson(
+      Map<String, dynamic>.from((j["allowance"] as Map?) ?? const {}),
+    ),
+    plans: [
+      for (final p in (j["plans"] as List? ?? const []))
+        TutorPlanInfo.fromJson(Map<String, dynamic>.from(p as Map)),
+    ],
+    orders: [
+      for (final o in (j["orders"] as List? ?? const []))
+        TutorOrderInfo.fromJson(Map<String, dynamic>.from(o as Map)),
+    ],
+    note: (j["note"] as String?) ?? "",
+  );
+
+  final bool configured;
+  final List<TutorModeInfo> modes;
+  final TutorAllowance allowance;
+  final List<TutorPlanInfo> plans;
+  final List<TutorOrderInfo> orders;
+  final String note;
+}
+
+class TutorBuyResult {
+  const TutorBuyResult({
+    required this.orderId,
+    required this.planLabel,
+    required this.amountLabel,
+    required this.checkoutUrl,
+  });
+
+  factory TutorBuyResult.fromJson(Map<String, dynamic> j) => TutorBuyResult(
+    orderId: (j["orderId"] as String?) ?? "",
+    planLabel: (j["planLabel"] as String?) ?? "",
+    amountLabel: (j["amountLabel"] as String?) ?? "",
+    checkoutUrl: (j["checkoutUrl"] as String?) ?? "",
+  );
+
+  final String orderId;
+  final String planLabel;
+  final String amountLabel;
+  final String checkoutUrl;
 }

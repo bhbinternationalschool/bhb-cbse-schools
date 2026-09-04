@@ -31,6 +31,7 @@ import { settlePaymentLinkWithWhatsApp } from "@/lib/paymentSettlement.server";
 import { ensureSchoolMirrorLoaded } from "@/lib/schoolDataMirror.server";
 import { recordPaymentGatewayEvent } from "@/lib/paymentsNormalized.server";
 import { ingestSettlementWebhook } from "@/lib/ledger/pgSettlement.server";
+import { activateTutorPassOrder } from "@/lib/tutorPasses.server";
 
 export const runtime = "nodejs";
 
@@ -60,6 +61,7 @@ function extractLinkRef(payload: Record<string, unknown>): {
   linkStatus?: string;
   registrationPaymentId?: string;
   eventParticipantId?: string;
+  tutorOrderId?: string;
 } {
   const data = (payload.data || {}) as Record<string, unknown>;
 
@@ -80,6 +82,10 @@ function extractLinkRef(payload: Record<string, unknown>): {
         notes.kind === "event_fee"
           ? notes.participantId ||
             String(data.link_id || "").replace(/^evtp_/, "")
+          : undefined,
+      tutorOrderId:
+        notes.kind === "tutor_pass"
+          ? notes.orderId || String(data.link_id || "")
           : undefined,
     };
   }
@@ -250,6 +256,7 @@ export async function POST(req: Request) {
     linkStatus,
     registrationPaymentId,
     eventParticipantId,
+    tutorOrderId,
   } = extractLinkRef(event);
 
   // Settlement fires only on the link reaching PAID. Order-level success
@@ -269,6 +276,31 @@ export async function POST(req: Request) {
   }
 
   await ensureSchoolMirrorLoaded();
+
+  // AI tutor passes: re-verify the link with the gateway, then activate.
+  // The pass is time, not money in the fee ledger — the settlement sweep
+  // books the amount like any other gateway receipt.
+  if (tutorOrderId) {
+    const live = await fetchCashfreeLinkStatus(tutorOrderId);
+    const verified = live.ok && live.status === "PAID";
+    const res = verified
+      ? await activateTutorPassOrder({ id: tutorOrderId, paymentRef: paymentId || "" })
+      : { ok: false as const, error: live.ok ? `Link status is ${live.status}` : live.error };
+    await recordPaymentGatewayEvent({
+      provider: "cashfree",
+      eventType: res.ok
+        ? res.alreadyPaid
+          ? "tutor_pass.already_active"
+          : "tutor_pass.activated"
+        : "tutor_pass.failed",
+      externalPaymentId: paymentId || "",
+      settlementStatus: res.ok ? (res.alreadyPaid ? "ignored" : "settled") : "failed",
+      eventJson: res.ok ? event : { error: res.error, raw: event },
+    });
+    return res.ok
+      ? NextResponse.json({ ok: true, tutorOrderId, endsAt: res.endsAt })
+      : NextResponse.json({ error: res.error }, { status: 400 });
+  }
 
   // Inter-school event entry fees settle onto the participant row.
   if (eventParticipantId) {

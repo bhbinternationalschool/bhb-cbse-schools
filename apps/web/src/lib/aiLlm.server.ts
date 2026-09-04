@@ -227,9 +227,11 @@ export type LlmPrecheck = {
  * promise to the generator so the wait is whichever finished last rather
  * than the sum.
  */
-export function startLlmPrecheck(): Promise<LlmPrecheck> {
+export function startLlmPrecheck(opts?: { requester?: string }): Promise<LlmPrecheck> {
   return (async () => {
-    const requester = await resolveRequester();
+    // A v1 route (the mobile app) resolves its own subject — the cookie
+    // reader here would stamp "system" on a parent's call otherwise.
+    const requester = opts?.requester || (await resolveRequester());
     const budget = await checkAiBudget(requester);
     return { requester, budget };
   })();
@@ -460,6 +462,9 @@ export async function generateTutorText(opts: {
   /** Stream slices of the reply as they arrive (tutor / ERP chat). */
   onDelta?: (text: string) => void;
   precheck?: Promise<LlmPrecheck>;
+  /** Paid tutor modes teach in full and need more room than a hint. */
+  maxTokens?: number;
+  promptVersion?: string;
 }): Promise<
   | { ok: true; text: string; engine: LlmEngine; generationId: string }
   | { ok: false; error: string; engine: LlmEngine }
@@ -468,15 +473,15 @@ export async function generateTutorText(opts: {
     system: opts.system,
     history: opts.history,
     userMessage: opts.userMessage,
-    maxTokens: 900,
+    maxTokens: opts.maxTokens ?? 900,
     temperature: 0.45,
     // Gemini 3.x spends part of maxOutputTokens on internal "thinking" before
     // the visible reply — 900 was enough for OpenAI but truncated Gemini's
     // actual answer, so Gemini gets a larger budget for the same reply length.
-    geminiMaxTokens: 1536,
+    geminiMaxTokens: Math.round((opts.maxTokens ?? 900) * 1.7),
     onDelta: opts.onDelta,
     precheck: opts.precheck,
-    meta: { route: "tutor", promptVersion: "v1" },
+    meta: { route: "tutor", promptVersion: opts.promptVersion ?? "v1" },
   });
 }
 

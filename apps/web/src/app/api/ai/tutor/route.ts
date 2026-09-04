@@ -7,6 +7,7 @@ import {
 import type { HomeworkTutorContext } from "@/lib/homeworkTutor.types";
 import type { OpenAiChatTurn } from "@/lib/openAi.server";
 import { aiStreamResponse, wantsAiStream } from "@/lib/aiStream.server";
+import { answerParentTutor, parseTutorAsk, TUTOR_MESSAGE_MAX } from "@/lib/tutorApi.server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -61,6 +62,20 @@ export async function POST(req: Request) {
       (h.role === "user" || h.role === "assistant") &&
       typeof h.content === "string",
   );
+
+  // A parent on the web portal is under the same household allowance as
+  // the app — hints free up to the daily cap, the full tutor on a pass.
+  if (session.persona === "parent" && session.householdId) {
+    const ask = parseTutorAsk({ ...body, mode: (body as { mode?: string }).mode });
+    if (ask.message.length > TUTOR_MESSAGE_MAX) {
+      return NextResponse.json({ error: "message too long" }, { status: 400 });
+    }
+    return answerParentTutor({
+      householdId: session.householdId,
+      ask,
+      stream: wantsAiStream(req),
+    });
+  }
 
   // Streaming callers (the portal's tutor panel) get the reply as it is
   // written; everyone else — the mobile app, scripts — keeps the JSON shape.

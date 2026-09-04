@@ -20,6 +20,7 @@ import "../modules/notices_screen.dart";
 import "../modules/ptm_screen.dart";
 import "../modules/receipts_screen.dart";
 import "../modules/transport_screen.dart";
+import "../modules/tutor_screen.dart";
 import "../profile/profile_screen.dart";
 import "home_stats.dart";
 import "student_id_screen.dart";
@@ -36,6 +37,7 @@ const _modules = [
   _Module("Fees", Icons.payments_outlined, ModuleTone.blue),
   _Module("Attendance", Icons.fact_check_outlined, ModuleTone.teal),
   _Module("Homework", Icons.menu_book_outlined, ModuleTone.purple),
+  _Module("Tutor", Icons.school_outlined, ModuleTone.amber),
   _Module("Notices", Icons.campaign_outlined, ModuleTone.coral),
   _Module("Transport", Icons.directions_bus_outlined, ModuleTone.pink),
   _Module("Exams", Icons.workspace_premium_outlined, ModuleTone.amber),
@@ -233,11 +235,14 @@ class _HomeScreenState extends State<HomeScreen> {
         screen = FeesScreen(api: api, child: child);
       case "Attendance":
         screen = AttendanceHistoryScreen(api: api, child: child);
+      case "Tutor":
+        screen = TutorScreen(api: api, context: TutorContext(child: child));
       case "Homework":
         screen = HomeworkScreen(
           api: api,
           subtitle: child.fullName,
           studentId: child.id,
+          child: child,
         );
       case "Notices":
         screen = NoticesScreen(api: api);

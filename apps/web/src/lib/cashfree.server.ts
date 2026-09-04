@@ -98,7 +98,7 @@ export async function createCashfreeLink(opts: {
     link_meta: {
       return_url: opts.returnUrl,
       notify_url: opts.webhookUrl,
-      upi_intent: "true",
+      upi_intent: true,
     },
     link_notes: opts.notes ?? {},
   };

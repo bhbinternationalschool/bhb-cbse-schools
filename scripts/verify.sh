@@ -182,6 +182,7 @@ SELFTESTS=(
   test:receipt-pdf
   test:fee-due-future
   test:ai-stream
+  test:tutor-plans
   test:question-bank
   test:rbac-infer
   test:rbac-scope
