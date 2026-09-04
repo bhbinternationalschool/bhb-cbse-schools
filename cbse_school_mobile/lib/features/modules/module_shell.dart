@@ -2,6 +2,8 @@ import "package:flutter/material.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
+import "../../core/ui/motion.dart";
+import "../../core/ui/spacing.dart";
 
 /// Shared chrome for module screens: navy app bar, pull-to-refresh list,
 /// one loading/error/empty pattern so every module behaves the same way.
@@ -22,17 +24,30 @@ class ModuleShell<T> extends StatefulWidget {
   final String title;
   final String? subtitle;
   final Future<T> Function() load;
-  final Widget Function(BuildContext context, T data, Future<void> Function() reload) builder;
+  final Widget Function(
+    BuildContext context,
+    T data,
+    Future<void> Function() reload,
+  )
+  builder;
   final IconData emptyIcon;
   final String emptyText;
   final bool Function(T data)? isEmpty;
-  final Widget Function(BuildContext context, T data, Future<void> Function() reload)?
-      floatingActionButton;
+  final Widget Function(
+    BuildContext context,
+    T data,
+    Future<void> Function() reload,
+  )?
+  floatingActionButton;
 
   /// Sticky footer under the list — a pay button, say. Only shown once data
   /// has loaded and the screen is not in its empty state.
-  final Widget Function(BuildContext context, T data, Future<void> Function() reload)?
-      bottomBar;
+  final Widget Function(
+    BuildContext context,
+    T data,
+    Future<void> Function() reload,
+  )?
+  bottomBar;
 
   @override
   State<ModuleShell<T>> createState() => _ModuleShellState<T>();
@@ -60,8 +75,11 @@ class _ModuleShellState<T> extends State<ModuleShell<T>> {
       // Anything else is a transport failure; the raw exception text
       // ("SocketException … errno = 111") means nothing to a parent.
       if (mounted) {
-        setState(() => _error = "Could not reach the school server. "
-            "Check your connection and try again.");
+        setState(
+          () => _error =
+              "Could not reach the school server. "
+              "Check your connection and try again.",
+        );
       }
     }
   }
@@ -93,68 +111,83 @@ class _ModuleShellState<T> extends State<ModuleShell<T>> {
       bottomNavigationBar: data == null || (widget.isEmpty?.call(data) ?? false)
           ? null
           : widget.bottomBar?.call(context, data, _load),
-      body: data == null
-          ? Center(
-              child: _error == null
-                  ? const CircularProgressIndicator(color: AppColors.primary)
-                  : Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.cloud_off_outlined,
-                              size: 40, color: AppColors.muted),
-                          const SizedBox(height: 12),
-                          Text(_error!, textAlign: TextAlign.center),
-                          const SizedBox(height: 12),
-                          FilledButton(
-                            onPressed: _load,
-                            child: const Text("Retry"),
-                          ),
-                        ],
-                      ),
-                    ),
-            )
-          : (widget.isEmpty?.call(data) ?? false)
-              ? RefreshIndicator(
-                  onRefresh: _load,
-                  color: AppColors.primary,
-                  child: ListView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    children: [
-                      SizedBox(
-                        height: MediaQuery.sizeOf(context).height * 0.6,
-                        child: Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(widget.emptyIcon,
-                                  size: 44, color: AppColors.muted),
-                              const SizedBox(height: 12),
-                              Padding(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 32),
-                                child: Text(
-                                  widget.emptyText,
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(
-                                    color: AppColors.muted,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
+      // States crossfade rather than snapping: the spinner dissolves into
+      // the list, an error slides in over the spinner, and a pull-to-refresh
+      // that changes nothing leaves the list exactly where it was.
+      body: AppCrossfade(
+        child: data == null
+            ? Center(
+                key: ValueKey(_error == null ? "loading" : "error"),
+                child: _error == null
+                    ? const CircularProgressIndicator(color: AppColors.primary)
+                    : Padding(
+                        padding: Insets.state,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.cloud_off_outlined,
+                              size: 40,
+                              color: AppColors.muted,
+                            ),
+                            const SizedBox(height: 12),
+                            Text(_error!, textAlign: TextAlign.center),
+                            const SizedBox(height: 12),
+                            FilledButton(
+                              onPressed: _load,
+                              child: const Text("Retry"),
+                            ),
+                          ],
                         ),
                       ),
-                    ],
-                  ),
-                )
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  color: AppColors.primary,
-                  child: widget.builder(context, data, _load),
+              )
+            : (widget.isEmpty?.call(data) ?? false)
+            ? RefreshIndicator(
+                key: const ValueKey("empty"),
+                onRefresh: _load,
+                color: AppColors.primary,
+                child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  children: [
+                    SizedBox(
+                      height: MediaQuery.sizeOf(context).height * 0.6,
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              widget.emptyIcon,
+                              size: 44,
+                              color: AppColors.muted,
+                            ),
+                            const SizedBox(height: 12),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 32,
+                              ),
+                              child: Text(
+                                widget.emptyText,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: AppColors.muted,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
+              )
+            : RefreshIndicator(
+                key: const ValueKey("content"),
+                onRefresh: _load,
+                color: AppColors.primary,
+                child: widget.builder(context, data, _load),
+              ),
+      ),
     );
   }
 }
@@ -170,7 +203,7 @@ void showComingSoon(BuildContext context, String module, String reason) {
     ),
     builder: (context) => SafeArea(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 24, 24, 28),
+        padding: Insets.sheet,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -201,8 +234,18 @@ String formatDateLabel(String isoDate) {
   final d = DateTime.tryParse(isoDate);
   if (d == null) return isoDate;
   const months = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
   ];
   return "${d.day} ${months[d.month - 1]} ${d.year}";
 }

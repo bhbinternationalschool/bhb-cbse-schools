@@ -3,6 +3,7 @@ import "package:url_launcher/url_launcher.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
+import "../../core/ui/haptics.dart";
 import "module_shell.dart";
 import "receipts_screen.dart";
 
@@ -92,6 +93,7 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
         throw ApiException("No browser available to open the payment page", 0);
       }
       _awaitingReturn = true;
+      Haptics.success();
     } on ApiException catch (e) {
       _toast(e.message);
     } catch (_) {

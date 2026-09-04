@@ -2,6 +2,7 @@ import "package:flutter/material.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
+import "../../core/ui/haptics.dart";
 
 const _statuses = [
   ("P", "Present", AppColors.success),
@@ -85,6 +86,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         _saving = false;
         _saved = true;
       });
+      Haptics.success();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Attendance saved")),
       );

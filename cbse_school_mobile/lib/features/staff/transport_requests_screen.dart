@@ -3,6 +3,7 @@ import "package:url_launcher/url_launcher.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
+import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
 
 /// The office's queue of transport requests from parents — the same rows
@@ -227,6 +228,7 @@ class _RequestCard extends StatelessWidget {
         status: status,
         note: note.text.trim(),
       );
+      Haptics.success();
       await reload();
     } on ApiException catch (e) {
       if (context.mounted) {

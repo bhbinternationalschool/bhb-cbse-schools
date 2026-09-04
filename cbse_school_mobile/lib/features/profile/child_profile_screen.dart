@@ -4,6 +4,7 @@ import "package:image_picker/image_picker.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
+import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
 
 /// One child: the full record as the school holds it, and the document
@@ -161,6 +162,7 @@ class ChildProfileScreen extends StatelessWidget {
       );
       if (!context.mounted) return;
       Navigator.of(context).pop(); // progress
+      Haptics.success();
       await showDialog<void>(
         context: context,
         builder: (context) => AlertDialog(
@@ -228,6 +230,7 @@ class ChildProfileScreen extends StatelessWidget {
     } on ApiException catch (e) {
       if (!context.mounted) return;
       Navigator.of(context).pop();
+      if ((e.statusCode ?? 0) < 500) Haptics.warning();
       await showDialog<void>(
         context: context,
         builder: (context) => AlertDialog(

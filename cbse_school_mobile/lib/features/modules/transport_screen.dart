@@ -3,6 +3,7 @@ import "package:url_launcher/url_launcher.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
+import "../../core/ui/haptics.dart";
 import "bus_routes_screen.dart";
 import "module_shell.dart";
 
@@ -191,6 +192,7 @@ class _ChildCard extends StatelessWidget {
       builder: (context) => _RequestForm(api: api, child: child, mine: mine),
     );
     if (sent == true) {
+      Haptics.success();
       await reload();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -310,6 +312,7 @@ class _RequestFormState extends State<_RequestForm> {
   Future<void> _send() async {
     if (_busy) return;
     if (_address.text.trim().isEmpty) {
+      Haptics.warning();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Please give the pickup address.")),
       );

@@ -5,6 +5,9 @@ import "package:url_launcher/url_launcher.dart";
 import "../../core/api/api_client.dart";
 import "../../core/config/app_config.dart";
 import "../../core/theme/app_theme.dart";
+import "../../core/ui/haptics.dart";
+import "../../core/ui/motion.dart";
+import "../../core/ui/spacing.dart";
 import "../modules/attendance_history_screen.dart";
 import "../modules/chat_thread_screen.dart";
 import "../modules/complaints_screen.dart";
@@ -276,6 +279,20 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // The three top-level states (spinner, error, dashboard) dissolve into
+    // one another instead of swapping; the dashboard's sections then rise
+    // in one after another on first paint.
+    return AppCrossfade(
+      child: KeyedSubtree(
+        key: ValueKey(
+          _summary == null ? (_error == null ? "loading" : "error") : "home",
+        ),
+        child: _buildState(context),
+      ),
+    );
+  }
+
+  Widget _buildState(BuildContext context) {
     final summary = _summary;
 
     if (summary == null) {
@@ -352,53 +369,88 @@ class _HomeScreenState extends State<HomeScreen> {
               child: child,
               siblings: summary.children,
               selectedIndex: _childIndex,
-              onSelectChild: (i) => setState(() => _childIndex = i),
+              onSelectChild: (i) {
+                if (i == _childIndex) return;
+                Haptics.tap();
+                setState(() => _childIndex = i);
+              },
               onNotices: () => _openModule("Notices", child),
               onLogout: _signOut,
             ),
             Transform.translate(
               offset: const Offset(0, -34),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: _StatsRow(
-                  child: child,
-                  attendance: _attendance[child.id],
-                  homework: _homework[child.id],
-                  onOpen: (label) => _openModule(label, child),
+                padding: Insets.gutter,
+                // Switching child crossfades the numbers rather than
+                // flashing new ones into the same boxes.
+                child: EntranceReveal(
+                  index: 0,
+                  child: AppCrossfade(
+                    duration: AppMotion.fast,
+                    child: _StatsRow(
+                      key: ValueKey(child.id),
+                      child: child,
+                      attendance: _attendance[child.id],
+                      homework: _homework[child.id],
+                      onOpen: (label) => _openModule(label, child),
+                    ),
+                  ),
                 ),
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
+              padding: Insets.pageBelowHeader,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const _SectionTitle("Quick access"),
-                  const SizedBox(height: 12),
-                  _ModuleGrid(onTap: (label) => _openModule(label, child)),
-                  const SizedBox(height: 22),
-                  const _SectionTitle("School"),
-                  const SizedBox(height: 12),
-                  if (summary.schoolWhatsApp != null) ...[
-                    _WhatsAppCard(
-                      contact: summary.schoolWhatsApp!,
-                      onOpen: () => _openWhatsApp(summary.schoolWhatsApp!),
-                    ),
-                    const SizedBox(height: 10),
-                  ],
-                  _ActionCard(
-                    tone: ModuleTone.blue,
-                    icon: Icons.qr_code_2,
-                    title: "Student ID · ${child.admissionNo}",
-                    subtitle:
-                        "Guardian ${summary.guardianName} · tap for the ID QR",
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => StudentIdScreen(
-                          child: child,
-                          guardianName: summary.guardianName,
+                  EntranceReveal(
+                    index: 1,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const _SectionTitle("Quick access"),
+                        const SizedBox(height: Space.md),
+                        _ModuleGrid(
+                          onTap: (label) {
+                            Haptics.tap();
+                            _openModule(label, child);
+                          },
                         ),
-                      ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: Space.xl),
+                  EntranceReveal(
+                    index: 2,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const _SectionTitle("School"),
+                        const SizedBox(height: Space.md),
+                        if (summary.schoolWhatsApp != null) ...[
+                          _WhatsAppCard(
+                            contact: summary.schoolWhatsApp!,
+                            onOpen: () =>
+                                _openWhatsApp(summary.schoolWhatsApp!),
+                          ),
+                          const SizedBox(height: 10),
+                        ],
+                        _ActionCard(
+                          tone: ModuleTone.blue,
+                          icon: Icons.qr_code_2,
+                          title: "Student ID · ${child.admissionNo}",
+                          subtitle:
+                              "Guardian ${summary.guardianName} · tap for the ID QR",
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => StudentIdScreen(
+                                child: child,
+                                guardianName: summary.guardianName,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -411,6 +463,7 @@ class _HomeScreenState extends State<HomeScreen> {
         selectedIndex: _tab,
         onDestinationSelected: (i) {
           // Home stays the root; other tabs push their screen and snap back.
+          if (i != _tab) Haptics.tap();
           switch (i) {
             case 1:
               _openModule("Fees", child);
@@ -636,41 +689,59 @@ class _ChildChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final first = child.fullName.split(" ").first;
-    return Material(
-      color: selected
-          ? AppColors.accentSoft
-          : Colors.white.withValues(alpha: 0.12),
-      borderRadius: BorderRadius.circular(18),
+    // Selection slides the gold fill from chip to chip instead of snapping.
+    return AnimatedContainer(
+      duration: AppMotion.fast,
+      curve: AppMotion.enter,
+      decoration: BoxDecoration(
+        color: selected
+            ? AppColors.accentSoft
+            : Colors.white.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(18),
+      ),
       clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(6, 4, 14, 4),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircleAvatar(
-                radius: 13,
-                backgroundColor: selected ? AppColors.primary : Colors.white24,
-                child: Text(
-                  child.initials,
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    color: selected ? AppColors.accentSoft : Colors.white,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(6, 4, 14, 4),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AnimatedContainer(
+                  duration: AppMotion.fast,
+                  width: 26,
+                  height: 26,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: selected ? AppColors.primary : Colors.white24,
+                  ),
+                  child: AnimatedDefaultTextStyle(
+                    duration: AppMotion.fast,
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: selected ? AppColors.accentSoft : Colors.white,
+                    ),
+                    child: Text(child.initials),
                   ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                "$first · ${child.classLabel.split(' · ').first}",
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w600,
-                  color: selected ? AppColors.primary : Colors.white,
+                const SizedBox(width: 8),
+                AnimatedDefaultTextStyle(
+                  duration: AppMotion.fast,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: selected ? AppColors.primary : Colors.white,
+                  ),
+                  child: Text(
+                    "$first · ${child.classLabel.split(' · ').first}",
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -710,6 +781,7 @@ class _ChildAvatar extends StatelessWidget {
 
 class _StatsRow extends StatelessWidget {
   const _StatsRow({
+    super.key,
     required this.child,
     required this.attendance,
     required this.homework,

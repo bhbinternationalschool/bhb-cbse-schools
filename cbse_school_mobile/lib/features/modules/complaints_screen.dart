@@ -2,6 +2,7 @@ import "package:flutter/material.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
+import "../../core/ui/haptics.dart";
 import "module_shell.dart";
 
 /// The household's complaints, and a form to raise one.
@@ -134,7 +135,10 @@ class ComplaintsScreen extends StatelessWidget {
         defaultChild: defaultChild,
       ),
     );
-    if (submitted == true) await reload();
+    if (submitted == true) {
+      Haptics.success();
+      await reload();
+    }
   }
 }
 
@@ -207,6 +211,7 @@ class _ComplaintFormState extends State<_ComplaintForm> {
     final subject = _subject.text.trim();
     final description = _description.text.trim();
     if (subject.isEmpty || description.isEmpty) {
+      Haptics.warning();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("Please fill in the subject and the details."),

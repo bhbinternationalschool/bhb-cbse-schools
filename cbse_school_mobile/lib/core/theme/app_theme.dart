@@ -1,5 +1,7 @@
 import "package:flutter/material.dart";
 
+import "../ui/motion.dart";
+
 /// Brand colours aligned with apps/web TENANT tokens.
 class AppColors {
   static const primary = Color(0xFF203050);
@@ -47,6 +49,14 @@ ThemeData buildAppTheme() {
     scaffoldBackgroundColor: AppColors.surface,
   );
   return base.copyWith(
+    // One fade-through transition for every route on every platform, so a
+    // pushed module and a go_router destination move the same way.
+    pageTransitionsTheme: PageTransitionsTheme(
+      builders: {
+        for (final platform in TargetPlatform.values)
+          platform: const FadeThroughPageTransitionsBuilder(),
+      },
+    ),
     appBarTheme: const AppBarTheme(
       backgroundColor: AppColors.primary,
       foregroundColor: Colors.white,

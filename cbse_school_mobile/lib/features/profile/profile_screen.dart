@@ -2,6 +2,7 @@ import "package:flutter/material.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
+import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
 import "child_profile_screen.dart";
 
@@ -124,6 +125,7 @@ class ProfileScreen extends StatelessWidget {
       builder: (context) => _HouseholdForm(api: api, profile: profile),
     );
     if (saved == true) {
+      Haptics.success();
       await reload();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

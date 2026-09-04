@@ -2,6 +2,7 @@ import "package:flutter/material.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
+import "../../core/ui/haptics.dart";
 import "module_shell.dart";
 
 class PtmScreen extends StatelessWidget {
@@ -43,6 +44,7 @@ class PtmScreen extends StatelessWidget {
         slotId: slot.id,
         studentId: child.id,
       );
+      Haptics.success();
       await reload();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
