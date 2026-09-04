@@ -34,7 +34,9 @@ ENV NEXT_PUBLIC_PAYMENT_GATEWAY=$NEXT_PUBLIC_PAYMENT_GATEWAY
 ENV NODE_OPTIONS=--max-old-space-size=4096
 
 # Track C desk cutover — NEXT_PUBLIC_*_READ_FROM_DB baked into client bundle
-COPY deploy/.generated/desk-cutover-build.env ./desk-cutover-build.env
+# Committed source of truth (deploy/desk-cutover-build.env), so a Cloud Build
+# trigger with no .env.local can build. Matches the live service exactly.
+COPY deploy/desk-cutover-build.env ./desk-cutover-build.env
 
 RUN set -a \
   && . ./desk-cutover-build.env \
