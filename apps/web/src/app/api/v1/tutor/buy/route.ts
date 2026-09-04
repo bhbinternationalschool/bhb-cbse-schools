@@ -2,7 +2,8 @@ import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { requestMeta, resolveApiAuth } from "@/lib/api/v1/auth";
 import { requireParentHousehold } from "@/lib/api/v1/household";
 import { writeAudit } from "@/lib/audit.server";
-import { createCashfreeLink, shouldUseCashfreeCheckout } from "@/lib/cashfree.server";
+import { shouldUseCashfreeCheckout } from "@/lib/cashfree.server";
+import { createCashfreeCheckout } from "@/lib/cashfreeCheckouts.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { householdWhatsApp, loadSis } from "@/lib/sis";
 import {
@@ -55,18 +56,21 @@ export async function POST(request: Request) {
     if (!ins.ok) throw new ApiError("server_error", ins.error, 500);
 
     const origin = publicAppOrigin();
-    const link = await createCashfreeLink({
-      linkId: orderId,
+    const link = await createCashfreeCheckout({
+      kind: "tutor_pass",
+      ref: orderId,
+      preferredId: orderId,
       amountPaise: plan.pricePaise,
       purpose: `AI tutor pass · ${plan.label} · ${TENANT.nameDisplay}`,
+      customerId: householdId,
       customerName: hh.guardianName || "Parent",
       customerMobile: mobile,
-      returnUrl: `${origin}/pay/tutor-pass/${orderId}`,
-      webhookUrl: `${origin}/api/payments/cashfree/webhook`,
-      notes: { kind: "tutor_pass", orderId, householdId, planCode: plan.code },
+      afterUrl: `${origin}/pay/tutor-pass/${orderId}`,
+      origin,
+      notes: { householdId, planCode: plan.code },
     });
     if (!link.ok) throw new ApiError("server_error", link.error, 502);
-    await setTutorOrderCheckoutUrl(orderId, link.linkUrl);
+    await setTutorOrderCheckoutUrl(orderId, link.checkoutUrl);
 
     const meta = requestMeta(request);
     await writeAudit({
@@ -85,7 +89,7 @@ export async function POST(request: Request) {
       planLabel: plan.label,
       amountPaise: plan.pricePaise,
       amountLabel: formatPaise(plan.pricePaise),
-      checkoutUrl: link.linkUrl,
+      checkoutUrl: link.checkoutUrl,
     });
   } catch (e) {
     return apiErr(e);

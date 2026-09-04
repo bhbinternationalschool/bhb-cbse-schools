@@ -1,3 +1,4 @@
+import { buildCashfreeOrderBody, type CashfreeOrderInput } from "@/lib/cashfreeCheckout";
 /**
  * Cashfree Payment Links — server-only (keys never exposed to client).
  *
@@ -172,6 +173,133 @@ export async function createCashfreePaymentLink(opts: {
   });
 }
 
+/**
+ * Which Cashfree product carries a checkout. "orders" (default) is the
+ * core Orders API + the school's hosted pay page; "links" is the Payment
+ * Links API, which needs a separate account approval the school does not
+ * have today. CASHFREE_CHECKOUT_MODE flips it back if that ever changes.
+ */
+export function cashfreeCheckoutMode(): "orders" | "links" {
+  return (process.env.CASHFREE_CHECKOUT_MODE || "").trim().toLowerCase() === "links"
+    ? "links"
+    : "orders";
+}
+
+/** The mode string cashfree.js expects on the pay page. */
+export function cashfreeSdkMode(): "sandbox" | "production" {
+  return cashfreeBaseUrl().includes("sandbox") ? "sandbox" : "production";
+}
+
+export type CashfreeOrderResult =
+  | { ok: true; orderId: string; cfOrderId: string; paymentSessionId: string; status: string }
+  | { ok: false; error: string };
+
+/**
+ * POST /pg/orders. A reused order_id (retry after a lost response) is
+ * resolved by fetching the existing order, the same way links were.
+ */
+export async function createCashfreeOrder(input: CashfreeOrderInput): Promise<CashfreeOrderResult> {
+  if (!cashfreeKeysPresent()) return { ok: false, error: "Cashfree keys not configured" };
+  const built = buildCashfreeOrderBody(input);
+  if (!built.ok) return built;
+  const res = await fetch(`${cashfreeBaseUrl()}/orders`, {
+    method: "POST",
+    headers: cashfreeAuthHeaders(),
+    body: JSON.stringify(built.body),
+  });
+  let data = (await res.json().catch(() => ({}))) as {
+    cf_order_id?: string | number;
+    order_id?: string;
+    order_status?: string;
+    payment_session_id?: string;
+    message?: string;
+  };
+  if (res.status === 409 || (!res.ok && /already exists/i.test(data.message || ""))) {
+    const existing = await fetch(
+      `${cashfreeBaseUrl()}/orders/${encodeURIComponent(input.orderId)}`,
+      { headers: cashfreeAuthHeaders() },
+    );
+    data = (await existing.json().catch(() => ({}))) as typeof data;
+    if (!existing.ok || !data.payment_session_id) {
+      return { ok: false, error: "Cashfree order exists but could not be fetched" };
+    }
+    if (data.order_status && data.order_status !== "ACTIVE") {
+      return { ok: false, error: `Existing Cashfree order is ${data.order_status}` };
+    }
+  } else if (!res.ok || !data.payment_session_id) {
+    return { ok: false, error: data.message || `Cashfree HTTP ${res.status}` };
+  }
+  return {
+    ok: true,
+    orderId: String(data.order_id || input.orderId),
+    cfOrderId: String(data.cf_order_id ?? ""),
+    paymentSessionId: String(data.payment_session_id),
+    status: String(data.order_status || "ACTIVE"),
+  };
+}
+
+export type CashfreeStatusResult =
+  | { ok: true; status: string; amountPaidRupees: number; source: "order" | "link" }
+  | { ok: false; error: string };
+
+/** GET /pg/orders/{order_id} — the authoritative order state. */
+export async function fetchCashfreeOrderStatus(orderId: string): Promise<CashfreeStatusResult> {
+  if (!cashfreeKeysPresent()) return { ok: false, error: "Cashfree keys not configured" };
+  const res = await fetch(`${cashfreeBaseUrl()}/orders/${encodeURIComponent(orderId)}`, {
+    headers: cashfreeAuthHeaders(),
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    order_status?: string;
+    order_amount?: number;
+    message?: string;
+  };
+  if (!res.ok || !data.order_status) {
+    return { ok: false, error: data.message || `Cashfree HTTP ${res.status}` };
+  }
+  return {
+    ok: true,
+    status: data.order_status,
+    amountPaidRupees: data.order_status === "PAID" ? Number(data.order_amount) || 0 : 0,
+    source: "order",
+  };
+}
+
+/**
+ * The successful payment on an order — its Cashfree payment id and bank
+ * reference (UTR), for the receipt. Null when nothing has succeeded.
+ */
+export async function fetchCashfreeOrderPayment(
+  orderId: string,
+): Promise<{ cfPaymentId: string; bankReference: string } | null> {
+  if (!cashfreeKeysPresent()) return null;
+  const res = await fetch(
+    `${cashfreeBaseUrl()}/orders/${encodeURIComponent(orderId)}/payments`,
+    { headers: cashfreeAuthHeaders() },
+  );
+  const data = (await res.json().catch(() => [])) as {
+    cf_payment_id?: string | number;
+    payment_status?: string;
+    bank_reference?: string;
+  }[];
+  if (!res.ok || !Array.isArray(data)) return null;
+  const hit = data.find((p) => p.payment_status === "SUCCESS");
+  return hit
+    ? { cfPaymentId: String(hit.cf_payment_id ?? ""), bankReference: String(hit.bank_reference || "") }
+    : null;
+}
+
+/**
+ * Status of whatever carries this id — an order first, then a payment
+ * link for records made before the switch to orders. PAID means the same
+ * thing in both.
+ */
+export async function fetchCashfreePaymentStatus(id: string): Promise<CashfreeStatusResult> {
+  const order = await fetchCashfreeOrderStatus(id);
+  if (order.ok) return order;
+  const link = await fetchCashfreeLinkStatus(id);
+  return link.ok ? { ...link, source: "link" } : link;
+}
+
 /** Authoritative status check before/after settling (never trust payload alone). */
 export async function fetchCashfreeLinkStatus(
   linkId: string,
@@ -216,12 +344,21 @@ export async function attachCashfreeToPaymentLink(opts: {
   }
 
   const origin = opts.appOrigin.replace(/\/$/, "");
-  const cf = await createCashfreePaymentLink({
-    link: opts.link,
+  // Lazy import: cashfreeCheckouts.server imports this module.
+  const { createCashfreeCheckout } = await import("@/lib/cashfreeCheckouts.server");
+  const cf = await createCashfreeCheckout({
+    kind: "fee_link",
+    ref: opts.link.id,
+    preferredId: opts.link.id,
+    amountPaise: opts.link.amountPaise,
+    purpose: `School fees ${opts.link.code} — ${opts.link.studentName}`,
+    customerId: opts.link.householdId,
     customerName: opts.customerName,
     customerMobile: opts.customerMobile,
-    callbackUrl: `${origin}/pay/share?linkId=${encodeURIComponent(opts.link.id)}&cf=1`,
-    webhookUrl: `${origin}/api/payments/cashfree/webhook`,
+    expiresOn: opts.link.expiresOn,
+    afterUrl: `${origin}/pay/share?linkId=${encodeURIComponent(opts.link.id)}&cf=1`,
+    origin,
+    notes: { linkId: opts.link.id, code: opts.link.code, householdId: opts.link.householdId },
   });
 
   if (!cf.ok) {
@@ -230,13 +367,13 @@ export async function attachCashfreeToPaymentLink(opts: {
 
   const patched = patchPaymentLink(opts.link.id, {
     gatewayMode: "cashfree",
-    gatewayCheckoutUrl: cf.linkUrl,
-    gatewayExternalId: cf.id,
+    gatewayCheckoutUrl: cf.checkoutUrl,
+    gatewayExternalId: cf.externalId,
   });
 
   if (!patched) {
     return { ok: false, error: "Could not save Cashfree link", link: opts.link };
   }
 
-  return { ok: true, link: patched, checkoutUrl: cf.linkUrl };
+  return { ok: true, link: patched, checkoutUrl: cf.checkoutUrl };
 }

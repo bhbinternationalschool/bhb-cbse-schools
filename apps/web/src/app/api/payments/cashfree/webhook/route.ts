@@ -21,7 +21,9 @@ import {
   getPaymentLinkByCode,
   loadPayments,
 } from "@/lib/payments";
-import { cashfreeKeysPresent, fetchCashfreeLinkStatus } from "@/lib/cashfree.server";
+import { cashfreeKeysPresent, fetchCashfreePaymentStatus } from "@/lib/cashfree.server";
+import { readCashfreeOrderEvent } from "@/lib/cashfreeCheckout";
+import { getCashfreeCheckout, settleCashfreeCheckout } from "@/lib/cashfreeCheckouts.server";
 import {
   captureRegistrationPayment,
   loadAdmissions,
@@ -139,7 +141,7 @@ async function settleRegistrationPayment(opts: {
   }
 
   // Authoritative re-verify — never fulfil on the webhook payload alone.
-  const live = await fetchCashfreeLinkStatus(payment.id);
+  const live = await fetchCashfreePaymentStatus(payment.id);
   if (!live.ok || live.status !== "PAID") {
     await recordPaymentGatewayEvent({
       provider: "cashfree",
@@ -196,7 +198,7 @@ export async function GET() {
     service: "cashfree-webhook",
     configured,
     note: configured
-      ? "POST PAYMENT_LINK_EVENT / SETTLEMENT_* (version 2025-01-01) here"
+      ? "POST PAYMENT_SUCCESS_WEBHOOK (orders) / PAYMENT_LINK_EVENT / SETTLEMENT_* (version 2025-01-01) here"
       : "Set CASHFREE_APP_ID, CASHFREE_SECRET_KEY (CASHFREE_ENV=sandbox|production)",
   });
 }
@@ -249,6 +251,32 @@ export async function POST(req: Request) {
       : NextResponse.json({ ok: false, error: res.error }, { status: 400 });
   }
 
+  // Orders API events (the default checkout since 2026-09-05). A success is
+  // re-verified and settled by kind; failures and drop-offs are recorded.
+  const orderEvent = readCashfreeOrderEvent(event);
+  if (orderEvent && (await getCashfreeCheckout(orderEvent.orderId))) {
+    if (orderEvent.type !== "PAYMENT_SUCCESS_WEBHOOK") {
+      await recordPaymentGatewayEvent({
+        provider: "cashfree",
+        eventType: orderEvent.type || "unknown",
+        externalOrderId: orderEvent.orderId,
+        externalPaymentId: orderEvent.cfPaymentId,
+        settlementStatus: "ignored",
+        eventJson: event,
+      });
+      return NextResponse.json({ ok: true, ignored: orderEvent.type });
+    }
+    const res = await settleCashfreeCheckout({
+      orderId: orderEvent.orderId,
+      paymentRef: orderEvent.bankReference || orderEvent.cfPaymentId,
+      source: "webhook",
+      event,
+    });
+    return res.ok
+      ? NextResponse.json({ ok: true, kind: res.kind, alreadyPaid: res.alreadyPaid, receiptNo: res.receiptNo, endsAt: res.endsAt })
+      : NextResponse.json({ error: res.error, kind: res.kind }, { status: 400 });
+  }
+
   const {
     linkId,
     code,
@@ -281,7 +309,7 @@ export async function POST(req: Request) {
   // The pass is time, not money in the fee ledger — the settlement sweep
   // books the amount like any other gateway receipt.
   if (tutorOrderId) {
-    const live = await fetchCashfreeLinkStatus(tutorOrderId);
+    const live = await fetchCashfreePaymentStatus(tutorOrderId);
     const verified = live.ok && live.status === "PAID";
     const res = verified
       ? await activateTutorPassOrder({ id: tutorOrderId, paymentRef: paymentId || "" })
@@ -387,7 +415,7 @@ export async function POST(req: Request) {
   }
 
   // Authoritative re-verify — never fulfil on the webhook payload alone.
-  const live = await fetchCashfreeLinkStatus(link.id);
+  const live = await fetchCashfreePaymentStatus(link.id);
   if (!live.ok || live.status !== "PAID") {
     await recordPaymentGatewayEvent({
       paymentLinkId: link.id,

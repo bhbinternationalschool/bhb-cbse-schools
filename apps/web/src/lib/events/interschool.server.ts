@@ -9,8 +9,7 @@
 import { getServerTenantContext } from "@/lib/serverTenant";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
-  createCashfreeLink,
-  fetchCashfreeLinkStatus,
+  fetchCashfreePaymentStatus,
   shouldUseCashfreeCheckout,
 } from "@/lib/cashfree.server";
 import { publicAppOrigin } from "@/lib/waSisBotServer";
@@ -828,21 +827,21 @@ export async function registerPublic(input: {
   let checkoutUrl: string | null = null;
   if (fee > 0 && shouldUseCashfreeCheckout()) {
     const origin = publicAppOrigin();
-    const cf = await createCashfreeLink({
-      linkId: `evtp_${participantId}`,
+    const { createCashfreeCheckout } = await import("@/lib/cashfreeCheckouts.server");
+    const cf = await createCashfreeCheckout({
+      kind: "event_fee",
+      ref: participantId,
+      preferredId: `evtp_${participantId}`,
       amountPaise: fee,
       purpose: `Entry fee — ${str(e.name)} · ${name} (${school})`,
+      customerId: participantId,
       customerName: name,
       customerMobile: mobile,
-      returnUrl: `${origin}/fest/${input.slug}?registered=${participantId}`,
-      webhookUrl: `${origin}/api/payments/cashfree/webhook`,
-      notes: {
-        kind: "event_fee",
-        participantId,
-        eventSlug: input.slug,
-      },
+      afterUrl: `${origin}/fest/${input.slug}?registered=${participantId}`,
+      origin,
+      notes: { participantId, eventSlug: input.slug },
     });
-    if (cf.ok) checkoutUrl = cf.linkUrl;
+    if (cf.ok) checkoutUrl = cf.checkoutUrl;
   }
 
   return { participantId, feePaise: fee, checkoutUrl };
@@ -852,7 +851,9 @@ export async function registerPublic(input: {
 export async function settleEventFee(input: {
   participantId: string;
   paymentRef: string;
-}): Promise<{ ok: boolean; error?: string }> {
+  /** The Cashfree order id when the fee rode the Orders API (else the link id is derived). */
+  orderId?: string;
+}): Promise<{ ok: boolean; error?: string; alreadyPaid?: boolean }> {
   const ctx = await evtCtx();
   const { data: p } = await ctx.sb
     .from("evt_participants")
@@ -861,10 +862,10 @@ export async function settleEventFee(input: {
     .eq("id", input.participantId)
     .single();
   if (!p) return { ok: false, error: "Participant not found" };
-  if (str((p as Row).fee_status) === "paid") return { ok: true };
-  const live = await fetchCashfreeLinkStatus(`evtp_${input.participantId}`);
+  if (str((p as Row).fee_status) === "paid") return { ok: true, alreadyPaid: true };
+  const live = await fetchCashfreePaymentStatus(input.orderId || `evtp_${input.participantId}`);
   if (!live.ok || live.status !== "PAID") {
-    return { ok: false, error: live.ok ? `Link is ${live.status}` : live.error };
+    return { ok: false, error: live.ok ? `Payment is ${live.status}` : live.error };
   }
   const { error } = await ctx.sb
     .from("evt_participants")

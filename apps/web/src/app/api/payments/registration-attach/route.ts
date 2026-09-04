@@ -11,7 +11,6 @@ import {
   registrationPayAbsoluteUrl,
 } from "@/lib/admissions";
 import {
-  createCashfreeLink,
   shouldUseCashfreeCheckout,
 } from "@/lib/cashfree.server";
 import { publicAppOrigin } from "@/lib/waSisBotServer";
@@ -65,23 +64,23 @@ export async function POST(req: Request) {
     "/registration/pay?cf=1#",
   );
 
-  const cf = await createCashfreeLink({
-    linkId: payment.id,
+  const { createCashfreeCheckout } = await import("@/lib/cashfreeCheckouts.server");
+  const cf = await createCashfreeCheckout({
+    kind: "registration",
+    ref: payment.id,
+    preferredId: payment.id,
     amountPaise: payment.amountPaise,
     purpose: `Registration fee ${payment.code} — ${payment.childName}`,
+    customerId: payment.id,
     customerName: payment.childName || "Parent",
     customerMobile: payment.mobile || "",
-    returnUrl,
-    webhookUrl: `${origin.replace(/\/$/, "")}/api/payments/cashfree/webhook`,
-    notes: {
-      kind: "registration",
-      registrationPaymentId: payment.id,
-      code: payment.code,
-    },
+    afterUrl: returnUrl,
+    origin,
+    notes: { registrationPaymentId: payment.id, code: payment.code },
   });
 
   if (!cf.ok) {
     return NextResponse.json({ ok: false, error: cf.error }, { status: 400 });
   }
-  return NextResponse.json({ ok: true, checkoutUrl: cf.linkUrl });
+  return NextResponse.json({ ok: true, checkoutUrl: cf.checkoutUrl });
 }
