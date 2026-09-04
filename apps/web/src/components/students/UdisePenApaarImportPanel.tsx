@@ -13,6 +13,7 @@ import { upgradeStudentClass } from "@/lib/classUpgrade";
 import {
   DEFAULT_UDISE_MATCH_OPTIONS,
   applyUdiseRowToStudent,
+  isConfidentUdiseMatch,
   applyUdiseStudentDetailsSync,
   classBelowId,
   findUdiseMatchCandidates,
@@ -749,12 +750,17 @@ export function UdisePenApaarImportPanel({
     studentId: string,
     studentName: string,
     reactivate = false,
+    // True when the operator picked this pupil off a candidate list rather
+    // than the matcher guessing. Only affects whether an Aadhaar-verified
+    // birth date may overwrite ours; see isConfidentUdiseMatch.
+    identityConfirmed = false,
   ) {
     setError(null);
     const r = applyUdiseRowToStudent({
       row,
       studentId,
       reactivate,
+      identityConfirmed,
       sis,
       masters,
     });
@@ -1562,6 +1568,7 @@ export function UdisePenApaarImportPanel({
                                           c.student.id,
                                           c.student.fullName,
                                           c.student.status !== "active",
+                                          true,
                                         )
                                       }
                                     >
@@ -1651,6 +1658,7 @@ export function UdisePenApaarImportPanel({
                                     p.studentId!,
                                     p.matchedName,
                                     true,
+                                    isConfidentUdiseMatch(p.method),
                                   )
                                 }
                                 title="Reactivate this student and fill UDISE data"
@@ -1686,6 +1694,8 @@ export function UdisePenApaarImportPanel({
                                       p.udise,
                                       p.studentId!,
                                       p.matchedName,
+                                      false,
+                                      isConfidentUdiseMatch(p.method),
                                     )
                                   }
                                   title="Write UDISE data onto the existing other-session record (does not move the student to this year)"
@@ -1707,6 +1717,8 @@ export function UdisePenApaarImportPanel({
                                     p.udise,
                                     p.studentId!,
                                     p.matchedName,
+                                    false,
+                                    isConfidentUdiseMatch(p.method),
                                   )
                                 }
                                 title="Write UDISE data onto this student"

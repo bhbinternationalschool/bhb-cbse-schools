@@ -25,6 +25,7 @@
     "test:parent-profile": "npx tsx src/lib/parentProfile.selftest.ts",
     "test:drive-archive": "npx tsx src/lib/driveArchive.selftest.ts",
     "test:receipt-pdf": "npx tsx src/lib/receiptPdf.selftest.ts",
+    "test:fee-due-future": "npx tsx src/lib/feeDueFuture.selftest.ts",
     "test:academic-risk": "npx tsx src/lib/academicRisk.selftest.ts",
     "test:item-analytics": "npx tsx src/lib/itemAnalytics.selftest.ts",
     "test:question-bank": "npx tsx src/lib/questionBank.selftest.ts",

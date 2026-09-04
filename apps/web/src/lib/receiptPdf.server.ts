@@ -236,7 +236,8 @@ export async function renderReceiptPdf(voucher: CollectionVoucher, ctx: ReceiptP
   doc.text(rupees(voucher.totalPaise), colAmt, y, { align: "right" });
   y += 6;
   doc.setFont("helvetica", "italic").setFontSize(9).setTextColor(92, 100, 120);
-  doc.text(`Rupees ${amountInWordsPaise(voucher.totalPaise)} only`, colPart, y, {
+  // amountInWordsPaise already reads "… Rupees Only".
+  doc.text(amountInWordsPaise(voucher.totalPaise), colPart, y, {
     maxWidth: right - colPart,
   });
   y += 10;

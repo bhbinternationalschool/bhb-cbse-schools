@@ -14,6 +14,9 @@
  */
 import {
   parseUdiseStudentDetailsMatrix,
+  udiseAadhaarVerified,
+  udiseAadhaarVerifiedAgainstDob,
+  isConfidentUdiseMatch,
   type UdiseStudentRow,
 } from "@/lib/udiseStudentDetails";
 
@@ -100,6 +103,39 @@ check("mother", r.motherName, "JUHI SINGH");
 // A header with neither PEN nor Father is not a student list.
 check("unrelated table is refused",
   parseUdiseStudentDetailsMatrix([["Item", "Qty"], ["Chalk", "20"]]).length, 0);
+
+// ---- the Aadhaar validation phrases ------------------------------------
+//
+// The portal never writes the bare word "Verified", so an equality test finds
+// nothing — which is what the code used to do, silently declining to mark any
+// pupil verified from the long export. Only the "against ... DOB" phrasing may
+// overwrite a birth date the office typed.
+const V_DOB = "Verified From UIDAI against Name, Gender & DOB";
+check("verified: against-DOB phrasing", udiseAadhaarVerified(V_DOB), true);
+check("verified: plain phrasing", udiseAadhaarVerified("Verified From UIDAI"), true);
+check("verified: failure is not a pass",
+  udiseAadhaarVerified("Verification Failed From UIDAI"), false);
+check("verified: not defined", udiseAadhaarVerified("Not Defined"), false);
+check("verified: blank", udiseAadhaarVerified(""), false);
+
+check("dob-verified: against-DOB phrasing", udiseAadhaarVerifiedAgainstDob(V_DOB), true);
+check("dob-verified: plain Aadhaar match is not a DOB match",
+  udiseAadhaarVerifiedAgainstDob("Verified From UIDAI"), false);
+check("dob-verified: failure",
+  udiseAadhaarVerifiedAgainstDob("Verification Failed From UIDAI"), false);
+check("dob-verified: not defined", udiseAadhaarVerifiedAgainstDob("Not Defined"), false);
+
+// ---- which matches are firm enough to overwrite a birth date -------------
+//
+// A fuzzy name match once paired PRATIK YADAV with PRATEEK YADAV — two boys,
+// two fathers. That pairing must never be allowed to rewrite a date.
+for (const m of ["pen", "apaar", "aadhaar", "name_father_class", "name_father",
+                 "name_class_section"] as const) {
+  check(`confident: ${m}`, isConfidentUdiseMatch(m), true);
+}
+for (const m of ["name_unique", "fuzzy_name_father", "ambiguous", "unmatched"] as const) {
+  check(`not confident: ${m}`, isConfidentUdiseMatch(m), false);
+}
 
 if (failures) {
   console.error(`udiseStudentDetails selftest: ${failures} failure(s)`);

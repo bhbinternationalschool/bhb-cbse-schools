@@ -73,8 +73,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Household not found" }, { status: 404 });
   }
 
+  // A family may pay months ahead from the app, so the recomputation must
+  // see them; only the dueKeys the parent chose are collected, and amounts
+  // still come from here, never from the client.
   const bundle = computeHouseholdDues(hh.id, sis, masters, fees, {
-    includeFuture: false,
+    includeFuture: true,
   });
   const dues = openFeeDues(bundle.flatMap((r) => r.dues)).filter(
     (d) => wanted.has(d.dueKey) && d.balancePaise > 0,

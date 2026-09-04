@@ -29,7 +29,7 @@ import { TENANT } from "@/lib/types";
  * the WhatsApp number is the one the bot answers on (asked of Meta, cached);
  * the email is the office mailbox by instruction, never the director's.
  */
-async function resolveSchoolHeader(masters: ReturnType<typeof loadMasters>): Promise<ReceiptSchoolHeader> {
+export async function resolveSchoolHeader(masters: ReturnType<typeof loadMasters>): Promise<ReceiptSchoolHeader> {
   const p = schoolIdentity(masters);
   const real = (v: string | null | undefined) => (v ?? "").trim();
   const wa = await schoolWhatsAppContact().catch(() => null);

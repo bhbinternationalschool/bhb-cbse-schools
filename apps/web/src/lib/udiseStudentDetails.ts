@@ -827,6 +827,59 @@ function aadhaarOfficialName(row: UdiseStudentRow): string {
   return n;
 }
 
+/**
+ * What UDISE+ says it actually checked against UIDAI.
+ *
+ * The portal writes one of a small set of phrases in "AADHAAR Validation
+ * Status", and they do not mean the same thing:
+ *
+ *   "Verified From UIDAI against Name, Gender & DOB"  — Aadhaar matched, and
+ *                                                       the birth date was one
+ *                                                       of the fields matched
+ *   "Verified From UIDAI"                             — Aadhaar matched
+ *   "Verification Failed From UIDAI"                  — did not match
+ *   "Not Defined" / blank                             — never attempted
+ *
+ * Only the first asserts anything about the date of birth. Note that the test
+ * for "verified" cannot be an equality check: no export writes the bare word.
+ */
+export function udiseAadhaarVerified(status: string | undefined | null): boolean {
+  const s = (status || "").trim();
+  return /^verified\b/i.test(s) && !/fail/i.test(s);
+}
+
+/** True only when UIDAI matched the birth date itself, not merely the Aadhaar. */
+export function udiseAadhaarVerifiedAgainstDob(
+  status: string | undefined | null,
+): boolean {
+  const s = (status || "").trim();
+  if (!udiseAadhaarVerified(s)) return false;
+  return /\bdob\b|date\s+of\s+birth/i.test(s);
+}
+
+/**
+ * Whether the pupil behind a portal row is settled well enough to overwrite a
+ * field the office typed, rather than merely fill one it left blank.
+ *
+ * A government identifier — PEN, APAAR, Aadhaar — is the child. A name plus a
+ * father plus a class is the child in practice: the roll is 300 pupils, not
+ * 300,000. A lone name, or a name matched approximately, is not: PRATIK YADAV
+ * and PRATEEK YADAV are two boys with two different fathers, and pairing them
+ * is exactly how a correct birth date gets replaced with a stranger's.
+ */
+export function isConfidentUdiseMatch(
+  method: UdiseMatchPreview["method"],
+): boolean {
+  return (
+    method === "pen" ||
+    method === "apaar" ||
+    method === "aadhaar" ||
+    method === "name_father_class" ||
+    method === "name_father" ||
+    method === "name_class_section"
+  );
+}
+
 function namesDiffer(a: string, b: string): boolean {
   return normName(a) !== normName(b) && !!normName(a) && !!normName(b);
 }
@@ -834,6 +887,9 @@ function namesDiffer(a: string, b: string): boolean {
 function buildPatch(
   student: SisStudent,
   row: UdiseStudentRow,
+  // Whether we are sure this portal row is about this pupil. Gates the one
+  // field that overwrites rather than fills — see the DOB rule below.
+  identityConfirmed = false,
 ): UdiseMatchPreview["willUpdate"] {
   const will: UdiseMatchPreview["willUpdate"] = {};
   // Never patch classId / sectionId — UDISE+ class can be wrong.
@@ -856,7 +912,7 @@ function buildPatch(
   }
 
   const a4 = extractLast4(row.aadhaarRaw);
-  const verified = /^verified$/i.test((row.aadhaarValidation || "").trim());
+  const verified = udiseAadhaarVerified(row.aadhaarValidation);
   if (a4 && student.aadhaarLast4 !== a4) {
     will.aadhaarLast4 = a4;
   }
@@ -910,10 +966,29 @@ function buildPatch(
     will.gender = g;
   }
 
-  // DOB: only auto-fill when SIS is blank. When both exist and differ, we never
-  // silently overwrite — it's surfaced as a mismatch for the operator instead.
+  // DOB. Two rules, and what separates them is who holds the better evidence.
+  //
+  // Blank in the SIS: the portal's date is the only one anybody has, so take it.
+  //
+  // Both present and different: the portal wins only when it says UIDAI matched
+  // the birth date itself, and only when we are sure the row is about this
+  // pupil. A date the office keyed from a birth certificate outranks a portal
+  // row we are half sure belongs to this child; a date Aadhaar has confirmed
+  // outranks the keyed one, because that is the date every board, scholarship
+  // and APAAR record will be checked against for the rest of the child's
+  // schooling. Anything weaker — "Not Defined", a failed check, a fuzzy name
+  // match — stays a mismatch for the operator to settle by hand.
   const portalDobKey = normDobKey(row.dob);
-  if (portalDobKey && !normDobKey(student.dob)) {
+  const sisDobKey = normDobKey(student.dob);
+  if (portalDobKey && !sisDobKey) {
+    will.dob = fmtDob(row.dob);
+  } else if (
+    portalDobKey &&
+    sisDobKey &&
+    portalDobKey !== sisDobKey &&
+    identityConfirmed &&
+    udiseAadhaarVerifiedAgainstDob(row.aadhaarValidation)
+  ) {
     will.dob = fmtDob(row.dob);
   }
 
@@ -974,7 +1049,13 @@ function buildPatch(
   return will;
 }
 
-function fillLabelsOf(will: UdiseMatchPreview["willUpdate"]): string[] {
+function fillLabelsOf(
+  will: UdiseMatchPreview["willUpdate"],
+  // The SIS date this patch would land on, so the label can say whether the
+  // date is being filled in or written over. Those are different acts and the
+  // operator should not have to work out which one from a bare arrow.
+  currentDob = "",
+): string[] {
   const labels: string[] = [];
   if (will.fullName) labels.push(`Name (Aadhaar) → ${will.fullName}`);
   if (will.fatherName) labels.push(`Father → ${will.fatherName}`);
@@ -1000,7 +1081,13 @@ function fillLabelsOf(will: UdiseMatchPreview["willUpdate"]): string[] {
   }
   if (will.gender) labels.push(`Gender → ${will.gender}`);
   if (will.category) labels.push(`Category → ${will.category}`);
-  if (will.dob) labels.push(`DOB → ${will.dob}`);
+  if (will.dob) {
+    labels.push(
+      currentDob.trim()
+        ? `DOB ${fmtDob(currentDob)} → ${will.dob} (Aadhaar-verified)`
+        : `DOB → ${will.dob}`,
+    );
+  }
   if (will.bloodGroup) labels.push(`Blood group → ${will.bloodGroup}`);
   if (will.motherTongue) labels.push(`Mother tongue → ${will.motherTongue}`);
   if (will.nationality) labels.push(`Nationality → ${will.nationality}`);
@@ -1064,16 +1151,17 @@ function buildPreviewRow(
   sisInactive = false,
 ): UdiseMatchPreview {
   const portalSuspect = isPortalSuspect(udise);
-  const portalAadhaarVerified = /^verified$/i.test(
-    (udise.aadhaarValidation || "").trim(),
-  );
+  const portalAadhaarVerified = udiseAadhaarVerified(udise.aadhaarValidation);
   const mbuAgeAlert = isMbuAgePending(udise.mbuStatus);
   // Representative record may itself be inactive (left / TC / promoted-out) —
   // derive from status so a single-pass match still flags it correctly.
   const inactive = !!student && (sisInactive || student.status !== "active");
   // Never auto-fill an inactive SIS record — just flag it for the operator.
-  const willUpdate = student && !inactive ? buildPatch(student, udise) : {};
-  const fillLabels = fillLabelsOf(willUpdate);
+  const willUpdate =
+    student && !inactive
+      ? buildPatch(student, udise, isConfidentUdiseMatch(method))
+      : {};
+  const fillLabels = fillLabelsOf(willUpdate, student?.dob ?? "");
   const sisFilled = sisFilledOf(student, masters);
 
   const udiseClassId = resolveUdiseClassId(udise.classHint, masters);
@@ -1138,8 +1226,9 @@ function buildPreviewRow(
   }
 
   if (dobMismatch) {
-    actionHint =
-      `${actionHint} · ⚠ DOB differs — SIS ${sisDob} vs UDISE+ ${udiseDob} (verify & correct; not auto-updated).`.trim();
+    actionHint = willUpdate.dob
+      ? `${actionHint} · DOB differs — SIS ${sisDob} vs UDISE+ ${udiseDob}. UDISE+ matched this date against Aadhaar at UIDAI, so applying will replace ours.`.trim()
+      : `${actionHint} · ⚠ DOB differs — SIS ${sisDob} vs UDISE+ ${udiseDob} (verify & correct; not auto-updated).`.trim();
   }
 
   return {
@@ -1529,6 +1618,15 @@ export function applyUdiseRowToStudent(input: {
   reactivate?: boolean;
   sis?: SisState;
   masters?: MastersState;
+  /**
+   * Whether this row is settled as being about this pupil. The panel passes
+   * the match method's own verdict for an auto-matched row, and `true` when
+   * the operator picked the pupil out of a candidate list by hand — choosing
+   * a name off that list *is* the confirmation. Defaults to false so a caller
+   * that says nothing gets the cautious rule, and so the preview and the
+   * apply never disagree about whether a birth date will be overwritten.
+   */
+  identityConfirmed?: boolean;
 }):
   | { ok: true; state: SisState; student: SisStudent; fields: string[] }
   | { ok: false; error: string } {
@@ -1536,7 +1634,7 @@ export function applyUdiseRowToStudent(input: {
   const idx = state.students.findIndex((s) => s.id === input.studentId);
   if (idx < 0) return { ok: false, error: "Student not found in SIS" };
   const cur = state.students[idx]!;
-  const will = buildPatch(cur, input.row);
+  const will = buildPatch(cur, input.row, input.identityConfirmed ?? false);
   const fields = Object.keys(will);
   if (!fields.length && !input.reactivate && cur.status === "active") {
     return { ok: false, error: "Nothing to update on this student" };
@@ -1662,11 +1760,11 @@ export function promoteUdiseRowToSession(input: {
       .filter(Boolean)
       .join(" · "),
   });
-  const withRow = normalizeStudent({
-    ...draft,
-    ...buildPatch(draft, input.row),
-  });
-  const fields = Object.keys(buildPatch(draft, input.row));
+  // The operator named both the source pupil and the target year, so who this
+  // row is about is not in question here.
+  const promoted = buildPatch(draft, input.row, true);
+  const withRow = normalizeStudent({ ...draft, ...promoted });
+  const fields = Object.keys(promoted);
   const nextState: SisState = {
     ...state,
     students: [...state.students, withRow],

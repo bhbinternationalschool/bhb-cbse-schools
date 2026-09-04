@@ -41,6 +41,7 @@ import {
 } from "@/lib/transportStartMonth";
 import { TransportPlannerPanel } from "@/components/transport/TransportPlannerPanel";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
+import { TransportRequestsPanel } from "@/components/transport/TransportRequestsPanel";
 import { ErpTableShell } from "@/components/ui/erp-roster";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
@@ -93,6 +94,7 @@ type TransportTab =
   | "dashboard"
   | "planner"
   | "riders"
+  | "requests"
   | "rosters"
   | "classRosters"
   | "staffRiders"
@@ -112,6 +114,7 @@ const TABS: ModuleTabItem[] = [
   { id: "dashboard", label: "Dashboard", tone: "navy" },
   { id: "planner", label: "Planner", tone: "teal" },
   { id: "riders", label: "Riders", tone: "navy" },
+  { id: "requests", label: "Requests", tone: "coral" },
   { id: "rosters", label: "Riders by bus", tone: "sky" },
   { id: "classRosters", label: "By class", tone: "sky" },
   { id: "staffRiders", label: "Staff riders", tone: "sky" },
@@ -750,6 +753,9 @@ export function TransportWorkspace() {
               sessionName={session.fullName}
               {...commonPanelProps}
             />
+          ) : null}
+          {tab === "requests" ? (
+            <TransportRequestsPanel onFlash={flash} />
           ) : null}
           {tab === "board" ? (
             <BoardingPanel

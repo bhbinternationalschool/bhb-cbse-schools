@@ -422,6 +422,55 @@ export async function pushFeeVouchersToDb(
   return { ok: true, count: active.length };
 }
 
+/**
+ * One household's vouchers — the parent app's receipt list. Same mappers
+ * as the full fetch, filtered at the query so a family never pulls the
+ * school's whole book.
+ */
+export async function fetchHouseholdVouchersFromDb(
+  householdId: string,
+): Promise<{ vouchers: CollectionVoucher[]; ok: boolean }> {
+  const ctx = await resolveCtx();
+  if (!ctx) return { vouchers: [], ok: false };
+  const { sb, tenantId } = ctx;
+  const { data: headers, error: hErr } = await sb
+    .from("fee_desk_vouchers")
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .eq("household_id", householdId)
+    .order("collected_at", { ascending: false });
+  if (hErr) {
+    console.warn("[fees-db] household vouchers fetch failed", hErr.message);
+    return { vouchers: [], ok: false };
+  }
+  if (!headers?.length) return { vouchers: [], ok: true };
+  const ids = headers.map((h) => h.id as string);
+  const [{ data: lineRows, error: lErr }, { data: tenderRows, error: tErr }] = await Promise.all([
+    fetchAllRows(sb, "fee_desk_voucher_lines", tenantId, ids),
+    fetchAllRows(sb, "fee_desk_voucher_tenders", tenantId, ids),
+  ]);
+  if (lErr || tErr) {
+    console.warn("[fees-db] household voucher parts fetch failed", lErr?.message || tErr?.message);
+    return { vouchers: [], ok: false };
+  }
+  const linesBy = new Map<string, Record<string, unknown>[]>();
+  for (const r of (lineRows ?? []) as Record<string, unknown>[]) {
+    const k = String(r.voucher_id);
+    (linesBy.get(k) ?? linesBy.set(k, []).get(k)!).push(r);
+  }
+  const tendersBy = new Map<string, Record<string, unknown>[]>();
+  for (const r of (tenderRows ?? []) as Record<string, unknown>[]) {
+    const k = String(r.voucher_id);
+    (tendersBy.get(k) ?? tendersBy.set(k, []).get(k)!).push(r);
+  }
+  return {
+    ok: true,
+    vouchers: (headers as Record<string, unknown>[]).map((h) =>
+      rowToVoucher(h, linesBy.get(String(h.id)) ?? [], tendersBy.get(String(h.id)) ?? []),
+    ),
+  };
+}
+
 export async function fetchFeeVouchersFromDb(): Promise<{
   vouchers: CollectionVoucher[];
   meta: FeeDeskSyncMeta | null;

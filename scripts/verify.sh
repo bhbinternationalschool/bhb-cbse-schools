@@ -180,6 +180,7 @@ SELFTESTS=(
   test:parent-profile
   test:drive-archive
   test:receipt-pdf
+  test:fee-due-future
   test:question-bank
   test:rbac-infer
   test:rbac-scope

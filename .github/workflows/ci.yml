@@ -226,6 +226,7 @@ jobs:
           npm run test:outdoor-duty-persistence
           npm run test:outdoor-duty-staff-id
           npm run test:drive-archive
+          npm run test:fee-due-future
           npm run test:parent-profile
           npm run test:parent-tickets
           npm run test:payroll-register
