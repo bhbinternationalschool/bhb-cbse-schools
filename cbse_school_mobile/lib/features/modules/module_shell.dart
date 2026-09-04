@@ -1,5 +1,6 @@
 import "package:flutter/material.dart";
 
+import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 
 /// Shared chrome for module screens: navy app bar, pull-to-refresh list,
@@ -52,11 +53,15 @@ class _ModuleShellState<T> extends State<ModuleShell<T>> {
     try {
       final data = await widget.load();
       if (mounted) setState(() => _data = data);
-    } catch (e) {
+    } on ApiException catch (e) {
+      // The server said something specific — a permission, a missing record.
+      if (mounted) setState(() => _error = e.message);
+    } catch (_) {
+      // Anything else is a transport failure; the raw exception text
+      // ("SocketException … errno = 111") means nothing to a parent.
       if (mounted) {
-        setState(() => _error = e.toString().isEmpty
-            ? "Could not reach the school server."
-            : e.toString());
+        setState(() => _error = "Could not reach the school server. "
+            "Check your connection and try again.");
       }
     }
   }

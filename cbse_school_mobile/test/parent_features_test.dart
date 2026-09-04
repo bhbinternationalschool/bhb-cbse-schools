@@ -140,4 +140,59 @@ void main() {
       expect(shelf.books.single.classLabels, ["VI"]);
     });
   });
+
+  group("leave", () {
+    test("list parses requests and the type catalogue", () {
+      final list = LeaveList.fromJson(const {
+        "requests": [
+          {
+            "id": "slr_1",
+            "studentId": "stu_1",
+            "studentName": "A",
+            "fromDate": "2026-09-08",
+            "toDate": "2026-09-09",
+            "days": 2,
+            "leaveType": "SL",
+            "leaveTypeLabel": "Full day",
+            "reason": "Fever",
+            "status": "pending",
+            "createdAt": "2026-09-04T06:13:33.716Z",
+            "decidedAt": "",
+            "decisionNote": "",
+          },
+        ],
+        "leaveTypes": [
+          {"code": "SL", "label": "Full day", "note": ""},
+          {"code": "HD_AM", "label": "Half day (AM)", "note": ""},
+        ],
+      });
+      expect(list.requests.single.isPending, isTrue);
+      expect(list.requests.single.days, 2);
+      expect(list.leaveTypes.map((t) => t.isHalfDay), [false, true]);
+    });
+  });
+
+  group("complaints", () {
+    test("ticket status drives the closed flag", () {
+      ComplaintTicketInfo t(String status) => ComplaintTicketInfo.fromJson({
+            "id": "c",
+            "studentId": null,
+            "category": "transport",
+            "categoryLabel": "Transport",
+            "subject": "s",
+            "description": "d",
+            "date": "2026-09-04",
+            "status": status,
+            "statusLabel": status,
+            "resolutionNote": "",
+            "createdAt": "",
+          });
+      expect(t("open").isClosed, isFalse);
+      expect(t("in_progress").isClosed, isFalse);
+      expect(t("resolved").isClosed, isTrue);
+      expect(t("closed").isClosed, isTrue);
+      expect(t("open").studentId, isNull);
+      expect(t("open").studentName, "");
+    });
+  });
 }

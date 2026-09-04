@@ -5,9 +5,11 @@ import "../../core/config/app_config.dart";
 import "../../core/theme/app_theme.dart";
 import "../modules/attendance_history_screen.dart";
 import "../modules/chat_thread_screen.dart";
+import "../modules/complaints_screen.dart";
 import "../modules/ebook_shelf_screen.dart";
 import "../modules/fees_screen.dart";
 import "../modules/homework_screen.dart";
+import "../modules/leave_screen.dart";
 import "../modules/module_shell.dart";
 import "../modules/notices_screen.dart";
 import "../modules/ptm_screen.dart";
@@ -32,6 +34,8 @@ const _modules = [
   _Module("Exams", Icons.workspace_premium_outlined, ModuleTone.amber),
   _Module("Library", Icons.local_library_outlined, ModuleTone.green),
   _Module("PTM", Icons.groups_outlined, ModuleTone.gray),
+  _Module("Leave", Icons.event_busy_outlined, ModuleTone.purple),
+  _Module("Complaints", Icons.support_agent_outlined, ModuleTone.pink),
 ];
 
 String _greeting() {
@@ -122,6 +126,10 @@ class _HomeScreenState extends State<HomeScreen> {
         _openModule("PTM", child);
       case "/transport":
         _openModule("Transport", child);
+      case "/leave":
+        _openModule("Leave", child);
+      case "/complaints":
+        _openModule("Complaints", child);
       case "/chat":
         Navigator.of(context).push(
           MaterialPageRoute(
@@ -214,6 +222,14 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       case "Library":
         screen = EbookShelfScreen(api: api);
+      case "Leave":
+        screen = LeaveScreen(api: api, child: child);
+      case "Complaints":
+        screen = ComplaintsScreen(
+          api: api,
+          children: _summary?.children ?? [child],
+          defaultChild: child,
+        );
     }
     if (screen != null) {
       Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen!));

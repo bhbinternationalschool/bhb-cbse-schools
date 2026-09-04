@@ -36,16 +36,16 @@ class ParentChild {
   });
 
   factory ParentChild.fromJson(Map<String, dynamic> j) => ParentChild(
-        id: j["id"] as String,
-        fullName: (j["fullName"] as String).trim().replaceAll(RegExp(r"\s+"), " "),
-        admissionNo: (j["admissionNo"] as String?) ?? "",
-        className: (j["className"] as String?) ?? "",
-        sectionName: (j["sectionName"] as String?) ?? "",
-        rollNo: (j["rollNo"] as String?) ?? "",
-        photoUrl: j["photoUrl"] as String?,
-        openBalancePaise: (j["openBalancePaise"] as num?)?.toInt() ?? 0,
-        openBalanceLabel: (j["openBalanceLabel"] as String?) ?? "₹0",
-      );
+    id: j["id"] as String,
+    fullName: (j["fullName"] as String).trim().replaceAll(RegExp(r"\s+"), " "),
+    admissionNo: (j["admissionNo"] as String?) ?? "",
+    className: (j["className"] as String?) ?? "",
+    sectionName: (j["sectionName"] as String?) ?? "",
+    rollNo: (j["rollNo"] as String?) ?? "",
+    photoUrl: j["photoUrl"] as String?,
+    openBalancePaise: (j["openBalancePaise"] as num?)?.toInt() ?? 0,
+    openBalanceLabel: (j["openBalanceLabel"] as String?) ?? "₹0",
+  );
 
   final String id;
   final String fullName;
@@ -65,8 +65,11 @@ class ParentChild {
   }
 
   String get initials {
-    final parts =
-        fullName.split(" ").where((p) => p.isNotEmpty).take(2).toList();
+    final parts = fullName
+        .split(" ")
+        .where((p) => p.isNotEmpty)
+        .take(2)
+        .toList();
     return parts.map((p) => p[0].toUpperCase()).join();
   }
 }
@@ -79,12 +82,12 @@ class ParentSummary {
   });
 
   factory ParentSummary.fromJson(Map<String, dynamic> j) => ParentSummary(
-        guardianName: (j["guardianName"] as String?) ?? "Parent",
-        children: ((j["children"] as List?) ?? const [])
-            .map((c) => ParentChild.fromJson(c as Map<String, dynamic>))
-            .toList(),
-        totalOpenBalanceLabel: (j["totalOpenBalanceLabel"] as String?) ?? "₹0",
-      );
+    guardianName: (j["guardianName"] as String?) ?? "Parent",
+    children: ((j["children"] as List?) ?? const [])
+        .map((c) => ParentChild.fromJson(c as Map<String, dynamic>))
+        .toList(),
+    totalOpenBalanceLabel: (j["totalOpenBalanceLabel"] as String?) ?? "₹0",
+  );
 
   final String guardianName;
   final List<ParentChild> children;
@@ -102,15 +105,19 @@ class SectionRef {
 }
 
 class ClassRef {
-  const ClassRef({required this.id, required this.name, required this.sections});
+  const ClassRef({
+    required this.id,
+    required this.name,
+    required this.sections,
+  });
 
   factory ClassRef.fromJson(Map<String, dynamic> j) => ClassRef(
-        id: j["id"] as String,
-        name: (j["name"] as String?) ?? "",
-        sections: ((j["sections"] as List?) ?? const [])
-            .map((s) => SectionRef.fromJson(s as Map<String, dynamic>))
-            .toList(),
-      );
+    id: j["id"] as String,
+    name: (j["name"] as String?) ?? "",
+    sections: ((j["sections"] as List?) ?? const [])
+        .map((s) => SectionRef.fromJson(s as Map<String, dynamic>))
+        .toList(),
+  );
 
   final String id;
   final String name;
@@ -129,14 +136,14 @@ class ClassTeacherInfo {
   });
 
   factory ClassTeacherInfo.fromJson(Map<String, dynamic> j) => ClassTeacherInfo(
-        classId: j["classId"] as String,
-        sectionId: j["sectionId"] as String,
-        className: (j["className"] as String?) ?? "",
-        sectionName: (j["sectionName"] as String?) ?? "",
-        studentCount: (j["studentCount"] as num?)?.toInt() ?? 0,
-        attendanceMarked: j["attendanceMarked"] == true,
-        markedCount: (j["markedCount"] as num?)?.toInt() ?? 0,
-      );
+    classId: j["classId"] as String,
+    sectionId: j["sectionId"] as String,
+    className: (j["className"] as String?) ?? "",
+    sectionName: (j["sectionName"] as String?) ?? "",
+    studentCount: (j["studentCount"] as num?)?.toInt() ?? 0,
+    attendanceMarked: j["attendanceMarked"] == true,
+    markedCount: (j["markedCount"] as num?)?.toInt() ?? 0,
+  );
 
   final String classId;
   final String sectionId;
@@ -157,12 +164,12 @@ class PeriodToday {
   });
 
   factory PeriodToday.fromJson(Map<String, dynamic> j) => PeriodToday(
-        periodNo: (j["periodNo"] as num?)?.toInt() ?? 0,
-        startTime: (j["startTime"] as String?) ?? "",
-        subjectName: (j["subjectName"] as String?) ?? "",
-        className: (j["className"] as String?) ?? "",
-        sectionName: (j["sectionName"] as String?) ?? "",
-      );
+    periodNo: (j["periodNo"] as num?)?.toInt() ?? 0,
+    startTime: (j["startTime"] as String?) ?? "",
+    subjectName: (j["subjectName"] as String?) ?? "",
+    className: (j["className"] as String?) ?? "",
+    sectionName: (j["sectionName"] as String?) ?? "",
+  );
 
   final int periodNo;
   final String startTime;
@@ -181,19 +188,20 @@ class StaffSummary {
   });
 
   factory StaffSummary.fromJson(Map<String, dynamic> j) => StaffSummary(
-        fullName: (j["fullName"] as String?) ?? "Staff",
-        date: (j["date"] as String?) ?? "",
-        classTeacherOf: j["classTeacherOf"] == null
-            ? null
-            : ClassTeacherInfo.fromJson(
-                j["classTeacherOf"] as Map<String, dynamic>),
-        periodsToday: ((j["periodsToday"] as List?) ?? const [])
-            .map((p) => PeriodToday.fromJson(p as Map<String, dynamic>))
-            .toList(),
-        classes: ((j["classes"] as List?) ?? const [])
-            .map((c) => ClassRef.fromJson(c as Map<String, dynamic>))
-            .toList(),
-      );
+    fullName: (j["fullName"] as String?) ?? "Staff",
+    date: (j["date"] as String?) ?? "",
+    classTeacherOf: j["classTeacherOf"] == null
+        ? null
+        : ClassTeacherInfo.fromJson(
+            j["classTeacherOf"] as Map<String, dynamic>,
+          ),
+    periodsToday: ((j["periodsToday"] as List?) ?? const [])
+        .map((p) => PeriodToday.fromJson(p as Map<String, dynamic>))
+        .toList(),
+    classes: ((j["classes"] as List?) ?? const [])
+        .map((c) => ClassRef.fromJson(c as Map<String, dynamic>))
+        .toList(),
+  );
 
   final String fullName;
   final String date;
@@ -212,14 +220,12 @@ class RosterStudent {
   });
 
   factory RosterStudent.fromJson(Map<String, dynamic> j) => RosterStudent(
-        id: j["id"] as String,
-        fullName: (j["fullName"] as String)
-            .trim()
-            .replaceAll(RegExp(r"\s+"), " "),
-        rollNo: (j["rollNo"] as String?) ?? "",
-        photoUrl: j["photoUrl"] as String?,
-        status: j["status"] as String?,
-      );
+    id: j["id"] as String,
+    fullName: (j["fullName"] as String).trim().replaceAll(RegExp(r"\s+"), " "),
+    rollNo: (j["rollNo"] as String?) ?? "",
+    photoUrl: j["photoUrl"] as String?,
+    status: j["status"] as String?,
+  );
 
   final String id;
   final String fullName;
@@ -238,12 +244,12 @@ class AttendanceRoster {
   });
 
   factory AttendanceRoster.fromJson(Map<String, dynamic> j) => AttendanceRoster(
-        date: (j["date"] as String?) ?? "",
-        attendanceMarked: j["attendanceMarked"] == true,
-        students: ((j["students"] as List?) ?? const [])
-            .map((s) => RosterStudent.fromJson(s as Map<String, dynamic>))
-            .toList(),
-      );
+    date: (j["date"] as String?) ?? "",
+    attendanceMarked: j["attendanceMarked"] == true,
+    students: ((j["students"] as List?) ?? const [])
+        .map((s) => RosterStudent.fromJson(s as Map<String, dynamic>))
+        .toList(),
+  );
 
   final String date;
   final bool attendanceMarked;
@@ -261,13 +267,13 @@ class FeeDue {
   });
 
   factory FeeDue.fromJson(Map<String, dynamic> j) => FeeDue(
-        dueKey: (j["dueKey"] as String?) ?? "",
-        label: (j["label"] as String?) ?? "",
-        kind: (j["kind"] as String?) ?? "",
-        dueOn: (j["dueOn"] as String?) ?? "",
-        balanceLabel: (j["balanceLabel"] as String?) ?? "₹0",
-        balancePaise: (j["balancePaise"] as num?)?.toInt() ?? 0,
-      );
+    dueKey: (j["dueKey"] as String?) ?? "",
+    label: (j["label"] as String?) ?? "",
+    kind: (j["kind"] as String?) ?? "",
+    dueOn: (j["dueOn"] as String?) ?? "",
+    balanceLabel: (j["balanceLabel"] as String?) ?? "₹0",
+    balancePaise: (j["balancePaise"] as num?)?.toInt() ?? 0,
+  );
 
   /// Server handle for this due; what the parent checkout is asked to
   /// collect. Amounts are never sent — the server recomputes them.
@@ -294,11 +300,11 @@ class ParentCheckout {
   });
 
   factory ParentCheckout.fromJson(Map<String, dynamic> j) => ParentCheckout(
-        linkId: (j["linkId"] as String?) ?? "",
-        amountPaise: (j["amountPaise"] as num?)?.toInt() ?? 0,
-        checkoutUrl: j["checkoutUrl"] as String?,
-        shareUrl: (j["shareUrl"] as String?) ?? "",
-      );
+    linkId: (j["linkId"] as String?) ?? "",
+    amountPaise: (j["amountPaise"] as num?)?.toInt() ?? 0,
+    checkoutUrl: j["checkoutUrl"] as String?,
+    shareUrl: (j["shareUrl"] as String?) ?? "",
+  );
 
   final String linkId;
   final int amountPaise;
@@ -327,17 +333,17 @@ class LibraryEbook {
   });
 
   factory LibraryEbook.fromJson(Map<String, dynamic> j) => LibraryEbook(
-        id: (j["id"] as String?) ?? "",
-        title: (j["title"] as String?) ?? "",
-        author: (j["author"] as String?) ?? "",
-        subject: (j["subject"] as String?) ?? "",
-        classLabels: ((j["classLabels"] as List?) ?? const [])
-            .map((e) => e.toString())
-            .toList(),
-        url: (j["url"] as String?) ?? "",
-        passKey: (j["passKey"] as String?) ?? "",
-        passKeyLabel: (j["passKeyLabel"] as String?) ?? "",
-      );
+    id: (j["id"] as String?) ?? "",
+    title: (j["title"] as String?) ?? "",
+    author: (j["author"] as String?) ?? "",
+    subject: (j["subject"] as String?) ?? "",
+    classLabels: ((j["classLabels"] as List?) ?? const [])
+        .map((e) => e.toString())
+        .toList(),
+    url: (j["url"] as String?) ?? "",
+    passKey: (j["passKey"] as String?) ?? "",
+    passKeyLabel: (j["passKeyLabel"] as String?) ?? "",
+  );
 
   final String id;
   final String title;
@@ -363,20 +369,190 @@ class EbookShelf {
   });
 
   factory EbookShelf.fromJson(Map<String, dynamic> j) => EbookShelf(
-        configured: j["configured"] == true,
-        shelfUrl: (j["shelfUrl"] as String?) ?? "",
-        shelfKey: (j["shelfKey"] as String?) ?? "",
-        note: (j["note"] as String?) ?? "",
-        books: ((j["books"] as List?) ?? const [])
-            .map((b) => LibraryEbook.fromJson(b as Map<String, dynamic>))
-            .toList(),
-      );
+    configured: j["configured"] == true,
+    shelfUrl: (j["shelfUrl"] as String?) ?? "",
+    shelfKey: (j["shelfKey"] as String?) ?? "",
+    note: (j["note"] as String?) ?? "",
+    books: ((j["books"] as List?) ?? const [])
+        .map((b) => LibraryEbook.fromJson(b as Map<String, dynamic>))
+        .toList(),
+  );
 
   final bool configured;
   final String shelfUrl;
   final String shelfKey;
   final String note;
   final List<LibraryEbook> books;
+}
+
+/// One leave request as /api/v1/leave/list returns it.
+class LeaveRequestInfo {
+  const LeaveRequestInfo({
+    required this.id,
+    required this.studentId,
+    required this.studentName,
+    required this.fromDate,
+    required this.toDate,
+    required this.days,
+    required this.leaveType,
+    required this.leaveTypeLabel,
+    required this.reason,
+    required this.status,
+    required this.createdAt,
+    required this.decidedAt,
+    required this.decisionNote,
+  });
+
+  factory LeaveRequestInfo.fromJson(Map<String, dynamic> j) => LeaveRequestInfo(
+    id: (j["id"] as String?) ?? "",
+    studentId: (j["studentId"] as String?) ?? "",
+    studentName: (j["studentName"] as String?) ?? "",
+    fromDate: (j["fromDate"] as String?) ?? "",
+    toDate: (j["toDate"] as String?) ?? "",
+    days: (j["days"] as num?)?.toInt() ?? 1,
+    leaveType: (j["leaveType"] as String?) ?? "",
+    leaveTypeLabel: (j["leaveTypeLabel"] as String?) ?? "",
+    reason: (j["reason"] as String?) ?? "",
+    status: (j["status"] as String?) ?? "pending",
+    createdAt: (j["createdAt"] as String?) ?? "",
+    decidedAt: (j["decidedAt"] as String?) ?? "",
+    decisionNote: (j["decisionNote"] as String?) ?? "",
+  );
+
+  final String id;
+  final String studentId;
+  final String studentName;
+  final String fromDate;
+  final String toDate;
+  final int days;
+  final String leaveType;
+  final String leaveTypeLabel;
+  final String reason;
+
+  /// pending | approved | rejected | cancelled
+  final String status;
+  final String createdAt;
+  final String decidedAt;
+  final String decisionNote;
+
+  bool get isPending => status == "pending";
+}
+
+class LeaveTypeInfo {
+  const LeaveTypeInfo({
+    required this.code,
+    required this.label,
+    required this.note,
+  });
+
+  factory LeaveTypeInfo.fromJson(Map<String, dynamic> j) => LeaveTypeInfo(
+    code: (j["code"] as String?) ?? "",
+    label: (j["label"] as String?) ?? "",
+    note: (j["note"] as String?) ?? "",
+  );
+
+  final String code;
+  final String label;
+  final String note;
+
+  /// Half-day codes are for one date only; the server refuses a range.
+  bool get isHalfDay => code == "HD_AM" || code == "HD_PM";
+}
+
+class LeaveList {
+  const LeaveList({required this.requests, required this.leaveTypes});
+
+  factory LeaveList.fromJson(Map<String, dynamic> j) => LeaveList(
+    requests: ((j["requests"] as List?) ?? const [])
+        .map((r) => LeaveRequestInfo.fromJson(r as Map<String, dynamic>))
+        .toList(),
+    leaveTypes: ((j["leaveTypes"] as List?) ?? const [])
+        .map((t) => LeaveTypeInfo.fromJson(t as Map<String, dynamic>))
+        .toList(),
+  );
+
+  final List<LeaveRequestInfo> requests;
+  final List<LeaveTypeInfo> leaveTypes;
+}
+
+/// One complaint ticket as /api/v1/complaints/list returns it.
+class ComplaintTicketInfo {
+  const ComplaintTicketInfo({
+    required this.id,
+    required this.studentId,
+    required this.studentName,
+    required this.category,
+    required this.categoryLabel,
+    required this.subject,
+    required this.description,
+    required this.date,
+    required this.status,
+    required this.statusLabel,
+    required this.resolutionNote,
+    required this.createdAt,
+  });
+
+  factory ComplaintTicketInfo.fromJson(Map<String, dynamic> j) =>
+      ComplaintTicketInfo(
+        id: (j["id"] as String?) ?? "",
+        studentId: j["studentId"] as String?,
+        studentName: (j["studentName"] as String?) ?? "",
+        category: (j["category"] as String?) ?? "other",
+        categoryLabel: (j["categoryLabel"] as String?) ?? "",
+        subject: (j["subject"] as String?) ?? "",
+        description: (j["description"] as String?) ?? "",
+        date: (j["date"] as String?) ?? "",
+        status: (j["status"] as String?) ?? "open",
+        statusLabel: (j["statusLabel"] as String?) ?? "",
+        resolutionNote: (j["resolutionNote"] as String?) ?? "",
+        createdAt: (j["createdAt"] as String?) ?? "",
+      );
+
+  final String id;
+  final String? studentId;
+  final String studentName;
+  final String category;
+  final String categoryLabel;
+  final String subject;
+  final String description;
+  final String date;
+
+  /// open | assigned | in_progress | resolved | closed
+  final String status;
+  final String statusLabel;
+  final String resolutionNote;
+  final String createdAt;
+
+  bool get isClosed => status == "resolved" || status == "closed";
+}
+
+class ComplaintCategoryInfo {
+  const ComplaintCategoryInfo({required this.value, required this.label});
+
+  factory ComplaintCategoryInfo.fromJson(Map<String, dynamic> j) =>
+      ComplaintCategoryInfo(
+        value: (j["value"] as String?) ?? "",
+        label: (j["label"] as String?) ?? "",
+      );
+
+  final String value;
+  final String label;
+}
+
+class ComplaintList {
+  const ComplaintList({required this.tickets, required this.categories});
+
+  factory ComplaintList.fromJson(Map<String, dynamic> j) => ComplaintList(
+    tickets: ((j["tickets"] as List?) ?? const [])
+        .map((t) => ComplaintTicketInfo.fromJson(t as Map<String, dynamic>))
+        .toList(),
+    categories: ((j["categories"] as List?) ?? const [])
+        .map((c) => ComplaintCategoryInfo.fromJson(c as Map<String, dynamic>))
+        .toList(),
+  );
+
+  final List<ComplaintTicketInfo> tickets;
+  final List<ComplaintCategoryInfo> categories;
 }
 
 class FeeLedger {
@@ -387,12 +563,12 @@ class FeeLedger {
   });
 
   factory FeeLedger.fromJson(Map<String, dynamic> j) => FeeLedger(
-        studentName: (j["studentName"] as String?) ?? "",
-        openDues: ((j["openDues"] as List?) ?? const [])
-            .map((d) => FeeDue.fromJson(d as Map<String, dynamic>))
-            .toList(),
-        openBalanceLabel: (j["openBalanceLabel"] as String?) ?? "₹0",
-      );
+    studentName: (j["studentName"] as String?) ?? "",
+    openDues: ((j["openDues"] as List?) ?? const [])
+        .map((d) => FeeDue.fromJson(d as Map<String, dynamic>))
+        .toList(),
+    openBalanceLabel: (j["openBalanceLabel"] as String?) ?? "₹0",
+  );
 
   final String studentName;
   final List<FeeDue> openDues;
@@ -415,10 +591,12 @@ class AttendanceHistory {
         absentDays: (j["absentDays"] as num?)?.toInt() ?? 0,
         lateDays: (j["lateDays"] as num?)?.toInt() ?? 0,
         entries: ((j["entries"] as List?) ?? const [])
-            .map((e) => (
-                  date: (e["date"] as String?) ?? "",
-                  status: (e["status"] as String?) ?? "",
-                ))
+            .map(
+              (e) => (
+                date: (e["date"] as String?) ?? "",
+                status: (e["status"] as String?) ?? "",
+              ),
+            )
             .toList(),
       );
 
@@ -494,10 +672,12 @@ class HomeworkFeed {
     ]..sort((a, b) => b.date.compareTo(a.date));
 
     final subjects = ((j["subjects"] as List?) ?? const [])
-        .map((s) => SubjectRef(
-              id: s["id"] as String,
-              name: (s["name"] as String?) ?? "",
-            ))
+        .map(
+          (s) => SubjectRef(
+            id: s["id"] as String,
+            name: (s["name"] as String?) ?? "",
+          ),
+        )
         .toList();
 
     return HomeworkFeed(items: items, subjects: subjects);
@@ -538,13 +718,13 @@ class PtmSlotInfo {
   });
 
   factory PtmSlotInfo.fromJson(Map<String, dynamic> j) => PtmSlotInfo(
-        id: j["id"] as String,
-        teacherName: (j["teacherName"] as String?) ?? "",
-        startAt: (j["startAt"] as String?) ?? "",
-        endAt: (j["endAt"] as String?) ?? "",
-        roomOrLink: (j["roomOrLink"] as String?) ?? "",
-        seatsLeft: (j["seatsLeft"] as num?)?.toInt() ?? 0,
-      );
+    id: j["id"] as String,
+    teacherName: (j["teacherName"] as String?) ?? "",
+    startAt: (j["startAt"] as String?) ?? "",
+    endAt: (j["endAt"] as String?) ?? "",
+    roomOrLink: (j["roomOrLink"] as String?) ?? "",
+    seatsLeft: (j["seatsLeft"] as num?)?.toInt() ?? 0,
+  );
 
   final String id;
   final String teacherName;
@@ -814,15 +994,17 @@ class PlanTargetClass {
   });
 
   factory PlanTargetClass.fromJson(Map<String, dynamic> j) => PlanTargetClass(
-        id: (j["id"] as String?) ?? "",
-        name: (j["name"] as String?) ?? "",
-        subjects: ((j["subjects"] as List?) ?? const [])
-            .map((e) => PlanTargetSubject(
-                  id: ((e as Map)["id"] as String?) ?? "",
-                  name: (e["name"] as String?) ?? "",
-                ))
-            .toList(),
-      );
+    id: (j["id"] as String?) ?? "",
+    name: (j["name"] as String?) ?? "",
+    subjects: ((j["subjects"] as List?) ?? const [])
+        .map(
+          (e) => PlanTargetSubject(
+            id: ((e as Map)["id"] as String?) ?? "",
+            name: (e["name"] as String?) ?? "",
+          ),
+        )
+        .toList(),
+  );
 
   final String id;
   final String name;
@@ -840,16 +1022,18 @@ class ScannedChapter {
   });
 
   factory ScannedChapter.fromJson(Map<String, dynamic> j) => ScannedChapter(
-        code: (j["code"] as String?) ?? "",
-        title: (j["title"] as String?) ?? "",
-        confidence: (j["confidence"] as String?) ?? "high",
-        topics: ((j["topics"] as List?) ?? const [])
-            .map((e) => ScannedTopic(
-                  code: ((e as Map)["code"] as String?) ?? "",
-                  title: (e["title"] as String?) ?? "",
-                ))
-            .toList(),
-      );
+    code: (j["code"] as String?) ?? "",
+    title: (j["title"] as String?) ?? "",
+    confidence: (j["confidence"] as String?) ?? "high",
+    topics: ((j["topics"] as List?) ?? const [])
+        .map(
+          (e) => ScannedTopic(
+            code: ((e as Map)["code"] as String?) ?? "",
+            title: (e["title"] as String?) ?? "",
+          ),
+        )
+        .toList(),
+  );
 
   String code;
   String title;
@@ -860,13 +1044,13 @@ class ScannedChapter {
   bool include;
 
   Map<String, dynamic> toImportJson() => {
-        "code": code,
-        "title": title,
-        "topics": [
-          for (final t in topics.where((t) => t.include))
-            {"code": t.code, "title": t.title},
-        ],
-      };
+    "code": code,
+    "title": title,
+    "topics": [
+      for (final t in topics.where((t) => t.include))
+        {"code": t.code, "title": t.title},
+    ],
+  };
 }
 
 class ScannedTopic {
@@ -887,16 +1071,15 @@ class SyllabusScan {
   });
 
   factory SyllabusScan.fromJson(Map<String, dynamic> j) => SyllabusScan(
-        chapters: ((j["chapters"] as List?) ?? const [])
-            .map((e) => ScannedChapter.fromJson(e as Map<String, dynamic>))
-            .toList(),
-        ignored: ((j["ignored"] as List?) ?? const [])
-            .map((e) => e.toString())
-            .toList(),
-        verdict:
-            ((j["quality"] as Map?)?["verdict"] as String?) ?? "poor",
-        rawText: (j["rawText"] as String?) ?? "",
-      );
+    chapters: ((j["chapters"] as List?) ?? const [])
+        .map((e) => ScannedChapter.fromJson(e as Map<String, dynamic>))
+        .toList(),
+    ignored: ((j["ignored"] as List?) ?? const [])
+        .map((e) => e.toString())
+        .toList(),
+    verdict: ((j["quality"] as Map?)?["verdict"] as String?) ?? "poor",
+    rawText: (j["rawText"] as String?) ?? "",
+  );
 
   final List<ScannedChapter> chapters;
   final List<String> ignored;
@@ -927,12 +1110,12 @@ class TeachingResource {
   });
 
   factory TeachingResource.fromJson(Map<String, dynamic> j) => TeachingResource(
-        id: (j["id"] as String?) ?? "",
-        kind: (j["kind"] as String?) ?? "link",
-        title: (j["title"] as String?) ?? "",
-        url: (j["url"] as String?) ?? "",
-        locator: (j["locator"] as String?) ?? "",
-      );
+    id: (j["id"] as String?) ?? "",
+    kind: (j["kind"] as String?) ?? "link",
+    title: (j["title"] as String?) ?? "",
+    url: (j["url"] as String?) ?? "",
+    locator: (j["locator"] as String?) ?? "",
+  );
 
   final String id;
 
@@ -954,16 +1137,16 @@ class TeachingUnit {
   });
 
   factory TeachingUnit.fromJson(Map<String, dynamic> j) => TeachingUnit(
-        id: (j["id"] as String?) ?? "",
-        code: (j["code"] as String?) ?? "",
-        title: (j["title"] as String?) ?? "",
-        topics: ((j["topics"] as List?) ?? const [])
-            .map((e) => TeachingUnit.fromJson(e as Map<String, dynamic>))
-            .toList(),
-        resources: ((j["resources"] as List?) ?? const [])
-            .map((e) => TeachingResource.fromJson(e as Map<String, dynamic>))
-            .toList(),
-      );
+    id: (j["id"] as String?) ?? "",
+    code: (j["code"] as String?) ?? "",
+    title: (j["title"] as String?) ?? "",
+    topics: ((j["topics"] as List?) ?? const [])
+        .map((e) => TeachingUnit.fromJson(e as Map<String, dynamic>))
+        .toList(),
+    resources: ((j["resources"] as List?) ?? const [])
+        .map((e) => TeachingResource.fromJson(e as Map<String, dynamic>))
+        .toList(),
+  );
 
   final String id;
   final String code;
@@ -1044,32 +1227,32 @@ class TeachingPeriod {
   });
 
   factory TeachingPeriod.fromJson(Map<String, dynamic> j) => TeachingPeriod(
-        periodNo: (j["periodNo"] as num?)?.toInt() ?? 0,
-        label: (j["label"] as String?) ?? "",
-        startTime: (j["startTime"] as String?) ?? "",
-        endTime: (j["endTime"] as String?) ?? "",
-        classId: (j["classId"] as String?) ?? "",
-        sectionId: (j["sectionId"] as String?) ?? "",
-        subjectId: (j["subjectId"] as String?) ?? "",
-        className: (j["className"] as String?) ?? "",
-        sectionName: (j["sectionName"] as String?) ?? "",
-        subjectName: (j["subjectName"] as String?) ?? "",
-        isSubstituted: (j["isSubstituted"] as bool?) ?? false,
-        status: (j["status"] as String?) ?? "pending",
-        unitIds: ((j["unitIds"] as List?) ?? const [])
-            .map((e) => e.toString())
-            .toList(),
-        lessonPlanId: (j["lessonPlanId"] as String?) ?? "",
-        chapters: ((j["chapters"] as List?) ?? const [])
-            .map((e) => TeachingUnit.fromJson(e as Map<String, dynamic>))
-            .toList(),
-        lessonPlans: ((j["lessonPlans"] as List?) ?? const [])
-            .map((e) => TeachingLessonPlan.fromJson(e as Map<String, dynamic>))
-            .toList(),
-        resources: ((j["resources"] as List?) ?? const [])
-            .map((e) => TeachingResource.fromJson(e as Map<String, dynamic>))
-            .toList(),
-      );
+    periodNo: (j["periodNo"] as num?)?.toInt() ?? 0,
+    label: (j["label"] as String?) ?? "",
+    startTime: (j["startTime"] as String?) ?? "",
+    endTime: (j["endTime"] as String?) ?? "",
+    classId: (j["classId"] as String?) ?? "",
+    sectionId: (j["sectionId"] as String?) ?? "",
+    subjectId: (j["subjectId"] as String?) ?? "",
+    className: (j["className"] as String?) ?? "",
+    sectionName: (j["sectionName"] as String?) ?? "",
+    subjectName: (j["subjectName"] as String?) ?? "",
+    isSubstituted: (j["isSubstituted"] as bool?) ?? false,
+    status: (j["status"] as String?) ?? "pending",
+    unitIds: ((j["unitIds"] as List?) ?? const [])
+        .map((e) => e.toString())
+        .toList(),
+    lessonPlanId: (j["lessonPlanId"] as String?) ?? "",
+    chapters: ((j["chapters"] as List?) ?? const [])
+        .map((e) => TeachingUnit.fromJson(e as Map<String, dynamic>))
+        .toList(),
+    lessonPlans: ((j["lessonPlans"] as List?) ?? const [])
+        .map((e) => TeachingLessonPlan.fromJson(e as Map<String, dynamic>))
+        .toList(),
+    resources: ((j["resources"] as List?) ?? const [])
+        .map((e) => TeachingResource.fromJson(e as Map<String, dynamic>))
+        .toList(),
+  );
 
   final int periodNo;
   final String label;
@@ -1117,14 +1300,14 @@ class TeachingDay {
   });
 
   factory TeachingDay.fromJson(Map<String, dynamic> j) => TeachingDay(
-        date: (j["date"] as String?) ?? "",
-        scheduleAvailable: (j["scheduleAvailable"] as bool?) ?? false,
-        reason: (j["reason"] as String?) ?? "",
-        detail: (j["detail"] as String?) ?? "",
-        periods: ((j["periods"] as List?) ?? const [])
-            .map((e) => TeachingPeriod.fromJson(e as Map<String, dynamic>))
-            .toList(),
-      );
+    date: (j["date"] as String?) ?? "",
+    scheduleAvailable: (j["scheduleAvailable"] as bool?) ?? false,
+    reason: (j["reason"] as String?) ?? "",
+    detail: (j["detail"] as String?) ?? "",
+    periods: ((j["periods"] as List?) ?? const [])
+        .map((e) => TeachingPeriod.fromJson(e as Map<String, dynamic>))
+        .toList(),
+  );
 
   final String date;
   final bool scheduleAvailable;
@@ -1152,13 +1335,15 @@ class TransportRouteInfo {
       code: (j["code"] as String?) ?? "",
       name: (j["name"] as String?) ?? "",
       stops: ((j["stops"] as List?) ?? const [])
-          .map((s) => TransportStopInfo(
-                name: (s["name"] as String?) ?? "",
-                sequence: (s["sequence"] as num?)?.toInt() ?? 0,
-                distanceKm: (s["distanceKm"] as num?)?.toDouble() ?? 0,
-                lat: (s["lat"] as num?)?.toDouble(),
-                lng: (s["lng"] as num?)?.toDouble(),
-              ))
+          .map(
+            (s) => TransportStopInfo(
+              name: (s["name"] as String?) ?? "",
+              sequence: (s["sequence"] as num?)?.toInt() ?? 0,
+              distanceKm: (s["distanceKm"] as num?)?.toDouble() ?? 0,
+              lat: (s["lat"] as num?)?.toDouble(),
+              lng: (s["lng"] as num?)?.toDouble(),
+            ),
+          )
           .toList(),
       vehicleName: (v?["name"] as String?) ?? "",
       vehicleReg: (v?["registrationNo"] as String?) ?? "",
@@ -1187,12 +1372,12 @@ class ChatThreadInfo {
   });
 
   factory ChatThreadInfo.fromJson(Map<String, dynamic> j) => ChatThreadInfo(
-        studentId: (j["studentId"] as String?) ?? "",
-        studentName: (j["studentName"] as String?) ?? "",
-        lastMessage: j["lastMessage"] as String?,
-        lastMessageAt: j["lastMessageAt"] as String?,
-        unreadCount: (j["unreadCount"] as num?)?.toInt() ?? 0,
-      );
+    studentId: (j["studentId"] as String?) ?? "",
+    studentName: (j["studentName"] as String?) ?? "",
+    lastMessage: j["lastMessage"] as String?,
+    lastMessageAt: j["lastMessageAt"] as String?,
+    unreadCount: (j["unreadCount"] as num?)?.toInt() ?? 0,
+  );
 
   final String studentId;
   final String studentName;
@@ -1212,13 +1397,13 @@ class ChatMessage {
   });
 
   factory ChatMessage.fromJson(Map<String, dynamic> j) => ChatMessage(
-        id: (j["id"] as String?) ?? "",
-        senderPersona: (j["senderPersona"] as String?) ?? "",
-        senderName: (j["senderName"] as String?) ?? "",
-        body: (j["body"] as String?) ?? "",
-        createdAt: (j["createdAt"] as String?) ?? "",
-        mine: (j["mine"] as bool?) ?? false,
-      );
+    id: (j["id"] as String?) ?? "",
+    senderPersona: (j["senderPersona"] as String?) ?? "",
+    senderName: (j["senderName"] as String?) ?? "",
+    body: (j["body"] as String?) ?? "",
+    createdAt: (j["createdAt"] as String?) ?? "",
+    mine: (j["mine"] as bool?) ?? false,
+  );
 
   final String id;
   final String senderPersona;
@@ -1237,13 +1422,13 @@ class ChatThread {
   });
 
   factory ChatThread.fromJson(Map<String, dynamic> j) => ChatThread(
-        studentId: (j["studentId"] as String?) ?? "",
-        studentName: (j["studentName"] as String?) ?? "",
-        teacherName: j["teacherName"] as String?,
-        messages: ((j["messages"] as List?) ?? const [])
-            .map((m) => ChatMessage.fromJson(m as Map<String, dynamic>))
-            .toList(),
-      );
+    studentId: (j["studentId"] as String?) ?? "",
+    studentName: (j["studentName"] as String?) ?? "",
+    teacherName: j["teacherName"] as String?,
+    messages: ((j["messages"] as List?) ?? const [])
+        .map((m) => ChatMessage.fromJson(m as Map<String, dynamic>))
+        .toList(),
+  );
 
   final String studentId;
   final String studentName;
@@ -1261,11 +1446,11 @@ class DefaulterChild {
     required this.openPaise,
   });
   factory DefaulterChild.fromJson(Map<String, dynamic> j) => DefaulterChild(
-        studentId: j["studentId"] as String? ?? "",
-        fullName: j["fullName"] as String? ?? "",
-        classLabel: j["classLabel"] as String? ?? "",
-        openPaise: (j["openPaise"] as num?)?.toInt() ?? 0,
-      );
+    studentId: j["studentId"] as String? ?? "",
+    fullName: j["fullName"] as String? ?? "",
+    classLabel: j["classLabel"] as String? ?? "",
+    openPaise: (j["openPaise"] as num?)?.toInt() ?? 0,
+  );
   final String studentId;
   final String fullName;
   final String classLabel;
@@ -1304,12 +1489,12 @@ class DefaultersList {
     required this.households,
   });
   factory DefaultersList.fromJson(Map<String, dynamic> j) => DefaultersList(
-        asOf: j["asOf"] as String? ?? "",
-        totalOpenPaise: (j["totalOpenPaise"] as num?)?.toInt() ?? 0,
-        households: ((j["households"] as List?) ?? const [])
-            .map((h) => DefaulterHousehold.fromJson(h as Map<String, dynamic>))
-            .toList(),
-      );
+    asOf: j["asOf"] as String? ?? "",
+    totalOpenPaise: (j["totalOpenPaise"] as num?)?.toInt() ?? 0,
+    households: ((j["households"] as List?) ?? const [])
+        .map((h) => DefaulterHousehold.fromJson(h as Map<String, dynamic>))
+        .toList(),
+  );
   final String asOf;
   final int totalOpenPaise;
   final List<DefaulterHousehold> households;
@@ -1353,11 +1538,11 @@ class SectionRegisterStatus {
 class RegistersList {
   const RegistersList({required this.date, required this.sections});
   factory RegistersList.fromJson(Map<String, dynamic> j) => RegistersList(
-        date: j["date"] as String? ?? "",
-        sections: ((j["sections"] as List?) ?? const [])
-            .map((s) => SectionRegisterStatus.fromJson(s as Map<String, dynamic>))
-            .toList(),
-      );
+    date: j["date"] as String? ?? "",
+    sections: ((j["sections"] as List?) ?? const [])
+        .map((s) => SectionRegisterStatus.fromJson(s as Map<String, dynamic>))
+        .toList(),
+  );
   final String date;
   final List<SectionRegisterStatus> sections;
 }
@@ -1388,6 +1573,7 @@ class StaffAttendanceRow {
   final String fullName;
   final String designation;
   final String mobile;
+
   /// "" (not marked) | P | A | L | HD | LE
   final String status;
   final String inTime;
@@ -1427,16 +1613,16 @@ class FollowUpLead {
     required this.overdueDays,
   });
   factory FollowUpLead.fromJson(Map<String, dynamic> j) => FollowUpLead(
-        id: j["id"] as String? ?? "",
-        enquiryNo: j["enquiryNo"] as String? ?? "",
-        childName: j["childName"] as String? ?? "",
-        guardianName: j["guardianName"] as String? ?? "",
-        mobile: j["mobile"] as String? ?? "",
-        stage: j["stage"] as String? ?? "",
-        classSought: j["classSought"] as String? ?? "",
-        nextFollowUpAt: j["nextFollowUpAt"] as String? ?? "",
-        overdueDays: (j["overdueDays"] as num?)?.toInt() ?? 0,
-      );
+    id: j["id"] as String? ?? "",
+    enquiryNo: j["enquiryNo"] as String? ?? "",
+    childName: j["childName"] as String? ?? "",
+    guardianName: j["guardianName"] as String? ?? "",
+    mobile: j["mobile"] as String? ?? "",
+    stage: j["stage"] as String? ?? "",
+    classSought: j["classSought"] as String? ?? "",
+    nextFollowUpAt: j["nextFollowUpAt"] as String? ?? "",
+    overdueDays: (j["overdueDays"] as num?)?.toInt() ?? 0,
+  );
   final String id;
   final String enquiryNo;
   final String childName;
@@ -1451,9 +1637,9 @@ class FollowUpLead {
 class WaTemplateVar {
   const WaTemplateVar({required this.key, required this.label});
   factory WaTemplateVar.fromJson(Map<String, dynamic> j) => WaTemplateVar(
-        key: j["key"] as String? ?? "",
-        label: j["label"] as String? ?? (j["key"] as String? ?? ""),
-      );
+    key: j["key"] as String? ?? "",
+    label: j["label"] as String? ?? (j["key"] as String? ?? ""),
+  );
   final String key;
   final String label;
 }
@@ -1512,15 +1698,14 @@ class BroadcastResult {
     required this.pushSent,
   });
   factory BroadcastResult.fromJson(Map<String, dynamic> j) => BroadcastResult(
-        mode: j["mode"] as String? ?? "",
-        recipientCount: (j["recipientCount"] as num?)?.toInt() ?? 0,
-        skippedOptOut: (j["skippedOptOut"] as num?)?.toInt() ?? 0,
-        sent: (j["sent"] as num?)?.toInt() ?? 0,
-        failed: (j["failed"] as num?)?.toInt() ?? 0,
-        pushSent:
-            ((j["push"] as Map<String, dynamic>?)?["sent"] as num?)?.toInt() ??
-                0,
-      );
+    mode: j["mode"] as String? ?? "",
+    recipientCount: (j["recipientCount"] as num?)?.toInt() ?? 0,
+    skippedOptOut: (j["skippedOptOut"] as num?)?.toInt() ?? 0,
+    sent: (j["sent"] as num?)?.toInt() ?? 0,
+    failed: (j["failed"] as num?)?.toInt() ?? 0,
+    pushSent:
+        ((j["push"] as Map<String, dynamic>?)?["sent"] as num?)?.toInt() ?? 0,
+  );
   final String mode;
   final int recipientCount;
   final int skippedOptOut;
@@ -1545,9 +1730,17 @@ class ApiClient {
 
   /// Raw JSON POST with the session cookie — for endpoints that return the
   /// whole body (not the {data} envelope), e.g. /api/staff-geo/ping.
-  Future<Map<String, dynamic>> postJson(String path, Map<String, dynamic> body) async {
-    final res = await http.post(_uri(path), headers: await _authHeaders(), body: jsonEncode(body));
-    final decoded = jsonDecode(res.body.isEmpty ? "{}" : res.body) as Map<String, dynamic>;
+  Future<Map<String, dynamic>> postJson(
+    String path,
+    Map<String, dynamic> body,
+  ) async {
+    final res = await http.post(
+      _uri(path),
+      headers: await _authHeaders(),
+      body: jsonEncode(body),
+    );
+    final decoded =
+        jsonDecode(res.body.isEmpty ? "{}" : res.body) as Map<String, dynamic>;
     if (res.statusCode >= 500) _throwFrom(res);
     return decoded;
   }
@@ -1579,8 +1772,9 @@ class ApiClient {
   /// isPrincipalLikeRole).
   Future<bool> isPrincipalLike() async {
     final rc = (await roleCode())?.toLowerCase() ?? "";
-    return RegExp(r"principal|owner|admin|director|hm|head.?master")
-        .hasMatch(rc);
+    return RegExp(
+      r"principal|owner|admin|director|hm|head.?master",
+    ).hasMatch(rc);
   }
 
   /// Runs just before the session is cleared on sign-out (push token
@@ -1590,7 +1784,9 @@ class ApiClient {
   Future<void> signOut() async {
     try {
       await beforeSignOut?.call();
-    } catch (_) {/* best-effort */}
+    } catch (_) {
+      /* best-effort */
+    }
     await _storage.delete(key: _cookieKey);
     await _storage.delete(key: _guardianKey);
     await _storage.delete(key: _personaKey);
@@ -1632,7 +1828,9 @@ class ApiClient {
       if (err is Map && err["message"] is String) {
         message = err["message"] as String;
       }
-    } catch (_) {/* keep default */}
+    } catch (_) {
+      /* keep default */
+    }
     throw ApiException(message, res.statusCode);
   }
 
@@ -1707,7 +1905,9 @@ class ApiClient {
         final body = jsonDecode(tokenRes.body) as Map<String, dynamic>;
         final desc = body["error_description"] ?? body["msg"];
         if (desc is String && desc.isNotEmpty) message = desc;
-      } catch (_) {/* keep default */}
+      } catch (_) {
+        /* keep default */
+      }
       throw ApiException(message, tokenRes.statusCode);
     }
     final token =
@@ -1837,14 +2037,17 @@ class ApiClient {
   /* ─── Principal / owner ─────────────────────────────────────────── */
 
   Future<DefaultersList> fetchDefaulters() async => DefaultersList.fromJson(
-      await _getData("/api/v1/principal/lists?kind=defaulters"));
+    await _getData("/api/v1/principal/lists?kind=defaulters"),
+  );
 
   Future<RegistersList> fetchRegistersToday() async => RegistersList.fromJson(
-      await _getData("/api/v1/principal/lists?kind=registers"));
+    await _getData("/api/v1/principal/lists?kind=registers"),
+  );
 
   Future<StaffAttendanceToday> fetchStaffAttendanceToday() async =>
       StaffAttendanceToday.fromJson(
-          await _getData("/api/v1/principal/lists?kind=staff_attendance"));
+        await _getData("/api/v1/principal/lists?kind=staff_attendance"),
+      );
 
   Future<List<FollowUpLead>> fetchFollowUpsDue() async {
     final d = await _getData("/api/v1/principal/lists?kind=followups");
@@ -1888,7 +2091,8 @@ class ApiClient {
     );
     if (res.statusCode != 200) _throwFrom(res);
     return BroadcastResult.fromJson(
-        jsonDecode(res.body) as Map<String, dynamic>);
+      jsonDecode(res.body) as Map<String, dynamic>,
+    );
   }
 
   Future<FeeLedger> fetchFeeLedger(String studentId) async =>
@@ -1921,12 +2125,67 @@ class ApiClient {
   Future<EbookShelf> fetchEbookShelf() async =>
       EbookShelf.fromJson(await _getData("/api/v1/library/ebooks"));
 
+  // ---- leave --------------------------------------------------------------
+
+  Future<LeaveList> fetchLeaveList({String? studentId}) async =>
+      LeaveList.fromJson(
+        await _getData(
+          studentId == null
+              ? "/api/v1/leave/list"
+              : "/api/v1/leave/list?studentId=$studentId",
+        ),
+      );
+
+  /// Returns the new request's id. The server validates dates, the half-day
+  /// rule and ownership; its message is what the parent should see.
+  Future<String> requestLeave({
+    required String studentId,
+    required String fromDate,
+    required String toDate,
+    required String leaveType,
+    required String reason,
+  }) async {
+    final data = await _postData("/api/v1/leave/request", {
+      "studentId": studentId,
+      "fromDate": fromDate,
+      "toDate": toDate,
+      "leaveType": leaveType,
+      "reason": reason,
+    });
+    return (data["id"] as String?) ?? "";
+  }
+
+  Future<void> cancelLeave(String id) async {
+    await _postData("/api/v1/leave/cancel", {"id": id});
+  }
+
+  // ---- complaints ---------------------------------------------------------
+
+  Future<ComplaintList> fetchComplaints() async =>
+      ComplaintList.fromJson(await _getData("/api/v1/complaints/list"));
+
+  /// Returns the new ticket's id.
+  Future<String> createComplaint({
+    String? studentId,
+    required String category,
+    required String subject,
+    required String description,
+  }) async {
+    final data = await _postData("/api/v1/complaints/create", {
+      if (studentId != null && studentId.isNotEmpty) "studentId": studentId,
+      "category": category,
+      "subject": subject,
+      "description": description,
+    });
+    return (data["id"] as String?) ?? "";
+  }
+
   Future<AttendanceHistory> fetchAttendanceHistory(
     String studentId, {
     int days = 90,
-  }) async =>
-      AttendanceHistory.fromJson(await _getData(
-          "/api/v1/parent/attendance?studentId=$studentId&days=$days"));
+  }) async => AttendanceHistory.fromJson(
+    await _getData("/api/v1/parent/attendance?studentId=$studentId&days=$days"),
+  );
 
   /// Parent form: pass studentId. Staff form: pass classId+sectionId.
   Future<HomeworkFeed> fetchHomeworkFeed({
@@ -1937,7 +2196,9 @@ class ApiClient {
     final query = studentId != null
         ? "studentId=$studentId"
         : "classId=$classId&sectionId=$sectionId";
-    return HomeworkFeed.fromJson(await _getData("/api/v1/homework/feed?$query"));
+    return HomeworkFeed.fromJson(
+      await _getData("/api/v1/homework/feed?$query"),
+    );
   }
 
   Future<void> postHomework({
@@ -2066,7 +2327,10 @@ class ApiClient {
     required String studentId,
     required String body,
   }) async {
-    await _postData("/api/v1/chat/send", {"studentId": studentId, "body": body});
+    await _postData("/api/v1/chat/send", {
+      "studentId": studentId,
+      "body": body,
+    });
   }
 
   Future<PunchState> fetchPunchState() async =>
