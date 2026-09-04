@@ -137,6 +137,7 @@
     "test:sibling-carry-over": "npx tsx src/lib/siblingCarryOver.selftest.ts",
     "test:udise-upload-store": "npx tsx src/lib/udiseUploadStore.selftest.ts",
     "test:lead-worklist": "npx tsx src/lib/leadWorklist.selftest.ts",
+    "test:student-import": "npx tsx src/lib/studentImport.selftest.ts",
     "test:payment-link-amount": "npx tsx src/lib/paymentLinkAmount.selftest.ts",
     "test:sis-wire-payload": "npx tsx src/lib/sisWirePayload.selftest.ts",
     "test:print-palette": "npx tsx src/lib/printPalette.selftest.ts",

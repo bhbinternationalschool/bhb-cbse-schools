@@ -144,6 +144,7 @@ SELFTESTS=(
   test:sibling-carry-over
   test:udise-upload-store
   test:lead-worklist
+  test:student-import
   test:cash-pool-orphans
   test:academic-risk
   test:admissions-ai

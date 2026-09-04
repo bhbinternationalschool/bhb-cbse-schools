@@ -246,7 +246,7 @@ export function excelSerialToIso(serial: number): string {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
-function normalizeDateField(raw: string): string {
+export function normalizeDateField(raw: string): string {
   const v = raw.trim();
   if (!v) return "";
   if (/^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0, 10);
@@ -256,9 +256,26 @@ function normalizeDateField(raw: string): string {
       const [a, b, rawYear] = parts as [number, number, number];
       let c = rawYear;
       if (c < 100) c += 2000;
-      // prefer D/M/Y when day > 12
+      // Which number is the day and which the month.
+      //
+      // Whichever exceeds 12 must be the day, and that settles it. When
+      // NEITHER exceeds 12 the value is genuinely ambiguous — 08/04 is the 4th
+      // of August to an American file and the 8th of April to an Indian one —
+      // and nothing in the string can tell them apart. We take D/M/Y, the
+      // local convention, and the caller has to know its source.
+      //
+      // What this must never do again is use `a` for both. The previous
+      // version read
+      //     const day   = a > 12 ? a : b > 12 ? b : a;
+      //     const month = a > 12 ? b : a;
+      // so for an ambiguous date BOTH came out as `a` and `b` was discarded:
+      // "08/04/2020" became 2020-08-08. That silently rewrote the day of every
+      // date whose day was 12 or under — 296 student birth dates, about 42% of
+      // the roll, undetectable afterwards because the result is a valid date.
+      // A wrong guess between the two conventions is recoverable; throwing one
+      // of the numbers away is not.
       const day = a > 12 ? a : b > 12 ? b : a;
-      const month = a > 12 ? b : a;
+      const month = a > 12 ? b : b > 12 ? a : b;
       const y = c;
       const m = String(month).padStart(2, "0");
       const d = String(day).padStart(2, "0");
