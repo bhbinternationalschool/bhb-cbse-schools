@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { CLOSURE_REASONS, type ClosureReasonCode } from "@/lib/holidayNotice";
 import Link from "next/link";
 import {
   BOARD_MODES,
@@ -2134,6 +2135,163 @@ export function NumberSeriesPanel({
   );
 }
 
+/**
+ * "Notify families": announce a published holiday on WhatsApp (with the
+ * app-push mirror). For an unplanned closure the office picks the cause
+ * and names who ordered it, so the message reads as an order the school
+ * is following, not a whim. Always previews the reach first.
+ */
+function HolidayNotifyButton({ holiday }: { holiday: Holiday }) {
+  const [open, setOpen] = useState(false);
+  const closure = holiday.kind === "emergency" || holiday.kind === "other";
+  const [reason, setReason] = useState<ClosureReasonCode>("heat_wave");
+  const [orderedBy, setOrderedBy] = useState("the District Magistrate, Varanasi");
+  const [reopenDate, setReopenDate] = useState("");
+  const [note, setNote] = useState(holiday.note || "");
+  const [busy, setBusy] = useState<"preview" | "send" | null>(null);
+  const [preview, setPreview] = useState<{
+    recipientCount: number;
+    via: string;
+    warning: string | null;
+    en: string;
+    hi: string;
+  } | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+
+  async function call(dryRun: boolean) {
+    setBusy(dryRun ? "preview" : "send");
+    try {
+      const res = await fetch("/api/masters/holidays/notify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          holiday: { id: holiday.id, title: holiday.title, startsOn: holiday.startsOn, endsOn: holiday.endsOn, kind: holiday.kind, note: holiday.note },
+          reason: closure ? reason : undefined,
+          orderedBy: closure ? orderedBy : undefined,
+          reopenDate: reopenDate || undefined,
+          note,
+          dryRun,
+        }),
+      });
+      const j = (await res.json()) as {
+        error?: string;
+        recipientCount?: number;
+        via?: string;
+        warning?: string | null;
+        preview?: { en: string; hi: string };
+        sent?: number;
+        failed?: number;
+      };
+      if (!res.ok) {
+        setDone(j.error || "Could not send");
+        return;
+      }
+      if (dryRun) {
+        setPreview({
+          recipientCount: j.recipientCount ?? 0,
+          via: j.via ?? "text",
+          warning: j.warning ?? null,
+          en: j.preview?.en ?? "",
+          hi: j.preview?.hi ?? "",
+        });
+      } else {
+        setDone(`Sent to ${j.sent ?? 0} families${j.failed ? `, ${j.failed} failed` : ""}.`);
+      }
+    } catch {
+      setDone("Could not reach the server");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        className="rounded-lg bg-[#25D366] px-2.5 py-1 text-[11px] font-semibold text-white"
+        onClick={() => {
+          setOpen(true);
+          setPreview(null);
+          setDone(null);
+        }}
+      >
+        Notify families
+      </button>
+      {open ? (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center">
+          <div className="w-full max-w-lg rounded-2xl bg-[var(--card)] p-5 shadow-xl">
+            <div className="text-base font-bold text-[var(--brand-deep)]">
+              {closure ? "Announce closure" : "Announce holiday"} · {holiday.title}
+            </div>
+            <div className="mt-1 text-xs text-[var(--muted)]">
+              {holiday.startsOn}{holiday.endsOn !== holiday.startsOn ? ` → ${holiday.endsOn}` : ""} · WhatsApp to every family, plus an app notification.
+            </div>
+            {closure ? (
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <label className="text-xs">
+                  <span className="font-semibold">Reason</span>
+                  <select className="mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-2 py-1.5 text-sm" value={reason} onChange={(e) => setReason(e.target.value as ClosureReasonCode)}>
+                    {CLOSURE_REASONS.map((r) => (
+                      <option key={r.code} value={r.code}>{r.en} · {r.hi}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-xs">
+                  <span className="font-semibold">Ordered by</span>
+                  <input className="mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-2 py-1.5 text-sm" value={orderedBy} onChange={(e) => setOrderedBy(e.target.value)} placeholder="the District Magistrate, Varanasi" />
+                </label>
+              </div>
+            ) : null}
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              <label className="text-xs">
+                <span className="font-semibold">School reopens on</span>
+                <input type="date" className="mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-2 py-1.5 text-sm" value={reopenDate} onChange={(e) => setReopenDate(e.target.value)} />
+                <span className="text-[10px] text-[var(--muted)]">Blank = the next working day after the holiday</span>
+              </label>
+              <label className="text-xs sm:col-span-2">
+                <span className="font-semibold">Note to families (optional)</span>
+                <textarea className="mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-2 py-1.5 text-sm" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder={closure ? "e.g. Homework for these days is in the parent app." : "e.g. Fee counter stays open on Saturday."} />
+              </label>
+            </div>
+            {preview ? (
+              <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--background)] p-3 text-xs">
+                <div className="font-semibold">
+                  Reach: {preview.recipientCount} families · via {preview.via === "template" ? "approved template" : "free text"}
+                </div>
+                {preview.warning ? <div className="mt-1 text-[#b45309]">{preview.warning}</div> : null}
+                <pre className="mt-2 whitespace-pre-wrap font-sans text-[11px] leading-relaxed">{preview.en}</pre>
+                <pre className="mt-2 whitespace-pre-wrap font-sans text-[11px] leading-relaxed">{preview.hi}</pre>
+              </div>
+            ) : null}
+            {done ? <div className="mt-3 text-sm font-semibold text-[var(--brand-deep)]">{done}</div> : null}
+            <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+              <button type="button" className="rounded-lg px-3 py-1.5 text-xs font-semibold" onClick={() => setOpen(false)}>
+                Close
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold"
+                disabled={busy !== null}
+                onClick={() => void call(true)}
+              >
+                {busy === "preview" ? "Checking…" : "Preview reach"}
+              </button>
+              <button
+                type="button"
+                className="rounded-lg bg-[#25D366] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                disabled={busy !== null || !preview}
+                onClick={() => void call(false)}
+              >
+                {busy === "send" ? "Sending…" : `Send to ${preview?.recipientCount ?? "…"} families`}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 function HolidayRuleRow({
   h,
   trailing,
@@ -2530,13 +2688,16 @@ export function HolidaysPanel({
                     key={h.id}
                     h={h}
                     trailing={
-                      <button
-                        type="button"
-                        className="text-[11px] font-semibold"
-                        onClick={() => unpublish(h.id)}
-                      >
-                        Unpublish
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <HolidayNotifyButton holiday={h} />
+                        <button
+                          type="button"
+                          className="text-[11px] font-semibold"
+                          onClick={() => unpublish(h.id)}
+                        >
+                          Unpublish
+                        </button>
+                      </div>
                     }
                   />
                 ))}

@@ -164,6 +164,13 @@ export const WA_TEMPLATE_VARIABLES: WaTemplateVariableDef[] = [
   { key: "noticeTitle", label: "Notice title", group: "Comms", sample: "Holiday announcement" },
   { key: "noticeBody", label: "Notice body", group: "Comms", sample: "School closed on Friday." },
   { key: "messageText", label: "Parent's message", group: "Comms", sample: "Amay could not finish the worksheet, please guide." },
+  { key: "holidayTitle", label: "Holiday name", group: "Holidays", sample: "Diwali break" },
+  { key: "holidayFrom", label: "Holiday from", group: "Holidays", sample: "Mon 19 Oct" },
+  { key: "holidayTo", label: "Holiday to", group: "Holidays", sample: "Sat 24 Oct" },
+  { key: "reopenDate", label: "School reopens on", group: "Holidays", sample: "Mon 26 Oct" },
+  { key: "holidayReason", label: "Closure reason", group: "Holidays", sample: "the heat wave" },
+  { key: "orderedBy", label: "Closure ordered by", group: "Holidays", sample: "the District Magistrate, Varanasi" },
+  { key: "holidayNote", label: "Holiday note", group: "Holidays", sample: "Homework for these days is in the parent app." },
   { key: "docTitle", label: "Document title", group: "Vault", sample: "Fire NOC" },
   { key: "expiryDate", label: "Expiry date", group: "Vault", sample: "31 Dec 2026" },
   { key: "orderNo", label: "Store order no.", group: "Store", sample: "STR-882" },
@@ -730,6 +737,42 @@ const SEED_DEFS: SeedDef[] = [
     ],
     footerEn: "Admissions desk · Reply STOP to opt out",
     footerHi: "प्रवेश कार्यालय · संदेश बंद करने के लिए STOP लिखें",
+  },
+
+  // ── Holidays ─────────────────────────────────────────────────
+  // Two shapes. A planned holiday comes straight off the Masters calendar
+  // (title and dates). An unplanned closure — the DM orders schools shut
+  // for a heat wave, a cold wave, heavy rain, an election — carries the
+  // reason and who ordered it, so a parent knows it is not the school's
+  // whim and that the calendar holds otherwise. Both end on a fixed line
+  // because Meta refuses a body that ends on a variable.
+  {
+    familyKey: "holiday_notice",
+    nameEn: "Holiday notice (planned)",
+    nameHi: "अवकाश सूचना (नियोजित)",
+    module: "comms",
+    category: "UTILITY",
+    metaName: "bhb_holiday_notice",
+    bodyEn:
+      "Namaste 🙏 A holiday notice from *{{schoolName}}*:\n\n🎉 *{{holidayTitle}}*\n📅 From: *{{holidayFrom}}*\n📅 To: *{{holidayTo}}*\n🏫 School reopens: *{{reopenDate}}*\n\n📝 {{holidayNote}}\n\nEnjoy the break with your family, and see you back at school! 🌼",
+    bodyHi:
+      "नमस्ते 🙏 *{{schoolName}}* की ओर से अवकाश सूचना:\n\n🎉 *{{holidayTitle}}*\n📅 से: *{{holidayFrom}}*\n📅 तक: *{{holidayTo}}*\n🏫 विद्यालय फिर खुलेगा: *{{reopenDate}}*\n\n📝 {{holidayNote}}\n\nपरिवार के साथ अवकाश का आनंद लें, फिर मिलते हैं विद्यालय में! 🌼",
+    footerEn: "School office · Reply to this message for help",
+    footerHi: "विद्यालय कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
+  },
+  {
+    familyKey: "holiday_emergency",
+    nameEn: "Unplanned closure (weather / administration)",
+    nameHi: "अचानक अवकाश (मौसम / प्रशासन)",
+    module: "comms",
+    category: "UTILITY",
+    metaName: "bhb_holiday_emergency",
+    bodyEn:
+      "Namaste 🙏 An important notice from *{{schoolName}}*:\n\n⚠️ School will remain *CLOSED* due to *{{holidayReason}}*, as ordered by {{orderedBy}}.\n\n📅 Closed from: *{{holidayFrom}}*\n📅 Closed till: *{{holidayTo}}*\n🏫 School reopens: *{{reopenDate}}*\n🚌 School buses will not run on these days.\n\n📝 {{holidayNote}}\n\nPlease keep your child safe at home. We will message you if the dates change. Thank you! 🙏",
+    bodyHi:
+      "नमस्ते 🙏 *{{schoolName}}* की ओर से महत्वपूर्ण सूचना:\n\n⚠️ *{{holidayReason}}* के कारण, {{orderedBy}} के आदेश पर विद्यालय *बंद* रहेगा।\n\n📅 बंद: *{{holidayFrom}}* से\n📅 तक: *{{holidayTo}}*\n🏫 विद्यालय फिर खुलेगा: *{{reopenDate}}*\n🚌 इन दिनों स्कूल बसें नहीं चलेंगी।\n\n📝 {{holidayNote}}\n\nकृपया बच्चे को घर पर सुरक्षित रखें। तारीखों में बदलाव हुआ तो हम संदेश भेजेंगे। धन्यवाद! 🙏",
+    footerEn: "School office · Reply to this message for help",
+    footerHi: "विद्यालय कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
   },
 
   // ── Teachers ─────────────────────────────────────────────────
