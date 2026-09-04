@@ -11,6 +11,7 @@ import {
   parseCount,
   parseTutorLanguage,
   parseTutorPlans,
+  prefersHindi,
   videoSearchQuery,
   passValidLabel,
   passWindow,
@@ -120,6 +121,9 @@ const dead = { ...live, endsAt: "2026-09-04T18:29:59.999Z" };
   assert.ok(buildTutorSystemPrompt("hint", {}, "BHB", "hi").includes("Devanagari"), "Hindi replies are asked for in Devanagari");
   assert.ok(buildTutorSystemPrompt("hint", {}, "BHB", "en").includes("simple English"));
   assert.ok(buildTutorSystemPrompt("hint", {}, "BHB").includes("Match the parent's language"), "auto follows the parent");
+  const both = buildTutorSystemPrompt("hint", {}, "BHB", "both");
+  assert.ok(both.includes("TWO parts") && both.includes("'हिंदी'") && both.includes("'English'"), "both = Hindi then English");
+  assert.ok(both.includes("NCERT") && both.includes("state-board"), "CBSE/NCERT only, state boards excluded");
   assert.ok(!hint.includes("Subject:"), "absent context is absent, not 'undefined'");
   const teach = buildTutorSystemPrompt("teach", {}, "BHB");
   assert.ok(teach.includes("short lesson"));
@@ -132,12 +136,15 @@ const dead = { ...live, endsAt: "2026-09-04T18:29:59.999Z" };
 // --- language + videos
 {
   assert.equal(parseTutorLanguage("hi"), "hi");
+  assert.equal(parseTutorLanguage("both"), "both");
   assert.equal(parseTutorLanguage("fr"), "auto");
   assert.equal(parseTutorLanguage(undefined), "auto");
-  assert.equal(videoSearchQuery("  fractions   ", "III A", "en"), "fractions class III explained for kids");
-  assert.equal(videoSearchQuery("भिन्न", "III A", "hi"), "भिन्न class III हिंदी में समझाइए");
-  assert.equal(videoSearchQuery("counting", "", "en"), "counting explained for kids", "no class → no empty level word");
-  assert.equal(videoSearchQuery("x".repeat(200), "LKG", "en").length < 120, true, "topic is capped");
+  assert.ok(prefersHindi("both") && prefersHindi("hi") && !prefersHindi("en") && !prefersHindi("auto"));
+  assert.equal(videoSearchQuery("  fractions   ", "III A", "en"), "fractions class III CBSE NCERT explained for kids");
+  assert.equal(videoSearchQuery("भिन्न", "III A", "hi"), "भिन्न class III CBSE NCERT हिंदी में समझाइए");
+  assert.equal(videoSearchQuery("fractions", "III A", "both"), "fractions class III CBSE NCERT हिंदी में समझाइए", "both → Hindi videos");
+  assert.equal(videoSearchQuery("counting", "", "en"), "counting CBSE NCERT explained for kids", "no class → no empty level word");
+  assert.ok(videoSearchQuery("x".repeat(200), "LKG", "en").length < 80 + 50, "topic is capped at 80 chars");
 }
 
 console.log("tutorPlans.selftest: ok");

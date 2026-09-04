@@ -30,9 +30,10 @@ export async function GET(request: Request) {
     const orders = allOrders.filter((o) => o.studentId === student.id).slice(0, 10);
     const status = llmStatus();
     // Families who told the school they prefer Hindi (or a regional
-    // language) start in Hindi; the app's toggle overrides per session.
+    // language) start with Hindi + English together; the app's toggle
+    // overrides per session.
     const hh = loadSis().households.find((h) => h.id === householdId);
-    const defaultLanguage = householdLanguage(hh ?? {}).language === "en" ? "en" : "hi";
+    const defaultLanguage = householdLanguage(hh ?? {}).language === "en" ? "en" : "both";
     return apiOk({
       configured: status.tutorEngine !== "none",
       engine: status.tutorEngine,

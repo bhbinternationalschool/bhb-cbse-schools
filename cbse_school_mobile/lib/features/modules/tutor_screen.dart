@@ -87,7 +87,8 @@ class _TutorScreenState extends State<TutorScreen> {
   String? _error;
   late String _mode = widget.initialMode;
 
-  /// "hi" or "en"; starts from the family's preference on record.
+  /// "hi", "both" (Hindi then English) or "en"; starts from the family's
+  /// preference on record.
   String _language = "en";
   final _messages = <_Msg>[];
   final _input = TextEditingController();
@@ -387,7 +388,7 @@ class _TutorScreenState extends State<TutorScreen> {
                             itemBuilder: (context, i) => _Bubble(
                               msg: _messages[i],
                               busy: _busy && i == _messages.length - 1,
-                              hindi: _language == "hi",
+                              hindi: _language != "en",
                               onVideos: _messages[i].topic.isEmpty
                                   ? null
                                   : () => _showVideos(_messages[i].topic),
@@ -396,7 +397,7 @@ class _TutorScreenState extends State<TutorScreen> {
                   ),
                   _Composer(
                     controller: _input,
-                    hint: _language == "hi"
+                    hint: _language != "en"
                         ? (_hi["${_mode}_prompt"] ?? "शिक्षक से पूछें…")
                         : (_modeInfo?.prompt ?? "Ask the tutor…"),
                     busy: _busy,
@@ -1053,7 +1054,7 @@ class _LanguageToggle extends StatelessWidget {
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
-        children: [seg("hi", "हिं"), seg("en", "EN")],
+        children: [seg("hi", "हिं"), seg("both", "हिं+EN"), seg("en", "EN")],
       ),
     );
   }
@@ -1083,7 +1084,7 @@ class _VideosSheetState extends State<_VideosSheet> {
   TutorVideos? _videos;
   String? _error;
 
-  bool get _hindi => widget.language == "hi";
+  bool get _hindi => widget.language != "en";
 
   @override
   void initState() {

@@ -7,7 +7,7 @@
  */
 import "server-only";
 import { aiCacheGet, aiCacheKey, aiCachePut } from "@/lib/aiCache.server";
-import { videoSearchQuery, type TutorLanguage } from "@/lib/tutorPlans";
+import { prefersHindi, videoSearchQuery, type TutorLanguage } from "@/lib/tutorPlans";
 
 export type TutorVideo = {
   videoId: string;
@@ -33,7 +33,7 @@ export async function searchTutorVideos(opts: {
   classLabel: string;
   language: TutorLanguage;
 }): Promise<TutorVideosResult> {
-  const lang: "hi" | "en" = opts.language === "hi" ? "hi" : "en";
+  const lang: "hi" | "en" = prefersHindi(opts.language) ? "hi" : "en";
   const query = videoSearchQuery(opts.topic, opts.classLabel, lang);
   const searchUrl = searchUrlFor(query);
   const key = (process.env.YOUTUBE_API_KEY || "").trim();

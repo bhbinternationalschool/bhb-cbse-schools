@@ -2572,17 +2572,17 @@ class ApiClient {
     if (res.statusCode != 200) _throwFrom(res);
   }
 
-
   /* ─── AI tutor (parent) ─────────────────────────────────────────── */
 
   /// The tutor's state for one child — a pass is per child, and the
   /// tutor is pinned to that child's class by the school's record.
-  Future<TutorStatus> fetchTutorStatus(String studentId) async =>
-      TutorStatus.fromJson(
-        await _getData(
-          "/api/v1/tutor/status?studentId=${Uri.encodeQueryComponent(studentId)}",
-        ),
-      );
+  Future<TutorStatus> fetchTutorStatus(
+    String studentId,
+  ) async => TutorStatus.fromJson(
+    await _getData(
+      "/api/v1/tutor/status?studentId=${Uri.encodeQueryComponent(studentId)}",
+    ),
+  );
 
   /// Starts buying a pass for one child; the returned checkout URL opens
   /// in the browser and the pass switches on by itself once the bank
@@ -2670,7 +2670,9 @@ class ApiClient {
       // One event per "data:" line; our server never splits an event
       // across lines, so a line splitter is the whole parser.
       await for (final line
-          in res.stream.transform(utf8.decoder).transform(const LineSplitter())) {
+          in res.stream
+              .transform(utf8.decoder)
+              .transform(const LineSplitter())) {
         if (!line.startsWith("data:")) continue;
         final payload = line.substring(5).trim();
         if (payload.isEmpty) continue;
@@ -3273,7 +3275,6 @@ class ApiClient {
   }
 }
 
-
 /* ─── AI tutor models ──────────────────────────────────────────────── */
 
 class TutorTurn {
@@ -3374,8 +3375,18 @@ class TutorAllowance {
     if (d == null) return "";
     final ist = d.toUtc().add(const Duration(hours: 5, minutes: 30));
     const months = [
-      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
     ];
     return "Valid till ${ist.day} ${months[ist.month - 1]}";
   }
@@ -3512,7 +3523,11 @@ class TutorStatus {
 
   factory TutorStatus.fromJson(Map<String, dynamic> j) => TutorStatus(
     configured: j["configured"] == true,
-    defaultLanguage: (j["defaultLanguage"] as String?) == "hi" ? "hi" : "en",
+    defaultLanguage: switch (j["defaultLanguage"]) {
+      "hi" => "hi",
+      "both" => "both",
+      _ => "en",
+    },
     videosAvailable: j["videosAvailable"] == true,
     modes: [
       for (final m in (j["modes"] as List? ?? const []))
@@ -3533,7 +3548,8 @@ class TutorStatus {
   );
 
   final bool configured;
-  /// "hi" or "en" — from the family's language preference on record.
+
+  /// "hi", "both" or "en" — from the family's language preference on record.
   final String defaultLanguage;
   final bool videosAvailable;
   final List<TutorModeInfo> modes;

@@ -86,11 +86,21 @@ export const TUTOR_MODES: readonly TutorModeInfo[] = [
   },
 ];
 
-/** The language replies are written in. "auto" follows the parent's message. */
-export type TutorLanguage = "auto" | "hi" | "en";
+/**
+ * The language replies are written in. "auto" follows the parent's
+ * message; "both" answers in Hindi and then repeats the same in English,
+ * for a parent who reads Hindi but wants the English the child meets
+ * at school alongside.
+ */
+export type TutorLanguage = "auto" | "hi" | "en" | "both";
 
 export function parseTutorLanguage(v: unknown): TutorLanguage {
-  return v === "hi" || v === "en" ? v : "auto";
+  return v === "hi" || v === "en" || v === "both" ? v : "auto";
+}
+
+/** Whether videos and UI copy for this setting should be Hindi. */
+export function prefersHindi(language: TutorLanguage): boolean {
+  return language === "hi" || language === "both";
 }
 
 /**
@@ -103,7 +113,11 @@ export function videoSearchQuery(topic: string, classLabel: string, language: Tu
   const t = topic.replace(/\s+/g, " ").trim().slice(0, 80);
   const cls = classLabel.replace(/\s+[A-Z]$/, "").trim(); // "II A" → "II"
   const level = cls ? ` class ${cls}` : "";
-  return language === "hi" ? `${t}${level} हिंदी में समझाइए` : `${t}${level} explained for kids`;
+  // "CBSE NCERT" steers the search to the board's syllabus and away from
+  // state-board channels that cover the same topic a class earlier or later.
+  return prefersHindi(language)
+    ? `${t}${level} CBSE NCERT हिंदी में समझाइए`
+    : `${t}${level} CBSE NCERT explained for kids`;
 }
 
 export function tutorMode(code: string | undefined | null): TutorModeInfo {
@@ -327,10 +341,13 @@ export function buildTutorSystemPrompt(
       ? "Reply in simple Hindi written in Devanagari, the way a patient teacher speaks to a parent who does not read English. Keep English subject words (like 'fraction') only where the school's textbook uses them, and explain them in Hindi."
       : language === "en"
         ? "Reply in simple English, short sentences, no jargon."
-        : "Match the parent's language (Hindi, English or Hinglish).";
+        : language === "both"
+          ? "Reply in TWO parts. First the full answer in simple Hindi (Devanagari) under the heading 'हिंदी'. Then the SAME answer in simple English under the heading 'English' — a faithful translation, not a shorter summary, so the parent can match the two line by line. If the parent wrote in Hindi, the English part also serves as the translation of what they asked."
+          : "Match the parent's language (Hindi, English or Hinglish).";
   const common = [
     `You are a tutor for families of ${schoolName}, an Indian school following the CBSE pattern.`,
     `${languageRule} Pitch everything at the child's class level.`,
+    "Curriculum: follow the CBSE syllabus and NCERT textbooks for the class. Do not use state-board (UP Board or any other state) syllabus, textbooks, chapter names or methods; if a topic sits in a different class under a state board, go by where CBSE/NCERT places it.",
     `You are set up for ${child}, who is in ${cls}. Help ONLY with what a ${cls} child studies. Level guide: ${classLevelGuide(ctx.className || "")}`,
     `If a question is clearly above or below that level, or is another child's work, do not answer it — say in one or two lines that this tutor is set for ${child}'s class (${cls}), and that the parent can open the tutor for the other child, who needs their own pass. Never stretch an answer up to a higher class.`,
     "Schoolwork only: if the question is not about the child's learning, politely redirect.",
