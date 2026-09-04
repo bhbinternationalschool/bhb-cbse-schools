@@ -159,7 +159,7 @@ export type VillageMarketRow = {
     blockName: string;
     districtName: string;
     matchScore: number;
-    settlementType: "village" | "town";
+    settlementType: "village" | "town" | "ward";
     baseline: {
       year: number;
       popTotal: number;
@@ -251,15 +251,21 @@ export type LeadAttribution = "exact" | "ambiguous";
  */
 export type VillageQueryMode = "radius" | "block";
 
-/** Villages, census towns, or both. */
-export type SettlementFilter = "all" | "village" | "town";
+/** Villages, census towns, city wards, or everything. */
+export type SettlementFilter = "all" | "village" | "town" | "ward";
 
-/** One CD block's whole market — the dashboard's entry point. */
+/**
+ * One block's whole market — the dashboard's entry point. A "block" is a
+ * rural CD block (Harhua, Pindra …) or an urban body treated the same way:
+ * "Varanasi City" is a block whose settlements are its 90 census wards.
+ */
 export type BlockMarketRow = {
   blockName: string;
   settlements: number;
   villages: number;
   towns: number;
+  /** City wards inside this block; > 0 marks an urban body. */
+  wards: number;
   pop2011: number;
   projectedPop: number;
   projectedChildPop: number;
@@ -363,7 +369,7 @@ export type VillageAliasSuggestion = {
   villageId: string;
   villageName: string;
   blockName: string;
-  settlementType: "village" | "town";
+  settlementType: "village" | "town" | "ward";
   childPool: number;
   /** Trigram similarity, 0-1. Shown so a weak suggestion looks weak. */
   score: number;
@@ -373,6 +379,19 @@ export type VillageAliasSuggestion = {
    * right answer. Never an automatic match — skeletons collide on short names.
    */
   skeletonMatch?: boolean;
+  /**
+   * Present when the spelling matched the official 2022 Nagar Nigam locality
+   * directory: this is a Varanasi City mohalla. The suggestion then points at
+   * the city's unsized holding settlement — never at a census ward, because
+   * the 2022 map has no crosswalk to the census-2011 wards that carry the
+   * population figures. wardNo is null when the same locality name exists in
+   * several wards ("Teliyana" is in four) — claiming one would be a guess.
+   */
+  cityWard?: {
+    wardNo: number | null;
+    wardName: string;
+    matchedLocality: string;
+  };
 };
 
 /** An unresolved spelling awaiting a decision. */
@@ -426,6 +445,32 @@ export function leadsPlacedBy(aliases: VillageAliasRow[]): number {
     .filter((a) => a.status === "confirmed")
     .reduce((sum, a) => sum + (a.leadCountAtConfirm || 0), 0);
 }
+
+/* ─── City ward directory (2022 delimitation) ──────────────── */
+
+/**
+ * One Nagar Nigam ward from the official 2022 delimitation, with the
+ * mohallas/colonies its gazette extent names. A reference for planning and
+ * for reading a locality — NOT joined to the census-2011 wards that carry
+ * the population figures, because no official crosswalk exists.
+ */
+export type CityWardDirectoryWard = {
+  wardNo: number;
+  wardName: string;
+  wardNameHi: string;
+  localities: string[];
+};
+
+export type CityWardDirectoryResponse = {
+  ok: true;
+  wards: CityWardDirectoryWard[];
+  totalLocalities: number;
+  source: string;
+};
+
+export type CityWardDirectoryResult =
+  | CityWardDirectoryResponse
+  | { ok: false; error: string };
 
 /* ─── Ad-targeting export ──────────────────────────────────── */
 
@@ -656,6 +701,11 @@ export function formatIndianNumber(n: number | null | undefined): string {
 export function formatPct(pct: number | null | undefined): string {
   if (pct === null || pct === undefined || !Number.isFinite(pct)) return "—";
   return `${pct.toFixed(1)}%`;
+}
+
+/** Coerce a stored settlement_type to the union, defaulting to village. */
+export function settlementTypeOf(raw: string | null | undefined): "village" | "town" | "ward" {
+  return raw === "town" || raw === "ward" ? raw : "village";
 }
 
 /** Coerce PostgREST numerics (which arrive as strings) to a number. */

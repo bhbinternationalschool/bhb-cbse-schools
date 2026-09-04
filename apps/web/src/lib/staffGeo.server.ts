@@ -165,6 +165,15 @@ export async function runStaffGeoTick(opts?: { now?: Date; dryRun?: boolean }): 
   const empty = { ok: true, tracking: false, date, evaluated: 0, incidents: [], alertsSent: 0, alertErrors: [], board: [] as StaffGeoBoardRow[] };
   if (!ctx) return { ...empty, ok: false };
 
+  // Bail before any expensive work when we are not tracking — the feature is
+  // off, it is a non-working day, or we are outside the window. This used to
+  // fall through to the mirror hydration and the staff_geo_last query below
+  // and only check `tracking` afterwards, so a disabled geo-fence still paid
+  // for a multi-MB hydration on every one of the 288 daily ticks.
+  // A dry run is exempt: it exists to preview evaluation, including when the
+  // window is closed.
+  if (!opts?.dryRun && !inTrackingWindow(st.settings, now)) return empty;
+
   await ensureSchoolMirrorHydrated();
   const masters = (getSchoolMirrorSync().masters as MastersState | null) || loadMasters();
   const staff = (masters.staff ?? []).filter((s) => s.status === "active");

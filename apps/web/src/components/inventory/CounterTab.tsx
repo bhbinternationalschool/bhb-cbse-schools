@@ -15,6 +15,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { RefreshCw, Search, Trash2 } from "lucide-react";
+import { useAccountsDesk } from "@/lib/useAccountsDesk";
+import {
+  buildPaymentChannelGroups,
+  channelsForPaymentMode,
+  decodePaymentChannel,
+  encodePaymentChannel,
+  paymentModeForTender,
+} from "@/lib/paymentChannels";
 import { Button } from "@/components/ui/button";
 import {
   ErpTable,
@@ -41,6 +49,10 @@ import {
   useSaver,
 } from "@/lib/inventory/client";
 import {
+  printStoreReceipt,
+  StoreReceiptDual,
+} from "@/components/inventory/StoreReceiptSheet";
+import {
   formatPaise,
   inputToPaise,
   marginPct,
@@ -64,6 +76,8 @@ type TenderRow = {
   mode: InvTenderMode;
   amountInput: string;
   reference: string;
+  /** Which bank account receives it. Empty for cash. */
+  bankAccountId?: string;
   /** Set once the clerk edits the amount, so auto-defaulting stops. */
   touched?: boolean;
 };
@@ -78,19 +92,53 @@ type CartLine = {
   qty: number;
   unitPricePaise: number;
   maxDiscountPct: number;
+  /**
+   * Always the value sent to the server — the cap lives on the price list as
+   * a percentage, so a flat ₹ discount travels as its exact equivalent
+   * percentage and the same cap holds either way.
+   */
   discountPct: number;
+  /** How the clerk is typing the discount: as a % or as flat rupees. */
+  discMode: "pct" | "flat";
+  /** The flat ₹ amount as typed, kept so a qty change can re-derive the %. */
+  flatInput: string;
   gstRate: number;
   costPaise: number;
 };
+
+/** The most a flat discount can be: exactly what the percentage cap allows. */
+function flatCapPaise(l: { qty: number; unitPricePaise: number; maxDiscountPct: number }) {
+  return Math.floor((l.qty * l.unitPricePaise * l.maxDiscountPct) / 100);
+}
+
+/**
+ * Re-derive discountPct from what was typed. In flat mode the % is the exact
+ * equivalent of the rupees — clamped to the cap when within it, and left OVER
+ * the cap when not, so the same "above the allowed" refusal fires either way.
+ */
+function withDisc(l: CartLine): CartLine {
+  if (l.discMode !== "flat") return l;
+  const gross = l.qty * l.unitPricePaise;
+  const flat = inputToPaise(l.flatInput);
+  if (gross <= 0 || flat <= 0) return { ...l, discountPct: 0 };
+  const pct = (flat * 100) / gross;
+  return {
+    ...l,
+    discountPct:
+      flat <= flatCapPaise(l) ? Math.min(pct, l.maxDiscountPct) : pct,
+  };
+}
 
 const TENDERS: InvTenderMode[] = ["cash", "upi", "card", "cheque", "bank"];
 
 export function CounterTab({
   boot,
   classes,
+  sections,
 }: {
   boot: InvBootstrap;
   classes: { id: string; label: string }[];
+  sections: { id: string; classId: string; label: string }[];
 }) {
   const [section, setSection] = useState<Section>("sell");
   const summary = useAsync(() => invApi.counterSummary(), []);
@@ -151,6 +199,7 @@ export function CounterTab({
         <SellSection
           boot={boot}
           classes={classes}
+          sections={sections}
           onSold={() => {
             summary.reload();
             setSection("sales");
@@ -158,10 +207,15 @@ export function CounterTab({
         />
       ) : null}
       {section === "sales" ? (
-        <SalesSection classes={classes} onChanged={summary.reload} />
+        <SalesSection classes={classes} sections={sections} onChanged={summary.reload} />
       ) : null}
       {section === "dues" ? (
-        <SalesSection classes={classes} onlyUnpaid onChanged={summary.reload} />
+        <SalesSection
+          classes={classes}
+          sections={sections}
+          onlyUnpaid
+          onChanged={summary.reload}
+        />
       ) : null}
     </div>
   );
@@ -172,13 +226,16 @@ export function CounterTab({
 function SellSection({
   boot,
   classes,
+  sections,
   onSold,
 }: {
   boot: InvBootstrap;
   classes: { id: string; label: string }[];
+  sections: { id: string; classId: string; label: string }[];
   onSold: () => void;
 }) {
   const saver = useSaver();
+  const accountsState = useAccountsDesk();
 
   const [buyerKind, setBuyerKind] = useState<InvBuyerKind>("student");
   const [student, setStudent] = useState<InvBuyerStudent | null>(null);
@@ -188,12 +245,17 @@ function SellSection({
 
   const [buyerSearch, setBuyerSearch] = useState("");
   const debouncedBuyer = useDebounced(buyerSearch, 300);
+  // Browsing by class/section lists that roster with no typing at all — the
+  // clerk serving a queue of one class should not have to spell each name.
+  const [browseClass, setBrowseClass] = useState("");
+  const [browseSection, setBrowseSection] = useState("");
   const buyers = useAsync(
     () =>
-      buyerKind === "student" && debouncedBuyer.trim().length >= 2
-        ? invApi.findStudents(debouncedBuyer)
+      buyerKind === "student" &&
+      (debouncedBuyer.trim().length >= 2 || browseClass)
+        ? invApi.findStudents(debouncedBuyer, browseClass, browseSection)
         : Promise.resolve([] as InvBuyerStudent[]),
-    [debouncedBuyer, buyerKind],
+    [debouncedBuyer, buyerKind, browseClass, browseSection],
   );
 
   const [locationId, setLocationId] = useState(
@@ -225,6 +287,12 @@ function SellSection({
   const [alreadyBought, setAlreadyBought] = useState<
     { itemId: string; itemName: string; totalQty: number; lastSaleDate: string; lastSaleNo: string }[]
   >([]);
+  /**
+   * This student's sales THIS session, shown under the buyer the moment they
+   * are picked — the clerk sees what the child already took (and can open the
+   * receipt) before ringing anything up, instead of finding out afterwards.
+   */
+  const [priorSales, setPriorSales] = useState<InvSale[]>([]);
 
   // Who else is in this family. Fetched alongside the purchase history so the
   // clerk can serve all of them without searching for each child by name.
@@ -248,6 +316,26 @@ function SellSection({
       live = false;
     };
   }, [buyerKind, student?.id, student?.householdId]);
+
+  useEffect(() => {
+    const id = buyerKind === "student" ? student?.id : "";
+    if (!id) {
+      setPriorSales([]);
+      return;
+    }
+    let live = true;
+    void invApi
+      .listSales({ studentId: id, status: "all", pageSize: 50 })
+      .then((page) => {
+        if (live) setPriorSales(page.rows.filter((s) => s.status !== "void"));
+      })
+      .catch(() => {
+        if (live) setPriorSales([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, [buyerKind, student?.id]);
 
   useEffect(() => {
     const id = buyerKind === "student" ? student?.id : "";
@@ -307,6 +395,13 @@ function SellSection({
   );
   const [kitId, setKitId] = useState("");
   const [note, setNote] = useState("");
+  const [manualReceiptNo, setManualReceiptNo] = useState("");
+  const [saleDate, setSaleDate] = useState(() =>
+    new Date().toISOString().slice(0, 10),
+  );
+
+  /** The just-posted sale(s), fetched back in full for the printable receipt. */
+  const [receiptSales, setReceiptSales] = useState<InvSale[] | null>(null);
 
   /**
    * One row per way the money arrived. A parent paying ₹800 cash and ₹1,200
@@ -340,6 +435,8 @@ function SellSection({
       unitPricePaise: item.salePaise,
       maxDiscountPct: item.maxDiscountPct,
       discountPct: 0,
+      discMode: "pct",
+      flatInput: "",
       gstRate: item.gstRate,
       costPaise: item.avgCostPaise,
     };
@@ -348,6 +445,22 @@ function SellSection({
   function addItem(itemId: string) {
     const item = itemsById.get(itemId);
     if (!item) return;
+    // Already taken this session? Ask before it goes in the cart — the clerk
+    // decides with the earlier receipt in front of them, rather than
+    // discovering the repeat after the money is taken.
+    const prior = alreadyBought.find((p) => p.itemId === itemId);
+    const inCart = cart.some((l) => l.itemId === itemId);
+    if (prior && !inCart) {
+      const ok = window.confirm(
+        `${student?.fullName ?? "This student"} already took ${prior.itemName}` +
+          ` × ${prior.totalQty} this session` +
+          (prior.lastSaleNo
+            ? ` (last on ${prior.lastSaleDate}, receipt ${prior.lastSaleNo})`
+            : "") +
+          `.\n\nSell it again — a replacement or an extra copy?`,
+      );
+      if (!ok) return;
+    }
     setCart((c) =>
       c.some((l) => l.itemId === itemId)
         ? c.map((l) => (l.itemId === itemId ? { ...l, qty: l.qty + 1 } : l))
@@ -367,6 +480,33 @@ function SellSection({
         const at = next.findIndex((l) => l.itemId === kl.itemId);
         if (at >= 0) next[at] = { ...next[at], qty: next[at].qty + kl.qty };
         else next.push(toLine(item, kl.qty));
+      }
+      return next;
+    });
+  }
+
+  /**
+   * Give every child their class kit in one action — only carts that are
+   * still empty are filled, so a second click cannot double anything.
+   */
+  function loadFamilyKits() {
+    const all = kits.data ?? [];
+    setCarts((prev) => {
+      const next = { ...prev };
+      for (const child of siblings) {
+        if ((next[child.id] ?? []).length > 0) continue;
+        const kit = all.find((k) => k.classIds.includes(child.classId));
+        if (!kit) continue;
+        const lines: CartLine[] = [];
+        for (const kl of kit.items) {
+          if (kl.isOptional) continue;
+          const item = itemsById.get(kl.itemId);
+          if (!item) continue;
+          const at = lines.findIndex((l) => l.itemId === kl.itemId);
+          if (at >= 0) lines[at] = { ...lines[at], qty: lines[at].qty + kl.qty };
+          else lines.push(toLine(item, kl.qty));
+        }
+        if (lines.length > 0) next[child.id] = lines;
       }
       return next;
     });
@@ -498,7 +638,11 @@ function SellSection({
     setWalkinPhone("");
     setStaffName("");
     setBuyerSearch("");
+    setBrowseClass("");
+    setBrowseSection("");
     setNote("");
+    setManualReceiptNo("");
+    setSaleDate(new Date().toISOString().slice(0, 10));
     setTenders([
       { id: newTenderId(), mode: "cash", amountInput: "", reference: "" },
     ]);
@@ -513,7 +657,7 @@ function SellSection({
     const res = await saver.run(() =>
       invApi.postHouseholdSale({
         sales: familyChildrenWithItems.map((child) => ({
-          sale_date: new Date().toISOString().slice(0, 10),
+          sale_date: saleDate,
           buyer_kind: "student",
           student_id: child.id,
           buyer_name: child.fullName,
@@ -539,7 +683,10 @@ function SellSection({
                 amountPaise: inputToPaise(t.amountInput),
                 mode: t.mode,
                 reference: t.reference.trim(),
+                bankAccountId: t.bankAccountId ?? "",
+                paidOn: saleDate,
               })),
+        manualReceiptNo: manualReceiptNo.trim() || undefined,
       }),
     );
 
@@ -554,7 +701,18 @@ function SellSection({
         }`,
       );
       reset();
-      onSold();
+      const fetched = (
+        await Promise.all(
+          res.sales.map((x) =>
+            invApi
+              .listSales({ saleId: x.saleId })
+              .then((r) => r.rows)
+              .catch(() => [] as InvSale[]),
+          ),
+        )
+      ).flat();
+      if (fetched.length > 0) setReceiptSales(fetched);
+      else onSold();
     }
   }
 
@@ -582,6 +740,8 @@ function SellSection({
         locationId,
         priceListId,
         kitId: kitId || undefined,
+        saleDate,
+        manualReceiptNo: manualReceiptNo.trim() || undefined,
         note,
         lines: cart.map((l) => ({
           itemId: l.itemId,
@@ -598,6 +758,7 @@ function SellSection({
                 amountPaise: inputToPaise(t.amountInput),
                 mode: t.mode,
                 reference: t.reference.trim(),
+                bankAccountId: t.bankAccountId ?? "",
               })),
       }),
     );
@@ -609,7 +770,12 @@ function SellSection({
           : `${res.saleNo} — paid in full, ${formatPaise(res.totalPaise)}`,
       );
       reset();
-      onSold();
+      const fetched = await invApi
+        .listSales({ saleId: res.saleId })
+        .then((r) => r.rows)
+        .catch(() => [] as InvSale[]);
+      if (fetched.length > 0) setReceiptSales(fetched);
+      else onSold();
     }
   }
 
@@ -617,6 +783,20 @@ function SellSection({
     const m = new Map(classes.map((c) => [c.id, c.label]));
     return (id: string) => m.get(id) ?? id;
   }, [classes]);
+
+  const sectionLabel = useMemo(() => {
+    const m = new Map(sections.map((x) => [x.id, x.label]));
+    return (id: string) => (id ? (m.get(id) ?? "") : "");
+  }, [sections]);
+
+  const classSectionOf = useCallback(
+    (classId: string, sectionId: string) => {
+      const cls = classLabel(classId);
+      const sec = sectionLabel(sectionId);
+      return sec ? `${cls}-${sec}` : cls;
+    },
+    [classLabel, sectionLabel],
+  );
 
   const unpricedInCart = cart.filter((l) => l.unitPricePaise <= 0);
 
@@ -666,11 +846,20 @@ function SellSection({
             student ? (
               <div className="flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2">
                 <div>
-                  <div className="font-medium">{student.fullName}</div>
+                  <div className="font-medium">
+                    {student.fullName}
+                    {student.fatherName ? (
+                      <span className="font-normal text-muted-foreground">
+                        {" "}
+                        · {student.fatherName}
+                      </span>
+                    ) : null}
+                  </div>
                   <div className="text-xs text-muted-foreground">
-                    {classLabel(student.classId)}
+                    {classSectionOf(student.classId, student.sectionId)}
                     {student.rollNo ? ` · Roll ${student.rollNo}` : ""}
                     {student.admissionNo ? ` · Adm ${student.admissionNo}` : ""}
+                    {student.phone ? ` · ${student.phone}` : ""}
                   </div>
                 </div>
                 <Button variant="ghost" size="xs" onClick={() => setStudent(null)}>
@@ -679,16 +868,42 @@ function SellSection({
               </div>
             ) : (
               <div className="space-y-1.5">
-                <div className="relative">
-                  <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-                  <input
-                    className={`${FIELD_CLASS} w-full pl-8`}
-                    placeholder="Search by name, admission no., roll or parent's phone"
-                    value={buyerSearch}
-                    onChange={(e) => setBuyerSearch(e.target.value)}
+                <div className="flex flex-wrap items-end gap-2">
+                  <div className="relative min-w-[200px] flex-1">
+                    <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+                    <input
+                      className={`${FIELD_CLASS} w-full pl-8`}
+                      placeholder="Search by name, admission no., roll or parent's phone"
+                      value={buyerSearch}
+                      onChange={(e) => setBuyerSearch(e.target.value)}
+                    />
+                  </div>
+                  <SelectField
+                    label=""
+                    className="w-[130px]"
+                    value={browseClass}
+                    placeholder="Any class"
+                    options={classes.map((c) => ({ value: c.id, label: c.label }))}
+                    onChange={(v) => {
+                      setBrowseClass(v);
+                      setBrowseSection("");
+                    }}
                   />
+                  {browseClass ? (
+                    <SelectField
+                      label=""
+                      className="w-[110px]"
+                      value={browseSection}
+                      placeholder="All sections"
+                      options={sections
+                        .filter((x) => x.classId === browseClass)
+                        .map((x) => ({ value: x.id, label: x.label }))}
+                      onChange={setBrowseSection}
+                    />
+                  ) : null}
                 </div>
-                {buyers.loading && debouncedBuyer.trim().length >= 2 ? (
+                {buyers.loading &&
+                (debouncedBuyer.trim().length >= 2 || browseClass) ? (
                   <p className="px-1 text-xs text-muted-foreground">Searching…</p>
                 ) : null}
                 {(buyers.data ?? []).length > 0 ? (
@@ -705,7 +920,8 @@ function SellSection({
                         >
                           <div className="font-medium">{s.fullName}</div>
                           <div className="text-xs text-muted-foreground">
-                            {classLabel(s.classId)}
+                            {classSectionOf(s.classId, s.sectionId)}
+                            {s.rollNo ? ` · Roll ${s.rollNo}` : ""}
                             {s.admissionNo ? ` · Adm ${s.admissionNo}` : ""}
                             {s.fatherName ? ` · ${s.fatherName}` : ""}
                           </div>
@@ -713,7 +929,8 @@ function SellSection({
                       </li>
                     ))}
                   </ul>
-                ) : debouncedBuyer.trim().length >= 2 && !buyers.loading ? (
+                ) : (debouncedBuyer.trim().length >= 2 || browseClass) &&
+                  !buyers.loading ? (
                   <p className="px-1 text-xs text-muted-foreground">
                     No student matches that.
                   </p>
@@ -738,6 +955,53 @@ function SellSection({
               onChange={setStaffName}
             />
           )}
+
+          {/* What this child already took this session — with their receipts */}
+          {buyerKind === "student" && student && priorSales.length > 0 ? (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-2.5">
+              <p className="text-xs font-semibold">
+                {student.fullName.split(" ")[0]} already bought{" "}
+                {priorSales.length} time{priorSales.length === 1 ? "" : "s"} this
+                session
+              </p>
+              <ul className="mt-1.5 space-y-1">
+                {priorSales.slice(0, 6).map((s) => (
+                  <li
+                    key={s.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-background/70 px-2 py-1.5 text-xs"
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="font-semibold">{s.saleNo}</span>
+                      <span className="text-muted-foreground">
+                        {" "}
+                        · {s.saleDate} ·{" "}
+                        {s.lines
+                          .map((l) => `${l.itemName}${l.qty > 1 ? ` ×${l.qty}` : ""}`)
+                          .join(", ")}
+                      </span>
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <span className="font-semibold tabular-nums">
+                        {formatPaise(s.totalPaise)}
+                      </span>
+                      {s.balancePaise > 0 ? (
+                        <span className="rounded bg-amber-500/20 px-1.5 py-0.5 font-semibold text-amber-700 dark:text-amber-400">
+                          {formatPaise(s.balancePaise)} due
+                        </span>
+                      ) : null}
+                      <Button
+                        variant="outline"
+                        size="xs"
+                        onClick={() => setReceiptSales([s])}
+                      >
+                        Receipt
+                      </Button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </section>
 
         {/* Kit suggestion */}
@@ -845,8 +1109,7 @@ function SellSection({
                           {child.fullName}
                           {child.classId ? (
                             <span className="ml-1 opacity-70">
-                              {classLabel(child.classId)}
-                              {child.sectionId ? `-${child.sectionId}` : ""}
+                              {classSectionOf(child.classId, child.sectionId)}
                             </span>
                           ) : null}
                           {lines > 0 ? (
@@ -858,11 +1121,22 @@ function SellSection({
                       );
                     })}
                   </div>
-                  <p className="text-[11px] text-muted-foreground">
-                    Each child gets their own receipt and their own balance —
-                    only the payment is shared. Nothing is posted until every
-                    child&rsquo;s books go through together.
-                  </p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] text-muted-foreground">
+                      Each child gets their own receipt and their own balance —
+                      only the payment is shared. Nothing is posted until every
+                      child&rsquo;s books go through together.
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="xs"
+                      className="shrink-0"
+                      onClick={loadFamilyKits}
+                      disabled={kits.loading}
+                    >
+                      Give each child their class kit
+                    </Button>
+                  </div>
                 </>
               ) : null}
             </div>
@@ -884,8 +1158,11 @@ function SellSection({
                   gstRate: l.gstRate,
                 });
                 const over = l.discountPct > l.maxDiscountPct;
+                const capFlat = flatCapPaise(l);
                 const patch = (p: Partial<CartLine>) =>
-                  setCart((c) => c.map((x, i) => (i === idx ? { ...x, ...p } : x)));
+                  setCart((c) =>
+                    c.map((x, i) => (i === idx ? withDisc({ ...x, ...p }) : x)),
+                  );
                 return (
                   <div key={l.itemId} className="rounded-lg border p-2">
                     <div className="flex items-start justify-between gap-2">
@@ -894,7 +1171,7 @@ function SellSection({
                         <div className="text-[11px] text-muted-foreground">
                           {l.sku} · {formatPaise(l.unitPricePaise)} each
                           {l.maxDiscountPct
-                            ? ` · up to ${l.maxDiscountPct}% off`
+                            ? ` · up to ${l.maxDiscountPct}% (${formatPaise(capFlat)}) off`
                             : " · no discount allowed"}
                         </div>
                       </div>
@@ -914,13 +1191,65 @@ function SellSection({
                         value={String(l.qty)}
                         onChange={(v) => patch({ qty: Number(v) || 0 })}
                       />
-                      <NumberField
-                        label="Discount"
-                        suffix="%"
-                        className="w-24"
-                        value={l.discountPct ? String(l.discountPct) : ""}
-                        onChange={(v) => patch({ discountPct: Number(v) || 0 })}
-                      />
+                      <div className="w-32">
+                        <div className="mb-1 flex items-center gap-1">
+                          <span className="text-[11px] text-muted-foreground">
+                            Discount
+                          </span>
+                          {(["pct", "flat"] as const).map((m) => (
+                            <button
+                              key={m}
+                              type="button"
+                              onClick={() =>
+                                patch(
+                                  m === "flat"
+                                    ? {
+                                        discMode: "flat",
+                                        // Carry the current % over as rupees,
+                                        // so switching modes changes nothing.
+                                        flatInput: l.discountPct
+                                          ? paiseToInput(
+                                              Math.round(
+                                                (l.qty *
+                                                  l.unitPricePaise *
+                                                  l.discountPct) /
+                                                  100,
+                                              ),
+                                            )
+                                          : "",
+                                      }
+                                    : {
+                                        discMode: "pct",
+                                        discountPct:
+                                          Math.round(l.discountPct * 100) / 100,
+                                      },
+                                )
+                              }
+                              className={
+                                l.discMode === m
+                                  ? "rounded bg-foreground px-1.5 py-0.5 text-[10px] font-medium text-background"
+                                  : "rounded border px-1.5 py-0.5 text-[10px] hover:bg-muted"
+                              }
+                            >
+                              {m === "pct" ? "%" : "₹"}
+                            </button>
+                          ))}
+                        </div>
+                        {l.discMode === "flat" ? (
+                          <MoneyField
+                            label=""
+                            value={l.flatInput}
+                            onChange={(v) => patch({ flatInput: v })}
+                          />
+                        ) : (
+                          <NumberField
+                            label=""
+                            suffix="%"
+                            value={l.discountPct ? String(l.discountPct) : ""}
+                            onChange={(v) => patch({ discountPct: Number(v) || 0 })}
+                          />
+                        )}
+                      </div>
                       <div className="flex-1 text-right text-sm">
                         <div className="font-medium tabular-nums">
                           {formatPaise(a.lineTotalPaise + a.taxPaise)}
@@ -934,8 +1263,9 @@ function SellSection({
                     </div>
                     {over ? (
                       <p className="mt-1 text-[11px] text-destructive">
-                        Above the {l.maxDiscountPct}% allowed on this item — this
-                        sale will be refused.
+                        {l.discMode === "flat"
+                          ? `More than the ${formatPaise(capFlat)} (${l.maxDiscountPct}%) allowed on this item — this sale will be refused.`
+                          : `Above the ${l.maxDiscountPct}% allowed on this item — this sale will be refused.`}
                       </p>
                     ) : null}
                   </div>
@@ -1079,6 +1409,59 @@ function SellSection({
                       ) : null}
                     </div>
 
+                    {row.mode !== "cash" ? (
+                      // Which account receives it. Without this the sale knows
+                      // the money came by UPI but not where it landed, so it
+                      // cannot be matched to a bank statement.
+                      (() => {
+                        const groups = channelsForPaymentMode(
+                          paymentModeForTender(row.mode),
+                          accountsState ?? undefined,
+                        );
+                        const options = groups.flatMap((g) => g.options);
+                        if (options.length === 0) {
+                          return (
+                            <p className="text-[11px] leading-snug text-[var(--danger)]">
+                              No bank account accepts{" "}
+                              {tenderLabel(row.mode)} — add one under Accounts →
+                              Masters → Banks, or this money cannot be traced.
+                            </p>
+                          );
+                        }
+                        return (
+                          <label className="block text-xs">
+                            <span className="mb-1 block text-[11px] font-medium text-[var(--muted)]">
+                              Into which account
+                            </span>
+                            <select
+                              className="field w-full"
+                              value={
+                                row.bankAccountId
+                                  ? encodePaymentChannel(
+                                      paymentModeForTender(row.mode),
+                                      row.bankAccountId,
+                                    )
+                                  : options[0]?.value
+                              }
+                              onChange={(e) =>
+                                patch({
+                                  bankAccountId: decodePaymentChannel(
+                                    e.target.value,
+                                  ).bankId,
+                                })
+                              }
+                            >
+                              {options.map((o) => (
+                                <option key={o.value} value={o.value}>
+                                  {o.label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        );
+                      })()
+                    ) : null}
+
                     <MoneyField
                       label={
                         tenders.length > 1
@@ -1170,6 +1553,17 @@ function SellSection({
             </p>
           ) : null}
 
+          <TextField
+            label="Sold on"
+            type="date"
+            value={saleDate}
+            onChange={setSaleDate}
+          />
+          <TextField
+            label="Book receipt no (manual)"
+            value={manualReceiptNo}
+            onChange={setManualReceiptNo}
+          />
           <TextField label="Note" value={note} onChange={setNote} />
 
           <div className="flex gap-2">
@@ -1202,6 +1596,52 @@ function SellSection({
           </div>
         </div>
       </aside>
+
+      {/* The printed proof of the sale — paid, partly paid or on account. */}
+      <InvDrawer
+        open={!!receiptSales}
+        wide
+        title={
+          receiptSales && receiptSales.length > 1
+            ? `${receiptSales.length} receipts`
+            : "Receipt"
+        }
+        subtitle={(receiptSales ?? []).map((x) => x.saleNo).join(" · ")}
+        onClose={() => {
+          setReceiptSales(null);
+          onSold();
+        }}
+        footer={
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setReceiptSales(null);
+                onSold();
+              }}
+            >
+              Close
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => printStoreReceipt("counter-receipt-print")}
+            >
+              Print / save PDF
+            </Button>
+          </>
+        }
+      >
+        <div id="counter-receipt-print" className="store-receipt-sheet space-y-3">
+          {(receiptSales ?? []).map((x) => (
+            <StoreReceiptDual
+              key={x.id}
+              sale={x}
+              classSection={classSectionOf(x.classId, x.sectionId)}
+            />
+          ))}
+        </div>
+      </InvDrawer>
     </div>
   );
 }
@@ -1229,10 +1669,12 @@ function Row({
 
 function SalesSection({
   classes,
+  sections,
   onlyUnpaid,
   onChanged,
 }: {
   classes: { id: string; label: string }[];
+  sections: { id: string; classId: string; label: string }[];
   onlyUnpaid?: boolean;
   onChanged: () => void;
 }) {
@@ -1252,9 +1694,30 @@ function SalesSection({
   const [collect, setCollect] = useState<InvSale | null>(null);
   const [collectInput, setCollectInput] = useState("");
   const [collectMode, setCollectMode] = useState<InvTenderMode>("cash");
+  const [collectOn, setCollectOn] = useState("");
+  /**
+   * Mode AND the account that receives it, as one choice — "upi:<bankId>".
+   *
+   * The store used to record only the mode, so a UPI collection was known to
+   * be UPI but not which of the school's accounts it landed in, and could not
+   * be matched against any statement. Fee Take has asked mode + account since
+   * the payment-channel work; this is the same picker, same encoding.
+   */
+  const [collectChannel, setCollectChannel] = useState("cash");
+  /** UTR / UPI ref / auth no. — required for anything that is not cash. */
+  const [collectRef, setCollectRef] = useState("");
+  const accountsState = useAccountsDesk();
+  const channelGroups = useMemo(
+    () => buildPaymentChannelGroups(accountsState ?? undefined),
+    [accountsState],
+  );
+  const collectNeedsRef = collectChannel !== "cash" && !collectRef.trim();
 
   const [ret, setRet] = useState<InvSale | null>(null);
   const [retReason, setRetReason] = useState("");
+  const [retOn, setRetOn] = useState("");
+  const [retRefundMode, setRetRefundMode] = useState<InvTenderMode>("cash");
+  const [retRefundRef, setRetRefundRef] = useState("");
   const [retSettlement, setRetSettlement] = useState<"reduce_balance" | "refund">(
     "reduce_balance",
   );
@@ -1264,17 +1727,31 @@ function SalesSection({
   const [voidSale, setVoidSale] = useState<InvSale | null>(null);
   const [voidReason, setVoidReason] = useState("");
 
+  const [receiptOf, setReceiptOf] = useState<InvSale | null>(null);
+
   const classLabel = useMemo(() => {
     const m = new Map(classes.map((c) => [c.id, c.label]));
     return (id: string) => m.get(id) ?? id;
   }, [classes]);
+
+  const sectionLabel = useMemo(() => {
+    const m = new Map(sections.map((x) => [x.id, x.label]));
+    return (id: string) => (id ? (m.get(id) ?? "") : "");
+  }, [sections]);
 
   async function submitCollect() {
     if (!collect) return;
     const amount = inputToPaise(collectInput);
     if (amount <= 0) return;
     const res = await saver.run(() =>
-      invApi.collectOnSale({ saleId: collect.id, amountPaise: amount, mode: collectMode }),
+      invApi.collectOnSale({
+        saleId: collect.id,
+        amountPaise: amount,
+        mode: decodePaymentChannel(collectChannel).mode as InvTenderMode,
+        bankAccountId: decodePaymentChannel(collectChannel).bankId,
+        reference: collectRef.trim(),
+        paidOn: collectOn || undefined,
+      }),
     );
     if (res) {
       saver.setNotice(
@@ -1288,8 +1765,19 @@ function SalesSection({
     }
   }
 
+  /**
+   * Money going back out needs the same trail as money coming in. A refund by
+   * UPI or cheque with no reference cannot be matched to the bank later, and
+   * an unexplained payment OUT is the harder one to answer for.
+   */
+  const retNeedsRef =
+    retSettlement === "refund" &&
+    retRefundMode !== "cash" &&
+    retRefundRef.trim() === "";
+
   async function submitReturn() {
     if (!ret || !retReason.trim()) return;
+    if (retNeedsRef) return;
     const lines = ret.lines
       .map((l) => ({ saleLineId: l.id, qty: Number(retQty[l.id]) || 0 }))
       .filter((l) => l.qty > 0);
@@ -1299,7 +1787,11 @@ function SalesSection({
       invApi.postSaleReturn({
         saleId: ret.id,
         reason: retReason.trim(),
+        returnDate: retOn || undefined,
         settlement: retSettlement,
+        refundMode: retSettlement === "refund" ? retRefundMode : "cash",
+        refundReference:
+          retSettlement === "refund" ? retRefundRef.trim() : "",
         restock: retRestock,
         lines,
       }),
@@ -1308,11 +1800,15 @@ function SalesSection({
       saver.setNotice(
         `${res.returnNo} — ${formatPaise(res.totalPaise)} credited` +
           (res.refundedPaise > 0
-            ? `, ${formatPaise(res.refundedPaise)} refunded`
+            ? `, ${formatPaise(res.refundedPaise)} refunded by ${tenderLabel(
+                retRefundMode,
+              )}${res.refundReference ? ` (${res.refundReference})` : ""}`
             : ""),
       );
       setRet(null);
       setRetReason("");
+      setRetRefundMode("cash");
+      setRetRefundRef("");
       setRetQty({});
       sales.reload();
       onChanged();
@@ -1394,7 +1890,11 @@ function SalesSection({
                     <div className="text-sm">{s.buyerName || "—"}</div>
                     <div className="text-[11px] text-muted-foreground">
                       {s.buyerKind === "student"
-                        ? classLabel(s.classId)
+                        ? `${classLabel(s.classId)}${
+                            sectionLabel(s.sectionId)
+                              ? `-${sectionLabel(s.sectionId)}`
+                              : ""
+                          }`
                         : s.buyerKind === "walkin"
                           ? "Walk-in"
                           : "Staff"}
@@ -1434,13 +1934,23 @@ function SalesSection({
                     >
                       {saleStatusLabel(s.status)}
                     </Pill>
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      onClick={() => setReceiptOf(s)}
+                    >
+                      Receipt
+                    </Button>
                     {s.status !== "void" && s.balancePaise > 0 ? (
                       <Button
                         variant="ghost"
                         size="xs"
                         onClick={() => {
                           setCollect(s);
+                          setCollectChannel("cash");
+                          setCollectRef("");
                           setCollectInput(paiseToInput(s.balancePaise));
+                          setCollectOn(new Date().toISOString().slice(0, 10));
                         }}
                       >
                         Collect
@@ -1454,6 +1964,7 @@ function SalesSection({
                           setRet(s);
                           setRetQty({});
                           setRetReason("");
+                          setRetOn(new Date().toISOString().slice(0, 10));
                         }}
                       >
                         Return
@@ -1480,6 +1991,45 @@ function SalesSection({
         </ErpTableShell>
       )}
 
+      {/* Receipt — reprint any sale, current balance and all payments on it. */}
+      <InvDrawer
+        open={!!receiptOf}
+        wide
+        title="Receipt"
+        subtitle={receiptOf ? `${receiptOf.saleNo} · ${receiptOf.buyerName}` : ""}
+        onClose={() => setReceiptOf(null)}
+        footer={
+          <>
+            <Button variant="outline" size="sm" onClick={() => setReceiptOf(null)}>
+              Close
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => printStoreReceipt("sales-receipt-print")}
+            >
+              Print / save PDF
+            </Button>
+          </>
+        }
+      >
+        <div id="sales-receipt-print" className="store-receipt-sheet">
+          {receiptOf ? (
+            <StoreReceiptDual
+              sale={receiptOf}
+              classSection={
+                receiptOf.buyerKind === "student"
+                  ? `${classLabel(receiptOf.classId)}${
+                      sectionLabel(receiptOf.sectionId)
+                        ? `-${sectionLabel(receiptOf.sectionId)}`
+                        : ""
+                    }`
+                  : ""
+              }
+            />
+          ) : null}
+        </div>
+      </InvDrawer>
+
       {/* Collect */}
       <InvDrawer
         open={!!collect}
@@ -1495,8 +2045,16 @@ function SalesSection({
             <Button variant="outline" size="sm" onClick={() => setCollect(null)}>
               Cancel
             </Button>
-            <Button size="sm" onClick={submitCollect} disabled={saver.saving}>
-              {saver.saving ? "Saving…" : "Record"}
+            <Button
+              size="sm"
+              onClick={submitCollect}
+              disabled={saver.saving || collectNeedsRef}
+            >
+              {saver.saving
+                ? "Saving…"
+                : collectNeedsRef
+                  ? "Enter UTR / reference"
+                  : "Record"}
             </Button>
           </>
         }
@@ -1509,13 +2067,47 @@ function SalesSection({
               value={collectInput}
               onChange={setCollectInput}
             />
-            <SelectField
-              label="Taken by"
-              value={collectMode}
-              placeholder="Cash"
-              options={TENDERS.map((t) => ({ value: t, label: tenderLabel(t) }))}
-              onChange={(v) => setCollectMode(v as InvTenderMode)}
+            <TextField
+              label="Received on"
+              type="date"
+              value={collectOn}
+              onChange={setCollectOn}
             />
+            {/* Mode AND destination account together: "UPI" alone cannot be
+                reconciled against a statement. Same picker as Fee Take. */}
+            <label className="block text-xs">
+              <span className="mb-1 block text-[11px] font-medium text-[var(--muted)]">
+                Taken by · which account
+              </span>
+              <select
+                className="field w-full"
+                value={collectChannel}
+                onChange={(e) => setCollectChannel(e.target.value)}
+              >
+                {channelGroups.map((g) => (
+                  <optgroup key={g.modeLabel} label={g.modeLabel}>
+                    {g.options.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+              {channelGroups.length <= 1 ? (
+                <span className="mt-1 block text-[11px] leading-snug text-[var(--danger)]">
+                  No bank account accepts non-cash yet — add one under Accounts
+                  → Masters → Banks, or this money cannot be traced.
+                </span>
+              ) : null}
+            </label>
+            {collectChannel !== "cash" ? (
+              <TextField
+                label="UTR / reference no."
+                value={collectRef}
+                onChange={setCollectRef}
+              />
+            ) : null}
           </div>
         ) : null}
       </InvDrawer>
@@ -1535,7 +2127,7 @@ function SalesSection({
             <Button
               size="sm"
               onClick={submitReturn}
-              disabled={saver.saving || !retReason.trim()}
+              disabled={saver.saving || !retReason.trim() || retNeedsRef}
             >
               {saver.saving ? "Saving…" : "Post return"}
             </Button>
@@ -1545,13 +2137,21 @@ function SalesSection({
         {ret ? (
           <div className="space-y-3">
             <InvAlert error={saver.error} />
-            <TextField
-              label="Reason"
-              required
-              value={retReason}
-              onChange={setRetReason}
-              placeholder="e.g. Wrong size"
-            />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <TextField
+                label="Reason"
+                required
+                value={retReason}
+                onChange={setRetReason}
+                placeholder="e.g. Wrong size"
+              />
+              <TextField
+                label="Returned on"
+                type="date"
+                value={retOn}
+                onChange={setRetOn}
+              />
+            </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <SelectField
                 label="Settle by"
@@ -1574,6 +2174,53 @@ function SalesSection({
                 Put the goods back in stock
               </label>
             </div>
+
+            {/* How the money actually leaves. Recorded because the books post
+                the refund to the account it went out of — cash out of the
+                drawer, UPI out of the bank — and a wrong one leaves the day's
+                cash count short with nothing to explain it. */}
+            {retSettlement === "refund" ? (
+              <div className="space-y-2 rounded-lg border p-3">
+                <p className="text-xs font-medium text-muted-foreground">
+                  How is the money going back?
+                </p>
+                <div className="flex flex-wrap gap-1">
+                  {TENDERS.map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setRetRefundMode(t)}
+                      className={
+                        retRefundMode === t
+                          ? "rounded-md bg-foreground px-2 py-1 text-xs font-medium text-background"
+                          : "rounded-md border px-2 py-1 text-xs hover:bg-muted"
+                      }
+                    >
+                      {tenderLabel(t)}
+                    </button>
+                  ))}
+                </div>
+                {retRefundMode !== "cash" ? (
+                  <>
+                    <TextField
+                      label="Transaction ID"
+                      value={retRefundRef}
+                      onChange={setRetRefundRef}
+                    />
+                    {retNeedsRef ? (
+                      <p className="text-xs text-destructive">
+                        A {tenderLabel(retRefundMode)} refund needs its
+                        transaction ID before it can be paid out.
+                      </p>
+                    ) : null}
+                  </>
+                ) : null}
+                <p className="text-[11px] text-muted-foreground">
+                  Only what they actually paid can come back — anything beyond
+                  that reduces what they still owe instead.
+                </p>
+              </div>
+            ) : null}
 
             <fieldset className="space-y-2 rounded-lg border p-3">
               <legend className="px-1 text-xs font-medium text-muted-foreground">

@@ -1,7 +1,16 @@
 "use client";
 
+/* ratchet-allow: raw_table — printed document: ErpTableShell brings a card shadow, rounded border, hover
+ * tint and theme-aware colours, all of which are wrong on paper — a sheet that
+ * followed dark mode would print white ink on white stock. */
+
 import { type ReportCard } from "@/lib/exams";
-import { TENANT } from "@/lib/types";
+import {
+  schoolAddressLine,
+  schoolPrintName,
+  schoolShortName,
+  schoolStatutoryLine,
+} from "@/lib/schoolIdentity";
 
 export function printReportCard(studentId: string, examTermId: string) {
   const sheet = document.getElementById(
@@ -32,17 +41,19 @@ export function ReportCardSheet({ card }: { card: ReportCard }) {
     >
       <div className="certificate-watermark pointer-events-none absolute inset-0 flex items-center justify-center">
         <span className="select-none text-5xl font-bold uppercase tracking-[0.2em] text-[rgba(32,48,80,0.06)] sm:text-6xl">
-          {TENANT.shortName}
+          {schoolShortName()}
         </span>
       </div>
 
       <div className="certificate-inner relative px-5 py-6 sm:px-8 sm:py-8">
         <header className="border-b-2 border-[var(--brand-gold)] pb-3 text-center">
           <p className="font-brand-name text-sm tracking-[0.12em] text-[var(--brand-deep)] sm:text-base">
-            {TENANT.nameDisplay}
+            {schoolPrintName()}
           </p>
           <p className="mt-0.5 text-[11px] text-[var(--muted)]">
-            {TENANT.schoolAddress} · Aff. No. {TENANT.affiliationNo}
+            {[schoolAddressLine(), schoolStatutoryLine()]
+              .filter(Boolean)
+              .join(" · ")}
           </p>
           <h1 className="mt-3 text-lg font-bold uppercase tracking-wide text-[var(--brand-deep)]">
             Progress report

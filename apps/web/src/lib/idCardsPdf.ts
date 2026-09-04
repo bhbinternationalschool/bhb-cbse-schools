@@ -15,6 +15,7 @@ import { currentAcademicYearCode, type MastersState } from "@/lib/masters";
 import { householdOf, type SisState, type SisStudent } from "@/lib/sis";
 import type { StaffRecord } from "@/lib/foundationMasters";
 import { TENANT } from "@/lib/types";
+import { formatDobLong } from "@/lib/dobFormat";
 import {
   ID_CARD_SECONDARY_PHOTO_IDS,
   ID_CARD_TEXT_FIELD_PRIORITY,
@@ -65,7 +66,7 @@ export function buildStudentIdCardDoc(
       roll_no: student.rollNo || "—",
       admission_no: student.admissionNo || "—",
       blood_group: student.bloodGroup || undefined,
-      dob: student.dob || undefined,
+      dob: student.dob ? formatDobLong(student.dob) : undefined,
       father_name: student.fatherName || undefined,
       mother_name: student.motherName || undefined,
       validity: `AY ${ay}`,

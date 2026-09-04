@@ -4,6 +4,7 @@ import {
   ADDRESS_ONE_LINE,
   CONTACT,
   POSTAL_ADDRESS,
+  RECOGNITION_STATEMENT,
   displayLegalName,
 } from "@/lib/publicOrgProfile";
 
@@ -37,21 +38,34 @@ export default function ContactPage() {
         <h2 className="mt-8 text-lg font-semibold text-slate-900">
           Email and phone
         </h2>
-        <p className="mt-3">
-          Email:{" "}
-          <a className="text-blue-700 underline" href={`mailto:${CONTACT.email}`}>
-            {CONTACT.email}
-          </a>
+        <dl className="mt-3 grid gap-x-8 gap-y-2 sm:grid-cols-[6rem_1fr]">
+          <dt className="text-sm font-medium text-slate-500">Email</dt>
+          <dd>
+            <a
+              className="text-blue-700 underline"
+              href={`mailto:${CONTACT.email}`}
+            >
+              {CONTACT.email}
+            </a>
+          </dd>
           {CONTACT.phone ? (
             <>
-              <br />
-              Phone:{" "}
-              <a className="text-blue-700 underline" href={`tel:${CONTACT.phone}`}>
-                {CONTACT.phone}
-              </a>
+              <dt className="text-sm font-medium text-slate-500">Phone</dt>
+              <dd>
+                <a
+                  className="text-blue-700 underline"
+                  href={`tel:${CONTACT.phone.replace(/\s/g, "")}`}
+                >
+                  {CONTACT.phone}
+                </a>
+                <span className="text-slate-500">
+                  {" "}
+                  · also reachable on WhatsApp
+                </span>
+              </dd>
             </>
           ) : null}
-        </p>
+        </dl>
 
         <h2 className="mt-8 text-lg font-semibold text-slate-900">
           Office hours
@@ -62,14 +76,22 @@ export default function ContactPage() {
           Payment and billing queries
         </h2>
         <p className="mt-3">
-          For a question about a fee charged, a payment that did not reflect,
-          or a refund request, write to{" "}
-          <a className="text-blue-700 underline" href={`mailto:${CONTACT.email}`}>
+          For a question about a fee charged, a payment that did not reflect, or
+          a refund request, write to{" "}
+          <a
+            className="text-blue-700 underline"
+            href={`mailto:${CONTACT.email}`}
+          >
             {CONTACT.email}
           </a>{" "}
           with the student&rsquo;s name, class and admission number, and the
           transaction reference. We respond within three working days.
         </p>
+
+        <h2 className="mt-8 text-lg font-semibold text-slate-900">
+          About the school
+        </h2>
+        <p className="mt-3">{RECOGNITION_STATEMENT}</p>
 
         <h2 className="mt-8 text-lg font-semibold text-slate-900">
           Visiting the campus

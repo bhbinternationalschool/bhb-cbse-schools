@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { startTransition, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { IndianRupee } from "lucide-react";
 import { PaymentChannelSelect } from "@/components/accounts/PaymentChannelSelect";
+import type { AccountsState } from "@/lib/accountsTypes";
+import { canApproveConcession } from "@/lib/rbac";
 import {
   decodeTenderChannel,
   encodeTenderChannel,
@@ -22,7 +24,10 @@ import {
   dayCloseNeedsAttention,
   openFeeDues,
   openChargeVoucherCount,
+  formatManualBookRef,
   isCollectionDateLocked,
+  leafNumber,
+  paperRefOf,
   deliverWhatsAppFeeReceipt,
   previewLastSessionTransfer,
   searchFeeStudents,
@@ -37,7 +42,11 @@ import {
   type TenderMode,
   type VoucherTender,
 } from "@/lib/fees";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import {
+  loadMasters,
+  currentAcademicYearCode,
+  type MastersState,
+} from "@/lib/masters";
 import {
   householdWhatsApp,
   isValidMobile,
@@ -61,17 +70,24 @@ import { FeeAdjustmentsBadge } from "@/components/fees/FeeAdjustmentsPanel";
 import {
   buildPerLineDiscountSlices,
   FEE_ADJUST_AUTO_LIMIT_PAISE,
+  linkAdjustmentsToVoucher,
   postCounterDiscountWaivers,
   type CounterDiscountSlice,
 } from "@/lib/feeAdjustments";
 import { FutureConcessionModal } from "@/components/fees/FutureConcessionModal";
 import {
   applyFutureConcessionsFromCounter,
+  changeStandingDiscount,
+  isRecurringAcademicFeeHead,
+  laterSameHeadDueKeys,
   listFutureConcessionCandidates,
   type FutureConcessionCandidate,
 } from "@/lib/counterConcession";
 import { lazyNamedTabPanel } from "@/components/ui/lazyTabPanel";
-import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
+import {
+  useDemoSession,
+  useSessionReadOnly,
+} from "@/components/shell/SessionContext";
 import {
   buildEnrichedPaymentSharePayload,
   buildPaymentShareUrl,
@@ -80,16 +96,15 @@ import {
   openPaymentLinkCount,
   whatsAppPaymentLinkUrl,
 } from "@/lib/payments";
-import {
-  scheduleClientSchoolMirrorSync,
-} from "@/lib/schoolDataMirror";
+import { attachGatewayCheckout } from "@/lib/paymentGatewayClient";
+import { StoreSellInline } from "@/components/fees/StoreSellInline";
+import { StorePurchasesPanel } from "@/components/fees/StorePurchasesPanel";
+import { scheduleClientSchoolMirrorSync } from "@/lib/schoolDataMirror";
 import {
   buildFeeAgreementDoc,
   downloadFeeAgreementPdf,
 } from "@/lib/feeAgreementPdf";
-import {
-  ModuleTabButton,
-} from "@/components/ui/ModuleTabs";
+import { ModuleTabButton } from "@/components/ui/ModuleTabs";
 import { MODULE_TAB_CONTAINER_CLASS } from "@/components/ui/modern-tab-bar";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ErpPanel, ErpTableShell } from "@/components/ui/erp-roster";
@@ -103,6 +118,48 @@ import { FeeAdjustmentsPanel } from "@/components/fees/FeeAdjustmentsPanel";
 import { FeeReportsPanel } from "@/components/fees/FeeFinancePanels";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { TransportRiderChip } from "@/components/transport/TransportRiderChip";
+import { ReceiptRepairDialog } from "@/components/fees/ReceiptRepairDialog";
+
+/**
+ * The search box owns its keystrokes. Typing re-renders ONLY this input;
+ * the workspace re-renders once per debounce tick instead of per key —
+ * the difference between this feeling like the store counter's search
+ * and feeling stuck.
+ */
+function FeeSearchInput({
+  onDebounced,
+  autoFocus,
+  resetSignal = 0,
+}: {
+  onDebounced: (q: string) => void;
+  autoFocus?: boolean;
+  /**
+   * Bumped by the parent when a student is picked, so the box empties and
+   * the match list collapses. The box owns its own text (that is the whole
+   * point of this component), so the parent cannot clear it directly.
+   */
+  resetSignal?: number;
+}) {
+  const [value, setValue] = useState("");
+  useEffect(() => {
+    if (resetSignal > 0) setValue("");
+  }, [resetSignal]);
+  useEffect(() => {
+    const t = setTimeout(() => onDebounced(value), 200);
+    return () => clearTimeout(t);
+  }, [value, onDebounced]);
+  return (
+    <input
+      className="field"
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      placeholder="Child, father, mother, mobile, adm no, class…"
+      autoComplete="off"
+      autoFocus={autoFocus}
+    />
+  );
+}
+
 const ChargeVouchersPanel = lazyNamedTabPanel(
   () => import("@/components/fees/ChargeVouchersPanel"),
   "ChargeVouchersPanel",
@@ -194,16 +251,35 @@ export function FeeTakeWorkspace() {
   const [tab, setTab] = useState<Tab>("dashboard");
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [sis, setSis] = useState<SisState | null>(null);
-  const [query, setQuery] = useState("");
+  // The search box owns its keystrokes (FeeSearchInput above) — only the
+  // debounced value lives here, so typing never re-renders this whole
+  // workspace. That per-key full re-render is what made Find student feel
+  // slow next to the store counter's search.
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+
+  /**
+   * May the person at this counter make a concession effective?
+   *
+   * Only owner / admin / principal. Anyone else may still tick "also apply
+   * to future months" — the grant is simply recorded pending, and shows on
+   * the parent's next bill only once it has been approved.
+   */
+  const mayApproveConcession = useMemo(
+    () => (session ? canApproveConcession(session, masters) : false),
+    [session, masters],
+  );
   const [classId, setClassId] = useState("");
   const [sectionId, setSectionId] = useState("");
   const [hits, setHits] = useState<StudentSearchHit[]>([]);
+  const [searchResetSignal, setSearchResetSignal] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   /**
-   * Which children of the household are open on the counter. Picking a
-   * student seeds this with just that child; tapping a sibling card adds
-   * them. Only these children's fees are shown and collectable — a child
-   * who is not on the counter can never contribute a rupee to the receipt.
+   * Which children's fee DETAILS are on screen — one at a time by default:
+   * tapping a sibling card switches the visible list to that child. Ticks
+   * are family-wide and SURVIVE the switch: every child's card shows their
+   * ticked total, the collect summary counts them all, and the receipt
+   * lists every line — nothing ticked is ever invisible, just collapsed.
+   * "Open all" widens the view to every child when the office wants it.
    */
   const [activeStudentIds, setActiveStudentIds] = useState<Set<string>>(
     new Set(),
@@ -217,6 +293,46 @@ export function FeeTakeWorkspace() {
     Record<string, string>
   >({});
   const [counterDiscountReason, setCounterDiscountReason] = useState("");
+  /**
+   * Dues whose discount the clerk has chosen to make recurring.
+   *
+   * Starts empty and stays empty unless someone ticks: a discount belongs to
+   * the month in hand until the office says it repeats. The old flow inferred
+   * this from a pre-ticked modal AFTER collect, which is how a single month's
+   * discount became a standing Masters rule nobody chose.
+   */
+  /**
+   * Lines this screen filled in by itself, keyed by the line that caused it.
+   *
+   * Ticking "make recurring" on April copies April's discount onto the later
+   * months of the same head already in the basket — otherwise the clerk sees
+   * May at full price, discounts it by hand, and ends up with two discounts
+   * on one month. Remembering what was auto-filled is what lets unticking
+   * take it back out again without touching a figure the clerk typed.
+   */
+  const [autoFilledBy, setAutoFilledBy] = useState<
+    Record<string, { value: string; keys: string[] }>
+  >({});
+
+  const [recurringDueKeys, setRecurringDueKeys] = useState<Set<string>>(
+    new Set(),
+  );
+  /**
+   * Lines ticked to be DISCOUNTED but not collected today.
+   *
+   * The counter often settles one head while agreeing a reduction on another
+   * the parent is not paying for yet — ₹100 off August transport while only
+   * tuition is taken. Without this a discount could only go on a head being
+   * collected, so the clerk had to either take money they were not given or
+   * leave Fee Take and edit Masters.
+   *
+   * These lines contribute their discount and nothing else: they are out of
+   * the collect total, out of the allocation, and off the receipt.
+   */
+  // Per-line "discount only" was removed with its checkbox: a discount now
+  // always belongs to the line it is typed on. Recording a discount without
+  // collecting is still possible — set the amount to zero and post it.
+
   const [futureConcessionPrompt, setFutureConcessionPrompt] = useState<{
     candidates: FutureConcessionCandidate[];
     selected: Set<string>;
@@ -224,13 +340,66 @@ export function FeeTakeWorkspace() {
   const [tenderLines, setTenderLines] = useState<TenderLine[]>([]);
   const [composer, setComposer] = useState<TenderComposer>(emptyComposer);
   const [collectionDate, setCollectionDate] = useState(todayIso);
+  /**
+   * Accounts desk state, HYDRATED here rather than assumed. The payment-mode
+   * dropdown is built from the bank accounts, and this browser only has them
+   * after a pull from the server — which used to happen only when the
+   * Accounts (or Transport) module was opened first, so a counter machine
+   * that went straight to Fee Take offered nothing but cash.
+   */
+  const [accountsState, setAccountsState] = useState<AccountsState | null>(
+    null,
+  );
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      try {
+        const { ensureAccountsHydrated } =
+          await import("@/lib/accountsPersistence");
+        await ensureAccountsHydrated();
+      } catch {
+        // Offline or first load — fall through to whatever is cached locally.
+      }
+      // Transport dues are billed HERE, on the counter — so the counter pulls
+      // the transport desk itself instead of trusting some other module to
+      // have done it. A changed pull re-ticks the dues so a student already
+      // on screen gains their transport line.
+      try {
+        const { ensureTransportHydrated } =
+          await import("@/lib/transportPersistence");
+        const changed = await ensureTransportHydrated();
+        if (live && changed) refresh();
+      } catch {
+        // Same fallback as accounts.
+      }
+      const { loadAccounts } = await import("@/lib/accountsStore");
+      if (live) setAccountsState(loadAccounts());
+      // ensureAccountsHydrated marks the module hydrated the moment the FIRST
+      // caller enters it, so when the app shell kicked hydration off just
+      // before us, our call returns while that pull is still in flight — and
+      // a single read here would freeze an empty store into the dropdown
+      // (observed live: bank in localStorage at 6s, dropdown stuck on cash).
+      // Re-read on a short ladder until the store shows substance.
+      for (const delay of [1500, 3500, 8000, 15000]) {
+        await new Promise((r) => setTimeout(r, delay));
+        if (!live) return;
+        const next = loadAccounts();
+        if (next.bankAccounts.length > 0 || next.coaAccounts.length > 0) {
+          setAccountsState(next);
+          if (next.bankAccounts.length > 0) break;
+        }
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, []);
   const [schoolReceiptNo, setSchoolReceiptNo] = useState("");
   const [note, setNote] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
+  const [collectError, setCollectError] = useState<string | null>(null);
   const [receipts, setReceipts] = useState<CollectionVoucher[]>([]);
-  const [previewReceiptId, setPreviewReceiptId] = useState<string | null>(
-    null,
-  );
+  const [previewReceiptId, setPreviewReceiptId] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const [mounted, setMounted] = useState(false);
 
@@ -241,7 +410,7 @@ export function FeeTakeWorkspace() {
     setMasters(m);
     setSis(s);
     setHits(
-      searchFeeStudents(query, s, m, f, {
+      searchFeeStudents(debouncedQuery, s, m, f, {
         classId,
         sectionId,
         academicYearCode: ay,
@@ -267,9 +436,8 @@ export function FeeTakeWorkspace() {
       const { ensureSisHydrated } = await import("@/lib/sisPersistence");
       const { ensureFeesHydrated } = await import("@/lib/feesPersistence");
       const { hydrateFeesStore } = await import("@/lib/fees");
-      const { ensurePaymentsHydrated } = await import(
-        "@/lib/paymentsPersistence"
-      );
+      const { ensurePaymentsHydrated } =
+        await import("@/lib/paymentsPersistence");
       const { withHydrationSlot } = await import("@/lib/deskHydrateGuard");
       await Promise.all([
         withHydrationSlot(() => ensureSisHydrated()),
@@ -277,18 +445,16 @@ export function FeeTakeWorkspace() {
         withHydrationSlot(() => ensurePaymentsHydrated()),
       ]);
       await hydrateFeesStore();
-      const { applyCollectionWipeSignalIfNeeded } = await import(
-        "@/lib/feeCollectionWipe"
-      );
+      const { applyCollectionWipeSignalIfNeeded } =
+        await import("@/lib/feeCollectionWipe");
       const wipe = await applyCollectionWipeSignalIfNeeded();
       if (wipe.wiped) {
         flash(
           `Cleared ${wipe.removedVouchers} local receipt(s) — ready for re-import`,
         );
       }
-      const { applyFeeDiscountSeedNow } = await import(
-        "@/lib/feeDiscountImportHydrate"
-      );
+      const { applyFeeDiscountSeedNow } =
+        await import("@/lib/feeDiscountImportHydrate");
       const discount = applyFeeDiscountSeedNow();
       if (discount.applied > 0) {
         flash(
@@ -328,27 +494,42 @@ export function FeeTakeWorkspace() {
     }
   }, []);
 
-  const [debouncedQuery, setDebouncedQuery] = useState(query);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedQuery(query);
-    }, 200);
-    return () => clearTimeout(timer);
-  }, [query]);
+  // The fees blob is a multi-megabyte localStorage parse — doing it PER
+  // KEYSTROKE is what made the search feel hung. Parse once per data tick.
+  const feesForSearch = useMemo(() => {
+    void tick;
+    return loadFees();
+  }, [tick]);
 
   useEffect(() => {
     if (!sis || !masters) return;
-    const fees = loadFees();
-    setHits(
-      searchFeeStudents(debouncedQuery, sis, masters, fees, {
-        classId,
-        sectionId,
-        academicYearCode: ay,
-        includeFuture,
-      }),
-    );
-  }, [debouncedQuery, classId, sectionId, sis, masters, tick, ay, includeFuture]);
+    // One letter matches half the roster and costs a full scan — wait for
+    // two, unless a class filter narrows the field.
+    if (debouncedQuery.trim().length < 2 && !classId) {
+      setHits([]);
+      return;
+    }
+    // Transition: the roster scan may take a frame — never block a keystroke.
+    startTransition(() => {
+      setHits(
+        searchFeeStudents(debouncedQuery, sis, masters, feesForSearch, {
+          classId,
+          sectionId,
+          academicYearCode: ay,
+          includeFuture,
+        }),
+      );
+    });
+  }, [
+    debouncedQuery,
+    classId,
+    sectionId,
+    sis,
+    masters,
+    feesForSearch,
+    ay,
+    includeFuture,
+  ]);
 
   const classOptions = useMemo(() => {
     if (!masters) return [];
@@ -396,18 +577,20 @@ export function FeeTakeWorkspace() {
       { cache: "no-store" },
     )
       .then((r) => r.json())
-      .then((body: { ok?: boolean; dues?: InjectedStoreDue[]; error?: string }) => {
-        if (!alive) return;
-        if (body.ok === false) {
-          // Say the store could not be reached rather than showing no dues,
-          // which would read as "this family owes the store nothing".
-          setStoreDuesError(body.error || "Store dues could not be loaded");
-          setStoreDues([]);
-          return;
-        }
-        setStoreDuesError("");
-        setStoreDues(body.dues ?? []);
-      })
+      .then(
+        (body: { ok?: boolean; dues?: InjectedStoreDue[]; error?: string }) => {
+          if (!alive) return;
+          if (body.ok === false) {
+            // Say the store could not be reached rather than showing no dues,
+            // which would read as "this family owes the store nothing".
+            setStoreDuesError(body.error || "Store dues could not be loaded");
+            setStoreDues([]);
+            return;
+          }
+          setStoreDuesError("");
+          setStoreDues(body.dues ?? []);
+        },
+      )
       .catch(() => {
         if (!alive) return;
         setStoreDuesError("Store dues could not be loaded");
@@ -425,8 +608,49 @@ export function FeeTakeWorkspace() {
    * logged and forgotten — an unsettled store line means the family is still
    * shown as owing money they have already paid.
    */
+  /**
+   * A voided fee receipt gives the store its due back: the collections it
+   * made are reversed, the slip stops saying PAID, and the family sees the
+   * store line owing again. Without this the store kept the money on paper
+   * while the parent had it in hand.
+   */
+  async function reverseStoreLinesForReceipt(receiptNo: string) {
+    try {
+      const res = await fetch("/api/inventory/sales", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "reverse-collect",
+          receiptNo,
+          reason: `Fee receipt ${receiptNo} voided`,
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        reversal?: { reversed: number; amountPaise: number };
+        error?: string;
+      };
+      if (!res.ok || body.ok === false) {
+        throw new Error(body.error || "Store refused the reversal");
+      }
+      const n = body.reversal?.reversed ?? 0;
+      if (n > 0) {
+        flash(
+          `Store collection returned — ${n} sale${n === 1 ? "" : "s"} back to unpaid`,
+        );
+      }
+    } catch (e) {
+      flash(
+        `Receipt voided, but the store collection could not be returned (${e instanceof Error ? e.message : "error"}) — fix it on the Store counter`,
+      );
+    }
+    setTick((t) => t + 1);
+  }
+
   async function settleStoreLines(receiptNo: string, lines: VoucherLine[]) {
-    const storeLines = lines.filter((l) => l.kind === "store" && l.amountPaise > 0);
+    const storeLines = lines.filter(
+      (l) => l.kind === "store" && l.amountPaise > 0,
+    );
     if (storeLines.length === 0) return;
 
     const failures: {
@@ -510,10 +734,14 @@ export function FeeTakeWorkspace() {
     return householdBundle.filter((row) => row.student.id === selectedId);
   }, [householdBundle, activeStudentIds, selectedId]);
 
-  /** Dues that can be ticked — only from children open on the counter. */
+  /**
+   * The SELECTION domain — every child of the family. A tick keeps counting
+   * whichever child's list happens to be open on screen; the visible list
+   * (activeBundle) only decides what is displayed, never what is collected.
+   */
   const allDues = useMemo(
-    () => activeBundle.flatMap((row) => row.dues),
-    [activeBundle],
+    () => householdBundle.flatMap((row) => row.dues),
+    [householdBundle],
   );
 
   const selectedDues = useMemo(
@@ -533,6 +761,21 @@ export function FeeTakeWorkspace() {
     [selectedDues, lineDiscountRupees],
   );
 
+  // Only heads that actually repeat can be offered as recurring — the same
+  // test collect uses, so the tick never promises something collect refuses.
+  const recurringEligible = useMemo(() => {
+    if (!masters || !sis) return new Set<string>();
+    return new Set(
+      listFutureConcessionCandidates(
+        discountSlices,
+        selectedDues,
+        masters,
+        householdBundle.map((r) => r.student),
+        ay,
+      ).map((c) => c.dueKey),
+    );
+  }, [discountSlices, selectedDues, masters, sis, householdBundle, ay]);
+
   const counterDiscountPaise = discountSlices.reduce(
     (s, x) => s + x.amountPaise,
     0,
@@ -540,18 +783,9 @@ export function FeeTakeWorkspace() {
 
   const netAfterDiscount = Math.max(0, collectTotal - counterDiscountPaise);
 
-  const lineDiscountsKey = useMemo(
-    () =>
-      Object.entries(lineDiscountRupees)
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([k, v]) => `${k}:${v}`)
-        .join("|"),
-    [lineDiscountRupees],
-  );
-
   useEffect(() => {
-    setTenderLines([]);
-    setComposer(emptyComposer());
+    // Selection changed: prune discounts down to what is still ticked, and a
+    // fresh selection restarts the discount reason.
     setLineDiscountRupees((prev) => {
       const next: Record<string, string> = {};
       for (const key of selectedKeys) {
@@ -559,21 +793,83 @@ export function FeeTakeWorkspace() {
       }
       return next;
     });
+    setAutoFilledBy({});
     setCounterDiscountReason("");
     setFutureConcessionPrompt(null);
-    if (collectTotal > 0) {
-      setCollectAmountRupees(String(collectTotal / 100));
-    } else {
-      setCollectAmountRupees("");
-    }
-  }, [selectionKey, collectTotal]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectionKey]);
 
   useEffect(() => {
-    if (collectTotal <= 0) return;
-    setCollectAmountRupees(String(netAfterDiscount / 100));
+    // ONE rule for the amount box: it always restates the NET of what is
+    // ticked. It used to be two effects — gross on selection change, net on
+    // discount change — so reselecting heads while discounts stood left the
+    // box on the gross figure while the banner showed net. Banner right,
+    // box wrong: the exact bug the counter kept hitting.
     setTenderLines([]);
     setComposer(emptyComposer());
-  }, [lineDiscountsKey]);
+    setCollectAmountRupees(
+      netAfterDiscount > 0 ? String(netAfterDiscount / 100) : "",
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectionKey, netAfterDiscount]);
+
+  /**
+   * The later months of the same head, for the same child, already in this
+   * basket — the lines a recurring discount should fill in.
+   *
+   * Later only: a discount the clerk is making recurring from April is a
+   * statement about April onward, and quietly rewriting a March line sitting
+   * in the same basket would be a different decision than the one they made.
+   */
+  /** Copy a line's discount onto the basket's later months of the same head. */
+  function spreadRecurringDiscount(sourceDueKey: string, rupees: string) {
+    const value = rupees.trim();
+    if (!value) return;
+    const targets = laterSameHeadDueKeys(selectedDues, sourceDueKey);
+    if (targets.length === 0) return;
+
+    // Worked out BEFORE the updater rather than inside it: a state updater
+    // may be called more than once for one event, and appending to a list
+    // from in there would record the same line twice.
+    const filled = targets.filter(
+      // Never overwrite a figure the clerk typed themselves.
+      (key) => !lineDiscountRupees[key]?.trim(),
+    );
+    if (filled.length === 0) return;
+
+    setLineDiscountRupees((prev) => {
+      const next = { ...prev };
+      for (const key of filled) next[key] = value;
+      return next;
+    });
+    // The value is remembered too, so undoing can tell an untouched
+    // auto-filled line from one the clerk has since edited.
+    setAutoFilledBy((prev) => ({
+      ...prev,
+      [sourceDueKey]: { value, keys: filled },
+    }));
+  }
+
+  /** Take back exactly what this line put in, and nothing else. */
+  function unspreadRecurringDiscount(sourceDueKey: string) {
+    const filled = autoFilledBy[sourceDueKey];
+    if (!filled || filled.keys.length === 0) return;
+    setLineDiscountRupees((prev) => {
+      const next = { ...prev };
+      for (const key of filled.keys) {
+        // Only take back what is still exactly what was put there. Once the
+        // clerk changes a figure it is theirs, and unticking the line it came
+        // from must not quietly delete their number.
+        if (next[key] === filled.value) delete next[key];
+      }
+      return next;
+    });
+    setAutoFilledBy((prev) => {
+      const next = { ...prev };
+      delete next[sourceDueKey];
+      return next;
+    });
+  }
 
   const collectTarget = useMemo(() => {
     if (netAfterDiscount <= 0) return 0;
@@ -583,6 +879,18 @@ export function FeeTakeWorkspace() {
   }, [collectAmountRupees, netAfterDiscount]);
   const isPartialCollect =
     collectTarget > 0 && collectTarget < netAfterDiscount;
+
+  /**
+   * What a payment link would ask the parent for.
+   *
+   * The button and the handler MUST read the same figure. They did not: the
+   * caption said `collectTotal`, the gross of the ticked heads, while the
+   * link itself carried the discounted amount — so a counter showing a
+   * ₹3,000 discount offered to "Send UPI link · ₹8,000" and then sent one
+   * for ₹5,000. Both numbers were defensible on their own; together they
+   * were a receipt waiting to be disputed.
+   */
+  const payLinkPaise = collectTarget > 0 ? collectTarget : netAfterDiscount;
   const tenderSum = tenderLines.reduce(
     (sum, t) => sum + Math.round((Number(t.amount) || 0) * 100),
     0,
@@ -635,6 +943,21 @@ export function FeeTakeWorkspace() {
     window.setTimeout(() => setNotice(null), 2800);
   }
 
+  /**
+   * A refused collection, said where the money is.
+   *
+   * flash() puts the reason in the workspace header pill and clears it after
+   * 2.8s. The collect button sits at the bottom of a long scrolled page, so a
+   * refusal — a duplicate school receipt no., a day-closed date — appeared
+   * off-screen and was gone before the counter could scroll to it. The button
+   * looked dead instead of refusing for a stated reason. This one stays until
+   * the next attempt.
+   */
+  function failCollect(msg: string) {
+    setCollectError(msg);
+    flash(msg);
+  }
+
   function resetPaymentFields() {
     setTenderLines([]);
     setComposer(emptyComposer());
@@ -643,6 +966,58 @@ export function FeeTakeWorkspace() {
     setNote("");
     setLineDiscountRupees({});
     setCounterDiscountReason("");
+  }
+
+  /**
+   * Change the standing discount on a head, from this month onward.
+   *
+   * "This month" is the first due of that head that has not gone past — not
+   * the line the clerk happens to be looking at. Clicking Change while
+   * scrolled to April must not reprice April: that month is billed, often
+   * collected, and its receipt would stop matching the money taken.
+   */
+  function changeHeadDiscount(due: FeeDueLine, rupees: string) {
+    if (!masters || !sis) return;
+    const student = sis.students.find((st) => st.id === due.studentId);
+    if (!student || !due.feeHeadId) return;
+
+    const monthStart = `${todayIso().slice(0, 7)}-01`;
+    const sameHead = allDues
+      .filter(
+        (d) => d.studentId === due.studentId && d.feeHeadId === due.feeHeadId,
+      )
+      .map((d) => d.dueOn)
+      .filter(Boolean)
+      .sort();
+    const fromDueOn =
+      sameHead.find((dueOn) => dueOn >= monthStart) ??
+      sameHead[sameHead.length - 1] ??
+      todayIso();
+
+    const paise = Math.round(
+      (Number(rupees.replace(/[^\d.]/g, "")) || 0) * 100,
+    );
+    const res = changeStandingDiscount({
+      studentId: due.studentId,
+      studentName: student.fullName,
+      feeHeadId: due.feeHeadId,
+      feeHeadName: due.feeHeadName || "this head",
+      newDiscountPaise: paise,
+      fromDueOn,
+      academicYearCode: ay,
+      reason: counterDiscountReason.trim(),
+      by: session.fullName,
+    });
+    if (!res.ok) {
+      flash(res.error);
+      return;
+    }
+    refresh();
+    flash(
+      paise > 0
+        ? `${due.feeHeadName} discount is ${formatInr(paise)} from ${fromDueOn} — earlier months keep what they were billed`
+        : `${due.feeHeadName} discount removed from ${fromDueOn} — earlier months unchanged`,
+    );
   }
 
   function freshSelectedDues() {
@@ -666,6 +1041,11 @@ export function FeeTakeWorkspace() {
     setActiveStudentIds(new Set([hit.student.id]));
     setSelectedKeys(new Set());
     resetPaymentFields();
+    // Empty the search box and hide the match list straight away, rather
+    // than after the 200ms debounce — the list is no longer hidden by the
+    // selection itself, so it must be cleared explicitly.
+    setDebouncedQuery("");
+    setSearchResetSignal((n) => n + 1);
   }
 
   /**
@@ -674,17 +1054,10 @@ export function FeeTakeWorkspace() {
    * a student whose fees are no longer on screen.
    */
   function toggleActiveStudent(studentId: string) {
-    setActiveStudentIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(studentId)) {
-        if (next.size === 1) return prev; // never leave the counter empty
-        next.delete(studentId);
-        clearStudentDues(studentId);
-      } else {
-        next.add(studentId);
-      }
-      return next;
-    });
+    // Switch, don't accumulate: one child's details at a time. The previous
+    // child's ticks stay selected — their card badge and the collect summary
+    // keep showing them ("Open all" restores the everyone-at-once view).
+    setActiveStudentIds(new Set([studentId]));
   }
 
   function toggleDue(due: FeeDueLine) {
@@ -791,6 +1164,27 @@ export function FeeTakeWorkspace() {
 
   function patchComposer(patch: Partial<TenderComposer>) {
     setComposer((prev) => ({ ...prev, ...patch }));
+    // Split-tender rebalance: typing a later mode's amount pulls that much
+    // out of the FIRST added line, so the total tracks the collect target
+    // (e.g. ₹1000 cash auto-filled, type ₹300 UPI → cash becomes ₹700).
+    if (patch.amount !== undefined && tenderLines.length > 0) {
+      const typedPaise = Math.round((Number(patch.amount) || 0) * 100);
+      setTenderLines((prev) => {
+        if (prev.length === 0) return prev;
+        const othersPaise = prev
+          .slice(1)
+          .reduce((s, t) => s + Math.round((Number(t.amount) || 0) * 100), 0);
+        const firstPaise = Math.max(
+          0,
+          collectTarget - othersPaise - typedPaise,
+        );
+        const firstAmount = String(firstPaise / 100);
+        if (prev[0]!.amount === firstAmount) return prev;
+        return prev.map((t, i) =>
+          i === 0 ? { ...t, amount: firstAmount } : t,
+        );
+      });
+    }
   }
 
   function addTenderLine() {
@@ -863,7 +1257,7 @@ export function FeeTakeWorkspace() {
       toAy,
     });
     if (!result.ok) {
-      flash(result.error);
+      failCollect(result.error);
       return;
     }
     setSis(loadSis());
@@ -876,15 +1270,16 @@ export function FeeTakeWorkspace() {
 
   function onCollect() {
     if (!selectedStudent || !sis || !masters) return;
+    setCollectError(null);
 
     const discountOnly = collectTarget <= 0 && counterDiscountPaise > 0;
 
     if (collectTarget <= 0 && !discountOnly) {
-      flash("Enter a collection amount");
+      failCollect("Enter a collection amount");
       return;
     }
     if (!discountOnly && tenderSum !== collectTarget) {
-      flash(
+      failCollect(
         isPartialCollect
           ? `Payments must equal partial amount (${formatInr(collectTarget)})`
           : `Payments must equal selected dues (${formatInr(collectTarget)})`,
@@ -900,11 +1295,24 @@ export function FeeTakeWorkspace() {
         householdBundle.map((r) => r.student),
         ay,
       );
-      if (candidates.length > 0 && !futureConcessionPrompt) {
+      // The clerk has already answered this on the line itself. The prompt is
+      // only for candidates that CLASH — a head that already carries a
+      // Masters concession — because that is the case which needs explaining
+      // before it is stacked. Everything else follows the tick, and an
+      // unticked line simply does not recur.
+      const chosen = candidates.filter((c) => recurringDueKeys.has(c.dueKey));
+      const clashing = chosen.filter((c) => c.existing.length > 0);
+      if (clashing.length > 0 && !futureConcessionPrompt) {
         setFutureConcessionPrompt({
-          candidates,
-          selected: new Set(candidates.map((c) => c.key)),
+          candidates: clashing,
+          // Never pre-ticked: stacking onto a head that already has a
+          // discount must be a deliberate act after reading what it does.
+          selected: new Set(),
         });
+        return;
+      }
+      if (chosen.length > 0) {
+        executeCollect(new Set(chosen.map((c) => c.key)));
         return;
       }
     }
@@ -917,7 +1325,13 @@ export function FeeTakeWorkspace() {
     setFutureConcessionPrompt(null);
 
     let futureConcessionMsg = "";
+    let waiverAdjustmentIds: string[] = [];
 
+    // Both artefacts are posted, and that is correct now that grants are
+    // judged against the due's own month: the waiver settles the month being
+    // collected, and the recurring grant starts at the NEXT installment.
+    // Before that gating existed the grant reached backwards and the month
+    // showed twice the discount typed.
     if (counterDiscountPaise > 0) {
       const waiverResult = postCounterDiscountWaivers({
         slices: discountSlices,
@@ -926,50 +1340,69 @@ export function FeeTakeWorkspace() {
         academicYearCode: ay,
       });
       if (!waiverResult.ok) {
-        flash(waiverResult.error);
+        failCollect(waiverResult.error);
         return;
       }
-
-      if (applyFutureKeys.size > 0 && masters) {
-        const candidates = listFutureConcessionCandidates(
-          discountSlices,
-          selectedDues,
-          masters,
-          householdBundle.map((r) => r.student),
-          ay,
-        );
-        const futureResult = applyFutureConcessionsFromCounter({
-          candidates,
-          applyKeys: applyFutureKeys,
-          reason: counterDiscountReason.trim() || "Counter concession",
-          academicYearCode: ay,
-        });
-        if (!futureResult.ok) {
-          flash(futureResult.error);
-          return;
-        }
-        const bits: string[] = [];
-        if (futureResult.granted > 0) {
-          bits.push(
-            `${futureResult.granted} future grant${futureResult.granted === 1 ? "" : "s"} approved`,
-          );
-        }
-        if (futureResult.pending > 0) {
-          bits.push(
-            `${futureResult.pending} pending Principal in Concessions`,
-          );
-        }
-        if (futureResult.skipped > 0) {
-          bits.push(`${futureResult.skipped} already on file`);
-        }
-        if (bits.length > 0) futureConcessionMsg = ` · ${bits.join(" · ")}`;
-      }
+      waiverAdjustmentIds = waiverResult.adjustmentIds;
 
       refresh();
     }
 
+    // Future-month grants apply AFTER the receipt exists (paid path), so
+    // each grant carries its source receipt and dies with it on void. The
+    // discount-only path has no receipt — grants apply immediately there.
+    const applyFutureGrants = (voucher?: { id: string; receiptNo: string }) => {
+      if (applyFutureKeys.size === 0 || !masters || counterDiscountPaise <= 0) {
+        return;
+      }
+      const candidates = listFutureConcessionCandidates(
+        discountSlices,
+        selectedDues,
+        masters,
+        householdBundle.map((r) => r.student),
+        ay,
+      );
+      const futureResult = applyFutureConcessionsFromCounter({
+        candidates,
+        applyKeys: applyFutureKeys,
+        reason: counterDiscountReason.trim() || "Counter concession",
+        academicYearCode: ay,
+        sourceVoucherId: voucher?.id,
+        sourceReceiptNo: voucher?.receiptNo,
+        // Same rule as Masters: a clerk who cannot approve a grant there
+        // must not be able to approve one by ticking a box here.
+        canApprove: mayApproveConcession,
+      });
+      if (!futureResult.ok) {
+        futureConcessionMsg = ` · future grants failed: ${futureResult.error}`;
+        return;
+      }
+      const bits: string[] = [];
+      if (futureResult.granted > 0) {
+        bits.push(
+          `${futureResult.granted} future grant${futureResult.granted === 1 ? "" : "s"} approved`,
+        );
+      }
+      if (futureResult.pending > 0) {
+        bits.push(`${futureResult.pending} pending Principal in Concessions`);
+      }
+      // A refused head must say so in full. "1 already on file" reads as
+      // housekeeping; the clerk needs to know a discount they just granted
+      // did NOT take, and which existing one is in the way.
+      if (futureResult.blocked.length > 0) {
+        bits.push(futureResult.blocked.join(" · "));
+      }
+      if (futureResult.skipped > futureResult.blocked.length) {
+        bits.push(
+          `${futureResult.skipped - futureResult.blocked.length} already on file`,
+        );
+      }
+      if (bits.length > 0) futureConcessionMsg = ` · ${bits.join(" · ")}`;
+    };
+
     if (collectTarget <= 0) {
       if (counterDiscountPaise > 0) {
+        applyFutureGrants();
         setSelectedKeys(new Set());
         setCollectAmountRupees("");
         setLineDiscountRupees({});
@@ -992,7 +1425,7 @@ export function FeeTakeWorkspace() {
       (id) => nameById.get(id) ?? "Student",
     );
     if (!alloc.ok) {
-      flash(alloc.error);
+      failCollect(alloc.error);
       return;
     }
     const lines = alloc.lines;
@@ -1003,8 +1436,7 @@ export function FeeTakeWorkspace() {
       instrumentDate: t.instrumentDate,
       bankName: t.bankName,
       bankAccountId: t.bankAccountId || undefined,
-      realisation:
-        t.mode === "cheque" ? "subject_to_clearance" : "cleared",
+      realisation: t.mode === "cheque" ? "subject_to_clearance" : "cleared",
     }));
 
     const primaryTxn =
@@ -1050,10 +1482,24 @@ export function FeeTakeWorkspace() {
     // and the store settles once per receipt, so a retry is safe.
     void settleStoreLines(result.voucher.receiptNo, lines);
 
+    // Bind this receipt's counter waivers to it, so voiding takes them back.
+    linkAdjustmentsToVoucher(waiverAdjustmentIds, result.voucher.id);
+
+    applyFutureGrants({
+      id: result.voucher.id,
+      receiptNo: result.voucher.receiptNo,
+    });
+
     setSelectedKeys(new Set());
     setCollectAmountRupees("");
+    setRecurringDueKeys(new Set());
     resetPaymentFields();
     refresh();
+    // The receipt just posted into the accounts desk — re-read it so the
+    // payment-mode dropdown never goes stale for the next student.
+    void import("@/lib/accountsStore").then(({ loadAccounts }) =>
+      setAccountsState(loadAccounts()),
+    );
     flash(
       (counterDiscountPaise > 0
         ? isPartialCollect
@@ -1066,7 +1512,7 @@ export function FeeTakeWorkspace() {
     setPreviewReceiptId(result.voucher.id);
   }
 
-  function onSendUpiLink() {
+  async function onSendUpiLink() {
     if (!selectedStudent || !sis || !masters) return;
     const selectedDues = householdBundle.flatMap((b) =>
       b.dues.filter((d) => selectedKeys.has(d.dueKey)),
@@ -1075,22 +1521,51 @@ export function FeeTakeWorkspace() {
       flash("Select dues to include on the payment link");
       return;
     }
+
+    // The link must ask for what the COUNTER is showing, not the gross
+    // balance of the ticked heads. A discount entered here, or an amount
+    // typed into the collect box, used to be ignored entirely: the clerk
+    // granted the discount, sent the link, and the parent was billed the
+    // undiscounted figure.
+    const discountByKey = new Map(
+      discountSlices.map((x) => [x.dueKey, x.amountPaise]),
+    );
+    const linkDues = selectedDues
+      // A head ticked for discount only is not being collected at all, so
+      // it has no place on a payment request.
+      .map((d) => ({
+        ...d,
+        balancePaise: Math.max(
+          0,
+          d.balancePaise - (discountByKey.get(d.dueKey) ?? 0),
+        ),
+      }))
+      .filter((d) => d.balancePaise > 0);
+
+    if (linkDues.length === 0) {
+      flash("Nothing left to pay on the selected heads");
+      return;
+    }
+
+    const targetPaise = payLinkPaise;
+    if (targetPaise <= 0) {
+      flash("Nothing left to pay on the selected heads");
+      return;
+    }
     const className =
-      masters.classes.find((c) => c.id === selectedStudent.classId)?.name ??
-      "";
+      masters.classes.find((c) => c.id === selectedStudent.classId)?.name ?? "";
     const sectionName =
-      masters.sections.find((s) => s.id === selectedStudent.sectionId)
-        ?.name ?? "";
-    const classLabel = sectionName
-      ? `${className}-${sectionName}`
-      : className;
+      masters.sections.find((s) => s.id === selectedStudent.sectionId)?.name ??
+      "";
+    const classLabel = sectionName ? `${className}-${sectionName}` : className;
 
     const created = createPaymentLink({
       householdId: selectedStudent.householdId,
       studentId: selectedStudent.id,
       studentName: selectedStudent.fullName,
       classLabel,
-      dues: selectedDues,
+      dues: linkDues,
+      targetPaise,
       createdBy: session.fullName,
       academicYearCode: selectedStudent.academicYearCode || ay,
       note: note.trim(),
@@ -1100,33 +1575,34 @@ export function FeeTakeWorkspace() {
       return;
     }
 
+    const attached = await attachGatewayCheckout(created.link);
+    const link = attached.link;
     const payload = buildEnrichedPaymentSharePayload(
-      created.link,
+      link,
       TENANT.nameDisplay,
       masters,
     );
     const url = buildPaymentShareUrl(payload);
-    const hh = sis.households.find(
-      (h) => h.id === selectedStudent.householdId,
-    );
+    const hh = sis.households.find((h) => h.id === selectedStudent.householdId);
     const mobile = householdWhatsApp(hh);
     if (mobile && isValidMobile(mobile)) {
       const msg = composeWhatsAppPaymentLinkMessage(
-        created.link,
+        link,
         url,
         TENANT.nameDisplay,
+        attached.attached,
       );
       window.open(whatsAppPaymentLinkUrl(mobile, msg), "_blank", "noopener");
       flash(
-        `UPI link ${created.link.code} · ${formatInr(created.link.amountPaise)} — WhatsApp opened`,
+        `${attached.attached ? "Checkout" : "UPI"} link ${link.code} · ${formatInr(link.amountPaise)} — WhatsApp opened`,
       );
     } else {
       void navigator.clipboard.writeText(url).then(
         () =>
           flash(
-            `UPI link ${created.link.code} copied — set WhatsApp on household to send`,
+            `${attached.attached ? "Checkout" : "UPI"} link ${link.code} copied — set WhatsApp on household to send`,
           ),
-        () => flash(`Created ${created.link.code}: ${url}`),
+        () => flash(`Created ${link.code}: ${url}`),
       );
     }
     setSelectedKeys(new Set());
@@ -1135,9 +1611,24 @@ export function FeeTakeWorkspace() {
   }
 
   function onVoid(id: string) {
-    if (!window.confirm("Void this receipt? Dues will reopen.")) return;
+    const voucher = receipts.find((v) => v.id === id);
+    const hadStore = !!voucher?.lines.some((l) => l.kind === "store");
+    if (
+      !window.confirm(
+        hadStore
+          ? "Void this receipt? Dues will reopen and the store items on it go back to ISSUED (unpaid)."
+          : "Void this receipt? Dues will reopen.",
+      )
+    ) {
+      return;
+    }
     voidVoucher(id);
     if (previewReceiptId === id) setPreviewReceiptId(null);
+    // The store took this money on the strength of the receipt; the receipt
+    // is gone, so the money goes back and the slip returns to ISSUED.
+    if (hadStore && voucher) {
+      void reverseStoreLinesForReceipt(voucher.receiptNo);
+    }
     refresh();
     flash("Receipt voided");
   }
@@ -1259,13 +1750,10 @@ export function FeeTakeWorkspace() {
                 <span className="mb-1.5 block text-[var(--muted)]">
                   Find student
                 </span>
-                <input
-                  className="field"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Child, father, mother, mobile, adm no, class…"
-                  autoComplete="off"
+                <FeeSearchInput
+                  onDebounced={setDebouncedQuery}
                   autoFocus={mounted}
+                  resetSignal={searchResetSignal}
                 />
               </label>
               <label className="block text-sm">
@@ -1287,7 +1775,9 @@ export function FeeTakeWorkspace() {
                 </select>
               </label>
               <label className="block text-sm">
-                <span className="mb-1.5 block text-[var(--muted)]">Section</span>
+                <span className="mb-1.5 block text-[var(--muted)]">
+                  Section
+                </span>
                 <select
                   className="field"
                   value={sectionId}
@@ -1320,7 +1810,9 @@ export function FeeTakeWorkspace() {
                   sectionOptions.find((s) => s.id === sectionId)?.name
                     ? `Sec ${sectionOptions.find((s) => s.id === sectionId)?.name}`
                     : "",
-                  query.trim() ? `Search “${query.trim()}”` : "",
+                  debouncedQuery.trim()
+                    ? `Search “${debouncedQuery.trim()}”`
+                    : "",
                 ])}
                 fileBaseName="fee_take_students"
                 columns={[
@@ -1348,8 +1840,13 @@ export function FeeTakeWorkspace() {
               />
             </div>
 
-            {/* Compact match strip — replaces left list */}
-            {(query.trim() || classId || sectionId) && !selectedStudent ? (
+            {/* Compact match strip — replaces left list.
+                Deliberately NOT gated on `!selectedStudent`: it used to be,
+                which meant that once a child was open the counter had to
+                press "Change student" before a search would show anything.
+                Picking a student clears the box (see pickStudent), so this
+                only reappears when the clerk actually types again. */}
+            {debouncedQuery.trim() || classId || sectionId ? (
               <div className="mt-3">
                 <p className="mb-2 text-[11px] text-[var(--muted)]">
                   {hits.length} match{hits.length === 1 ? "" : "es"} — pick one
@@ -1375,6 +1872,17 @@ export function FeeTakeWorkspace() {
                           <span className="text-[11px] text-[var(--muted)]">
                             {h.classLabel} · {h.student.admissionNo}
                           </span>
+                          {/* Father's name on EVERY row. Two children of the
+                              same class share a first name often enough that
+                              the class and admission number alone do not tell
+                              the counter which one is standing there; the
+                              match-reason chip below only appears when the
+                              father is why the row matched. */}
+                          {h.student.fatherName ? (
+                            <span className="text-[11px] font-medium text-[var(--brand-mid)]">
+                              s/o d/o {h.student.fatherName}
+                            </span>
+                          ) : null}
                           {/* Why this row is here — a hit on the mother's
                               name or a sibling's mobile is not obvious from
                               the child's name alone. */}
@@ -1465,6 +1973,15 @@ export function FeeTakeWorkspace() {
                     </span>
                     <span className="text-[var(--muted)]">
                       {" "}
+                      {(() => {
+                        const parent =
+                          selectedStudent.fatherName ||
+                          sis?.households.find(
+                            (h) => h.id === selectedStudent.householdId,
+                          )?.guardianName ||
+                          "";
+                        return parent ? `· ${parent} ` : "";
+                      })()}
                       · {selectedStudent.admissionNo} · household open
                       {householdBundle.length > 1
                         ? ` · ${householdBundle.length} siblings`
@@ -1574,8 +2091,28 @@ export function FeeTakeWorkspace() {
               collectTotal={collectTotal}
               counterDiscountPaise={counterDiscountPaise}
               discountSlices={discountSlices}
+              accountsState={accountsState}
               netAfterDiscount={netAfterDiscount}
               lineDiscountRupees={lineDiscountRupees}
+              recurringEligible={recurringEligible}
+              recurringChosen={recurringDueKeys}
+              onChangeHeadDiscount={changeHeadDiscount}
+              onToggleRecurring={(dueKey, on) => {
+                setRecurringDueKeys((prev) => {
+                  const next = new Set(prev);
+                  if (on) next.add(dueKey);
+                  else next.delete(dueKey);
+                  return next;
+                });
+                // The months already on screen follow the tick immediately,
+                // rather than waiting for the next billing to show it.
+                if (on)
+                  spreadRecurringDiscount(
+                    dueKey,
+                    lineDiscountRupees[dueKey] ?? "",
+                  );
+                else unspreadRecurringDiscount(dueKey);
+              }}
               onLineDiscount={(dueKey, rupees) => {
                 setLineDiscountRupees((prev) => {
                   const next = { ...prev };
@@ -1583,6 +2120,12 @@ export function FeeTakeWorkspace() {
                   else next[dueKey] = rupees;
                   return next;
                 });
+                // Ticking first and typing second must behave the same as
+                // typing first and ticking second.
+                if (recurringDueKeys.has(dueKey)) {
+                  if (rupees.trim()) spreadRecurringDiscount(dueKey, rupees);
+                  else unspreadRecurringDiscount(dueKey);
+                }
               }}
               counterDiscountReason={counterDiscountReason}
               onCounterDiscountReason={setCounterDiscountReason}
@@ -1616,10 +2159,12 @@ export function FeeTakeWorkspace() {
               onSchoolReceiptNo={setSchoolReceiptNo}
               onNote={setNote}
               onCollect={onCollect}
-              onSendUpiLink={onSendUpiLink}
+              collectError={collectError}
+              onSendUpiLink={() => void onSendUpiLink()}
               masters={masters}
               cashierName={session.fullName}
               priorReceipts={householdReceipts}
+              storeTick={tick}
               readOnly={readOnly}
               onOpenReceipt={setPreviewReceiptId}
               transferPreviews={lastSessionPreviews}
@@ -1632,6 +2177,14 @@ export function FeeTakeWorkspace() {
                   new Set(householdBundle.map((r) => r.student.id)),
                 )
               }
+              onStoreSold={(saleNo, totalPaise) => {
+                // refresh() re-reads store dues (the loader keys on tick), so
+                // the new due appears in the fee lines ready to be ticked.
+                refresh();
+                flash(
+                  `Store sale ${saleNo} · ${formatInr(totalPaise)} added — tick it below to collect with the fees`,
+                );
+              }}
             />
           )}
         </div>
@@ -1779,7 +2332,7 @@ function FeeSummaryChip({
     },
     current: {
       box: "border-[#fcd34d] bg-[#fffbeb]",
-      label: "text-[#b45309]",
+      label: "text-[var(--warning)]",
       value: "text-[#92400e]",
     },
     total: {
@@ -1801,7 +2354,9 @@ function FeeSummaryChip({
   const s = styles[tone];
   return (
     <div className={`rounded-lg border px-2.5 py-1.5 ${s.box}`}>
-      <div className={`text-[10px] font-bold uppercase tracking-wide ${s.label}`}>
+      <div
+        className={`text-[10px] font-bold uppercase tracking-wide ${s.label}`}
+      >
         {label}
       </div>
       <div className={`mt-0.5 text-sm font-bold tabular-nums ${s.value}`}>
@@ -1828,9 +2383,14 @@ function CollectPanel({
   collectTotal,
   counterDiscountPaise,
   discountSlices,
+  accountsState,
   netAfterDiscount,
   lineDiscountRupees,
   onLineDiscount,
+  recurringEligible,
+  recurringChosen,
+  onToggleRecurring,
+  onChangeHeadDiscount,
   counterDiscountReason,
   onCounterDiscountReason,
   collectTarget,
@@ -1853,10 +2413,12 @@ function CollectPanel({
   onSchoolReceiptNo,
   onNote,
   onCollect,
+  collectError,
   onSendUpiLink,
   masters,
   cashierName,
   priorReceipts,
+  storeTick,
   onOpenReceipt,
   transferPreviews,
   onTransferLastSession,
@@ -1865,6 +2427,7 @@ function CollectPanel({
   activeStudentIds,
   onToggleActiveStudent,
   onOpenAllSiblings,
+  onStoreSold,
 }: {
   student: SisStudent;
   householdBundle: { student: SisStudent; dues: FeeDueLine[] }[];
@@ -1873,6 +2436,7 @@ function CollectPanel({
   activeStudentIds: Set<string>;
   onToggleActiveStudent: (studentId: string) => void;
   onOpenAllSiblings: () => void;
+  onStoreSold: (saleNo: string, totalPaise: number) => void;
   selectedKeys: Set<string>;
   includeFuture: boolean;
   onIncludeFuture: (v: boolean) => void;
@@ -1887,9 +2451,14 @@ function CollectPanel({
   collectTotal: number;
   counterDiscountPaise: number;
   discountSlices: CounterDiscountSlice[];
+  accountsState: AccountsState | null;
   netAfterDiscount: number;
   lineDiscountRupees: Record<string, string>;
   onLineDiscount: (dueKey: string, rupees: string) => void;
+  recurringEligible: Set<string>;
+  recurringChosen: Set<string>;
+  onToggleRecurring: (dueKey: string, on: boolean) => void;
+  onChangeHeadDiscount: (due: FeeDueLine, rupees: string) => void;
   counterDiscountReason: string;
   onCounterDiscountReason: (v: string) => void;
   collectTarget: number;
@@ -1912,10 +2481,13 @@ function CollectPanel({
   onSchoolReceiptNo: (v: string) => void;
   onNote: (v: string) => void;
   onCollect: () => void;
+  /** Why the last collection attempt was refused — shown at the button. */
+  collectError: string | null;
   onSendUpiLink: () => void;
   masters: MastersState | null;
   cashierName: string;
   priorReceipts: CollectionVoucher[];
+  storeTick: number;
   onOpenReceipt: (id: string) => void;
   transferPreviews: LastSessionTransferPreview[];
   onTransferLastSession: () => void;
@@ -1928,6 +2500,29 @@ function CollectPanel({
   const modeMeta = TENDER_MODES.find((m) => m.value === composerMode);
   const hasUncleared = tenderLines.some((t) => t.mode === "cheque");
   const siblingCount = householdBundle.length;
+
+  /**
+   * Children who are ticked but NOT on screen.
+   *
+   * Ticks are family-wide while the fee list shows one child at a time, so a
+   * sibling's ticks keep counting from behind a collapsed card. The office
+   * then types the visible child's amount, it does not match the family total,
+   * and the collect button sits there disabled saying "Still need ..." — which
+   * reads as "the button is broken for this child". Only families with more
+   * than one child can hit it, which is why it looks student-specific.
+   */
+  const offScreenTicked = useMemo(() => {
+    if (siblingCount <= 1) return [];
+    return householdBundle
+      .filter((row) => !activeStudentIds.has(row.student.id))
+      .map((row) => ({
+        student: row.student,
+        paise: row.dues
+          .filter((d) => selectedKeys.has(d.dueKey))
+          .reduce((sum, d) => sum + d.balancePaise, 0),
+      }))
+      .filter((r) => r.paise > 0);
+  }, [householdBundle, activeStudentIds, selectedKeys, siblingCount]);
   const allHouseholdDues = householdBundle.flatMap((r) => r.dues);
 
   const feeSummary = useMemo(() => {
@@ -2003,6 +2598,8 @@ function CollectPanel({
   // have had to restate the expression, and two independent definitions of
   // "is this payment complete" is how they drift apart. One value, one rule.
   const discountOnly = collectTarget <= 0 && counterDiscountPaise > 0;
+  /** Must match `payLinkPaise` in the workspace — same rule, same inputs. */
+  const linkAmountPaise = collectTarget > 0 ? collectTarget : netAfterDiscount;
   const matched =
     discountOnly ||
     (collectTarget > 0 && tenderSum === collectTarget && tenderSum > 0);
@@ -2046,7 +2643,9 @@ function CollectPanel({
               selected{" "}
               <span
                 className={`font-semibold ${
-                  collectTarget > 0 ? "text-[var(--success)]" : "text-[var(--muted)]"
+                  collectTarget > 0
+                    ? "text-[var(--success)]"
+                    : "text-[var(--muted)]"
                 }`}
               >
                 {formatInr(collectTarget)}
@@ -2141,272 +2740,313 @@ function CollectPanel({
         ) : null}
       </div>
 
-      {/* ── Counter layout ────────────────────────────────────────────────
-             LEFT   = who is paying (every child of the family, side by side)
-             RIGHT  = what they are paying (that child's fees, group-wise)
-             BELOW  = the money (full width, always the last thing on screen)
-             The old household-information card is gone: guardian name and
-             WhatsApp sit on the search line, one glance away, and the space
-             it used belongs to the fees.
+      {/* ── Counter layout, store-counter style ──────────────────────────
+             LEFT   = who + what: the family's children, then their fees
+             RIGHT  = the money: a sticky payment column, always in view
+             (approved design 2026-08-27 — mirrors the store counter's
+             1fr/right-aside shape; phones still get the sticky bottom bar)
       ── */}
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,0.62fr)_minmax(0,1.38fr)] items-start">
-        {/* ── LEFT COLUMN: children of this family ── */}
-        <div className="space-y-3 min-w-0">
-          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-sm">
-            <div className="mb-2.5 flex items-center justify-between gap-2 border-b border-[var(--border)] pb-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-[var(--brand-deep)]">
-                {siblingCount > 1
-                  ? `Children in this family (${siblingCount})`
-                  : "Student"}
-              </span>
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(360px,420px)] items-start">
+        <div className="min-w-0 space-y-4">
+          {/* ── LEFT COLUMN: children of this family ── */}
+          <div className="space-y-3 min-w-0">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-sm">
+              <div className="mb-2.5 flex items-center justify-between gap-2 border-b border-[var(--border)] pb-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-[var(--brand-deep)]">
+                  {siblingCount > 1
+                    ? `Children in this family (${siblingCount})`
+                    : "Student"}
+                </span>
+                {siblingCount > 1 ? (
+                  <button
+                    type="button"
+                    className="text-xs font-semibold text-[var(--brand-mid)] hover:underline"
+                    onClick={onOpenAllSiblings}
+                  >
+                    Open all
+                  </button>
+                ) : null}
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+                {householdBundle.map((row) => {
+                  const openDs = openFeeDues(row.dues);
+                  const rDue = openDs.reduce((s, d) => s + d.balancePaise, 0);
+                  const rOver = openDs.some((d) => d.dueOn <= today);
+                  const on = activeStudentIds.has(row.student.id);
+                  const pickedForStudent = openDs.filter((d) =>
+                    selectedKeys.has(d.dueKey),
+                  );
+                  const pickedPaise = pickedForStudent.reduce(
+                    (s, d) => s + d.balancePaise,
+                    0,
+                  );
+                  const pickedDiscount = discountSlices.reduce(
+                    (s, x) =>
+                      x.studentId === row.student.id ? s + x.amountPaise : s,
+                    0,
+                  );
+                  const pickedNet = Math.max(0, pickedPaise - pickedDiscount);
+                  return (
+                    <button
+                      key={row.student.id}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => onToggleActiveStudent(row.student.id)}
+                      className={`relative rounded-xl border-2 p-2.5 text-left transition active:scale-[0.99] ${
+                        on
+                          ? "border-[var(--brand-gold)] bg-[rgba(197,160,40,0.08)]"
+                          : "border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[rgba(197,160,40,0.45)]"
+                      }`}
+                    >
+                      <span
+                        className={`absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full border text-[11px] font-bold ${
+                          on
+                            ? "border-[var(--brand-gold)] bg-[var(--brand-gold)] text-white"
+                            : "border-[var(--border)] bg-[var(--card)] text-transparent"
+                        }`}
+                        aria-hidden
+                      >
+                        ✓
+                      </span>
+                      <div className="pr-6 text-sm font-bold text-[var(--brand-deep)]">
+                        <StudentNameLabel student={row.student} />
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-[var(--muted)]">
+                        {classLabel(row.student)} · {row.student.admissionNo}
+                      </div>
+                      <div
+                        className={`mt-1.5 text-base font-bold tabular-nums ${
+                          rOver
+                            ? "text-[var(--danger)]"
+                            : rDue > 0
+                              ? "text-[var(--brand-deep)]"
+                              : "text-[var(--success)]"
+                        }`}
+                      >
+                        {formatInr(rDue)}
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                            rOver
+                              ? "bg-[var(--danger-soft)] text-[var(--danger)]"
+                              : rDue > 0
+                                ? "bg-[rgba(197,160,40,0.18)] text-[var(--brand-deep)]"
+                                : "bg-[var(--success-soft)] text-[var(--success)]"
+                          }`}
+                        >
+                          {rOver
+                            ? "Overdue"
+                            : rDue > 0
+                              ? `${openDs.length} open`
+                              : "All clear"}
+                        </span>
+                        {pickedPaise > 0 ? (
+                          <span className="rounded-full bg-[var(--success-soft)] px-2 py-0.5 text-[10px] font-bold text-[var(--success)]">
+                            ticked {formatInr(pickedNet)}
+                            {pickedDiscount > 0
+                              ? ` (−${formatInr(pickedDiscount)})`
+                              : ""}
+                          </span>
+                        ) : null}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
               {siblingCount > 1 ? (
-                <button
-                  type="button"
-                  className="text-xs font-semibold text-[var(--brand-mid)] hover:underline"
-                  onClick={onOpenAllSiblings}
-                >
-                  Open all
-                </button>
+                <p className="mt-2.5 border-t border-dashed border-[var(--border)] pt-2 text-[11px] leading-snug text-[var(--muted)]">
+                  Tap a child to see their fees — one at a time. Ticks are
+                  remembered when you switch: each card&apos;s green badge shows
+                  what stays selected, and the total collects them all.
+                </p>
               ) : null}
             </div>
 
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1 2xl:grid-cols-2">
-              {householdBundle.map((row) => {
-                const openDs = openFeeDues(row.dues);
-                const rDue = openDs.reduce((s, d) => s + d.balancePaise, 0);
-                const rOver = openDs.some((d) => d.dueOn <= today);
-                const on = activeStudentIds.has(row.student.id);
-                const pickedForStudent = openDs.filter((d) =>
-                  selectedKeys.has(d.dueKey),
-                );
-                const pickedPaise = pickedForStudent.reduce(
-                  (s, d) => s + d.balancePaise,
-                  0,
-                );
-                return (
-                  <button
-                    key={row.student.id}
-                    type="button"
-                    aria-pressed={on}
-                    onClick={() => onToggleActiveStudent(row.student.id)}
-                    className={`relative rounded-xl border-2 p-2.5 text-left transition active:scale-[0.99] ${
-                      on
-                        ? "border-[var(--brand-gold)] bg-[rgba(197,160,40,0.08)]"
-                        : "border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[rgba(197,160,40,0.45)]"
-                    }`}
-                  >
-                    <span
-                      className={`absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full border text-[11px] font-bold ${
-                        on
-                          ? "border-[var(--brand-gold)] bg-[var(--brand-gold)] text-white"
-                          : "border-[var(--border)] bg-[var(--card)] text-transparent"
-                      }`}
-                      aria-hidden
-                    >
-                      ✓
-                    </span>
-                    <div className="pr-6 text-sm font-bold text-[var(--brand-deep)]">
-                      <StudentNameLabel student={row.student} />
-                    </div>
-                    <div className="mt-0.5 text-[11px] text-[var(--muted)]">
-                      {classLabel(row.student)} · {row.student.admissionNo}
-                    </div>
-                    <div
-                      className={`mt-1.5 text-base font-bold tabular-nums ${
-                        rOver
-                          ? "text-[var(--danger)]"
-                          : rDue > 0
-                            ? "text-[var(--brand-deep)]"
-                            : "text-[var(--success)]"
-                      }`}
-                    >
-                      {formatInr(rDue)}
-                    </div>
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                          rOver
-                            ? "bg-[var(--danger-soft)] text-[var(--danger)]"
-                            : rDue > 0
-                              ? "bg-[rgba(197,160,40,0.18)] text-[var(--brand-deep)]"
-                              : "bg-[var(--success-soft)] text-[var(--success)]"
-                        }`}
-                      >
-                        {rOver
-                          ? "Overdue"
-                          : rDue > 0
-                            ? `${openDs.length} open`
-                            : "All clear"}
-                      </span>
-                      {pickedPaise > 0 ? (
-                        <span className="rounded-full bg-[var(--success-soft)] px-2 py-0.5 text-[10px] font-bold text-[var(--success)]">
-                          ticked {formatInr(pickedPaise)}
-                        </span>
-                      ) : null}
-                    </div>
-                  </button>
-                );
-              })}
+            <div className="flex flex-wrap gap-1.5">
+              {siblingCount > 1 ? (
+                <MiniBtn onClick={onSelectAllSiblings}>
+                  Tick all open fees
+                </MiniBtn>
+              ) : (
+                <MiniBtn onClick={onSelectAllSiblings}>Select all dues</MiniBtn>
+              )}
+              <MiniBtn onClick={onSelectOverdue}>Tick overdue</MiniBtn>
+              <MiniBtn onClick={onClear}>Clear all</MiniBtn>
             </div>
 
-            {siblingCount > 1 ? (
-              <p className="mt-2.5 border-t border-dashed border-[var(--border)] pt-2 text-[11px] leading-snug text-[var(--muted)]">
-                Tap a child to put their fees on the counter. Closing a child
-                also un-ticks their fees, so nothing hidden is ever collected.
-              </p>
-            ) : null}
+            {/* Sell store items to the child on the counter — the due joins
+              these fee lines and is paid on the same receipt. */}
+            <StoreSellInline
+              studentId={activeBundle[0]?.student.id ?? student.id}
+              studentName={
+                activeBundle[0]?.student.fullName ?? student.fullName
+              }
+              classId={activeBundle[0]?.student.classId ?? student.classId}
+              sectionId={
+                activeBundle[0]?.student.sectionId ?? student.sectionId
+              }
+              readOnly={readOnly}
+              onSold={onStoreSold}
+            />
           </div>
 
-          <div className="flex flex-wrap gap-1.5">
-            {siblingCount > 1 ? (
-              <MiniBtn onClick={onSelectAllSiblings}>
-                Tick all open fees
-              </MiniBtn>
-            ) : (
-              <MiniBtn onClick={onSelectAllSiblings}>Select all dues</MiniBtn>
-            )}
-            <MiniBtn onClick={onSelectOverdue}>Tick overdue</MiniBtn>
-            <MiniBtn onClick={onClear}>Clear all</MiniBtn>
-          </div>
-        </div>
+          {/* ── RIGHT COLUMN: fees of the children on the counter ── */}
+          <div className="space-y-3 min-w-0">
+            <div className="max-h-[min(70vh,44rem)] space-y-3 overflow-y-auto pr-1">
+              {activeBundle.every((r) => openFeeDues(r.dues).length === 0) &&
+              activeBundle.every((r) => r.dues.length === 0) ? (
+                <p className="text-xs text-[var(--muted)]">
+                  No open dues
+                  {!student.feeGroupId
+                    ? " — assign a fee group on the student profile"
+                    : ""}
+                  .
+                </p>
+              ) : (
+                activeBundle.map((row) => {
+                  const openDues = openFeeDues(row.dues);
+                  const dueKeys = openDues.map((d) => d.dueKey);
+                  const selectedForStudent = openDues.filter((d) =>
+                    selectedKeys.has(d.dueKey),
+                  );
+                  const allSelected =
+                    dueKeys.length > 0 &&
+                    dueKeys.every((k) => selectedKeys.has(k));
+                  const someSelected =
+                    !allSelected && selectedForStudent.length > 0;
+                  const rowTotal = openDues.reduce(
+                    (s, d) => s + d.balancePaise,
+                    0,
+                  );
+                  const rowSelected = selectedForStudent.reduce(
+                    (s, d) => s + d.balancePaise,
+                    0,
+                  );
+                  const rowDiscount = discountSlices.reduce(
+                    (s, x) =>
+                      x.studentId === row.student.id ? s + x.amountPaise : s,
+                    0,
+                  );
+                  const rowSelectedNet = Math.max(0, rowSelected - rowDiscount);
+                  const hasOverdue = openDues.some((d) => d.dueOn <= today);
 
-        {/* ── RIGHT COLUMN: fees of the children on the counter ── */}
-        <div className="space-y-3 min-w-0">
-          <div className="max-h-[min(70vh,44rem)] space-y-3 overflow-y-auto pr-1">
-            {activeBundle.every((r) => openFeeDues(r.dues).length === 0) &&
-            activeBundle.every((r) => r.dues.length === 0) ? (
-              <p className="text-xs text-[var(--muted)]">
-                No open dues
-                {!student.feeGroupId
-                  ? " — assign a fee group on the student profile"
-                  : ""}
-                .
-              </p>
-            ) : (
-              activeBundle.map((row) => {
-                const openDues = openFeeDues(row.dues);
-                const dueKeys = openDues.map((d) => d.dueKey);
-                const selectedForStudent = openDues.filter((d) =>
-                  selectedKeys.has(d.dueKey),
-                );
-                const allSelected =
-                  dueKeys.length > 0 &&
-                  dueKeys.every((k) => selectedKeys.has(k));
-                const someSelected =
-                  !allSelected && selectedForStudent.length > 0;
-                const rowTotal = openDues.reduce(
-                  (s, d) => s + d.balancePaise,
-                  0,
-                );
-                const rowSelected = selectedForStudent.reduce(
-                  (s, d) => s + d.balancePaise,
-                  0,
-                );
-                const hasOverdue = openDues.some((d) => d.dueOn <= today);
-
-                return (
-                  <div
-                    key={row.student.id}
-                    className="flex min-h-0 flex-col rounded-xl border border-[rgba(197,160,40,0.45)] bg-[var(--card)] p-3"
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-2 border-b border-[var(--border)] pb-2">
-                      <div className="flex min-w-0 flex-col items-start gap-1">
-                        <label className="flex min-w-0 cursor-pointer items-start gap-2.5">
-                          <input
-                            type="checkbox"
-                            className="mt-1"
-                            checked={allSelected}
-                            ref={(el) => {
-                              if (el) el.indeterminate = someSelected;
-                            }}
-                            onChange={() => onToggleStudentAll(row.student.id)}
-                            disabled={openDues.length === 0}
+                  return (
+                    <div
+                      key={row.student.id}
+                      className="flex min-h-0 flex-col rounded-xl border border-[rgba(197,160,40,0.45)] bg-[var(--card)] p-3"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2 border-b border-[var(--border)] pb-2">
+                        <div className="flex min-w-0 flex-col items-start gap-1">
+                          <label className="flex min-w-0 cursor-pointer items-start gap-2.5">
+                            <input
+                              type="checkbox"
+                              className="mt-1"
+                              checked={allSelected}
+                              ref={(el) => {
+                                if (el) el.indeterminate = someSelected;
+                              }}
+                              onChange={() =>
+                                onToggleStudentAll(row.student.id)
+                              }
+                              disabled={openDues.length === 0}
+                            />
+                            <div className="min-w-0">
+                              <div className="text-sm font-bold text-[var(--brand-deep)]">
+                                <StudentNameLabel student={row.student} />
+                              </div>
+                              <div className="mt-0.5 text-[11px] text-[var(--muted)]">
+                                {classLabel(row.student)} ·{" "}
+                                {row.student.admissionNo} ·{" "}
+                                {feeGroupLabel(row.student)}
+                              </div>
+                            </div>
+                          </label>
+                          <TransportRiderChip
+                            studentId={row.student.id}
+                            academicYearCode={row.student.academicYearCode}
+                            dues={row.dues}
                           />
-                          <div className="min-w-0">
-                            <div className="text-sm font-bold text-[var(--brand-deep)]">
-                              <StudentNameLabel student={row.student} />
-                            </div>
-                            <div className="mt-0.5 text-[11px] text-[var(--muted)]">
-                              {classLabel(row.student)} ·{" "}
-                              {row.student.admissionNo} ·{" "}
-                              {feeGroupLabel(row.student)}
-                            </div>
+                        </div>
+                        <div className="text-right">
+                          <div
+                            className={`text-sm font-bold ${
+                              hasOverdue
+                                ? "text-[var(--danger)]"
+                                : rowTotal === 0 && row.dues.length > 0
+                                  ? "text-[var(--success)]"
+                                  : "text-[var(--brand-deep)]"
+                            }`}
+                          >
+                            {formatInr(rowTotal)}
                           </div>
-                        </label>
-                        <TransportRiderChip
-                          studentId={row.student.id}
-                          academicYearCode={row.student.academicYearCode}
-                          dues={row.dues}
-                        />
-                      </div>
-                      <div className="text-right">
-                        <div
-                          className={`text-sm font-bold ${
-                            hasOverdue
-                              ? "text-[var(--danger)]"
-                              : rowTotal === 0 && row.dues.length > 0
+                          <div
+                            className={`text-xs font-semibold ${
+                              rowSelected > 0
                                 ? "text-[var(--success)]"
-                                : "text-[var(--brand-deep)]"
-                          }`}
-                        >
-                          {formatInr(rowTotal)}
-                        </div>
-                        <div
-                          className={`text-xs font-semibold ${
-                            rowSelected > 0
-                              ? "text-[var(--success)]"
-                              : "text-[var(--muted)]"
-                          }`}
-                        >
-                          {selectedForStudent.length}/{openDues.length} open ·{" "}
-                          {formatInr(rowSelected)}
+                                : "text-[var(--muted)]"
+                            }`}
+                          >
+                            {selectedForStudent.length}/{openDues.length} open ·{" "}
+                            {formatInr(rowSelectedNet)}
+                            {rowDiscount > 0
+                              ? ` (−${formatInr(rowDiscount)})`
+                              : ""}
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      <MiniBtn
-                        onClick={() => onToggleStudentAll(row.student.id)}
-                      >
-                        {allSelected ? "Unselect" : "Select child"}
-                      </MiniBtn>
-                      <MiniBtn
-                        onClick={() => onSelectStudentOverdue(row.student.id)}
-                      >
-                        Overdue
-                      </MiniBtn>
-                      {someSelected || allSelected ? (
-                        <MiniBtn onClick={() => onClearStudent(row.student.id)}>
-                          Clear
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        <MiniBtn
+                          onClick={() => onToggleStudentAll(row.student.id)}
+                        >
+                          {allSelected ? "Unselect" : "Select child"}
                         </MiniBtn>
-                      ) : null}
-                    </div>
+                        <MiniBtn
+                          onClick={() => onSelectStudentOverdue(row.student.id)}
+                        >
+                          Overdue
+                        </MiniBtn>
+                        {someSelected || allSelected ? (
+                          <MiniBtn
+                            onClick={() => onClearStudent(row.student.id)}
+                          >
+                            Clear
+                          </MiniBtn>
+                        ) : null}
+                      </div>
 
-                    {row.dues.length === 0 ? (
-                      <p className="mt-2 text-xs text-[var(--muted)]">
-                        No fee lines for this student
-                      </p>
-                    ) : (
-                      <DueBreakupPicker
-                        dues={row.dues}
-                        selectedKeys={selectedKeys}
-                        today={today}
-                        onToggle={onToggle}
-                        onToggleMonth={onToggleMonth}
-                        lineDiscountRupees={lineDiscountRupees}
-                        onLineDiscount={onLineDiscount}
-                      />
-                    )}
-                  </div>
-                );
-              })
-            )}
+                      {row.dues.length === 0 ? (
+                        <p className="mt-2 text-xs text-[var(--muted)]">
+                          No fee lines for this student
+                        </p>
+                      ) : (
+                        <DueBreakupPicker
+                          dues={row.dues}
+                          selectedKeys={selectedKeys}
+                          today={today}
+                          onToggle={onToggle}
+                          onToggleMonth={onToggleMonth}
+                          lineDiscountRupees={lineDiscountRupees}
+                          recurringEligible={recurringEligible}
+                          recurringChosen={recurringChosen}
+                          onToggleRecurring={onToggleRecurring}
+                          onChangeHeadDiscount={onChangeHeadDiscount}
+                          onLineDiscount={onLineDiscount}
+                        />
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* ── THE MONEY: full width, under both columns ── */}
-      <div className="mt-4 space-y-4">
+        {/* ── THE MONEY: sticky right column ── */}
+        <aside className="min-w-0 space-y-4 lg:sticky lg:top-3">
           <div
             className="relative overflow-hidden rounded-2xl border border-[var(--border)] shadow-[0_12px_40px_rgba(32,48,80,0.1)]"
             style={{
@@ -2441,7 +3081,7 @@ function CollectPanel({
                         after {formatInr(counterDiscountPaise)} discount
                       </span>
                     ) : siblingCount > 1 ? (
-                      <span className="rounded-full bg-[#c5a028] px-2 py-0.5 text-[11px] font-bold text-[#1a2740]">
+                      <span className="rounded-full bg-[var(--brand-accent)] px-2 py-0.5 text-[11px] font-bold text-[#1a2740]">
                         Household · {siblingCount} students
                       </span>
                     ) : (
@@ -2450,13 +3090,37 @@ function CollectPanel({
                       </span>
                     )}
                   </div>
+                  {offScreenTicked.length > 0 ? (
+                    <div className="mt-1.5 rounded-lg bg-[rgba(197,160,40,0.22)] px-2 py-1.5 text-[11px] leading-snug text-white">
+                      Includes{" "}
+                      {offScreenTicked.map((r, i) => (
+                        <span key={r.student.id}>
+                          {i > 0 ? " · " : ""}
+                          <strong>{formatInr(r.paise)}</strong> ticked for{" "}
+                          {r.student.fullName}
+                        </span>
+                      ))}{" "}
+                      — not on screen.
+                      <button
+                        type="button"
+                        className="ml-1 rounded bg-white/90 px-1.5 py-0.5 text-[10px] font-bold text-[#1a2740] hover:bg-white"
+                        onClick={() =>
+                          offScreenTicked.forEach((r) =>
+                            onClearStudent(r.student.id),
+                          )
+                        }
+                      >
+                        Untick them
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
                 <label className="block text-xs">
                   <span className="mb-1 block text-xs font-medium text-white/75">
                     Collection date
                   </span>
                   <input
-                    className="field !border-white/20 !bg-white/95 !py-1.5 !text-xs !text-[var(--brand-deep)]"
+                    className={COLLECT_FIELD}
                     type="date"
                     value={collectionDate}
                     onChange={(e) => onCollectionDate(e.target.value)}
@@ -2464,7 +3128,8 @@ function CollectPanel({
                   />
                   {isCollectionDateLocked(collectionDate) ? (
                     <span className="mt-1 block text-[11px] font-semibold leading-snug text-[#fca5a5]">
-                      This date is day-closed — pick another date or reject handover
+                      This date is day-closed — pick another date or reject
+                      handover
                     </span>
                   ) : null}
                 </label>
@@ -2473,7 +3138,7 @@ function CollectPanel({
                     School receipt no.
                   </span>
                   <input
-                    className="field !border-white/20 !bg-white/95 !py-1.5 !text-xs !text-[var(--brand-deep)]"
+                    className={COLLECT_FIELD}
                     value={schoolReceiptNo}
                     onChange={(e) => onSchoolReceiptNo(e.target.value)}
                     placeholder="Optional · e.g. FEE-BOOK-A/4521"
@@ -2482,30 +3147,98 @@ function CollectPanel({
                 </label>
               </div>
 
+              <label className="mt-3 block text-xs">
+                <span className="mb-1 flex flex-wrap items-baseline gap-x-2 text-xs font-medium text-white/75">
+                  Note
+                  <span className="text-[11px] font-normal text-white/50">
+                    optional · kept with the receipt, not printed on it
+                  </span>
+                </span>
+                <textarea
+                  className={COLLECT_FIELD}
+                  rows={2}
+                  value={note}
+                  onChange={(e) => onNote(e.target.value)}
+                  placeholder="e.g. paid by uncle · balance promised by the 10th"
+                  autoComplete="off"
+                  /*
+                   * Capped so a long note can never push out what the system
+                   * appends after it. The stored note is
+                   * `note · Counter discount … · Cheque realisation subject to
+                   * clearance` (~91 characters), and compactFeesForStorage
+                   * truncates the whole field at 280 when localStorage is under
+                   * pressure — from the END. A cheque warning cut in half is
+                   * worse than no note at all, so the free text is bounded
+                   * where the two together always fit.
+                   */
+                  maxLength={180}
+                />
+                {note.length > 150 ? (
+                  <span className="mt-1 block text-[11px] text-white/60">
+                    {180 - note.length} characters left
+                  </span>
+                ) : null}
+              </label>
+
               {collectTotal > 0 && counterDiscountPaise > 0 ? (
                 <div className="mt-4 rounded-xl border border-[rgba(197,160,40,0.35)] bg-[rgba(255,255,255,0.06)] px-3 py-3 backdrop-blur-sm sm:px-4">
                   <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#f0d878]">
                     Head-wise discount summary
                   </p>
                   <ul className="mt-2 space-y-1 text-xs text-white/90">
-                    {discountSlices.map((s) => (
-                      <li
-                        key={s.dueKey}
-                        className="flex justify-between gap-2 rounded-md bg-white/5 px-2 py-1"
-                      >
-                        <span className="min-w-0 truncate">{s.label}</span>
-                        <span className="shrink-0 font-bold text-[#f0d878]">
-                          −{formatInr(s.amountPaise)}
-                        </span>
-                      </li>
-                    ))}
+                    {discountSlices.map((s) => {
+                      const due = allHouseholdDues.find(
+                        (d) => d.dueKey === s.dueKey,
+                      );
+                      const student = householdBundle.find(
+                        (r) => r.student.id === s.studentId,
+                      )?.student;
+                      // Where this discount can go beyond this month, say so
+                      // — and when it cannot, say WHY, so the office is never
+                      // left wondering why no future-months question came.
+                      const futureHint =
+                        due?.kind === "academic" &&
+                        due.feeHeadId &&
+                        masters &&
+                        student &&
+                        isRecurringAcademicFeeHead(
+                          masters,
+                          student,
+                          due.feeHeadId,
+                          student.academicYearCode || "",
+                        )
+                          ? "future months offered on Collect"
+                          : due?.kind === "transport"
+                            ? "for future months, set a transport discount on the Transport roster"
+                            : due?.kind === "academic"
+                              ? "one-time head — nothing to extend"
+                              : "";
+                      return (
+                        <li
+                          key={s.dueKey}
+                          className="rounded-md bg-white/5 px-2 py-1"
+                        >
+                          <div className="flex justify-between gap-2">
+                            <span className="min-w-0 truncate">{s.label}</span>
+                            <span className="shrink-0 font-bold text-[#f0d878]">
+                              −{formatInr(s.amountPaise)}
+                            </span>
+                          </div>
+                          {futureHint ? (
+                            <div className="text-[10px] text-white/60">
+                              {futureHint}
+                            </div>
+                          ) : null}
+                        </li>
+                      );
+                    })}
                   </ul>
                   <label className="mt-3 block text-xs">
                     <span className="mb-1 block text-xs font-medium text-white/75">
                       Reason for discount
                     </span>
                     <input
-                      className="field w-full !border-white/25 !bg-white !py-2 !text-xs !text-[var(--brand-deep)]"
+                      className={`${COLLECT_FIELD} w-full !border-white/25 !bg-white !py-2`}
                       value={counterDiscountReason}
                       onChange={(e) => onCounterDiscountReason(e.target.value)}
                       placeholder="e.g. Security deposit relaxed on management approval"
@@ -2522,19 +3255,21 @@ function CollectPanel({
                       <span className="mb-1 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.12em] text-[#f0d878]">
                         Amount to collect
                         {isPartialCollect ? (
-                          <span className="rounded-full bg-[#c5a028] px-2 py-0.5 text-[10px] font-extrabold text-[#1a2740]">
+                          <span className="rounded-full bg-[var(--brand-accent)] px-2 py-0.5 text-[10px] font-extrabold text-[#1a2740]">
                             Partial
                           </span>
                         ) : null}
                       </span>
                       <div className="flex items-center gap-2">
-                        <span className="text-xl font-bold text-white/80">₹</span>
+                        <span className="text-xl font-bold text-white/80">
+                          ₹
+                        </span>
                         <input
                           type="number"
                           min={0}
                           step="0.01"
                           max={netAfterDiscount / 100}
-                          className="field w-full !border-white/25 !bg-white !py-2 !text-xl !font-bold !text-[var(--brand-deep)]"
+                          className={`${COLLECT_FIELD} w-full !border-white/25 !bg-white !py-2 !text-xl !font-bold`}
                           value={collectAmountRupees}
                           onChange={(e) => onCollectAmount(e.target.value)}
                           placeholder="0"
@@ -2587,7 +3322,7 @@ function CollectPanel({
                 </ul>
               ) : null}
 
-              {remainingPaise > 0 ? (
+              {collectTarget > 0 ? (
                 <div className="mt-4 rounded-xl border border-[rgba(197,160,40,0.35)] bg-[rgba(248,248,240,0.97)] p-3 shadow-sm">
                   <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                     <div className="text-xs font-extrabold uppercase tracking-wider text-[var(--brand-deep)]">
@@ -2610,15 +3345,21 @@ function CollectPanel({
                         Mode & account
                       </span>
                       <PaymentChannelSelect
-                        className="field !border-[rgba(32,48,80,0.18)] !py-1.5 !text-xs"
+                        className="field !border-[rgba(32,48,80,0.18)] !bg-white !py-1.5 !text-xs !text-[#203050]"
                         variant="tender"
+                        accounts={accountsState ?? undefined}
                         value={composer.channel}
                         onChange={(channel) =>
                           onPatchComposer({
                             channel,
                             ref: "",
                             bankName: "",
-                            amount: "",
+                            // First mode auto-fills the full collect amount;
+                            // later modes auto-fill whatever is still uncovered.
+                            amount:
+                              remainingPaise > 0
+                                ? String(remainingPaise / 100)
+                                : "",
                             instrumentDate: collectionDate || todayIso(),
                           })
                         }
@@ -2633,7 +3374,7 @@ function CollectPanel({
                               {modeMeta.refLabel}
                             </span>
                             <input
-                              className="field !py-1.5 !text-xs"
+                              className="field !bg-white !py-1.5 !text-xs !text-[#203050] placeholder:!text-[#20305066]"
                               value={composer.ref}
                               onChange={(e) =>
                                 onPatchComposer({ ref: e.target.value })
@@ -2649,7 +3390,7 @@ function CollectPanel({
                             Amount (₹)
                           </span>
                           <input
-                            className="field !border-[rgba(197,160,40,0.45)] !bg-[rgba(197,160,40,0.08)] !py-1.5 !text-xs font-bold"
+                            className="field !border-[rgba(197,160,40,0.45)] !bg-white !py-1.5 !text-xs font-bold !text-[#203050] placeholder:!text-[#20305066]"
                             inputMode="decimal"
                             value={composer.amount}
                             onChange={(e) =>
@@ -2670,6 +3411,12 @@ function CollectPanel({
                     ) : null}
                   </div>
                 </div>
+              ) : null}
+
+              {collectError ? (
+                <p className="mt-3 rounded-lg border border-[#fca5a5] bg-[rgba(239,68,68,0.15)] px-3 py-2 text-[11px] font-semibold leading-snug text-[#fecaca]">
+                  {collectError}
+                </p>
               ) : null}
 
               {(() => {
@@ -2707,19 +3454,34 @@ function CollectPanel({
               <button
                 type="button"
                 className="mt-2 w-full rounded-xl border-2 border-[#128C7E] bg-[#128C7E]/15 px-4 py-2.5 text-xs font-bold text-[#0f766e] hover:bg-[#128C7E]/25 disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={collectTotal <= 0 || readOnly}
+                disabled={linkAmountPaise <= 0 || readOnly}
                 onClick={onSendUpiLink}
               >
-                {collectTotal > 0
-                  ? `Send UPI link · ${formatInr(collectTotal)}`
+                {linkAmountPaise > 0
+                  ? `Send UPI link · ${formatInr(linkAmountPaise)}`
                   : "Select dues for UPI link"}
               </button>
               <p className="mt-2 text-center text-xs text-white/75">
                 Collecting as{" "}
-                <span className="font-semibold text-[#f0d878]">{cashierName}</span>
+                <span className="font-semibold text-[#f0d878]">
+                  {cashierName}
+                </span>
               </p>
             </div>
           </div>
+
+          {/* Store purchases — issued vs paid, in the fee record */}
+          <StorePurchasesPanel
+            studentIds={householdBundle.map((r) => r.student.id)}
+            nameById={
+              new Map(
+                householdBundle.map(
+                  (r) => [r.student.id, r.student.fullName] as const,
+                ),
+              )
+            }
+            tick={storeTick}
+          />
 
           {/* Earlier receipts */}
           <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)]">
@@ -2736,69 +3498,85 @@ function CollectPanel({
                 No earlier receipts for this household yet.
               </p>
             ) : (
-          <ul className="max-h-64 divide-y divide-[var(--border)] overflow-y-auto">
-            {priorReceipts.map((v) => {
-              const voided = !!v.voidedAt;
-              const names = Array.from(
-                new Set(v.lines.map((l) => l.studentName)),
-              );
-              const modes = Array.from(
-                new Set(v.tenders.map((t) => tenderModeLabel(t.mode))),
-              );
-              return (
-                <li
-                  key={v.id}
-                  className={`flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 ${
-                    voided ? "opacity-60" : ""
-                  }`}
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-bold text-[var(--brand-deep)]">
-                        {v.receiptNo}
-                      </span>
-                      {voided ? (
-                        <span className="rounded bg-[rgba(180,60,60,0.12)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--danger)]">
-                          Void
-                        </span>
-                      ) : (
-                        <span className="rounded bg-[rgba(15,122,76,0.12)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--ok)]">
-                          Paid
-                        </span>
-                      )}
-                      {v.schoolReceiptNo ? (
-                        <span className="text-[11px] text-[var(--muted)]">
-                          Book {v.schoolReceiptNo}
-                        </span>
-                      ) : null}
-                      {v.whatsappSentAt && !voided ? (
-                        <span className="rounded bg-[#128C7E]/12 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#128C7E]">
-                          WA
-                        </span>
-                      ) : null}
-                    </div>
-                    <p className="mt-0.5 truncate text-xs text-[var(--muted)]">
-                      {v.collectionDate} · {names.join(", ")} ·{" "}
-                      {modes.join(" + ")} · by {v.cashierName}
-                    </p>
-                  </div>
-                  <div className="text-sm font-bold tabular-nums text-[var(--brand-deep)]">
-                    {formatInr(v.totalPaise)}
-                  </div>
-                  <button
-                    type="button"
-                    className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
-                    onClick={() => onOpenReceipt(v.id)}
-                  >
-                    Open
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
+              <ul className="max-h-64 divide-y divide-[var(--border)] overflow-y-auto">
+                {priorReceipts.map((v) => {
+                  const voided = !!v.voidedAt;
+                  const names = Array.from(
+                    new Set(v.lines.map((l) => l.studentName)),
+                  );
+                  const modes = Array.from(
+                    new Set(v.tenders.map((t) => tenderModeLabel(t.mode))),
+                  );
+                  return (
+                    <li
+                      key={v.id}
+                      className={`flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 ${
+                        voided ? "opacity-60" : ""
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-bold text-[var(--brand-deep)]">
+                            {v.receiptNo}
+                          </span>
+                          {voided ? (
+                            <span className="rounded bg-[rgba(180,60,60,0.12)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--danger)]">
+                              Void
+                            </span>
+                          ) : (
+                            <span className="rounded bg-[rgba(15,122,76,0.12)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--ok)]">
+                              Paid
+                            </span>
+                          )}
+                          {paperRefOf(v) ? (
+                            <span className="rounded bg-[rgba(197,160,40,0.16)] px-1.5 py-0.5 text-[11px] font-semibold text-[var(--brand-deep)]">
+                              Book {paperRefOf(v)}
+                            </span>
+                          ) : null}
+                          {/* The UTR is what a parent quotes from their bank app,
+                          so it belongs on the row that a UTR search returns. */}
+                          {v.tenders
+                            .map((t) => t.ref?.trim())
+                            .filter(Boolean)
+                            .slice(0, 2)
+                            .map((ref) => (
+                              <span
+                                key={ref}
+                                className="font-mono text-[10px] text-[var(--muted)]"
+                                title="Transaction reference"
+                              >
+                                {ref}
+                              </span>
+                            ))}
+                          {v.whatsappSentAt && !voided ? (
+                            <span className="rounded bg-[#128C7E]/12 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#128C7E]">
+                              WA
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="mt-0.5 truncate text-xs text-[var(--muted)]">
+                          {v.collectionDate} · {names.join(", ")} ·{" "}
+                          {modes.join(" + ")} · by {v.cashierName}
+                        </p>
+                      </div>
+                      <div className="text-sm font-bold tabular-nums text-[var(--brand-deep)]">
+                        {formatInr(v.totalPaise)}
+                      </div>
+                      <button
+                        type="button"
+                        className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
+                        onClick={() => onOpenReceipt(v.id)}
+                      >
+                        Open
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </aside>
       </div>
-    </div>
 
       {/* ── Sticky collect bar, phones only ──────────────────────────────
           The page stacks on a phone: sibling tabs, then every month's dues,
@@ -2841,7 +3619,7 @@ function CollectPanel({
           </button>
         </div>
       </div>
-</div>
+    </div>
   );
 }
 
@@ -2958,6 +3736,18 @@ function WhatsAppInline({
   );
 }
 
+/**
+ * The collect card's fields, which live on a navy panel rather than on the
+ * page background — so they override the shared `field` styles.
+ *
+ * Written once because it appeared five times. The dark-mode `#05080f` has no
+ * design token: it is the near-black these controls sit on inside the card,
+ * and substituting --surface would lighten all five at once. One literal in
+ * one place is the honest version of five copies.
+ */
+const COLLECT_FIELD =
+  "field !border-white/20 !bg-white/95 !py-1.5 !text-xs !text-[var(--brand-deep)] dark:!bg-[#05080f] dark:!text-white dark:!font-bold dark:!border-white/30 dark:placeholder:!text-white/40";
+
 function ReceiptPreviewModal({
   voucher,
   sis,
@@ -2996,6 +3786,32 @@ function ReceiptPreviewModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  /**
+   * The office prints with Cmd+P / File → Print as often as with the Print
+   * button — and browser print applies none of the isolation classes, so the
+   * whole Fee Take page went to paper (seen in the wild: an 11-page PDF for
+   * one receipt). While THIS modal is open, any print — button or browser —
+   * isolates the receipt sheet: `beforeprint` fires for both paths.
+   */
+  useEffect(() => {
+    const target = () => document.getElementById(`receipt-${voucher.id}`);
+    const isolate = () => {
+      document.body.classList.add("printing-fee-receipt");
+      target()?.classList.add("print-target");
+    };
+    const release = () => {
+      document.body.classList.remove("printing-fee-receipt");
+      target()?.classList.remove("print-target");
+    };
+    window.addEventListener("beforeprint", isolate);
+    window.addEventListener("afterprint", release);
+    return () => {
+      release();
+      window.removeEventListener("beforeprint", isolate);
+      window.removeEventListener("afterprint", release);
+    };
+  }, [voucher.id]);
+
   useEffect(() => {
     let cancelled = false;
     async function buildRemainQr() {
@@ -3005,12 +3821,27 @@ function ReceiptPreviewModal({
         setRemainUrl(null);
         return;
       }
+      // Dues UP TO the running month, not the whole session.
+      //
+      // With includeFuture the QR asked for every month the year will ever
+      // bill — ₹1,38,525 on a receipt for ₹5,000 — which is not a bill the
+      // school has issued and not a sum any parent owes today. The figure a
+      // "pay remaining dues" code should carry is what is outstanding NOW.
+      //
+      // Concessions and counter waivers are already off: `balancePaise` is
+      // what `computeStudentDues` arrives at after both.
       const rows = computeHouseholdDues(
         voucher.householdId,
         sis,
         masters,
         loadFees(),
-        { includeFuture: true },
+        // Scoped to the running session: without it the household's older
+        // student records are summed in too, and the QR asks for years the
+        // family has already left behind.
+        {
+          includeFuture: false,
+          academicYearCode: currentAcademicYearCode(masters),
+        },
       );
       const open = openFeeDues(rows.flatMap((r) => r.dues)).filter(
         (d) => d.balancePaise > 0,
@@ -3050,6 +3881,36 @@ function ReceiptPreviewModal({
       cancelled = true;
     };
   }, [voucher.id, voucher.householdId, voucher.receiptNo, sis, masters]);
+
+  // The parent's referral QR — their own code, so an enquiry scanned from
+  // this receipt is attributed back to them.
+  const [referralQr, setReferralQr] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    async function buildReferralQr() {
+      const hh = sis?.households.find((h) => h.id === voucher.householdId);
+      if (!hh) {
+        setReferralQr(null);
+        return;
+      }
+      const { referralCodeFor } = await import("@/lib/referrals");
+      const QRCode = (await import("qrcode")).default;
+      const url = `https://${TENANT.publicPortal}/apply?ref=${encodeURIComponent(
+        referralCodeFor(hh),
+      )}`;
+      const dataUrl = await QRCode.toDataURL(url, {
+        width: 180,
+        margin: 0,
+        errorCorrectionLevel: "M",
+        color: { dark: "#203050", light: "#ffffff" },
+      });
+      if (!cancelled) setReferralQr(dataUrl);
+    }
+    void buildReferralQr();
+    return () => {
+      cancelled = true;
+    };
+  }, [voucher.householdId, sis]);
 
   async function sendWhatsApp() {
     setWaError(null);
@@ -3121,6 +3982,14 @@ function ReceiptPreviewModal({
                   </span>
                 ) : null}
               </p>
+              {/* Inside the print-hide card on purpose: the counter's own
+                  remark is for the office, and the family's printed copy
+                  should not carry it. */}
+              {voucher.note ? (
+                <p className="mt-1 max-w-prose text-xs italic text-[var(--muted)]">
+                  {voucher.note}
+                </p>
+              ) : null}
             </div>
             <div className="flex flex-wrap gap-2">
               <button
@@ -3158,9 +4027,7 @@ function ReceiptPreviewModal({
                   className="field !py-1.5"
                   inputMode="numeric"
                   value={waDraft}
-                  onChange={(e) =>
-                    setWaDraft(normalizeMobile(e.target.value))
-                  }
+                  onChange={(e) => setWaDraft(normalizeMobile(e.target.value))}
                   placeholder="10-digit mobile"
                   maxLength={10}
                 />
@@ -3173,7 +4040,9 @@ function ReceiptPreviewModal({
           ) : null}
 
           {waError ? (
-            <p className="text-xs font-semibold text-[var(--danger)]">{waError}</p>
+            <p className="text-xs font-semibold text-[var(--danger)]">
+              {waError}
+            </p>
           ) : null}
           {waNotice ? (
             <p className="text-xs font-semibold text-[#128C7E]">{waNotice}</p>
@@ -3185,6 +4054,7 @@ function ReceiptPreviewModal({
           sis={sis}
           masters={masters}
           remainingPayQrDataUrl={remainQr}
+          referralQrDataUrl={referralQr}
           remainingPayAmountPaise={remainAmt}
           remainingPayUrl={remainUrl}
         />
@@ -3213,8 +4083,39 @@ function ReceiptsPanel({
   const [classId, setClassId] = useState("");
   const [sectionId, setSectionId] = useState("");
   const [modeFilter, setModeFilter] = useState<"" | TenderMode>("");
-  const [concessionFilter, setConcessionFilter] = useState<"" | "with" | "without">("");
+  const [concessionFilter, setConcessionFilter] = useState<
+    "" | "with" | "without"
+  >("");
   const [collectorQ, setCollectorQ] = useState("");
+  /**
+   * One box for every number a receipt can be found by: our receipt no., the
+   * paper book number written on it, the UTR / UPI ref of any tender, and the
+   * transaction id. The counter is usually holding exactly one of these — a
+   * parent quoting a UTR from their bank app, or a paper stub — and had no way
+   * to get from it to the receipt.
+   */
+  const [refQ, setRefQ] = useState("");
+  /** Paper-book register: only receipts carrying a book number. */
+  const [paperOnly, setPaperOnly] = useState(false);
+  /** The receipt being re-attached, when one is. */
+  const [repairing, setRepairing] = useState<string | null>(null);
+
+  /**
+   * A receipt that cannot say what it settled.
+   *
+   * Either it has no lines — it clears nothing, and every month it paid reads
+   * unpaid — or its lines do not add up to the money collected, which means
+   * some of them were lost. Both are repairable; a receipt that ties is left
+   * alone.
+   */
+  function needsRepair(v: CollectionVoucher): boolean {
+    if (v.voidedAt) return false;
+    if (v.totalPaise <= 0) return false;
+    if (v.lines.length === 0) return true;
+    return v.lines.reduce((n, l) => n + l.amountPaise, 0) !== v.totalPaise;
+  }
+  const [leafFrom, setLeafFrom] = useState("");
+  const [leafTo, setLeafTo] = useState("");
 
   const guardianOf = (householdId: string) =>
     sis?.households.find((h) => h.id === householdId)?.guardianName ?? "";
@@ -3281,9 +4182,7 @@ function ReceiptsPanel({
       }
 
       if (concessionFilter) {
-        const hasConcession = v.lines.some(
-          (l) => (l.concessionPaise ?? 0) > 0,
-        );
+        const hasConcession = v.lines.some((l) => (l.concessionPaise ?? 0) > 0);
         if (concessionFilter === "with" && !hasConcession) return false;
         if (concessionFilter === "without" && hasConcession) return false;
       }
@@ -3293,6 +4192,41 @@ function ReceiptsPanel({
         !v.cashierName.toLowerCase().includes(collectorQ.trim().toLowerCase())
       ) {
         return false;
+      }
+
+      const paperNo = paperRefOf(v);
+
+      if (paperOnly && !paperNo) return false;
+
+      // Serial range over the book. Compared numerically when both ends and
+      // the stub are numbers — "9" must not sort after "10" — and as text
+      // otherwise, so lettered series still filter sensibly.
+      if (leafFrom || leafTo) {
+        if (!paperNo) return false;
+        const n = leafNumber(paperNo);
+        const a = leafNumber(leafFrom);
+        const b = leafNumber(leafTo);
+        if (n != null && (a != null || b != null)) {
+          if (a != null && n < a) return false;
+          if (b != null && n > b) return false;
+        } else {
+          const key = paperNo.toUpperCase();
+          if (leafFrom && key < leafFrom.toUpperCase()) return false;
+          if (leafTo && key > leafTo.toUpperCase()) return false;
+        }
+      }
+
+      const rq = refQ.trim().toLowerCase();
+      if (rq) {
+        const haystack = [
+          v.receiptNo,
+          paperNo,
+          v.transactionId ?? "",
+          ...v.tenders.map((t) => t.ref ?? ""),
+        ]
+          .join(" ")
+          .toLowerCase();
+        if (!haystack.includes(rq)) return false;
       }
 
       return true;
@@ -3308,6 +4242,10 @@ function ReceiptsPanel({
     modeFilter,
     concessionFilter,
     collectorQ,
+    refQ,
+    paperOnly,
+    leafFrom,
+    leafTo,
     sis,
   ]);
 
@@ -3329,6 +4267,9 @@ function ReceiptsPanel({
         ? "No concession"
         : "",
     collectorQ.trim() ? `Collector “${collectorQ.trim()}”` : "",
+    refQ.trim() ? `Ref “${refQ.trim()}”` : "",
+    paperOnly ? "Paper book only" : "",
+    leafFrom || leafTo ? `Serial ${leafFrom || "…"}–${leafTo || "…"}` : "",
   ]);
 
   function clearFilters() {
@@ -3341,6 +4282,10 @@ function ReceiptsPanel({
     setModeFilter("");
     setConcessionFilter("");
     setCollectorQ("");
+    setRefQ("");
+    setPaperOnly(false);
+    setLeafFrom("");
+    setLeafTo("");
   }
 
   const hasFilters =
@@ -3352,7 +4297,11 @@ function ReceiptsPanel({
     sectionId ||
     modeFilter ||
     concessionFilter ||
-    collectorQ;
+    collectorQ ||
+    refQ ||
+    paperOnly ||
+    leafFrom ||
+    leafTo;
 
   if (receipts.length === 0) {
     return (
@@ -3384,9 +4333,7 @@ function ReceiptsPanel({
             rows={filtered.map((v) => {
               const students = [...new Set(v.lines.map((l) => l.studentName))];
               const modes = [
-                ...new Set(
-                  v.tenders.map((t) => tenderModeLabel(t.mode)),
-                ),
+                ...new Set(v.tenders.map((t) => tenderModeLabel(t.mode))),
               ];
               return {
                 receipt: v.receiptNo || v.id,
@@ -3512,6 +4459,64 @@ function ReceiptsPanel({
               className="mt-1 w-full rounded-lg border border-[var(--border)] px-2.5 py-2 text-sm"
             />
           </label>
+          <label className="block text-xs font-semibold text-[var(--muted)] sm:col-span-2">
+            Receipt no. / UTR / paper book no.
+            <input
+              type="search"
+              value={refQ}
+              onChange={(e) => setRefQ(e.target.value)}
+              placeholder="RCV-00118 · UTR / UPI ref · 1376 · FEE-BOOK-A/4521"
+              className="mt-1 w-full rounded-lg border border-[var(--border)] px-2.5 py-2 text-sm"
+            />
+          </label>
+        </div>
+
+        {/* Paper-book register: the office reconciles the printed book against
+            what the system holds, so it needs the book's own view — stubs only,
+            in serial order, over a date range. */}
+        <div className="mt-2 flex flex-wrap items-end gap-2 rounded-lg border border-[rgba(197,160,40,0.35)] bg-[rgba(197,160,40,0.06)] px-2.5 py-2">
+          <label className="flex items-center gap-1.5 text-xs font-semibold text-[var(--brand-deep)]">
+            <input
+              type="checkbox"
+              checked={paperOnly}
+              onChange={(e) => setPaperOnly(e.target.checked)}
+            />
+            Paper book only
+          </label>
+          <label className="block text-[11px] font-semibold text-[var(--muted)]">
+            Serial from
+            <input
+              value={leafFrom}
+              onChange={(e) => setLeafFrom(e.target.value)}
+              placeholder="1370"
+              className="mt-0.5 w-24 rounded-lg border border-[var(--border)] px-2 py-1 text-sm"
+            />
+          </label>
+          <label className="block text-[11px] font-semibold text-[var(--muted)]">
+            to
+            <input
+              value={leafTo}
+              onChange={(e) => setLeafTo(e.target.value)}
+              placeholder="1399"
+              className="mt-0.5 w-24 rounded-lg border border-[var(--border)] px-2 py-1 text-sm"
+            />
+          </label>
+          {paperOnly || leafFrom || leafTo ? (
+            <button
+              type="button"
+              className="rounded-lg border border-[var(--border)] px-2 py-1 text-[11px] font-semibold"
+              onClick={() => {
+                setPaperOnly(false);
+                setLeafFrom("");
+                setLeafTo("");
+              }}
+            >
+              Clear book filter
+            </button>
+          ) : null}
+          <span className="text-[11px] text-[var(--muted)]">
+            Missing stubs in a range are the ones to chase in the book.
+          </span>
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[var(--muted)]">
@@ -3593,7 +4598,27 @@ function ReceiptsPanel({
                     </div>
                   </button>
                   {!voided ? (
-                    <div className="flex justify-end gap-2 border-t border-[var(--border)] px-4 py-2">
+                    <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--border)] px-4 py-2">
+                      {/* Only where the receipt cannot say what it settled:
+                          no lines at all, or lines that do not add up to the
+                          money collected. Everywhere else this button would
+                          be an invitation to rewrite a correct receipt. */}
+                      {needsRepair(v) ? (
+                        <>
+                          <span className="mr-auto text-[11px] font-semibold text-[var(--warning)]">
+                            {v.lines.length === 0
+                              ? "No months attached — this receipt clears nothing"
+                              : `Lines add to ${formatInr(v.lines.reduce((n, l) => n + l.amountPaise, 0))}, not ${formatInr(v.totalPaise)}`}
+                          </span>
+                          <button
+                            type="button"
+                            className="rounded-lg border border-[var(--warning)] px-3 py-1.5 text-xs font-semibold text-[var(--warning)]"
+                            onClick={() => setRepairing(v.id)}
+                          >
+                            Re-attach
+                          </button>
+                        </>
+                      ) : null}
                       <button
                         type="button"
                         className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
@@ -3616,6 +4641,25 @@ function ReceiptsPanel({
           </ul>
         )}
       </ErpTableShell>
+
+      {repairing
+        ? (() => {
+            const v = receipts.find((r) => r.id === repairing);
+            if (!v) return null;
+            return (
+              <ReceiptRepairDialog
+                voucher={v}
+                sis={sis}
+                masters={masters}
+                onClose={() => setRepairing(null)}
+                onRepaired={(m) => {
+                  setRepairing(null);
+                  window.alert(m);
+                }}
+              />
+            );
+          })()
+        : null}
     </div>
   );
 }

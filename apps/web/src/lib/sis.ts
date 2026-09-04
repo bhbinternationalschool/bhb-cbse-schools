@@ -4,6 +4,7 @@
  */
 
 import { activeSessionCode } from "@/lib/sessionWriteGuard";
+import type { PhotoConsent } from "@/lib/photoConsent";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import {
@@ -134,6 +135,13 @@ export type Household = {
    */
   preferredLanguage: string;
   channelPreference: string;
+  /**
+   * Whether this family agreed to photographs of their child being
+   * published. Same "" = not-asked convention as the preferences above, and
+   * for the same reason: the fallback must never be stored as their answer.
+   * The website reads this. See lib/photoConsent.ts.
+   */
+  photoConsent?: PhotoConsent;
   /** "HH:MM" IST; both set = do-not-disturb window for non-urgent sends */
   quietHoursStart: string;
   quietHoursEnd: string;

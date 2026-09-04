@@ -61,3 +61,34 @@ export function enquiryQuestionsFor(className: string): {
 export function dpdpNoticeText(schoolName: string): string {
   return `I agree that ${schoolName} may store these details and contact me about this admission enquiry (phone, WhatsApp, SMS). The details are used only for admissions and are not shared outside the school. I can ask the school office to correct or delete them at any time.`;
 }
+
+/**
+ * Photography and video — the wording beside its own, optional tick.
+ *
+ * This began as a blanket consent inside the mandatory admission terms. It is
+ * now a SEPARATE box a family can simply leave alone, because consent under
+ * the DPDP Act 2023 must be free, specific and unambiguous, and for a child it
+ * comes from the parent — and a tick you cannot register without is hard to
+ * call free.
+ *
+ * So this is phrased as a request, not a notice. It says what is taken, where
+ * it may appear, what will NOT happen (DPDP s.9 forbids targeted advertising
+ * to children; silence on that invites the assumption), and — the sentence
+ * doing the real work — that leaving it unticked costs the child nothing.
+ *
+ * Deliberately NOT on the enquiry form. An enquiry is a family asking about
+ * admission: nobody is enrolled and no photograph will be taken, so consent
+ * collected there would be for something that is not going to happen.
+ */
+export function photographyNoticeText(schoolName: string): string {
+  return (
+    `I agree that ${schoolName} may use photographs and video of my child, ` +
+    `taken at school activities, on the school's own website, notice boards, ` +
+    `prospectus and printed material. They are not sold, not given to ` +
+    `advertisers, and my child is not named beside a picture without being ` +
+    `asked first. I can change my mind at any time by telling the school ` +
+    `office — it will be applied to pictures already published as well as new ` +
+    `ones. Leaving this box unticked is completely fine and makes no ` +
+    `difference to my child's place at the school.`
+  );
+}

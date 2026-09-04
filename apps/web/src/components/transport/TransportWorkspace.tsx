@@ -41,6 +41,7 @@ import {
 } from "@/lib/transportStartMonth";
 import { TransportPlannerPanel } from "@/components/transport/TransportPlannerPanel";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
+import { TransportRequestsPanel } from "@/components/transport/TransportRequestsPanel";
 import { ErpTableShell } from "@/components/ui/erp-roster";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
@@ -60,6 +61,7 @@ import {
   assignStudentToRoute,
   computeTransportPeriodDues,
   endTransportAssignment,
+  overlappingAssignments,
   setAssignmentServiceMode,
   setBoardingSuspended,
   type TransportAssignment,
@@ -92,6 +94,7 @@ type TransportTab =
   | "dashboard"
   | "planner"
   | "riders"
+  | "requests"
   | "rosters"
   | "classRosters"
   | "staffRiders"
@@ -111,6 +114,7 @@ const TABS: ModuleTabItem[] = [
   { id: "dashboard", label: "Dashboard", tone: "navy" },
   { id: "planner", label: "Planner", tone: "teal" },
   { id: "riders", label: "Riders", tone: "navy" },
+  { id: "requests", label: "Requests", tone: "coral" },
   { id: "rosters", label: "Riders by bus", tone: "sky" },
   { id: "classRosters", label: "By class", tone: "sky" },
   { id: "staffRiders", label: "Staff riders", tone: "sky" },
@@ -749,6 +753,9 @@ export function TransportWorkspace() {
               sessionName={session.fullName}
               {...commonPanelProps}
             />
+          ) : null}
+          {tab === "requests" ? (
+            <TransportRequestsPanel onFlash={flash} />
           ) : null}
           {tab === "board" ? (
             <BoardingPanel
@@ -1484,6 +1491,19 @@ function RidersPanel(props: RidersPanelProps) {
                         {assignment.route?.code} · {assignment.route?.busNo} ·{" "}
                         {assignment.stopName} · from {assignment.effectiveFrom}
                       </div>
+                      {/* An overlapping row means this rider has more than one
+                          assignment covering the same months. Billing keeps only
+                          the newest, so the family is not charged twice — but the
+                          extra row is a data fault the office should clear. */}
+                      {overlappingAssignments(assignment.studentId, {
+                        academicYearCode,
+                        state: props.state,
+                      }).length > 0 ? (
+                        <div className="mt-0.5 inline-block rounded bg-[rgba(197,160,40,0.16)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--brand-deep)]">
+                          Overlapping assignment — only the newest is billed; end
+                          or correct the older one
+                        </div>
+                      ) : null}
                       <div className="text-[10px] text-[var(--muted)]">
                         {formatInr(applyServiceMode(fee, assignment.serviceMode))}/month
                         {assignment.serviceMode &&

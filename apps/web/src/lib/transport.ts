@@ -192,6 +192,15 @@ export type FleetVehicle = {
   type: VehicleType;
   fuelType: FuelType;
   fuelUnit: FuelUnit;
+  /**
+   * The second fuel a bi-fuel vehicle actually runs on.
+   *
+   * Four of this fleet are CNG with a petrol tank. One value could not say
+   * that, so they were recorded as whichever fuel someone thought of first,
+   * and a petrol fill on a CNG bus had nowhere to go. Empty for a
+   * single-fuel vehicle, which is most of them.
+   */
+  secondaryFuelType?: FuelType | "";
   tankCapacity: number;
   odometerKm: number;
   avgMileage: number;
@@ -535,6 +544,27 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
+/**
+ * The fuels a vehicle can be filled with, each with the unit it is sold in.
+ *
+ * One entry for a single-fuel vehicle, two for a bi-fuel one — and the units
+ * differ between them, which is the whole point: a CNG+petrol bus takes kg of
+ * CNG and litres of petrol, at different rates. Anything pricing a fill has
+ * to ask this rather than assume the vehicle has one rate.
+ */
+export function vehicleFuelOptions(
+  v: Pick<FleetVehicle, "fuelType" | "secondaryFuelType">,
+): { fuelType: FuelType; unit: FuelUnit }[] {
+  const out: { fuelType: FuelType; unit: FuelUnit }[] = [
+    { fuelType: v.fuelType, unit: fuelUnitFor(v.fuelType) },
+  ];
+  const second = v.secondaryFuelType || "";
+  if (second && second !== v.fuelType) {
+    out.push({ fuelType: second as FuelType, unit: fuelUnitFor(second as FuelType) });
+  }
+  return out;
+}
+
 function fuelUnitFor(ft: FuelType): FuelUnit {
   if (ft === "cng") return "kg";
   if (ft === "electric") return "kwh";
@@ -702,15 +732,22 @@ function normalizeAssignment(
   };
 }
 
-function normalizeVehicle(v: Partial<FleetVehicle>): FleetVehicle {
+export function normalizeVehicle(v: Partial<FleetVehicle>): FleetVehicle {
   const fuelType = (v.fuelType as FuelType) || "diesel";
+  // A secondary fuel that repeats the primary says nothing, so it is dropped.
+  const secondary = (v.secondaryFuelType as FuelType | "") || "";
   return {
     id: v.id ?? id("veh"),
     registrationNo: (v.registrationNo ?? "").trim().toUpperCase() || "TBD",
     name: v.name ?? v.registrationNo ?? "Bus",
     type: (v.type as VehicleType) || "bus",
     fuelType,
-    fuelUnit: v.fuelUnit || fuelUnitFor(fuelType),
+    // The unit is a FACT ABOUT THE FUEL, not a preference: CNG is sold by the
+    // kilogram, diesel and petrol by the litre, electricity by the kWh. A
+    // stored unit that contradicts its fuel is a data error — production had
+    // a CNG bus recorded in litres — so it is corrected rather than kept.
+    fuelUnit: fuelUnitFor(fuelType),
+    secondaryFuelType: secondary && secondary !== fuelType ? secondary : "",
     tankCapacity: Math.max(0, Number(v.tankCapacity) || 0),
     odometerKm: Math.max(0, Number(v.odometerKm) || 0),
     avgMileage: Math.max(0, Number(v.avgMileage) || 0),
@@ -1175,7 +1212,66 @@ export function computeTransportPeriodDues(
     }
   }
 
-  return out.sort((a, b) => a.dueOn.localeCompare(b.dueOn));
+  // One month, one transport charge. Overlapping assignments for the same
+  // student are a data fault, not a reason to bill a family twice: it happens
+  // whenever a re-assignment is back-dated to before the assignment it
+  // replaces, because assignTransport's close-the-previous-row step declines
+  // to set an effectiveTo earlier than that row's own effectiveFrom and leaves
+  // it open. Twelve riders were double-billed for Apr-Aug 2026 that way.
+  //
+  // The winner is the most recently created assignment covering the period —
+  // the latest decision the office made about that rider. Ties fall back to
+  // the assignment id so the choice is stable between renders rather than
+  // depending on array order.
+  const byPeriod = new Map<string, TransportPeriodDue>();
+  const createdAt = new Map(
+    assignments.map((a) => [a.id, a.createdAt ?? ""] as const),
+  );
+  for (const due of out) {
+    const prev = byPeriod.get(due.periodKey);
+    if (!prev) {
+      byPeriod.set(due.periodKey, due);
+      continue;
+    }
+    const a = createdAt.get(due.assignmentId) ?? "";
+    const b = createdAt.get(prev.assignmentId) ?? "";
+    const newer =
+      a !== b ? a > b : due.assignmentId > prev.assignmentId;
+    if (newer) byPeriod.set(due.periodKey, due);
+  }
+
+  return [...byPeriod.values()].sort((a, b) => a.dueOn.localeCompare(b.dueOn));
+}
+
+/**
+ * Assignments for a student that overlap each other — a data fault the roster
+ * should surface. Billing already de-duplicates (see above), so this is for
+ * showing the office what needs correcting, not for protecting the invoice.
+ */
+export function overlappingAssignments(
+  studentId: string,
+  options?: { academicYearCode?: string; state?: TransportState },
+): TransportAssignment[][] {
+  const s = options?.state ?? loadTransport();
+  const ay = options?.academicYearCode ?? DEFAULT_AY;
+  const rows = s.assignments.filter(
+    (a) => a.studentId === studentId && a.academicYearCode === ay,
+  );
+  const END = "9999-12-31";
+  const clashes: TransportAssignment[][] = [];
+  for (let i = 0; i < rows.length; i += 1) {
+    for (let j = i + 1; j < rows.length; j += 1) {
+      const x = rows[i];
+      const y = rows[j];
+      if (
+        x.effectiveFrom <= (y.effectiveTo || END) &&
+        y.effectiveFrom <= (x.effectiveTo || END)
+      ) {
+        clashes.push([x, y]);
+      }
+    }
+  }
+  return clashes;
 }
 
 /* ─── Fee policy ───────────────────────────────────────────── */
@@ -1355,6 +1451,12 @@ export function assignStudentToRoute(input: {
     };
   }
 
+  // Close whatever the rider was on before. The end date is the day before the
+  // new assignment starts — but never earlier than the old row's own start, or
+  // the row would end before it began. That case (a re-assignment back-dated
+  // to on/before the row it replaces) used to leave the old row OPEN, so both
+  // billed and the family was charged twice a month; it is now closed to a
+  // zero-length row, which covers no period and bills nothing.
   const nextAssignments = state.assignments.map((a) => {
     if (
       a.studentId === input.studentId &&
@@ -1364,9 +1466,7 @@ export function assignStudentToRoute(input: {
       const dayBefore = new Date(`${input.effectiveFrom}T12:00:00`);
       dayBefore.setDate(dayBefore.getDate() - 1);
       const end = dayBefore.toISOString().slice(0, 10);
-      if (end >= a.effectiveFrom) {
-        return { ...a, effectiveTo: end };
-      }
+      return { ...a, effectiveTo: end >= a.effectiveFrom ? end : a.effectiveFrom };
     }
     return a;
   });

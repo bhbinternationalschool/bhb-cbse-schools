@@ -10,6 +10,7 @@ import {
 import { feesReadFromDbEnabled } from "@/lib/feesDbConfig";
 import { fetchStudentOpenDuesFromCache } from "@/lib/feesDeskAncillary.server";
 import { loadMasters } from "@/lib/masters";
+import { schoolWhatsAppContact } from "@/lib/schoolWhatsApp.server";
 import { loadSis } from "@/lib/sis";
 
 export const runtime = "nodejs";
@@ -21,6 +22,9 @@ export const runtime = "nodejs";
  *
  * Parent sessions are scoped to their own household. Staff with students.view
  * may pass ?householdId= to inspect a household (office support flows).
+ *
+ * Also carries the school's WhatsApp contact (the number the parent bot
+ * answers on) so the app can open that chat without baking a number in.
  */
 export async function GET(request: Request) {
   try {
@@ -119,6 +123,10 @@ export async function GET(request: Request) {
       0,
     );
 
+    // Null when the school has no WhatsApp number to give — the app hides
+    // its card rather than showing one that goes nowhere.
+    const schoolWhatsApp = await schoolWhatsAppContact().catch(() => null);
+
     return apiOk({
       householdId,
       guardianName: household.guardianName,
@@ -127,6 +135,7 @@ export async function GET(request: Request) {
       children: childSummaries,
       totalOpenBalancePaise: totalPaise,
       totalOpenBalanceLabel: formatInr(totalPaise),
+      schoolWhatsApp,
     });
   } catch (e) {
     return apiErr(e);

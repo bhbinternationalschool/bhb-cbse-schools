@@ -1344,16 +1344,43 @@ export async function amendGoodsReceipt(
     grnId: string;
     supplierInvoiceNo?: string;
     supplierInvoiceDate?: string;
+    /** Moves the goods-receipt date. */
+    receiptDate?: string;
+    /** Moves the bill date — the ledger voucher is reversed and re-posted. */
+    billDate?: string;
+    /**
+     * Per-line corrections. Stock, weighted-average cost, order progress,
+     * the bill and its ledger voucher are all restated in one transaction —
+     * or none of them are.
+     */
+    lines?: {
+      lineId: string;
+      qtyReceived?: number;
+      ratePaise?: number;
+      discountPct?: number;
+      gstRate?: number;
+    }[];
     note?: string;
   },
   actor: string,
-): Promise<{ grnId: string; amended: boolean }> {
+): Promise<{ grnId: string; amended: boolean; ledgerVoucherNo?: string }> {
   const { sb, tenantId } = await invCtx();
   const payload: Record<string, unknown> = { grn_id: input.grnId };
   if (input.supplierInvoiceNo !== undefined)
     payload.supplier_invoice_no = input.supplierInvoiceNo;
   if (input.supplierInvoiceDate !== undefined)
     payload.supplier_invoice_date = input.supplierInvoiceDate;
+  if (input.receiptDate) payload.receipt_date = input.receiptDate;
+  if (input.billDate) payload.bill_date = input.billDate;
+  if (input.lines?.length) {
+    payload.lines = input.lines.map((l) => ({
+      line_id: l.lineId,
+      ...(l.qtyReceived !== undefined ? { qty_received: l.qtyReceived } : {}),
+      ...(l.ratePaise !== undefined ? { rate_paise: l.ratePaise } : {}),
+      ...(l.discountPct !== undefined ? { discount_pct: l.discountPct } : {}),
+      ...(l.gstRate !== undefined ? { gst_rate: l.gstRate } : {}),
+    }));
+  }
   if (input.note !== undefined) payload.note = input.note;
 
   const { data, error } = await sb.rpc("inv_amend_grn", {
@@ -1363,5 +1390,9 @@ export async function amendGoodsReceipt(
   });
   if (error) throw new InvError(error.message, 422);
   const out = (data ?? {}) as Row;
-  return { grnId: str(out.grn_id), amended: out.amended === true };
+  return {
+    grnId: str(out.grn_id),
+    amended: out.amended === true,
+    ledgerVoucherNo: str(out.ledger_voucher_no),
+  };
 }

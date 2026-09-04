@@ -21,20 +21,28 @@ let pending: StaffAttendanceState | null = null;
 type DeskMeta = {
   updatedAt: string;
   registerCount: number;
+  outdoorDutyCount: number;
+};
+
+const EMPTY_META: DeskMeta = {
+  updatedAt: "",
+  registerCount: 0,
+  outdoorDutyCount: 0,
 };
 
 function readMeta(): DeskMeta {
-  if (typeof window === "undefined") return { updatedAt: "", registerCount: 0 };
+  if (typeof window === "undefined") return { ...EMPTY_META };
   try {
     const raw = localStorage.getItem(META_KEY);
-    if (!raw) return { updatedAt: "", registerCount: 0 };
+    if (!raw) return { ...EMPTY_META };
     const p = JSON.parse(raw) as DeskMeta;
     return {
       updatedAt: String(p.updatedAt || ""),
       registerCount: Number(p.registerCount) || 0,
+      outdoorDutyCount: Number(p.outdoorDutyCount) || 0,
     };
   } catch {
-    return { updatedAt: "", registerCount: 0 };
+    return { ...EMPTY_META };
   }
 }
 
@@ -74,18 +82,22 @@ async function pushStaffAttendanceDeskApi(state: StaffAttendanceState) {
       body: JSON.stringify({
         registers: state.registers ?? [],
         settings: state.settings,
+        outdoorDuty: state.outdoorDuty ?? [],
       }),
     });
     const body = (await res.json().catch(() => null)) as {
       ok?: boolean;
       updatedAt?: string;
       count?: number;
+      outdoorDutyCount?: number;
       error?: string;
     } | null;
     if (res.ok && body?.ok) {
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         registerCount: body.count ?? state.registers.length,
+        outdoorDutyCount:
+          body.outdoorDutyCount ?? (state.outdoorDuty ?? []).length,
       });
     } else if (!res.ok) {
       console.warn(
@@ -125,7 +137,10 @@ export async function fetchStaffAttendanceDeskFromApi(): Promise<{
     if (!Array.isArray(body.registers)) return null;
     return {
       registers: body.registers,
-      ancillary: body.ancillary ?? { settings: defaultAttendanceSettings() },
+      ancillary: body.ancillary ?? {
+        settings: defaultAttendanceSettings(),
+        outdoorDuty: [],
+      },
       updatedAt: body.updatedAt || "",
       count: body.count ?? body.registers.length,
     };
@@ -147,19 +162,23 @@ export async function hydrateStaffAttendanceDeskFromDb(
   if (!remote) {
     return {
       registers: [],
-      ancillary: { settings: defaultAttendanceSettings() },
+      ancillary: { settings: defaultAttendanceSettings(), outdoorDuty: [] },
       changed: false,
       ok: false,
     };
   }
 
   const meta = readMeta();
+  const remoteOutdoor = remote.ancillary.outdoorDuty?.length ?? 0;
   const shouldTake =
     preferDb ||
     staffAttendanceReadFromDbClientEnabled() ||
     meta.registerCount === 0 ||
     (remote.updatedAt && remote.updatedAt >= meta.updatedAt) ||
-    remote.count > meta.registerCount;
+    remote.count > meta.registerCount ||
+    // A day with no new register can still have someone check out for
+    // outdoor duty on another device; the register counts alone would miss it.
+    remoteOutdoor > meta.outdoorDutyCount;
 
   if (!shouldTake) {
     return { registers: [], ancillary: remote.ancillary, changed: false, ok: true };
@@ -168,6 +187,7 @@ export async function hydrateStaffAttendanceDeskFromDb(
   writeMeta({
     updatedAt: remote.updatedAt,
     registerCount: remote.count,
+    outdoorDutyCount: remoteOutdoor,
   });
   return {
     registers: remote.registers,

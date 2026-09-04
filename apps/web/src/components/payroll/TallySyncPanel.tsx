@@ -144,7 +144,7 @@ export function TallySyncPanel({
           </p>
         ) : null}
         {error ? (
-          <p className="mt-2 text-sm font-medium text-[#b42318]">{error}</p>
+          <p className="mt-2 text-sm font-medium text-[var(--danger)]">{error}</p>
         ) : null}
 
         <div className="mt-4 flex flex-wrap items-end gap-3">
@@ -261,7 +261,7 @@ export function TallySyncPanel({
                 <span className="text-[var(--muted)]">Balance</span>
                 <p
                   className={`font-semibold ${
-                    jv.balanced ? "text-teal-700" : "text-[#b42318]"
+                    jv.balanced ? "text-teal-700" : "text-[var(--danger)]"
                   }`}
                 >
                   {jv.balanced ? "OK" : `Off ${formatInr(jv.imbalance)}`}
@@ -271,7 +271,7 @@ export function TallySyncPanel({
           </div>
 
           {jv.error ? (
-            <p className="mt-3 text-sm font-medium text-[#b42318]">{jv.error}</p>
+            <p className="mt-3 text-sm font-medium text-[var(--danger)]">{jv.error}</p>
           ) : null}
 
           <div className="mt-3 overflow-x-auto">

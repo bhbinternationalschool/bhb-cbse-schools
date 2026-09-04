@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { FeeReceiptSheet, printFeeReceipt } from "@/components/fees/FeeReceiptSheet";
+import {
+  FeeReceiptSheet,
+  printFeeReceipt,
+} from "@/components/fees/FeeReceiptSheet";
 import {
   decodeReceiptSharePayload,
   type ReceiptSharePayload,
@@ -11,6 +14,38 @@ import { TENANT } from "@/lib/types";
 export default function SharedReceiptPage() {
   const [payload, setPayload] = useState<ReceiptSharePayload | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // The referral QR, drawn here rather than carried in the link. The code is
+  // a dozen characters; the PNG is kilobytes, and this payload rides in a URL
+  // that goes out over WhatsApp.
+  const [referralQr, setReferralQr] = useState<string | null>(null);
+  useEffect(() => {
+    const code = payload?.referralCode;
+    if (!code) {
+      setReferralQr(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const QRCode = (await import("qrcode")).default;
+        const url = `https://${TENANT.publicPortal}/apply?ref=${encodeURIComponent(code)}`;
+        const dataUrl = await QRCode.toDataURL(url, {
+          width: 180,
+          margin: 0,
+          errorCorrectionLevel: "M",
+          color: { dark: "#203050", light: "#ffffff" },
+        });
+        if (!cancelled) setReferralQr(dataUrl);
+      } catch {
+        // No QR is survivable — the code and link are printed beside it.
+        if (!cancelled) setReferralQr(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [payload?.referralCode]);
 
   useEffect(() => {
     const raw = window.location.hash.replace(/^#/, "");
@@ -68,6 +103,8 @@ export default function SharedReceiptPage() {
         voucher={payload.voucher}
         householdHint={payload.householdHint}
         students={payload.students}
+        referralCodeProp={payload.referralCode}
+        referralQrDataUrl={referralQr}
       />
     </main>
   );

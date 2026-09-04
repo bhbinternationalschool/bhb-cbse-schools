@@ -18,6 +18,10 @@ import {
   type StaffAttendanceDeskAncillary,
 } from "@/lib/staffAttendanceDeskAncillary.server";
 import {
+  fetchStaffAttendanceOutdoorDutyFromDb,
+  pushStaffAttendanceOutdoorDutyToDb,
+} from "@/lib/staffAttendanceOutdoorDuty.server";
+import {
   staffAttendanceDualWriteDbEnabled,
   staffAttendanceReadFromDbEnabled,
 } from "@/lib/staffAttendanceDbConfig";
@@ -28,12 +32,15 @@ export type StaffAttendanceDeskSyncMeta = {
   lastMarkedAt: string | null;
   updatedAt: string;
   settingsUpdatedAt?: string | null;
+  outdoorDutyCount?: number;
+  outdoorDutyUpdatedAt?: string | null;
 };
 
 export { staffAttendanceDualWriteDbEnabled, staffAttendanceReadFromDbEnabled };
 
 const META_SELECT =
-  "register_count, last_marked_at, updated_at, settings_updated_at";
+  "register_count, last_marked_at, updated_at, settings_updated_at, " +
+  "outdoor_duty_count, outdoor_duty_updated_at";
 
 function mapMetaRow(
   metaRow: Record<string, unknown> | null,
@@ -44,6 +51,8 @@ function mapMetaRow(
     lastMarkedAt: metaRow.last_marked_at as string | null,
     updatedAt: String(metaRow.updated_at),
     settingsUpdatedAt: metaRow.settings_updated_at as string | null,
+    outdoorDutyCount: (metaRow.outdoor_duty_count as number) ?? 0,
+    outdoorDutyUpdatedAt: metaRow.outdoor_duty_updated_at as string | null,
   };
 }
 
@@ -333,8 +342,14 @@ export async function fetchStaffAttendanceRegistersFromDb(): Promise<{
 }
 
 export async function pushStaffAttendanceDeskToDb(
-  state: Pick<StaffAttendanceState, "registers" | "settings">,
-): Promise<{ ok: boolean; error?: string; registerCount: number }> {
+  state: Pick<StaffAttendanceState, "registers" | "settings"> &
+    Partial<Pick<StaffAttendanceState, "outdoorDuty">>,
+): Promise<{
+  ok: boolean;
+  error?: string;
+  registerCount: number;
+  outdoorDutyCount?: number;
+}> {
   const regResult = await pushStaffAttendanceRegistersToDb(state.registers ?? []);
   if (!regResult.ok) {
     return { ok: false, error: regResult.error, registerCount: 0 };
@@ -351,7 +366,22 @@ export async function pushStaffAttendanceDeskToDb(
     };
   }
 
-  return { ok: true, registerCount: regResult.count };
+  const odResult = await pushStaffAttendanceOutdoorDutyToDb(
+    state.outdoorDuty ?? [],
+  );
+  if (!odResult.ok) {
+    return {
+      ok: false,
+      error: odResult.error,
+      registerCount: regResult.count,
+    };
+  }
+
+  return {
+    ok: true,
+    registerCount: regResult.count,
+    outdoorDutyCount: odResult.count,
+  };
 }
 
 export type StaffAttendanceDeskSnapshot = {
@@ -363,11 +393,19 @@ export type StaffAttendanceDeskSnapshot = {
 };
 
 export async function fetchStaffAttendanceDeskFromDb(): Promise<StaffAttendanceDeskSnapshot> {
-  const [{ registers, meta, ok }, settings] = await Promise.all([
+  const [{ registers, meta, ok }, settings, outdoor] = await Promise.all([
     fetchStaffAttendanceRegistersFromDb(),
     fetchStaffAttendanceSettingsFromDb(),
+    fetchStaffAttendanceOutdoorDutyFromDb(),
   ]);
-  return { registers, ancillary: { settings }, meta, ok };
+  return {
+    registers,
+    ancillary: { settings, outdoorDuty: outdoor.outdoorDuty },
+    meta,
+    // Either slice failing to read means this snapshot is not a confirmed
+    // empty state — merging it as truth could blank what the client holds.
+    ok: ok && outdoor.ok,
+  };
 }
 
 export async function pushStaffAttendanceRegisterToDb(

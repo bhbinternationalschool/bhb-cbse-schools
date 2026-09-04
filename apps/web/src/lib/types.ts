@@ -19,7 +19,7 @@ export const TENANT = {
   city: "Varanasi",
   state: "Uttar Pradesh",
   logoUrl: "/logo.png?v=2",
-  logoCrestUrl: "/logo-crest.png?v=1",
+  logoCrestUrl: "/logo-crest.png?v=2",
   primaryColor: "#203050",
   primaryMid: "#384870",
   accentColor: "#C5A028",
@@ -30,6 +30,15 @@ export const TENANT = {
   /** Demo CBSE identifiers — replace with real affiliation when live */
   affiliationNo: "213XXXX",
   schoolCode: "70XXX",
+  /**
+   * Printed on receipts and slips. Empty values are simply NOT printed —
+   * a receipt must never carry an invented UDISE code or phone number, so
+   * fill these with the real ones before handing printed copies to parents.
+   */
+  udiseCode: "",
+  officePhone: "",
+  whatsappNumber: "",
+  officeEmail: "director@bhbinternational.school",
   /** Campus — Google Maps: Piyamilan chauraha, Baniyavapar, Ayar 221202 */
   schoolAddress:
     "Piyamilan Chauraha, Baniyavapar, Ayar, Varanasi, Uttar Pradesh 221202",

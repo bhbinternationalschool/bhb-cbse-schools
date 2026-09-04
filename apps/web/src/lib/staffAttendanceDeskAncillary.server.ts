@@ -10,7 +10,12 @@ import {
 import { staffAttendanceDualWriteDbEnabled } from "@/lib/staffAttendanceDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
 
-export type StaffAttendanceDeskAncillary = Pick<StaffAttendanceState, "settings">;
+/** The desk slices that ride alongside registers/marks: settings, and the
+ * outdoor duty sessions those registers' marks are derived from. */
+export type StaffAttendanceDeskAncillary = Pick<
+  StaffAttendanceState,
+  "settings" | "outdoorDuty"
+>;
 
 async function ctx() {
   return getServerTenantContext();

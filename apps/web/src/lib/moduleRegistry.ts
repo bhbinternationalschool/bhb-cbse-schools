@@ -37,6 +37,7 @@ export type RegistryModuleId =
   | "exams"
   | "certificates"
   | "comms"
+  | "website"
   | "reports"
   | "rte_ews"
   | "documents"
@@ -414,6 +415,14 @@ export const REGISTRY_MODULES: RegistryModuleDef[] = [
     defaultEnabled: true,
   },
   {
+    id: "website",
+    label: "Website",
+    blurb: "Public pages, media and what goes live",
+    href: "/website",
+    group: "academics",
+    defaultEnabled: true,
+  },
+  {
     id: "transport",
     label: "Transport",
     blurb: "Routes, fleet, riders and transport dues",
@@ -626,6 +635,7 @@ export function registryModuleForHref(href: string): RegistryModuleId | null {
   if (path === "/scholarships" || path.startsWith("/scholarships/")) return "scholarships";
   if (path === "/question-bank" || path.startsWith("/question-bank/")) return "question_bank";
   if (path === "/cbse-loc" || path.startsWith("/cbse-loc/")) return "cbse_loc";
+  if (path === "/website" || path.startsWith("/website/")) return "website";
   if (
     path === "/comms" ||
     path.startsWith("/comms/") ||

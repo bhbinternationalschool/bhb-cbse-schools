@@ -265,6 +265,46 @@ export function siblingGrantHint(
   return `${base} · sibling of ${sibs.map((s) => s.fullName).join(", ")}`;
 }
 
+/**
+ * A live discount already sitting on this fee head, whoever granted it.
+ *
+ * alreadyGranted() only asks whether the SAME rule is already on the student,
+ * so nothing stopped a second, different rule landing on the same head — an
+ * imported ₹150 off tuition and a counter ₹150 off tuition both apply, and
+ * the parent is charged ₹300 less than the school thinks.
+ *
+ * The office's instruction is that a head carries one discount at a time: to
+ * change it, remove the first. This is what enforces that, so return the
+ * offending grant rather than a boolean — the caller has to be able to name
+ * what is already there.
+ *
+ * RTE is deliberately exempt. A free-ship plus its per-head waivers is one
+ * policy expressed as several grants, each capped at the amount billed, and
+ * blocking it would break exemptions the school is legally required to give.
+ */
+export function activeGrantOnHead(
+  masters: MastersState,
+  studentId: string,
+  feeHeadId: string,
+  grants?: ConcessionGrant[],
+): { grant: ConcessionGrant; rule: ConcessionRule } | null {
+  const all = grants ?? masters.concessionGrants ?? [];
+  for (const g of all) {
+    if (g.studentId !== studentId) continue;
+    if (g.status === "rejected") continue;
+    const rule = (masters.concessions ?? []).find(
+      (c) => c.id === g.concessionId,
+    );
+    if (!rule || !rule.isActive) continue;
+    if (rule.kind === "rte") continue;
+    if (rule.feeHeadIds.length > 0 && !rule.feeHeadIds.includes(feeHeadId)) {
+      continue;
+    }
+    return { grant: g, rule };
+  }
+  return null;
+}
+
 export function isStudentAlreadyGranted(
   studentId: string,
   concession: ConcessionRule,

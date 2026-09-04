@@ -5,6 +5,14 @@
 
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { DEFAULT_AY } from "@/lib/masters";
+import {
+  schoolAddressLine,
+  schoolCrestUrl,
+  schoolIdentity,
+  schoolLogoUrl,
+  schoolPrintName,
+  schoolShortName,
+} from "@/lib/schoolIdentity";
 import { TENANT } from "@/lib/types";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
@@ -839,16 +847,17 @@ export function totalPrintCount(paper: ExamPaper): number {
 }
 
 export function schoolHeaderDefaults() {
+  const p = schoolIdentity();
   return {
-    schoolName: TENANT.nameDisplay,
-    shortName: TENANT.shortName,
-    logoUrl: TENANT.logoUrl,
-    crestUrl: TENANT.logoCrestUrl,
-    city: TENANT.city,
-    state: TENANT.state,
-    affiliationNo: TENANT.affiliationNo,
-    schoolCode: TENANT.schoolCode,
-    address: TENANT.schoolAddress,
+    schoolName: schoolPrintName(),
+    shortName: schoolShortName(),
+    logoUrl: schoolLogoUrl(),
+    crestUrl: schoolCrestUrl(),
+    city: p.city || TENANT.city,
+    state: p.state || TENANT.state,
+    affiliationNo: p.affiliationNo || TENANT.affiliationNo,
+    schoolCode: p.schoolCode || TENANT.schoolCode,
+    address: schoolAddressLine(),
   };
 }
 

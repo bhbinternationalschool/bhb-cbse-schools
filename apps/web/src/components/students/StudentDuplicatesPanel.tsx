@@ -24,6 +24,7 @@ import {
 } from "@/lib/studentDuplicates";
 import { StudentAvatar } from "@/components/students/StudentAvatar";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { formatDobLong } from "@/lib/dobFormat";
 
 export function StudentDuplicatesPanel({
   tick = 0,
@@ -293,7 +294,7 @@ export function StudentDuplicatesPanel({
                             {s.rollNo ? ` · Roll ${s.rollNo}` : ""}
                           </div>
                           <div className="mt-0.5 text-[11px] text-[var(--muted)]">
-                            {s.dob ? `DOB ${s.dob}` : "DOB —"}
+                            {s.dob ? `DOB ${formatDobLong(s.dob)}` : "DOB —"}
                             {s.fatherName ? ` · F: ${s.fatherName}` : ""}
                             {s.pen ? ` · PEN ${s.pen}` : ""}
                             {` · ${countDocsWithFiles(s.docs)}/7 docs`}

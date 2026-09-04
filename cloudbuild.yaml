@@ -42,6 +42,13 @@ substitutions:
   # PROTECTED_SUPER_ADMIN_EMAILS above.
   _FLEET_EDGE_ALLOWED_IPS: ""
   _FLEET_EDGE_SOS_NOTIFY_MOBILE: ""
+  # Cashfree PG (2026-08-27). The mode flag is baked into the client bundle
+  # (build-arg) AND set at runtime — a runtime-only NEXT_PUBLIC var is inert
+  # in the browser. App ID is the public client id (not secret); the secret
+  # key lives in Secret Manager — see CASHFREE_SECRET_KEY in --set-secrets.
+  _NEXT_PUBLIC_PAYMENT_GATEWAY: ""
+  _CASHFREE_APP_ID: ""
+  _CASHFREE_ENV: "production"
 
 steps:
   - name: gcr.io/cloud-builders/docker
@@ -67,6 +74,8 @@ steps:
       - NEXT_PUBLIC_TENANT_SLUG=bhb-international
       - --build-arg
       - NEXT_PUBLIC_VAPID_PUBLIC_KEY=${_NEXT_PUBLIC_VAPID_PUBLIC_KEY}
+      - --build-arg
+      - NEXT_PUBLIC_PAYMENT_GATEWAY=${_NEXT_PUBLIC_PAYMENT_GATEWAY}
       - .
 
   - name: gcr.io/cloud-builders/docker
@@ -109,8 +118,8 @@ steps:
       # which Cloud Run refuses once a var is secret-backed — "Cannot update
       # environment variable [...] because it has already been set with a
       # different type." They now go through --set-secrets below instead.
-      - --set-env-vars=^|^NEXT_PUBLIC_APP_URL=${_NEXT_PUBLIC_APP_URL}|NEXT_PUBLIC_DEMO_AUTH=${_NEXT_PUBLIC_DEMO_AUTH}|NEXT_PUBLIC_SUPABASE_URL=${_NEXT_PUBLIC_SUPABASE_URL}|NEXT_PUBLIC_SUPABASE_ANON_KEY=${_NEXT_PUBLIC_SUPABASE_ANON_KEY}|NEXT_PUBLIC_SCHOOL_NAME=BHB International School|NEXT_PUBLIC_TENANT_SLUG=bhb-international|NODE_ENV=production|WHATSAPP_PHONE_ID=${_WHATSAPP_PHONE_ID}|WHATSAPP_WABA_ID=${_WHATSAPP_WABA_ID}|WHATSAPP_DEFAULT_COUNTRY_CODE=${_WHATSAPP_DEFAULT_COUNTRY_CODE}|WHATSAPP_GRAPH_VERSION=${_WHATSAPP_GRAPH_VERSION}|AI_TUTOR_MODEL=${_AI_TUTOR_MODEL}|AI_PREFERRED_ENGINE=${_AI_PREFERRED_ENGINE}|GOOGLE_OAUTH_CLIENT_ID=${_GOOGLE_OAUTH_CLIENT_ID}|PROTECTED_SUPER_ADMIN_EMAILS=${_PROTECTED_SUPER_ADMIN_EMAILS}|NEXT_PUBLIC_VAPID_PUBLIC_KEY=${_NEXT_PUBLIC_VAPID_PUBLIC_KEY}|VAPID_PUBLIC_KEY=${_NEXT_PUBLIC_VAPID_PUBLIC_KEY}|FLEET_EDGE_ALLOWED_IPS=${_FLEET_EDGE_ALLOWED_IPS}|FLEET_EDGE_SOS_NOTIFY_MOBILE=${_FLEET_EDGE_SOS_NOTIFY_MOBILE}
-      - --set-secrets=^|^SUPABASE_SERVICE_ROLE_KEY=school-erp-supabase-service-role-key:latest|CRON_SECRET=school-erp-cron-secret:latest|WA_DISPATCH_SECRET=school-erp-wa-dispatch-secret:latest|MIRROR_SYNC_SECRET=school-erp-mirror-sync-secret:latest|WHATSAPP_TOKEN=school-erp-whatsapp-token:latest|WHATSAPP_VERIFY_TOKEN=school-erp-whatsapp-verify-token:latest|GOOGLE_MAPS_API_KEY=school-erp-google-maps-api-key:latest|GEMINI_API_KEY=school-erp-gemini-api-key:latest|OPENAI_API_KEY=school-erp-openai-api-key:latest|GOOGLE_OAUTH_CLIENT_SECRET=school-erp-google-oauth-client-secret:latest|DIRECT_URL=school-erp-direct-url:latest|VAPID_PRIVATE_KEY=school-erp-vapid-private-key:latest|WA_APP_SECRET=school-erp-wa-app-secret:latest|SARVAM_API_KEY=school-erp-sarvam-api-key:latest|GMAIL_SA_KEY_JSON=school-erp-gmail-sa-key:latest
+      - --set-env-vars=^|^NEXT_PUBLIC_APP_URL=${_NEXT_PUBLIC_APP_URL}|NEXT_PUBLIC_DEMO_AUTH=${_NEXT_PUBLIC_DEMO_AUTH}|NEXT_PUBLIC_SUPABASE_URL=${_NEXT_PUBLIC_SUPABASE_URL}|NEXT_PUBLIC_SUPABASE_ANON_KEY=${_NEXT_PUBLIC_SUPABASE_ANON_KEY}|NEXT_PUBLIC_SCHOOL_NAME=BHB International School|NEXT_PUBLIC_TENANT_SLUG=bhb-international|NODE_ENV=production|WHATSAPP_PHONE_ID=${_WHATSAPP_PHONE_ID}|WHATSAPP_WABA_ID=${_WHATSAPP_WABA_ID}|WHATSAPP_DEFAULT_COUNTRY_CODE=${_WHATSAPP_DEFAULT_COUNTRY_CODE}|WHATSAPP_GRAPH_VERSION=${_WHATSAPP_GRAPH_VERSION}|AI_TUTOR_MODEL=${_AI_TUTOR_MODEL}|AI_PREFERRED_ENGINE=${_AI_PREFERRED_ENGINE}|GOOGLE_OAUTH_CLIENT_ID=${_GOOGLE_OAUTH_CLIENT_ID}|PROTECTED_SUPER_ADMIN_EMAILS=${_PROTECTED_SUPER_ADMIN_EMAILS}|NEXT_PUBLIC_VAPID_PUBLIC_KEY=${_NEXT_PUBLIC_VAPID_PUBLIC_KEY}|VAPID_PUBLIC_KEY=${_NEXT_PUBLIC_VAPID_PUBLIC_KEY}|FLEET_EDGE_ALLOWED_IPS=${_FLEET_EDGE_ALLOWED_IPS}|FLEET_EDGE_SOS_NOTIFY_MOBILE=${_FLEET_EDGE_SOS_NOTIFY_MOBILE}|NEXT_PUBLIC_PAYMENT_GATEWAY=${_NEXT_PUBLIC_PAYMENT_GATEWAY}|CASHFREE_APP_ID=${_CASHFREE_APP_ID}|CASHFREE_ENV=${_CASHFREE_ENV}
+      - --set-secrets=^|^SUPABASE_SERVICE_ROLE_KEY=school-erp-supabase-service-role-key:latest|CRON_SECRET=school-erp-cron-secret:latest|WA_DISPATCH_SECRET=school-erp-wa-dispatch-secret:latest|MIRROR_SYNC_SECRET=school-erp-mirror-sync-secret:latest|WHATSAPP_TOKEN=school-erp-whatsapp-token:latest|WHATSAPP_VERIFY_TOKEN=school-erp-whatsapp-verify-token:latest|GOOGLE_MAPS_API_KEY=school-erp-google-maps-api-key:latest|GEMINI_API_KEY=school-erp-gemini-api-key:latest|OPENAI_API_KEY=school-erp-openai-api-key:latest|GOOGLE_OAUTH_CLIENT_SECRET=school-erp-google-oauth-client-secret:latest|DIRECT_URL=school-erp-direct-url:latest|VAPID_PRIVATE_KEY=school-erp-vapid-private-key:latest|WA_APP_SECRET=school-erp-wa-app-secret:latest|SARVAM_API_KEY=school-erp-sarvam-api-key:latest|GMAIL_SA_KEY_JSON=school-erp-gmail-sa-key:latest|CASHFREE_SECRET_KEY=school-erp-cashfree-secret-key:latest|GOOGLE_CALENDAR_API_KEY=school-erp-google-calendar-key:latest|YOUTUBE_API_KEY=school-erp-youtube-api-key:latest
 
   # Desk-cutover runtime flags. Applied as an additive env update from the
   # COMMITTED deploy/desk-cutover-runtime.env — the trigger has no .env.local,

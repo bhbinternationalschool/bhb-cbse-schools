@@ -22,11 +22,7 @@ import {
   scheduleSisDeskSync,
   sisNormalizedSyncEnabled,
 } from "@/lib/sisNormalizedClient";
-import {
-  isDeskHydrated,
-  markDeskHydrated,
-  resetDeskHydrated,
-} from "@/lib/deskHydrateGuard";
+import { dedupeHydration, isDeskHydrated, markDeskHydrated, resetDeskHydrated } from "@/lib/deskHydrateGuard";
 
 const MODULE = "sis";
 
@@ -170,6 +166,12 @@ export async function flushSisSync() {
 export async function ensureSisHydrated(): Promise<boolean> {
   if (!sisRemoteEnabled()) return false;
   if (isDeskHydrated(MODULE)) return false;
+  // The roster is the biggest single payload the app pulls (~2.5 MB), so a
+  // duplicate fetch of it costs more than any other desk's.
+  return dedupeHydration(MODULE, hydrateSisOnce);
+}
+
+async function hydrateSisOnce(): Promise<boolean> {
 
   const { hydrateSisDeskFromDb, sisSyncRecentlyPushed } = await import(
     "@/lib/sisNormalizedClient"

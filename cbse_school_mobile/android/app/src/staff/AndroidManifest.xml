@@ -1,0 +1,43 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Staff-only permissions. These are the reason the two apps are
+         separate: every one of them backs a staff feature, and none of them
+         belongs in a build that parents install.
+
+         Play treats ACCESS_BACKGROUND_LOCATION as a restricted permission —
+         it needs the declaration form, a demonstration video and prominent
+         in-app disclosure. The case here is presence tracking: a foreground
+         service pings GPS on the school's configured interval, inside the
+         school's timing window only, behind a persistent notification. See
+         lib/features/staff/presence_service.dart. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+
+    <!-- Dictating lesson plan notes (speech_to_text). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+
+    <!-- Photographing a textbook contents page (image_picker). The camera
+         is optional so the app still installs on camera-less devices. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+
+    <application>
+        <service
+            android:name="id.flutter.flutter_background_service.BackgroundService"
+            android:foregroundServiceType="location"
+            tools:replace="android:foregroundServiceType" />
+    </application>
+
+    <queries>
+        <!-- Required on Android 11+ so speech_to_text can find the
+             on-device recognition service. -->
+        <intent>
+            <action android:name="android.speech.RecognitionService"/>
+        </intent>
+    </queries>
+</manifest>

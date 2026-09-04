@@ -20,6 +20,7 @@
 
 import { NextResponse } from "next/server";
 import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
+import { batchNeedsApproval } from "@/lib/data/approvalGate";
 import { collectionDef } from "@/lib/data/registry";
 import { list, write, type Row } from "@/lib/data/server/repo";
 import type { Cursor, FailCode, WriteOp } from "@/lib/data/types";
@@ -126,6 +127,36 @@ export async function POST(req: Request, ctx: RouteCtx) {
       },
       { status: 400 },
     );
+  }
+
+  // A decision, not data entry. Checked HERE and not only in the desk,
+  // because the desk's Publish button is a suggestion — the API is one fetch
+  // away from anyone holding an editor's session.
+  if (
+    batchNeedsApproval(
+      def.approval,
+      ops as unknown as { op?: string; row?: Record<string, unknown> }[],
+    )
+  ) {
+    const approver = await requireStaffPermission(
+      req,
+      def.approval!.module,
+      "approve",
+    );
+    if (!approver.ok) {
+      return NextResponse.json(
+        {
+          ok: false,
+          // "auth" is the vocabulary's word for 401/403 — the client already
+          // knows it. Inventing a kind would land in whatever default branch
+          // each caller happens to have.
+          kind: "auth",
+          message: def.approval!.message,
+          conflicts: [],
+        },
+        { status: 403 },
+      );
+    }
   }
 
   const result = await write(collection, ops);

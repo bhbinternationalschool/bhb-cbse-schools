@@ -17,12 +17,14 @@
  * Run: npx tsx src/lib/ledger/ledger.selftest.ts
  */
 import assert from "node:assert/strict";
+import { defaultCoaAccounts } from "@/lib/accountsNormalize";
 
 import {
   deskJournalToLedgerVoucher,
   voucherTypeForSource,
 } from "@/lib/ledger/mirror";
 import { defaultLedgerAccounts, isPostableLedgerCode } from "@/lib/ledger/coa";
+import { rupeesToPaise } from "@/lib/cashfreeSettlements.server";
 import {
   runAnomalyChecks,
   summariseAnomalies,
@@ -53,6 +55,8 @@ import {
 import {
   buildExpenseVoucher,
   buildFeeReceiptVoucher,
+  buildPgSettlementVoucher,
+  sessionStartOf,
   buildPayrollAccrualVoucher,
   buildPayrollPaymentVoucher,
   buildVendorBillVoucher,
@@ -124,12 +128,16 @@ function journal(patch: Partial<JournalEntry>): JournalEntry {
 
   // Every desk code the posting paths resolve by string must survive into v2,
   // or a mirrored journal lands nowhere.
-  for (const code of [
-    "1000", "1010", "1020", "1030", "1040", "1050",
-    "2000", "2100", "2200", "3000", "4000", "4100", "4200",
-    "5000", "5010", "5020", "5030", "5040", "5050", "5060", "5900",
-  ]) {
-    assert.ok(codes.includes(code), `v2 chart must keep desk code ${code}`);
+  //
+  // Read from the desk seed rather than a hand-kept list: the list was the
+  // reason the two charts could drift. The desk shipped 5010 "Milk Expenses"
+  // while the live book had no such account, so every milk expense was
+  // refused with "no ledger account with code 5010" and queued as unposted.
+  for (const acc of defaultCoaAccounts()) {
+    assert.ok(
+      codes.includes(acc.code),
+      `v2 chart must keep desk code ${acc.code} (${acc.name}) — a desk account with no ledger account cannot be posted`,
+    );
   }
 
   // Parents must exist, or the roll-up to a statement line breaks.
@@ -961,14 +969,19 @@ function ln(o: Partial<AnomalyFacts["lines"][number]> & { voucherId: string }) {
     facts({
       balances: [{ code: "1000", name: "Cash", kind: "asset", isCash: true, isBank: false, closingPaise: -1_00 }],
       reopenedPeriods: [{ period: "2026-07", status: "open" }, { period: "2026-06", status: "locked" }],
-      vouchers: [v({ id: "old", date: "2026-01-01", createdAt: "2026-08-01T00:00:00Z" })],
+      // Dated inside the LOCKED month, written two months later: backdating
+      // is only reported when the period it lands in is actually shut. Into
+      // an open month it is ordinary late entry, which is what a school
+      // keying this year's history into a mid-year system does to almost
+      // every voucher — 648 of 721 on production, burying everything else.
+      vouchers: [v({ id: "old", date: "2026-06-01", createdAt: "2026-08-01T00:00:00Z" })],
       lines: [ln({ voucherId: "old", debitPaise: 100 })],
     }),
   );
   assert.equal(all[0]!.severity, "critical", "the most serious finding sorts first");
   assert.ok(all.some((a) => a.code === "period_reopened"), "a relocked month is surfaced");
   assert.ok(!all.some((a) => a.code === "period_reopened" && a.references[0] === "2026-06"), "a still-locked month is not");
-  assert.ok(all.some((a) => a.code === "backdated_entry"), "an entry written months later is noted");
+  assert.ok(all.some((a) => a.code === "backdated_entry"), "an entry written months later INTO A SHUT MONTH is noted");
 
   const s = summariseAnomalies(all);
   assert.ok(s.critical >= 1);
@@ -1111,6 +1124,181 @@ function ln(o: Partial<AnomalyFacts["lines"][number]> & { voucherId: string }) {
   console.log("  ok  a missing reconciliation is passed as absent, never as agreed");
 }
 
+/* ─── Gateway money: capture, settlement, fees ──────────────── */
+
+{
+  // Decimal rupees are the gateway's unit and paise are ours. The conversion
+  // happens once; these are the values that break a naive `* 100`.
+  assert.equal(rupeesToPaise(97.94), 9794, "97.94 is 9794 paise, not 9793");
+  assert.equal(rupeesToPaise("100"), 10000);
+  assert.equal(rupeesToPaise("0.05"), 5);
+  assert.equal(rupeesToPaise("1234567.89"), 123456789, "lakh-scale stays exact");
+  assert.equal(rupeesToPaise(-12.5), -1250, "a negative adjustment keeps its sign");
+  assert.equal(rupeesToPaise(null), 0);
+  assert.equal(rupeesToPaise(""), 0);
+  console.log("  ok  decimal rupees convert to paise exactly, including negatives");
+}
+
+{
+  // A gateway receipt is money the gateway holds, not money in the bank.
+  const built = buildFeeReceiptVoucher({
+    voucher: {
+      id: "v_gw",
+      householdId: "hh_9",
+      receiptNo: "RC-9",
+      collectionDate: "2026-08-29",
+      totalPaise: 5_000_00,
+      cashierName: "Cashfree webhook",
+      voidedAt: null,
+    },
+    tenders: [
+      {
+        mode: "upi",
+        amountPaise: 5_000_00,
+        ref: "CF_123",
+        instrumentDate: "2026-08-29",
+        bankAccountId: "",
+        gatewayProvider: "cashfree",
+      },
+    ],
+    lines: [{ kind: "academic", amountPaise: 5_000_00 }],
+  });
+  assert.ok(built.ok, `gateway receipt must build: ${built.ok ? "" : built.reason}`);
+  const { by } = shape(built.voucher.lines);
+  assert.equal(by["1100"], 5_000_00, "gateway capture waits in clearing");
+  assert.equal(by["1010"], undefined, "and never touches a bank account");
+
+  // The same tender without a gateway is counter money and does go to bank.
+  const counter = buildFeeReceiptVoucher({
+    voucher: {
+      id: "v_ctr",
+      householdId: "hh_9",
+      receiptNo: "RC-10",
+      collectionDate: "2026-08-29",
+      totalPaise: 5_000_00,
+      cashierName: "Counter",
+      voidedAt: null,
+    },
+    tenders: [
+      { mode: "upi", amountPaise: 5_000_00, ref: "UTR9", instrumentDate: "2026-08-29", bankAccountId: "bnk_1" },
+    ],
+    lines: [{ kind: "academic", amountPaise: 5_000_00 }],
+  });
+  assert.ok(counter.ok, "counter receipt must build");
+  assert.equal(shape(counter.voucher.lines).by["1010"], 5_000_00, "counter UPI is bank money the same day");
+  console.log("  ok  gateway capture waits in clearing; the same UPI at the counter goes to bank");
+}
+
+{
+  // ₹100 captured, settled at ₹97.94 after ₹1.75 fee and ₹0.31 GST.
+  const built = buildPgSettlementVoucher({
+    provider: "cashfree",
+    bankAccountCode: "1011",
+    bankAccountId: "bnk_1",
+    settlement: {
+      cfSettlementId: "738",
+      utr: "1644822317781212",
+      settledOn: "2026-08-29",
+      settlementType: "STANDARD",
+      paymentAmountPaise: 100_00,
+      amountSettledPaise: 97_94,
+      serviceChargePaise: 1_75,
+      serviceTaxPaise: 31,
+      settlementChargePaise: 0,
+      settlementTaxPaise: 0,
+      adjustmentPaise: 0,
+    },
+  });
+  assert.ok(built.ok, `settlement must build: ${built.ok ? "" : built.reason}`);
+  const v = built.voucher;
+  const { dr, cr, by } = shape(v.lines);
+
+  assert.equal(dr, cr, "the settlement balances");
+  assert.equal(by["1011"], 97_94, "the bank gets exactly what the bank got");
+  assert.equal(by["5080"], 1_75, "the gateway fee is an expense");
+  assert.equal(by["1080"], 31, "its GST is claimable input credit, not expense");
+  assert.equal(by["1100"], -100_00, "clearing is relieved of the whole capture");
+  assert.equal(v.sourceId, "cashfree:738", "keyed on the settlement, so a replay lands once");
+
+  const bankLine = v.lines.find((l) => l.accountCode === "1011");
+  assert.equal(bankLine?.instrument?.ref, "1644822317781212", "the bank line carries the UTR to match on");
+  assert.equal(bankLine?.subledgerId, "bnk_1", "and names the account, for the bank book");
+  console.log("  ok  a settlement moves clearing to bank, books the fee and claims its GST");
+}
+
+{
+  // A prior cycle's refund is deducted from this one. The credit to clearing
+  // shrinks by it, because that is where the refunded capture was sitting.
+  const built = buildPgSettlementVoucher({
+    provider: "cashfree",
+    bankAccountCode: "1011",
+    bankAccountId: "bnk_1",
+    settlement: {
+      cfSettlementId: "739",
+      utr: "UTR739",
+      settledOn: "2026-08-29",
+      settlementType: "STANDARD",
+      paymentAmountPaise: 10_000_00,
+      amountSettledPaise: 7_800_00,
+      serviceChargePaise: 170_00,
+      serviceTaxPaise: 30_00,
+      settlementChargePaise: 0,
+      settlementTaxPaise: 0,
+      adjustmentPaise: -2_000_00,
+    },
+  });
+  assert.ok(built.ok, `adjusted settlement must build: ${built.ok ? "" : built.reason}`);
+  const { dr, cr, by } = shape(built.voucher.lines);
+  assert.equal(dr, cr, "it still balances with a negative adjustment");
+  assert.equal(by["1100"], -8_000_00, "clearing is relieved of the capture net of the refund");
+  console.log("  ok  a prior-cycle refund reduces the settlement without unbalancing it");
+}
+
+{
+  // The gateway's own arithmetic must close. A settlement whose parts do not
+  // add up is a settlement nobody understands, and a plug would hide it.
+  const bad = buildPgSettlementVoucher({
+    provider: "cashfree",
+    bankAccountCode: "1010",
+    bankAccountId: "",
+    settlement: {
+      cfSettlementId: "740",
+      utr: "UTR740",
+      settledOn: "2026-08-29",
+      settlementType: "STANDARD",
+      paymentAmountPaise: 100_00,
+      amountSettledPaise: 90_00,
+      serviceChargePaise: 1_75,
+      serviceTaxPaise: 31,
+      settlementChargePaise: 0,
+      settlementTaxPaise: 0,
+      adjustmentPaise: 0,
+    },
+  });
+  assert.ok(!bad.ok, "a settlement that does not add up is refused");
+
+  const noUtr = buildPgSettlementVoucher({
+    provider: "cashfree",
+    bankAccountCode: "1010",
+    bankAccountId: "",
+    settlement: {
+      cfSettlementId: "741",
+      utr: "",
+      settledOn: "2026-08-29",
+      settlementType: "STANDARD",
+      paymentAmountPaise: 100_00,
+      amountSettledPaise: 100_00,
+      serviceChargePaise: 0,
+      serviceTaxPaise: 0,
+      settlementChargePaise: 0,
+      settlementTaxPaise: 0,
+      adjustmentPaise: 0,
+    },
+  });
+  assert.ok(!noUtr.ok, "without a UTR there is nothing to reconcile against");
+  console.log("  ok  settlements that do not add up, or have no UTR, are refused not plugged");
+}
+
 /* ─── Live path ────────────────────────────────────────────── */
 
 async function live() {
@@ -1220,3 +1408,72 @@ void live()
     console.error(e);
     process.exit(1);
   });
+
+{
+  // Session parsing: "2026-27" and "2026-2027" both open on 1 April 2026;
+  // an unreadable code is NULL — never a guessed advance.
+  assert.equal(sessionStartOf("2026-27"), "2026-04-01");
+  assert.equal(sessionStartOf("2026-2027"), "2026-04-01");
+  assert.equal(sessionStartOf("garbage"), null);
+  assert.equal(sessionStartOf(undefined), null);
+  console.log("  ok  session codes parse to their 1 April, unknown stays unknown");
+}
+
+{
+  // A registration fee taken in February for the April session is a
+  // LIABILITY (2400, tagged with its session), not income. The store share
+  // stays a current settlement — the goods were already handed over.
+  const built = buildFeeReceiptVoucher({
+    voucher: {
+      id: "vAdv", householdId: "hh_9", receiptNo: "RC-9",
+      collectionDate: "2026-02-10", totalPaise: 6_000_00,
+      cashierName: "Counter 1", voidedAt: null,
+      academicYearCode: "2026-27",
+    },
+    tenders: [{ mode: "cash", amountPaise: 6_000_00, ref: "", instrumentDate: null, bankAccountId: "" }],
+    lines: [
+      { kind: "academic", amountPaise: 5_000_00 },
+      { kind: "store", amountPaise: 1_000_00 },
+    ],
+  });
+  assert.ok(built.ok, "advance receipt must build");
+  const v = built.voucher;
+  const adv = v.lines.find((l) => l.accountCode === "2400");
+  assert.ok(adv, "the fee share goes to Fees Received in Advance");
+  assert.equal(adv.creditPaise, 5_000_00);
+  assert.equal(adv.costCentreCode, "2026-27", "the session tag is what the release keys on");
+  assert.ok(!v.lines.some((l) => l.accountCode === "4000"), "no income before the session starts");
+  assert.equal(
+    v.lines.find((l) => l.accountCode === "1040")?.creditPaise,
+    1_000_00,
+    "store dues settle now regardless of session",
+  );
+
+  // The same receipt ON 1 April is plain income — the session has begun.
+  const onDay = buildFeeReceiptVoucher({
+    voucher: {
+      id: "vDay", householdId: "hh_9", receiptNo: "RC-10",
+      collectionDate: "2026-04-01", totalPaise: 5_000_00,
+      cashierName: "", voidedAt: null, academicYearCode: "2026-27",
+    },
+    tenders: [{ mode: "cash", amountPaise: 5_000_00, ref: "", instrumentDate: null, bankAccountId: "" }],
+    lines: [{ kind: "academic", amountPaise: 5_000_00 }],
+  });
+  assert.ok(onDay.ok);
+  assert.ok(onDay.voucher.lines.some((l) => l.accountCode === "4000"), "1 April onward is income");
+
+  // No session code on the row: income, because an unknown session must not
+  // be routed to a liability on a guess.
+  const noYear = buildFeeReceiptVoucher({
+    voucher: {
+      id: "vNo", householdId: "hh_9", receiptNo: "RC-11",
+      collectionDate: "2026-02-10", totalPaise: 5_000_00,
+      cashierName: "", voidedAt: null,
+    },
+    tenders: [{ mode: "cash", amountPaise: 5_000_00, ref: "", instrumentDate: null, bankAccountId: "" }],
+    lines: [{ kind: "academic", amountPaise: 5_000_00 }],
+  });
+  assert.ok(noYear.ok);
+  assert.ok(noYear.voucher.lines.some((l) => l.accountCode === "4000"), "unknown session stays income");
+  console.log("  ok  early money is a liability with its session tag; on-time or unknown stays income");
+}

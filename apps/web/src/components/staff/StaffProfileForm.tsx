@@ -367,6 +367,8 @@ export function StaffProfileForm(props: Props) {
             <div className="grid gap-6 lg:grid-cols-2">
               <StaffImageField
                 label="Photo"
+                visibility="private"
+                pathPrefix={`staff/${draft.id}`}
                 value={draft.photoUrl}
                 onChange={(photoUrl) =>
                   patch({
@@ -393,6 +395,8 @@ export function StaffProfileForm(props: Props) {
               />
               <StaffImageField
                 label="Signature"
+                visibility="private"
+                pathPrefix={`staff/${draft.id}`}
                 value={draft.signatureUrl}
                 aspect="wide"
                 onChange={(signatureUrl) => patch({ signatureUrl })}
@@ -978,6 +982,8 @@ export function StaffProfileForm(props: Props) {
             <div className="sm:col-span-2 lg:col-span-3">
               <StaffImageField
                 label="Signature"
+                visibility="private"
+                pathPrefix={`staff/${draft.id}`}
                 value={draft.signatureUrl}
                 aspect="wide"
                 onChange={(signatureUrl) => patch({ signatureUrl })}

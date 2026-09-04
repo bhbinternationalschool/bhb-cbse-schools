@@ -16,11 +16,7 @@ import {
 import { mergeDbDeskIntoFeesState } from "@/lib/feesNormalizedMerge";
 import { feesReadFromDbEnabled } from "@/lib/feesDbConfig";
 import { deskSkipBlobHydrateClient, deskSkipBlobPushClient } from "@/lib/deskCutover";
-import {
-  isDeskHydrated,
-  markDeskHydrated,
-  resetDeskHydrated,
-} from "@/lib/deskHydrateGuard";
+import { dedupeHydration, isDeskHydrated, markDeskHydrated, resetDeskHydrated } from "@/lib/deskHydrateGuard";
 
 const MODULE = "fees";
 
@@ -54,6 +50,12 @@ export function scheduleFeesSync(state: FeesState) {
  */
 export async function ensureFeesHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
+  // Collapse concurrent callers onto one fetch. The fee counter mounts
+  // several components that each ask for this in the same tick.
+  return dedupeHydration(MODULE, hydrateFeesOnce);
+}
+
+async function hydrateFeesOnce(): Promise<boolean> {
 
   const readFromDb = feesReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("fees")

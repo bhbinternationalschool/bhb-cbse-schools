@@ -18,7 +18,7 @@ import {
 import { formatInr } from "@/lib/fees";
 import type { PublicRegistrationConfig } from "@/lib/publicRegistration";
 import { HOUSEHOLD_LANGUAGES } from "@/lib/householdPrefs";
-import { dpdpNoticeText } from "@/lib/admissionsEnquiryForm";
+import { dpdpNoticeText, photographyNoticeText } from "@/lib/admissionsEnquiryForm";
 import { TENANT } from "@/lib/types";
 
 const inp =
@@ -237,6 +237,12 @@ export function PublicFamilyRegisterForm({
   }
 
   const [consent, setConsent] = useState(false);
+  /**
+   * Photographs — its own answer, and NOT required. The form submits whether
+   * it was ticked; leaving it alone is a real answer ("no"), not a missing
+   * one, because the family was asked.
+   */
+  const [photoConsent, setPhotoConsent] = useState(false);
   const [preferredLanguage, setPreferredLanguage] = useState("");
 
   async function onSubmit(e: React.FormEvent) {
@@ -272,6 +278,7 @@ export function PublicFamilyRegisterForm({
             feeAmountPaise: Math.max(0, Math.round(Number(c.feeInr) * 100) || 0),
           })),
           consent,
+          photoConsent,
           preferredLanguage,
         }),
       });
@@ -299,6 +306,7 @@ export function PublicFamilyRegisterForm({
         mobile,
         campaignSrc: initialSrc || "website",
         consent,
+        photoConsent,
         preferredLanguage,
         feeHeadName: feeHead?.name || "Registration fee",
         children: children.map((c) => ({
@@ -497,7 +505,7 @@ export function PublicFamilyRegisterForm({
           </div>
         ) : null}
         {error ? (
-          <p className="text-sm font-medium text-[#b42318]">{error}</p>
+          <p className="text-sm font-medium text-[var(--danger)]">{error}</p>
         ) : null}
         {upiQr ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -700,8 +708,27 @@ export function PublicFamilyRegisterForm({
           <span>{dpdpNoticeText(TENANT.nameDisplay)}</span>
         </label>
 
+        {/* Its own box, and deliberately NOT `required`. Bundling this into
+            the tick above would mean a family could not register without
+            agreeing to photographs, which is exactly what makes consent
+            unfree under the DPDP Act. Leaving it alone must cost nothing. */}
+        <label className="flex items-start gap-2 rounded-xl border border-dashed border-[var(--border)] p-3 text-[11px] text-[var(--muted)]">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={photoConsent}
+            onChange={(e) => setPhotoConsent(e.target.checked)}
+          />
+          <span>
+            <strong className="block text-[var(--brand-deep)]">
+              Photographs (optional)
+            </strong>
+            {photographyNoticeText(TENANT.nameDisplay)}
+          </span>
+        </label>
+
         {error ? (
-          <p className="text-sm font-medium text-[#b42318]">{error}</p>
+          <p className="text-sm font-medium text-[var(--danger)]">{error}</p>
         ) : null}
 
         <button

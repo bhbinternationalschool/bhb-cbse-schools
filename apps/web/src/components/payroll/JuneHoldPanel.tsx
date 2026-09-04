@@ -144,7 +144,7 @@ export function JuneHoldPanel() {
         <p className="text-sm font-medium text-[var(--brand-deep)]">{notice}</p>
       ) : null}
       {error ? (
-        <p className="text-sm font-medium text-[#b42318]">{error}</p>
+        <p className="text-sm font-medium text-[var(--danger)]">{error}</p>
       ) : null}
 
       <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">

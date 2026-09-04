@@ -13,6 +13,8 @@ export async function GET(req: Request) {
       students: await findStudents(
         q.get("search") ?? "",
         q.get("academicYearCode") ?? academicYearCode,
+        q.get("classId") ?? "",
+        q.get("sectionId") ?? "",
       ),
     };
   });

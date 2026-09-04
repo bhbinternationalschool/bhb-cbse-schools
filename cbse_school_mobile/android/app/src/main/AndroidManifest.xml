@@ -1,22 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET"/>
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
-    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
-    <uses-permission android:name="android.permission.WAKE_LOCK"/>
-    <!-- Dictating lesson plan notes (speech_to_text). -->
-    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <!-- FCM push (Android 13+ runtime prompt, asked after sign-in). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-    <!-- Photographing a textbook contents page (image_picker). The camera
-         is optional so the app still installs on camera-less devices. -->
-    <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <application
-        android:label="BHB International School"
+        android:label="@string/app_label"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
@@ -55,10 +43,6 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
-            <service
-            android:name="id.flutter.flutter_background_service.BackgroundService"
-            android:foregroundServiceType="location"
-            tools:replace="android:foregroundServiceType" />
 </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and
@@ -80,11 +64,6 @@
         <intent>
             <action android:name="android.intent.action.VIEW"/>
             <data android:scheme="http"/>
-        </intent>
-        <!-- Required on Android 11+ so speech_to_text can find the
-             on-device recognition service. -->
-        <intent>
-            <action android:name="android.speech.RecognitionService"/>
         </intent>
     </queries>
 </manifest>

@@ -212,7 +212,7 @@ function chipClass(active: boolean, tone: FilterChip["tone"]): string {
       case "slate":
         return "bg-[#334155] text-white";
       case "red":
-        return "bg-[#b42318] text-white";
+        return "bg-[var(--danger)] text-white";
       default:
         return "bg-[var(--brand-deep)] text-white";
     }
@@ -225,7 +225,7 @@ function chipClass(active: boolean, tone: FilterChip["tone"]): string {
     case "slate":
       return "bg-[rgba(71,85,105,0.12)] text-[#334155] hover:brightness-95";
     case "red":
-      return "bg-[rgba(180,35,24,0.1)] text-[#b42318] hover:brightness-95";
+      return "bg-[rgba(180,35,24,0.1)] text-[var(--danger)] hover:brightness-95";
     default:
       return "bg-[rgba(32,48,80,0.06)] text-[var(--muted)] hover:brightness-95";
   }

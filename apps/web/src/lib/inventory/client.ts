@@ -278,6 +278,7 @@ export const invApi = {
     locationId: string;
     qty: number;
     unitCostPaise?: number;
+    at?: string;
     note?: string;
   }) =>
     req<{ qty: number }>("/stock", {
@@ -290,6 +291,7 @@ export const invApi = {
     locationId: string;
     countedQty: number;
     reason: string;
+    at?: string;
   }) =>
     req<{ delta: number; before: number; after: number }>("/stock", {
       method: "POST",
@@ -302,6 +304,7 @@ export const invApi = {
     toLocationId: string;
     qty: number;
     note?: string;
+    at?: string;
   }) =>
     req<{ qty: number }>("/stock", {
       method: "POST",
@@ -387,12 +390,24 @@ export const invApi = {
     grnId: string;
     supplierInvoiceNo?: string;
     supplierInvoiceDate?: string;
+    receiptDate?: string;
+    billDate?: string;
+    lines?: {
+      lineId: string;
+      qtyReceived?: number;
+      ratePaise?: number;
+      discountPct?: number;
+      gstRate?: number;
+    }[];
     note?: string;
   }) =>
-    req<{ amended: { grnId: string; amended: boolean } }>("/receipts", {
-      method: "POST",
-      body: JSON.stringify({ amend }),
-    }).then((r) => r.amended),
+    req<{ amended: { grnId: string; amended: boolean; ledgerVoucherNo?: string } }>(
+      "/receipts",
+      {
+        method: "POST",
+        body: JSON.stringify({ amend }),
+      },
+    ).then((r) => r.amended),
 
   listBills: (query: { vendorId?: string; status?: string } = {}) =>
     req<{ bills: InvVendorBill[] }>("/bills", { query }).then((r) => r.bills),
@@ -423,12 +438,13 @@ export const invApi = {
 
   /* ─── Counter sales ──────────────────────────────────────── */
 
-  findStudents: (search: string) =>
-    req<{ students: InvBuyerStudent[] }>("/buyers", { query: { search } }).then(
-      (r) => r.students,
-    ),
+  findStudents: (search: string, classId = "", sectionId = "") =>
+    req<{ students: InvBuyerStudent[] }>("/buyers", {
+      query: { search, classId, sectionId },
+    }).then((r) => r.students),
 
   listSales: (query: {
+    saleId?: string;
     search?: string;
     status?: string;
     buyerKind?: InvBuyerKind | "";
@@ -457,7 +473,13 @@ export const invApi = {
   /** Several children, one payment. One sale each; all of them or none. */
   postHouseholdSale: (input: {
     sales: Record<string, unknown>[];
-    payments: { amountPaise: number; mode: string; reference: string }[];
+    payments: {
+      amountPaise: number;
+      mode: string;
+      reference: string;
+      paidOn?: string;
+    }[];
+    manualReceiptNo?: string;
   }) =>
     req<{
       household: {
@@ -517,6 +539,9 @@ export const invApi = {
     amountPaise: number;
     mode?: InvTenderMode;
     reference?: string;
+    /** Which bank account received it — empty for cash. */
+    bankAccountId?: string;
+    paidOn?: string;
   }) =>
     req<{ paidPaise: number; balancePaise: number; status: InvSaleStatus }>(
       "/sales",
@@ -530,6 +555,8 @@ export const invApi = {
         totalPaise: number;
         refundedPaise: number;
         balanceReducedPaise: number;
+        /** Empty unless money actually went back out. */
+        refundReference: string;
       };
     }>("/sales", {
       method: "POST",

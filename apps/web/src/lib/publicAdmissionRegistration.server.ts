@@ -13,6 +13,7 @@
  * the payment step.
  */
 
+import type { PhotoConsent } from "@/lib/photoConsent";
 import {
   captureRegistrationPayment,
   createRegistrationUpiLink,
@@ -170,6 +171,8 @@ export async function registerFromAdmissionLink(input: {
   }[];
   /** Parent ticked the DPDP consent box on the form */
   consent?: boolean;
+  /** Parent ticked the SEPARATE, optional photographs box. */
+  photoConsent?: boolean;
   preferredLanguage?: string;
 }): Promise<
   | { ok: true; leadIds: string[]; step: AdmissionLinkPaymentStep | null }
@@ -211,6 +214,24 @@ export async function registerFromAdmissionLink(input: {
       });
     }
   }
+
+  // The family was shown the photographs box and either ticked it or did
+  // not — both are answers, and both are recorded. Written onto the
+  // household because that is what the website reads, and because this path
+  // registers into an EXISTING household rather than creating one.
+  withConsent = {
+    ...withConsent,
+    households: withConsent.households.map((h) =>
+      h.id === payload.householdId
+        ? {
+            ...h,
+            photoConsent: (input.photoConsent ? "granted" : "refused") as PhotoConsent,
+            updatedAt: new Date().toISOString(),
+          }
+        : h,
+    ),
+  };
+
   const stepped = nextPaymentStep(withConsent, leadIds, input.feeHeadName);
   if (!stepped.ok) return stepped;
 

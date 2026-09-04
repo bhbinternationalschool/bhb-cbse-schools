@@ -2893,6 +2893,26 @@ export function normalizeAcademicYearCode(code: string): string {
   return t;
 }
 
+/**
+ * The last day of an academic session — 31 March of its closing year.
+ *
+ * "2026-27" → "2027-03-31". Returns null for anything it cannot read with
+ * certainty, because the caller uses this as a concession's END DATE: a
+ * wrong date here either cuts a family's discount off early or extends it,
+ * and both are worse than leaving the grant as it was.
+ */
+export function academicYearEndOn(code: string): string | null {
+  const norm = normalizeAcademicYearCode(code);
+  const m = norm.match(/^(20\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const startYear = Number(m[1]);
+  const endYY = Number(m[2]);
+  // The closing year must be the one that follows: 2026-27, never 2026-29.
+  const expected = (startYear + 1) % 100;
+  if (endYY !== expected) return null;
+  return `${startYear + 1}-03-31`;
+}
+
 export function isAllSessionsConcession(rule: ConcessionRule): boolean {
   const scope = (rule.academicYearCode || "").trim();
   return !scope || scope === CONCESSION_ALL_SESSIONS;

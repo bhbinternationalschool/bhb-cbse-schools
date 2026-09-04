@@ -19,6 +19,7 @@
  */
 
 import type { RbacModule } from "@/lib/rbac";
+import type { ApprovalRule } from "@/lib/data/approvalGate";
 
 /** Scope filters the repo will refuse to build a query without. */
 export type ScopeKey = "tenant_id" | "academic_year_code";
@@ -37,6 +38,12 @@ export type CollectionDef = {
    * silently authorising nothing — or, worse, defaulting to something.
    */
   readonly rbac: { readonly view: RbacModule; readonly edit: RbacModule };
+  /**
+   * Writes that are a DECISION rather than data entry, and need `approve` on
+   * top of `edit`. Enforced in the write route, so hiding a button is not
+   * mistaken for a rule. See lib/data/approvalGate.ts.
+   */
+  readonly approval?: ApprovalRule;
   /**
    * Filters that MUST be present on every query. `tenant_id` is always
    * required; `academic_year_code` is required wherever records belong to a
@@ -176,6 +183,113 @@ export const COLLECTIONS: readonly CollectionDef[] = [
       list: { sortColumn, defaultLimit: 500, maxLimit: 1000 },
     }),
   ),
+  // ── Website (Phase 1) ──────────────────────────────────────────────────
+  // Server-authoritative from the first commit, unlike most desks here. A
+  // parent, a search engine and an admissions enquiry all read the public
+  // page and none of them has a localStorage — and a stale tab pushing an
+  // empty state is what emptied the Transport desk on 2026-08-21.
+  //
+  // Tenant-scoped only: a website is not a thing that belongs to an academic
+  // session. Scoping by year would hide last year's About page every April.
+  // ── UDISE+ working sheet ─────────────────────────────────────────────
+  // Reconciling a UDISE+ export takes days, and the sheet must follow the
+  // login rather than one browser. Rows are stored AS UPLOADED; the matched
+  // table the office sees is derived from them against SIS every time, so a
+  // child settled since the upload reports itself settled instead of being
+  // shown again.
+  {
+    id: "udise.sheets",
+    module: "students",
+    table: "udise_upload_sheets",
+    rbac: { view: "students", edit: "students" },
+    scope: ["tenant_id"],
+    // "Start a fresh sheet" must be undoable — a day's reconciliation is not
+    // something to lose to a misclick.
+    softDelete: true,
+    list: { sortColumn: "id", defaultLimit: 20, maxLimit: 50 },
+  },
+  {
+    id: "udise.rows",
+    module: "students",
+    table: "udise_upload_rows",
+    rbac: { view: "students", edit: "students" },
+    scope: ["tenant_id"],
+    softDelete: true,
+    // A UDISE+ export runs to the whole school. The ceiling is the registry's
+    // own maximum, and the reader pages to it rather than asking for
+    // everything — PostgREST truncates at 1000 and calls it success.
+    list: { sortColumn: "id", defaultLimit: 1000, maxLimit: 1000 },
+  },
+  {
+    id: "site.pages",
+    module: "website",
+    table: "site_pages",
+    rbac: { view: "website", edit: "website" },
+    // Author drafts, director approves — the decision taken on 2026-08-30.
+    // Saving a draft stays ordinary work; putting a page in front of the
+    // public, now or on a schedule, is the decision. Scheduling counts: it is
+    // publishing with a delay, and the delay is not what makes it safe.
+    // Taking a page DOWN needs no approval, deliberately.
+    approval: {
+      module: "website",
+      whenEquals: { status: ["published", "scheduled"] },
+      whenSet: ["published_at", "scheduled_publish_at"],
+      message:
+        "Only the director can publish a page to the website. Save it as a draft and ask for it to be approved.",
+    },
+    scope: ["tenant_id"],
+    // "Someone deleted the About page" has to be answerable, so the row
+    // stays and Phase 7 restores from it.
+    softDelete: true,
+    // Sorted by slug rather than title: the slug is unique among live pages,
+    // which is what keyset paging needs, and two pages may share a title.
+    list: { sortColumn: "slug", defaultLimit: 200, maxLimit: 500 },
+  },
+  {
+    id: "site.blocks",
+    module: "website",
+    table: "site_blocks",
+    rbac: { view: "website", edit: "website" },
+    scope: ["tenant_id"],
+    softDelete: true,
+    // A long page is perhaps 30 blocks. The ceiling is the registry's own
+    // maximum, not a guess at how big the site might get — a page size with
+    // no real bound is how the admissions payload reached 2.37 MB.
+    list: { sortColumn: "id", defaultLimit: 500, maxLimit: 1000 },
+  },
+  {
+    id: "site.media",
+    module: "website",
+    table: "site_media",
+    rbac: { view: "website", edit: "website" },
+    scope: ["tenant_id"],
+    // A media row may still be referenced by a block on a live page, so
+    // removing it must not orphan that block silently.
+    softDelete: true,
+    list: { sortColumn: "id", defaultLimit: 200, maxLimit: 1000 },
+  },
+  {
+    id: "site.menu",
+    module: "website",
+    table: "site_menu",
+    rbac: { view: "website", edit: "website" },
+    scope: ["tenant_id"],
+    // A menu entry carries nothing of its own; deleting one loses no record.
+    softDelete: false,
+    list: { sortColumn: "id", defaultLimit: 100, maxLimit: 200 },
+  },
+  {
+    id: "site.publications",
+    module: "website",
+    table: "site_publications",
+    rbac: { view: "website", edit: "website" },
+    scope: ["tenant_id"],
+    // Unpublishing is a status change, not a deletion — the decision to have
+    // shown something publicly is itself worth keeping.
+    softDelete: false,
+    list: { sortColumn: "id", defaultLimit: 200, maxLimit: 1000 },
+  },
+
   {
     // Stage 6. The table that made the case for projections: 919 leads,
     // 2.37 MB, of which lead_json is 1.82 MB that no list screen reads.

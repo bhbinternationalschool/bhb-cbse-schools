@@ -1,5 +1,33 @@
 # BHB International School — Google Play Store submission pack
 
+> **Read first (2026-09-04): the app that goes on Play is the PARENT app.**
+> The codebase now builds two apps (commit 590f17c). Only the parent one is
+> submitted to Play; the staff app stays on the download page as an APK,
+> because its background-location, microphone and camera use would put every
+> release through Play's restricted-permission review.
+>
+> | | Parent app (Play) | Staff app (download page) |
+> |---|---|---|
+> | Package | `school.bhbinternational.parent` | `school.bhbinternational.cbse_school_mobile` |
+> | Label | BHB School — Parents | BHB School — Staff |
+> | Build | `scripts/build.sh parent appbundle` | `scripts/build.sh staff apk` |
+> | Permissions | INTERNET, POST_NOTIFICATIONS only | + location, background location, audio |
+>
+> Before the first parent build, register the package with Firebase once:
+> `scripts/register-parent-firebase-app.sh` (needs a live `gcloud auth login`).
+>
+> What this changes in the pack below:
+> - `app-release.aab` in this folder is the OLD combined app — do not upload
+>   it. Upload `build/app/outputs/bundle/parentRelease/app-parent-release.aab`.
+> - Section 3, full description: drop the "Teachers get their daily tools"
+>   paragraph and its three bullets; the parent app has none of them.
+> - Section 4, data safety: drop the **Location** row. The parent app never
+>   asks for location, and declaring it invites the review the split avoids.
+> - Play's sensitive-permission declaration forms never come up: the parent
+>   AAB carries no location, microphone or camera permission.
+> - Screenshots: retake from the parent build; teacher screens must not appear.
+
+
 Everything needed to publish. You create the account and click the buttons;
 copy-paste the text below into each field.
 
@@ -9,7 +37,7 @@ copy-paste the text below into each field.
 
 | File | Play Console field |
 |---|---|
-| `app-release.aab` | Production → Create release → upload |
+| `app-release.aab` | **Stale — old combined app.** Upload the parent AAB from `scripts/build.sh parent appbundle` instead |
 | `icon-512.png` (512×512) | Store listing → App icon |
 | `feature-graphic-1024x500.png` | Store listing → Feature graphic |
 | `screenshots/1..5.png` (1080×2400) | Store listing → Phone screenshots |
@@ -171,3 +199,8 @@ for trying it with a few families before the public rollout.
 **upload key**. If this Mac is lost and these aren't backed up, you can still
 recover via Play App Signing (Google holds the real key), but keep them safe
 anyway — store both in the school's password manager. Never commit them to git.
+
+
+## Microphone (parent app, added 2026-09-05)
+
+The parent app now requests `RECORD_AUDIO` at runtime, only when a parent taps the mic in the AI tutor to speak a question. Recognition uses the phone's own speech service (Google speech recogniser); the app does not record, store or upload audio. Data safety form: no audio collected by the app. No Play permission declaration form is required for the microphone.

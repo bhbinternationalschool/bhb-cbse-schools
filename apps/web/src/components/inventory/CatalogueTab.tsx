@@ -59,6 +59,7 @@ type Draft = Partial<InvItem> & {
   maxDiscountInput?: string;
   openingQtyInput?: string;
   openingCostInput?: string;
+  openingDateInput?: string;
   openingLocationId?: string;
 };
 
@@ -432,6 +433,7 @@ export function CatalogueTab({
           locationId: draft.openingLocationId,
           qty: openingQty,
           unitCostPaise: inputToPaise(draft.openingCostInput ?? ""),
+          at: draft.openingDateInput || undefined,
           note: "Opening stock entered from catalogue",
         });
       }
@@ -895,6 +897,13 @@ export function CatalogueTab({
                     value={draft.openingLocationId ?? ""}
                     options={locationOptions}
                     onChange={(v) => set("openingLocationId", v)}
+                  />
+                  <TextField
+                    label="As on date"
+                    type="date"
+                    hint="Backdate to the session start if this is last year's closing"
+                    value={draft.openingDateInput ?? ""}
+                    onChange={(v) => set("openingDateInput", v)}
                   />
                 </div>
               </fieldset>

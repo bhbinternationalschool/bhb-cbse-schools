@@ -2,6 +2,7 @@ import "dart:convert";
 
 import "package:flutter_secure_storage/flutter_secure_storage.dart";
 import "package:http/http.dart" as http;
+import "package:http_parser/http_parser.dart";
 
 import "../config/app_config.dart";
 
@@ -36,16 +37,16 @@ class ParentChild {
   });
 
   factory ParentChild.fromJson(Map<String, dynamic> j) => ParentChild(
-        id: j["id"] as String,
-        fullName: (j["fullName"] as String).trim().replaceAll(RegExp(r"\s+"), " "),
-        admissionNo: (j["admissionNo"] as String?) ?? "",
-        className: (j["className"] as String?) ?? "",
-        sectionName: (j["sectionName"] as String?) ?? "",
-        rollNo: (j["rollNo"] as String?) ?? "",
-        photoUrl: j["photoUrl"] as String?,
-        openBalancePaise: (j["openBalancePaise"] as num?)?.toInt() ?? 0,
-        openBalanceLabel: (j["openBalanceLabel"] as String?) ?? "₹0",
-      );
+    id: j["id"] as String,
+    fullName: (j["fullName"] as String).trim().replaceAll(RegExp(r"\s+"), " "),
+    admissionNo: (j["admissionNo"] as String?) ?? "",
+    className: (j["className"] as String?) ?? "",
+    sectionName: (j["sectionName"] as String?) ?? "",
+    rollNo: (j["rollNo"] as String?) ?? "",
+    photoUrl: j["photoUrl"] as String?,
+    openBalancePaise: (j["openBalancePaise"] as num?)?.toInt() ?? 0,
+    openBalanceLabel: (j["openBalanceLabel"] as String?) ?? "₹0",
+  );
 
   final String id;
   final String fullName;
@@ -65,10 +66,40 @@ class ParentChild {
   }
 
   String get initials {
-    final parts =
-        fullName.split(" ").where((p) => p.isNotEmpty).take(2).toList();
+    final parts = fullName
+        .split(" ")
+        .where((p) => p.isNotEmpty)
+        .take(2)
+        .toList();
     return parts.map((p) => p[0].toUpperCase()).join();
   }
+}
+
+/// The school's WhatsApp chat — the number the parent bot answers on. The
+/// server reads it from Meta, so the app never carries a number of its own.
+class SchoolWhatsApp {
+  const SchoolWhatsApp({
+    required this.number,
+    required this.display,
+    required this.chatUrl,
+  });
+
+  /// Null when the server gave nothing usable; the card is then not shown.
+  static SchoolWhatsApp? fromJson(Map<String, dynamic>? j) {
+    if (j == null) return null;
+    final chatUrl = (j["chatUrl"] as String?) ?? "";
+    final number = (j["number"] as String?) ?? "";
+    if (chatUrl.isEmpty || number.isEmpty) return null;
+    return SchoolWhatsApp(
+      number: number,
+      display: (j["display"] as String?) ?? number,
+      chatUrl: chatUrl,
+    );
+  }
+
+  final String number;
+  final String display;
+  final String chatUrl;
 }
 
 class ParentSummary {
@@ -76,19 +107,24 @@ class ParentSummary {
     required this.guardianName,
     required this.children,
     required this.totalOpenBalanceLabel,
+    this.schoolWhatsApp,
   });
 
   factory ParentSummary.fromJson(Map<String, dynamic> j) => ParentSummary(
-        guardianName: (j["guardianName"] as String?) ?? "Parent",
-        children: ((j["children"] as List?) ?? const [])
-            .map((c) => ParentChild.fromJson(c as Map<String, dynamic>))
-            .toList(),
-        totalOpenBalanceLabel: (j["totalOpenBalanceLabel"] as String?) ?? "₹0",
-      );
+    guardianName: (j["guardianName"] as String?) ?? "Parent",
+    children: ((j["children"] as List?) ?? const [])
+        .map((c) => ParentChild.fromJson(c as Map<String, dynamic>))
+        .toList(),
+    totalOpenBalanceLabel: (j["totalOpenBalanceLabel"] as String?) ?? "₹0",
+    schoolWhatsApp: SchoolWhatsApp.fromJson(
+      j["schoolWhatsApp"] as Map<String, dynamic>?,
+    ),
+  );
 
   final String guardianName;
   final List<ParentChild> children;
   final String totalOpenBalanceLabel;
+  final SchoolWhatsApp? schoolWhatsApp;
 }
 
 class SectionRef {
@@ -102,15 +138,19 @@ class SectionRef {
 }
 
 class ClassRef {
-  const ClassRef({required this.id, required this.name, required this.sections});
+  const ClassRef({
+    required this.id,
+    required this.name,
+    required this.sections,
+  });
 
   factory ClassRef.fromJson(Map<String, dynamic> j) => ClassRef(
-        id: j["id"] as String,
-        name: (j["name"] as String?) ?? "",
-        sections: ((j["sections"] as List?) ?? const [])
-            .map((s) => SectionRef.fromJson(s as Map<String, dynamic>))
-            .toList(),
-      );
+    id: j["id"] as String,
+    name: (j["name"] as String?) ?? "",
+    sections: ((j["sections"] as List?) ?? const [])
+        .map((s) => SectionRef.fromJson(s as Map<String, dynamic>))
+        .toList(),
+  );
 
   final String id;
   final String name;
@@ -129,14 +169,14 @@ class ClassTeacherInfo {
   });
 
   factory ClassTeacherInfo.fromJson(Map<String, dynamic> j) => ClassTeacherInfo(
-        classId: j["classId"] as String,
-        sectionId: j["sectionId"] as String,
-        className: (j["className"] as String?) ?? "",
-        sectionName: (j["sectionName"] as String?) ?? "",
-        studentCount: (j["studentCount"] as num?)?.toInt() ?? 0,
-        attendanceMarked: j["attendanceMarked"] == true,
-        markedCount: (j["markedCount"] as num?)?.toInt() ?? 0,
-      );
+    classId: j["classId"] as String,
+    sectionId: j["sectionId"] as String,
+    className: (j["className"] as String?) ?? "",
+    sectionName: (j["sectionName"] as String?) ?? "",
+    studentCount: (j["studentCount"] as num?)?.toInt() ?? 0,
+    attendanceMarked: j["attendanceMarked"] == true,
+    markedCount: (j["markedCount"] as num?)?.toInt() ?? 0,
+  );
 
   final String classId;
   final String sectionId;
@@ -157,12 +197,12 @@ class PeriodToday {
   });
 
   factory PeriodToday.fromJson(Map<String, dynamic> j) => PeriodToday(
-        periodNo: (j["periodNo"] as num?)?.toInt() ?? 0,
-        startTime: (j["startTime"] as String?) ?? "",
-        subjectName: (j["subjectName"] as String?) ?? "",
-        className: (j["className"] as String?) ?? "",
-        sectionName: (j["sectionName"] as String?) ?? "",
-      );
+    periodNo: (j["periodNo"] as num?)?.toInt() ?? 0,
+    startTime: (j["startTime"] as String?) ?? "",
+    subjectName: (j["subjectName"] as String?) ?? "",
+    className: (j["className"] as String?) ?? "",
+    sectionName: (j["sectionName"] as String?) ?? "",
+  );
 
   final int periodNo;
   final String startTime;
@@ -181,19 +221,20 @@ class StaffSummary {
   });
 
   factory StaffSummary.fromJson(Map<String, dynamic> j) => StaffSummary(
-        fullName: (j["fullName"] as String?) ?? "Staff",
-        date: (j["date"] as String?) ?? "",
-        classTeacherOf: j["classTeacherOf"] == null
-            ? null
-            : ClassTeacherInfo.fromJson(
-                j["classTeacherOf"] as Map<String, dynamic>),
-        periodsToday: ((j["periodsToday"] as List?) ?? const [])
-            .map((p) => PeriodToday.fromJson(p as Map<String, dynamic>))
-            .toList(),
-        classes: ((j["classes"] as List?) ?? const [])
-            .map((c) => ClassRef.fromJson(c as Map<String, dynamic>))
-            .toList(),
-      );
+    fullName: (j["fullName"] as String?) ?? "Staff",
+    date: (j["date"] as String?) ?? "",
+    classTeacherOf: j["classTeacherOf"] == null
+        ? null
+        : ClassTeacherInfo.fromJson(
+            j["classTeacherOf"] as Map<String, dynamic>,
+          ),
+    periodsToday: ((j["periodsToday"] as List?) ?? const [])
+        .map((p) => PeriodToday.fromJson(p as Map<String, dynamic>))
+        .toList(),
+    classes: ((j["classes"] as List?) ?? const [])
+        .map((c) => ClassRef.fromJson(c as Map<String, dynamic>))
+        .toList(),
+  );
 
   final String fullName;
   final String date;
@@ -212,14 +253,12 @@ class RosterStudent {
   });
 
   factory RosterStudent.fromJson(Map<String, dynamic> j) => RosterStudent(
-        id: j["id"] as String,
-        fullName: (j["fullName"] as String)
-            .trim()
-            .replaceAll(RegExp(r"\s+"), " "),
-        rollNo: (j["rollNo"] as String?) ?? "",
-        photoUrl: j["photoUrl"] as String?,
-        status: j["status"] as String?,
-      );
+    id: j["id"] as String,
+    fullName: (j["fullName"] as String).trim().replaceAll(RegExp(r"\s+"), " "),
+    rollNo: (j["rollNo"] as String?) ?? "",
+    photoUrl: j["photoUrl"] as String?,
+    status: j["status"] as String?,
+  );
 
   final String id;
   final String fullName;
@@ -238,12 +277,12 @@ class AttendanceRoster {
   });
 
   factory AttendanceRoster.fromJson(Map<String, dynamic> j) => AttendanceRoster(
-        date: (j["date"] as String?) ?? "",
-        attendanceMarked: j["attendanceMarked"] == true,
-        students: ((j["students"] as List?) ?? const [])
-            .map((s) => RosterStudent.fromJson(s as Map<String, dynamic>))
-            .toList(),
-      );
+    date: (j["date"] as String?) ?? "",
+    attendanceMarked: j["attendanceMarked"] == true,
+    students: ((j["students"] as List?) ?? const [])
+        .map((s) => RosterStudent.fromJson(s as Map<String, dynamic>))
+        .toList(),
+  );
 
   final String date;
   final bool attendanceMarked;
@@ -252,6 +291,7 @@ class AttendanceRoster {
 
 class FeeDue {
   const FeeDue({
+    required this.dueKey,
     required this.label,
     required this.kind,
     required this.dueOn,
@@ -260,13 +300,17 @@ class FeeDue {
   });
 
   factory FeeDue.fromJson(Map<String, dynamic> j) => FeeDue(
-        label: (j["label"] as String?) ?? "",
-        kind: (j["kind"] as String?) ?? "",
-        dueOn: (j["dueOn"] as String?) ?? "",
-        balanceLabel: (j["balanceLabel"] as String?) ?? "₹0",
-        balancePaise: (j["balancePaise"] as num?)?.toInt() ?? 0,
-      );
+    dueKey: (j["dueKey"] as String?) ?? "",
+    label: (j["label"] as String?) ?? "",
+    kind: (j["kind"] as String?) ?? "",
+    dueOn: (j["dueOn"] as String?) ?? "",
+    balanceLabel: (j["balanceLabel"] as String?) ?? "₹0",
+    balancePaise: (j["balancePaise"] as num?)?.toInt() ?? 0,
+  );
 
+  /// Server handle for this due; what the parent checkout is asked to
+  /// collect. Amounts are never sent — the server recomputes them.
+  final String dueKey;
   final String label;
   final String kind;
   final String dueOn;
@@ -274,24 +318,799 @@ class FeeDue {
   final int balancePaise;
 }
 
+/// What /api/payments/parent-checkout hands back once the pay-link exists.
+///
+/// `checkoutUrl` is the gateway's hosted page (Cashfree) and is what the
+/// parent should be sent to. It is null when the gateway could not be
+/// attached; `shareUrl` — the school's own pay page for the link — always
+/// works and is the fallback, the same one the web portal uses.
+class ParentCheckout {
+  const ParentCheckout({
+    required this.linkId,
+    required this.amountPaise,
+    required this.checkoutUrl,
+    required this.shareUrl,
+  });
+
+  factory ParentCheckout.fromJson(Map<String, dynamic> j) => ParentCheckout(
+    linkId: (j["linkId"] as String?) ?? "",
+    amountPaise: (j["amountPaise"] as num?)?.toInt() ?? 0,
+    checkoutUrl: j["checkoutUrl"] as String?,
+    shareUrl: (j["shareUrl"] as String?) ?? "",
+  );
+
+  final String linkId;
+  final int amountPaise;
+  final String? checkoutUrl;
+  final String shareUrl;
+
+  /// Where to send the parent. Null only if the server returned neither,
+  /// which the client treats as "could not start payment".
+  Uri? get payUri {
+    final raw = (checkoutUrl ?? "").isNotEmpty ? checkoutUrl! : shareUrl;
+    return raw.isEmpty ? null : Uri.tryParse(raw);
+  }
+}
+
+/// One title on the school's e-book shelf (FlipHTML5 bookcases).
+class LibraryEbook {
+  const LibraryEbook({
+    required this.id,
+    required this.title,
+    required this.author,
+    required this.subject,
+    required this.classLabels,
+    required this.url,
+    required this.passKey,
+    required this.passKeyLabel,
+  });
+
+  factory LibraryEbook.fromJson(Map<String, dynamic> j) => LibraryEbook(
+    id: (j["id"] as String?) ?? "",
+    title: (j["title"] as String?) ?? "",
+    author: (j["author"] as String?) ?? "",
+    subject: (j["subject"] as String?) ?? "",
+    classLabels: ((j["classLabels"] as List?) ?? const [])
+        .map((e) => e.toString())
+        .toList(),
+    url: (j["url"] as String?) ?? "",
+    passKey: (j["passKey"] as String?) ?? "",
+    passKeyLabel: (j["passKeyLabel"] as String?) ?? "",
+  );
+
+  final String id;
+  final String title;
+  final String author;
+  final String subject;
+  final List<String> classLabels;
+  final String url;
+  final String passKey;
+  final String passKeyLabel;
+}
+
+/// GET /api/v1/library/ebooks.
+///
+/// `configured` false is a real, distinct state — the office has not set the
+/// shelf up — and is shown as such rather than as an empty catalogue.
+class EbookShelf {
+  const EbookShelf({
+    required this.configured,
+    required this.shelfUrl,
+    required this.shelfKey,
+    required this.note,
+    required this.books,
+  });
+
+  factory EbookShelf.fromJson(Map<String, dynamic> j) => EbookShelf(
+    configured: j["configured"] == true,
+    shelfUrl: (j["shelfUrl"] as String?) ?? "",
+    shelfKey: (j["shelfKey"] as String?) ?? "",
+    note: (j["note"] as String?) ?? "",
+    books: ((j["books"] as List?) ?? const [])
+        .map((b) => LibraryEbook.fromJson(b as Map<String, dynamic>))
+        .toList(),
+  );
+
+  final bool configured;
+  final String shelfUrl;
+  final String shelfKey;
+  final String note;
+  final List<LibraryEbook> books;
+}
+
+/// One leave request as /api/v1/leave/list returns it.
+class LeaveRequestInfo {
+  const LeaveRequestInfo({
+    required this.id,
+    required this.studentId,
+    required this.studentName,
+    required this.fromDate,
+    required this.toDate,
+    required this.days,
+    required this.leaveType,
+    required this.leaveTypeLabel,
+    required this.reason,
+    required this.status,
+    required this.createdAt,
+    required this.decidedAt,
+    required this.decisionNote,
+  });
+
+  factory LeaveRequestInfo.fromJson(Map<String, dynamic> j) => LeaveRequestInfo(
+    id: (j["id"] as String?) ?? "",
+    studentId: (j["studentId"] as String?) ?? "",
+    studentName: (j["studentName"] as String?) ?? "",
+    fromDate: (j["fromDate"] as String?) ?? "",
+    toDate: (j["toDate"] as String?) ?? "",
+    days: (j["days"] as num?)?.toInt() ?? 1,
+    leaveType: (j["leaveType"] as String?) ?? "",
+    leaveTypeLabel: (j["leaveTypeLabel"] as String?) ?? "",
+    reason: (j["reason"] as String?) ?? "",
+    status: (j["status"] as String?) ?? "pending",
+    createdAt: (j["createdAt"] as String?) ?? "",
+    decidedAt: (j["decidedAt"] as String?) ?? "",
+    decisionNote: (j["decisionNote"] as String?) ?? "",
+  );
+
+  final String id;
+  final String studentId;
+  final String studentName;
+  final String fromDate;
+  final String toDate;
+  final int days;
+  final String leaveType;
+  final String leaveTypeLabel;
+  final String reason;
+
+  /// pending | approved | rejected | cancelled
+  final String status;
+  final String createdAt;
+  final String decidedAt;
+  final String decisionNote;
+
+  bool get isPending => status == "pending";
+}
+
+class LeaveTypeInfo {
+  const LeaveTypeInfo({
+    required this.code,
+    required this.label,
+    required this.note,
+  });
+
+  factory LeaveTypeInfo.fromJson(Map<String, dynamic> j) => LeaveTypeInfo(
+    code: (j["code"] as String?) ?? "",
+    label: (j["label"] as String?) ?? "",
+    note: (j["note"] as String?) ?? "",
+  );
+
+  final String code;
+  final String label;
+  final String note;
+
+  /// Half-day codes are for one date only; the server refuses a range.
+  bool get isHalfDay => code == "HD_AM" || code == "HD_PM";
+}
+
+class LeaveList {
+  const LeaveList({required this.requests, required this.leaveTypes});
+
+  factory LeaveList.fromJson(Map<String, dynamic> j) => LeaveList(
+    requests: ((j["requests"] as List?) ?? const [])
+        .map((r) => LeaveRequestInfo.fromJson(r as Map<String, dynamic>))
+        .toList(),
+    leaveTypes: ((j["leaveTypes"] as List?) ?? const [])
+        .map((t) => LeaveTypeInfo.fromJson(t as Map<String, dynamic>))
+        .toList(),
+  );
+
+  final List<LeaveRequestInfo> requests;
+  final List<LeaveTypeInfo> leaveTypes;
+}
+
+/// One complaint ticket as /api/v1/complaints/list returns it.
+class ComplaintTicketInfo {
+  const ComplaintTicketInfo({
+    required this.id,
+    required this.studentId,
+    required this.studentName,
+    required this.category,
+    required this.categoryLabel,
+    required this.subject,
+    required this.description,
+    required this.date,
+    required this.status,
+    required this.statusLabel,
+    required this.resolutionNote,
+    required this.createdAt,
+  });
+
+  factory ComplaintTicketInfo.fromJson(Map<String, dynamic> j) =>
+      ComplaintTicketInfo(
+        id: (j["id"] as String?) ?? "",
+        studentId: j["studentId"] as String?,
+        studentName: (j["studentName"] as String?) ?? "",
+        category: (j["category"] as String?) ?? "other",
+        categoryLabel: (j["categoryLabel"] as String?) ?? "",
+        subject: (j["subject"] as String?) ?? "",
+        description: (j["description"] as String?) ?? "",
+        date: (j["date"] as String?) ?? "",
+        status: (j["status"] as String?) ?? "open",
+        statusLabel: (j["statusLabel"] as String?) ?? "",
+        resolutionNote: (j["resolutionNote"] as String?) ?? "",
+        createdAt: (j["createdAt"] as String?) ?? "",
+      );
+
+  final String id;
+  final String? studentId;
+  final String studentName;
+  final String category;
+  final String categoryLabel;
+  final String subject;
+  final String description;
+  final String date;
+
+  /// open | assigned | in_progress | resolved | closed
+  final String status;
+  final String statusLabel;
+  final String resolutionNote;
+  final String createdAt;
+
+  bool get isClosed => status == "resolved" || status == "closed";
+}
+
+class ComplaintCategoryInfo {
+  const ComplaintCategoryInfo({required this.value, required this.label});
+
+  factory ComplaintCategoryInfo.fromJson(Map<String, dynamic> j) =>
+      ComplaintCategoryInfo(
+        value: (j["value"] as String?) ?? "",
+        label: (j["label"] as String?) ?? "",
+      );
+
+  final String value;
+  final String label;
+}
+
+class ComplaintList {
+  const ComplaintList({required this.tickets, required this.categories});
+
+  factory ComplaintList.fromJson(Map<String, dynamic> j) => ComplaintList(
+    tickets: ((j["tickets"] as List?) ?? const [])
+        .map((t) => ComplaintTicketInfo.fromJson(t as Map<String, dynamic>))
+        .toList(),
+    categories: ((j["categories"] as List?) ?? const [])
+        .map((c) => ComplaintCategoryInfo.fromJson(c as Map<String, dynamic>))
+        .toList(),
+  );
+
+  final List<ComplaintTicketInfo> tickets;
+  final List<ComplaintCategoryInfo> categories;
+}
+
+// ---- profile & documents -----------------------------------------------------
+
+/// One entry on the school's document checklist, with this child's status.
+class StudentDocInfo {
+  const StudentDocInfo({
+    required this.key,
+    required this.label,
+    required this.required,
+    required this.status,
+    required this.statusLabel,
+    required this.fileName,
+    required this.uploadedAt,
+    required this.reviewNote,
+    required this.previewUrl,
+  });
+
+  factory StudentDocInfo.fromJson(Map<String, dynamic> j) => StudentDocInfo(
+    key: (j["key"] as String?) ?? "",
+    label: (j["label"] as String?) ?? "",
+    required: j["required"] == true,
+    status: (j["status"] as String?) ?? "missing",
+    statusLabel: (j["statusLabel"] as String?) ?? "",
+    fileName: (j["fileName"] as String?) ?? "",
+    uploadedAt: (j["uploadedAt"] as String?) ?? "",
+    reviewNote: (j["reviewNote"] as String?) ?? "",
+    previewUrl: j["previewUrl"] as String?,
+  );
+
+  final String key;
+  final String label;
+  final bool required;
+
+  /// missing | received | pending | verified | rejected
+  final String status;
+  final String statusLabel;
+  final String fileName;
+  final String uploadedAt;
+  final String reviewNote;
+
+  /// Server-relative proxy URL for the stored file; null when none is kept.
+  final String? previewUrl;
+
+  bool get hasFile => status != "missing" && fileName.isNotEmpty;
+  bool get isVerified => status == "verified";
+  bool get isPending => status == "pending" || status == "received";
+  bool get isRejected => status == "rejected";
+}
+
+/// The checklist itself — what the school asks for, and what each is.
+class DocChecklistItem {
+  const DocChecklistItem({
+    required this.key,
+    required this.label,
+    required this.required,
+    required this.accept,
+    required this.hint,
+  });
+
+  factory DocChecklistItem.fromJson(Map<String, dynamic> j) => DocChecklistItem(
+    key: (j["key"] as String?) ?? "",
+    label: (j["label"] as String?) ?? "",
+    required: j["required"] == true,
+    accept: (j["accept"] as String?) ?? "",
+    hint: (j["hint"] as String?) ?? "",
+  );
+
+  final String key;
+  final String label;
+  final bool required;
+  final String accept;
+  final String hint;
+
+  bool get allowsPdf => accept.contains("application/pdf");
+}
+
+/// A child's full record as the school holds it — read-only in the app.
+class StudentProfile {
+  const StudentProfile({
+    required this.id,
+    required this.fullName,
+    required this.admissionNo,
+    required this.classLabel,
+    required this.fields,
+    required this.photoUrl,
+    required this.completeness,
+    required this.docs,
+  });
+
+  factory StudentProfile.fromJson(Map<String, dynamic> j) {
+    String s(String k) => (j[k] as String?) ?? "";
+    // Label → value, in the order a parent expects to read them. Blank
+    // values are kept so the screen can show "—" rather than hide a field
+    // the office has not filled in.
+    final fields = <(String, String)>[
+      ("Admission no.", s("admissionNo")),
+      ("Class", s("classLabel")),
+      ("Roll no.", s("rollNo")),
+      ("Date of birth", s("dob")),
+      (
+        "Gender",
+        switch (s("gender")) {
+          "M" => "Male",
+          "F" => "Female",
+          "O" => "Other",
+          _ => "",
+        },
+      ),
+      ("Blood group", s("bloodGroup")),
+      ("Category", s("category")),
+      ("Religion", s("religion")),
+      ("Nationality", s("nationality")),
+      ("Mother tongue", s("motherTongue")),
+      ("Place of birth", s("placeOfBirth")),
+      ("Father's name", s("fatherName")),
+      ("Father's mobile", s("fatherMobile")),
+      ("Mother's name", s("motherName")),
+      ("Mother's mobile", s("motherMobile")),
+      (
+        "Emergency contact",
+        [
+          s("emergencyName"),
+          s("emergencyMobile"),
+        ].where((x) => x.isNotEmpty).join(" · "),
+      ),
+      ("Aadhaar", s("aadhaarMasked")),
+      ("PEN", s("pen")),
+      ("APAAR ID", s("apaarId")),
+      ("Previous school", s("previousSchool")),
+      ("Joined on", s("joinedOn")),
+      ("Academic year", s("academicYearCode")),
+    ];
+    return StudentProfile(
+      id: s("id"),
+      fullName: s("fullName"),
+      admissionNo: s("admissionNo"),
+      classLabel: s("classLabel"),
+      fields: fields,
+      photoUrl: s("photoUrl"),
+      completeness: (j["completeness"] as num?)?.toInt() ?? 0,
+      docs: ((j["docs"] as List?) ?? const [])
+          .map((d) => StudentDocInfo.fromJson(d as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+
+  final String id;
+  final String fullName;
+  final String admissionNo;
+  final String classLabel;
+  final List<(String, String)> fields;
+  final String photoUrl;
+  final int completeness;
+  final List<StudentDocInfo> docs;
+
+  int get requiredMissing =>
+      docs.where((d) => d.required && (!d.hasFile || d.isRejected)).length;
+}
+
+/// The family's contact record; only some fields are the parent's to edit.
+class HouseholdProfile {
+  const HouseholdProfile({required this.id, required this.values});
+
+  factory HouseholdProfile.fromJson(Map<String, dynamic> j) => HouseholdProfile(
+    id: (j["id"] as String?) ?? "",
+    values: {
+      for (final k in const [
+        "code",
+        "guardianName",
+        "mobile",
+        "whatsappMobile",
+        "altMobile",
+        "email",
+        "address",
+        "locality",
+        "landmark",
+        "city",
+        "state",
+        "pincode",
+      ])
+        k: (j[k] as String?) ?? "",
+    },
+  );
+
+  final String id;
+  final Map<String, String> values;
+
+  String operator [](String key) => values[key] ?? "";
+}
+
+class ParentProfile {
+  const ParentProfile({
+    required this.household,
+    required this.editableHouseholdFields,
+    required this.documents,
+    required this.children,
+  });
+
+  factory ParentProfile.fromJson(Map<String, dynamic> j) => ParentProfile(
+    household: HouseholdProfile.fromJson(
+      (j["household"] as Map<String, dynamic>?) ?? const {},
+    ),
+    editableHouseholdFields:
+        ((j["editableHouseholdFields"] as List?) ?? const [])
+            .map((e) => e.toString())
+            .toList(),
+    documents: ((j["documents"] as List?) ?? const [])
+        .map((d) => DocChecklistItem.fromJson(d as Map<String, dynamic>))
+        .toList(),
+    children: ((j["children"] as List?) ?? const [])
+        .map((c) => StudentProfile.fromJson(c as Map<String, dynamic>))
+        .toList(),
+  );
+
+  final HouseholdProfile household;
+  final List<String> editableHouseholdFields;
+  final List<DocChecklistItem> documents;
+  final List<StudentProfile> children;
+}
+
+/// What the server said about an uploaded document.
+class DocumentSubmitResult {
+  const DocumentSubmitResult({
+    required this.doc,
+    required this.message,
+    required this.checkRan,
+    required this.overall,
+    required this.checks,
+  });
+
+  factory DocumentSubmitResult.fromJson(Map<String, dynamic> j) {
+    final v = (j["validation"] as Map<String, dynamic>?) ?? const {};
+    return DocumentSubmitResult(
+      doc: StudentDocInfo.fromJson(
+        (j["doc"] as Map<String, dynamic>?) ?? const {},
+      ),
+      message: (j["message"] as String?) ?? "Submitted for verification.",
+      checkRan: v["ran"] == true,
+      overall: v["overall"] as String?,
+      checks: ((v["checks"] as List?) ?? const [])
+          .map(
+            (c) => (
+              label: (c["label"] as String?) ?? "",
+              status: (c["status"] as String?) ?? "",
+            ),
+          )
+          .toList(),
+    );
+  }
+
+  final StudentDocInfo doc;
+  final String message;
+  final bool checkRan;
+
+  /// likely_match | review | likely_mismatch | unreadable, or null.
+  final String? overall;
+  final List<({String label, String status})> checks;
+}
+
+// ---- receipts, transport ----------------------------------------------------
+
+class ReceiptInfo {
+  const ReceiptInfo({
+    required this.id,
+    required this.receiptNo,
+    required this.date,
+    required this.totalLabel,
+    required this.students,
+    required this.particulars,
+    required this.paidBy,
+    required this.voided,
+    required this.pdfUrl,
+  });
+
+  factory ReceiptInfo.fromJson(Map<String, dynamic> j) => ReceiptInfo(
+    id: (j["id"] as String?) ?? "",
+    receiptNo: (j["receiptNo"] as String?) ?? "",
+    date: (j["date"] as String?) ?? "",
+    totalLabel: (j["totalLabel"] as String?) ?? "",
+    students: ((j["students"] as List?) ?? const [])
+        .map((e) => e.toString())
+        .toList(),
+    particulars: ((j["particulars"] as List?) ?? const [])
+        .map((e) => e.toString())
+        .toList(),
+    paidBy: (j["paidBy"] as String?) ?? "",
+    voided: j["voided"] == true,
+    pdfUrl: (j["pdfUrl"] as String?) ?? "",
+  );
+
+  final String id;
+  final String receiptNo;
+  final String date;
+  final String totalLabel;
+  final List<String> students;
+  final List<String> particulars;
+  final String paidBy;
+  final bool voided;
+  final String pdfUrl;
+}
+
+class ChildTransport {
+  const ChildTransport({
+    required this.routeCode,
+    required this.routeName,
+    required this.stopName,
+    required this.serviceMode,
+    required this.suspended,
+    required this.monthlyFeeLabel,
+    required this.vehicleName,
+    required this.vehicleReg,
+    required this.driverName,
+    required this.driverMobile,
+  });
+
+  factory ChildTransport.fromJson(Map<String, dynamic> j) {
+    // Nested maps may arrive untyped; read them leniently.
+    final v = j["vehicle"] is Map
+        ? Map<String, dynamic>.from(j["vehicle"] as Map)
+        : const <String, dynamic>{};
+    final d = j["driver"] is Map
+        ? Map<String, dynamic>.from(j["driver"] as Map)
+        : null;
+    return ChildTransport(
+      routeCode: (j["routeCode"] as String?) ?? "",
+      routeName: (j["routeName"] as String?) ?? "",
+      stopName: (j["stopName"] as String?) ?? "",
+      serviceMode: (j["serviceMode"] as String?) ?? "both",
+      suspended: j["suspended"] == true,
+      monthlyFeeLabel: (j["monthlyFeeLabel"] as String?) ?? "",
+      vehicleName: (v["name"] as String?) ?? "",
+      vehicleReg: (v["registrationNo"] as String?) ?? "",
+      driverName: (d?["name"] as String?) ?? "",
+      driverMobile: (d?["mobile"] as String?) ?? "",
+    );
+  }
+
+  final String routeCode;
+  final String routeName;
+  final String stopName;
+  final String serviceMode;
+  final bool suspended;
+  final String monthlyFeeLabel;
+  final String vehicleName;
+  final String vehicleReg;
+  final String driverName;
+  final String driverMobile;
+
+  bool get canCallDriver =>
+      driverMobile.replaceAll(RegExp(r"\D"), "").length >= 10;
+}
+
+class TransportRequestState {
+  const TransportRequestState({
+    required this.id,
+    required this.status,
+    required this.createdAt,
+    required this.handlingNote,
+  });
+
+  factory TransportRequestState.fromJson(Map<String, dynamic> j) =>
+      TransportRequestState(
+        id: (j["id"] as String?) ?? "",
+        status: (j["status"] as String?) ?? "open",
+        createdAt: (j["createdAt"] as String?) ?? "",
+        handlingNote: (j["handlingNote"] as String?) ?? "",
+      );
+
+  final String id;
+
+  /// open | contacted | assigned | declined
+  final String status;
+  final String createdAt;
+  final String handlingNote;
+
+  bool get isActive => status == "open" || status == "contacted";
+}
+
+class ChildTransportInfo {
+  const ChildTransportInfo({
+    required this.id,
+    required this.fullName,
+    required this.classLabel,
+    required this.transport,
+    required this.request,
+  });
+
+  factory ChildTransportInfo.fromJson(Map<String, dynamic> j) =>
+      ChildTransportInfo(
+        id: (j["id"] as String?) ?? "",
+        fullName: (j["fullName"] as String?) ?? "",
+        classLabel: (j["classLabel"] as String?) ?? "",
+        transport: j["transport"] is Map<String, dynamic>
+            ? ChildTransport.fromJson(j["transport"] as Map<String, dynamic>)
+            : null,
+        request: j["request"] is Map<String, dynamic>
+            ? TransportRequestState.fromJson(
+                j["request"] as Map<String, dynamic>,
+              )
+            : null,
+      );
+
+  final String id;
+  final String fullName;
+  final String classLabel;
+  final ChildTransport? transport;
+  final TransportRequestState? request;
+}
+
+class MyTransport {
+  const MyTransport({
+    required this.children,
+    required this.address,
+    required this.locality,
+    required this.landmark,
+  });
+
+  factory MyTransport.fromJson(Map<String, dynamic> j) {
+    final h = j["household"] is Map
+        ? Map<String, dynamic>.from(j["household"] as Map)
+        : const <String, dynamic>{};
+    return MyTransport(
+      children: ((j["children"] as List?) ?? const [])
+          .map((c) => ChildTransportInfo.fromJson(c as Map<String, dynamic>))
+          .toList(),
+      address: (h["address"] as String?) ?? "",
+      locality: (h["locality"] as String?) ?? "",
+      landmark: (h["landmark"] as String?) ?? "",
+    );
+  }
+
+  final List<ChildTransportInfo> children;
+  final String address;
+  final String locality;
+  final String landmark;
+}
+
+/// A request as the office queue shows it (staff app).
+class TransportRequestInfo {
+  const TransportRequestInfo({
+    required this.id,
+    required this.studentName,
+    required this.classLabel,
+    required this.contactName,
+    required this.contactMobile,
+    required this.pickupAddress,
+    required this.locality,
+    required this.landmark,
+    required this.preferredStop,
+    required this.note,
+    required this.status,
+    required this.handlingNote,
+    required this.handledBy,
+    required this.createdAt,
+  });
+
+  factory TransportRequestInfo.fromJson(Map<String, dynamic> j) =>
+      TransportRequestInfo(
+        id: (j["id"] as String?) ?? "",
+        studentName: (j["studentName"] as String?) ?? "",
+        classLabel: (j["classLabel"] as String?) ?? "",
+        contactName: (j["contactName"] as String?) ?? "",
+        contactMobile: (j["contactMobile"] as String?) ?? "",
+        pickupAddress: (j["pickupAddress"] as String?) ?? "",
+        locality: (j["locality"] as String?) ?? "",
+        landmark: (j["landmark"] as String?) ?? "",
+        preferredStop: (j["preferredStop"] as String?) ?? "",
+        note: (j["note"] as String?) ?? "",
+        status: (j["status"] as String?) ?? "open",
+        handlingNote: (j["handlingNote"] as String?) ?? "",
+        handledBy: (j["handledBy"] as String?) ?? "",
+        createdAt: (j["createdAt"] as String?) ?? "",
+      );
+
+  final String id;
+  final String studentName;
+  final String classLabel;
+  final String contactName;
+  final String contactMobile;
+  final String pickupAddress;
+  final String locality;
+  final String landmark;
+  final String preferredStop;
+  final String note;
+  final String status;
+  final String handlingNote;
+  final String handledBy;
+  final String createdAt;
+
+  bool get isActive => status == "open" || status == "contacted";
+}
+
 class FeeLedger {
   const FeeLedger({
     required this.studentName,
     required this.openDues,
+    required this.futureDues,
     required this.openBalanceLabel,
+    required this.futureBalanceLabel,
   });
 
   factory FeeLedger.fromJson(Map<String, dynamic> j) => FeeLedger(
-        studentName: (j["studentName"] as String?) ?? "",
-        openDues: ((j["openDues"] as List?) ?? const [])
-            .map((d) => FeeDue.fromJson(d as Map<String, dynamic>))
-            .toList(),
-        openBalanceLabel: (j["openBalanceLabel"] as String?) ?? "₹0",
-      );
+    studentName: (j["studentName"] as String?) ?? "",
+    openDues: ((j["openDues"] as List?) ?? const [])
+        .map((d) => FeeDue.fromJson(d as Map<String, dynamic>))
+        .toList(),
+    futureDues: ((j["futureDues"] as List?) ?? const [])
+        .map((d) => FeeDue.fromJson(d as Map<String, dynamic>))
+        .toList(),
+    openBalanceLabel: (j["openBalanceLabel"] as String?) ?? "₹0",
+    futureBalanceLabel: (j["futureBalanceLabel"] as String?) ?? "₹0",
+  );
 
   final String studentName;
+
+  /// Asked for now.
   final List<FeeDue> openDues;
+
+  /// Months ahead the family may clear early; never ticked by default.
+  final List<FeeDue> futureDues;
   final String openBalanceLabel;
+  final String futureBalanceLabel;
+
+  bool get isEmpty => openDues.isEmpty && futureDues.isEmpty;
 }
 
 class AttendanceHistory {
@@ -310,10 +1129,12 @@ class AttendanceHistory {
         absentDays: (j["absentDays"] as num?)?.toInt() ?? 0,
         lateDays: (j["lateDays"] as num?)?.toInt() ?? 0,
         entries: ((j["entries"] as List?) ?? const [])
-            .map((e) => (
-                  date: (e["date"] as String?) ?? "",
-                  status: (e["status"] as String?) ?? "",
-                ))
+            .map(
+              (e) => (
+                date: (e["date"] as String?) ?? "",
+                status: (e["status"] as String?) ?? "",
+              ),
+            )
             .toList(),
       );
 
@@ -389,10 +1210,12 @@ class HomeworkFeed {
     ]..sort((a, b) => b.date.compareTo(a.date));
 
     final subjects = ((j["subjects"] as List?) ?? const [])
-        .map((s) => SubjectRef(
-              id: s["id"] as String,
-              name: (s["name"] as String?) ?? "",
-            ))
+        .map(
+          (s) => SubjectRef(
+            id: s["id"] as String,
+            name: (s["name"] as String?) ?? "",
+          ),
+        )
         .toList();
 
     return HomeworkFeed(items: items, subjects: subjects);
@@ -433,13 +1256,13 @@ class PtmSlotInfo {
   });
 
   factory PtmSlotInfo.fromJson(Map<String, dynamic> j) => PtmSlotInfo(
-        id: j["id"] as String,
-        teacherName: (j["teacherName"] as String?) ?? "",
-        startAt: (j["startAt"] as String?) ?? "",
-        endAt: (j["endAt"] as String?) ?? "",
-        roomOrLink: (j["roomOrLink"] as String?) ?? "",
-        seatsLeft: (j["seatsLeft"] as num?)?.toInt() ?? 0,
-      );
+    id: j["id"] as String,
+    teacherName: (j["teacherName"] as String?) ?? "",
+    startAt: (j["startAt"] as String?) ?? "",
+    endAt: (j["endAt"] as String?) ?? "",
+    roomOrLink: (j["roomOrLink"] as String?) ?? "",
+    seatsLeft: (j["seatsLeft"] as num?)?.toInt() ?? 0,
+  );
 
   final String id;
   final String teacherName;
@@ -709,15 +1532,17 @@ class PlanTargetClass {
   });
 
   factory PlanTargetClass.fromJson(Map<String, dynamic> j) => PlanTargetClass(
-        id: (j["id"] as String?) ?? "",
-        name: (j["name"] as String?) ?? "",
-        subjects: ((j["subjects"] as List?) ?? const [])
-            .map((e) => PlanTargetSubject(
-                  id: ((e as Map)["id"] as String?) ?? "",
-                  name: (e["name"] as String?) ?? "",
-                ))
-            .toList(),
-      );
+    id: (j["id"] as String?) ?? "",
+    name: (j["name"] as String?) ?? "",
+    subjects: ((j["subjects"] as List?) ?? const [])
+        .map(
+          (e) => PlanTargetSubject(
+            id: ((e as Map)["id"] as String?) ?? "",
+            name: (e["name"] as String?) ?? "",
+          ),
+        )
+        .toList(),
+  );
 
   final String id;
   final String name;
@@ -735,16 +1560,18 @@ class ScannedChapter {
   });
 
   factory ScannedChapter.fromJson(Map<String, dynamic> j) => ScannedChapter(
-        code: (j["code"] as String?) ?? "",
-        title: (j["title"] as String?) ?? "",
-        confidence: (j["confidence"] as String?) ?? "high",
-        topics: ((j["topics"] as List?) ?? const [])
-            .map((e) => ScannedTopic(
-                  code: ((e as Map)["code"] as String?) ?? "",
-                  title: (e["title"] as String?) ?? "",
-                ))
-            .toList(),
-      );
+    code: (j["code"] as String?) ?? "",
+    title: (j["title"] as String?) ?? "",
+    confidence: (j["confidence"] as String?) ?? "high",
+    topics: ((j["topics"] as List?) ?? const [])
+        .map(
+          (e) => ScannedTopic(
+            code: ((e as Map)["code"] as String?) ?? "",
+            title: (e["title"] as String?) ?? "",
+          ),
+        )
+        .toList(),
+  );
 
   String code;
   String title;
@@ -755,13 +1582,13 @@ class ScannedChapter {
   bool include;
 
   Map<String, dynamic> toImportJson() => {
-        "code": code,
-        "title": title,
-        "topics": [
-          for (final t in topics.where((t) => t.include))
-            {"code": t.code, "title": t.title},
-        ],
-      };
+    "code": code,
+    "title": title,
+    "topics": [
+      for (final t in topics.where((t) => t.include))
+        {"code": t.code, "title": t.title},
+    ],
+  };
 }
 
 class ScannedTopic {
@@ -782,16 +1609,15 @@ class SyllabusScan {
   });
 
   factory SyllabusScan.fromJson(Map<String, dynamic> j) => SyllabusScan(
-        chapters: ((j["chapters"] as List?) ?? const [])
-            .map((e) => ScannedChapter.fromJson(e as Map<String, dynamic>))
-            .toList(),
-        ignored: ((j["ignored"] as List?) ?? const [])
-            .map((e) => e.toString())
-            .toList(),
-        verdict:
-            ((j["quality"] as Map?)?["verdict"] as String?) ?? "poor",
-        rawText: (j["rawText"] as String?) ?? "",
-      );
+    chapters: ((j["chapters"] as List?) ?? const [])
+        .map((e) => ScannedChapter.fromJson(e as Map<String, dynamic>))
+        .toList(),
+    ignored: ((j["ignored"] as List?) ?? const [])
+        .map((e) => e.toString())
+        .toList(),
+    verdict: ((j["quality"] as Map?)?["verdict"] as String?) ?? "poor",
+    rawText: (j["rawText"] as String?) ?? "",
+  );
 
   final List<ScannedChapter> chapters;
   final List<String> ignored;
@@ -822,12 +1648,12 @@ class TeachingResource {
   });
 
   factory TeachingResource.fromJson(Map<String, dynamic> j) => TeachingResource(
-        id: (j["id"] as String?) ?? "",
-        kind: (j["kind"] as String?) ?? "link",
-        title: (j["title"] as String?) ?? "",
-        url: (j["url"] as String?) ?? "",
-        locator: (j["locator"] as String?) ?? "",
-      );
+    id: (j["id"] as String?) ?? "",
+    kind: (j["kind"] as String?) ?? "link",
+    title: (j["title"] as String?) ?? "",
+    url: (j["url"] as String?) ?? "",
+    locator: (j["locator"] as String?) ?? "",
+  );
 
   final String id;
 
@@ -849,16 +1675,16 @@ class TeachingUnit {
   });
 
   factory TeachingUnit.fromJson(Map<String, dynamic> j) => TeachingUnit(
-        id: (j["id"] as String?) ?? "",
-        code: (j["code"] as String?) ?? "",
-        title: (j["title"] as String?) ?? "",
-        topics: ((j["topics"] as List?) ?? const [])
-            .map((e) => TeachingUnit.fromJson(e as Map<String, dynamic>))
-            .toList(),
-        resources: ((j["resources"] as List?) ?? const [])
-            .map((e) => TeachingResource.fromJson(e as Map<String, dynamic>))
-            .toList(),
-      );
+    id: (j["id"] as String?) ?? "",
+    code: (j["code"] as String?) ?? "",
+    title: (j["title"] as String?) ?? "",
+    topics: ((j["topics"] as List?) ?? const [])
+        .map((e) => TeachingUnit.fromJson(e as Map<String, dynamic>))
+        .toList(),
+    resources: ((j["resources"] as List?) ?? const [])
+        .map((e) => TeachingResource.fromJson(e as Map<String, dynamic>))
+        .toList(),
+  );
 
   final String id;
   final String code;
@@ -939,32 +1765,32 @@ class TeachingPeriod {
   });
 
   factory TeachingPeriod.fromJson(Map<String, dynamic> j) => TeachingPeriod(
-        periodNo: (j["periodNo"] as num?)?.toInt() ?? 0,
-        label: (j["label"] as String?) ?? "",
-        startTime: (j["startTime"] as String?) ?? "",
-        endTime: (j["endTime"] as String?) ?? "",
-        classId: (j["classId"] as String?) ?? "",
-        sectionId: (j["sectionId"] as String?) ?? "",
-        subjectId: (j["subjectId"] as String?) ?? "",
-        className: (j["className"] as String?) ?? "",
-        sectionName: (j["sectionName"] as String?) ?? "",
-        subjectName: (j["subjectName"] as String?) ?? "",
-        isSubstituted: (j["isSubstituted"] as bool?) ?? false,
-        status: (j["status"] as String?) ?? "pending",
-        unitIds: ((j["unitIds"] as List?) ?? const [])
-            .map((e) => e.toString())
-            .toList(),
-        lessonPlanId: (j["lessonPlanId"] as String?) ?? "",
-        chapters: ((j["chapters"] as List?) ?? const [])
-            .map((e) => TeachingUnit.fromJson(e as Map<String, dynamic>))
-            .toList(),
-        lessonPlans: ((j["lessonPlans"] as List?) ?? const [])
-            .map((e) => TeachingLessonPlan.fromJson(e as Map<String, dynamic>))
-            .toList(),
-        resources: ((j["resources"] as List?) ?? const [])
-            .map((e) => TeachingResource.fromJson(e as Map<String, dynamic>))
-            .toList(),
-      );
+    periodNo: (j["periodNo"] as num?)?.toInt() ?? 0,
+    label: (j["label"] as String?) ?? "",
+    startTime: (j["startTime"] as String?) ?? "",
+    endTime: (j["endTime"] as String?) ?? "",
+    classId: (j["classId"] as String?) ?? "",
+    sectionId: (j["sectionId"] as String?) ?? "",
+    subjectId: (j["subjectId"] as String?) ?? "",
+    className: (j["className"] as String?) ?? "",
+    sectionName: (j["sectionName"] as String?) ?? "",
+    subjectName: (j["subjectName"] as String?) ?? "",
+    isSubstituted: (j["isSubstituted"] as bool?) ?? false,
+    status: (j["status"] as String?) ?? "pending",
+    unitIds: ((j["unitIds"] as List?) ?? const [])
+        .map((e) => e.toString())
+        .toList(),
+    lessonPlanId: (j["lessonPlanId"] as String?) ?? "",
+    chapters: ((j["chapters"] as List?) ?? const [])
+        .map((e) => TeachingUnit.fromJson(e as Map<String, dynamic>))
+        .toList(),
+    lessonPlans: ((j["lessonPlans"] as List?) ?? const [])
+        .map((e) => TeachingLessonPlan.fromJson(e as Map<String, dynamic>))
+        .toList(),
+    resources: ((j["resources"] as List?) ?? const [])
+        .map((e) => TeachingResource.fromJson(e as Map<String, dynamic>))
+        .toList(),
+  );
 
   final int periodNo;
   final String label;
@@ -1012,14 +1838,14 @@ class TeachingDay {
   });
 
   factory TeachingDay.fromJson(Map<String, dynamic> j) => TeachingDay(
-        date: (j["date"] as String?) ?? "",
-        scheduleAvailable: (j["scheduleAvailable"] as bool?) ?? false,
-        reason: (j["reason"] as String?) ?? "",
-        detail: (j["detail"] as String?) ?? "",
-        periods: ((j["periods"] as List?) ?? const [])
-            .map((e) => TeachingPeriod.fromJson(e as Map<String, dynamic>))
-            .toList(),
-      );
+    date: (j["date"] as String?) ?? "",
+    scheduleAvailable: (j["scheduleAvailable"] as bool?) ?? false,
+    reason: (j["reason"] as String?) ?? "",
+    detail: (j["detail"] as String?) ?? "",
+    periods: ((j["periods"] as List?) ?? const [])
+        .map((e) => TeachingPeriod.fromJson(e as Map<String, dynamic>))
+        .toList(),
+  );
 
   final String date;
   final bool scheduleAvailable;
@@ -1047,13 +1873,15 @@ class TransportRouteInfo {
       code: (j["code"] as String?) ?? "",
       name: (j["name"] as String?) ?? "",
       stops: ((j["stops"] as List?) ?? const [])
-          .map((s) => TransportStopInfo(
-                name: (s["name"] as String?) ?? "",
-                sequence: (s["sequence"] as num?)?.toInt() ?? 0,
-                distanceKm: (s["distanceKm"] as num?)?.toDouble() ?? 0,
-                lat: (s["lat"] as num?)?.toDouble(),
-                lng: (s["lng"] as num?)?.toDouble(),
-              ))
+          .map(
+            (s) => TransportStopInfo(
+              name: (s["name"] as String?) ?? "",
+              sequence: (s["sequence"] as num?)?.toInt() ?? 0,
+              distanceKm: (s["distanceKm"] as num?)?.toDouble() ?? 0,
+              lat: (s["lat"] as num?)?.toDouble(),
+              lng: (s["lng"] as num?)?.toDouble(),
+            ),
+          )
           .toList(),
       vehicleName: (v?["name"] as String?) ?? "",
       vehicleReg: (v?["registrationNo"] as String?) ?? "",
@@ -1082,12 +1910,12 @@ class ChatThreadInfo {
   });
 
   factory ChatThreadInfo.fromJson(Map<String, dynamic> j) => ChatThreadInfo(
-        studentId: (j["studentId"] as String?) ?? "",
-        studentName: (j["studentName"] as String?) ?? "",
-        lastMessage: j["lastMessage"] as String?,
-        lastMessageAt: j["lastMessageAt"] as String?,
-        unreadCount: (j["unreadCount"] as num?)?.toInt() ?? 0,
-      );
+    studentId: (j["studentId"] as String?) ?? "",
+    studentName: (j["studentName"] as String?) ?? "",
+    lastMessage: j["lastMessage"] as String?,
+    lastMessageAt: j["lastMessageAt"] as String?,
+    unreadCount: (j["unreadCount"] as num?)?.toInt() ?? 0,
+  );
 
   final String studentId;
   final String studentName;
@@ -1107,13 +1935,13 @@ class ChatMessage {
   });
 
   factory ChatMessage.fromJson(Map<String, dynamic> j) => ChatMessage(
-        id: (j["id"] as String?) ?? "",
-        senderPersona: (j["senderPersona"] as String?) ?? "",
-        senderName: (j["senderName"] as String?) ?? "",
-        body: (j["body"] as String?) ?? "",
-        createdAt: (j["createdAt"] as String?) ?? "",
-        mine: (j["mine"] as bool?) ?? false,
-      );
+    id: (j["id"] as String?) ?? "",
+    senderPersona: (j["senderPersona"] as String?) ?? "",
+    senderName: (j["senderName"] as String?) ?? "",
+    body: (j["body"] as String?) ?? "",
+    createdAt: (j["createdAt"] as String?) ?? "",
+    mine: (j["mine"] as bool?) ?? false,
+  );
 
   final String id;
   final String senderPersona;
@@ -1132,13 +1960,13 @@ class ChatThread {
   });
 
   factory ChatThread.fromJson(Map<String, dynamic> j) => ChatThread(
-        studentId: (j["studentId"] as String?) ?? "",
-        studentName: (j["studentName"] as String?) ?? "",
-        teacherName: j["teacherName"] as String?,
-        messages: ((j["messages"] as List?) ?? const [])
-            .map((m) => ChatMessage.fromJson(m as Map<String, dynamic>))
-            .toList(),
-      );
+    studentId: (j["studentId"] as String?) ?? "",
+    studentName: (j["studentName"] as String?) ?? "",
+    teacherName: j["teacherName"] as String?,
+    messages: ((j["messages"] as List?) ?? const [])
+        .map((m) => ChatMessage.fromJson(m as Map<String, dynamic>))
+        .toList(),
+  );
 
   final String studentId;
   final String studentName;
@@ -1156,11 +1984,11 @@ class DefaulterChild {
     required this.openPaise,
   });
   factory DefaulterChild.fromJson(Map<String, dynamic> j) => DefaulterChild(
-        studentId: j["studentId"] as String? ?? "",
-        fullName: j["fullName"] as String? ?? "",
-        classLabel: j["classLabel"] as String? ?? "",
-        openPaise: (j["openPaise"] as num?)?.toInt() ?? 0,
-      );
+    studentId: j["studentId"] as String? ?? "",
+    fullName: j["fullName"] as String? ?? "",
+    classLabel: j["classLabel"] as String? ?? "",
+    openPaise: (j["openPaise"] as num?)?.toInt() ?? 0,
+  );
   final String studentId;
   final String fullName;
   final String classLabel;
@@ -1199,12 +2027,12 @@ class DefaultersList {
     required this.households,
   });
   factory DefaultersList.fromJson(Map<String, dynamic> j) => DefaultersList(
-        asOf: j["asOf"] as String? ?? "",
-        totalOpenPaise: (j["totalOpenPaise"] as num?)?.toInt() ?? 0,
-        households: ((j["households"] as List?) ?? const [])
-            .map((h) => DefaulterHousehold.fromJson(h as Map<String, dynamic>))
-            .toList(),
-      );
+    asOf: j["asOf"] as String? ?? "",
+    totalOpenPaise: (j["totalOpenPaise"] as num?)?.toInt() ?? 0,
+    households: ((j["households"] as List?) ?? const [])
+        .map((h) => DefaulterHousehold.fromJson(h as Map<String, dynamic>))
+        .toList(),
+  );
   final String asOf;
   final int totalOpenPaise;
   final List<DefaulterHousehold> households;
@@ -1248,11 +2076,11 @@ class SectionRegisterStatus {
 class RegistersList {
   const RegistersList({required this.date, required this.sections});
   factory RegistersList.fromJson(Map<String, dynamic> j) => RegistersList(
-        date: j["date"] as String? ?? "",
-        sections: ((j["sections"] as List?) ?? const [])
-            .map((s) => SectionRegisterStatus.fromJson(s as Map<String, dynamic>))
-            .toList(),
-      );
+    date: j["date"] as String? ?? "",
+    sections: ((j["sections"] as List?) ?? const [])
+        .map((s) => SectionRegisterStatus.fromJson(s as Map<String, dynamic>))
+        .toList(),
+  );
   final String date;
   final List<SectionRegisterStatus> sections;
 }
@@ -1283,6 +2111,7 @@ class StaffAttendanceRow {
   final String fullName;
   final String designation;
   final String mobile;
+
   /// "" (not marked) | P | A | L | HD | LE
   final String status;
   final String inTime;
@@ -1322,16 +2151,16 @@ class FollowUpLead {
     required this.overdueDays,
   });
   factory FollowUpLead.fromJson(Map<String, dynamic> j) => FollowUpLead(
-        id: j["id"] as String? ?? "",
-        enquiryNo: j["enquiryNo"] as String? ?? "",
-        childName: j["childName"] as String? ?? "",
-        guardianName: j["guardianName"] as String? ?? "",
-        mobile: j["mobile"] as String? ?? "",
-        stage: j["stage"] as String? ?? "",
-        classSought: j["classSought"] as String? ?? "",
-        nextFollowUpAt: j["nextFollowUpAt"] as String? ?? "",
-        overdueDays: (j["overdueDays"] as num?)?.toInt() ?? 0,
-      );
+    id: j["id"] as String? ?? "",
+    enquiryNo: j["enquiryNo"] as String? ?? "",
+    childName: j["childName"] as String? ?? "",
+    guardianName: j["guardianName"] as String? ?? "",
+    mobile: j["mobile"] as String? ?? "",
+    stage: j["stage"] as String? ?? "",
+    classSought: j["classSought"] as String? ?? "",
+    nextFollowUpAt: j["nextFollowUpAt"] as String? ?? "",
+    overdueDays: (j["overdueDays"] as num?)?.toInt() ?? 0,
+  );
   final String id;
   final String enquiryNo;
   final String childName;
@@ -1346,9 +2175,9 @@ class FollowUpLead {
 class WaTemplateVar {
   const WaTemplateVar({required this.key, required this.label});
   factory WaTemplateVar.fromJson(Map<String, dynamic> j) => WaTemplateVar(
-        key: j["key"] as String? ?? "",
-        label: j["label"] as String? ?? (j["key"] as String? ?? ""),
-      );
+    key: j["key"] as String? ?? "",
+    label: j["label"] as String? ?? (j["key"] as String? ?? ""),
+  );
   final String key;
   final String label;
 }
@@ -1407,15 +2236,14 @@ class BroadcastResult {
     required this.pushSent,
   });
   factory BroadcastResult.fromJson(Map<String, dynamic> j) => BroadcastResult(
-        mode: j["mode"] as String? ?? "",
-        recipientCount: (j["recipientCount"] as num?)?.toInt() ?? 0,
-        skippedOptOut: (j["skippedOptOut"] as num?)?.toInt() ?? 0,
-        sent: (j["sent"] as num?)?.toInt() ?? 0,
-        failed: (j["failed"] as num?)?.toInt() ?? 0,
-        pushSent:
-            ((j["push"] as Map<String, dynamic>?)?["sent"] as num?)?.toInt() ??
-                0,
-      );
+    mode: j["mode"] as String? ?? "",
+    recipientCount: (j["recipientCount"] as num?)?.toInt() ?? 0,
+    skippedOptOut: (j["skippedOptOut"] as num?)?.toInt() ?? 0,
+    sent: (j["sent"] as num?)?.toInt() ?? 0,
+    failed: (j["failed"] as num?)?.toInt() ?? 0,
+    pushSent:
+        ((j["push"] as Map<String, dynamic>?)?["sent"] as num?)?.toInt() ?? 0,
+  );
   final String mode;
   final int recipientCount;
   final int skippedOptOut;
@@ -1440,9 +2268,17 @@ class ApiClient {
 
   /// Raw JSON POST with the session cookie — for endpoints that return the
   /// whole body (not the {data} envelope), e.g. /api/staff-geo/ping.
-  Future<Map<String, dynamic>> postJson(String path, Map<String, dynamic> body) async {
-    final res = await http.post(_uri(path), headers: await _authHeaders(), body: jsonEncode(body));
-    final decoded = jsonDecode(res.body.isEmpty ? "{}" : res.body) as Map<String, dynamic>;
+  Future<Map<String, dynamic>> postJson(
+    String path,
+    Map<String, dynamic> body,
+  ) async {
+    final res = await http.post(
+      _uri(path),
+      headers: await _authHeaders(),
+      body: jsonEncode(body),
+    );
+    final decoded =
+        jsonDecode(res.body.isEmpty ? "{}" : res.body) as Map<String, dynamic>;
     if (res.statusCode >= 500) _throwFrom(res);
     return decoded;
   }
@@ -1474,8 +2310,9 @@ class ApiClient {
   /// isPrincipalLikeRole).
   Future<bool> isPrincipalLike() async {
     final rc = (await roleCode())?.toLowerCase() ?? "";
-    return RegExp(r"principal|owner|admin|director|hm|head.?master")
-        .hasMatch(rc);
+    return RegExp(
+      r"principal|owner|admin|director|hm|head.?master",
+    ).hasMatch(rc);
   }
 
   /// Runs just before the session is cleared on sign-out (push token
@@ -1485,7 +2322,9 @@ class ApiClient {
   Future<void> signOut() async {
     try {
       await beforeSignOut?.call();
-    } catch (_) {/* best-effort */}
+    } catch (_) {
+      /* best-effort */
+    }
     await _storage.delete(key: _cookieKey);
     await _storage.delete(key: _guardianKey);
     await _storage.delete(key: _personaKey);
@@ -1527,7 +2366,9 @@ class ApiClient {
       if (err is Map && err["message"] is String) {
         message = err["message"] as String;
       }
-    } catch (_) {/* keep default */}
+    } catch (_) {
+      /* keep default */
+    }
     throw ApiException(message, res.statusCode);
   }
 
@@ -1602,7 +2443,9 @@ class ApiClient {
         final body = jsonDecode(tokenRes.body) as Map<String, dynamic>;
         final desc = body["error_description"] ?? body["msg"];
         if (desc is String && desc.isNotEmpty) message = desc;
-      } catch (_) {/* keep default */}
+      } catch (_) {
+        /* keep default */
+      }
       throw ApiException(message, tokenRes.statusCode);
     }
     final token =
@@ -1729,17 +2572,160 @@ class ApiClient {
     if (res.statusCode != 200) _throwFrom(res);
   }
 
+  /* ─── AI tutor (parent) ─────────────────────────────────────────── */
+
+  /// The tutor's state for one child — a pass is per child, and the
+  /// tutor is pinned to that child's class by the school's record.
+  Future<TutorStatus> fetchTutorStatus(
+    String studentId,
+  ) async => TutorStatus.fromJson(
+    await _getData(
+      "/api/v1/tutor/status?studentId=${Uri.encodeQueryComponent(studentId)}",
+    ),
+  );
+
+  /// Starts buying a pass for one child; the returned checkout URL opens
+  /// in the browser and the pass switches on by itself once the bank
+  /// confirms.
+  Future<TutorBuyResult> buyTutorPass({
+    required String planCode,
+    required String studentId,
+  }) async => TutorBuyResult.fromJson(
+    await _postData("/api/v1/tutor/buy", {
+      "planCode": planCode,
+      "studentId": studentId,
+    }),
+  );
+
+  /// Asks the tutor and yields the reply as it is written: [TutorDelta]s
+  /// carry text slices, one [TutorDone] closes the reply. A refusal (the
+  /// allowance is spent) surfaces as a [TutorRefused] exception so the
+  /// screen can offer passes; anything else is an [ApiException].
+  /// A child's class and subject teachers, the school's contact hours,
+  /// and per-teacher WhatsApp links that go to the SCHOOL's number with
+  /// the message pre-addressed (the school relays it; teachers' own
+  /// numbers are never shown). Links come only while the window is open.
+  Future<TeacherContacts> fetchTeacherContacts({
+    required String studentId,
+    bool hindi = false,
+  }) async => TeacherContacts.fromJson(
+    await _getData(
+      "/api/v1/teachers/contacts?studentId=${Uri.encodeQueryComponent(studentId)}${hindi ? "&lang=hi" : ""}",
+    ),
+  );
+
+  /// YouTube videos for a topic at the child's class level — a search,
+  /// not the tutor, so no pass is needed. Falls back to a search link
+  /// when the school has no YouTube API key.
+  Future<TutorVideos> fetchTutorVideos({
+    required String studentId,
+    required String topic,
+    required String language,
+  }) async => TutorVideos.fromJson(
+    await _postData("/api/v1/tutor/videos", {
+      "studentId": studentId,
+      "topic": topic,
+      "language": language,
+    }),
+  );
+
+  Stream<TutorEvent> askTutorStream({
+    required String message,
+    required String mode,
+    required List<TutorTurn> history,
+    required Map<String, String> context,
+    String? studentId,
+    String language = "auto",
+  }) async* {
+    final client = http.Client();
+    try {
+      final req = http.Request("POST", _uri("/api/v1/tutor/ask"))
+        ..headers.addAll(await _authHeaders())
+        ..headers["Accept"] = "text/event-stream"
+        ..body = jsonEncode({
+          "message": message,
+          "mode": mode,
+          "history": [
+            for (final t in history) {"role": t.role, "content": t.content},
+          ],
+          "context": context,
+          "studentId": ?studentId,
+          "language": language,
+        });
+      final res = await client.send(req);
+      if (res.statusCode != 200) {
+        final body = await res.stream.bytesToString();
+        Map<String, dynamic> j = const {};
+        try {
+          j = jsonDecode(body) as Map<String, dynamic>;
+        } catch (_) {
+          /* not JSON */
+        }
+        final err = j["error"];
+        final message = err is String
+            ? err
+            : err is Map && err["message"] is String
+            ? err["message"] as String
+            : "Tutor unavailable (${res.statusCode})";
+        if (res.statusCode == 402) {
+          throw TutorRefused(
+            message,
+            needsPass: j["needsPass"] == true,
+            allowance: j["allowance"] is Map
+                ? TutorAllowance.fromJson(
+                    Map<String, dynamic>.from(j["allowance"] as Map),
+                  )
+                : null,
+          );
+        }
+        throw ApiException(message, res.statusCode);
+      }
+      // One event per "data:" line; our server never splits an event
+      // across lines, so a line splitter is the whole parser.
+      await for (final line
+          in res.stream
+              .transform(utf8.decoder)
+              .transform(const LineSplitter())) {
+        if (!line.startsWith("data:")) continue;
+        final payload = line.substring(5).trim();
+        if (payload.isEmpty) continue;
+        final j = jsonDecode(payload) as Map<String, dynamic>;
+        switch (j["type"]) {
+          case "delta":
+            yield TutorDelta((j["text"] as String?) ?? "");
+          case "done":
+            yield TutorDone(
+              reply: (j["reply"] as String?) ?? "",
+              charge: (j["charge"] as String?) ?? "",
+              allowance: j["allowance"] is Map
+                  ? TutorAllowance.fromJson(
+                      Map<String, dynamic>.from(j["allowance"] as Map),
+                    )
+                  : null,
+            );
+          case "error":
+            throw ApiException((j["error"] as String?) ?? "Tutor failed", 503);
+        }
+      }
+    } finally {
+      client.close();
+    }
+  }
+
   /* ─── Principal / owner ─────────────────────────────────────────── */
 
   Future<DefaultersList> fetchDefaulters() async => DefaultersList.fromJson(
-      await _getData("/api/v1/principal/lists?kind=defaulters"));
+    await _getData("/api/v1/principal/lists?kind=defaulters"),
+  );
 
   Future<RegistersList> fetchRegistersToday() async => RegistersList.fromJson(
-      await _getData("/api/v1/principal/lists?kind=registers"));
+    await _getData("/api/v1/principal/lists?kind=registers"),
+  );
 
   Future<StaffAttendanceToday> fetchStaffAttendanceToday() async =>
       StaffAttendanceToday.fromJson(
-          await _getData("/api/v1/principal/lists?kind=staff_attendance"));
+        await _getData("/api/v1/principal/lists?kind=staff_attendance"),
+      );
 
   Future<List<FollowUpLead>> fetchFollowUpsDue() async {
     final d = await _getData("/api/v1/principal/lists?kind=followups");
@@ -1783,18 +2769,217 @@ class ApiClient {
     );
     if (res.statusCode != 200) _throwFrom(res);
     return BroadcastResult.fromJson(
-        jsonDecode(res.body) as Map<String, dynamic>);
+      jsonDecode(res.body) as Map<String, dynamic>,
+    );
   }
 
   Future<FeeLedger> fetchFeeLedger(String studentId) async =>
       FeeLedger.fromJson(await _getData("/api/v1/fees/ledger/$studentId"));
 
+  /// Start an online payment for some of the household's open dues.
+  ///
+  /// Only due keys travel; the server recomputes what is owed, creates the
+  /// pay-link, attaches the gateway checkout and — via its webhook — settles
+  /// the receipt when the money lands. The app's part ends at opening the
+  /// returned URL. Not a {data} envelope route, hence [postJson].
+  Future<ParentCheckout> startParentCheckout({
+    required List<String> dueKeys,
+    required String studentId,
+  }) async {
+    final body = await postJson("/api/payments/parent-checkout", {
+      "dueKeys": dueKeys,
+      "studentId": studentId,
+    });
+    if (body["ok"] != true) {
+      final err = body["error"];
+      throw ApiException(
+        err is String && err.isNotEmpty ? err : "Could not start payment",
+        400,
+      );
+    }
+    return ParentCheckout.fromJson(body);
+  }
+
+  // ---- profile & documents ----------------------------------------------
+
+  Future<ParentProfile> fetchProfile() async =>
+      ParentProfile.fromJson(await _getData("/api/v1/profile"));
+
+  /// Only the fields the server lists as editable are sent; it validates
+  /// formats and returns the household as now stored.
+  Future<HouseholdProfile> updateHousehold(Map<String, String> fields) async {
+    final data = await _postData("/api/v1/profile/household", fields);
+    return HouseholdProfile.fromJson(
+      (data["household"] as Map<String, dynamic>?) ?? const {},
+    );
+  }
+
+  /// Upload one document for one child. The server checks the bytes, reads
+  /// the text on it against the child's record, stores it, and marks it
+  /// "pending" for the office. Its message is what the parent should see.
+  Future<DocumentSubmitResult> uploadStudentDocument({
+    required String studentId,
+    required String docKey,
+    required String filePath,
+    required String fileName,
+    required String mimeType,
+  }) async {
+    final req = http.MultipartRequest("POST", _uri("/api/v1/profile/document"));
+    final headers = await _authHeaders();
+    headers.remove("Content-Type");
+    req.headers.addAll(headers);
+    req.fields["studentId"] = studentId;
+    req.fields["docKey"] = docKey;
+    req.files.add(
+      await http.MultipartFile.fromPath(
+        "file",
+        filePath,
+        filename: fileName,
+        contentType: MediaType.parse(mimeType),
+      ),
+    );
+    final streamed = await req.send();
+    final res = await http.Response.fromStream(streamed);
+    if (res.statusCode != 200) _throwFrom(res);
+    final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+    return DocumentSubmitResult.fromJson(
+      (decoded["data"] as Map<String, dynamic>?) ?? const {},
+    );
+  }
+
+  /// Headers for loading a stored document image straight into a widget.
+  Future<Map<String, String>> imageHeaders() async {
+    final h = await _authHeaders();
+    h.remove("Content-Type");
+    return h;
+  }
+
+  // ---- receipts ---------------------------------------------------------
+
+  Future<List<ReceiptInfo>> fetchReceipts() async {
+    final data = await _getData("/api/v1/receipts");
+    return ((data["receipts"] as List?) ?? const [])
+        .map((r) => ReceiptInfo.fromJson(r as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// The receipt PDF's bytes, fetched with the session — the browser could
+  /// not open the link on its own, it has no cookie.
+  Future<List<int>> fetchReceiptPdf(String pdfUrl) async {
+    final res = await http.get(_uri(pdfUrl), headers: await imageHeaders());
+    if (res.statusCode != 200) _throwFrom(res);
+    return res.bodyBytes;
+  }
+
+  // ---- transport --------------------------------------------------------
+
+  Future<MyTransport> fetchMyTransport() async =>
+      MyTransport.fromJson(await _getData("/api/v1/transport/mine"));
+
+  Future<String> requestTransport({
+    required String studentId,
+    required String pickupAddress,
+    required String locality,
+    required String landmark,
+    required String preferredStop,
+    required String note,
+  }) async {
+    final data = await _postData("/api/v1/transport/request", {
+      "studentId": studentId,
+      "pickupAddress": pickupAddress,
+      "locality": locality,
+      "landmark": landmark,
+      "preferredStop": preferredStop,
+      "note": note,
+    });
+    return (data["id"] as String?) ?? "";
+  }
+
+  /// Staff: the office queue. status = active | open | contacted | assigned | declined.
+  Future<List<TransportRequestInfo>> fetchTransportRequests({
+    String status = "active",
+  }) async {
+    final data = await _getData("/api/v1/transport/requests?status=$status");
+    return ((data["requests"] as List?) ?? const [])
+        .map((r) => TransportRequestInfo.fromJson(r as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<void> updateTransportRequest({
+    required String id,
+    required String status,
+    String note = "",
+  }) async {
+    await _postData("/api/v1/transport/requests/$id", {
+      "status": status,
+      "note": note,
+    });
+  }
+
+  Future<EbookShelf> fetchEbookShelf() async =>
+      EbookShelf.fromJson(await _getData("/api/v1/library/ebooks"));
+
+  // ---- leave --------------------------------------------------------------
+
+  Future<LeaveList> fetchLeaveList({String? studentId}) async =>
+      LeaveList.fromJson(
+        await _getData(
+          studentId == null
+              ? "/api/v1/leave/list"
+              : "/api/v1/leave/list?studentId=$studentId",
+        ),
+      );
+
+  /// Returns the new request's id. The server validates dates, the half-day
+  /// rule and ownership; its message is what the parent should see.
+  Future<String> requestLeave({
+    required String studentId,
+    required String fromDate,
+    required String toDate,
+    required String leaveType,
+    required String reason,
+  }) async {
+    final data = await _postData("/api/v1/leave/request", {
+      "studentId": studentId,
+      "fromDate": fromDate,
+      "toDate": toDate,
+      "leaveType": leaveType,
+      "reason": reason,
+    });
+    return (data["id"] as String?) ?? "";
+  }
+
+  Future<void> cancelLeave(String id) async {
+    await _postData("/api/v1/leave/cancel", {"id": id});
+  }
+
+  // ---- complaints ---------------------------------------------------------
+
+  Future<ComplaintList> fetchComplaints() async =>
+      ComplaintList.fromJson(await _getData("/api/v1/complaints/list"));
+
+  /// Returns the new ticket's id.
+  Future<String> createComplaint({
+    String? studentId,
+    required String category,
+    required String subject,
+    required String description,
+  }) async {
+    final data = await _postData("/api/v1/complaints/create", {
+      if (studentId != null && studentId.isNotEmpty) "studentId": studentId,
+      "category": category,
+      "subject": subject,
+      "description": description,
+    });
+    return (data["id"] as String?) ?? "";
+  }
+
   Future<AttendanceHistory> fetchAttendanceHistory(
     String studentId, {
     int days = 90,
-  }) async =>
-      AttendanceHistory.fromJson(await _getData(
-          "/api/v1/parent/attendance?studentId=$studentId&days=$days"));
+  }) async => AttendanceHistory.fromJson(
+    await _getData("/api/v1/parent/attendance?studentId=$studentId&days=$days"),
+  );
 
   /// Parent form: pass studentId. Staff form: pass classId+sectionId.
   Future<HomeworkFeed> fetchHomeworkFeed({
@@ -1805,7 +2990,9 @@ class ApiClient {
     final query = studentId != null
         ? "studentId=$studentId"
         : "classId=$classId&sectionId=$sectionId";
-    return HomeworkFeed.fromJson(await _getData("/api/v1/homework/feed?$query"));
+    return HomeworkFeed.fromJson(
+      await _getData("/api/v1/homework/feed?$query"),
+    );
   }
 
   Future<void> postHomework({
@@ -1934,7 +3121,10 @@ class ApiClient {
     required String studentId,
     required String body,
   }) async {
-    await _postData("/api/v1/chat/send", {"studentId": studentId, "body": body});
+    await _postData("/api/v1/chat/send", {
+      "studentId": studentId,
+      "body": body,
+    });
   }
 
   Future<PunchState> fetchPunchState() async =>
@@ -2096,4 +3286,380 @@ class ApiClient {
     );
     if (res.statusCode != 200) _throwFrom(res);
   }
+}
+
+/* ─── AI tutor models ──────────────────────────────────────────────── */
+
+class TutorTurn {
+  const TutorTurn(this.role, this.content);
+
+  final String role; // user | assistant
+  final String content;
+}
+
+sealed class TutorEvent {
+  const TutorEvent();
+}
+
+class TutorDelta extends TutorEvent {
+  const TutorDelta(this.text);
+
+  final String text;
+}
+
+class TutorDone extends TutorEvent {
+  const TutorDone({
+    required this.reply,
+    required this.charge,
+    required this.allowance,
+  });
+
+  final String reply;
+  final String charge; // free | pass
+  final TutorAllowance? allowance;
+}
+
+/// The server said no — the free hints are used up, or the mode needs a
+/// pass. Carries the fresh allowance so the screen can explain.
+class TutorRefused implements Exception {
+  TutorRefused(this.message, {required this.needsPass, this.allowance});
+
+  final String message;
+  final bool needsPass;
+  final TutorAllowance? allowance;
+
+  @override
+  String toString() => message;
+}
+
+class TutorAllowance {
+  const TutorAllowance({
+    required this.studentName,
+    required this.classLabel,
+    required this.freeHintsPerDay,
+    required this.freeUsedToday,
+    required this.passValidLabel,
+    required this.passPlanLabel,
+    required this.passEndsAt,
+    required this.passMessagesPerDay,
+    required this.passUsedToday,
+  });
+
+  factory TutorAllowance.fromJson(Map<String, dynamic> j) {
+    final pass = j["pass"] is Map
+        ? Map<String, dynamic>.from(j["pass"] as Map)
+        : null;
+    return TutorAllowance(
+      studentName: (j["studentName"] as String?) ?? "",
+      classLabel: (j["classLabel"] as String?) ?? "",
+      freeHintsPerDay: (j["freeHintsPerDay"] as num?)?.toInt() ?? 0,
+      freeUsedToday: (j["freeUsedToday"] as num?)?.toInt() ?? 0,
+      passValidLabel: (j["passValidLabel"] as String?) ?? "",
+      passPlanLabel: (pass?["planLabel"] as String?) ?? "",
+      passEndsAt: (pass?["endsAt"] as String?) ?? "",
+      passMessagesPerDay: (j["passMessagesPerDay"] as num?)?.toInt() ?? 0,
+      passUsedToday: (j["passUsedToday"] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  final String studentName;
+  final String classLabel;
+  final int freeHintsPerDay;
+  final int freeUsedToday;
+  final String passValidLabel;
+  final String passPlanLabel;
+  final String passEndsAt;
+  final int passMessagesPerDay;
+  final int passUsedToday;
+
+  String get studentFirstName =>
+      studentName.isEmpty ? "this child" : studentName.split(" ").first;
+
+  bool get hasPass =>
+      passEndsAt.isNotEmpty &&
+      (DateTime.tryParse(passEndsAt)?.isAfter(DateTime.now()) ?? false);
+  int get freeLeft => (freeHintsPerDay - freeUsedToday).clamp(0, 1 << 30);
+
+  /// "Valid till 12 Sep" from the end date when the server label is absent
+  /// (a streamed allowance carries the pass, not the label).
+  String get validLabel {
+    if (passValidLabel.isNotEmpty) return passValidLabel;
+    final d = DateTime.tryParse(passEndsAt);
+    if (d == null) return "";
+    final ist = d.toUtc().add(const Duration(hours: 5, minutes: 30));
+    const months = [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+    ];
+    return "Valid till ${ist.day} ${months[ist.month - 1]}";
+  }
+}
+
+class TutorModeInfo {
+  const TutorModeInfo({
+    required this.code,
+    required this.label,
+    required this.blurb,
+    required this.paid,
+    required this.prompt,
+  });
+
+  factory TutorModeInfo.fromJson(Map<String, dynamic> j) => TutorModeInfo(
+    code: (j["code"] as String?) ?? "hint",
+    label: (j["label"] as String?) ?? "",
+    blurb: (j["blurb"] as String?) ?? "",
+    paid: j["paid"] == true,
+    prompt: (j["prompt"] as String?) ?? "",
+  );
+
+  final String code;
+  final String label;
+  final String blurb;
+  final bool paid;
+  final String prompt;
+}
+
+class TutorPlanInfo {
+  const TutorPlanInfo({
+    required this.code,
+    required this.label,
+    required this.days,
+    required this.priceLabel,
+  });
+
+  factory TutorPlanInfo.fromJson(Map<String, dynamic> j) => TutorPlanInfo(
+    code: (j["code"] as String?) ?? "",
+    label: (j["label"] as String?) ?? "",
+    days: (j["days"] as num?)?.toInt() ?? 0,
+    priceLabel: (j["priceLabel"] as String?) ?? "",
+  );
+
+  final String code;
+  final String label;
+  final int days;
+  final String priceLabel;
+}
+
+class TutorOrderInfo {
+  const TutorOrderInfo({
+    required this.id,
+    required this.days,
+    required this.amountLabel,
+    required this.status,
+    required this.checkoutUrl,
+    required this.validLabel,
+  });
+
+  factory TutorOrderInfo.fromJson(Map<String, dynamic> j) => TutorOrderInfo(
+    id: (j["id"] as String?) ?? "",
+    days: (j["days"] as num?)?.toInt() ?? 0,
+    amountLabel: (j["amountLabel"] as String?) ?? "",
+    status: (j["status"] as String?) ?? "",
+    checkoutUrl: (j["checkoutUrl"] as String?) ?? "",
+    validLabel: (j["validLabel"] as String?) ?? "",
+  );
+
+  final String id;
+  final int days;
+  final String amountLabel;
+  final String status;
+  final String checkoutUrl;
+  final String validLabel;
+}
+
+class TutorVideo {
+  const TutorVideo({
+    required this.videoId,
+    required this.title,
+    required this.channel,
+    required this.thumbnail,
+    required this.url,
+  });
+
+  factory TutorVideo.fromJson(Map<String, dynamic> j) => TutorVideo(
+    videoId: (j["videoId"] as String?) ?? "",
+    title: (j["title"] as String?) ?? "",
+    channel: (j["channel"] as String?) ?? "",
+    thumbnail: (j["thumbnail"] as String?) ?? "",
+    url: (j["url"] as String?) ?? "",
+  );
+
+  final String videoId;
+  final String title;
+  final String channel;
+  final String thumbnail;
+  final String url;
+}
+
+class TutorVideos {
+  const TutorVideos({
+    required this.query,
+    required this.searchUrl,
+    required this.items,
+  });
+
+  factory TutorVideos.fromJson(Map<String, dynamic> j) => TutorVideos(
+    query: (j["query"] as String?) ?? "",
+    searchUrl: (j["searchUrl"] as String?) ?? "",
+    items: [
+      for (final v in (j["items"] as List? ?? const []))
+        TutorVideo.fromJson(Map<String, dynamic>.from(v as Map)),
+    ],
+  );
+
+  final String query;
+  final String searchUrl;
+  final List<TutorVideo> items;
+}
+
+class TutorStatus {
+  const TutorStatus({
+    required this.configured,
+    required this.defaultLanguage,
+    required this.videosAvailable,
+    required this.modes,
+    required this.allowance,
+    required this.plans,
+    required this.orders,
+    required this.note,
+  });
+
+  factory TutorStatus.fromJson(Map<String, dynamic> j) => TutorStatus(
+    configured: j["configured"] == true,
+    defaultLanguage: switch (j["defaultLanguage"]) {
+      "hi" => "hi",
+      "both" => "both",
+      _ => "en",
+    },
+    videosAvailable: j["videosAvailable"] == true,
+    modes: [
+      for (final m in (j["modes"] as List? ?? const []))
+        TutorModeInfo.fromJson(Map<String, dynamic>.from(m as Map)),
+    ],
+    allowance: TutorAllowance.fromJson(
+      Map<String, dynamic>.from((j["allowance"] as Map?) ?? const {}),
+    ),
+    plans: [
+      for (final p in (j["plans"] as List? ?? const []))
+        TutorPlanInfo.fromJson(Map<String, dynamic>.from(p as Map)),
+    ],
+    orders: [
+      for (final o in (j["orders"] as List? ?? const []))
+        TutorOrderInfo.fromJson(Map<String, dynamic>.from(o as Map)),
+    ],
+    note: (j["note"] as String?) ?? "",
+  );
+
+  final bool configured;
+
+  /// "hi", "both" or "en" — from the family's language preference on record.
+  final String defaultLanguage;
+  final bool videosAvailable;
+  final List<TutorModeInfo> modes;
+  final TutorAllowance allowance;
+  final List<TutorPlanInfo> plans;
+  final List<TutorOrderInfo> orders;
+  final String note;
+}
+
+class TutorBuyResult {
+  const TutorBuyResult({
+    required this.orderId,
+    required this.planLabel,
+    required this.amountLabel,
+    required this.checkoutUrl,
+  });
+
+  factory TutorBuyResult.fromJson(Map<String, dynamic> j) => TutorBuyResult(
+    orderId: (j["orderId"] as String?) ?? "",
+    planLabel: (j["planLabel"] as String?) ?? "",
+    amountLabel: (j["amountLabel"] as String?) ?? "",
+    checkoutUrl: (j["checkoutUrl"] as String?) ?? "",
+  );
+
+  final String orderId;
+  final String planLabel;
+  final String amountLabel;
+  final String checkoutUrl;
+}
+
+
+/* ─── Teacher contacts ─────────────────────────────────────────────── */
+
+class TeacherContact {
+  const TeacherContact({
+    required this.staffId,
+    required this.name,
+    required this.role,
+    required this.isClassTeacher,
+    required this.chatInApp,
+    required this.waUrl,
+  });
+
+  factory TeacherContact.fromJson(Map<String, dynamic> j) => TeacherContact(
+    staffId: (j["staffId"] as String?) ?? "",
+    name: (j["name"] as String?) ?? "",
+    role: (j["role"] as String?) ?? "",
+    isClassTeacher: j["isClassTeacher"] == true,
+    chatInApp: j["chatInApp"] == true,
+    waUrl: (j["waUrl"] as String?) ?? "",
+  );
+
+  final String staffId;
+  final String name;
+  final String role;
+  final bool isClassTeacher;
+  final bool chatInApp;
+  /// Empty outside the school's contact hours.
+  final String waUrl;
+}
+
+class TeacherContacts {
+  const TeacherContacts({
+    required this.studentName,
+    required this.classLabel,
+    required this.hoursLabel,
+    required this.hoursOpen,
+    required this.hoursNote,
+    required this.schoolWhatsAppDisplay,
+    required this.teachers,
+  });
+
+  factory TeacherContacts.fromJson(Map<String, dynamic> j) {
+    final st = Map<String, dynamic>.from((j["student"] as Map?) ?? const {});
+    final h = Map<String, dynamic>.from((j["hours"] as Map?) ?? const {});
+    final w = j["whatsapp"] is Map
+        ? Map<String, dynamic>.from(j["whatsapp"] as Map)
+        : const <String, dynamic>{};
+    return TeacherContacts(
+      studentName: (st["name"] as String?) ?? "",
+      classLabel: (st["classLabel"] as String?) ?? "",
+      hoursLabel: (h["label"] as String?) ?? "8 AM – 8 PM",
+      hoursOpen: h["open"] == true,
+      hoursNote: (h["note"] as String?) ?? "",
+      schoolWhatsAppDisplay: (w["display"] as String?) ?? "",
+      teachers: [
+        for (final t in (j["teachers"] as List? ?? const []))
+          TeacherContact.fromJson(Map<String, dynamic>.from(t as Map)),
+      ],
+    );
+  }
+
+  final String studentName;
+  final String classLabel;
+  final String hoursLabel;
+  final bool hoursOpen;
+  final String hoursNote;
+  final String schoolWhatsAppDisplay;
+  final List<TeacherContact> teachers;
 }

@@ -1,3 +1,4 @@
+/* ratchet-allow: raw_table — matches <table> while PARSING imported HTML; this module renders nothing */
 /**
  * RTE / EWS / scholarship seats (§21c).
  * Demo store: localStorage `bhb_rte_ews_v1`.
@@ -5,7 +6,16 @@
  */
 
 import { assertModulePermission } from "@/lib/rbacGuard";
-import { DEFAULT_AY, loadMasters, resolveFeeGroupId, suggestFeeStudentType, type MastersState } from "@/lib/masters";
+import {
+  DEFAULT_AY,
+  loadMasters,
+  normalizeConcessionGrant,
+  normalizeConcessionRule,
+  resolveFeeGroupId,
+  saveMasters,
+  suggestFeeStudentType,
+  type MastersState,
+} from "@/lib/masters";
 import {
   describeFilters,
   exportFilterReport,
@@ -1467,6 +1477,215 @@ export function listEnrolledRteStudents(sis?: SisState) {
         (s.studentType === "RTE" || s.category === "EWS"),
     )
     .sort((a, b) => a.fullName.localeCompare(b.fullName));
+}
+
+/* ─── Assign / remove RTE directly on SIS students ─── */
+
+/** Mark an existing SIS student as RTE (fee type + tag + RTE fee group). */
+export function assignRteToStudent(input: {
+  studentId: string;
+  by: string;
+}): { ok: true; student: SisStudent } | { ok: false; error: string } {
+  const before = loadSis();
+  const st = before.students.find((s) => s.id === input.studentId);
+  if (!st) return { ok: false, error: "Student not found" };
+  if (st.studentType === "RTE") {
+    return { ok: false, error: "Student is already RTE" };
+  }
+  // May create the RTE/EWS tags (saves SIS) — reload after.
+  const tagIds = ensureRteEwsTagIds({ category: st.category });
+  const masters = loadMasters();
+  const ayCode = st.academicYearCode || DEFAULT_AY;
+  const feeGroupId =
+    resolveFeeGroupId(masters, {
+      studentType: "RTE",
+      classId: st.classId,
+      academicYearCode: ayCode,
+      preferPublished: true,
+    }) || st.feeGroupId;
+
+  const sis = loadSis();
+  const students = sis.students.map((s) =>
+    s.id === st.id
+      ? {
+          ...s,
+          studentType: "RTE" as const,
+          feeGroupId,
+          tagIds: Array.from(new Set([...(s.tagIds ?? []), ...tagIds])),
+          notes: [s.notes, `RTE assigned by ${input.by} on ${todayIso()}`]
+            .filter(Boolean)
+            .join(" · "),
+        }
+      : s,
+  );
+  saveSis({ ...sis, students });
+  return { ok: true, student: students.find((s) => s.id === st.id)! };
+}
+
+/** Take RTE/EWS off a student — fee type reverts, tags and waivers drop. */
+export function removeRteFromStudent(input: {
+  studentId: string;
+  by: string;
+}): { ok: true } | { ok: false; error: string } {
+  const sis = loadSis();
+  const st = sis.students.find((s) => s.id === input.studentId);
+  if (!st) return { ok: false, error: "Student not found" };
+  if (st.studentType !== "RTE" && st.category !== "EWS") {
+    return { ok: false, error: "Student is not RTE / EWS" };
+  }
+
+  const ayCode = st.academicYearCode || DEFAULT_AY;
+  const joinedYear = (st.joinedOn || "").slice(0, 4);
+  const revertType =
+    st.studentType === "RTE"
+      ? joinedYear && joinedYear < ayCode.slice(0, 4)
+        ? ("PROMOTE" as const)
+        : suggestFeeStudentType(st.joinedOn || "", ayCode)
+      : st.studentType;
+
+  const masters = loadMasters();
+  const feeGroupId =
+    resolveFeeGroupId(masters, {
+      studentType: revertType,
+      classId: st.classId,
+      academicYearCode: ayCode,
+      preferPublished: true,
+    }) || st.feeGroupId;
+
+  const rteTagIds = new Set(
+    (sis.tags ?? [])
+      .filter((t) => t.code === "RTE" || t.code === "EWS")
+      .map((t) => t.id),
+  );
+  const students = sis.students.map((s) =>
+    s.id === st.id
+      ? {
+          ...s,
+          studentType: revertType,
+          category:
+            s.category === "EWS" ? ("" as SisStudent["category"]) : s.category,
+          feeGroupId,
+          tagIds: (s.tagIds ?? []).filter((id) => !rteTagIds.has(id)),
+          notes: [s.notes, `RTE removed by ${input.by} on ${todayIso()}`]
+            .filter(Boolean)
+            .join(" · "),
+        }
+      : s,
+  );
+  saveSis({ ...sis, students });
+
+  const existing = masters.concessionGrants ?? [];
+  const kept = existing.filter(
+    (g) =>
+      !(g.studentId === st.id && g.id.startsWith(RTE_WAIVER_GRANT_PREFIX)),
+  );
+  if (kept.length !== existing.length) {
+    void saveMasters({ ...masters, concessionGrants: kept });
+  }
+  return { ok: true };
+}
+
+/* ─── Per-student, per-head RTE fee waivers ───
+ * One 100% concession rule per fee head (created lazily), one approved grant
+ * per student per waived head. Fee Take's dues engine applies them like any
+ * other concession, so "untick a head" simply means "grant its waiver". */
+
+const RTE_WAIVER_GRANT_PREFIX = "cg_rtew_";
+
+function rteWaiverRuleId(feeHeadId: string): string {
+  return `cnc_rtew_${feeHeadId}`;
+}
+
+function rteWaiverGrantId(studentId: string, feeHeadId: string): string {
+  return `${RTE_WAIVER_GRANT_PREFIX}${studentId}_${feeHeadId}`;
+}
+
+/** Fee-head ids currently waived for this student via RTE per-head grants. */
+export function rteWaivedHeadIds(
+  masters: MastersState,
+  studentId: string,
+): Set<string> {
+  const byRule = new Map(masters.concessions.map((c) => [c.id, c]));
+  const out = new Set<string>();
+  for (const g of masters.concessionGrants ?? []) {
+    if (g.studentId !== studentId || g.status !== "approved") continue;
+    if (!g.id.startsWith(RTE_WAIVER_GRANT_PREFIX)) continue;
+    for (const headId of byRule.get(g.concessionId)?.feeHeadIds ?? []) {
+      out.add(headId);
+    }
+  }
+  return out;
+}
+
+/** Tick = charge the head (no waiver); untick = waive it 100% for this student. */
+export async function setRteHeadWaiver(input: {
+  studentId: string;
+  feeHeadId: string;
+  waived: boolean;
+  by: string;
+  academicYearCode?: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const masters = loadMasters();
+  const head = masters.feeHeads.find((h) => h.id === input.feeHeadId);
+  if (!head) return { ok: false, error: "Fee head not found" };
+
+  let concessions = masters.concessions;
+  let rule = concessions.find((c) => c.id === rteWaiverRuleId(input.feeHeadId));
+  if (!rule && input.waived) {
+    rule = normalizeConcessionRule({
+      id: rteWaiverRuleId(input.feeHeadId),
+      code: `RTEW_${(head.code || head.nameEn).replace(/\W+/g, "_").toUpperCase()}`.slice(0, 24),
+      name: `RTE waiver — ${head.nameEn}`,
+      kind: "rte_ews",
+      academicYearCode: input.academicYearCode || DEFAULT_AY,
+      mode: "percent",
+      value: 100,
+      siblingTiers: [],
+      feeHeadIds: [input.feeHeadId],
+      autoApproveMaxPaise: null,
+      documentationRequired: false,
+      incompatibleCodes: [],
+      notes: "Per-head RTE waiver (RTE module)",
+      isActive: true,
+    });
+    concessions = [...concessions, rule];
+  }
+
+  const grantId = rteWaiverGrantId(input.studentId, input.feeHeadId);
+  const existing = masters.concessionGrants ?? [];
+  let concessionGrants = existing;
+  if (input.waived) {
+    if (!existing.some((g) => g.id === grantId)) {
+      concessionGrants = [
+        ...existing,
+        normalizeConcessionGrant({
+          id: grantId,
+          concessionId: rule!.id,
+          studentId: input.studentId,
+          status: "approved",
+          reason: `RTE — head not charged (by ${input.by})`,
+          effectiveFrom: todayIso(),
+          effectiveTo: null,
+          createdAt: nowIso(),
+          siblingChildNo: null,
+        }),
+      ];
+    }
+  } else {
+    concessionGrants = existing.filter((g) => g.id !== grantId);
+  }
+
+  if (
+    concessions === masters.concessions &&
+    concessionGrants === existing
+  ) {
+    return { ok: true };
+  }
+  const saved = await saveMasters({ ...masters, concessions, concessionGrants });
+  if (!saved.ok) {
+    return { ok: false, error: `Masters save blocked (${saved.reason})` };
+  }
+  return { ok: true };
 }
 
 export function quotaTypeLabel(t: QuotaType): string {

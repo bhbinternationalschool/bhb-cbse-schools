@@ -1,3 +1,4 @@
+import { createSseParser, readGeminiStreamChunk } from "@/lib/aiStream";
 /**
  * Google Gemini — ERP floating assistant (server-only).
  */
@@ -44,6 +45,19 @@ export type LlmUsage = {
 export function geminiConfigured(): boolean {
   return geminiApiKey().length > 0;
 }
+
+const GEMINI_SAFETY = [
+  { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+  { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+  {
+    category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+    threshold: "BLOCK_MEDIUM_AND_ABOVE",
+  },
+  {
+    category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+    threshold: "BLOCK_MEDIUM_AND_ABOVE",
+  },
+];
 
 export type GeminiChatTurn = {
   role: "user" | "model";
@@ -93,24 +107,7 @@ export async function generateGeminiText(opts: {
           temperature: opts.temperature ?? 0.35,
           maxOutputTokens: opts.maxTokens ?? 1024,
         },
-        safetySettings: [
-          {
-            category: "HARM_CATEGORY_HARASSMENT",
-            threshold: "BLOCK_MEDIUM_AND_ABOVE",
-          },
-          {
-            category: "HARM_CATEGORY_HATE_SPEECH",
-            threshold: "BLOCK_MEDIUM_AND_ABOVE",
-          },
-          {
-            category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-            threshold: "BLOCK_MEDIUM_AND_ABOVE",
-          },
-          {
-            category: "HARM_CATEGORY_DANGEROUS_CONTENT",
-            threshold: "BLOCK_MEDIUM_AND_ABOVE",
-          },
-        ],
+        safetySettings: GEMINI_SAFETY,
       }),
     });
 
@@ -151,6 +148,113 @@ export async function generateGeminiText(opts: {
       };
     }
 
+    return { ok: true, text: sanitizeGeminiReply(text), model, usage };
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Gemini request failed",
+      model,
+    };
+  }
+}
+
+/**
+ * generateGeminiText, streamed: streamGenerateContent with alt=sse hands
+ * back candidate parts as they are produced. `onDelta` sees each slice;
+ * the resolved value is the whole reply (sanitised the same way) with the
+ * usage the last chunk reports.
+ */
+export async function streamGeminiText(
+  opts: {
+    system: string;
+    history?: GeminiChatTurn[];
+    userMessage: string;
+    maxTokens?: number;
+    temperature?: number;
+    model?: string;
+  },
+  onDelta: (text: string) => void,
+): Promise<
+  | { ok: true; text: string; model: string; usage: LlmUsage }
+  | { ok: false; error: string; model: string }
+> {
+  const model = (opts.model || geminiModel()).trim();
+  const key = geminiApiKey();
+  if (!key) {
+    return { ok: false, error: "GEMINI_API_KEY not configured", model };
+  }
+  const version = process.env.GEMINI_API_VERSION || "v1beta";
+  const url = `https://generativelanguage.googleapis.com/${version}/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(key)}`;
+
+  const contents: { role: string; parts: { text: string }[] }[] = [];
+  for (const turn of (opts.history || []).slice(-10)) {
+    const text = turn.text.trim();
+    if (!text) continue;
+    contents.push({
+      role: turn.role === "model" ? "model" : "user",
+      parts: [{ text }],
+    });
+  }
+  contents.push({ role: "user", parts: [{ text: opts.userMessage.trim() }] });
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: opts.system }] },
+        contents,
+        generationConfig: {
+          temperature: opts.temperature ?? 0.35,
+          maxOutputTokens: opts.maxTokens ?? 1024,
+        },
+        safetySettings: GEMINI_SAFETY,
+      }),
+    });
+    if (!res.ok || !res.body) {
+      const json = (await res.json().catch(() => ({}))) as {
+        error?: { message?: string };
+      };
+      return {
+        ok: false,
+        error: json.error?.message || `Gemini HTTP ${res.status}`,
+        model,
+      };
+    }
+    let text = "";
+    let finishReason = "";
+    let usage: LlmUsage = { promptTokens: null, completionTokens: null };
+    const parser = createSseParser();
+    const decoder = new TextDecoder();
+    const reader = res.body.getReader();
+    const take = (payloads: string[]) => {
+      for (const p of payloads) {
+        const chunk = readGeminiStreamChunk(p);
+        if (!chunk) continue;
+        if (chunk.error) throw new Error(chunk.error);
+        if (chunk.text) {
+          text += chunk.text;
+          onDelta(chunk.text);
+        }
+        if (chunk.finishReason) finishReason = chunk.finishReason;
+        if (chunk.usage) usage = chunk.usage;
+      }
+    };
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      take(parser.feed(decoder.decode(value, { stream: true })));
+    }
+    take(parser.feed(decoder.decode()));
+    take(parser.flush());
+    text = text.trim();
+    if (!text) {
+      return {
+        ok: false,
+        error: `Empty Gemini response (${finishReason || "unknown"})`,
+        model,
+      };
+    }
     return { ok: true, text: sanitizeGeminiReply(text), model, usage };
   } catch (e) {
     return {

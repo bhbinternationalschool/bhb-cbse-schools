@@ -18,6 +18,9 @@ import {
   registrationCollectedPaise,
   registrationFeeHeads,
   registrationPayAbsoluteUrl,
+} from "@/lib/admissions";
+import { fetchRegistrationCheckoutUrl } from "@/lib/paymentGatewayClient";
+import {
   setLeadRegistrationFee,
   takeRegistrationPayment,
   waiveRegistrationFee,
@@ -25,7 +28,16 @@ import {
   type RegistrationFeePayment,
 } from "@/lib/admissions";
 import { formatInr, TENDER_MODES, type TenderMode } from "@/lib/fees";
+import {
+  channelsForPaymentMode,
+  decodePaymentChannel,
+  encodePaymentChannel,
+  paymentModeForTender,
+} from "@/lib/paymentChannels";
+import { useAccountsDesk } from "@/lib/useAccountsDesk";
 import { type MastersState } from "@/lib/masters";
+import { type SisState, type SisStudent } from "@/lib/sis";
+import { useDemoSession } from "@/components/shell/SessionContext";
 import { TENANT } from "@/lib/types";
 import {
   MastersEmptyRow,
@@ -68,6 +80,7 @@ function emptySiblingDraft(feeDefault: string): SiblingDraft {
 export function AdmissionRegistrationPanel({
   state,
   masters,
+  sis,
   by,
   canEdit,
   onCommit,
@@ -75,12 +88,96 @@ export function AdmissionRegistrationPanel({
 }: {
   state: AdmissionsState;
   masters: MastersState;
+  sis: SisState;
   by: string;
   canEdit: boolean;
   onCommit: (next: AdmissionsState, msg?: string) => void;
   onOpenCrmLead: (id: string) => void;
 }) {
+  const sessionAy = useDemoSession().academicYearCode;
   const queue = useMemo(() => listRegistrationQueue(state), [state]);
+
+  /**
+   * Children ADMITTED this session, straight from the roster. Most walked in
+   * and were admitted without ever being a CRM lead, so the registration fee
+   * had nowhere to be taken. Each row links to (or creates) a registration
+   * record; the money is captured by the same take-fee flow as the queue, and
+   * it survives re-login because the server never prunes registration
+   * payments or paid/enrolled leads.
+   */
+  const yearAdmissions = useMemo(() => {
+    const ayStart = `${sessionAy.slice(0, 4)}-04-01`;
+    const rows: {
+      student: SisStudent;
+      lead: (typeof state.leads)[number] | null;
+    }[] = [];
+    for (const s of sis.students ?? []) {
+      if (s.academicYearCode !== sessionAy) continue;
+      if (s.status && s.status !== "active") continue;
+      // The admission number carries its own vintage (BHB-2026-27-…): that
+      // outranks joinedOn, which promotions also stamp — without this, every
+      // promoted old student "joined" this session.
+      const vintage = /BHB-(\d{4}-\d{2})/.exec(s.admissionNo || "")?.[1] ?? "";
+      const isNew = vintage
+        ? vintage === sessionAy
+        : (s.joinedOn || "") >= ayStart;
+      if (!isNew) continue;
+      const lead =
+        state.leads.find((l) => l.sisStudentId === s.id) ??
+        state.leads.find(
+          (l) => l.admissionNo && l.admissionNo === s.admissionNo,
+        ) ??
+        null;
+      rows.push({ student: s, lead });
+    }
+    return rows.sort((a, b) =>
+      a.student.fullName.localeCompare(b.student.fullName),
+    );
+  }, [sis.students, state, sessionAy]);
+
+  function startRegistrationFor(s: SisStudent) {
+    const mobile = (s.fatherMobile || s.motherMobile || "").replace(/\D/g, "").slice(-10);
+    if (mobile.length !== 10) {
+      onCommit(state, "This student has no 10-digit parent mobile — add it in Students first");
+      return;
+    }
+    const r = createFamilyRegistrationsFromDesk(
+      state,
+      {
+        guardianName: s.fatherName || "Guardian",
+        mobile,
+        source: "walk_in",
+        children: [
+          {
+            childName: s.fullName,
+            classSoughtId: s.classId,
+            feeHeadId: feeHeads[0]?.id || "",
+            feeAmountPaise: Math.round(Number(amountInr || "500") * 100) || 50000,
+          },
+        ],
+        feeHeadName: feeHeads[0]?.name,
+      },
+      by,
+    );
+    if (!r.ok) {
+      onCommit(state, r.reason);
+      return;
+    }
+    // Tie the new registration to the admitted student, so the row above and
+    // the roster agree on who this is — and so the prune guard protects it.
+    const created = r.leads[0];
+    const linked = {
+      ...r.state,
+      leads: r.state.leads.map((l) =>
+        l.id === created.id
+          ? { ...l, sisStudentId: s.id, admissionNo: s.admissionNo }
+          : l,
+      ),
+    };
+    onCommit(linked, `${s.fullName} added to registration — take the fee below`);
+    setSelectedId(created.id);
+    setCollectFocusIds([created.id]);
+  }
   const feeHeads = useMemo(() => registrationFeeHeads(masters), [masters]);
   const classes = useMemo(
     () => (masters.classes ?? []).filter((c) => c.isActive),
@@ -101,6 +198,9 @@ export function AdmissionRegistrationPanel({
   const [amountInr, setAmountInr] = useState("500");
   const [collectInr, setCollectInr] = useState("");
   const [collectMode, setCollectMode] = useState<TenderMode>("cash");
+  const [collectOn, setCollectOn] = useState(() =>
+    new Date().toISOString().slice(0, 10),
+  );
   const [collectRef, setCollectRef] = useState("");
   const [collectBank, setCollectBank] = useState("");
   const [qrUrl, setQrUrl] = useState<string | null>(null);
@@ -210,16 +310,23 @@ export function AdmissionRegistrationPanel({
       return;
     }
     const portal = `https://${TENANT.publicPortal}`;
-    const url = registrationPayAbsoluteUrl(portal, openPayment);
-    setLastPayUrl(url);
+    const fallbackUrl = registrationPayAbsoluteUrl(portal, openPayment);
     let cancelled = false;
-    void QRCode.toDataURL(url, {
-      width: 180,
-      margin: 1,
-      color: { dark: "#203050", light: "#ffffff" },
-    }).then((d) => {
+    async function resolveUrl() {
+      // Prefer the live gateway checkout (auto-captures on payment);
+      // fall back to the demo pay page when no gateway is configured.
+      const checkout = await fetchRegistrationCheckoutUrl(openPayment!.id);
+      const url = checkout || fallbackUrl;
+      if (cancelled) return;
+      setLastPayUrl(url);
+      const d = await QRCode.toDataURL(url, {
+        width: 180,
+        margin: 1,
+        color: { dark: "#203050", light: "#ffffff" },
+      });
       if (!cancelled) setQrUrl(d);
-    });
+    }
+    void resolveUrl();
     return () => {
       cancelled = true;
     };
@@ -260,13 +367,14 @@ export function AdmissionRegistrationPanel({
     }
     const r = takeRegistrationPayment(next, selected.id, by, {
       amountPaise: paise,
+      paidOn: collectOn || undefined,
       tenders: [
         {
           mode: collectMode,
           amountPaise: paise,
           ref: collectRef.trim(),
           bankName: collectBank.trim(),
-          instrumentDate: new Date().toISOString().slice(0, 10),
+          instrumentDate: collectOn || new Date().toISOString().slice(0, 10),
         },
       ],
     });
@@ -779,6 +887,104 @@ export function AdmissionRegistrationPanel({
       ) : null}
 
       {!(selected && collectFocusIds.length > 0) ? (
+      <>
+      <MastersTableCard
+        title={`This year's admissions — ${sessionAy} (${yearAdmissions.length})`}
+      >
+        <p className="px-4 pt-2 text-xs text-[var(--muted)]">
+          Admitted on the roster this session. Take their registration fee
+          here — a row without a registration yet gets one in one click, then
+          the normal take-fee applies.
+        </p>
+        <ErpTableShell density="compact" className="overflow-x-auto">
+          <ErpTable minWidth="min-w-[760px]">
+            <ErpTableHead>
+              <tr>
+                <th className="px-3 py-2 text-left font-medium">Student</th>
+                <th className="px-3 py-2 text-left font-medium">Class</th>
+                <th className="px-3 py-2 text-left font-medium">Father · mobile</th>
+                <th className="px-3 py-2 text-right font-medium">Reg. fee</th>
+                <th className="px-3 py-2 text-right font-medium" />
+              </tr>
+            </ErpTableHead>
+            <ErpTableBody hoverable>
+              {yearAdmissions.length === 0 ? (
+                <MastersEmptyRow colSpan={5} label="No admissions recorded this session yet" />
+              ) : (
+                yearAdmissions.map(({ student: s, lead }) => {
+                  const cls =
+                    classes.find((c) => c.id === s.classId)?.name ?? "—";
+                  const collected = lead
+                    ? registrationCollectedPaise(state, lead.id)
+                    : 0;
+                  const balance = lead ? registrationBalancePaise(state, lead) : 0;
+                  return (
+                    <tr key={s.id}>
+                      <td className="px-3 py-2">
+                        <div className="text-sm font-medium">{s.fullName}</div>
+                        <div className="text-[11px] text-[var(--muted)]">
+                          {s.admissionNo}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-sm">{cls}</td>
+                      <td className="px-3 py-2 text-xs">
+                        {s.fatherName || "—"}
+                        <div className="text-[11px] text-[var(--muted)]">
+                          {s.fatherMobile || s.motherMobile || "no mobile"}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-right text-sm tabular-nums">
+                        {!lead ? (
+                          <span className="text-[var(--muted)]">not started</span>
+                        ) : balance <= 0 && collected > 0 ? (
+                          <span className="font-semibold text-emerald-600">
+                            {formatInr(collected)} paid
+                          </span>
+                        ) : collected > 0 ? (
+                          <span className="font-semibold text-amber-600">
+                            {formatInr(balance)} due
+                          </span>
+                        ) : (
+                          <span className="font-semibold text-[var(--danger)]">
+                            {formatInr(balance)} due
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right whitespace-nowrap">
+                        {!lead && canEdit ? (
+                          <button
+                            type="button"
+                            className="rounded-lg bg-[var(--primary)] px-2.5 py-1 text-[11px] font-semibold text-[var(--primary-foreground)]"
+                            onClick={() => startRegistrationFor(s)}
+                          >
+                            Start registration
+                          </button>
+                        ) : lead ? (
+                          <button
+                            type="button"
+                            className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold"
+                            onClick={() => {
+                              setSelectedId(lead.id);
+                              setCollectFocusIds([lead.id]);
+                              takeFeeRef.current?.scrollIntoView({
+                                behavior: "smooth",
+                                block: "start",
+                              });
+                            }}
+                          >
+                            {balance > 0 ? "Take fee" : "Open"}
+                          </button>
+                        ) : null}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </ErpTableBody>
+          </ErpTable>
+        </ErpTableShell>
+      </MastersTableCard>
+
       <MastersTableCard title="Registration queue — from Lead CRM">
         {queue.length === 0 ? (
           <div className="px-4 py-10 text-center text-sm text-[var(--muted)]">
@@ -862,6 +1068,7 @@ export function AdmissionRegistrationPanel({
           </ErpTable>
         )}
       </MastersTableCard>
+      </>
       ) : null}
 
       {selected ? (
@@ -1029,6 +1236,15 @@ export function AdmissionRegistrationPanel({
                       </option>
                     ))}
                   </select>
+                </label>
+                <label className="text-[11px] font-semibold text-[var(--muted)]">
+                  Received on
+                  <input
+                    type="date"
+                    className={`${inp} mt-1`}
+                    value={collectOn}
+                    onChange={(e) => setCollectOn(e.target.value)}
+                  />
                 </label>
                 <label className="text-[11px] font-semibold text-[var(--muted)]">
                   {modeMeta?.refLabel || "Ref"}

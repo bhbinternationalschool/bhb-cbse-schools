@@ -34,6 +34,8 @@ import { VillageAliasPanel } from "@/components/admissions/VillageAliasPanel";
 import { erpBtn, erpBtnOutline, erpField } from "@/components/ui/erp-ui";
 import {
   type BlockMarketRow,
+  type CityWardDirectoryResult,
+  type CityWardDirectoryWard,
   DEFAULT_ORIGIN,
   DEFAULT_RADIUS_M,
   buildMetaCustomAudienceCsv,
@@ -70,9 +72,10 @@ const POOL_OPTIONS = [
 ];
 
 const TYPE_OPTIONS: { value: SettlementFilter; label: string }[] = [
-  { value: "all", label: "Villages & towns" },
+  { value: "all", label: "All settlements" },
   { value: "village", label: "Villages only" },
   { value: "town", label: "Census towns only" },
+  { value: "ward", label: "City wards only" },
 ];
 
 /** Client-side view filter — depends on leads, which only the server knows. */
@@ -266,7 +269,11 @@ function VillageCard({ row }: { row: VillageMarketRow }) {
               {census?.villageName || row.osmName}
             </h3>
             <p className="truncate text-micro text-[var(--muted)]">
-              {census?.blockName ? `Block ${census.blockName}` : "Block unknown"}
+              {census?.blockName
+                ? census.settlementType === "ward"
+                  ? census.blockName
+                  : `Block ${census.blockName}`
+                : "Block unknown"}
               {census?.districtName ? ` · ${census.districtName}` : ""}
               {` · ${row.placeType}`}
             </p>
@@ -454,7 +461,7 @@ function BlockMarketTable({
     <div className="erp-surface space-y-2">
       <div className="flex items-baseline justify-between gap-2">
         <h3 className="text-sm font-semibold text-[var(--brand-deep)]">
-          Blocks — weakest coverage first
+          Blocks &amp; city — weakest coverage first
         </h3>
         {selected.length ? (
           <button
@@ -473,7 +480,7 @@ function BlockMarketTable({
             <li key={b.blockName}>
               <button
                 type="button"
-                onClick={() => onSelect(active ? "" : b.blockName)}
+                onClick={() => onSelect(b.blockName)}
                 aria-pressed={active}
                 className={`w-full rounded-lg border px-2.5 py-2 text-left transition-colors ${
                   active
@@ -484,10 +491,18 @@ function BlockMarketTable({
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
                   <span className="text-sm font-semibold text-[var(--brand-deep)]">
                     {b.blockName}
+                    {b.wards > 0 ? (
+                      <span className="ml-1.5 rounded-full border border-[var(--info)]/25 bg-[var(--info-soft)] px-1.5 py-px text-micro font-semibold text-[var(--info)]">
+                        City
+                      </span>
+                    ) : null}
                   </span>
                   <span className="text-micro text-[var(--muted)]">
-                    {formatIndianNumber(b.settlements)} settlements
-                    {b.towns > 0 ? ` (${b.towns} town${b.towns === 1 ? "" : "s"})` : ""}
+                    {b.wards > 0
+                      ? `${formatIndianNumber(b.wards)} wards`
+                      : `${formatIndianNumber(b.settlements)} settlements${
+                          b.towns > 0 ? ` (${b.towns} town${b.towns === 1 ? "" : "s"})` : ""
+                        }`}
                     {" · "}
                     {formatIndianNumber(b.projectedChildPop)} children 0-6 est.
                   </span>
@@ -511,10 +526,213 @@ function BlockMarketTable({
         })}
       </ul>
       <p className="text-micro text-[var(--muted)]">
-        Bar length is the size of the block&rsquo;s estimated 0-6 pool. Click a block
-        to filter the settlements below.
+        Bar length is the size of the block&rsquo;s estimated 0-6 pool. Click blocks
+        to filter the settlements below — clicking again deselects.
       </p>
     </div>
+  );
+}
+
+/**
+ * The real block filter: a checkbox dropdown over every block on file,
+ * grouped into rural CD blocks and urban bodies (whose settlements are city
+ * wards). Multi-select, because a camp is often planned for two adjacent
+ * blocks at once.
+ */
+function BlockFilterDropdown({
+  available,
+  blockMarket,
+  selected,
+  disabled,
+  onChange,
+}: {
+  available: string[];
+  blockMarket: BlockMarketRow[];
+  selected: string[];
+  disabled: boolean;
+  onChange: (blocks: string[]) => void;
+}) {
+  const cityBlocks = useMemo(
+    () => new Set(blockMarket.filter((b) => b.wards > 0).map((b) => b.blockName)),
+    [blockMarket],
+  );
+  const groups = useMemo(
+    () => [
+      { label: "Rural blocks", names: available.filter((b) => !cityBlocks.has(b)) },
+      { label: "Varanasi city & towns", names: available.filter((b) => cityBlocks.has(b)) },
+    ],
+    [available, cityBlocks],
+  );
+
+  const toggle = (name: string) => {
+    onChange(
+      selected.includes(name)
+        ? selected.filter((b) => b !== name)
+        : [...selected, name],
+    );
+  };
+
+  const summary =
+    selected.length === 0
+      ? "All blocks"
+      : selected.length === 1
+        ? selected[0]
+        : `${selected.length} blocks`;
+
+  return (
+    <details className="relative text-micro text-[var(--muted)]">
+      <summary
+        className={`${erpField} flex cursor-pointer select-none list-none items-center justify-between gap-2 ${
+          disabled ? "pointer-events-none opacity-60" : ""
+        }`}
+      >
+        <span className="truncate font-medium text-[var(--brand-deep)]">{summary}</span>
+        <span aria-hidden>▾</span>
+      </summary>
+      <div className="absolute left-0 z-20 mt-1 max-h-72 w-64 overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--card)] p-2 shadow-lg">
+        <button
+          type="button"
+          className="mb-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-2 py-1 text-left text-micro font-semibold text-[var(--brand-deep)] hover:border-[var(--brand-mid)]"
+          onClick={() => onChange([])}
+        >
+          All blocks{selected.length ? " (clear selection)" : ""}
+        </button>
+        {groups.map((g) =>
+          g.names.length ? (
+            <div key={g.label} className="mt-1">
+              <p className="px-1 py-0.5 text-micro font-semibold uppercase tracking-wide text-[var(--muted)]">
+                {g.label}
+              </p>
+              {g.names.map((name) => (
+                <label
+                  key={name}
+                  className="flex cursor-pointer items-center gap-2 rounded-lg px-1.5 py-1 hover:bg-[var(--surface-sunken)]"
+                >
+                  <input
+                    type="checkbox"
+                    className="accent-[var(--brand-mid)]"
+                    checked={selected.includes(name)}
+                    onChange={() => toggle(name)}
+                  />
+                  <span className="text-xs text-[var(--brand-deep)]">{name}</span>
+                </label>
+              ))}
+            </div>
+          ) : null,
+        )}
+      </div>
+    </details>
+  );
+}
+
+/**
+ * The official 2022 Nagar Nigam ward directory: every ward with the
+ * mohallas/colonies its gazetted extent names. This answers "which ward is
+ * Sigra in?" for planning — it is a reference list, NOT the census ward
+ * cards: the 2022 wards have no official crosswalk to the census-2011 wards
+ * that carry the child-pool figures, so the two are never joined.
+ */
+function CityWardDirectoryPanel() {
+  const [wards, setWards] = useState<CityWardDirectoryWard[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/admissions/city-wards", { cache: "no-store" });
+        const body = (await res.json()) as CityWardDirectoryResult;
+        if (cancelled) return;
+        if (!res.ok || !body.ok) {
+          setError("error" in body && body.error ? body.error : `Failed (${res.status})`);
+          return;
+        }
+        setWards(body.wards);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Network error");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const q = query.trim().toLowerCase();
+  const filtered = useMemo(() => {
+    if (!wards) return [];
+    if (!q) return wards;
+    return wards.filter(
+      (w) =>
+        String(w.wardNo) === q ||
+        w.wardName.toLowerCase().includes(q) ||
+        w.wardNameHi.includes(query.trim()) ||
+        w.localities.some((l) => l.toLowerCase().includes(q)),
+    );
+  }, [wards, q, query]);
+
+  return (
+    <details className="erp-surface-sm" open={false}>
+      <summary className="cursor-pointer text-xs font-semibold text-[var(--brand-deep)]">
+        Varanasi City ward directory — mohallas &amp; colonies (2022 delimitation)
+      </summary>
+      <div className="mt-2 space-y-2">
+        <p className="text-micro text-[var(--muted)]">
+          The Nagar Nigam&rsquo;s 100 current wards and the localities their
+          gazette extents name — use it to read where a lead&rsquo;s mohalla
+          falls. These are the 2022 wards; the population cards above are the
+          census-2011 wards, and there is no official mapping between the two.
+          Ramnagar, Gangapur, the Cantonment and Maruadih are separate bodies
+          outside this list.
+        </p>
+        <input
+          type="search"
+          className={erpField}
+          placeholder="search a ward, mohalla or colony — e.g. Sigra, Khojwa, Lanka"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        {error ? (
+          <p className="text-micro text-[var(--danger)]">{error}</p>
+        ) : !wards ? (
+          <div className="space-y-1.5">
+            <Skeleton className="h-4 w-2/3" />
+            <Skeleton className="h-4 w-1/2" />
+          </div>
+        ) : filtered.length ? (
+          <ul className="max-h-80 space-y-1.5 overflow-y-auto pr-1">
+            {filtered.map((w) => (
+              <li
+                key={w.wardNo}
+                className="rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-2.5 py-1.5"
+              >
+                <p className="text-xs font-semibold text-[var(--brand-deep)]">
+                  Ward {w.wardNo} · {w.wardName}
+                  {w.wardNameHi ? (
+                    <span className="ml-1.5 font-normal text-[var(--muted)]">
+                      {w.wardNameHi}
+                    </span>
+                  ) : null}
+                </p>
+                <p className="mt-0.5 text-micro text-[var(--muted)]">
+                  {w.localities.length ? w.localities.join(", ") : "—"}
+                </p>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-micro text-[var(--warning)]">
+            No ward or locality matches &ldquo;{query.trim()}&rdquo;. The
+            spelling queue can still map it by hand.
+          </p>
+        )}
+        {wards && q ? (
+          <p className="text-micro text-[var(--muted)]">
+            {filtered.length} of {wards.length} wards match.
+          </p>
+        ) : null}
+      </div>
+    </details>
   );
 }
 
@@ -753,11 +971,31 @@ function VillageDemographicsGridInner({
 
   const data = state.status === "ready" ? state.data : null;
 
+  // Options for the village/ward dropdown — the settlements the server
+  // returned for the current block selection. Numeric compare so Ward 2
+  // sorts before Ward 10.
+  const villageNames = useMemo(() => {
+    if (!data) return [] as string[];
+    const names = new Set<string>();
+    for (const v of data.villages) names.add(v.census?.villageName || v.osmName);
+    return [...names].sort((a, b) => a.localeCompare(b, "en-IN", { numeric: true }));
+  }, [data]);
+
   const sorted = useMemo(() => {
     if (!data) return [];
+    // In radius mode the server ignores the name filter (it filters census
+    // rows, and radius rows come from OpenStreetMap), so the search applies
+    // here instead — otherwise typing a name would visibly do nothing.
+    const q = search.trim().toLowerCase();
+    const named =
+      data.mode === "radius" && q
+        ? data.villages.filter((v) =>
+            (v.census?.villageName || v.osmName).toLowerCase().includes(q),
+          )
+        : data.villages;
     // Status depends on leads, which only the server can compute, so this one
     // filter is applied here rather than in SQL.
-    const rows = data.villages.filter((v) => {
+    const rows = named.filter((v) => {
       if (status === "all") return true;
       if (v.penetrationPct === null) return false;
       if (status === "untouched") return v.leads.total === 0;
@@ -791,7 +1029,7 @@ function VillageDemographicsGridInner({
       default:
         return rows.sort((a, b) => opportunityScore(b) - opportunityScore(a));
     }
-  }, [data, sort, status]);
+  }, [data, sort, status, search]);
 
   const [exporting, setExporting] = useState<"targeting" | "audience" | null>(null);
   const [exportNote, setExportNote] = useState<string | null>(null);
@@ -902,6 +1140,18 @@ function VillageDemographicsGridInner({
   );
 
   const busy = state.status === "loading";
+
+  // The settlement cards render only once the office narrows down — 400
+  // unfiltered cards read as noise, and the block table above already answers
+  // "where overall". Radius mode is its own selection (a handful of mapped
+  // places), so it always shows.
+  const hasSelection =
+    mode === "radius" ||
+    blocks.length > 0 ||
+    search.trim() !== "" ||
+    settlementType !== "all" ||
+    minChildPool > 0 ||
+    status !== "all";
   const visible = sorted.slice(0, page * PAGE_SIZE);
   const hasMore = sorted.length > visible.length;
 
@@ -931,7 +1181,7 @@ function VillageDemographicsGridInner({
                 }}
               >
                 <option value="block">By block (census)</option>
-                <option value="radius">Near school (OpenStreetMap)</option>
+                <option value="radius">Near school (by distance)</option>
               </select>
             </label>
 
@@ -1074,7 +1324,7 @@ function VillageDemographicsGridInner({
           {mode === "block"
             ? `Census villages · ${blocks.length ? blocks.join(", ") : "all blocks"}`
             : `Origin ${lat.toFixed(4)}, ${lon.toFixed(4)} · radius ${(radius / 1000).toFixed(0)} km`}
-          {data && data.mode === "radius"
+          {data && data.mode === "radius" && data.source.overpassEndpoint
             ? ` · OpenStreetMap data ${data.source.cached ? "cached" : "fetched"} ${new Date(data.source.fetchedAt).toLocaleString("en-IN")}`
             : ""}
         </p>
@@ -1240,17 +1490,163 @@ function VillageDemographicsGridInner({
             </ul>
           ) : null}
 
+          <div className="erp-surface-sm space-y-2">
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="min-w-[11rem]">
+                <p className="text-micro text-[var(--muted)]">
+                  {mode === "radius" ? "Block (in range)" : "Block / city"}
+                </p>
+                <BlockFilterDropdown
+                  available={data.blocks.available}
+                  blockMarket={data.blockMarket}
+                  selected={blocks}
+                  disabled={busy}
+                  onChange={(next) => {
+                    setBlocks(next);
+                    reload({ blocks: next });
+                  }}
+                />
+              </div>
+              <label className="min-w-[10rem] text-micro text-[var(--muted)]">
+                Village / ward
+                <select
+                  className={erpField}
+                  disabled={busy}
+                  value={villageNames.includes(search) ? search : ""}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setSearch(next);
+                    if (searchDebounce.current) window.clearTimeout(searchDebounce.current);
+                    reload({ search: next });
+                  }}
+                >
+                  <option value="">
+                    {blocks.length ? "All in selected blocks" : "All settlements"}
+                  </option>
+                  {villageNames.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="min-w-[10rem] flex-1 text-micro text-[var(--muted)]">
+                Search by name
+                <input
+                  type="search"
+                  className={erpField}
+                  placeholder="e.g. Ayar, Puari, Ward 12"
+                  value={search}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setSearch(next);
+                    if (searchDebounce.current) window.clearTimeout(searchDebounce.current);
+                    searchDebounce.current = window.setTimeout(
+                      () => reload({ search: next.trim() }),
+                      350,
+                    );
+                  }}
+                />
+              </label>
+              <>
+                  <label className="text-micro text-[var(--muted)]">
+                    Type
+                    <select
+                      className={erpField}
+                      value={settlementType}
+                      disabled={busy}
+                      onChange={(e) => {
+                        const next = e.target.value as SettlementFilter;
+                        setSettlementType(next);
+                        reload({ settlementType: next });
+                      }}
+                    >
+                      {TYPE_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-micro text-[var(--muted)]">
+                    Minimum size
+                    <select
+                      className={erpField}
+                      value={minChildPool}
+                      disabled={busy}
+                      onChange={(e) => {
+                        const next = Number(e.target.value);
+                        setMinChildPool(next);
+                        reload({ minChildPool: next });
+                      }}
+                    >
+                      {POOL_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </>
+              <label className="text-micro text-[var(--muted)]">
+                Coverage
+                <select
+                  className={erpField}
+                  value={status}
+                  onChange={(e) => {
+                    setStatus(e.target.value as StatusFilter);
+                    setPage(1);
+                  }}
+                >
+                  {STATUS_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            {hasSelection ? (
+              <p className="text-micro text-[var(--muted)]">
+                Showing <strong>{formatIndianNumber(visible.length)}</strong> of{" "}
+                {formatIndianNumber(sorted.length)}
+                {data.counts.truncated
+                  ? ` shown, ${formatIndianNumber(data.counts.matchingFilter)} match the filter`
+                  : ""}
+                {blocks.length ? ` · block ${blocks.join(", ")}` : " · all blocks"}
+                {mode === "radius" ? ` · within ${(radius / 1000).toFixed(0)} km` : ""}
+                {mode === "radius" ? (
+                  <span className="ml-1 text-[var(--muted)]">
+                    — city wards carry no coordinates, so Varanasi City shows
+                    under &ldquo;By block&rdquo;, not by distance.
+                  </span>
+                ) : null}
+              </p>
+            ) : (
+              <p className="text-micro text-[var(--muted)]">
+                Pick a block, a village/ward, or type a name — the settlement
+                cards stay hidden until you narrow down.
+              </p>
+            )}
+          </div>
+
           {data.mode === "block" ? (
             <BlockMarketTable
               rows={data.blockMarket}
               selected={blocks}
               onSelect={(b) => {
-                const next = b ? [b] : [];
+                const next = !b
+                  ? []
+                  : blocks.includes(b)
+                    ? blocks.filter((x) => x !== b)
+                    : [...blocks, b];
                 setBlocks(next);
                 reload({ blocks: next });
               }}
             />
           ) : null}
+
+          {data.mode === "block" ? <CityWardDirectoryPanel /> : null}
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <SummaryTile
@@ -1323,93 +1719,7 @@ function VillageDemographicsGridInner({
             </details>
           ) : null}
 
-          <div className="erp-surface-sm space-y-2">
-            <div className="flex flex-wrap items-end gap-2">
-              <label className="min-w-[10rem] flex-1 text-micro text-[var(--muted)]">
-                Village or town name
-                <input
-                  type="search"
-                  className={erpField}
-                  placeholder="e.g. Ayar, Puari"
-                  defaultValue={search}
-                  onChange={(e) => {
-                    const next = e.target.value;
-                    setSearch(next);
-                    if (searchDebounce.current) window.clearTimeout(searchDebounce.current);
-                    searchDebounce.current = window.setTimeout(
-                      () => reload({ search: next.trim() }),
-                      350,
-                    );
-                  }}
-                />
-              </label>
-              <label className="text-micro text-[var(--muted)]">
-                Type
-                <select
-                  className={erpField}
-                  value={settlementType}
-                  disabled={busy}
-                  onChange={(e) => {
-                    const next = e.target.value as SettlementFilter;
-                    setSettlementType(next);
-                    reload({ settlementType: next });
-                  }}
-                >
-                  {TYPE_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="text-micro text-[var(--muted)]">
-                Minimum size
-                <select
-                  className={erpField}
-                  value={minChildPool}
-                  disabled={busy}
-                  onChange={(e) => {
-                    const next = Number(e.target.value);
-                    setMinChildPool(next);
-                    reload({ minChildPool: next });
-                  }}
-                >
-                  {POOL_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="text-micro text-[var(--muted)]">
-                Coverage
-                <select
-                  className={erpField}
-                  value={status}
-                  onChange={(e) => {
-                    setStatus(e.target.value as StatusFilter);
-                    setPage(1);
-                  }}
-                >
-                  {STATUS_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <p className="text-micro text-[var(--muted)]">
-              Showing <strong>{formatIndianNumber(visible.length)}</strong> of{" "}
-              {formatIndianNumber(sorted.length)}
-              {data.counts.truncated
-                ? ` shown, ${formatIndianNumber(data.counts.matchingFilter)} match the filter`
-                : ""}
-              {blocks.length ? ` · block ${blocks.join(", ")}` : " · all blocks"}
-            </p>
-          </div>
-
-          {sorted.length ? (
+          {!hasSelection ? null : sorted.length ? (
             <>
               <div className="grid gap-3 lg:grid-cols-2">
                 {visible.map((row) => (
@@ -1432,12 +1742,12 @@ function VillageDemographicsGridInner({
               <p className="text-sm font-medium text-[var(--brand-deep)]">
                 {mode === "block"
                   ? "No census villages on file for this selection"
-                  : `No villages or hamlets mapped inside ${(radius / 1000).toFixed(0)} km`}
+                  : `No settlements found inside ${(radius / 1000).toFixed(0)} km`}
               </p>
               <p className="mt-1 text-xs text-[var(--muted)]">
                 {mode === "block"
                   ? "Load the Census PCA rows with scripts/seed-census.ts, then pick a block."
-                  : "OpenStreetMap has no village node in this radius. Widen it, switch to By block, or check the school coordinates."}
+                  : "Widen the radius, clear the name/type/size filters, or check the school coordinates."}
               </p>
             </div>
           )}

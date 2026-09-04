@@ -5,20 +5,34 @@ import { Landmark } from "lucide-react";
 import {
   AccountsMastersPanel,
 } from "@/components/accounts/AccountsMastersPanel";
+import {
+  ExpenseHeadsPanel,
+  SpendTagsPanel,
+} from "@/components/accounts/LedgerEntryPanels";
 import { UnpostedEntriesBanner } from "@/components/accounts/UnpostedEntriesBanner";
 import { DeskSyncBanner } from "@/components/accounts/DeskSyncBanner";
 import {
+  BankReconPanel,
+  GatewaySettlementPanel,
+  LedgerBookPanel,
+  LedgerReportsPanel,
+} from "@/components/accounts/LedgerPanels";
+import { VendorHistoryPanel } from "@/components/accounts/VendorHistoryPanel";
+import {
+  ChequesPanel,
+  LegacyBookNotice,
+  MultiLineExpensePanel,
+  QuickExpensePanel,
+  VoucherEntryPanel,
+} from "@/components/accounts/LedgerEntryPanels";
+import {
   BanksPanel,
   BillsPanel,
-  BooksPanel,
-  CashBookPanel,
-  DayBookPanel,
   DayCloseAccountsPanel,
-  ExpensesPanel,
   OwnerLoansPanel,
-  ReportsPanel,
 } from "@/components/accounts/AccountsPanels";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { hasPermission } from "@/lib/rbac";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { SkeletonModulePage } from "@/components/ui/skeleton";
@@ -32,33 +46,46 @@ import { dayCloseNeedsAttention } from "@/lib/fees";
 
 type AccountsTab =
   | "dashboard"
-  | "daybook"
-  | "cash"
-  | "banks"
+  | "book"
+  | "vouchers"
+  | "bookreports"
+  | "recon"
   | "masters"
-  | "expenses"
   | "bills"
   | "owner"
-  | "books"
-  | "dayclose"
-  | "reports";
+  | "dayclose";
+
+/**
+ * Where a retired browser-book tab now lives in the server book. Deep links
+ * and dashboard cards still point at the old ids; they land on the
+ * replacement instead of a dead tab.
+ */
+const LEGACY_TAB_MAP: Record<string, AccountsTab> = {
+  daybook: "vouchers",
+  cash: "bookreports",
+  banks: "bookreports",
+  expenses: "vouchers",
+  books: "bookreports",
+  reports: "bookreports",
+};
 
 const TABS: ModuleTabItem[] = [
   { id: "dashboard", label: "Dashboard", tone: "navy" },
-  { id: "daybook", label: "Day book", tone: "teal" },
-  { id: "cash", label: "Cash", tone: "green" },
-  { id: "banks", label: "Banks", tone: "sky" },
+  { id: "book", label: "Server book", tone: "green" },
+  { id: "vouchers", label: "Vouchers", tone: "green" },
+  { id: "bookreports", label: "Book reports", tone: "green" },
+  { id: "recon", label: "Bank recon", tone: "green" },
   { id: "masters", label: "Masters", tone: "violet" },
-  { id: "expenses", label: "Expenses", tone: "amber" },
   { id: "bills", label: "Bills & AP", tone: "violet" },
   { id: "owner", label: "Owner loans", tone: "coral" },
-  { id: "books", label: "Books", tone: "slate" },
   { id: "dayclose", label: "Day close", tone: "rose" },
-  { id: "reports", label: "Reports", tone: "navy" },
 ];
 
 export function AccountsWorkspace() {
   const session = useDemoSession();
+  // Running the projection is a bulk write to the book; the button only
+  // renders for someone the API would let through anyway.
+  const canApprove = hasPermission(session, null, "accounts", "approve");
   const [tab, setTab] = useState<AccountsTab>("dashboard");
 
   useEffect(() => {
@@ -66,18 +93,17 @@ export function AccountsWorkspace() {
     const raw = new URLSearchParams(window.location.search).get("tab");
     const allowed: AccountsTab[] = [
       "dashboard",
-      "daybook",
-      "cash",
-      "banks",
+      "book",
+      "vouchers",
+      "bookreports",
+      "recon",
       "masters",
-      "expenses",
       "bills",
       "owner",
-      "books",
       "dayclose",
-      "reports",
     ];
     if (raw && (allowed as string[]).includes(raw)) setTab(raw as AccountsTab);
+    else if (raw && LEGACY_TAB_MAP[raw]) setTab(LEGACY_TAB_MAP[raw]);
   }, []);
   const [state, setState] = useState<AccountsState | null>(() =>
     typeof window !== "undefined" ? seedAccountsIfEmpty() : null,
@@ -87,6 +113,7 @@ export function AccountsWorkspace() {
   const [tick, setTick] = useState(0);
 
   const actorName = session.fullName || "Accounts user";
+  const [entryTick, setEntryTick] = useState(0);
 
   function flash(message: string) {
     setNotice(message);
@@ -185,28 +212,81 @@ export function AccountsWorkspace() {
         <ModuleDashboardHost
           moduleId="accounts"
           refreshKey={tick}
-          onNavigateTab={(t) => setTab(t as AccountsTab)}
+          // Dashboard cards still name retired tabs; land them on the
+          // server-book replacement instead of a blank screen.
+          onNavigateTab={(t) => setTab(LEGACY_TAB_MAP[t] ?? (t as AccountsTab))}
         />
-      ) : tab === "daybook" ? (
-        <DayBookPanel {...panelProps} />
-      ) : tab === "cash" ? (
-        <CashBookPanel {...panelProps} />
-      ) : tab === "banks" ? (
-        <BanksPanel {...panelProps} />
+      ) : tab === "book" ? (
+        <LedgerBookPanel canApprove={canApprove} />
+      ) : tab === "vouchers" ? (
+        <div className="mt-4 space-y-4">
+          <QuickExpensePanel
+            banks={(state.bankAccounts ?? [])
+              .filter((b) => b.isActive !== false)
+              .map((b) => ({ id: b.id, name: b.name }))}
+            actor={actorName}
+            onPosted={() => setEntryTick((n) => n + 1)}
+          />
+          {/* Between the one-head quick form and the raw double-entry
+              screen: the everyday pile of expenses from one trip. */}
+          <MultiLineExpensePanel
+            banks={(state.bankAccounts ?? [])
+              .filter((b) => b.isActive !== false)
+              .map((b) => ({ id: b.id, name: b.name }))}
+            actor={actorName}
+            onPosted={() => setEntryTick((n) => n + 1)}
+          />
+          <VoucherEntryPanel
+            banks={(state.bankAccounts ?? [])
+              .filter((b) => b.isActive !== false)
+              .map((b) => ({ id: b.id, name: b.name }))}
+            actor={actorName}
+            onPosted={() => setEntryTick((n) => n + 1)}
+          />
+          <ChequesPanel
+            banks={(state.bankAccounts ?? [])
+              .filter((b) => b.isActive !== false)
+              .map((b) => ({ id: b.id, name: b.name }))}
+            actor={actorName}
+            refreshKey={entryTick}
+          />
+        </div>
+      ) : tab === "bookreports" ? (
+        <LedgerReportsPanel />
+      ) : tab === "recon" ? (
+        <>
+          <BankReconPanel
+            banks={(state.bankAccounts ?? [])
+              .filter((b) => b.isActive !== false)
+              .map((b) => ({ id: b.id, name: b.name }))}
+          />
+          {/* Same job, one step earlier: the gateway's settlements are what
+              the bank credits will turn out to be, so they belong beside the
+              statement rather than in a tab of their own. */}
+          <GatewaySettlementPanel />
+        </>
       ) : tab === "masters" ? (
-        <AccountsMastersPanel {...panelProps} />
-      ) : tab === "expenses" ? (
-        <ExpensesPanel {...panelProps} />
+        <div className="space-y-4">
+          <BanksPanel {...panelProps} />
+          <ExpenseHeadsPanel />
+          <SpendTagsPanel />
+          <AccountsMastersPanel {...panelProps} />
+        </div>
       ) : tab === "bills" ? (
-        <BillsPanel {...panelProps} />
+        <>
+          <BillsPanel {...panelProps} />
+          {/* The store's bills and the expense book's vendors are different
+              sets — a fuel dealer never raises a purchase order. Both belong
+              on the payables tab. */}
+          <VendorHistoryPanel />
+        </>
       ) : tab === "owner" ? (
-        <OwnerLoansPanel {...panelProps} />
-      ) : tab === "books" ? (
-        <BooksPanel {...panelProps} />
+        <>
+          <LegacyBookNotice tab="Owner loans — use the owner-loan presets in Vouchers" />
+          <OwnerLoansPanel {...panelProps} />
+        </>
       ) : tab === "dayclose" ? (
         <DayCloseAccountsPanel {...panelProps} />
-      ) : tab === "reports" ? (
-        <ReportsPanel {...panelProps} />
       ) : null}
     </ErpWorkspaceShell>
   );

@@ -19,6 +19,15 @@ import {
 import {
   ensureLedgerMasters,
   ledgerCloseFiscalYear,
+  ledgerFindVoucher,
+  ledgerListAccounts,
+  ledgerRecentTagsByAccount,
+  ledgerSaveExpenseHead,
+  ledgerRemoveExpenseHead,
+  ledgerListCostCentres,
+  ledgerSaveCostCentre,
+  ledgerRemoveCostCentre,
+  ledgerSpendByCentre,
   ledgerLockPeriod,
   ledgerOpenBalances,
   ledgerParityAgainstDesk,
@@ -28,8 +37,19 @@ import {
   ledgerSubledgerBalances,
   ledgerTrialBalance,
 } from "@/lib/ledger/ledger.server";
-import { vendorDues } from "@/lib/inventory/procurement.server";
-import { ledgerReconciliation, projectAll } from "@/lib/ledger/project.server";
+import {
+  listVendorBills,
+  recordVendorPayment,
+  vendorDues,
+} from "@/lib/inventory/procurement.server";
+import { InvError } from "@/lib/inventory/db.server";
+import type { InvPaymentMode } from "@/lib/inventory/types";
+import {
+  feeAdvanceBalances,
+  ledgerReconciliation,
+  projectAll,
+  releaseFeeAdvances,
+} from "@/lib/ledger/project.server";
 import {
   ledgerAnomalies,
   ledgerCockpit,
@@ -37,6 +57,8 @@ import {
   receivablesAgeing,
 } from "@/lib/ledger/controls.server";
 import {
+  ledgerVendors,
+  ledgerVendorStatement,
   accountStatement,
   balanceSheetReport,
   caYearEndPack,
@@ -126,7 +148,30 @@ type PostBody =
   | { action: "ageing"; asOf: string; side?: "payables" | "receivables" }
   | { action: "cockpit"; asOf: string; fyFrom: string }
   | { action: "parity"; deskRows: { code: string; balancePaise: number }[] }
-  | { action: "vendor-dues" };
+  | { action: "vendor-accounts" }
+  | { action: "vendor-statement"; partyKey: string; asOf?: string }
+  | { action: "vendor-dues" }
+  | { action: "accounts" }
+  | { action: "save-expense-head"; code?: string; name: string; parentCode?: string }
+  | { action: "remove-expense-head"; code: string }
+  | { action: "cost-centres" }
+  | { action: "recent-tags" }
+  | { action: "save-cost-centre"; code?: string; name: string }
+  | { action: "remove-cost-centre"; code: string }
+  | { action: "spend-by-centre"; fromDate: string; toDate: string }
+  | { action: "fee-advances" }
+  | { action: "release-fee-advances"; academicYearCode: string; date?: string }
+  | { action: "find-voucher"; voucherNo: string }
+  | { action: "vendor-bills"; vendorId?: string }
+  | {
+      action: "pay-vendor-bill";
+      billId: string;
+      amountPaise: number;
+      mode?: string;
+      reference?: string;
+      note?: string;
+      paidOn?: string;
+    };
 
 export async function POST(req: Request) {
   let body: PostBody;
@@ -165,6 +210,13 @@ export async function POST(req: Request) {
     "ageing",
     "cockpit",
     "vendor-dues",
+    "vendor-bills",
+    "accounts",
+    "find-voucher",
+    "fee-advances",
+    "cost-centres",
+    "recent-tags",
+    "spend-by-centre",
   ]);
 
   const auth = await requireStaffPermission(
@@ -321,6 +373,85 @@ export async function POST(req: Request) {
           : await payablesAgeing(body.asOf);
       return NextResponse.json({ ok: true, side: body.side ?? "payables", report });
     }
+    case "fee-advances": {
+      // What sits in Fees Received in Advance, per session.
+      const res = await feeAdvanceBalances();
+      return NextResponse.json(res, { status: res.ok ? 200 : 502 });
+    }
+    case "release-fee-advances": {
+      // Session start: the advance pile becomes income, as one visible journal.
+      const res = await releaseFeeAdvances({
+        academicYearCode: body.academicYearCode || "",
+        date: body.date || new Date().toISOString().slice(0, 10),
+        createdBy: actor,
+      });
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    case "recent-tags": {
+      // Which cost centre each head was last booked to, so the entry form can
+      // suggest it. Read-only: it only reports what is already in the book.
+      return NextResponse.json({ ok: true, tags: await ledgerRecentTagsByAccount() });
+    }
+    case "accounts": {
+      // The chart, for entry forms — postable accounts only.
+      return NextResponse.json({ ok: true, accounts: await ledgerListAccounts() });
+    }
+    case "save-expense-head": {
+      // Category → sub-head structure for expenses, kept in the chart itself
+      // so entries, statements and the CA pack all roll up the same way.
+      const res = await ledgerSaveExpenseHead({
+        code: body.code,
+        name: body.name,
+        parentCode: body.parentCode,
+      });
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    case "remove-expense-head": {
+      const res = await ledgerRemoveExpenseHead(body.code);
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    case "cost-centres": {
+      return NextResponse.json({ ok: true, centres: await ledgerListCostCentres() });
+    }
+    case "save-cost-centre": {
+      const res = await ledgerSaveCostCentre({ code: body.code, name: body.name });
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    case "remove-cost-centre": {
+      const res = await ledgerRemoveCostCentre(body.code);
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    case "spend-by-centre": {
+      // Expense debits net of credits, tag × head — how much Bus-1 took in
+      // fuel, EMI and service over a period.
+      const rows = await ledgerSpendByCentre({
+        fromDate: body.fromDate,
+        toDate: body.toDate,
+      });
+      return NextResponse.json({ ok: true, rows });
+    }
+    case "find-voucher": {
+      // A reversal needs the id behind the number a statement line shows.
+      const voucher = await ledgerFindVoucher(body.voucherNo || "");
+      return NextResponse.json(
+        voucher ? { ok: true, voucher } : { ok: false, error: "No voucher with that number" },
+        { status: voucher ? 200 : 404 },
+      );
+    }
+    case "vendor-accounts": {
+      // The EXPENSE book's vendors, which are not the store's: these are the
+      // parties created by expense vouchers, keyed by name. A vendor can
+      // appear in both, and the two balances answer different questions.
+      const res = await ledgerVendors();
+      return NextResponse.json(res, { status: res.ok ? 200 : 502 });
+    }
+    case "vendor-statement": {
+      const res = await ledgerVendorStatement({
+        partyKey: String(body.partyKey ?? ""),
+        asOf: body.asOf,
+      });
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
     case "vendor-dues": {
       // Vendors and their balances live in the store module, but this is the
       // Accounts screen asking, so it is guarded by the accounts permission
@@ -328,6 +459,49 @@ export async function POST(req: Request) {
       // needs to see who the school owes.
       const dues = await vendorDues();
       return NextResponse.json({ ok: true, dues });
+    }
+    case "vendor-bills": {
+      // The open bills behind a vendor's balance — what a payment settles.
+      // Same store data, same accounts guard as vendor-dues.
+      try {
+        const bills = await listVendorBills({
+          vendorId: body.vendorId,
+          status: "unpaid",
+        });
+        return NextResponse.json({ ok: true, bills });
+      } catch (e) {
+        const status = e instanceof InvError ? e.status : 500;
+        return NextResponse.json(
+          { ok: false, error: e instanceof Error ? e.message : "Failed" },
+          { status },
+        );
+      }
+    }
+    case "pay-vendor-bill": {
+      // Paying from Accounts uses the SAME server function the store uses:
+      // the payment row, the bill's balance and the ledger entry
+      // (Dr 2000 Accounts Payable / Cr tender) commit in one transaction, so
+      // the two modules cannot drift apart. Over-payment is refused there.
+      try {
+        const res = await recordVendorPayment(
+          {
+            billId: body.billId,
+            amountPaise: body.amountPaise,
+            mode: body.mode as InvPaymentMode | undefined,
+            reference: body.reference,
+            note: body.note,
+            paidOn: body.paidOn,
+          },
+          actor,
+        );
+        return NextResponse.json({ ok: true, ...res });
+      } catch (e) {
+        const status = e instanceof InvError ? e.status : 500;
+        return NextResponse.json(
+          { ok: false, error: e instanceof Error ? e.message : "Payment failed" },
+          { status },
+        );
+      }
     }
     case "cockpit": {
       const res = await ledgerCockpit({ asOf: body.asOf, fyFrom: body.fyFrom });

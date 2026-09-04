@@ -68,9 +68,13 @@ function sanitizeSearch(raw: unknown): string {
 export async function findStudents(
   search: string,
   academicYearCode: string,
+  classId = "",
+  sectionId = "",
 ): Promise<InvBuyerStudent[]> {
   const term = sanitizeSearch(search);
-  if (term.length < 2) return [];
+  // With a class chosen the counter is browsing a roster, not searching —
+  // an empty term then means "everyone in this class".
+  if (term.length < 2 && !classId) return [];
 
   const { sb, tenantId } = await invCtx();
   let q = sb
@@ -79,15 +83,20 @@ export async function findStudents(
       "id, full_name, admission_no, class_id, section_id, roll_no, father_name," +
         " father_mobile, mother_mobile, household_id, status, academic_year_code",
     )
-    .eq("tenant_id", tenantId)
-    .or(
+    .eq("tenant_id", tenantId);
+
+  if (term.length >= 2) {
+    q = q.or(
       `full_name.ilike.%${term}%,admission_no.ilike.%${term}%,` +
         `roll_no.ilike.%${term}%,father_mobile.ilike.%${term}%`,
     );
+  }
+  if (classId) q = q.eq("class_id", classId);
+  if (sectionId) q = q.eq("section_id", sectionId);
 
   if (academicYearCode) q = q.eq("academic_year_code", academicYearCode);
 
-  const { data, error } = await q.order("full_name").limit(30);
+  const { data, error } = await q.order("full_name").limit(classId ? 80 : 30);
   if (error) throw new InvError(`Student search: ${error.message}`, 500);
 
   // sis_students is outside this module's generated types, so the row shape
@@ -178,6 +187,7 @@ function rowToPayment(r: Row): InvSalePayment {
     amountPaise: int(r.amount_paise),
     mode: str(r.mode) as InvTenderMode,
     reference: str(r.reference),
+    bankAccountId: str(r.bank_account_id),
     note: str(r.note),
     createdBy: str(r.created_by),
   };
@@ -194,6 +204,7 @@ export async function listSales(query: InvSaleQuery): Promise<InvSalePage> {
     .select("*", { count: "exact" })
     .eq("tenant_id", tenantId);
 
+  if (query.saleId) q = q.eq("id", query.saleId);
   if (query.status === "unpaid") q = q.in("status", ["open", "part_paid"]);
   else if (query.status && query.status !== "all") q = q.eq("status", query.status);
   if (query.buyerKind) q = q.eq("buyer_kind", query.buyerKind);
@@ -217,7 +228,7 @@ export async function listSales(query: InvSaleQuery): Promise<InvSalePage> {
   }
 
   const saleIds = rows.map((r) => str(r.id));
-  const [lineRes, payRes, retRes] = await Promise.all([
+  const [lineRes, payRes, retRes, voucherRes] = await Promise.all([
     sb
       .from("inv_sale_lines")
       .select("*")
@@ -234,7 +245,20 @@ export async function listSales(query: InvSaleQuery): Promise<InvSalePage> {
       .from("inv_sale_return_lines")
       .select("sale_line_id, qty")
       .eq("tenant_id", tenantId),
+    // The school books voucher for each sale — the official receipt number
+    // the office quotes, alongside the store's own sale number.
+    sb
+      .from("ledger_vouchers")
+      .select("source_id, voucher_no")
+      .eq("tenant_id", tenantId)
+      .eq("source_type", "inv_sale")
+      .in("source_id", saleIds),
   ]);
+
+  const voucherBySale = new Map<string, string>();
+  for (const v of (voucherRes.data ?? []) as Row[]) {
+    voucherBySale.set(str(v.source_id), str(v.voucher_no));
+  }
 
   const returnedByLine = new Map<string, number>();
   for (const r of (retRes.data ?? []) as Row[]) {
@@ -276,6 +300,7 @@ export async function listSales(query: InvSaleQuery): Promise<InvSalePage> {
         buyerName: str(r.buyer_name),
         buyerPhone: str(r.buyer_phone),
         classId: str(r.class_id),
+        sectionId: str(r.section_id),
         locationId: str(r.location_id),
         priceListId: str(r.price_list_id),
         kitId: str(r.kit_id),
@@ -296,6 +321,8 @@ export async function listSales(query: InvSaleQuery): Promise<InvSalePage> {
         payments: paysBySale.get(id) ?? [],
         // A cancelled sale earned nothing, whatever its line values say.
         marginPaise: str(r.status) === "void" ? 0 : total - cost,
+        ledgerVoucherNo: voucherBySale.get(id) ?? "",
+        manualReceiptNo: str(r.manual_receipt_no),
       };
     }),
     total: count ?? rows.length,
@@ -314,10 +341,12 @@ export async function postSale(
     buyerName?: string;
     buyerPhone?: string;
     classId?: string;
+    sectionId?: string;
     locationId?: string;
     priceListId?: string;
     kitId?: string;
     saleDate?: string;
+    manualReceiptNo?: string;
     note?: string;
     lines: {
       itemId: string;
@@ -326,7 +355,13 @@ export async function postSale(
       discountPct?: number;
       gstRate?: number;
     }[];
-    payments?: { amountPaise: number; mode?: InvTenderMode; reference?: string }[];
+    payments?: {
+      amountPaise: number;
+      mode?: InvTenderMode;
+      reference?: string;
+      /** Bank account that receives it — empty for cash. */
+      bankAccountId?: string;
+    }[];
   },
   actor: string,
   academicYearCode: string,
@@ -363,6 +398,7 @@ export async function postSale(
       buyer_name: str(input.buyerName),
       buyer_phone: str(input.buyerPhone),
       class_id: str(input.classId),
+      section_id: str(input.sectionId),
       location_id: input.locationId || null,
       price_list_id: input.priceListId || null,
       kit_id: input.kitId || null,
@@ -381,12 +417,26 @@ export async function postSale(
           amount_paise: int(p.amountPaise),
           mode: p.mode || "cash",
           reference: str(p.reference),
+          bank_account_id: str(p.bankAccountId),
         })),
     },
   });
   if (error) throw new InvError(cleanDbMessage(error.message), 409);
 
   const out = (data ?? {}) as Row;
+
+  // Post-insert metadata: the paper receipt-book number the clerk copied
+  // from the manual book. Kept out of the posting RPC on purpose — it is
+  // reference data, not money, and must never fail a sale.
+  const manualNo = str(input.manualReceiptNo).trim().slice(0, 40);
+  if (manualNo && out.sale_id) {
+    await sb
+      .from("inv_sales")
+      .update({ manual_receipt_no: manualNo })
+      .eq("tenant_id", tenantId)
+      .eq("id", str(out.sale_id));
+  }
+
   return {
     saleId: str(out.sale_id),
     saleNo: str(out.sale_no),
@@ -417,6 +467,8 @@ export async function collectOnSale(
     amountPaise: number;
     mode?: InvTenderMode;
     reference?: string;
+    /** Bank account that received it — empty for cash. */
+    bankAccountId?: string;
     paidOn?: string;
     note?: string;
     /**
@@ -445,6 +497,7 @@ export async function collectOnSale(
       amount_paise: amount,
       mode: input.mode || "cash",
       reference: str(input.reference),
+      bank_account_id: str(input.bankAccountId),
       paid_on: input.paidOn || null,
       note: str(input.note),
       external_ref: str(input.externalRef),
@@ -468,6 +521,8 @@ export async function postSaleReturn(
     reason: string;
     settlement?: "reduce_balance" | "refund";
     refundMode?: string;
+    /** Required for a non-cash refund: money out must be traceable. */
+    refundReference?: string;
     restock?: boolean;
     returnDate?: string;
     note?: string;
@@ -483,6 +538,8 @@ export async function postSaleReturn(
   balanceReducedPaise: number;
   /** Empty when the server ledger is not in use for this school. */
   ledgerVoucherNo: string;
+  /** Echoed back so a receipt can quote it. Empty when no money moved. */
+  refundReference: string;
 }> {
   if (!String(input.reason ?? "").trim()) {
     throw new InvError("A reason is required for a sale return", 400);
@@ -502,6 +559,7 @@ export async function postSaleReturn(
       reason: String(input.reason).trim(),
       settlement: input.settlement || "reduce_balance",
       refund_mode: str(input.refundMode) || "cash",
+      refund_reference: str(input.refundReference).trim(),
       restock: input.restock !== false,
       return_date: input.returnDate || null,
       note: str(input.note),
@@ -521,6 +579,7 @@ export async function postSaleReturn(
     refundedPaise: int(out.refunded_paise),
     balanceReducedPaise: int(out.balance_reduced_paise),
     ledgerVoucherNo: str(out.ledger_voucher_no),
+    refundReference: str(out.refund_reference),
   };
 }
 
@@ -614,6 +673,42 @@ export async function listSaleReturns(opts: {
   });
 }
 
+/**
+ * Give a store collection back when the fee receipt that paid it is voided.
+ *
+ * Keyed on the fee receipt number the collection was stamped with, so one
+ * call undoes every store line that receipt settled. Idempotent: a payment
+ * already reversed is skipped, so a retry cannot double-credit.
+ */
+export async function reverseCollectionByReceipt(input: {
+  receiptNo: string;
+  actor: string;
+  reason?: string;
+}): Promise<{
+  reversed: number;
+  amountPaise: number;
+  sales: { saleNo: string; status: string; amountPaise: number }[];
+}> {
+  const { sb, tenantId } = await invCtx();
+  const { data, error } = await sb.rpc("inv_reverse_collection", {
+    p_tenant_id: tenantId,
+    p_actor: input.actor,
+    p_external_ref: input.receiptNo,
+    p_reason: input.reason ?? "Fee receipt voided",
+  });
+  if (error) throw new InvError(cleanDbMessage(error.message), 422);
+  const out = (data ?? {}) as Row;
+  return {
+    reversed: int(out.reversed),
+    amountPaise: int(out.amount_paise),
+    sales: ((out.sales ?? []) as Row[]).map((r) => ({
+      saleNo: str(r.sale_no),
+      status: str(r.status),
+      amountPaise: int(r.amount_paise),
+    })),
+  };
+}
+
 /* ─── Counter summary ──────────────────────────────────────── */
 
 export async function counterSummary(): Promise<InvCounterSummary> {
@@ -632,11 +727,16 @@ export async function counterSummary(): Promise<InvCounterSummary> {
       .select("balance_paise")
       .eq("tenant_id", tenantId)
       .in("status", ["open", "part_paid"]),
+    // Payments on a sale that was later CANCELLED do not count as money
+    // taken: the void hands the money back and reverses the receipt in the
+    // books, but the payment row stays as history — so the summary must
+    // exclude it, the same way "Sold today" already excludes void sales.
     sb
       .from("inv_sale_payments")
-      .select("amount_paise")
+      .select("amount_paise, sale:inv_sales!inner(status)")
       .eq("tenant_id", tenantId)
-      .eq("paid_on", today),
+      .eq("paid_on", today)
+      .neq("sale.status", "void"),
   ]);
 
   const todayRows = (todayRes.data ?? []) as Row[];
@@ -827,25 +927,55 @@ export type InvHouseholdSaleResult = {
 export async function postHouseholdSale(
   input: {
     sales: Record<string, unknown>[];
-    payments: { amountPaise: number; mode: string; reference: string }[];
+    payments: {
+      amountPaise: number;
+      mode: string;
+      reference: string;
+      bankAccountId?: string;
+      paidOn?: string;
+    }[];
+    /** Paper receipt-book number — one payment, so one number for all children. */
+    manualReceiptNo?: string;
   },
   actor: string,
+  academicYearCode: string,
 ): Promise<InvHouseholdSaleResult> {
   const { sb, tenantId } = await invCtx();
   const { data, error } = await sb.rpc("inv_post_household_sale", {
     p_tenant_id: tenantId,
     p_actor: actor,
     p_payload: {
-      sales: input.sales,
+      // inv_post_sale numbers each receipt from academic_year_code — without
+      // it the household path fell into a separate "SL/0001" series.
+      sales: input.sales.map((s) => ({
+        academic_year_code: academicYearCode,
+        ...s,
+      })),
       payments: input.payments.map((p) => ({
         amount_paise: p.amountPaise,
         mode: p.mode,
         reference: p.reference,
+        bank_account_id: p.bankAccountId ?? "",
+        // Collection date — falls back to the first sale's sale_date in SQL.
+        paid_on: p.paidOn || "",
       })),
     },
   });
   if (error) throw new InvError(error.message, 422);
   const out = (data ?? {}) as Row;
+
+  const manualNo = str(input.manualReceiptNo).trim().slice(0, 40);
+  const saleIds = ((out.sales ?? []) as Row[])
+    .map((r) => str(r.sale_id))
+    .filter(Boolean);
+  if (manualNo && saleIds.length > 0) {
+    await sb
+      .from("inv_sales")
+      .update({ manual_receipt_no: manualNo })
+      .eq("tenant_id", tenantId)
+      .in("id", saleIds);
+  }
+
   return {
     sales: ((out.sales ?? []) as Row[]).map((r) => ({
       saleId: str(r.sale_id),

@@ -107,6 +107,7 @@ function OrdersSection({ boot }: { boot: InvBootstrap }) {
   const [draft, setDraft] = useState<{
     id?: string;
     vendorId: string;
+    orderDate: string;
     expectedDate: string;
     freightInput: string;
     note: string;
@@ -126,6 +127,7 @@ function OrdersSection({ boot }: { boot: InvBootstrap }) {
   function openNew() {
     setDraft({
       vendorId: "",
+      orderDate: new Date().toISOString().slice(0, 10),
       expectedDate: "",
       freightInput: "",
       note: "",
@@ -137,6 +139,7 @@ function OrdersSection({ boot }: { boot: InvBootstrap }) {
     setDraft({
       id: o.id,
       vendorId: o.vendorId,
+      orderDate: o.orderDate,
       expectedDate: o.expectedDate,
       freightInput: paiseToInput(o.freightPaise),
       note: o.note,
@@ -199,6 +202,7 @@ function OrdersSection({ boot }: { boot: InvBootstrap }) {
         invApi.saveOrder({
           id: draft.id,
           vendorId: draft.vendorId,
+          orderDate: draft.orderDate || undefined,
           expectedDate: draft.expectedDate || undefined,
           freightPaise: inputToPaise(draft.freightInput),
           note: draft.note,
@@ -405,6 +409,12 @@ function OrdersSection({ boot }: { boot: InvBootstrap }) {
                 onChange={(v) => setDraft((d) => (d ? { ...d, vendorId: v } : d))}
               />
               <TextField
+                label="Order date"
+                type="date"
+                value={draft.orderDate}
+                onChange={(v) => setDraft((d) => (d ? { ...d, orderDate: v } : d))}
+              />
+              <TextField
                 label="Expected delivery"
                 type="date"
                 value={draft.expectedDate}
@@ -593,7 +603,12 @@ function ReceiveSection({ boot }: { boot: InvBootstrap }) {
   const [amending, setAmending] = useState<InvGrn | null>(null);
   const [amendInv, setAmendInv] = useState("");
   const [amendDate, setAmendDate] = useState("");
+  const [amendReceiptOn, setAmendReceiptOn] = useState("");
+  const [amendBillDate, setAmendBillDate] = useState("");
   const [amendNote, setAmendNote] = useState("");
+  const [amendLines, setAmendLines] = useState<
+    { lineId: string; itemName: string; qty: string; rate: string; disc: string; gst: string }[]
+  >([]);
   const [poId, setPoId] = useState("");
   const [vendorId, setVendorId] = useState("");
   const [locationId, setLocationId] = useState(
@@ -750,7 +765,11 @@ function ReceiveSection({ boot }: { boot: InvBootstrap }) {
     }
   }
 
-  const list = receipts.data ?? [];
+  const all = receipts.data ?? [];
+  // Cancelled receipts are history, not work — they sit in their own section
+  // below so the live table reads as "what we actually hold".
+  const list = all.filter((g: InvGrn) => g.status !== "void");
+  const cancelledList = all.filter((g: InvGrn) => g.status === "void");
 
   return (
     <div className="space-y-3">
@@ -871,7 +890,19 @@ function ReceiveSection({ boot }: { boot: InvBootstrap }) {
                               setAmending(g);
                               setAmendInv(g.supplierInvoiceNo);
                               setAmendDate(g.supplierInvoiceDate);
+                              setAmendReceiptOn(g.receiptDate);
+                              setAmendBillDate("");
                               setAmendNote(g.note);
+                              setAmendLines(
+                                g.lines.map((l) => ({
+                                  lineId: l.id,
+                                  itemName: l.itemName ?? "",
+                                  qty: String(l.qtyReceived),
+                                  rate: (l.ratePaise / 100).toFixed(2),
+                                  disc: String(l.discountPct),
+                                  gst: String(l.gstRate),
+                                })),
+                              );
                             }}
                           >
                             Amend
@@ -893,6 +924,43 @@ function ReceiveSection({ boot }: { boot: InvBootstrap }) {
           </ErpTable>
         </ErpTableShell>
       )}
+
+      {cancelledList.length > 0 ? (
+        <details className="rounded-xl border border-[var(--border)]">
+          <summary className="cursor-pointer px-4 py-2.5 text-sm font-semibold text-muted-foreground">
+            Cancelled receipts ({cancelledList.length})
+          </summary>
+          <ErpTableShell density="compact" className="overflow-x-auto">
+            <ErpTable minWidth="min-w-[640px]">
+              <ErpTableHead>
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium">Receipt</th>
+                  <th className="px-3 py-2 text-left font-medium">Vendor</th>
+                  <th className="px-3 py-2 text-right font-medium">Value</th>
+                  <th className="px-3 py-2 text-left font-medium">Why cancelled</th>
+                </tr>
+              </ErpTableHead>
+              <ErpTableBody>
+                {cancelledList.map((g: InvGrn) => (
+                  <tr key={g.id} className="opacity-70">
+                    <td className="px-3 py-2">
+                      <div className="font-mono text-xs">{g.grnNo}</div>
+                      <div className="text-[11px] text-muted-foreground">{g.receiptDate}</div>
+                    </td>
+                    <td className="px-3 py-2">{g.vendorName}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {formatPaise(g.totalPaise)}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-[var(--danger)]">
+                      {g.voidReason || "—"}
+                    </td>
+                  </tr>
+                ))}
+              </ErpTableBody>
+            </ErpTable>
+          </ErpTableShell>
+        </details>
+      ) : null}
 
       <InvDrawer
         open={!!voiding}
@@ -967,7 +1035,7 @@ function ReceiveSection({ boot }: { boot: InvBootstrap }) {
       <InvDrawer
         open={!!amending}
         title={`Amend ${amending?.grnNo ?? ""}`}
-        subtitle="Invoice details only — quantities and rates need a cancel and re-entry"
+        subtitle="Invoice details, dates, quantities, rates, discounts and GST"
         onClose={() => setAmending(null)}
         footer={
           <>
@@ -984,11 +1052,41 @@ function ReceiveSection({ boot }: { boot: InvBootstrap }) {
                     grnId: amending.id,
                     supplierInvoiceNo: amendInv,
                     supplierInvoiceDate: amendDate,
+                    receiptDate: amendReceiptOn || undefined,
+                    billDate: amendBillDate || undefined,
+                    lines: amendLines
+                      .map((al) => {
+                        const orig = amending.lines.find((l) => l.id === al.lineId);
+                        if (!orig) return null;
+                        const qty = Number(al.qty);
+                        const rate = Math.round(Number(al.rate) * 100);
+                        const disc = Number(al.disc);
+                        const gst = Number(al.gst);
+                        const changed =
+                          qty !== orig.qtyReceived ||
+                          rate !== orig.ratePaise ||
+                          disc !== orig.discountPct ||
+                          gst !== orig.gstRate;
+                        if (!changed || !Number.isFinite(qty) || !Number.isFinite(rate))
+                          return null;
+                        return {
+                          lineId: al.lineId,
+                          qtyReceived: qty,
+                          ratePaise: rate,
+                          discountPct: disc,
+                          gstRate: gst,
+                        };
+                      })
+                      .filter((x): x is NonNullable<typeof x> => x !== null),
                     note: amendNote,
                   }),
                 );
                 if (res) {
-                  saver.setNotice(`${amending.grnNo} updated`);
+                  saver.setNotice(
+                    res.ledgerVoucherNo
+                      ? `${amending.grnNo} updated — books re-posted as ${res.ledgerVoucherNo}`
+                      : `${amending.grnNo} updated`,
+                  );
                   setAmending(null);
                   receipts.reload();
                 }
@@ -1001,9 +1099,9 @@ function ReceiveSection({ boot }: { boot: InvBootstrap }) {
       >
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">
-            Only what the supplier called this delivery. Quantities, rates and
-            tax have already moved stock and money — to change those, cancel the
-            receipt and enter it again, so the correction leaves a trail.
+            Correct what the supplier&apos;s invoice actually says — names,
+            dates, quantities, rates, discounts and GST. Every change restates
+            stock and the books together, and the old voucher stays visible.
           </p>
           <TextField
             label="Supplier invoice no"
@@ -1016,6 +1114,102 @@ function ReceiveSection({ boot }: { boot: InvBootstrap }) {
             value={amendDate}
             onChange={setAmendDate}
           />
+          <TextField
+            label="Goods received on"
+            type="date"
+            value={amendReceiptOn}
+            onChange={setAmendReceiptOn}
+          />
+          <TextField
+            label="Bill date (leave blank to keep as is)"
+            type="date"
+            value={amendBillDate}
+            onChange={setAmendBillDate}
+          />
+          <p className="text-[11px] text-muted-foreground">
+            Changing the bill date corrects the books too: the old ledger
+            voucher is reversed and a fresh one is posted at the new date —
+            both stay visible, which is how an append-only book corrects.
+          </p>
+          {amendLines.length > 0 ? (
+            <div className="space-y-2">
+              <p className="text-xs font-semibold">Lines</p>
+              <p className="text-[11px] text-muted-foreground">
+                Stock, average cost, the order, the bill and the books restate
+                together — a quantity cut below what has already been issued is
+                refused. Adding or removing an item still needs cancel and
+                re-entry.
+              </p>
+              <div className="overflow-x-auto">
+                <ErpTable minWidth="min-w-0" className="text-xs">
+                  <ErpTableHead>
+                    <tr className="text-left text-muted-foreground">
+                      <th className="py-1 pr-2 font-medium">Item</th>
+                      <th className="py-1 pr-2 font-medium">Qty</th>
+                      <th className="py-1 pr-2 font-medium">Rate ₹</th>
+                      <th className="py-1 pr-2 font-medium">Disc %</th>
+                      <th className="py-1 font-medium">GST %</th>
+                    </tr>
+                  </ErpTableHead>
+                  <ErpTableBody>
+                    {amendLines.map((al, i) => (
+                      <tr key={al.lineId}>
+                        <td className="py-1 pr-2">{al.itemName}</td>
+                        <td className="py-1 pr-2">
+                          <input
+                            className="w-16 rounded-md border px-1.5 py-1 text-right"
+                            inputMode="decimal"
+                            value={al.qty}
+                            onChange={(e) =>
+                              setAmendLines((ls) =>
+                                ls.map((x, j) => (j === i ? { ...x, qty: e.target.value } : x)),
+                              )
+                            }
+                          />
+                        </td>
+                        <td className="py-1 pr-2">
+                          <input
+                            className="w-20 rounded-md border px-1.5 py-1 text-right"
+                            inputMode="decimal"
+                            value={al.rate}
+                            onChange={(e) =>
+                              setAmendLines((ls) =>
+                                ls.map((x, j) => (j === i ? { ...x, rate: e.target.value } : x)),
+                              )
+                            }
+                          />
+                        </td>
+                        <td className="py-1 pr-2">
+                          <input
+                            className="w-14 rounded-md border px-1.5 py-1 text-right"
+                            inputMode="decimal"
+                            value={al.disc}
+                            onChange={(e) =>
+                              setAmendLines((ls) =>
+                                ls.map((x, j) => (j === i ? { ...x, disc: e.target.value } : x)),
+                              )
+                            }
+                          />
+                        </td>
+                        <td className="py-1">
+                          <input
+                            className="w-14 rounded-md border px-1.5 py-1 text-right"
+                            inputMode="decimal"
+                            value={al.gst}
+                            onChange={(e) =>
+                              setAmendLines((ls) =>
+                                ls.map((x, j) => (j === i ? { ...x, gst: e.target.value } : x)),
+                              )
+                            }
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </ErpTableBody>
+                </ErpTable>
+              </div>
+            </div>
+          ) : null}
           <TextField label="Note" value={amendNote} onChange={setAmendNote} />
           <InvAlert error={saver.error} />
         </div>
@@ -1254,10 +1448,21 @@ function BillsSection() {
     balancePaise: number;
     amountInput: string;
     mode: string;
+    paidOn: string;
     reference: string;
   } | null>(null);
 
-  const list = useMemo(() => bills.data ?? [], [bills.data]);
+  const allBills = useMemo(() => bills.data ?? [], [bills.data]);
+  const list = useMemo(
+    () => allBills.filter((b) => b.status !== "cancelled"),
+    [allBills],
+  );
+  // A cancelled bill owes nobody anything — it must not sit in the same
+  // table as live bills, and it must not count in the outstanding figure.
+  const cancelledBills = useMemo(
+    () => allBills.filter((b) => b.status === "cancelled"),
+    [allBills],
+  );
   const totals = useMemo(
     () => ({
       outstanding: list.reduce((s, b) => s + b.balancePaise, 0),
@@ -1277,6 +1482,7 @@ function BillsSection() {
         billId: pay.billId,
         amountPaise: amount,
         mode: pay.mode,
+        paidOn: pay.paidOn || undefined,
         reference: pay.reference,
       }),
     );
@@ -1400,6 +1606,7 @@ function BillsSection() {
                             balancePaise: b.balancePaise,
                             amountInput: paiseToInput(b.balancePaise),
                             mode: "bank",
+                            paidOn: new Date().toISOString().slice(0, 10),
                             reference: "",
                           })
                         }
@@ -1414,6 +1621,43 @@ function BillsSection() {
           </ErpTable>
         </ErpTableShell>
       )}
+
+      {cancelledBills.length > 0 ? (
+        <details className="rounded-xl border border-[var(--border)]">
+          <summary className="cursor-pointer px-4 py-2.5 text-sm font-semibold text-muted-foreground">
+            Cancelled bills ({cancelledBills.length})
+          </summary>
+          <ErpTableShell density="compact" className="overflow-x-auto">
+            <ErpTable minWidth="min-w-[560px]">
+              <ErpTableHead>
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium">Bill</th>
+                  <th className="px-3 py-2 text-left font-medium">Vendor</th>
+                  <th className="px-3 py-2 text-left font-medium">Date</th>
+                  <th className="px-3 py-2 text-right font-medium">Was for</th>
+                </tr>
+              </ErpTableHead>
+              <ErpTableBody>
+                {cancelledBills.map((b) => (
+                  <tr key={b.id} className="opacity-70">
+                    <td className="px-3 py-2">
+                      <div className="font-mono text-xs">{b.billNo}</div>
+                      <div className="text-[11px] text-muted-foreground">
+                        {b.grnNo ? `from ${b.grnNo}` : ""}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2">{b.vendorName}</td>
+                    <td className="px-3 py-2 text-xs">{b.billDate}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {formatPaise(b.totalPaise)}
+                    </td>
+                  </tr>
+                ))}
+              </ErpTableBody>
+            </ErpTable>
+          </ErpTableShell>
+        </details>
+      ) : null}
 
       <InvDrawer
         open={!!pay}
@@ -1440,6 +1684,12 @@ function BillsSection() {
               value={pay.amountInput}
               onChange={(v) => setPay((p) => (p ? { ...p, amountInput: v } : p))}
             />
+            <TextField
+              label="Paid on"
+              type="date"
+              value={pay.paidOn}
+              onChange={(v) => setPay((p) => (p ? { ...p, paidOn: v } : p))}
+            />
             <SelectField
               label="Paid by"
               value={pay.mode}
@@ -1463,8 +1713,9 @@ function BillsSection() {
               onChange={(v) => setPay((p) => (p ? { ...p, reference: v } : p))}
             />
             <p className="rounded-lg bg-muted/50 px-3 py-2 text-[11px] text-muted-foreground">
-              Payments are recorded against the bill here. They do not yet post
-              into the Accounts ledger — that arrives with the ledger rebuild.
+              The payment, the bill&rsquo;s balance and the ledger entry post
+              together — a backdated date books it on that day, in that
+              financial year.
             </p>
           </div>
         ) : null}
@@ -1482,6 +1733,7 @@ function ReturnsSection({ boot }: { boot: InvBootstrap }) {
 
   const [grnId, setGrnId] = useState("");
   const [reason, setReason] = useState("");
+  const [retOn, setRetOn] = useState(() => new Date().toISOString().slice(0, 10));
   const [qtyByLine, setQtyByLine] = useState<Record<string, string>>({});
   const [open, setOpen] = useState(false);
 
@@ -1515,6 +1767,7 @@ function ReturnsSection({ boot }: { boot: InvBootstrap }) {
         vendorId: grn.vendorId,
         locationId: grn.locationId || boot.settings.defaultLocationId,
         reason: reason.trim(),
+        returnDate: retOn || undefined,
         lines,
       }),
     );
@@ -1636,6 +1889,12 @@ function ReturnsSection({ boot }: { boot: InvBootstrap }) {
             }}
           />
 
+          <TextField
+            label="Return date"
+            type="date"
+            value={retOn}
+            onChange={setRetOn}
+          />
           <TextField
             label="Reason"
             required

@@ -275,7 +275,7 @@ export function IncrementPanel({ mode = "full" }: { mode?: Mode }) {
         <p className="text-sm font-medium text-[var(--brand-deep)]">{notice}</p>
       ) : null}
       {error ? (
-        <p className="text-sm font-medium text-[#b42318]">{error}</p>
+        <p className="text-sm font-medium text-[var(--danger)]">{error}</p>
       ) : null}
 
       {showPolicy ? (
@@ -552,7 +552,7 @@ export function IncrementPanel({ mode = "full" }: { mode?: Mode }) {
             {indPreview ? (
               <p className="text-sm text-[var(--brand-deep)]">
                 {indPreview.error ? (
-                  <span className="text-[#b42318]">{indPreview.error}</span>
+                  <span className="text-[var(--danger)]">{indPreview.error}</span>
                 ) : (
                   <>
                     Current basic {formatInr(indPreview.oldBasic)} →{" "}
@@ -637,7 +637,7 @@ export function IncrementPanel({ mode = "full" }: { mode?: Mode }) {
               </Link>
             ) : null}
             {!policy.enabled ? (
-              <p className="w-full text-xs text-[#b42318]">
+              <p className="w-full text-xs text-[var(--danger)]">
                 Enable and save the policy before building a batch.
               </p>
             ) : null}

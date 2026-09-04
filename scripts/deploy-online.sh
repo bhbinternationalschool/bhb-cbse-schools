@@ -63,6 +63,9 @@ GOOGLE_OAUTH_CLIENT_SECRET="$(get_env GOOGLE_OAUTH_CLIENT_SECRET)"
 NEXT_PUBLIC_VAPID_PUBLIC_KEY="$(get_env NEXT_PUBLIC_VAPID_PUBLIC_KEY)"
 FLEET_EDGE_ALLOWED_IPS="$(get_env FLEET_EDGE_ALLOWED_IPS)"
 FLEET_EDGE_SOS_NOTIFY_MOBILE="$(get_env FLEET_EDGE_SOS_NOTIFY_MOBILE)"
+NEXT_PUBLIC_PAYMENT_GATEWAY="$(get_env NEXT_PUBLIC_PAYMENT_GATEWAY)"
+CASHFREE_APP_ID="$(get_env CASHFREE_APP_ID)"
+CASHFREE_ENV="$(get_env CASHFREE_ENV)"
 
 WHATSAPP_DEFAULT_COUNTRY_CODE="${WHATSAPP_DEFAULT_COUNTRY_CODE:-91}"
 WHATSAPP_GRAPH_VERSION="${WHATSAPP_GRAPH_VERSION:-v21.0}"
@@ -130,6 +133,11 @@ if [[ -n "$FLEET_EDGE_SOS_NOTIFY_MOBILE" ]]; then
 else
   echo "Fleet Edge: SOS_NOTIFY_MOBILE not set — DriverSOSAlert will log but notify no one"
 fi
+if [[ "$NEXT_PUBLIC_PAYMENT_GATEWAY" == "cashfree" && -n "$CASHFREE_APP_ID" ]]; then
+  echo "Cashfree: gateway active, env ${CASHFREE_ENV:-production} (secret key must be in Secret Manager as school-erp-cashfree-secret-key)"
+else
+  echo "Cashfree: not active (NEXT_PUBLIC_PAYMENT_GATEWAY=${NEXT_PUBLIC_PAYMENT_GATEWAY:-unset}) — pay-links fall back to Razorpay/demo"
+fi
 if [[ -n "$CRON_SECRET" ]]; then
   echo "Cron guard: CRON_SECRET present (scheduled comms + automation)"
 else
@@ -178,6 +186,18 @@ fi
 # Set DEPLOY_SA_KEY to override, or drop the key at the default path. With no
 # key present the script falls back to the interactive login exactly as before.
 DEPLOY_SA_KEY="${DEPLOY_SA_KEY:-$HOME/.config/bhb-deploy/deploy-sa.json}"
+# "File exists" is not "file is a key". A failed `keys create` (the org policy
+# iam.disableServiceAccountKeyCreation blocks minting — discovered 2026-08-25,
+# and the cause of the 2026-08-23 zero-byte trap) leaves an EMPTY file behind,
+# and hard-exiting on it turned every later deploy into a silent failure. An
+# empty or non-JSON file now falls back to the interactive login with a
+# warning instead.
+if [[ -f "$DEPLOY_SA_KEY" ]] && ! python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$DEPLOY_SA_KEY" 2>/dev/null; then
+  echo "WARNING: $DEPLOY_SA_KEY exists but is empty or not valid JSON — ignoring it."
+  echo "         (Key minting is blocked by org policy iam.disableServiceAccountKeyCreation;"
+  echo "          see docs/DEPLOY_SERVICE_ACCOUNT.md. Falling back to interactive login.)"
+  DEPLOY_SA_KEY="/nonexistent-deploy-key"
+fi
 if [[ -f "$DEPLOY_SA_KEY" ]]; then
   case "$DEPLOY_SA_KEY" in
     "$ROOT"/*)
@@ -232,6 +252,9 @@ SUBSTITUTIONS+="@_GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}"
 SUBSTITUTIONS+="@_NEXT_PUBLIC_VAPID_PUBLIC_KEY=${NEXT_PUBLIC_VAPID_PUBLIC_KEY}"
 SUBSTITUTIONS+="@_FLEET_EDGE_ALLOWED_IPS=${FLEET_EDGE_ALLOWED_IPS}"
 SUBSTITUTIONS+="@_FLEET_EDGE_SOS_NOTIFY_MOBILE=${FLEET_EDGE_SOS_NOTIFY_MOBILE}"
+SUBSTITUTIONS+="@_NEXT_PUBLIC_PAYMENT_GATEWAY=${NEXT_PUBLIC_PAYMENT_GATEWAY}"
+SUBSTITUTIONS+="@_CASHFREE_APP_ID=${CASHFREE_APP_ID}"
+SUBSTITUTIONS+="@_CASHFREE_ENV=${CASHFREE_ENV:-production}"
 
 gcloud builds submit "$ROOT" \
   --project="$PROJECT_ID" \

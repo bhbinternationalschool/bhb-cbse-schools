@@ -6,6 +6,7 @@ import "package:geolocator/geolocator.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
+import "../../core/ui/haptics.dart";
 
 double _distanceM(double lat1, double lng1, double lat2, double lng2) {
   const r = 6371000.0;
@@ -109,6 +110,7 @@ class _SelfAttendanceScreenState extends State<SelfAttendanceScreen> {
     final pos = _position;
     if (pos == null || _punching) return;
     if (pos.isMocked) {
+      Haptics.warning();
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text(
               "Mock location is ON (fake-GPS app / developer setting). Disable it — mock punches are rejected and flagged.")));
@@ -124,6 +126,7 @@ class _SelfAttendanceScreenState extends State<SelfAttendanceScreen> {
         mocked: pos.isMocked,
       );
       if (!mounted) return;
+      Haptics.success();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(
           "Punched ${result.kind.toUpperCase()} at ${result.time} — ${result.distanceM} m from campus",

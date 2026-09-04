@@ -655,6 +655,13 @@ export type InvSalePayment = {
   amountPaise: number;
   mode: InvTenderMode;
   reference: string;
+  /**
+   * Accounts-desk bank account that received this money. Empty for cash, and
+   * for payments taken before this was captured — a store UPI collection used
+   * to record the mode but not the destination, so it could not be matched to
+   * any statement.
+   */
+  bankAccountId: string;
   note: string;
   createdBy: string;
 };
@@ -670,6 +677,7 @@ export type InvSale = {
   buyerName: string;
   buyerPhone: string;
   classId: string;
+  sectionId: string;
   locationId: string;
   priceListId: string;
   kitId: string;
@@ -690,6 +698,10 @@ export type InvSale = {
   payments: InvSalePayment[];
   /** totalPaise − costPaise. What the school actually made on this sale. */
   marginPaise: number;
+  /** School books voucher no (SL/FY…) — the official receipt number. */
+  ledgerVoucherNo: string;
+  /** Paper receipt-book number the clerk wrote by hand, when one was. */
+  manualReceiptNo: string;
 };
 
 export type InvSaleReturn = {
@@ -735,6 +747,7 @@ export type InvBuyerStudent = {
 };
 
 export type InvSaleQuery = {
+  saleId?: string;
   search?: string;
   buyerKind?: InvBuyerKind | "";
   status?: InvSaleStatus | "unpaid" | "all";

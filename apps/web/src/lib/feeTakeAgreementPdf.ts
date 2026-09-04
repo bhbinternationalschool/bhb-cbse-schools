@@ -25,6 +25,11 @@ import {
   type SisState,
   type SisStudent,
 } from "@/lib/sis";
+import {
+  schoolAddressLine,
+  schoolLegalName,
+  schoolShortName,
+} from "@/lib/schoolIdentity";
 import { TENANT } from "@/lib/types";
 
 type LineAgg = {
@@ -246,12 +251,12 @@ export function downloadHouseholdFeeAgreementPdf(
   doc.setFont("helvetica", "bold");
   doc.setFontSize(15);
   doc.setTextColor(32, 48, 80);
-  doc.text(TENANT.name, pageW / 2, y, { align: "center" });
+  doc.text(schoolLegalName(), pageW / 2, y, { align: "center" });
   y += 14;
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.setTextColor(70, 70, 70);
-  doc.text(TENANT.schoolAddress, pageW / 2, y, { align: "center" });
+  doc.text(schoolAddressLine(), pageW / 2, y, { align: "center" });
   y += 16;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
@@ -439,7 +444,7 @@ export function downloadHouseholdFeeAgreementPdf(
     doc.setFontSize(7);
     doc.setTextColor(130, 130, 130);
     doc.text(
-      `${TENANT.shortName} · Fee Agreement · ${formatInr(grand.dues)} due · page ${i}/${pages}`,
+      `${schoolShortName()} · Fee Agreement · ${formatInr(grand.dues)} due · page ${i}/${pages}`,
       pageW / 2,
       pageH - 16,
       { align: "center" },

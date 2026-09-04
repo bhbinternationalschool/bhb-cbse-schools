@@ -526,5 +526,5 @@ export function FeeAdjustmentsBadge() {
     return () => window.clearInterval(t);
   }, []);
   if (!n) return null;
-  return <span className="ml-1 text-[10px] font-semibold text-[#b45309]">({n})</span>;
+  return <span className="ml-1 text-[10px] font-semibold text-[var(--warning)]">({n})</span>;
 }

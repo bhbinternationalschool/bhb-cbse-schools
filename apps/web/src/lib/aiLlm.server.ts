@@ -28,6 +28,7 @@ import {
 
 import {
   generateGeminiText,
+  streamGeminiText,
   geminiConfigured,
   geminiModel,
   type LlmUsage,
@@ -37,8 +38,10 @@ import {
   openAiConfigured,
   openAiModel,
   type OpenAiChatTurn,
+  streamOpenAiText,
 } from "@/lib/openAi.server";
 import { getDemoSession } from "@/lib/auth";
+import { noteAiBudgetUse } from "@/lib/aiBudget.server";
 import { recordAiGeneration, type AiTier } from "@/lib/aiGenerations.server";
 import { checkAiBudget } from "@/lib/aiBudget.server";
 import { aiCacheGet, aiCacheKey, aiCachePut } from "@/lib/aiCache.server";
@@ -198,7 +201,41 @@ type LlmTextOpts = {
   geminiMaxTokens?: number;
   geminiTemperature?: number;
   meta: AiCallMeta;
+  /**
+   * Stream the reply: each slice is handed over as the provider produces
+   * it. The audit row, budget check and cache behave exactly as without
+   * it — the full text is still assembled and recorded at the end. Not
+   * honoured in jsonMode (a half-parsed object is useless to anyone).
+   */
+  onDelta?: (text: string) => void;
+  /**
+   * The requester + budget verdict, if the caller started resolving them
+   * earlier so they overlap its own preparation (knowledge-base retrieval,
+   * say) instead of running after it. See startLlmPrecheck().
+   */
+  precheck?: Promise<LlmPrecheck>;
 };
+
+export type LlmPrecheck = {
+  requester: string;
+  budget: Awaited<ReturnType<typeof checkAiBudget>>;
+};
+
+/**
+ * Kick off the two lookups every call needs before the model is asked.
+ * Call it first thing, do the rest of the preparation, then hand the
+ * promise to the generator so the wait is whichever finished last rather
+ * than the sum.
+ */
+export function startLlmPrecheck(opts?: { requester?: string }): Promise<LlmPrecheck> {
+  return (async () => {
+    // A v1 route (the mobile app) resolves its own subject — the cookie
+    // reader here would stamp "system" on a parent's call otherwise.
+    const requester = opts?.requester || (await resolveRequester());
+    const budget = await checkAiBudget(requester);
+    return { requester, budget };
+  })();
+}
 
 /**
  * Best-effort requester for the audit row: the staff session when the call
@@ -227,31 +264,37 @@ async function attemptEngine(
   const tier: AiTier = opts.meta.tier ?? "flash";
   const t0 = Date.now();
   let r: AttemptResult;
+  const onDelta = opts.jsonMode ? undefined : opts.onDelta;
   if (engine === "openai") {
-    r = await generateOpenAiText({
+    const oa = {
       system: opts.system,
       history: opts.history,
       userMessage: opts.userMessage,
-      jsonMode: opts.jsonMode,
       maxTokens: opts.maxTokens,
       temperature: opts.temperature,
       model: openAiModel(tier),
-    });
+    };
+    r = onDelta
+      ? await streamOpenAiText(oa, onDelta)
+      : await generateOpenAiText({ ...oa, jsonMode: opts.jsonMode });
   } else {
     const geminiSystem = opts.jsonMode
       ? `${opts.system}\n\nRespond with valid JSON only — no markdown fences.`
       : opts.system;
-    const g = await generateGeminiText({
+    const gm = {
       system: geminiSystem,
       history: (opts.history || []).map((h) => ({
-        role: h.role === "assistant" ? "model" : "user",
+        role: h.role === "assistant" ? ("model" as const) : ("user" as const),
         text: h.content,
       })),
       userMessage: opts.userMessage,
       maxTokens: opts.geminiMaxTokens ?? opts.maxTokens,
       temperature: opts.geminiTemperature ?? opts.temperature,
       model: geminiModel(tier),
-    });
+    };
+    const g = onDelta
+      ? await streamGeminiText(gm, onDelta)
+      : await generateGeminiText(gm);
     r = g.ok
       ? { ...g, text: opts.jsonMode ? stripJsonFence(g.text) : g.text }
       : g;
@@ -274,6 +317,12 @@ async function attemptEngine(
     latencyMs,
     requester,
   });
+  if (r.ok) {
+    noteAiBudgetUse(
+      requester,
+      (r.usage.promptTokens ?? 0) + (r.usage.completionTokens ?? 0),
+    );
+  }
   return { r, generationId };
 }
 
@@ -307,21 +356,36 @@ async function callLlmText(
   if (key) {
     const hit = await aiCacheGet(key);
     if (hit) {
+      opts.onDelta?.(hit.response);
       return { ok: true, text: hit.response, engine: (hit.engine as LlmEngine) || "none", generationId: hit.generationId };
     }
   }
-  const requester = await resolveRequester();
-  const budget = await checkAiBudget(requester);
+  const { requester, budget } = await (opts.precheck ?? startLlmPrecheck());
   if (!budget.ok) return { ok: false, error: budget.reason, engine: "none" };
   const errors: string[] = [];
 
+  // Once a provider has streamed anything to the caller, falling back to
+  // the other engine would replay a second reply on top of the first — so
+  // a mid-stream failure ends the call rather than retrying.
+  let streamed = false;
+  const attemptOpts: LlmTextOpts = opts.onDelta
+    ? {
+        ...opts,
+        onDelta: (t) => {
+          streamed = true;
+          opts.onDelta!(t);
+        },
+      }
+    : opts;
+
   for (const engine of engines) {
-    const { r, generationId } = await attemptEngine(engine, opts, requester);
+    const { r, generationId } = await attemptEngine(engine, attemptOpts, requester);
     if (r.ok) {
       if (key) void aiCachePut({ key, route: opts.meta.route, engine, model: r.model, response: r.text, generationId });
       return { ok: true, text: r.text, engine, generationId };
     }
     errors.push(`${engine}: ${r.error}`);
+    if (streamed) break;
   }
 
   return {
@@ -356,8 +420,7 @@ async function callLlmJson<T>(
       }
     }
   }
-  const requester = await resolveRequester();
-  const budget = await checkAiBudget(requester);
+  const { requester, budget } = await (opts.precheck ?? startLlmPrecheck());
   if (!budget.ok) return { ok: false, error: budget.reason, engine: "none" };
   const errors: string[] = [];
 
@@ -396,6 +459,12 @@ export async function generateTutorText(opts: {
   system: string;
   history?: OpenAiChatTurn[];
   userMessage: string;
+  /** Stream slices of the reply as they arrive (tutor / ERP chat). */
+  onDelta?: (text: string) => void;
+  precheck?: Promise<LlmPrecheck>;
+  /** Paid tutor modes teach in full and need more room than a hint. */
+  maxTokens?: number;
+  promptVersion?: string;
 }): Promise<
   | { ok: true; text: string; engine: LlmEngine; generationId: string }
   | { ok: false; error: string; engine: LlmEngine }
@@ -404,13 +473,15 @@ export async function generateTutorText(opts: {
     system: opts.system,
     history: opts.history,
     userMessage: opts.userMessage,
-    maxTokens: 900,
+    maxTokens: opts.maxTokens ?? 900,
     temperature: 0.45,
     // Gemini 3.x spends part of maxOutputTokens on internal "thinking" before
     // the visible reply — 900 was enough for OpenAI but truncated Gemini's
     // actual answer, so Gemini gets a larger budget for the same reply length.
-    geminiMaxTokens: 1536,
-    meta: { route: "tutor", promptVersion: "v1" },
+    geminiMaxTokens: Math.round((opts.maxTokens ?? 900) * 1.7),
+    onDelta: opts.onDelta,
+    precheck: opts.precheck,
+    meta: { route: "tutor", promptVersion: opts.promptVersion ?? "v1" },
   });
 }
 

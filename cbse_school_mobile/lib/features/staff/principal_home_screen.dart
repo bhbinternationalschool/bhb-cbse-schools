@@ -5,7 +5,8 @@ import "../../core/theme/app_theme.dart";
 import "../modules/homework_screen.dart";
 import "../modules/module_shell.dart";
 import "../modules/notices_screen.dart";
-import "../modules/transport_screen.dart";
+import "../modules/bus_routes_screen.dart";
+import "transport_requests_screen.dart";
 import "attendance_screen.dart";
 import "broadcast_screen.dart";
 import "principal_lists.dart";
@@ -100,25 +101,29 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
   Future<void> _postHomework() async {
     final target = await _pickSection();
     if (target == null || !mounted) return;
-    _push(HomeworkScreen(
-      api: widget.api,
-      subtitle: target.$3,
-      classId: target.$1,
-      sectionId: target.$2,
-      canPost: true,
-    ));
+    _push(
+      HomeworkScreen(
+        api: widget.api,
+        subtitle: target.$3,
+        classId: target.$1,
+        sectionId: target.$2,
+        canPost: true,
+      ),
+    );
   }
 
   Future<void> _openStudents() async {
     final target = await _pickSection();
     if (target == null || !mounted) return;
-    _push(StudentsScreen(
-      api: widget.api,
-      classId: target.$1,
-      sectionId: target.$2,
-      date: _snap?.attendanceDate ?? "",
-      title: target.$3,
-    ));
+    _push(
+      StudentsScreen(
+        api: widget.api,
+        classId: target.$1,
+        sectionId: target.$2,
+        date: _snap?.attendanceDate ?? "",
+        title: target.$3,
+      ),
+    );
   }
 
   @override
@@ -166,7 +171,10 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                     children: [
                       Text(_error!, textAlign: TextAlign.center),
                       const SizedBox(height: 12),
-                      FilledButton(onPressed: _load, child: const Text("Retry")),
+                      FilledButton(
+                        onPressed: _load,
+                        child: const Text("Retry"),
+                      ),
                       TextButton(
                         onPressed: _signOut,
                         child: const Text("Sign out"),
@@ -192,8 +200,9 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
             Container(
               decoration: const BoxDecoration(
                 color: AppColors.primary,
-                borderRadius:
-                    BorderRadius.vertical(bottom: Radius.circular(28)),
+                borderRadius: BorderRadius.vertical(
+                  bottom: Radius.circular(28),
+                ),
               ),
               padding: EdgeInsets.fromLTRB(
                 20,
@@ -416,6 +425,13 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                     childAspectRatio: 1.05,
                     children: [
                       _Action(
+                        icon: Icons.directions_bus_outlined,
+                        label: "Transport requests",
+                        tone: ModuleTone.pink,
+                        onTap: () =>
+                            _push(TransportRequestsScreen(api: widget.api)),
+                      ),
+                      _Action(
                         icon: Icons.campaign_outlined,
                         label: "Broadcast",
                         tone: ModuleTone.coral,
@@ -468,7 +484,7 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                         icon: Icons.directions_bus_outlined,
                         label: "Transport",
                         tone: ModuleTone.blue,
-                        onTap: () => _push(TransportScreen(api: widget.api)),
+                        onTap: () => _push(BusRoutesScreen(api: widget.api)),
                       ),
                       _Action(
                         icon: Icons.where_to_vote_outlined,
@@ -564,12 +580,17 @@ class _Stat extends StatelessWidget {
                       child: Text(
                         label,
                         style: const TextStyle(
-                            fontSize: 10.5, color: AppColors.muted),
+                          fontSize: 10.5,
+                          color: AppColors.muted,
+                        ),
                       ),
                     ),
                     if (onTap != null)
-                      const Icon(Icons.chevron_right,
-                          size: 14, color: AppColors.muted),
+                      const Icon(
+                        Icons.chevron_right,
+                        size: 14,
+                        color: AppColors.muted,
+                      ),
                   ],
                 ),
               ],
@@ -663,8 +684,11 @@ class _AlertRow extends StatelessWidget {
                 ),
               ),
               if (onTap != null)
-                const Icon(Icons.chevron_right,
-                    size: 16, color: Color(0xFF854F0B)),
+                const Icon(
+                  Icons.chevron_right,
+                  size: 16,
+                  color: Color(0xFF854F0B),
+                ),
             ],
           ),
         ),

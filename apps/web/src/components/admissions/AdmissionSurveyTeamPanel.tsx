@@ -415,7 +415,7 @@ export function AdmissionSurveyTeamPanel({
                   {canEdit ? (
                     <button
                       type="button"
-                      className="text-[10px] text-[#b42318] underline"
+                      className="text-[10px] text-[var(--danger)] underline"
                       onClick={() =>
                         onCommit(
                           setLeadCallerAssigned(state, id, false),

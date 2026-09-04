@@ -104,7 +104,7 @@ export function ParentHomeworkPortal({
   return (
     <div className="px-4 pb-8 pt-3">
       {notice ? (
-        <p className="mb-3 rounded-lg bg-[rgba(15,122,76,0.1)] px-3 py-2 text-sm text-[#0f7a4c]">
+        <p className="mb-3 rounded-lg bg-[rgba(15,122,76,0.1)] px-3 py-2 text-sm text-[var(--success)]">
           {notice}
         </p>
       ) : null}
@@ -249,6 +249,7 @@ export function ParentHomeworkPortal({
                   )}
                 </div>
                 <HomeworkTutorChat
+                  studentId={child.id}
                   context={{
                     childName: child.fullName,
                     className:
@@ -264,7 +265,7 @@ export function ParentHomeworkPortal({
                   <div className="mt-3 space-y-2 rounded-lg bg-[rgba(32,48,80,0.04)] p-2">
                     {sub ? (
                       <div className="space-y-1">
-                        <p className="text-xs text-[#0f7a4c]">
+                        <p className="text-xs text-[var(--success)]">
                           Submitted {sub.submittedAt.slice(0, 10)}
                           {sub.teacherAckAt ? " · teacher acknowledged" : ""}
                         </p>

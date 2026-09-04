@@ -52,6 +52,8 @@ export type LedgerAccountSeed = {
   scheduleGroup: string;
   isCash?: boolean;
   isBank?: boolean;
+  /** Set when this account IS one desk bank, so a form need not ask again. */
+  bankAccountId?: string;
   /** Backed by a party sub-ledger (receivables, payables). */
   isControl?: boolean;
 };

@@ -71,3 +71,81 @@ export function stripEmptyList<T extends Record<string, unknown>>(
 ): Partial<T>[] {
   return (records ?? []).map((r) => stripEmptyForWire(r, keep));
 }
+
+/* ─── One level deeper: the document skeleton ─────────────────────────────
+ *
+ * `stripEmptyForWire` is shallow by design, and that left the largest single
+ * thing on the wire untouched. Every student carries a `docs` object with a
+ * fixed slot per document — birth certificate, photo, Aadhaar, TC and the
+ * rest — and each slot is twelve fields whether or not a file was ever
+ * uploaded.
+ *
+ * Measured on production: 4,991 slots across 713 students, 1014 kB, and
+ * every single one empty. Not one student has a document on file. That is
+ * 40% of the roster payload spent saying "nothing here", seven times per
+ * child, and it is re-downloaded by every browser that opens a desk needing
+ * the roster — the fee counter chief among them.
+ *
+ * Lossless for the same reason the shallow strip is, one level down:
+ *
+ *     normalizeStudentDocs(undefined) -> emptyStudentDocs()
+ *     absent slot                     -> emptyDocFile()
+ *
+ * and `loadSis()` normalises every student on every read, so an omitted slot
+ * is rebuilt before anything can observe its absence. `sisWirePayload.selftest`
+ * asserts the round trip against the real normaliser rather than trusting
+ * this comment.
+ *
+ * A slot is only dropped when it is empty in EVERY field. A status of
+ * "pending" or "rejected", a review note, a file name with no URL — any of
+ * these and the whole slot is sent untouched. The rule is deliberately
+ * conservative: the saving is already the entire population, so there is
+ * nothing to gain by trimming a slot that holds anything at all.
+ */
+
+/** True when a document slot holds nothing a normaliser would not rebuild. */
+export function isEmptyDocSlot(v: unknown): boolean {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+  const slot = v as Record<string, unknown>;
+  for (const [k, val] of Object.entries(slot)) {
+    if (k === "status") {
+      if (val !== "missing") return false;
+      continue;
+    }
+    if (val === "" || val === 0 || val === null || val === undefined) continue;
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Drop empty document slots from one student, and `docs` itself when every
+ * slot is empty. Returns the record unchanged when there is nothing to drop.
+ */
+export function stripEmptyDocsForWire<T extends Record<string, unknown>>(
+  record: T,
+): T {
+  const docs = record.docs;
+  if (!docs || typeof docs !== "object" || Array.isArray(docs)) return record;
+
+  const kept: Record<string, unknown> = {};
+  for (const [key, slot] of Object.entries(docs as Record<string, unknown>)) {
+    if (!isEmptyDocSlot(slot)) kept[key] = slot;
+  }
+
+  const entries = Object.keys(kept).length;
+  if (entries === Object.keys(docs as Record<string, unknown>).length) {
+    return record; // nothing was empty
+  }
+
+  const out = { ...record } as Record<string, unknown>;
+  if (entries === 0) delete out.docs;
+  else out.docs = kept;
+  return out as T;
+}
+
+export function stripEmptyDocsList<T extends Record<string, unknown>>(
+  records: readonly T[] | null | undefined,
+): T[] {
+  return (records ?? []).map((r) => stripEmptyDocsForWire(r));
+}

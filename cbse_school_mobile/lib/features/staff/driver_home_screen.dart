@@ -5,6 +5,7 @@ import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "route_manifest_screen.dart";
 import "self_attendance_screen.dart";
+import "transport_requests_screen.dart";
 
 /// Driver home (field persona): the school's routes with ordered stops and
 /// vehicle details, GPS self-attendance, and the day's boarding list.
@@ -82,10 +83,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     }
 
     final origin = "${pinned.first.lat},${pinned.first.lng}";
-    final waypoints = pinned
-        .skip(1)
-        .map((s) => "${s.lat},${s.lng}")
-        .join("|");
+    final waypoints = pinned.skip(1).map((s) => "${s.lat},${s.lng}").join("|");
     final uri = Uri.parse(
       "https://www.google.com/maps/dir/?api=1"
       "&origin=$origin"
@@ -142,8 +140,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
             Container(
               decoration: const BoxDecoration(
                 color: AppColors.primary,
-                borderRadius:
-                    BorderRadius.vertical(bottom: Radius.circular(28)),
+                borderRadius: BorderRadius.vertical(
+                  bottom: Radius.circular(28),
+                ),
               ),
               padding: EdgeInsets.fromLTRB(
                 20,
@@ -202,6 +201,34 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // The transport in-charge signs in through this home too
+                  // (their role reads as transport crew). The office queue is
+                  // theirs; a driver tapping it is told by the server it is not.
+                  Card(
+                    child: ListTile(
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              TransportRequestsScreen(api: widget.api),
+                        ),
+                      ),
+                      leading: const Icon(
+                        Icons.directions_bus_outlined,
+                        color: AppColors.primary,
+                      ),
+                      title: const Text(
+                        "Transport requests from parents",
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      trailing: const Icon(
+                        Icons.chevron_right,
+                        color: AppColors.muted,
+                      ),
+                    ),
+                  ),
                   Card(
                     child: ListTile(
                       onTap: () => Navigator.of(context).push(
@@ -232,11 +259,15 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                       ),
                       subtitle: const Text(
                         "कैंपस से GPS पंच इन / आउट",
-                        style:
-                            TextStyle(fontSize: 11.5, color: AppColors.muted),
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: AppColors.muted,
+                        ),
                       ),
-                      trailing: const Icon(Icons.chevron_right,
-                          color: AppColors.muted),
+                      trailing: const Icon(
+                        Icons.chevron_right,
+                        color: AppColors.muted,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 14),
@@ -327,18 +358,22 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                                     child: FilledButton.icon(
                                       onPressed: () =>
                                           Navigator.of(context).push(
-                                        MaterialPageRoute(
-                                          builder: (_) => RouteManifestScreen(
-                                            api: widget.api,
-                                            routeId: route.id,
-                                            routeLabel: route.name.isEmpty
-                                                ? route.code
-                                                : route.name,
+                                            MaterialPageRoute(
+                                              builder: (_) =>
+                                                  RouteManifestScreen(
+                                                    api: widget.api,
+                                                    routeId: route.id,
+                                                    routeLabel:
+                                                        route.name.isEmpty
+                                                        ? route.code
+                                                        : route.name,
+                                                  ),
+                                            ),
                                           ),
-                                        ),
+                                      icon: const Icon(
+                                        Icons.fact_check_outlined,
+                                        size: 18,
                                       ),
-                                      icon: const Icon(Icons.fact_check_outlined,
-                                          size: 18),
                                       label: const Text(
                                         "हाज़िरी लें",
                                         style: TextStyle(
@@ -351,8 +386,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                                   const SizedBox(width: 8),
                                   OutlinedButton.icon(
                                     onPressed: () => _openRouteMap(route),
-                                    icon: const Icon(Icons.map_outlined,
-                                        size: 18),
+                                    icon: const Icon(
+                                      Icons.map_outlined,
+                                      size: 18,
+                                    ),
                                     label: const Text(
                                       "रास्ता",
                                       style: TextStyle(fontSize: 14),
@@ -376,11 +413,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                                             decoration: BoxDecoration(
                                               color: i == 0
                                                   ? AppColors.success
-                                                  : i ==
-                                                          route.stops.length -
-                                                              1
-                                                      ? AppColors.danger
-                                                      : AppColors.primaryMid,
+                                                  : i == route.stops.length - 1
+                                                  ? AppColors.danger
+                                                  : AppColors.primaryMid,
                                               shape: BoxShape.circle,
                                             ),
                                           ),
@@ -395,8 +430,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                                       const SizedBox(width: 10),
                                       Expanded(
                                         child: Padding(
-                                          padding:
-                                              const EdgeInsets.only(top: 0),
+                                          padding: const EdgeInsets.only(
+                                            top: 0,
+                                          ),
                                           child: Text(
                                             route.stops[i].name,
                                             style: const TextStyle(

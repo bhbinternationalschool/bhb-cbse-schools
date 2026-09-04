@@ -153,7 +153,7 @@ export function StatutoryRemitPanel() {
         <p className="text-sm font-medium text-[var(--brand-deep)]">{notice}</p>
       ) : null}
       {error ? (
-        <p className="text-sm font-medium text-[#b42318]">{error}</p>
+        <p className="text-sm font-medium text-[var(--danger)]">{error}</p>
       ) : null}
 
       <div className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
@@ -179,13 +179,13 @@ export function StatutoryRemitPanel() {
                     </p>
                     <div className="mt-1 flex flex-wrap gap-1.5">
                       {epfPenalty ? (
-                        <span className="rounded-full bg-[rgba(180,35,24,0.1)] px-2 py-0.5 text-[10px] font-semibold text-[#b42318]">
+                        <span className="rounded-full bg-[rgba(180,35,24,0.1)] px-2 py-0.5 text-[10px] font-semibold text-[var(--danger)]">
                           EPF est. penalty {formatInr(epfPenalty.estimatedTotal)} ·{" "}
                           {epfPenalty.daysOverdue}d overdue
                         </span>
                       ) : null}
                       {esicPenalty ? (
-                        <span className="rounded-full bg-[rgba(180,35,24,0.1)] px-2 py-0.5 text-[10px] font-semibold text-[#b42318]">
+                        <span className="rounded-full bg-[rgba(180,35,24,0.1)] px-2 py-0.5 text-[10px] font-semibold text-[var(--danger)]">
                           ESIC est. penalty {formatInr(esicPenalty.estimatedTotal)} ·{" "}
                           {esicPenalty.daysOverdue}d overdue
                         </span>

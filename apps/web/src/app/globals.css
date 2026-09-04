@@ -70,8 +70,10 @@
   /* Elevation — navy-tinted shadows, replaces ad-hoc shadow-sm/md mixes.
      Consume as shadow-[var(--shadow-2)] etc. */
   --shadow-1: 0 1px 2px rgba(32, 48, 80, 0.06);
-  --shadow-2: 0 2px 8px rgba(32, 48, 80, 0.08), 0 1px 2px rgba(32, 48, 80, 0.05);
-  --shadow-3: 0 8px 24px rgba(32, 48, 80, 0.1), 0 2px 6px rgba(32, 48, 80, 0.06);
+  --shadow-2:
+    0 2px 8px rgba(32, 48, 80, 0.08), 0 1px 2px rgba(32, 48, 80, 0.05);
+  --shadow-3:
+    0 8px 24px rgba(32, 48, 80, 0.1), 0 2px 6px rgba(32, 48, 80, 0.06);
   --shadow-4: 0 16px 48px rgba(32, 48, 80, 0.16); /* modals/popovers */
   /* Motion — shared durations/easing for entrance + hover transitions. */
   --motion-fast: 120ms;
@@ -116,7 +118,8 @@
   --color-chart-6: var(--chart-6);
   --color-chart-7: var(--chart-7);
   --color-chart-8: var(--chart-8);
-  --font-sans: var(--font-sans-face), "Plus Jakarta Sans", system-ui, sans-serif;
+  --font-sans:
+    var(--font-sans-face), "Plus Jakarta Sans", system-ui, sans-serif;
   --font-display: var(--font-display-face), Fraunces, Georgia, serif;
   --font-heading: var(--font-sans);
   --color-sidebar-ring: var(--sidebar-ring);
@@ -168,7 +171,9 @@ body {
 body {
   margin: 0;
   font-family: var(--font-sans);
-  font-feature-settings: "ss01" on, "cv11" on;
+  font-feature-settings:
+    "ss01" on,
+    "cv11" on;
   letter-spacing: -0.011em;
   line-height: 1.5;
 }
@@ -520,7 +525,9 @@ h3,
 }
 
 .comms-strip-item {
-  transition: color 120ms ease, opacity 120ms ease;
+  transition:
+    color 120ms ease,
+    opacity 120ms ease;
 }
 
 .comms-strip-item:hover {
@@ -593,12 +600,17 @@ h3,
   background: var(--primary);
   color: var(--primary-foreground);
   box-shadow: 0 0 0 1px rgba(197, 160, 40, 0.35);
-  transition: background 160ms ease, box-shadow 160ms ease, transform 100ms ease;
+  transition:
+    background 160ms ease,
+    box-shadow 160ms ease,
+    transform 100ms ease;
 }
 
 .btn-accent:hover {
   background: color-mix(in oklch, var(--primary), white 15%);
-  box-shadow: 0 0 0 1px var(--brand-gold), 0 4px 14px rgba(197, 160, 40, 0.25);
+  box-shadow:
+    0 0 0 1px var(--brand-gold),
+    0 4px 14px rgba(197, 160, 40, 0.25);
 }
 
 .btn-accent:active {
@@ -735,20 +747,14 @@ h3,
 
 /* Crest highlight — punch + soft gold halo */
 .logo-mark {
-  filter:
-    brightness(1.08)
-    contrast(1.12)
-    saturate(1.18)
+  filter: brightness(1.08) contrast(1.12) saturate(1.18)
     drop-shadow(0 0 1px rgba(248, 248, 240, 0.55))
     drop-shadow(0 0 10px rgba(197, 160, 40, 0.55))
     drop-shadow(0 6px 16px rgba(32, 48, 80, 0.35));
 }
 
 .logo-mark-lg {
-  filter:
-    brightness(1.1)
-    contrast(1.14)
-    saturate(1.22)
+  filter: brightness(1.1) contrast(1.14) saturate(1.22)
     drop-shadow(0 0 2px rgba(248, 248, 240, 0.7))
     drop-shadow(0 0 14px rgba(197, 160, 40, 0.65))
     drop-shadow(0 0 28px rgba(197, 160, 40, 0.28))
@@ -758,10 +764,7 @@ h3,
 @media (prefers-reduced-motion: reduce) {
   .logo-mark,
   .logo-mark-lg {
-    filter:
-      brightness(1.08)
-      contrast(1.12)
-      saturate(1.15)
+    filter: brightness(1.08) contrast(1.12) saturate(1.15)
       drop-shadow(0 2px 8px rgba(32, 48, 80, 0.25));
   }
 }
@@ -809,36 +812,55 @@ h3,
     overflow: visible !important;
   }
 
+  /* Let the content decide the page count.
+     Two copies were once squeezed onto one A4 with overflow:hidden and any
+     longer receipt was silently CUT OFF — so each copy was given a forced
+     full page instead (min-height 272mm + page-break-after). That fixed the
+     truncation but made EVERY receipt two sheets, even a one-child receipt
+     whose two copies measure 120mm and 100mm and would sit on one page with
+     room to spare (measured on RCV-00262: 168mm parent, 145mm office).
+     Now: no forced height and no forced break, but a copy may never be
+     split across a page boundary. Small receipts print on one sheet with
+     the tear line; long ones fall onto a second sheet whole. Nothing is
+     hidden either way. */
   body.printing-fee-receipt .fee-receipt-dual-a4,
   body:has(.fee-receipt-sheet.print-target) .fee-receipt-dual-a4 {
-    display: flex !important;
-    flex-direction: column !important;
-    height: 285mm !important;
-    max-height: 285mm !important;
+    display: block !important;
+    height: auto !important;
+    max-height: none !important;
     padding: 0 !important;
     gap: 0 !important;
-    page-break-inside: avoid !important;
   }
 
   body.printing-fee-receipt .fee-receipt-copy,
   body:has(.fee-receipt-sheet.print-target) .fee-receipt-copy {
-    flex: 1 1 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    height: auto !important;
     min-height: 0 !important;
-    max-height: calc(50% - 4mm) !important;
-    overflow: hidden !important;
+    max-height: none !important;
+    overflow: visible !important;
+    /* A copy is the unit that must stay whole — this is what stops the
+       lines below the tear line landing on the next page mid-copy. */
     page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
 
+  /* No forced break between the copies: they share a sheet when they fit.
+     `break-inside: avoid` above is what pushes the office copy onto its own
+     sheet when it does not, so the split still never lands mid-copy. */
+  body.printing-fee-receipt .fee-receipt-copy:not(:last-of-type),
+  body:has(.fee-receipt-sheet.print-target)
+    .fee-receipt-copy:not(:last-of-type) {
+    page-break-after: auto !important;
+    break-after: auto !important;
+    margin-bottom: 6mm !important;
+  }
+
+  /* The tear line is meaningful again whenever both copies share the sheet. */
   body.printing-fee-receipt .fee-receipt-perforation,
   body:has(.fee-receipt-sheet.print-target) .fee-receipt-perforation {
-    flex: 0 0 4mm !important;
-    margin: 0 !important;
-    padding: 0.5mm 0 !important;
-    border-top: 2px dashed rgba(32, 48, 80, 0.55) !important;
-    border-bottom: 2px dashed rgba(32, 48, 80, 0.55) !important;
-    background: white !important;
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
+    display: flex !important;
   }
 
   body.printing-fee-receipt .fee-receipt-sheet .print-hide,
@@ -1014,6 +1036,52 @@ h3,
     overflow: visible !important;
   }
 
+  /* Store counter receipts — one slip per page; a family sale's sheets all
+     sit in one print target and break onto their own pages. */
+  body.printing-store-receipt {
+    background: white !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body.printing-store-receipt * {
+    visibility: hidden !important;
+  }
+
+  body.printing-store-receipt .store-receipt-sheet.print-target,
+  body.printing-store-receipt .store-receipt-sheet.print-target * {
+    visibility: visible !important;
+  }
+
+  body.printing-store-receipt .store-receipt-sheet.print-target {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: white !important;
+    opacity: 1 !important;
+    overflow: visible !important;
+  }
+
+  body.printing-store-receipt .store-receipt-page {
+    max-width: 120mm !important;
+    margin: 0 auto !important;
+    border: none !important;
+    break-after: page;
+  }
+
+  body.printing-store-receipt .store-receipt-page:last-child {
+    break-after: auto;
+  }
+
+  body.printing-store-receipt .print-hide {
+    display: none !important;
+  }
+
   /* Exam question papers */
   body.printing-exam-paper {
     background: white !important;
@@ -1177,146 +1245,351 @@ h3,
  * fixed here, since Phase 0 is tokens only and this file doesn't touch
  * call sites. Flagging plainly rather than leaving it a silent surprise.
  */
-.dark {
-  --brand-deep: #e4eaf7;
-  --brand-mid: #aab8d8;
-  --brand-accent: #d4b84a;
-  --brand-accent-soft: #a8863a;
-  --brand-gold: #d4b84a;
-  --brand-gold-soft: #a8863a;
-  --brand-cream: #f8f8f0;
-  --surface: #0e1526;
-  --panel: rgba(24, 34, 56, 0.92);
-  --ink: #e4eaf7;
-  --muted: #96a0ba;
-  --muted-surface: #141d33;
-  --danger: #f97066;
-  --danger-soft: rgba(249, 112, 102, 0.16);
-  --ok: #3dd68c;
-  --success: #3dd68c;
-  --success-soft: rgba(61, 214, 140, 0.16);
-  --warning: #f0a94e;
-  --warning-soft: rgba(240, 169, 78, 0.16);
-  --info: #6d9bff;
-  --info-soft: rgba(109, 155, 255, 0.16);
-  --ring: #d4b84a;
-  --background: #0e1526;
-  --foreground: #e4eaf7;
-  --card: #182238;
-  --card-foreground: #e4eaf7;
-  --popover: #182238;
-  --popover-foreground: #e4eaf7;
-  /* Primary flips to gold in dark — confirmed direction: a distinctive
-     brand statement, and navy-on-navy would be invisible anyway. */
-  --primary: #c5a028;
-  --primary-foreground: #16233d;
-  --secondary: #141d33;
-  --secondary-foreground: #e4eaf7;
-  --muted-foreground: #96a0ba;
-  --accent: rgba(197, 160, 40, 0.16);
-  --accent-foreground: #e4eaf7;
-  --destructive: #f97066;
-  --border: rgba(200, 214, 245, 0.14);
-  --input: rgba(200, 214, 245, 0.2);
-  --chart-1: #5b8def;
-  --chart-2: #f87171;
-  --chart-3: #fb923c;
-  --chart-4: #4ade80;
-  --chart-5: #a78bfa;
-  --chart-6: #22d3ee;
-  --chart-7: #fb7185;
-  --chart-8: #eab308;
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-3: 0 8px 24px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.35);
-  --shadow-4: 0 16px 48px rgba(0, 0, 0, 0.6);
-  --surface-raised: #182238;
-  --surface-sunken: #0a0f1c;
-  --shell-sidebar-bg: rgba(14, 21, 38, 0.98);
-  --shell-header-bg: rgba(14, 21, 38, 0.92);
-  --overlay: rgba(2, 5, 12, 0.6);
-  color-scheme: dark;
-  --sidebar: #0e1526;
-  --sidebar-foreground: #e4eaf7;
-  --sidebar-primary: #c5a028;
-  --sidebar-primary-foreground: #16233d;
-  --sidebar-accent: #182238;
-  --sidebar-accent-foreground: #e4eaf7;
-  --sidebar-border: rgba(200, 214, 245, 0.12);
-  --sidebar-ring: #d4b84a;
+/* ─── Dark mode is a SCREEN concern ───────────────────────────────────────
+ *
+ * Everything below — the palette and the utility remaps that go with it —
+ * applies only to screens. On paper it must not apply at all, and scoping it
+ * here is what guarantees that: with these rules out of the way, `:root`'s
+ * light values are simply what is left, for every token, with nothing to
+ * keep in step and no list to forget to update.
+ *
+ * Restating four or five tokens inside `@media print` was the first attempt
+ * and it was not enough. The sheets between them reach for --card, --border,
+ * --danger, --warning and more, and the remaps below are worse than the
+ * palette: `.dark .bg-white { background-color: var(--card) }` turns every
+ * white card on a printed sheet into dark navy, and a receipt asks for exact
+ * colour, so it would have printed that navy faithfully.
+ *
+ * Paper is white. There is no version of dark mode that belongs on it.
+ * ───────────────────────────────────────────────────────────────────────── */
+@media screen {
+  .dark {
+    --brand-deep: #e4eaf7;
+    --brand-mid: #aab8d8;
+    --brand-accent: #d4b84a;
+    --brand-accent-soft: #a8863a;
+    --brand-gold: #d4b84a;
+    --brand-gold-soft: #a8863a;
+    --brand-cream: #f8f8f0;
+    --surface: #0e1526;
+    --panel: rgba(24, 34, 56, 0.92);
+    --ink: #e4eaf7;
+    --muted: #96a0ba;
+    --muted-surface: #141d33;
+    --danger: #f97066;
+    --danger-soft: rgba(249, 112, 102, 0.16);
+    --ok: #3dd68c;
+    --success: #3dd68c;
+    --success-soft: rgba(61, 214, 140, 0.16);
+    --warning: #f0a94e;
+    --warning-soft: rgba(240, 169, 78, 0.16);
+    --info: #6d9bff;
+    --info-soft: rgba(109, 155, 255, 0.16);
+    --ring: #d4b84a;
+    --background: #0e1526;
+    --foreground: #e4eaf7;
+    --card: #182238;
+    --card-foreground: #e4eaf7;
+    --popover: #182238;
+    --popover-foreground: #e4eaf7;
+    /* Primary flips to gold in dark — confirmed direction: a distinctive
+       brand statement, and navy-on-navy would be invisible anyway. */
+    --primary: #c5a028;
+    --primary-foreground: #16233d;
+    --secondary: #141d33;
+    --secondary-foreground: #e4eaf7;
+    --muted-foreground: #96a0ba;
+    --accent: rgba(197, 160, 40, 0.16);
+    --accent-foreground: #e4eaf7;
+    --destructive: #f97066;
+    --border: rgba(200, 214, 245, 0.14);
+    --input: rgba(200, 214, 245, 0.2);
+    --chart-1: #5b8def;
+    --chart-2: #f87171;
+    --chart-3: #fb923c;
+    --chart-4: #4ade80;
+    --chart-5: #a78bfa;
+    --chart-6: #22d3ee;
+    --chart-7: #fb7185;
+    --chart-8: #eab308;
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-3: 0 8px 24px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.35);
+    --shadow-4: 0 16px 48px rgba(0, 0, 0, 0.6);
+    --surface-raised: #182238;
+    --surface-sunken: #0a0f1c;
+    --shell-sidebar-bg: rgba(14, 21, 38, 0.98);
+    --shell-header-bg: rgba(14, 21, 38, 0.92);
+    --overlay: rgba(2, 5, 12, 0.6);
+    color-scheme: dark;
+    --sidebar: #0e1526;
+    --sidebar-foreground: #e4eaf7;
+    --sidebar-primary: #c5a028;
+    --sidebar-primary-foreground: #16233d;
+    --sidebar-accent: #182238;
+    --sidebar-accent-foreground: #e4eaf7;
+    --sidebar-border: rgba(200, 214, 245, 0.12);
+    --sidebar-ring: #d4b84a;
+  }
+
+  /* ── Dark-mode safety net for literal light utilities ─────────────────────
+     264 `bg-white` sites (measured 2026-08-18) plus a handful of slate/gray
+     utilities and `text-black` were written for the light theme and never got
+     a dark: variant — white cards on a navy page, black text on dark cards,
+     invisible sidebar text. Remapping the utility classes themselves under
+     .dark fixes every site at once and cannot regress as new screens are
+     added; a screen that genuinely wants white in dark mode should say so with
+     an explicit token. Translucent bg-white/N (N ≤ 25) are highlights over
+     coloured surfaces and are left alone. */
+  .dark .bg-white {
+    background-color: var(--card);
+  }
+  .dark .bg-white\/95,
+  .dark .bg-white\/90,
+  .dark .bg-white\/80,
+  .dark .bg-white\/70 {
+    background-color: color-mix(in srgb, var(--card) 88%, transparent);
+  }
+  .dark .text-black,
+  .dark .text-slate-900,
+  .dark .text-slate-800,
+  .dark .text-slate-700,
+  .dark .text-\[\#203050\],
+  .dark .text-\[\#0f172a\] {
+    color: var(--foreground);
+  }
+  .dark .text-slate-600,
+  .dark .text-slate-500,
+  .dark .text-slate-400,
+  .dark .text-gray-500 {
+    color: var(--muted);
+  }
+  .dark .bg-slate-50,
+  .dark .bg-slate-100,
+  .dark .bg-slate-200,
+  .dark .bg-\[\#f0f2f5\],
+  .dark .bg-\[\#f5f6f6\],
+  .dark .bg-\[\#f3f4f6\],
+  .dark .bg-\[\#f8faf8\],
+  .dark .bg-\[\#f5f8fb\] {
+    background-color: var(--surface-sunken);
+  }
+  .dark .border-slate-200,
+  .dark .border-slate-300 {
+    border-color: var(--border);
+  }
+  /* `border-slate-900` is the accent rule on the legal pages' callouts — a
+     near-black line that disappears against the dark page. Flip it to the
+     foreground colour so the emphasis survives the theme. */
+  .dark .border-slate-900 {
+    border-color: var(--foreground);
+  }
+  /* `text-blue-700` inline links on the public/legal pages (privacy, terms,
+     refund, about): a 700-weight blue on the near-black dark background lands
+     around 2.4:1. Lift it to the light-blue ramp so the links stay legible. */
+  .dark .text-blue-700,
+  .dark .text-blue-600 {
+    color: #7dabf8;
+  }
+  /* `bg-[var(--brand-deep)] text-white` (167 sites — primary buttons, active
+     navy tabs, badges): --brand-deep flips to a LIGHT text colour in dark
+     mode, so these became white-on-white. Keep them a solid deep navy that
+     white text stays readable on. */
+  .dark .bg-\[var\(--brand-deep\)\] {
+    background-color: #2c4170;
+  }
+  /* Native controls (select popups, date pickers, scrollbars) follow the theme
+     only when the element itself is scoped; .dark already sets color-scheme,
+     this makes sure inputs inherit it and never render a white field. */
+  .dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  .dark select,
+  .dark textarea {
+    color-scheme: dark;
+    background-color: var(--surface-sunken);
+    color: var(--foreground);
+    border-color: var(--input);
+  }
+  .dark input::placeholder,
+  .dark textarea::placeholder {
+    color: var(--muted);
+  }
+  .dark input[type="date"]::-webkit-calendar-picker-indicator,
+  .dark input[type="time"]::-webkit-calendar-picker-indicator {
+    filter: invert(0.85);
+  }
+
+  /* Deliberately-light islands (public gate page, printed posters/passes):
+     opt out of the .dark remaps above so they read the same on any device. */
+  .dark .theme-light-island,
+  .dark .theme-light-island .text-\[\#203050\] {
+    color: #203050;
+  }
+  .dark .theme-light-island.bg-white,
+  .dark .theme-light-island .bg-white {
+    background-color: #ffffff;
+  }
+  .dark .theme-light-island input:not([type="checkbox"]):not([type="radio"]),
+  .dark .theme-light-island select,
+  .dark .theme-light-island textarea {
+    color-scheme: light;
+    background-color: #ffffff;
+    color: #203050;
+    border-color: rgba(32, 48, 80, 0.25);
+  }
+  .dark .theme-light-island input::placeholder {
+    color: #7a8299;
+  }
 }
 
-/* ── Dark-mode safety net for literal light utilities ─────────────────────
-   264 `bg-white` sites (measured 2026-08-18) plus a handful of slate/gray
-   utilities and `text-black` were written for the light theme and never got
-   a dark: variant — white cards on a navy page, black text on dark cards,
-   invisible sidebar text. Remapping the utility classes themselves under
-   .dark fixes every site at once and cannot regress as new screens are
-   added; a screen that genuinely wants white in dark mode should say so with
-   an explicit token. Translucent bg-white/N (N ≤ 25) are highlights over
-   coloured surfaces and are left alone. */
-.dark .bg-white { background-color: var(--card); }
-.dark .bg-white\/95,
-.dark .bg-white\/90,
-.dark .bg-white\/80,
-.dark .bg-white\/70 { background-color: color-mix(in srgb, var(--card) 88%, transparent); }
-.dark .text-black,
-.dark .text-slate-900,
-.dark .text-slate-800,
-.dark .text-slate-700,
-.dark .text-\[\#203050\],
-.dark .text-\[\#0f172a\] { color: var(--foreground); }
-.dark .text-slate-600,
-.dark .text-slate-500,
-.dark .text-slate-400,
-.dark .text-gray-500 { color: var(--muted); }
-.dark .bg-slate-50,
-.dark .bg-slate-100,
-.dark .bg-slate-200,
-.dark .bg-\[\#f0f2f5\],
-.dark .bg-\[\#f5f6f6\],
-.dark .bg-\[\#f3f4f6\],
-.dark .bg-\[\#f8faf8\],
-.dark .bg-\[\#f5f8fb\] { background-color: var(--surface-sunken); }
-.dark .border-slate-200 { border-color: var(--border); }
-/* `text-blue-700` inline links on the public/legal pages (privacy, terms,
-   refund, about): a 700-weight blue on the near-black dark background lands
-   around 2.4:1. Lift it to the light-blue ramp so the links stay legible. */
-.dark .text-blue-700,
-.dark .text-blue-600 { color: #7dabf8; }
-/* `bg-[var(--brand-deep)] text-white` (167 sites — primary buttons, active
-   navy tabs, badges): --brand-deep flips to a LIGHT text colour in dark
-   mode, so these became white-on-white. Keep them a solid deep navy that
-   white text stays readable on. */
-.dark .bg-\[var\(--brand-deep\)\] { background-color: #2c4170; }
-/* Native controls (select popups, date pickers, scrollbars) follow the theme
-   only when the element itself is scoped; .dark already sets color-scheme,
-   this makes sure inputs inherit it and never render a white field. */
-.dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
-.dark select,
-.dark textarea {
-  color-scheme: dark;
-  background-color: var(--surface-sunken);
-  color: var(--foreground);
-  border-color: var(--input);
-}
-.dark input::placeholder,
-.dark textarea::placeholder { color: var(--muted); }
-.dark input[type="date"]::-webkit-calendar-picker-indicator,
-.dark input[type="time"]::-webkit-calendar-picker-indicator { filter: invert(0.85); }
+/* Inter-school event certificates — print one per page, nothing else. */
+@media print {
+  /* Store sales day book — the storekeeper's handover sheet. */
+  body.printing-store-daybook * {
+    visibility: hidden !important;
+  }
+  body.printing-store-daybook .store-daybook-sheet.print-target,
+  body.printing-store-daybook .store-daybook-sheet.print-target * {
+    visibility: visible !important;
+  }
+  body.printing-store-daybook .store-daybook-sheet.print-target {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+  }
 
-/* Deliberately-light islands (public gate page, printed posters/passes):
-   opt out of the .dark remaps above so they read the same on any device. */
-.dark .theme-light-island,
-.dark .theme-light-island .text-\[\#203050\] { color: #203050; }
-.dark .theme-light-island.bg-white,
-.dark .theme-light-island .bg-white { background-color: #ffffff; }
-.dark .theme-light-island input:not([type="checkbox"]):not([type="radio"]),
-.dark .theme-light-island select,
-.dark .theme-light-island textarea {
-  color-scheme: light;
-  background-color: #ffffff;
-  color: #203050;
-  border-color: rgba(32, 48, 80, 0.25);
+  /* Counter day close — one A4 to sign and file. */
+  body.printing-day-close * {
+    visibility: hidden !important;
+  }
+  body.printing-day-close .day-close-sheet.print-target,
+  body.printing-day-close .day-close-sheet.print-target * {
+    visibility: visible !important;
+  }
+  body.printing-day-close .day-close-sheet.print-target {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+  }
+  body.printing-day-close .print-hide {
+    display: none !important;
+  }
+
+  body.printing-evt-certs * {
+    visibility: hidden !important;
+  }
+  body.printing-evt-certs .evt-cert-sheet.print-target,
+  body.printing-evt-certs .evt-cert-sheet.print-target * {
+    visibility: visible !important;
+  }
+  body.printing-evt-certs .evt-cert-sheet.print-target {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  body.printing-evt-certs .evt-cert-page {
+    page-break-after: always;
+    border: none !important;
+    box-shadow: none !important;
+  }
 }
-.dark .theme-light-island input::placeholder { color: #7a8299; }
+
+/* Inter-school event poster + square graphic — print those, nothing else. */
+@media print {
+  body.printing-evt-poster * {
+    visibility: hidden !important;
+  }
+  body.printing-evt-poster .evt-poster-sheet.print-target,
+  body.printing-evt-poster .evt-poster-sheet.print-target * {
+    visibility: visible !important;
+  }
+  body.printing-evt-poster .evt-poster-sheet.print-target {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  body.printing-evt-poster .evt-poster-page {
+    page-break-after: always;
+    border: none !important;
+    box-shadow: none !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
+
+/* Store slip — parent copy and office copy, one per page. */
+@media print {
+  body.printing-store-receipt .store-receipt-copy {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  body.printing-store-receipt .store-receipt-copy:not(:last-child) {
+    page-break-after: always;
+    break-after: page;
+  }
+  body.printing-store-receipt .store-receipt-page {
+    max-width: 100% !important;
+    border: none !important;
+    box-shadow: none !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
+
+/* ─── Paper is white ──────────────────────────────────────────────────────
+ *
+ * Every print sheet in the app — fee receipts, day close, payslips, report
+ * cards, certificates, ID cards, visitor passes, the store day book —
+ * colours its text with design tokens. In dark mode those tokens hold light
+ * values: `--brand-deep` is #e4eaf7 and `--muted` is #96a0ba, both nearly
+ * white. The print rules already force a white background, so a receipt
+ * printed from a browser in dark mode came out white text on white paper:
+ * a page that looks blank, wastes a sheet, and hands a parent nothing.
+ *
+ * Reported from the counter on 2026-08-30 against fee receipts; it was never
+ * specific to them. The condition is "the browser is in dark mode when
+ * someone presses print", so the fix belongs to printing, not to receipts.
+ *
+ * The palette needs no restating here. The dark rules are scoped to
+ * `@media screen` (see "Dark mode is a SCREEN concern"), so what is left on
+ * paper is :root's light palette — every token, with no list to keep in
+ * step. A first attempt did restate four of them, and missed --card,
+ * --border, --danger and --warning, which the store receipt, the visitor
+ * pass and the event sheets all reach for.
+ */
+@media print {
+  /* The sheets are documents, not screens: dark on white, whatever the
+   * browser was showing. */
+  body[class*="printing-"] .print-target {
+    color: #203050;
+    background: #fff;
+  }
+
+  /* Some labels are deliberately WHITE on a navy block — the copy header
+   * ("Parent copy" / "Office copy") and the fee table's header row, 14
+   * elements in all on a two-copy receipt. Those are only legible if the
+   * navy actually prints; drop the background and they become the same
+   * invisible text this whole block exists to prevent, just by a different
+   * route. Asked for on the sheet itself rather than relying on the body
+   * rule alone, so it cannot be lost to a selector change upstream. */
+  body[class*="printing-"] .print-target,
+  body[class*="printing-"] .print-target * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

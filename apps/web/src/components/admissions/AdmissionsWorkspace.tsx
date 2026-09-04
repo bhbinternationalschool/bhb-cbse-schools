@@ -35,6 +35,7 @@ import {
   markLost,
   markVerified,
   promoteToRegistration,
+  registrationBlockers,
   publicRegisterAbsoluteUrl,
   relationLabel,
   saveAdmissions,
@@ -72,6 +73,8 @@ import { canAccessModule, hasPermission, loadRbac } from "@/lib/rbac";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
+import { FollowUpDialog } from "@/components/admissions/FollowUpDialog";
+import { LeadWorklistPanel } from "@/components/admissions/LeadWorklistPanel";
 import {
   ErpTable,
   ErpTableBody,
@@ -185,6 +188,17 @@ export function AdmissionsWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+
+  /**
+   * The lead a follow-up is being logged against, and how it was reached.
+   * Set from the list's own action buttons, so a call can be written up
+   * without leaving the call list.
+   */
+  const [followUpFor, setFollowUpFor] = useState<{
+    lead: AdmissionLead;
+    channel: FollowUpChannel;
+  } | null>(null);
+
   const [captureYearFilter, setCaptureYearFilter] = useState<string>("all");
   const [filter, setFilter] = useState<
     | AdmissionStage
@@ -275,6 +289,17 @@ export function AdmissionsWorkspace() {
         if (cancelled) return;
         const next = loadAdmissions();
         setState(next);
+        // The Registration tab lists this session's ADMITTED students, which
+        // come from the SIS roster — pulled here rather than trusted to the
+        // background sweep, and re-read once it lands, so a fresh login does
+        // not render the card empty (found exactly that way on 2026-08-26).
+        try {
+          const { ensureSisHydrated } = await import("@/lib/sisPersistence");
+          const sisPulled = await ensureSisHydrated();
+          if (!cancelled && sisPulled) setSis(loadSis());
+        } catch {
+          // Offline — the mount-time copy stands.
+        }
         if (pulled && next.leads.length > 0) {
           setNotice(`Synced ${next.leads.length} lead(s) from Supabase.`);
           window.setTimeout(() => setNotice(null), 6000);
@@ -288,7 +313,10 @@ export function AdmissionsWorkspace() {
       }
     })();
 
-    const refresh = () => setState(loadAdmissions());
+    const refresh = () => {
+      setState(loadAdmissions());
+      setSis(loadSis());
+    };
     const onHydrated = () => refresh();
     window.addEventListener("storage", refresh);
     window.addEventListener("focus", refresh);
@@ -1024,7 +1052,7 @@ export function AdmissionsWorkspace() {
                     setFilter("overdue");
                     setTab("leads");
                   }}
-                  className="rounded-lg border border-[rgba(180,35,24,0.3)] bg-[rgba(180,35,24,0.06)] px-2.5 py-1.5 font-medium text-[#b42318]"
+                  className="rounded-lg border border-[rgba(180,35,24,0.3)] bg-[rgba(180,35,24,0.06)] px-2.5 py-1.5 font-medium text-[var(--danger)]"
                 >
                   Overdue{" "}
                   <span className="opacity-80">{fuCounts.overdue}</span>
@@ -1149,6 +1177,20 @@ export function AdmissionsWorkspace() {
 
       {tab === "leads" ? (
         <div className="space-y-4">
+          {/* Before the table: the instruction. The table is a reference you
+              search; this says which leads need something and what that
+              something is. Hidden on a solo lead page, which is one lead. */}
+          {state ? (
+            <LeadWorklistPanel
+              leads={state.leads}
+              today={todayYmd()}
+              onOpenLead={(id) => openLead(id)}
+              onCall={(id) => {
+                const lead = state.leads.find((l) => l.id === id);
+                if (lead) setFollowUpFor({ lead, channel: "call" });
+              }}
+            />
+          ) : null}
           <div className="space-y-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-2">
@@ -1208,7 +1250,7 @@ export function AdmissionsWorkspace() {
                 localityQ.trim() ? (
                   <button
                     type="button"
-                    className="text-[10px] font-semibold text-[#b42318] underline"
+                    className="text-[10px] font-semibold text-[var(--danger)] underline"
                     onClick={() => {
                       setFilter("open");
                       setCaptureYearFilter("all");
@@ -1314,7 +1356,7 @@ export function AdmissionsWorkspace() {
                         filter === id
                           ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
                           : id === "overdue"
-                            ? "bg-[rgba(180,35,24,0.12)] text-[#b42318]"
+                            ? "bg-[rgba(180,35,24,0.12)] text-[var(--danger)]"
                             : id === "due_today"
                               ? "bg-[rgba(180,83,9,0.14)] text-[#9a3412]"
                               : "bg-[var(--surface-sunken)] text-[var(--muted)]"
@@ -1435,6 +1477,9 @@ export function AdmissionsWorkspace() {
                     <ErpSortTh sort={leadSort} field="followUp">
                       Next follow-up
                     </ErpSortTh>
+                    <th className="px-3 py-2 text-left text-[11px] font-bold uppercase">
+                      Do
+                    </th>
                   </tr>
                 </ErpTableHead>
                 <ErpTableBody>
@@ -1605,6 +1650,85 @@ export function AdmissionsWorkspace() {
                             </span>
                           )}
                         </td>
+                        {/* What the office actually DOES to a lead, on the
+                            row itself. Working a call list means ringing the
+                            next family, not opening each one to find the
+                            buttons. Every action stops the row's own click,
+                            which opens the lead. */}
+                        <td
+                          className="px-3 py-2"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {showOnly ? (
+                            <span className="text-[10px] text-[var(--muted)]">
+                              admitted
+                            </span>
+                          ) : (
+                            <div className="flex flex-wrap gap-1">
+                              {canCreate && l.mobile ? (
+                                <button
+                                  type="button"
+                                  title={`Call ${l.mobile} and write it up`}
+                                  className="rounded-lg bg-[var(--success)] px-2 py-1 text-[10px] font-bold text-white"
+                                  onClick={() =>
+                                    setFollowUpFor({ lead: l, channel: "call" })
+                                  }
+                                >
+                                  Call
+                                </button>
+                              ) : null}
+                              {canCreate ? (
+                                <button
+                                  type="button"
+                                  title="Log a follow-up without calling"
+                                  className="rounded-lg border border-[var(--border)] px-2 py-1 text-[10px] font-semibold text-[var(--brand-deep)]"
+                                  onClick={() =>
+                                    setFollowUpFor({
+                                      lead: l,
+                                      channel: "whatsapp",
+                                    })
+                                  }
+                                >
+                                  Follow-up
+                                </button>
+                              ) : null}
+                              {canCreate && l.stage === "enquiry" ? (
+                                (() => {
+                                  const blocked = registrationBlockers(
+                                    state,
+                                    l.id,
+                                  );
+                                  return (
+                                    <button
+                                      type="button"
+                                      disabled={blocked.length > 0}
+                                      title={
+                                        blocked.length
+                                          ? `Still needed: ${blocked.map((b) => b.message).join(" ")}`
+                                          : "Move this enquiry to Registered"
+                                      }
+                                      className="rounded-lg bg-[var(--brand-deep)] px-2 py-1 text-[10px] font-bold text-white disabled:opacity-40"
+                                      onClick={() => doRegisterLead(l.id)}
+                                    >
+                                      Register
+                                    </button>
+                                  );
+                                })()
+                              ) : null}
+                              {/* Opens in place. This was a new browser tab
+                                  for one build; in use it just left a trail of
+                                  tabs to close, so it opens the lead below the
+                                  list where it always did. */}
+                              <button
+                                type="button"
+                                onClick={() => openLead(l.id)}
+                                className="rounded-lg border border-[var(--border)] px-2 py-1 text-[10px] font-semibold text-[var(--muted)]"
+                              >
+                                Open
+                              </button>
+                            </div>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
@@ -1651,6 +1775,7 @@ export function AdmissionsWorkspace() {
         <AdmissionRegistrationPanel
           state={state}
           masters={masters}
+          sis={sis}
           by={session.fullName}
           canEdit={canCreate}
           onCommit={commit}
@@ -1979,7 +2104,7 @@ export function AdmissionsWorkspace() {
                         {childrenRows.length > 1 ? (
                           <button
                             type="button"
-                            className="text-[11px] font-semibold text-[#b42318]"
+                            className="text-[11px] font-semibold text-[var(--danger)]"
                             onClick={() =>
                               setChildrenRows((rows) =>
                                 rows.filter((r) => r.key !== row.key),
@@ -2159,6 +2284,30 @@ export function AdmissionsWorkspace() {
             );
           })()
         : null}
+      {followUpFor ? (
+        <FollowUpDialog
+          lead={{
+            id: followUpFor.lead.id,
+            enquiryNo: followUpFor.lead.enquiryNo,
+            childName: followUpFor.lead.childName,
+            guardianName: followUpFor.lead.guardianName,
+            mobile: followUpFor.lead.mobile,
+          }}
+          channel={followUpFor.channel}
+          onClose={() => setFollowUpFor(null)}
+          onSave={(draft) => {
+            const cur = loadAdmissions();
+            const r = logFollowUp(cur, followUpFor.lead.id, draft, session.fullName);
+            if (!r.ok) {
+              setNotice(r.reason);
+              window.setTimeout(() => setNotice(null), 3200);
+              return;
+            }
+            commit(r.state, "Follow-up saved");
+            setFollowUpFor(null);
+          }}
+        />
+      ) : null}
     </ErpWorkspaceShell>
   );
 }
@@ -2180,6 +2329,20 @@ function Field({
     </label>
   );
 }
+
+/**
+ * The lead's journey, as the office actually walks it: who the child is, who
+ * the family is, then what is needed to register and admit. The order is the
+ * order of the work, not the order the fields happened to be written in.
+ */
+type LeadStep = "child" | "family" | "registration" | "followup";
+
+const LEAD_STEPS: { id: LeadStep; label: string }[] = [
+  { id: "child", label: "1 · Child" },
+  { id: "family", label: "2 · Family" },
+  { id: "registration", label: "3 · Registration" },
+  { id: "followup", label: "4 · Follow-up" },
+];
 
 function LeadDetail({
   lead,
@@ -2263,6 +2426,22 @@ function LeadDetail({
       setAiSuggestion({ ...aiSuggestion, generationId: undefined });
     }
   }
+  /**
+   * Which step of the lead's journey is on screen.
+   *
+   * This panel was ~1,300 lines in one scroll, so the registration checklist
+   * — the thing that unblocks the Register button — was a thousand lines
+   * below the button itself. Tabs put each decision where its step is, and
+   * the blocker list above links straight to the right one.
+   */
+  const [step, setStep] = useState<LeadStep>("child");
+
+  /** The same rule the guard uses, so the screen cannot promise differently. */
+  const regBlockers = useMemo(
+    () => (lead.stage === "enquiry" ? registrationBlockers(state, lead.id) : []),
+    [state, lead.id, lead.stage],
+  );
+
   const [aiSuggestionLoading, setAiSuggestionLoading] = useState(false);
   const [aiSuggestionError, setAiSuggestionError] = useState<string | null>(
     null,
@@ -2431,7 +2610,13 @@ function LeadDetail({
               {lead.stage === "enquiry" ? (
                 <button
                   type="button"
-                  className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-[11px] font-semibold text-white"
+                  disabled={regBlockers.length > 0}
+                  title={
+                    regBlockers.length
+                      ? `Still needed: ${regBlockers.map((b) => b.message).join(" ")}`
+                      : "Move this enquiry to Registered"
+                  }
+                  className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-40"
                   onClick={onRegister}
                 >
                   → Register
@@ -2457,7 +2642,7 @@ function LeadDetail({
               ) : null}
               <button
                 type="button"
-                className="rounded-lg border border-[rgba(180,35,24,0.35)] px-3 py-1.5 text-[11px] font-semibold text-[#b42318]"
+                className="rounded-lg border border-[rgba(180,35,24,0.35)] px-3 py-1.5 text-[11px] font-semibold text-[var(--danger)]"
                 onClick={onLost}
               >
                 Mark lost
@@ -2518,6 +2703,32 @@ function LeadDetail({
             </div>
           </div>
         </div>
+
+        {/* Why the button is off, said in full and kept on screen. It used to
+            be a three-second flash from the click handler, while the ticks
+            that would clear it sat a thousand lines further down the panel —
+            so a walk-in lead read as a broken button. Each line moves to the
+            step that holds the fix. */}
+        {canEdit && !locked && lead.stage === "enquiry" && regBlockers.length ? (
+          <div className="mt-3 rounded-xl border border-[var(--warning)]/40 bg-[var(--warning-soft)] px-3 py-2">
+            <p className="text-[11px] font-bold text-[var(--warning)]">
+              Before this enquiry can be registered
+            </p>
+            <ul className="mt-1 space-y-0.5">
+              {regBlockers.map((b, i) => (
+                <li key={i} className="text-[11px] text-[var(--brand-deep)]">
+                  <button
+                    type="button"
+                    className="text-left underline decoration-dotted underline-offset-2"
+                    onClick={() => setStep(b.where === "family" ? "family" : b.where === "checklist" ? "registration" : "child")}
+                  >
+                    {b.message}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
 
         {!locked ? (
           <div className="mt-3">
@@ -2582,6 +2793,47 @@ function LeadDetail({
         ) : null}
       </div>
 
+      {/* One row of steps instead of one very long scroll. A step carrying an
+          unfinished blocker is marked, so nobody has to open all four to find
+          the one that is holding registration up. */}
+      <div className="flex flex-wrap gap-1.5">
+        {LEAD_STEPS.map((t) => {
+          const pending = regBlockers.filter(
+            (b) => (b.where === "checklist" ? "registration" : b.where) === t.id,
+          ).length;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setStep(t.id)}
+              className={`rounded-lg px-3 py-1.5 text-[11px] font-bold ${
+                step === t.id
+                  ? "bg-[var(--brand-deep)] text-white"
+                  : "border border-[var(--border)] text-[var(--muted)]"
+              }`}
+            >
+              {t.label}
+              {pending ? (
+                <span
+                  className={`ml-1.5 rounded-full px-1.5 ${
+                    step === t.id
+                      ? "bg-white/25"
+                      : "bg-[var(--warning-soft)] text-[var(--warning)]"
+                  }`}
+                  title={`${pending} thing(s) still needed here`}
+                >
+                  {pending}
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Two columns from `lg` up: these cards are narrow and were stacking
+          into a scroll several screens long on a desk monitor. */}
+      <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
+      {step === "followup" ? (
       <MastersWorkCard
         title="Counsellor / calling agent"
         hint="Assign ownership, log every call or WhatsApp attempt, and set the next follow-up date. Use Due today / Overdue filters in the list."
@@ -2857,8 +3109,9 @@ function LeadDetail({
 
         <LeadTimeline lead={lead} onEvents={setTimelineEvents} />
       </MastersWorkCard>
+      ) : null}
 
-      {hh ? (
+      {hh && step === "family" ? (
         <MastersWorkCard
           title={`Household ${hh.code}`}
           hint="One family card — many guardians, many child enquiries. Enroll shares one SIS household."
@@ -3051,6 +3304,7 @@ function LeadDetail({
         </MastersWorkCard>
       ) : null}
 
+      {step === "child" ? (
       <MastersWorkCard title="Child & class">
         {!locked && canEdit ? (
           <div className="mb-3">
@@ -3197,7 +3451,9 @@ function LeadDetail({
           </Field>
         </div>
       </MastersWorkCard>
+      ) : null}
 
+      {step === "child" ? (
       <MastersWorkCard title="Family preferences & attribution">
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Language for school messages">
@@ -3273,13 +3529,41 @@ function LeadDetail({
               }}
             />
             {lead.referredByHouseholdId ? (
-              <p className="mt-0.5 text-[10px] text-[var(--muted)]">
-                → {sis.households.find((h) => h.id === lead.referredByHouseholdId)?.guardianName || lead.referredByHouseholdId}
-                {(() => {
-                  const h = sis.households.find((x) => x.id === lead.referredByHouseholdId);
-                  return h ? ` (${referralCodeFor(h)})` : "";
-                })()}
-              </p>
+              (() => {
+                const h = sis.households.find(
+                  (x) => x.id === lead.referredByHouseholdId,
+                );
+                const kids = sis.students.filter(
+                  (s) =>
+                    s.householdId === lead.referredByHouseholdId &&
+                    s.status === "active",
+                );
+                return (
+                  <p className="mt-0.5 text-[10px] text-[var(--muted)]">
+                    → <span className="font-semibold text-[var(--brand-deep)]">
+                      {h?.guardianName || lead.referredByHouseholdId}
+                    </span>
+                    {h ? ` · ${referralCodeFor(h)}` : ""}
+                    {h?.mobile ? ` · ${h.mobile}` : ""}
+                    {kids.length > 0 ? (
+                      <>
+                        <br />
+                        Their ward{kids.length > 1 ? "s" : ""}:{" "}
+                        {kids
+                          .map(
+                            (k) =>
+                              `${k.fullName} (${
+                                masters?.classes.find((c) => c.id === k.classId)
+                                  ?.name ?? "—"
+                              }, ${k.admissionNo})`,
+                          )
+                          .join(" · ")}{" "}
+                        — the referral discount lands on this child&apos;s fees.
+                      </>
+                    ) : null}
+                  </p>
+                );
+              })()
             ) : lead.referralCode ? (
               <p className="mt-0.5 text-[10px] text-[var(--warning)]">Code not matched to an enrolled household yet.</p>
             ) : null}
@@ -3293,7 +3577,9 @@ function LeadDetail({
           </Field>
         </div>
       </MastersWorkCard>
+      ) : null}
 
+      {step === "family" ? (
       <MastersWorkCard title="Parents & address (synced from household)">
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Primary guardian / father">
@@ -3378,7 +3664,9 @@ function LeadDetail({
           </Field>
         </div>
       </MastersWorkCard>
+      ) : null}
 
+      {step === "registration" ? (
       <MastersWorkCard
         title="Registration checklist"
         hint="Required before moving enquiry → Registered"
@@ -3442,6 +3730,8 @@ function LeadDetail({
           />
         </Field>
       </MastersWorkCard>
+      ) : null}
+      </div>
     </div>
   );
 }

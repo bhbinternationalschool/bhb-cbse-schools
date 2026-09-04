@@ -178,7 +178,7 @@ export function TransportGoogleMap({
         </div>
       ) : null}
       {status === "error" ? (
-        <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-white/95 p-4 text-center text-sm text-[#b42318]">
+        <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-white/95 p-4 text-center text-sm text-[var(--danger)]">
           {error || "Could not load Google Maps"}
         </div>
       ) : null}

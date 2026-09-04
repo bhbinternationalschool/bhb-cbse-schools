@@ -1,10 +1,13 @@
 "use client";
 
+/* ratchet-allow: raw_table — the <table> here is inside an HTML string written into a print popup, not JSX — there is no component to shell */
+
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { DayClosePanel } from "@/components/fees/DayClosePanel";
 import {
   bankBalancePaise,
+  bankMovementExists,
   cashInHandPaise,
   deleteBankAccount,
   postBankMovement,
@@ -42,6 +45,7 @@ import {
   listLinkedVendorsForExpense,
   listRootExpenseCategories,
   nextExpenseVoucherNo,
+  resolveBankForPaymentMode,
 } from "@/lib/accountsLookups";
 import {
   isExpenseVoucherCancelled,
@@ -271,12 +275,59 @@ function StatCard({
   );
 }
 
-export function DashboardPanel({ state, onRefresh }: AccountsPanelProps) {
+export function DashboardPanel({ state, onRefresh, tick }: AccountsPanelProps) {
   void onRefresh;
   const snap = dashboardSnapshot(state);
   const dayClosePending = dayCloseNeedsAttention();
   const bankTotal = totalBankBalancePaise(state);
-  const todayBook = useMemo(() => buildDayBook(todayIso()), []);
+  const [backfillBusy, setBackfillBusy] = useState(false);
+  const [backfillNote, setBackfillNote] = useState<string | null>(null);
+
+  const doStoreBankBackfill = async () => {
+    if (backfillBusy) return;
+    setBackfillBusy(true);
+    setBackfillNote(null);
+    try {
+      const { runStoreBankBackfill } = await import(
+        "@/lib/accountsStoreBankBackfill"
+      );
+      const out = await runStoreBankBackfill();
+      if (!out.ok) {
+        setBackfillNote(out.error);
+        return;
+      }
+      const r = out.result;
+      const parts: string[] = [];
+      parts.push(
+        r.applied === 0
+          ? "Nothing new to bring in."
+          : `${r.applied} store movement(s) added — ${formatInr(Math.abs(r.appliedPaise))} ${r.appliedPaise < 0 ? "out of" : "into"} the bank book.`,
+      );
+      if (r.skippedExisting > 0)
+        parts.push(`${r.skippedExisting} already there.`);
+      if (r.unknownBank > 0)
+        parts.push(`${r.unknownBank} name a bank this desk does not have.`);
+      if (r.failed.length > 0)
+        parts.push(`${r.failed.length} could not be written (${r.failed[0]!.reason}).`);
+      setBackfillNote([...parts, ...out.notes].join(" "));
+    } catch {
+      setBackfillNote("Could not bring in the store's bank history.");
+    } finally {
+      setBackfillBusy(false);
+    }
+  };
+  // Recompute when the desk changes, not once at mount.
+  //
+  // The dependency list was empty, so this froze at whatever it read when the
+  // panel first rendered. buildDayBook already drops voided receipts — it
+  // filters on `!v.voidedAt` — but a receipt voided after the panel mounted
+  // kept showing in today's collection until the page was reloaded, which
+  // reads as the void not having worked.
+  //
+  // `tick` is the workspace's refresh counter and `state` changes when the
+  // void posts its reversal to accounts; either one is enough on its own, and
+  // both together mean no route in leaves it stale.
+  const todayBook = useMemo(() => buildDayBook(todayIso()), [tick, state]);
   const openApCount = listUnifiedPayables(state).length;
   const ownerDueCount = listOwnerLoanDue(todayIso(), state).length;
 
@@ -315,6 +366,27 @@ export function DashboardPanel({ state, onRefresh }: AccountsPanelProps) {
           <div className="text-xs text-[var(--muted)]">
             {state.bankAccounts.filter((b) => b.isActive).length} active account(s)
           </div>
+          {/* Store banked and paid through the server module, which never
+              wrote the desk bank book, so this tile counted fee receipts
+              coming in and nothing going out. New payments mirror themselves;
+              this brings over the history. Safe to press twice — every
+              movement is keyed by its store payment row and one already here
+              is skipped. */}
+          <button
+            type="button"
+            className="mt-2 text-[11px] font-semibold text-[var(--brand-mid)] underline decoration-dotted underline-offset-2 disabled:opacity-60"
+            disabled={backfillBusy}
+            onClick={() => void doStoreBankBackfill()}
+          >
+            {backfillBusy
+              ? "Bringing store payments in…"
+              : "Bring in store bank payments"}
+          </button>
+          {backfillNote ? (
+            <p className="mt-1 max-w-md text-[11px] text-[var(--muted)]">
+              {backfillNote}
+            </p>
+          ) : null}
         </div>
         {dayClosePending ? (
           <span className="rounded-lg bg-[rgba(197,160,40,0.2)] px-3 py-1.5 text-xs font-bold text-[#8a6d12]">
@@ -2022,6 +2094,21 @@ type StoreVendorDue = {
   oldestBillDate: string;
 };
 
+/** One open store bill, as `listVendorBills` returns it. */
+type StoreVendorBill = {
+  id: string;
+  billNo: string;
+  supplierInvoiceNo: string;
+  grnNo: string;
+  billDate: string;
+  dueDate: string;
+  totalPaise: number;
+  paidPaise: number;
+  balancePaise: number;
+  status: string;
+  overdueDays: number;
+};
+
 /**
  * What the school owes its store suppliers, read from account 2000.
  *
@@ -2038,6 +2125,23 @@ function StoreVendorDues() {
   const [rows, setRows] = useState<StoreVendorDue[] | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [openVendor, setOpenVendor] = useState<string | null>(null);
+  const [billsByVendor, setBillsByVendor] = useState<
+    Record<string, StoreVendorBill[]>
+  >({});
+  const [billsBusy, setBillsBusy] = useState(false);
+  const [pay, setPay] = useState<{
+    billId: string;
+    billNo: string;
+    vendorId: string;
+    balancePaise: number;
+    amount: string;
+    mode: string;
+    paidOn: string;
+    reference: string;
+  } | null>(null);
+  const [paying, setPaying] = useState(false);
+  const [notice, setNotice] = useState("");
 
   const load = async () => {
     setLoading(true);
@@ -2071,6 +2175,134 @@ function StoreVendorDues() {
     void load();
   }, []);
 
+  const loadBills = async (vendorId: string) => {
+    setBillsBusy(true);
+    try {
+      const res = await fetch("/api/ledger", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "vendor-bills", vendorId }),
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        bills?: StoreVendorBill[];
+        error?: string;
+      };
+      if (res.ok && json.ok) {
+        setBillsByVendor((m) => ({ ...m, [vendorId]: json.bills ?? [] }));
+      } else {
+        setNotice(json.error || "Could not read this vendor's bills");
+      }
+    } catch {
+      setNotice("Could not reach the server");
+    } finally {
+      setBillsBusy(false);
+    }
+  };
+
+  const toggleVendor = (vendorId: string) => {
+    if (openVendor === vendorId) {
+      setOpenVendor(null);
+      return;
+    }
+    setOpenVendor(vendorId);
+    setPay(null);
+    void loadBills(vendorId);
+  };
+
+  const submitPay = async () => {
+    if (!pay || paying) return;
+    const amountPaise = paiseFromInr(pay.amount);
+    if (amountPaise <= 0) {
+      setNotice("Enter the amount to pay");
+      return;
+    }
+    setPaying(true);
+    try {
+      const res = await fetch("/api/ledger", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "pay-vendor-bill",
+          billId: pay.billId,
+          amountPaise,
+          mode: pay.mode,
+          paidOn: pay.paidOn || undefined,
+          reference: pay.reference.trim(),
+        }),
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        balancePaise?: number;
+        paymentNo?: string;
+        ledgerVoucherNo?: string;
+        error?: string;
+      };
+      if (!res.ok || !json.ok) {
+        setNotice(json.error || "Payment failed");
+        return;
+      }
+      // Mirror the payment into the DESK bank book.
+      //
+      // The store pays through inv_pay_vendor_bill, which writes the server
+      // book (Dr 2000 / Cr tender) and nothing else. The desk's own bank
+      // ledger never saw a store payment, so the Accounts dashboard's "Bank
+      // balances" counted fee receipts coming IN and not one rupee going OUT
+      // — 170 debits, zero credits, while the book carried 3.06 lakh of bank
+      // payments the desk had never heard of.
+      //
+      // Written here rather than in the RPC on purpose: a desk push deletes
+      // accounts_desk_bank_ledger rows whose ids it does not carry, so a row
+      // inserted server-side would be destroyed by the next browser sync.
+      //
+      // Never allowed to disturb the payment itself — that has already
+      // committed on the server, and a desk-side problem must not report a
+      // successful payment as failed.
+      let deskNote = "";
+      if (pay.mode !== "cash") {
+        try {
+          const source = json.paymentNo || `${pay.billId}:${amountPaise}`;
+          if (!bankMovementExists("inv_vendor_payment", source)) {
+            const bankId = resolveBankForPaymentMode(pay.mode as PaymentMode);
+            if (bankId) {
+              const moved = postBankMovement({
+                bankId,
+                date: pay.paidOn || undefined,
+                direction: "cr",
+                amountPaise,
+                mode: pay.mode as PaymentMode,
+                sourceType: "inv_vendor_payment",
+                sourceId: source,
+                narration: `Vendor payment · ${pay.billNo}`,
+                transactionRef: pay.reference.trim(),
+              });
+              if (!moved.ok) deskNote = ` · bank book not updated: ${moved.error}`;
+            } else {
+              deskNote =
+                ` · no bank is set up for ${pay.mode}, so the desk bank book was not updated`;
+            }
+          }
+        } catch {
+          deskNote = " · the desk bank book could not be updated";
+        }
+      }
+
+      setNotice(
+        `Paid ${formatInr(amountPaise)} against ${pay.billNo} — ` +
+          `${formatInr(json.balancePaise ?? 0)} still outstanding` +
+          (json.ledgerVoucherNo ? ` · voucher ${json.ledgerVoucherNo}` : "") +
+          deskNote,
+      );
+      const vendorId = pay.vendorId;
+      setPay(null);
+      await Promise.all([load(), loadBills(vendorId)]);
+    } catch {
+      setNotice("Could not reach the server");
+    } finally {
+      setPaying(false);
+    }
+  };
+
   const owing = (rows ?? []).filter((r) => r.ledgerDuePaise !== 0);
   const totalPaise = owing.reduce((n, r) => n + r.ledgerDuePaise, 0);
 
@@ -2082,7 +2314,10 @@ function StoreVendorDues() {
             Store vendors
           </h3>
           <p className="text-[11px] text-[var(--muted)]">
-            From the ledger, account 2000 — the same figure as the trial balance
+            Every vendor created in Store → Vendors, with what the ledger says
+            the school owes. Click a vendor to see and pay its open bills —
+            the payment settles the store bill and posts to the books in one
+            step.
           </p>
         </div>
         <button type="button" className={BTN_OUTLINE} onClick={() => void load()}>
@@ -2096,14 +2331,21 @@ function StoreVendorDues() {
         </p>
       ) : null}
 
+      {notice ? (
+        <p className="mb-2 rounded-lg border border-[var(--border)] bg-[var(--accent)] px-3 py-1.5 text-xs text-[var(--brand-deep)]">
+          {notice}
+        </p>
+      ) : null}
+
       {loading && !rows ? (
         <p className="py-3 text-sm text-[var(--muted)]">Loading vendor dues…</p>
       ) : null}
 
       {rows && rows.length === 0 ? (
         <p className="py-3 text-sm text-[var(--muted)]">
-          No store vendors yet. They are created in Store → Vendors, and appear
-          here as soon as a bill is raised against one.
+          No store vendors yet. Create them in Store → Vendors; they appear
+          here immediately, and their bills become payable here as soon as a
+          goods receipt raises one.
         </p>
       ) : null}
 
@@ -2118,49 +2360,213 @@ function StoreVendorDues() {
                 <th className="pb-2 text-right">Owed (books)</th>
                 <th className="pb-2 text-right">Open bills</th>
                 <th className="pb-2 text-left">Oldest</th>
+                <th className="pb-2 text-right">Action</th>
               </tr>
             </ErpTableHead>
             <ErpTableBody>
               {rows.map((r) => {
                 const agrees = r.ledgerDuePaise === r.billsOpenPaise;
+                const expanded = openVendor === r.vendorId;
+                const bills = billsByVendor[r.vendorId] ?? [];
                 return (
-                  <tr key={r.vendorId}>
-                    <td className="py-2 font-semibold">
-                      {r.name}
-                      {r.paymentTermsDays > 0 ? (
-                        <span className="ml-1 text-[11px] font-normal text-[var(--muted)]">
-                          {r.paymentTermsDays}d terms
-                        </span>
-                      ) : null}
-                    </td>
-                    <td className="py-2 text-[var(--muted)]">
-                      {r.phone || r.contactPerson || "—"}
-                    </td>
-                    <td className="py-2 text-[var(--muted)]">{r.gstin || "—"}</td>
-                    <td className="py-2 text-right font-semibold">
-                      {formatInr(r.ledgerDuePaise)}
-                    </td>
-                    <td
-                      className={`py-2 text-right ${
-                        agrees ? "text-[var(--muted)]" : "text-[var(--danger)]"
-                      }`}
-                      title={
-                        agrees
-                          ? undefined
-                          : "The store's bills and the ledger disagree — a bill moved on one side only"
-                      }
-                    >
-                      {formatInr(r.billsOpenPaise)}
-                      {r.openBillCount > 0 ? (
-                        <span className="ml-1 text-[11px] text-[var(--muted)]">
-                          ({r.openBillCount})
-                        </span>
-                      ) : null}
-                    </td>
-                    <td className="py-2 text-[var(--muted)]">
-                      {r.oldestBillDate || "—"}
-                    </td>
-                  </tr>
+                  <Fragment key={r.vendorId}>
+                    <tr>
+                      <td className="py-2 font-semibold">
+                        {r.name}
+                        {r.paymentTermsDays > 0 ? (
+                          <span className="ml-1 text-[11px] font-normal text-[var(--muted)]">
+                            {r.paymentTermsDays}d terms
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="py-2 text-[var(--muted)]">
+                        {r.phone || r.contactPerson || "—"}
+                      </td>
+                      <td className="py-2 text-[var(--muted)]">{r.gstin || "—"}</td>
+                      <td className="py-2 text-right font-semibold">
+                        {formatInr(r.ledgerDuePaise)}
+                      </td>
+                      <td
+                        className={`py-2 text-right ${
+                          agrees ? "text-[var(--muted)]" : "text-[var(--danger)]"
+                        }`}
+                        title={
+                          agrees
+                            ? undefined
+                            : "The store's bills and the ledger disagree — a bill moved on one side only"
+                        }
+                      >
+                        {formatInr(r.billsOpenPaise)}
+                        {r.openBillCount > 0 ? (
+                          <span className="ml-1 text-[11px] text-[var(--muted)]">
+                            ({r.openBillCount})
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="py-2 text-[var(--muted)]">
+                        {r.oldestBillDate || "—"}
+                      </td>
+                      <td className="py-2 text-right">
+                        <button
+                          type="button"
+                          className={BTN_OUTLINE}
+                          onClick={() => toggleVendor(r.vendorId)}
+                        >
+                          {expanded
+                            ? "Close"
+                            : r.openBillCount > 0
+                              ? "Bills / pay"
+                              : "Bills"}
+                        </button>
+                      </td>
+                    </tr>
+                    {expanded ? (
+                      <tr>
+                        <td colSpan={7} className="pb-3">
+                          <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] p-2">
+                            {billsBusy && !bills.length ? (
+                              <p className="px-1 py-2 text-xs text-[var(--muted)]">
+                                Loading bills…
+                              </p>
+                            ) : bills.length === 0 ? (
+                              <p className="px-1 py-2 text-xs text-[var(--muted)]">
+                                No open bills. A bill is raised in Store when
+                                goods are received against this vendor.
+                              </p>
+                            ) : (
+                              <ul className="space-y-2">
+                                {bills.map((b) => (
+                                  <li
+                                    key={b.id}
+                                    className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-2"
+                                  >
+                                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                                      <span className="font-semibold text-[var(--brand-deep)]">
+                                        {b.billNo}
+                                        {b.supplierInvoiceNo
+                                          ? ` · inv ${b.supplierInvoiceNo}`
+                                          : ""}
+                                        {b.grnNo ? ` · ${b.grnNo}` : ""}
+                                      </span>
+                                      <span className="text-[var(--muted)]">
+                                        {b.billDate}
+                                        {b.overdueDays > 0 ? (
+                                          <span className="ml-1 font-semibold text-[var(--danger)]">
+                                            {b.overdueDays}d overdue
+                                          </span>
+                                        ) : null}
+                                      </span>
+                                      <span>
+                                        {formatInr(b.totalPaise)} billed ·{" "}
+                                        {formatInr(b.paidPaise)} paid ·{" "}
+                                        <strong>
+                                          {formatInr(b.balancePaise)} due
+                                        </strong>
+                                      </span>
+                                      {pay?.billId !== b.id ? (
+                                        <button
+                                          type="button"
+                                          className={BTN}
+                                          disabled={b.balancePaise <= 0}
+                                          onClick={() =>
+                                            setPay({
+                                              billId: b.id,
+                                              billNo: b.billNo,
+                                              vendorId: r.vendorId,
+                                              balancePaise: b.balancePaise,
+                                              amount: (b.balancePaise / 100).toFixed(2),
+                                              mode: "bank",
+                                              paidOn: new Date()
+                                                .toISOString()
+                                                .slice(0, 10),
+                                              reference: "",
+                                            })
+                                          }
+                                        >
+                                          Pay
+                                        </button>
+                                      ) : null}
+                                    </div>
+                                    {pay?.billId === b.id ? (
+                                      <div className="mt-2 flex flex-wrap items-end gap-2 border-t border-[var(--border)] pt-2">
+                                        <label className="text-[11px] text-[var(--muted)]">
+                                          Amount (₹)
+                                          <input
+                                            className={FIELD}
+                                            value={pay.amount}
+                                            onChange={(e) =>
+                                              setPay({ ...pay, amount: e.target.value })
+                                            }
+                                          />
+                                        </label>
+                                        <label className="text-[11px] text-[var(--muted)]">
+                                          Paid on
+                                          <input
+                                            type="date"
+                                            className={FIELD}
+                                            value={pay.paidOn}
+                                            onChange={(e) =>
+                                              setPay({ ...pay, paidOn: e.target.value })
+                                            }
+                                          />
+                                        </label>
+                                        <label className="text-[11px] text-[var(--muted)]">
+                                          Mode
+                                          <select
+                                            className={FIELD}
+                                            value={pay.mode}
+                                            onChange={(e) =>
+                                              setPay({ ...pay, mode: e.target.value })
+                                            }
+                                          >
+                                            <option value="bank">Bank</option>
+                                            <option value="upi">UPI</option>
+                                            <option value="neft">NEFT</option>
+                                            <option value="rtgs">RTGS</option>
+                                            <option value="cheque">Cheque</option>
+                                            <option value="cash">Cash</option>
+                                          </select>
+                                        </label>
+                                        <label className="text-[11px] text-[var(--muted)]">
+                                          Reference
+                                          <input
+                                            className={FIELD}
+                                            placeholder="UTR / cheque no."
+                                            value={pay.reference}
+                                            onChange={(e) =>
+                                              setPay({ ...pay, reference: e.target.value })
+                                            }
+                                          />
+                                        </label>
+                                        <button
+                                          type="button"
+                                          className={BTN}
+                                          disabled={paying}
+                                          onClick={() => void submitPay()}
+                                        >
+                                          {paying
+                                            ? "Paying…"
+                                            : `Pay ${formatInr(paiseFromInr(pay.amount))}`}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className={BTN_OUTLINE}
+                                          disabled={paying}
+                                          onClick={() => setPay(null)}
+                                        >
+                                          Cancel
+                                        </button>
+                                      </div>
+                                    ) : null}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
                 );
               })}
             </ErpTableBody>
@@ -2348,6 +2754,10 @@ export function BillsPanel({
 
   return (
     <div className="mt-4 space-y-4">
+      {/* Server-truth vendors first: this is where store suppliers are
+          seen and paid. The forms below are the browser-book side. */}
+      <StoreVendorDues />
+
       <section className={`${CARD} space-y-4`}>
         <h3 className="text-sm font-bold text-[var(--brand-deep)]">
           Vendor bill entry
@@ -2582,7 +2992,6 @@ export function BillsPanel({
         </div>
       </section>
 
-      <StoreVendorDues />
 
       <section className={CARD}>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">

@@ -3,6 +3,7 @@ import "package:flutter/material.dart";
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "module_shell.dart";
+import "tutor_screen.dart";
 
 /// Homework feed for one section. Parents pass [studentId]; teachers pass
 /// [classId]+[sectionId] and get a compose button.
@@ -15,10 +16,15 @@ class HomeworkScreen extends StatelessWidget {
     this.classId,
     this.sectionId,
     this.canPost = false,
+    this.child,
   });
 
   final ApiClient api;
   final String subtitle;
+
+  /// The child this feed belongs to, when a parent opened it — enables
+  /// "Ask tutor" on each item, with the assignment as the tutor's context.
+  final ParentChild? child;
   final String? studentId;
   final String? classId;
   final String? sectionId;
@@ -133,16 +139,50 @@ class HomeworkScreen extends StatelessWidget {
                       ),
                     ],
                     const SizedBox(height: 8),
-                    Text(
-                      [
-                        if (item.teacherName.isNotEmpty) item.teacherName,
-                        if ((item.dueAt ?? "").isNotEmpty)
-                          "due ${formatDateLabel(item.dueAt!)}",
-                      ].join(" · "),
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: AppColors.muted,
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            [
+                              if (item.teacherName.isNotEmpty)
+                                item.teacherName,
+                              if ((item.dueAt ?? "").isNotEmpty)
+                                "due ${formatDateLabel(item.dueAt!)}",
+                            ].join(" · "),
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: AppColors.muted,
+                            ),
+                          ),
+                        ),
+                        if (child != null)
+                          TextButton.icon(
+                            onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => TutorScreen(
+                                  api: api,
+                                  context: TutorContext(
+                                    child: child!,
+                                    subjectLabel: item.subjectName,
+                                    homeworkTitle: item.title,
+                                    homeworkBody: item.body,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            style: TextButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                              ),
+                            ),
+                            icon: const Icon(Icons.school_outlined, size: 16),
+                            label: const Text(
+                              "Ask tutor",
+                              style: TextStyle(fontSize: 12),
+                            ),
+                          ),
+                      ],
                     ),
                   ],
                 ),

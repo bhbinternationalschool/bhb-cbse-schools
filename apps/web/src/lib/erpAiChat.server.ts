@@ -14,7 +14,12 @@ import {
   buildErpAiGeminiSystemPrompt,
   inferLinksFromGeminiText,
 } from "@/lib/erpAiContext.server";
-import { generateTutorText, llmConfigured, type LlmEngine } from "@/lib/aiLlm.server";
+import {
+  generateTutorText,
+  llmConfigured,
+  startLlmPrecheck,
+  type LlmEngine,
+} from "@/lib/aiLlm.server";
 import { geminiConfigured } from "@/lib/erpAiGemini.server";
 import { loadMasters, type MastersState } from "@/lib/masters";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
@@ -38,6 +43,11 @@ export async function replyErpAiChatServer(opts: {
   pathname?: string;
   tab?: string;
   masters?: MastersState | null;
+  /**
+   * Stream the LLM part of the reply. Local (guide / canned) answers are
+   * instant and arrive whole in the returned message, never as deltas.
+   */
+  onDelta?: (text: string) => void;
 }): Promise<{
   message: ErpAiMessage;
   engine: "local" | LlmEngine;
@@ -58,6 +68,11 @@ export async function replyErpAiChatServer(opts: {
       llmConfigured: anyLlm,
     };
   }
+
+  // Everything the model call needs that touches the network starts now,
+  // together: the requester + budget verdict, and the knowledge-base
+  // lookup. Serial, they were the bulk of the wait before the first word.
+  const precheck = startLlmPrecheck();
 
   const history = (opts.history || []).slice(-8).map((h) => ({
     role: h.role,
@@ -90,6 +105,8 @@ export async function replyErpAiChatServer(opts: {
     system,
     history,
     userMessage: opts.message,
+    onDelta: opts.onDelta,
+    precheck,
   });
 
   if (!llm.ok) {

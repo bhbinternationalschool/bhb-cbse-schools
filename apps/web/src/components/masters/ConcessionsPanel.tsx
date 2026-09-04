@@ -1,4 +1,9 @@
 "use client";
+import {
+  canApproveConcession,
+  canGrantConcession,
+  concessionGrantStatus,
+} from "@/lib/rbac";
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Printer, X } from "lucide-react";
@@ -40,7 +45,12 @@ import {
   suggestStudentsForConcession,
 } from "@/lib/concessionSuggest";
 import {
+  buildAllConcessionStudentLists,
   buildConcessionStudentList,
+  concessionRowMatches,
+  isCounterGeneratedConcession,
+  groupConcessionRowsByFamily,
+  type ConcessionFamilyGroup,
   type ConcessionStudentListRow,
 } from "@/lib/concessionStudentList";
 import { EditControl } from "@/components/masters/EditControl";
@@ -140,9 +150,7 @@ export function ConcessionsPanel({
     setKind(rule.kind);
     setMode(rule.mode);
     setValueInput(
-      rule.mode === "percent"
-        ? String(rule.value)
-        : String(rule.value / 100),
+      rule.mode === "percent" ? String(rule.value) : String(rule.value / 100),
     );
     setFeeHeadIds([...rule.feeHeadIds]);
     setAlwaysPrincipal(rule.autoApproveMaxPaise == null);
@@ -261,9 +269,9 @@ export function ConcessionsPanel({
       value,
       siblingTiers:
         kind === "sibling"
-          ? siblingTiers.map(normalizeSiblingTier).sort(
-              (a, b) => a.childNo - b.childNo,
-            )
+          ? siblingTiers
+              .map(normalizeSiblingTier)
+              .sort((a, b) => a.childNo - b.childNo)
           : [],
       feeHeadIds,
       autoApproveMaxPaise,
@@ -458,350 +466,367 @@ export function ConcessionsPanel({
             </button>
             {formOpen ? (
               <div className="border-t border-[var(--border)] px-3 pb-3">
-<form
-          onSubmit={saveRule}
-          className="pt-1"
-        >
-
-          <label className="mt-3 block text-sm">
-            <span className="mb-1.5 block text-[var(--muted)]">Code</span>
-            <input
-              className="field"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              placeholder="SIBLING"
-              required
-            />
-          </label>
-          <label className="mt-3 block text-sm">
-            <span className="mb-1.5 block text-[var(--muted)]">Name</span>
-            <input
-              className="field"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Sibling discount"
-              required
-            />
-          </label>
-          <label className="mt-3 block text-sm">
-            <span className="mb-1.5 block text-[var(--muted)]">Kind</span>
-            <select
-              className="field"
-              value={kind}
-              onChange={(e) => {
-                const next = e.target.value;
-                setKind(next);
-                if (next === "sibling" && siblingTiers.length === 0) {
-                  setSiblingTiers(defaultSiblingTiers());
-                }
-              }}
-            >
-              {kinds.map((k) => (
-                <option key={k.id} value={k.code}>
-                  {k.label}
-                  {k.isSystem ? "" : " (custom)"}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="button"
-            className="mt-1.5 text-xs font-medium text-[var(--brand-mid)]"
-            onClick={() => {
-              setKindsOpen(true);
-              setShowKindForm(true);
-            }}
-          >
-            Need another kind? Create kind ↓
-          </button>
-
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <label className="block text-sm">
-              <span className="mb-1.5 block text-[var(--muted)]">Mode</span>
-              <select
-                className="field"
-                value={mode}
-                onChange={(e) =>
-                  setMode(e.target.value as ConcessionValueMode)
-                }
-              >
-                <option value="percent">Percent</option>
-                <option value="fixed">Fixed ₹</option>
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="mb-1.5 block text-[var(--muted)]">
-                {kind === "sibling"
-                  ? "Fallback value"
-                  : mode === "percent"
-                    ? "Percent"
-                    : "Amount (₹)"}
-              </span>
-              <input
-                className="field"
-                value={valueInput}
-                onChange={(e) => setValueInput(e.target.value)}
-                inputMode="decimal"
-                required
-              />
-            </label>
-          </div>
-
-          {kind === "sibling" ? (
-            <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <div className="text-xs font-semibold text-[var(--brand-deep)]">
-                    Sibling child tiers
-                  </div>
-                  <p className="mt-0.5 text-[11px] text-[var(--muted)]">
-                    1st child usually pays full fee. Set discount for 2nd, 3rd,
-                    4th+ (highest tier covers higher numbers).
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="text-[11px] font-semibold text-[var(--brand-mid)]"
-                  onClick={() => {
-                    const nextNo =
-                      Math.max(1, ...siblingTiers.map((t) => t.childNo), 1) +
-                      1;
-                    setSiblingTiers([
-                      ...siblingTiers,
-                      {
-                        childNo: Math.max(2, nextNo),
-                        mode,
-                        value:
-                          mode === "percent"
-                            ? Math.min(
-                                100,
-                                (siblingTiers[siblingTiers.length - 1]
-                                  ?.value ?? 10) + 5,
-                              )
-                            : siblingTiers[siblingTiers.length - 1]?.value ??
-                              0,
-                      },
-                    ]);
-                  }}
-                >
-                  + Add child tier
-                </button>
-              </div>
-              <ul className="mt-2 space-y-2">
-                {siblingTiers.map((t, idx) => {
-                  const last = idx === siblingTiers.length - 1;
-                  return (
-                    <li
-                      key={`${t.childNo}-${idx}`}
-                      className="grid grid-cols-[4.5rem_5.5rem_1fr_auto] items-end gap-2"
+                <form onSubmit={saveRule} className="pt-1">
+                  <label className="mt-3 block text-sm">
+                    <span className="mb-1.5 block text-[var(--muted)]">
+                      Code
+                    </span>
+                    <input
+                      className="field"
+                      value={code}
+                      onChange={(e) => setCode(e.target.value)}
+                      placeholder="SIBLING"
+                      required
+                    />
+                  </label>
+                  <label className="mt-3 block text-sm">
+                    <span className="mb-1.5 block text-[var(--muted)]">
+                      Name
+                    </span>
+                    <input
+                      className="field"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="Sibling discount"
+                      required
+                    />
+                  </label>
+                  <label className="mt-3 block text-sm">
+                    <span className="mb-1.5 block text-[var(--muted)]">
+                      Kind
+                    </span>
+                    <select
+                      className="field"
+                      value={kind}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setKind(next);
+                        if (next === "sibling" && siblingTiers.length === 0) {
+                          setSiblingTiers(defaultSiblingTiers());
+                        }
+                      }}
                     >
-                      <label className="block text-[11px]">
-                        <span className="mb-0.5 block text-[var(--muted)]">
-                          Child #
-                        </span>
-                        <input
-                          className="field !py-1 !text-xs"
-                          inputMode="numeric"
-                          value={t.childNo}
-                          onChange={(e) => {
-                            const n = Math.max(
-                              2,
-                              Number(e.target.value.replace(/\D/g, "") || 2),
-                            );
-                            setSiblingTiers((prev) =>
-                              prev.map((row, i) =>
-                                i === idx ? { ...row, childNo: n } : row,
-                              ),
-                            );
-                          }}
-                        />
-                      </label>
-                      <label className="block text-[11px]">
-                        <span className="mb-0.5 block text-[var(--muted)]">
-                          Mode
-                        </span>
-                        <select
-                          className="field !py-1 !text-xs"
-                          value={t.mode}
-                          onChange={(e) =>
-                            setSiblingTiers((prev) =>
-                              prev.map((row, i) =>
-                                i === idx
-                                  ? {
-                                      ...row,
-                                      mode: e.target
-                                        .value as ConcessionValueMode,
-                                    }
-                                  : row,
-                              ),
-                            )
-                          }
-                        >
-                          <option value="percent">%</option>
-                          <option value="fixed">₹</option>
-                        </select>
-                      </label>
-                      <label className="block text-[11px]">
-                        <span className="mb-0.5 block text-[var(--muted)]">
-                          {ordinalChildLabel(t.childNo)}
-                          {last ? "+" : ""} child ·{" "}
-                          {t.mode === "percent" ? "%" : "₹"}
-                        </span>
-                        <input
-                          className="field !py-1 !text-xs"
-                          inputMode="decimal"
-                          value={
-                            t.mode === "percent"
-                              ? String(t.value)
-                              : String(t.value / 100)
-                          }
-                          onChange={(e) => {
-                            const raw = e.target.value;
-                            setSiblingTiers((prev) =>
-                              prev.map((row, i) => {
-                                if (i !== idx) return row;
-                                if (row.mode === "percent") {
-                                  return {
-                                    ...row,
-                                    value: Math.max(
-                                      0,
-                                      Math.min(
-                                        100,
-                                        Number(raw.replace(/[^\d.]/g, "")) ||
-                                          0,
-                                      ),
-                                    ),
-                                  };
-                                }
-                                return {
-                                  ...row,
-                                  value: parseInrToPaise(raw),
-                                };
-                              }),
-                            );
-                          }}
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        className="mb-0.5 text-[11px] font-semibold text-[var(--danger)] disabled:opacity-40"
-                        disabled={siblingTiers.length <= 1}
-                        onClick={() =>
-                          setSiblingTiers((prev) =>
-                            prev.filter((_, i) => i !== idx),
-                          )
+                      {kinds.map((k) => (
+                        <option key={k.id} value={k.code}>
+                          {k.label}
+                          {k.isSystem ? "" : " (custom)"}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    className="mt-1.5 text-xs font-medium text-[var(--brand-mid)]"
+                    onClick={() => {
+                      setKindsOpen(true);
+                      setShowKindForm(true);
+                    }}
+                  >
+                    Need another kind? Create kind ↓
+                  </button>
+
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <label className="block text-sm">
+                      <span className="mb-1.5 block text-[var(--muted)]">
+                        Mode
+                      </span>
+                      <select
+                        className="field"
+                        value={mode}
+                        onChange={(e) =>
+                          setMode(e.target.value as ConcessionValueMode)
                         }
                       >
-                        Remove
+                        <option value="percent">Percent</option>
+                        <option value="fixed">Fixed ₹</option>
+                      </select>
+                    </label>
+                    <label className="block text-sm">
+                      <span className="mb-1.5 block text-[var(--muted)]">
+                        {kind === "sibling"
+                          ? "Fallback value"
+                          : mode === "percent"
+                            ? "Percent"
+                            : "Amount (₹)"}
+                      </span>
+                      <input
+                        className="field"
+                        value={valueInput}
+                        onChange={(e) => setValueInput(e.target.value)}
+                        inputMode="decimal"
+                        required
+                      />
+                    </label>
+                  </div>
+
+                  {kind === "sibling" ? (
+                    <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <div className="text-xs font-semibold text-[var(--brand-deep)]">
+                            Sibling child tiers
+                          </div>
+                          <p className="mt-0.5 text-[11px] text-[var(--muted)]">
+                            1st child usually pays full fee. Set discount for
+                            2nd, 3rd, 4th+ (highest tier covers higher numbers).
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          className="text-[11px] font-semibold text-[var(--brand-mid)]"
+                          onClick={() => {
+                            const nextNo =
+                              Math.max(
+                                1,
+                                ...siblingTiers.map((t) => t.childNo),
+                                1,
+                              ) + 1;
+                            setSiblingTiers([
+                              ...siblingTiers,
+                              {
+                                childNo: Math.max(2, nextNo),
+                                mode,
+                                value:
+                                  mode === "percent"
+                                    ? Math.min(
+                                        100,
+                                        (siblingTiers[siblingTiers.length - 1]
+                                          ?.value ?? 10) + 5,
+                                      )
+                                    : (siblingTiers[siblingTiers.length - 1]
+                                        ?.value ?? 0),
+                              },
+                            ]);
+                          }}
+                        >
+                          + Add child tier
+                        </button>
+                      </div>
+                      <ul className="mt-2 space-y-2">
+                        {siblingTiers.map((t, idx) => {
+                          const last = idx === siblingTiers.length - 1;
+                          return (
+                            <li
+                              key={`${t.childNo}-${idx}`}
+                              className="grid grid-cols-[4.5rem_5.5rem_1fr_auto] items-end gap-2"
+                            >
+                              <label className="block text-[11px]">
+                                <span className="mb-0.5 block text-[var(--muted)]">
+                                  Child #
+                                </span>
+                                <input
+                                  className="field !py-1 !text-xs"
+                                  inputMode="numeric"
+                                  value={t.childNo}
+                                  onChange={(e) => {
+                                    const n = Math.max(
+                                      2,
+                                      Number(
+                                        e.target.value.replace(/\D/g, "") || 2,
+                                      ),
+                                    );
+                                    setSiblingTiers((prev) =>
+                                      prev.map((row, i) =>
+                                        i === idx
+                                          ? { ...row, childNo: n }
+                                          : row,
+                                      ),
+                                    );
+                                  }}
+                                />
+                              </label>
+                              <label className="block text-[11px]">
+                                <span className="mb-0.5 block text-[var(--muted)]">
+                                  Mode
+                                </span>
+                                <select
+                                  className="field !py-1 !text-xs"
+                                  value={t.mode}
+                                  onChange={(e) =>
+                                    setSiblingTiers((prev) =>
+                                      prev.map((row, i) =>
+                                        i === idx
+                                          ? {
+                                              ...row,
+                                              mode: e.target
+                                                .value as ConcessionValueMode,
+                                            }
+                                          : row,
+                                      ),
+                                    )
+                                  }
+                                >
+                                  <option value="percent">%</option>
+                                  <option value="fixed">₹</option>
+                                </select>
+                              </label>
+                              <label className="block text-[11px]">
+                                <span className="mb-0.5 block text-[var(--muted)]">
+                                  {ordinalChildLabel(t.childNo)}
+                                  {last ? "+" : ""} child ·{" "}
+                                  {t.mode === "percent" ? "%" : "₹"}
+                                </span>
+                                <input
+                                  className="field !py-1 !text-xs"
+                                  inputMode="decimal"
+                                  value={
+                                    t.mode === "percent"
+                                      ? String(t.value)
+                                      : String(t.value / 100)
+                                  }
+                                  onChange={(e) => {
+                                    const raw = e.target.value;
+                                    setSiblingTiers((prev) =>
+                                      prev.map((row, i) => {
+                                        if (i !== idx) return row;
+                                        if (row.mode === "percent") {
+                                          return {
+                                            ...row,
+                                            value: Math.max(
+                                              0,
+                                              Math.min(
+                                                100,
+                                                Number(
+                                                  raw.replace(/[^\d.]/g, ""),
+                                                ) || 0,
+                                              ),
+                                            ),
+                                          };
+                                        }
+                                        return {
+                                          ...row,
+                                          value: parseInrToPaise(raw),
+                                        };
+                                      }),
+                                    );
+                                  }}
+                                />
+                              </label>
+                              <button
+                                type="button"
+                                className="mb-0.5 text-[11px] font-semibold text-[var(--danger)] disabled:opacity-40"
+                                disabled={siblingTiers.length <= 1}
+                                onClick={() =>
+                                  setSiblingTiers((prev) =>
+                                    prev.filter((_, i) => i !== idx),
+                                  )
+                                }
+                              >
+                                Remove
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  <div className="mt-3">
+                    <div className="mb-1.5 text-sm text-[var(--muted)]">
+                      Fee heads (empty = all)
+                    </div>
+                    <div className="flex max-h-36 flex-wrap gap-1.5 overflow-y-auto rounded-xl border border-[var(--border)] p-2">
+                      {activeHeads.map((h) => {
+                        const on = feeHeadIds.includes(h.id);
+                        return (
+                          <button
+                            key={h.id}
+                            type="button"
+                            onClick={() => toggleHead(h.id)}
+                            className={`rounded-lg px-2 py-1 text-xs font-medium ${
+                              on
+                                ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                                : "bg-[var(--surface)] text-[var(--brand-deep)]"
+                            }`}
+                          >
+                            {h.nameEn}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <label className="mt-3 flex items-center gap-2 text-sm text-[var(--brand-deep)]">
+                    <input
+                      type="checkbox"
+                      checked={alwaysPrincipal}
+                      onChange={(e) => setAlwaysPrincipal(e.target.checked)}
+                    />
+                    Always require Principal approval
+                  </label>
+                  {!alwaysPrincipal ? (
+                    <label className="mt-3 block text-sm">
+                      <span className="mb-1.5 block text-[var(--muted)]">
+                        Auto-approve if concession ≤ ₹
+                      </span>
+                      <input
+                        className="field"
+                        value={autoApprove}
+                        onChange={(e) => setAutoApprove(e.target.value)}
+                        inputMode="decimal"
+                      />
+                    </label>
+                  ) : null}
+
+                  <label className="mt-3 flex items-center gap-2 text-sm text-[var(--brand-deep)]">
+                    <input
+                      type="checkbox"
+                      checked={docsRequired}
+                      onChange={(e) => setDocsRequired(e.target.checked)}
+                    />
+                    Supporting document required
+                  </label>
+
+                  <label className="mt-3 block text-sm">
+                    <span className="mb-1.5 block text-[var(--muted)]">
+                      Incompatible codes (comma-separated)
+                    </span>
+                    <input
+                      className="field"
+                      value={incompatible}
+                      onChange={(e) => setIncompatible(e.target.value)}
+                      placeholder="STAFF, MERIT"
+                    />
+                  </label>
+
+                  <label className="mt-3 block text-sm">
+                    <span className="mb-1.5 block text-[var(--muted)]">
+                      Notes
+                    </span>
+                    <input
+                      className="field"
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                      placeholder="Policy notes for Accounts / Principal"
+                    />
+                  </label>
+
+                  <div className="mt-4 flex gap-2">
+                    {editingId ? (
+                      <button
+                        type="button"
+                        className="rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)]"
+                        onClick={() => {
+                          resetForm();
+                          setFormOpen(false);
+                        }}
+                      >
+                        Cancel
                       </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          ) : null}
+                    ) : null}
+                    <button
+                      type="submit"
+                      className="btn-accent flex-1 rounded-xl px-4 py-2.5 text-sm font-semibold"
+                    >
+                      {editingId ? "Update concession" : "Save concession"}
+                    </button>
+                  </div>
 
-          <div className="mt-3">
-            <div className="mb-1.5 text-sm text-[var(--muted)]">
-              Fee heads (empty = all)
-            </div>
-            <div className="flex max-h-36 flex-wrap gap-1.5 overflow-y-auto rounded-xl border border-[var(--border)] p-2">
-              {activeHeads.map((h) => {
-                const on = feeHeadIds.includes(h.id);
-                return (
-                  <button
-                    key={h.id}
-                    type="button"
-                    onClick={() => toggleHead(h.id)}
-                    className={`rounded-lg px-2 py-1 text-xs font-medium ${
-                      on
-                        ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
-                        : "bg-[var(--surface)] text-[var(--brand-deep)]"
-                    }`}
-                  >
-                    {h.nameEn}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <label className="mt-3 flex items-center gap-2 text-sm text-[var(--brand-deep)]">
-            <input
-              type="checkbox"
-              checked={alwaysPrincipal}
-              onChange={(e) => setAlwaysPrincipal(e.target.checked)}
-            />
-            Always require Principal approval
-          </label>
-          {!alwaysPrincipal ? (
-            <label className="mt-3 block text-sm">
-              <span className="mb-1.5 block text-[var(--muted)]">
-                Auto-approve if concession ≤ ₹
-              </span>
-              <input
-                className="field"
-                value={autoApprove}
-                onChange={(e) => setAutoApprove(e.target.value)}
-                inputMode="decimal"
-              />
-            </label>
-          ) : null}
-
-          <label className="mt-3 flex items-center gap-2 text-sm text-[var(--brand-deep)]">
-            <input
-              type="checkbox"
-              checked={docsRequired}
-              onChange={(e) => setDocsRequired(e.target.checked)}
-            />
-            Supporting document required
-          </label>
-
-          <label className="mt-3 block text-sm">
-            <span className="mb-1.5 block text-[var(--muted)]">
-              Incompatible codes (comma-separated)
-            </span>
-            <input
-              className="field"
-              value={incompatible}
-              onChange={(e) => setIncompatible(e.target.value)}
-              placeholder="STAFF, MERIT"
-            />
-          </label>
-
-          <label className="mt-3 block text-sm">
-            <span className="mb-1.5 block text-[var(--muted)]">Notes</span>
-            <input
-              className="field"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Policy notes for Accounts / Principal"
-            />
-          </label>
-
-          <div className="mt-4 flex gap-2">
-            {editingId ? (
-              <button
-                type="button"
-                className="rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)]"
-                onClick={() => { resetForm(); setFormOpen(false); }}
-              >
-                Cancel
-              </button>
-            ) : null}
-            <button
-              type="submit"
-              className="btn-accent flex-1 rounded-xl px-4 py-2.5 text-sm font-semibold"
-            >
-              {editingId ? "Update concession" : "Save concession"}
-            </button>
-          </div>
-
-          <p className="mt-3 text-[11px] leading-relaxed text-[var(--muted)]">
-            Example: Sibling 10% on Tuition, auto if ≤ {formatInr(500_000)} —
-            above that, Principal maker-checker.
-          </p>
-        </form>
+                  <p className="mt-3 text-[11px] leading-relaxed text-[var(--muted)]">
+                    Example: Sibling 10% on Tuition, auto if ≤{" "}
+                    {formatInr(500_000)} — above that, Principal maker-checker.
+                  </p>
+                </form>
               </div>
             ) : (
               <p className="border-t border-[var(--border)] px-3 py-2 text-[11px] text-[var(--muted)]">
@@ -965,6 +990,20 @@ function GrantStudentsCard({
 }) {
   const sis = useMemo(() => loadSis(), [grants.length, state.concessionGrants]);
   const ay = useSetupAy(state);
+  const session = useDemoSessionOptional();
+  /**
+   * Who may do what with a concession. Recording one and making it effective
+   * are separate acts: an assigned user can prepare the discount a parent is
+   * asking for, but only owner / admin / principal can hand it over.
+   */
+  const mayApprove = useMemo(
+    () => (session ? canApproveConcession(session, state) : false),
+    [session, state],
+  );
+  const mayGrant = useMemo(
+    () => (session ? canGrantConcession(session, state) : false),
+    [session, state],
+  );
   const [selectMode, setSelectMode] = useState<"single" | "multiple">(
     concession.kind === "sibling" ? "multiple" : "single",
   );
@@ -978,6 +1017,18 @@ function GrantStudentsCard({
   >({});
   const [childNoOverride, setChildNoOverride] = useState<number | 0>(0);
   const [reason, setReason] = useState("");
+  /**
+   * The month the discount starts from.
+   *
+   * This used to be today, with nothing to change it — so a discount agreed
+   * in July for the whole session silently began in whatever month the clerk
+   * happened to record it, and the earlier months stayed billed at full rate.
+   * Defaults to the current month, which is what a same-day grant wants, and
+   * is now a field the office can move back.
+   */
+  const [fromMonth, setFromMonth] = useState(() =>
+    new Date().toISOString().slice(0, 7),
+  );
   const [autoApprove, setAutoApprove] = useState(true);
 
   useEffect(() => {
@@ -1017,7 +1068,8 @@ function GrantStudentsCard({
   };
 
   const suggestions = useMemo(
-    () => suggestStudentsForConcession(concession, sis, grants ?? [], ay, state),
+    () =>
+      suggestStudentsForConcession(concession, sis, grants ?? [], ay, state),
     [concession, sis, grants, ay, state],
   );
 
@@ -1025,8 +1077,7 @@ function GrantStudentsCard({
     const q = query.trim().toLowerCase();
     // Scope to the current session so a child promoted across years shows once.
     let list = sis.students.filter(
-      (s) =>
-        s.status === "active" && ayNorm(s.academicYearCode) === ayNorm(ay),
+      (s) => s.status === "active" && ayNorm(s.academicYearCode) === ayNorm(ay),
     );
     if (classId) list = list.filter((s) => s.classId === classId);
     if (sectionId) list = list.filter((s) => s.sectionId === sectionId);
@@ -1065,7 +1116,11 @@ function GrantStudentsCard({
     return siblingChildNumber(sis, s);
   }
 
-  function toggleStudent(s: SisStudent, hint?: string, suggestChildNo?: number) {
+  function toggleStudent(
+    s: SisStudent,
+    hint?: string,
+    suggestChildNo?: number,
+  ) {
     if (selectMode === "single") {
       setSelectedIds([s.id]);
       setQuery(`${s.fullName} · ${s.admissionNo}`);
@@ -1141,13 +1196,18 @@ function GrantStudentsCard({
   function grant(e: React.FormEvent) {
     e.preventDefault();
     if (selectedIds.length === 0) return;
-    const today = new Date().toISOString().slice(0, 10);
-    const shouldAuto =
+    // The first of the chosen month: a fee month is billed whole, so a
+    // mid-month start would be a date the biller cannot act on.
+    const effectiveFrom = /^\d{4}-\d{2}$/.test(fromMonth)
+      ? `${fromMonth}-01`
+      : new Date().toISOString().slice(0, 10);
+    // The money test as before — and then WHO. An assigned user's grant
+    // stays pending however small it is; approval is not something the
+    // person asking for it can give themselves.
+    const amountAllowsAuto =
       autoApprove && concession.autoApproveMaxPaise != null;
-    const status = (shouldAuto ? "approved" : "pending") as
-      | "pending"
-      | "approved"
-      | "rejected";
+    const status = concessionGrantStatus(mayApprove, amountAllowsAuto) as
+      "pending" | "approved" | "rejected";
     const now = new Date().toISOString();
     const rows = selectedIds
       .filter(
@@ -1156,9 +1216,7 @@ function GrantStudentsCard({
       .map((id) => {
         const st = sis.students.find((s) => s.id === id);
         const childNo =
-          concession.kind === "sibling" && st
-            ? resolvedChildNo(st)
-            : null;
+          concession.kind === "sibling" && st ? resolvedChildNo(st) : null;
         return {
           id: newId("cg"),
           concessionId: concession.id,
@@ -1169,10 +1227,11 @@ function GrantStudentsCard({
             (st && concession.kind === "sibling"
               ? siblingGrantHint(sis, st, childNo ?? undefined)
               : concession.name),
-          effectiveFrom: today,
+          effectiveFrom,
           effectiveTo: null as string | null,
           createdAt: now,
-          siblingChildNo: childNo && childNo >= 2 ? childNo : childNo === 1 ? 1 : null,
+          siblingChildNo:
+            childNo && childNo >= 2 ? childNo : childNo === 1 ? 1 : null,
         };
       });
     if (rows.length === 0) {
@@ -1184,9 +1243,12 @@ function GrantStudentsCard({
         ...state,
         concessionGrants: [...(state.concessionGrants ?? []), ...rows],
       },
-      shouldAuto
+      status === "approved"
         ? `Granted & approved for ${rows.length} student${rows.length === 1 ? "" : "s"}`
-        : `Granted (pending) for ${rows.length} student${rows.length === 1 ? "" : "s"}`,
+        : mayApprove
+          ? `Granted (pending) for ${rows.length} student${rows.length === 1 ? "" : "s"}`
+          : `Sent for approval — ${rows.length} student${rows.length === 1 ? "" : "s"}. ` +
+            "A principal, admin or owner must approve it before it applies.",
     );
     clearSelection();
     setReason("");
@@ -1196,6 +1258,12 @@ function GrantStudentsCard({
     grantId: string,
     status: "approved" | "rejected" | "pending",
   ) {
+    // Approving and rejecting ARE the approval. An assigned user reaching
+    // this would be approving their own grant.
+    if (!mayApprove) {
+      commit(state, "Only a principal, admin or owner can approve or reject");
+      return;
+    }
     commit(
       {
         ...state,
@@ -1212,6 +1280,12 @@ function GrantStudentsCard({
   }
 
   function removeGrant(grantId: string) {
+    // Removing an approved grant is a change to what a family is charged,
+    // so it sits on the same side of the line as approving one.
+    if (!mayApprove) {
+      commit(state, "Only a principal, admin or owner can remove a grant");
+      return;
+    }
     commit(
       {
         ...state,
@@ -1317,9 +1391,7 @@ function GrantStudentsCard({
                       className={`flex w-full items-start gap-2 px-1 py-2 text-left text-xs hover:bg-[var(--card)] ${
                         on ? "bg-[var(--card)]" : ""
                       }`}
-                      onClick={() =>
-                        toggleStudent(s, hint, siblingChildNo)
-                      }
+                      onClick={() => toggleStudent(s, hint, siblingChildNo)}
                     >
                       {selectMode === "multiple" ? (
                         <span
@@ -1370,8 +1442,7 @@ function GrantStudentsCard({
             Selected ({selectedStudents.length}):
           </span>
           {selectedStudents.map((s) => {
-            const n =
-              concession.kind === "sibling" ? resolvedChildNo(s) : 0;
+            const n = concession.kind === "sibling" ? resolvedChildNo(s) : 0;
             const tier =
               concession.kind === "sibling"
                 ? resolveSiblingTierValue(concession, n)
@@ -1461,10 +1532,7 @@ function GrantStudentsCard({
                 <option key={c} value={c}>
                   {ordinalChildLabel(c)}
                   {c ===
-                  Math.max(
-                    0,
-                    ...concession.siblingTiers.map((t) => t.childNo),
-                  )
+                  Math.max(0, ...concession.siblingTiers.map((t) => t.childNo))
                     ? "+"
                     : ""}{" "}
                   child
@@ -1480,7 +1548,22 @@ function GrantStudentsCard({
         </div>
       ) : null}
 
-      <form onSubmit={grant} className="mt-3 grid gap-2 sm:grid-cols-2">
+      {!mayGrant ? (
+        <p className="mt-3 rounded-xl border border-dashed border-[var(--border)] bg-[var(--card)]/70 px-4 py-6 text-center text-sm text-[var(--muted)]">
+          Your role cannot grant concessions. A principal, admin or owner — or a
+          user given the fees module — can record one here.
+        </p>
+      ) : null}
+      {!mayApprove && mayGrant ? (
+        <p className="mt-3 rounded-xl border border-[rgba(197,160,40,0.4)] bg-[rgba(197,160,40,0.08)] px-3 py-2 text-[11px] leading-relaxed text-[var(--brand-deep)]">
+          Anything you grant here is saved as <strong>pending</strong> and does
+          not reduce a bill until a principal, admin or owner approves it.
+        </p>
+      ) : null}
+      <form
+        onSubmit={grant}
+        className={`mt-3 grid gap-2 sm:grid-cols-2 ${mayGrant ? "" : "hidden"}`}
+      >
         <label className="block text-sm">
           <span className="mb-1 block text-[11px] text-[var(--muted)]">
             Class
@@ -1583,7 +1666,22 @@ function GrantStudentsCard({
             </p>
           ) : null}
         </label>
-        <label className="block text-sm sm:col-span-2">
+        <label className="block text-sm">
+          <span className="mb-1 block text-[11px] text-[var(--muted)]">
+            Applies from
+          </span>
+          <input
+            type="month"
+            className="field !py-1.5"
+            value={fromMonth}
+            onChange={(e) => setFromMonth(e.target.value)}
+          />
+          <span className="mt-1 block text-[10px] leading-snug text-[var(--muted)]">
+            Months already billed are not re-opened by moving this back — it
+            governs what the counter charges from here on.
+          </span>
+        </label>
+        <label className="block text-sm">
           <span className="mb-1 block text-[11px] text-[var(--muted)]">
             Reason
           </span>
@@ -1695,13 +1793,63 @@ function ConcessionStudentListDrawer({
   const printRef = useRef<HTMLDivElement>(null);
   const sis = useMemo(() => loadSis(), []);
   const kinds = useMemo(() => resolveConcessionKinds(state), [state]);
-  const kindLabel =
-    kinds.find((k) => k.code === rule.kind)?.label ?? rule.kind;
+  const kindLabel = kinds.find((k) => k.code === rule.kind)?.label ?? rule.kind;
+
+  /**
+   * Which policy the list is showing. Defaults to the one the drawer was
+   * opened from; "__all__" widens it, because "who is on a discount, and
+   * which one?" is the question the office asks more often than "who is on
+   * this policy".
+   */
+  const [policyCode, setPolicyCode] = useState<string>(rule.code);
+  const [nameQuery, setNameQuery] = useState("");
+  /** Siblings together — the view that justifies why one child and not another. */
+  const [byFamily, setByFamily] = useState(false);
+
+  const allRows = useMemo(
+    () =>
+      policyCode === "__all__"
+        ? buildAllConcessionStudentLists(state, sis, { sessionAy: ay })
+        : buildConcessionStudentList(
+            state,
+            state.concessions.find((c) => c.code === policyCode) ?? rule,
+            sis,
+            { sessionAy: ay },
+          ),
+    [state, rule, sis, ay, policyCode],
+  );
 
   const rows = useMemo(
-    () => buildConcessionStudentList(state, rule, sis, { sessionAy: ay }),
-    [state, rule, sis, ay],
+    () => allRows.filter((r) => concessionRowMatches(r, nameQuery)),
+    [allRows, nameQuery],
   );
+
+  const families = useMemo(() => groupConcessionRowsByFamily(rows), [rows]);
+
+  const activePolicy = useMemo(
+    () => state.concessions.find((c) => c.code === policyCode) ?? rule,
+    [state.concessions, policyCode, rule],
+  );
+
+  /**
+   * The pickable policies: deduplicated by code, and without the rules the
+   * counter mints per transaction. Production carries 106 concessions, of
+   * which all but a handful are `CTR-TUITION-<amount>` — a picker listing
+   * those is a picker nobody can use. They still appear under "All
+   * discounts", because a child genuinely holds them.
+   */
+  const policies = useMemo(() => {
+    const seen = new Set<string>();
+    return state.concessions
+      .filter((c) => {
+        const code = c.code.toUpperCase();
+        if (seen.has(code) || isCounterGeneratedConcession(code)) return false;
+        seen.add(code);
+        return true;
+      })
+      .map((c) => ({ code: c.code, name: c.name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [state.concessions]);
 
   const printedAt = new Date().toLocaleString("en-IN", {
     dateStyle: "medium",
@@ -1753,9 +1901,9 @@ function ConcessionStudentListDrawer({
               id={titleId}
               className="text-xl font-bold text-[var(--brand-deep)] sm:text-2xl"
             >
-              {rule.name}{" "}
+              {policyCode === "__all__" ? "All discounts" : activePolicy.name}{" "}
               <span className="text-base font-normal text-[var(--muted)]">
-                {rule.code}
+                {policyCode === "__all__" ? "" : activePolicy.code}
               </span>
             </h2>
             <p className="mt-1 text-sm text-[var(--muted)]">
@@ -1786,15 +1934,76 @@ function ConcessionStudentListDrawer({
             </button>
           </div>
 
+          {/* Filters sit OUTSIDE printRef: the paper should carry the result,
+              not the controls that produced it. */}
+          <div className="mb-3 flex flex-wrap items-end gap-2">
+            <label className="min-w-[12rem] flex-1 text-sm">
+              <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                Find a student or father
+              </span>
+              <input
+                className="field !py-1.5"
+                value={nameQuery}
+                onChange={(e) => setNameQuery(e.target.value)}
+                placeholder="Name, father, admission no., class…"
+              />
+            </label>
+            <label className="min-w-[12rem] text-sm">
+              <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                Discount type
+              </span>
+              <select
+                className="field !py-1.5"
+                value={policyCode}
+                onChange={(e) => setPolicyCode(e.target.value)}
+              >
+                <option value="__all__">All discounts</option>
+                {policies.map((p) => (
+                  <option key={p.code} value={p.code}>
+                    {p.name} ({p.code})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-2 pb-2 text-xs text-[var(--brand-deep)]">
+              <input
+                type="checkbox"
+                checked={byFamily}
+                onChange={(e) => setByFamily(e.target.checked)}
+              />
+              Siblings together
+            </label>
+          </div>
+
           <div ref={printRef}>
             <h3 className="text-lg font-bold text-[var(--brand-deep)]">
-              {rule.name} ({rule.code})
+              {policyCode === "__all__"
+                ? "All discounts"
+                : `${activePolicy.name} (${activePolicy.code})`}
             </h3>
             <p className="meta text-sm text-[var(--muted)]">
-              {kindLabel} · {formatConcessionValue(rule)} · Session {ay} ·{" "}
-              {rows.length} students · Printed {printedAt}
+              {policyCode === "__all__"
+                ? `Every discount policy`
+                : `${kindLabel} · ${formatConcessionValue(activePolicy)}`}{" "}
+              · Session {ay} · {rows.length} student
+              {rows.length === 1 ? "" : "s"}
+              {byFamily
+                ? ` in ${families.length} famil${families.length === 1 ? "y" : "ies"}`
+                : ""}
+              {nameQuery.trim() ? ` · filtered by “${nameQuery.trim()}”` : ""} ·
+              Printed {printedAt}
             </p>
-            <ConcessionStudentPrintTable rows={rows} />
+            {byFamily ? (
+              <ConcessionFamilyPrintTable
+                families={families}
+                showPolicy={policyCode === "__all__"}
+              />
+            ) : (
+              <ConcessionStudentPrintTable
+                rows={rows}
+                showPolicy={policyCode === "__all__"}
+              />
+            )}
           </div>
         </div>
       </div>
@@ -1802,18 +2011,90 @@ function ConcessionStudentListDrawer({
   );
 }
 
+function EmptyList({ filtered }: { filtered: boolean }) {
+  return (
+    <p className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--card)]/70 px-4 py-10 text-center text-sm text-[var(--muted)]">
+      {filtered
+        ? "No student matches that search."
+        : "No students assigned to this discount yet."}
+    </p>
+  );
+}
+
+/**
+ * Siblings under one heading, so a discount can be justified at a glance.
+ *
+ * The question this answers is "why this child and not his brother?" — and a
+ * list sorted by class puts the two of them pages apart.
+ */
+function ConcessionFamilyPrintTable({
+  families,
+  showPolicy,
+}: {
+  families: ConcessionFamilyGroup[];
+  showPolicy: boolean;
+}) {
+  if (families.length === 0) return <EmptyList filtered />;
+  return (
+    <div className="space-y-3">
+      {families.map((family) => (
+        <ErpTableShell
+          key={family.householdId || family.rows[0]?.id}
+          className="overflow-x-auto"
+        >
+          <p className="border-b border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide text-[var(--brand-deep)]">
+            {family.fatherName || "No father on file"}
+            <span className="ml-2 font-normal normal-case text-[var(--muted)]">
+              {family.rows.length} child
+              {family.rows.length === 1 ? "" : "ren"} on discount
+            </span>
+          </p>
+          <ErpTable minWidth="min-w-[640px]">
+            <ErpTableHead>
+              <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                <th className="px-3 py-2">Admission no.</th>
+                <th className="px-3 py-2">Student</th>
+                <th className="px-3 py-2">Class</th>
+                {showPolicy ? <th className="px-3 py-2">Discount</th> : null}
+                <th className="px-3 py-2">Sibling</th>
+                <th className="px-3 py-2">Status</th>
+                <th className="px-3 py-2">From</th>
+              </tr>
+            </ErpTableHead>
+            <ErpTableBody>
+              {family.rows.map((row) => (
+                <tr key={row.id} className="text-[var(--brand-deep)]">
+                  <td className="px-3 py-2 font-medium">{row.admissionNo}</td>
+                  <td className="px-3 py-2">{row.studentName}</td>
+                  <td className="px-3 py-2">{row.classLabel}</td>
+                  {showPolicy ? (
+                    <td className="px-3 py-2">{row.concessionName}</td>
+                  ) : null}
+                  <td className="px-3 py-2 text-[var(--muted)]">
+                    {row.siblingNote}
+                  </td>
+                  <td className="status px-3 py-2 capitalize">{row.status}</td>
+                  <td className="whitespace-nowrap px-3 py-2">
+                    {row.effectiveFrom}
+                  </td>
+                </tr>
+              ))}
+            </ErpTableBody>
+          </ErpTable>
+        </ErpTableShell>
+      ))}
+    </div>
+  );
+}
+
 function ConcessionStudentPrintTable({
   rows,
+  showPolicy,
 }: {
   rows: ConcessionStudentListRow[];
+  showPolicy: boolean;
 }) {
-  if (rows.length === 0) {
-    return (
-      <p className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--card)]/70 px-4 py-10 text-center text-sm text-[var(--muted)]">
-        No students assigned to this discount yet.
-      </p>
-    );
-  }
+  if (rows.length === 0) return <EmptyList filtered />;
 
   return (
     <ErpTableShell className="overflow-x-auto">
@@ -1823,7 +2104,9 @@ function ConcessionStudentPrintTable({
             <th className="px-3 py-2.5">#</th>
             <th className="px-3 py-2.5">Admission no.</th>
             <th className="px-3 py-2.5">Student</th>
+            <th className="px-3 py-2.5">Father</th>
             <th className="px-3 py-2.5">Class</th>
+            {showPolicy ? <th className="px-3 py-2.5">Discount</th> : null}
             <th className="px-3 py-2.5">Status</th>
             <th className="px-3 py-2.5">From</th>
             <th className="px-3 py-2.5">Reason</th>
@@ -1837,9 +2120,15 @@ function ConcessionStudentPrintTable({
               </td>
               <td className="px-3 py-2 font-medium">{row.admissionNo}</td>
               <td className="px-3 py-2">{row.studentName}</td>
+              <td className="px-3 py-2">{row.fatherName}</td>
               <td className="px-3 py-2">{row.classLabel}</td>
+              {showPolicy ? (
+                <td className="px-3 py-2">{row.concessionName}</td>
+              ) : null}
               <td className="status px-3 py-2 capitalize">{row.status}</td>
-              <td className="px-3 py-2 whitespace-nowrap">{row.effectiveFrom}</td>
+              <td className="px-3 py-2 whitespace-nowrap">
+                {row.effectiveFrom}
+              </td>
               <td className="px-3 py-2 text-[var(--muted)]">{row.reason}</td>
             </tr>
           ))}

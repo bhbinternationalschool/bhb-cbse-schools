@@ -5,6 +5,13 @@
  */
 
 import { assertModulePermission } from "@/lib/rbacGuard";
+import {
+  carryOverFromSibling,
+  carryOverHousehold,
+  carryOverNote,
+} from "@/lib/siblingCarryOver";
+import { normalizePhotoConsent, type PhotoConsent } from "@/lib/photoConsent";
+import { sanitizeStoredMediaUrl } from "@/lib/media";
 import { normalizeHouseholdLanguage } from "@/lib/householdPrefs";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import {
@@ -100,6 +107,11 @@ export type AdmissionHousehold = {
   guardians: AdmissionGuardian[];
   /** Set on first child enroll — siblings reuse this SIS household */
   sisHouseholdId: string;
+  /**
+   * Whether this family agreed to photographs being published.
+   * "" = never asked, which is NOT agreement. See lib/photoConsent.ts.
+   */
+  photoConsent?: PhotoConsent;
   note: string;
   createdAt: string;
   updatedAt: string;
@@ -375,6 +387,12 @@ export type RegistrationTender = {
   ref: string;
   bankName: string;
   instrumentDate: string;
+  /**
+   * Set only when a payment gateway captured this money. It settles a cycle
+   * later, net of fees, so the ledger holds it in clearing rather than
+   * claiming a bank balance that does not exist yet.
+   */
+  gatewayProvider?: string;
 };
 
 export type RegistrationFeePayment = {
@@ -448,7 +466,7 @@ export function stageTagClass(stage: AdmissionStage): string {
     case "enrolled":
       return "bg-[rgba(21,128,61,0.22)] text-[#166534]";
     case "lost":
-      return "bg-[rgba(180,35,24,0.12)] text-[#b42318]";
+      return "bg-[rgba(180,35,24,0.12)] text-[var(--danger)]";
     default:
       return "bg-[rgba(32,48,80,0.08)] text-[var(--brand-deep)]";
   }
@@ -554,7 +572,7 @@ export function leadFollowUpBucket(lead: AdmissionLead): LeadFollowUpBucket {
 export function followUpBucketClass(bucket: LeadFollowUpBucket): string {
   switch (bucket) {
     case "overdue":
-      return "bg-[rgba(180,35,24,0.12)] text-[#b42318]";
+      return "bg-[rgba(180,35,24,0.12)] text-[var(--danger)]";
     case "due_today":
       return "bg-[rgba(180,83,9,0.14)] text-[#9a3412]";
     case "scheduled":
@@ -1451,16 +1469,8 @@ export function mergeProjectedLead(
 }
 
 export function sanitizeSurveyPhotoUrl(value?: string | null): string {
-  const url = (value ?? "").trim();
-  if (!url) return "";
-  if (/^data:/i.test(url)) {
-    console.warn(
-      "[admissions] refusing to store a data: URL as a survey photo " +
-        `(${Math.round(url.length / 1024)} KB). Upload it and store the URL.`,
-    );
-    return "";
-  }
-  return url;
+  // One rule for every stored image in the app; see lib/media.ts.
+  return sanitizeStoredMediaUrl(value, "admissions survey photo");
 }
 
 export function saveAdmissions(state: AdmissionsState): void {
@@ -2104,35 +2114,98 @@ export function followUpCounts(state: AdmissionsState): {
   return { overdue, dueToday, unassigned };
 }
 
-export function promoteToRegistration(
+/**
+ * What is still stopping this lead moving to Registered.
+ *
+ * Exported so the SCREEN and the GUARD read the same rule. Before this, the
+ * button called promoteToRegistration, got a refusal, and flashed it for
+ * three seconds — while the tick that would fix it sat a thousand lines
+ * further down the panel. A walk-in lead therefore looked like a broken
+ * button rather than an unfinished checklist.
+ *
+ * Each blocker names the field it is about, so the screen can send someone
+ * straight to it instead of asking them to hunt.
+ */
+export type RegistrationBlocker = {
+  /** The lead field to fix, when there is one. */
+  field?: keyof AdmissionLead;
+  /** Which step of the panel holds the fix. */
+  where: "child" | "family" | "checklist";
+  message: string;
+};
+
+export function registrationBlockers(
   state: AdmissionsState,
   leadId: string,
-): { ok: true; state: AdmissionsState } | { ok: false; reason: string } {
+): RegistrationBlocker[] {
   const lead = state.leads.find((l) => l.id === leadId);
-  if (!lead) return { ok: false, reason: "Lead not found" };
+  if (!lead) return [{ where: "child", message: "Lead not found" }];
+
+  const out: RegistrationBlocker[] = [];
   if (lead.stage !== "enquiry" && lead.stage !== "applied") {
-    return { ok: false, reason: "Only enquiry can move to registration" };
+    out.push({
+      where: "child",
+      // enquiry and applied are the only stages before registration; a lead
+      // past them has already been through it.
+      message: `This lead is already at “${lead.stage}” — registration is behind it.`,
+    });
+    // Nothing below is worth listing: the stage alone settles it.
+    return out;
   }
+
   const hh = householdOf(state, lead.householdId);
   const mother =
     lead.motherName.trim() ||
     motherFromHousehold(hh || emptyAdmissionHousehold())?.fullName ||
     "";
   if (!mother.trim()) {
-    return {
-      ok: false,
-      reason: "Add mother (or mother-relation guardian) on the household before registration",
-    };
+    out.push({
+      field: "motherName",
+      where: "family",
+      message: "Add the mother’s name (or a mother-relation guardian on the household).",
+    });
   }
   if (!lead.declarationAccepted) {
-    return { ok: false, reason: "Parent declaration must be accepted" };
+    out.push({
+      field: "declarationAccepted",
+      where: "checklist",
+      message: "Tick “Parent declaration accepted”.",
+    });
   }
-  if (!lead.docsBirthCert || !lead.docsPhoto) {
-    return {
-      ok: false,
-      reason: "Birth certificate and photo checklist must be marked",
-    };
+  if (!lead.docsBirthCert) {
+    out.push({
+      field: "docsBirthCert",
+      where: "checklist",
+      message: "Tick “Birth certificate”.",
+    });
   }
+  if (!lead.docsPhoto) {
+    out.push({
+      field: "docsPhoto",
+      where: "checklist",
+      message: "Tick “Passport photo”.",
+    });
+  }
+  return out;
+}
+
+export function promoteToRegistration(
+  state: AdmissionsState,
+  leadId: string,
+): { ok: true; state: AdmissionsState } | { ok: false; reason: string } {
+  const lead = state.leads.find((l) => l.id === leadId);
+  if (!lead) return { ok: false, reason: "Lead not found" };
+  // Same rule the screen shows, so the two can never drift apart.
+  const blockers = registrationBlockers(state, leadId);
+  if (blockers.length) {
+    return { ok: false, reason: blockers.map((b) => b.message).join(" ") };
+  }
+
+  const hh = householdOf(state, lead.householdId);
+  const mother =
+    lead.motherName.trim() ||
+    motherFromHousehold(hh || emptyAdmissionHousehold())?.fullName ||
+    "";
 
   let nextState = state;
   let applicationNo = lead.applicationNo;
@@ -2570,8 +2643,35 @@ export function enrollLead(
       pincode: lead.pincode || admHh?.pincode || "",
       altMobile:
         admHh?.guardians.find((g) => !g.isPrimary && g.mobile)?.mobile || "",
+      // Carried across from registration, where the family was actually
+      // asked. Losing it here would silently downgrade a "yes" to
+      // "never asked" the moment the child enrolled — and the website reads
+      // the SIS household, not this one.
+      photoConsent: normalizePhotoConsent(admHh?.photoConsent),
     });
-    households = [...households, hh];
+
+    // A brand-new household, but the parents may already be known to the
+    // school under a different mobile. Where BOTH parent names match a family
+    // on roll, take their address and email rather than leaving the office to
+    // type it again. Contact NUMBERS are never copied: the mobile is how a
+    // household is identified here, so sharing one would merge two families
+    // and send another household's fee reminders to the wrong phone.
+    const twinHh = (() => {
+      const f = normParentName(lead.guardianName || "");
+      const m = normParentName(lead.motherName || "");
+      if (f.length < 3 || m.length < 3) return undefined;
+      const twin = sis.students.find(
+        (s2) =>
+          s2.status === "active" &&
+          normParentName(s2.fatherName) === f &&
+          normParentName(s2.motherName) === m,
+      );
+      return twin
+        ? households.find((h) => h.id === twin.householdId)
+        : undefined;
+    })();
+    const filled = carryOverHousehold({ household: hh, donor: twinHh });
+    households = [...households, filled.household];
     sisHouseholdId = hh.id;
   }
 
@@ -2622,10 +2722,56 @@ export function enrollLead(
       : "",
   });
 
+  /*
+   * A second child of the same family should not need the parents' details
+   * typed again. The trustworthy signal is the household: by this point the
+   * school has already decided this child belongs to an existing family, via
+   * a sibling link or a matching mobile. Where that decision was made only on
+   * the parents' NAMES, identity numbers are held back — two families in one
+   * village really can share both names, and a wrong Aadhaar travels into
+   * UDISE where nobody would catch it.
+   *
+   * Only blanks are filled: whatever the office typed on this child's form is
+   * what they meant.
+   */
+  const familySiblings = sis.students
+    .filter(
+      (s2) =>
+        s2.status === "active" &&
+        s2.householdId &&
+        s2.householdId === sisHouseholdId,
+    )
+    // Most recently joined first: the newest sibling's record is the one the
+    // office filled in most lately, and so the likeliest to be current.
+    .sort((a, b) => String(b.joinedOn ?? "").localeCompare(String(a.joinedOn ?? "")));
+
+  const nameTwins =
+    familySiblings.length === 0 && student.fatherName && student.motherName
+      ? sis.students.filter(
+          (s2) =>
+            s2.status === "active" &&
+            normParentName(s2.fatherName) === normParentName(student.fatherName) &&
+            normParentName(s2.motherName) === normParentName(student.motherName),
+        )
+      : [];
+
+  const carry = carryOverFromSibling({
+    student,
+    siblings: familySiblings.length ? familySiblings : nameTwins,
+    confidence: familySiblings.length ? "household" : "names_only",
+  });
+  const note = carryOverNote(carry);
+  const enrolledStudent = note
+    ? {
+        ...carry.student,
+        notes: [carry.student.notes, note].filter(Boolean).join(" · "),
+      }
+    : carry.student;
+
   saveSis({
     ...sis,
     households,
-    students: [...sis.students, student],
+    students: [...sis.students, enrolledStudent],
   });
 
   let next = state;
@@ -3626,6 +3772,12 @@ export function createFamilyRegistrationsFromPublic(
     campaignSrc?: string;
     /** Parent ticked the DPDP consent box */
     consent?: boolean;
+    /**
+     * Parent ticked the SEPARATE, optional photographs box. `false` here is a
+     * real answer — they were asked and declined — and is recorded as such,
+     * not left blank. Blank is reserved for families nobody has asked.
+     */
+    photoConsent?: boolean;
     preferredLanguage?: string;
   },
   by = "Parent self-register",
@@ -3675,6 +3827,22 @@ export function createFamilyRegistrationsFromPublic(
       ...(input.preferredLanguage ? { preferredLanguage: input.preferredLanguage } : {}),
     });
   }
+  // The family was asked, so their answer is recorded either way — a tick is
+  // "granted", an untouched box is "refused". Neither is left blank: blank
+  // means nobody asked, and that distinction is the whole point of opt-in.
+  next = {
+    ...next,
+    households: next.households.map((h) =>
+      h.id === r.householdId
+        ? {
+            ...h,
+            photoConsent: (input.photoConsent ? "granted" : "refused") as PhotoConsent,
+            updatedAt: new Date().toISOString(),
+          }
+        : h,
+    ),
+  };
+
   return {
     ok: true,
     state: next,
@@ -3739,6 +3907,8 @@ export function takeRegistrationPayment(
       bankName?: string;
       instrumentDate?: string;
     }[];
+    /** The date the money was actually received; today when absent. */
+    paidOn?: string;
     note?: string;
     feeHeadName?: string;
   },
@@ -3814,7 +3984,9 @@ export function takeRegistrationPayment(
     mobile: lead.mobile,
     childName: lead.childName,
     createdBy: by,
-    paidAt: new Date().toISOString(),
+    paidAt: input.paidOn
+      ? new Date(`${input.paidOn}T12:00:00`).toISOString()
+      : new Date().toISOString(),
     upiRef:
       refs ||
       `${primary.mode.toUpperCase()}-${Date.now().toString(36).toUpperCase()}`,
@@ -3982,6 +4154,13 @@ export function captureRegistrationPayment(
   state: AdmissionsState,
   paymentId: string,
   upiRef: string,
+  /**
+   * The gateway that captured it, when one did. Most callers are counter
+   * collection — a clerk taking cash or a UPI into the school's own QR — and
+   * that money really is in the bank, so the default is empty and only the
+   * gateway webhook passes a provider.
+   */
+  gatewayProvider = "",
 ):
   | { ok: true; state: AdmissionsState; payment: RegistrationFeePayment }
   | { ok: false; reason: string } {
@@ -4003,14 +4182,18 @@ export function captureRegistrationPayment(
           mode: (t.mode || "upi") as TenderMode,
           ref: t.ref || ref,
           instrumentDate: t.instrumentDate || new Date().toISOString().slice(0, 10),
+          gatewayProvider: gatewayProvider || t.gatewayProvider || "",
         }))
       : [
-          normalizeRegistrationTender({
-            mode: "upi",
-            amountPaise: payment.amountPaise,
-            ref,
-            instrumentDate: new Date().toISOString().slice(0, 10),
-          }),
+          {
+            ...normalizeRegistrationTender({
+              mode: "upi",
+              amountPaise: payment.amountPaise,
+              ref,
+              instrumentDate: new Date().toISOString().slice(0, 10),
+            }),
+            gatewayProvider,
+          },
         ];
   const updated: RegistrationFeePayment = {
     ...payment,
@@ -4089,6 +4272,48 @@ export function waiveRegistrationFee(
   });
   out = applyRegistrationLedgerSync(out, leadId, by, payment.id);
   return out;
+}
+
+/**
+ * Fee Take voided an R-series receipt — the CRM must stop saying "paid".
+ * Looks the payment up by its posted fee voucher id; reopens it and
+ * refreshes the lead's registration status. Safe to call for any voided
+ * voucher: a non-registration receipt simply finds no payment.
+ */
+export function revertRegistrationPaymentForVoidedReceipt(
+  feeVoucherId: string,
+): boolean {
+  if (!feeVoucherId) return false;
+  const state = loadAdmissions();
+  const payment = (state.registrationPayments || []).find(
+    (p) => p.feeVoucherId === feeVoucherId && p.status === "paid",
+  );
+  if (!payment) return false;
+  let next: AdmissionsState = {
+    ...state,
+    registrationPayments: (state.registrationPayments || []).map((p) =>
+      p.id === payment.id
+        ? {
+            ...p,
+            status: "open" as const,
+            paidAt: "",
+            note: [
+              p.note,
+              `R receipt ${p.feeReceiptNo || ""} voided at Fee Take`.trim(),
+            ]
+              .filter(Boolean)
+              .join(" · "),
+          }
+        : p,
+    ),
+  };
+  next = refreshLeadRegistrationPaymentStatus(
+    next,
+    payment.leadId,
+    `R receipt ${payment.feeReceiptNo || payment.code} voided — balance reopened`,
+  );
+  saveAdmissions(next);
+  return true;
 }
 
 export type RegistrationPaySharePayload = {

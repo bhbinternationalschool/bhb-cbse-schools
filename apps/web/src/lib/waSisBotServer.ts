@@ -1,3 +1,4 @@
+import { parseTeacherWaText, teacherRelayAck } from "@/lib/teacherContact";
 /**
  * Server WhatsApp bot for SIS parents (enrolled households).
  */
@@ -17,7 +18,7 @@ import {
   openFeeDues,
   type FeeDueLine,
 } from "@/lib/fees";
-import { loadMasters } from "@/lib/masters";
+import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
 import {
   buildPaymentSharePayload,
   buildPaymentShareUrlAbsolute,
@@ -42,6 +43,10 @@ import {
   type SisBotDueLine,
 } from "@/lib/sisParentBotEngine";
 import { attachRazorpayToPaymentLink } from "@/lib/razorpay.server";
+import {
+  attachCashfreeToPaymentLink,
+  shouldUseCashfreeCheckout,
+} from "@/lib/cashfree.server";
 import { loadSis, householdWhatsApp, type Household, type SisStudent } from "@/lib/sis";
 import { TENANT } from "@/lib/types";
 import {
@@ -176,12 +181,19 @@ function flattenOpenDues(
   hhId: string,
   studentId?: string,
 ): FeeDueLine[] {
+  const masters = loadMasters();
+  // Scoped to the running session: this flattens the WHOLE household, so
+  // older student rows of the same children would otherwise be added in and
+  // the bot would quote a parent several times what they owe.
   const rows = computeHouseholdDues(
     hhId,
     loadSis(),
-    loadMasters(),
+    masters,
     loadFees(),
-    { includeFuture: false },
+    {
+      includeFuture: false,
+      academicYearCode: currentAcademicYearCode(masters),
+    },
   );
   let dues = openFeeDues(rows.flatMap((r) => r.dues)).filter(
     (d) => d.balancePaise > 0,
@@ -423,15 +435,18 @@ async function buildPayLinkReply(
   const mobile10 =
     householdWhatsApp(hh) || hh.mobile || hh.whatsappMobile || "";
 
-  const rz = await attachRazorpayToPaymentLink({
+  const attachOpts = {
     link,
     customerName: hh.guardianName || payLabel.studentName,
     customerMobile: mobile10,
     appOrigin: publicAppOrigin(),
-  });
-  if (rz.ok) {
-    link = rz.link;
-    payUrl = rz.checkoutUrl;
+  };
+  const gw = shouldUseCashfreeCheckout()
+    ? await attachCashfreeToPaymentLink(attachOpts)
+    : await attachRazorpayToPaymentLink(attachOpts);
+  if (gw.ok) {
+    link = gw.link;
+    payUrl = gw.checkoutUrl;
     autoSettle = true;
   } else {
     const upi = resolveSchoolCollectionsUpi(masters);
@@ -623,6 +638,26 @@ export async function handleWaSisBotInbound(opts: {
     by: thread.parentName || "Parent",
     waMessageId: opts.waMessageId,
   };
+
+  // ── A message for a teacher, pre-addressed by the app ("Ref: T:…"):
+  // relay it through the school within hours, hold it after 8 PM. ──
+  const relay = parseTeacherWaText(text);
+  if (relay) {
+    const child = childrenOf(hh).find((s) => s.id === relay.studentId);
+    const hindi = (hh.preferredLanguage || "") !== "" && hh.preferredLanguage !== "en";
+    if (!child) {
+      return finishLanguageFlow(store, thread, parentMsg, hindi ? "यह बच्चा आपके परिवार में दर्ज नहीं है। कृपया ऐप से दोबारा भेजें।" : "That child is not on your family's record. Please send again from the app.");
+    }
+    if (!relay.message) {
+      return finishLanguageFlow(store, thread, parentMsg, hindi ? "कृपया अपना संदेश 'Ref' वाली पंक्ति के नीचे लिखकर भेजें।" : "Please type your message below the 'Ref' line and send again.");
+    }
+    const { relayTeacherMessage } = await import("@/lib/teacherContact.server");
+    const r = await relayTeacherMessage({ household: hh, student: child, staffId: relay.staffId, body: relay.message, channel: "whatsapp" });
+    const ack = r.ok
+      ? teacherRelayAck({ teacherName: r.teacherName, open: r.via !== "held", hindi })
+      : hindi ? `संदेश नहीं भेजा जा सका: ${r.error}` : `Could not send: ${r.error}`;
+    return finishLanguageFlow(store, thread, parentMsg, ack);
+  }
 
   const isGreeting =
     !opts.fromUnified &&

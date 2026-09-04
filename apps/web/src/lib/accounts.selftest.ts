@@ -352,7 +352,7 @@ function assertSubledgersTieToGl(label: string): void {
 {
   freshBooks();
   const drawer = poolByCode("drawer");
-  const mess = categoryIdByName("Mess");
+  const mess = categoryIdByName("Refreshment");
 
   // Fund through a complete posting path so the GL side exists too.
   postFeeCollectionToAccounts({
@@ -749,7 +749,7 @@ function assertSubledgersTieToGl(label: string): void {
   freshBooks();
   const drawer = poolByCode("drawer");
   const bank = firstBankId();
-  const mess = categoryIdByName("Mess");
+  const mess = categoryIdByName("Refreshment");
 
   postFeeCollectionToAccounts({
     voucherId: "v_mixed_1",

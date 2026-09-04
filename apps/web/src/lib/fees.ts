@@ -29,6 +29,7 @@ import {
   resolveStudentFeeGroupId,
   resolveStructureLinesForClass,
   resolveSiblingTierValue,
+  saveMasters,
   shouldBillMidYearLine,
   concessionAmountFromValue,
   type MastersState,
@@ -450,6 +451,15 @@ export type VoucherTender = {
   /** School bank account that received / will receive this tender. */
   bankAccountId?: string;
   /**
+   * The payment gateway that captured this money, when one did ("cashfree",
+   * "razorpay"). Gateway money is not in a bank account yet: it settles a
+   * cycle later, net of fees, so the book holds it in clearing until the
+   * settlement says which bank got how much. Empty for counter tenders —
+   * including a UPI paid into the school's own QR, which really is in the
+   * bank the same day.
+   */
+  gatewayProvider?: string;
+  /**
    * Cheque (and similar) — receipt issued but bank clearance pending.
    * Non-cheque modes are always "cleared".
    */
@@ -689,11 +699,53 @@ export function formatManualBookRef(seriesCode: string, leaf: string): string {
   return `${s}/${n}`;
 }
 
-/** True if this school/paper receipt ref is already used on a live voucher. */
+/**
+ * The paper number written on a receipt, whichever way it was recorded — the
+ * manual-book path stores SERIES/LEAF, the counter stores a free-text school
+ * receipt no.
+ */
+export function paperRefOf(v: {
+  manualBookSeries?: string;
+  manualBookLeaf?: string;
+  schoolReceiptNo?: string;
+}): string {
+  const manual = formatManualBookRef(
+    v.manualBookSeries ?? "",
+    v.manualBookLeaf ?? "",
+  );
+  return manual || (v.schoolReceiptNo ?? "").trim();
+}
+
+/**
+ * Trailing digits of a book stub, so a serial range sorts 9 before 10 rather
+ * than as text, where "9" would fall after "10" and hide a whole page of the
+ * book from a range filter.
+ */
+export function leafNumber(ref: string): number | null {
+  const m = ref.trim().match(/(\d+)\s*$/);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * True if this school/paper receipt ref is already used on a live voucher of
+ * ANOTHER family.
+ *
+ * The paper book is written one leaf per family visit, not one leaf per
+ * system receipt: collect for two siblings and both receipts legitimately
+ * carry the same number. Blocking that made the counter clear the field to
+ * get past it, which left receipts with no link to the book at all — worse
+ * for reconciliation than the duplicate the rule was guarding against.
+ *
+ * Reuse across a DIFFERENT household is still refused. That is the case the
+ * rule exists for: one family's leaf recorded against another family's money.
+ */
 export function isSchoolReceiptNoTaken(
   schoolReceiptNo: string,
   fees?: FeesState,
   exceptVoucherId?: string,
+  sameHouseholdId?: string,
 ): boolean {
   const key = schoolReceiptNo.trim().toUpperCase();
   if (!key) return false;
@@ -701,6 +753,7 @@ export function isSchoolReceiptNoTaken(
   return f.vouchers.some((v) => {
     if (v.voidedAt) return false;
     if (exceptVoucherId && v.id === exceptVoucherId) return false;
+    if (sameHouseholdId && v.householdId === sameHouseholdId) return false;
     if ((v.schoolReceiptNo ?? "").trim().toUpperCase() === key) return true;
     if (
       v.source === "manual_book" &&
@@ -1612,6 +1665,7 @@ function normalizeVoucher(v: Partial<CollectionVoucher>): CollectionVoucher {
       instrumentDate: t.instrumentDate ?? "",
       bankName: t.bankName ?? "",
       bankAccountId: t.bankAccountId ?? "",
+      gatewayProvider: t.gatewayProvider ?? "",
       realisation:
         t.realisation ??
         (t.mode === "cheque" ? "subject_to_clearance" : "cleared"),
@@ -1783,18 +1837,60 @@ export function syncAllStudentFeeGroups(options?: {
   return { updated, skipped };
 }
 
+/**
+ * All row ids the same child holds across sessions (memoized ~5s): grants
+ * key on a session row id, but the concession belongs to the CHILD — after
+ * promotion the new row must still see last session's grant.
+ */
+let grantAliasMemo: { at: number; map: Map<string, string[]> } | null = null;
+function grantAliasIdsFor(student: {
+  id: string;
+  admissionNo: string;
+}): string[] {
+  const adm = (student.admissionNo || "").trim().toUpperCase();
+  if (!adm) return [];
+  const now = Date.now();
+  if (!grantAliasMemo || now - grantAliasMemo.at > 5000) {
+    const map = new Map<string, string[]>();
+    for (const s of loadSis().students) {
+      const k = (s.admissionNo || "").trim().toUpperCase();
+      if (!k) continue;
+      const list = map.get(k) ?? [];
+      list.push(s.id);
+      map.set(k, list);
+    }
+    grantAliasMemo = { at: now, map };
+  }
+  return (grantAliasMemo.map.get(adm) ?? []).filter((id) => id !== student.id);
+}
+
 function concessionForHead(
   masters: MastersState,
   student: { id: string; admissionNo: string; academicYearCode?: string },
   feeHeadId: string,
   billedPaise: number,
   asOf: string,
+  /**
+   * The date THIS due falls on. A grant is judged against the month it is
+   * being applied to, not against today.
+   *
+   * Without this a discount granted in August discounted April as well: the
+   * only question asked was whether the grant is live now. That is how a
+   * ₹150 counter discount showed as ₹300 on the month it was given — the
+   * one-off waiver for that month, plus a recurring grant dated to the NEXT
+   * installment which nothing stopped from reaching backwards.
+   *
+   * Omitted, it falls back to asOf, which is the old behaviour — used by
+   * callers that have no single due in hand.
+   */
+  effectiveOn?: string,
 ): { totalPaise: number; details: FeeConcessionDetail[] } {
   const mastersWithRules = mergeDiscountRulesFromSeed(masters);
   const grants = resolvedConcessionGrantsForStudent(
     mastersWithRules,
     student,
-    asOf,
+    effectiveOn || asOf,
+    grantAliasIdsFor(student),
   );
   const details: FeeConcessionDetail[] = [];
   let total = 0;
@@ -1939,13 +2035,25 @@ export function computeStudentDues(
      * everywhere except the counter, so no other screen changes.
      */
     storeDues?: InjectedStoreDue[];
+    /**
+     * The paid-by-due-key map, when the caller is already looping students.
+     *
+     * It is built from the whole voucher history and does not vary by
+     * student, so computing it inside this function meant a full scan of
+     * every voucher ONCE PER STUDENT — the fee counter's search does this
+     * for up to 80 students per keystroke. Passed in, it is built once.
+     *
+     * Omit it and the behaviour is exactly as before; there is no cache and
+     * therefore nothing that can go stale.
+     */
+    paidMap?: Map<string, number>;
   },
 ): FeeDueLine[] {
   if (student.status !== "active" && !options?.includeInactive) return [];
   const asOf = options?.asOf ?? new Date().toISOString().slice(0, 10);
   const includeFuture = options?.includeFuture ?? true;
   const includePaid = options?.includePaid ?? true;
-  const paidMap = paidByDueKey(fees);
+  const paidMap = options?.paidMap ?? paidByDueKey(fees);
   const waiverMap = postedWaiversByDueKey(student.id);
   const lines: FeeDueLine[] = [];
   const midYearPolicy = normalizeMidYearFeePolicy(masters.midYearFeePolicy);
@@ -1996,6 +2104,7 @@ export function computeStudentDues(
         sl.feeHeadId,
         billed,
         asOf,
+        dueOn,
       );
       const paid = paidMap.get(dueKey) ?? 0;
       const balance = Math.max(0, billed - concession.totalPaise - paid);
@@ -2052,7 +2161,14 @@ export function computeStudentDues(
     const transportHeadId =
       masters.feeHeads.find((h) => h.code === "TRANSPORT")?.id ?? "";
     const transportConcession = transportHeadId
-      ? concessionForHead(masters, student, transportHeadId, td.amountPaise, asOf)
+      ? concessionForHead(
+          masters,
+          student,
+          transportHeadId,
+          td.amountPaise,
+          asOf,
+          td.dueOn,
+        )
       : { totalPaise: 0, details: [] as FeeConcessionDetail[] };
     const balance = Math.max(
       0,
@@ -2123,6 +2239,7 @@ export function computeStudentDues(
       sf.feeHeadId,
       billed,
       asOf,
+      sf.dueOn,
     );
     const paid = paidMap.get(dueKey) ?? 0;
     const balance = Math.max(0, billed - concession.totalPaise - paid);
@@ -2177,25 +2294,16 @@ export function computeStudentDues(
   // Apply stop-future + waivers to lines collected via raw push (transport/special/store)
   const adjusted = lines
     .filter((l) => !stopFutureBlocks(student.id, l.dueOn))
-    .map((l) => {
-      const waived = waiverMap.get(l.dueKey) ?? 0;
-      if (waived <= 0) return l;
-      const balance = Math.max(0, l.balancePaise - waived);
-      return {
-        ...l,
-        concessionPaise: l.concessionPaise + waived,
-        balancePaise: balance,
-        label:
-          balance <= 0
-            ? `${l.label} · waived`
-            : `${l.label} · −${formatInr(waived)} waived`,
-      };
-    })
+    .map((l) => applyPostedWaiver(l, waiverMap))
     .filter(
       (l) =>
         l.balancePaise > 0 ||
         (includePaid && (l.paidPaise > 0 || (waiverMap.get(l.dueKey) ?? 0) > 0)),
     );
+  // Everything waived above is done; the tail lines (arrears, charge
+  // vouchers, ad-hoc, late fees, store) are appended after this point and
+  // get the same treatment at the end — see waiveTailLines below.
+  const waiverDone = new Set(adjusted.map((l) => l.dueKey));
 
   // Late fee on overdue academic/special balances
   for (const late of computeLateFeeDues(
@@ -2251,6 +2359,26 @@ export function computeStudentDues(
     }
   }
 
+  /**
+   * A counter discount on a tail line (arrears, charge voucher, ad-hoc, late
+   * fee, store) posts a waiver like any other, but those lines are built
+   * AFTER the waiver pass above — so the discount reduced what was collected
+   * while the line kept its full balance, and the difference sat on screen as
+   * a phantom due for ever. Found 2026-08-29 on an arrear discounted ₹200:
+   * ₹1,600 billed, ₹1,400 collected, ₹200 "still due".
+   */
+  const waiveTailLines = (all: FeeDueLine[]): FeeDueLine[] =>
+    all
+      .map((l) =>
+        waiverDone.has(l.dueKey) ? l : applyPostedWaiver(l, waiverMap),
+      )
+      .filter(
+        (l) =>
+          l.balancePaise > 0 ||
+          l.paidPaise > 0 ||
+          (waiverMap.get(l.dueKey) ?? 0) > 0,
+      );
+
   if (plan) {
     const covered = coveredDueKeySet(plan);
     const filtered = adjusted.filter((l) => !covered.has(l.dueKey));
@@ -2259,11 +2387,19 @@ export function computeStudentDues(
       asOf,
       includeFuture,
     });
-    return appendStoreDues(
-      appendArrearsDues([...filtered, ...slices], student, fees, paidMap, includePaid),
-      student,
-      options?.storeDues,
-      includePaid,
+    return waiveTailLines(
+      appendStoreDues(
+        appendArrearsDues(
+          [...filtered, ...slices],
+          student,
+          fees,
+          paidMap,
+          includePaid,
+        ),
+        student,
+        options?.storeDues,
+        includePaid,
+      ),
     ).sort((a, b) =>
       a.dueOn === b.dueOn
         ? a.label.localeCompare(b.label)
@@ -2271,16 +2407,58 @@ export function computeStudentDues(
     );
   }
 
-  return appendStoreDues(
-    appendArrearsDues(adjusted, student, fees, paidMap, includePaid),
-    student,
-    options?.storeDues,
-    includePaid,
+  return waiveTailLines(
+    appendStoreDues(
+      appendArrearsDues(adjusted, student, fees, paidMap, includePaid),
+      student,
+      options?.storeDues,
+      includePaid,
+    ),
   ).sort((a, b) =>
     a.dueOn === b.dueOn
       ? a.label.localeCompare(b.label)
       : a.dueOn.localeCompare(b.dueOn),
   );
+}
+
+/** Subtract a posted waiver from one due line, stamping the label. */
+function applyPostedWaiver(
+  l: FeeDueLine,
+  waiverMap: Map<string, number>,
+): FeeDueLine {
+  const waived = waiverMap.get(l.dueKey) ?? 0;
+  if (waived <= 0) return l;
+  const balance = Math.max(0, l.balancePaise - waived);
+  return {
+    ...l,
+    concessionPaise: l.concessionPaise + waived,
+    // Name it in the same list Masters concessions appear in.
+    //
+    // A waiver used to change only concessionPaise and the label suffix, so
+    // the head's discount breakdown listed the standing concessions and said
+    // nothing about the waiver — the total was right while the itemisation
+    // was short by exactly the counter discount. Asked where the money had
+    // gone, the screen could not say. It is a different KIND of discount from
+    // a standing rule, and says so, but it is not invisible.
+    concessionDetails: [
+      ...(l.concessionDetails ?? []),
+      {
+        grantId: "",
+        concessionId: "",
+        code: "COUNTER",
+        name: "Counter discount · this month only",
+        kind: "waiver",
+        rateLabel: formatInr(waived),
+        siblingLabel: "",
+        amountPaise: waived,
+      },
+    ],
+    balancePaise: balance,
+    label:
+      balance <= 0
+        ? `${l.label} · waived`
+        : `${l.label} · −${formatInr(waived)} waived`,
+  };
 }
 
 function appendStoreDues(
@@ -2727,11 +2905,38 @@ export function computeHouseholdDues(
     includeFuture?: boolean;
     includePaid?: boolean;
     storeDues?: InjectedStoreDue[];
+    /**
+     * Scope the household to ONE session's student records.
+     *
+     * A child promoted across years has one `students` row per year, all of
+     * them `status: "active"` — on this data 679 active rows were only ~236
+     * real children, and 157 of 189 households spanned more than one year.
+     * Summing the bundle without this adds last year's child to this year's
+     * child and reports several times the true balance (seen in the wild: a
+     * "pay remaining dues" QR for 62,050 on a household that owed 10,500).
+     *
+     * `searchFeeStudents` has always scoped this way — that is why the
+     * counter's own numbers were right while the receipt's were not.
+     *
+     * Omit it and nothing changes: callers that resolve specific dueKeys
+     * (pay links, parent checkout, the per-student ledger) must keep seeing
+     * every record, or a key belonging to an older row stops resolving.
+     */
+    academicYearCode?: string;
   },
 ): { student: SisStudent; dues: FeeDueLine[] }[] {
-  const members = sis.students.filter(
+  let members = sis.students.filter(
     (s) => s.householdId === householdId && s.status === "active",
   );
+  if (options?.academicYearCode) {
+    const scope = normAyCode(options.academicYearCode);
+    const scoped = members.filter(
+      (s) => normAyCode(s.academicYearCode) === scope,
+    );
+    // Fall back to every record when the scope matches nothing, so a family
+    // with only older rows still shows a balance instead of a silent zero.
+    if (scoped.length) members = scoped;
+  }
   return members.map((student) => ({
     student,
     dues: computeStudentDues(student, masters, fees, options),
@@ -3003,10 +3208,30 @@ export function collectPayment(input: {
     };
   }
 
-  if (manualRef && isSchoolReceiptNoTaken(manualRef, fees)) {
+  if (
+    manualRef &&
+    isSchoolReceiptNoTaken(manualRef, fees, undefined, input.householdId)
+  ) {
+    // Name the receipt that holds it. "Already used" sends the counter
+    // hunting through the book; "used on RCV-00118 (04-May-2026, ₹4,000)"
+    // is either recognised as their own earlier entry or found in seconds.
+    const clash = fees.vouchers.find(
+      (v) =>
+        !v.voidedAt &&
+        v.householdId !== input.householdId &&
+        ((v.schoolReceiptNo ?? "").trim().toUpperCase() ===
+          manualRef.toUpperCase() ||
+          (v.source === "manual_book" &&
+            formatManualBookRef(
+              v.manualBookSeries,
+              v.manualBookLeaf,
+            ).toUpperCase() === manualRef.toUpperCase())),
+    );
     return {
       ok: false,
-      error: `School / paper receipt no. "${manualRef}" is already used on another receipt`,
+      error: clash
+        ? `School / paper receipt no. "${manualRef}" is already on receipt ${clash.receiptNo} (${clash.collectionDate}, ${formatInr(clash.totalPaise)}) — use the next number in the book`
+        : `School / paper receipt no. "${manualRef}" is already used on another receipt`,
       code: "manual_no",
     };
   }
@@ -3284,7 +3509,54 @@ export function voidVoucher(voucherId: string): boolean {
   // this the money stayed on the books for good — cash in hand and fee income
   // were overstated by every voided receipt (audit 2026-08-23, L1).
   reverseFeeCollectionInBooks(voucher, "Fee receipt voided");
+
+  // An R-series receipt is an admissions registration payment — reopen it in
+  // the CRM, or the lead keeps saying "paid" for money the void returned.
+  // (No-op for ordinary fee receipts: nothing links to this voucher id.)
+  void import("@/lib/admissions")
+    .then(({ revertRegistrationPaymentForVoidedReceipt }) => {
+      revertRegistrationPaymentForVoidedReceipt(voucher.id);
+    })
+    .catch(() => {});
+
+  // Future-month grants born from this receipt's counter discount die with
+  // it — a voided receipt must not leave its concession running in Masters.
+  revokeGrantsFromVoidedReceipt(voucher);
+
+  // So do the counter waivers it carried: otherwise the discount outlives
+  // the receipt and each retry stacks another waiver on the same line.
+  void import("@/lib/feeAdjustments").then(({ cancelAdjustmentsForVoucher }) => {
+    cancelAdjustmentsForVoucher({
+      voucherId: voucher.id,
+      receiptNo: voucher.receiptNo,
+    });
+  });
   return true;
+}
+
+/**
+ * Reject every Masters concession grant stamped with this voucher's marker
+ * (`[v:<id>]`, written when the counter's "save for future months" applied).
+ * Rejection, not deletion: the grant stays on file with the void note, so
+ * Concessions shows why the discount stopped.
+ */
+function revokeGrantsFromVoidedReceipt(voucher: CollectionVoucher): void {
+  const masters = loadMasters();
+  const marker = `[v:${voucher.id}]`;
+  const grants = masters.concessionGrants ?? [];
+  let changed = false;
+  const next = grants.map((g) => {
+    if (g.status === "rejected" || !g.reason.includes(marker)) return g;
+    changed = true;
+    return {
+      ...g,
+      status: "rejected" as const,
+      reason: `${g.reason} · auto-revoked — receipt ${voucher.receiptNo} voided ${new Date().toISOString().slice(0, 10)}`,
+    };
+  });
+  if (changed) {
+    void saveMasters({ ...masters, concessionGrants: next });
+  }
 }
 
 /**
@@ -4107,11 +4379,17 @@ export function searchFeeStudents(
     });
   }
 
+  // Built once for the whole result set rather than once per student: it
+  // is the same map every time, and rebuilding it per hit was the bulk of
+  // what made typing in the counter feel stuck.
+  const paidMap = paidByDueKey(f);
+
   return list
     .slice(0, classId || sectionId ? 80 : 40)
     .map((student) => {
       const dues = computeStudentDues(student, m, f, {
         includeFuture: filters?.includeFuture ?? false,
+        paidMap,
       });
       const balancePaise = openFeeDues(dues).reduce(
         (sum, d) => sum + d.balancePaise,

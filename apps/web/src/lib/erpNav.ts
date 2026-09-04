@@ -9,6 +9,7 @@ import {
   ClipboardCheck,
   DoorOpen,
   FileBarChart2,
+  Globe,
   GraduationCap,
   HardHat,
   IndianRupee,
@@ -89,9 +90,9 @@ export const TONE: Record<
     soft: "from-[rgba(2,132,199,0.08)] to-transparent",
   },
   rose: {
-    icon: "bg-[rgba(180,35,24,0.1)] text-[#b42318]",
-    chip: "bg-[rgba(180,35,24,0.08)] text-[#b42318]",
-    bar: "bg-[#b42318]",
+    icon: "bg-[rgba(180,35,24,0.1)] text-[var(--danger)]",
+    chip: "bg-[rgba(180,35,24,0.08)] text-[var(--danger)]",
+    bar: "bg-[var(--danger)]",
     soft: "from-[rgba(180,35,24,0.06)] to-transparent",
   },
   violet: {
@@ -107,9 +108,9 @@ export const TONE: Record<
     soft: "from-[rgba(71,85,105,0.08)] to-transparent",
   },
   green: {
-    icon: "bg-[rgba(15,122,76,0.12)] text-[#0f7a4c]",
-    chip: "bg-[rgba(15,122,76,0.1)] text-[#0f7a4c]",
-    bar: "bg-[#0f7a4c]",
+    icon: "bg-[rgba(15,122,76,0.12)] text-[var(--success)]",
+    chip: "bg-[rgba(15,122,76,0.1)] text-[var(--success)]",
+    bar: "bg-[var(--success)]",
     soft: "from-[rgba(15,122,76,0.08)] to-transparent",
   },
 };
@@ -291,6 +292,14 @@ export const HUB_GROUPS: HubGroup[] = [
         detail: "Unified this-week/this-month view across events, holidays, exams, PTM and fee dues, with WhatsApp RSVP.",
         icon: CalendarHeart,
         tone: "gold",
+      },
+      {
+        href: "/website",
+        title: "Website",
+        blurb: "Pages · media",
+        detail: "The public site: pages, photographs and video, and what goes live on bhbinternational.school.",
+        icon: Globe,
+        tone: "sky",
       },
       {
         href: "/certificates",

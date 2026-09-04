@@ -196,6 +196,26 @@ export function deleteBankAccount(
   return { ok: true };
 }
 
+/**
+ * Has this exact source already been written to the bank book?
+ *
+ * postBankMovement always appends — it has no idempotency of its own — so a
+ * caller replaying an action (a retried vendor payment, a double-clicked
+ * button) would post the money twice. Callers outside the fee desk must ask
+ * this first.
+ */
+export function bankMovementExists(
+  sourceType: string,
+  sourceId: string,
+  state?: AccountsState,
+): boolean {
+  if (!sourceId) return false;
+  const s = state ?? loadAccounts();
+  return s.bankLedger.some(
+    (e) => e.sourceType === sourceType && e.sourceId === sourceId && !e.voidedAt,
+  );
+}
+
 export function postBankMovement(input: {
   bankId: string;
   date?: string;

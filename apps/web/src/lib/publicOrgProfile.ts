@@ -60,11 +60,44 @@ export const REGISTRATION_DETAILS: { label: string; value: string }[] = [
     label: "Registration no.",
     value: "158 of 2008 (Book 4, Volume 23, pages 177–220)",
   },
-  // CBSE affiliation no. can go here. Do NOT add the trust's PAN — the
-  // gateway takes it through KYC, it has no business on a public page.
+  {
+    label: "Recognition",
+    value:
+      "Recognised by the State Government of Uttar Pradesh for Nursery to Class VIII",
+  },
+  // No central-board affiliation number is held, so none is listed. Do NOT add
+  // the trust's PAN either — the gateway takes it through KYC, it has no
+  // business on a public page.
 ];
 
 export const TRADING_NAME = "BHB International School";
+
+/**
+ * The school's recognition, in the words published on every public page.
+ *
+ * The school is recognised by the State Government of Uttar Pradesh for
+ * Nursery to Class VIII and holds no central-board affiliation number. Saying
+ * so plainly, in the footer of every page, is what stops an automated merchant
+ * review from classifying the site as a CBSE high school and then demanding an
+ * affiliation letter that does not exist.
+ *
+ * Do not describe the school as CBSE-affiliated anywhere on the public site
+ * unless and until an affiliation number is actually held; "follows the
+ * NCERT/CBSE curriculum framework" is a statement about syllabus, which is
+ * true, and is as far as this may go.
+ */
+export const RECOGNITION_STATEMENT =
+  "BHB International School is recognized by the State Government of Uttar Pradesh (Nursery to Class VIII) and follows the standard NCERT/CBSE curriculum framework.";
+
+/*
+ * There is deliberately no CLASS_RANGE constant. Public copy states what the
+ * school is *recognised* for — see RECOGNITION_STATEMENT — and does not
+ * enumerate the classes it teaches. Recognition covers Nursery to Class VIII,
+ * while IX and X are taught here with those candidates registered for board
+ * examinations through an affiliated partner school. One "offering X to Y"
+ * line cannot carry both facts without being wrong in one direction or the
+ * other, so the public pages omit it rather than pick a wrong half.
+ */
 
 /**
  * Name on the bank account the payment gateway settles into, which is also
@@ -136,10 +169,18 @@ export const LEGAL_ADDRESS_ONE_LINE = addressOneLine(LEGAL_ADDRESS);
 
 export const CONTACT = {
   email: "director@bhbinternational.school",
-  /** Office line published for customers. Set to the number you actually answer. */
-  phone: null as string | null,
+  /**
+   * Office line published for customers.
+   *
+   * This is the school's verified WhatsApp Business number, which is the line
+   * parents already use and the office actually answers. A payment gateway's
+   * risk review requires a reachable phone number on the Contact page, so it
+   * is published rather than held back.
+   */
+  phone: "+91 94519 38805" as string | null,
   /** Office hours shown on the Contact page. */
-  hours: "Monday to Saturday, 8:00 am – 3:00 pm IST (excluding school holidays)",
+  hours:
+    "Monday to Saturday, 8:00 am – 3:00 pm IST (excluding school holidays)",
   website: "https://bhbinternational.school",
 } as const;
 
@@ -206,23 +247,26 @@ export const PUBLIC_SERVICES: PublicService[] = [
     code: "SECONDARY",
     name: "Secondary programme — Classes IX and X",
     summary:
-      "Full-session secondary education preparing students for the CBSE Class X board examination.",
+      "Full-session secondary schooling: tuition, amenities, examinations and school communications.",
     price: formatInr(39400),
     cadence: "per academic session (2026-27), new admission",
     detail:
-      "New admission ₹39,400 for the session, which includes a refundable security deposit. Students continuing from the previous session pay ₹33,400. Payable in full or in monthly instalments from April to March.",
+      "New admission ₹39,400 for the session, which includes a refundable security deposit. Students continuing from the previous session pay ₹33,400. Payable in full or in monthly instalments from April to March. Classes IX and X are taught at this campus; those students are registered for board examinations through an affiliated partner school, and any board registration or examination fee charged by that board is payable to that board separately and is not collected here.",
   },
   {
     code: "TRANSPORT",
     name: "School bus transport",
     summary:
       "Optional door-to-school pick-up and drop on the school's own bus routes, charged by distance.",
-    // TODO: these slabs come from `defaultFeePolicy()` in transport.ts, not from
-    // a published fee notice — replace with the notified rates when confirmed.
-    price: `${formatInr(400)} – ${formatInr(900)}`,
-    cadence: "per month, by distance slab (indicative)",
+    // Rates confirmed by the director, 2026-08-31, and consistent with the live
+    // transport fee policy (rateMode "band_then_formula": stops priced per stop
+    // up to 8 km, then base ₹500 covering 5 km plus ₹100 per further km). The
+    // old ₹400–₹900 slab list published here was never the billing rule — the
+    // `slabs` array is unused whenever rateMode is band_then_formula.
+    price: `${formatInr(500)} – ${formatInr(3000)}`,
+    cadence: "per month, by distance from the school",
     detail:
-      "Indicative slabs: up to 3 km ₹400 per month · up to 5 km ₹550 · up to 8 km ₹700 · beyond 8 km ₹900. The slab is fixed by the stop assigned to the student. Transport is optional and billed separately from the session fee. Please confirm the rate for your stop with the school office before enrolling for transport.",
+      "The monthly charge depends on how far the student's assigned stop is from the school. Stops within 8 km are priced individually by stop; beyond that the charge is ₹500 covering the first 5 km plus ₹100 for every further kilometre. Transport is optional, is billed monthly and is separate from the session fee. Please confirm the rate for your stop with the school office before enrolling for transport.",
   },
   {
     code: "EXAM",
@@ -232,7 +276,7 @@ export const PUBLIC_SERVICES: PublicService[] = [
     price: `${formatInr(500)} – ${formatInr(1000)}`,
     cadence: "per examination cycle",
     detail:
-      "₹500 per cycle for Nursery to Class V and ₹1,000 per cycle for Classes VI to X, charged in September and February. Already counted inside the session fee shown above; listed separately because it appears as its own line on the fee receipt.",
+      "₹500 per cycle from Nursery to Class VIII and ₹1,000 per cycle for Classes IX and X, charged in September and February. This is the school's own examination fee and is separate from any board examination fee. Already counted inside the session fee shown above; listed separately because it appears as its own line on the fee receipt.",
   },
   {
     code: "AMENITY",
@@ -242,7 +286,7 @@ export const PUBLIC_SERVICES: PublicService[] = [
     price: `${formatInr(1000)} – ${formatInr(3500)}`,
     cadence: "once per academic session, in April",
     detail:
-      "₹1,500 for Foundation and ₹3,500 for Classes IX–X on new admission, with lower rates for students continuing from the previous session. Already counted inside the session fee shown above; listed separately because it appears as its own line on the fee receipt.",
+      "₹1,500 for Foundation and Primary, ₹2,000 for Classes VI to VIII and ₹3,500 for Classes IX and X on new admission, with a lower rate for Foundation students continuing from the previous session. Already counted inside the session fee shown above; listed separately because it appears as its own line on the fee receipt.",
   },
 ];
 

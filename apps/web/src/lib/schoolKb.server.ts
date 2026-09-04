@@ -103,6 +103,7 @@ export async function indexPublishedNotices(): Promise<
     if (!error) removed = staleIds.length;
   }
 
+  invalidateKbPresence();
   return { ok: true, indexed, skipped, removed };
 }
 
@@ -125,6 +126,37 @@ export async function schoolKbStats(): Promise<{
  * an embedding/DB error returns an empty match list, never throws, so a
  * bot's reply flow degrades to its pre-RAG behavior rather than breaking.
  */
+/**
+ * Whether this tenant has anything in the knowledge base at all, cached
+ * for a minute. Retrieval otherwise pays an embedding round-trip (over a
+ * second) to match against an empty table — every chat message did, all
+ * day, when the school had not published a single indexed notice.
+ * Writers call invalidateKbPresence() so a first index is seen at once.
+ */
+const KB_PRESENCE_TTL_MS = 60_000;
+let kbPresence: { tenantId: string; hasChunks: boolean; at: number } | null = null;
+
+export function invalidateKbPresence(): void {
+  kbPresence = null;
+}
+
+type TenantDb = NonNullable<Awaited<ReturnType<typeof getServerTenantContext>>>["sb"];
+
+async function kbHasChunks(sb: TenantDb, tenantId: string): Promise<boolean> {
+  const now = Date.now();
+  if (kbPresence && kbPresence.tenantId === tenantId && now - kbPresence.at < KB_PRESENCE_TTL_MS) {
+    return kbPresence.hasChunks;
+  }
+  const { count, error } = await sb
+    .from("school_kb_chunks")
+    .select("id", { count: "exact", head: true })
+    .eq("tenant_id", tenantId);
+  // A failed count must not silence retrieval: assume there is content.
+  const hasChunks = error ? true : (count ?? 0) > 0;
+  kbPresence = { tenantId, hasChunks, at: now };
+  return hasChunks;
+}
+
 export async function retrieveRelevantKb(
   query: string,
   // Audience strings beyond CommsAudience exist for non-notice sources
@@ -136,6 +168,7 @@ export async function retrieveRelevantKb(
     const ctx = await getServerTenantContext();
     if (!ctx) return [];
     const { sb, tenantId } = ctx;
+    if (!(await kbHasChunks(sb, tenantId))) return [];
 
     const emb = await embedText(query);
     if (!emb.ok) return [];

@@ -1,10 +1,14 @@
-import "package:flutter/material.dart";
+/// Default entry point, kept so a bare `flutter run` still works.
+///
+/// The school ships two apps from this codebase and each has its own entry —
+/// lib/main_parent.dart and lib/main_staff.dart. Release builds must name one
+/// explicitly with `-t`, together with the matching `--flavor`, or the
+/// permissions in the manifest will not match the code that is running.
+///
+/// This delegates to staff because that is what the single combined app used
+/// to be, so existing scripts and muscle memory keep behaving as before.
+library;
 
-import "app/cbse_school_app.dart";
-import "features/staff/presence_service.dart";
+import "main_staff.dart" as staff;
 
-Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await initPresenceService();
-  runApp(const CbseSchoolApp());
-}
+Future<void> main() => staff.main();

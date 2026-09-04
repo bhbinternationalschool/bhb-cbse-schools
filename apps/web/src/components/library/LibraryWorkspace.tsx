@@ -41,6 +41,10 @@ import {
   libraryStats,
   listActiveTitles,
   loadLibrary,
+  mergeEbookShelfSeed,
+  saveLibrary,
+  upsertEbookShelf,
+  bookcaseCode,
   overdueIssues,
   returnBook,
   runLibraryReport,
@@ -51,6 +55,7 @@ import {
   type LibraryIssue,
   type LibraryItemCondition,
   type LibraryProcurementDoc,
+  type LibraryEbook,
   type LibraryReportFormat,
   type LibraryReportId,
   type LibraryTitle,
@@ -68,6 +73,7 @@ type LibTab =
   | "issue"
   | "history"
   | "procurement"
+  | "ebooks"
   | "reports";
 
 const TABS: ModuleTabItem[] = [
@@ -76,6 +82,7 @@ const TABS: ModuleTabItem[] = [
   { id: "issue", label: "Issue / Return", tone: "amber" },
   { id: "history", label: "History", tone: "green" },
   { id: "procurement", label: "Procurement", tone: "violet" },
+  { id: "ebooks", label: "E-books", tone: "coral" },
   { id: "reports", label: "Reports", tone: "slate" },
 ];
 
@@ -186,6 +193,7 @@ export function LibraryWorkspace() {
       "issue",
       "history",
       "procurement",
+      "ebooks",
       "reports",
     ];
     if (raw && (allowed as string[]).includes(raw)) setTab(raw as LibTab);
@@ -1507,6 +1515,14 @@ export function LibraryWorkspace() {
         </div>
       ) : null}
 
+      {tab === "ebooks" ? (
+        <EbooksPanel
+          tick={tick}
+          readOnly={readOnly}
+          onChanged={(msg) => refresh(msg)}
+        />
+      ) : null}
+
       {tab === "reports" ? (
         <div className="max-w-lg space-y-4 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-[var(--brand-deep)]">
@@ -1574,5 +1590,245 @@ export function LibraryWorkspace() {
         </div>
       ) : null}
     </ErpWorkspaceShell>
+  );
+}
+
+/* ─── E-books shelf ─────────────────────────────────────────── */
+
+/**
+ * The school's FlipHTML5 shelf, catalogued: which bookcase is which book,
+ * for which class and subject. This list feeds two readers — the parent /
+ * student shelf API (which attaches the pass key) and the teaching module's
+ * "from school shelf" picker on chapter resources. The codes are opaque and
+ * the shelf pages unreadable from here, so a person who has the shelf open
+ * names each one, once, and it sticks.
+ */
+function EbooksPanel({
+  tick,
+  readOnly,
+  onChanged,
+}: {
+  tick: number;
+  readOnly: boolean;
+  onChanged: (msg: string) => void;
+}) {
+  const state = useMemo(() => {
+    void tick;
+    return loadLibrary();
+  }, [tick]);
+  const [url, setUrl] = useState("");
+  const [title, setTitle] = useState("");
+  const [subject, setSubject] = useState("");
+  const [classes, setClasses] = useState("");
+  const [editId, setEditId] = useState<string | null>(null);
+
+  function beginEdit(b: LibraryEbook) {
+    setEditId(b.id);
+    setUrl(b.url);
+    setTitle(b.title);
+    setSubject(b.subject);
+    setClasses(b.classLabels.join(", "));
+  }
+
+  function submit() {
+    const res = upsertEbookShelf(state, {
+      url: url.trim(),
+      title: title.trim(),
+      subject: subject.trim(),
+      classLabels: classes
+        .split(/[,\s]+/)
+        .map((c) => c.trim())
+        .filter(Boolean),
+    });
+    if ("error" in res) {
+      onChanged(res.error);
+      return;
+    }
+    saveLibrary(res.state);
+    setUrl("");
+    setTitle("");
+    setSubject("");
+    setClasses("");
+    setEditId(null);
+    onChanged(editId ? "E-book updated" : "E-book added to the shelf");
+  }
+
+  function loadSeed() {
+    const merged = mergeEbookShelfSeed(state.ebooks);
+    if (merged.added === 0) {
+      onChanged("Every seeded bookcase is already on the shelf");
+      return;
+    }
+    saveLibrary({ ...state, ebooks: merged.ebooks });
+    onChanged(
+      `${merged.added} bookcases added — name each one so readers know what it is`,
+    );
+  }
+
+  function toggleActive(b: LibraryEbook) {
+    saveLibrary({
+      ...state,
+      ebooks: state.ebooks.map((e) =>
+        e.id === b.id ? { ...e, isActive: !e.isActive } : e,
+      ),
+    });
+    onChanged(b.isActive ? "Hidden from readers" : "Visible to readers again");
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
+              E-book shelf ({state.ebooks.length})
+            </h2>
+            <p className="text-xs text-[var(--muted)]">
+              These feed the parent shelf and the syllabus &ldquo;from school
+              shelf&rdquo; picker. Name, subject and classes are what readers
+              and teachers see.
+            </p>
+          </div>
+          {!readOnly ? (
+            <button
+              type="button"
+              onClick={loadSeed}
+              className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
+            >
+              Load school bookcases
+            </button>
+          ) : null}
+        </div>
+
+        {!readOnly ? (
+          <div className="mt-3 flex flex-wrap items-end gap-2 rounded-lg border border-dashed border-[var(--border)] px-3 py-2">
+            <label className="text-[11px] font-semibold text-[var(--muted)]">
+              FlipHTML5 shelf link
+              <input
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="https://fliphtml5.com/bookcase/…"
+                className="mt-1 block w-72 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-xs"
+              />
+            </label>
+            <label className="text-[11px] font-semibold text-[var(--muted)]">
+              Title
+              <input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Class VIII Maths"
+                className="mt-1 block w-48 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-xs"
+              />
+            </label>
+            <label className="text-[11px] font-semibold text-[var(--muted)]">
+              Subject
+              <input
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                placeholder="Mathematics"
+                className="mt-1 block w-36 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-xs"
+              />
+            </label>
+            <label className="text-[11px] font-semibold text-[var(--muted)]">
+              Classes
+              <input
+                value={classes}
+                onChange={(e) => setClasses(e.target.value)}
+                placeholder="VIII or VI, VII"
+                className="mt-1 block w-28 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-xs"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={submit}
+              disabled={!url.trim()}
+              className="rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
+            >
+              {editId ? "Save" : "Add"}
+            </button>
+            {editId ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setEditId(null);
+                  setUrl("");
+                  setTitle("");
+                  setSubject("");
+                  setClasses("");
+                }}
+                className="px-2 py-1.5 text-xs font-semibold text-[var(--muted)]"
+              >
+                Cancel
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
+        {state.ebooks.length === 0 ? (
+          <p className="mt-4 text-sm text-[var(--muted)]">
+            Nothing on the shelf yet. &ldquo;Load school bookcases&rdquo; adds
+            the school&rsquo;s FlipHTML5 cases in one go; then name each one.
+          </p>
+        ) : (
+          <ul className="mt-3 divide-y divide-[var(--border)]">
+            {state.ebooks.map((b) => (
+              <li
+                key={b.id}
+                className={`flex flex-wrap items-center justify-between gap-2 py-2 ${
+                  b.isActive ? "" : "opacity-50"
+                }`}
+              >
+                <div className="min-w-0">
+                  <span className="text-sm font-medium text-[var(--brand-deep)]">
+                    {b.title || `Untitled (${bookcaseCode(b.url) || "?"})`}
+                  </span>
+                  <span className="ml-2 text-xs text-[var(--muted)]">
+                    {[
+                      b.subject,
+                      b.classLabels.length ? b.classLabels.join(", ") : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ") || "no subject / class set"}
+                  </span>
+                  {!b.title ? (
+                    <span className="ml-2 rounded-full bg-[rgba(197,160,40,0.18)] px-2 py-0.5 text-[10px] font-bold text-[#8a5a10]">
+                      needs a name
+                    </span>
+                  ) : null}
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <a
+                    href={b.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs font-semibold text-[var(--brand-deep)] underline"
+                  >
+                    Open
+                  </a>
+                  {!readOnly ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => beginEdit(b)}
+                        className="text-xs font-semibold text-[var(--brand-deep)] underline"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => toggleActive(b)}
+                        className="text-xs font-semibold text-[var(--muted)] underline"
+                      >
+                        {b.isActive ? "Hide" : "Show"}
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
   );
 }

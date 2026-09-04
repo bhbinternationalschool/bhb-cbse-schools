@@ -207,7 +207,7 @@ const TONE_STYLES: Record<
   gold: {
     chip: "bg-[rgba(197,160,40,0.18)] text-[#8a6d12]",
     value: "text-[#8a6d12]",
-    ring: "hover:ring-[#c5a028]/40 focus-visible:ring-[#c5a028]",
+    ring: "hover:ring-[var(--brand-accent)]/40 focus-visible:ring-[var(--brand-accent)]",
     bar: "#c5a028",
   },
   teal: {

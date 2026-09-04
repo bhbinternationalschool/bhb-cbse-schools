@@ -100,6 +100,18 @@ export const DEFAULT_ANOMALY_THRESHOLDS: AnomalyThresholds = {
   backdatingGraceDays: 14,
 };
 
+/**
+ * The kind of party a line belongs to.
+ *
+ * partyKey is built as `<kind>:<external id>`, so the kind is already there.
+ * Read rather than re-fetched, because a control that needs its own query is
+ * a control that quietly stops running.
+ */
+function partyKindOf(partyKey: string): string {
+  const i = partyKey.indexOf(":");
+  return i > 0 ? partyKey.slice(0, i) : "";
+}
+
 function daysBetween(a: string, b: string): number {
   const da = Date.parse(`${a.slice(0, 10)}T00:00:00Z`);
   const db = Date.parse(`${b.slice(0, 10)}T00:00:00Z`);
@@ -141,8 +153,24 @@ export function findDuplicatePayments(
     payments.push({ voucher: v, partyKey: l.partyKey, partyName: l.partyName, amountPaise: l.debitPaise });
   }
 
+  // A party the school still owes money to has not been paid twice — it has
+  // been paid in instalments.
+  //
+  // Peerson Books tripped this: 1,00,000 on 4 April and again on 5 April.
+  // Both were instalments on one 6,87,450 bill (50,000 → 1,00,000 →
+  // 1,00,000 → 1,23,000 = the 3,73,000 the bill records as paid), and the
+  // school still owed the balance. A real double payment leaves the supplier
+  // holding money they were never billed for, which is a debit balance — so
+  // that, not the repeated amount alone, is the thing worth waking someone
+  // for. `party_overpaid` still reports the debit balance itself.
+  // Same net, same reason: a reversed bill and its reversal cancel, and
+  // counting only one of them would make a settled supplier look overpaid and
+  // so turn every instalment into a "duplicate payment".
+  const partyNet = netByParty(facts);
+
   const grouped = new Map<string, typeof payments>();
   for (const p of payments) {
+    if ((partyNet.get(p.partyKey)?.paise ?? 0) <= 0) continue;
     const key = `${p.partyKey}|${p.amountPaise}`;
     const list = grouped.get(key);
     if (list) list.push(p);
@@ -177,20 +205,43 @@ export function findDuplicatePayments(
  * that is a genuine advance, which is why it is a warning rather than a
  * critical — but it is never something to discover at year end.
  */
-export function findOverpaidParties(facts: AnomalyFacts): Anomaly[] {
-  const live = new Set(facts.vouchers.filter((v) => !v.reversed).map((v) => v.id));
+/**
+ * What each party's account nets to, counting EVERY line.
+ *
+ * Reversals are not filtered out, and that is the point. A reversal is posted
+ * as an equal and opposite entry, so the pair cancels on its own. Dropping the
+ * reversed voucher while keeping its reversal — which is what this used to
+ * do — leaves the reversing debit standing alone and makes the party look
+ * overpaid by exactly the reversed amount.
+ *
+ * On this data Gyan Sindhu had two bills reversed (a receipt amended, a bill
+ * date corrected). The control reported them as ₹1,11,233.15 overpaid, every
+ * single day, when the school in fact still owed them ₹31,310.03. Two
+ * ordinary corrections, reported as a warning about money.
+ */
+function netByParty(facts: AnomalyFacts): Map<string, { name: string; paise: number }> {
   const net = new Map<string, { name: string; paise: number }>();
   for (const l of facts.lines) {
-    if (!live.has(l.voucherId) || !l.partyKey) continue;
+    if (!l.partyKey) continue;
     const cur = net.get(l.partyKey) ?? { name: l.partyName, paise: 0 };
     cur.paise += l.debitPaise - l.creditPaise;
     if (l.partyName) cur.name = l.partyName;
     net.set(l.partyKey, cur);
   }
+  return net;
+}
+
+export function findOverpaidParties(facts: AnomalyFacts): Anomaly[] {
+  const net = netByParty(facts);
 
   const out: Anomaly[] = [];
   for (const [key, v] of net) {
     if (v.paise <= 0) continue;
+    // Suppliers only. On a SUPPLIER a debit balance means we paid more than
+    // they billed. On a STUDENT it means the exact opposite — they owe the
+    // school — so this fired on every student with a store balance: 177 of
+    // 177 of them, the whole store sales book, reported as overpayments.
+    if (partyKindOf(key) !== "vendor") continue;
     out.push({
       code: "party_overpaid",
       severity: "warning",
@@ -330,6 +381,11 @@ export function findBackdatedEntries(
   t: AnomalyThresholds,
 ): Anomaly[] {
   const out: Anomaly[] = [];
+  const shutPeriods = new Set(
+    facts.reopenedPeriods
+      .filter((p) => p.status === "locked" || p.status === "closed")
+      .map((p) => p.period),
+  );
   for (const v of facts.vouchers) {
     if (v.reversed) continue;
     // Opening balances are dated the first day of the year and entered later
@@ -337,6 +393,15 @@ export function findBackdatedEntries(
     if (v.voucherType === "opening" || v.voucherType === "closing") continue;
     const lag = daysBetween(v.date, v.createdAt.slice(0, 10));
     if (lag <= t.backdatingGraceDays) continue;
+    // Only when the period it lands in is actually shut.
+    //
+    // The reason this rule exists is that backdating is indistinguishable
+    // from altering a closed period. If the period is open, late entry is
+    // just late entry — and a school keying this year's history into a
+    // system it adopted mid-year backdates nearly everything: 648 of 721
+    // vouchers here, average 95 days. At that volume the rule reported the
+    // migration, and buried everything else.
+    if (!shutPeriods.has(String(v.date).slice(0, 7))) continue;
     const amount = facts.lines
       .filter((l) => l.voucherId === v.id)
       .reduce((n, l) => n + l.debitPaise, 0);

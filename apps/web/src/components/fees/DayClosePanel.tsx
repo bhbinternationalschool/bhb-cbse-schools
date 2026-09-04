@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { DayCloseSheet, printDayClose } from "@/components/fees/DayCloseSheet";
 import {
   approveDayClose,
   buildDayBook,
@@ -200,17 +201,28 @@ export function DayClosePanel({
               Accounts. After submit, new receipts for that date are locked.
             </p>
           </div>
-          <label className="block text-sm">
-            <span className="mb-1 block text-[11px] text-[var(--muted)]">
-              Close date
-            </span>
-            <input
-              className="field !py-1.5"
-              type="date"
-              value={closeDate}
-              onChange={(e) => setCloseDate(e.target.value)}
-            />
-          </label>
+          <div className="flex items-end gap-2">
+            <label className="block text-sm">
+              <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                Close date
+              </span>
+              <input
+                className="field !py-1.5"
+                type="date"
+                value={closeDate}
+                onChange={(e) => setCloseDate(e.target.value)}
+              />
+            </label>
+            {/* The sheet the two of them sign. Printable at any stage — the
+                cashier often prints the draft to count against. */}
+            <button
+              type="button"
+              className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-bold text-[var(--brand-deep)] hover:bg-[var(--surface)]"
+              onClick={() => printDayClose()}
+            >
+              Print for signature
+            </button>
+          </div>
         </div>
 
         {session ? (
@@ -441,7 +453,7 @@ export function DayClosePanel({
                     variance === 0
                       ? "text-[#15803d]"
                       : variance > 0
-                        ? "text-[#b45309]"
+                        ? "text-[var(--warning)]"
                         : "text-[#dc2626]"
                   }`}
                 >
@@ -731,6 +743,26 @@ export function DayClosePanel({
           </ul>
         </div>
       ) : null}
+
+      {/* Rendered always, shown only by the print stylesheet: printing must
+          never depend on a preview being open, and the sheet needs the same
+          numbers the panel is showing right now. */}
+      <div className="hidden print:block">
+        <DayCloseSheet
+          closeDate={closeDate}
+          cashierName={session?.cashierName || cashierName}
+          receiverName={receiverName}
+          cashierRemarks={cashierRemarks}
+          receiverRemarks={receiverRemarks}
+          status={session?.status ?? "draft"}
+          vouchers={book.vouchers}
+          modeTotals={book.modeTotals}
+          denoms={denoms}
+          totalPaise={book.totalPaise}
+          systemCashPaise={systemCash}
+          physicalCashPaise={physical}
+        />
+      </div>
     </div>
   );
 }
@@ -752,7 +784,7 @@ function Kpi({
       : accent === "short"
         ? "text-[#dc2626]"
         : accent === "excess"
-          ? "text-[#b45309]"
+          ? "text-[var(--warning)]"
           : accent === "cash"
             ? "text-[#16a34a]"
             : "text-[var(--brand-deep)]";

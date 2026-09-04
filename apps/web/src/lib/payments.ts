@@ -302,6 +302,18 @@ export function createPaymentLink(input: {
   academicYearCode?: string;
   expiresInDays?: number;
   note?: string;
+  /**
+   * What the parent should actually pay, when that is less than the full
+   * balance of the selected dues — a counter discount, or an amount the
+   * clerk typed into the collect box.
+   *
+   * Without this the link was always raised for the GROSS balance: the
+   * clerk granted a discount, sent the link, and the parent was asked for
+   * the undiscounted figure. Allocated oldest-due-first, the same order a
+   * part payment is applied at the counter, so the link's breakup matches
+   * the receipt the payment will produce.
+   */
+  targetPaise?: number;
 }):
   | { ok: true; link: PaymentLink }
   | { ok: false; error: string } {
@@ -309,7 +321,32 @@ export function createPaymentLink(input: {
   if (open.length === 0) {
     return { ok: false, error: "Select at least one open due" };
   }
-  const lines = duesToPaymentLines(open);
+
+  const gross = open.reduce((s, d) => s + d.balancePaise, 0);
+  const target =
+    input.targetPaise === undefined
+      ? gross
+      : Math.max(0, Math.min(Math.round(input.targetPaise), gross));
+  if (target <= 0) {
+    return { ok: false, error: "Amount must be positive" };
+  }
+
+  const ordered = [...open].sort((a, b) => {
+    const byDue = a.dueOn.localeCompare(b.dueOn);
+    return byDue !== 0 ? byDue : a.dueKey.localeCompare(b.dueKey);
+  });
+
+  let remain = target;
+  const charged: FeeDueLine[] = [];
+  for (const d of ordered) {
+    if (remain <= 0) break;
+    const take = Math.min(d.balancePaise, remain);
+    if (take <= 0) continue;
+    charged.push({ ...d, balancePaise: take });
+    remain -= take;
+  }
+
+  const lines = duesToPaymentLines(charged);
   const amountPaise = lines.reduce((s, l) => s + l.amountPaise, 0);
   if (amountPaise <= 0) {
     return { ok: false, error: "Amount must be positive" };
@@ -451,6 +488,13 @@ export function applyPaymentLink(input: {
         ref: upiRef,
         instrumentDate: collectionDate,
         bankName: "",
+        // A real gateway holds this money until it settles, so the book puts
+        // it in clearing rather than in a bank it has not reached. Demo links
+        // carry no provider: nothing was captured, so nothing is in transit.
+        gatewayProvider:
+          link.gatewayMode === "cashfree" || link.gatewayMode === "razorpay"
+            ? link.gatewayMode
+            : "",
         realisation: "cleared",
       },
     ],
@@ -624,6 +668,7 @@ export function composeWhatsAppPaymentLinkMessage(
   link: PaymentLink,
   payUrl: string,
   schoolName: string,
+  autoSettle = false,
 ): string {
   const lines = [
     `*${schoolName}*`,
@@ -633,11 +678,15 @@ export function composeWhatsAppPaymentLinkMessage(
     `Amount: *${formatInr(link.amountPaise)}*`,
     `Valid till: ${link.expiresOn}`,
     "",
-    "Pay with GPay / UPI:",
+    autoSettle ? "Pay securely (UPI / card / netbanking):" : "Pay with GPay / UPI:",
     payUrl,
     "",
-    "1️⃣ Open link → pay in Google Pay / UPI",
-    "2️⃣ Tap *Confirm paid* on the page for receipt",
+    ...(autoSettle
+      ? ["Receipt comes automatically on WhatsApp after payment."]
+      : [
+          "1️⃣ Open link → pay in Google Pay / UPI",
+          "2️⃣ Tap *Confirm paid* on the page for receipt",
+        ]),
     "",
     "Or pay at school counter and share UTR.",
   ];

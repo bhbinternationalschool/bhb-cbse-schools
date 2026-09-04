@@ -14,6 +14,7 @@ import {
   whatsAppPaymentLinkUrl,
   type PaymentLink,
 } from "@/lib/payments";
+import { attachGatewayCheckout } from "@/lib/paymentGatewayClient";
 import { householdWhatsApp, loadSis, type SisState } from "@/lib/sis";
 import { TENANT } from "@/lib/types";
 import {
@@ -62,7 +63,16 @@ export function PayLinksPanel({
     window.setTimeout(() => setNotice(null), 2800);
   }
 
-  function copyLink(link: PaymentLink) {
+  /** Attach live gateway checkout before sharing; UPI share on failure. */
+  async function ensureGateway(link: PaymentLink): Promise<PaymentLink> {
+    const result = await attachGatewayCheckout(link);
+    if (result.attached && !link.gatewayCheckoutUrl) refresh();
+    else if (result.error) flash(`UPI link (no checkout: ${result.error})`);
+    return result.link;
+  }
+
+  async function copyLink(rawLink: PaymentLink) {
+    const link = await ensureGateway(rawLink);
     const payload = buildEnrichedPaymentSharePayload(link, TENANT.nameDisplay);
     const url = buildPaymentShareUrl(payload);
     void navigator.clipboard.writeText(url).then(
@@ -71,19 +81,21 @@ export function PayLinksPanel({
     );
   }
 
-  function shareWhatsApp(link: PaymentLink) {
-    const hh = sis?.households.find((h) => h.id === link.householdId);
+  async function shareWhatsApp(rawLink: PaymentLink) {
+    const hh = sis?.households.find((h) => h.id === rawLink.householdId);
     const mobile = householdWhatsApp(hh);
     if (!mobile) {
       setError("No WhatsApp number on this household — set it on Fee Take");
       return;
     }
+    const link = await ensureGateway(rawLink);
     const payload = buildEnrichedPaymentSharePayload(link, TENANT.nameDisplay);
     const url = buildPaymentShareUrl(payload);
     const msg = composeWhatsAppPaymentLinkMessage(
       link,
       url,
       TENANT.nameDisplay,
+      !!link.gatewayCheckoutUrl,
     );
     window.open(whatsAppPaymentLinkUrl(mobile, msg), "_blank", "noopener");
     flash(`WhatsApp opened for ${mobile}`);
@@ -187,6 +199,11 @@ export function PayLinksPanel({
                     {link.code}
                   </span>
                   <StatusPill status={link.status} />
+                  {link.gatewayCheckoutUrl ? (
+                    <span className="rounded bg-[rgba(22,163,74,0.12)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#15803d]">
+                      {link.gatewayMode === "razorpay" ? "Razorpay" : "Cashfree"}
+                    </span>
+                  ) : null}
                   <span className="text-sm font-bold tabular-nums text-[var(--brand-deep)]">
                     {formatInr(link.amountPaise)}
                   </span>
@@ -209,14 +226,14 @@ export function PayLinksPanel({
                     <button
                       type="button"
                       className="rounded-lg border border-[rgba(32,48,80,0.15)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)]"
-                      onClick={() => copyLink(link)}
+                      onClick={() => void copyLink(link)}
                     >
                       Copy link
                     </button>
                     <button
                       type="button"
                       className="rounded-lg bg-[#128C7E] px-2.5 py-1 text-[11px] font-bold text-white"
-                      onClick={() => shareWhatsApp(link)}
+                      onClick={() => void shareWhatsApp(link)}
                     >
                       WhatsApp
                     </button>
@@ -255,10 +272,10 @@ export function PayLinksPanel({
 
 function StatusPill({ status }: { status: PaymentLink["status"] }) {
   const map: Record<PaymentLink["status"], string> = {
-    open: "bg-[rgba(37,99,235,0.12)] text-[#1d4ed8]",
+    open: "bg-[rgba(37,99,235,0.12)] text-[var(--info)]",
     paid: "bg-[rgba(22,163,74,0.12)] text-[#15803d]",
     cancelled: "bg-[rgba(32,48,80,0.08)] text-[var(--muted)]",
-    expired: "bg-[rgba(217,119,6,0.12)] text-[#b45309]",
+    expired: "bg-[rgba(217,119,6,0.12)] text-[var(--warning)]",
   };
   return (
     <span

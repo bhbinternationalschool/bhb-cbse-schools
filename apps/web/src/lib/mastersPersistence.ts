@@ -16,11 +16,7 @@ import {
 import { mergeDbDeskIntoMastersState } from "@/lib/mastersNormalizedMerge";
 import { mastersReadFromDbEnabled } from "@/lib/mastersDbConfig";
 import { deskSkipMirrorBlobSliceClient } from "@/lib/deskCutover";
-import {
-  isDeskHydrated,
-  markDeskHydrated,
-  resetDeskHydrated,
-} from "@/lib/deskHydrateGuard";
+import { dedupeHydration, isDeskHydrated, markDeskHydrated, resetDeskHydrated } from "@/lib/deskHydrateGuard";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { guardMastersOverwrite } from "@/lib/mastersWriteGuard";
 
@@ -118,6 +114,11 @@ export async function pushMastersRemoteServer(
 
 export async function ensureMastersHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
+  // Same collapse as fees and sis: concurrent callers share one fetch.
+  return dedupeHydration(MODULE, hydrateMastersOnce);
+}
+
+async function hydrateMastersOnce(): Promise<boolean> {
 
   const readFromDb = mastersReadFromDbEnabled();
   let mirrorChanged = false;

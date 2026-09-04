@@ -34,6 +34,7 @@ import {
   defaultSettings,
   emptyAccounts,
   ensureConstructionCoaAccounts,
+  migrateRefreshmentSubHead,
   ensureStoreCoaAccounts,
   normalizeBank,
   normalizeBankLedger,
@@ -180,12 +181,57 @@ export function accountsStateIsEmpty(state: AccountsState): boolean {
   );
 }
 
+/**
+ * Re-home cash entries whose pool no longer exists.
+ *
+ * Pool ids are generated per browser, so a re-seed (see the gate above) or a
+ * desk restored from another machine can leave the ledger pointing at ids
+ * that are gone. The money is still real — the entries are counter receipts —
+ * so they are moved to the main cash box rather than being left invisible.
+ * Losing which drawer it sat in is a far smaller error than losing the cash.
+ */
+export function repairOrphanCashLedger(state: AccountsState): AccountsState {
+  if (state.cashPools.length === 0 || state.cashLedger.length === 0) {
+    return state;
+  }
+  const live = new Set(state.cashPools.map((p) => p.id));
+  const orphans = state.cashLedger.filter((e) => !live.has(e.poolId));
+  if (orphans.length === 0) return state;
+
+  const home =
+    state.cashPools.find((p) => p.code === "main") ?? state.cashPools[0];
+  return {
+    ...state,
+    cashLedger: state.cashLedger.map((e) =>
+      live.has(e.poolId)
+        ? e
+        : {
+            ...e,
+            poolId: home.id,
+            narration: e.narration
+              ? `${e.narration} · re-homed from a removed cash pool`
+              : "Re-homed from a removed cash pool",
+          },
+    ),
+  };
+}
+
 /** Seed a starter chart of accounts, cash pools, one bank, categories, one trustee. */
 export function seedAccountsIfEmpty(): AccountsState {
   let state = loadAccounts();
-  if (state.coaAccounts.length > 0) {
+  // Gate the seed on what it actually creates.
+  //
+  // This used to return early only when coaAccounts existed — but the block
+  // below also builds CASH POOLS, with fresh random ids. A browser holding a
+  // hydrated cash ledger and an empty chart therefore re-seeded three pools,
+  // and every existing ledger entry was left pointing at pool ids that no
+  // longer existed. Cash then read as zero on the desk while the entries sat
+  // there in full: 59 fee receipts, ₹2,37,325, invisible.
+  if (state.coaAccounts.length > 0 || state.cashPools.length > 0) {
     state = ensureConstructionCoaAccounts(state);
     state = ensureStoreCoaAccounts(state);
+    state = migrateRefreshmentSubHead(state);
+    state = repairOrphanCashLedger(state);
     saveAccounts(state);
     return state;
   }
@@ -208,7 +254,7 @@ export function seedAccountsIfEmpty(): AccountsState {
   const bankAccounts: BankAccount[] = [];
 
   const expenseCategories: ExpenseCategory[] = [
-    normalizeExpenseCategory({ name: "Mess", coaCode: COA_EXP_MESS }),
+    normalizeExpenseCategory({ name: "Refreshment", coaCode: COA_EXP_MESS }),
     normalizeExpenseCategory({ name: "Milk", coaCode: COA_EXP_MILK }),
     normalizeExpenseCategory({ name: "Utilities", coaCode: COA_EXP_UTILITIES }),
     normalizeExpenseCategory({

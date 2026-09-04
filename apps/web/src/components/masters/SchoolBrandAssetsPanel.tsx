@@ -47,6 +47,8 @@ export function SchoolBrandAssetsPanel({
               </h3>
               <StaffImageField
                 label="School logo"
+                visibility="public"
+                pathPrefix="brand"
                 value={draft.logoUrl}
                 onChange={(v) => set("logoUrl", v)}
                 onError={setError}
@@ -54,6 +56,8 @@ export function SchoolBrandAssetsPanel({
               />
               <StaffImageField
                 label="Favicon"
+                visibility="public"
+                pathPrefix="brand"
                 value={draft.faviconUrl}
                 onChange={(v) => set("faviconUrl", v)}
                 onError={setError}
@@ -68,6 +72,8 @@ export function SchoolBrandAssetsPanel({
               </h3>
               <StaffImageField
                 label="Watermark"
+                visibility="public"
+                pathPrefix="brand"
                 value={draft.watermarkUrl}
                 onChange={(v) => set("watermarkUrl", v)}
                 onError={setError}
@@ -76,6 +82,8 @@ export function SchoolBrandAssetsPanel({
               />
               <StaffImageField
                 label="Page background"
+                visibility="public"
+                pathPrefix="brand"
                 value={draft.pageBackgroundUrl}
                 onChange={(v) => set("pageBackgroundUrl", v)}
                 onError={setError}
@@ -96,8 +104,8 @@ export function SchoolBrandAssetsPanel({
                     Tile school display name
                   </span>
                   <span className="block text-[11px] text-[var(--muted)]">
-                    When no page background image — repeat &ldquo;{draft.displayName}&rdquo;
-                    diagonally across the page
+                    When no page background image — repeat &ldquo;
+                    {draft.displayName}&rdquo; diagonally across the page
                   </span>
                 </span>
               </label>
@@ -108,11 +116,13 @@ export function SchoolBrandAssetsPanel({
                 Signatures & stamps
               </h3>
               <p className="text-[11px] text-[var(--muted)]">
-                Upload stamps as PNG with transparent background. Director stamp preview
-                uses a blue tint (govt submission style).
+                Upload stamps as PNG with transparent background. Director stamp
+                preview uses a blue tint (govt submission style).
               </p>
               <StaffImageField
                 label="Director signature"
+                visibility="private"
+                pathPrefix="brand/signatures"
                 value={draft.directorSignatureUrl}
                 onChange={(v) => set("directorSignatureUrl", v)}
                 onError={setError}
@@ -121,6 +131,8 @@ export function SchoolBrandAssetsPanel({
               />
               <StaffImageField
                 label="Principal stamp + signature"
+                visibility="private"
+                pathPrefix="brand/signatures"
                 value={draft.principalStampSignatureUrl}
                 onChange={(v) => set("principalStampSignatureUrl", v)}
                 onError={setError}
@@ -130,6 +142,8 @@ export function SchoolBrandAssetsPanel({
               <div>
                 <StaffImageField
                   label="Director stamp + signature"
+                  visibility="private"
+                  pathPrefix="brand/signatures"
                   value={draft.directorStampSignatureUrl}
                   onChange={(v) => set("directorStampSignatureUrl", v)}
                   onError={setError}
@@ -138,7 +152,9 @@ export function SchoolBrandAssetsPanel({
                 />
                 {draft.directorStampSignatureUrl ? (
                   <div className="mt-2 flex items-center gap-2">
-                    <span className="text-[11px] text-[var(--muted)]">Preview tint:</span>
+                    <span className="text-[11px] text-[var(--muted)]">
+                      Preview tint:
+                    </span>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={draft.directorStampSignatureUrl}

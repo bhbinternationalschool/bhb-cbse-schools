@@ -8,6 +8,7 @@ import {
   listSales,
   postSale,
   postSaleReturn,
+  reverseCollectionByReceipt,
   storeDuesForStudents,
   voidSale,
   studentPurchases,
@@ -21,7 +22,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
-  return invRoute(req, "view", async () => {
+  return invRoute(req, "view", async ({ academicYearCode }) => {
     const q = invQuery(req);
     const view = q.get("view") ?? "list";
 
@@ -31,16 +32,18 @@ export async function GET(req: Request) {
     }
     if (view === "siblings")
       return {
+        // Default to the session's academic year — without it a family that
+        // has been here three sessions shows every child three times.
         siblings: await householdSiblings(
           q.get("householdId") ?? "",
-          q.get("ay") ?? "",
+          q.get("ay") || academicYearCode,
         ),
       };
     if (view === "purchases")
       return {
         purchases: await studentPurchases(
           q.get("studentId") ?? "",
-          q.get("ay") ?? "",
+          q.get("ay") || academicYearCode,
         ),
       };
     if (view === "dues") {
@@ -61,6 +64,7 @@ export async function GET(req: Request) {
 
     const status = q.get("status");
     const query: InvSaleQuery = {
+      saleId: q.get("saleId") ?? "",
       search: q.get("search") ?? "",
       buyerKind: (q.get("buyerKind") as InvBuyerKind | null) ?? "",
       status: (status as InvSaleQuery["status"]) ?? "all",
@@ -79,6 +83,7 @@ type Body =
   | ({ action: "collect" } & Parameters<typeof collectOnSale>[0])
   | ({ action: "return" } & Parameters<typeof postSaleReturn>[0])
   | { action: "void"; saleId: string; reason: string }
+  | { action: "reverse-collect"; receiptNo: string; reason?: string }
   | ({ action: "household" } & Parameters<typeof postHouseholdSale>[0]);
 
 export async function POST(req: Request) {
@@ -107,12 +112,23 @@ export async function POST(req: Request) {
         household: await postHouseholdSale(
           body as Parameters<typeof postHouseholdSale>[0],
           actor,
+          academicYearCode,
         ),
       };
     }
     if (action === "void") {
       const v = body as { saleId: string; reason: string };
       return voidSale(v.saleId, v.reason, actor);
+    }
+    if (action === "reverse-collect") {
+      const r = body as { receiptNo: string; reason?: string };
+      return {
+        reversal: await reverseCollectionByReceipt({
+          receiptNo: r.receiptNo,
+          actor,
+          reason: r.reason,
+        }),
+      };
     }
     return {
       sale: await postSale(

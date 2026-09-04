@@ -46,7 +46,7 @@ export const TIMETABLE_REPORT_CATEGORIES: {
   headerClass: string;
 }[] = [
   { id: "load", title: "Teaching load", headerClass: "bg-[#1565c0]" },
-  { id: "substitution", title: "Substitution", headerClass: "bg-[#b45309]" },
+  { id: "substitution", title: "Substitution", headerClass: "bg-[var(--warning)]" },
 ];
 
 export const TIMETABLE_REPORTS: TimetableReportDef[] = [

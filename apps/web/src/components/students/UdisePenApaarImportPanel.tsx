@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { getSessionActor } from "@/lib/sessionActor";
 import Link from "next/link";
 import {
   STUDENT_TYPES,
@@ -12,6 +13,7 @@ import { upgradeStudentClass } from "@/lib/classUpgrade";
 import {
   DEFAULT_UDISE_MATCH_OPTIONS,
   applyUdiseRowToStudent,
+  isConfidentUdiseMatch,
   applyUdiseStudentDetailsSync,
   classBelowId,
   findUdiseMatchCandidates,
@@ -25,6 +27,7 @@ import {
   setUdiseStudentStatus,
   migrateUdiseRowToSis,
   previewUdiseStudentDetailsSync,
+  findUdiseHeaderRow,
   promoteUdiseRowToSession,
   reconcileUdisePortalUpload,
   type UdiseMatchOptions,
@@ -32,6 +35,17 @@ import {
   type UdiseRowTone,
   type UdiseStudentRow,
 } from "@/lib/udiseStudentDetails";
+import {
+  clearUdiseUpload,
+  loadUdiseUpload,
+  mergeUdiseMatrices,
+  saveUdiseUpload,
+} from "@/lib/udiseUploadStore";
+import {
+  clearServerSheet,
+  loadServerSheet,
+  saveServerSheet,
+} from "@/lib/udiseUploadServer";
 import {
   ErpTable,
   ErpTableBody,
@@ -58,12 +72,12 @@ const TONE_ROW: Record<UdiseRowTone, string> = {
 
 const TONE_BADGE: Record<UdiseRowTone, string> = {
   fill: "bg-[rgba(14,90,140,0.2)] text-[#0a4a73]",
-  ok: "bg-[rgba(15,122,76,0.2)] text-[#0f7a4c]",
+  ok: "bg-[rgba(15,122,76,0.2)] text-[var(--success)]",
   verify: "bg-[rgba(180,120,24,0.25)] text-[#8a5a10]",
   suspect: "bg-[rgba(180,35,24,0.2)] text-[#8b1a12]",
   ambiguous: "bg-[rgba(100,60,140,0.2)] text-[#5a2a7a]",
   inactive: "bg-[rgba(60,60,60,0.25)] text-[#333]",
-  mbu_age: "bg-[#b42318] text-white",
+  mbu_age: "bg-[var(--danger)] text-white",
 };
 
 const TONE_LABEL: Record<UdiseRowTone, string> = {
@@ -77,6 +91,9 @@ const TONE_LABEL: Record<UdiseRowTone, string> = {
 };
 
 type FilterTone =
+  /** Everything still needing attention — the default, and the point of the
+   *  screen. A row settled in SIS drops out of it on its own. */
+  | "todo"
   | "all"
   | "fill"
   | "verify"
@@ -125,7 +142,7 @@ function MbuAgeActions({
 
   return (
     <div className="mt-1 rounded-md border border-[rgba(180,35,24,0.3)] bg-[rgba(180,35,24,0.05)] p-1.5">
-      <p className="text-[10px] font-semibold text-[#b42318]">
+      <p className="text-[10px] font-semibold text-[var(--danger)]">
         Age below class ({className}) — govt MBU
       </p>
       {student.promotionLocked ? (
@@ -150,7 +167,7 @@ function MbuAgeActions({
           <button
             type="button"
             disabled={!target}
-            className="rounded bg-[#b42318] px-2 py-0.5 text-[10px] font-semibold text-white disabled:opacity-40"
+            className="rounded bg-[var(--danger)] px-2 py-0.5 text-[10px] font-semibold text-white disabled:opacity-40"
             onClick={() => onReassign(student.id, student.fullName, target)}
             title="De-nominate from current class and re-assign to the age-correct lower class"
           >
@@ -169,7 +186,7 @@ function MbuAgeActions({
         {student.promotionLocked ? (
           <button
             type="button"
-            className="rounded border border-[#0f7a4c] px-2 py-0.5 text-[10px] font-semibold text-[#0f7a4c]"
+            className="rounded border border-[var(--success)] px-2 py-0.5 text-[10px] font-semibold text-[var(--success)]"
             onClick={() => onLock(student.id, student.fullName, false)}
           >
             Unlock promotion
@@ -215,7 +232,15 @@ export function UdisePenApaarImportPanel({
   const [error, setError] = useState<string | null>(null);
   const [applyResult, setApplyResult] = useState<string | null>(null);
   const [justApplied, setJustApplied] = useState(false);
-  const [filter, setFilter] = useState<FilterTone>("all");
+  /**
+   * Opens on what is left to do, not on everything.
+   *
+   * The list is recomputed against SIS each time, so a child already verified
+   * reports itself in sync and disappears from this view without anyone
+   * ticking anything off. "All" is one click away when the whole sheet is
+   * wanted.
+   */
+  const [filter, setFilter] = useState<FilterTone>("todo");
   const [migrateType, setMigrateType] = useState<FeeStudentType>("RTE");
   const [migrateFeeGroupId, setMigrateFeeGroupId] = useState("");
   const [fallbackClassId, setFallbackClassId] = useState("");
@@ -288,6 +313,7 @@ export function UdisePenApaarImportPanel({
 
   const visible = useMemo(() => {
     if (!preview) return [];
+    if (filter === "todo") return preview.filter((p) => p.tone !== "ok");
     if (filter === "changes") return preview.filter((p) => p.fillLabels.length);
     if (filter === "class_mismatch")
       return preview.filter((p) => p.classMismatch);
@@ -328,6 +354,81 @@ export function UdisePenApaarImportPanel({
     }
   }
 
+  /** How this working set was built, for the line above the table. */
+  const [storedInfo, setStoredInfo] = useState<{
+    files: { name: string; at: string; rows: number }[];
+    updatedAt: string;
+    /** Which copy is on screen — it changes what the office can rely on. */
+    where: "server" | "browser";
+  } | null>(null);
+
+  /**
+   * Bring back the sheet the office was working through.
+   *
+   * Only the ROWS were kept; the table is recomputed against SIS as it stands
+   * now. So a child whose PEN has been written since the upload comes back
+   * already settled, and the list shrinks as the work gets done rather than
+   * showing the same names for ever.
+   */
+  useEffect(() => {
+    let cancelled = false;
+
+    function show(
+      matrix: unknown[][],
+      files: { name: string; at: string; rows: number }[],
+      updatedAt: string,
+      where: "server" | "browser",
+    ) {
+      const { preview: p, formatOk: ok } = previewUdiseStudentDetailsSync(
+        matrix,
+        sis,
+        masters,
+        matchOpts,
+        academicYearCode,
+      );
+      if (cancelled) return;
+      setMatrix(matrix);
+      setPreview(p);
+      setFormatOk(ok);
+      setStoredInfo({ files, updatedAt, where });
+      setFileName(files[files.length - 1]?.name ?? "");
+    }
+
+    void (async () => {
+      // The server first, because that is the copy that follows the login.
+      try {
+        const res = await loadServerSheet(academicYearCode ?? "");
+        if (!cancelled && res.ok && res.sheet?.matrix?.length) {
+          show(
+            res.sheet.matrix,
+            res.sheet.sheet.files,
+            res.sheet.sheet.updatedAt,
+            "server",
+          );
+          return;
+        }
+      } catch {
+        // Offline, or the read failed. Fall through to this browser's copy
+        // rather than showing nothing — a counsellor mid-reconciliation
+        // should not lose the sheet because the network dropped.
+      }
+
+      const stored = loadUdiseUpload();
+      if (!stored || !stored.matrix?.length) return;
+      try {
+        show(stored.matrix, stored.files ?? [], stored.updatedAt, "browser");
+      } catch {
+        clearUdiseUpload();
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // Restores once, when the panel opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function onFile(file: File | null) {
     if (!file) return;
     setFileName(file.name);
@@ -335,7 +436,32 @@ export function UdisePenApaarImportPanel({
     setBusy(true);
     try {
       const buf = await file.arrayBuffer();
-      const mat = await matrixFromUdiseStudentsFile(buf);
+      const incoming = await matrixFromUdiseStudentsFile(buf);
+
+      /*
+       * Fold this sheet into the one already being worked, rather than
+       * replacing it. UDISE+ exports come out class by class and month by
+       * month; replacing would discard the rows the office had already
+       * reconciled from an earlier file, and re-uploading everything to get
+       * them back is the loop this is meant to end.
+       */
+      const head = findUdiseHeaderRow(incoming);
+      const stored = loadUdiseUpload();
+      const merged = head
+        ? mergeUdiseMatrices({
+            existing: stored?.matrix ?? null,
+            incoming,
+            headerRowIndex: head.headerRow,
+            cols: {
+              pen: head.col.pen ?? -1,
+              apaar: head.col.apaar ?? -1,
+              name: head.col.name ?? -1,
+              dob: head.col.dob ?? -1,
+            },
+          })
+        : { matrix: incoming, added: 0, updated: 0, unchanged: 0 };
+      const mat = merged.matrix;
+
       const { preview: p, formatOk: ok } = previewUdiseStudentDetailsSync(
         mat,
         sis,
@@ -346,6 +472,66 @@ export function UdisePenApaarImportPanel({
       setMatrix(mat);
       setPreview(p);
       setFormatOk(ok);
+
+      if (ok && head) {
+        const at = new Date().toISOString();
+        const files = [
+          ...(stored?.files ?? []),
+          {
+            name: file.name,
+            at,
+            rows: Math.max(0, incoming.length - head.headerRow - 1),
+          },
+        ].slice(-10);
+
+        // The browser copy first: it is instant, and it is what keeps the
+        // sheet if the network is down. The server copy is what makes it
+        // follow the login to another machine.
+        const keptLocal = saveUdiseUpload({
+          version: 1,
+          academicYearCode: academicYearCode ?? "",
+          files,
+          matrix: mat,
+          updatedAt: at,
+        });
+
+        const cols = {
+          pen: head.col.pen ?? -1,
+          apaar: head.col.apaar ?? -1,
+          name: head.col.name ?? -1,
+          dob: head.col.dob ?? -1,
+        };
+        const saved = await saveServerSheet({
+          academicYearCode: academicYearCode ?? "",
+          head: mat.slice(0, head.headerRow + 1),
+          headerRowIndex: head.headerRow,
+          body: mat.slice(head.headerRow + 1),
+          files,
+          cols,
+          actor: getSessionActor()?.fullName ?? "",
+        });
+
+        setStoredInfo({
+          files,
+          updatedAt: at,
+          where: saved.ok ? "server" : "browser",
+        });
+
+        const mergeLine = stored?.matrix?.length
+          ? `Merged into the sheet already open: ${merged.added} new row(s), ` +
+            `${merged.updated} changed, ${merged.unchanged} unchanged.`
+          : "";
+        setApplyResult(mergeLine || null);
+
+        // Said out loud rather than swallowed: the office needs to know
+        // whether the sheet will be on the other machine tomorrow.
+        if (!saved.ok) {
+          setError(
+            `Saved in this browser only — it will not appear on another machine. ${saved.error}` +
+              (keptLocal ? "" : " It could not be saved here either, so it will be lost on reload."),
+          );
+        }
+      }
       setJustApplied(false);
       setApplyResult(null);
       setOpen(true);
@@ -564,12 +750,17 @@ export function UdisePenApaarImportPanel({
     studentId: string,
     studentName: string,
     reactivate = false,
+    // True when the operator picked this pupil off a candidate list rather
+    // than the matcher guessing. Only affects whether an Aadhaar-verified
+    // birth date may overwrite ours; see isConfidentUdiseMatch.
+    identityConfirmed = false,
   ) {
     setError(null);
     const r = applyUdiseRowToStudent({
       row,
       studentId,
       reactivate,
+      identityConfirmed,
       sis,
       masters,
     });
@@ -773,12 +964,12 @@ export function UdisePenApaarImportPanel({
             <p className="text-[11px] text-[var(--muted)]">File: {fileName}</p>
           ) : null}
           {!formatOk ? (
-            <p className="text-xs text-[#b42318]">
+            <p className="text-xs text-[var(--danger)]">
               Header row not recognised — use UDISE+ “List of All Students” export.
             </p>
           ) : null}
           {error ? (
-            <p className="rounded-lg bg-[rgba(180,35,24,0.08)] px-3 py-2 text-sm text-[#b42318]">
+            <p className="rounded-lg bg-[rgba(180,35,24,0.08)] px-3 py-2 text-sm text-[var(--danger)]">
               {error}
             </p>
           ) : null}
@@ -851,13 +1042,13 @@ export function UdisePenApaarImportPanel({
               <span className="text-[#0a4a73]">Fill {stats.fill}</span>
               <span className="text-[#8a5a10]">Verify {stats.verify}</span>
               <span className="text-[#8b1a12]">Suspect {stats.suspect}</span>
-              <span className="font-semibold text-[#b42318]">
+              <span className="font-semibold text-[var(--danger)]">
                 MBU age {stats.mbuAge}
               </span>
               <span className="text-[#8a5a10]">
                 Class≠UDISE {stats.classMismatch}
               </span>
-              <span className="text-[#0f7a4c]">OK {stats.ok}</span>
+              <span className="text-[var(--success)]">OK {stats.ok}</span>
               {stats.ambiguous ? (
                 <span className="text-[#5a2a7a]">Ambiguous {stats.ambiguous}</span>
               ) : null}
@@ -881,7 +1072,7 @@ export function UdisePenApaarImportPanel({
                     ? ` (${reconciliation.duplicateFilePens} duplicate PEN row${reconciliation.duplicateFilePens === 1 ? "" : "s"})`
                     : ""}
                 </span>
-                <span className="text-[#0f7a4c]">
+                <span className="text-[var(--success)]">
                   On UDISE+ now (this year):{" "}
                   <strong>{reconciliation.onUdiseSelectedYear}</strong>
                 </span>
@@ -929,10 +1120,44 @@ export function UdisePenApaarImportPanel({
 
           {preview ? (
             <>
+              {storedInfo ? (
+                <p className="mb-2 rounded-lg bg-[var(--surface-sunken)] px-3 py-1.5 text-[11px] text-[var(--muted)]">
+                  {storedInfo.where === "server"
+                    ? "Working sheet saved on the server — it follows your login to any machine · "
+                    : "Working sheet in THIS BROWSER only — it will not be on another machine · "}
+                  {storedInfo.files.length === 1
+                    ? storedInfo.files[0]!.name
+                    : `${storedInfo.files.length} uploads merged, latest ${
+                        storedInfo.files[storedInfo.files.length - 1]?.name ?? ""
+                      }`}{" "}
+                  · saved {storedInfo.updatedAt.slice(0, 16).replace("T", " ")}.
+                  The list is re-checked against Students each time it opens, so
+                  anything settled since drops out on its own.{" "}
+                  <button
+                    type="button"
+                    className="underline decoration-dotted underline-offset-2"
+                    onClick={() => {
+                      clearUdiseUpload();
+                      void clearServerSheet(academicYearCode ?? "");
+                      setStoredInfo(null);
+                      setMatrix(null);
+                      setPreview(null);
+                      setFileName("");
+                      setApplyResult(null);
+                    }}
+                  >
+                    Start a fresh sheet
+                  </button>
+                </p>
+              ) : null}
               <div className="flex flex-wrap items-end gap-2">
                 {(
                   [
-                    ["all", "All"],
+                    [
+                      "todo",
+                      `Still to do (${preview ? preview.filter((p) => p.tone !== "ok").length : 0})`,
+                    ],
+                    ["all", `All (${preview?.length ?? 0})`],
                     ["fill", "To fill"],
                     ["verify", "Verify"],
                     ["suspect", "Suspect / not in SIS"],
@@ -986,7 +1211,7 @@ export function UdisePenApaarImportPanel({
               </div>
 
               {applyResult ? (
-                <p className="rounded-lg bg-[rgba(15,122,76,0.1)] px-3 py-2 text-xs text-[#0f7a4c]">
+                <p className="rounded-lg bg-[rgba(15,122,76,0.1)] px-3 py-2 text-xs text-[var(--success)]">
                   {applyResult}
                 </p>
               ) : null}
@@ -1158,7 +1383,7 @@ export function UdisePenApaarImportPanel({
                             </span>
                           ) : null}
                           {p.mbuAgeAlert ? (
-                            <span className="mt-1 block text-[10px] font-bold text-[#b42318]">
+                            <span className="mt-1 block text-[10px] font-bold text-[var(--danger)]">
                               Notify: age below for class (govt MBU)
                             </span>
                           ) : null}
@@ -1203,9 +1428,9 @@ export function UdisePenApaarImportPanel({
                             <span
                               className={
                                 /^verified$/i.test(p.aadhaarValidationStatus)
-                                  ? "font-semibold text-[#0f7a4c]"
+                                  ? "font-semibold text-[var(--success)]"
                                   : /fail/i.test(p.aadhaarValidationStatus)
-                                    ? "font-semibold text-[#b42318]"
+                                    ? "font-semibold text-[var(--danger)]"
                                     : ""
                               }
                             >
@@ -1217,7 +1442,7 @@ export function UdisePenApaarImportPanel({
                             <span
                               className={
                                 p.mbuAgeAlert
-                                  ? "font-bold text-[#b42318]"
+                                  ? "font-bold text-[var(--danger)]"
                                   : ""
                               }
                             >
@@ -1228,7 +1453,7 @@ export function UdisePenApaarImportPanel({
                             <div
                               className={
                                 p.dobMismatch
-                                  ? "mt-1 font-semibold text-[#b42318]"
+                                  ? "mt-1 font-semibold text-[var(--danger)]"
                                   : "mt-1"
                               }
                             >
@@ -1267,7 +1492,7 @@ export function UdisePenApaarImportPanel({
                                   className={
                                     p.sisInactive
                                       ? "font-semibold text-[#8b1a12]"
-                                      : "text-[#0f7a4c]"
+                                      : "text-[var(--success)]"
                                   }
                                 >
                                   {p.sisStatus || "—"}
@@ -1318,7 +1543,7 @@ export function UdisePenApaarImportPanel({
                                     <span
                                       className={`text-[9px] font-semibold ${
                                         c.student.status === "active"
-                                          ? "text-[#0f7a4c]"
+                                          ? "text-[var(--success)]"
                                           : "text-[#8b1a12]"
                                       }`}
                                     >
@@ -1343,6 +1568,7 @@ export function UdisePenApaarImportPanel({
                                           c.student.id,
                                           c.student.fullName,
                                           c.student.status !== "active",
+                                          true,
                                         )
                                       }
                                     >
@@ -1368,7 +1594,7 @@ export function UdisePenApaarImportPanel({
                                     ) : (
                                       <button
                                         type="button"
-                                        className="rounded border border-[#0f7a4c] px-2 py-0.5 text-[10px] font-semibold text-[#0f7a4c]"
+                                        className="rounded border border-[var(--success)] px-2 py-0.5 text-[10px] font-semibold text-[var(--success)]"
                                         onClick={() =>
                                           setStudentStatus(
                                             c.student.id,
@@ -1432,6 +1658,7 @@ export function UdisePenApaarImportPanel({
                                     p.studentId!,
                                     p.matchedName,
                                     true,
+                                    isConfidentUdiseMatch(p.method),
                                   )
                                 }
                                 title="Reactivate this student and fill UDISE data"
@@ -1467,6 +1694,8 @@ export function UdisePenApaarImportPanel({
                                       p.udise,
                                       p.studentId!,
                                       p.matchedName,
+                                      false,
+                                      isConfidentUdiseMatch(p.method),
                                     )
                                   }
                                   title="Write UDISE data onto the existing other-session record (does not move the student to this year)"
@@ -1488,6 +1717,8 @@ export function UdisePenApaarImportPanel({
                                     p.udise,
                                     p.studentId!,
                                     p.matchedName,
+                                    false,
+                                    isConfidentUdiseMatch(p.method),
                                   )
                                 }
                                 title="Write UDISE data onto this student"
@@ -1503,7 +1734,7 @@ export function UdisePenApaarImportPanel({
                               p.tone === "mbu_age") ? (
                               <button
                                 type="button"
-                                className="rounded-lg border border-[rgba(15,122,76,0.4)] bg-white px-2 py-1 text-[11px] font-medium text-[#0f7a4c]"
+                                className="rounded-lg border border-[rgba(15,122,76,0.4)] bg-white px-2 py-1 text-[11px] font-medium text-[var(--success)]"
                                 onClick={() => tickVerified(p)}
                               >
                                 ✓ Tick verified
@@ -1522,7 +1753,7 @@ export function UdisePenApaarImportPanel({
                               p.sisInactive ? (
                                 <button
                                   type="button"
-                                  className="rounded-lg border border-[#0f7a4c] px-2 py-1 text-[11px] font-semibold text-[#0f7a4c]"
+                                  className="rounded-lg border border-[var(--success)] px-2 py-1 text-[11px] font-semibold text-[var(--success)]"
                                   onClick={() =>
                                     setStudentStatus(
                                       p.studentId!,

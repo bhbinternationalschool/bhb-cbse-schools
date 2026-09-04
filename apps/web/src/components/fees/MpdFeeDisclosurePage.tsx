@@ -1,5 +1,14 @@
 import { formatInr, type MpdFeeGroupRow } from "@/lib/feeFinance";
-import { TENANT } from "@/lib/types";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+} from "@/components/ui/erp-roster";
+import {
+  schoolAddressLine,
+  schoolPrintName,
+  schoolStatutoryLine,
+} from "@/lib/schoolIdentity";
 
 /**
  * Mandatory Public Disclosure — fee structure (CBSE / state MPD style).
@@ -23,11 +32,12 @@ export function MpdFeeDisclosurePage({
             Mandatory public disclosure · Fee structure
           </p>
           <h1 className="mt-1 text-2xl font-semibold sm:text-3xl">
-            {TENANT.nameDisplay}
+            {schoolPrintName()}
           </h1>
           <p className="mt-2 text-sm text-[var(--muted)]">
-            {TENANT.schoolAddress} · Affiliation {TENANT.affiliationNo} · School
-            code {TENANT.schoolCode}
+            {[schoolAddressLine(), schoolStatutoryLine()]
+              .filter(Boolean)
+              .join(" · ")}
             {ay ? ` · Academic year ${ay}` : ""}
           </p>
         </div>
@@ -62,15 +72,15 @@ export function MpdFeeDisclosurePage({
                     Classes: {g.classNames.join(", ")}
                   </p>
                 ) : null}
-                <table className="mt-4 w-full text-left text-sm">
-                  <thead>
+                <ErpTable minWidth="min-w-0" className="mt-4 text-sm">
+                  <ErpTableHead>
                     <tr className="border-b border-[rgba(32,48,80,0.1)] text-[11px] uppercase tracking-wide text-[var(--muted)]">
                       <th className="py-2 pr-2 font-medium">Head</th>
                       <th className="py-2 pr-2 font-medium">Installment</th>
                       <th className="py-2 text-right font-medium">Amount</th>
                     </tr>
-                  </thead>
-                  <tbody>
+                  </ErpTableHead>
+                  <ErpTableBody>
                     {g.heads.map((h, i) => (
                       <tr
                         key={`${h.headName}-${h.installmentLabel}-${i}`}
@@ -85,8 +95,8 @@ export function MpdFeeDisclosurePage({
                         </td>
                       </tr>
                     ))}
-                  </tbody>
-                </table>
+                  </ErpTableBody>
+                </ErpTable>
               </section>
             ))}
           </div>

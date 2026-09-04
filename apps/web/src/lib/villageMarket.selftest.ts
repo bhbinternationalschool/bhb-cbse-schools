@@ -39,9 +39,11 @@ import {
   buildCensusRows,
   buildCensusRowsFromTable,
   cellInt,
+  cityBlockName,
   cleanVillageName,
   nameCell,
   parseCsv,
+  parseWardNumber,
 } from "./censusPca";
 import { buildOverpassQuery, toNearbyPlaces } from "./villageMarket.server";
 import { acceptsGeocode } from "./villageTravel.server";
@@ -257,6 +259,71 @@ const all = buildCensusRows(PCA, { district: "Varanasi", tru: "all" });
 assert.equal(all.rows.length, 1, "the duplicate code collapses to one row");
 assert.equal(all.rows[0].pop_total_2011, 3800, "the larger of the two lines wins");
 assert.ok(all.skipped.some((s) => s.reason === "duplicate village in file"));
+
+/* ── city wards from the PCA-TV layout ──────────────────────── */
+
+assert.equal(cityBlockName("Varanasi (M Corp.)"), "Varanasi City");
+assert.equal(cityBlockName("Varanasi (CB)"), "Varanasi Cantt", "the cantonment must NOT collapse into plain Varanasi");
+assert.equal(cityBlockName("Ramnagar (NPP)"), "Ramnagar Town");
+assert.equal(cityBlockName("Gangapur (NP)"), "Gangapur Town");
+assert.equal(cityBlockName("Maruadih Railway Settlement (ITS)"), "Maruadih Railway Settlement");
+
+assert.equal(parseWardNumber("Varanasi (M Corp.) WARD NO.-0001"), 1);
+assert.equal(parseWardNumber("0042"), 42);
+assert.equal(parseWardNumber("Varanasi (M Corp.)"), null);
+assert.equal(parseWardNumber(""), null);
+
+// The PCA-TV sheet: one file interleaving DISTRICT / SUB-DISTRICT / VILLAGE /
+// TOWN / WARD lines. Seeding wards must (a) name them "Ward N", (b) take the
+// TOWN line above as their block, (c) synthesise a unique code — the
+// Town/Village column repeats the TOWN's code on every ward — and (d) skip a
+// census town's single "ward", which IS the town the CDB seed already loaded.
+const PCA_TV = [
+  ["State", "District", "Subdistt", "Town/Village", "Ward", "Level", "Name", "TRU", "No_HH", "TOT_P", "TOT_M", "TOT_F", "P_06", "M_06", "F_06", "P_LIT"],
+  ["09", "197", "00996", "000000", "0000", "SUB-DISTRICT", "Varanasi", "Total", "1", "10", "5", "5", "2", "1", "1", "5"],
+  ["09", "197", "00996", "208900", "0000", "VILLAGE", "Ayar", "Rural", "540", "3417", "1780", "1637", "480", "250", "230", "2100"],
+  ["09", "197", "00996", "209729", "0000", "TOWN", "Benipur (CT)", "Urban", "2000", "12470", "6400", "6070", "1878", "960", "918", "8000"],
+  ["09", "197", "00996", "209729", "0001", "WARD", "Benipur (CT) WARD NO.-0001", "Urban", "2000", "12470", "6400", "6070", "1878", "960", "918", "8000"],
+  ["09", "197", "00996", "801235", "0000", "TOWN", "Varanasi (M Corp.)", "Urban", "190000", "1198491", "630000", "568491", "135677", "70000", "65677", "900000"],
+  ["09", "197", "00996", "801235", "0001", "WARD", "Varanasi (M Corp.) WARD NO.-0001", "Urban", "2841", "16890", "8800", "8090", "1914", "1000", "914", "12000"],
+  ["09", "197", "00996", "801235", "0002", "WARD", "Varanasi (M Corp.) WARD NO.-0002", "Urban", "2474", "15411", "8000", "7411", "2023", "1050", "973", "11000"],
+];
+const wards = buildCensusRowsFromTable(PCA_TV, {
+  district: "Varanasi",
+  tru: "urban",
+  levels: ["ward"],
+  growth: 1.15,
+  observedChildRatio: true,
+});
+assert.equal(wards.rows.length, 2, "two M Corp wards; the CT's lone ward is skipped");
+assert.deepEqual(
+  wards.rows.map((r) => r.village_name),
+  ["Ward 1", "Ward 2"],
+);
+assert.equal(wards.rows[0].block_name, "Varanasi City");
+assert.equal(wards.rows[0].settlement_type, "ward");
+assert.equal(wards.rows[0].census_code, "801235W0001", "town code + ward number, else 90 wards dedupe into one");
+assert.equal(wards.rows[1].census_code, "801235W0002");
+assert.equal(wards.rows[0].pop_total_2011, 16890);
+assert.equal(wards.rows[0].child_0_6_total_2011, 1914);
+assert.equal(wards.rows[0].growth_multiplier, 1.15);
+assert.equal(
+  wards.rows[0].child_ratio,
+  Math.round((1914 / 16890) * 10000) / 10000,
+  "observed 0-6 share, not the flat rural default",
+);
+assert.ok(
+  wards.skipped.some((s) => s.reason.includes("census-town ward")),
+  "the CT ward must be reported as skipped, not silently dropped",
+);
+
+// Seeding towns from the same file must still treat TOWN lines as leaves.
+const towns = buildCensusRowsFromTable(PCA_TV, { tru: "urban", levels: ["town"] });
+assert.deepEqual(
+  towns.rows.map((r) => r.village_name),
+  ["Benipur", "Varanasi (M Corp.)"],
+  "town mode keeps TOWN lines as settlements, exactly as the CDB seed did",
+);
 
 // --observed-child-ratio uses the village's own published share.
 const observed = buildCensusRows(PCA, { district: "Varanasi", observedChildRatio: true });

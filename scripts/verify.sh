@@ -71,6 +71,8 @@ SELFTESTS=(
   test:projection
   test:read-client
   test:survey-photo
+  test:media-contract
+  test:website
   test:partial-lead
   test:wire-payload
   test:projected-lead-write
@@ -89,6 +91,26 @@ SELFTESTS=(
   test:erp-chat
   test:wa-templates-automation
   test:fee-student-search
+  test:household-dues-ay
+  test:refreshment-chart
+  test:vendor-payment-bank
+  test:store-bank-backfill
+  test:daybook-voided
+  test:controls-noise
+  test:expense-spread
+  test:vehicle-fuel
+  test:expense-voucher-draft
+  test:fee-push-line-safety
+  test:receipt-repair
+  test:projection-double-post
+  test:holiday-import
+  test:payment-link-amount
+  test:sis-wire-payload
+  test:print-palette
+  test:receipt-head-grouping
+  test:concession-student-list
+  test:future-concession-start
+  test:concession-authority
   test:substitution-auto
   test:timetable-substitution
   test:transport-sibling-gaps
@@ -113,6 +135,74 @@ SELFTESTS=(
   test:ebook-access
   test:village-market
   test:lead-score
+  test:fuel-expense-line
+  test:vendor-history
+  test:site-seo
+  test:approval-gate
+  test:photo-consent
+  test:registration-blockers
+  test:sibling-carry-over
+  test:udise-upload-store
+  test:udise-student-details
+  test:lead-worklist
+  test:student-import
+  test:cash-pool-orphans
+  test:academic-risk
+  test:admissions-ai
+  test:admissions-enquiry-form
+  test:admissions-kb
+  test:birthday-cards
+  test:collections-ai
+  test:concession-per-due
+  test:desk-sync-status
+  test:duty-roster
+  test:email
+  test:exam-invigilation
+  test:exams
+  test:household-prefs
+  test:item-analytics
+  test:item-score-import
+  test:lead-extract-ai
+  test:lead-followup-ai
+  test:lead-quality
+  test:lead-timeline
+  test:ledger
+  test:lesson-plan-ai
+  test:marketing-content-ai
+  test:module-filters
+  test:outdoor-duty-persistence
+  test:outdoor-duty-staff-id
+  test:payroll-register
+  test:ptm-brief-ai
+  test:parent-tickets
+  test:school-whatsapp
+  test:upload-validation
+  test:parent-profile
+  test:drive-archive
+  test:receipt-pdf
+  test:fee-due-future
+  test:ai-stream
+  test:tutor-plans
+  test:cashfree-checkout
+  test:teacher-contact
+  test:question-bank
+  test:rbac-infer
+  test:rbac-scope
+  test:receipt-lookup
+  test:referrals
+  test:report-export
+  test:report-remark-ai
+  test:salary-additional
+  test:school-receipt-no
+  test:session-cookie-edge
+  test:staff-geo
+  test:standing-discount-change
+  test:syllabus-outcomes-import
+  test:transport-overlap-billing
+  test:wa-contact-state
+  test:wa-delivery-log
+  test:wa-sequences
+  test:wa-staff-att-bot
 )
 
 bold "Verifying $(git rev-parse --short HEAD 2>/dev/null || echo 'working tree') on $(git branch --show-current 2>/dev/null || echo '?')"
@@ -169,6 +259,47 @@ if [ -f "$CI_FILE" ]; then
     echo "  Add them to SELFTESTS in scripts/verify.sh."
     FAILED+=("ci-drift|")
   fi
+fi
+
+# ── Orphan check: a self-test nothing runs ─────────────────────────────
+# The check above catches a test CI runs and this script does not. It cannot
+# catch the worse case: a `test:*` script written, committed, and wired into
+# NEITHER, which reports nothing and is mistaken for coverage. Found on
+# 2026-09-02 with three such tests, all passing, none ever executed by the
+# suite that says "all checks passed".
+# Self-tests that legitimately run nowhere in this suite, each with its reason.
+# An entry here is a claim someone has to defend, which is the point.
+NOT_IN_SUITE=(
+  # Drives a real HTTP endpoint; needs the dev server up, so it cannot run in
+  # a suite that must pass on a clean checkout with nothing listening.
+  test:wa-webhook
+)
+
+# Self-tests that legitimately run nowhere in this suite, each with its reason.
+# An entry here is a claim someone has to defend, which is the point.
+NOT_IN_SUITE=(
+  # Drives a real HTTP endpoint, so it needs the dev server listening. This
+  # suite must pass on a clean checkout with nothing running.
+  test:wa-webhook
+)
+
+ORPHANS=()
+while read -r t; do
+  [ -z "$t" ] && continue
+  case " ${SELFTESTS[*]} ${NOT_IN_SUITE[*]} " in
+    *" $t "*) ;;
+    *) ORPHANS+=("$t") ;;
+  esac
+done < <(node -e '
+  const s = require("./apps/web/package.json").scripts || {};
+  for (const k of Object.keys(s)) if (k.startsWith("test:")) console.log(k);
+' 2>/dev/null | sort -u)
+
+if [ ${#ORPHANS[@]} -gt 0 ]; then
+  red "Orphaned self-tests — defined in package.json, run by nothing:"
+  printf '  - %s\n' "${ORPHANS[@]}"
+  echo "  Add them to SELFTESTS in scripts/verify.sh and to $CI_FILE."
+  FAILED+=("orphan-selftests|")
 fi
 
 # ── Summary ───────────────────────────────────────────────────────────
