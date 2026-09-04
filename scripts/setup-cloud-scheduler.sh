@@ -79,9 +79,18 @@ create_job() {
   )
 
   if gcloud scheduler jobs describe "$name" --location="$REGION" >/dev/null 2>&1; then
+    # A plain `jobs update` silently re-enables a PAUSED job. Remember the
+    # state and put it back, so re-running this script never switches on a
+    # feature that was paused on purpose (the staff GPS tick, 2026-08-29).
+    local was_state
+    was_state="$(gcloud scheduler jobs describe "$name" --location="$REGION" --format='value(state)' 2>/dev/null || true)"
     echo "Updating ${name}..."
     gcloud scheduler jobs update http "$name" \
       "${flags[@]}" --update-headers="x-cron-secret=${CRON_SECRET}"
+    if [[ "$was_state" == "PAUSED" ]]; then
+      echo "  ...${name} was paused; keeping it paused"
+      gcloud scheduler jobs pause "$name" --location="$REGION" --quiet
+    fi
   else
     echo "Creating ${name}..."
     gcloud scheduler jobs create http "$name" \
