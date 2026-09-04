@@ -35,6 +35,7 @@ export async function replyHomeworkTutor(opts: {
   message: string;
   history?: OpenAiChatTurn[];
   context?: HomeworkTutorContext;
+  onDelta?: (text: string) => void;
 }) {
   const message = opts.message.trim();
   if (!message) {
@@ -45,5 +46,6 @@ export async function replyHomeworkTutor(opts: {
     system: buildTutorSystem(opts.context || {}),
     history: opts.history,
     userMessage: message,
+    onDelta: opts.onDelta,
   });
 }

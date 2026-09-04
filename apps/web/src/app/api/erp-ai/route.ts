@@ -6,8 +6,11 @@ import { openAiModel } from "@/lib/openAi.server";
 import { geminiModel } from "@/lib/erpAiGemini.server";
 import { loadMasters } from "@/lib/masters";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
+import { aiStreamResponse, wantsAiStream } from "@/lib/aiStream.server";
+import type { ErpAiMessage } from "@/lib/erpAiChat";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function GET() {
   const status = llmStatus();
@@ -68,6 +71,33 @@ export async function POST(req: Request) {
 
   await ensureSchoolMirrorHydrated();
   const masters = loadMasters();
+
+  if (wantsAiStream(req)) {
+    type Done = {
+      engine: string;
+      geminiConfigured: boolean;
+      llmConfigured: boolean;
+      message: ErpAiMessage;
+    };
+    return aiStreamResponse<Done>(async (send) => {
+      const r = await replyErpAiChatServer({
+        session,
+        message,
+        history: body.history,
+        pathname: body.pathname,
+        tab: body.tab,
+        masters,
+        onDelta: (text) => send({ type: "delta", text }),
+      });
+      return {
+        type: "done",
+        engine: r.engine,
+        geminiConfigured: r.geminiConfigured,
+        llmConfigured: r.llmConfigured,
+        message: r.message,
+      };
+    });
+  }
 
   const result = await replyErpAiChatServer({
     session,

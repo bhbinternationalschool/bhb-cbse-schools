@@ -38,6 +38,11 @@ export async function replyErpAiChatServer(opts: {
   pathname?: string;
   tab?: string;
   masters?: MastersState | null;
+  /**
+   * Stream the LLM part of the reply. Local (guide / canned) answers are
+   * instant and arrive whole in the returned message, never as deltas.
+   */
+  onDelta?: (text: string) => void;
 }): Promise<{
   message: ErpAiMessage;
   engine: "local" | LlmEngine;
@@ -90,6 +95,7 @@ export async function replyErpAiChatServer(opts: {
     system,
     history,
     userMessage: opts.message,
+    onDelta: opts.onDelta,
   });
 
   if (!llm.ok) {

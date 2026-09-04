@@ -28,6 +28,7 @@ import {
 
 import {
   generateGeminiText,
+  streamGeminiText,
   geminiConfigured,
   geminiModel,
   type LlmUsage,
@@ -37,6 +38,7 @@ import {
   openAiConfigured,
   openAiModel,
   type OpenAiChatTurn,
+  streamOpenAiText,
 } from "@/lib/openAi.server";
 import { getDemoSession } from "@/lib/auth";
 import { recordAiGeneration, type AiTier } from "@/lib/aiGenerations.server";
@@ -198,6 +200,13 @@ type LlmTextOpts = {
   geminiMaxTokens?: number;
   geminiTemperature?: number;
   meta: AiCallMeta;
+  /**
+   * Stream the reply: each slice is handed over as the provider produces
+   * it. The audit row, budget check and cache behave exactly as without
+   * it — the full text is still assembled and recorded at the end. Not
+   * honoured in jsonMode (a half-parsed object is useless to anyone).
+   */
+  onDelta?: (text: string) => void;
 };
 
 /**
@@ -227,31 +236,37 @@ async function attemptEngine(
   const tier: AiTier = opts.meta.tier ?? "flash";
   const t0 = Date.now();
   let r: AttemptResult;
+  const onDelta = opts.jsonMode ? undefined : opts.onDelta;
   if (engine === "openai") {
-    r = await generateOpenAiText({
+    const oa = {
       system: opts.system,
       history: opts.history,
       userMessage: opts.userMessage,
-      jsonMode: opts.jsonMode,
       maxTokens: opts.maxTokens,
       temperature: opts.temperature,
       model: openAiModel(tier),
-    });
+    };
+    r = onDelta
+      ? await streamOpenAiText(oa, onDelta)
+      : await generateOpenAiText({ ...oa, jsonMode: opts.jsonMode });
   } else {
     const geminiSystem = opts.jsonMode
       ? `${opts.system}\n\nRespond with valid JSON only — no markdown fences.`
       : opts.system;
-    const g = await generateGeminiText({
+    const gm = {
       system: geminiSystem,
       history: (opts.history || []).map((h) => ({
-        role: h.role === "assistant" ? "model" : "user",
+        role: h.role === "assistant" ? ("model" as const) : ("user" as const),
         text: h.content,
       })),
       userMessage: opts.userMessage,
       maxTokens: opts.geminiMaxTokens ?? opts.maxTokens,
       temperature: opts.geminiTemperature ?? opts.temperature,
       model: geminiModel(tier),
-    });
+    };
+    const g = onDelta
+      ? await streamGeminiText(gm, onDelta)
+      : await generateGeminiText(gm);
     r = g.ok
       ? { ...g, text: opts.jsonMode ? stripJsonFence(g.text) : g.text }
       : g;
@@ -307,6 +322,7 @@ async function callLlmText(
   if (key) {
     const hit = await aiCacheGet(key);
     if (hit) {
+      opts.onDelta?.(hit.response);
       return { ok: true, text: hit.response, engine: (hit.engine as LlmEngine) || "none", generationId: hit.generationId };
     }
   }
@@ -315,13 +331,28 @@ async function callLlmText(
   if (!budget.ok) return { ok: false, error: budget.reason, engine: "none" };
   const errors: string[] = [];
 
+  // Once a provider has streamed anything to the caller, falling back to
+  // the other engine would replay a second reply on top of the first — so
+  // a mid-stream failure ends the call rather than retrying.
+  let streamed = false;
+  const attemptOpts: LlmTextOpts = opts.onDelta
+    ? {
+        ...opts,
+        onDelta: (t) => {
+          streamed = true;
+          opts.onDelta!(t);
+        },
+      }
+    : opts;
+
   for (const engine of engines) {
-    const { r, generationId } = await attemptEngine(engine, opts, requester);
+    const { r, generationId } = await attemptEngine(engine, attemptOpts, requester);
     if (r.ok) {
       if (key) void aiCachePut({ key, route: opts.meta.route, engine, model: r.model, response: r.text, generationId });
       return { ok: true, text: r.text, engine, generationId };
     }
     errors.push(`${engine}: ${r.error}`);
+    if (streamed) break;
   }
 
   return {
@@ -396,6 +427,8 @@ export async function generateTutorText(opts: {
   system: string;
   history?: OpenAiChatTurn[];
   userMessage: string;
+  /** Stream slices of the reply as they arrive (tutor / ERP chat). */
+  onDelta?: (text: string) => void;
 }): Promise<
   | { ok: true; text: string; engine: LlmEngine; generationId: string }
   | { ok: false; error: string; engine: LlmEngine }
@@ -410,6 +443,7 @@ export async function generateTutorText(opts: {
     // the visible reply — 900 was enough for OpenAI but truncated Gemini's
     // actual answer, so Gemini gets a larger budget for the same reply length.
     geminiMaxTokens: 1536,
+    onDelta: opts.onDelta,
     meta: { route: "tutor", promptVersion: "v1" },
   });
 }

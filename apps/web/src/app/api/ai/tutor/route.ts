@@ -6,8 +6,10 @@ import {
 } from "@/lib/homeworkTutor.server";
 import type { HomeworkTutorContext } from "@/lib/homeworkTutor.types";
 import type { OpenAiChatTurn } from "@/lib/openAi.server";
+import { aiStreamResponse, wantsAiStream } from "@/lib/aiStream.server";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function GET() {
   const status = llmStatus();
@@ -56,6 +58,22 @@ export async function POST(req: Request) {
       (h.role === "user" || h.role === "assistant") &&
       typeof h.content === "string",
   );
+
+  // Streaming callers (the portal's tutor panel) get the reply as it is
+  // written; everyone else — the mobile app, scripts — keeps the JSON shape.
+  if (wantsAiStream(req)) {
+    return aiStreamResponse<{ engine: string; reply: string }>(async (send) => {
+      const r = await replyHomeworkTutor({
+        message,
+        history,
+        context: body.context,
+        onDelta: (text) => send({ type: "delta", text }),
+      });
+      return r.ok
+        ? { type: "done", engine: r.engine, reply: r.text }
+        : { type: "error", error: r.error };
+    });
+  }
 
   const result = await replyHomeworkTutor({
     message,

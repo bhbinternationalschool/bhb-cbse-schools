@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { consumeAiStream } from "@/lib/aiStream";
 import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import {
   erpAiStorageKey,
@@ -305,11 +306,19 @@ export function ErpAiChatbot() {
       }));
 
     void (async () => {
-      let reply: ErpAiMessage;
+      let reply: ErpAiMessage | null = null;
+      // While the model writes, its words land in a provisional bubble that
+      // is not persisted; the "done" event replaces it with the real message
+      // (links and all), which is what gets stored.
+      const draftId = `msg_draft_${Date.now()}`;
+      let partial = "";
       try {
         const res = await fetch("/api/erp-ai", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "text/event-stream",
+          },
           body: JSON.stringify({
             message: trimmed,
             history: history.slice(0, -1),
@@ -317,27 +326,38 @@ export function ErpAiChatbot() {
             tab: tab || undefined,
           }),
         });
-        const json = (await res.json().catch(() => ({}))) as {
+        await consumeAiStream<{
           message?: ErpAiMessage;
           geminiConfigured?: boolean;
           llmConfigured?: boolean;
           engine?: string;
-          error?: string;
-        };
-        if (res.ok && json.message) {
-          reply = json.message;
-          if (json.llmConfigured ?? json.geminiConfigured) {
-            setLlmOn(true);
-            if (json.engine && json.engine !== "local") {
-              setEngineLabel(engineDisplayLabel(json.engine));
+        }>(res, (ev) => {
+          if (ev.type === "delta") {
+            if (!partial) setTyping(false);
+            partial += ev.text;
+            setMessages([
+              ...withUser,
+              {
+                id: draftId,
+                role: "assistant",
+                at: new Date().toISOString(),
+                text: partial,
+              },
+            ]);
+          } else if (ev.type === "done" && ev.message) {
+            reply = ev.message;
+            if (ev.llmConfigured ?? ev.geminiConfigured) {
+              setLlmOn(true);
+              if (ev.engine && ev.engine !== "local") {
+                setEngineLabel(engineDisplayLabel(ev.engine));
+              }
             }
           }
-        } else {
-          reply = replyErpAiChat(trimmed, { session, masters });
-        }
+        });
       } catch {
-        reply = replyErpAiChat(trimmed, { session, masters });
+        /* fall through to the local engine */
       }
+      if (!reply) reply = replyErpAiChat(trimmed, { session, masters });
 
       const withReply = [...withUser, reply];
       push(withReply);

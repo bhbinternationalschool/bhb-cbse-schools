@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { speakText } from "@/lib/voiceClient";
+import { consumeAiStream } from "@/lib/aiStream";
 import type { HomeworkTutorContext } from "@/lib/homeworkTutor.types";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 
@@ -41,26 +42,40 @@ export function HomeworkTutorChat({
     try {
       const res = await fetch("/api/ai/tutor", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "text/event-stream",
+        },
         body: JSON.stringify({
           message,
           history: nextHistory.slice(0, -1),
           context,
         }),
       });
-      const json = (await res.json()) as {
-        ok?: boolean;
-        reply?: string;
-        error?: string;
-        engine?: string;
-      };
-      if (!res.ok || !json.ok || !json.reply) {
-        onError?.(json.error || "Tutor unavailable");
+      // The reply grows in place as the tutor writes it; the final event
+      // carries the whole text, which replaces whatever was assembled.
+      let partial = "";
+      let finished = false;
+      let failed: string | null = null;
+      await consumeAiStream<{ engine?: string; reply?: string }>(res, (ev) => {
+        if (ev.type === "delta") {
+          partial += ev.text;
+          setHistory([...nextHistory, { role: "assistant", content: partial }]);
+        } else if (ev.type === "done") {
+          finished = true;
+          if (ev.engine) setEngine(ev.engine);
+          setHistory([
+            ...nextHistory,
+            { role: "assistant", content: ev.reply || partial },
+          ]);
+        } else {
+          failed = ev.error;
+        }
+      });
+      if (!finished) {
+        onError?.(failed || "Tutor unavailable");
         setHistory(history);
-        return;
       }
-      if (json.engine) setEngine(json.engine);
-      setHistory([...nextHistory, { role: "assistant", content: json.reply }]);
     } catch {
       onError?.("Could not reach tutor");
       setHistory(history);
