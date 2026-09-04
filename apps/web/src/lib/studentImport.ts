@@ -26,6 +26,7 @@ import {
   studentToRegisterExportRow,
 } from "@/lib/studentRegisterExport";
 import { downloadExcelCsv } from "@/lib/reportExport";
+import { parseDobLong } from "@/lib/dobFormat";
 import type { NumberSeries } from "@/lib/foundationMasters";
 import {
   findNumberSeries,
@@ -250,6 +251,11 @@ export function normalizeDateField(raw: string): string {
   const v = raw.trim();
   if (!v) return "";
   if (/^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0, 10);
+  // "04-August-2020" — the form our own exports write, and the only one of
+  // these that cannot be read two ways. Tried before the numeric shapes so it
+  // never reaches the ambiguous branch below.
+  const spelled = parseDobLong(v);
+  if (spelled) return spelled;
   if (/^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$/.test(v)) {
     const parts = v.split(/[/-]/).map((p) => Number(p));
     if (parts.length === 3) {

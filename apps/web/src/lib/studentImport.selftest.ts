@@ -18,6 +18,7 @@
  * fell on or before the 12th were wrong.
  */
 import { normalizeDateField, excelSerialToIso } from "@/lib/studentImport";
+import { formatDobLong } from "@/lib/dobFormat";
 
 let failures = 0;
 function check(label: string, got: string, want: string) {
@@ -55,6 +56,17 @@ for (const a of [1, 3, 4, 5, 7, 8, 9, 10, 11, 12]) {
     }
   }
 }
+
+// The spelled-out form our own export writes must round-trip exactly, and must
+// never fall through to the ambiguous numeric branch.
+check("long form, August", normalizeDateField("04-August-2020"), "2020-08-04");
+check("long form, short month", normalizeDateField("04-Aug-2020"), "2020-08-04");
+check("long form, spaces", normalizeDateField("9 December 2019"), "2019-12-09");
+check("long form, day > 12", normalizeDateField("23-November-2019"), "2019-11-23");
+check("round trip", normalizeDateField(formatDobLong("2013-09-12")), "2013-09-12");
+check("round trip, ambiguous day", normalizeDateField(formatDobLong("2020-08-04")), "2020-08-04");
+check("formatDobLong output", formatDobLong("2020-08-04"), "04-August-2020");
+check("formatDobLong leaves rubbish alone", formatDobLong("not a date"), "not a date");
 
 // Already ISO, and Excel serials, are left alone.
 check("ISO passes through", normalizeDateField("2015-01-15"), "2015-01-15");
