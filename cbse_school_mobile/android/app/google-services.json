@@ -33,6 +33,35 @@
           ]
         }
       }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:287837565122:android:138da42560b8080df88b5b",
+        "android_client_info": {
+          "package_name": "school.bhbinternational.parent"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "287837565122-d630rf0rdv4vc4o26h8f145qbsh3fo43.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAZ5iORBNFqqGIsIpTgjnhgYA3xGeTOad0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "287837565122-d630rf0rdv4vc4o26h8f145qbsh3fo43.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
     }
   ],
   "configuration_version": "1"
