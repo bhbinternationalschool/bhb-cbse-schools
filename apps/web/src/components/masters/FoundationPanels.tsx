@@ -2689,7 +2689,7 @@ export function HolidaysPanel({
                     h={h}
                     trailing={
                       <div className="flex items-center gap-2">
-                        <HolidayNotifyButton holiday={h} />
+                        {h.mode !== "weekly" ? <HolidayNotifyButton holiday={h} /> : null}
                         <button
                           type="button"
                           className="text-[11px] font-semibold"
