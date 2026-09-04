@@ -15,6 +15,7 @@ import "../modules/leave_screen.dart";
 import "../modules/module_shell.dart";
 import "../modules/notices_screen.dart";
 import "../modules/ptm_screen.dart";
+import "../modules/receipts_screen.dart";
 import "../modules/transport_screen.dart";
 import "../profile/profile_screen.dart";
 import "home_stats.dart";
@@ -39,6 +40,7 @@ const _modules = [
   _Module("PTM", Icons.groups_outlined, ModuleTone.gray),
   _Module("Leave", Icons.event_busy_outlined, ModuleTone.purple),
   _Module("Complaints", Icons.support_agent_outlined, ModuleTone.pink),
+  _Module("Receipts", Icons.receipt_long_outlined, ModuleTone.blue),
 ];
 
 String _greeting() {
@@ -135,6 +137,8 @@ class _HomeScreenState extends State<HomeScreen> {
         _openModule("Complaints", child);
       case "/profile":
         _openProfile();
+      case "/receipts":
+        _openModule("Receipts", child);
       case "/chat":
         Navigator.of(context).push(
           MaterialPageRoute(
@@ -248,6 +252,8 @@ class _HomeScreenState extends State<HomeScreen> {
         screen = EbookShelfScreen(api: api);
       case "Leave":
         screen = LeaveScreen(api: api, child: child);
+      case "Receipts":
+        screen = ReceiptsScreen(api: api);
       case "Complaints":
         screen = ComplaintsScreen(
           api: api,

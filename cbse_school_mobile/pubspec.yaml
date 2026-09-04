@@ -27,7 +27,8 @@ dependencies:
   flutter_svg: ^2.3.0
   http_parser: ^4.1.2
   file_selector: ^1.1.0
-
+  path_provider: ^2.1.6
+  pdfx: ^2.11.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

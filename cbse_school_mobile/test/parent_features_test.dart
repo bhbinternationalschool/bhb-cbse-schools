@@ -359,4 +359,143 @@ void main() {
       expect(DocumentSubmitResult.fromJson(const {}).checkRan, isFalse);
     });
   });
+
+  group("receipts, pay-ahead and transport", () {
+    test("the ledger splits what is due now from what may be paid ahead", () {
+      final ledger = FeeLedger.fromJson(const {
+        "studentName": "A",
+        "openDues": [
+          {
+            "dueKey": "sep",
+            "label": "Tuition · Sep",
+            "kind": "installment",
+            "dueOn": "2026-09-10",
+            "balancePaise": 150000,
+            "balanceLabel": "₹1,500",
+          },
+        ],
+        "futureDues": [
+          {
+            "dueKey": "feb",
+            "label": "Exam · Feb",
+            "kind": "installment",
+            "dueOn": "2027-02-10",
+            "balancePaise": 50000,
+            "balanceLabel": "₹500",
+          },
+        ],
+        "openBalanceLabel": "₹1,500",
+        "futureBalanceLabel": "₹500",
+      });
+      expect(ledger.openDues.single.dueKey, "sep");
+      expect(ledger.futureDues.single.dueKey, "feb");
+      expect(ledger.isEmpty, isFalse);
+      expect(
+        FeeLedger.fromJson(const {"openDues": [], "futureDues": []}).isEmpty,
+        isTrue,
+      );
+    });
+
+    test("a receipt parses with its PDF link and void flag", () {
+      final r = ReceiptInfo.fromJson(const {
+        "id": "rcv_1",
+        "receiptNo": "RCV-00051",
+        "date": "2026-04-06",
+        "totalLabel": "₹7,500",
+        "students": ["A", "B"],
+        "particulars": ["Tuition"],
+        "paidBy": "Cash",
+        "voided": false,
+        "pdfUrl": "/api/v1/receipts/rcv_1/pdf",
+      });
+      expect(r.pdfUrl, "/api/v1/receipts/rcv_1/pdf");
+      expect(r.voided, isFalse);
+      expect(r.students, ["A", "B"]);
+    });
+
+    test(
+      "a child's transport shows the bus and a callable driver, or the request state",
+      () {
+        final mine = MyTransport.fromJson(const {
+          "household": {
+            "address": "Ayar",
+            "locality": "",
+            "landmark": "",
+            "mobile": "9",
+          },
+          "children": [
+            {
+              "id": "s1",
+              "fullName": "A",
+              "classLabel": "V-A",
+              "transport": {
+                "routeCode": "R1",
+                "routeName": "City",
+                "stopName": "Temple",
+                "serviceMode": "both",
+                "suspended": false,
+                "monthlyFeeLabel": "₹800",
+                "vehicle": {
+                  "name": "Bus 1",
+                  "registrationNo": "UP65QT4657",
+                  "type": "bus",
+                },
+                "driver": {"name": "Ram", "mobile": "+91 98765 43210"},
+              },
+              "request": null,
+            },
+            {
+              "id": "s2",
+              "fullName": "B",
+              "classLabel": "II-A",
+              "transport": null,
+              "request": {
+                "id": "treq_1",
+                "status": "contacted",
+                "createdAt": "2026-09-04T00:00:00Z",
+                "handlingNote": "Called",
+              },
+            },
+            {
+              "id": "s3",
+              "fullName": "C",
+              "classLabel": "I-A",
+              "transport": null,
+              "request": null,
+            },
+          ],
+        });
+        expect(mine.address, "Ayar");
+        expect(mine.children[0].transport!.canCallDriver, isTrue);
+        expect(mine.children[0].transport!.vehicleReg, "UP65QT4657");
+        expect(mine.children[1].transport, isNull);
+        expect(mine.children[1].request!.isActive, isTrue);
+        expect(mine.children[2].request, isNull);
+
+        final noNumber = ChildTransport.fromJson(const {
+          "routeCode": "R",
+          "vehicle": {},
+          "driver": {"name": "Ram", "mobile": ""},
+        });
+        expect(
+          noNumber.canCallDriver,
+          isFalse,
+          reason: "no number, no call button",
+        );
+      },
+    );
+
+    test("a queue row knows whether it still needs action", () {
+      final open = TransportRequestInfo.fromJson(const {
+        "id": "t",
+        "status": "open",
+      });
+      final done = TransportRequestInfo.fromJson(const {
+        "id": "t",
+        "status": "assigned",
+      });
+      expect(open.isActive, isTrue);
+      expect(done.isActive, isFalse);
+    });
+  });
 }

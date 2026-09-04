@@ -846,11 +846,246 @@ class DocumentSubmitResult {
   final List<({String label, String status})> checks;
 }
 
+// ---- receipts, transport ----------------------------------------------------
+
+class ReceiptInfo {
+  const ReceiptInfo({
+    required this.id,
+    required this.receiptNo,
+    required this.date,
+    required this.totalLabel,
+    required this.students,
+    required this.particulars,
+    required this.paidBy,
+    required this.voided,
+    required this.pdfUrl,
+  });
+
+  factory ReceiptInfo.fromJson(Map<String, dynamic> j) => ReceiptInfo(
+    id: (j["id"] as String?) ?? "",
+    receiptNo: (j["receiptNo"] as String?) ?? "",
+    date: (j["date"] as String?) ?? "",
+    totalLabel: (j["totalLabel"] as String?) ?? "",
+    students: ((j["students"] as List?) ?? const [])
+        .map((e) => e.toString())
+        .toList(),
+    particulars: ((j["particulars"] as List?) ?? const [])
+        .map((e) => e.toString())
+        .toList(),
+    paidBy: (j["paidBy"] as String?) ?? "",
+    voided: j["voided"] == true,
+    pdfUrl: (j["pdfUrl"] as String?) ?? "",
+  );
+
+  final String id;
+  final String receiptNo;
+  final String date;
+  final String totalLabel;
+  final List<String> students;
+  final List<String> particulars;
+  final String paidBy;
+  final bool voided;
+  final String pdfUrl;
+}
+
+class ChildTransport {
+  const ChildTransport({
+    required this.routeCode,
+    required this.routeName,
+    required this.stopName,
+    required this.serviceMode,
+    required this.suspended,
+    required this.monthlyFeeLabel,
+    required this.vehicleName,
+    required this.vehicleReg,
+    required this.driverName,
+    required this.driverMobile,
+  });
+
+  factory ChildTransport.fromJson(Map<String, dynamic> j) {
+    // Nested maps may arrive untyped; read them leniently.
+    final v = j["vehicle"] is Map
+        ? Map<String, dynamic>.from(j["vehicle"] as Map)
+        : const <String, dynamic>{};
+    final d = j["driver"] is Map
+        ? Map<String, dynamic>.from(j["driver"] as Map)
+        : null;
+    return ChildTransport(
+      routeCode: (j["routeCode"] as String?) ?? "",
+      routeName: (j["routeName"] as String?) ?? "",
+      stopName: (j["stopName"] as String?) ?? "",
+      serviceMode: (j["serviceMode"] as String?) ?? "both",
+      suspended: j["suspended"] == true,
+      monthlyFeeLabel: (j["monthlyFeeLabel"] as String?) ?? "",
+      vehicleName: (v["name"] as String?) ?? "",
+      vehicleReg: (v["registrationNo"] as String?) ?? "",
+      driverName: (d?["name"] as String?) ?? "",
+      driverMobile: (d?["mobile"] as String?) ?? "",
+    );
+  }
+
+  final String routeCode;
+  final String routeName;
+  final String stopName;
+  final String serviceMode;
+  final bool suspended;
+  final String monthlyFeeLabel;
+  final String vehicleName;
+  final String vehicleReg;
+  final String driverName;
+  final String driverMobile;
+
+  bool get canCallDriver =>
+      driverMobile.replaceAll(RegExp(r"\D"), "").length >= 10;
+}
+
+class TransportRequestState {
+  const TransportRequestState({
+    required this.id,
+    required this.status,
+    required this.createdAt,
+    required this.handlingNote,
+  });
+
+  factory TransportRequestState.fromJson(Map<String, dynamic> j) =>
+      TransportRequestState(
+        id: (j["id"] as String?) ?? "",
+        status: (j["status"] as String?) ?? "open",
+        createdAt: (j["createdAt"] as String?) ?? "",
+        handlingNote: (j["handlingNote"] as String?) ?? "",
+      );
+
+  final String id;
+
+  /// open | contacted | assigned | declined
+  final String status;
+  final String createdAt;
+  final String handlingNote;
+
+  bool get isActive => status == "open" || status == "contacted";
+}
+
+class ChildTransportInfo {
+  const ChildTransportInfo({
+    required this.id,
+    required this.fullName,
+    required this.classLabel,
+    required this.transport,
+    required this.request,
+  });
+
+  factory ChildTransportInfo.fromJson(Map<String, dynamic> j) =>
+      ChildTransportInfo(
+        id: (j["id"] as String?) ?? "",
+        fullName: (j["fullName"] as String?) ?? "",
+        classLabel: (j["classLabel"] as String?) ?? "",
+        transport: j["transport"] is Map<String, dynamic>
+            ? ChildTransport.fromJson(j["transport"] as Map<String, dynamic>)
+            : null,
+        request: j["request"] is Map<String, dynamic>
+            ? TransportRequestState.fromJson(
+                j["request"] as Map<String, dynamic>,
+              )
+            : null,
+      );
+
+  final String id;
+  final String fullName;
+  final String classLabel;
+  final ChildTransport? transport;
+  final TransportRequestState? request;
+}
+
+class MyTransport {
+  const MyTransport({
+    required this.children,
+    required this.address,
+    required this.locality,
+    required this.landmark,
+  });
+
+  factory MyTransport.fromJson(Map<String, dynamic> j) {
+    final h = j["household"] is Map
+        ? Map<String, dynamic>.from(j["household"] as Map)
+        : const <String, dynamic>{};
+    return MyTransport(
+      children: ((j["children"] as List?) ?? const [])
+          .map((c) => ChildTransportInfo.fromJson(c as Map<String, dynamic>))
+          .toList(),
+      address: (h["address"] as String?) ?? "",
+      locality: (h["locality"] as String?) ?? "",
+      landmark: (h["landmark"] as String?) ?? "",
+    );
+  }
+
+  final List<ChildTransportInfo> children;
+  final String address;
+  final String locality;
+  final String landmark;
+}
+
+/// A request as the office queue shows it (staff app).
+class TransportRequestInfo {
+  const TransportRequestInfo({
+    required this.id,
+    required this.studentName,
+    required this.classLabel,
+    required this.contactName,
+    required this.contactMobile,
+    required this.pickupAddress,
+    required this.locality,
+    required this.landmark,
+    required this.preferredStop,
+    required this.note,
+    required this.status,
+    required this.handlingNote,
+    required this.handledBy,
+    required this.createdAt,
+  });
+
+  factory TransportRequestInfo.fromJson(Map<String, dynamic> j) =>
+      TransportRequestInfo(
+        id: (j["id"] as String?) ?? "",
+        studentName: (j["studentName"] as String?) ?? "",
+        classLabel: (j["classLabel"] as String?) ?? "",
+        contactName: (j["contactName"] as String?) ?? "",
+        contactMobile: (j["contactMobile"] as String?) ?? "",
+        pickupAddress: (j["pickupAddress"] as String?) ?? "",
+        locality: (j["locality"] as String?) ?? "",
+        landmark: (j["landmark"] as String?) ?? "",
+        preferredStop: (j["preferredStop"] as String?) ?? "",
+        note: (j["note"] as String?) ?? "",
+        status: (j["status"] as String?) ?? "open",
+        handlingNote: (j["handlingNote"] as String?) ?? "",
+        handledBy: (j["handledBy"] as String?) ?? "",
+        createdAt: (j["createdAt"] as String?) ?? "",
+      );
+
+  final String id;
+  final String studentName;
+  final String classLabel;
+  final String contactName;
+  final String contactMobile;
+  final String pickupAddress;
+  final String locality;
+  final String landmark;
+  final String preferredStop;
+  final String note;
+  final String status;
+  final String handlingNote;
+  final String handledBy;
+  final String createdAt;
+
+  bool get isActive => status == "open" || status == "contacted";
+}
+
 class FeeLedger {
   const FeeLedger({
     required this.studentName,
     required this.openDues,
+    required this.futureDues,
     required this.openBalanceLabel,
+    required this.futureBalanceLabel,
   });
 
   factory FeeLedger.fromJson(Map<String, dynamic> j) => FeeLedger(
@@ -858,12 +1093,24 @@ class FeeLedger {
     openDues: ((j["openDues"] as List?) ?? const [])
         .map((d) => FeeDue.fromJson(d as Map<String, dynamic>))
         .toList(),
+    futureDues: ((j["futureDues"] as List?) ?? const [])
+        .map((d) => FeeDue.fromJson(d as Map<String, dynamic>))
+        .toList(),
     openBalanceLabel: (j["openBalanceLabel"] as String?) ?? "₹0",
+    futureBalanceLabel: (j["futureBalanceLabel"] as String?) ?? "₹0",
   );
 
   final String studentName;
+
+  /// Asked for now.
   final List<FeeDue> openDues;
+
+  /// Months ahead the family may clear early; never ticked by default.
+  final List<FeeDue> futureDues;
   final String openBalanceLabel;
+  final String futureBalanceLabel;
+
+  bool get isEmpty => openDues.isEmpty && futureDues.isEmpty;
 }
 
 class AttendanceHistory {
@@ -2465,6 +2712,68 @@ class ApiClient {
     final h = await _authHeaders();
     h.remove("Content-Type");
     return h;
+  }
+
+  // ---- receipts ---------------------------------------------------------
+
+  Future<List<ReceiptInfo>> fetchReceipts() async {
+    final data = await _getData("/api/v1/receipts");
+    return ((data["receipts"] as List?) ?? const [])
+        .map((r) => ReceiptInfo.fromJson(r as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// The receipt PDF's bytes, fetched with the session — the browser could
+  /// not open the link on its own, it has no cookie.
+  Future<List<int>> fetchReceiptPdf(String pdfUrl) async {
+    final res = await http.get(_uri(pdfUrl), headers: await imageHeaders());
+    if (res.statusCode != 200) _throwFrom(res);
+    return res.bodyBytes;
+  }
+
+  // ---- transport --------------------------------------------------------
+
+  Future<MyTransport> fetchMyTransport() async =>
+      MyTransport.fromJson(await _getData("/api/v1/transport/mine"));
+
+  Future<String> requestTransport({
+    required String studentId,
+    required String pickupAddress,
+    required String locality,
+    required String landmark,
+    required String preferredStop,
+    required String note,
+  }) async {
+    final data = await _postData("/api/v1/transport/request", {
+      "studentId": studentId,
+      "pickupAddress": pickupAddress,
+      "locality": locality,
+      "landmark": landmark,
+      "preferredStop": preferredStop,
+      "note": note,
+    });
+    return (data["id"] as String?) ?? "";
+  }
+
+  /// Staff: the office queue. status = active | open | contacted | assigned | declined.
+  Future<List<TransportRequestInfo>> fetchTransportRequests({
+    String status = "active",
+  }) async {
+    final data = await _getData("/api/v1/transport/requests?status=$status");
+    return ((data["requests"] as List?) ?? const [])
+        .map((r) => TransportRequestInfo.fromJson(r as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<void> updateTransportRequest({
+    required String id,
+    required String status,
+    String note = "",
+  }) async {
+    await _postData("/api/v1/transport/requests/$id", {
+      "status": status,
+      "note": note,
+    });
   }
 
   Future<EbookShelf> fetchEbookShelf() async =>

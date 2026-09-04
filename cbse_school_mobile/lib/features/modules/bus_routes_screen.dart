@@ -7,15 +7,15 @@ import "module_shell.dart";
 /// Parent-facing bus routes list — same data drivers see (routes, stops,
 /// vehicle), since no per-student route assignment exists yet to narrow it
 /// down to "your child's bus" specifically.
-class TransportScreen extends StatelessWidget {
-  const TransportScreen({super.key, required this.api});
+class BusRoutesScreen extends StatelessWidget {
+  const BusRoutesScreen({super.key, required this.api});
 
   final ApiClient api;
 
   @override
   Widget build(BuildContext context) {
     return ModuleShell<List<TransportRouteInfo>>(
-      title: "Transport",
+      title: "All bus routes",
       load: api.fetchTransportRoutes,
       emptyIcon: Icons.directions_bus_outlined,
       emptyText:
@@ -103,8 +103,8 @@ class TransportScreen extends StatelessWidget {
                                     color: i == 0
                                         ? AppColors.success
                                         : i == route.stops.length - 1
-                                            ? AppColors.danger
-                                            : AppColors.primaryMid,
+                                        ? AppColors.danger
+                                        : AppColors.primaryMid,
                                     shape: BoxShape.circle,
                                   ),
                                 ),

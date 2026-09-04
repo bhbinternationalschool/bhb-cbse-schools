@@ -4,6 +4,7 @@ import "package:url_launcher/url_launcher.dart";
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "module_shell.dart";
+import "receipts_screen.dart";
 
 /// One child's open dues, with online payment.
 ///
@@ -27,6 +28,10 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
   /// Dues the parent has un-ticked. Stored inverted so that a fresh ledger
   /// starts fully selected without needing a load callback.
   final _deselected = <String>{};
+
+  /// Months ahead the parent has chosen to clear now. Stored the other way
+  /// round: nothing ahead is selected until they tick it.
+  final _ahead = <String>{};
   bool _starting = false;
 
   /// Set when the browser has been opened for a payment; the next resume
@@ -64,9 +69,12 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
     }
   }
 
-  List<FeeDue> _selected(FeeLedger ledger) => ledger.openDues
-      .where((d) => d.dueKey.isNotEmpty && !_deselected.contains(d.dueKey))
-      .toList();
+  List<FeeDue> _selected(FeeLedger ledger) => [
+    ...ledger.openDues.where(
+      (d) => d.dueKey.isNotEmpty && !_deselected.contains(d.dueKey),
+    ),
+    ...ledger.futureDues.where((d) => _ahead.contains(d.dueKey)),
+  ];
 
   Future<void> _pay(FeeLedger ledger) async {
     final dues = _selected(ledger);
@@ -100,6 +108,55 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  Widget _dueTile(FeeDue due, {required bool ahead}) {
+    final selected = ahead
+        ? _ahead.contains(due.dueKey)
+        : due.dueKey.isNotEmpty && !_deselected.contains(due.dueKey);
+    return Card(
+      child: CheckboxListTile(
+        dense: true,
+        controlAffinity: ListTileControlAffinity.leading,
+        activeColor: AppColors.primary,
+        value: selected,
+        onChanged: due.dueKey.isEmpty
+            ? null
+            : (v) => setState(() {
+                if (ahead) {
+                  v == true
+                      ? _ahead.add(due.dueKey)
+                      : _ahead.remove(due.dueKey);
+                } else if (v == true) {
+                  _deselected.remove(due.dueKey);
+                } else {
+                  _deselected.add(due.dueKey);
+                }
+              }),
+        title: Text(
+          due.label,
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: AppColors.ink,
+          ),
+        ),
+        subtitle: due.dueOn.isEmpty
+            ? null
+            : Text(
+                "${ahead ? "Falls due" : "Due"} ${formatDateLabel(due.dueOn)}",
+                style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
+              ),
+        secondary: Text(
+          due.balanceLabel,
+          style: const TextStyle(
+            fontSize: 13.5,
+            fontWeight: FontWeight.w700,
+            color: AppColors.ink,
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return ModuleShell<FeeLedger>(
@@ -108,7 +165,7 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
       load: () => widget.api.fetchFeeLedger(widget.child.id),
       emptyIcon: Icons.task_alt,
       emptyText: "No pending fees — all dues are cleared. Thank you!",
-      isEmpty: (ledger) => ledger.openDues.isEmpty,
+      isEmpty: (ledger) => ledger.isEmpty,
       bottomBar: (context, ledger, reload) {
         _reload = reload;
         final selected = _selected(ledger);
@@ -184,68 +241,52 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
                 style: TextStyle(fontSize: 12, color: AppColors.muted),
               ),
             ),
-            for (final due in ledger.openDues)
-              Card(
-                child: CheckboxListTile(
-                  dense: true,
-                  controlAffinity: ListTileControlAffinity.leading,
-                  activeColor: AppColors.primary,
-                  value:
-                      due.dueKey.isNotEmpty &&
-                      !_deselected.contains(due.dueKey),
-                  onChanged: due.dueKey.isEmpty
-                      ? null
-                      : (v) => setState(() {
-                          if (v == true) {
-                            _deselected.remove(due.dueKey);
-                          } else {
-                            _deselected.add(due.dueKey);
-                          }
-                        }),
-                  title: Text(
-                    due.label,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.ink,
-                    ),
-                  ),
-                  subtitle: due.dueOn.isEmpty
-                      ? null
-                      : Text(
-                          "Due ${formatDateLabel(due.dueOn)}",
-                          style: const TextStyle(
-                            fontSize: 11.5,
-                            color: AppColors.muted,
-                          ),
-                        ),
-                  secondary: Text(
-                    due.balanceLabel,
-                    style: const TextStyle(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.ink,
-                    ),
+            for (final due in ledger.openDues) _dueTile(due, ahead: false),
+            if (ledger.futureDues.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 4, 4, 6),
+                child: Text(
+                  "Pay ahead · ${ledger.futureBalanceLabel} for the months to come",
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.ink,
                   ),
                 ),
               ),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(4, 0, 4, 6),
+                child: Text(
+                  "Not due yet. Tick any you would like to clear now.",
+                  style: TextStyle(fontSize: 12, color: AppColors.muted),
+                ),
+              ),
+              for (final due in ledger.futureDues) _dueTile(due, ahead: true),
+            ],
             const SizedBox(height: 12),
-            const Card(
-              child: Padding(
-                padding: EdgeInsets.all(14),
-                child: Row(
-                  children: [
-                    Icon(Icons.info_outline, size: 18, color: AppColors.muted),
-                    SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        "Online payment opens the school's secure payment page "
-                        "in your browser — UPI, cards and net banking. Fees can "
-                        "also be paid at the school office by cash, UPI or cheque.",
-                        style: TextStyle(fontSize: 12, color: AppColors.muted),
-                      ),
-                    ),
-                  ],
+            Card(
+              child: ListTile(
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => ReceiptsScreen(api: widget.api),
+                  ),
+                ),
+                leading: const Icon(
+                  Icons.receipt_long_outlined,
+                  color: AppColors.primary,
+                ),
+                title: const Text(
+                  "Previous receipts",
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+                subtitle: const Text(
+                  "Every payment so far, as a PDF",
+                  style: TextStyle(fontSize: 11.5, color: AppColors.muted),
+                ),
+                trailing: const Icon(
+                  Icons.chevron_right,
+                  color: AppColors.muted,
                 ),
               ),
             ),
