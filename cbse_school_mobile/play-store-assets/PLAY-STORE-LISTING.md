@@ -199,3 +199,8 @@ for trying it with a few families before the public rollout.
 **upload key**. If this Mac is lost and these aren't backed up, you can still
 recover via Play App Signing (Google holds the real key), but keep them safe
 anyway — store both in the school's password manager. Never commit them to git.
+
+
+## Microphone (parent app, added 2026-09-05)
+
+The parent app now requests `RECORD_AUDIO` at runtime, only when a parent taps the mic in the AI tutor to speak a question. Recognition uses the phone's own speech service (Google speech recogniser); the app does not record, store or upload audio. Data safety form: no audio collected by the app. No Play permission declaration form is required for the microphone.

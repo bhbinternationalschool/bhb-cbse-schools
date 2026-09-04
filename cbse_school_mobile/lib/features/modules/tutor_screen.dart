@@ -1,5 +1,6 @@
 import "package:flutter/material.dart";
 import "package:flutter_secure_storage/flutter_secure_storage.dart";
+import "package:speech_to_text/speech_to_text.dart";
 import "package:url_launcher/url_launcher.dart";
 
 import "../../core/api/api_client.dart";
@@ -478,6 +479,9 @@ class _TutorScreenState extends State<TutorScreen> {
                         : (_modeInfo?.prompt ?? "Ask the tutor…"),
                     busy: _busy,
                     onSend: _send,
+                    // Spoken questions are recognised in the reply language;
+                    // "both" listens in Hindi, which also catches Hinglish.
+                    speechLocale: _language == "en" ? "en_IN" : "hi_IN",
                   ),
                 ],
               ),
@@ -800,21 +804,101 @@ class _Bubble extends StatelessWidget {
   }
 }
 
-class _Composer extends StatelessWidget {
+class _Composer extends StatefulWidget {
   const _Composer({
     required this.controller,
     required this.hint,
     required this.busy,
     required this.onSend,
+    required this.speechLocale,
   });
 
   final TextEditingController controller;
   final String hint;
   final bool busy;
   final VoidCallback onSend;
+  final String speechLocale;
+
+  @override
+  State<_Composer> createState() => _ComposerState();
+}
+
+/// The composer with a microphone: a parent who would rather speak than
+/// type — or cannot type Hindi easily — taps the mic, speaks, and the
+/// words land in the box to check before sending. Recognition runs on
+/// the phone's own speech service; the app records and uploads nothing.
+class _ComposerState extends State<_Composer> {
+  final _speech = SpeechToText();
+  bool _ready = false;
+  bool _listening = false;
+  String _baseText = "";
+
+  @override
+  void dispose() {
+    if (_listening) _speech.stop();
+    super.dispose();
+  }
+
+  Future<void> _toggleMic() async {
+    if (_listening) {
+      await _speech.stop();
+      if (mounted) setState(() => _listening = false);
+      return;
+    }
+    Haptics.tap();
+    if (!_ready) {
+      _ready = await _speech.initialize(
+        onError: (_) {
+          if (mounted) setState(() => _listening = false);
+        },
+        onStatus: (status) {
+          if ((status == "done" || status == "notListening") && mounted) {
+            setState(() => _listening = false);
+          }
+        },
+      );
+    }
+    if (!_ready) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              "Voice input is not available on this phone. Please type your question.",
+            ),
+          ),
+        );
+      }
+      return;
+    }
+    _baseText = widget.controller.text.trim();
+    setState(() => _listening = true);
+    await _speech.listen(
+      listenOptions: SpeechListenOptions(
+        localeId: widget.speechLocale,
+        partialResults: true,
+        listenMode: ListenMode.dictation,
+      ),
+      onResult: (result) {
+        final heard = result.recognizedWords.trim();
+        final joined = [
+          if (_baseText.isNotEmpty) _baseText,
+          if (heard.isNotEmpty) heard,
+        ].join(" ");
+        widget.controller.text = joined;
+        widget.controller.selection = TextSelection.fromPosition(
+          TextPosition(offset: joined.length),
+        );
+        if (result.finalResult && mounted) {
+          Haptics.success();
+          setState(() => _listening = false);
+        }
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
+    final hindi = widget.speechLocale.startsWith("hi");
     return SafeArea(
       top: false,
       child: Padding(
@@ -826,15 +910,38 @@ class _Composer extends StatelessWidget {
         ),
         child: Row(
           children: [
+            AnimatedContainer(
+              duration: AppMotion.fast,
+              decoration: BoxDecoration(
+                color: _listening ? AppColors.danger : Colors.white,
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: _listening
+                      ? AppColors.danger
+                      : AppColors.ink.withValues(alpha: 0.12),
+                ),
+              ),
+              child: IconButton(
+                tooltip: _listening ? "Stop" : "Speak your question",
+                onPressed: widget.busy ? null : _toggleMic,
+                icon: Icon(
+                  _listening ? Icons.stop : Icons.mic_none,
+                  color: _listening ? Colors.white : AppColors.primary,
+                ),
+              ),
+            ),
+            const SizedBox(width: Space.sm),
             Expanded(
               child: TextField(
-                controller: controller,
+                controller: widget.controller,
                 minLines: 1,
                 maxLines: 5,
                 textInputAction: TextInputAction.send,
-                onSubmitted: (_) => onSend(),
+                onSubmitted: (_) => widget.onSend(),
                 decoration: InputDecoration(
-                  hintText: hint,
+                  hintText: _listening
+                      ? (hindi ? "सुन रहा हूँ… बोलिए" : "Listening… speak now")
+                      : widget.hint,
                   filled: true,
                   fillColor: Colors.white,
                   contentPadding: const EdgeInsets.symmetric(
@@ -854,9 +961,9 @@ class _Composer extends StatelessWidget {
             ),
             const SizedBox(width: Space.sm),
             IconButton.filled(
-              onPressed: busy ? null : onSend,
+              onPressed: widget.busy ? null : widget.onSend,
               style: IconButton.styleFrom(backgroundColor: AppColors.primary),
-              icon: busy
+              icon: widget.busy
                   ? const SizedBox(
                       width: 16,
                       height: 16,

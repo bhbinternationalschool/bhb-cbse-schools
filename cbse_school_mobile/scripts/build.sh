@@ -96,7 +96,10 @@ fi
 
 if [ "$FLAVOR" = parent ]; then
   # Anything here needs a Play declaration form the parent app must never file.
-  BAD=$(echo "$PERMS" | grep -E 'LOCATION|RECORD_AUDIO|CAMERA|FOREGROUND_SERVICE|READ_MEDIA|READ_EXTERNAL_STORAGE|RECEIVE_BOOT_COMPLETED' || true)
+  # RECORD_AUDIO is deliberately NOT in this list: the AI tutor's voice input
+  # needs the microphone (runtime prompt only, no declaration form), and
+  # recognition runs through the phone's own speech service.
+  BAD=$(echo "$PERMS" | grep -E 'LOCATION|CAMERA|FOREGROUND_SERVICE|READ_MEDIA|READ_EXTERNAL_STORAGE|RECEIVE_BOOT_COMPLETED' || true)
   if [ -n "$BAD" ]; then
     echo "FAIL: the parent app must not carry these — a plugin's manifest is" >&2
     echo "merging them in; add tools:node=\"remove\" lines to" >&2
@@ -104,7 +107,8 @@ if [ "$FLAVOR" = parent ]; then
     echo "$BAD" | sed 's/^/  /' >&2
     exit 1
   fi
-  echo "OK: parent app carries no restricted permission"
+  echo "$PERMS" | grep -q RECORD_AUDIO || { echo "FAIL: parent app lost RECORD_AUDIO; the tutor's voice input will not work" >&2; exit 1; }
+  echo "OK: parent app carries no restricted permission (microphone kept for tutor voice input)"
 else
   echo "$PERMS" | grep -q ACCESS_BACKGROUND_LOCATION \
     || { echo "FAIL: staff app lost ACCESS_BACKGROUND_LOCATION; presence pings will not work" >&2; exit 1; }

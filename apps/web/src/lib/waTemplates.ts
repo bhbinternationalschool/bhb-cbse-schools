@@ -163,6 +163,7 @@ export const WA_TEMPLATE_VARIABLES: WaTemplateVariableDef[] = [
   { key: "staffName", label: "Staff name", group: "Staff", sample: "Rajesh Kumar" },
   { key: "noticeTitle", label: "Notice title", group: "Comms", sample: "Holiday announcement" },
   { key: "noticeBody", label: "Notice body", group: "Comms", sample: "School closed on Friday." },
+  { key: "messageText", label: "Parent's message", group: "Comms", sample: "Amay could not finish the worksheet, please guide." },
   { key: "docTitle", label: "Document title", group: "Vault", sample: "Fire NOC" },
   { key: "expiryDate", label: "Expiry date", group: "Vault", sample: "31 Dec 2026" },
   { key: "orderNo", label: "Store order no.", group: "Store", sample: "STR-882" },
@@ -261,14 +262,16 @@ type SeedDef = {
 };
 
 const SEED_DEFS: SeedDef[] = [
-  // ── Transport ────────────────────────────────────────────────
-  // Drafts for the office to review and submit to Meta. Nothing sends until
-  // Meta approves the name: the fleet-edge alert path has already proved that
-  // free-form fails outside the 24h window, 223 times in a row.
+  // Every template reads the same way on a parent's phone: a warm greeting,
+  // the facts on their own lines with a small icon each, one clear thing to
+  // do, and a fixed sign-off — Meta refuses a body that starts or ends on a
+  // variable, and a parent skims a message, they do not read it.
   //
-  // The ETA wording says "expected" and names it as a schedule on purpose.
-  // There is no live position behind it — Tata's telemetry feed is not
-  // subscribed — and a parent who reads it as live will stand at the stop.
+  // ── Transport ────────────────────────────────────────────────
+  // Nothing sends until Meta approves the name: the fleet-edge alert path
+  // has already proved that free-form fails outside the 24h window, 223
+  // times in a row. The ETA wording says "expected" and names it as a
+  // schedule on purpose — there is no live position behind it.
   {
     familyKey: "transport_eta",
     nameEn: "Bus expected time",
@@ -277,11 +280,11 @@ const SEED_DEFS: SeedDef[] = [
     category: "UTILITY",
     metaName: "bhb_transport_eta",
     bodyEn:
-      "Namaste {{guardianName}}, bus *{{busNo}}* is expected at {{stopName}} at about {{expectedTime}} for *{{childName}}*. This is the scheduled time, not the bus's live position.",
+      "Namaste {{guardianName}} ji 🙏\n\n🚌 Bus *{{busNo}}* is expected at *{{stopName}}* at about *{{expectedTime}}* for {{childName}}.\n\nThis is the scheduled time, not the bus's live position. Please be at the stop a few minutes early.\n\nHave a good day! 🌼",
     bodyHi:
-      "नमस्ते {{guardianName}}, *{{childName}}* के लिए बस *{{busNo}}* {{stopName}} पर लगभग {{expectedTime}} बजे पहुँचने की उम्मीद है। यह निर्धारित समय है, बस की लाइव लोकेशन नहीं।",
-    footerEn: "Transport desk",
-    footerHi: "परिवहन कार्यालय",
+      "नमस्ते {{guardianName}} जी 🙏\n\n🚌 {{childName}} के लिए बस *{{busNo}}* *{{stopName}}* पर लगभग *{{expectedTime}}* बजे पहुँचने की उम्मीद है।\n\nयह निर्धारित समय है, बस की लाइव लोकेशन नहीं। कृपया कुछ मिनट पहले स्टॉप पर पहुँचें।\n\nआपका दिन शुभ हो! 🌼",
+    footerEn: "Transport desk · Reply to this message for help",
+    footerHi: "परिवहन कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
   },
   {
     familyKey: "transport_delay",
@@ -291,11 +294,11 @@ const SEED_DEFS: SeedDef[] = [
     category: "UTILITY",
     metaName: "bhb_transport_delay",
     bodyEn:
-      "Namaste {{guardianName}}, bus *{{busNo}}* is running about {{minutesLate}} minutes late for {{stopName}}. *{{childName}}* will be picked up as soon as it arrives.",
+      "Namaste {{guardianName}} ji 🙏\n\n⏰ Bus *{{busNo}}* is running about *{{minutesLate}} minutes late* for {{stopName}}.\n\n{{childName}} will be picked up as soon as it arrives — please keep them ready at the stop.\n\nSorry for the wait, and thank you for your patience. 🙏",
     bodyHi:
-      "नमस्ते {{guardianName}}, बस *{{busNo}}* {{stopName}} के लिए लगभग {{minutesLate}} मिनट देरी से चल रही है। *{{childName}}* को बस पहुँचते ही ले लिया जाएगा।",
-    footerEn: "Transport desk",
-    footerHi: "परिवहन कार्यालय",
+      "नमस्ते {{guardianName}} जी 🙏\n\n⏰ बस *{{busNo}}* {{stopName}} के लिए लगभग *{{minutesLate}} मिनट देरी* से चल रही है।\n\n{{childName}} को बस पहुँचते ही ले लिया जाएगा — कृपया उन्हें स्टॉप पर तैयार रखें।\n\nअसुविधा के लिए खेद है, आपके धैर्य के लिए धन्यवाद। 🙏",
+    footerEn: "Transport desk · Reply to this message for help",
+    footerHi: "परिवहन कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
   },
   {
     familyKey: "transport_breakdown",
@@ -305,11 +308,11 @@ const SEED_DEFS: SeedDef[] = [
     category: "UTILITY",
     metaName: "bhb_transport_breakdown",
     bodyEn:
-      "Namaste {{guardianName}}, bus *{{busNo}}* has broken down. *{{childName}}* is safe with the attendant. {{actionTaken}}",
+      "Namaste {{guardianName}} ji 🙏\n\n⚠️ Bus *{{busNo}}* has broken down on the way.\n\n✅ {{childName}} is *safe* with the bus attendant.\n\n🔧 What we are doing: {{actionTaken}}\n\nWe will message you again the moment there is an update. Thank you for your patience. 🙏",
     bodyHi:
-      "नमस्ते {{guardianName}}, बस *{{busNo}}* खराब हो गई है। *{{childName}}* परिचारक के साथ सुरक्षित हैं। {{actionTaken}}",
-    footerEn: "Transport desk",
-    footerHi: "परिवहन कार्यालय",
+      "नमस्ते {{guardianName}} जी 🙏\n\n⚠️ बस *{{busNo}}* रास्ते में खराब हो गई है।\n\n✅ {{childName}} बस परिचारक के साथ *सुरक्षित* हैं।\n\n🔧 हम क्या कर रहे हैं: {{actionTaken}}\n\nकोई भी नई जानकारी मिलते ही हम फिर संदेश भेजेंगे। आपके धैर्य के लिए धन्यवाद। 🙏",
+    footerEn: "Transport desk · Reply to this message for help",
+    footerHi: "परिवहन कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
   },
   {
     familyKey: "transport_route_change",
@@ -319,11 +322,11 @@ const SEED_DEFS: SeedDef[] = [
     category: "UTILITY",
     metaName: "bhb_transport_route_change",
     bodyEn:
-      "Namaste {{guardianName}}, from {{effectiveFrom}} *{{childName}}* will be picked up at {{stopName}} by bus *{{busNo}}*. Please contact the school office if this does not suit.",
+      "Namaste {{guardianName}} ji 🙏\n\nThere is a change in {{childName}}'s school transport:\n\n📅 From: *{{effectiveFrom}}*\n📍 Stop: *{{stopName}}*\n🚌 Bus: *{{busNo}}*\n\nIf this does not suit your family, please reply to this message or call the school office and we will sort it out.\n\nThank you! 🙏",
     bodyHi:
-      "नमस्ते {{guardianName}}, {{effectiveFrom}} से *{{childName}}* को {{stopName}} से बस *{{busNo}}* द्वारा लिया जाएगा। यदि यह उपयुक्त न हो तो कृपया विद्यालय कार्यालय से संपर्क करें।",
-    footerEn: "Transport desk",
-    footerHi: "परिवहन कार्यालय",
+      "नमस्ते {{guardianName}} जी 🙏\n\n{{childName}} के स्कूल परिवहन में बदलाव है:\n\n📅 कब से: *{{effectiveFrom}}*\n📍 स्टॉप: *{{stopName}}*\n🚌 बस: *{{busNo}}*\n\nयदि यह आपके परिवार के लिए उपयुक्त न हो, तो कृपया इसी संदेश का उत्तर दें या विद्यालय कार्यालय में फ़ोन करें — हम व्यवस्था कर देंगे।\n\nधन्यवाद! 🙏",
+    footerEn: "Transport desk · Reply to this message for help",
+    footerHi: "परिवहन कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
   },
   {
     familyKey: "transport_not_boarded",
@@ -333,13 +336,14 @@ const SEED_DEFS: SeedDef[] = [
     category: "UTILITY",
     metaName: "bhb_transport_not_boarded",
     bodyEn:
-      "Namaste {{guardianName}}, *{{childName}}* did not board bus *{{busNo}}* at {{stopName}} at {{time}}. Please tell the school if they are travelling separately today.",
+      "Namaste {{guardianName}} ji 🙏\n\n❗ {{childName}} did *not board* bus *{{busNo}}* at {{stopName}} at *{{time}}* today.\n\nIf they are travelling separately today, please reply *OK* so we know all is well. If not, please call the school office right away.\n\nWe just want to be sure your child is safe. 🙏",
     bodyHi:
-      "नमस्ते {{guardianName}}, *{{childName}}* {{time}} बजे {{stopName}} पर बस *{{busNo}}* में नहीं चढ़े। यदि वे आज अलग से आ रहे हैं तो कृपया विद्यालय को बताएं।",
-    footerEn: "Transport desk",
-    footerHi: "परिवहन कार्यालय",
+      "नमस्ते {{guardianName}} जी 🙏\n\n❗ {{childName}} आज *{{time}}* बजे {{stopName}} पर बस *{{busNo}}* में *नहीं चढ़े*।\n\nयदि वे आज अलग से आ रहे हैं, तो कृपया *OK* लिखकर उत्तर दें ताकि हमें पता रहे कि सब ठीक है। यदि नहीं, तो कृपया तुरंत विद्यालय कार्यालय में फ़ोन करें।\n\nहम बस यह सुनिश्चित करना चाहते हैं कि आपका बच्चा सुरक्षित है। 🙏",
+    footerEn: "Transport desk · Reply to this message for help",
+    footerHi: "परिवहन कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
   },
 
+  // ── Admissions ───────────────────────────────────────────────
   {
     familyKey: "admissions_registration_invite",
     nameEn: "Registration invite",
@@ -348,11 +352,11 @@ const SEED_DEFS: SeedDef[] = [
     category: "UTILITY",
     metaName: "bhb_registration_invite",
     bodyEn:
-      "Namaste {{guardianName}}, please complete registration for *{{childName}}* at {{schoolName}}. Register: {{registerLink}}",
+      "Namaste {{guardianName}} ji 🙏\n\nThank you for your interest in *{{schoolName}}* for {{childName}}. 🎒\n\nThe next step is a short online registration — it takes about 5 minutes:\n\n🔗 {{registerLink}}\n\nOnce done, our admissions team will call you to fix a campus visit. We look forward to welcoming your family! 🌼",
     bodyHi:
-      "नमस्ते {{guardianName}}, कृपया {{schoolName}} में *{{childName}}* का पंजीकरण पूरा करें। लिंक: {{registerLink}}",
-    footerEn: "Admissions desk",
-    footerHi: "प्रवेश कार्यालय",
+      "नमस्ते {{guardianName}} जी 🙏\n\n{{childName}} के लिए *{{schoolName}}* में रुचि दिखाने के लिए धन्यवाद। 🎒\n\nअगला कदम एक छोटा-सा ऑनलाइन पंजीकरण है — इसमें लगभग 5 मिनट लगते हैं:\n\n🔗 {{registerLink}}\n\nपंजीकरण के बाद हमारी प्रवेश टीम आपको फ़ोन करके कैंपस विज़िट तय करेगी। आपके परिवार का स्वागत करने की प्रतीक्षा है! 🌼",
+    footerEn: "Admissions desk · Reply to this message for help",
+    footerHi: "प्रवेश कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
   },
   {
     familyKey: "admissions_fee_reminder",
@@ -362,9 +366,11 @@ const SEED_DEFS: SeedDef[] = [
     category: "UTILITY",
     metaName: "bhb_registration_fee_reminder",
     bodyEn:
-      "Dear {{guardianName}}, registration fee for *{{childName}}* is due: *{{feeDue}}*. Pay: {{payLink}}",
+      "Namaste {{guardianName}} ji 🙏\n\nA gentle reminder — the registration fee for {{childName}} is pending:\n\n💰 Amount: *{{feeDue}}*\n\nPay securely in a minute (UPI, card or net banking):\n🔗 {{payLink}}\n\nYour seat is confirmed as soon as the payment goes through. Thank you! 🙏",
     bodyHi:
-      "प्रिय {{guardianName}}, *{{childName}}* का पंजीकरण शुल्क बकाया है: *{{feeDue}}*। भुगतान: {{payLink}}",
+      "नमस्ते {{guardianName}} जी 🙏\n\nएक विनम्र स्मरण — {{childName}} का पंजीकरण शुल्क बाकी है:\n\n💰 राशि: *{{feeDue}}*\n\nएक मिनट में सुरक्षित भुगतान करें (UPI, कार्ड या नेट बैंकिंग):\n🔗 {{payLink}}\n\nभुगतान होते ही सीट पक्की हो जाएगी। धन्यवाद! 🙏",
+    footerEn: "Admissions desk · Reply to this message for help",
+    footerHi: "प्रवेश कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
   },
   {
     familyKey: "admissions_open_day",
@@ -376,9 +382,11 @@ const SEED_DEFS: SeedDef[] = [
     headerFormat: "IMAGE",
     mediaUrl: "",
     bodyEn:
-      "Dear {{guardianName}}, you are invited to visit campus for *{{childName}}* counselling at {{schoolName}}. Register: {{registerLink}}",
+      "Namaste {{guardianName}} ji 🙏\n\nYou are warmly invited to visit *{{schoolName}}* with {{childName}}! 🏫\n\nWalk through our classrooms, meet the teachers, and get a one-to-one counselling session on the right class and the way we teach.\n\nBook your visit here:\n🔗 {{registerLink}}\n\nWe would love to show you around. 🌼",
     bodyHi:
-      "प्रिय {{guardianName}}, {{schoolName}} में *{{childName}}* की काउंसलिंग हेतु कैंपस आने का निमंत्रण। पंजीकरण: {{registerLink}}",
+      "नमस्ते {{guardianName}} जी 🙏\n\n{{childName}} के साथ *{{schoolName}}* देखने आने का हार्दिक निमंत्रण! 🏫\n\nहमारी कक्षाएँ देखें, शिक्षकों से मिलें, और सही कक्षा व हमारी पढ़ाने की पद्धति पर व्यक्तिगत काउंसलिंग पाएँ।\n\nअपनी विज़िट यहाँ बुक करें:\n🔗 {{registerLink}}\n\nआपको कैंपस दिखाने में हमें खुशी होगी। 🌼",
+    footerEn: "Admissions desk · Reply STOP to opt out",
+    footerHi: "प्रवेश कार्यालय · संदेश बंद करने के लिए STOP लिखें",
   },
   {
     familyKey: "admissions_followup",
@@ -388,10 +396,14 @@ const SEED_DEFS: SeedDef[] = [
     category: "UTILITY",
     metaName: "bhb_admission_followup",
     bodyEn:
-      "Namaste {{guardianName}}, checking in on *{{childName}}*'s admission enquiry at {{schoolName}}. Reply YES to continue or call the desk.",
+      "Namaste {{guardianName}} ji 🙏\n\nJust checking in on {{childName}}'s admission enquiry at *{{schoolName}}*. 🎒\n\nIs there anything we can help with — the class, fees, transport, or a campus visit?\n\n👉 Reply *YES* and our admissions team will call you back, or reply with your question here.\n\nWe are happy to help. 🙏",
     bodyHi:
-      "नमस्ते {{guardianName}}, {{schoolName}} में *{{childName}}* की प्रवेश पूछताछ पर फॉलो-अप। जारी रखने के लिए YES लिखें।",
+      "नमस्ते {{guardianName}} जी 🙏\n\n*{{schoolName}}* में {{childName}} की प्रवेश पूछताछ के बारे में हाल जानना चाहते हैं। 🎒\n\nक्या किसी बात में मदद चाहिए — कक्षा, शुल्क, परिवहन या कैंपस विज़िट?\n\n👉 *YES* लिखें और हमारी प्रवेश टीम आपको फ़ोन करेगी, या अपना प्रश्न यहीं लिख भेजें।\n\nहमें मदद करके खुशी होगी। 🙏",
+    footerEn: "Admissions desk · Reply to this message for help",
+    footerHi: "प्रवेश कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
   },
+
+  // ── Fees ─────────────────────────────────────────────────────
   {
     familyKey: "fees_soft_reminder",
     nameEn: "Fee soft reminder",
@@ -400,9 +412,11 @@ const SEED_DEFS: SeedDef[] = [
     category: "UTILITY",
     metaName: "bhb_fee_soft_reminder",
     bodyEn:
-      "Dear {{guardianName}}, fee for *{{childName}}* ({{classLabel}}) is due soon: *{{feeDue}}*. Pay: {{payLink}}",
+      "Namaste {{guardianName}} ji 🙏\n\nA friendly reminder that {{childName}}'s school fee ({{classLabel}}) is due soon:\n\n💰 Amount: *{{feeDue}}*\n\nPay in a minute from your phone — UPI, card or net banking:\n🔗 {{payLink}}\n\nYour receipt arrives on WhatsApp the moment the payment goes through. Thank you! 🙏",
     bodyHi:
-      "प्रिय {{guardianName}}, *{{childName}}* ({{classLabel}}) का शुल्क शीघ्र देय: *{{feeDue}}*। भुगतान: {{payLink}}",
+      "नमस्ते {{guardianName}} जी 🙏\n\nएक विनम्र स्मरण — {{childName}} ({{classLabel}}) का विद्यालय शुल्क शीघ्र देय है:\n\n💰 राशि: *{{feeDue}}*\n\nअपने फ़ोन से एक मिनट में भुगतान करें — UPI, कार्ड या नेट बैंकिंग:\n🔗 {{payLink}}\n\nभुगतान होते ही रसीद व्हाट्सऐप पर आ जाएगी। धन्यवाद! 🙏",
+    footerEn: "Fee counter · Reply to this message for help",
+    footerHi: "शुल्क काउंटर · सहायता के लिए इसी संदेश का उत्तर दें",
   },
   {
     familyKey: "fees_stage_reminder",
@@ -412,9 +426,11 @@ const SEED_DEFS: SeedDef[] = [
     category: "UTILITY",
     metaName: "bhb_fee_stage_reminder",
     bodyEn:
-      "Dear {{guardianName}}, *{{childName}}* has overdue fees (stage {{stage}}): *{{feeDue}}*. Please clear dues: {{payLink}}",
+      "Namaste {{guardianName}} ji 🙏\n\n{{childName}}'s school fee is *overdue* (reminder {{stage}}):\n\n💰 Amount pending: *{{feeDue}}*\n\nPlease clear it at your earliest — it takes a minute:\n🔗 {{payLink}}\n\nIf you have already paid or need a little more time, just reply to this message and the fee counter will help. Thank you! 🙏",
     bodyHi:
-      "प्रिय {{guardianName}}, *{{childName}}* का बकाया शुल्क (चरण {{stage}}): *{{feeDue}}*। भुगतान: {{payLink}}",
+      "नमस्ते {{guardianName}} जी 🙏\n\n{{childName}} का विद्यालय शुल्क *बकाया* है (स्मरण {{stage}}):\n\n💰 बकाया राशि: *{{feeDue}}*\n\nकृपया जल्द से जल्द भुगतान करें — इसमें एक मिनट लगता है:\n🔗 {{payLink}}\n\nयदि आपने भुगतान कर दिया है या थोड़ा समय चाहिए, तो इसी संदेश का उत्तर दें — शुल्क काउंटर आपकी मदद करेगा। धन्यवाद! 🙏",
+    footerEn: "Fee counter · Reply to this message for help",
+    footerHi: "शुल्क काउंटर · सहायता के लिए इसी संदेश का उत्तर दें",
   },
   {
     familyKey: "fees_pay_link",
@@ -424,9 +440,11 @@ const SEED_DEFS: SeedDef[] = [
     category: "UTILITY",
     metaName: "bhb_fee_pay_link",
     bodyEn:
-      "{{schoolName}}: Pay link for *{{childName}}* — amount *{{feeDue}}*: {{payLink}}",
+      "Namaste 🙏 Here is the fee payment link from *{{schoolName}}* for {{childName}}:\n\n💰 Amount: *{{feeDue}}*\n🔗 {{payLink}}\n\nPay with UPI, card or net banking — the receipt comes to you on WhatsApp right after. Thank you! 🙏",
     bodyHi:
-      "{{schoolName}}: *{{childName}}* हेतु भुगतान लिंक — राशि *{{feeDue}}*: {{payLink}}",
+      "नमस्ते 🙏 *{{schoolName}}* की ओर से {{childName}} के शुल्क भुगतान का लिंक:\n\n💰 राशि: *{{feeDue}}*\n🔗 {{payLink}}\n\nUPI, कार्ड या नेट बैंकिंग से भुगतान करें — रसीद तुरंत व्हाट्सऐप पर मिलेगी। धन्यवाद! 🙏",
+    footerEn: "Fee counter · Reply to this message for help",
+    footerHi: "शुल्क काउंटर · सहायता के लिए इसी संदेश का उत्तर दें",
   },
   {
     familyKey: "fees_receipt",
@@ -436,9 +454,11 @@ const SEED_DEFS: SeedDef[] = [
     category: "UTILITY",
     metaName: "bhb_fee_receipt",
     bodyEn:
-      "Receipt {{receiptNo}} for *{{childName}}*: paid *{{feeDue}}* on {{paidOn}}. Thank you — {{schoolName}}",
+      "Namaste 🙏 Thank you for your payment!\n\n✅ Receipt no: *{{receiptNo}}*\n👧 Student: {{childName}}\n💰 Paid: *{{feeDue}}*\n📅 On: {{paidOn}}\n\nYour receipt PDF is attached above and is also saved in the parent app under Receipts.\n\nWith thanks, *{{schoolName}}* 🌼",
     bodyHi:
-      "*{{childName}}* की रसीद {{receiptNo}}: {{paidOn}} को *{{feeDue}}* प्राप्त। धन्यवाद — {{schoolName}}",
+      "नमस्ते 🙏 भुगतान के लिए धन्यवाद!\n\n✅ रसीद संख्या: *{{receiptNo}}*\n👧 छात्र: {{childName}}\n💰 भुगतान: *{{feeDue}}*\n📅 दिनांक: {{paidOn}}\n\nरसीद की PDF ऊपर संलग्न है और पैरेंट ऐप में \"Receipts\" में भी सुरक्षित है।\n\nसधन्यवाद, *{{schoolName}}* 🌼",
+    footerEn: "Fee counter · Keep this for your records",
+    footerHi: "शुल्क काउंटर · इसे अपने रिकॉर्ड के लिए रखें",
   },
   {
     familyKey: "fees_marketing_carousel",
@@ -448,21 +468,27 @@ const SEED_DEFS: SeedDef[] = [
     category: "MARKETING",
     metaName: "bhb_fee_offer_carousel",
     headerFormat: "NONE",
-    bodyEn: "Fee options for the new session at {{schoolName}} — swipe cards below.",
-    bodyHi: "{{schoolName}} में नए सत्र के शुल्क विकल्प — नीचे कार्ड देखें।",
+    bodyEn:
+      "Namaste 🙏 Fee options for the new session at *{{schoolName}}* — swipe the cards below to see what suits your family best. 🎒",
+    bodyHi:
+      "नमस्ते 🙏 *{{schoolName}}* में नए सत्र के शुल्क विकल्प — नीचे कार्ड स्वाइप करके देखें कि आपके परिवार के लिए क्या सबसे उपयुक्त है। 🎒",
     carousel: [
       {
         headerFormat: "IMAGE",
-        body: "Early bird concession — save on annual fees.",
+        body: "🌟 Early-bird concession — pay the annual fee before the session starts and save.",
         buttons: [{ type: "URL", text: "Pay now", url: "{{payLink}}" }],
       },
       {
         headerFormat: "IMAGE",
-        body: "Installment plans available for {{classLabel}}.",
+        body: "📆 Easy instalments for {{classLabel}} — spread the fee across the year, no extra charge.",
         buttons: [{ type: "QUICK_REPLY", text: "Know more" }],
       },
     ],
+    footerEn: "Fee counter · Reply STOP to opt out",
+    footerHi: "शुल्क काउंटर · संदेश बंद करने के लिए STOP लिखें",
   },
+
+  // ── Daily school life ────────────────────────────────────────
   {
     familyKey: "attendance_absent",
     nameEn: "Student absent alert",
@@ -471,9 +497,11 @@ const SEED_DEFS: SeedDef[] = [
     category: "UTILITY",
     metaName: "bhb_attendance_absent",
     bodyEn:
-      "Dear {{guardianName}}, *{{childName}}* ({{classLabel}}) is marked absent today ({{date}}). Reply if this is incorrect.",
+      "Namaste {{guardianName}} ji 🙏\n\n📋 {{childName}} ({{classLabel}}) has been marked *absent* today, {{date}}.\n\nIf this is a mistake, or if your child is unwell, please reply to this message so the class teacher knows.\n\nWishing {{childName}} a quick return to class! 🌼",
     bodyHi:
-      "प्रिय {{guardianName}}, *{{childName}}* ({{classLabel}}) आज ({{date}}) अनुपस्थित अंकित है। गलत हो तो उत्तर दें।",
+      "नमस्ते {{guardianName}} जी 🙏\n\n📋 {{childName}} ({{classLabel}}) आज, {{date}} को *अनुपस्थित* अंकित किए गए हैं।\n\nयदि यह गलती है, या आपका बच्चा अस्वस्थ है, तो कृपया इसी संदेश का उत्तर दें ताकि कक्षा शिक्षक को पता रहे।\n\n{{childName}} जल्द कक्षा में लौटें, यही कामना है! 🌼",
+    footerEn: "Class teacher · Reply to this message",
+    footerHi: "कक्षा शिक्षक · इसी संदेश का उत्तर दें",
   },
   {
     familyKey: "homework_published",
@@ -483,9 +511,11 @@ const SEED_DEFS: SeedDef[] = [
     category: "UTILITY",
     metaName: "bhb_homework_published",
     bodyEn:
-      "Homework for {{classLabel}} — {{subject}}: {{homeworkTitle}}. Due {{dueDate}}. — {{schoolName}}",
+      "Namaste 🙏 New homework for *{{classLabel}}* is up:\n\n📘 Subject: *{{subject}}*\n📝 Work: {{homeworkTitle}}\n📅 Due: *{{dueDate}}*\n\nOpen the parent app for the full details — and tap *Ask tutor* there if your child needs a hand with it. 🎓\n\n— {{schoolName}}, with thanks 🙏",
     bodyHi:
-      "{{classLabel}} गृहकार्य — {{subject}}: {{homeworkTitle}}। अंतिम तिथि {{dueDate}}। — {{schoolName}}",
+      "नमस्ते 🙏 *{{classLabel}}* का नया गृहकार्य आ गया है:\n\n📘 विषय: *{{subject}}*\n📝 कार्य: {{homeworkTitle}}\n📅 अंतिम तिथि: *{{dueDate}}*\n\nपूरा विवरण पैरेंट ऐप में देखें — और यदि बच्चे को मदद चाहिए तो वहीं *Ask tutor* दबाएँ। 🎓\n\n— {{schoolName}}, सधन्यवाद 🙏",
+    footerEn: "Class teacher · Open the parent app for details",
+    footerHi: "कक्षा शिक्षक · विवरण पैरेंट ऐप में देखें",
   },
   {
     familyKey: "exams_datesheet",
@@ -496,9 +526,11 @@ const SEED_DEFS: SeedDef[] = [
     metaName: "bhb_exam_datesheet",
     headerFormat: "DOCUMENT",
     bodyEn:
-      "Dear {{guardianName}}, datesheet for *{{childName}}* ({{examName}}) is ready. Please check the attached schedule.",
+      "Namaste {{guardianName}} ji 🙏\n\n📅 The date sheet for *{{examName}}* is ready for {{childName}} — it is attached above as a PDF.\n\nPlease note the dates, and help your child start revision early. The AI tutor in the parent app has an *Exam preparation* mode for exactly this. 🎓\n\nAll the best to {{childName}}! 🌟",
     bodyHi:
-      "प्रिय {{guardianName}}, *{{childName}}* की डेटशीट ({{examName}}) तैयार है। संलग्न समय-सारणी देखें।",
+      "नमस्ते {{guardianName}} जी 🙏\n\n📅 {{childName}} के लिए *{{examName}}* की डेटशीट तैयार है — ऊपर PDF संलग्न है।\n\nकृपया तारीखें नोट करें और बच्चे को समय से दोहराई शुरू करने में मदद करें। पैरेंट ऐप के AI ट्यूटर में इसी के लिए *Exam preparation* मोड है। 🎓\n\n{{childName}} को शुभकामनाएँ! 🌟",
+    footerEn: "Examination desk · Reply to this message for help",
+    footerHi: "परीक्षा विभाग · सहायता के लिए इसी संदेश का उत्तर दें",
   },
   {
     familyKey: "exams_result",
@@ -508,9 +540,11 @@ const SEED_DEFS: SeedDef[] = [
     category: "UTILITY",
     metaName: "bhb_exam_result",
     bodyEn:
-      "Results for {{examName}} — *{{childName}}* are published. Login to parent portal for details. — {{schoolName}}",
+      "Namaste 🙏 The results of *{{examName}}* are out for {{childName}}! 🎉\n\nOpen the parent app to see the marks, the report card and the teacher's remarks.\n\nWhatever the result, a word of encouragement from you goes a long way. 💛\n\n— {{schoolName}}, with best wishes 🙏",
     bodyHi:
-      "{{examName}} के परिणाम — *{{childName}}* प्रकाशित। विवरण हेतु पोर्टल देखें। — {{schoolName}}",
+      "नमस्ते 🙏 {{childName}} के *{{examName}}* के परिणाम आ गए हैं! 🎉\n\nअंक, रिपोर्ट कार्ड और शिक्षक की टिप्पणी पैरेंट ऐप में देखें।\n\nपरिणाम जो भी हो, आपके प्रोत्साहन के दो शब्द बहुत मायने रखते हैं। 💛\n\n— {{schoolName}}, शुभकामनाओं सहित 🙏",
+    footerEn: "Examination desk · Open the parent app",
+    footerHi: "परीक्षा विभाग · पैरेंट ऐप खोलें",
   },
   {
     familyKey: "ptm_invite",
@@ -520,9 +554,11 @@ const SEED_DEFS: SeedDef[] = [
     category: "UTILITY",
     metaName: "bhb_ptm_invite",
     bodyEn:
-      "Dear {{guardianName}}, PTM for *{{childName}}* on {{ptmDate}} at {{ptmTime}}. Book slot: {{ptmLink}}",
+      "Namaste {{guardianName}} ji 🙏\n\nYou are invited to the Parent–Teacher Meeting for {{childName}}:\n\n📅 Date: *{{ptmDate}}*\n⏰ Time: *{{ptmTime}}*\n\nPick a slot that suits you (it takes a moment):\n🔗 {{ptmLink}}\n\nA short conversation with the class teacher makes a real difference. We look forward to meeting you! 🌼",
     bodyHi:
-      "प्रिय {{guardianName}}, *{{childName}}* की PTM {{ptmDate}} को {{ptmTime}} बजे। स्लॉट बुक करें: {{ptmLink}}",
+      "नमस्ते {{guardianName}} जी 🙏\n\n{{childName}} की अभिभावक–शिक्षक बैठक (PTM) में आपका स्वागत है:\n\n📅 दिनांक: *{{ptmDate}}*\n⏰ समय: *{{ptmTime}}*\n\nअपना सुविधाजनक स्लॉट चुनें (बस एक पल लगता है):\n🔗 {{ptmLink}}\n\nकक्षा शिक्षक से एक छोटी-सी बातचीत बहुत फ़र्क़ लाती है। आपसे मिलने की प्रतीक्षा है! 🌼",
+    footerEn: "Class teacher · Reply to this message for help",
+    footerHi: "कक्षा शिक्षक · सहायता के लिए इसी संदेश का उत्तर दें",
   },
   {
     familyKey: "leave_student_status",
@@ -532,9 +568,11 @@ const SEED_DEFS: SeedDef[] = [
     category: "UTILITY",
     metaName: "bhb_student_leave_status",
     bodyEn:
-      "Leave request for *{{childName}}* is *{{leaveStatus}}* ({{leaveFrom}}–{{leaveTo}}). — {{schoolName}}",
+      "Namaste 🙏 An update on {{childName}}'s leave request:\n\n📋 Status: *{{leaveStatus}}*\n📅 Dates: {{leaveFrom}} to {{leaveTo}}\n\nIf you have a question about this, reply to this message and the class teacher will get back to you.\n\n— {{schoolName}}, with thanks 🙏",
     bodyHi:
-      "*{{childName}}* का अवकाश अनुरोध *{{leaveStatus}}* है ({{leaveFrom}}–{{leaveTo}})। — {{schoolName}}",
+      "नमस्ते 🙏 {{childName}} के अवकाश अनुरोध पर अपडेट:\n\n📋 स्थिति: *{{leaveStatus}}*\n📅 दिनांक: {{leaveFrom}} से {{leaveTo}}\n\nइस बारे में कोई प्रश्न हो तो इसी संदेश का उत्तर दें — कक्षा शिक्षक आपसे संपर्क करेंगे।\n\n— {{schoolName}}, सधन्यवाद 🙏",
+    footerEn: "Class teacher · Reply to this message for help",
+    footerHi: "कक्षा शिक्षक · सहायता के लिए इसी संदेश का उत्तर दें",
   },
   {
     familyKey: "leave_staff_status",
@@ -544,9 +582,11 @@ const SEED_DEFS: SeedDef[] = [
     category: "UTILITY",
     metaName: "bhb_staff_leave_status",
     bodyEn:
-      "Hi {{staffName}}, your leave request is *{{leaveStatus}}* ({{leaveFrom}}–{{leaveTo}}).",
+      "Hello {{staffName}} 🙏\n\nAn update on your leave request:\n\n📋 Status: *{{leaveStatus}}*\n📅 Dates: {{leaveFrom}} to {{leaveTo}}\n\nFor anything about this, please reply to this message or speak to the office. Thank you!",
     bodyHi:
-      "नमस्ते {{staffName}}, आपका अवकाश अनुरोध *{{leaveStatus}}* है ({{leaveFrom}}–{{leaveTo}})।",
+      "नमस्ते {{staffName}} जी 🙏\n\nआपके अवकाश अनुरोध पर अपडेट:\n\n📋 स्थिति: *{{leaveStatus}}*\n📅 दिनांक: {{leaveFrom}} से {{leaveTo}}\n\nइस बारे में कुछ भी पूछना हो तो इसी संदेश का उत्तर दें या कार्यालय से बात करें। धन्यवाद!",
+    footerEn: "School office",
+    footerHi: "विद्यालय कार्यालय",
   },
   {
     familyKey: "vault_expiry",
@@ -556,9 +596,11 @@ const SEED_DEFS: SeedDef[] = [
     category: "UTILITY",
     metaName: "bhb_vault_expiry",
     bodyEn:
-      "Reminder: document *{{docTitle}}* expires on {{expiryDate}}. Please renew. — {{schoolName}}",
+      "Namaste 🙏 A reminder from *{{schoolName}}*:\n\n📄 Document: *{{docTitle}}*\n⏳ Expires on: *{{expiryDate}}*\n\nPlease renew it before that date and share the new copy with the school office, so the records stay complete. Thank you! 🙏",
     bodyHi:
-      "अनुस्मारक: दस्तावेज़ *{{docTitle}}* की वैधता {{expiryDate}} को समाप्त। नवीनीकरण करें। — {{schoolName}}",
+      "नमस्ते 🙏 *{{schoolName}}* की ओर से एक स्मरण:\n\n📄 दस्तावेज़: *{{docTitle}}*\n⏳ वैधता समाप्ति: *{{expiryDate}}*\n\nकृपया इस तिथि से पहले इसका नवीनीकरण कराएँ और नई प्रति विद्यालय कार्यालय को दें, ताकि रिकॉर्ड पूरा रहे। धन्यवाद! 🙏",
+    footerEn: "School office · Reply to this message for help",
+    footerHi: "विद्यालय कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
   },
   {
     familyKey: "comms_notice",
@@ -567,8 +609,12 @@ const SEED_DEFS: SeedDef[] = [
     module: "comms",
     category: "UTILITY",
     metaName: "bhb_school_notice",
-    bodyEn: "*{{schoolName}} notice*\n{{noticeTitle}}\n\n{{noticeBody}}",
-    bodyHi: "*{{schoolName}} सूचना*\n{{noticeTitle}}\n\n{{noticeBody}}",
+    bodyEn:
+      "📢 *Notice from {{schoolName}}*\n\n*{{noticeTitle}}*\n\n{{noticeBody}}\n\nPlease read carefully and reply to this message if you have a question. Thank you! 🙏",
+    bodyHi:
+      "📢 *{{schoolName}} की सूचना*\n\n*{{noticeTitle}}*\n\n{{noticeBody}}\n\nकृपया ध्यान से पढ़ें और कोई प्रश्न हो तो इसी संदेश का उत्तर दें। धन्यवाद! 🙏",
+    footerEn: "School office",
+    footerHi: "विद्यालय कार्यालय",
   },
   {
     familyKey: "store_order",
@@ -578,9 +624,11 @@ const SEED_DEFS: SeedDef[] = [
     category: "UTILITY",
     metaName: "bhb_store_order",
     bodyEn:
-      "Store order {{orderNo}} for *{{childName}}* is *{{orderStatus}}*. Amount: {{feeDue}}. — {{schoolName}}",
+      "Namaste 🙏 An update on your school store order for {{childName}}:\n\n🧾 Order: *{{orderNo}}*\n📦 Status: *{{orderStatus}}*\n💰 Amount: {{feeDue}}\n\nBooks and uniforms can be collected from the school store on working days. Reply to this message for help.\n\n— {{schoolName}}, with thanks 🙏",
     bodyHi:
-      "*{{childName}}* का स्टोर ऑर्डर {{orderNo}} *{{orderStatus}}* है। राशि: {{feeDue}}। — {{schoolName}}",
+      "नमस्ते 🙏 {{childName}} के स्कूल स्टोर ऑर्डर पर अपडेट:\n\n🧾 ऑर्डर: *{{orderNo}}*\n📦 स्थिति: *{{orderStatus}}*\n💰 राशि: {{feeDue}}\n\nकिताबें और यूनिफ़ॉर्म कार्य-दिवसों में स्कूल स्टोर से ले सकते हैं। सहायता के लिए इसी संदेश का उत्तर दें।\n\n— {{schoolName}}, सधन्यवाद 🙏",
+    footerEn: "School store",
+    footerHi: "स्कूल स्टोर",
   },
   {
     familyKey: "transport_fee",
@@ -590,9 +638,11 @@ const SEED_DEFS: SeedDef[] = [
     category: "UTILITY",
     metaName: "bhb_transport_fee",
     bodyEn:
-      "Transport fee for *{{childName}}* (route {{routeName}}) due: *{{feeDue}}*. Pay: {{payLink}}",
+      "Namaste 🙏 A reminder that the transport fee for {{childName}} is due:\n\n🚌 Route: {{routeName}}\n💰 Amount: *{{feeDue}}*\n\nPay in a minute from your phone:\n🔗 {{payLink}}\n\nThe receipt comes to you on WhatsApp right after. Thank you! 🙏",
     bodyHi:
-      "*{{childName}}* (मार्ग {{routeName}}) का परिवहन शुल्क बकाया: *{{feeDue}}*। भुगतान: {{payLink}}",
+      "नमस्ते 🙏 स्मरण — {{childName}} का परिवहन शुल्क देय है:\n\n🚌 मार्ग: {{routeName}}\n💰 राशि: *{{feeDue}}*\n\nअपने फ़ोन से एक मिनट में भुगतान करें:\n🔗 {{payLink}}\n\nरसीद तुरंत व्हाट्सऐप पर मिलेगी। धन्यवाद! 🙏",
+    footerEn: "Transport desk · Reply to this message for help",
+    footerHi: "परिवहन कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
   },
   {
     familyKey: "certificates_ready",
@@ -602,9 +652,11 @@ const SEED_DEFS: SeedDef[] = [
     category: "UTILITY",
     metaName: "bhb_certificate_ready",
     bodyEn:
-      "Dear {{guardianName}}, {{certType}} for *{{childName}}* is ready for collection. — {{schoolName}}",
+      "Namaste {{guardianName}} ji 🙏\n\n📜 The *{{certType}}* for {{childName}} is ready and waiting for you at the school office.\n\nYou can collect it on any working day during office hours. Please carry a photo ID.\n\n— {{schoolName}}, with thanks 🙏",
     bodyHi:
-      "प्रिय {{guardianName}}, *{{childName}}* का {{certType}} संग्रह हेतु तैयार है। — {{schoolName}}",
+      "नमस्ते {{guardianName}} जी 🙏\n\n📜 {{childName}} का *{{certType}}* तैयार है और विद्यालय कार्यालय में आपकी प्रतीक्षा कर रहा है।\n\nकिसी भी कार्य-दिवस पर कार्यालय समय में इसे ले सकते हैं। कृपया एक फोटो पहचान-पत्र साथ लाएँ।\n\n— {{schoolName}}, सधन्यवाद 🙏",
+    footerEn: "School office · Reply to this message for help",
+    footerHi: "विद्यालय कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
   },
   {
     familyKey: "rte_nudge",
@@ -614,9 +666,11 @@ const SEED_DEFS: SeedDef[] = [
     category: "UTILITY",
     metaName: "bhb_rte_nudge",
     bodyEn:
-      "Dear {{guardianName}}, please complete RTE/EWS documents for *{{childName}}* by {{dueDate}}. — {{schoolName}}",
+      "Namaste {{guardianName}} ji 🙏\n\nTo complete {{childName}}'s RTE/EWS admission, a few documents are still needed:\n\n📅 Please submit them by *{{dueDate}}*\n\nBring them to the school office, or reply to this message if you are unsure which documents are required — we will guide you.\n\n— {{schoolName}}, with thanks 🙏",
     bodyHi:
-      "प्रिय {{guardianName}}, कृपया *{{childName}}* के RTE/EWS दस्तावेज़ {{dueDate}} तक पूरे करें। — {{schoolName}}",
+      "नमस्ते {{guardianName}} जी 🙏\n\n{{childName}} का RTE/EWS प्रवेश पूरा करने के लिए कुछ दस्तावेज़ अभी बाकी हैं:\n\n📅 कृपया *{{dueDate}}* तक जमा करें\n\nइन्हें विद्यालय कार्यालय में लाएँ, या कौन-से दस्तावेज़ चाहिए यह पूछने के लिए इसी संदेश का उत्तर दें — हम मार्गदर्शन करेंगे।\n\n— {{schoolName}}, सधन्यवाद 🙏",
+    footerEn: "Admissions desk · Reply to this message for help",
+    footerHi: "प्रवेश कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
   },
   {
     familyKey: "field_survey_nudge",
@@ -626,9 +680,11 @@ const SEED_DEFS: SeedDef[] = [
     category: "MARKETING",
     metaName: "bhb_field_survey_nudge",
     bodyEn:
-      "Hi {{guardianName}}, our team visited regarding *{{childName}}*. Complete enquiry: {{registerLink}} — {{schoolName}}",
+      "Namaste {{guardianName}} ji 🙏\n\nIt was lovely to meet you when our team visited about {{childName}}'s schooling. 🎒\n\nIf you would like to take the next step with *{{schoolName}}*, complete a quick enquiry here and our admissions desk will call you:\n🔗 {{registerLink}}\n\nNo pressure at all — we are here whenever you are ready. 🌼",
     bodyHi:
-      "नमस्ते {{guardianName}}, हमारी टीम *{{childName}}* हेतु मिली थी। पूछताछ पूरी करें: {{registerLink}} — {{schoolName}}",
+      "नमस्ते {{guardianName}} जी 🙏\n\n{{childName}} की पढ़ाई के बारे में जब हमारी टीम आई थी, आपसे मिलकर अच्छा लगा। 🎒\n\nयदि आप *{{schoolName}}* के साथ अगला कदम बढ़ाना चाहें, तो यहाँ एक छोटी-सी पूछताछ पूरी करें — हमारा प्रवेश कार्यालय आपको फ़ोन करेगा:\n🔗 {{registerLink}}\n\nकोई दबाव नहीं — जब भी आप तैयार हों, हम यहीं हैं। 🌼",
+    footerEn: "Admissions desk · Reply STOP to opt out",
+    footerHi: "प्रवेश कार्यालय · संदेश बंद करने के लिए STOP लिखें",
   },
   {
     familyKey: "auth_parent_login_otp",
@@ -637,6 +693,8 @@ const SEED_DEFS: SeedDef[] = [
     module: "general",
     category: "AUTHENTICATION",
     metaName: "bhb_parent_login_otp",
+    // Meta fixes the wording of AUTHENTICATION templates; only the code
+    // slot is ours. Left as approved.
     bodyEn:
       "{{otp}} is your parent login verification code. Do not share this code with anyone. It expires in 10 minutes.",
     bodyHi:
@@ -649,27 +707,48 @@ const SEED_DEFS: SeedDef[] = [
     module: "admissions",
     category: "MARKETING",
     metaName: "bhb_admission_carousel",
-    bodyEn: "Why families choose {{schoolName}} — explore highlights.",
-    bodyHi: "{{schoolName}} क्यों चुनें — मुख्य बातें देखें।",
+    bodyEn:
+      "Namaste 🙏 Admissions are open at *{{schoolName}}*! Swipe the cards below to see why families choose us — and how to apply. 🎒",
+    bodyHi:
+      "नमस्ते 🙏 *{{schoolName}}* में प्रवेश खुले हैं! नीचे कार्ड स्वाइप करके देखें कि परिवार हमें क्यों चुनते हैं — और आवेदन कैसे करें। 🎒",
     carousel: [
       {
         headerFormat: "IMAGE",
-        body: "CBSE curriculum · strong academics",
-        buttons: [
-          { type: "URL", text: "Apply", url: "{{registerLink}}" },
-        ],
+        body: "📚 CBSE pattern, NCERT books, small classes — and an AI tutor at home for every child.",
+        buttons: [{ type: "URL", text: "Apply", url: "{{registerLink}}" }],
       },
       {
         headerFormat: "IMAGE",
-        body: "Sports, labs & activity clubs",
+        body: "⚽ Sports, science lab, activity clubs and a library children actually use.",
         buttons: [{ type: "QUICK_REPLY", text: "Visit campus" }],
       },
       {
         headerFormat: "IMAGE",
-        body: "Safe transport & daycare options",
+        body: "🚌 Safe school buses with attendants, and a parent app that keeps you informed.",
         buttons: [{ type: "QUICK_REPLY", text: "Call desk" }],
       },
     ],
+    footerEn: "Admissions desk · Reply STOP to opt out",
+    footerHi: "प्रवेश कार्यालय · संदेश बंद करने के लिए STOP लिखें",
+  },
+
+  // ── Teachers ─────────────────────────────────────────────────
+  // A parent's message relayed to a teacher through the school's number.
+  // Free-form only reaches a teacher inside Meta's 24h session; this
+  // template carries it any time within school hours.
+  {
+    familyKey: "teacher_message",
+    nameEn: "Parent message for teacher",
+    nameHi: "अभिभावक का शिक्षक के लिए संदेश",
+    module: "general",
+    category: "UTILITY",
+    metaName: "bhb_teacher_message",
+    bodyEn:
+      "Hello {{staffName}} 🙏\n\nA parent has sent you a message through the school:\n\n👧 Student: *{{childName}}* ({{classLabel}})\n👤 From: {{guardianName}}\n\n💬 \"{{messageText}}\"\n\nPlease reply in the staff app or call the parent. Parents are told teachers respond between 8 AM and 8 PM. Thank you!",
+    bodyHi:
+      "नमस्ते {{staffName}} जी 🙏\n\nएक अभिभावक ने विद्यालय के माध्यम से आपको संदेश भेजा है:\n\n👧 छात्र: *{{childName}}* ({{classLabel}})\n👤 भेजने वाले: {{guardianName}}\n\n💬 \"{{messageText}}\"\n\nकृपया स्टाफ ऐप में उत्तर दें या अभिभावक को फ़ोन करें। अभिभावकों को बताया गया है कि शिक्षक सुबह 8 से रात 8 बजे के बीच उत्तर देते हैं। धन्यवाद!",
+    footerEn: "School office · Sent via the parent app",
+    footerHi: "विद्यालय कार्यालय · पैरेंट ऐप के माध्यम से भेजा गया",
   },
 ];
 

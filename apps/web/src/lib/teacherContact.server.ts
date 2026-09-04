@@ -20,7 +20,9 @@ import {
   type TeacherContact,
 } from "@/lib/teacherContact";
 import { findGrid, loadTimetable } from "@/lib/timetable";
-import { sendWhatsAppText } from "@/lib/waSend";
+import { buildWaTemplateBodyComponent, sendWhatsAppTemplate, sendWhatsAppText } from "@/lib/waSend";
+import { listApprovedTemplates, loadWaTemplates } from "@/lib/waTemplates";
+import { ensureWaTemplatesHydrated } from "@/lib/waTemplatesPersistence";
 import { sendPushToSubjects } from "@/lib/webPush.server";
 
 /** Class teacher(s) first, then every teacher on the section's timetable. */
@@ -136,8 +138,32 @@ async function deliverToTeacher(
   }).catch(() => ({ sent: 0, expired: 0, failed: 0 }));
   if (push.sent > 0) via.push("push");
   if (staff?.mobile) {
-    const wa = await sendWhatsAppText({ toMobile: staff.mobile, body: text, clientMessageId: m.id }).catch(() => ({ ok: false, mode: "none" }));
-    if (wa.ok) via.push("whatsapp");
+    // The approved "teacher_message" template reaches a teacher at any time;
+    // free text only inside Meta's 24h session with the school's number.
+    let wa: { ok: boolean } = { ok: false };
+    const tpl = await approvedTeacherTemplate();
+    if (tpl) {
+      wa = await sendWhatsAppTemplate({
+        toMobile: staff.mobile,
+        name: tpl.metaName,
+        language: tpl.metaLanguage || tpl.language,
+        components: [
+          buildWaTemplateBodyComponent(tpl.variables, {
+            staffName: staff.fullName,
+            childName: m.student.fullName,
+            classLabel,
+            guardianName: m.household.guardianName || "Parent",
+            messageText: m.body,
+          }),
+        ],
+        clientMessageId: m.id,
+      }).catch(() => ({ ok: false }));
+      if (wa.ok) via.push("whatsapp-template");
+    }
+    if (!wa.ok) {
+      wa = await sendWhatsAppText({ toMobile: staff.mobile, body: text, clientMessageId: m.id }).catch(() => ({ ok: false }));
+      if (wa.ok) via.push("whatsapp");
+    }
   }
   const ctx = await getServerTenantContext();
   const delivered = via.length > 0;
@@ -187,4 +213,15 @@ export async function flushHeldTeacherMessages(): Promise<{ delivered: number; f
     else delivered += 1;
   }
   return { delivered, failed, skipped: false };
+}
+
+/** The approved "teacher_message" template, English first, if Meta has approved one. */
+async function approvedTeacherTemplate() {
+  try {
+    await ensureWaTemplatesHydrated();
+  } catch {
+    /* fall through to whatever is cached locally */
+  }
+  const approved = listApprovedTemplates(loadWaTemplates()).filter((t) => t.familyKey === "teacher_message");
+  return approved.find((t) => t.language === "en") ?? approved[0] ?? null;
 }
