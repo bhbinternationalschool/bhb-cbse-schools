@@ -52,6 +52,33 @@ export type UdiseStudentRow = {
   apaarStatus: string;
   suspectedDuplicate: string;
   mbuStatus: string;
+  // The "List of Active Students" export carries the full student profile —
+  // 66 columns against the 23 of "Students Details" — so these are blank on
+  // the shorter report and populated on the longer one. Everything here is
+  // read; only the fields the SIS actually has a home for are offered as an
+  // update, and each of those only when our own field is empty.
+  guardianName: string;
+  mobile: string;
+  altMobile: string;
+  email: string;
+  address: string;
+  pincode: string;
+  motherTongue: string;
+  bloodGroup: string;
+  admissionNo: string;
+  admissionDate: string;
+  isIndianNational: string;
+  nationality: string;
+  ews: string;
+  aay: string;
+  impairmentType: string;
+  disabilityCertificate: string;
+  disabilityPercent: string;
+  outOfSchoolChild: string;
+  isRepeater: string;
+  heightCm: string;
+  weightKg: string;
+  rteSection12c: string;
 };
 
 export type UdiseMatchMethod =
@@ -133,6 +160,11 @@ export type UdiseMatchPreview = {
     udiseMbuStatus?: string;
     udisePortalClassHint?: string;
     udiseAgeBelowClassAlert?: boolean;
+    // From the longer "List of Active Students" export only.
+    bloodGroup?: string;
+    motherTongue?: string;
+    nationality?: string;
+    joinedOn?: string;
   };
   /** Fields already present in SIS (for display) */
   sisFilled: {
@@ -403,6 +435,29 @@ export function findUdiseHeaderRow(
         apaarStatus: idx([(n) => n.includes("apaar status")]),
         suspectedDuplicate: idx([(n) => n.includes("suspected duplicate")]),
         mbu: idx([(n) => n.includes("mbu")]),
+        // Present only on the longer "List of Active Students" export.
+        guardianName: idx([(n) => n.includes("guardian name")]),
+        mobile: idx([(n) => n === "mobile no" || n === "mobile number"]),
+        altMobile: idx([(n) => n.includes("alternate mobile")]),
+        email: idx([(n) => n.includes("email")]),
+        address: idx([(n) => n === "address"]),
+        pincode: idx([(n) => n === "pincode" || n === "pin code" || n === "pin"]),
+        motherTongue: idx([(n) => n.includes("mother tongue")]),
+        bloodGroup: idx([(n) => n.includes("blood group")]),
+        admissionNo: idx([(n) => n.includes("admission no")]),
+        admissionDate: idx([(n) => n.includes("admission date")]),
+        isIndianNational: idx([(n) => n.includes("indian national")]),
+        nationality: idx([(n) => n.includes("nationality of foreign")]),
+        ews: idx([(n) => n.includes("ews") || n.includes("disadvantaged")]),
+        aay: idx([(n) => n.includes("antyodaya") || n.includes("aay")]),
+        impairmentType: idx([(n) => n.includes("type of impairment")]),
+        disabilityCertificate: idx([(n) => n.includes("disability certificate")]),
+        disabilityPercent: idx([(n) => n.includes("disability percentage")]),
+        outOfSchoolChild: idx([(n) => n.includes("out of school")]),
+        isRepeater: idx([(n) => n.includes("repeater")]),
+        heightCm: idx([(n) => n.includes("height")]),
+        weightKg: idx([(n) => n.includes("weight")]),
+        rteSection12c: idx([(n) => n.includes("section 12c") || n.includes("section 12 c")]),
       },
     };
   }
@@ -426,6 +481,10 @@ export function parseUdiseStudentDetailsMatrix(
     const pen = cleanPen(get(row, "pen"));
     if (!fullName) continue;
     if (/^list of all/i.test(fullName)) continue;
+    // "List of Active Students" puts a row of column numbers — (1) (2) (3) …
+    // — between the header and the first pupil. Left in, it becomes a student
+    // called "(4)" that matches nothing and inflates every count on the panel.
+    if (/^\(\d+\)$/.test(fullName.trim())) continue;
     out.push({
       classHint: get(row, "className"),
       sectionHint: get(row, "section"),
@@ -449,6 +508,28 @@ export function parseUdiseStudentDetailsMatrix(
       apaarStatus: get(row, "apaarStatus"),
       suspectedDuplicate: get(row, "suspectedDuplicate"),
       mbuStatus: get(row, "mbu"),
+      guardianName: get(row, "guardianName"),
+      mobile: get(row, "mobile"),
+      altMobile: get(row, "altMobile"),
+      email: get(row, "email"),
+      address: get(row, "address"),
+      pincode: get(row, "pincode"),
+      motherTongue: get(row, "motherTongue"),
+      bloodGroup: get(row, "bloodGroup"),
+      admissionNo: get(row, "admissionNo"),
+      admissionDate: get(row, "admissionDate"),
+      isIndianNational: get(row, "isIndianNational"),
+      nationality: get(row, "nationality"),
+      ews: get(row, "ews"),
+      aay: get(row, "aay"),
+      impairmentType: get(row, "impairmentType"),
+      disabilityCertificate: get(row, "disabilityCertificate"),
+      disabilityPercent: get(row, "disabilityPercent"),
+      outOfSchoolChild: get(row, "outOfSchoolChild"),
+      isRepeater: get(row, "isRepeater"),
+      heightCm: get(row, "heightCm"),
+      weightKg: get(row, "weightKg"),
+      rteSection12c: get(row, "rteSection12c"),
     });
   }
   return out;
@@ -836,6 +917,39 @@ function buildPatch(
     will.dob = fmtDob(row.dob);
   }
 
+  // Profile fields the longer export carries. Same rule as DOB throughout:
+  // fill only where the SIS is blank, never overwrite what the office typed.
+  // The portal writes "NA" for empty, which udiseIsBlank already knows about.
+  const fillIfBlank = (
+    key: "bloodGroup" | "motherTongue" | "nationality" | "joinedOn",
+    raw: string,
+    clean: (v: string) => string = (v) => v.trim(),
+  ) => {
+    const v = (raw || "").trim();
+    if (!v || udiseIsBlank(v)) return;
+    if ((student[key] || "").trim()) return;
+    const out = clean(v);
+    if (out) will[key] = out;
+  };
+
+  fillIfBlank("bloodGroup", row.bloodGroup, (v) =>
+    // "Under Investigation - Result will follow" and similar are not a group.
+    /^(A|B|AB|O)[+-]?$|^(A|B|AB|O)\s*(positive|negative)$/i.test(v) ? v.toUpperCase() : "",
+  );
+  // "42 - HINDI - Hindi" → "Hindi"
+  fillIfBlank("motherTongue", row.motherTongue, (v) => {
+    const parts = v.split("-").map((p) => p.trim()).filter(Boolean);
+    return parts.length ? parts[parts.length - 1]! : "";
+  });
+  if (!(student.nationality || "").trim() && /^yes$/i.test((row.isIndianNational || "").trim())) {
+    will.nationality = "Indian";
+  }
+  // Admission date, dd/mm/yyyy on the portal.
+  fillIfBlank("joinedOn", row.admissionDate, (v) => {
+    const m = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/.exec(v);
+    return m ? `${m[3]}-${m[2]!.padStart(2, "0")}-${m[1]!.padStart(2, "0")}` : "";
+  });
+
   const aval = (row.aadhaarValidation || "").trim();
   // Record the portal validation status only when it actually differs — this
   // covers both "Verified" and "Failed" without re-flagging an unchanged row.
@@ -887,6 +1001,10 @@ function fillLabelsOf(will: UdiseMatchPreview["willUpdate"]): string[] {
   if (will.gender) labels.push(`Gender → ${will.gender}`);
   if (will.category) labels.push(`Category → ${will.category}`);
   if (will.dob) labels.push(`DOB → ${will.dob}`);
+  if (will.bloodGroup) labels.push(`Blood group → ${will.bloodGroup}`);
+  if (will.motherTongue) labels.push(`Mother tongue → ${will.motherTongue}`);
+  if (will.nationality) labels.push(`Nationality → ${will.nationality}`);
+  if (will.joinedOn) labels.push(`Admission date → ${will.joinedOn}`);
   return labels;
 }
 

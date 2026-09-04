@@ -143,6 +143,7 @@ SELFTESTS=(
   test:registration-blockers
   test:sibling-carry-over
   test:udise-upload-store
+  test:udise-student-details
   test:lead-worklist
   test:student-import
   test:cash-pool-orphans
