@@ -141,6 +141,7 @@
     "test:payroll-register": "npx tsx src/lib/payrollRegister.selftest.ts",
     "test:staff-geo": "npx tsx src/lib/staffGeo.selftest.ts",
     "test:wa-staff-att-bot": "npx tsx src/lib/waStaffAttendanceBotEngine.selftest.ts",
+    "test:outdoor-duty-staff-id": "npx tsx src/lib/outdoorDutyStaffId.selftest.ts",
     "import:leads": "npx tsx scripts/import-lead-excels.ts",
     "import:fee-discounts": "npx tsx scripts/import-fee-discounts-excel.ts",
     "clear:collections": "npx tsx scripts/clear-fee-collections.ts",
