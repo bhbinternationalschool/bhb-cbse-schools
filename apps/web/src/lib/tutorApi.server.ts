@@ -19,10 +19,12 @@ import {
   tutorRequesterKey,
 } from "@/lib/tutorPasses.server";
 import {
+  parseTutorLanguage,
   tutorMode,
   tutorVerdict,
   type TutorAllowance,
   type TutorContext,
+  type TutorLanguage,
   type TutorMode,
 } from "@/lib/tutorPlans";
 
@@ -32,6 +34,7 @@ export type TutorAskBody = {
   context?: TutorContext;
   mode?: string;
   studentId?: string;
+  language?: string;
 };
 
 export type TutorAskDone = {
@@ -49,6 +52,7 @@ export function parseTutorAsk(body: TutorAskBody): {
   context: TutorContext;
   mode: TutorMode;
   studentId: string;
+  language: TutorLanguage;
 } {
   const message = (body.message || "").trim();
   const history = (body.history || [])
@@ -65,6 +69,7 @@ export function parseTutorAsk(body: TutorAskBody): {
     context: body.context || {},
     mode: tutorMode(body.mode).code,
     studentId: (body.studentId || "").trim(),
+    language: parseTutorLanguage(body.language),
   };
 }
 
@@ -116,6 +121,7 @@ export async function answerParentTutor(opts: {
       history: ask.history,
       context: ask.context,
       mode: ask.mode,
+      language: ask.language,
       onDelta,
       precheck,
     });

@@ -9,7 +9,7 @@ import { TENANT } from "@/lib/types";
 import { generateTutorText, type LlmPrecheck } from "@/lib/aiLlm.server";
 import type { HomeworkTutorContext } from "@/lib/homeworkTutor.types";
 import type { OpenAiChatTurn } from "@/lib/openAi.server";
-import { buildTutorSystemPrompt, tutorMaxTokens, type TutorMode } from "@/lib/tutorPlans";
+import { buildTutorSystemPrompt, tutorMaxTokens, type TutorLanguage, type TutorMode } from "@/lib/tutorPlans";
 
 export type { HomeworkTutorContext } from "@/lib/homeworkTutor.types";
 
@@ -18,6 +18,7 @@ export async function replyHomeworkTutor(opts: {
   history?: OpenAiChatTurn[];
   context?: HomeworkTutorContext;
   mode?: TutorMode;
+  language?: TutorLanguage;
   onDelta?: (text: string) => void;
   precheck?: Promise<LlmPrecheck>;
 }) {
@@ -28,7 +29,7 @@ export async function replyHomeworkTutor(opts: {
   const mode: TutorMode = opts.mode ?? "hint";
 
   return generateTutorText({
-    system: buildTutorSystemPrompt(mode, opts.context || {}, TENANT.nameDisplay),
+    system: buildTutorSystemPrompt(mode, opts.context || {}, TENANT.nameDisplay, opts.language ?? "auto"),
     history: opts.history,
     userMessage: message,
     onDelta: opts.onDelta,

@@ -3,6 +3,8 @@ import { resolveApiAuth } from "@/lib/api/v1/auth";
 import { requireParentHousehold } from "@/lib/api/v1/household";
 import { llmStatus } from "@/lib/aiLlm.server";
 import { listTutorPassOrders, tutorAllowance, tutorPlans } from "@/lib/tutorPasses.server";
+import { householdLanguage } from "@/lib/householdPrefs";
+import { loadSis } from "@/lib/sis";
 import { resolveTutorStudent } from "@/lib/tutorApi.server";
 import { formatPaise, passValidLabel, TUTOR_MODES } from "@/lib/tutorPlans";
 
@@ -27,9 +29,15 @@ export async function GET(request: Request) {
     ]);
     const orders = allOrders.filter((o) => o.studentId === student.id).slice(0, 10);
     const status = llmStatus();
+    // Families who told the school they prefer Hindi (or a regional
+    // language) start in Hindi; the app's toggle overrides per session.
+    const hh = loadSis().households.find((h) => h.id === householdId);
+    const defaultLanguage = householdLanguage(hh ?? {}).language === "en" ? "en" : "hi";
     return apiOk({
       configured: status.tutorEngine !== "none",
       engine: status.tutorEngine,
+      defaultLanguage,
+      videosAvailable: !!(process.env.YOUTUBE_API_KEY || "").trim(),
       modes: TUTOR_MODES.map((m) => ({
         code: m.code,
         label: m.label,

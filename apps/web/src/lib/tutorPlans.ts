@@ -86,6 +86,26 @@ export const TUTOR_MODES: readonly TutorModeInfo[] = [
   },
 ];
 
+/** The language replies are written in. "auto" follows the parent's message. */
+export type TutorLanguage = "auto" | "hi" | "en";
+
+export function parseTutorLanguage(v: unknown): TutorLanguage {
+  return v === "hi" || v === "en" ? v : "auto";
+}
+
+/**
+ * A YouTube search for this topic at this class level, in the family's
+ * language. Deterministic on purpose: the same lesson finds the same
+ * videos, so results cache well and the model is not asked to invent
+ * titles or links it cannot see.
+ */
+export function videoSearchQuery(topic: string, classLabel: string, language: TutorLanguage): string {
+  const t = topic.replace(/\s+/g, " ").trim().slice(0, 80);
+  const cls = classLabel.replace(/\s+[A-Z]$/, "").trim(); // "II A" → "II"
+  const level = cls ? ` class ${cls}` : "";
+  return language === "hi" ? `${t}${level} हिंदी में समझाइए` : `${t}${level} explained for kids`;
+}
+
 export function tutorMode(code: string | undefined | null): TutorModeInfo {
   return TUTOR_MODES.find((m) => m.code === code) ?? TUTOR_MODES[0]!;
 }
@@ -298,12 +318,19 @@ export function buildTutorSystemPrompt(
   mode: TutorMode,
   ctx: TutorContext,
   schoolName: string,
+  language: TutorLanguage = "auto",
 ): string {
   const child = ctx.childName || "the child";
   const cls = ctx.className || "their class";
+  const languageRule =
+    language === "hi"
+      ? "Reply in simple Hindi written in Devanagari, the way a patient teacher speaks to a parent who does not read English. Keep English subject words (like 'fraction') only where the school's textbook uses them, and explain them in Hindi."
+      : language === "en"
+        ? "Reply in simple English, short sentences, no jargon."
+        : "Match the parent's language (Hindi, English or Hinglish).";
   const common = [
     `You are a tutor for families of ${schoolName}, an Indian school following the CBSE pattern.`,
-    "Match the parent's language (Hindi, English or Hinglish) and pitch everything at the child's class level.",
+    `${languageRule} Pitch everything at the child's class level.`,
     `You are set up for ${child}, who is in ${cls}. Help ONLY with what a ${cls} child studies. Level guide: ${classLevelGuide(ctx.className || "")}`,
     `If a question is clearly above or below that level, or is another child's work, do not answer it — say in one or two lines that this tutor is set for ${child}'s class (${cls}), and that the parent can open the tutor for the other child, who needs their own pass. Never stretch an answer up to a higher class.`,
     "Schoolwork only: if the question is not about the child's learning, politely redirect.",

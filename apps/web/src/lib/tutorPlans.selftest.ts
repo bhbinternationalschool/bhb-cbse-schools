@@ -9,7 +9,9 @@ import {
   DEFAULT_TUTOR_PLANS,
   formatPaise,
   parseCount,
+  parseTutorLanguage,
   parseTutorPlans,
+  videoSearchQuery,
   passValidLabel,
   passWindow,
   TUTOR_MODES,
@@ -115,6 +117,9 @@ const dead = { ...live, endsAt: "2026-09-04T18:29:59.999Z" };
   assert.ok(hint.includes("needs their own pass"), "siblings are sent to their own tutor");
   const two = buildTutorSystemPrompt("teach", { childName: "Dipti", className: "II A" }, "BHB");
   assert.ok(two.includes("Classes I–II") && !two.includes("Pre-primary"));
+  assert.ok(buildTutorSystemPrompt("hint", {}, "BHB", "hi").includes("Devanagari"), "Hindi replies are asked for in Devanagari");
+  assert.ok(buildTutorSystemPrompt("hint", {}, "BHB", "en").includes("simple English"));
+  assert.ok(buildTutorSystemPrompt("hint", {}, "BHB").includes("Match the parent's language"), "auto follows the parent");
   assert.ok(!hint.includes("Subject:"), "absent context is absent, not 'undefined'");
   const teach = buildTutorSystemPrompt("teach", {}, "BHB");
   assert.ok(teach.includes("short lesson"));
@@ -122,6 +127,17 @@ const dead = { ...live, endsAt: "2026-09-04T18:29:59.999Z" };
   assert.ok(teach.includes("Never invent facts about the school"), "guard rails apply to every mode");
   const score = buildTutorSystemPrompt("score", { homeworkBody: "x".repeat(5000) }, "BHB");
   assert.ok(score.length < 5000, "assignment text is capped");
+}
+
+// --- language + videos
+{
+  assert.equal(parseTutorLanguage("hi"), "hi");
+  assert.equal(parseTutorLanguage("fr"), "auto");
+  assert.equal(parseTutorLanguage(undefined), "auto");
+  assert.equal(videoSearchQuery("  fractions   ", "III A", "en"), "fractions class III explained for kids");
+  assert.equal(videoSearchQuery("भिन्न", "III A", "hi"), "भिन्न class III हिंदी में समझाइए");
+  assert.equal(videoSearchQuery("counting", "", "en"), "counting explained for kids", "no class → no empty level word");
+  assert.equal(videoSearchQuery("x".repeat(200), "LKG", "en").length < 120, true, "topic is capped");
 }
 
 console.log("tutorPlans.selftest: ok");

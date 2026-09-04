@@ -6,6 +6,7 @@ import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../../core/ui/motion.dart";
 import "../../core/ui/spacing.dart";
+import "video_player_screen.dart";
 
 /// What the tutor is told about the child and, when opened from a
 /// homework item, the assignment.
@@ -55,18 +56,39 @@ class TutorScreen extends StatefulWidget {
 }
 
 class _Msg {
-  _Msg(this.role, this.text, {this.mode = ""});
+  _Msg(this.role, this.text, {this.mode = "", this.topic = ""});
 
   final String role;
   String text;
   final String mode;
+
+  /// For an assistant reply: the question it answered — the video topic.
+  final String topic;
   String charge = "";
 }
+
+/// The few UI strings a Hindi-first parent must be able to read.
+const _hi = <String, String>{
+  "watch": "वीडियो देखें",
+  "videosTitle": "इस विषय के वीडियो",
+  "search": "YouTube पर खोजें",
+  "noVideos": "अभी कोई वीडियो नहीं मिला — YouTube पर खोजें।",
+  "hint_prompt": "जैसे: भिन्न कैसे समझाऊँ?",
+  "teach_prompt": "जैसे: कक्षा 5 के लिए प्रकाश संश्लेषण सिखाइए",
+  "examples_prompt": "जैसे: भाग के तीन हल किए हुए उदाहरण",
+  "practice_prompt": "जैसे: कक्षा 4 के लिए काल पर 5 प्रश्न",
+  "score_prompt": "प्रश्न और बच्चे के उत्तर यहाँ लिखें",
+  "homework_prompt": "जैसे: आज के गणित के होमवर्क में मदद",
+  "exam_prompt": "जैसे: कक्षा 3 की EVS यूनिट टेस्ट की तैयारी",
+};
 
 class _TutorScreenState extends State<TutorScreen> {
   TutorStatus? _status;
   String? _error;
   late String _mode = widget.initialMode;
+
+  /// "hi" or "en"; starts from the family's preference on record.
+  String _language = "en";
   final _messages = <_Msg>[];
   final _input = TextEditingController();
   final _scroll = ScrollController();
@@ -90,7 +112,10 @@ class _TutorScreenState extends State<TutorScreen> {
     try {
       final s = await widget.api.fetchTutorStatus(widget.context.child.id);
       if (!mounted) return;
-      setState(() => _status = s);
+      setState(() {
+        _status = s;
+        if (_messages.isEmpty) _language = s.defaultLanguage;
+      });
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
@@ -141,7 +166,7 @@ class _TutorScreenState extends State<TutorScreen> {
       for (final m in _messages.where((m) => m.text.isNotEmpty))
         TutorTurn(m.role, m.text),
     ];
-    final reply = _Msg("assistant", "", mode: _mode);
+    final reply = _Msg("assistant", "", mode: _mode, topic: text);
     setState(() {
       _busy = true;
       _messages.add(_Msg("user", text, mode: _mode));
@@ -155,6 +180,7 @@ class _TutorScreenState extends State<TutorScreen> {
         history: history,
         context: widget.context.toJson(),
         studentId: widget.context.child.id,
+        language: _language,
       )) {
         if (!mounted) return;
         switch (ev) {
@@ -197,8 +223,28 @@ class _TutorScreenState extends State<TutorScreen> {
     }
   }
 
+  Future<void> _showVideos(String topic) async {
+    Haptics.tap();
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => _VideosSheet(
+        api: widget.api,
+        studentId: widget.context.child.id,
+        topic: topic,
+        language: _language,
+      ),
+    );
+  }
+
   TutorStatus _withAllowance(TutorStatus s, TutorAllowance a) => TutorStatus(
     configured: s.configured,
+    defaultLanguage: s.defaultLanguage,
+    videosAvailable: s.videosAvailable,
     modes: s.modes,
     allowance: a,
     plans: s.plans,
@@ -253,6 +299,14 @@ class _TutorScreenState extends State<TutorScreen> {
           ],
         ),
         actions: [
+          if (status != null)
+            _LanguageToggle(
+              language: _language,
+              onChanged: (v) {
+                Haptics.tap();
+                setState(() => _language = v);
+              },
+            ),
           if (status != null)
             TextButton.icon(
               onPressed: () => _showPasses(),
@@ -333,12 +387,18 @@ class _TutorScreenState extends State<TutorScreen> {
                             itemBuilder: (context, i) => _Bubble(
                               msg: _messages[i],
                               busy: _busy && i == _messages.length - 1,
+                              hindi: _language == "hi",
+                              onVideos: _messages[i].topic.isEmpty
+                                  ? null
+                                  : () => _showVideos(_messages[i].topic),
                             ),
                           ),
                   ),
                   _Composer(
                     controller: _input,
-                    hint: _modeInfo?.prompt ?? "Ask the tutor…",
+                    hint: _language == "hi"
+                        ? (_hi["${_mode}_prompt"] ?? "शिक्षक से पूछें…")
+                        : (_modeInfo?.prompt ?? "Ask the tutor…"),
                     busy: _busy,
                     onSend: _send,
                   ),
@@ -537,10 +597,17 @@ class _Welcome extends StatelessWidget {
 }
 
 class _Bubble extends StatelessWidget {
-  const _Bubble({required this.msg, required this.busy});
+  const _Bubble({
+    required this.msg,
+    required this.busy,
+    required this.hindi,
+    this.onVideos,
+  });
 
   final _Msg msg;
   final bool busy;
+  final bool hindi;
+  final VoidCallback? onVideos;
 
   @override
   Widget build(BuildContext context) {
@@ -595,13 +662,48 @@ class _Bubble extends StatelessWidget {
                     ),
                   ),
                   if (!mine && msg.charge.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      msg.charge == "free" ? "Free hint" : "Full tutor",
-                      style: const TextStyle(
-                        fontSize: 10,
-                        color: AppColors.muted,
-                      ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Text(
+                          msg.charge == "free" ? "Free hint" : "Full tutor",
+                          style: const TextStyle(
+                            fontSize: 10,
+                            color: AppColors.muted,
+                          ),
+                        ),
+                        const Spacer(),
+                        if (onVideos != null)
+                          InkWell(
+                            onTap: onVideos,
+                            borderRadius: BorderRadius.circular(12),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.play_circle_outline,
+                                    size: 15,
+                                    color: AppColors.danger,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    hindi ? _hi["watch"]! : "Watch videos",
+                                    style: const TextStyle(
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppColors.danger,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   ],
                 ],
@@ -902,6 +1004,258 @@ class _PlanTile extends StatelessWidget {
               const Icon(Icons.chevron_right, color: AppColors.muted),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// हिं / EN — the reply language. Sits in the app bar so a parent who does
+/// not read English finds it before typing anything.
+class _LanguageToggle extends StatelessWidget {
+  const _LanguageToggle({required this.language, required this.onChanged});
+
+  final String language;
+  final void Function(String) onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget seg(String code, String label) {
+      final on = language == code;
+      return InkWell(
+        onTap: () => onChanged(code),
+        borderRadius: BorderRadius.circular(14),
+        child: AnimatedContainer(
+          duration: AppMotion.fast,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: on ? AppColors.accentSoft : Colors.transparent,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w700,
+              color: on ? AppColors.primary : Colors.white,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(right: 4),
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [seg("hi", "हिं"), seg("en", "EN")],
+      ),
+    );
+  }
+}
+
+/// Videos for the topic of one reply. Each opens inside the app (an
+/// in-app browser tab), never in a separate YouTube app the parent may
+/// not have.
+class _VideosSheet extends StatefulWidget {
+  const _VideosSheet({
+    required this.api,
+    required this.studentId,
+    required this.topic,
+    required this.language,
+  });
+
+  final ApiClient api;
+  final String studentId;
+  final String topic;
+  final String language;
+
+  @override
+  State<_VideosSheet> createState() => _VideosSheetState();
+}
+
+class _VideosSheetState extends State<_VideosSheet> {
+  TutorVideos? _videos;
+  String? _error;
+
+  bool get _hindi => widget.language == "hi";
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final v = await widget.api.fetchTutorVideos(
+        studentId: widget.studentId,
+        topic: widget.topic,
+        language: widget.language,
+      );
+      if (mounted) setState(() => _videos = v);
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _error = "Could not reach the school server.");
+      }
+    }
+  }
+
+  Future<void> _open(String url) async {
+    Haptics.tap();
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    await launchUrl(uri, mode: LaunchMode.inAppBrowserView);
+  }
+
+  /// Plays inside the app: a link handed to the system is claimed by the
+  /// YouTube app on most phones and pulls the parent out of ours.
+  Future<void> _play(TutorVideo v) {
+    Haptics.tap();
+    return Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => VideoPlayerScreen(video: v)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final v = _videos;
+    return SafeArea(
+      child: Padding(
+        padding: Insets.sheet,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              _hindi ? _hi["videosTitle"]! : "Videos on this topic",
+              style: const TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+                color: AppColors.ink,
+              ),
+            ),
+            const SizedBox(height: Space.xs),
+            Text(
+              widget.topic,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12.5, color: AppColors.muted),
+            ),
+            const SizedBox(height: Space.lg),
+            if (v == null && _error == null)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(Space.lg),
+                  child: CircularProgressIndicator(color: AppColors.primary),
+                ),
+              )
+            else if (_error != null)
+              Text(_error!, style: const TextStyle(color: AppColors.danger))
+            else ...[
+              if (v!.items.isEmpty)
+                Text(
+                  _hindi
+                      ? _hi["noVideos"]!
+                      : "No videos found yet — search YouTube instead.",
+                  style: const TextStyle(fontSize: 13, color: AppColors.ink),
+                ),
+              for (final item in v.items) ...[
+                _VideoTile(video: item, onTap: () => _play(item)),
+                const SizedBox(height: Space.sm),
+              ],
+              const SizedBox(height: Space.xs),
+              OutlinedButton.icon(
+                onPressed: () => _open(v.searchUrl),
+                icon: const Icon(Icons.search, size: 18),
+                label: Text(_hindi ? _hi["search"]! : "Search on YouTube"),
+              ),
+              const SizedBox(height: Space.sm),
+              Text(
+                _hindi
+                    ? "वीडियो YouTube के हैं, स्कूल के नहीं — देखकर ही भरोसा करें।"
+                    : "Videos are from YouTube, not the school — judge them as you watch.",
+                style: const TextStyle(fontSize: 11, color: AppColors.muted),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _VideoTile extends StatelessWidget {
+  const _VideoTile({required this.video, required this.onTap});
+
+  final TutorVideo video;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(14),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Row(
+          children: [
+            SizedBox(
+              width: 112,
+              height: 66,
+              child: video.thumbnail.isEmpty
+                  ? const ColoredBox(color: Color(0xFFE6E4DC))
+                  : Image.network(
+                      video.thumbnail,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) =>
+                          const ColoredBox(color: Color(0xFFE6E4DC)),
+                    ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 10, 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      video.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.ink,
+                        height: 1.3,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      video.channel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppColors.muted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.only(right: 8),
+              child: Icon(Icons.play_circle_fill, color: AppColors.danger),
+            ),
+          ],
         ),
       ),
     );

@@ -29,6 +29,7 @@ dependencies:
   file_selector: ^1.1.0
   path_provider: ^2.1.6
   pdfx: ^2.11.0
+  webview_flutter: ^4.14.1
 dev_dependencies:
   flutter_test:
     sdk: flutter

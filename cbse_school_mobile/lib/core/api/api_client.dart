@@ -2601,12 +2601,28 @@ class ApiClient {
   /// carry text slices, one [TutorDone] closes the reply. A refusal (the
   /// allowance is spent) surfaces as a [TutorRefused] exception so the
   /// screen can offer passes; anything else is an [ApiException].
+  /// YouTube videos for a topic at the child's class level — a search,
+  /// not the tutor, so no pass is needed. Falls back to a search link
+  /// when the school has no YouTube API key.
+  Future<TutorVideos> fetchTutorVideos({
+    required String studentId,
+    required String topic,
+    required String language,
+  }) async => TutorVideos.fromJson(
+    await _postData("/api/v1/tutor/videos", {
+      "studentId": studentId,
+      "topic": topic,
+      "language": language,
+    }),
+  );
+
   Stream<TutorEvent> askTutorStream({
     required String message,
     required String mode,
     required List<TutorTurn> history,
     required Map<String, String> context,
     String? studentId,
+    String language = "auto",
   }) async* {
     final client = http.Client();
     try {
@@ -2621,6 +2637,7 @@ class ApiClient {
           ],
           "context": context,
           "studentId": ?studentId,
+          "language": language,
         });
       final res = await client.send(req);
       if (res.statusCode != 200) {
@@ -3436,9 +3453,56 @@ class TutorOrderInfo {
   final String validLabel;
 }
 
+class TutorVideo {
+  const TutorVideo({
+    required this.videoId,
+    required this.title,
+    required this.channel,
+    required this.thumbnail,
+    required this.url,
+  });
+
+  factory TutorVideo.fromJson(Map<String, dynamic> j) => TutorVideo(
+    videoId: (j["videoId"] as String?) ?? "",
+    title: (j["title"] as String?) ?? "",
+    channel: (j["channel"] as String?) ?? "",
+    thumbnail: (j["thumbnail"] as String?) ?? "",
+    url: (j["url"] as String?) ?? "",
+  );
+
+  final String videoId;
+  final String title;
+  final String channel;
+  final String thumbnail;
+  final String url;
+}
+
+class TutorVideos {
+  const TutorVideos({
+    required this.query,
+    required this.searchUrl,
+    required this.items,
+  });
+
+  factory TutorVideos.fromJson(Map<String, dynamic> j) => TutorVideos(
+    query: (j["query"] as String?) ?? "",
+    searchUrl: (j["searchUrl"] as String?) ?? "",
+    items: [
+      for (final v in (j["items"] as List? ?? const []))
+        TutorVideo.fromJson(Map<String, dynamic>.from(v as Map)),
+    ],
+  );
+
+  final String query;
+  final String searchUrl;
+  final List<TutorVideo> items;
+}
+
 class TutorStatus {
   const TutorStatus({
     required this.configured,
+    required this.defaultLanguage,
+    required this.videosAvailable,
     required this.modes,
     required this.allowance,
     required this.plans,
@@ -3448,6 +3512,8 @@ class TutorStatus {
 
   factory TutorStatus.fromJson(Map<String, dynamic> j) => TutorStatus(
     configured: j["configured"] == true,
+    defaultLanguage: (j["defaultLanguage"] as String?) == "hi" ? "hi" : "en",
+    videosAvailable: j["videosAvailable"] == true,
     modes: [
       for (final m in (j["modes"] as List? ?? const []))
         TutorModeInfo.fromJson(Map<String, dynamic>.from(m as Map)),
@@ -3467,6 +3533,9 @@ class TutorStatus {
   );
 
   final bool configured;
+  /// "hi" or "en" — from the family's language preference on record.
+  final String defaultLanguage;
+  final bool videosAvailable;
   final List<TutorModeInfo> modes;
   final TutorAllowance allowance;
   final List<TutorPlanInfo> plans;
