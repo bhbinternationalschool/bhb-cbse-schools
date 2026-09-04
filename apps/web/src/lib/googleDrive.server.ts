@@ -144,6 +144,56 @@ export type DriveFileMeta = {
   size: number | null;
 };
 
+/**
+ * Drive's multipart upload takes at most 5 MB in one request. Above that the
+ * resumable protocol is required: open a session, then PUT the bytes. A
+ * single PUT of the whole body is valid on a resumable session (Drive
+ * accepts it up to its 5 TB ceiling), so no chunking loop is needed here.
+ */
+const MULTIPART_MAX_BYTES = 4 * 1024 * 1024;
+
+async function uploadResumable(
+  accessToken: string,
+  folderId: string,
+  input: { fileName: string; mimeType: string; data: Buffer },
+): Promise<{ ok: true; driveFileId: string } | { ok: false; error: string }> {
+  try {
+    const open = await fetch(
+      `${DRIVE_UPLOAD_API}/files?uploadType=resumable&fields=id`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json; charset=UTF-8",
+          "X-Upload-Content-Type": input.mimeType,
+          "X-Upload-Content-Length": String(input.data.length),
+        },
+        body: JSON.stringify({ name: input.fileName, parents: [folderId] }),
+      },
+    );
+    const session = open.headers.get("location");
+    if (!open.ok || !session) {
+      const body = (await open.json().catch(() => ({}))) as { error?: { message?: string } };
+      return { ok: false, error: body.error?.message || `Drive HTTP ${open.status} opening upload` };
+    }
+    const put = await fetch(session, {
+      method: "PUT",
+      headers: {
+        "Content-Type": input.mimeType,
+        "Content-Length": String(input.data.length),
+      },
+      body: new Uint8Array(input.data),
+    });
+    const json = (await put.json().catch(() => ({}))) as { id?: string; error?: { message?: string } };
+    if (!put.ok || !json.id) {
+      return { ok: false, error: json.error?.message || `Drive HTTP ${put.status} uploading` };
+    }
+    return { ok: true, driveFileId: json.id };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Drive upload failed" };
+  }
+}
+
 export async function uploadFileToDrive(input: {
   /** Folder segments under the tenant root, e.g. ["students", studentId]. */
   folderPath: string[];
@@ -159,6 +209,10 @@ export async function uploadFileToDrive(input: {
 
   const folder = await resolveFolderPath(token.accessToken, input.folderPath);
   if (!folder.ok) return folder;
+
+  if (input.data.length > MULTIPART_MAX_BYTES) {
+    return uploadResumable(token.accessToken, folder.folderId, input);
+  }
 
   const boundary = `bhbdrive-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const metadata = JSON.stringify({

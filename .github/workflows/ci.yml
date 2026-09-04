@@ -223,13 +223,18 @@ jobs:
           npm run test:module-filters
           npm run test:outdoor-duty-persistence
           npm run test:outdoor-duty-staff-id
+          npm run test:drive-archive
+          npm run test:parent-profile
           npm run test:parent-tickets
           npm run test:payroll-register
           npm run test:ptm-brief-ai
           npm run test:question-bank
           npm run test:rbac-infer
           npm run test:rbac-scope
+          npm run test:school-whatsapp
+          npm run test:upload-validation
           npm run test:receipt-lookup
+          npm run test:receipt-pdf
           npm run test:referrals
           npm run test:report-export
           npm run test:report-remark-ai

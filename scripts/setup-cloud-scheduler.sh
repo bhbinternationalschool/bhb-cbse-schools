@@ -112,6 +112,14 @@ create_job "bhb-birthday-tick" "5 * * * *" \
   "${APP_URL}/api/birthday/tick" \
   "Asia/Kolkata" "300s"
 
+# Receipt archive: a PDF of every fee receipt into the school's Google Drive
+# (Receipts / <academic year> / <month>). Idempotent through drive_archive
+# and bounded to 40 per run, so half-hourly clears a day's counter in one
+# pass and a backlog over a few.
+create_job "bhb-drive-archive-receipts" "*/30 * * * *" \
+  "${APP_URL}/api/drive/archive/receipts/tick" \
+  "Asia/Kolkata" "300s"
+
 # Staff GPS presence: evaluates geofence/staleness and alerts on state changes.
 #
 # PAUSED as of 2026-08-29 — the geo-fence is switched off in Staff → GPS and no

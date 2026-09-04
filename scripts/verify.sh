@@ -173,6 +173,11 @@ SELFTESTS=(
   test:payroll-register
   test:ptm-brief-ai
   test:parent-tickets
+  test:school-whatsapp
+  test:upload-validation
+  test:parent-profile
+  test:drive-archive
+  test:receipt-pdf
   test:question-bank
   test:rbac-infer
   test:rbac-scope

@@ -11,6 +11,8 @@ import {
   publicMediaUrl,
   sanitizeMediaPath,
 } from "@/lib/media";
+import { archiveToDrive } from "@/lib/driveArchive.server";
+import { mediaArchiveFileName, mediaArchiveFolder } from "@/lib/driveArchive";
 
 export const runtime = "nodejs";
 
@@ -118,6 +120,19 @@ export async function POST(req: Request) {
           )
         : privateMediaUrl(path);
 
+    // The bucket is what serves the file; the school's Drive gets a copy it
+    // can browse without the ERP. Drive being down does not undo the upload
+    // — the row records the failure and the caller is told.
+    const drive = await archiveToDrive({
+      kind: "media",
+      ref: `${bucket}/${path}`,
+      folderPath: mediaArchiveFolder(bucket, new Date()),
+      fileName: mediaArchiveFileName(path),
+      mimeType: contentType,
+      data: buffer,
+    });
+    if (!drive.ok) console.warn("[api/upload] drive archive failed:", drive.error);
+
     return NextResponse.json({
       ok: true,
       url,
@@ -125,6 +140,9 @@ export async function POST(req: Request) {
       path,
       contentType,
       bytes: file.size,
+      drive: drive.ok
+        ? { ok: true, fileId: drive.driveFileId, url: drive.driveUrl }
+        : { ok: false, error: drive.error },
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Upload error";
