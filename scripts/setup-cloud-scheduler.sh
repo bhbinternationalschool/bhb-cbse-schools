@@ -93,11 +93,23 @@ create_job() {
   fi
 }
 
-create_job "bhb-comms-scheduled-publish" "*/5 * * * *" \
+# Scheduled notices / news / gallery + social cross-post. Was */5 around the
+# clock — 288 cold starts a day, the largest single line in the August cost
+# audit. Now every 10 minutes from 06:00 to 21:59 (96 a day): a post is
+# scheduled with a datetime picker and lands within ten minutes of it, and
+# one set for the small hours goes out at 06:00 — the school has never
+# published at night on purpose. If that ever changes, widen the hours here
+# rather than the interval.
+create_job "bhb-comms-scheduled-publish" "*/10 6-21 * * *" \
   "${APP_URL}/api/comms/scheduled-publish/tick" \
   "Asia/Kolkata" "120s"
 
-create_job "bhb-wa-automation-tick" "*/15 * * * *" \
+# WhatsApp automation rules (approval-first). The automation's own quiet
+# hours default to 20:00-08:00, during which it sends nothing anyway, so
+# ticking overnight only ever found "not now". Every 30 minutes, 08:00 to
+# 19:59 (24 a day, from 96); reminders are day-granular, approvals are
+# reviewed by staff in office hours.
+create_job "bhb-wa-automation-tick" "*/30 8-19 * * *" \
   "${APP_URL}/api/wa/automation/tick" \
   "Asia/Kolkata" "120s"
 
