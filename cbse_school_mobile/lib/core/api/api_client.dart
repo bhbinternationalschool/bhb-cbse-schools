@@ -252,6 +252,7 @@ class AttendanceRoster {
 
 class FeeDue {
   const FeeDue({
+    required this.dueKey,
     required this.label,
     required this.kind,
     required this.dueOn,
@@ -260,6 +261,7 @@ class FeeDue {
   });
 
   factory FeeDue.fromJson(Map<String, dynamic> j) => FeeDue(
+        dueKey: (j["dueKey"] as String?) ?? "",
         label: (j["label"] as String?) ?? "",
         kind: (j["kind"] as String?) ?? "",
         dueOn: (j["dueOn"] as String?) ?? "",
@@ -267,11 +269,114 @@ class FeeDue {
         balancePaise: (j["balancePaise"] as num?)?.toInt() ?? 0,
       );
 
+  /// Server handle for this due; what the parent checkout is asked to
+  /// collect. Amounts are never sent — the server recomputes them.
+  final String dueKey;
   final String label;
   final String kind;
   final String dueOn;
   final String balanceLabel;
   final int balancePaise;
+}
+
+/// What /api/payments/parent-checkout hands back once the pay-link exists.
+///
+/// `checkoutUrl` is the gateway's hosted page (Cashfree) and is what the
+/// parent should be sent to. It is null when the gateway could not be
+/// attached; `shareUrl` — the school's own pay page for the link — always
+/// works and is the fallback, the same one the web portal uses.
+class ParentCheckout {
+  const ParentCheckout({
+    required this.linkId,
+    required this.amountPaise,
+    required this.checkoutUrl,
+    required this.shareUrl,
+  });
+
+  factory ParentCheckout.fromJson(Map<String, dynamic> j) => ParentCheckout(
+        linkId: (j["linkId"] as String?) ?? "",
+        amountPaise: (j["amountPaise"] as num?)?.toInt() ?? 0,
+        checkoutUrl: j["checkoutUrl"] as String?,
+        shareUrl: (j["shareUrl"] as String?) ?? "",
+      );
+
+  final String linkId;
+  final int amountPaise;
+  final String? checkoutUrl;
+  final String shareUrl;
+
+  /// Where to send the parent. Null only if the server returned neither,
+  /// which the client treats as "could not start payment".
+  Uri? get payUri {
+    final raw = (checkoutUrl ?? "").isNotEmpty ? checkoutUrl! : shareUrl;
+    return raw.isEmpty ? null : Uri.tryParse(raw);
+  }
+}
+
+/// One title on the school's e-book shelf (FlipHTML5 bookcases).
+class LibraryEbook {
+  const LibraryEbook({
+    required this.id,
+    required this.title,
+    required this.author,
+    required this.subject,
+    required this.classLabels,
+    required this.url,
+    required this.passKey,
+    required this.passKeyLabel,
+  });
+
+  factory LibraryEbook.fromJson(Map<String, dynamic> j) => LibraryEbook(
+        id: (j["id"] as String?) ?? "",
+        title: (j["title"] as String?) ?? "",
+        author: (j["author"] as String?) ?? "",
+        subject: (j["subject"] as String?) ?? "",
+        classLabels: ((j["classLabels"] as List?) ?? const [])
+            .map((e) => e.toString())
+            .toList(),
+        url: (j["url"] as String?) ?? "",
+        passKey: (j["passKey"] as String?) ?? "",
+        passKeyLabel: (j["passKeyLabel"] as String?) ?? "",
+      );
+
+  final String id;
+  final String title;
+  final String author;
+  final String subject;
+  final List<String> classLabels;
+  final String url;
+  final String passKey;
+  final String passKeyLabel;
+}
+
+/// GET /api/v1/library/ebooks.
+///
+/// `configured` false is a real, distinct state — the office has not set the
+/// shelf up — and is shown as such rather than as an empty catalogue.
+class EbookShelf {
+  const EbookShelf({
+    required this.configured,
+    required this.shelfUrl,
+    required this.shelfKey,
+    required this.note,
+    required this.books,
+  });
+
+  factory EbookShelf.fromJson(Map<String, dynamic> j) => EbookShelf(
+        configured: j["configured"] == true,
+        shelfUrl: (j["shelfUrl"] as String?) ?? "",
+        shelfKey: (j["shelfKey"] as String?) ?? "",
+        note: (j["note"] as String?) ?? "",
+        books: ((j["books"] as List?) ?? const [])
+            .map((b) => LibraryEbook.fromJson(b as Map<String, dynamic>))
+            .toList(),
+      );
+
+  final bool configured;
+  final String shelfUrl;
+  final String shelfKey;
+  final String note;
+  final List<LibraryEbook> books;
 }
 
 class FeeLedger {
@@ -1788,6 +1893,33 @@ class ApiClient {
 
   Future<FeeLedger> fetchFeeLedger(String studentId) async =>
       FeeLedger.fromJson(await _getData("/api/v1/fees/ledger/$studentId"));
+
+  /// Start an online payment for some of the household's open dues.
+  ///
+  /// Only due keys travel; the server recomputes what is owed, creates the
+  /// pay-link, attaches the gateway checkout and — via its webhook — settles
+  /// the receipt when the money lands. The app's part ends at opening the
+  /// returned URL. Not a {data} envelope route, hence [postJson].
+  Future<ParentCheckout> startParentCheckout({
+    required List<String> dueKeys,
+    required String studentId,
+  }) async {
+    final body = await postJson("/api/payments/parent-checkout", {
+      "dueKeys": dueKeys,
+      "studentId": studentId,
+    });
+    if (body["ok"] != true) {
+      final err = body["error"];
+      throw ApiException(
+        err is String && err.isNotEmpty ? err : "Could not start payment",
+        400,
+      );
+    }
+    return ParentCheckout.fromJson(body);
+  }
+
+  Future<EbookShelf> fetchEbookShelf() async =>
+      EbookShelf.fromJson(await _getData("/api/v1/library/ebooks"));
 
   Future<AttendanceHistory> fetchAttendanceHistory(
     String studentId, {

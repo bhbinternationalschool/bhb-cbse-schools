@@ -5,12 +5,14 @@ import "../../core/config/app_config.dart";
 import "../../core/theme/app_theme.dart";
 import "../modules/attendance_history_screen.dart";
 import "../modules/chat_thread_screen.dart";
+import "../modules/ebook_shelf_screen.dart";
 import "../modules/fees_screen.dart";
 import "../modules/homework_screen.dart";
 import "../modules/module_shell.dart";
 import "../modules/notices_screen.dart";
 import "../modules/ptm_screen.dart";
 import "../modules/transport_screen.dart";
+import "home_stats.dart";
 import "student_id_screen.dart";
 
 class _Module {
@@ -67,6 +69,11 @@ class _HomeScreenState extends State<HomeScreen> {
   ParentSummary? _summary;
   String? _error;
   String? _pendingRoute;
+
+  /// Attendance and homework per child, loaded after the summary. A missing
+  /// entry (still loading, or the call failed) shows as a dash.
+  final _attendance = <String, AttendanceHistory>{};
+  final _homework = <String, HomeworkFeed>{};
 
   @override
   void initState() {
@@ -142,6 +149,7 @@ class _HomeScreenState extends State<HomeScreen> {
           if (mounted) _consumePendingRoute();
         });
       }
+      _loadStats(summary);
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
@@ -149,6 +157,28 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() => _error = "Could not reach the school server.");
       }
     }
+  }
+
+  /// The two home tiles come from the same calls the Attendance and Homework
+  /// screens make, so home and module never disagree. Failures are left as
+  /// a dash rather than surfaced — the modules will show the real error.
+  Future<void> _loadStats(ParentSummary summary) async {
+    await Future.wait([
+      for (final child in summary.children) ...[
+        widget.api
+            .fetchAttendanceHistory(child.id)
+            .then((h) {
+              if (mounted) setState(() => _attendance[child.id] = h);
+            })
+            .catchError((_) {}),
+        widget.api
+            .fetchHomeworkFeed(studentId: child.id)
+            .then((f) {
+              if (mounted) setState(() => _homework[child.id] = f);
+            })
+            .catchError((_) {}),
+      ],
+    ]);
   }
 
   Future<void> _signOut() async {
@@ -183,11 +213,7 @@ class _HomeScreenState extends State<HomeScreen> {
           "Date sheets and report cards appear here once the school publishes them.",
         );
       case "Library":
-        showComingSoon(
-          context,
-          "Library",
-          "Issued books and due dates appear here once the library goes digital.",
-        );
+        screen = EbookShelfScreen(api: api);
     }
     if (screen != null) {
       Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen!));
@@ -279,12 +305,18 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.cloud_off_outlined,
-                          size: 40, color: AppColors.muted),
+                      const Icon(
+                        Icons.cloud_off_outlined,
+                        size: 40,
+                        color: AppColors.muted,
+                      ),
                       const SizedBox(height: 12),
                       Text(_error!, textAlign: TextAlign.center),
                       const SizedBox(height: 16),
-                      FilledButton(onPressed: _load, child: const Text("Retry")),
+                      FilledButton(
+                        onPressed: _load,
+                        child: const Text("Retry"),
+                      ),
                       TextButton(
                         onPressed: _signOut,
                         child: const Text("Sign out"),
@@ -304,8 +336,11 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.school_outlined,
-                    size: 40, color: AppColors.muted),
+                const Icon(
+                  Icons.school_outlined,
+                  size: 40,
+                  color: AppColors.muted,
+                ),
                 const SizedBox(height: 12),
                 const Text(
                   "No active students found for this account. Contact the school office.",
@@ -333,13 +368,19 @@ class _HomeScreenState extends State<HomeScreen> {
               child: child,
               childCount: summary.children.length,
               onSwitchChild: _pickChild,
+              onNotices: () => _openModule("Notices", child),
               onLogout: _signOut,
             ),
             Transform.translate(
               offset: const Offset(0, -26),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: _StatsRow(child: child),
+                child: _StatsRow(
+                  child: child,
+                  attendance: _attendance[child.id],
+                  homework: _homework[child.id],
+                  onOpen: (label) => _openModule(label, child),
+                ),
               ),
             ),
             Padding(
@@ -446,12 +487,14 @@ class _Header extends StatelessWidget {
     required this.child,
     required this.childCount,
     required this.onSwitchChild,
+    required this.onNotices,
     required this.onLogout,
   });
 
   final ParentChild child;
   final int childCount;
   final VoidCallback onSwitchChild;
+  final VoidCallback onNotices;
   final VoidCallback onLogout;
 
   @override
@@ -528,7 +571,8 @@ class _Header extends StatelessWidget {
             ),
           ),
           IconButton(
-            onPressed: () {},
+            tooltip: "Notices",
+            onPressed: onNotices,
             icon: const Icon(Icons.notifications_none, color: Colors.white),
           ),
           IconButton(
@@ -697,12 +741,22 @@ class _ChildTile extends StatelessWidget {
 }
 
 class _StatsRow extends StatelessWidget {
-  const _StatsRow({required this.child});
+  const _StatsRow({
+    required this.child,
+    required this.attendance,
+    required this.homework,
+    required this.onOpen,
+  });
 
   final ParentChild child;
+  final AttendanceHistory? attendance;
+  final HomeworkFeed? homework;
+  final void Function(String module) onOpen;
 
   @override
   Widget build(BuildContext context) {
+    final attendanceValue = attendanceTileValue(attendance);
+    final homeworkValue = homeworkTileValue(homework, DateTime.now());
     return Row(
       children: [
         Expanded(
@@ -712,22 +766,25 @@ class _StatsRow extends StatelessWidget {
             color: child.openBalancePaise > 0
                 ? AppColors.warning
                 : AppColors.success,
+            onTap: () => onOpen("Fees"),
           ),
         ),
         const SizedBox(width: 8),
-        const Expanded(
+        Expanded(
           child: _StatCard(
             label: "Attendance",
-            value: "—",
-            color: AppColors.muted,
+            value: attendanceValue,
+            color: attendanceValue == "—" ? AppColors.muted : AppColors.ink,
+            onTap: () => onOpen("Attendance"),
           ),
         ),
         const SizedBox(width: 8),
-        const Expanded(
+        Expanded(
           child: _StatCard(
             label: "Homework",
-            value: "—",
-            color: AppColors.muted,
+            value: homeworkValue,
+            color: homeworkValue == "—" ? AppColors.muted : AppColors.ink,
+            onTap: () => onOpen("Homework"),
           ),
         ),
       ],
@@ -740,34 +797,40 @@ class _StatCard extends StatelessWidget {
     required this.label,
     required this.value,
     required this.color,
+    required this.onTap,
   });
 
   final String label;
   final String value;
   final Color color;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              label,
-              style: const TextStyle(fontSize: 11, color: AppColors.muted),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w600,
-                color: color,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: const TextStyle(fontSize: 11, color: AppColors.muted),
               ),
-            ),
-          ],
+              const SizedBox(height: 2),
+              Text(
+                value,
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w600,
+                  color: color,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

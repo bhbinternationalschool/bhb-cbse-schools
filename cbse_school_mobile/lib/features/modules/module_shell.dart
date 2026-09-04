@@ -15,6 +15,7 @@ class ModuleShell<T> extends StatefulWidget {
     this.emptyText = "Nothing here yet.",
     this.isEmpty,
     this.floatingActionButton,
+    this.bottomBar,
   });
 
   final String title;
@@ -26,6 +27,11 @@ class ModuleShell<T> extends StatefulWidget {
   final bool Function(T data)? isEmpty;
   final Widget Function(BuildContext context, T data, Future<void> Function() reload)?
       floatingActionButton;
+
+  /// Sticky footer under the list — a pay button, say. Only shown once data
+  /// has loaded and the screen is not in its empty state.
+  final Widget Function(BuildContext context, T data, Future<void> Function() reload)?
+      bottomBar;
 
   @override
   State<ModuleShell<T>> createState() => _ModuleShellState<T>();
@@ -79,6 +85,9 @@ class _ModuleShellState<T> extends State<ModuleShell<T>> {
       floatingActionButton: data == null
           ? null
           : widget.floatingActionButton?.call(context, data, _load),
+      bottomNavigationBar: data == null || (widget.isEmpty?.call(data) ?? false)
+          ? null
+          : widget.bottomBar?.call(context, data, _load),
       body: data == null
           ? Center(
               child: _error == null
