@@ -13,7 +13,7 @@ import "server-only";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { embedText, embeddingsConfigured } from "@/lib/embeddings.server";
 import { admissionsKbChunks, emptyAdmissionsKb, normalizeAdmissionsKb, type AdmissionsKbState } from "@/lib/admissionsKb";
-import { retrieveRelevantKb, type KbMatch } from "@/lib/schoolKb.server";
+import { retrieveRelevantKb, type KbMatch, invalidateKbPresence } from "@/lib/schoolKb.server";
 import { generateAdmissionsAnswerJson, type LlmEngine } from "@/lib/aiLlm.server";
 import { TENANT } from "@/lib/types";
 import { sarvamConfigured, sarvamTranslate } from "@/lib/sarvam.server";
@@ -90,6 +90,7 @@ export async function indexAdmissionsKb(): Promise<
     const { error } = await sb.from("school_kb_chunks").delete().in("id", stale);
     if (!error) removed = stale.length;
   }
+  invalidateKbPresence();
   return { ok: true, indexed, skipped, removed };
 }
 

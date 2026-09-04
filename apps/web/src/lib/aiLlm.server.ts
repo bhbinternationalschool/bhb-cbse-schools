@@ -41,6 +41,7 @@ import {
   streamOpenAiText,
 } from "@/lib/openAi.server";
 import { getDemoSession } from "@/lib/auth";
+import { noteAiBudgetUse } from "@/lib/aiBudget.server";
 import { recordAiGeneration, type AiTier } from "@/lib/aiGenerations.server";
 import { checkAiBudget } from "@/lib/aiBudget.server";
 import { aiCacheGet, aiCacheKey, aiCachePut } from "@/lib/aiCache.server";
@@ -207,7 +208,32 @@ type LlmTextOpts = {
    * honoured in jsonMode (a half-parsed object is useless to anyone).
    */
   onDelta?: (text: string) => void;
+  /**
+   * The requester + budget verdict, if the caller started resolving them
+   * earlier so they overlap its own preparation (knowledge-base retrieval,
+   * say) instead of running after it. See startLlmPrecheck().
+   */
+  precheck?: Promise<LlmPrecheck>;
 };
+
+export type LlmPrecheck = {
+  requester: string;
+  budget: Awaited<ReturnType<typeof checkAiBudget>>;
+};
+
+/**
+ * Kick off the two lookups every call needs before the model is asked.
+ * Call it first thing, do the rest of the preparation, then hand the
+ * promise to the generator so the wait is whichever finished last rather
+ * than the sum.
+ */
+export function startLlmPrecheck(): Promise<LlmPrecheck> {
+  return (async () => {
+    const requester = await resolveRequester();
+    const budget = await checkAiBudget(requester);
+    return { requester, budget };
+  })();
+}
 
 /**
  * Best-effort requester for the audit row: the staff session when the call
@@ -289,6 +315,12 @@ async function attemptEngine(
     latencyMs,
     requester,
   });
+  if (r.ok) {
+    noteAiBudgetUse(
+      requester,
+      (r.usage.promptTokens ?? 0) + (r.usage.completionTokens ?? 0),
+    );
+  }
   return { r, generationId };
 }
 
@@ -326,8 +358,7 @@ async function callLlmText(
       return { ok: true, text: hit.response, engine: (hit.engine as LlmEngine) || "none", generationId: hit.generationId };
     }
   }
-  const requester = await resolveRequester();
-  const budget = await checkAiBudget(requester);
+  const { requester, budget } = await (opts.precheck ?? startLlmPrecheck());
   if (!budget.ok) return { ok: false, error: budget.reason, engine: "none" };
   const errors: string[] = [];
 
@@ -387,8 +418,7 @@ async function callLlmJson<T>(
       }
     }
   }
-  const requester = await resolveRequester();
-  const budget = await checkAiBudget(requester);
+  const { requester, budget } = await (opts.precheck ?? startLlmPrecheck());
   if (!budget.ok) return { ok: false, error: budget.reason, engine: "none" };
   const errors: string[] = [];
 
@@ -429,6 +459,7 @@ export async function generateTutorText(opts: {
   userMessage: string;
   /** Stream slices of the reply as they arrive (tutor / ERP chat). */
   onDelta?: (text: string) => void;
+  precheck?: Promise<LlmPrecheck>;
 }): Promise<
   | { ok: true; text: string; engine: LlmEngine; generationId: string }
   | { ok: false; error: string; engine: LlmEngine }
@@ -444,6 +475,7 @@ export async function generateTutorText(opts: {
     // actual answer, so Gemini gets a larger budget for the same reply length.
     geminiMaxTokens: 1536,
     onDelta: opts.onDelta,
+    precheck: opts.precheck,
     meta: { route: "tutor", promptVersion: "v1" },
   });
 }

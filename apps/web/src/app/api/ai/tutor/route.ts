@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDemoSession } from "@/lib/auth";
-import { llmStatus } from "@/lib/aiLlm.server";
+import { llmStatus, startLlmPrecheck } from "@/lib/aiLlm.server";
 import {
   replyHomeworkTutor,
 } from "@/lib/homeworkTutor.server";
@@ -32,6 +32,9 @@ export async function POST(req: Request) {
       { status: 403 },
     );
   }
+
+  // Budget + requester resolve while the body is read and validated.
+  const precheck = startLlmPrecheck();
 
   let body: {
     message?: string;
@@ -68,6 +71,7 @@ export async function POST(req: Request) {
         history,
         context: body.context,
         onDelta: (text) => send({ type: "delta", text }),
+        precheck,
       });
       return r.ok
         ? { type: "done", engine: r.engine, reply: r.text }
@@ -79,6 +83,7 @@ export async function POST(req: Request) {
     message,
     history,
     context: body.context,
+    precheck,
   });
 
   if (!result.ok) {

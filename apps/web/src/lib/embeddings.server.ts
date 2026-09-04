@@ -12,6 +12,14 @@ export function embeddingsConfigured(): boolean {
   return openAiConfigured();
 }
 
+/**
+ * The last few query embeddings, by exact text. A retried or re-asked
+ * question skips the round-trip; the vector for a given string never
+ * changes, so there is nothing to expire beyond bounding the size.
+ */
+const EMBED_MEMO_MAX = 64;
+const embedMemo = new Map<string, number[]>();
+
 export async function embedText(
   text: string,
 ): Promise<{ ok: true; vector: number[] } | { ok: false; error: string }> {
@@ -19,6 +27,8 @@ export async function embedText(
   if (!key) return { ok: false, error: "OPENAI_API_KEY not configured" };
   const input = text.trim().slice(0, 8000);
   if (!input) return { ok: false, error: "Empty text" };
+  const memo = embedMemo.get(input);
+  if (memo) return { ok: true, vector: memo };
 
   try {
     const res = await fetch("https://api.openai.com/v1/embeddings", {
@@ -40,6 +50,10 @@ export async function embedText(
     if (!Array.isArray(vector) || vector.length !== EMBEDDING_DIMENSIONS) {
       return { ok: false, error: "Unexpected embedding response shape" };
     }
+    if (embedMemo.size >= EMBED_MEMO_MAX) {
+      embedMemo.delete(embedMemo.keys().next().value as string);
+    }
+    embedMemo.set(input, vector);
     return { ok: true, vector };
   } catch (e) {
     return {

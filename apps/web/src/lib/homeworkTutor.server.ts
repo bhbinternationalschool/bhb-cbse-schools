@@ -3,7 +3,7 @@
  */
 
 import { TENANT } from "@/lib/types";
-import { generateTutorText } from "@/lib/aiLlm.server";
+import { generateTutorText, type LlmPrecheck } from "@/lib/aiLlm.server";
 import type { HomeworkTutorContext } from "@/lib/homeworkTutor.types";
 import type { OpenAiChatTurn } from "@/lib/openAi.server";
 
@@ -36,6 +36,7 @@ export async function replyHomeworkTutor(opts: {
   history?: OpenAiChatTurn[];
   context?: HomeworkTutorContext;
   onDelta?: (text: string) => void;
+  precheck?: Promise<LlmPrecheck>;
 }) {
   const message = opts.message.trim();
   if (!message) {
@@ -47,5 +48,6 @@ export async function replyHomeworkTutor(opts: {
     history: opts.history,
     userMessage: message,
     onDelta: opts.onDelta,
+    precheck: opts.precheck,
   });
 }

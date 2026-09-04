@@ -4,8 +4,6 @@ import { replyErpAiChatServer } from "@/lib/erpAiChat.server";
 import { llmStatus } from "@/lib/aiLlm.server";
 import { openAiModel } from "@/lib/openAi.server";
 import { geminiModel } from "@/lib/erpAiGemini.server";
-import { loadMasters } from "@/lib/masters";
-import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { aiStreamResponse, wantsAiStream } from "@/lib/aiStream.server";
 import type { ErpAiMessage } from "@/lib/erpAiChat";
 
@@ -69,9 +67,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "message too long" }, { status: 400 });
   }
 
-  await ensureSchoolMirrorHydrated();
-  const masters = loadMasters();
-
+  // The engine hydrates the school mirror and loads masters itself;
+  // doing it here as well parsed the 6.7 MB mirror file twice per message.
   if (wantsAiStream(req)) {
     type Done = {
       engine: string;
@@ -86,7 +83,6 @@ export async function POST(req: Request) {
         history: body.history,
         pathname: body.pathname,
         tab: body.tab,
-        masters,
         onDelta: (text) => send({ type: "delta", text }),
       });
       return {
@@ -105,7 +101,6 @@ export async function POST(req: Request) {
     history: body.history,
     pathname: body.pathname,
     tab: body.tab,
-    masters,
   });
 
   return NextResponse.json({
