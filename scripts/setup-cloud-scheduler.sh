@@ -113,11 +113,19 @@ create_job "bhb-birthday-tick" "5 * * * *" \
   "Asia/Kolkata" "300s"
 
 # Receipt archive: a PDF of every fee receipt into the school's Google Drive
-# (Receipts / <academic year> / <month>). Idempotent through drive_archive
-# and bounded to 40 per run, so half-hourly clears a day's counter in one
-# pass and a backlog over a few.
-create_job "bhb-drive-archive-receipts" "*/30 * * * *" \
-  "${APP_URL}/api/drive/archive/receipts/tick" \
+# (Receipts / <academic year> / <month>).
+#
+# Once a day, after the counter closes — not on a repeating interval. Every
+# tick of a job is a cold start of the service (min-instances=0) plus its
+# Secret Manager reads, which is what the August bill audit traced the cost
+# to; a half-hourly job would be 48 starts a day to find, most times, nothing.
+# One pass at 15:45 covers the day's counter receipts and the previous
+# night's online ones. Nobody waits on it: a parent opening a receipt in the
+# app gets it rendered on the spot and archived as a side effect. Idempotent
+# through drive_archive, so a missed day is simply picked up by the next.
+# limit=120 with a 300s deadline: a day is a few dozen receipts at ~1.5s each.
+create_job "bhb-drive-archive-receipts" "45 15 * * *" \
+  "${APP_URL}/api/drive/archive/receipts/tick?limit=120" \
   "Asia/Kolkata" "300s"
 
 # Staff GPS presence: evaluates geofence/staleness and alerts on state changes.
