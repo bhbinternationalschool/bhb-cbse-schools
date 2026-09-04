@@ -29,6 +29,7 @@ export async function GET(req: Request) {
     registers: desk.registers,
     ancillary: desk.ancillary,
     settings: desk.ancillary.settings,
+    outdoorDuty: desk.ancillary.outdoorDuty,
     count: desk.registers.length,
     updatedAt: desk.meta?.updatedAt || new Date().toISOString(),
     meta: desk.meta,
@@ -37,6 +38,7 @@ export async function GET(req: Request) {
 
 type DeskPostBody = Pick<StaffAttendanceState, "registers" | "settings"> &
   Partial<StaffAttendanceDeskAncillary>;
+
 
 /** POST — push staff attendance desk snapshot */
 export async function POST(req: Request) {
@@ -60,6 +62,7 @@ export async function POST(req: Request) {
   const result = await pushStaffAttendanceDeskToDb({
     registers: Array.isArray(body.registers) ? body.registers : [],
     settings: body.settings,
+    outdoorDuty: Array.isArray(body.outdoorDuty) ? body.outdoorDuty : [],
   });
   if (!result.ok) {
     return NextResponse.json(
@@ -71,6 +74,7 @@ export async function POST(req: Request) {
   return NextResponse.json({
     ok: true,
     count: result.registerCount,
+    outdoorDutyCount: result.outdoorDutyCount ?? 0,
     updatedAt: new Date().toISOString(),
   });
 }
