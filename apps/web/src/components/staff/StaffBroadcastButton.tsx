@@ -143,21 +143,34 @@ export function StaffBroadcastButton() {
     return chatSelfFromSession(session, masters, loadSis());
   }, [masters, session]);
 
+  /**
+   * The chat actor's staffId falls back to a synthetic `sess_…` key when a
+   * login has no staff record — fine for chat, wrong for anything that
+   * files a real per-staff record (leave, requests, attendance marks), which
+   * would then join to nothing. Everything below writes with THIS id, and
+   * the self-service tabs only appear when it resolves.
+   */
+  const selfStaff = useMemo(() => {
+    if (!masters || !actor || actor.kind !== "staff" || !actor.staffId) {
+      return null;
+    }
+    return (masters.staff ?? []).find((s) => s.id === actor.staffId) ?? null;
+  }, [masters, actor]);
+
   useEffect(() => {
-    if (!open || !actor?.staffId) return;
-    setOdActive(activeOutdoorDutyForStaff(loadStaffAttendance(), actor.staffId));
-  }, [open, actor]);
+    if (!open || !selfStaff) return;
+    setOdActive(activeOutdoorDutyForStaff(loadStaffAttendance(), selfStaff.id));
+  }, [open, selfStaff]);
 
   const sections = useMemo((): ChatSectionRef[] => {
     if (!masters || !actor || actor.kind !== "staff" || !session) return [];
-    const staff = (masters.staff ?? []).find((s) => s.id === actor.staffId);
     return staffAllowedSections(
-      staff,
+      selfStaff,
       masters,
       session.academicYearCode,
       actor.roleCodes,
     );
-  }, [masters, actor, session]);
+  }, [masters, actor, selfStaff, session]);
 
   const selectedTemplate = useMemo(
     () => templates.find((t) => t.id === templateId) || null,
@@ -242,13 +255,13 @@ export function StaffBroadcastButton() {
   }
 
   async function submitLeave() {
-    if (!actor?.staffId || !session) return;
+    if (!selfStaff || !session) return;
     setBusy(true);
     setError(null);
     try {
       const r = applyLeave({
         academicYearCode: session.academicYearCode,
-        staffId: actor.staffId,
+        staffId: selfStaff.id,
         typeCode: leaveType,
         fromDate,
         toDate,
@@ -283,12 +296,12 @@ export function StaffBroadcastButton() {
   }
 
   async function submitRequest() {
-    if (!actor?.staffId || !session) return;
+    if (!selfStaff || !session) return;
     setBusy(true);
     setError(null);
     try {
       const r = createStaffRequestTicket({
-        staffId: actor.staffId,
+        staffId: selfStaff.id,
         raisedByName: session.fullName,
         type: requestType,
         subject: requestSubject.trim(),
@@ -322,14 +335,14 @@ export function StaffBroadcastButton() {
   }
 
   async function submitOutdoorStart() {
-    if (!actor?.staffId || !session || !masters) return;
+    if (!selfStaff || !session || !masters) return;
     setBusy(true);
     setError(null);
     try {
       const geo = await captureSurveyGeo().catch(() => null);
       const r = startOutdoorDuty({
         academicYearCode: session.academicYearCode,
-        staffId: actor.staffId,
+        staffId: selfStaff.id,
         purpose: odPurpose,
         destination: odDestination.trim(),
         note: odNote.trim(),
@@ -364,7 +377,7 @@ export function StaffBroadcastButton() {
   }
 
   async function submitOutdoorEnd() {
-    if (!actor?.staffId || !session || !masters || !odActive) return;
+    if (!selfStaff || !session || !masters || !odActive) return;
     setBusy(true);
     setError(null);
     try {
@@ -372,7 +385,7 @@ export function StaffBroadcastButton() {
       const r = endOutdoorDuty({
         academicYearCode: session.academicYearCode,
         sessionId: odActive.id,
-        staffId: actor.staffId,
+        staffId: selfStaff.id,
         endGeo: geo,
         markedBy: session.fullName,
         roster: masters.staff ?? [],
@@ -529,41 +542,57 @@ export function StaffBroadcastButton() {
                   >
                     Send a message
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setMode("leave")}
-                    className={`rounded-md px-2.5 py-1 font-medium ${
-                      mode === "leave"
-                        ? "bg-[var(--brand-deep)] text-white"
-                        : "text-[var(--muted)]"
-                    }`}
-                  >
-                    Apply for leave
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setMode("request")}
-                    className={`rounded-md px-2.5 py-1 font-medium ${
-                      mode === "request"
-                        ? "bg-[var(--brand-deep)] text-white"
-                        : "text-[var(--muted)]"
-                    }`}
-                  >
-                    Raise a request
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setMode("outdoor")}
-                    className={`rounded-md px-2.5 py-1 font-medium ${
-                      mode === "outdoor"
-                        ? "bg-[var(--brand-deep)] text-white"
-                        : "text-[var(--muted)]"
-                    }`}
-                  >
-                    {odActive ? "Outdoor duty (active)" : "Check out for outdoor duty"}
-                  </button>
+                  {/* Leave, requests and outdoor duty all file a record
+                      against a real staff id. A login with no staff record
+                      has none, so don't offer an action that must fail. */}
+                  {selfStaff ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setMode("leave")}
+                        className={`rounded-md px-2.5 py-1 font-medium ${
+                          mode === "leave"
+                            ? "bg-[var(--brand-deep)] text-white"
+                            : "text-[var(--muted)]"
+                        }`}
+                      >
+                        Apply for leave
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setMode("request")}
+                        className={`rounded-md px-2.5 py-1 font-medium ${
+                          mode === "request"
+                            ? "bg-[var(--brand-deep)] text-white"
+                            : "text-[var(--muted)]"
+                        }`}
+                      >
+                        Raise a request
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setMode("outdoor")}
+                        className={`rounded-md px-2.5 py-1 font-medium ${
+                          mode === "outdoor"
+                            ? "bg-[var(--brand-deep)] text-white"
+                            : "text-[var(--muted)]"
+                        }`}
+                      >
+                        {odActive
+                          ? "Outdoor duty (active)"
+                          : "Check out for outdoor duty"}
+                      </button>
+                    </>
+                  ) : null}
                 </div>
               )}
+
+              {audience === "leadership" && !selfStaff ? (
+                <p className="text-[10px] text-[var(--muted)]">
+                  Leave, requests and outdoor duty need a staff record linked
+                  to your login — ask admin to link it in Staff → Profiles.
+                </p>
+              ) : null}
 
               {audience === "leadership" && mode === "leave" ? (
                 leaveDone ? (

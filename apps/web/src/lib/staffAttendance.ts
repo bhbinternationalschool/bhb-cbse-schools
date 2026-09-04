@@ -781,6 +781,43 @@ function outdoorGeoToPunchGeo(
   return { lat: g.lat, lng: g.lng, accuracyM: g.accuracyM, at: g.at, source: "app_gps" };
 }
 
+/**
+ * An attendance mark's staffId must reference a real staff record.
+ *
+ * The chat actor manufactures a `sess_…` key when a login resolves to no
+ * staff row (reasonable for chat — a participant needs *some* stable key),
+ * and the outdoor-duty flow used to carry that key straight into a mark.
+ * Such a mark joins to nothing: invisible to the roster, to every
+ * attendance report, and to payroll. One reached production on
+ * 2026-09-04 as `sess_director_bhbinternationa`.
+ */
+export function staffIdIsOnRoster(
+  roster: StaffRecord[] | undefined,
+  staffId: string,
+): boolean {
+  if (!staffId) return false;
+  return (roster ?? []).some((s) => s.id === staffId);
+}
+
+export const NO_STAFF_RECORD_ERROR =
+  "Your login is not linked to a staff record, so attendance cannot be filed";
+
+/** Empty roster is "cannot verify", not "not a staff member" — say so
+ * rather than telling a real teacher they have no staff record. Either
+ * way the mark is refused: an unverifiable staffId must not be written. */
+export const ROSTER_UNAVAILABLE_ERROR =
+  "The staff list has not loaded yet, so attendance cannot be filed — reopen this screen and try again";
+
+function outdoorDutyActorError(
+  roster: StaffRecord[] | undefined,
+  staffId: string,
+): string | null {
+  if (!staffId) return "Could not resolve your staff record";
+  if (!(roster ?? []).length) return ROSTER_UNAVAILABLE_ERROR;
+  if (!staffIdIsOnRoster(roster, staffId)) return NO_STAFF_RECORD_ERROR;
+  return null;
+}
+
 export function activeOutdoorDutyForStaff(
   state: StaffAttendanceState,
   staffId: string,
@@ -824,9 +861,8 @@ export function startOutdoorDuty(input: {
 }):
   | { ok: true; state: StaffAttendanceState; session: OutdoorDutySession }
   | { ok: false; error: string } {
-  if (!input.staffId) {
-    return { ok: false, error: "Could not resolve your staff record" };
-  }
+  const actorError = outdoorDutyActorError(input.roster, input.staffId);
+  if (actorError) return { ok: false, error: actorError };
   if (!input.destination.trim()) {
     return { ok: false, error: "Destination is required" };
   }
@@ -897,6 +933,8 @@ export function endOutdoorDuty(input: {
 }):
   | { ok: true; state: StaffAttendanceState; session: OutdoorDutySession }
   | { ok: false; error: string } {
+  const actorError = outdoorDutyActorError(input.roster, input.staffId);
+  if (actorError) return { ok: false, error: actorError };
   const state = loadStaffAttendance();
   const idx = state.outdoorDuty.findIndex((s) => s.id === input.sessionId);
   if (idx < 0) return { ok: false, error: "Outdoor duty session not found" };

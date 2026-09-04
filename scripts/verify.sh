@@ -168,6 +168,7 @@ SELFTESTS=(
   test:lesson-plan-ai
   test:marketing-content-ai
   test:module-filters
+  test:outdoor-duty-staff-id
   test:payroll-register
   test:ptm-brief-ai
   test:question-bank
