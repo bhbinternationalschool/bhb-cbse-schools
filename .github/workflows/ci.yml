@@ -221,6 +221,7 @@ jobs:
           npm run test:lesson-plan-ai
           npm run test:marketing-content-ai
           npm run test:module-filters
+          npm run test:outdoor-duty-persistence
           npm run test:outdoor-duty-staff-id
           npm run test:payroll-register
           npm run test:ptm-brief-ai
