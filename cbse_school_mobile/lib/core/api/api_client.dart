@@ -2,6 +2,7 @@ import "dart:convert";
 
 import "package:flutter_secure_storage/flutter_secure_storage.dart";
 import "package:http/http.dart" as http;
+import "package:http_parser/http_parser.dart";
 
 import "../config/app_config.dart";
 
@@ -74,11 +75,39 @@ class ParentChild {
   }
 }
 
+/// The school's WhatsApp chat — the number the parent bot answers on. The
+/// server reads it from Meta, so the app never carries a number of its own.
+class SchoolWhatsApp {
+  const SchoolWhatsApp({
+    required this.number,
+    required this.display,
+    required this.chatUrl,
+  });
+
+  /// Null when the server gave nothing usable; the card is then not shown.
+  static SchoolWhatsApp? fromJson(Map<String, dynamic>? j) {
+    if (j == null) return null;
+    final chatUrl = (j["chatUrl"] as String?) ?? "";
+    final number = (j["number"] as String?) ?? "";
+    if (chatUrl.isEmpty || number.isEmpty) return null;
+    return SchoolWhatsApp(
+      number: number,
+      display: (j["display"] as String?) ?? number,
+      chatUrl: chatUrl,
+    );
+  }
+
+  final String number;
+  final String display;
+  final String chatUrl;
+}
+
 class ParentSummary {
   const ParentSummary({
     required this.guardianName,
     required this.children,
     required this.totalOpenBalanceLabel,
+    this.schoolWhatsApp,
   });
 
   factory ParentSummary.fromJson(Map<String, dynamic> j) => ParentSummary(
@@ -87,11 +116,15 @@ class ParentSummary {
         .map((c) => ParentChild.fromJson(c as Map<String, dynamic>))
         .toList(),
     totalOpenBalanceLabel: (j["totalOpenBalanceLabel"] as String?) ?? "₹0",
+    schoolWhatsApp: SchoolWhatsApp.fromJson(
+      j["schoolWhatsApp"] as Map<String, dynamic>?,
+    ),
   );
 
   final String guardianName;
   final List<ParentChild> children;
   final String totalOpenBalanceLabel;
+  final SchoolWhatsApp? schoolWhatsApp;
 }
 
 class SectionRef {
@@ -553,6 +586,264 @@ class ComplaintList {
 
   final List<ComplaintTicketInfo> tickets;
   final List<ComplaintCategoryInfo> categories;
+}
+
+// ---- profile & documents -----------------------------------------------------
+
+/// One entry on the school's document checklist, with this child's status.
+class StudentDocInfo {
+  const StudentDocInfo({
+    required this.key,
+    required this.label,
+    required this.required,
+    required this.status,
+    required this.statusLabel,
+    required this.fileName,
+    required this.uploadedAt,
+    required this.reviewNote,
+    required this.previewUrl,
+  });
+
+  factory StudentDocInfo.fromJson(Map<String, dynamic> j) => StudentDocInfo(
+    key: (j["key"] as String?) ?? "",
+    label: (j["label"] as String?) ?? "",
+    required: j["required"] == true,
+    status: (j["status"] as String?) ?? "missing",
+    statusLabel: (j["statusLabel"] as String?) ?? "",
+    fileName: (j["fileName"] as String?) ?? "",
+    uploadedAt: (j["uploadedAt"] as String?) ?? "",
+    reviewNote: (j["reviewNote"] as String?) ?? "",
+    previewUrl: j["previewUrl"] as String?,
+  );
+
+  final String key;
+  final String label;
+  final bool required;
+
+  /// missing | received | pending | verified | rejected
+  final String status;
+  final String statusLabel;
+  final String fileName;
+  final String uploadedAt;
+  final String reviewNote;
+
+  /// Server-relative proxy URL for the stored file; null when none is kept.
+  final String? previewUrl;
+
+  bool get hasFile => status != "missing" && fileName.isNotEmpty;
+  bool get isVerified => status == "verified";
+  bool get isPending => status == "pending" || status == "received";
+  bool get isRejected => status == "rejected";
+}
+
+/// The checklist itself — what the school asks for, and what each is.
+class DocChecklistItem {
+  const DocChecklistItem({
+    required this.key,
+    required this.label,
+    required this.required,
+    required this.accept,
+    required this.hint,
+  });
+
+  factory DocChecklistItem.fromJson(Map<String, dynamic> j) => DocChecklistItem(
+    key: (j["key"] as String?) ?? "",
+    label: (j["label"] as String?) ?? "",
+    required: j["required"] == true,
+    accept: (j["accept"] as String?) ?? "",
+    hint: (j["hint"] as String?) ?? "",
+  );
+
+  final String key;
+  final String label;
+  final bool required;
+  final String accept;
+  final String hint;
+
+  bool get allowsPdf => accept.contains("application/pdf");
+}
+
+/// A child's full record as the school holds it — read-only in the app.
+class StudentProfile {
+  const StudentProfile({
+    required this.id,
+    required this.fullName,
+    required this.admissionNo,
+    required this.classLabel,
+    required this.fields,
+    required this.photoUrl,
+    required this.completeness,
+    required this.docs,
+  });
+
+  factory StudentProfile.fromJson(Map<String, dynamic> j) {
+    String s(String k) => (j[k] as String?) ?? "";
+    // Label → value, in the order a parent expects to read them. Blank
+    // values are kept so the screen can show "—" rather than hide a field
+    // the office has not filled in.
+    final fields = <(String, String)>[
+      ("Admission no.", s("admissionNo")),
+      ("Class", s("classLabel")),
+      ("Roll no.", s("rollNo")),
+      ("Date of birth", s("dob")),
+      (
+        "Gender",
+        switch (s("gender")) {
+          "M" => "Male",
+          "F" => "Female",
+          "O" => "Other",
+          _ => "",
+        },
+      ),
+      ("Blood group", s("bloodGroup")),
+      ("Category", s("category")),
+      ("Religion", s("religion")),
+      ("Nationality", s("nationality")),
+      ("Mother tongue", s("motherTongue")),
+      ("Place of birth", s("placeOfBirth")),
+      ("Father's name", s("fatherName")),
+      ("Father's mobile", s("fatherMobile")),
+      ("Mother's name", s("motherName")),
+      ("Mother's mobile", s("motherMobile")),
+      (
+        "Emergency contact",
+        [
+          s("emergencyName"),
+          s("emergencyMobile"),
+        ].where((x) => x.isNotEmpty).join(" · "),
+      ),
+      ("Aadhaar", s("aadhaarMasked")),
+      ("PEN", s("pen")),
+      ("APAAR ID", s("apaarId")),
+      ("Previous school", s("previousSchool")),
+      ("Joined on", s("joinedOn")),
+      ("Academic year", s("academicYearCode")),
+    ];
+    return StudentProfile(
+      id: s("id"),
+      fullName: s("fullName"),
+      admissionNo: s("admissionNo"),
+      classLabel: s("classLabel"),
+      fields: fields,
+      photoUrl: s("photoUrl"),
+      completeness: (j["completeness"] as num?)?.toInt() ?? 0,
+      docs: ((j["docs"] as List?) ?? const [])
+          .map((d) => StudentDocInfo.fromJson(d as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+
+  final String id;
+  final String fullName;
+  final String admissionNo;
+  final String classLabel;
+  final List<(String, String)> fields;
+  final String photoUrl;
+  final int completeness;
+  final List<StudentDocInfo> docs;
+
+  int get requiredMissing =>
+      docs.where((d) => d.required && (!d.hasFile || d.isRejected)).length;
+}
+
+/// The family's contact record; only some fields are the parent's to edit.
+class HouseholdProfile {
+  const HouseholdProfile({required this.id, required this.values});
+
+  factory HouseholdProfile.fromJson(Map<String, dynamic> j) => HouseholdProfile(
+    id: (j["id"] as String?) ?? "",
+    values: {
+      for (final k in const [
+        "code",
+        "guardianName",
+        "mobile",
+        "whatsappMobile",
+        "altMobile",
+        "email",
+        "address",
+        "locality",
+        "landmark",
+        "city",
+        "state",
+        "pincode",
+      ])
+        k: (j[k] as String?) ?? "",
+    },
+  );
+
+  final String id;
+  final Map<String, String> values;
+
+  String operator [](String key) => values[key] ?? "";
+}
+
+class ParentProfile {
+  const ParentProfile({
+    required this.household,
+    required this.editableHouseholdFields,
+    required this.documents,
+    required this.children,
+  });
+
+  factory ParentProfile.fromJson(Map<String, dynamic> j) => ParentProfile(
+    household: HouseholdProfile.fromJson(
+      (j["household"] as Map<String, dynamic>?) ?? const {},
+    ),
+    editableHouseholdFields:
+        ((j["editableHouseholdFields"] as List?) ?? const [])
+            .map((e) => e.toString())
+            .toList(),
+    documents: ((j["documents"] as List?) ?? const [])
+        .map((d) => DocChecklistItem.fromJson(d as Map<String, dynamic>))
+        .toList(),
+    children: ((j["children"] as List?) ?? const [])
+        .map((c) => StudentProfile.fromJson(c as Map<String, dynamic>))
+        .toList(),
+  );
+
+  final HouseholdProfile household;
+  final List<String> editableHouseholdFields;
+  final List<DocChecklistItem> documents;
+  final List<StudentProfile> children;
+}
+
+/// What the server said about an uploaded document.
+class DocumentSubmitResult {
+  const DocumentSubmitResult({
+    required this.doc,
+    required this.message,
+    required this.checkRan,
+    required this.overall,
+    required this.checks,
+  });
+
+  factory DocumentSubmitResult.fromJson(Map<String, dynamic> j) {
+    final v = (j["validation"] as Map<String, dynamic>?) ?? const {};
+    return DocumentSubmitResult(
+      doc: StudentDocInfo.fromJson(
+        (j["doc"] as Map<String, dynamic>?) ?? const {},
+      ),
+      message: (j["message"] as String?) ?? "Submitted for verification.",
+      checkRan: v["ran"] == true,
+      overall: v["overall"] as String?,
+      checks: ((v["checks"] as List?) ?? const [])
+          .map(
+            (c) => (
+              label: (c["label"] as String?) ?? "",
+              status: (c["status"] as String?) ?? "",
+            ),
+          )
+          .toList(),
+    );
+  }
+
+  final StudentDocInfo doc;
+  final String message;
+  final bool checkRan;
+
+  /// likely_match | review | likely_mismatch | unreadable, or null.
+  final String? overall;
+  final List<({String label, String status})> checks;
 }
 
 class FeeLedger {
@@ -2120,6 +2411,60 @@ class ApiClient {
       );
     }
     return ParentCheckout.fromJson(body);
+  }
+
+  // ---- profile & documents ----------------------------------------------
+
+  Future<ParentProfile> fetchProfile() async =>
+      ParentProfile.fromJson(await _getData("/api/v1/profile"));
+
+  /// Only the fields the server lists as editable are sent; it validates
+  /// formats and returns the household as now stored.
+  Future<HouseholdProfile> updateHousehold(Map<String, String> fields) async {
+    final data = await _postData("/api/v1/profile/household", fields);
+    return HouseholdProfile.fromJson(
+      (data["household"] as Map<String, dynamic>?) ?? const {},
+    );
+  }
+
+  /// Upload one document for one child. The server checks the bytes, reads
+  /// the text on it against the child's record, stores it, and marks it
+  /// "pending" for the office. Its message is what the parent should see.
+  Future<DocumentSubmitResult> uploadStudentDocument({
+    required String studentId,
+    required String docKey,
+    required String filePath,
+    required String fileName,
+    required String mimeType,
+  }) async {
+    final req = http.MultipartRequest("POST", _uri("/api/v1/profile/document"));
+    final headers = await _authHeaders();
+    headers.remove("Content-Type");
+    req.headers.addAll(headers);
+    req.fields["studentId"] = studentId;
+    req.fields["docKey"] = docKey;
+    req.files.add(
+      await http.MultipartFile.fromPath(
+        "file",
+        filePath,
+        filename: fileName,
+        contentType: MediaType.parse(mimeType),
+      ),
+    );
+    final streamed = await req.send();
+    final res = await http.Response.fromStream(streamed);
+    if (res.statusCode != 200) _throwFrom(res);
+    final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+    return DocumentSubmitResult.fromJson(
+      (decoded["data"] as Map<String, dynamic>?) ?? const {},
+    );
+  }
+
+  /// Headers for loading a stored document image straight into a widget.
+  Future<Map<String, String>> imageHeaders() async {
+    final h = await _authHeaders();
+    h.remove("Content-Type");
+    return h;
   }
 
   Future<EbookShelf> fetchEbookShelf() async =>

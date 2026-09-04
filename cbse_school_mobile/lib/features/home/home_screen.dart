@@ -1,4 +1,6 @@
 import "package:flutter/material.dart";
+import "package:flutter_svg/flutter_svg.dart";
+import "package:url_launcher/url_launcher.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/config/app_config.dart";
@@ -14,6 +16,7 @@ import "../modules/module_shell.dart";
 import "../modules/notices_screen.dart";
 import "../modules/ptm_screen.dart";
 import "../modules/transport_screen.dart";
+import "../profile/profile_screen.dart";
 import "home_stats.dart";
 import "student_id_screen.dart";
 
@@ -130,6 +133,8 @@ class _HomeScreenState extends State<HomeScreen> {
         _openModule("Leave", child);
       case "/complaints":
         _openModule("Complaints", child);
+      case "/profile":
+        _openProfile();
       case "/chat":
         Navigator.of(context).push(
           MaterialPageRoute(
@@ -194,6 +199,25 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) widget.onLogout();
   }
 
+  /// Hands off to WhatsApp with the greeting the school's bot answers. The
+  /// bot recognises the parent by the number they message from, which is
+  /// why the card says to use the registered mobile.
+  Future<void> _openWhatsApp(SchoolWhatsApp contact) async {
+    final uri = Uri.tryParse(contact.chatUrl);
+    final ok =
+        uri != null &&
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            "Could not open WhatsApp. The school's number is ${contact.display}.",
+          ),
+        ),
+      );
+    }
+  }
+
   void _openModule(String label, ParentChild child) {
     final api = widget.api;
     Widget? screen;
@@ -236,53 +260,10 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _showProfile(ParentSummary summary, ParentChild child) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                summary.guardianName,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.ink,
-                ),
-              ),
-              const SizedBox(height: 4),
-              for (final c in summary.children)
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Text(
-                    "${c.fullName} — ${c.classLabel}\nAdmission no. ${c.admissionNo}",
-                    style: const TextStyle(
-                      fontSize: 12.5,
-                      color: AppColors.muted,
-                      height: 1.4,
-                    ),
-                  ),
-                ),
-              const SizedBox(height: 16),
-              OutlinedButton.icon(
-                onPressed: () {
-                  Navigator.pop(context);
-                  _signOut();
-                },
-                icon: const Icon(Icons.logout, size: 18),
-                label: const Text("Sign out"),
-              ),
-            ],
-          ),
-        ),
+  void _openProfile() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ProfileScreen(api: widget.api, onSignOut: _signOut),
       ),
     );
   }
@@ -408,6 +389,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   const SizedBox(height: 10),
                   _ModuleGrid(onTap: (label) => _openModule(label, child)),
                   const SizedBox(height: 12),
+                  if (summary.schoolWhatsApp != null) ...[
+                    _WhatsAppCard(
+                      contact: summary.schoolWhatsApp!,
+                      onOpen: () => _openWhatsApp(summary.schoolWhatsApp!),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
                   Card(
                     child: ListTile(
                       onTap: () => Navigator.of(context).push(
@@ -475,7 +463,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               );
             case 3:
-              _showProfile(summary, child);
+              _openProfile();
           }
         },
         destinations: const [
@@ -912,6 +900,50 @@ class _ModuleGrid extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// "Chat with the school on WhatsApp" — the same bot parents already use
+/// for dues, receipts and UPI payment, one tap from the app.
+class _WhatsAppCard extends StatelessWidget {
+  const _WhatsAppCard({required this.contact, required this.onOpen});
+
+  final SchoolWhatsApp contact;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        onTap: onOpen,
+        leading: Container(
+          width: 40,
+          height: 40,
+          padding: const EdgeInsets.all(9),
+          decoration: BoxDecoration(
+            // WhatsApp's own brand green, so the card reads as WhatsApp at
+            // a glance; the glyph is the official mark in white.
+            color: const Color(0xFF25D366),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: SvgPicture.asset("assets/icons/whatsapp.svg"),
+        ),
+        title: const Text(
+          "Chat with the school on WhatsApp",
+          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        ),
+        subtitle: Text(
+          "${contact.display} · dues, receipts, pay by UPI, or ask for a "
+          "person. Message from the mobile registered with the school.",
+          style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
+        ),
+        trailing: const Icon(
+          Icons.open_in_new,
+          color: AppColors.muted,
+          size: 18,
+        ),
+      ),
     );
   }
 }

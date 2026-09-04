@@ -24,6 +24,9 @@ dependencies:
   flutter_local_notifications: ^19.0.0
   package_info_plus: ^9.0.0
   flutter_background_service: ^5.1.0
+  flutter_svg: ^2.3.0
+  http_parser: ^4.1.2
+  file_selector: ^1.1.0
 
 dev_dependencies:
   flutter_test:
@@ -35,6 +38,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/images/logo-crest.png
+    - assets/icons/whatsapp.svg
 
 flutter_launcher_icons:
   android: true
