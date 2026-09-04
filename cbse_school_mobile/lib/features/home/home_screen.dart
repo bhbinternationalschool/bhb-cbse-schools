@@ -19,6 +19,7 @@ import "../modules/module_shell.dart";
 import "../modules/notices_screen.dart";
 import "../modules/ptm_screen.dart";
 import "../modules/receipts_screen.dart";
+import "../modules/teachers_screen.dart";
 import "../modules/transport_screen.dart";
 import "../modules/tutor_screen.dart";
 import "../profile/profile_screen.dart";
@@ -440,6 +441,23 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                           const SizedBox(height: 10),
                         ],
+                        _ActionCard(
+                          tone: ModuleTone.green,
+                          icon: Icons.forum_outlined,
+                          title: "Message a teacher · 8 AM – 8 PM",
+                          subtitle:
+                              "Class and subject teachers, in app or on WhatsApp through the school",
+                          onTap: () {
+                            Haptics.tap();
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    TeachersScreen(api: widget.api, child: child),
+                              ),
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 10),
                         _ActionCard(
                           tone: ModuleTone.blue,
                           icon: Icons.qr_code_2,

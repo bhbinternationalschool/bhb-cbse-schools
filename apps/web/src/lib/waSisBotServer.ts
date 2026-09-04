@@ -1,3 +1,4 @@
+import { parseTeacherWaText, teacherRelayAck } from "@/lib/teacherContact";
 /**
  * Server WhatsApp bot for SIS parents (enrolled households).
  */
@@ -637,6 +638,26 @@ export async function handleWaSisBotInbound(opts: {
     by: thread.parentName || "Parent",
     waMessageId: opts.waMessageId,
   };
+
+  // ── A message for a teacher, pre-addressed by the app ("Ref: T:…"):
+  // relay it through the school within hours, hold it after 8 PM. ──
+  const relay = parseTeacherWaText(text);
+  if (relay) {
+    const child = childrenOf(hh).find((s) => s.id === relay.studentId);
+    const hindi = (hh.preferredLanguage || "") !== "" && hh.preferredLanguage !== "en";
+    if (!child) {
+      return finishLanguageFlow(store, thread, parentMsg, hindi ? "यह बच्चा आपके परिवार में दर्ज नहीं है। कृपया ऐप से दोबारा भेजें।" : "That child is not on your family's record. Please send again from the app.");
+    }
+    if (!relay.message) {
+      return finishLanguageFlow(store, thread, parentMsg, hindi ? "कृपया अपना संदेश 'Ref' वाली पंक्ति के नीचे लिखकर भेजें।" : "Please type your message below the 'Ref' line and send again.");
+    }
+    const { relayTeacherMessage } = await import("@/lib/teacherContact.server");
+    const r = await relayTeacherMessage({ household: hh, student: child, staffId: relay.staffId, body: relay.message, channel: "whatsapp" });
+    const ack = r.ok
+      ? teacherRelayAck({ teacherName: r.teacherName, open: r.via !== "held", hindi })
+      : hindi ? `संदेश नहीं भेजा जा सका: ${r.error}` : `Could not send: ${r.error}`;
+    return finishLanguageFlow(store, thread, parentMsg, ack);
+  }
 
   const isGreeting =
     !opts.fromUnified &&

@@ -1,4 +1,5 @@
 import "package:flutter/material.dart";
+import "package:flutter_secure_storage/flutter_secure_storage.dart";
 import "package:url_launcher/url_launcher.dart";
 
 import "../../core/api/api_client.dart";
@@ -95,11 +96,48 @@ class _TutorScreenState extends State<TutorScreen> {
   final _scroll = ScrollController();
   bool _busy = false;
 
+  static const _guideSeenKey = "tutor_guide_seen_v1";
+
   @override
   void initState() {
     super.initState();
     _load();
+    _maybeShowGuide();
   }
+
+  /// The tuition guide opens by itself the first time a family opens the
+  /// tutor, and lives behind the ? in the app bar after that.
+  Future<void> _maybeShowGuide() async {
+    const storage = FlutterSecureStorage();
+    String? seen;
+    try {
+      seen = await storage.read(key: _guideSeenKey);
+    } catch (_) {
+      seen = "1";
+    }
+    if (seen != null || !mounted) return;
+    await Future<void>.delayed(const Duration(milliseconds: 600));
+    if (!mounted) return;
+    await _showGuide();
+    try {
+      await storage.write(key: _guideSeenKey, value: "1");
+    } catch (_) {
+      /* a phone that refuses storage just sees it again next time */
+    }
+  }
+
+  Future<void> _showGuide() => showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.white,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
+    builder: (context) => _GuideSheet(
+      hindi: _language != "en",
+      childFirstName: widget.context.child.fullName.split(" ").first,
+    ),
+  );
 
   @override
   void dispose() {
@@ -300,14 +338,14 @@ class _TutorScreenState extends State<TutorScreen> {
           ],
         ),
         actions: [
-          if (status != null)
-            _LanguageToggle(
-              language: _language,
-              onChanged: (v) {
-                Haptics.tap();
-                setState(() => _language = v);
-              },
-            ),
+          IconButton(
+            tooltip: "How to use the tutor",
+            onPressed: () {
+              Haptics.tap();
+              _showGuide();
+            },
+            icon: const Icon(Icons.help_outline),
+          ),
           if (status != null)
             TextButton.icon(
               onPressed: () => _showPasses(),
@@ -362,6 +400,37 @@ class _TutorScreenState extends State<TutorScreen> {
             : Column(
                 key: const ValueKey("chat"),
                 children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      Space.xl,
+                      Space.sm,
+                      Space.lg,
+                      0,
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            _language == "en"
+                                ? "Reply language"
+                                : "उत्तर की भाषा · Reply language",
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppColors.muted,
+                            ),
+                          ),
+                        ),
+                        _LanguageToggle(
+                          language: _language,
+                          dark: false,
+                          onChanged: (v) {
+                            Haptics.tap();
+                            setState(() => _language = v);
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
                   _ModeBar(
                     modes: status.modes,
                     selected: _mode,
@@ -375,7 +444,14 @@ class _TutorScreenState extends State<TutorScreen> {
                   _AllowanceStrip(allowance: status.allowance, mode: _modeInfo),
                   Expanded(
                     child: _messages.isEmpty
-                        ? _Welcome(mode: _modeInfo, note: status.note)
+                        ? _Welcome(
+                            mode: _modeInfo,
+                            note: status.note,
+                            onGuide: () {
+                              Haptics.tap();
+                              _showGuide();
+                            },
+                          )
                         : ListView.builder(
                             controller: _scroll,
                             padding: const EdgeInsets.fromLTRB(
@@ -538,10 +614,11 @@ class _AllowanceStrip extends StatelessWidget {
 }
 
 class _Welcome extends StatelessWidget {
-  const _Welcome({required this.mode, required this.note});
+  const _Welcome({required this.mode, required this.note, this.onGuide});
 
   final TutorModeInfo? mode;
   final String note;
+  final VoidCallback? onGuide;
 
   @override
   Widget build(BuildContext context) {
@@ -578,6 +655,15 @@ class _Welcome extends StatelessWidget {
             ],
           ),
         ),
+        const SizedBox(height: Space.md),
+        if (onGuide != null)
+          OutlinedButton.icon(
+            onPressed: onGuide,
+            icon: const Icon(Icons.menu_book_outlined, size: 18),
+            label: const Text(
+              "How to use the tutor as daily tuition · रोज़ की ट्यूशन कैसे करें",
+            ),
+          ),
         const SizedBox(height: Space.lg),
         Text(
           note,
@@ -1014,10 +1100,17 @@ class _PlanTile extends StatelessWidget {
 /// हिं / EN — the reply language. Sits in the app bar so a parent who does
 /// not read English finds it before typing anything.
 class _LanguageToggle extends StatelessWidget {
-  const _LanguageToggle({required this.language, required this.onChanged});
+  const _LanguageToggle({
+    required this.language,
+    required this.onChanged,
+    this.dark = true,
+  });
 
   final String language;
   final void Function(String) onChanged;
+
+  /// On the navy app bar (light text) or on the page (ink text).
+  final bool dark;
 
   @override
   Widget build(BuildContext context) {
@@ -1038,7 +1131,11 @@ class _LanguageToggle extends StatelessWidget {
             style: TextStyle(
               fontSize: 12.5,
               fontWeight: FontWeight.w700,
-              color: on ? AppColors.primary : Colors.white,
+              color: on
+                  ? AppColors.primary
+                  : dark
+                  ? Colors.white
+                  : AppColors.ink,
             ),
           ),
         ),
@@ -1049,7 +1146,9 @@ class _LanguageToggle extends StatelessWidget {
       margin: const EdgeInsets.only(right: 4),
       padding: const EdgeInsets.all(2),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.14),
+        color: dark
+            ? Colors.white.withValues(alpha: 0.14)
+            : AppColors.ink.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(16),
       ),
       child: Row(
@@ -1255,6 +1354,191 @@ class _VideoTile extends StatelessWidget {
             const Padding(
               padding: EdgeInsets.only(right: 8),
               child: Icon(Icons.play_circle_fill, color: AppColors.danger),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The tuition routine, in the parent's language: what to do each day
+/// with the tutor instead of paying for a tuition teacher.
+class _GuideSheet extends StatelessWidget {
+  const _GuideSheet({required this.hindi, required this.childFirstName});
+
+  final bool hindi;
+  final String childFirstName;
+
+  @override
+  Widget build(BuildContext context) {
+    final n = childFirstName;
+    final steps = hindi
+        ? <(IconData, String, String)>[
+            (
+              Icons.menu_book_outlined,
+              "1. आज का पाठ (10 मिनट)",
+              "\"Teach a topic\" चुनें और आज स्कूल में पढ़ाया विषय लिखें — जैसे \"भिन्न\"। ट्यूटर $n की कक्षा के स्तर पर छोटा पाठ देगा।",
+            ),
+            (
+              Icons.functions,
+              "2. हल किए उदाहरण (5 मिनट)",
+              "\"Worked examples\" में वही विषय लिखें। हर कदम दिखेगा — $n के साथ बैठकर पढ़ें।",
+            ),
+            (
+              Icons.edit_note,
+              "3. अभ्यास (10 मिनट)",
+              "\"Practice questions\" से 5 प्रश्न लें। $n उन्हें कॉपी में हल करे — उत्तर तब तक नहीं दिखेंगे।",
+            ),
+            (
+              Icons.fact_check_outlined,
+              "4. उत्तर जाँच (5 मिनट)",
+              "\"Check answers\" में प्रश्न और $n के उत्तर लिखें। अंक और क्या सुधारना है, दोनों मिलेंगे।",
+            ),
+            (
+              Icons.home_work_outlined,
+              "5. होमवर्क",
+              "Homework स्क्रीन पर किसी भी काम के आगे \"Ask tutor\" दबाएँ — वह काम ट्यूटर के सामने पहले से होगा।",
+            ),
+            (
+              Icons.event_available_outlined,
+              "6. परीक्षा से पहले",
+              "\"Exam preparation\" में विषय और तारीख लिखें — दोहराने की सूची, दिन-वार योजना और संभावित प्रश्न मिलेंगे।",
+            ),
+            (
+              Icons.play_circle_outline,
+              "7. समझ न आए तो वीडियो",
+              "हर उत्तर के नीचे \"वीडियो देखें\" — उसी विषय के हिंदी वीडियो, ऐप के अंदर ही चलते हैं।",
+            ),
+            (
+              Icons.lightbulb_outline,
+              "मुफ़्त संकेत",
+              "\"Hints\" रोज़ 20 बार मुफ़्त हैं — जब $n अटके तो अगला कदम पूछें। पूरा ट्यूटर पास से खुलता है: एक दिन, हफ़्ता या महीना, एक बच्चे के लिए।",
+            ),
+          ]
+        : <(IconData, String, String)>[
+            (
+              Icons.menu_book_outlined,
+              "1. Today's lesson (10 min)",
+              "Choose \"Teach a topic\" and type what was taught in school today, e.g. \"fractions\". The tutor gives a short lesson at $n's class level.",
+            ),
+            (
+              Icons.functions,
+              "2. Worked examples (5 min)",
+              "In \"Worked examples\", type the same topic. Every step is shown — read them with $n.",
+            ),
+            (
+              Icons.edit_note,
+              "3. Practice (10 min)",
+              "\"Practice questions\" gives 5 questions. $n solves them in a notebook — answers stay hidden until you ask.",
+            ),
+            (
+              Icons.fact_check_outlined,
+              "4. Check answers (5 min)",
+              "In \"Check answers\", type the questions with $n's answers. You get marks and what to fix.",
+            ),
+            (
+              Icons.home_work_outlined,
+              "5. Homework",
+              "On the Homework screen, tap \"Ask tutor\" next to any item — that assignment is already in front of the tutor.",
+            ),
+            (
+              Icons.event_available_outlined,
+              "6. Before a test",
+              "In \"Exam preparation\", type the subject and date — you get a revision list, a day-wise plan and likely questions.",
+            ),
+            (
+              Icons.play_circle_outline,
+              "7. Stuck? Watch a video",
+              "Under every reply, \"Watch videos\" finds videos on that topic and plays them inside the app.",
+            ),
+            (
+              Icons.lightbulb_outline,
+              "Free hints",
+              "\"Hints\" are free, 20 a day — when $n is stuck, ask for the next step. The full tutor opens with a pass: a day, a week or a month, for one child.",
+            ),
+          ];
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.86,
+      maxChildSize: 0.95,
+      builder: (context, controller) => SafeArea(
+        child: ListView(
+          controller: controller,
+          padding: Insets.sheet,
+          children: [
+            Text(
+              hindi
+                  ? "ट्यूशन की ज़रूरत नहीं — ट्यूटर से रोज़ 30 मिनट"
+                  : "No tuition needed — 30 minutes a day with the tutor",
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: AppColors.ink,
+                height: 1.3,
+              ),
+            ),
+            const SizedBox(height: Space.xs),
+            Text(
+              hindi
+                  ? "$n के साथ बैठें, यह क्रम रोज़ दोहराएँ। ट्यूटर उसकी कक्षा (CBSE) के हिसाब से पढ़ाता है, हिंदी या अंग्रेज़ी में।"
+                  : "Sit with $n and follow this routine every day. The tutor teaches at $n's class level (CBSE), in Hindi or English.",
+              style: const TextStyle(
+                fontSize: 13,
+                color: AppColors.muted,
+                height: 1.45,
+              ),
+            ),
+            const SizedBox(height: Space.lg),
+            for (final (icon, title, body) in steps) ...[
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: ModuleTone.amber.background,
+                      borderRadius: BorderRadius.circular(11),
+                    ),
+                    child: Icon(
+                      icon,
+                      size: 19,
+                      color: ModuleTone.amber.foreground,
+                    ),
+                  ),
+                  const SizedBox(width: Space.md),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.ink,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          body,
+                          style: const TextStyle(
+                            fontSize: 12.5,
+                            color: AppColors.ink,
+                            height: 1.45,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: Space.lg),
+            ],
+            FilledButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(hindi ? "समझ गया, शुरू करें" : "Got it, let's start"),
             ),
           ],
         ),

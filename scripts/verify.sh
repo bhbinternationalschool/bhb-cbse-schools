@@ -184,6 +184,7 @@ SELFTESTS=(
   test:ai-stream
   test:tutor-plans
   test:cashfree-checkout
+  test:teacher-contact
   test:question-bank
   test:rbac-infer
   test:rbac-scope

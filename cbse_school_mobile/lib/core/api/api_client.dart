@@ -2601,6 +2601,19 @@ class ApiClient {
   /// carry text slices, one [TutorDone] closes the reply. A refusal (the
   /// allowance is spent) surfaces as a [TutorRefused] exception so the
   /// screen can offer passes; anything else is an [ApiException].
+  /// A child's class and subject teachers, the school's contact hours,
+  /// and per-teacher WhatsApp links that go to the SCHOOL's number with
+  /// the message pre-addressed (the school relays it; teachers' own
+  /// numbers are never shown). Links come only while the window is open.
+  Future<TeacherContacts> fetchTeacherContacts({
+    required String studentId,
+    bool hindi = false,
+  }) async => TeacherContacts.fromJson(
+    await _getData(
+      "/api/v1/teachers/contacts?studentId=${Uri.encodeQueryComponent(studentId)}${hindi ? "&lang=hi" : ""}",
+    ),
+  );
+
   /// YouTube videos for a topic at the child's class level — a search,
   /// not the tutor, so no pass is needed. Falls back to a search link
   /// when the school has no YouTube API key.
@@ -3578,4 +3591,75 @@ class TutorBuyResult {
   final String planLabel;
   final String amountLabel;
   final String checkoutUrl;
+}
+
+
+/* ─── Teacher contacts ─────────────────────────────────────────────── */
+
+class TeacherContact {
+  const TeacherContact({
+    required this.staffId,
+    required this.name,
+    required this.role,
+    required this.isClassTeacher,
+    required this.chatInApp,
+    required this.waUrl,
+  });
+
+  factory TeacherContact.fromJson(Map<String, dynamic> j) => TeacherContact(
+    staffId: (j["staffId"] as String?) ?? "",
+    name: (j["name"] as String?) ?? "",
+    role: (j["role"] as String?) ?? "",
+    isClassTeacher: j["isClassTeacher"] == true,
+    chatInApp: j["chatInApp"] == true,
+    waUrl: (j["waUrl"] as String?) ?? "",
+  );
+
+  final String staffId;
+  final String name;
+  final String role;
+  final bool isClassTeacher;
+  final bool chatInApp;
+  /// Empty outside the school's contact hours.
+  final String waUrl;
+}
+
+class TeacherContacts {
+  const TeacherContacts({
+    required this.studentName,
+    required this.classLabel,
+    required this.hoursLabel,
+    required this.hoursOpen,
+    required this.hoursNote,
+    required this.schoolWhatsAppDisplay,
+    required this.teachers,
+  });
+
+  factory TeacherContacts.fromJson(Map<String, dynamic> j) {
+    final st = Map<String, dynamic>.from((j["student"] as Map?) ?? const {});
+    final h = Map<String, dynamic>.from((j["hours"] as Map?) ?? const {});
+    final w = j["whatsapp"] is Map
+        ? Map<String, dynamic>.from(j["whatsapp"] as Map)
+        : const <String, dynamic>{};
+    return TeacherContacts(
+      studentName: (st["name"] as String?) ?? "",
+      classLabel: (st["classLabel"] as String?) ?? "",
+      hoursLabel: (h["label"] as String?) ?? "8 AM – 8 PM",
+      hoursOpen: h["open"] == true,
+      hoursNote: (h["note"] as String?) ?? "",
+      schoolWhatsAppDisplay: (w["display"] as String?) ?? "",
+      teachers: [
+        for (final t in (j["teachers"] as List? ?? const []))
+          TeacherContact.fromJson(Map<String, dynamic>.from(t as Map)),
+      ],
+    );
+  }
+
+  final String studentName;
+  final String classLabel;
+  final String hoursLabel;
+  final bool hoursOpen;
+  final String hoursNote;
+  final String schoolWhatsAppDisplay;
+  final List<TeacherContact> teachers;
 }
