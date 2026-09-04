@@ -19,6 +19,7 @@
     "test:lesson-plan-ai": "npx tsx src/lib/lessonPlanAi.selftest.ts",
     "test:household-prefs": "npx tsx src/lib/householdPrefs.selftest.ts",
     "test:ptm-brief-ai": "npx tsx src/lib/ptmBriefAi.selftest.ts",
+    "test:parent-tickets": "npx tsx src/lib/parentTickets.selftest.ts",
     "test:academic-risk": "npx tsx src/lib/academicRisk.selftest.ts",
     "test:item-analytics": "npx tsx src/lib/itemAnalytics.selftest.ts",
     "test:question-bank": "npx tsx src/lib/questionBank.selftest.ts",

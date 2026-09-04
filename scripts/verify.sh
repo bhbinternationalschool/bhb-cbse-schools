@@ -172,6 +172,7 @@ SELFTESTS=(
   test:outdoor-duty-staff-id
   test:payroll-register
   test:ptm-brief-ai
+  test:parent-tickets
   test:question-bank
   test:rbac-infer
   test:rbac-scope

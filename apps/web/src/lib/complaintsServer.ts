@@ -10,11 +10,15 @@
  */
 
 import { loadWaBotSlice, saveWaBotSlice } from "@/lib/waBotStore.server";
-import type {
-  ComplaintCategory,
-  ComplaintStatus,
-  ComplaintTicket,
+import {
+  mergeTicketsForHousehold,
+  normalizeComplaintState,
+  type ComplaintCategory,
+  type ComplaintSource,
+  type ComplaintStatus,
+  type ComplaintTicket,
 } from "@/lib/complaints";
+import { getServerTenantContext } from "@/lib/serverTenant";
 
 type ServerComplaintStore = { version: 1; tickets: ComplaintTicket[] };
 
@@ -46,7 +50,8 @@ export async function listServerComplaintTickets(): Promise<
   return store.tickets;
 }
 
-/** Append a WhatsApp-submitted ticket. Mirrors createComplaintTicket's
+/** Append a ticket raised without a browser — WhatsApp Flow (the default
+ * source) or the parent app. Mirrors createComplaintTicket's
  * shape/validation so both paths produce interchangeable ComplaintTicket
  * rows the browser-side workspace can merge without special-casing. */
 export async function appendServerComplaintTicket(input: {
@@ -57,6 +62,7 @@ export async function appendServerComplaintTicket(input: {
   category: ComplaintCategory;
   subject: string;
   description: string;
+  source?: ComplaintSource;
 }): Promise<{ ok: true; ticket: ComplaintTicket } | { ok: false; error: string }> {
   if (!input.householdId) return { ok: false, error: "Missing household" };
   if (!input.subject.trim()) return { ok: false, error: "Subject required" };
@@ -80,7 +86,7 @@ export async function appendServerComplaintTicket(input: {
     status: "open" as ComplaintStatus,
     resolutionNote: "",
     resolvedAt: null,
-    source: "whatsapp",
+    source: input.source ?? "whatsapp",
     createdAt: now,
     updatedAt: now,
   };
@@ -89,4 +95,37 @@ export async function appendServerComplaintTicket(input: {
     tickets: [ticket, ...store.tickets],
   });
   return { ok: true, ticket };
+}
+
+/**
+ * The office's triaged copy of the complaints module (module_local_state).
+ * Null when the row cannot be read — unknown, not empty — so a caller can
+ * refuse rather than tell a parent they have no complaints.
+ */
+async function readOfficeComplaintTickets(): Promise<ComplaintTicket[] | null> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return null;
+  const { data, error } = await ctx.sb
+    .from("module_local_state")
+    .select("state")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("module_key", "complaints")
+    .maybeSingle();
+  if (error) {
+    console.warn("[complaints] office state read failed", error.message);
+    return null;
+  }
+  return normalizeComplaintState(data?.state ?? null).tickets;
+}
+
+/** Everything one household has raised, wherever it currently lives. */
+export async function listHouseholdComplaintTickets(
+  householdId: string,
+): Promise<ComplaintTicket[] | null> {
+  const [office, intake] = await Promise.all([
+    readOfficeComplaintTickets(),
+    listServerComplaintTickets(),
+  ]);
+  if (office === null) return null;
+  return mergeTicketsForHousehold(office, intake, householdId);
 }

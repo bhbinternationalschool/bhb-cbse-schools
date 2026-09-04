@@ -272,3 +272,22 @@ export function listTicketsForHousehold(state: ComplaintState, householdId: stri
     .filter((t) => t.householdId === householdId)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
+
+/**
+ * One household's tickets from the two places a ticket can live.
+ *
+ * The office's copy (module_local_state "complaints") is where triage
+ * happens — assignment, status, resolution — so it wins by id. The server
+ * intake store (WhatsApp Flow and the parent app) holds tickets the office
+ * has not merged yet; those show as raised, status "open". Newest first.
+ */
+export function mergeTicketsForHousehold(
+  office: ComplaintTicket[],
+  intake: ComplaintTicket[],
+  householdId: string,
+): ComplaintTicket[] {
+  const byId = new Map<string, ComplaintTicket>();
+  for (const t of intake) if (t.householdId === householdId) byId.set(t.id, t);
+  for (const t of office) if (t.householdId === householdId) byId.set(t.id, t);
+  return [...byId.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
