@@ -1213,8 +1213,7 @@ function buildPatch(
     // Only flag a change when the student isn't already verified by UDISE+.
     if (student.aadhaarVerification !== "verified_udise") {
       will.aadhaarVerification = "verified_udise";
-      // Aadhaar now govt-verified — drop any stored full number if present.
-      if (student.aadhaarNumber) will.aadhaarNumber = "";
+      // The full number, when the office has it, stays on the record.
       if (!will.aadhaarLast4 && student.aadhaarLast4 !== a4) will.aadhaarLast4 = a4;
     }
   } else if (
@@ -2418,7 +2417,7 @@ export function markStudentVerifiedFromUdise(input: {
     penStatus: pen ? "has_pen" : cur.penStatus,
     apaarId: apaar || cur.apaarId,
     aadhaarLast4: a4 || cur.aadhaarLast4,
-    aadhaarNumber: "",
+    aadhaarNumber: cur.aadhaarNumber,
     aadhaarVerification: "verified_udise",
     notes: [
       cur.notes,
