@@ -133,6 +133,14 @@ create_job "bhb-birthday-tick" "5 * * * *" \
   "${APP_URL}/api/birthday/tick" \
   "Asia/Kolkata" "300s"
 
+# ERP command desk: the director's end-of-day digest of what staff asked the
+# ERP over WhatsApp / app / assistant. Sends once after ERP_COMMANDS_DIGEST_HOUR
+# (default 19:00 IST), only on days with commands; idempotent per date, so the
+# three evening attempts cover a cold start or a late command.
+create_job "bhb-erp-commands-digest-tick" "20 19-21 * * *" \
+  "${APP_URL}/api/erp-commands/digest/tick" \
+  "Asia/Kolkata" "120s"
+
 # Receipt archive: a PDF of every fee receipt into the school's Google Drive
 # (Receipts / <academic year> / <month>).
 #

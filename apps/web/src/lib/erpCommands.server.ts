@@ -103,6 +103,8 @@ type CommandStore = {
   pausedAt: string;
   pending: Record<string, PendingErpConfirm>;
   usage: Record<string, number[]>;
+  /** IST date the director's daily digest last went out for. */
+  digestSentFor?: string;
 };
 
 let memoryStore: CommandStore = {
@@ -131,6 +133,21 @@ async function writeStore(store: CommandStore): Promise<void> {
   memoryStore = store;
   const { saveWaBotSlice } = await import("@/lib/waBotStore.server");
   await saveWaBotSlice("commands", store);
+}
+
+/** Pause state and digest bookkeeping, for the daily digest job. */
+export async function readCommandDeskState(): Promise<{
+  paused: boolean;
+  pausedBy: string;
+  digestSentFor: string | null;
+}> {
+  const st = await readStore();
+  return { paused: st.paused, pausedBy: st.pausedBy, digestSentFor: st.digestSentFor ?? null };
+}
+
+export async function markCommandDigestSent(date: string): Promise<void> {
+  const st = await readStore();
+  await writeStore({ ...st, digestSentFor: date });
 }
 
 /** Env kill switch — `ERP_WA_COMMANDS=off` disables the branch entirely. */
@@ -350,6 +367,24 @@ export async function handleErpStaffCommand(
   const [masters, rbac] = await Promise.all([loadServerMasters(), loadServerRbac()]);
   const session = staffSessionFor(inbound.staff, masters);
   const allowed = allowedCommandsFor(session, masters, rbac);
+
+  if (command.id === "commands_digest") {
+    if (inbound.flow !== "owner") {
+      void audit(session, command, parsed.fields, text, "denied", {
+        reason: "rbac",
+        channel: inbound.channel,
+      });
+      return {
+        handled: true,
+        audience: "erp_command_denied",
+        text: "The command desk report is for the director.",
+      };
+    }
+    const { composeCommandDigestForDate } = await import("@/lib/erpCommandsDigest.server");
+    const digest = await composeCommandDigestForDate(todayIso);
+    void audit(session, command, parsed.fields, text, "ok", { channel: inbound.channel });
+    return { handled: true, audience: "erp_command_commands_digest", text: digest.text };
+  }
 
   if (command.id === "help") {
     return {
