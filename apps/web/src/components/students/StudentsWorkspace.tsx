@@ -59,8 +59,15 @@ import {
   StudentAvatar,
   StudentNameLabel,
 } from "@/components/students/StudentAvatar";
-import { FilterExportButtons } from "@/components/reports/FilterExportButtons";
-import { describeFilters } from "@/lib/reportExport";
+import { describeFilters, downloadPdfReport, downloadXlsxReport } from "@/lib/reportExport";
+import {
+  BulkActionBar,
+  ExportMenu,
+  RowActionMenu,
+  RowCheckbox,
+  useRowSelection,
+} from "@/components/ui/erp-grid";
+import { openWaMe } from "@/lib/waMe";
 import {
   STUDENT_REGISTER_EXPORT_COLUMNS,
   studentToRegisterExportRow,
@@ -709,6 +716,9 @@ export function StudentsWorkspace() {
     if (state?.students.some((s) => s.id === selectedId)) return;
     setSelectedId(filtered[0]!.id);
   }, [filtered, selectedId, state]);
+
+  const rosterKeys = useMemo(() => filtered.map((s) => s.id), [filtered]);
+  const rosterSelection = useRowSelection(rosterKeys);
 
   const exportRows = useMemo(() => {
     if (!masters || !state) return [];
@@ -1390,13 +1400,13 @@ export function StudentsWorkspace() {
               {sortOrder === "asc" ? "↑ Asc" : "↓ Desc"}
             </button>
           </div>
-          <FilterExportButtons
+          <ExportMenu
             title="Student register (full form)"
             subtitle={`${TENANT.shortName} · ${headerAy}`}
             filterNote={exportFilterNote}
             fileBaseName="students_full_register"
             columns={STUDENT_REGISTER_EXPORT_COLUMNS}
-            rows={exportRows}
+            rows={() => exportRows}
             onMessage={(msg) => {
               setNotice(msg);
               window.setTimeout(() => setNotice(null), 2200);
@@ -1597,9 +1607,139 @@ export function StudentsWorkspace() {
 
       <div className="mt-5 grid gap-5 lg:grid-cols-[1.2fr_0.8fr]">
         <div>
-          <div className="mb-2 text-sm font-semibold text-[var(--brand-deep)]">
+          <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-[var(--brand-deep)]">
+            <RowCheckbox
+              checked={rosterSelection.allSelected(rosterKeys)}
+              indeterminate={rosterSelection.someSelected(rosterKeys)}
+              onChange={() => rosterSelection.toggleAll(rosterKeys)}
+              label="Select every student shown"
+            />
             Register · {filtered.length} (all matches)
+            {rosterSelection.count ? (
+              <span className="text-xs font-normal text-[var(--muted)]">· {rosterSelection.count} selected</span>
+            ) : null}
           </div>
+
+          <BulkActionBar
+            selection={rosterSelection}
+            noun="student"
+            actions={[
+              {
+                id: "activate",
+                label: "Mark active",
+                onRun: (ids) => {
+                  const picked = new Set(ids);
+                  const next = {
+                    ...sis,
+                    students: sis.students.map((st) =>
+                      picked.has(st.id) && st.status !== "active" ? { ...st, status: "active" as const } : st,
+                    ),
+                  };
+                  commit(next, `${ids.length} student(s) marked active`);
+                  rosterSelection.clear();
+                },
+              },
+              {
+                id: "inactivate",
+                label: "Mark inactive",
+                onRun: (ids) => {
+                  const picked = new Set(ids);
+                  const next = {
+                    ...sis,
+                    students: sis.students.map((st) =>
+                      picked.has(st.id) && st.status === "active" ? { ...st, status: "inactive" as const } : st,
+                    ),
+                  };
+                  commit(next, `${ids.length} student(s) marked inactive`);
+                  rosterSelection.clear();
+                },
+              },
+              {
+                id: "wa",
+                label: "Send WhatsApp",
+                title: "Opens WhatsApp to each selected family's guardian mobile (12 per click)",
+                onRun: (ids) => {
+                  const text = window.prompt(
+                    "Message to the families:",
+                    "Namaste, this is a message from BHB International School.",
+                  );
+                  if (!text) return;
+                  const picked = new Set(ids);
+                  const seen = new Set<string>();
+                  let opened = 0;
+                  for (const st of sis.students) {
+                    if (!picked.has(st.id) || opened >= 12) continue;
+                    const mob = householdOf(sis, st.householdId)?.mobile ?? "";
+                    if (!mob || seen.has(mob)) continue;
+                    seen.add(mob);
+                    openWaMe(mob, text);
+                    opened += 1;
+                  }
+                  setNotice(`Opened WhatsApp for ${opened} famil${opened === 1 ? "y" : "ies"}`);
+                  window.setTimeout(() => setNotice(null), 2800);
+                },
+              },
+              {
+                id: "pdf",
+                label: "Register PDF",
+                onRun: async (ids) => {
+                  const picked = new Set(ids);
+                  const rows = filtered
+                    .filter((st) => picked.has(st.id))
+                    .map((st) => studentToRegisterExportRow(st, sis, m));
+                  await downloadPdfReport({
+                    title: "Student register (selected)",
+                    subtitle: `${TENANT.shortName} · ${headerAy}`,
+                    columns: STUDENT_REGISTER_EXPORT_COLUMNS,
+                    rows,
+                    fileBaseName: "students_selected",
+                  });
+                },
+              },
+              {
+                id: "udise",
+                label: "UDISE+ sheet (Excel)",
+                title: "PEN, APAAR, Aadhaar, parents and DOB of the selected pupils, ready for the portal",
+                onRun: async (ids) => {
+                  const picked = new Set(ids);
+                  const rows = filtered
+                    .filter((st) => picked.has(st.id))
+                    .map((st) => ({
+                      admissionNo: st.admissionNo,
+                      name: st.fullName,
+                      class: classSectionOf(st),
+                      gender: st.gender,
+                      dob: st.dob,
+                      pen: st.pen,
+                      apaar: st.apaarId,
+                      aadhaarLast4: st.aadhaarLast4 || (st.aadhaarNumber || "").slice(-4),
+                      father: st.fatherName,
+                      mother: st.motherName,
+                      mobile: householdOf(sis, st.householdId)?.mobile ?? "",
+                    }));
+                  await downloadXlsxReport({
+                    title: "UDISE+ mapping sheet",
+                    subtitle: `${TENANT.shortName} · ${headerAy}`,
+                    columns: [
+                      { key: "admissionNo", header: "Adm no" },
+                      { key: "name", header: "Student", width: 2 },
+                      { key: "class", header: "Class" },
+                      { key: "gender", header: "Gender" },
+                      { key: "dob", header: "DOB" },
+                      { key: "pen", header: "PEN" },
+                      { key: "apaar", header: "APAAR" },
+                      { key: "aadhaarLast4", header: "Aadhaar (L4)" },
+                      { key: "father", header: "Father", width: 1.6 },
+                      { key: "mother", header: "Mother", width: 1.6 },
+                      { key: "mobile", header: "Mobile" },
+                    ],
+                    rows,
+                    fileBaseName: "udise_mapping_selected",
+                  });
+                },
+              },
+            ]}
+          />
 
           {view === "list" ? (
             <ErpTableShell>
@@ -1615,11 +1755,19 @@ export function StudentsWorkspace() {
                       className={`flex items-start gap-2 px-4 py-3 ${
                         focused
                           ? "bg-[rgba(197,160,40,0.14)]"
-                          : on
-                            ? "bg-[rgba(32,48,80,0.05)]"
-                            : ""
+                          : rosterSelection.isSelected(s.id)
+                            ? "bg-[var(--accent)]"
+                            : on
+                              ? "bg-[rgba(32,48,80,0.05)]"
+                              : ""
                       }`}
                     >
+                      <RowCheckbox
+                        className="mt-3"
+                        checked={rosterSelection.isSelected(s.id)}
+                        onChange={() => rosterSelection.toggle(s.id)}
+                        label={`Select ${s.fullName}`}
+                      />
                       <div className="min-w-0 flex-1">
                         <button
                           type="button"
@@ -1682,6 +1830,9 @@ export function StudentsWorkspace() {
                       </div>
                       <RowActions
                         student={s}
+                        guardianMobile={hh?.mobile ?? ""}
+                        onView={() => openProfile(s.id)}
+                        onHousehold={() => openHousehold(s.id)}
                         onToggle={() => toggleStatus(s)}
                         onRemove={() => onRemove(s)}
                       />
@@ -1838,28 +1989,66 @@ export function StudentsWorkspace() {
 
 function RowActions({
   student,
+  guardianMobile,
+  onView,
+  onHousehold,
   onToggle,
   onRemove,
 }: {
   student: SisStudent;
+  guardianMobile: string;
+  onView: () => void;
+  onHousehold: () => void;
   onToggle: () => void;
   onRemove: () => void;
 }) {
   return (
     <div className="flex shrink-0 flex-col items-end gap-1">
-      <Link
-        href={`/students/${student.id}/edit`}
-        className="text-xs font-medium text-[var(--brand-mid)]"
-      >
-        Edit
-      </Link>
-      <button
-        type="button"
-        className="text-xs font-medium text-[var(--brand-mid)]"
-        onClick={onToggle}
-      >
-        {student.status === "active" ? "Inactivate" : "Activate"}
-      </button>
+      <RowActionMenu
+        row={student}
+        label={`Actions for ${student.fullName}`}
+        actions={[
+          { id: "view", label: "View details", onSelect: onView },
+          {
+            id: "edit",
+            label: "Edit properties",
+            onSelect: (s) => {
+              window.location.href = `/students/${s.id}/edit`;
+            },
+          },
+          { id: "household", label: "Household & siblings", onSelect: onHousehold },
+          {
+            id: "fees",
+            label: "Fee ledger & receipts",
+            onSelect: (s) => {
+              window.location.href = `/fees?household=${encodeURIComponent(s.householdId)}`;
+            },
+          },
+          {
+            id: "attendance",
+            label: "Attendance history",
+            onSelect: (s) => {
+              window.location.href = `/attendance?student=${encodeURIComponent(s.id)}`;
+            },
+          },
+          {
+            id: "wa",
+            label: "Send WhatsApp to family",
+            disabled: () => !guardianMobile,
+            onSelect: (s) =>
+              openWaMe(
+                guardianMobile,
+                `Namaste, this is a message from BHB International School regarding ${s.fullName}.`,
+              ),
+          },
+          {
+            id: "status",
+            label: student.status === "active" ? "Mark inactive" : "Mark active",
+            separatorAbove: true,
+            onSelect: onToggle,
+          },
+        ]}
+      />
       <RemoveControl
         check={checkStudentRemoval(student)}
         onRemove={onRemove}

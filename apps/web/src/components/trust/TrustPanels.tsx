@@ -41,6 +41,7 @@ import {
   type TrustReportId,
 } from "@/lib/trustReportCatalog";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 export type TrustPanelProps = {
   state: TrustState;
@@ -535,11 +536,18 @@ export function LabourPanel({
                 <td className="py-2 text-right">{formatInr(l.amountPaise)}</td>
                 <td className="py-2">{l.paidStatus}</td>
                 <td className="py-2">
-                  {l.paidStatus === "unpaid" ? (
-                    <button type="button" className={BTN_OUTLINE} onClick={() => pay(l.id)}>
-                      Pay
-                    </button>
-                  ) : null}
+                  <RowActionMenu
+                    row={l}
+                    label="Loan instalment actions"
+                    actions={[
+                      {
+                        id: "pay",
+                        label: "Pay this instalment",
+                        hidden: (x) => x.paidStatus !== "unpaid",
+                        onSelect: (x) => pay(x.id),
+                      },
+                    ]}
+                  />
                 </td>
               </tr>
             ))}
@@ -639,37 +647,39 @@ export function AllotmentsPanel({
                 <td className="py-2">{a.partyName}</td>
                 <td className="py-2">{a.targetEnd}</td>
                 <td className="py-2 text-right">{a.progressPct}%</td>
-                <td className="py-2 space-x-1">
-                  <button
-                    type="button"
-                    className={BTN_OUTLINE}
-                    onClick={() => {
-                      const res = updateAllotmentProgress(a.id, Math.min(100, a.progressPct + 25));
-                      if (!res.ok) onError(res.error);
-                      else {
-                        onFlash("Progress updated");
-                        onRefresh();
-                      }
-                    }}
-                  >
-                    +25%
-                  </button>
-                  {a.status === "submitted" || a.progressPct >= 100 ? (
-                    <button
-                      type="button"
-                      className={BTN_OUTLINE}
-                      onClick={() => {
-                        const res = verifyAllotment(a.id, actorName);
-                        if (!res.ok) onError(res.error);
-                        else {
-                          onFlash("Verified");
-                          onRefresh();
-                        }
-                      }}
-                    >
-                      Verify
-                    </button>
-                  ) : null}
+                <td className="py-2">
+                  <RowActionMenu
+                    row={a}
+                    label="Allotment actions"
+                    actions={[
+                      {
+                        id: "progress",
+                        label: "Record +25% progress",
+                        disabled: (x) => x.progressPct >= 100,
+                        onSelect: (x) => {
+                          const res = updateAllotmentProgress(x.id, Math.min(100, x.progressPct + 25));
+                          if (!res.ok) onError(res.error);
+                          else {
+                            onFlash("Progress updated");
+                            onRefresh();
+                          }
+                        },
+                      },
+                      {
+                        id: "verify",
+                        label: "Verify completed work",
+                        hidden: (x) => !(x.status === "submitted" || x.progressPct >= 100),
+                        onSelect: (x) => {
+                          const res = verifyAllotment(x.id, actorName);
+                          if (!res.ok) onError(res.error);
+                          else {
+                            onFlash("Verified");
+                            onRefresh();
+                          }
+                        },
+                      },
+                    ]}
+                  />
                 </td>
               </tr>
             ))}
@@ -907,22 +917,25 @@ export function BillsPanel({
                 <td className="py-2 text-right">{formatInr(c.amountPaise)}</td>
                 <td className="py-2">{c.paymentStatus}</td>
                 <td className="py-2">
-                  {c.paymentStatus === "open" ? (
-                    <button
-                      type="button"
-                      className={BTN_OUTLINE}
-                      onClick={() => {
-                        const r = payCostLine(c.id, { poolId });
-                        if (!r.ok) onError(r.error);
-                        else {
-                          onFlash("Paid → CWIP");
-                          onRefresh();
-                        }
-                      }}
-                    >
-                      Pay
-                    </button>
-                  ) : null}
+                  <RowActionMenu
+                    row={c}
+                    label="Cost line actions"
+                    actions={[
+                      {
+                        id: "pay",
+                        label: "Pay (into CWIP)",
+                        hidden: (x) => x.paymentStatus !== "open",
+                        onSelect: (x) => {
+                          const r = payCostLine(x.id, { poolId });
+                          if (!r.ok) onError(r.error);
+                          else {
+                            onFlash("Paid → CWIP");
+                            onRefresh();
+                          }
+                        },
+                      },
+                    ]}
+                  />
                 </td>
               </tr>
             ))}

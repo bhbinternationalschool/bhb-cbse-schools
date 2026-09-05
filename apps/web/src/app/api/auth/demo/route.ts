@@ -9,6 +9,8 @@ import type { Persona } from "@/lib/types";
 import { TENANT } from "@/lib/types";
 import { isDemoAuth } from "@/lib/supabase/client";
 import { superAdminRoleCode } from "@/lib/superAdmin";
+import { resolveStaffHomeKind } from "@/lib/staffHomeKind.server";
+import { loadServerMasters } from "@/lib/api/v1/auth";
 import { resolveLoginAcademicYearCode } from "@/lib/workspaceSession.server";
 
 export async function POST(request: Request) {
@@ -62,9 +64,22 @@ export async function POST(request: Request) {
     );
   }
 
+  // A demo login pinned to a roster record carries that person's name, not
+  // the demo persona's — audit rows and "entered by" fields read it.
+  let rosterName = "";
+  if (body.staffId?.trim()) {
+    try {
+      const masters = await loadServerMasters();
+      rosterName =
+        masters.staff.find((s) => s.id === body.staffId?.trim())?.fullName || "";
+    } catch {
+      /* keep the demo name */
+    }
+  }
+
   const session: DemoSession = {
     persona,
-    fullName: body.fullName?.trim() || user.fullName,
+    fullName: body.fullName?.trim() || rosterName || user.fullName,
     roleCode:
       ownerRole ||
       (body.staffId && body.roleCode?.trim() ? body.roleCode.trim() : user.roleCode),
@@ -82,7 +97,21 @@ export async function POST(request: Request) {
     );
   }
 
-  const res = NextResponse.json({ ok: true, session });
+  let homeKind: string | undefined;
+  if (persona === "staff" || persona === "field") {
+    try {
+      homeKind =
+        persona === "field"
+          ? "crew"
+          : resolveStaffHomeKind(session, await loadServerMasters());
+    } catch (e) {
+      console.warn("[demo] homeKind failed", e);
+    }
+  }
+  const res = NextResponse.json({
+    ok: true,
+    session: homeKind ? { ...session, homeKind } : session,
+  });
   res.cookies.set(demoSessionCookieName(), signed, appSessionCookieOptions());
   return res;
 }

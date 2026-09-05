@@ -6,6 +6,8 @@ import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionCo
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { field } from "@/components/ui/erp-ui";
+import { ExportMenu, RowActionMenu } from "@/components/ui/erp-grid";
+import { openWaMe } from "@/lib/waMe";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
 import { classSectionLabel } from "@/lib/timetable";
 import { loadSis, type SisState, type SisStudent } from "@/lib/sis";
@@ -395,6 +397,42 @@ export function VisitorsWorkspace() {
             </button>
           </div>
 
+          {visitorRows.length > 0 ? (
+            <div className="flex justify-end">
+              <ExportMenu
+                title="Visitor log"
+                subtitle={`${visitorRows.length} entr${visitorRows.length === 1 ? "y" : "ies"}`}
+                fileBaseName="visitor_log"
+                columns={[
+                  { key: "no", header: "Pass no" },
+                  { key: "name", header: "Visitor", width: 1.6 },
+                  { key: "mobile", header: "Mobile" },
+                  { key: "purpose", header: "Purpose" },
+                  { key: "meet", header: "To meet", width: 1.4 },
+                  { key: "in", header: "In" },
+                  { key: "out", header: "Out" },
+                  { key: "source", header: "Source" },
+                ]}
+                rows={() =>
+                  visitorRows.map((v) => ({
+                    no: v.visitorNo || "",
+                    name: v.visitorName,
+                    mobile: v.mobile || "",
+                    purpose: visitorPurposeLabel(v.purpose),
+                    meet: v.personToMeet || "",
+                    in: new Date(v.inTime).toLocaleString("en-IN"),
+                    out: v.outTime ? new Date(v.outTime).toLocaleString("en-IN") : "",
+                    source: v.source || "desk",
+                  }))
+                }
+                onMessage={(msg) => {
+                  setNotice(msg);
+                  window.setTimeout(() => setNotice(null), 4000);
+                }}
+                compact
+              />
+            </div>
+          ) : null}
           {visitorRows.length === 0 ? (
             <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-8 text-center text-sm text-[var(--muted)]">
               {L.noVisitors}
@@ -420,27 +458,34 @@ export function VisitorsWorkspace() {
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs font-semibold"
-                        onClick={() => setPrintEntry(v)}
-                      >
-                        {L.printPass}
-                      </button>
-                      <button
-                        type="button"
                         className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs font-semibold disabled:opacity-50"
                         disabled={readOnly || !!v.outTime}
                         onClick={() => onCheckOut(v.id)}
                       >
                         {v.outTime ? L.checkedOut : L.checkOut}
                       </button>
-                      <button
-                        type="button"
-                        className="text-xs font-bold text-[var(--danger)]"
-                        disabled={readOnly}
-                        onClick={() => onDeleteEntry(v.id)}
-                      >
-                        {L.del}
-                      </button>
+                      <RowActionMenu
+                        row={v}
+                        label={`Actions for ${v.visitorName}`}
+                        actions={[
+                          { id: "pass", label: L.printPass, onSelect: (r) => setPrintEntry(r) },
+                          {
+                            id: "wa",
+                            label: "Send WhatsApp",
+                            disabled: (r) => !r.mobile,
+                            onSelect: (r) =>
+                              openWaMe(r.mobile ?? "", `Namaste ${r.visitorName}, this is BHB International School.`),
+                          },
+                          {
+                            id: "del",
+                            label: L.del,
+                            tone: "danger",
+                            separatorAbove: true,
+                            hidden: () => readOnly,
+                            onSelect: (r) => onDeleteEntry(r.id),
+                          },
+                        ]}
+                      />
                     </div>
                   </div>
                 </li>

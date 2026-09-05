@@ -17,6 +17,7 @@ import {
 import { loadTimetable, teachingPeriods } from "@/lib/timetable";
 import type { MastersState } from "@/lib/masters";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 type Props = {
   academicYearCode: string;
@@ -384,22 +385,20 @@ export function ExamDateSheetPanel({
                         )}
                       </td>
                       <td className="border border-[var(--border)] p-2">
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            className="font-semibold text-[var(--brand-mid)]"
-                            onClick={() => startEdit(row)}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="font-semibold text-[var(--danger)]"
-                            onClick={() => remove(row)}
-                          >
-                            Remove
-                          </button>
-                        </div>
+                        <RowActionMenu
+                          row={row}
+                          label="Date-sheet row actions"
+                          actions={[
+                            { id: "edit", label: "Edit this sitting", onSelect: (r) => startEdit(r) },
+                            {
+                              id: "remove",
+                              label: "Remove from date sheet",
+                              tone: "danger",
+                              separatorAbove: true,
+                              onSelect: (r) => remove(r),
+                            },
+                          ]}
+                        />
                       </td>
                     </tr>
                   );

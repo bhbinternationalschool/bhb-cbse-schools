@@ -14,6 +14,7 @@ import {
   ErpTableBody,
   ErpTableHead,
 } from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 /**
  * Who rides, by class and section.
@@ -155,6 +156,7 @@ export function ClassTransportPanel({
                     <th className="px-3 py-2 text-right font-bold">
                       Per month
                     </th>
+                    <th className="w-10 px-2 py-2" aria-label="Actions" />
                   </tr>
                 </ErpTableHead>
                 <ErpTableBody>
@@ -200,6 +202,9 @@ export function ClassTransportPanel({
                             nil
                           </span>
                         )}
+                      </td>
+                      <td className="px-2 py-1.5 text-right">
+                        <RowActionMenu row={r} label="Rider actions" actions={[{ id: "open", label: "Open student profile", onSelect: (x) => { window.location.href = `/students/${encodeURIComponent(String(x.studentId))}/edit`; } }]} />
                       </td>
                     </tr>
                   ))}

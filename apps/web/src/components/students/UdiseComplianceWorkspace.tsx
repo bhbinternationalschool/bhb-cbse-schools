@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — worklist rows carry bespoke reminder / verify controls tied to gap state
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";

@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — the marks-entry grid and the promotion summary — cells are inputs, not a record list
 
 import { useEffect, useMemo, useState } from "react";
 import { ClipboardList } from "lucide-react";

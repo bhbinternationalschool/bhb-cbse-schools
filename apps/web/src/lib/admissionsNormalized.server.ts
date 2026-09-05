@@ -16,6 +16,7 @@ import {
 } from "@/lib/admissions";
 import { admissionsDualWriteDbEnabled } from "@/lib/admissionsDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { fetchAllPages } from "@/lib/supabase/pageAll";
 
 export type AdmissionDeskSyncMeta = {
   householdCount: number;
@@ -437,17 +438,29 @@ export async function pushAdmissionDeskToDb(
   // reason — pruning them would orphan money and admission records; only
   // plain unpaid leads still follow the client's snapshot.
   {
-    const { data: paidRows } = await sb
-      .from("admission_desk_registration_payments")
-      .select("lead_id")
-      .eq("tenant_id", tenantId);
+    const { rows: paidRows } = await fetchAllPages<{ lead_id: string }>((from, to) =>
+      sb
+        .from("admission_desk_registration_payments")
+        .select("lead_id")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
     const paidLeadIds = new Set(
       (paidRows ?? []).map((r) => String((r as { lead_id: string }).lead_id)),
     );
-    const { data: linkedRows } = await sb
-      .from("admission_desk_leads")
-      .select("id, sis_student_id")
-      .eq("tenant_id", tenantId);
+    // Paged — 948 leads today. An unpaged read here would have let the prune
+    // below delete every lead past the thousandth that the pushing browser
+    // did not carry.
+    const { rows: linkedRows } = await fetchAllPages<{ id: string; sis_student_id: string | null }>(
+      (from, to) =>
+        sb
+          .from("admission_desk_leads")
+          .select("id, sis_student_id")
+          .eq("tenant_id", tenantId)
+          .order("id", { ascending: true })
+          .range(from, to),
+    );
     const keepLeads = new Set(leads.map((l) => l.id));
     for (const r of (linkedRows ?? []) as { id: string; sis_student_id: string | null }[]) {
       if (paidLeadIds.has(r.id) || (r.sis_student_id ?? "") !== "") {
@@ -457,10 +470,14 @@ export async function pushAdmissionDeskToDb(
     await deleteStale(sb, tenantId, "admission_desk_leads", keepLeads);
 
     // Households referenced by any surviving lead stay too.
-    const { data: leadHh } = await sb
-      .from("admission_desk_leads")
-      .select("household_id")
-      .eq("tenant_id", tenantId);
+    const { rows: leadHh } = await fetchAllPages<{ household_id: string | null }>((from, to) =>
+      sb
+        .from("admission_desk_leads")
+        .select("household_id")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
     const keepHh = new Set(households.map((h) => h.id));
     for (const r of (leadHh ?? []) as { household_id: string | null }[]) {
       if (r.household_id) keepHh.add(String(r.household_id));
@@ -601,16 +618,29 @@ export async function fetchAdmissionDeskFromDb(): Promise<{
     { data: opsRow },
     { data: metaRow },
   ] = await Promise.all([
-    sb.from("admission_desk_households").select("*").eq("tenant_id", tenantId),
-    sb
-      .from("admission_desk_leads")
-      .select(leadProjectionEnabled() ? LEAD_LIST_COLUMNS : "*")
-      .eq("tenant_id", tenantId)
-      .order("updated_at", { ascending: false }),
-    sb
-      .from("admission_desk_registration_payments")
-      .select("*")
-      .eq("tenant_id", tenantId),
+    // All three paged. The lead list stood at 948 rows on 2026-09-06; the
+    // unpaged read sorted newest-first, so the first leads to vanish would
+    // have been the oldest — the ones still waiting on a decision.
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb.from("admission_desk_households").select("*").eq("tenant_id", tenantId).order("id", { ascending: true }).range(from, to),
+    ).then((r) => ({ data: r.rows, error: r.error ? { message: r.error } : null })),
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb
+        .from("admission_desk_leads")
+        .select(leadProjectionEnabled() ? LEAD_LIST_COLUMNS : "*")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to) as unknown as PromiseLike<{
+        data: Record<string, unknown>[] | null;
+        error: { message: string } | null;
+      }>,
+    ).then((r) => ({
+      data: r.rows.sort((a, b) => String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? ""))),
+      error: r.error ? { message: r.error } : null,
+    })),
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb.from("admission_desk_registration_payments").select("*").eq("tenant_id", tenantId).order("id", { ascending: true }).range(from, to),
+    ).then((r) => ({ data: r.rows, error: r.error ? { message: r.error } : null })),
     sb
       .from("admission_desk_field_ops")
       .select("ops_json, sequences_json")

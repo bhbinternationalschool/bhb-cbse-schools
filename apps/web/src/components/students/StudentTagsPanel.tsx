@@ -17,6 +17,7 @@ import {
   ErpTableHead,
   ErpTableShell,
 } from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 export function StudentTagsPanel({
   tick = 0,
@@ -241,13 +242,14 @@ export function StudentTagsPanel({
         </select>
       </div>
 
-      <ErpTableShell>
+      <ErpTableShell exportAs="student_tags" exportTitle="Student tags">
         <ErpTable>
           <ErpTableHead>
             <tr>
               <th className="px-3 py-2 font-semibold">Student</th>
               <th className="px-3 py-2 font-semibold">Class</th>
               <th className="px-3 py-2 font-semibold">Assign tags</th>
+              <th className="w-10 px-2 py-2" aria-label="Actions" />
             </tr>
           </ErpTableHead>
           <ErpTableBody>
@@ -288,6 +290,9 @@ export function StudentTagsPanel({
                         );
                       })}
                     </div>
+                  </td>
+                  <td className="px-2 py-1.5 text-right">
+                    <RowActionMenu row={s} label="Student actions" actions={[{ id: "open", label: "Open student profile", onSelect: (x) => { window.location.href = `/students/${encodeURIComponent(String(x.id))}/edit`; } }]} />
                   </td>
                 </tr>
               );

@@ -49,6 +49,7 @@ import {
   ErpTableHead,
   ErpTableShell,
 } from "@/components/ui/erp-roster";
+import { BulkActionBar, RowActionMenu, RowCheckbox, useRowSelection } from "@/components/ui/erp-grid";
 
 type AttTab =
   | "punch"
@@ -258,6 +259,9 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
     }
     flash(bits.join(" · "));
   }
+
+  const staffKeys = useMemo(() => filtered.map((s) => s.id), [filtered]);
+  const staffSel = useRowSelection(staffKeys);
 
   function setStatus(id: string, st: AttendanceStatus) {
     setMarks((prev) =>
@@ -823,10 +827,30 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
             />
           </label>
 
-          <ErpTableShell>
+          <BulkActionBar
+            selection={staffSel}
+            noun="staff member"
+            actions={ATTENDANCE_STATUSES.map((st) => ({
+              id: st.code,
+              label: `Mark ${st.short}`,
+              onRun: (ids: string[]) => {
+                for (const id of ids) setStatus(id, st.code);
+                staffSel.clear();
+              },
+            }))}
+          />
+          <ErpTableShell exportAs="staff_attendance" exportTitle="Staff attendance">
             <ErpTable minWidth="min-w-[880px]">
               <ErpTableHead>
                 <tr>
+                  <th className="w-10 px-2 py-2">
+                    <RowCheckbox
+                      checked={staffSel.allSelected(filtered.map((s) => s.id))}
+                      indeterminate={staffSel.someSelected(filtered.map((s) => s.id))}
+                      onChange={() => staffSel.toggleAll(filtered.map((s) => s.id))}
+                      label="Select all staff shown"
+                    />
+                  </th>
                   <th className="px-3 py-2">Code</th>
                   <th className="px-3 py-2">Name</th>
                   <th className="px-3 py-2">Rule</th>
@@ -834,6 +858,7 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
                   <th className="px-3 py-2">Out</th>
                   <th className="px-3 py-2">Way</th>
                   <th className="px-3 py-2">Mark</th>
+                  <th className="w-10 px-2 py-2" aria-label="Actions" />
                 </tr>
               </ErpTableHead>
               <ErpTableBody>
@@ -842,6 +867,13 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
                   const rule = ruleForStaff(rulesState, s.id);
                   return (
                     <tr key={s.id}>
+                      <td className="w-10 px-2 py-2">
+                        <RowCheckbox
+                          checked={staffSel.isSelected(s.id)}
+                          onChange={() => staffSel.toggle(s.id)}
+                          label={`Select ${s.fullName}`}
+                        />
+                      </td>
                       <td className="px-3 py-2 font-semibold text-[var(--brand-deep)]">
                         {s.empCode}
                       </td>
@@ -903,6 +935,9 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
                             {mark.note}
                           </p>
                         ) : null}
+                      </td>
+                      <td className="px-2 py-1.5 text-right">
+                        <RowActionMenu row={s} label="Staff actions" actions={[{ id: "open", label: "Open staff record", onSelect: (x) => { window.location.href = `/staff/${encodeURIComponent(String(x.id))}/edit`; } }]} />
                       </td>
                     </tr>
                   );

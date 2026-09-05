@@ -37,10 +37,9 @@ import {
 import {
   buildExpenseVoucher,
   buildFeeReceiptVoucher,
-  buildPayrollAccrualVoucher,
-  buildPayrollPaymentVoucher,
+
   buildVendorBillVoucher,
-  monthEndIso,
+
   sessionStartOf,
   type BuildResult,
 } from "@/lib/ledger/projectionMap";
@@ -265,17 +264,35 @@ export async function projectFeeReceipts(opts?: {
   if (rows.length === 0) return outcome;
 
   const ids = rows.map((r) => String(r.id));
-  const [{ data: tenders }, { data: lines }] = await Promise.all([
-    ctx.sb
-      .from("fee_desk_voucher_tenders")
-      .select("voucher_id, mode, amount_paise, ref, instrument_date, tender_json")
-      .eq("tenant_id", ctx.tenantId)
-      .in("voucher_id", ids),
-    ctx.sb
-      .from("fee_desk_voucher_lines")
-      .select("voucher_id, kind, amount_paise")
-      .eq("tenant_id", ctx.tenantId)
-      .in("voucher_id", ids),
+  // Chunked and paged. One `in` over every receipt id asked PostgREST for
+  // ~1,900 line rows in a single request; it returned the first thousand and
+  // reported success, so the receipts at the tail would have been projected
+  // with no lines — the whole amount landing on the fallback head (2026-09-05).
+  const readByVoucher = async (table: string, select: string) => {
+    const out: Record<string, unknown>[] = [];
+    for (let i = 0; i < ids.length; i += 150) {
+      const chunk = ids.slice(i, i + 150);
+      for (let from = 0; ; from += 1000) {
+        const { data } = await ctx.sb
+          .from(table)
+          .select(select)
+          .eq("tenant_id", ctx.tenantId)
+          .in("voucher_id", chunk)
+          .order("id", { ascending: true })
+          .range(from, from + 999);
+        const page = (data ?? []) as unknown as Record<string, unknown>[];
+        out.push(...page);
+        if (page.length < 1000) break;
+      }
+    }
+    return out;
+  };
+  const [tenders, lines] = await Promise.all([
+    readByVoucher(
+      "fee_desk_voucher_tenders",
+      "id, voucher_id, mode, amount_paise, ref, instrument_date, tender_json",
+    ),
+    readByVoucher("fee_desk_voucher_lines", "id, voucher_id, kind, amount_paise"),
   ]);
 
   const tendersBy = new Map<string, Record<string, unknown>[]>();
@@ -537,25 +554,18 @@ export async function projectPayrollRuns(opts?: {
     return outcome;
   }
 
-  const [{ data, error }, existing] = await Promise.all([
-    ctx.sb
-      .from("payroll_desk_runs")
-      .select("id, month, status, posted_by, posted_at, paid_at")
-      .eq("tenant_id", ctx.tenantId)
-      .order("month")
-      .limit(opts?.limit ?? 500),
-    existingBySource(["payroll_run", "payroll_payment"]),
-  ]);
+  const { data, error } = await ctx.sb
+    .from("payroll_desk_runs")
+    .select("id, month, status")
+    .eq("tenant_id", ctx.tenantId)
+    .order("month")
+    .limit(opts?.limit ?? 500);
   if (error) {
     outcome.refused.push({ sourceId: "-", reason: error.message });
     return outcome;
   }
-  if (!existing.ok) {
-    outcome.refused.push({ sourceId: "-", reason: existing.error ?? "read failed" });
-    return outcome;
-  }
 
-  const runs = (data ?? []) as Record<string, unknown>[];
+  const runs = (data ?? []) as { id: string; month: string; status: string }[];
   outcome.scanned = runs.length;
   if (runs.length === 0) return outcome;
 
@@ -563,81 +573,212 @@ export async function projectPayrollRuns(opts?: {
     PAYROLL_ACCRUAL_STATUSES.has(String(r.status ?? "").toLowerCase()),
   );
   outcome.skipped += runs.length - eligible.length;
-  if (eligible.length === 0) return outcome;
 
-  const { data: lineRows } = await ctx.sb
-    .from("payroll_desk_run_lines")
-    .select("run_id, staff_id, full_name, gross, net_pay, advance_deduct, amount_payable")
-    .eq("tenant_id", ctx.tenantId)
-    .in("run_id", eligible.map((r) => String(r.id)));
-
-  const linesBy = new Map<string, Record<string, unknown>[]>();
-  for (const l of (lineRows ?? []) as Record<string, unknown>[]) {
-    const k = String(l.run_id);
-    (linesBy.get(k) ?? linesBy.set(k, []).get(k)!).push(l);
-  }
-
+  // The database function is the one implementation: it is what the trigger
+  // runs the moment a run is saved as posted, it reads the desk's rupees as
+  // rupees (this file once read them as paise), and it holds the overlap
+  // guard against the reconstructed 2026 salary. Calling it here means the
+  // projection can never post a different voucher from the trigger — the
+  // same (source_type, source_id) lands exactly once whichever path is first.
   for (const run of eligible) {
-    const id = String(run.id);
-    const month = String(run.month ?? "");
-    const deskLines = (linesBy.get(id) ?? []).map((l) => ({
-      staffId: String(l.staff_id ?? ""),
-      fullName: String(l.full_name ?? ""),
-      grossPaise: Number(l.gross ?? 0),
-      netPaise: Number(l.amount_payable ?? l.net_pay ?? 0),
-      advanceDeductPaise: Number(l.advance_deduct ?? 0),
-    }));
-    const accrualDate = monthEndIso(month);
-
-    await applyRecord({
-      key: `payroll_run:${id}`,
-      existing: existing.map,
-      cancelled: false,
-      cancelReason: "",
-      sourceId: id,
-      outcome,
-      build: () =>
-        accrualDate
-          ? buildPayrollAccrualVoucher({
-              run: {
-                id,
-                month,
-                status: String(run.status ?? ""),
-                postedBy: String(run.posted_by ?? ""),
-              },
-              lines: deskLines,
-              date: accrualDate,
-            })
-          : { ok: false, reason: `payroll run ${id} has no usable month` },
+    const { data: res, error: rpcErr } = await ctx.sb.rpc("payroll_ledger_post", {
+      p_tenant_id: ctx.tenantId,
+      p_run_id: run.id,
+      p_actor: "projection",
     });
-
-    // Payment is its own event, on its own date.
-    if (String(run.status ?? "").toLowerCase() === "paid" && run.paid_at) {
-      const net = deskLines.reduce((n, l) => n + Math.round(l.netPaise || 0), 0);
-      const paidDate = String(run.paid_at).slice(0, 10);
-      await applyRecord({
-        key: `payroll_payment:${id}`,
-        existing: existing.map,
-        cancelled: false,
-        cancelReason: "",
-        sourceId: `${id} (payment)`,
-        outcome,
-        build: () =>
-          buildPayrollPaymentVoucher({
-            run: {
-              id,
-              month,
-              status: String(run.status ?? ""),
-              postedBy: String(run.posted_by ?? ""),
-            },
-            netPaise: net,
-            date: paidDate,
-          }),
-      });
+    if (rpcErr) {
+      outcome.refused.push({ sourceId: run.id, reason: rpcErr.message });
+      continue;
+    }
+    const r = (res ?? {}) as {
+      ok?: boolean;
+      refused?: string;
+      skipped?: string;
+      accrual?: { voucher_no?: string; created?: boolean } | null;
+      payment?: { voucher_no?: string; created?: boolean; skipped?: string } | null;
+    };
+    if (!r.ok) {
+      outcome.refused.push({ sourceId: run.id, reason: r.refused ?? "refused" });
+      continue;
+    }
+    if (r.skipped) {
+      outcome.skipped += 1;
+      continue;
+    }
+    if (r.accrual?.created) outcome.posted += 1;
+    else outcome.alreadyPosted += 1;
+    if (r.payment?.voucher_no) {
+      if (r.payment.created) outcome.posted += 1;
+      else outcome.alreadyPosted += 1;
     }
   }
 
   return outcome;
+}
+
+/** One row per payroll run: what the book holds for it and what blocks it. */
+export type PayrollLedgerStatusRow = {
+  runId: string;
+  month: string;
+  status: string;
+  staff: number;
+  grossPaise: number;
+  netPaise: number;
+  accrualVoucherNo: string;
+  paymentVoucherNo: string;
+  overlap: { total: number; reclassified: number; mixed: number; salaryPaise: number };
+  blocked: string;
+};
+
+export async function payrollLedgerStatus(): Promise<{
+  ok: boolean;
+  error?: string;
+  rows: PayrollLedgerStatusRow[];
+}> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, error: "Supabase tenant not configured", rows: [] };
+
+  const [{ data: runs, error }, { data: lines }, { data: vouchers }] = await Promise.all([
+    ctx.sb
+      .from("payroll_desk_runs")
+      .select("id, month, status")
+      .eq("tenant_id", ctx.tenantId)
+      .order("month", { ascending: false })
+      .limit(24),
+    ctx.sb
+      .from("payroll_desk_run_lines")
+      .select("run_id, gross, net_pay")
+      .eq("tenant_id", ctx.tenantId)
+      .order("id", { ascending: true })
+      .range(0, 4999),
+    ctx.sb
+      .from("ledger_vouchers")
+      .select("id, voucher_no, source_type, source_id, reverses_voucher_id")
+      .eq("tenant_id", ctx.tenantId)
+      .in("source_type", ["payroll_run", "payroll_payment"])
+      .order("id", { ascending: true })
+      .range(0, 999),
+  ]);
+  if (error) return { ok: false, error: error.message, rows: [] };
+
+  const reversed = new Set(
+    ((vouchers ?? []) as { reverses_voucher_id?: string | null }[])
+      .map((v) => String(v.reverses_voucher_id ?? ""))
+      .filter(Boolean),
+  );
+  const voucherFor = (sourceType: string, sourceId: string) =>
+    ((vouchers ?? []) as { id: string; voucher_no: string; source_type: string; source_id: string }[])
+      .find((v) => v.source_type === sourceType && v.source_id === sourceId && !reversed.has(v.id))
+      ?.voucher_no ?? "";
+
+  const totals = new Map<string, { staff: number; gross: number; net: number }>();
+  for (const l of (lines ?? []) as { run_id: string; gross: number; net_pay: number }[]) {
+    const t = totals.get(l.run_id) ?? { staff: 0, gross: 0, net: 0 };
+    t.staff += 1;
+    t.gross += Number(l.gross ?? 0);
+    t.net += Number(l.net_pay ?? 0);
+    totals.set(l.run_id, t);
+  }
+
+  const rows: PayrollLedgerStatusRow[] = [];
+  for (const run of (runs ?? []) as { id: string; month: string; status: string }[]) {
+    const { data: ov } = await ctx.sb.rpc("payroll_ledger_overlap", {
+      p_tenant_id: ctx.tenantId,
+      p_month: run.month,
+    });
+    const items = (ov ?? []) as { reclassified: boolean; mixed: boolean; salary_paise: number }[];
+    const overlap = {
+      total: items.length,
+      reclassified: items.filter((i) => i.reclassified).length,
+      mixed: items.filter((i) => i.mixed).length,
+      salaryPaise: items.reduce((n, i) => n + Number(i.salary_paise ?? 0), 0),
+    };
+    const t = totals.get(run.id) ?? { staff: 0, gross: 0, net: 0 };
+    const status = String(run.status ?? "").toLowerCase();
+    const accrual = voucherFor("payroll_run", run.id);
+    let blocked = "";
+    if (PAYROLL_ACCRUAL_STATUSES.has(status) && !accrual) {
+      blocked =
+        overlap.total > overlap.reclassified
+          ? `${overlap.total - overlap.reclassified} reconstructed salary voucher(s) for this month's pay would be counted twice`
+          : "not in the book yet — run the projection";
+    }
+    rows.push({
+      runId: run.id,
+      month: run.month,
+      status,
+      staff: t.staff,
+      grossPaise: Math.round(t.gross * 100),
+      netPaise: Math.round(t.net * 100),
+      accrualVoucherNo: accrual,
+      paymentVoucherNo: voucherFor("payroll_payment", run.id),
+      overlap,
+      blocked,
+    });
+  }
+  return { ok: true, rows };
+}
+
+/** Reclassify the reconstructed salary that blocks a month, then post its runs. */
+export async function payrollReclassifyAndPost(input: {
+  month: string;
+  actor: string;
+}): Promise<{
+  ok: boolean;
+  error?: string;
+  reclassified: number;
+  skipped: number;
+  skippedNos: string[];
+  posted: { runId: string; accrual?: string; payment?: string; refused?: string }[];
+}> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, error: "Supabase tenant not configured", reclassified: 0, skipped: 0, skippedNos: [], posted: [] };
+  if (!/^\d{4}-\d{2}$/.test(input.month)) {
+    return { ok: false, error: "Month must be YYYY-MM", reclassified: 0, skipped: 0, skippedNos: [], posted: [] };
+  }
+
+  const { data: rc, error: rcErr } = await ctx.sb.rpc("payroll_ledger_reclass_overlap", {
+    p_tenant_id: ctx.tenantId,
+    p_month: input.month,
+    p_actor: input.actor,
+  });
+  if (rcErr) return { ok: false, error: rcErr.message, reclassified: 0, skipped: 0, skippedNos: [], posted: [] };
+  const r = (rc ?? {}) as { reclassified?: number; skipped?: number; skipped_nos?: string[] };
+
+  const { data: runs } = await ctx.sb
+    .from("payroll_desk_runs")
+    .select("id, status")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("month", input.month);
+  const posted: { runId: string; accrual?: string; payment?: string; refused?: string }[] = [];
+  for (const run of (runs ?? []) as { id: string; status: string }[]) {
+    if (!PAYROLL_ACCRUAL_STATUSES.has(String(run.status ?? "").toLowerCase())) continue;
+    const { data: res, error: pErr } = await ctx.sb.rpc("payroll_ledger_post", {
+      p_tenant_id: ctx.tenantId,
+      p_run_id: run.id,
+      p_actor: input.actor,
+    });
+    const o = (res ?? {}) as {
+      ok?: boolean;
+      refused?: string;
+      accrual?: { voucher_no?: string } | null;
+      payment?: { voucher_no?: string; skipped?: string } | null;
+    };
+    posted.push({
+      runId: run.id,
+      accrual: o.accrual?.voucher_no,
+      payment: o.payment?.voucher_no ?? o.payment?.skipped,
+      refused: pErr?.message ?? (o.ok ? undefined : o.refused ?? "refused"),
+    });
+  }
+
+  return {
+    ok: true,
+    reclassified: Number(r.reclassified ?? 0),
+    skipped: Number(r.skipped ?? 0),
+    skippedNos: (r.skipped_nos ?? []).map(String),
+    posted,
+  };
 }
 
 /* ─── Run everything ───────────────────────────────────────── */

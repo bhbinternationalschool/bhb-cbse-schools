@@ -82,6 +82,7 @@ import {
   StaffMyAdvances,
   StaffMyPayslips,
 } from "@/components/payroll/StaffSelfService";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 type PayTab =
   | "dashboard"
@@ -727,7 +728,7 @@ export function PayrollWorkspace() {
               </button>
             </div>
           </div>
-          <ErpTableShell>
+          <ErpTableShell exportAs="payroll_runs" exportTitle="Payroll runs">
             <ErpTable>
               <ErpTableHead>
                 <tr className="text-[11px] text-[var(--muted)]">
@@ -758,16 +759,27 @@ export function PayrollWorkspace() {
                         <td className="px-4 py-2.5">{r.lines.length}</td>
                         <td className="px-4 py-2.5">{formatInr(net)}</td>
                         <td className="px-4 py-2.5 text-right">
-                          <button
-                            type="button"
-                            className="text-[11px] font-semibold"
-                            onClick={() => {
-                              setSelectedId(r.id);
-                              setTab("detail");
-                            }}
-                          >
-                            Open
-                          </button>
+                          <RowActionMenu
+                            row={r}
+                            label={`Actions for run ${r.month}`}
+                            actions={[
+                              {
+                                id: "open",
+                                label: "Open run",
+                                onSelect: (x) => {
+                                  setSelectedId(x.id);
+                                  setTab("detail");
+                                },
+                              },
+                              {
+                                id: "book",
+                                label: "See it in the server book",
+                                onSelect: () => {
+                                  window.location.href = "/accounts?tab=book";
+                                },
+                              },
+                            ]}
+                          />
                         </td>
                       </tr>
                     );
@@ -1182,7 +1194,7 @@ function RunDetail({
         </div>
       </div>
 
-      <ErpTableShell>
+      <ErpTableShell exportAs="payroll_run_lines" exportTitle="Payroll run lines">
         <ErpTable minWidth="min-w-[780px]">
           <ErpTableHead>
             <tr>
@@ -1274,24 +1286,43 @@ function RunDetail({
                         : "—"}
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <button
-                        type="button"
-                        className="text-[11px] font-semibold text-[var(--brand-deep)]"
-                        onClick={() =>
-                          setExpandedStaffId(open ? null : l.staffId)
-                        }
-                      >
-                        {editable ? "Adjust / pay" : "Details"}
-                      </button>
-                      {editable ? (
+                      <span className="inline-flex items-center gap-1">
                         <button
                           type="button"
-                          className="ml-2 text-[11px] font-semibold text-[var(--danger)]"
-                          onClick={() => onRemoveLine(l.staffId)}
+                          className="text-[11px] font-semibold text-[var(--brand-deep)]"
+                          onClick={() =>
+                            setExpandedStaffId(open ? null : l.staffId)
+                          }
                         >
-                          Remove
+                          {editable ? "Adjust / pay" : "Details"}
                         </button>
-                      ) : null}
+                        <RowActionMenu
+                          row={l}
+                          label={`Actions for ${l.fullName}`}
+                          actions={[
+                            {
+                              id: "details",
+                              label: editable ? "Adjust / pay" : "Details",
+                              onSelect: (x) => setExpandedStaffId(open ? null : x.staffId),
+                            },
+                            {
+                              id: "staff",
+                              label: "Open staff record",
+                              onSelect: (x) => {
+                                window.location.href = `/staff/${encodeURIComponent(x.staffId)}/edit`;
+                              },
+                            },
+                            {
+                              id: "remove",
+                              label: "Remove from this run",
+                              tone: "danger",
+                              separatorAbove: true,
+                              hidden: () => !editable,
+                              onSelect: (x) => onRemoveLine(x.staffId),
+                            },
+                          ]}
+                        />
+                      </span>
                     </td>
                   </tr>
                   {open ? (
@@ -1710,7 +1741,7 @@ function PayrollAuditPanel() {
           Refresh
         </button>
       </div>
-      <ErpTableShell className="overflow-x-auto">
+      <ErpTableShell className="overflow-x-auto" exportAs="payroll_audit_trail" exportTitle="Payroll audit trail">
         <ErpTable minWidth="min-w-full" className="text-xs">
           <ErpTableHead>
             <tr className="text-[var(--muted)]">

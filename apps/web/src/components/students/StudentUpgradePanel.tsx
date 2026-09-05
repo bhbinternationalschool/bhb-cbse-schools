@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — an append-only change log; entries are never edited
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";

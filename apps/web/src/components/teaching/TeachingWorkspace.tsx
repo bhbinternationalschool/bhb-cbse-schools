@@ -31,6 +31,7 @@ import { LessonPlansPanel } from "@/components/teaching/LessonPlansPanel";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 type TeachTab = "today" | "plan" | "lessons" | "coverage";
 
@@ -513,7 +514,7 @@ export function TeachingWorkspace() {
                           </td>
                           {canEdit ? (
                             <td className="px-3 py-2">
-                              <div className="flex gap-1">
+                              <div className="flex items-center gap-1">
                                 <button
                                   type="button"
                                   onClick={() => logPeriod(row, "delivered")}
@@ -521,13 +522,19 @@ export function TeachingWorkspace() {
                                 >
                                   Taught
                                 </button>
-                                <button
-                                  type="button"
-                                  onClick={() => logPeriod(row, "not_delivered")}
-                                  className="rounded-lg border border-[var(--border)] px-2 py-1 text-xs font-semibold text-[var(--danger)]"
-                                >
-                                  Not taught
-                                </button>
+                                <RowActionMenu
+                                  row={row}
+                                  label="Period actions"
+                                  actions={[
+                                    { id: "taught", label: "Mark taught", onSelect: (x) => logPeriod(x, "delivered") },
+                                    {
+                                      id: "not",
+                                      label: "Mark not taught",
+                                      tone: "danger",
+                                      onSelect: (x) => logPeriod(x, "not_delivered"),
+                                    },
+                                  ]}
+                                />
                               </div>
                             </td>
                           ) : null}

@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — journal preview and export log — rows are voucher lines
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -315,7 +316,7 @@ export function TallySyncPanel({
         </div>
       ) : null}
 
-      <ErpTableShell className="p-4">
+      <ErpTableShell className="p-4" exportAs="tally_journal" exportTitle="Tally journal">
         <h3 className="font-display text-base font-bold text-[var(--brand-deep)]">
           Sync history
         </h3>

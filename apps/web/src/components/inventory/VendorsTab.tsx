@@ -31,6 +31,7 @@ import {
 } from "@/components/inventory/InvUi";
 import { invApi, useAsync, useDebounced, useSaver } from "@/lib/inventory/client";
 import type { InvVendor } from "@/lib/inventory/types";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 const EMPTY: Partial<InvVendor> = {
   name: "",
@@ -154,7 +155,7 @@ export function VendorsTab({ onChanged }: { onChanged?: () => void }) {
           </Button>
         </div>
       ) : (
-        <ErpTableShell density="compact" className="overflow-x-auto">
+        <ErpTableShell density="compact" className="overflow-x-auto" exportAs="store_vendors" exportTitle="Store vendors">
           <ErpTable minWidth="min-w-[820px]">
             <ErpTableHead>
               <tr>
@@ -194,9 +195,28 @@ export function VendorsTab({ onChanged }: { onChanged?: () => void }) {
                     {v.defaultDiscountPct ? `${v.defaultDiscountPct}%` : "—"}
                   </td>
                   <td className="px-3 py-2 text-right">
-                    <Button variant="ghost" size="xs" onClick={() => setDraft(v)}>
-                      Edit
-                    </Button>
+                    <RowActionMenu
+                      row={v}
+                      label={`Actions for ${v.name}`}
+                      actions={[
+                        { id: "edit", label: "Edit details", onSelect: (r) => setDraft(r) },
+                        {
+                          id: "bills",
+                          label: "Bills & payments (Accounts)",
+                          onSelect: () => {
+                            window.location.href = "/accounts?tab=bills";
+                          },
+                        },
+                        {
+                          id: "wa",
+                          label: "Send WhatsApp",
+                          disabled: (r) => !r.phone,
+                          onSelect: (r) => {
+                            window.open(`https://wa.me/${String(r.phone ?? "").replace(/\D/g, "")}`, "_blank", "noopener");
+                          },
+                        },
+                      ]}
+                    />
                   </td>
                 </tr>
               ))}

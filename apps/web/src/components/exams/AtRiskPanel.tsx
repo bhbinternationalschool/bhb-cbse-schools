@@ -29,6 +29,7 @@ import { loadSis } from "@/lib/sis";
 import { openWaMe } from "@/lib/waMe";
 import { retentionOutreachText } from "@/lib/retentionOutreach";
 import { TENANT } from "@/lib/types";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 const LEVEL_TONE: Record<RiskLevel, string> = {
   high: "bg-[var(--danger)]/15 text-[var(--danger)]",
@@ -222,7 +223,7 @@ export function AtRiskPanel(props: {
             : "No student is flagged for this exam."}
         </p>
       ) : (
-        <ErpTableShell>
+        <ErpTableShell exportAs="at_risk_students" exportTitle="At-risk students">
           <ErpTable>
             <ErpTableHead>
               <tr>
@@ -232,6 +233,7 @@ export function AtRiskPanel(props: {
                 <th className="px-2 py-2 text-right">{term.label}</th>
                 <th className="px-2 py-2 text-right">Att.</th>
                 <th className="px-3 py-2 text-left">What to do (AI draft)</th>
+                <th className="w-10 px-2 py-2" aria-label="Actions" />
               </tr>
             </ErpTableHead>
             <ErpTableBody>
@@ -309,6 +311,9 @@ export function AtRiskPanel(props: {
                           Message parent (WhatsApp)
                         </button>
                       ) : null}
+                    </td>
+                    <td className="px-2 py-1.5 text-right">
+                      <RowActionMenu row={f} label="Student actions" actions={[{ id: "open", label: "Open student profile", onSelect: (x) => { window.location.href = `/students/${encodeURIComponent(x.studentId)}/edit`; } }, { id: "copy", label: "Copy AI note", onSelect: (x) => void copyNote(x.studentId) }, { id: "outreach", label: "Parent outreach message", onSelect: (x) => parentOutreach(x) }]} />
                     </td>
                   </tr>
                 );

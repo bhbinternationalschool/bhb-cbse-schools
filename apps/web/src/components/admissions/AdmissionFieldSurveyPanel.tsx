@@ -49,6 +49,7 @@ import {
 import { SisParentMatchBanner } from "@/components/admissions/SisParentMatchBanner";
 import { AdmissionSurveyTeamPanel } from "@/components/admissions/AdmissionSurveyTeamPanel";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 const inp =
   "w-full rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm";
@@ -1417,6 +1418,7 @@ export function AdmissionFieldSurveyPanel({
                 <th className="px-3 py-2">Agent</th>
                 <th className="px-3 py-2">Photo</th>
                 <th className="px-3 py-2">Date</th>
+                <th className="w-10 px-2 py-2" aria-label="Actions" />
               </tr>
             </ErpTableHead>
             <ErpTableBody hoverable>
@@ -1491,6 +1493,9 @@ export function AdmissionFieldSurveyPanel({
                     </td>
                     <td className="px-3 py-2 text-[11px]">
                       {(l.leadDate || "").slice(0, 10)}
+                    </td>
+                    <td className="px-2 py-1.5 text-right">
+                      <RowActionMenu row={l} label="Lead actions" actions={[{ id: "crm", label: "Open in CRM", onSelect: (x) => onOpenCrm(x.id) }]} />
                     </td>
                   </tr>
                 );

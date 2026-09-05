@@ -1,4 +1,5 @@
 import "dart:convert";
+import "dart:typed_data";
 
 import "package:flutter_secure_storage/flutter_secure_storage.dart";
 import "package:http/http.dart" as http;
@@ -6,12 +7,19 @@ import "package:http_parser/http_parser.dart";
 
 import "../config/app_config.dart";
 
+part "staff_api.dart";
+
 /// Session cookie minted by the ERP (see web /api/auth/*).
 const _cookieName = "bhb_demo_session";
 const _cookieKey = "bhb_session_cookie";
 const _guardianKey = "bhb_guardian_name";
 const _personaKey = "bhb_persona";
 const _roleKey = "bhb_role_code";
+
+/// Which staff home the server resolved for this login — see the ERP's
+/// lib/staffHomeKind.ts. Stored at login and refreshed by every staff
+/// summary load, so a designation change reaches the phone on next open.
+const _kindKey = "bhb_home_kind";
 
 class ApiException implements Exception {
   ApiException(this.message, [this.statusCode]);
@@ -218,6 +226,7 @@ class StaffSummary {
     required this.classTeacherOf,
     required this.periodsToday,
     required this.classes,
+    this.homeKind = "",
   });
 
   factory StaffSummary.fromJson(Map<String, dynamic> j) => StaffSummary(
@@ -234,6 +243,7 @@ class StaffSummary {
     classes: ((j["classes"] as List?) ?? const [])
         .map((c) => ClassRef.fromJson(c as Map<String, dynamic>))
         .toList(),
+    homeKind: (j["homeKind"] as String?) ?? "",
   );
 
   final String fullName;
@@ -241,6 +251,7 @@ class StaffSummary {
   final ClassTeacherInfo? classTeacherOf;
   final List<PeriodToday> periodsToday;
   final List<ClassRef> classes;
+  final String homeKind;
 }
 
 class RosterStudent {
@@ -2292,6 +2303,10 @@ class ApiClient {
 
   Future<String?> roleCode() => _storage.read(key: _roleKey);
 
+  /// leadership | teaching | crew | office | support — null for sessions
+  /// minted before the server started sending it (fall back to role code).
+  Future<String?> homeKind() => _storage.read(key: _kindKey);
+
   /// Drivers and attendants get the bus home instead of the teacher home.
   ///
   /// Keyed on roleCode, NOT persona. Every driver signs in through staff OTP,
@@ -2302,7 +2317,7 @@ class ApiClient {
   /// designation at login, and is what actually tells them apart.
   Future<bool> isTransportCrew() async {
     final rc = (await roleCode())?.toLowerCase() ?? "";
-    return RegExp(r"driver|conductor|attendant|transport").hasMatch(rc);
+    return RegExp(r"driver|conductor|attend[ae]nt|transport").hasMatch(rc);
   }
 
   /// principal / owner / admin / director style roles get the school-wide
@@ -2329,6 +2344,7 @@ class ApiClient {
     await _storage.delete(key: _guardianKey);
     await _storage.delete(key: _personaKey);
     await _storage.delete(key: _roleKey);
+    await _storage.delete(key: _kindKey);
   }
 
   Future<void> _storeSession(Map<String, dynamic>? session) async {
@@ -2338,6 +2354,10 @@ class ApiClient {
     if (persona != null) await _storage.write(key: _personaKey, value: persona);
     final role = session?["roleCode"] as String?;
     if (role != null) await _storage.write(key: _roleKey, value: role);
+    final kind = session?["homeKind"] as String?;
+    if (kind != null && kind.isNotEmpty) {
+      await _storage.write(key: _kindKey, value: kind);
+    }
   }
 
   Future<Map<String, String>> _authHeaders() async {
@@ -2510,7 +2530,11 @@ class ApiClient {
     );
     if (res.statusCode != 200) _throwFrom(res);
     final body = jsonDecode(res.body) as Map<String, dynamic>;
-    return StaffSummary.fromJson(body["data"] as Map<String, dynamic>);
+    final summary = StaffSummary.fromJson(body["data"] as Map<String, dynamic>);
+    if (summary.homeKind.isNotEmpty) {
+      await _storage.write(key: _kindKey, value: summary.homeKind);
+    }
+    return summary;
   }
 
   Future<AttendanceRoster> fetchAttendanceRoster({
@@ -3593,7 +3617,6 @@ class TutorBuyResult {
   final String checkoutUrl;
 }
 
-
 /* ─── Teacher contacts ─────────────────────────────────────────────── */
 
 class TeacherContact {
@@ -3620,6 +3643,7 @@ class TeacherContact {
   final String role;
   final bool isClassTeacher;
   final bool chatInApp;
+
   /// Empty outside the school's contact hours.
   final String waUrl;
 }

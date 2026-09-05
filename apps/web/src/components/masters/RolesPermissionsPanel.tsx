@@ -38,6 +38,7 @@ import {
   MastersTablesRow,
   MastersWorkCard,
 } from "@/components/masters/MastersLayout";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 type RbacTab = "matrix" | "roles" | "assignments" | "summary" | "audit";
 
@@ -500,16 +501,20 @@ export function RolesPermissionsPanel() {
                       />
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <button
-                        type="button"
-                        className="text-[11px] font-semibold text-[var(--brand-deep)] underline-offset-2 hover:underline"
-                        onClick={() => {
-                          setRoleId(r.id);
-                          setTab("matrix");
-                        }}
-                      >
-                        Matrix →
-                      </button>
+                      <RowActionMenu
+                        row={r}
+                        label={`Actions for role ${r.name}`}
+                        actions={[
+                          {
+                            id: "matrix",
+                            label: "Open permission matrix",
+                            onSelect: (x) => {
+                              setRoleId(x.id);
+                              setTab("matrix");
+                            },
+                          },
+                        ]}
+                      />
                     </td>
                   </tr>
                 ))}
@@ -666,13 +671,18 @@ export function RolesPermissionsPanel() {
                           {a.note || "—"}
                         </td>
                         <td className="px-3 py-2 text-right">
-                          <button
-                            type="button"
-                            className="text-xs font-medium text-[var(--danger)]"
-                            onClick={() => removeAssignment(a.id)}
-                          >
-                            Remove
-                          </button>
+                          <RowActionMenu
+                            row={a}
+                            label="Assignment actions"
+                            actions={[
+                              {
+                                id: "remove",
+                                label: "Remove this role assignment",
+                                tone: "danger",
+                                onSelect: (x) => removeAssignment(x.id),
+                              },
+                            ]}
+                          />
                         </td>
                       </tr>
                     );

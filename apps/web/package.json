@@ -28,6 +28,7 @@
     "test:fee-due-future": "npx tsx src/lib/feeDueFuture.selftest.ts",
     "test:ai-stream": "npx tsx src/lib/aiStream.selftest.ts",
     "test:tutor-plans": "npx tsx src/lib/tutorPlans.selftest.ts",
+    "test:staff-home-kind": "npx tsx src/lib/staffHomeKind.selftest.ts",
     "test:cashfree-checkout": "npx tsx src/lib/cashfreeCheckout.selftest.ts",
     "test:teacher-contact": "npx tsx src/lib/teacherContact.selftest.ts",
     "test:academic-risk": "npx tsx src/lib/academicRisk.selftest.ts",

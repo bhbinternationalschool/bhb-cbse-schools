@@ -6,15 +6,17 @@ import {
   markClassChannelDraftApplied,
   officeCreateClassChannelDraft,
   syncClassChannels,
+  syncClassChannelsIfStale,
 } from "@/lib/waClassChannelServer";
 import type { ClassChannelIntentKind } from "@/lib/waClassChannelEngine";
 import { waOutboundConfigured } from "@/lib/waSend";
-import { ensureSchoolMirrorLoaded } from "@/lib/schoolDataMirror.server";
 
 export const runtime = "nodejs";
 
 export async function GET() {
-  await syncClassChannels();
+  // Cheap by default: the roster walk + store write runs at most every 10
+  // minutes; POST {action:"sync"} rebuilds on demand.
+  await syncClassChannelsIfStale();
   const state = await listClassChannelState();
   return NextResponse.json({
     channel: "whatsapp_class",

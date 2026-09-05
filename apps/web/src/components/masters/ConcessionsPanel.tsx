@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — printable concession registers — rows carry no student id to act on
 import {
   canApproveConcession,
   canGrantConcession,

@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — the legacy browser-book desk, being retired tab by tab (phase C); its tables are not extended
 
 /* ratchet-allow: raw_table — the <table> here is inside an HTML string written into a print popup, not JSX — there is no component to shell */
 

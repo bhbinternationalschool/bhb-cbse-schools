@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — drill-down rows that select an area on click; the row IS the action
 
 /**
  * Below the item-score grid: what the saved marks say about the class.
@@ -292,7 +293,7 @@ export function ItemAnalysis(props: {
         </p>
       ) : (
         <div className="grid gap-3 lg:grid-cols-[1.4fr_1fr]">
-          <ErpTableShell>
+          <ErpTableShell exportAs="item_analysis" exportTitle="Item analysis">
           <ErpTable className="text-xs">
             <ErpTableHead>
               <tr>

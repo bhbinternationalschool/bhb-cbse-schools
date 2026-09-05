@@ -32,6 +32,7 @@ import {
   type StaffAttendanceRulesState,
 } from "@/lib/staffAttendanceRules";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 export function StaffAttendanceRulesPanel() {
   const [state, setState] = useState<StaffAttendanceRulesState | null>(null);
@@ -500,13 +501,14 @@ export function StaffAttendanceRulesPanel() {
           </button>
         </div>
 
-        <ErpTableShell className="max-h-[min(48vh,380px)] overflow-auto">
+        <ErpTableShell className="max-h-[min(48vh,380px)] overflow-auto" exportAs="staff_attendance_rules" exportTitle="Staff attendance rules">
           <ErpTable minWidth="min-w-full">
             <ErpTableHead sticky>
               <tr>
                 <th className="px-3 py-2 w-10" />
                 <th className="px-3 py-2">Staff</th>
                 <th className="px-3 py-2">Assigned rule</th>
+                <th className="w-10 px-2 py-2" aria-label="Actions" />
               </tr>
             </ErpTableHead>
             <ErpTableBody hoverable>
@@ -526,6 +528,9 @@ export function StaffAttendanceRulesPanel() {
                     </td>
                     <td className="px-3 py-2 text-xs text-[var(--muted)]">
                       {asg ? ruleName(asg.ruleId) : "—"}
+                    </td>
+                    <td className="px-2 py-1.5 text-right">
+                      <RowActionMenu row={s} label="Staff actions" actions={[{ id: "open", label: "Open staff record", onSelect: (x) => { window.location.href = `/staff/${encodeURIComponent(String(x.id))}/edit`; } }]} />
                     </td>
                   </tr>
                 );

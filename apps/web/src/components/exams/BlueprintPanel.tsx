@@ -33,6 +33,7 @@ import {
 import type { SyllabusUnit } from "@/lib/teaching";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 function nid() {
   return `bpr_${Math.random().toString(36).slice(2, 10)}`;
@@ -340,15 +341,19 @@ export function BlueprintPanel(props: {
                   </td>
                   <td className="py-1 text-right tabular-nums text-[var(--muted)]">{bankAvail(r)}</td>
                   <td className="py-1 pl-1 text-right">
-                    {canEdit ? (
-                      <button
-                        type="button"
-                        className="text-[11px] text-[var(--danger)] underline"
-                        onClick={() => setRows((prev) => prev.filter((x) => x.id !== r.id))}
-                      >
-                        ✕
-                      </button>
-                    ) : null}
+                    <RowActionMenu
+                      row={r}
+                      label="Blueprint line actions"
+                      actions={[
+                        {
+                          id: "remove",
+                          label: "Remove line",
+                          tone: "danger",
+                          hidden: () => !canEdit,
+                          onSelect: (x) => setRows((prev) => prev.filter((y) => y.id !== x.id)),
+                        },
+                      ]}
+                    />
                   </td>
                 </tr>
               ))}

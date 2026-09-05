@@ -43,6 +43,7 @@ import {
   ErpTableShell,
 } from "@/components/ui/erp-roster";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 type RowState = {
   studentId: string;
@@ -503,7 +504,7 @@ export function RemarksPanel(props: {
         {engineNote ? ` · ${engineNote}` : ""}
       </p>
 
-      <ErpTableShell>
+      <ErpTableShell exportAs="report_card_remarks" exportTitle="Report card remarks">
         <ErpTable minWidth="min-w-full" className="text-xs sm:text-sm">
           <ErpTableHead>
             <tr>
@@ -616,7 +617,7 @@ export function RemarksPanel(props: {
                     )}
                   </td>
                   <td className="px-2 py-2">
-                    <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-1">
                       <button
                         type="button"
                         className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] px-2 py-1 text-[10px] font-semibold disabled:opacity-50"
@@ -627,20 +628,31 @@ export function RemarksPanel(props: {
                         <Sparkles className="size-3" aria-hidden />
                         {busy === row.studentId ? "…" : row.text ? "Redraft" : "AI draft"}
                       </button>
-                      <button
-                        type="button"
-                        className="rounded-md px-2 py-1 text-[10px] text-[var(--muted)] underline-offset-2 hover:underline"
-                        onClick={() =>
-                          setExpanded((prev) => {
-                            const n = new Set(prev);
-                            if (n.has(row.studentId)) n.delete(row.studentId);
-                            else n.add(row.studentId);
-                            return n;
-                          })
-                        }
-                      >
-                        {isOpen ? "Hide subjects" : `Subjects (${row.subjects.filter((s) => s.remark).length}/${row.subjects.length})`}
-                      </button>
+                      <RowActionMenu
+                        row={row}
+                        label="Remark actions"
+                        actions={[
+                          {
+                            id: "subjects",
+                            label: isOpen
+                              ? "Hide subject remarks"
+                              : `Subject remarks (${row.subjects.filter((s) => s.remark).length}/${row.subjects.length})`,
+                            onSelect: (x) =>
+                              setExpanded((prev) => {
+                                const n = new Set(prev);
+                                if (n.has(x.studentId)) n.delete(x.studentId);
+                                else n.add(x.studentId);
+                                return n;
+                              }),
+                          },
+                          {
+                            id: "redraft",
+                            label: row.text ? "Redraft with AI" : "Draft with AI",
+                            disabled: () => !canEdit || busy !== null || !row.card,
+                            onSelect: (x) => generate([x.studentId]),
+                          },
+                        ]}
+                      />
                     </div>
                   </td>
                 </tr>

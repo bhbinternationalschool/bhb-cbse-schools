@@ -81,6 +81,13 @@ import {
   ErpTableHead,
 } from "@/components/ui/erp-roster";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
+import {
+  BulkActionBar,
+  ExportMenu,
+  RowActionMenu,
+  RowCheckbox,
+  useRowSelection,
+} from "@/components/ui/erp-grid";
 import { AddressAutocompleteField } from "@/components/maps/AddressAutocompleteField";
 import { lazyNamedTabPanel } from "@/components/ui/lazyTabPanel";
 import {
@@ -494,6 +501,8 @@ export function AdmissionsWorkspace() {
 
   // Lead date falls back to createdAt exactly as the cell does, so the column
   // orders on the same value the clerk is reading.
+  const leadKeys = useMemo(() => filtered.map((l) => l.id), [filtered]);
+  const leadSelection = useRowSelection(leadKeys);
   const leadSort = useTableSort(
     filtered,
     {
@@ -1455,6 +1464,71 @@ export function AdmissionsWorkspace() {
             ) : null}
           </div>
 
+          <div className="flex justify-end">
+            <ExportMenu
+              title="Admission leads"
+              subtitle={`${filtered.length} lead(s) in this view`}
+              fileBaseName="admission_leads"
+              columns={[
+                { key: "no", header: "Lead no" },
+                { key: "date", header: "Lead date" },
+                { key: "stage", header: "Status" },
+                { key: "source", header: "Source" },
+                { key: "child", header: "Child", width: 1.6 },
+                { key: "guardian", header: "Guardian", width: 1.6 },
+                { key: "mobile", header: "Mobile" },
+                { key: "counsellor", header: "Counsellor" },
+                { key: "followUp", header: "Next follow-up" },
+              ]}
+              rows={() =>
+                leadSort.rows.map((l) => ({
+                  no: l.enquiryNo,
+                  date: (l.leadDate || l.createdAt || "").slice(0, 10),
+                  stage: l.stage,
+                  source: l.source || "",
+                  child: l.childName || "",
+                  guardian: l.guardianName || "",
+                  mobile: l.mobile || "",
+                  counsellor: l.assignedTo || "",
+                  followUp: (l.nextFollowUpAt || "").slice(0, 10),
+                }))
+              }
+              onMessage={(msg) => {
+                setNotice(msg);
+                window.setTimeout(() => setNotice(null), 2400);
+              }}
+              compact
+            />
+          </div>
+          <BulkActionBar
+            selection={leadSelection}
+            noun="lead"
+            actions={[
+              {
+                id: "wa",
+                label: "Send WhatsApp",
+                title: "Opens WhatsApp for each selected family with a mobile (12 per click)",
+                onRun: (ids) => {
+                  const text = window.prompt(
+                    "Message to the families:",
+                    "Namaste, this is BHB International School regarding your admission enquiry.",
+                  );
+                  if (!text) return;
+                  const picked = new Set(ids);
+                  const seen = new Set<string>();
+                  let opened = 0;
+                  for (const l of filtered) {
+                    if (!picked.has(l.id) || !l.mobile || seen.has(l.mobile) || opened >= 12) continue;
+                    seen.add(l.mobile);
+                    openWaMe(l.mobile, text);
+                    opened += 1;
+                  }
+                  setNotice(`Opened WhatsApp for ${opened} famil${opened === 1 ? "y" : "ies"}`);
+                  window.setTimeout(() => setNotice(null), 2800);
+                },
+              },
+            ]}
+          />
           <MastersTableCard title="Leads">
             {filtered.length === 0 ? (
               <MastersEmptyRow label="No leads in this view — use New enquiry to capture." />
@@ -1462,6 +1536,14 @@ export function AdmissionsWorkspace() {
               <ErpTable minWidth="min-w-full">
                 <ErpTableHead>
                   <tr>
+                    <th className="w-10 px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                      <RowCheckbox
+                        checked={leadSelection.allSelected(leadSort.rows.map((r) => r.id))}
+                        indeterminate={leadSelection.someSelected(leadSort.rows.map((r) => r.id))}
+                        onChange={() => leadSelection.toggleAll(leadSort.rows.map((r) => r.id))}
+                        label="Select all leads shown"
+                      />
+                    </th>
                     <ErpSortTh sort={leadSort} field="enquiryNo">Lead no.</ErpSortTh>
                     <ErpSortTh sort={leadSort} field="leadDate">Lead date</ErpSortTh>
                     <ErpSortTh sort={leadSort} field="ay">Adm. year</ErpSortTh>
@@ -1519,6 +1601,13 @@ export function AdmissionsWorkspace() {
                           if (!showOnly) openLead(l.id);
                         }}
                       >
+                        <td className="w-10 px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                          <RowCheckbox
+                            checked={leadSelection.isSelected(l.id)}
+                            onChange={() => leadSelection.toggle(l.id)}
+                            label={`Select lead ${l.enquiryNo}`}
+                          />
+                        </td>
                         <td className="px-3 py-2 font-mono text-[12px]">
                           {l.enquiryNo}
                           {hh ? (
@@ -1726,6 +1815,44 @@ export function AdmissionsWorkspace() {
                               >
                                 Open
                               </button>
+                              <RowActionMenu
+                                row={l}
+                                label={`More actions for ${l.enquiryNo}`}
+                                actions={[
+                                  { id: "open", label: "Open in CRM", onSelect: (r) => openLead(r.id) },
+                                  {
+                                    id: "wa",
+                                    label: "WhatsApp the family",
+                                    disabled: (r) => !r.mobile,
+                                    onSelect: (r) =>
+                                      openWaMe(
+                                        r.mobile,
+                                        `Namaste, this is BHB International School regarding ${r.childName || "your child"}'s admission enquiry.`,
+                                      ),
+                                  },
+                                  {
+                                    id: "call",
+                                    label: "Call & write it up",
+                                    hidden: () => !canCreate,
+                                    disabled: (r) => !r.mobile,
+                                    onSelect: (r) => setFollowUpFor({ lead: r, channel: "call" }),
+                                  },
+                                  {
+                                    id: "followup",
+                                    label: "Log a follow-up",
+                                    hidden: () => !canCreate,
+                                    onSelect: (r) => setFollowUpFor({ lead: r, channel: "whatsapp" }),
+                                  },
+                                  {
+                                    id: "register",
+                                    label: "Move to Registered",
+                                    separatorAbove: true,
+                                    hidden: (r) => !canCreate || r.stage !== "enquiry",
+                                    disabled: (r) => registrationBlockers(state, r.id).length > 0,
+                                    onSelect: (r) => doRegisterLead(r.id),
+                                  },
+                                ]}
+                              />
                             </div>
                           )}
                         </td>

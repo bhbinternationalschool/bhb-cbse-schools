@@ -22,6 +22,7 @@ import {
 } from "@/lib/exams";
 import { examsDualWriteDbEnabled } from "@/lib/examsDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { fetchAllPages, fetchByIds } from "@/lib/supabase/pageAll";
 
 export type ExamDeskSyncMeta = {
   termCount: number;
@@ -519,10 +520,15 @@ export async function pushExamDeskToDb(
   if (!r.ok) return r;
 
   const sheetIds = new Set(sheets.map((s) => s.id));
-  const { data: existingMarks } = await sb
-    .from("exam_desk_marks")
-    .select("id, mark_sheet_id")
-    .eq("tenant_id", tenantId);
+  const { rows: existingMarks } = await fetchAllPages<{ id: string; mark_sheet_id: string }>(
+    (from, to) =>
+      sb
+        .from("exam_desk_marks")
+        .select("id, mark_sheet_id")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+  );
   const staleMarkIds = (existingMarks ?? [])
     .filter((m) => sheetIds.has(String(m.mark_sheet_id)))
     .map((m) => String(m.id));
@@ -533,10 +539,15 @@ export async function pushExamDeskToDb(
   r = await upsertChunks(sb, "exam_desk_marks", allMarks, 500);
   if (!r.ok) return r;
 
-  const { data: existingCoScholastic } = await sb
-    .from("exam_desk_coscholastic")
-    .select("id, mark_sheet_id")
-    .eq("tenant_id", tenantId);
+  const { rows: existingCoScholastic } = await fetchAllPages<{ id: string; mark_sheet_id: string }>(
+    (from, to) =>
+      sb
+        .from("exam_desk_coscholastic")
+        .select("id, mark_sheet_id")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+  );
   const staleCoScholasticIds = (existingCoScholastic ?? [])
     .filter((e) => sheetIds.has(String(e.mark_sheet_id)))
     .map((e) => String(e.id));
@@ -547,10 +558,15 @@ export async function pushExamDeskToDb(
   r = await upsertChunks(sb, "exam_desk_coscholastic", allCoScholastic, 500);
   if (!r.ok) return r;
 
-  const { data: existingRemarks } = await sb
-    .from("exam_desk_remarks")
-    .select("id, mark_sheet_id")
-    .eq("tenant_id", tenantId);
+  const { rows: existingRemarks } = await fetchAllPages<{ id: string; mark_sheet_id: string }>(
+    (from, to) =>
+      sb
+        .from("exam_desk_remarks")
+        .select("id, mark_sheet_id")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+  );
   const staleRemarkIds = (existingRemarks ?? [])
     .filter((e) => sheetIds.has(String(e.mark_sheet_id)))
     .map((e) => String(e.id));
@@ -561,10 +577,15 @@ export async function pushExamDeskToDb(
   r = await upsertChunks(sb, "exam_desk_remarks", allRemarks, 500);
   if (!r.ok) return r;
 
-  const { data: existingItemScores } = await sb
-    .from("exam_desk_item_scores")
-    .select("id, mark_sheet_id")
-    .eq("tenant_id", tenantId);
+  const { rows: existingItemScores } = await fetchAllPages<{ id: string; mark_sheet_id: string }>(
+    (from, to) =>
+      sb
+        .from("exam_desk_item_scores")
+        .select("id, mark_sheet_id")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+  );
   const staleItemScoreIds = (existingItemScores ?? [])
     .filter((e) => sheetIds.has(String(e.mark_sheet_id)))
     .map((e) => String(e.id));
@@ -633,7 +654,9 @@ export async function fetchExamDeskFromDb(): Promise<{
     sb.from("exam_desk_terms").select("*").eq("tenant_id", tenantId),
     sb.from("exam_desk_subjects").select("*").eq("tenant_id", tenantId),
     sb.from("exam_desk_date_sheet").select("*").eq("tenant_id", tenantId),
-    sb.from("exam_desk_sheets").select("*").eq("tenant_id", tenantId),
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb.from("exam_desk_sheets").select("*").eq("tenant_id", tenantId).order("id", { ascending: true }).range(from, to),
+    ).then((r) => ({ data: r.rows, error: r.error ? { message: r.error } : null })),
     sb
       .from("exam_desk_policy")
       .select("policy_json")
@@ -662,12 +685,16 @@ export async function fetchExamDeskFromDb(): Promise<{
   let markRows: Record<string, unknown>[] = [];
   const sheetIds = (sheetHeaders ?? []).map((h) => String(h.id));
   if (sheetIds.length) {
-    const { data } = await sb
-      .from("exam_desk_marks")
-      .select("*")
-      .eq("tenant_id", tenantId)
-      .in("mark_sheet_id", sheetIds);
-    markRows = (data ?? []) as Record<string, unknown>[];
+    const { rows } = await fetchByIds<Record<string, unknown>>(sheetIds, (chunk, from, to) =>
+      sb
+        .from("exam_desk_marks")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .in("mark_sheet_id", chunk)
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
+    markRows = rows;
   }
 
   const marksBySheet = new Map<string, Record<string, unknown>[]>();
@@ -680,12 +707,16 @@ export async function fetchExamDeskFromDb(): Promise<{
 
   let coScholasticRows: Record<string, unknown>[] = [];
   if (sheetIds.length) {
-    const { data } = await sb
-      .from("exam_desk_coscholastic")
-      .select("*")
-      .eq("tenant_id", tenantId)
-      .in("mark_sheet_id", sheetIds);
-    coScholasticRows = (data ?? []) as Record<string, unknown>[];
+    const { rows } = await fetchByIds<Record<string, unknown>>(sheetIds, (chunk, from, to) =>
+      sb
+        .from("exam_desk_coscholastic")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .in("mark_sheet_id", chunk)
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
+    coScholasticRows = rows;
   }
 
   const coScholasticBySheet = new Map<string, Record<string, unknown>[]>();
@@ -698,12 +729,16 @@ export async function fetchExamDeskFromDb(): Promise<{
 
   let remarkRows: Record<string, unknown>[] = [];
   if (sheetIds.length) {
-    const { data } = await sb
-      .from("exam_desk_remarks")
-      .select("*")
-      .eq("tenant_id", tenantId)
-      .in("mark_sheet_id", sheetIds);
-    remarkRows = (data ?? []) as Record<string, unknown>[];
+    const { rows } = await fetchByIds<Record<string, unknown>>(sheetIds, (chunk, from, to) =>
+      sb
+        .from("exam_desk_remarks")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .in("mark_sheet_id", chunk)
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
+    remarkRows = rows;
   }
   const remarksBySheet = new Map<string, Record<string, unknown>[]>();
   for (const e of remarkRows) {

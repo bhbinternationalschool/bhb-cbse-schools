@@ -165,6 +165,10 @@ export type StaffHrState = {
 
 const STORAGE_KEY = "bhb_staff_hr_v1";
 
+/** Server-side copy — API routes hydrate it from the desk, then read/write
+ * through the same load/persist functions the browser uses. */
+let serverStaffHrCache: StaffHrState | null = null;
+
 export const DEFAULT_LEAVE_TYPES: LeaveType[] = [
   {
     code: "CL",
@@ -509,7 +513,9 @@ function normalizeState(raw: Partial<StaffHrState>): StaffHrState {
 }
 
 export function loadStaffHr(): StaffHrState {
-  if (typeof window === "undefined") return emptyStaffHrState();
+  if (typeof window === "undefined") {
+    return serverStaffHrCache ?? emptyStaffHrState();
+  }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return emptyStaffHrState();
@@ -522,7 +528,11 @@ export function loadStaffHr(): StaffHrState {
 }
 
 function persistStaffHr(state: StaffHrState) {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined") {
+    // Routes push to the desk explicitly after the mutation succeeds.
+    serverStaffHrCache = normalizeState(state);
+    return;
+  }
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(normalizeState(state)));
   void import("@/lib/staffHrPersistence").then(({ scheduleStaffHrSync }) => {
     scheduleStaffHrSync(state);
@@ -535,8 +545,15 @@ export function saveStaffHr(state: StaffHrState) {
 }
 
 export function writeStaffHrLocalRaw(state: StaffHrState) {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined") {
+    serverStaffHrCache = normalizeState(state);
+    return;
+  }
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(normalizeState(state)));
+}
+
+export function normalizeStaffHrState(raw: Partial<StaffHrState>): StaffHrState {
+  return normalizeState(raw);
 }
 
 export function staffHrStateIsEmpty(state: StaffHrState): boolean {

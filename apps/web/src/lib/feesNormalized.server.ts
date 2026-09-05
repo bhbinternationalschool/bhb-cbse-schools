@@ -19,6 +19,7 @@ import {
 } from "@/lib/feesDeskAncillary.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { feesDualWriteDbEnabled } from "@/lib/feesDbConfig";
+import { fetchAllPages } from "@/lib/supabase/pageAll";
 
 export type FeeDeskSyncMeta = {
   voucherCount: number;
@@ -308,10 +309,14 @@ export async function pushFeeVouchersToDb(
   const ids = active.map((v) => v.id);
   const idSet = new Set(ids);
 
-  const { data: existingHeaders } = await sb
-    .from("fee_desk_vouchers")
-    .select("id")
-    .eq("tenant_id", tenantId);
+  const { rows: existingHeaders } = await fetchAllPages<{ id: string }>((from, to) =>
+    sb
+      .from("fee_desk_vouchers")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
   const staleIds = (existingHeaders ?? [])
     .map((r) => String(r.id))
     .filter((id) => !idSet.has(id));
@@ -481,11 +486,21 @@ export async function fetchFeeVouchersFromDb(): Promise<{
   if (!ctx) return { vouchers: [], meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
-  const { data: headers, error: hErr } = await sb
-    .from("fee_desk_vouchers")
-    .select("*")
-    .eq("tenant_id", tenantId)
-    .order("collected_at", { ascending: false });
+  // Paged: 502 receipts today; the thousand-and-first would have vanished
+  // from every browser silently, and the next push would have pruned its
+  // lines. Ordered by id for stable pages, newest first afterwards.
+  const headersRes = await fetchAllPages<Record<string, unknown>>((from, to) =>
+    sb
+      .from("fee_desk_vouchers")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+  const hErr = headersRes.error ? { message: headersRes.error } : null;
+  const headers = headersRes.rows.sort((a, b) =>
+    String(b.collected_at ?? "").localeCompare(String(a.collected_at ?? "")),
+  );
 
   if (hErr) {
     console.warn("[fees-db] fetch failed", hErr.message);

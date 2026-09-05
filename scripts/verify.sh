@@ -183,6 +183,7 @@ SELFTESTS=(
   test:fee-due-future
   test:ai-stream
   test:tutor-plans
+  test:staff-home-kind
   test:cashfree-checkout
   test:teacher-contact
   test:question-bank

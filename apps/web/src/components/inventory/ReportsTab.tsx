@@ -39,6 +39,7 @@ import {
   type InvBootstrap,
   type InvSaleStatus,
 } from "@/lib/inventory/types";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 type ReportId =
   | "dashboard"
@@ -316,7 +317,7 @@ function RepeatPurchases() {
           Nothing sold twice to the same child this year.
         </p>
       ) : (
-        <ErpTableShell>
+        <ErpTableShell exportAs="store_dues_by_student" exportTitle="Store dues by student">
           <ErpTable minWidth="min-w-full">
             <ErpTableHead>
               <tr>
@@ -328,6 +329,7 @@ function RepeatPurchases() {
                 <th className="pb-2 text-right">Value</th>
                 <th className="pb-2 text-left">Receipts</th>
                 <th className="pb-2 text-left">Apart</th>
+                <th className="w-10 px-2 py-2" aria-label="Actions" />
               </tr>
             </ErpTableHead>
             <ErpTableBody>
@@ -358,6 +360,9 @@ function RepeatPurchases() {
                       {row.minutesApart < 60
                         ? `${row.minutesApart} min`
                         : `${row.firstSaleDate} → ${row.lastSaleDate}`}
+                    </td>
+                    <td className="px-2 py-1.5 text-right">
+                      <RowActionMenu row={row} label="Student actions" actions={[{ id: "open", label: "Open student profile", onSelect: (x) => { window.location.href = `/students/${encodeURIComponent(String(x.studentId))}/edit`; } }]} />
                     </td>
                   </tr>
                 );
@@ -1012,7 +1017,7 @@ function ReportShell<T extends { rows: unknown[] }>({
           {empty}
         </div>
       ) : (
-        <ErpTableShell density="compact" className="overflow-x-auto">
+        <ErpTableShell density="compact" className="overflow-x-auto" exportAs="store_report" exportTitle="Store report">
           {children}
         </ErpTableShell>
       )}

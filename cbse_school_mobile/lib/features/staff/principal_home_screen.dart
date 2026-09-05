@@ -9,6 +9,16 @@ import "../modules/bus_routes_screen.dart";
 import "transport_requests_screen.dart";
 import "attendance_screen.dart";
 import "broadcast_screen.dart";
+import "documents_screen.dart";
+import "leave_approvals_screen.dart";
+import "marks_screen.dart";
+import "staff_complaints_screen.dart";
+import "staff_leave_screen.dart";
+import "staff_roster_screen.dart";
+import "student_leave_queue_screen.dart";
+import "timetable_screen.dart";
+import "waiting_card.dart";
+import "../modules/chat_inbox_screen.dart";
 import "principal_lists.dart";
 import "section_picker.dart";
 import "presence_screen.dart";
@@ -30,10 +40,14 @@ class PrincipalHomeScreen extends StatefulWidget {
     super.key,
     required this.api,
     required this.onLogout,
+    this.openRoute,
   });
 
   final ApiClient api;
   final VoidCallback onLogout;
+
+  /// Deep link from a notification tap, consumed once the snapshot loads.
+  final String? openRoute;
 
   @override
   State<PrincipalHomeScreen> createState() => _PrincipalHomeScreenState();
@@ -44,9 +58,51 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
   StaffSummary? _staff;
   String? _name;
   String? _error;
+  int _refresh = 0;
+  bool _deepLinkDone = false;
 
-  void _push(Widget screen) {
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
+  Future<void> _push(Widget screen) async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
+    if (mounted) setState(() => _refresh += 1);
+  }
+
+  void _openWaiting(String kind) {
+    switch (kind) {
+      case "staff_leave":
+        _push(LeaveApprovalsScreen(api: widget.api));
+      case "student_leave":
+        _push(StudentLeaveQueueScreen(api: widget.api));
+      case "complaints":
+        _push(StaffComplaintsScreen(api: widget.api));
+      case "documents":
+        _push(DocumentsScreen(api: widget.api));
+    }
+  }
+
+  void _consumeDeepLink() {
+    final raw = widget.openRoute;
+    if (raw == null || _deepLinkDone) return;
+    _deepLinkDone = true;
+    switch (Uri.tryParse(raw)?.path ?? raw) {
+      case "/leave-approvals":
+        _push(LeaveApprovalsScreen(api: widget.api));
+      case "/student-leave":
+        _push(StudentLeaveQueueScreen(api: widget.api));
+      case "/complaints":
+        _push(StaffComplaintsScreen(api: widget.api));
+      case "/documents":
+        _push(DocumentsScreen(api: widget.api));
+      case "/leave":
+        _push(StaffLeaveScreen(api: widget.api));
+      case "/chat":
+        _push(ChatInboxScreen(api: widget.api));
+      case "/notices":
+        _push(NoticesScreen(api: widget.api));
+      case "/attendance":
+        _markAttendance();
+      case "/homework":
+        _postHomework();
+    }
   }
 
   /// Class/section picker over the school-wide class list (from
@@ -141,6 +197,10 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
       setState(() {
         _snap = snap;
         _name = name;
+        _refresh += 1;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _consumeDeepLink();
       });
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
@@ -255,6 +315,12 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  WaitingCard(
+                    api: widget.api,
+                    onOpen: _openWaiting,
+                    refreshKey: _refresh,
+                  ),
+                  const SizedBox(height: 8),
                   const _SectionTitle("Fees"),
                   Row(
                     children: [
@@ -436,6 +502,73 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                         label: "Broadcast",
                         tone: ModuleTone.coral,
                         onTap: () => _push(BroadcastScreen(api: widget.api)),
+                      ),
+                      _Action(
+                        icon: Icons.event_busy_outlined,
+                        label: "Staff leave",
+                        tone: ModuleTone.amber,
+                        onTap: () =>
+                            _push(LeaveApprovalsScreen(api: widget.api)),
+                      ),
+                      _Action(
+                        icon: Icons.event_outlined,
+                        label: "Leave requests",
+                        tone: ModuleTone.blue,
+                        onTap: () =>
+                            _push(StudentLeaveQueueScreen(api: widget.api)),
+                      ),
+                      _Action(
+                        icon: Icons.report_problem_outlined,
+                        label: "Complaints",
+                        tone: ModuleTone.coral,
+                        onTap: () =>
+                            _push(StaffComplaintsScreen(api: widget.api)),
+                      ),
+                      _Action(
+                        icon: Icons.folder_open_outlined,
+                        label: "Documents",
+                        tone: ModuleTone.purple,
+                        onTap: () => _push(DocumentsScreen(api: widget.api)),
+                      ),
+                      _Action(
+                        icon: Icons.grading_outlined,
+                        label: "Marks",
+                        tone: ModuleTone.amber,
+                        onTap: () async {
+                          var staff = _staff;
+                          staff ??= await widget.api.fetchStaffSummary();
+                          if (!mounted) return;
+                          _push(
+                            MarksScreen(
+                              api: widget.api,
+                              classes: staff.classes,
+                            ),
+                          );
+                        },
+                      ),
+                      _Action(
+                        icon: Icons.calendar_view_week_outlined,
+                        label: "Timetable",
+                        tone: ModuleTone.blue,
+                        onTap: () => _push(TimetableScreen(api: widget.api)),
+                      ),
+                      _Action(
+                        icon: Icons.chat_bubble_outline,
+                        label: "Messages",
+                        tone: ModuleTone.teal,
+                        onTap: () => _push(ChatInboxScreen(api: widget.api)),
+                      ),
+                      _Action(
+                        icon: Icons.contact_phone_outlined,
+                        label: "Staff contacts",
+                        tone: ModuleTone.green,
+                        onTap: () => _push(StaffRosterScreen(api: widget.api)),
+                      ),
+                      _Action(
+                        icon: Icons.beach_access_outlined,
+                        label: "My leave",
+                        tone: ModuleTone.gray,
+                        onTap: () => _push(StaffLeaveScreen(api: widget.api)),
                       ),
                       _Action(
                         icon: Icons.fact_check_outlined,

@@ -6,6 +6,7 @@ import { WEEKDAY_SHORT, teachingPeriods, type TimetableState } from "@/lib/timet
 import { computeFreeTeacherSlots } from "@/lib/timetableReportCatalog";
 import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import { field } from "@/components/ui/erp-ui";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 /**
  * "Which teacher is free at period X on day Y?" — the computation already
@@ -108,13 +109,14 @@ export function FreePeriodsPanel({
           No teacher is free for this selection.
         </div>
       ) : (
-        <ErpTableShell>
+        <ErpTableShell exportAs="free_periods" exportTitle="Free periods">
           <ErpTable minWidth="min-w-[480px]">
             <ErpTableHead>
               <tr>
                 <th className="px-3 py-2 font-semibold">Period</th>
                 <th className="px-3 py-2 font-semibold">Emp code</th>
                 <th className="px-3 py-2 font-semibold">Teacher</th>
+                <th className="w-10 px-2 py-2" aria-label="Actions" />
               </tr>
             </ErpTableHead>
             <ErpTableBody>
@@ -125,6 +127,9 @@ export function FreePeriodsPanel({
                   </td>
                   <td className="px-3 py-2">{s.empCode}</td>
                   <td className="px-3 py-2">{s.teacherName}</td>
+                  <td className="px-2 py-1.5 text-right">
+                    <RowActionMenu row={s} label="Teacher actions" actions={[{ id: "open", label: "Open staff record", onSelect: (x) => { window.location.href = `/staff/${encodeURIComponent(String(x.teacherId))}/edit`; } }]} />
+                  </td>
                 </tr>
               ))}
             </ErpTableBody>

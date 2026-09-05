@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import type { CSSProperties, ReactNode } from "react";
+import { useRef, type CSSProperties, type ReactNode } from "react";
 import { Breadcrumbs, type BreadcrumbItem } from "@/components/ui/breadcrumbs";
 import { ErpSparkline, type ErpChartRow } from "@/components/ui/erp-chart-lazy";
 import { cn } from "@/lib/utils";
+import { ExportMenu } from "@/components/ui/erp-grid";
 
 export type ErpMetricTone = "green" | "rose" | "sky" | "violet" | "amber" | "navy";
 
@@ -301,14 +302,27 @@ export function ErpTableShell({
   density = "comfortable",
   className,
   style,
+  exportAs,
+  exportTitle,
 }: {
   children: ReactNode;
   density?: "compact" | "comfortable";
   className?: string;
   style?: CSSProperties;
+  /**
+   * File base name for an "Export data" menu (Excel / CSV / PDF) of the rows
+   * this shell is showing. The export reads the rendered table — header
+   * cells become columns, body cells become values — so a screen gets the
+   * standard's export with one prop and no column mapping. Screens with a
+   * richer, typed export keep their own ExportMenu and leave this unset.
+   */
+  exportAs?: string;
+  exportTitle?: string;
 }) {
+  const shellRef = useRef<HTMLDivElement>(null);
   return (
     <div
+      ref={shellRef}
       className={cn(
         "erp-table-shell overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow-1)]",
         className,
@@ -318,9 +332,56 @@ export function ErpTableShell({
         ...style,
       }}
     >
+      {exportAs ? (
+        <div className="flex justify-end border-b border-[var(--border)] px-3 py-1.5">
+          <ExportMenu
+            compact
+            title={exportTitle || exportAs.replace(/[_-]+/g, " ")}
+            fileBaseName={exportAs}
+            columns={domTableColumns(shellRef)}
+            rows={() => domTableRows(shellRef)}
+          />
+        </div>
+      ) : null}
       {children}
     </div>
   );
+}
+
+/* Read a rendered table as export data. Header cells give the columns; a
+ * blank header or one that says Actions / Do is a button column and is
+ * skipped. Body cells give the values, as the office sees them. */
+function domHeaders(ref: { current: HTMLDivElement | null }) {
+  const table = ref.current?.querySelector("table");
+  const ths = table ? Array.from(table.querySelectorAll("thead th")) : [];
+  return ths
+    .map((th, index) => ({
+      index,
+      header: (th.textContent || "").replace(/\s+/g, " ").trim(),
+    }))
+    .filter((c) => c.header && !/^(actions?|do)$/i.test(c.header))
+    .map((c) => ({ key: `c${c.index}`, header: c.header, index: c.index }));
+}
+function domTableColumns(ref: { current: HTMLDivElement | null }) {
+  // Resolved when the menu opens, so an empty first paint costs nothing.
+  return domHeaders(ref).map(({ key, header }) => ({ key, header }));
+}
+function domTableRows(ref: { current: HTMLDivElement | null }) {
+  const table = ref.current?.querySelector("table");
+  if (!table) return [];
+  const cols = domHeaders(ref);
+  const out: Record<string, string>[] = [];
+  for (const tr of Array.from(table.querySelectorAll("tbody tr"))) {
+    const tds = Array.from(tr.querySelectorAll("td"));
+    if (tds.length === 0 || (tds.length === 1 && tds[0]!.hasAttribute("colspan"))) continue;
+    const row: Record<string, string> = {};
+    for (const c of cols) {
+      const td = tds[c.index] as HTMLElement | undefined;
+      row[c.key] = td ? (td.innerText || td.textContent || "").replace(/\s+/g, " ").trim() : "";
+    }
+    out.push(row);
+  }
+  return out;
 }
 
 export function ErpTable({

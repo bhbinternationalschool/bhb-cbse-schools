@@ -40,6 +40,7 @@ import {
   ErpTableHead,
   ErpTableShell,
 } from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 type UpdateTool =
   | "details"
@@ -615,7 +616,7 @@ export function StudentUpdatePanel({
               No active students in this class / section.
             </p>
           ) : tool === "student_images" ? (
-            <ErpTableShell className="overflow-x-auto">
+            <ErpTableShell className="overflow-x-auto" exportAs="student_update_sheet" exportTitle="Student update sheet">
               <ErpTable>
                 <ErpTableHead>
                   <tr>
@@ -623,6 +624,7 @@ export function StudentUpdatePanel({
                     <th className="px-3 py-2 font-semibold">Student</th>
                     <th className="px-3 py-2 font-semibold">Class</th>
                     <th className="px-3 py-2 font-semibold">Photo</th>
+                    <th className="w-10 px-2 py-2" aria-label="Actions" />
                   </tr>
                 </ErpTableHead>
                 <ErpTableBody>
@@ -650,6 +652,9 @@ export function StudentUpdatePanel({
                           onError={(msg) => setError(msg)}
                         />
                       </td>
+                      <td className="px-2 py-1.5 text-right">
+                        <RowActionMenu row={s} label="Student actions" actions={[{ id: "open", label: "Open student profile", onSelect: (x) => { window.location.href = `/students/${encodeURIComponent(String(x.id))}/edit`; } }]} />
+                      </td>
                     </tr>
                   ))}
                 </ErpTableBody>
@@ -664,6 +669,7 @@ export function StudentUpdatePanel({
                     <th className="px-3 py-2 font-semibold">Father</th>
                     <th className="px-3 py-2 font-semibold">Mother</th>
                     <th className="px-3 py-2 font-semibold">Guardian</th>
+                    <th className="w-10 px-2 py-2" aria-label="Actions" />
                   </tr>
                 </ErpTableHead>
                 <ErpTableBody>
@@ -713,6 +719,9 @@ export function StudentUpdatePanel({
                             }
                             onError={(msg) => setError(msg)}
                           />
+                        </td>
+                        <td className="px-2 py-1.5 text-right">
+                          <RowActionMenu row={s} label="Student actions" actions={[{ id: "open", label: "Open student profile", onSelect: (x) => { window.location.href = `/students/${encodeURIComponent(String(x.id))}/edit`; } }]} />
                         </td>
                       </tr>
                     );

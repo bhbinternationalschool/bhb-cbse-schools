@@ -19,6 +19,7 @@ import { formatInr, loadMasters, type MastersState } from "@/lib/masters";
 import { loadSis, type SisState } from "@/lib/sis";
 import { TENANT } from "@/lib/types";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 type Category = {
   id: string;
@@ -652,12 +653,25 @@ export function InterSchoolPanel({
                             </span>
                           </td>
                           <td className="px-3 py-2 text-right">
-                            {p.status === "pending" ? (
-                              <span className="flex justify-end gap-1">
-                                <button type="button" className={btnOutline} disabled={readOnly} onClick={() => void api({ action: "status", participantId: p.id, status: "approved" }).then(() => reloadParticipants(selected.id)).catch(oops)}>Approve</button>
-                                <button type="button" className="rounded-lg px-2 py-1 text-xs font-semibold text-[var(--danger)]" disabled={readOnly} onClick={() => void api({ action: "status", participantId: p.id, status: "rejected" }).then(() => reloadParticipants(selected.id)).catch(oops)}>Reject</button>
-                              </span>
-                            ) : null}
+                            <RowActionMenu
+                              row={p}
+                              label="Registration actions"
+                              actions={[
+                                {
+                                  id: "approve",
+                                  label: "Approve",
+                                  hidden: (x) => x.status !== "pending" || !!readOnly,
+                                  onSelect: (x) => void api({ action: "status", participantId: x.id, status: "approved" }).then(() => reloadParticipants(selected.id)).catch(oops),
+                                },
+                                {
+                                  id: "reject",
+                                  label: "Reject",
+                                  tone: "danger",
+                                  hidden: (x) => x.status !== "pending" || !!readOnly,
+                                  onSelect: (x) => void api({ action: "status", participantId: x.id, status: "rejected" }).then(() => reloadParticipants(selected.id)).catch(oops),
+                                },
+                              ]}
+                            />
                           </td>
                         </tr>
                       );

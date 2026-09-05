@@ -25,17 +25,35 @@ async function gatherFacts(asOf: string): Promise<AnomalyFacts | null> {
   if (!ctx) return null;
   const { sb, tenantId } = ctx;
 
-  const [vouchersRes, balancesRes, periodsRes] = await Promise.all([
-    sb
-      .from("ledger_vouchers")
-      .select("id, voucher_no, voucher_type, voucher_date, created_at, narration, source_type, source_id, created_by, reverses_voucher_id")
-      .eq("tenant_id", tenantId)
-      .lte("voucher_date", asOf),
+  // Paged. The book passed a thousand vouchers in August; an unpaged read
+  // returns the first thousand and reports success, so every control ran on
+  // a third of the book and a reversed pair whose halves fell either side of
+  // the cut looked like two unexplained entries (2026-09-05).
+  const readVouchers = async (): Promise<Record<string, unknown>[]> => {
+    const out: Record<string, unknown>[] = [];
+    const page = 1000;
+    for (let from = 0; ; from += page) {
+      const { data, error } = await sb
+        .from("ledger_vouchers")
+        .select("id, voucher_no, voucher_type, voucher_date, created_at, narration, source_type, source_id, created_by, reverses_voucher_id")
+        .eq("tenant_id", tenantId)
+        .lte("voucher_date", asOf)
+        .order("id", { ascending: true })
+        .range(from, from + page - 1);
+      if (error) break;
+      const rows = (data ?? []) as Record<string, unknown>[];
+      out.push(...rows);
+      if (rows.length < page) break;
+    }
+    return out;
+  };
+
+  const [voucherRows, balancesRes, periodsRes] = await Promise.all([
+    readVouchers(),
     periodBalances({ from: "0001-01-01", to: asOf }),
     sb.from("ledger_periods").select("period, status").eq("tenant_id", tenantId),
   ]);
 
-  const voucherRows = (vouchersRes.data ?? []) as Record<string, unknown>[];
   // A voucher is "reversed" when something points at it. Collected here rather
   // than trusted from a flag, because the ledger has no such flag by design —
   // the reversal is the record.
@@ -50,12 +68,21 @@ async function gatherFacts(asOf: string): Promise<AnomalyFacts | null> {
   for (let i = 0; i < ids.length; i += 200) {
     const chunk = ids.slice(i, i + 200);
     if (chunk.length === 0) continue;
-    const { data } = await sb
-      .from("ledger_lines")
-      .select("voucher_id, debit_paise, credit_paise, instrument_ref, party_id, ledger_accounts!inner(code), ledger_parties(external_id, name, kind)")
-      .eq("tenant_id", tenantId)
-      .in("voucher_id", chunk);
-    for (const r of (data ?? []) as Record<string, unknown>[]) {
+    const chunkLines: Record<string, unknown>[] = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await sb
+        .from("ledger_lines")
+        .select("voucher_id, debit_paise, credit_paise, instrument_ref, party_id, ledger_accounts!inner(code), ledger_parties(external_id, name, kind)")
+        .eq("tenant_id", tenantId)
+        .in("voucher_id", chunk)
+        .order("id", { ascending: true })
+        .range(from, from + 999);
+      if (error) break;
+      const rows = (data ?? []) as Record<string, unknown>[];
+      chunkLines.push(...rows);
+      if (rows.length < 1000) break;
+    }
+    for (const r of chunkLines) {
       const acct = r.ledger_accounts as { code?: string } | null;
       const party = r.ledger_parties as { external_id?: string; name?: string; kind?: string } | null;
       lines.push({
@@ -74,12 +101,23 @@ async function gatherFacts(asOf: string): Promise<AnomalyFacts | null> {
   // deployment) this is simply empty rather than an error — the other rules
   // still run.
   const unreconciled: AnomalyFacts["unreconciled"] = [];
+  // A reversed entry and its reversal will never reach a bank statement —
+  // together they are nothing. Listing both as "an entry the bank has never
+  // seen" once buried the controls page under 270 warnings that cancelled
+  // each other out (2026-09-05).
+  const cancelledVoucherNos = new Set(
+    voucherRows
+      .filter((r) => reversedIds.has(String(r.id)) || !!r.reverses_voucher_id)
+      .map((r) => String(r.voucher_no ?? ""))
+      .filter(Boolean),
+  );
   const { data: bookUnmatched } = await sb
     .from("ledger_v_bank_book")
     .select("ledger_line_id, voucher_date, signed_paise, line_narration, voucher_no, match_id")
     .eq("tenant_id", tenantId)
     .is("match_id", null);
   for (const r of (bookUnmatched ?? []) as Record<string, unknown>[]) {
+    if (cancelledVoucherNos.has(String(r.voucher_no ?? ""))) continue;
     unreconciled.push({
       side: "book",
       id: String(r.ledger_line_id),
@@ -186,20 +224,49 @@ async function feeReceiptsWithoutLines(): Promise<Anomaly[]> {
   if (!ctx) return [];
   const { sb, tenantId } = ctx;
 
-  const [{ data: vouchers, error: vErr }, { data: lines, error: lErr }] =
-    await Promise.all([
-      sb
+  // Paged, both of them. PostgREST caps a request at 1000 rows and reports the
+  // truncation as success; with 1,913 line rows, the unpaged read saw the
+  // first thousand and declared 214 receipts (₹9.9 lakh) to be without lines
+  // when exactly one was (2026-09-05). A control that cries wolf is worse than
+  // no control.
+  const page = 1000;
+  const readVouchers = async () => {
+    const out: { id: string; receipt_no: string; total_paise: number }[] = [];
+    for (let from = 0; ; from += page) {
+      const { data, error } = await sb
         .from("fee_desk_vouchers")
         .select("id, receipt_no, total_paise")
         .eq("tenant_id", tenantId)
-        .is("voided_at", null),
-      sb.from("fee_desk_voucher_lines").select("voucher_id").eq("tenant_id", tenantId),
-    ]);
-  if (vErr || lErr || !vouchers) return [];
+        .is("voided_at", null)
+        .order("id", { ascending: true })
+        .range(from, from + page - 1);
+      if (error) return null;
+      const rows = (data ?? []) as { id: string; receipt_no: string; total_paise: number }[];
+      out.push(...rows);
+      if (rows.length < page) break;
+    }
+    return out;
+  };
+  const readLines = async () => {
+    const out: { voucher_id: string }[] = [];
+    for (let from = 0; ; from += page) {
+      const { data, error } = await sb
+        .from("fee_desk_voucher_lines")
+        .select("id, voucher_id")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, from + page - 1);
+      if (error) return null;
+      const rows = (data ?? []) as { voucher_id: string }[];
+      out.push(...rows);
+      if (rows.length < page) break;
+    }
+    return out;
+  };
+  const [vouchers, lines] = await Promise.all([readVouchers(), readLines()]);
+  if (!vouchers || !lines) return [];
 
-  const withLines = new Set(
-    (lines ?? []).map((l) => String((l as { voucher_id: string }).voucher_id)),
-  );
+  const withLines = new Set(lines.map((l) => String(l.voucher_id)));
   const orphans = (vouchers as { id: string; receipt_no: string; total_paise: number }[])
     .filter((v) => !withLines.has(v.id));
   if (orphans.length === 0) return [];
@@ -240,14 +307,23 @@ function rupeesFromPaise(paise: number): string {
 async function ageingItemsFor(controlCode: string): Promise<AgeingItem[]> {
   const ctx = await getServerTenantContext();
   if (!ctx) return [];
-  const { data } = await ctx.sb
-    .from("ledger_lines")
-    .select("voucher_id, debit_paise, credit_paise, ledger_accounts!inner(code), ledger_parties(external_id, name, kind), ledger_vouchers!inner(voucher_no, voucher_date, due_date)")
-    .eq("tenant_id", ctx.tenantId)
-    .eq("ledger_accounts.code", controlCode);
+  // Paged: the store receivable alone carries a line per sale.
+  const data: Record<string, unknown>[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data: page } = await ctx.sb
+      .from("ledger_lines")
+      .select("voucher_id, debit_paise, credit_paise, ledger_accounts!inner(code), ledger_parties(external_id, name, kind), ledger_vouchers!inner(voucher_no, voucher_date, due_date)")
+      .eq("tenant_id", ctx.tenantId)
+      .eq("ledger_accounts.code", controlCode)
+      .order("id", { ascending: true })
+      .range(from, from + 999);
+    const rows = (page ?? []) as Record<string, unknown>[];
+    data.push(...rows);
+    if (rows.length < 1000) break;
+  }
 
   const byKey = new Map<string, AgeingItem>();
-  for (const r of (data ?? []) as Record<string, unknown>[]) {
+  for (const r of data) {
     const party = r.ledger_parties as { external_id?: string; name?: string; kind?: string } | null;
     const voucher = r.ledger_vouchers as { voucher_no?: string; voucher_date?: string; due_date?: string } | null;
     if (!party?.external_id) continue;
@@ -304,6 +380,7 @@ export type Cockpit = {
   incomeThisYearPaise: number;
   expenditureThisYearPaise: number;
   surplusThisYearPaise: number;
+  banks?: { code: string; name: string; closingPaise: number }[];
   anomalies: Anomaly[];
   summary: ReturnType<typeof summariseAnomalies>;
   payablesAgeing: AgeingReport;
@@ -315,30 +392,62 @@ export type Cockpit = {
  * Deliberately small. A dashboard that shows forty numbers gets skimmed; this
  * shows the position, what is owed each way, and anything that looks wrong.
  */
-export async function ledgerCockpit(input: {
+export type LedgerPosition = {
+  ok: boolean;
+  error?: string;
+  asOf: string;
+  cashPaise: number;
+  bankPaise: number;
+  /** Every bank account with its own balance — the total alone hides a negative one. */
+  banks: { code: string; name: string; closingPaise: number }[];
+  chequesInHandPaise: number;
+  payablesPaise: number;
+  receivablesPaise: number;
+  incomeThisYearPaise: number;
+  expenditureThisYearPaise: number;
+  surplusThisYearPaise: number;
+};
+
+/**
+ * The position alone — balances, no controls, no ageing.
+ *
+ * The dashboard needs these five numbers within a second of opening; the
+ * cockpit's controls take several seconds over a book of thousands of
+ * vouchers, and while they ran the dashboard was showing browser-book figures
+ * that said cash ₹0. Cash and bank are the SUM of every account flagged as
+ * such: the earlier read took the bank GROUP's own balance (1010) and so
+ * reported "at bank ₹40,501" while UBI-Main stood at −₹21,465 beneath it.
+ */
+export async function ledgerPosition(input: {
   asOf: string;
   fyFrom: string;
-}): Promise<Cockpit> {
-  const [balances, checks, ageing] = await Promise.all([
+}): Promise<LedgerPosition> {
+  const ctx = await getServerTenantContext();
+  const [balances, flagsRes] = await Promise.all([
     periodBalances({ from: input.fyFrom, to: input.asOf }),
-    ledgerAnomalies({ asOf: input.asOf }),
-    payablesAgeing(input.asOf),
+    ctx
+      ? ctx.sb.from("ledger_accounts").select("code, is_cash, is_bank").eq("tenant_id", ctx.tenantId)
+      : Promise.resolve({ data: [] as { code: string; is_cash: boolean; is_bank: boolean }[] }),
   ]);
+  const empty: LedgerPosition = {
+    ok: false,
+    error: balances.error,
+    asOf: input.asOf,
+    cashPaise: 0, bankPaise: 0, banks: [], chequesInHandPaise: 0,
+    payablesPaise: 0, receivablesPaise: 0,
+    incomeThisYearPaise: 0, expenditureThisYearPaise: 0, surplusThisYearPaise: 0,
+  };
+  if (!balances.ok) return empty;
 
-  if (!balances.ok) {
-    return {
-      ok: false,
-      error: balances.error,
-      asOf: input.asOf,
-      cashPaise: 0, bankPaise: 0, chequesInHandPaise: 0,
-      payablesPaise: 0, receivablesPaise: 0,
-      incomeThisYearPaise: 0, expenditureThisYearPaise: 0, surplusThisYearPaise: 0,
-      anomalies: [], summary: { critical: 0, warning: 0, info: 0, totalAmountPaise: 0 },
-      payablesAgeing: ageing,
-    };
-  }
-
+  const flags = new Map(
+    ((flagsRes.data ?? []) as { code: string; is_cash: boolean; is_bank: boolean }[]).map((r) => [
+      String(r.code),
+      { isCash: !!r.is_cash, isBank: !!r.is_bank },
+    ]),
+  );
   const at = (code: string) => balances.rows.find((r) => r.code === code)?.closingPaise ?? 0;
+  const cashRows = balances.rows.filter((r) => flags.get(r.code)?.isCash);
+  const bankRows = balances.rows.filter((r) => flags.get(r.code)?.isBank);
   const income = balances.rows
     .filter((r) => r.kind === "income")
     .reduce((n, r) => n + (r.creditPaise - r.debitPaise), 0);
@@ -349,14 +458,49 @@ export async function ledgerCockpit(input: {
   return {
     ok: true,
     asOf: input.asOf,
-    cashPaise: at("1000"),
-    bankPaise: at("1010"),
+    cashPaise: cashRows.length ? cashRows.reduce((n, r) => n + r.closingPaise, 0) : at("1000"),
+    bankPaise: bankRows.length ? bankRows.reduce((n, r) => n + r.closingPaise, 0) : at("1010"),
+    banks: bankRows
+      .filter((r) => r.closingPaise !== 0 || r.debitPaise !== 0 || r.creditPaise !== 0)
+      .map((r) => ({ code: r.code, name: r.name, closingPaise: r.closingPaise })),
     chequesInHandPaise: at("1050"),
     payablesPaise: at(L_ACCOUNTS_PAYABLE),
     receivablesPaise: at(L_FEE_RECEIVABLE) + at(L_STORE_RECEIVABLE),
     incomeThisYearPaise: income,
     expenditureThisYearPaise: expenditure,
     surplusThisYearPaise: income - expenditure,
+  };
+}
+
+export async function ledgerCockpit(input: {
+  asOf: string;
+  fyFrom: string;
+}): Promise<Cockpit> {
+  const [position, checks, ageing] = await Promise.all([
+    ledgerPosition(input),
+    ledgerAnomalies({ asOf: input.asOf }),
+    payablesAgeing(input.asOf),
+  ]);
+
+  if (!position.ok) {
+    return {
+      ok: false,
+      error: position.error,
+      asOf: input.asOf,
+      cashPaise: 0, bankPaise: 0, chequesInHandPaise: 0,
+      payablesPaise: 0, receivablesPaise: 0,
+      incomeThisYearPaise: 0, expenditureThisYearPaise: 0, surplusThisYearPaise: 0,
+      anomalies: [], summary: { critical: 0, warning: 0, info: 0, totalAmountPaise: 0 },
+      payablesAgeing: ageing,
+    };
+  }
+
+  const { ok: _ok, error: _err, ...figures } = position;
+  void _ok;
+  void _err;
+  return {
+    ok: true,
+    ...figures,
     anomalies: checks.anomalies,
     summary: checks.summary,
     payablesAgeing: ageing,

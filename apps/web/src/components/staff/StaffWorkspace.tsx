@@ -55,6 +55,14 @@ import {
 } from "@/components/ui/erp-roster";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
+import {
+  BulkActionBar,
+  ExportMenu,
+  RowActionMenu,
+  RowCheckbox,
+  useRowSelection,
+} from "@/components/ui/erp-grid";
+import { openWaMe } from "@/lib/waMe";
 import { field, btn } from "@/components/ui/erp-ui";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { StaffLeavePanel } from "@/components/staff/StaffLeavePanel";
@@ -327,6 +335,8 @@ export function StaffWorkspace() {
 
   // Role and status render as composed text / a badge, so they sort on the
   // underlying values rather than on what the cell happens to show.
+  const rosterKeys = useMemo(() => filtered.map((s) => s.id), [filtered]);
+  const rosterSelection = useRowSelection(rosterKeys);
   const staffSort = useTableSort(
     filtered,
     {
@@ -616,18 +626,110 @@ export function StaffWorkspace() {
               />
             </label>
           </FilterBar>
-          <Link
-            href="/staff/new"
-            className="shrink-0 rounded-xl bg-[var(--brand-deep)] px-4 py-2.5 text-sm font-bold text-white"
-          >
-            Add staff
-          </Link>
+          <div className="flex shrink-0 items-center gap-2">
+            <ExportMenu
+              title="Staff register"
+              subtitle={`${filtered.length} staff · ${staffFilters.status === "active" ? "active" : staffFilters.status}`}
+              fileBaseName="staff_register"
+              columns={[
+                { key: "code", header: "Code" },
+                { key: "name", header: "Name", width: 2 },
+                { key: "designation", header: "Designation", width: 1.5 },
+                { key: "department", header: "Department", width: 1.5 },
+                { key: "stream", header: "Stream" },
+                { key: "gender", header: "Gender" },
+                { key: "mobile", header: "Mobile" },
+                { key: "status", header: "Status" },
+              ]}
+              rows={() =>
+                staffSort.rows.map((r) => ({
+                  code: r.empCode,
+                  name: r.fullName,
+                  designation: state.designations.find((d) => d.id === r.designationId)?.name ?? "",
+                  department: state.departments.find((d) => d.id === r.departmentId)?.name ?? "",
+                  stream: r.stream.replace("_", " "),
+                  gender: r.gender === "M" ? "Male" : r.gender === "F" ? "Female" : r.gender === "O" ? "Other" : "",
+                  mobile: r.mobile || "",
+                  status: r.status,
+                }))
+              }
+              onMessage={(msg) => {
+                setNotice(msg);
+                window.setTimeout(() => setNotice(null), 2400);
+              }}
+            />
+            <Link
+              href="/staff/new"
+              className="shrink-0 rounded-xl bg-[var(--brand-deep)] px-4 py-2.5 text-sm font-bold text-white"
+            >
+              Add staff
+            </Link>
+          </div>
         </div>
+
+        <BulkActionBar
+          selection={rosterSelection}
+          noun="staff member"
+          actions={[
+            {
+              id: "activate",
+              label: "Mark active",
+              onRun: (ids) => {
+                const picked = new Set(ids);
+                const next = {
+                  ...state,
+                  staff: state.staff.map((r) =>
+                    picked.has(r.id) && r.status !== "active" ? { ...r, status: "active" as const } : r,
+                  ),
+                };
+                commit(next, `${ids.length} staff marked active`);
+                rosterSelection.clear();
+              },
+            },
+            {
+              id: "inactivate",
+              label: "Mark inactive",
+              onRun: (ids) => {
+                const picked = new Set(ids);
+                const next = {
+                  ...state,
+                  staff: state.staff.map((r) =>
+                    picked.has(r.id) && r.status === "active" ? { ...r, status: "inactive" as const } : r,
+                  ),
+                };
+                commit(next, `${ids.length} staff marked inactive`);
+                rosterSelection.clear();
+              },
+            },
+            {
+              id: "wa",
+              label: "Send WhatsApp",
+              title: "Opens WhatsApp for each selected member with a mobile (12 per click)",
+              onRun: (ids) => {
+                const text = window.prompt("Message to send on WhatsApp:", "Namaste, this is a message from the school office.");
+                if (!text) return;
+                const picked = new Set(ids);
+                const withMobile = state.staff.filter((r) => picked.has(r.id) && r.mobile);
+                for (const r of withMobile.slice(0, 12)) openWaMe(r.mobile, text);
+                setNotice(`Opened WhatsApp for ${Math.min(12, withMobile.length)} of ${ids.length} selected`);
+                window.setTimeout(() => setNotice(null), 2800);
+              },
+            },
+          ]}
+        />
 
         <ErpTableShell>
           <ErpTable>
             <ErpTableHead>
               <tr>
+                <th className="w-10 px-3 py-3">
+                  <RowCheckbox
+                    checked={rosterSelection.allSelected(staffSort.rows.map((r) => r.id))}
+                    indeterminate={rosterSelection.someSelected(staffSort.rows.map((r) => r.id))}
+                    onChange={() => rosterSelection.toggleAll(staffSort.rows.map((r) => r.id))}
+                    label="Select all staff shown"
+                  />
+                </th>
                 <th className="px-4 py-3 font-bold">Photo</th>
                 <ErpSortTh sort={staffSort} field="code">Code</ErpSortTh>
                 <ErpSortTh sort={staffSort} field="name">Name</ErpSortTh>
@@ -648,7 +750,19 @@ export function StaffWorkspace() {
                   (d) => d.id === s.designationId,
                 );
                 return (
-                  <tr key={s.id} className="hover:bg-[var(--surface-sunken)]">
+                  <tr
+                    key={s.id}
+                    className={`hover:bg-[var(--surface-sunken)] ${
+                      rosterSelection.isSelected(s.id) ? "bg-[var(--accent)]" : ""
+                    }`}
+                  >
+                    <td className="w-10 px-3 py-2">
+                      <RowCheckbox
+                        checked={rosterSelection.isSelected(s.id)}
+                        onChange={() => rosterSelection.toggle(s.id)}
+                        label={`Select ${s.fullName}`}
+                      />
+                    </td>
                     <td className="px-4 py-2">
                       {s.photoUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
@@ -697,20 +811,43 @@ export function StaffWorkspace() {
                       />
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <div className="inline-flex flex-col items-end gap-1">
-                        <Link
-                          href={`/staff/${s.id}/edit`}
-                          className="text-xs font-semibold text-[var(--brand-deep)] underline-offset-2 hover:underline"
-                        >
-                          Manage
-                        </Link>
-                        <button
-                          type="button"
-                          className="text-xs font-medium text-[var(--brand-mid)]"
-                          onClick={() => toggleStatus(s)}
-                        >
-                          {s.status === "active" ? "Inactivate" : "Activate"}
-                        </button>
+                      <div className="inline-flex items-center gap-1">
+                        <RowActionMenu
+                          row={s}
+                          label={`Actions for ${s.fullName}`}
+                          actions={[
+                            {
+                              id: "view",
+                              label: "View & edit details",
+                              onSelect: (r) => router.push(`/staff/${r.id}/edit`),
+                            },
+                            {
+                              id: "attendance",
+                              label: "Attendance history",
+                              onSelect: (r) =>
+                                router.push(`/attendance?tab=staff&staff=${encodeURIComponent(r.id)}`),
+                            },
+                            {
+                              id: "payslips",
+                              label: "Salary & payslips",
+                              onSelect: (r) =>
+                                router.push(`/payroll?staff=${encodeURIComponent(r.id)}`),
+                            },
+                            {
+                              id: "wa",
+                              label: "Send WhatsApp",
+                              disabled: (r) => !r.mobile,
+                              onSelect: (r) =>
+                                openWaMe(r.mobile, `Namaste ${r.fullName}, this is a message from the school office.`),
+                            },
+                            {
+                              id: "status",
+                              label: s.status === "active" ? "Mark inactive" : "Mark active",
+                              separatorAbove: true,
+                              onSelect: (r) => toggleStatus(r),
+                            },
+                          ]}
+                        />
                         <RemoveControl
                           compact
                           check={checkStaffRemoval(state, s.id)}
@@ -724,7 +861,7 @@ export function StaffWorkspace() {
               {filtered.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={9}
+                    colSpan={10}
                     className="px-4 py-10 text-center text-sm text-[var(--muted)]"
                   >
                     No staff match these filters.{" "}

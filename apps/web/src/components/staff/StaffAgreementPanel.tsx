@@ -49,6 +49,7 @@ import {
   ErpTableShell,
 } from "@/components/ui/erp-roster";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 type Mode = "hr" | "self";
 type AiLanguage = "en" | "hi" | "both";
@@ -694,7 +695,7 @@ export function StaffAgreementPanel({
         </ErpPanel>
       ) : null}
 
-      <ErpTableShell>
+      <ErpTableShell exportAs="staff_agreements" exportTitle="Staff agreements">
         <ErpTable>
           <ErpTableHead>
             <tr>
@@ -705,6 +706,7 @@ export function StaffAgreementPanel({
               <th className="px-4 py-3 font-bold">Created</th>
               <th className="px-4 py-3 font-bold">Hash</th>
               <th className="px-4 py-3 font-bold" />
+              <th className="w-10 px-2 py-2" aria-label="Actions" />
             </tr>
           </ErpTableHead>
           <ErpTableBody>
@@ -846,6 +848,9 @@ export function StaffAgreementPanel({
                       </details>
                     ) : null}
                   </div>
+                </td>
+                <td className="px-2 py-1.5 text-right">
+                  <RowActionMenu row={row} label="Agreement actions" actions={[{ id: "open", label: "Open staff record", onSelect: (x) => { window.location.href = `/staff/${encodeURIComponent(String(x.staffId))}/edit`; } }]} />
                 </td>
               </tr>
             ))}

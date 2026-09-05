@@ -33,6 +33,7 @@ import { openWaMe } from "@/lib/waMe";
 import { TENANT } from "@/lib/types";
 import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 const inp = "w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-sm";
 
@@ -168,7 +169,7 @@ export function BirthdaysPanel({ canEdit }: { canEdit: boolean }) {
           <p className="mt-2 text-xs text-[var(--muted)]">No birthdays on this date.</p>
         ) : (
           <div className="mt-2">
-            <ErpTableShell>
+            <ErpTableShell exportAs="birthdays_today" exportTitle="Birthdays">
               <ErpTable>
                 <ErpTableHead>
                   <tr>
@@ -203,16 +204,27 @@ export function BirthdaysPanel({ canEdit }: { canEdit: boolean }) {
                           <a className="inline-flex items-center gap-1 text-[var(--brand-deep)] underline" href={`/api/birthday/card?student=${encodeURIComponent(row.studentId)}&date=${date}&design=${s.design}&format=${s.format}`} download={`birthday-${row.fullName.replace(/\s+/g, "_")}.png`}>
                             <Download className="h-3 w-3" /> PNG
                           </a>
-                          {canEdit && row.mobile ? (
-                            <>
-                              <button type="button" className="ml-2 text-[var(--brand-deep)] underline" onClick={() => openWa(row)}>
-                                Open WhatsApp
-                              </button>
-                              <button type="button" disabled={!!busy} className="ml-2 text-[var(--brand-deep)] underline disabled:opacity-50" onClick={() => void sendNow([row.studentId], false)}>
-                                Send now
-                              </button>
-                            </>
-                          ) : null}
+                          <RowActionMenu
+                            className="ml-1 align-middle"
+                            row={row}
+                            label={`Actions for ${row.fullName}`}
+                            actions={[
+                              {
+                                id: "wa",
+                                label: "Open WhatsApp",
+                                hidden: () => !canEdit,
+                                disabled: (x) => !x.mobile,
+                                onSelect: (x) => openWa(x),
+                              },
+                              {
+                                id: "send",
+                                label: "Send card now",
+                                hidden: () => !canEdit,
+                                disabled: (x) => !!busy || !x.mobile,
+                                onSelect: (x) => void sendNow([x.studentId], false),
+                              },
+                            ]}
+                          />
                         </td>
                       </tr>
                     );

@@ -854,25 +854,32 @@ function accountsDash(): ModuleDashboardModel {
         tone: "green",
         tab: "daybook",
       },
+      // The money tiles are filled from the server book (see
+      // accountsServerKpis.ts). They used to paint the browser book's figures
+      // first — cash ₹0, a bank total made of master opening balances — and
+      // the office read those as the truth before the real ones arrived.
+      // Nothing is better than a wrong number, so they start blank.
       {
         id: "cash",
         label: "Cash in hand",
-        value: formatInr(snap.cashInHandPaise),
+        value: "…",
+        hint: "reading the server book",
         tone: "navy",
         tab: "cash",
       },
       {
         id: "bank",
         label: "Bank total",
-        value: formatInr(bankTotal),
+        value: "…",
+        hint: "reading the server book",
         tone: "sky",
         tab: "banks",
       },
       {
         id: "ap",
         label: "Open payables",
-        value: formatInr(snap.openApPaise),
-        hint: `${openAp.length} bill(s)`,
+        value: "…",
+        hint: "reading the server book",
         tone: "coral",
         tab: "payables",
         detailTitle: "Open payables",

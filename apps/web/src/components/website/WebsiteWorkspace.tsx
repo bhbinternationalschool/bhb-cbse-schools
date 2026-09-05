@@ -53,6 +53,7 @@ import {
   type SiteLang,
   type SitePage,
 } from "@/lib/website";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 type Filter = PageStatus | "all";
 type Tab = "pages" | "media" | "publish";
@@ -389,7 +390,7 @@ export function WebsiteWorkspace() {
             )}
           </div>
 
-          <ErpTableShell>
+          <ErpTableShell exportAs="website_pages" exportTitle="Website pages">
             {loading ? (
               <p className="p-6 text-sm text-[var(--muted)]">Loading pages…</p>
             ) : shown.length === 0 ? (
@@ -440,23 +441,27 @@ export function WebsiteWorkspace() {
                         </span>
                       </td>
                       <td className="px-4 py-2.5 text-right">
-                        <button
-                          type="button"
-                          className="mr-1 inline-flex items-center gap-1 rounded-lg border border-[var(--border)] px-2 py-1 text-[11px] font-semibold text-[var(--brand-deep)]"
-                          onClick={() => setEditingId(page.id)}
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold text-[var(--danger)] disabled:opacity-50"
-                          disabled={busy}
-                          onClick={() => void removePage(page)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                          Remove
-                        </button>
+                        <RowActionMenu
+                          row={page}
+                          label={`Actions for ${page.title}`}
+                          actions={[
+                            { id: "edit", label: "Edit page", icon: <Pencil />, onSelect: (p) => setEditingId(p.id) },
+                            {
+                              id: "open",
+                              label: "Open on the site",
+                              onSelect: (p) => window.open(`/${p.slug}`.replace(/\/+/g, "/"), "_blank", "noopener"),
+                            },
+                            {
+                              id: "remove",
+                              label: "Remove page",
+                              icon: <Trash2 />,
+                              tone: "danger",
+                              separatorAbove: true,
+                              disabled: () => busy,
+                              onSelect: (p) => void removePage(p),
+                            },
+                          ]}
+                        />
                       </td>
                     </tr>
                   ))}

@@ -3,6 +3,7 @@ import "package:flutter/material.dart";
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../modules/module_shell.dart";
+import "student_note_sheet.dart";
 
 /// Read-only section roster for teachers — names, rolls, and today's
 /// attendance status when the register is marked.
@@ -39,7 +40,7 @@ class StudentsScreen extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         children: [
           Text(
-            "${roster.students.length} students · attendance ${roster.attendanceMarked ? "marked" : "not marked"} today",
+            "${roster.students.length} students · attendance ${roster.attendanceMarked ? "marked" : "not marked"} today · tap a student for a merit, discipline or sick-room note",
             style: const TextStyle(fontSize: 12, color: AppColors.muted),
           ),
           const SizedBox(height: 10),
@@ -47,6 +48,12 @@ class StudentsScreen extends StatelessWidget {
             Card(
               child: ListTile(
                 dense: true,
+                onTap: () => showStudentNoteSheet(
+                  context,
+                  api: api,
+                  student: s,
+                  classLabel: title,
+                ),
                 leading: CircleAvatar(
                   radius: 17,
                   backgroundColor: ModuleTone.teal.background,

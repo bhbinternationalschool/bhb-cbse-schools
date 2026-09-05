@@ -29,6 +29,7 @@ import {
   ErpTableHead,
   ErpTableShell,
 } from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
   const session = useDemoSession();
@@ -406,7 +407,7 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
         </div>
       </div>
 
-      <ErpTableShell className="p-4">
+      <ErpTableShell className="p-4" exportAs="staff_advances" exportTitle="Staff advances">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-bold text-[var(--brand-deep)]">
             Ledger
@@ -497,17 +498,20 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
                       )}
                     </td>
                     <td className="py-2 text-right">
-                      {!readOnly &&
-                      a.recoveries.length === 0 &&
-                      a.source !== "with_salary" ? (
-                        <button
-                          type="button"
-                          className="text-[11px] font-semibold text-[var(--danger)]"
-                          onClick={() => onVoid(a.id)}
-                        >
-                          Delete
-                        </button>
-                      ) : null}
+                      <RowActionMenu
+                        row={a}
+                        label="Advance actions"
+                        actions={[
+                          {
+                            id: "delete",
+                            label: "Delete advance",
+                            tone: "danger",
+                            hidden: (x) =>
+                              readOnly || x.recoveries.length > 0 || x.source === "with_salary",
+                            onSelect: (x) => onVoid(x.id),
+                          },
+                        ]}
+                      />
                     </td>
                   </tr>
                 );

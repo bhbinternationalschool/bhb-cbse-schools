@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — appraisal summary rows; scoring happens in the form above the table
 
 import { useEffect, useMemo, useState } from "react";
 import { useDemoSession } from "@/components/shell/SessionContext";
@@ -420,7 +421,7 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
           </button>
         </form>
 
-        <ErpTableShell>
+        <ErpTableShell exportAs="staff_appraisals" exportTitle="Staff appraisals">
           <div className="border-b border-[var(--border)] px-4 py-3">
             <h3 className="text-sm font-bold text-[var(--brand-deep)]">
               Cycle ratings

@@ -51,6 +51,7 @@ import {
   ErpTableHead,
   ErpTableShell,
 } from "@/components/ui/erp-roster";
+import { BulkActionBar, RowActionMenu, RowCheckbox, useRowSelection } from "@/components/ui/erp-grid";
 
 function waUrl(mobile: string, message: string): string {
   const digits = mobile.replace(/\D/g, "");
@@ -657,6 +658,9 @@ export function AdmissionRegistrationPanel({
     );
   }
 
+  const admKeys = useMemo(() => yearAdmissions.map(({ student }) => student.id), [yearAdmissions]);
+  const admSel = useRowSelection(admKeys);
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -896,10 +900,47 @@ export function AdmissionRegistrationPanel({
           here — a row without a registration yet gets one in one click, then
           the normal take-fee applies.
         </p>
+        <BulkActionBar
+          selection={admSel}
+          noun="admission"
+          actions={[
+            {
+              id: "wa",
+              label: "Send WhatsApp",
+              title: "Opens WhatsApp for each selected family with a mobile (12 per click)",
+              onRun: (ids) => {
+                const text = window.prompt(
+                  "Message to the families:",
+                  "Namaste, this is BHB International School regarding your child's admission.",
+                );
+                if (!text) return;
+                const picked = new Set(ids);
+                const seen = new Set<string>();
+                let opened = 0;
+                for (const { student } of yearAdmissions) {
+                  const mob = student.fatherMobile || student.motherMobile || "";
+                  if (!picked.has(student.id) || !mob || seen.has(mob) || opened >= 12) continue;
+                  seen.add(mob);
+                  window.open(waUrl(mob, text), "_blank", "noopener");
+                  opened += 1;
+                }
+                admSel.clear();
+              },
+            },
+          ]}
+        />
         <ErpTableShell density="compact" className="overflow-x-auto">
           <ErpTable minWidth="min-w-[760px]">
             <ErpTableHead>
               <tr>
+                <th className="w-10 px-2 py-2">
+                  <RowCheckbox
+                    checked={admSel.allSelected(admKeys)}
+                    indeterminate={admSel.someSelected(admKeys)}
+                    onChange={() => admSel.toggleAll(admKeys)}
+                    label="Select all admissions shown"
+                  />
+                </th>
                 <th className="px-3 py-2 text-left font-medium">Student</th>
                 <th className="px-3 py-2 text-left font-medium">Class</th>
                 <th className="px-3 py-2 text-left font-medium">Father · mobile</th>
@@ -920,6 +961,13 @@ export function AdmissionRegistrationPanel({
                   const balance = lead ? registrationBalancePaise(state, lead) : 0;
                   return (
                     <tr key={s.id}>
+                      <td className="w-10 px-2 py-2">
+                        <RowCheckbox
+                          checked={admSel.isSelected(s.id)}
+                          onChange={() => admSel.toggle(s.id)}
+                          label={`Select ${s.fullName}`}
+                        />
+                      </td>
                       <td className="px-3 py-2">
                         <div className="text-sm font-medium">{s.fullName}</div>
                         <div className="text-[11px] text-[var(--muted)]">
@@ -960,20 +1008,44 @@ export function AdmissionRegistrationPanel({
                             Start registration
                           </button>
                         ) : lead ? (
-                          <button
-                            type="button"
-                            className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold"
-                            onClick={() => {
-                              setSelectedId(lead.id);
-                              setCollectFocusIds([lead.id]);
-                              takeFeeRef.current?.scrollIntoView({
-                                behavior: "smooth",
-                                block: "start",
-                              });
-                            }}
-                          >
-                            {balance > 0 ? "Take fee" : "Open"}
-                          </button>
+                          <span className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold"
+                              onClick={() => {
+                                setSelectedId(lead.id);
+                                setCollectFocusIds([lead.id]);
+                                takeFeeRef.current?.scrollIntoView({
+                                  behavior: "smooth",
+                                  block: "start",
+                                });
+                              }}
+                            >
+                              {balance > 0 ? "Take fee" : "Open"}
+                            </button>
+                            <RowActionMenu
+                              row={lead}
+                              label="Registration actions"
+                              actions={[
+                                {
+                                  id: "open",
+                                  label: "Open registration",
+                                  onSelect: (l) => {
+                                    setSelectedId(l.id);
+                                    setCollectFocusIds([l.id]);
+                                    takeFeeRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                                  },
+                                },
+                                {
+                                  id: "wa",
+                                  label: "WhatsApp the family",
+                                  disabled: (l) => !l.mobile,
+                                  onSelect: (l) =>
+                                    window.open(`https://wa.me/${String(l.mobile ?? "").replace(/\D/g, "")}`, "_blank", "noopener"),
+                                },
+                              ]}
+                            />
+                          </span>
                         ) : null}
                       </td>
                     </tr>

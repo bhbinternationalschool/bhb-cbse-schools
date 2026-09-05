@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — rows are AppTableRow components with their own per-row controls
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";

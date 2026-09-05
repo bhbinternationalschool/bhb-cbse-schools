@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { applyClassChannelDraftToErp } from "@/lib/waClassChannelApply";
 import { loadMasters } from "@/lib/masters";
@@ -66,7 +66,16 @@ export function ClassChannelsPanel() {
 
   const subjects = loadMasters().subjects ?? [];
 
+  // Read through a ref so `refresh` keeps one identity for the life of the
+  // panel — it used to depend on selectedChannelId, which re-ran the effect
+  // below (and re-armed its interval) every time the selection changed.
+  const selectedRef = useRef(selectedChannelId);
+  selectedRef.current = selectedChannelId;
+  const inFlight = useRef(false);
+
   const refresh = useCallback(async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     try {
       const res = await fetch("/api/wa/class-channel");
       if (!res.ok) return;
@@ -83,7 +92,7 @@ export function ClassChannelsPanel() {
       setChannels(ch);
       setDrafts(Array.isArray(json.drafts) ? json.drafts : []);
       setThreads(Array.isArray(json.threads) ? json.threads : []);
-      if (!selectedChannelId && ch[0]) setSelectedChannelId(ch[0].id);
+      if (!selectedRef.current && ch[0]) setSelectedChannelId(ch[0].id);
 
       // Auto-apply confirmed drafts into ERP modules
       for (const d of json.drafts || []) {
@@ -104,19 +113,26 @@ export function ClassChannelsPanel() {
       }
     } catch {
       /* */
+    } finally {
+      inFlight.current = false;
     }
-  }, [selectedChannelId]);
+  }, []);
 
+  // One load on mount, then a poll every 60 s while the tab is visible. The
+  // server rebuilds channels itself when its copy is empty, so the panel no
+  // longer fires a POST sync on every mount.
   useEffect(() => {
-    void (async () => {
-      await refresh();
-      if (channels.length === 0) {
-        await syncMembers();
-      }
-    })();
-    const t = window.setInterval(() => void refresh(), 15_000);
-    return () => window.clearInterval(t);
-  }, [refresh, channels.length]);
+    void refresh();
+    const tick = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    const t = window.setInterval(tick, 60_000);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      window.clearInterval(t);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [refresh]);
 
   function flash(msg: string) {
     setNotice(msg);

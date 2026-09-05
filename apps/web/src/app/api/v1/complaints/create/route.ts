@@ -10,6 +10,9 @@ import {
 } from "@/lib/complaints";
 import { appendServerComplaintTicket } from "@/lib/complaintsServer";
 import { householdWhatsApp, loadSis } from "@/lib/sis";
+import { leadershipStaffIds } from "@/lib/staffHomeKind.server";
+import { resolveClassTeachers } from "@/lib/staffResolve";
+import { sendPushToSubjects } from "@/lib/webPush.server";
 
 export const runtime = "nodejs";
 
@@ -84,6 +87,31 @@ export async function POST(request: Request) {
       ip: meta.ip,
       userAgent: meta.userAgent,
     });
+
+    // Leadership always; the child's class teacher too, so a classroom
+    // complaint reaches the person who can act on it today. Best-effort.
+    try {
+      const teachers = student
+        ? resolveClassTeachers(
+            ctx.masters,
+            student.classId,
+            student.sectionId,
+            student.academicYearCode,
+          ).map((t) => t.id)
+        : [];
+      await sendPushToSubjects(
+        "staff",
+        [...new Set([...leadershipStaffIds(ctx.masters), ...teachers])],
+        {
+          title: `New complaint · ${complaintCategoryLabel(result.ticket.category)}`,
+          body: `${subject}${student ? ` · ${student.fullName}` : ""}`,
+          url: "/complaints",
+          data: { kind: "complaint", ticketId: result.ticket.id },
+        },
+      );
+    } catch (e) {
+      console.warn("[complaints-v1] staff push failed", (e as Error)?.message);
+    }
 
     return apiOk({
       id: result.ticket.id,

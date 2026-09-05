@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — report output with dynamic columns; rows are aggregates, not records
 
 import { useEffect, useMemo, useState } from "react";
 import { ATTENDANCE_STATUSES, loadAttendance, type AttendanceStatus } from "@/lib/attendance";
@@ -451,7 +452,7 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
         </div>
 
         {preview ? (
-          <ErpTableShell>
+          <ErpTableShell exportAs="attendance_report" exportTitle="Attendance report">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] px-4 py-3">
               <h3 className="text-sm font-bold text-[var(--brand-deep)]">
                 {preview.title}

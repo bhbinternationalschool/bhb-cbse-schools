@@ -12,6 +12,7 @@ import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { loadSis } from "@/lib/sis";
 import { classLabel } from "@/lib/homework";
 import { sendPushToSubject } from "@/lib/webPush.server";
+import { assertSectionScope } from "@/lib/api/v1/staffScope";
 
 export const runtime = "nodejs";
 
@@ -37,6 +38,9 @@ export async function POST(request: Request) {
     }
 
     await ensureSchoolMirrorHydrated();
+    // Class teacher, a subject teacher on the section's timetable, or the
+    // office — the module permission alone let any staff login mark any class.
+    await assertSectionScope(ctx, body.classId, body.sectionId);
     await ensureAttendanceHydratedServer();
 
     const marks: AttendanceMark[] = body.marks.map((m) => ({

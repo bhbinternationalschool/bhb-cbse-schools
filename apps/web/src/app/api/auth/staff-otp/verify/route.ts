@@ -9,6 +9,7 @@ import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { loadServerMasters } from "@/lib/api/v1/auth";
 import { inferRoleCodes } from "@/lib/rbac";
 import { superAdminRoleCode } from "@/lib/superAdmin";
+import { resolveStaffHomeKind } from "@/lib/staffHomeKind.server";
 import { TENANT } from "@/lib/types";
 import { writeAudit } from "@/lib/audit.server";
 
@@ -118,7 +119,16 @@ export async function POST(request: Request) {
       );
     }
 
-    const res = NextResponse.json({ ok: true, session });
+    // Which home the staff app opens — resolved here from the roster so the
+    // app never guesses from the role code (see lib/staffHomeKind.ts).
+    let homeKind = "teaching";
+    try {
+      homeKind = resolveStaffHomeKind(session, await loadServerMasters());
+    } catch (e) {
+      console.warn("[staff-otp/verify] homeKind failed", e);
+    }
+
+    const res = NextResponse.json({ ok: true, session: { ...session, homeKind } });
     res.cookies.set(demoSessionCookieName(), signed, appSessionCookieOptions());
     return res;
   } catch (e) {
