@@ -131,6 +131,19 @@ this module by module; the estimate is that migration before any command.
 - **One switch.** Director can pause the command desk in Masters; WhatsApp then replies
   "commands are paused".
 
+## WhatsApp cost per message (Meta, India)
+
+| Message | Until 30 Sep 2026 | From 1 Oct 2026 |
+|---|---|---|
+| Staff → school number (inbound) | free | free |
+| Reply to staff inside 24-h window (result, confirm card, "done") | free | ~₹0.115 |
+| Utility template to a parent (receipt, due reminder, PTM slot, bus delay) | ~₹0.115 outside a window, free inside | ~₹0.115 always |
+| Marketing template (admissions, events) | ~₹0.78 | ~₹0.78 |
+
+Design rule that follows: one reply per command (result and confirm card in a single
+message), no "processing…" messages. Heavy users (fee desk) can use the mobile app command
+bar, which costs nothing per message.
+
 ## Timeline
 
 | Weeks | Work | Days |
@@ -138,4 +151,4 @@ this module by module; the estimate is that migration before any command.
 | 1–3 | Phase 0. Ends with `5A me kaun absent hai` working on WhatsApp for one class teacher | 12–15 |
 | 3–5 | Phase 1 reads, rolled out to principal, fee desk, class teachers as each lands | 7–9 |
 | 5–9 | Phase 2 writes; homework and attendance first, money-adjacent last | 14–18 |
-| **Total** | One developer. Running cost ≈ one LLM call per command; WA replies inside the 24-hour service window carry no template charge | **33–42** |
+| **Total** | One developer. Running cost ≈ one LLM call per command, plus WA replies to staff: free inside the 24-hour window until 30 Sep 2026, then ~₹0.115 per reply (utility rate, India) from 1 Oct 2026. 50 staff × 10 commands/day ≈ ₹60/day | **33–42** |
