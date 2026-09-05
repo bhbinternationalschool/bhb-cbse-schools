@@ -37,6 +37,9 @@ import {
   formatAttendanceSummaryReply,
   formatClassDefaultersReply,
   formatCollectionReply,
+  formatFreeTeachersReply,
+  parseFreeTeachersQuery,
+  periodAtTime,
   resolveClassOrSectionRef,
   type CommandAuditRow,
   type PendingErpConfirm,
@@ -163,6 +166,16 @@ const masters = {
   assert.equal(parseErpCommandLocal("VIII B me kaun nahi aaya")?.fields.section, "8B");
   assert.equal(parseErpCommandLocal("5A में कौन गैरहाजिर है")?.commandId, "absent_list", "Devanagari fee/absent words match without ASCII word boundaries");
   assert.equal(parseErpCommandLocal("7B की उपस्थिति")?.fields.section, "7B");
+  assert.equal(parseErpCommandLocal("who is free in period 3")?.fields.text, "3");
+  assert.equal(parseErpCommandLocal("period 3 me kaun free hai")?.fields.text, "3");
+  assert.equal(parseErpCommandLocal("3rd period khali kaun hai")?.fields.text, "3");
+  assert.equal(parseErpCommandLocal("abhi kaun free hai")?.fields.text, "now");
+  assert.equal(parseErpCommandLocal("free teachers next period")?.fields.text, "next");
+  assert.equal(parseErpCommandLocal("kal 5th period kaun khali hai")?.commandId, "free_teachers");
+  assert.equal(parseErpCommandLocal("P4 free teachers")?.fields.text, "4");
+  assert.equal(parseFreeTeachersQuery("free of fees for Amay"), null, "fee waivers are not this");
+  assert.equal(parseFreeTeachersQuery("5A free period"), null, "a section's free period is not this ask");
+  assert.equal(parseFreeTeachersQuery("kaun free hai"), "now", "no period said → now");
   assert.equal(parseErpCommandLocal("aaj ka collection")?.commandId, "collection_today");
   assert.equal(parseErpCommandLocal("today's collection")?.commandId, "collection_today");
   assert.equal(parseErpCommandLocal("kal ka collection")?.commandId, "collection_today");
@@ -666,6 +679,53 @@ const masters = {
 
   const yesterday = formatCollectionReply({ ...base, date: "2026-09-04", dayClose: null });
   assert.ok(yesterday.startsWith("*Fee collection* · 4 Sep") && yesterday.includes("Day close: not started."), yesterday);
+}
+
+// ─── period at time ────────────────────────────────────────────────────
+{
+  const periods = [
+    { no: 1, startTime: "08:00", endTime: "08:40" },
+    { no: 2, startTime: "08:40", endTime: "09:20" },
+    { no: 3, startTime: "09:40", endTime: "10:20" },
+  ];
+  assert.deepEqual(periodAtTime(periods, "08:10", "now"), { no: 1 });
+  assert.deepEqual(periodAtTime(periods, "09:30", "now"), { no: 3 }, "a break counts as the period about to start");
+  assert.deepEqual(periodAtTime(periods, "08:10", "next"), { no: 2 });
+  assert.deepEqual(periodAtTime(periods, "07:30", "now"), { before: true });
+  assert.deepEqual(periodAtTime(periods, "10:30", "now"), { after: true });
+  assert.deepEqual(periodAtTime(periods, "10:00", "next"), { after: true });
+}
+
+// ─── free teachers reply ───────────────────────────────────────────────
+{
+  const t = formatFreeTeachersReply({
+    date: "2026-09-05",
+    todayIso: "2026-09-05",
+    periodNo: 3,
+    periodLabel: "Period 3",
+    timeLabel: "09:40–10:20",
+    weekdayLabel: "Sat",
+    free: [
+      { name: "Sunita Sharma", dayLoad: 5, subLoad: 0, designation: "TGT" },
+      { name: "Anita Devi", dayLoad: 3, subLoad: 0, designation: "PRT" },
+      { name: "Rakesh Verma", dayLoad: 3, subLoad: 1, designation: "" },
+    ],
+    absentCount: 1,
+    uncovered: [{ classLabel: "V A", subject: "Maths", absentTeacher: "Kabir Ali" }],
+    covered: [{ classLabel: "VI B", subject: "Hindi", substitute: "Anita Devi" }],
+  });
+  assert.ok(t.startsWith("*Free in Period 3* · today · 09:40–10:20\n3 free"), t);
+  assert.ok(t.indexOf("Anita Devi (PRT)  · 3 pd today") < t.indexOf("Rakesh Verma  · 3 pd today, 1 sub"), "lighter load first; a sub counts double");
+  assert.ok(t.indexOf("Rakesh Verma") < t.indexOf("Sunita Sharma"), t);
+  assert.ok(t.includes("*Uncovered this period* (1 absent today)\nV A Maths — Kabir Ali absent"), t);
+  assert.ok(t.includes("*Substitutions this period*\nVI B Hindi → Anita Devi"), t);
+
+  const none = formatFreeTeachersReply({
+    date: "2026-09-04", todayIso: "2026-09-05", periodNo: 1, periodLabel: "Period 1", timeLabel: "", weekdayLabel: "Fri",
+    free: [], absentCount: 2, uncovered: [], covered: [],
+  });
+  assert.ok(none.startsWith("*Free in Period 1* · Fri 4 Sep"), none);
+  assert.ok(none.includes("No teacher is free this period.") && none.includes("2 teachers absent today; this period is covered."), none);
 }
 
 console.log("erpCommands.selftest.ts OK");
