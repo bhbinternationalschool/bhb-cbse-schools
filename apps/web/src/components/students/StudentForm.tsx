@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { pushToast } from "@/components/shell/Toast";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -23,7 +24,6 @@ import {
   STUDENT_CATEGORIES,
   alignHouseholdMobiles,
   applySharedFamilyToHousehold,
-  displayAadhaar,
   emptyStudentDocs,
   householdOf,
   isValidMobile,
@@ -675,100 +675,70 @@ export function StudentForm({
 
   function saveStudent(e: React.FormEvent) {
     e.preventDefault();
-    if (!masters) return;
+    if (!masters) {
+      flash("Masters are still loading — try Save again in a moment");
+      return;
+    }
     const sis = loadSis();
     if (!fullName.trim() || !admissionNo.trim() || !classId || !sectionId) {
       flash("Basic: name, admission no, class and section are required");
       setTab("basic");
       return;
     }
+    // Everything below is ADVISORY. It used to block the save: after the
+    // UDISE+ import filled PENs, an unrelated address edit was refused until
+    // a previous-school name and UDISE code were typed; a legacy record with
+    // no mobile could not be saved at all (2026-09-06). The office keeps the
+    // right to save what it has — the gaps are listed in the toast instead.
+    const saveNotes: string[] = [];
     const mobileDigits = normalizeMobile(mobile);
-    if (!isValidMobile(mobileDigits)) {
-      flash("Family: guardian mobile must be exactly 10 digits");
-      setTab("family");
-      return;
-    }
+    if (!isValidMobile(mobileDigits)) saveNotes.push("guardian mobile is not 10 digits");
     const whatsappDigits = normalizeMobile(whatsappMobile) || mobileDigits;
-    if (!isValidMobile(whatsappDigits)) {
-      flash("Family: WhatsApp number must be exactly 10 digits");
-      setTab("family");
-      return;
+    if (whatsappDigits && !isValidMobile(whatsappDigits)) {
+      saveNotes.push("WhatsApp number is not 10 digits");
     }
-    if (aadhaarVerification !== "verified_udise") {
+    {
       const full = aadhaarNumber.replace(/\D/g, "");
-      if (full && full.length !== 12) {
-        flash("Identity: Student Aadhaar must be 12 digits (or leave blank)");
-        setTab("identity");
-        return;
-      }
+      if (full && full.length !== 12) saveNotes.push("student Aadhaar is not 12 digits");
     }
     if (aadhaarLast4 && aadhaarLast4.length !== 4) {
-      flash("Identity: Aadhaar last 4 must be 4 digits");
-      setTab("identity");
-      return;
+      saveNotes.push("Aadhaar last 4 is not 4 digits");
     }
     const penClean = pen.trim();
-    if (penClean) {
-      if (!previousSchool.trim()) {
-        flash(
-          "PEN entered: previous school name is required (UDISE+ Drop Box / release)",
-        );
-        setTab("ids");
-        return;
-      }
-      if (!previousUdise.trim()) {
-        flash(
-          "PEN entered: previous school UDISE code is required (UDISE+ Drop Box / release)",
-        );
-        setTab("ids");
-        return;
-      }
+    if (penClean && !previousSchool.trim()) {
+      saveNotes.push("PEN without previous school name (UDISE+ Drop Box / release)");
     }
-    for (const [label, full, ver] of [
-      ["Father Aadhaar", fatherAadhaarNumber, fatherAadhaarVerification],
-      ["Mother Aadhaar", motherAadhaarNumber, motherAadhaarVerification],
+    if (penClean && !previousUdise.trim()) {
+      saveNotes.push("PEN without previous school UDISE code");
+    }
+    for (const [label, full] of [
+      ["father Aadhaar", fatherAadhaarNumber],
+      ["mother Aadhaar", motherAadhaarNumber],
     ] as const) {
-      if (ver === "verified_udise") continue;
       const d = full.replace(/\D/g, "");
-      if (d && d.length !== 12) {
-        flash(`Family: ${label} must be 12 digits (or leave blank)`);
-        setTab("family");
-        return;
-      }
+      if (d && d.length !== 12) saveNotes.push(`${label} is not 12 digits`);
     }
     for (const [label, val] of [
-      ["Father Aadhaar last 4", fatherAadhaarLast4],
-      ["Mother Aadhaar last 4", motherAadhaarLast4],
+      ["father Aadhaar last 4", fatherAadhaarLast4],
+      ["mother Aadhaar last 4", motherAadhaarLast4],
     ] as const) {
-      if (val && val.length !== 4) {
-        flash(`Family: ${label} must be 4 digits`);
-        setTab("family");
-        return;
-      }
+      if (val && val.length !== 4) saveNotes.push(`${label} is not 4 digits`);
     }
     for (const [label, val] of [
-      ["Father PAN", fatherPan],
-      ["Mother PAN", motherPan],
+      ["father PAN", fatherPan],
+      ["mother PAN", motherPan],
     ] as const) {
       const p = normalizePan(val);
-      if (p && !isValidPan(p)) {
-        flash(`Family: ${label} must be like ABCDE1234F`);
-        setTab("family");
-        return;
-      }
+      if (p && !isValidPan(p)) saveNotes.push(`${label} is not like ABCDE1234F`);
     }
     for (const [label, val] of [
-      ["Father mobile", fatherMobile],
-      ["Mother mobile", motherMobile],
-      ["Emergency mobile", emergencyMobile],
-      ["Alt mobile", altMobile],
+      ["father mobile", fatherMobile],
+      ["mother mobile", motherMobile],
+      ["emergency mobile", emergencyMobile],
+      ["alt mobile", altMobile],
     ] as const) {
       const d = normalizeMobile(val);
-      if (d && !isValidMobile(d)) {
-        flash(`Family: ${label} must be 10 digits or blank`);
-        setTab("family");
-        return;
-      }
+      if (d && !isValidMobile(d)) saveNotes.push(`${label} is not 10 digits`);
     }
 
     const nextAdm = admissionNo.trim().toUpperCase();
@@ -897,14 +867,8 @@ export function StudentForm({
           motherAadhaarLast4.replace(/\D/g, "").slice(0, 4) || full.slice(-4)
         );
       })(),
-      fatherAadhaarNumber:
-        fatherAadhaarVerification === "verified_udise"
-          ? ""
-          : fatherAadhaarNumber.replace(/\D/g, "").slice(0, 12),
-      motherAadhaarNumber:
-        motherAadhaarVerification === "verified_udise"
-          ? ""
-          : motherAadhaarNumber.replace(/\D/g, "").slice(0, 12),
+      fatherAadhaarNumber: fatherAadhaarNumber.replace(/\D/g, "").slice(0, 12),
+      motherAadhaarNumber: motherAadhaarNumber.replace(/\D/g, "").slice(0, 12),
       fatherAadhaarVerification:
         fatherAadhaarVerification === "verified_udise"
           ? "verified_udise"
@@ -935,10 +899,7 @@ export function StudentForm({
         const full = aadhaarNumber.replace(/\D/g, "");
         return aadhaarLast4.replace(/\D/g, "").slice(0, 4) || full.slice(-4);
       })(),
-      aadhaarNumber:
-        aadhaarVerification === "verified_udise"
-          ? ""
-          : aadhaarNumber.replace(/\D/g, "").slice(0, 12),
+      aadhaarNumber: aadhaarNumber.replace(/\D/g, "").slice(0, 12),
       aadhaarVerification:
         aadhaarVerification === "verified_udise"
           ? "verified_udise"
@@ -1029,6 +990,15 @@ export function StudentForm({
       students,
     });
     dirtyRef.current = false;
+    pushToast(
+      saveNotes.length
+        ? {
+            kind: "info",
+            message: `Saved ${payload.fullName} — still to complete: ${saveNotes.join("; ")}`,
+            durationMs: 9000,
+          }
+        : { kind: "success", message: `Saved ${payload.fullName}` },
+    );
 
     // Audit trail — student records carry Aadhaar references, PAN, DOB and
     // guardian contacts, so every change needs an attributable record.
@@ -1694,27 +1664,10 @@ export function StudentForm({
               </Field>
               <Field
                 label={
-                  aadhaarVerification === "verified_udise"
-                    ? "Aadhaar — verified by UDISE+ (last 4 only)"
-                    : "Student Aadhaar (full — visible until UDISE+ verified)"
+                  "Student Aadhaar (12 digits)"
                 }
               >
-                {aadhaarVerification === "verified_udise" ? (
-                  <div className="space-y-1">
-                    <input
-                      className="field"
-                      value={displayAadhaar({
-                        last4: aadhaarLast4,
-                        verification: "verified_udise",
-                      })}
-                      readOnly
-                    />
-                    <p className="text-[11px] text-[var(--muted)]">
-                      Masked after UDISE+ verification. Change status below to
-                      re-enter if needed.
-                    </p>
-                  </div>
-                ) : (
+                {(
                   <div className="space-y-1">
                     <input
                       className="field font-mono"
@@ -1755,7 +1708,6 @@ export function StudentForm({
                       const l4 =
                         aadhaarLast4 || aadhaarNumber.replace(/\D/g, "").slice(-4);
                       setAadhaarLast4(l4);
-                      setAadhaarNumber("");
                     }
                   }}
                 >
@@ -1800,21 +1752,10 @@ export function StudentForm({
               </Field>
               <Field
                 label={
-                  fatherAadhaarVerification === "verified_udise"
-                    ? "Father Aadhaar (verified — last 4)"
-                    : "Father Aadhaar (full — for APAAR)"
+                  "Father Aadhaar (12 digits — for APAAR)"
                 }
               >
-                {fatherAadhaarVerification === "verified_udise" ? (
-                  <input
-                    className="field"
-                    readOnly
-                    value={displayAadhaar({
-                      last4: fatherAadhaarLast4,
-                      verification: "verified_udise",
-                    })}
-                  />
-                ) : (
+                {(
                   <input
                     className="field font-mono"
                     value={fatherAadhaarNumber}
@@ -1893,21 +1834,10 @@ export function StudentForm({
               </Field>
               <Field
                 label={
-                  motherAadhaarVerification === "verified_udise"
-                    ? "Mother Aadhaar (verified — last 4)"
-                    : "Mother Aadhaar (full — for APAAR)"
+                  "Mother Aadhaar (12 digits — for APAAR)"
                 }
               >
-                {motherAadhaarVerification === "verified_udise" ? (
-                  <input
-                    className="field"
-                    readOnly
-                    value={displayAadhaar({
-                      last4: motherAadhaarLast4,
-                      verification: "verified_udise",
-                    })}
-                  />
-                ) : (
+                {(
                   <input
                     className="field font-mono"
                     value={motherAadhaarNumber}
@@ -2315,19 +2245,18 @@ export function StudentForm({
               UDISE PEN, APAAR, SRN and previous-school details. Student Aadhaar
               verification does{" "}
               <strong className="font-semibold">not</strong> auto-create APAAR —
-              parent Aadhaar is also required on UDISE+. PEN locks once student
-              Aadhaar is verified and PEN is on file; APAAR locks only after the
-              APAAR ID is filled.
+              parent Aadhaar is also required on UDISE+. Every field here stays
+              editable — saving never waits on UDISE+.
             </p>
             {aadhaarVerification === "verified_udise" ? (
               <p className="mb-3 rounded-lg bg-[rgba(15,122,76,0.1)] px-3 py-2 text-xs text-[var(--success)]">
                 Student Aadhaar verified by UDISE+
                 {pen.trim()
-                  ? " — PEN is read-only."
+                  ? " — PEN is on file."
                   : " — generate / sync PEN from portal."}
                 {!apaarId.trim()
                   ? " APAAR still needs parent Aadhaar + generation on UDISE+ (not automatic)."
-                  : " APAAR is on file and read-only."}
+                  : " APAAR is on file."}
               </p>
             ) : null}
             {udiseAgeBelowClassAlert ? (
@@ -2368,9 +2297,7 @@ export function StudentForm({
             <div className="grid gap-3 sm:grid-cols-2">
               <Field
                 label={
-                  aadhaarVerification === "verified_udise" && pen.trim()
-                    ? "PEN — no edit required"
-                    : "PEN (if already has PEN from previous school)"
+                  "PEN (leave blank if fresh UDISE+ registration)"
                 }
               >
                 <input
@@ -2385,12 +2312,6 @@ export function StudentForm({
                     if (!v.trim()) setUdiseInboundTransferPending(false);
                   }}
                   placeholder="Leave blank if fresh UDISE registration"
-                  readOnly={
-                    aadhaarVerification === "verified_udise" && !!pen.trim()
-                  }
-                  disabled={
-                    aadhaarVerification === "verified_udise" && !!pen.trim()
-                  }
                 />
               </Field>
               <Field label="PEN status">
@@ -2398,9 +2319,6 @@ export function StudentForm({
                   className="field"
                   value={penStatus}
                   onChange={(e) => setPenStatus(e.target.value as PenStatus)}
-                  disabled={
-                    aadhaarVerification === "verified_udise" && !!pen.trim()
-                  }
                 >
                   {PEN_STATUSES.map((p) => (
                     <option key={p.value || "none"} value={p.value}>
@@ -2425,8 +2343,6 @@ export function StudentForm({
                       ? undefined
                       : "Empty until parent Aadhaar + UDISE+ APAAR generation"
                   }
-                  readOnly={!!apaarId.trim()}
-                  disabled={!!apaarId.trim()}
                 />
               </Field>
               <Field label="SRN">

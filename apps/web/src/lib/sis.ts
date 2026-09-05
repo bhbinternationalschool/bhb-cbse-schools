@@ -206,8 +206,10 @@ export type SisStudent = {
   placeOfBirth: string;
   aadhaarLast4: string;
   /**
-   * Full 12-digit Aadhaar while not yet verified on UDISE+.
-   * After `aadhaarVerification === "verified_udise"`, UI shows last 4 only.
+   * Full 12-digit Aadhaar. Kept after UDISE+ verification too — the office
+   * needs the whole number on the register (2026-09-06); it was previously
+   * blanked on verify and, worse, never had a database column at all, so it
+   * only ever lived in one browser. Persisted in sis_students.profile.
    */
   aadhaarNumber: string;
   /** UDISE+ Aadhaar validation */
@@ -581,12 +583,12 @@ export function displayAadhaar(input: {
   last4?: string;
   verification?: AadhaarVerificationStatus;
 }): string {
+  // Staff-facing: the whole number whenever it is known, whatever the
+  // verification state. Only when just the last four exist is it masked.
+  // (Parent-facing views use maskAadhaar and never show the full number.)
   const last4 =
     (input.last4 || "").replace(/\D/g, "").slice(-4) ||
     (input.number || "").replace(/\D/g, "").slice(-4);
-  if (input.verification === "verified_udise") {
-    return last4 ? `********${last4}` : "—";
-  }
   const full = (input.number || "").replace(/\D/g, "");
   if (full.length === 12) return full.replace(/(\d{4})(?=\d)/g, "$1 ");
   if (last4) return `********${last4}`;
@@ -602,7 +604,7 @@ export function hasStoredAadhaar(input: {
   return full.length === 12 || last4.length === 4;
 }
 
-/** After UDISE verify: keep last4, clear full number from display store. */
+/** After UDISE verify: mark verified; the full number (when known) stays. */
 export function applyAadhaarUdiseVerified(input: {
   number?: string;
   last4?: string;
@@ -615,7 +617,7 @@ export function applyAadhaarUdiseVerified(input: {
     (input.last4 || "").replace(/\D/g, "").slice(-4) ||
     (input.number || "").replace(/\D/g, "").slice(-4);
   return {
-    aadhaarNumber: "",
+    aadhaarNumber: normalizeAadhaarFull(input.number || ""),
     aadhaarLast4: last4,
     aadhaarVerification: "verified_udise",
   };
@@ -624,6 +626,95 @@ export function applyAadhaarUdiseVerified(input: {
 export function isValidPan(value: string): boolean {
   if (!value) return true;
   return /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(value);
+}
+
+/**
+ * SisStudent fields that have NO column in sis_students. They travel in the
+ * `profile` jsonb column (studentToRow / rowToStudent in
+ * sisNormalized.server.ts). Before 2026-09-06 these were silently dropped on
+ * every push — full Aadhaar numbers, verification, the UDISE+ flags, caste,
+ * permanent address, bank, health, parents' occupation … all lost the moment
+ * another browser hydrated. Add a field to SisStudent → add it here, unless
+ * it gets its own column or its own store (curriculum, revisionAt).
+ */
+export const STUDENT_PROFILE_KEYS = [
+  "legacyErpAdmissionNo",
+  "systemAdmissionPending",
+  "importedViaLegacyList",
+  "aadhaarNumber",
+  "aadhaarVerification",
+  "fatherAadhaarNumber",
+  "motherAadhaarNumber",
+  "fatherAadhaarVerification",
+  "motherAadhaarVerification",
+  "udiseComplianceRemindedAt",
+  "udiseAadhaarValidationStatus",
+  "udiseMbuStatus",
+  "udisePortalClassHint",
+  "udiseAgeBelowClassAlert",
+  "udiseInboundTransferPending",
+  "promotionLocked",
+  "promotionLockReason",
+  "caste",
+  "admissionClass",
+  "admissionFormNo",
+  "registrationNo",
+  "tcNo",
+  "previousSchoolClass",
+  "previousSchoolYear",
+  "permanentAddress",
+  "permanentCity",
+  "permanentState",
+  "permanentPincode",
+  "transportRoute",
+  "heightCm",
+  "weightKg",
+  "isCwsn",
+  "disabilityDetails",
+  "medicalNotes",
+  "fatherOccupation",
+  "motherOccupation",
+  "fatherQualification",
+  "motherQualification",
+  "annualIncome",
+  "bankName",
+  "bankAccountNo",
+  "bankIfsc",
+  "secondLanguage",
+  "thirdLanguage",
+  "hobbies",
+  "fatherPhotoUrl",
+  "motherPhotoUrl",
+  "rfidNo",
+  "biometricId",
+  "loginUsername",
+  "loginPassword",
+  "tagIds",
+] as const satisfies readonly (keyof SisStudent)[];
+
+export type StudentProfileKey = (typeof STUDENT_PROFILE_KEYS)[number];
+
+/** The profile bag for a student: only keys with a meaningful value. */
+export function studentProfileExtras(s: SisStudent): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of STUDENT_PROFILE_KEYS) {
+    const v = s[k];
+    if (v === undefined || v === null || v === "" || v === false) continue;
+    if (Array.isArray(v) && v.length === 0) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+/** Read back the profile bag defensively (unknown jsonb → partial student). */
+export function studentProfileFromRow(v: unknown): Partial<SisStudent> {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+  const src = v as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const k of STUDENT_PROFILE_KEYS) {
+    if (k in src) out[k] = src[k];
+  }
+  return out as Partial<SisStudent>;
 }
 
 /** Normalize legacy / partial student rows after load. */
@@ -704,13 +795,10 @@ export function normalizeStudent(s: Partial<SisStudent> & { id: string }): SisSt
       const full = normalizeAadhaarFull(s.aadhaarNumber ?? "", l4);
       return l4 || full.slice(-4);
     })(),
-    aadhaarNumber:
-      String(s.aadhaarVerification) === "verified_udise"
-        ? ""
-        : normalizeAadhaarFull(
-            s.aadhaarNumber ?? "",
-            (s.aadhaarLast4 ?? "").replace(/\D/g, "").slice(0, 4),
-          ),
+    aadhaarNumber: normalizeAadhaarFull(
+      s.aadhaarNumber ?? "",
+      (s.aadhaarLast4 ?? "").replace(/\D/g, "").slice(0, 4),
+    ),
     aadhaarVerification: normalizeAadhaarVerification(
       s.aadhaarVerification,
       s.aadhaarNumber || s.aadhaarLast4,

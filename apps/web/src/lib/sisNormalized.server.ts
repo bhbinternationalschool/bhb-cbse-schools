@@ -14,6 +14,8 @@ import {
   type SisStudent,
   type StudentDocs,
   type StudentDocKey,
+  studentProfileExtras,
+  studentProfileFromRow,
 } from "@/lib/sis";
 import { sisDualWriteDbEnabled } from "@/lib/sisDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
@@ -97,6 +99,8 @@ export type StudentRow = {
   docs: unknown;
   notes: string | null;
   photo_url: string | null;
+  /** Non-column fields — see STUDENT_PROFILE_KEYS. */
+  profile?: unknown;
   updated_at: string;
 };
 
@@ -153,6 +157,8 @@ function rowToHousehold(row: HouseholdRow): Household {
 
 export function rowToStudent(row: StudentRow): SisStudent {
   return normalizeStudent({
+    // Non-column fields first; the columns below win where both exist.
+    ...studentProfileFromRow(row.profile),
     // Optimistic-locking token: the version this record was read at.
     revisionAt: row.updated_at,
     id: row.id,
@@ -275,6 +281,10 @@ function studentToRow(s: SisStudent, tenantId: string, now: string) {
     docs: stripHeavyUrls(s.docs),
     notes: s.notes,
     photo_url: photoForRemote(s.photoUrl),
+    // Everything SisStudent carries that has no column of its own — full
+    // Aadhaar numbers, verification, UDISE+ flags, address, bank, health.
+    // Dropped silently before 2026-09-06 (see the migration of that date).
+    profile: studentProfileExtras(s),
     updated_at: now,
   };
 }
