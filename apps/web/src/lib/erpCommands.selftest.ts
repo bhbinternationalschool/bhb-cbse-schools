@@ -35,6 +35,8 @@ import {
   formatStudentFeesReply,
   formatStudentMatchesAsk,
   formatAttendanceSummaryReply,
+  formatClassDefaultersReply,
+  resolveClassOrSectionRef,
   type CommandAuditRow,
   type PendingErpConfirm,
   type StudentLike,
@@ -426,7 +428,15 @@ const masters = {
   // The local parser routes it as a command with the student field filled.
   const p = parseErpCommandLocal("fees Amay Gupta 4B");
   assert.ok(p && p.commandId === "student_fees" && p.fields.student === "amay gupta 4B", JSON.stringify(p));
-  assert.equal(parseErpCommandLocal("Class 3 defaulters"), null, "class dues is a later command, not student fees");
+  assert.equal(parseErpCommandLocal("Class 3 defaulters")?.commandId, "class_defaulters");
+  assert.equal(parseErpCommandLocal("Class 3 defaulters")?.fields.section, "3", "whole class when no letter");
+  assert.equal(parseErpCommandLocal("5A defaulters")?.fields.section, "5A");
+  assert.equal(parseErpCommandLocal("class 5 ke bakayedar")?.commandId, "class_defaulters");
+  assert.equal(parseErpCommandLocal("fees pending list 7B")?.commandId, "class_defaulters");
+  assert.equal(parseErpCommandLocal("class 3 me kisne fees nahi di")?.commandId, "class_defaulters");
+  assert.equal(parseErpCommandLocal("कक्षा 3 के बकायेदार")?.commandId, "class_defaulters");
+  assert.equal(parseErpCommandLocal("Amay Gupta 4B fees pending")?.commandId, "student_fees", "a name with a section is still one student");
+  assert.equal(parseErpCommandLocal("defaulters"), null, "no class → not a command");
   // Model JSON carries the student too.
   const llm = parseErpCommandLlmJson('{"command":"student_fees","student":"Amay Gupta","confidence":0.9}');
   assert.equal(llm?.student, "Amay Gupta");
@@ -569,6 +579,39 @@ const masters = {
 
   const yesterday = formatAttendanceSummaryReply({ ...input, date: "2026-09-04" });
   assert.ok(yesterday.includes("· 4 Sep"), yesterday);
+}
+
+// ─── class-or-section resolution ───────────────────────────────────────
+{
+  const whole = resolveClassOrSectionRef({ classKey: "5", sectionName: "" }, masters);
+  assert.ok(whole.ok && whole.wholeClass && whole.sections.map((s) => s.sectionId).join() === "s5a,s5b", JSON.stringify(whole));
+  const one = resolveClassOrSectionRef({ classKey: "5", sectionName: "B" }, masters);
+  assert.ok(one.ok && !one.wholeClass && one.sections.length === 1 && one.sections[0]!.sectionId === "s5b");
+  const none = resolveClassOrSectionRef({ classKey: "12", sectionName: "" }, masters);
+  assert.ok(!none.ok && none.reason === "no_class");
+}
+
+// ─── class defaulters reply ────────────────────────────────────────────
+{
+  const inr = (p: number) => `₹${(p / 100).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+  const rows = [
+    { sectionLabel: "V A", rollNo: "4", fullName: "Aarav Sharma", overdueAmountPaise: 840000, overdueDays: 45, earliestDueOn: "2026-07-22", onPlan: false },
+    { sectionLabel: "V B", rollNo: "9", fullName: "Kabir Ali", overdueAmountPaise: 1200000, overdueDays: 12, earliestDueOn: "2026-08-24", onPlan: true },
+    { sectionLabel: "V A", rollNo: "11", fullName: "Riya Verma", overdueAmountPaise: 400000, overdueDays: 26, earliestDueOn: "2026-08-10", onPlan: false },
+  ];
+  const whole = formatClassDefaultersReply({ title: "Class V", todayIso: "2026-09-05", wholeClass: true, rows, formatInr: inr });
+  assert.ok(whole.startsWith("*Class V* · defaulters · today"), whole);
+  assert.ok(whole.includes("3 students · *₹24,400* overdue"), whole);
+  assert.ok(whole.includes("*V A* · 2 · ₹12,400\n4. Aarav Sharma  ₹8,400 · 45d (22 Jul)\n11. Riya Verma  ₹4,000 · 26d (10 Aug)"), whole);
+  assert.ok(whole.includes("*V B* · 1 · ₹12,000\n9. Kabir Ali  ₹12,000 · 12d (24 Aug) · plan"), whole);
+  assert.ok(whole.endsWith("Reply with a name for the full ledger."));
+
+  const section = formatClassDefaultersReply({ title: "V A", todayIso: "2026-09-05", wholeClass: false, rows: rows.filter((r) => r.sectionLabel === "V A"), formatInr: inr });
+  assert.ok(section.includes("2 students · *₹12,400* overdue\n\n4. Aarav Sharma"), section);
+  assert.ok(!section.includes("*V A* · 2"), "no per-section header for a single section");
+
+  const limited = formatClassDefaultersReply({ title: "Class V", todayIso: "2026-09-05", wholeClass: true, rows: [], limitedTo: ["V A"], formatInr: inr });
+  assert.ok(limited.includes("(your sections only: V A)") && limited.includes("No overdue fees. ✅"), limited);
 }
 
 console.log("erpCommands.selftest.ts OK");

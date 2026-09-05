@@ -42,6 +42,7 @@ import { classifyClassHolidayDay } from "@/lib/holidayPolicy";
 import { householdWhatsApp, loadSis, type SisStudent } from "@/lib/sis";
 import { computeHouseholdDues, loadFees, openFeeDues } from "@/lib/fees";
 import { flagFutureDues } from "@/lib/feeDueFuture";
+import { listLiveDefaulters } from "@/lib/playbook";
 import { ensureFeesHydratedServer } from "@/lib/feesPersistence.server";
 import { formatInr, loadMasters } from "@/lib/masters";
 import { classLabel } from "@/lib/homework";
@@ -59,6 +60,7 @@ import {
   findErpCommand,
   formatAbsentListReply,
   formatAttendanceSummaryReply,
+  formatClassDefaultersReply,
   formatHelpReply,
   formatSectionProblem,
   formatStudentFeesReply,
@@ -70,6 +72,7 @@ import {
   parseCommandsSwitch,
   parseConfirmReply,
   parseErpCommandLocal,
+  resolveClassOrSectionRef,
   resolveCommandDate,
   resolveSectionRef,
   type ErpCommandDef,
@@ -431,7 +434,49 @@ export async function handleErpStaffCommand(
   // 6. Resolve fields.
   const resolved: Record<string, string> = {};
   let sectionMatch: SectionMatch | null = null;
-  if (command.fields.some((f) => f.type === "section")) {
+  if (command.id === "class_defaulters") {
+    const askedRaw = parsed.fields.section || "";
+    const refs = extractSectionRefs(askedRaw || text);
+    if (!refs.length) {
+      return { handled: true, audience: "erp_command_ask", text: "Which class? e.g. _class 3 defaulters_ or _5A defaulters_." };
+    }
+    const res = resolveClassOrSectionRef(refs[0]!, masters);
+    if (!res.ok) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: formatSectionProblem(res.reason, res.options, askedRaw || text),
+      };
+    }
+    const roleCodes = resolveSessionRoles(rbac, session, masters).map((r) => r.code);
+    let sections = res.sections;
+    let limitedTo: string[] | undefined;
+    if (!isOfficeLike(roleCodes) && !roleCodes.includes("accounts")) {
+      const mine = new Set(
+        staffAllowedSections(inbound.staff, masters, session.academicYearCode, roleCodes).map((s) => s.sectionId),
+      );
+      const allowed = res.sections.filter((s) => mine.has(s.sectionId));
+      if (!allowed.length) {
+        void audit(session, command, parsed.fields, text, "denied", {
+          reason: "scope",
+          classId: res.classId,
+          channel: inbound.channel,
+        });
+        return {
+          handled: true,
+          audience: "erp_command_denied",
+          text: formatSectionProblem("not_allowed", [], res.wholeClass ? res.className : res.sections[0]!.label),
+        };
+      }
+      if (allowed.length < res.sections.length) limitedTo = allowed.map((s) => s.label);
+      sections = allowed;
+    }
+    resolved.classId = res.classId;
+    resolved.title = res.wholeClass ? `Class ${res.className}` : res.sections[0]!.label;
+    resolved.wholeClass = res.wholeClass ? "1" : "";
+    resolved.sectionIds = sections.map((s) => s.sectionId).join(",");
+    if (limitedTo) resolved.limitedTo = limitedTo.join("|");
+  } else if (command.fields.some((f) => f.type === "section")) {
     const askedRaw = parsed.fields.section || "";
     const refs = extractSectionRefs(askedRaw || text);
     if (!refs.length) {
@@ -624,6 +669,8 @@ async function runReadCommand(
       return studentFees(resolved, session, todayIso);
     case "attendance_summary":
       return attendanceSummary(resolved, session, todayIso);
+    case "class_defaulters":
+      return classDefaulters(resolved, session, todayIso);
     default:
       return "That command isn't wired up yet.";
   }
@@ -741,6 +788,41 @@ async function attendanceSummary(
     scope: school ? "school" : "mine",
     classes,
     staff,
+  });
+}
+
+async function classDefaulters(
+  resolved: Record<string, string>,
+  session: DemoSession,
+  todayIso: string,
+): Promise<string> {
+  await ensureFeesHydratedServer();
+  const sis = loadSis();
+  const masters = loadMasters();
+  const want = new Set((resolved.sectionIds || "").split(",").filter(Boolean));
+  const rows = listLiveDefaulters({
+    asOf: todayIso,
+    academicYearCode: session.academicYearCode,
+    sis,
+    masters,
+  })
+    .filter((d) => want.has(d.student.sectionId) && d.overdueDays > 0)
+    .map((d) => ({
+      sectionLabel: classLabel(masters, d.student.classId, d.student.sectionId).replace(" · ", " "),
+      rollNo: d.student.rollNo,
+      fullName: d.fullName,
+      overdueAmountPaise: d.overdueAmountPaise,
+      overdueDays: d.overdueDays,
+      earliestDueOn: d.earliestDueOn,
+      onPlan: !!d.planCode,
+    }));
+  return formatClassDefaultersReply({
+    title: resolved.title || "Class",
+    todayIso,
+    wholeClass: resolved.wholeClass === "1",
+    rows,
+    limitedTo: resolved.limitedTo ? resolved.limitedTo.split("|") : undefined,
+    formatInr,
   });
 }
 
