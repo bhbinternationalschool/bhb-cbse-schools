@@ -32,6 +32,7 @@ import {
   ErpTableBody,
   ErpTableHead,
 } from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 const CARD = "rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4";
 const BTN =
@@ -338,9 +339,9 @@ export function LedgerBookPanel({ canApprove }: { canApprove: boolean }) {
         ) : null}
         {cockpit?.ok && cockpit.anomalies.length > 0 ? (
           <ul className="mt-2 space-y-2">
-            {cockpit.anomalies.map((a) => (
+            {cockpit.anomalies.map((a, i) => (
               <li
-                key={`${a.code}-${a.title}`}
+                key={`${a.code}-${i}`}
                 className={`rounded-lg border px-3 py-2 text-xs ${SEV_STYLE[a.severity]}`}
               >
                 <p className="font-bold">
@@ -359,6 +360,7 @@ export function LedgerBookPanel({ canApprove }: { canApprove: boolean }) {
       </section>
 
       <FeeAdvancesCard onChanged={() => void load()} />
+      <PayrollLedgerCard canApprove={canApprove} onChanged={() => void load()} />
 
       {/* Payables ageing */}
       {cockpit?.ok && cockpit.payablesAgeing.rows.length > 0 ? (
@@ -535,6 +537,7 @@ export function LedgerBookPanel({ canApprove }: { canApprove: boolean }) {
                   <th className="pb-2 text-left">Narration</th>
                   <th className="pb-2 text-left">Source</th>
                   <th className="pb-2 text-left">By</th>
+                  <th className="w-10 px-2 py-2" aria-label="Actions" />
                 </tr>
               </ErpTableHead>
               <ErpTableBody>
@@ -546,6 +549,9 @@ export function LedgerBookPanel({ canApprove }: { canApprove: boolean }) {
                     <td className="py-1.5 text-xs text-[var(--muted)]">{v.narration}</td>
                     <td className="py-1.5 text-xs">{v.sourceType || "manual"}</td>
                     <td className="py-1.5 text-xs">{v.createdBy}</td>
+                    <td className="px-2 py-1.5 text-right">
+                      <RowActionMenu row={v} label="Voucher actions" actions={[{ id: "copy", label: "Copy voucher number", onSelect: (x) => void navigator.clipboard.writeText(x.voucherNo) }, { id: "statement", label: "Open Book reports", onSelect: () => { window.location.href = "/accounts?tab=bookreports"; } }]} />
+                    </td>
                   </tr>
                 ))}
               </ErpTableBody>
@@ -563,6 +569,139 @@ export function LedgerBookPanel({ canApprove }: { canApprove: boolean }) {
  * income. The release is one visible journal (Dr 2400 / Cr 4000) dated in
  * the session — pressed by a person, never silent.
  */
+type PayrollLedgerRow = {
+  runId: string;
+  month: string;
+  status: string;
+  staff: number;
+  grossPaise: number;
+  netPaise: number;
+  accrualVoucherNo: string;
+  paymentVoucherNo: string;
+  overlap: { total: number; reclassified: number; mixed: number; salaryPaise: number };
+  blocked: string;
+};
+
+/**
+ * Payroll in the book. A posted run posts itself; this shows whether it did,
+ * and offers the one action that unblocks a month whose salary was already
+ * reconstructed from the bank statement before Payroll existed.
+ */
+function PayrollLedgerCard({
+  canApprove,
+  onChanged,
+}: {
+  canApprove: boolean;
+  onChanged?: () => void;
+}) {
+  const [rows, setRows] = useState<PayrollLedgerRow[] | null>(null);
+  const [busy, setBusy] = useState("");
+  const [notice, setNotice] = useState("");
+
+  const load = useCallback(async () => {
+    const res = await ledgerApi<{ rows: PayrollLedgerRow[] }>({ action: "payroll-ledger-status" });
+    if (res.ok) setRows(res.rows ?? []);
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  if (!rows || rows.length === 0) return null;
+
+  return (
+    <section className={CARD}>
+      <h4 className="text-sm font-bold text-[var(--brand-deep)]">Payroll in the book</h4>
+      <p className="text-[11px] text-[var(--muted)]">
+        A run saved as posted books itself at month end: salary and employer PF/ESI
+        as expense, PF, ESI and other deductions as payables, the net as Salary
+        Payable. Marking it paid books the payment. A month whose salary was
+        already reconstructed from the bank statement is blocked until that
+        reconstruction is reclassified — one click, and the book counts it once.
+      </p>
+      {notice ? (
+        <p className="mt-2 rounded-lg border border-[var(--border)] bg-[var(--accent)] px-3 py-1.5 text-xs text-[var(--brand-deep)]">
+          {notice}
+        </p>
+      ) : null}
+      <ul className="mt-2 space-y-1.5">
+        {rows.map((r) => (
+          <li
+            key={r.runId}
+            className="rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2 text-xs"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sm font-semibold">
+                {r.month} · {r.status} · {r.staff} staff
+              </span>
+              <span className="tabular-nums">
+                gross {formatInr(r.grossPaise)} · net {formatInr(r.netPaise)}
+              </span>
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--muted)]">
+              <span>
+                Accrual: {r.accrualVoucherNo ? <b className="font-mono text-[var(--brand-deep)]">{r.accrualVoucherNo}</b> : "not in the book"}
+              </span>
+              <span>
+                Payment: {r.paymentVoucherNo ? <b className="font-mono text-[var(--brand-deep)]">{r.paymentVoucherNo}</b> : r.status === "paid" ? "—" : "not paid yet"}
+              </span>
+              {r.overlap.total > 0 ? (
+                <span>
+                  Reconstructed salary for this month&apos;s pay: {r.overlap.total} voucher(s),{" "}
+                  {formatInr(r.overlap.salaryPaise)}, {r.overlap.reclassified} reclassified
+                  {r.overlap.mixed ? ` (${r.overlap.mixed} mixed with other expenses — only the salary lines move)` : ""}
+                </span>
+              ) : null}
+            </div>
+            {r.blocked ? (
+              <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[11px] font-semibold text-[var(--danger)]">Blocked: {r.blocked}</span>
+                {canApprove && r.overlap.total > r.overlap.reclassified ? (
+                  <button
+                    type="button"
+                    className={BTN_OUTLINE}
+                    disabled={busy === r.month}
+                    onClick={async () => {
+                      setBusy(r.month);
+                      setNotice("");
+                      try {
+                        const res = await ledgerApi<{
+                          reclassified: number;
+                          skipped: number;
+                          skippedNos: string[];
+                          posted: { accrual?: string; payment?: string; refused?: string }[];
+                        }>({ action: "payroll-overlap-reclass", month: r.month });
+                        if (!res.ok) {
+                          setNotice(res.error || "The book refused the reclassification");
+                        } else {
+                          const p = res.posted?.[0];
+                          setNotice(
+                            `Reclassified ${res.reclassified} voucher(s)` +
+                              (res.skipped ? `, ${res.skipped} skipped (${res.skippedNos.join(", ")})` : "") +
+                              (p?.accrual ? ` · payroll posted as ${p.accrual}` : "") +
+                              (p?.payment ? ` · payment ${p.payment}` : "") +
+                              (p?.refused ? ` · still refused: ${p.refused}` : ""),
+                          );
+                          await load();
+                          onChanged?.();
+                        }
+                      } finally {
+                        setBusy("");
+                      }
+                    }}
+                  >
+                    Reclassify {r.overlap.total - r.overlap.reclassified} voucher(s) and post
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function FeeAdvancesCard({ onChanged }: { onChanged?: () => void }) {
   const [rows, setRows] = useState<{ academicYearCode: string; balancePaise: number }[] | null>(null);
   const [busy, setBusy] = useState(false);

@@ -12,10 +12,11 @@
 import { formatInr } from "@/lib/masters";
 import type { ModuleDashboardModel } from "@/components/dashboard/ModuleDashboard";
 
-type Cockpit = {
+type Position = {
   ok: boolean;
   cashPaise: number;
   bankPaise: number;
+  banks?: { code: string; name: string; closingPaise: number }[];
   chequesInHandPaise: number;
   payablesPaise: number;
   receivablesPaise: number;
@@ -51,8 +52,11 @@ export async function patchAccountsDashWithServerBook(
   model: ModuleDashboardModel,
 ): Promise<ModuleDashboardModel | null> {
   const today = todayIso();
+  // "position" is the cockpit without its controls: the same balances in a
+  // fraction of the time. The controls run over every voucher and took several
+  // seconds, during which the dashboard showed browser-book figures.
   const [cockpit, rp] = await Promise.all([
-    ledgerPost<Cockpit>({ action: "cockpit", asOf: today, fyFrom: fyStart() }),
+    ledgerPost<Position>({ action: "position", asOf: today, fyFrom: fyStart() }),
     ledgerPost<{ ok: boolean; report?: { totalReceiptsPaise: number } }>({
       action: "receipts-payments",
       from: today,
@@ -75,7 +79,11 @@ export async function patchAccountsDashWithServerBook(
       return { ...k, value: formatInr(cockpit.cashPaise), hint: "server book" };
     }
     if (k.id === "bank") {
-      return { ...k, value: formatInr(cockpit.bankPaise), hint: "server book" };
+      const banks = (cockpit.banks ?? []).filter((b) => b.code !== "1010");
+      const hint = banks.length
+        ? banks.map((b) => `${b.name.split("·")[0]!.trim()} ${formatInr(b.closingPaise)}`).join(" · ")
+        : "server book";
+      return { ...k, value: formatInr(cockpit.bankPaise), hint };
     }
     if (k.id === "ap") {
       return {

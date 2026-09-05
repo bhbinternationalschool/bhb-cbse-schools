@@ -48,11 +48,14 @@ import {
   feeAdvanceBalances,
   ledgerReconciliation,
   projectAll,
+  payrollLedgerStatus,
+  payrollReclassifyAndPost,
   releaseFeeAdvances,
 } from "@/lib/ledger/project.server";
 import {
   ledgerAnomalies,
   ledgerCockpit,
+  ledgerPosition,
   payablesAgeing,
   receivablesAgeing,
 } from "@/lib/ledger/controls.server";
@@ -119,6 +122,8 @@ type PostBody =
   | { action: "close-year"; fyCode: string; surplusAccountCode?: string }
   | { action: "ensure-masters" }
   | { action: "project"; limit?: number }
+  | { action: "payroll-ledger-status" }
+  | { action: "payroll-overlap-reclass"; month: string }
   | { action: "reconcile" }
   | {
       action: "import-statement";
@@ -147,6 +152,7 @@ type PostBody =
   | { action: "anomalies"; asOf: string }
   | { action: "ageing"; asOf: string; side?: "payables" | "receivables" }
   | { action: "cockpit"; asOf: string; fyFrom: string }
+  | { action: "position"; asOf: string; fyFrom: string }
   | { action: "parity"; deskRows: { code: string; balancePaise: number }[] }
   | { action: "vendor-accounts" }
   | { action: "vendor-statement"; partyKey: string; asOf?: string }
@@ -189,7 +195,10 @@ export async function POST(req: Request) {
     body.action === "open-balances" ||
     // Projection writes vouchers for every desk record it can see. It is
     // idempotent and safe to repeat, but it is still a bulk write to the book.
-    body.action === "project";
+    body.action === "project" ||
+    // Reclassifying the reconstructed salary rewrites what the book says
+    // about five months of pay. Same rights as the projection.
+    body.action === "payroll-overlap-reclass";
 
   // Reports read the book and change nothing, so they need only view rights —
   // which is what makes a read-only auditor login possible at all. Requiring
@@ -209,6 +218,8 @@ export async function POST(req: Request) {
     "anomalies",
     "ageing",
     "cockpit",
+    "position",
+    "payroll-ledger-status",
     "vendor-dues",
     "vendor-bills",
     "accounts",
@@ -276,6 +287,14 @@ export async function POST(req: Request) {
     case "project": {
       const res = await projectAll({ limit: body.limit });
       return NextResponse.json(res, { status: res.ok ? 200 : 207 });
+    }
+    case "payroll-ledger-status": {
+      const res = await payrollLedgerStatus();
+      return NextResponse.json(res, { status: res.ok ? 200 : 502 });
+    }
+    case "payroll-overlap-reclass": {
+      const res = await payrollReclassifyAndPost({ month: String(body.month ?? ""), actor });
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
     }
     case "reconcile": {
       const res = await ledgerReconciliation();
@@ -505,6 +524,11 @@ export async function POST(req: Request) {
     }
     case "cockpit": {
       const res = await ledgerCockpit({ asOf: body.asOf, fyFrom: body.fyFrom });
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    case "position": {
+      // Balances only — what the dashboard tiles need, in well under a second.
+      const res = await ledgerPosition({ asOf: body.asOf, fyFrom: body.fyFrom });
       return NextResponse.json(res, { status: res.ok ? 200 : 422 });
     }
     case "parity": {

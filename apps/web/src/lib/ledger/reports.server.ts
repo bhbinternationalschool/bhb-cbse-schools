@@ -466,13 +466,24 @@ export async function ledgerVendors(): Promise<{
 
 type RawVendorLine = VendorLine & { partyId: string };
 
-/** Paged read of every ledger line carrying one of these vendor parties. */
+/**
+ * Paged read of every ledger line carrying one of these vendor parties.
+ *
+ * The ledger has no "reversed" flag by design — the reversal voucher IS the
+ * record, pointing at the voucher it cancels through `reverses_voucher_id`.
+ * (The first version asked the vouchers table for a `reversed_at` column that
+ * never existed; PostgREST refused, the route answered 500, and the Vendor
+ * history panel showed "0 vendors" for a book holding 25 — 2026-09-05.)
+ * Both halves of a reversed pair are dropped here: a cancelled bill is not a
+ * bill, and its reversal is not a payment.
+ */
 async function fetchVendorLines(
   sb: NonNullable<Awaited<ReturnType<typeof getServerTenantContext>>>["sb"],
   tenantId: string,
   partyIds: string[],
 ): Promise<RawVendorLine[]> {
-  const out: RawVendorLine[] = [];
+  type Staged = RawVendorLine & { voucherId: string; reversesVoucherId: string };
+  const staged: Staged[] = [];
   // Chunked so the `in` filter cannot outgrow the URL length PostgREST accepts.
   for (let i = 0; i < partyIds.length; i += 100) {
     const chunk = partyIds.slice(i, i + 100);
@@ -481,7 +492,7 @@ async function fetchVendorLines(
       const { data, error } = await sb
         .from("ledger_lines")
         .select(
-          "party_id, debit_paise, credit_paise, narration, instrument_ref, ledger_accounts!inner(code, name), ledger_vouchers!inner(voucher_no, voucher_type, voucher_date, reversed_at)",
+          "voucher_id, party_id, debit_paise, credit_paise, narration, instrument_ref, ledger_accounts!inner(code, name), ledger_vouchers!inner(voucher_no, voucher_type, voucher_date, reverses_voucher_id)",
         )
         .eq("tenant_id", tenantId)
         .in("party_id", chunk)
@@ -492,13 +503,17 @@ async function fetchVendorLines(
       for (const r of rows) {
         const acct = r.ledger_accounts as { code?: string; name?: string } | null;
         const vch = r.ledger_vouchers as
-          | { voucher_no?: string; voucher_type?: string; voucher_date?: string; reversed_at?: string | null }
+          | {
+              voucher_no?: string;
+              voucher_type?: string;
+              voucher_date?: string;
+              reverses_voucher_id?: string | null;
+            }
           | null;
-        // A reversed voucher settles and owes nothing; leaving it in would
-        // report a debt that was cancelled.
-        if (vch?.reversed_at) continue;
         const code = String(acct?.code ?? "");
-        out.push({
+        staged.push({
+          voucherId: String(r.voucher_id ?? ""),
+          reversesVoucherId: String(vch?.reverses_voucher_id ?? ""),
           partyId: String(r.party_id ?? ""),
           date: String(vch?.voucher_date ?? ""),
           voucherNo: String(vch?.voucher_no ?? ""),
@@ -515,7 +530,35 @@ async function fetchVendorLines(
       if (rows.length < page) break;
     }
   }
-  return out;
+
+  // Which of these vouchers has since been reversed. A reversal usually
+  // carries the same party and is already in `staged`, but it is asked of the
+  // book directly so a reversal posted without the party still counts.
+  const voucherIds = [...new Set(staged.map((s) => s.voucherId).filter(Boolean))];
+  const reversed = new Set<string>(
+    staged.map((s) => s.reversesVoucherId).filter(Boolean),
+  );
+  for (let i = 0; i < voucherIds.length; i += 200) {
+    const chunk = voucherIds.slice(i, i + 200);
+    const { data, error } = await sb
+      .from("ledger_vouchers")
+      .select("reverses_voucher_id")
+      .eq("tenant_id", tenantId)
+      .in("reverses_voucher_id", chunk);
+    if (error) throw new Error(error.message);
+    for (const r of (data ?? []) as { reverses_voucher_id?: string }[]) {
+      if (r.reverses_voucher_id) reversed.add(String(r.reverses_voucher_id));
+    }
+  }
+
+  return staged
+    .filter((s) => !reversed.has(s.voucherId) && !s.reversesVoucherId)
+    .map((s) => {
+      const { voucherId: _v, reversesVoucherId: _r, ...line } = s;
+      void _v;
+      void _r;
+      return line;
+    });
 }
 
 /** One vendor's full history, with a running balance of what is owed. */

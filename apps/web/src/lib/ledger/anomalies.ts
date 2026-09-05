@@ -219,10 +219,23 @@ export function findDuplicatePayments(
  * single day, when the school in fact still owed them ₹31,310.03. Two
  * ordinary corrections, reported as a warning about money.
  */
+/**
+ * What each party is owed or owes, read from the PAYABLES account alone.
+ *
+ * An expense voucher tags the party on the expense debit as well as on the
+ * payable credit, and a wage paid straight out of the drawer tags them on a
+ * debit with no payable at all. Netting every line that carries the name
+ * therefore reports a weekly ₹2,000 to a labourer as "paid more than billed",
+ * and a trustee's loan repayments the same way — 22 such phantoms on
+ * 2026-09-05. Only the control account can say whether money is owed.
+ */
+const PAYABLES_CODE = "2000";
+
 function netByParty(facts: AnomalyFacts): Map<string, { name: string; paise: number }> {
   const net = new Map<string, { name: string; paise: number }>();
   for (const l of facts.lines) {
     if (!l.partyKey) continue;
+    if (l.accountCode !== PAYABLES_CODE) continue;
     const cur = net.get(l.partyKey) ?? { name: l.partyName, paise: 0 };
     cur.paise += l.debitPaise - l.creditPaise;
     if (l.partyName) cur.name = l.partyName;
