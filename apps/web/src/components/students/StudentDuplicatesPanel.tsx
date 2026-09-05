@@ -221,7 +221,7 @@ export function StudentDuplicatesPanel({
                       className={`rounded-md px-2 py-0.5 text-[11px] font-bold ${
                         g.score >= 90
                           ? "bg-[rgba(192,57,43,0.14)] text-[#c0392b]"
-                          : "bg-[rgba(196,149,58,0.16)] text-[var(--brand-gold)]"
+                          : "bg-[rgba(196,149,58,0.16)] text-[var(--warning)]"
                       }`}
                     >
                       {g.score}% match

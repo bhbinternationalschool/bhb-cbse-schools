@@ -111,13 +111,13 @@ export const FEE_REPORT_CATEGORIES: {
   {
     id: "student",
     title: "Student",
-    headerClass: "bg-[#f9a825]",
+    headerClass: "bg-[#b26a00]",
     icon: "grad",
   },
   {
     id: "general",
     title: "General",
-    headerClass: "bg-[#42a5f5]",
+    headerClass: "bg-[#1e6fbf]",
     icon: "doc",
   },
 ];

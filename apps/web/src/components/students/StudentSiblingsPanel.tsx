@@ -314,7 +314,7 @@ const COLUMN_TONE = {
 const COUNT_TONE = {
   navy: "bg-[rgba(32,48,80,0.1)] text-[var(--brand-deep)]",
   teal: "bg-[rgba(15,118,110,0.16)] text-[#0f766e]",
-  amber: "bg-[rgba(196,149,58,0.2)] text-[var(--brand-gold)]",
+  amber: "bg-[rgba(196,149,58,0.2)] text-[var(--warning)]",
 } as const;
 
 function SiblingColumn({

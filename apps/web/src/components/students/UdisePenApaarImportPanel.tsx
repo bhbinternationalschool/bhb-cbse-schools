@@ -80,7 +80,7 @@ const TONE_BADGE: Record<UdiseRowTone, string> = {
   verify: "bg-[rgba(180,120,24,0.25)] text-[#8a5a10]",
   suspect: "bg-[rgba(180,35,24,0.2)] text-[#8b1a12]",
   ambiguous: "bg-[rgba(100,60,140,0.2)] text-[#5a2a7a]",
-  inactive: "bg-[rgba(60,60,60,0.25)] text-[#333]",
+  inactive: "bg-[rgba(90,106,138,0.22)] text-[var(--foreground)]",
   mbu_age: "bg-[var(--danger)] text-white",
 };
 
@@ -1053,7 +1053,7 @@ export function UdisePenApaarImportPanel({
                 <span className="text-[#5a2a7a]">Ambiguous {stats.ambiguous}</span>
               ) : null}
               {stats.inactive ? (
-                <span className="text-[#333]">Inactive in SIS {stats.inactive}</span>
+                <span className="text-[var(--foreground)]">Inactive in SIS {stats.inactive}</span>
               ) : null}
             </div>
           ) : null}
@@ -1334,7 +1334,7 @@ export function UdisePenApaarImportPanel({
                   </button>
                   <button
                     type="button"
-                    className="rounded-lg border border-[#555] bg-white px-3 py-1.5 text-xs font-semibold text-[#333] disabled:opacity-50"
+                    className="rounded-lg border border-[var(--border)] bg-white px-3 py-1.5 text-xs font-semibold text-[var(--foreground)] disabled:opacity-50"
                     disabled={busy || !inactiveRows.length}
                     onClick={() =>
                       exportPreviewCsv(

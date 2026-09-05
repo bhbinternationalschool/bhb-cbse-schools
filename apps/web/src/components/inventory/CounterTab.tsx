@@ -834,7 +834,7 @@ function SellSection({
                   }}
                   className={
                     buyerKind === b.id
-                      ? "rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white"
+                      ? "rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-sm font-medium text-white"
                       : "rounded-lg border px-3 py-1.5 text-sm hover:bg-muted"
                   }
                 >

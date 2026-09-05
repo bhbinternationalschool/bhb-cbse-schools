@@ -387,7 +387,7 @@ function DocumentPreview({
 
   return (
     <div
-      className="relative min-h-[480px] overflow-hidden rounded-xl border border-[var(--border)] bg-[#fafaf5] p-6 shadow-sm"
+      className="theme-light-island relative min-h-[480px] overflow-hidden rounded-xl border border-[var(--border)] bg-[#fafaf5] p-6 shadow-sm"
     >
       {profile?.pageBackgroundUrl ? (
         <div
