@@ -34,6 +34,7 @@ import {
   matchStudents,
   formatStudentFeesReply,
   formatStudentMatchesAsk,
+  formatAttendanceSummaryReply,
   type CommandAuditRow,
   type PendingErpConfirm,
   type StudentLike,
@@ -159,6 +160,13 @@ const masters = {
   assert.equal(parseErpCommandLocal("VIII B me kaun nahi aaya")?.fields.section, "8B");
   assert.equal(parseErpCommandLocal("5A में कौन गैरहाजिर है")?.commandId, "absent_list", "Devanagari fee/absent words match without ASCII word boundaries");
   assert.equal(parseErpCommandLocal("7B की उपस्थिति")?.fields.section, "7B");
+  assert.equal(parseErpCommandLocal("attendance summary")?.commandId, "attendance_summary");
+  assert.equal(parseErpCommandLocal("aaj ki attendance")?.commandId, "attendance_summary");
+  assert.equal(parseErpCommandLocal("today's attendance")?.commandId, "attendance_summary");
+  assert.equal(parseErpCommandLocal("kal ki hazri report")?.commandId, "attendance_summary");
+  assert.equal(parseErpCommandLocal("आज की उपस्थिति")?.commandId, "attendance_summary");
+  assert.equal(parseErpCommandLocal("5A attendance")?.commandId, "absent_list", "a section makes it the absent list");
+  assert.equal(parseErpCommandLocal("absent")?.commandId, undefined, "'absent' alone is neither");
   assert.equal(parseErpCommandLocal("commands")?.commandId, "help");
   assert.equal(parseErpCommandLocal("commands report")?.commandId, "commands_digest");
   assert.equal(parseErpCommandLocal("aaj ke commands")?.commandId, "commands_digest");
@@ -512,6 +520,55 @@ const masters = {
     "aarav sharma",
   );
   assert.ok(ask.includes("• Aarav Sharma (V · A, roll 4)\n• Aarav Sharma (V · B, roll 9)"), ask);
+}
+
+// ─── attendance summary reply ──────────────────────────────────────────
+{
+  const sec = (label: string, total: number, present: number, absent = 0, leave = 0, marked = true, holiday = false) => ({
+    label, total, marked, holiday, present, absent, leave, late: 0, halfDay: 0,
+  });
+  const input = {
+    date: "2026-09-05",
+    todayIso: "2026-09-05",
+    scope: "school" as const,
+    classes: [
+      { className: "Nursery", sections: [sec("Nursery A", 20, 0, 0, 0, false, true)] },
+      { className: "V", sections: [sec("V A", 32, 30, 2), sec("V B", 31, 28, 2, 1)] },
+      { className: "VI", sections: [sec("VI A", 30, 0, 0, 0, false)] },
+    ],
+    staff: {
+      activeStaff: 44,
+      registerMarked: true,
+      present: 40,
+      absent: 1,
+      leave: 1,
+      notPunched: ["Rakesh Verma", "Sunita Sharma"],
+    },
+  };
+  const t = formatAttendanceSummaryReply(input);
+  assert.ok(t.startsWith("*School attendance* · today"), t);
+  assert.ok(t.includes("Present *92%* (58 / 63) · Absent 4 · Leave 1"), t);
+  assert.ok(t.includes("2 of 3 sections marked"), "the holiday section is not counted as expected");
+  assert.ok(t.includes("*Not marked:* VI A"), t);
+  assert.ok(!t.includes("Nursery A"), "a section on holiday is not listed as pending");
+  assert.ok(t.includes("V  92%  (A 30/32, B 28/31)"), t);
+  assert.ok(t.includes("*Staff:* Present 40 · Absent 1 · Leave 1 of 44"), t);
+  assert.ok(t.includes("Not punched in: Rakesh Verma, Sunita Sharma"), t);
+
+  const mine = formatAttendanceSummaryReply({ ...input, scope: "mine", staff: null, classes: input.classes.slice(1, 2) });
+  assert.ok(mine.startsWith("*Your sections* · today"));
+  assert.ok(!mine.includes("Staff"));
+
+  const early = formatAttendanceSummaryReply({
+    ...input,
+    classes: [{ className: "V", sections: [sec("V A", 32, 0, 0, 0, false)] }],
+    staff: { activeStaff: 44, registerMarked: false, present: 0, absent: 0, leave: 0, notPunched: [] },
+  });
+  assert.ok(early.includes("No section marked yet (1 pending)"), early);
+  assert.ok(early.includes("*Staff:* no punches yet (44 active)."), early);
+
+  const yesterday = formatAttendanceSummaryReply({ ...input, date: "2026-09-04" });
+  assert.ok(yesterday.includes("· 4 Sep"), yesterday);
 }
 
 console.log("erpCommands.selftest.ts OK");

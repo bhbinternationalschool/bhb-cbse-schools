@@ -35,7 +35,10 @@ import {
 import { staffAllowedSections } from "@/lib/erpChatAccess";
 import { loadServerMasters, loadServerRbac } from "@/lib/api/v1/auth";
 import { ensureAttendanceHydratedServer } from "@/lib/attendancePersistence";
-import { findRegister, loadAttendance } from "@/lib/attendance";
+import { findRegister, loadAttendance, summarizeMarks } from "@/lib/attendance";
+import { loadStaffAttendance } from "@/lib/staffAttendance";
+import { ensureStaffAttendanceHydratedServer } from "@/lib/staffAttendancePersistence";
+import { classifyClassHolidayDay } from "@/lib/holidayPolicy";
 import { householdWhatsApp, loadSis, type SisStudent } from "@/lib/sis";
 import { computeHouseholdDues, loadFees, openFeeDues } from "@/lib/fees";
 import { flagFutureDues } from "@/lib/feeDueFuture";
@@ -55,6 +58,7 @@ import {
   extractSectionRefs,
   findErpCommand,
   formatAbsentListReply,
+  formatAttendanceSummaryReply,
   formatHelpReply,
   formatSectionProblem,
   formatStudentFeesReply,
@@ -527,6 +531,23 @@ export async function handleErpStaffCommand(
     resolved.studentName = student.fullName;
     resolved.detail = isOfficeLike(roleCodes) || roleCodes.includes("accounts") ? "full" : "basic";
   }
+  if (command.id === "attendance_summary") {
+    const roleCodes = resolveSessionRoles(rbac, session, masters).map((r) => r.code);
+    if (isOfficeLike(roleCodes)) {
+      resolved.scope = "school";
+    } else {
+      const mine = staffAllowedSections(inbound.staff, masters, session.academicYearCode, roleCodes);
+      if (!mine.length) {
+        return {
+          handled: true,
+          audience: "erp_command_denied",
+          text: "The school-wide attendance summary is for the office and leadership. You can ask for your own section, e.g. _5A me aaj kaun absent hai_.",
+        };
+      }
+      resolved.scope = "mine";
+      resolved.sectionIds = mine.map((s) => s.sectionId).join(",");
+    }
+  }
   if (command.fields.some((f) => f.type === "date")) {
     resolved.date =
       parsed.fields.date && /^\d{4}-\d{2}-\d{2}$/.test(parsed.fields.date)
@@ -601,6 +622,8 @@ async function runReadCommand(
       return absentList(resolved, session, todayIso);
     case "student_fees":
       return studentFees(resolved, session, todayIso);
+    case "attendance_summary":
+      return attendanceSummary(resolved, session, todayIso);
     default:
       return "That command isn't wired up yet.";
   }
@@ -640,6 +663,84 @@ async function absentList(
     leave: pick("LE"),
     late: pick("L"),
     halfDay: pick("HD"),
+  });
+}
+
+async function attendanceSummary(
+  resolved: Record<string, string>,
+  session: DemoSession,
+  todayIso: string,
+): Promise<string> {
+  const school = resolved.scope === "school";
+  await Promise.all([
+    ensureAttendanceHydratedServer(),
+    school ? ensureStaffAttendanceHydratedServer() : Promise.resolve(false),
+  ]);
+  const ay = session.academicYearCode;
+  const date = resolved.date || todayIso;
+  const masters = loadMasters();
+  const sis = loadSis();
+  const att = loadAttendance();
+  const onlyIds = resolved.sectionIds ? new Set(resolved.sectionIds.split(",")) : null;
+  const regs = (att.registers ?? []).filter((r) => r.academicYearCode === ay && r.date === date);
+  const regBySection = new Map(regs.map((r) => [r.sectionId, r]));
+  const studentsBySection = new Map<string, number>();
+  for (const st of sis.students) {
+    if (st.status !== "active" || st.academicYearCode !== ay) continue;
+    studentsBySection.set(st.sectionId, (studentsBySection.get(st.sectionId) ?? 0) + 1);
+  }
+  const classes = [...masters.classes]
+    .filter((c) => c.isActive !== false)
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+    .map((c) => ({
+      className: c.name,
+      sections: masters.sections
+        .filter((s) => s.classId === c.id && s.isActive !== false && (!onlyIds || onlyIds.has(s.id)))
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((s) => {
+          const reg = regBySection.get(s.id);
+          const sum = reg ? summarizeMarks(reg.marks || []) : null;
+          const total = studentsBySection.get(s.id) ?? (sum?.total ?? 0);
+          return {
+            label: classLabel(masters, c.id, s.id).replace(" · ", " "),
+            total,
+            marked: !!reg,
+            holiday: !reg && classifyClassHolidayDay(masters, date, ay, c.id).status === "holiday",
+            present: sum?.present ?? 0,
+            absent: sum?.absent ?? 0,
+            leave: sum?.leave ?? 0,
+            late: sum?.late ?? 0,
+            halfDay: sum?.halfDay ?? 0,
+          };
+        }),
+    }))
+    .filter((c) => c.sections.length > 0);
+
+  let staff: Parameters<typeof formatAttendanceSummaryReply>[0]["staff"] = null;
+  if (school) {
+    const active = (masters.staff ?? []).filter((s) => s.status === "active");
+    const reg = (loadStaffAttendance().registers ?? []).find(
+      (r) => r.date === date && r.academicYearCode === ay,
+    );
+    const marks = new Map((reg?.marks ?? []).map((m) => [m.staffId, m.status]));
+    staff = {
+      activeStaff: active.length,
+      registerMarked: !!reg,
+      present: active.filter((s) => ["P", "L", "HD"].includes(marks.get(s.id) ?? "")).length,
+      absent: active.filter((s) => marks.get(s.id) === "A").length,
+      leave: active.filter((s) => marks.get(s.id) === "LE").length,
+      notPunched: active
+        .filter((s) => !marks.has(s.id))
+        .map((s) => s.fullName.split(" ").slice(0, 2).join(" "))
+        .sort(),
+    };
+  }
+  return formatAttendanceSummaryReply({
+    date,
+    todayIso,
+    scope: school ? "school" : "mine",
+    classes,
+    staff,
   });
 }
 

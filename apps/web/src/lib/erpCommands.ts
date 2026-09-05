@@ -97,6 +97,31 @@ export const ERP_COMMANDS: ErpCommandDef[] = [
     scope: "own_sections",
   },
   {
+    id: "attendance_summary",
+    title: "Today's attendance summary",
+    kind: "read",
+    module: "attendance",
+    action: "view",
+    description:
+      "School-wide attendance for a date: present percentage by class, sections not yet marked, and staff present / absent / not punched in. Teachers get their own sections only. No section in the message — a section means the absent list instead.",
+    examples: [
+      "attendance summary",
+      "aaj ki attendance",
+      "today's attendance",
+      "kal ki attendance report",
+      "school attendance status",
+    ],
+    fields: [
+      {
+        name: "date",
+        type: "date",
+        required: false,
+        description: "YYYY-MM-DD; today when not said. 'kal' / 'yesterday' means yesterday.",
+      },
+    ],
+    scope: "any",
+  },
+  {
     id: "student_fees",
     title: "A student's pending fees",
     kind: "read",
@@ -351,6 +376,15 @@ const ABSENT_WORDS =
 
 const HELP_WORDS = /^\s*(commands?|command\s+help|cmd|कमांड|\?)\s*$/i;
 
+/**
+ * Attendance without a section is the school (or the teacher's sections):
+ * "attendance summary", "aaj ki attendance", "today's attendance", "kitne
+ * present". Requires an attendance word; "absent" alone is not enough,
+ * because "absent" with no section is a half-typed absent-list ask.
+ */
+const ATTENDANCE_SUMMARY_WORDS =
+  /(?<![\p{L}\p{M}\p{N}])(attendance|hazri|haziri|हाज़िरी|हाजिरी|upasthiti|उपस्थिति|kitne\s+present|present\s+percent(age)?)(?![\p{L}\p{M}\p{N}])/iu;
+
 const DIGEST_WORDS =
   /^\s*(commands?\s+(report|digest|summary|log)|(aaj|today)\s*(ke|ka|'s)?\s*commands?|ai\s+(report|digest))\s*$/i;
 
@@ -381,6 +415,9 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
     };
   }
   const refs = extractSectionRefs(t);
+  if (!refs.length && ATTENDANCE_SUMMARY_WORDS.test(t) && !FEE_WORDS.test(t)) {
+    return { commandId: "attendance_summary", fields: { date: "" }, source: "local" };
+  }
   if (refs.length && ABSENT_WORDS.test(t)) {
     const r = refs[0]!;
     return {
@@ -1085,4 +1122,114 @@ export function formatStudentMatchesAsk(
     (m) => `• ${m.fullName} (${m.classLabel}${m.rollNo ? `, roll ${m.rollNo}` : ""})`,
   );
   return `Which one did you mean?\n${rows.join("\n")}\nReply with the full name and class.`;
+}
+
+// ─── Attendance summary ────────────────────────────────────────────────
+
+export type AttendanceSummarySection = {
+  label: string; // "V A"
+  total: number;
+  marked: boolean;
+  holiday: boolean;
+  present: number;
+  absent: number;
+  leave: number;
+  late: number;
+  halfDay: number;
+};
+
+export type AttendanceSummaryClass = {
+  className: string;
+  sections: AttendanceSummarySection[];
+};
+
+export type AttendanceSummaryStaff = {
+  activeStaff: number;
+  registerMarked: boolean;
+  present: number;
+  absent: number;
+  leave: number;
+  /** Active staff with no mark at all on the register. */
+  notPunched: string[];
+};
+
+export type AttendanceSummaryInput = {
+  date: string;
+  todayIso: string;
+  scope: "school" | "mine";
+  classes: AttendanceSummaryClass[];
+  staff: AttendanceSummaryStaff | null;
+};
+
+function pct(n: number, d: number): string {
+  return d > 0 ? `${Math.round((n / d) * 100)}%` : "—";
+}
+
+export function formatAttendanceSummaryReply(input: AttendanceSummaryInput): string {
+  const when = input.date === input.todayIso ? "today" : shortDate(input.date);
+  const lines: string[] = [
+    `*${input.scope === "school" ? "School attendance" : "Your sections"}* · ${when}`,
+  ];
+  const all = input.classes.flatMap((c) => c.sections);
+  if (!all.length) {
+    lines.push("No active sections found.");
+    return lines.join("\n");
+  }
+  const marked = all.filter((s) => s.marked);
+  const pending = all.filter((s) => !s.marked && !s.holiday);
+  const holidays = all.filter((s) => !s.marked && s.holiday);
+  const total = marked.reduce((n, s) => n + s.total, 0);
+  const present = marked.reduce((n, s) => n + s.present, 0);
+  const absent = marked.reduce((n, s) => n + s.absent, 0);
+  const leave = marked.reduce((n, s) => n + s.leave, 0);
+  const late = marked.reduce((n, s) => n + s.late, 0);
+  if (!marked.length) {
+    lines.push(
+      holidays.length === all.length
+        ? "Holiday for every section."
+        : `No section marked yet (${pending.length} pending).`,
+    );
+  } else {
+    const head = [`Present *${pct(present, total)}* (${present} / ${total})`];
+    if (absent) head.push(`Absent ${absent}`);
+    if (leave) head.push(`Leave ${leave}`);
+    if (late) head.push(`Late ${late}`);
+    lines.push(head.join(" · "));
+    lines.push(`${marked.length} of ${all.length - holidays.length} sections marked`);
+  }
+  if (pending.length) {
+    lines.push(`*Not marked:* ${pending.map((s) => s.label).join(", ")}`);
+  }
+  if (marked.length) {
+    lines.push("", "*By class*");
+    for (const c of input.classes) {
+      const secs = c.sections.filter((s) => s.marked);
+      if (!secs.length) continue;
+      const t = secs.reduce((n, s) => n + s.total, 0);
+      const p = secs.reduce((n, s) => n + s.present, 0);
+      const parts = secs.map((s) => {
+        const name = s.label.replace(new RegExp(`^${c.className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*`), "");
+        return `${name || s.label} ${s.present}/${s.total}`;
+      });
+      lines.push(`${c.className}  ${pct(p, t)}  (${parts.join(", ")})`);
+    }
+  }
+  if (input.staff) {
+    const st = input.staff;
+    lines.push("");
+    if (!st.registerMarked) {
+      lines.push(`*Staff:* no punches yet (${st.activeStaff} active).`);
+    } else {
+      const parts = [`Present ${st.present}`];
+      if (st.absent) parts.push(`Absent ${st.absent}`);
+      if (st.leave) parts.push(`Leave ${st.leave}`);
+      lines.push(`*Staff:* ${parts.join(" · ")} of ${st.activeStaff}`);
+      if (st.notPunched.length) {
+        const shown = st.notPunched.slice(0, 8).join(", ");
+        const more = st.notPunched.length > 8 ? ` +${st.notPunched.length - 8} more` : "";
+        lines.push(`Not punched in: ${shown}${more}`);
+      }
+    }
+  }
+  return lines.join("\n");
 }
