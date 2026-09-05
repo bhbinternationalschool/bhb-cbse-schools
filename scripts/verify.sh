@@ -63,6 +63,7 @@ SELFTESTS=(
   test:masters-freeze
   test:session-year
   test:academic-year-resolve
+  test:workspace-policy
   test:masters-read-failure
   test:save-full-cache
   test:sis-memory-fallback
