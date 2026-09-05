@@ -26,6 +26,7 @@ import {
   parseErpCommandLocal,
   resolveCommandDate,
   resolveSectionRef,
+  waMarkersToAssistantText,
   type PendingErpConfirm,
 } from "./erpCommands";
 
@@ -280,6 +281,26 @@ const masters = {
     ).includes("V A, V B"),
   );
   assert.ok(formatSectionProblem("not_allowed", [], "V A").includes("own sections"));
+}
+
+// ─── WhatsApp markers → assistant markdown ─────────────────────────────
+{
+  assert.equal(waMarkersToAssistantText("*V A* · today"), "**V A** · today");
+  assert.equal(
+    waMarkersToAssistantText("Present 29 / 32\n\n*Absent*\n4. Aarav"),
+    "Present 29 / 32\n\n**Absent**\n4. Aarav",
+  );
+  assert.equal(
+    waMarkersToAssistantText("Try _5A me aaj kaun absent hai_."),
+    "Try 5A me aaj kaun absent hai.",
+    "italics become plain text",
+  );
+  assert.equal(
+    waMarkersToAssistantText("cmd_yes_abc snake_case_word"),
+    "cmd_yes_abc snake_case_word",
+    "underscores inside words are not italics",
+  );
+  assert.equal(waMarkersToAssistantText("2 * 3 * 4"), "2 * 3 * 4", "spaced asterisks are arithmetic, not bold");
 }
 
 console.log("erpCommands.selftest.ts OK");

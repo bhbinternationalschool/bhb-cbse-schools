@@ -585,3 +585,14 @@ export function parseCommandsSwitch(text: string): "on" | "off" | null {
   if (/^commands?\s+(on|resume|start|chalu|chalu karo)$/.test(t)) return "on";
   return null;
 }
+
+/**
+ * The engine writes WhatsApp markers (*bold*, _italic_). The in-ERP
+ * assistant renders **bold** only, so bold is doubled and italics are
+ * dropped to plain text. Button ids (cmd_yes_…) never pass through here.
+ */
+export function waMarkersToAssistantText(text: string): string {
+  return (text || "")
+    .replace(/(^|[^*])\*(\S(?:[^*\n]*\S)?)\*(?!\*)/g, "$1**$2**")
+    .replace(/(^|[\s(])_([^_\n]+)_(?=$|[\s).,!?])/g, "$1$2");
+}

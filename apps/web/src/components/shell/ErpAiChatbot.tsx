@@ -289,10 +289,14 @@ export function ErpAiChatbot() {
     setProactiveGuide(null);
   }
 
-  function ask(text: string) {
+  /**
+   * Send a line to the assistant. `shownAs` labels the user bubble when the
+   * wire text is a button id (a command confirm card's cmd_yes_… token).
+   */
+  function ask(text: string, shownAs?: string) {
     const trimmed = text.trim();
     if (!trimmed || typing || !masters) return;
-    const user = makeUserMessage(trimmed);
+    const user = makeUserMessage(shownAs || trimmed);
     const withUser = [...messages, user];
     push(withUser);
     setDraft("");
@@ -582,7 +586,7 @@ export function ErpAiChatbot() {
       {!minimized ? (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-b-2xl border border-t-0 border-[var(--border)] bg-[var(--surface)] shadow-[0_18px_50px_rgba(32,48,80,0.28)]">
           <div className="flex-1 space-y-2.5 overflow-y-auto px-3 py-3">
-            {messages.map((m) => (
+            {messages.map((m, mi) => (
               <div
                 key={m.id}
                 className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
@@ -628,6 +632,25 @@ export function ErpAiChatbot() {
                         >
                           Got it — thanks
                         </button>
+                      ) : null}
+                      {m.confirm && !typing && mi === messages.length - 1 ? (
+                        <div className="mt-2.5 flex gap-1.5">
+                          <button
+                            type="button"
+                            className="flex-1 rounded-lg py-1.5 text-[11px] font-bold text-white"
+                            style={{ background: TENANT.primaryColor }}
+                            onClick={() => ask(m.confirm!.yesId, "Confirm")}
+                          >
+                            Confirm
+                          </button>
+                          <button
+                            type="button"
+                            className="flex-1 rounded-lg border border-[var(--border)] py-1.5 text-[11px] font-bold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
+                            onClick={() => ask(m.confirm!.noId, "Cancel")}
+                          >
+                            Cancel
+                          </button>
+                        </div>
                       ) : null}
                       {m.links?.length ? (
                         <div className="mt-2 flex flex-wrap gap-1.5">
