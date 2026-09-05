@@ -30,8 +30,13 @@ import {
   formatCommandDigest,
   formatCommandDigestOneLine,
   summarizeCommandAudit,
+  parseStudentFeesQuery,
+  matchStudents,
+  formatStudentFeesReply,
+  formatStudentMatchesAsk,
   type CommandAuditRow,
   type PendingErpConfirm,
+  type StudentLike,
 } from "./erpCommands";
 
 console.log("erpCommands.selftest.ts");
@@ -152,6 +157,8 @@ const masters = {
   assert.equal(parseErpCommandLocal("class 3 A attendance today")?.commandId, "absent_list");
   assert.equal(parseErpCommandLocal("8B hazri")?.commandId, "absent_list");
   assert.equal(parseErpCommandLocal("VIII B me kaun nahi aaya")?.fields.section, "8B");
+  assert.equal(parseErpCommandLocal("5A में कौन गैरहाजिर है")?.commandId, "absent_list", "Devanagari fee/absent words match without ASCII word boundaries");
+  assert.equal(parseErpCommandLocal("7B की उपस्थिति")?.fields.section, "7B");
   assert.equal(parseErpCommandLocal("commands")?.commandId, "help");
   assert.equal(parseErpCommandLocal("commands report")?.commandId, "commands_digest");
   assert.equal(parseErpCommandLocal("aaj ke commands")?.commandId, "commands_digest");
@@ -386,6 +393,125 @@ const masters = {
   const one = formatCommandDigestOneLine(stats, "2026-09-05");
   assert.equal(one, "ERP commands 2026-09-05: 6 commands, 1 writes, 1 denied, most by Rakesh Verma (3).");
   assert.ok(!one.includes("\n"));
+}
+
+// ─── student fees: query → name (+ section / roll) ──────────────────────
+{
+  const q = (t: string) => parseStudentFeesQuery(t);
+  assert.deepEqual(q("Amay ki fees pending"), { name: "amay" });
+  assert.deepEqual(q("show me all dues of Aarav Sharma"), { name: "aarav sharma" });
+  assert.deepEqual(q("Riya Verma dues"), { name: "riya verma" });
+  assert.deepEqual(q("Aarav ka kitna baki hai"), { name: "aarav" });
+  assert.deepEqual(q("fees Amay Gupta 4B"), {
+    name: "amay gupta",
+    section: { classKey: "4", sectionName: "B" },
+  });
+  assert.deepEqual(q("roll 12 4B fees"), {
+    name: "",
+    section: { classKey: "4", sectionName: "B" },
+    rollNo: "12",
+  });
+  assert.deepEqual(q("Amay Gupta ki फीस बकाया"), { name: "amay gupta" });
+  assert.equal(q("class 3 fees pending"), null, "a section alone is a class question");
+  assert.equal(q("Amay Gupta"), null, "no fee word — not a fees query");
+  assert.equal(q("5A me aaj kaun absent hai"), null);
+  // The local parser routes it as a command with the student field filled.
+  const p = parseErpCommandLocal("fees Amay Gupta 4B");
+  assert.ok(p && p.commandId === "student_fees" && p.fields.student === "amay gupta 4B", JSON.stringify(p));
+  assert.equal(parseErpCommandLocal("Class 3 defaulters"), null, "class dues is a later command, not student fees");
+  // Model JSON carries the student too.
+  const llm = parseErpCommandLlmJson('{"command":"student_fees","student":"Amay Gupta","confidence":0.9}');
+  assert.equal(llm?.student, "Amay Gupta");
+}
+
+// ─── student matching ──────────────────────────────────────────────────
+{
+  const st = (id: string, fullName: string, sectionId: string, rollNo: string, extra?: Partial<StudentLike>): StudentLike => ({
+    id,
+    fullName,
+    admissionNo: `ADM${id}`,
+    rollNo,
+    classId: "c",
+    sectionId,
+    status: "active",
+    academicYearCode: "2026-27",
+    ...extra,
+  });
+  const students = [
+    st("1", "Amay Gupta", "s4b", "12"),
+    st("2", "Amay Singh", "s1a", "3"),
+    st("3", "Aarav Sharma", "s5a", "4"),
+    st("4", "Aarav Sharma", "s5b", "9"),
+    st("5", "Riya Verma", "s5a", "11"),
+    st("6", "Old Amay", "s4b", "1", { status: "left" }),
+    st("7", "Amay Gupta", "s4b", "12", { academicYearCode: "2025-26" }),
+  ];
+  const ay = { academicYearCode: "2026-27" };
+  const names = (r: ReturnType<typeof matchStudents>) => r.map((m) => `${m.student.id}:${m.student.fullName}`);
+  assert.deepEqual(names(matchStudents({ name: "amay" }, students, ay)), ["1:Amay Gupta", "2:Amay Singh"], "first name → both, inactive and last year excluded");
+  assert.deepEqual(names(matchStudents({ name: "amay gupta" }, students, ay)), ["1:Amay Gupta"], "exact full name wins");
+  assert.deepEqual(names(matchStudents({ name: "aarav sharma" }, students, ay)), ["3:Aarav Sharma", "4:Aarav Sharma"], "two students, same name → both, caller asks back");
+  assert.deepEqual(names(matchStudents({ name: "aarav sharma" }, students, { ...ay, sectionId: "s5b" })), ["4:Aarav Sharma"], "section narrows");
+  assert.deepEqual(names(matchStudents({ name: "aarav sh" }, students, ay)), ["3:Aarav Sharma", "4:Aarav Sharma"], "prefix per word");
+  assert.deepEqual(names(matchStudents({ name: "sharma" }, students, ay)), ["3:Aarav Sharma", "4:Aarav Sharma"], "surname only");
+  assert.deepEqual(names(matchStudents({ name: "", rollNo: "12" }, students, { ...ay, sectionId: "s4b" })), ["1:Amay Gupta"], "roll within a section");
+  assert.deepEqual(names(matchStudents({ name: "", rollNo: "12" }, students, ay)), [], "roll without a section is too vague");
+  assert.deepEqual(names(matchStudents({ name: "adm5" }, students, ay)), ["5:Riya Verma"], "admission number");
+  assert.deepEqual(names(matchStudents({ name: "zzz" }, students, ay)), []);
+}
+
+// ─── student fees reply ────────────────────────────────────────────────
+{
+  const inr = (p: number) => `₹${(p / 100).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+  const base = {
+    studentName: "Amay Gupta",
+    classLabel: "IV · B",
+    rollNo: "12",
+    todayIso: "2026-09-05",
+    lastReceipt: { receiptNo: "R-0912", date: "2026-06-08", amountPaise: 515000, modes: ["UPI"] },
+    parentMobile: "9876543221",
+    siblings: [{ name: "Anaya Gupta", classLabel: "I · A", duePaise: 620000 }],
+    formatInr: inr,
+  };
+  const dues = [
+    { label: "Jul 2026", headName: "Tuition", kind: "academic", dueOn: "2026-07-10", balancePaise: 400000, billedPaise: 450000, concessionPaise: 50000, concessionNames: ["Sibling 2nd child"], future: false },
+    { label: "Jul 2026", headName: "Transport", kind: "transport", dueOn: "2026-07-10", balancePaise: 120000, billedPaise: 120000, concessionPaise: 0, concessionNames: [], future: false },
+    { label: "Aug 2026", headName: "Tuition", kind: "academic", dueOn: "2026-08-10", balancePaise: 400000, billedPaise: 450000, concessionPaise: 50000, concessionNames: ["Sibling 2nd child"], future: false },
+    { label: "Sep 2026", headName: "Tuition", kind: "academic", dueOn: "2026-09-10", balancePaise: 400000, billedPaise: 450000, concessionPaise: 50000, concessionNames: ["Sibling 2nd child"], future: false },
+    { label: "Oct 2026", headName: "Tuition", kind: "academic", dueOn: "2026-10-10", balancePaise: 400000, billedPaise: 450000, concessionPaise: 50000, concessionNames: [], future: true },
+    { label: "Nov 2026", headName: "Tuition", kind: "academic", dueOn: "2026-11-10", balancePaise: 400000, billedPaise: 450000, concessionPaise: 50000, concessionNames: [], future: true },
+    { label: "Dec 2026", headName: "Tuition", kind: "academic", dueOn: "2026-12-10", balancePaise: 400000, billedPaise: 450000, concessionPaise: 50000, concessionNames: [], future: true },
+  ];
+  const full = formatStudentFeesReply({ ...base, dues, detail: "full" });
+  assert.ok(full.startsWith("*Amay Gupta* · IV · B · Roll 12"), full);
+  assert.ok(full.includes("Total due today: *₹13,200*   (overdue since 10 Jul)"), full);
+  assert.ok(full.includes("*By month*\nJul 2026   ₹5,200\nAug 2026   ₹4,000\nSep 2026   ₹4,000"), full);
+  assert.ok(full.includes("*By head*\nTuition   ₹12,000  (₹1,500 Sibling 2nd child concession applied)\nTransport   ₹1,200"), full);
+  assert.ok(full.includes("Pay-ahead, not yet due: Oct 2026 to Dec 2026, ₹12,000"), full);
+  assert.ok(full.includes("Last receipt: ₹5,150 on 8 Jun, UPI (R-0912)"), full);
+  assert.ok(full.includes("Parent: 98xxxxxx21"));
+  assert.ok(full.includes("Sibling Anaya Gupta, I · A: ₹6,200 due"));
+
+  const basic = formatStudentFeesReply({ ...base, dues, detail: "basic" });
+  assert.ok(basic.includes("Tuition   ₹12,000  (₹1,500 concession applied)"), "class teacher sees the amount, not the policy name");
+  assert.ok(!basic.includes("Sibling"), "class teacher does not see the sibling line");
+
+  const clear = formatStudentFeesReply({ ...base, dues: dues.filter((d) => d.future), detail: "full", siblings: [] });
+  assert.ok(clear.includes("No dues pending today. ✅"), clear);
+  assert.ok(clear.includes("Pay-ahead"));
+
+  const none = formatStudentFeesReply({ ...base, dues: [], lastReceipt: null, siblings: [], detail: "basic" });
+  assert.ok(none.includes("No receipt on record this session."));
+
+  assert.ok(formatStudentMatchesAsk([], "Zed").includes('"Zed"'));
+  const ask = formatStudentMatchesAsk(
+    [
+      { fullName: "Aarav Sharma", classLabel: "V · A", rollNo: "4" },
+      { fullName: "Aarav Sharma", classLabel: "V · B", rollNo: "9" },
+    ],
+    "aarav sharma",
+  );
+  assert.ok(ask.includes("• Aarav Sharma (V · A, roll 4)\n• Aarav Sharma (V · B, roll 9)"), ask);
 }
 
 console.log("erpCommands.selftest.ts OK");

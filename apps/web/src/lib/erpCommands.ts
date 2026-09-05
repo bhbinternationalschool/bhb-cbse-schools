@@ -20,7 +20,7 @@ import type { RbacAction, RbacModule } from "@/lib/rbac";
 
 export type ErpCommandKind = "read" | "write";
 
-export type ErpCommandFieldType = "section" | "date" | "text";
+export type ErpCommandFieldType = "section" | "date" | "text" | "student";
 
 export type ErpCommandField = {
   name: string;
@@ -54,6 +54,8 @@ export type ErpCommandFields = {
   section?: string;
   date?: string;
   text?: string;
+  /** Student as written — a name, optionally with a class-section or roll. */
+  student?: string;
 };
 
 export type ParsedErpCommand = {
@@ -90,6 +92,31 @@ export const ERP_COMMANDS: ErpCommandDef[] = [
         type: "date",
         required: false,
         description: "YYYY-MM-DD; today when not said. 'kal' / 'yesterday' means yesterday.",
+      },
+    ],
+    scope: "own_sections",
+  },
+  {
+    id: "student_fees",
+    title: "A student's pending fees",
+    kind: "read",
+    module: "fees",
+    action: "view",
+    description:
+      "What one student owes: total due now, by month, by fee head, pay-ahead months, last receipt and the parent's mobile. Asks back when two students share the name.",
+    examples: [
+      "Amay ki fees pending",
+      "show me all dues of Aarav Sharma",
+      "Riya Verma dues",
+      "fees Amay Gupta 4B",
+      "Aarav ka kitna baki hai",
+    ],
+    fields: [
+      {
+        name: "student",
+        type: "student",
+        required: true,
+        description: "Student name as written, plus class-section or roll if given, e.g. 'Amay Gupta 4B'",
       },
     ],
     scope: "own_sections",
@@ -318,8 +345,9 @@ export function resolveCommandDate(text: string, todayIso: string): string {
 
 // ─── Local parser ──────────────────────────────────────────────────────
 
+// \b is ASCII-only in JS, so Hindi words need explicit letter lookarounds.
 const ABSENT_WORDS =
-  /\b(absent|absentee|absentees|gair\s*hazir|gairhazir|गैर\s*हाज़िर|गैरहाजिर|अनुपस्थित|nahi\s+aaya|nahi\s+aaye|नहीं\s+आया|नहीं\s+आए|hazri|haziri|हाज़िरी|हाजिरी|attendance|upasthiti|उपस्थिति)\b/i;
+  /(?<![\p{L}\p{M}\p{N}])(absent|absentee|absentees|gair\s*hazir|gairhazir|गैर\s*हाज़िर|गैरहाजिर|अनुपस्थित|nahi\s+aaya|nahi\s+aaye|नहीं\s+आया|नहीं\s+आए|hazri|haziri|हाज़िरी|हाजिरी|attendance|upasthiti|उपस्थिति)(?![\p{L}\p{M}\p{N}])/iu;
 
 const HELP_WORDS = /^\s*(commands?|command\s+help|cmd|कमांड|\?)\s*$/i;
 
@@ -339,6 +367,18 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
   }
   if (DIGEST_WORDS.test(t)) {
     return { commandId: "commands_digest", fields: {}, source: "local" };
+  }
+  const feesQ = parseStudentFeesQuery(t);
+  if (feesQ) {
+    return {
+      commandId: "student_fees",
+      fields: {
+        student: [feesQ.name, feesQ.section ? `${feesQ.section.classKey}${feesQ.section.sectionName}` : "", feesQ.rollNo ? `roll ${feesQ.rollNo}` : ""]
+          .filter(Boolean)
+          .join(" "),
+      },
+      source: "local",
+    };
   }
   const refs = extractSectionRefs(t);
   if (refs.length && ABSENT_WORDS.test(t)) {
@@ -378,6 +418,7 @@ export type ErpCommandLlmParse = {
   section?: string;
   date?: string;
   text?: string;
+  student?: string;
   confidence: number; // 0..1
 };
 
@@ -408,6 +449,7 @@ export function parseErpCommandLlmJson(
     section: str("section"),
     date: str("date"),
     text: str("text"),
+    student: str("student"),
     confidence,
   };
 }
@@ -430,7 +472,8 @@ export function buildErpCommandSystemPrompt(opts: {
     "Commands:",
     ...lines,
     "",
-    'Respond with JSON only: {"command": "<id or none>", "section": "<as written, e.g. 5A>", "date": "<YYYY-MM-DD or empty>", "text": "<free text if a command needs it>", "confidence": <0..1>}.',
+    'Respond with JSON only: {"command": "<id or none>", "section": "<as written, e.g. 5A>", "date": "<YYYY-MM-DD or empty>", "student": "<student name as written, with class/roll if said>", "text": "<free text if a command needs it>", "confidence": <0..1>}.',
+    "A student's name is a name, not a section: 'Amay ki fees' has student=Amay and no section.",
     'If the message is a greeting, a chat, a question about something not in the list, or you are unsure, answer {"command":"none","confidence":0}.',
     "Never invent a section or date that the message does not say. Leave date empty for today.",
   ].join("\n");
@@ -781,4 +824,265 @@ export function formatCommandDigestOneLine(stats: CommandDigestStats, date: stri
   const top = stats.byActor[0];
   if (top) parts.push(`most by ${top.name} (${top.count})`);
   return `ERP commands ${date}: ${parts.join(", ")}.`;
+}
+
+// ─── Student fees: query parsing, matching, formatting ─────────────────
+
+export type StudentFeesQuery = {
+  /** Name words as typed, lower-cased, without the fee words. */
+  name: string;
+  section?: { classKey: string; sectionName: string };
+  rollNo?: string;
+};
+
+const FEE_WORDS =
+  /(?<![\p{L}\p{M}\p{N}])(fees?|dues?|pending|baki|bakaya|bakaaya|balance|outstanding|ledger|बकाया|फीस|बाकी)(?![\p{L}\p{M}\p{N}])/iu;
+
+const FEE_STOP_WORDS = new Set([
+  "show", "me", "all", "the", "of", "for", "please", "pls", "plz", "student", "students",
+  "ki", "ka", "ke", "ko", "kitni", "kitna", "kitne", "hai", "h", "hain", "kya", "batao", "bata",
+  "dikhao", "dikha", "do", "dena", "check", "what", "is", "are", "how", "much", "today", "aaj",
+  "total", "pending", "fee", "fees", "due", "dues", "baki", "bakaya", "bakaaya", "balance",
+  "outstanding", "ledger", "amount", "paisa", "paise", "rupees", "rs",
+  "बकाया", "फीस", "बाकी", "की", "का", "के", "कितनी", "कितना", "है", "दिखाओ", "बताओ",
+]);
+
+/**
+ * "Amay ki fees pending", "show me all dues of Aarav Sharma", "fees Amay
+ * Gupta 4B", "roll 12 4B fees". Null unless a fee word is present and at
+ * least one name word survives — a section on its own ("class 3 fees") is a
+ * class question, not a student one.
+ */
+export function parseStudentFeesQuery(text: string): StudentFeesQuery | null {
+  const t = (text || "").trim();
+  if (!t || !FEE_WORDS.test(t)) return null;
+  let rest = t.toLowerCase();
+  let rollNo: string | undefined;
+  const roll = /\broll\s*(?:no\.?|number)?\s*(\d{1,3})\b/.exec(rest);
+  if (roll) {
+    rollNo = roll[1]!;
+    rest = rest.replace(roll[0], " ");
+  }
+  const refs = extractSectionRefs(rest);
+  const section = refs[0];
+  if (section) {
+    rest = rest
+      .replace(/\b(?:class|grade|std|kaksha|कक्षा)\s*[a-z0-9]+(?:st|nd|rd|th)?\s*(?:-|\s)?\s*(?:section|sec\.?)?\s*[a-h]?\b/g, " ")
+      .replace(/(?<![a-z0-9])(\d{1,2}|[ivx]{1,4}|nursery|lkg|ukg|kg|pg)(?:st|nd|rd|th)?\s*-?\s*[a-h](?![a-z0-9])/g, " ");
+  }
+  const words = rest
+    .replace(/[^\p{L}\p{M}\p{N}\s'.-]/gu, " ")
+    .split(/\s+/)
+    .map((w) => w.replace(/^[.'-]+|[.'-]+$/g, ""))
+    .filter((w) => w && !FEE_STOP_WORDS.has(w) && !/^\d+$/.test(w));
+  const name = words.join(" ").trim();
+  if (!name || !/[\p{L}\p{M}]{2,}/u.test(name)) {
+    return rollNo && section ? { name: "", section, rollNo } : null;
+  }
+  return { name, ...(section ? { section } : {}), ...(rollNo ? { rollNo } : {}) };
+}
+
+export type StudentLike = {
+  id: string;
+  fullName: string;
+  admissionNo?: string;
+  rollNo: string;
+  classId: string;
+  sectionId: string;
+  status: string;
+  academicYearCode: string;
+};
+
+export type StudentMatch<T extends StudentLike = StudentLike> = {
+  student: T;
+  /** 3 exact full name · 2 every word matched · 1 first-name only */
+  score: number;
+};
+
+function nameTokens(s: string): string[] {
+  return (s || "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{M}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+/**
+ * Rank active students of the year against a typed name. Every typed word
+ * must start some word of the student's name (so "Aarav Sh" finds Aarav
+ * Sharma, and "Sharma" finds every Sharma). A section or roll in the query
+ * narrows first. Admission number matches exactly.
+ */
+export function matchStudents<T extends StudentLike>(
+  query: StudentFeesQuery,
+  students: T[],
+  opts: {
+    academicYearCode: string;
+    /** Resolved from the query's section ref, when it resolved. */
+    sectionId?: string | null;
+    limit?: number;
+  },
+): StudentMatch<T>[] {
+  const q = nameTokens(query.name);
+  const pool = students.filter(
+    (s) =>
+      s.status === "active" &&
+      s.academicYearCode === opts.academicYearCode &&
+      (!opts.sectionId || s.sectionId === opts.sectionId) &&
+      (!query.rollNo || String(parseInt(s.rollNo, 10)) === String(parseInt(query.rollNo, 10))),
+  );
+  if (!q.length) {
+    return (query.rollNo && opts.sectionId ? pool : []).map((student) => ({ student, score: 2 }));
+  }
+  const out: StudentMatch<T>[] = [];
+  for (const s of pool) {
+    if (s.admissionNo && q.length === 1 && s.admissionNo.toLowerCase() === q[0]) {
+      out.push({ student: s, score: 3 });
+      continue;
+    }
+    const nt = nameTokens(s.fullName);
+    const every = q.every((w) => nt.some((n) => n.startsWith(w)));
+    if (!every) continue;
+    const exact = q.length === nt.length && q.every((w, i) => nt[i] === w);
+    out.push({ student: s, score: exact ? 3 : q.length > 1 ? 2 : 1 });
+  }
+  out.sort(
+    (a, b) =>
+      b.score - a.score ||
+      a.student.fullName.localeCompare(b.student.fullName),
+  );
+  // One exact full-name match beats any number of prefix matches.
+  if (out.length > 1 && out[0]!.score === 3 && out[1]!.score < 3) return out.slice(0, 1);
+  return out.slice(0, opts.limit ?? 6);
+}
+
+export type StudentFeesDue = {
+  label: string; // installment / month label
+  headName: string;
+  kind: string;
+  dueOn: string;
+  balancePaise: number;
+  billedPaise: number;
+  concessionPaise: number;
+  concessionNames: string[];
+  future: boolean;
+};
+
+export type StudentFeesInput = {
+  studentName: string;
+  classLabel: string;
+  rollNo: string;
+  todayIso: string;
+  dues: StudentFeesDue[];
+  lastReceipt: { receiptNo: string; date: string; amountPaise: number; modes: string[] } | null;
+  parentMobile: string;
+  siblings: { name: string; classLabel: string; duePaise: number }[];
+  /** full: fee desk / leadership — concession names and sibling line. */
+  detail: "full" | "basic";
+  formatInr: (paise: number) => string;
+};
+
+function maskMobile(m: string): string {
+  const d = (m || "").replace(/\D/g, "");
+  if (d.length < 6) return d;
+  return `${d.slice(0, 2)}xxxxxx${d.slice(-2)}`;
+}
+
+function shortDate(iso: string): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" });
+}
+
+export function formatStudentFeesReply(input: StudentFeesInput): string {
+  const inr = input.formatInr;
+  const head = `*${input.studentName}* · ${input.classLabel}${input.rollNo ? ` · Roll ${input.rollNo}` : ""}`;
+  const now = input.dues.filter((d) => !d.future && d.balancePaise > 0);
+  const ahead = input.dues.filter((d) => d.future && d.balancePaise > 0);
+  const total = now.reduce((s, d) => s + d.balancePaise, 0);
+  const lines: string[] = [head];
+
+  if (!now.length) {
+    lines.push("No dues pending today. ✅");
+  } else {
+    const overdue = now.filter((d) => d.dueOn && d.dueOn < input.todayIso).map((d) => d.dueOn).sort()[0];
+    lines.push(
+      `Total due today: *${inr(total)}*${overdue ? `   (overdue since ${shortDate(overdue)})` : ""}`,
+    );
+    // By month / installment, in due-date order.
+    const byMonth = new Map<string, { paise: number; dueOn: string }>();
+    for (const d of now) {
+      const cur = byMonth.get(d.label) ?? { paise: 0, dueOn: d.dueOn };
+      cur.paise += d.balancePaise;
+      if (d.dueOn < cur.dueOn) cur.dueOn = d.dueOn;
+      byMonth.set(d.label, cur);
+    }
+    const months = [...byMonth.entries()].sort((a, b) => a[1].dueOn.localeCompare(b[1].dueOn));
+    if (months.length > 1 || months[0]?.[0]) {
+      lines.push("", "*By month*");
+      for (const [label, v] of months) lines.push(`${label}   ${inr(v.paise)}`);
+    }
+    // By head, largest first, with the concession applied where allowed.
+    const byHead = new Map<string, { paise: number; concession: number; names: Set<string>; labels: Set<string> }>();
+    for (const d of now) {
+      const cur = byHead.get(d.headName) ?? { paise: 0, concession: 0, names: new Set(), labels: new Set() };
+      cur.paise += d.balancePaise;
+      cur.concession += d.concessionPaise;
+      for (const n of d.concessionNames) cur.names.add(n);
+      cur.labels.add(d.label);
+      byHead.set(d.headName, cur);
+    }
+    lines.push("", "*By head*");
+    for (const [name, v] of [...byHead.entries()].sort((a, b) => b[1].paise - a[1].paise)) {
+      let note = "";
+      if (v.concession > 0) {
+        note =
+          input.detail === "full" && v.names.size
+            ? `  (${inr(v.concession)} ${[...v.names].join(", ")} concession applied)`
+            : `  (${inr(v.concession)} concession applied)`;
+      }
+      lines.push(`${name}   ${inr(v.paise)}${note}`);
+    }
+  }
+
+  if (ahead.length) {
+    const aheadTotal = ahead.reduce((s, d) => s + d.balancePaise, 0);
+    const labels = [...new Set(ahead.map((d) => d.label))];
+    const span = labels.length > 2 ? `${labels[0]} to ${labels[labels.length - 1]}` : labels.join(", ");
+    lines.push("", `Pay-ahead, not yet due: ${span}, ${inr(aheadTotal)}`);
+  }
+
+  if (input.lastReceipt) {
+    const r = input.lastReceipt;
+    lines.push(
+      `Last receipt: ${inr(r.amountPaise)} on ${shortDate(r.date)}${r.modes.length ? `, ${r.modes.join(" + ")}` : ""} (${r.receiptNo})`,
+    );
+  } else {
+    lines.push("No receipt on record this session.");
+  }
+  if (input.parentMobile) lines.push(`Parent: ${maskMobile(input.parentMobile)}`);
+
+  if (input.detail === "full" && input.siblings.length) {
+    for (const sib of input.siblings) {
+      lines.push(
+        sib.duePaise > 0
+          ? `Sibling ${sib.name}, ${sib.classLabel}: ${inr(sib.duePaise)} due`
+          : `Sibling ${sib.name}, ${sib.classLabel}: no dues`,
+      );
+    }
+  }
+  return lines.join("\n");
+}
+
+export function formatStudentMatchesAsk(
+  matches: { fullName: string; classLabel: string; rollNo: string }[],
+  asked: string,
+): string {
+  if (!matches.length) {
+    return `I couldn't find an active student matching "${asked}". Try the full name, or add the class, e.g. _Amay Gupta 4B_.`;
+  }
+  const rows = matches.map(
+    (m) => `• ${m.fullName} (${m.classLabel}${m.rollNo ? `, roll ${m.rollNo}` : ""})`,
+  );
+  return `Which one did you mean?\n${rows.join("\n")}\nReply with the full name and class.`;
 }
