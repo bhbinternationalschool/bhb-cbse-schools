@@ -22,6 +22,8 @@ import {
   lowerClassIds,
   markStudentVerifiedFromUdise,
   matrixFromUdiseStudentsFile,
+  parseUdiseStudentDetailsMatrix,
+  udiseRowsToMatrix,
   nextSessionCode,
   setStudentPromotionLock,
   setUdiseStudentStatus,
@@ -38,8 +40,9 @@ import {
 import {
   clearUdiseUpload,
   loadUdiseUpload,
-  mergeUdiseMatrices,
+  mergeUdiseRecords,
   saveUdiseUpload,
+  type UdiseSheetRecord,
 } from "@/lib/udiseUploadStore";
 import {
   clearServerSheet,
@@ -225,6 +228,12 @@ export function UdisePenApaarImportPanel({
 }: Props) {
   const [open, setOpen] = useState(true);
   const [fileName, setFileName] = useState("");
+  /**
+   * The sheet itself: one canonical record per child, merged across every
+   * file uploaded. `matrix` is only its projection into the shape the match,
+   * apply and import functions read; it is never the source of truth.
+   */
+  const [records, setRecords] = useState<UdiseSheetRecord[] | null>(null);
   const [matrix, setMatrix] = useState<unknown[][] | null>(null);
   const [preview, setPreview] = useState<UdiseMatchPreview[] | null>(null);
   const [formatOk, setFormatOk] = useState(true);
@@ -374,20 +383,22 @@ export function UdisePenApaarImportPanel({
     let cancelled = false;
 
     function show(
-      matrix: unknown[][],
+      recs: UdiseSheetRecord[],
       files: { name: string; at: string; rows: number }[],
       updatedAt: string,
       where: "server" | "browser",
     ) {
+      const mat = udiseRowsToMatrix(recs.map((r) => r.fields));
       const { preview: p, formatOk: ok } = previewUdiseStudentDetailsSync(
-        matrix,
+        mat,
         sis,
         masters,
         matchOpts,
         academicYearCode,
       );
       if (cancelled) return;
-      setMatrix(matrix);
+      setRecords(recs);
+      setMatrix(mat);
       setPreview(p);
       setFormatOk(ok);
       setStoredInfo({ files, updatedAt, where });
@@ -398,9 +409,9 @@ export function UdisePenApaarImportPanel({
       // The server first, because that is the copy that follows the login.
       try {
         const res = await loadServerSheet(academicYearCode ?? "");
-        if (!cancelled && res.ok && res.sheet?.matrix?.length) {
+        if (!cancelled && res.ok && res.sheet?.records.length) {
           show(
-            res.sheet.matrix,
+            res.sheet.records,
             res.sheet.sheet.files,
             res.sheet.sheet.updatedAt,
             "server",
@@ -414,9 +425,9 @@ export function UdisePenApaarImportPanel({
       }
 
       const stored = loadUdiseUpload();
-      if (!stored || !stored.matrix?.length) return;
+      if (!stored || !stored.records?.length) return;
       try {
-        show(stored.matrix, stored.files ?? [], stored.updatedAt, "browser");
+        show(stored.records, stored.files ?? [], stored.updatedAt, "browser");
       } catch {
         clearUdiseUpload();
       }
@@ -438,29 +449,33 @@ export function UdisePenApaarImportPanel({
       const buf = await file.arrayBuffer();
       const incoming = await matrixFromUdiseStudentsFile(buf);
 
-      /*
-       * Fold this sheet into the one already being worked, rather than
-       * replacing it. UDISE+ exports come out class by class and month by
-       * month; replacing would discard the rows the office had already
-       * reconciled from an earlier file, and re-uploading everything to get
-       * them back is the loop this is meant to end.
-       */
+      // Both portal layouts are read the same way: the file is parsed to
+      // canonical records on arrival, so the 23-column export with PENs and
+      // the 66-column one with birth dates and parents land on the same
+      // child instead of under each other's headers.
       const head = findUdiseHeaderRow(incoming);
-      const stored = loadUdiseUpload();
-      const merged = head
-        ? mergeUdiseMatrices({
-            existing: stored?.matrix ?? null,
-            incoming,
-            headerRowIndex: head.headerRow,
-            cols: {
-              pen: head.col.pen ?? -1,
-              apaar: head.col.apaar ?? -1,
-              name: head.col.name ?? -1,
-              dob: head.col.dob ?? -1,
-            },
-          })
-        : { matrix: incoming, added: 0, updated: 0, unchanged: 0 };
-      const mat = merged.matrix;
+      const rows = head ? parseUdiseStudentDetailsMatrix(incoming) : [];
+      if (!head || !rows.length) {
+        setError(
+          "Could not find UDISE+ student headers (Name plus Student PEN or Father Name) in this file.",
+        );
+        setOpen(true);
+        return;
+      }
+
+      /*
+       * Fold this file into the sheet already being worked — the one on
+       * screen, which came from the server — rather than replacing it.
+       * UDISE+ exports come out class by class and month by month;
+       * replacing would discard the rows the office had already reconciled
+       * from an earlier file, and re-uploading everything to get them back
+       * is the loop this is meant to end.
+       */
+      const merged = mergeUdiseRecords({
+        existing: records ?? [],
+        incoming: rows,
+      });
+      const mat = udiseRowsToMatrix(merged.records.map((r) => r.fields));
 
       const { preview: p, formatOk: ok } = previewUdiseStudentDetailsSync(
         mat,
@@ -469,81 +484,65 @@ export function UdisePenApaarImportPanel({
         matchOpts,
         academicYearCode,
       );
+      setRecords(merged.records);
       setMatrix(mat);
       setPreview(p);
       setFormatOk(ok);
 
-      if (ok && head) {
-        const at = new Date().toISOString();
-        const files = [
-          ...(stored?.files ?? []),
-          {
-            name: file.name,
-            at,
-            rows: Math.max(0, incoming.length - head.headerRow - 1),
-          },
-        ].slice(-10);
+      const at = new Date().toISOString();
+      const files = [
+        ...(storedInfo?.files ?? []),
+        { name: file.name, at, rows: rows.length },
+      ].slice(-10);
 
-        // The browser copy first: it is instant, and it is what keeps the
-        // sheet if the network is down. The server copy is what makes it
-        // follow the login to another machine.
-        const keptLocal = saveUdiseUpload({
-          version: 1,
-          academicYearCode: academicYearCode ?? "",
-          files,
-          matrix: mat,
-          updatedAt: at,
-        });
+      // The browser copy first: it is instant, and it is what keeps the
+      // sheet if the network is down. The server copy is what makes it
+      // follow the login to another machine.
+      const keptLocal = saveUdiseUpload({
+        version: 2,
+        academicYearCode: academicYearCode ?? "",
+        files,
+        records: merged.records,
+        updatedAt: at,
+      });
 
-        const cols = {
-          pen: head.col.pen ?? -1,
-          apaar: head.col.apaar ?? -1,
-          name: head.col.name ?? -1,
-          dob: head.col.dob ?? -1,
-        };
-        const saved = await saveServerSheet({
-          academicYearCode: academicYearCode ?? "",
-          head: mat.slice(0, head.headerRow + 1),
-          headerRowIndex: head.headerRow,
-          body: mat.slice(head.headerRow + 1),
-          files,
-          cols,
-          actor: getSessionActor()?.fullName ?? "",
-        });
+      const saved = await saveServerSheet({
+        academicYearCode: academicYearCode ?? "",
+        files,
+        changed: merged.changed,
+        removed: merged.removed,
+        actor: getSessionActor()?.fullName ?? "",
+      });
 
-        setStoredInfo({
-          files,
-          updatedAt: at,
-          where: saved.ok ? "server" : "browser",
-        });
+      setStoredInfo({
+        files,
+        updatedAt: at,
+        where: saved.ok ? "server" : "browser",
+      });
 
-        const mergeLine = stored?.matrix?.length
-          ? `Merged into the sheet already open: ${merged.added} new row(s), ` +
-            `${merged.updated} changed, ${merged.unchanged} unchanged.`
-          : "";
-        setApplyResult(mergeLine || null);
+      const hadSheet = (records?.length ?? 0) > 0;
+      const joined = merged.removed.length
+        ? ` ${merged.removed.length} pair(s) of rows recognised as the same child and joined.`
+        : "";
+      setApplyResult(
+        hadSheet
+          ? `Merged ${rows.length} row(s) from ${file.name} into the sheet already open: ` +
+              `${merged.added} new child(ren), ${merged.updated} updated, ${merged.unchanged} unchanged.${joined}`
+          : `Read ${rows.length} row(s) from ${file.name}: ${merged.records.length} child(ren) on the sheet.${joined}`,
+      );
 
-        // Said out loud rather than swallowed: the office needs to know
-        // whether the sheet will be on the other machine tomorrow.
-        if (!saved.ok) {
-          setError(
-            `Saved in this browser only — it will not appear on another machine. ${saved.error}` +
-              (keptLocal ? "" : " It could not be saved here either, so it will be lost on reload."),
-          );
-        }
-      }
-      setJustApplied(false);
-      setApplyResult(null);
-      setOpen(true);
-      if (!ok || !p.length) {
+      // Said out loud rather than swallowed: the office needs to know
+      // whether the sheet will be on the other machine tomorrow.
+      if (!saved.ok) {
         setError(
-          "Could not find UDISE+ Students Details headers (Student PEN, Name, APAAR ID, …).",
+          `Saved in this browser only — it will not appear on another machine. ${saved.error}` +
+            (keptLocal ? "" : " It could not be saved here either, so it will be lost on reload."),
         );
       }
+      setJustApplied(false);
+      setOpen(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not read file");
-      setMatrix(null);
-      setPreview(null);
     } finally {
       setBusy(false);
     }
@@ -1138,8 +1137,12 @@ export function UdisePenApaarImportPanel({
                     className="underline decoration-dotted underline-offset-2"
                     onClick={() => {
                       clearUdiseUpload();
-                      void clearServerSheet(academicYearCode ?? "");
+                      void clearServerSheet(
+                        academicYearCode ?? "",
+                        (records ?? []).map((r) => r.key),
+                      );
                       setStoredInfo(null);
+                      setRecords(null);
                       setMatrix(null);
                       setPreview(null);
                       setFileName("");

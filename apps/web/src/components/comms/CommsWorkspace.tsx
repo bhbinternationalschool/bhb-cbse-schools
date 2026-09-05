@@ -344,7 +344,12 @@ export function CommsWorkspace() {
     const url = new URL(window.location.href);
     url.pathname = "/comms";
     url.searchParams.set("tab", next);
-    router.replace(`${url.pathname}?${url.searchParams.toString()}`);
+    // history.replaceState keeps useSearchParams in sync (Next ≥ 14.1) with
+    // no server round trip. router.replace() asked the server for the page
+    // again on every click, so a tab switch waited behind whatever request
+    // the server was busy with — which is exactly how the Class WA tab
+    // "hung until you clicked another module".
+    window.history.replaceState(null, "", `${url.pathname}?${url.searchParams.toString()}`);
     setListQuery("");
   }
 

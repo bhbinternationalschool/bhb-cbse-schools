@@ -14,11 +14,18 @@
  */
 import {
   parseUdiseStudentDetailsMatrix,
+  previewUdiseStudentDetailsSync,
   udiseAadhaarVerified,
   udiseAadhaarVerifiedAgainstDob,
+  udiseEmptyRow,
+  udiseIsBlank,
+  udiseNamesCompatible,
+  udiseRowsToMatrix,
   isConfidentUdiseMatch,
   type UdiseStudentRow,
 } from "@/lib/udiseStudentDetails";
+import { normalizeStudent, type SisState, type SisStudent } from "@/lib/sis";
+import type { MastersState } from "@/lib/masters";
 
 let failures = 0;
 function check(label: string, got: unknown, want: unknown) {
@@ -130,12 +137,114 @@ check("dob-verified: not defined", udiseAadhaarVerifiedAgainstDob("Not Defined")
 // A fuzzy name match once paired PRATIK YADAV with PRATEEK YADAV — two boys,
 // two fathers. That pairing must never be allowed to rewrite a date.
 for (const m of ["pen", "apaar", "aadhaar", "name_father_class", "name_father",
-                 "name_class_section"] as const) {
+                 "name_class_section", "name_parents", "name_dob"] as const) {
   check(`confident: ${m}`, isConfidentUdiseMatch(m), true);
 }
 for (const m of ["name_unique", "fuzzy_name_father", "ambiguous", "unmatched"] as const) {
   check(`not confident: ${m}`, isConfidentUdiseMatch(m), false);
 }
+
+// ---- blanks the portal spells in words -----------------------------------
+for (const v of ["", "NA", "N/A", "-", "—", "NOT AVAILABLE", "Not Applicable", "nil"]) {
+  check(`blank: "${v}"`, udiseIsBlank(v), true);
+}
+check("a PEN is not blank", udiseIsBlank("23220880281"), false);
+
+// ---- names that differ by a surname --------------------------------------
+check("surname added", udiseNamesCompatible("VEER PRATAP", "VEER PRATAP MISHRA"), true);
+check("middle name added", udiseNamesCompatible("RITESH SINGH", "RITESH KUMAR SINGH"), true);
+check("honorific ignored", udiseNamesCompatible("SMT PRIYA SINGH", "PRIYA SINGH"), true);
+check("same tokens, other order", udiseNamesCompatible("RAM KUMAR", "KUMAR RAM"), false);
+check("different first name", udiseNamesCompatible("VEER PRATAP", "DHEER PRATAP"), false);
+check("spelling change is not a surname", udiseNamesCompatible("PRATIK YADAV", "PRATEEK YADAV"), false);
+
+// ---- matching the two exports to the SIS ---------------------------------
+//
+// The rule set on 2026-09-05: a name with a surname on one side only is the
+// same child when the parents, or the birth date, agree; class is never
+// changed; DOB from a confirmed row replaces ours; once PEN and APAAR are in
+// the SIS the row is done and stops appearing.
+const masters = {
+  classes: [
+    { id: "c-nur", name: "Nursery", isActive: true },
+    { id: "c-1", name: "I", isActive: true },
+  ],
+  sections: [{ id: "s-a", name: "A", classId: "c-nur", isActive: true }],
+  feeGroups: [],
+} as unknown as MastersState;
+
+let n = 0;
+function pupil(o: Partial<SisStudent>): SisStudent {
+  n += 1;
+  return normalizeStudent({
+    id: `st-${n}`,
+    admissionNo: `A${n}`,
+    status: "active",
+    academicYearCode: "2026-27",
+    classId: "c-nur",
+    sectionId: "s-a",
+    fullName: "",
+    fatherName: "",
+    motherName: "",
+    dob: "",
+    pen: "",
+    apaarId: "",
+    ...o,
+  } as SisStudent);
+}
+const sis = {
+  students: [
+    pupil({ fullName: "VEER PRATAP MISHRA", fatherName: "RAJESH MISHRA", motherName: "SUNITA MISHRA", dob: "2019-05-12" }),
+    pupil({ fullName: "VEER PRATAP SINGH", fatherName: "AJAY SINGH", motherName: "PRIYANKA SINGH", dob: "2019-01-01" }),
+    pupil({ fullName: "AARVI SINGH", fatherName: "DHARM PRAKASH SINGH", motherName: "PRIYA SINGH", dob: "2023-01-21", pen: "23220880281", apaarId: "123456786927" }),
+    pupil({ fullName: "AADVIK", fatherName: "", motherName: "", dob: "2021-07-04" }),
+    pupil({ fullName: "AADVIK", fatherName: "", motherName: "", dob: "2020-03-03", classId: "c-1" }),
+  ],
+  households: [],
+} as unknown as SisState;
+
+const rowOf = (o: Partial<UdiseStudentRow>): UdiseStudentRow => ({ ...udiseEmptyRow(), ...o });
+const previewOf = (rows: UdiseStudentRow[]) =>
+  previewUdiseStudentDetailsSync(udiseRowsToMatrix(rows), sis, masters, undefined, "2026-27").preview;
+
+// Surname on the SIS side only, both parents agree → matched, DOB replaced.
+const [veer] = previewOf([
+  rowOf({ fullName: "VEER PRATAP", fatherName: "RAJESH KUMAR MISHRA", motherName: "SUNITA", dob: "12/06/2019", pen: "P-VEER", classHint: "I" }),
+]);
+check("veer: method", veer?.method, "name_parents");
+check("veer: matched the Mishra boy", veer?.matchedName, "VEER PRATAP MISHRA");
+check("veer: PEN will be written", veer?.willUpdate.pen, "P-VEER");
+check("veer: DOB replaced from a confirmed row, ISO", veer?.willUpdate.dob, "2019-06-12");
+check("veer: class flagged, never patched", [veer?.classMismatch, "classId" in (veer?.willUpdate ?? {})], [true, false]);
+
+// Same short name, parents disagree with both → not guessed.
+const [stranger] = previewOf([
+  rowOf({ fullName: "VEER PRATAP", fatherName: "MOHAN LAL", motherName: "GEETA" }),
+]);
+check("stranger: not matched to either Veer", stranger?.studentId, null);
+check("stranger: left for the operator", stranger?.method, "ambiguous");
+
+// Two AADVIKs with no parents anywhere: the birth date decides.
+const [aadvik] = previewOf([rowOf({ fullName: "AADVIK SINGH", dob: "04/07/2021" })]);
+check("aadvik: method", aadvik?.method, "name_dob");
+check("aadvik: the right twin", aadvik?.udise.dob === "04/07/2021" && aadvik?.matchedName === "AADVIK", true);
+
+// A settled child: PEN and APAAR already in the SIS, nothing to fill → ok,
+// even before Aadhaar is marked verified.
+const [settled] = previewOf([
+  rowOf({ fullName: "AARVI SINGH", pen: "23220880281", apaarId: "********6927", fatherName: "DHARM PRAKASH SINGH", motherName: "PRIYA SINGH", dob: "21/01/2023" }),
+]);
+check("settled: matched by PEN", settled?.method, "pen");
+check("settled: a masked APAAR does not replace the full one", settled?.willUpdate.apaarId, undefined);
+check("settled: nothing to fill", settled?.fillLabels, []);
+check("settled: leaves the to-do list", settled?.tone, "ok");
+
+// The same child with the portal's MBU flag: it is recorded once, and the row
+// is done after that rather than parked under "MBU pending" for ever.
+const [mbu] = previewOf([
+  rowOf({ fullName: "AARVI SINGH", pen: "23220880281", mbuStatus: "MBU Pending" }),
+]);
+check("mbu: recorded as a fill, not a permanent flag", mbu?.tone, "fill");
 
 if (failures) {
   console.error(`udiseStudentDetails selftest: ${failures} failure(s)`);

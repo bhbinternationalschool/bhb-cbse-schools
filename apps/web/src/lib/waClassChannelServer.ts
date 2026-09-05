@@ -255,6 +255,35 @@ export function buildChannelMembers(
   return members;
 }
 
+/** Membership fingerprint — what a sync is allowed to change. `updatedAt`
+ * is deliberately left out so an unchanged roster never counts as a change. */
+function channelFingerprint(channels: ClassChannel[]): string {
+  return JSON.stringify(
+    channels
+      .map((c) => ({
+        id: c.id,
+        label: c.label,
+        classId: c.classId,
+        sectionId: c.sectionId,
+        members: c.members,
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id)),
+  );
+}
+
+let lastSyncAt = 0;
+const SYNC_MAX_AGE_MS = 10 * 60 * 1000;
+
+/**
+ * Rebuild every section's channel from Staff duties + the SIS roster.
+ *
+ * Writes only when membership actually changed. Before this, every call
+ * re-saved the whole WhatsApp bot bundle (all eight slices → desk table,
+ * jsonb blob, disk) even when nothing moved — and the panel called it on
+ * every 15-second poll, twice per request. That is what made the Class WA
+ * tab feel stuck: each poll held the server for a full roster walk plus
+ * three writes, and a tab click (a server round trip) queued behind it.
+ */
 export async function syncClassChannels(
   ay = DEFAULT_AY,
 ): Promise<ClassChannel[]> {
@@ -265,26 +294,52 @@ export async function syncClassChannels(
     const cls = (masters.classes ?? []).find((c) => c.id === s.classId);
     return !!cls;
   });
+  const byId = new Map(store.channels.map((c) => [c.id, c]));
   const next: ClassChannel[] = [];
   for (const sec of sections) {
     const cls = (masters.classes ?? []).find((c) => c.id === sec.classId);
     if (!cls) continue;
     const id = `ch_${ay}_${sec.id}`;
-    const prev = store.channels.find((c) => c.id === id);
-    next.push({
-      id,
-      academicYearCode: ay,
-      classId: cls.id,
-      sectionId: sec.id,
-      label: `${cls.name || cls.id} · ${sec.name || ""}`.trim(),
-      members: buildChannelMembers(masters, cls.id, sec.id, ay),
-      updatedAt: nowIso(),
-    });
-    void prev;
+    const prev = byId.get(id);
+    const members = buildChannelMembers(masters, cls.id, sec.id, ay);
+    const label = `${cls.name || cls.id} · ${sec.name || ""}`.trim();
+    const unchanged =
+      prev &&
+      prev.label === label &&
+      JSON.stringify(prev.members) === JSON.stringify(members);
+    next.push(
+      unchanged
+        ? prev
+        : {
+            id,
+            academicYearCode: ay,
+            classId: cls.id,
+            sectionId: sec.id,
+            label,
+            members,
+            updatedAt: nowIso(),
+          },
+    );
+  }
+  lastSyncAt = Date.now();
+  if (channelFingerprint(next) === channelFingerprint(store.channels)) {
+    return store.channels;
   }
   store.channels = next;
   await writeStore(store);
   return next;
+}
+
+/** Sync at most once per 10 minutes per server instance; the office's
+ * "Rebuild" button and an inbound teacher message still force it. */
+export async function syncClassChannelsIfStale(
+  ay = DEFAULT_AY,
+): Promise<ClassChannel[]> {
+  const store = await readStore();
+  if (store.channels.length > 0 && Date.now() - lastSyncAt < SYNC_MAX_AGE_MS) {
+    return store.channels;
+  }
+  return syncClassChannels(ay);
 }
 
 export function findTeacherByMobile(
@@ -544,7 +599,6 @@ export async function markClassChannelDraftApplied(
 }
 
 export async function listClassChannelState() {
-  await syncClassChannels();
   const store = await readStore();
   return {
     channels: store.channels,
@@ -601,7 +655,7 @@ export async function handleWaClassChannelInbound(msg: {
   stub?: boolean;
   error?: string;
 }> {
-  await syncClassChannels();
+  await syncClassChannelsIfStale();
   const masters = loadMasters();
   const ay = DEFAULT_AY;
   const staff = findTeacherByMobile(masters, msg.fromWaId);
@@ -848,7 +902,7 @@ export async function officeCreateClassChannelDraft(input: {
   byStaffId?: string;
   byName: string;
 }): Promise<{ ok: true; draft: ClassChannelDraft } | { ok: false; error: string }> {
-  await syncClassChannels();
+  await syncClassChannelsIfStale();
   const store = await readStore();
   const channel = store.channels.find((c) => c.id === input.channelId);
   if (!channel) return { ok: false, error: "Channel not found" };
