@@ -36,22 +36,6 @@ export async function resolveLoginAcademicYearCode(
 ): Promise<string | null> {
   const trimmed = requested?.trim();
 
-  if (trimmed) {
-    // Honour an explicit request only if Masters actually defines it.
-    // Selecting a closed year is legitimate (looking at last year's records);
-    // a year Masters has never heard of is a fabrication or a forgery.
-    const known = await listAcademicYearCodesFromDesk();
-    if (known.includes(trimmed)) return trimmed;
-    if (known.length > 0) {
-      console.warn(
-        `[session] ignoring requested academic year ${trimmed}; ` +
-          `Masters defines ${known.join(", ")}`,
-      );
-    }
-    // Unreadable Masters: fall through and resolve rather than trust the
-    // request. Not returning `trimmed` here is deliberate.
-  }
-
   const { bundle, readFailed } = await fetchMastersDeskFromDb();
   if (readFailed) {
     console.error("[session] cannot resolve academic year: masters unreadable");
@@ -61,7 +45,37 @@ export async function resolveLoginAcademicYearCode(
   const years = bundle.academicYears ?? [];
   const resolved = resolveAcademicYear(years, new Date().toISOString());
   if (resolved.conflict) console.warn(`[session] ${resolved.conflict.message}`);
+
+  if (trimmed && resolved.code && trimmed !== resolved.code) {
+    // A LOGIN starts in the current year, full stop. This used to honour any
+    // year Masters defines — "selecting a closed year is legitimate" — but
+    // no login screen offers a choice; the only thing that ever arrived here
+    // was the browser's own guess, DEFAULT_AY "2025-26", from a login page
+    // whose masters copy was empty. Because 2025-26 IS a defined year it was
+    // accepted, every session began in the closed year, and the shell had to
+    // PATCH it to 2026-27 seconds later (2026-09-06: five times in an hour,
+    // with the pages showing last year's data in between). Looking at a
+    // closed year is still ordinary work — through the header selector,
+    // i.e. PATCH /api/session/ay, which validates against Masters.
+    console.warn(
+      `[session] login asked for ${trimmed}; starting in the current year ${resolved.code} instead`,
+    );
+  }
   if (resolved.code) return resolved.code;
+
+  if (trimmed) {
+    // Nothing covers today and nothing is marked current. Honour the request
+    // only if Masters defines it — a year Masters has never heard of is a
+    // fabrication or a forgery.
+    const known = await listAcademicYearCodesFromDesk();
+    if (known.includes(trimmed)) return trimmed;
+    if (known.length > 0) {
+      console.warn(
+        `[session] ignoring requested academic year ${trimmed}; ` +
+          `Masters defines ${known.join(", ")}`,
+      );
+    }
+  }
 
   // Nothing covers today and nothing is marked current — between sessions, or
   // next year not yet created. Use the latest year Masters defines rather than
