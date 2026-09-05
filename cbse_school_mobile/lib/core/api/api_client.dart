@@ -23,6 +23,56 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
+/// Reply from the ERP command desk (`POST /api/v1/commands`).
+class StaffCommandConfirm {
+  const StaffCommandConfirm({
+    required this.token,
+    required this.summary,
+    required this.yesId,
+    required this.noId,
+  });
+
+  factory StaffCommandConfirm.fromJson(Map<String, dynamic> j) =>
+      StaffCommandConfirm(
+        token: (j["token"] as String?) ?? "",
+        summary: (j["summary"] as String?) ?? "",
+        yesId: (j["yesId"] as String?) ?? "",
+        noId: (j["noId"] as String?) ?? "",
+      );
+
+  final String token;
+  final String summary;
+  final String yesId;
+  final String noId;
+}
+
+class StaffCommandResult {
+  const StaffCommandResult({
+    required this.handled,
+    required this.audience,
+    required this.text,
+    this.confirm,
+  });
+
+  factory StaffCommandResult.fromJson(Map<String, dynamic> j) =>
+      StaffCommandResult(
+        handled: j["handled"] == true,
+        audience: (j["audience"] as String?) ?? "",
+        text: (j["text"] as String?) ?? "",
+        confirm: j["confirm"] is Map<String, dynamic>
+            ? StaffCommandConfirm.fromJson(j["confirm"] as Map<String, dynamic>)
+            : null,
+      );
+
+  /// False when the engine did not recognise the text as a command.
+  final bool handled;
+  final String audience;
+  /// WhatsApp-style text: *bold*, _italic_, newlines.
+  final String text;
+  /// Present when a write command is waiting for Confirm / Cancel.
+  final StaffCommandConfirm? confirm;
+}
+
 class ParentChild {
   const ParentChild({
     required this.id,
@@ -2503,6 +2553,13 @@ class ApiClient {
 
   /// The teacher home screen payload — identity, class-teacher section,
   /// today's periods, and the class/section list for attendance marking.
+  /// One line to the ERP command desk — "5A me aaj kaun absent hai", or a
+  /// confirm card's button id to settle a pending write.
+  Future<StaffCommandResult> runStaffCommand(String text) async {
+    final data = await _postData("/api/v1/commands", {"text": text});
+    return StaffCommandResult.fromJson(data);
+  }
+
   Future<StaffSummary> fetchStaffSummary() async {
     final res = await http.get(
       _uri("/api/v1/staff/summary"),

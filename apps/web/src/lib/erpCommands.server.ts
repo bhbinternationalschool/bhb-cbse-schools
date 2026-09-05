@@ -67,13 +67,20 @@ import {
 
 export type ErpCommandFlow = "owner" | "staff" | "teacher";
 
+export type ErpCommandChannel = "whatsapp" | "app";
+
 export type ErpCommandInbound = {
-  mobile10: string;
+  /**
+   * Who is talking, as a stable key for pending confirms and the hourly
+   * cap: the 10-digit mobile on WhatsApp, `staff:<id>` from the app.
+   */
+  actorKey: string;
+  channel: ErpCommandChannel;
   text: string;
   flow: ErpCommandFlow;
   staff: StaffRecord | null;
   displayName: string;
-  /** Voice note, when the message had no text. */
+  /** Voice note, when the message had no text (WhatsApp only). */
   audio?: { mediaId: string; mimeType?: string } | null;
 };
 
@@ -83,7 +90,10 @@ export type ErpCommandResult =
       handled: true;
       audience: string;
       text?: string;
+      /** WhatsApp rendering of a confirm card. */
       menu?: { menu: WaInteractiveMenu; textFallback: string };
+      /** Channel-neutral confirm card, for the app to draw its own buttons. */
+      confirm?: { token: string; summary: string; yesId: string; noId: string };
     };
 
 type CommandStore = {
@@ -214,6 +224,8 @@ export async function handleErpStaffCommand(
   }
   if (!text) return { handled: false };
 
+  const actor = inbound.actorKey;
+
   // 2a. Director pause switch.
   const sw = parseCommandsSwitch(text);
   if (sw) {
@@ -227,7 +239,7 @@ export async function handleErpStaffCommand(
     store = {
       ...store,
       paused: sw === "off",
-      pausedBy: sw === "off" ? inbound.displayName || inbound.mobile10 : "",
+      pausedBy: sw === "off" ? inbound.displayName || actor : "",
       pausedAt: sw === "off" ? new Date().toISOString() : "",
     };
     await writeStore(store);
@@ -242,7 +254,7 @@ export async function handleErpStaffCommand(
   }
 
   // 3. Pending confirm card (write commands).
-  const pending = store.pending[inbound.mobile10] ?? null;
+  const pending = store.pending[actor] ?? null;
   const decision = parseConfirmReply(text, pending, {
     // A teacher's plain "yes" belongs to the class-channel draft flow.
     allowPlainWords: inbound.flow !== "teacher",
@@ -256,7 +268,7 @@ export async function handleErpStaffCommand(
       };
     }
     const rest = { ...store.pending };
-    delete rest[inbound.mobile10];
+    delete rest[actor];
     store = { ...store, pending: rest };
     await writeStore(store);
     if (decision.decision === "no") {
@@ -286,7 +298,12 @@ export async function handleErpStaffCommand(
     };
   }
 
-  if (!parsed && looksLikeCommand(text)) {
+  // On WhatsApp the older bots still answer whatever this is not, so only
+  // command-shaped text is worth a model call. In the app the bar exists
+  // for commands alone, so anything beyond a stray tap gets the parser.
+  const worthParsing =
+    inbound.channel === "app" ? text.length >= 4 && text.length <= 300 : looksLikeCommand(text);
+  if (!parsed && worthParsing) {
     const { generateErpCommandJson } = await import("@/lib/aiLlm.server");
     const r = await generateErpCommandJson({
       text,
@@ -308,8 +325,8 @@ export async function handleErpStaffCommand(
   if (!parsed) return { handled: false };
 
   // 2b. Hourly cap per staff member.
-  const use = noteCommandUse(store.usage[inbound.mobile10], nowMs);
-  store = { ...store, usage: { ...store.usage, [inbound.mobile10]: use.history } };
+  const use = noteCommandUse(store.usage[actor], nowMs);
+  store = { ...store, usage: { ...store.usage, [actor]: use.history } };
   await writeStore(store);
   if (!use.allowed) {
     return {
@@ -346,7 +363,10 @@ export async function handleErpStaffCommand(
   }
 
   if (!allowed.some((c) => c.id === command.id)) {
-    void audit(session, command, parsed.fields, text, "denied", { reason: "rbac" });
+    void audit(session, command, parsed.fields, text, "denied", {
+      reason: "rbac",
+      channel: inbound.channel,
+    });
     return {
       handled: true,
       audience: "erp_command_denied",
@@ -388,6 +408,7 @@ export async function handleErpStaffCommand(
         void audit(session, command, parsed.fields, text, "denied", {
           reason: "scope",
           sectionId: sectionMatch.sectionId,
+          channel: inbound.channel,
         });
         return {
           handled: true,
@@ -428,7 +449,7 @@ export async function handleErpStaffCommand(
       ...store,
       pending: {
         ...store.pending,
-        [inbound.mobile10]: {
+        [actor]: {
           token,
           commandId: command.id,
           fields: parsed.fields,
@@ -445,6 +466,8 @@ export async function handleErpStaffCommand(
     return {
       handled: true,
       audience: "erp_command_confirm",
+      text: body,
+      confirm: { token, summary, yesId: ids.yes, noId: ids.no },
       menu: {
         menu: {
           kind: "buttons",
@@ -466,6 +489,7 @@ export async function handleErpStaffCommand(
     ...resolved,
     source: parsed.source,
     voice: fromVoice,
+    channel: inbound.channel,
   });
   return { handled: true, audience: `erp_command_${command.id}`, text: reply };
 }
@@ -560,8 +584,8 @@ async function audit(
       action: command.kind === "write" ? "edit" : "view",
       entityType: "command",
       entityId: command.id,
-      summary: `WhatsApp command (${outcome}): ${originalText.slice(0, 200)}`,
-      after: { channel: "whatsapp", command: command.id, fields, outcome, ...detail },
+      summary: `${detail.channel === "app" ? "App" : "WhatsApp"} command (${outcome}): ${originalText.slice(0, 200)}`,
+      after: { command: command.id, fields, outcome, ...detail },
     });
     if (!r.ok) console.warn("[erpCommands] audit not recorded:", r.error);
   } catch (e) {

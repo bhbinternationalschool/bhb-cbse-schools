@@ -2,6 +2,7 @@ import "package:flutter/material.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
+import "command_bar.dart";
 import "../modules/homework_screen.dart";
 import "../modules/module_shell.dart";
 import "../modules/notices_screen.dart";
@@ -255,6 +256,10 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  StaffCommandBar(
+                    api: widget.api,
+                    suggestions: const ["COMMANDS"],
+                  ),
                   const _SectionTitle("Fees"),
                   Row(
                     children: [
