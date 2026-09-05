@@ -7,6 +7,8 @@ import { findRegister, loadAttendance } from "@/lib/attendance";
 import { loadTimetable, teachingPeriods } from "@/lib/timetable";
 import { loadSis } from "@/lib/sis";
 
+import { resolveStaffHomeKind } from "@/lib/staffHomeKind.server";
+
 export const runtime = "nodejs";
 
 function todayInKolkata(): { date: string; weekday: number } {
@@ -142,6 +144,11 @@ export async function GET(request: Request) {
       classTeacherOf,
       periodsToday: periods,
       classes,
+      homeKind: resolveStaffHomeKind(ctx.session, ctx.masters, {
+        teachesClasses:
+          !!primary ||
+          grids.some((g) => g.slots.some((s) => s.teacherId === staffId)),
+      }),
     });
   } catch (e) {
     return apiErr(e);

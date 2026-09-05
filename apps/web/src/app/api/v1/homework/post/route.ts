@@ -18,6 +18,7 @@ import {
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { loadSis } from "@/lib/sis";
 import { sendPushToSubjects } from "@/lib/webPush.server";
+import { assertSectionScope } from "@/lib/api/v1/staffScope";
 
 export const runtime = "nodejs";
 
@@ -45,6 +46,7 @@ export async function POST(request: Request) {
     const body = (await request.json()) as PostBody;
 
     await ensureSchoolMirrorHydrated();
+    await assertSectionScope(ctx, body.classId || "", body.sectionId || "");
     await ensureHomeworkHydratedServer();
 
     const today = new Date().toLocaleDateString("en-CA", {

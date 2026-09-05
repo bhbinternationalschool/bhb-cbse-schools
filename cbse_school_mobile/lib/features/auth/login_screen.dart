@@ -54,7 +54,9 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
       if (mounted) {
-        setState(() => _error = "Could not reach the school server. Try again.");
+        setState(
+          () => _error = "Could not reach the school server. Try again.",
+        );
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -62,50 +64,54 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _sendOtp() => _run(() async {
-        final masked = _staffMode
-            ? await widget.api.requestStaffOtp(_mobile.text.trim())
-            : await widget.api.requestOtp(_mobile.text.trim());
-        if (!mounted) return;
-        setState(() {
-          _otpSent = true;
-          _maskedMobile = masked;
-          _info = "OTP sent on WhatsApp to $masked";
-        });
-      });
+    final masked = _staffMode
+        ? await widget.api.requestStaffOtp(_mobile.text.trim())
+        : await widget.api.requestOtp(_mobile.text.trim());
+    if (!mounted) return;
+    setState(() {
+      _otpSent = true;
+      _maskedMobile = masked;
+      _info = "OTP sent on WhatsApp to $masked";
+    });
+  });
 
   Future<void> _verifyOtp() => _run(() async {
-        if (_staffMode) {
-          await widget.api.verifyStaffOtp(_mobile.text.trim(), _otp.text.trim());
-        } else {
-          await widget.api.verifyOtp(_mobile.text.trim(), _otp.text.trim());
-        }
-        if (mounted) widget.onSignedIn();
-      });
+    if (_staffMode) {
+      await widget.api.verifyStaffOtp(_mobile.text.trim(), _otp.text.trim());
+    } else {
+      await widget.api.verifyOtp(_mobile.text.trim(), _otp.text.trim());
+    }
+    if (mounted) widget.onSignedIn();
+  });
 
   Future<void> _staffSignIn() => _run(() async {
-        await widget.api.staffLogin(_email.text.trim(), _password.text);
-        if (mounted) widget.onSignedIn();
-      });
+    await widget.api.staffLogin(_email.text.trim(), _password.text);
+    if (mounted) widget.onSignedIn();
+  });
 
   Future<void> _devLogin() => _run(() async {
-        // Dev affordances via the email field: a roster id (stf_…) links the
-        // demo session to that staff record as a teacher; "driver" signs in
-        // as the field/driver persona; empty stays the principal demo.
-        final email = _email.text.trim().toLowerCase();
-        final isDriver = _staffMode && (email == "driver" || email == "field");
-        final isTeacher = _staffMode && email.startsWith("stf_");
-        await widget.api.devLogin(
-          persona: isDriver
-              ? "field"
-              : _staffMode
-                  ? "staff"
-                  : "parent",
-          householdId: _staffMode ? null : _mobile.text.trim(),
-          staffId: isTeacher ? _email.text.trim() : null,
-          roleCode: isTeacher ? "teacher" : null,
-        );
-        if (mounted) widget.onSignedIn();
-      });
+    // Dev affordances via the email field: a roster id (stf_…) links the
+    // demo session to that staff record as a teacher; "driver" signs in
+    // as the field/driver persona; empty stays the principal demo.
+    final email = _email.text.trim().toLowerCase();
+    final isDriver = _staffMode && (email == "driver" || email == "field");
+    // "stf_xxx" links a roster record as a teacher; "stf_xxx:office" (or
+    // :accounts, :support…) links it with that role so the desk home
+    // can be exercised without a real OTP login.
+    final isTeacher = _staffMode && email.startsWith("stf_");
+    final parts = email.split(":");
+    await widget.api.devLogin(
+      persona: isDriver
+          ? "field"
+          : _staffMode
+          ? "staff"
+          : "parent",
+      householdId: _staffMode ? null : _mobile.text.trim(),
+      staffId: isTeacher ? parts.first : null,
+      roleCode: isTeacher ? (parts.length > 1 ? parts[1] : "teacher") : null,
+    );
+    if (mounted) widget.onSignedIn();
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -129,9 +135,9 @@ class _LoginScreenState extends State<LoginScreen> {
                     widget.config.schoolName,
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          color: AppColors.primary,
-                          fontWeight: FontWeight.w700,
-                        ),
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                   const SizedBox(height: 16),
                   SegmentedButton<bool>(
@@ -151,13 +157,13 @@ class _LoginScreenState extends State<LoginScreen> {
                     onSelectionChanged: _busy
                         ? null
                         : (s) => setState(() {
-                              _staffMode = s.first;
-                              _staffUseOtp = false;
-                              _otpSent = false;
-                              _otp.clear();
-                              _error = null;
-                              _info = null;
-                            }),
+                            _staffMode = s.first;
+                            _staffUseOtp = false;
+                            _otpSent = false;
+                            _otp.clear();
+                            _error = null;
+                            _info = null;
+                          }),
                   ),
                   if (_staffMode) ...[
                     const SizedBox(height: 8),
@@ -167,12 +173,12 @@ class _LoginScreenState extends State<LoginScreen> {
                         onPressed: _busy
                             ? null
                             : () => setState(() {
-                                  _staffUseOtp = !_staffUseOtp;
-                                  _otpSent = false;
-                                  _otp.clear();
-                                  _error = null;
-                                  _info = null;
-                                }),
+                                _staffUseOtp = !_staffUseOtp;
+                                _otpSent = false;
+                                _otp.clear();
+                                _error = null;
+                                _info = null;
+                              }),
                         child: Text(
                           _staffUseOtp
                               ? "Sign in with password instead"
@@ -246,10 +252,10 @@ class _LoginScreenState extends State<LoginScreen> {
                     onPressed: _busy
                         ? null
                         : _staffMode && !_staffUseOtp
-                            ? _staffSignIn
-                            : _otpSent
-                                ? _verifyOtp
-                                : _sendOtp,
+                        ? _staffSignIn
+                        : _otpSent
+                        ? _verifyOtp
+                        : _sendOtp,
                     child: _busy
                         ? const SizedBox(
                             height: 20,
@@ -260,8 +266,8 @@ class _LoginScreenState extends State<LoginScreen> {
                             _staffMode && !_staffUseOtp
                                 ? "Sign in"
                                 : _otpSent
-                                    ? "Verify & sign in"
-                                    : "Send OTP",
+                                ? "Verify & sign in"
+                                : "Send OTP",
                           ),
                   ),
                   if ((!_staffMode || _staffUseOtp) && _otpSent) ...[
@@ -270,11 +276,11 @@ class _LoginScreenState extends State<LoginScreen> {
                       onPressed: _busy
                           ? null
                           : () => setState(() {
-                                _otpSent = false;
-                                _otp.clear();
-                                _info = null;
-                                _error = null;
-                              }),
+                              _otpSent = false;
+                              _otp.clear();
+                              _info = null;
+                              _error = null;
+                            }),
                       child: const Text("Change mobile number"),
                     ),
                   ],

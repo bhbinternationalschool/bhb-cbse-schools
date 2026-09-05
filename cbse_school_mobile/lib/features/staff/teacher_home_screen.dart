@@ -4,15 +4,23 @@ import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../modules/chat_inbox_screen.dart";
 import "../modules/homework_screen.dart";
-import "../modules/module_shell.dart";
 import "../modules/notices_screen.dart";
 import "../modules/syllabus_scan_screen.dart";
 import "presence_screen.dart";
 import "../modules/teaching_screen.dart";
 import "attendance_screen.dart";
+import "documents_screen.dart";
+import "marks_screen.dart";
+import "payslips_screen.dart";
+import "ptm_teacher_screen.dart";
 import "section_picker.dart";
 import "self_attendance_screen.dart";
+import "staff_complaints_screen.dart";
+import "staff_leave_screen.dart";
+import "student_leave_queue_screen.dart";
 import "students_screen.dart";
+import "timetable_screen.dart";
+import "waiting_card.dart";
 
 String _greeting() {
   final h = DateTime.now().hour;
@@ -32,13 +40,21 @@ class _StaffModule {
 const _staffModules = [
   _StaffModule("Attendance", Icons.fact_check_outlined, ModuleTone.teal),
   _StaffModule("Period log", Icons.bookmark_added_outlined, ModuleTone.green),
-  _StaffModule("Scan syllabus", Icons.document_scanner_outlined, ModuleTone.blue),
   _StaffModule("Homework", Icons.menu_book_outlined, ModuleTone.purple),
   _StaffModule("Marks", Icons.grading_outlined, ModuleTone.amber),
-  _StaffModule("My leave", Icons.event_outlined, ModuleTone.coral),
   _StaffModule("Timetable", Icons.calendar_view_week_outlined, ModuleTone.blue),
-  _StaffModule("Notices", Icons.campaign_outlined, ModuleTone.pink),
   _StaffModule("Students", Icons.school_outlined, ModuleTone.green),
+  _StaffModule("Leave requests", Icons.event_busy_outlined, ModuleTone.blue),
+  _StaffModule("Complaints", Icons.report_problem_outlined, ModuleTone.coral),
+  _StaffModule("PTM", Icons.groups_outlined, ModuleTone.purple),
+  _StaffModule("Documents", Icons.folder_open_outlined, ModuleTone.teal),
+  _StaffModule(
+    "Scan syllabus",
+    Icons.document_scanner_outlined,
+    ModuleTone.blue,
+  ),
+  _StaffModule("Notices", Icons.campaign_outlined, ModuleTone.pink),
+  _StaffModule("My leave", Icons.event_outlined, ModuleTone.coral),
   _StaffModule("Payslips", Icons.receipt_long_outlined, ModuleTone.gray),
 ];
 
@@ -66,6 +82,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
   StaffSummary? _summary;
   String? _error;
   String? _pendingRoute;
+  int _refresh = 0;
 
   @override
   void initState() {
@@ -100,14 +117,51 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         _openModule("Homework");
       case "/attendance":
         _openModule("Attendance");
+      case "/timetable":
+        _openModule("Timetable");
+      case "/leave":
+        _openModule("My leave");
+      case "/student-leave":
+        _openModule("Leave requests");
+      case "/complaints":
+        _openModule("Complaints");
+      case "/ptm":
+        _openModule("PTM");
+      case "/documents":
+        _openModule("Documents");
+      case "/marks":
+        _openModule("Marks");
+      case "/payslips":
+        _openModule("Payslips");
     }
+  }
+
+  void _openWaiting(String kind) {
+    switch (kind) {
+      case "student_leave":
+        _openModule("Leave requests");
+      case "complaints":
+        _openModule("Complaints");
+      case "documents":
+        _openModule("Documents");
+    }
+  }
+
+  Future<void> _pushScreen(Widget screen) async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
+    if (mounted) setState(() => _refresh += 1);
   }
 
   Future<void> _load() async {
     setState(() => _error = null);
     try {
       final summary = await widget.api.fetchStaffSummary();
-      if (mounted) setState(() => _summary = summary);
+      if (mounted) {
+        setState(() {
+          _summary = summary;
+          _refresh += 1;
+        });
+      }
       if (_pendingRoute != null) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) _consumePendingRoute();
@@ -226,29 +280,23 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
           MaterialPageRoute(builder: (_) => NoticesScreen(api: widget.api)),
         );
       case "Marks":
-        showComingSoon(
-          context,
-          "Marks entry",
-          "Opens once the exam desk publishes mark sheets for this term.",
+        await _pushScreen(
+          MarksScreen(api: widget.api, classes: summary.classes),
         );
       case "My leave":
-        showComingSoon(
-          context,
-          "Leave",
-          "Leave requests go live once HR configures leave types in the ERP.",
-        );
+        await _pushScreen(StaffLeaveScreen(api: widget.api));
       case "Timetable":
-        showComingSoon(
-          context,
-          "Timetable",
-          "Your period schedule appears here once the school publishes the timetable.",
-        );
+        await _pushScreen(TimetableScreen(api: widget.api));
       case "Payslips":
-        showComingSoon(
-          context,
-          "Payslips",
-          "Payslips appear here after the first payroll run in the ERP.",
-        );
+        await _pushScreen(PayslipsScreen(api: widget.api));
+      case "Leave requests":
+        await _pushScreen(StudentLeaveQueueScreen(api: widget.api));
+      case "Complaints":
+        await _pushScreen(StaffComplaintsScreen(api: widget.api));
+      case "PTM":
+        await _pushScreen(PtmTeacherScreen(api: widget.api));
+      case "Documents":
+        await _pushScreen(DocumentsScreen(api: widget.api));
     }
   }
 
@@ -266,12 +314,18 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.cloud_off_outlined,
-                          size: 40, color: AppColors.muted),
+                      const Icon(
+                        Icons.cloud_off_outlined,
+                        size: 40,
+                        color: AppColors.muted,
+                      ),
                       const SizedBox(height: 12),
                       Text(_error!, textAlign: TextAlign.center),
                       const SizedBox(height: 16),
-                      FilledButton(onPressed: _load, child: const Text("Retry")),
+                      FilledButton(
+                        onPressed: _load,
+                        child: const Text("Retry"),
+                      ),
                       TextButton(
                         onPressed: _signOut,
                         child: const Text("Sign out"),
@@ -296,8 +350,9 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
             Container(
               decoration: const BoxDecoration(
                 color: AppColors.primary,
-                borderRadius:
-                    BorderRadius.vertical(bottom: Radius.circular(28)),
+                borderRadius: BorderRadius.vertical(
+                  bottom: Radius.circular(28),
+                ),
               ),
               padding: EdgeInsets.fromLTRB(
                 20,
@@ -314,11 +369,11 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                       summary.fullName.isEmpty
                           ? "S"
                           : summary.fullName
-                              .split(" ")
-                              .where((p) => p.isNotEmpty)
-                              .take(2)
-                              .map((p) => p[0].toUpperCase())
-                              .join(),
+                                .split(" ")
+                                .where((p) => p.isNotEmpty)
+                                .take(2)
+                                .map((p) => p[0].toUpperCase())
+                                .join(),
                       style: const TextStyle(
                         color: AppColors.primary,
                         fontWeight: FontWeight.w600,
@@ -375,8 +430,9 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                   onTap: () => _openAttendance(
                     classId: ct?.classId,
                     sectionId: ct?.sectionId,
-                    label:
-                        ct == null ? null : "${ct.className} ${ct.sectionName}",
+                    label: ct == null
+                        ? null
+                        : "${ct.className} ${ct.sectionName}",
                   ),
                 ),
               ),
@@ -391,8 +447,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                     child: ListTile(
                       onTap: () => Navigator.of(context).push(
                         MaterialPageRoute(
-                          builder: (_) =>
-                              SelfAttendanceScreen(api: widget.api),
+                          builder: (_) => SelfAttendanceScreen(api: widget.api),
                         ),
                       ),
                       leading: Container(
@@ -418,11 +473,15 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                       ),
                       subtitle: const Text(
                         "GPS punch in / out from campus",
-                        style:
-                            TextStyle(fontSize: 11.5, color: AppColors.muted),
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: AppColors.muted,
+                        ),
                       ),
-                      trailing: const Icon(Icons.chevron_right,
-                          color: AppColors.muted),
+                      trailing: const Icon(
+                        Icons.chevron_right,
+                        color: AppColors.muted,
+                      ),
                     ),
                   ),
                   Card(
@@ -456,11 +515,15 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                       ),
                       subtitle: const Text(
                         "Share location during school hours (works with app closed)",
-                        style:
-                            TextStyle(fontSize: 11.5, color: AppColors.muted),
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: AppColors.muted,
+                        ),
                       ),
-                      trailing: const Icon(Icons.chevron_right,
-                          color: AppColors.muted),
+                      trailing: const Icon(
+                        Icons.chevron_right,
+                        color: AppColors.muted,
+                      ),
                     ),
                   ),
                   const Text(
@@ -477,7 +540,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                       child: Padding(
                         padding: EdgeInsets.all(14),
                         child: Text(
-                          "No timetable published for today yet.",
+                          "No periods for you today on the published timetable.",
                           style: TextStyle(
                             fontSize: 12.5,
                             color: AppColors.muted,
@@ -496,8 +559,9 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                           children: [
                             for (final p in summary.periodsToday)
                               Padding(
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 8),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 8,
+                                ),
                                 child: Row(
                                   children: [
                                     Expanded(
@@ -523,7 +587,13 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                         ),
                       ),
                     ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
+                  WaitingCard(
+                    api: widget.api,
+                    onOpen: _openWaiting,
+                    refreshKey: _refresh,
+                  ),
+                  const SizedBox(height: 8),
                   const Text(
                     "Modules",
                     style: TextStyle(
@@ -589,7 +659,9 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
               _openModule("Students");
             case 2:
               Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => ChatInboxScreen(api: widget.api)),
+                MaterialPageRoute(
+                  builder: (_) => ChatInboxScreen(api: widget.api),
+                ),
               );
             case 3:
               showModalBottomSheet<void>(
@@ -662,13 +734,13 @@ class _AttendanceBanner extends StatelessWidget {
     final title = info == null
         ? "Mark attendance"
         : marked
-            ? "Attendance marked · ${info!.className} ${info!.sectionName}"
-            : "Mark today's attendance";
+        ? "Attendance marked · ${info!.className} ${info!.sectionName}"
+        : "Mark today's attendance";
     final subtitle = info == null
         ? "Choose a class and section"
         : marked
-            ? "${info!.markedCount} students recorded — tap to review"
-            : "${info!.className} ${info!.sectionName} · ${info!.studentCount} students · not marked yet";
+        ? "${info!.markedCount} students recorded — tap to review"
+        : "${info!.className} ${info!.sectionName} · ${info!.studentCount} students · not marked yet";
     return Material(
       color: color,
       borderRadius: BorderRadius.circular(16),

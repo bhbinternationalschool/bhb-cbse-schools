@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { resolveStaffHomeKind } from "@/lib/staffHomeKind.server";
 import { createClient } from "@supabase/supabase-js";
 import { DEMO_USERS, demoSessionCookieName, type DemoSession } from "@/lib/auth";
 import { appSessionCookieOptions } from "@/lib/authCookies.server";
@@ -218,7 +219,19 @@ export async function POST(request: Request) {
     );
   }
 
-  const res = NextResponse.json({ ok: true, session });
+  let homeKind: string | undefined;
+  if (persona === "staff") {
+    try {
+      homeKind = resolveStaffHomeKind(session, await loadServerMasters());
+    } catch (e) {
+      console.warn("[session] homeKind failed", e);
+    }
+  }
+
+  const res = NextResponse.json({
+    ok: true,
+    session: homeKind ? { ...session, homeKind } : session,
+  });
   res.cookies.set(demoSessionCookieName(), signed, appSessionCookieOptions());
   return res;
 }

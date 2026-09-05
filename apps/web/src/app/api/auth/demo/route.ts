@@ -9,6 +9,8 @@ import type { Persona } from "@/lib/types";
 import { TENANT } from "@/lib/types";
 import { isDemoAuth } from "@/lib/supabase/client";
 import { superAdminRoleCode } from "@/lib/superAdmin";
+import { resolveStaffHomeKind } from "@/lib/staffHomeKind.server";
+import { loadServerMasters } from "@/lib/api/v1/auth";
 import { resolveLoginAcademicYearCode } from "@/lib/workspaceSession.server";
 
 export async function POST(request: Request) {
@@ -82,7 +84,21 @@ export async function POST(request: Request) {
     );
   }
 
-  const res = NextResponse.json({ ok: true, session });
+  let homeKind: string | undefined;
+  if (persona === "staff" || persona === "field") {
+    try {
+      homeKind =
+        persona === "field"
+          ? "crew"
+          : resolveStaffHomeKind(session, await loadServerMasters());
+    } catch (e) {
+      console.warn("[demo] homeKind failed", e);
+    }
+  }
+  const res = NextResponse.json({
+    ok: true,
+    session: homeKind ? { ...session, homeKind } : session,
+  });
   res.cookies.set(demoSessionCookieName(), signed, appSessionCookieOptions());
   return res;
 }

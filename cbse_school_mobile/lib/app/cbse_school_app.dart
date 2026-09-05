@@ -57,6 +57,21 @@ class _CbseSchoolAppState extends State<CbseSchoolApp> {
     // is what actually gets a driver to the bus home. Without it they land
     // on the teacher home and the route/boarding screens are unreachable.
     if (persona == "field") return "/driver";
+
+    // The server resolves the home from the roster (designation, stream,
+    // class links) — see lib/staffHomeKind.ts. The role-code regexes below
+    // only cover sessions minted before it started sending homeKind.
+    switch (await _api.homeKind()) {
+      case "leadership":
+        return "/principal";
+      case "crew":
+        return "/driver";
+      case "office":
+      case "support":
+        return "/desk";
+      case "teaching":
+        return "/staff";
+    }
     if (await _api.isTransportCrew()) return "/driver";
     return await _api.isPrincipalLike() ? "/principal" : "/staff";
   }

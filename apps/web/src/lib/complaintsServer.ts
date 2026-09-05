@@ -129,3 +129,55 @@ export async function listHouseholdComplaintTickets(
   if (office === null) return null;
   return mergeTicketsForHousehold(office, intake, householdId);
 }
+
+/** Every ticket, wherever it lives — the office copy wins by id. Null when
+ * the office copy cannot be read. */
+export async function listAllComplaintTickets(): Promise<ComplaintTicket[] | null> {
+  const [office, intake] = await Promise.all([
+    readOfficeComplaintTickets(),
+    listServerComplaintTickets(),
+  ]);
+  if (office === null) return null;
+  const byId = new Map<string, ComplaintTicket>();
+  for (const t of intake) byId.set(t.id, t);
+  for (const t of office) byId.set(t.id, t);
+  return [...byId.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+/**
+ * Apply a patch to one ticket in the store that currently holds it: the
+ * office copy (module_local_state) when the office has merged it, else the
+ * intake store. Returns the updated ticket.
+ */
+export async function updateComplaintTicketServer(
+  id: string,
+  patch: Partial<Pick<ComplaintTicket, "status" | "resolutionNote" | "resolvedAt" | "assignedToStaffId">>,
+): Promise<{ ok: true; ticket: ComplaintTicket } | { ok: false; error: string }> {
+  const now = nowIso();
+  const { readModuleLocalState, writeModuleLocalState } = await import(
+    "@/lib/moduleLocalState.server"
+  );
+  const office = await readModuleLocalState<unknown>("complaints");
+  if (office === null) return { ok: false, error: "Complaints are unavailable right now" };
+  const officeState = normalizeComplaintState(office.state);
+  const inOffice = officeState.tickets.find((t) => t.id === id);
+  if (inOffice) {
+    const ticket: ComplaintTicket = { ...inOffice, ...patch, updatedAt: now };
+    const next = {
+      ...officeState,
+      tickets: officeState.tickets.map((t) => (t.id === id ? ticket : t)),
+    };
+    const written = await writeModuleLocalState("complaints", next);
+    if (!written.ok) return { ok: false, error: written.error };
+    return { ok: true, ticket };
+  }
+  const store = await readStore();
+  const inIntake = store.tickets.find((t) => t.id === id);
+  if (!inIntake) return { ok: false, error: "Ticket not found" };
+  const ticket: ComplaintTicket = { ...inIntake, ...patch, updatedAt: now };
+  await saveWaBotSlice("complaints", {
+    version: 1,
+    tickets: store.tickets.map((t) => (t.id === id ? ticket : t)),
+  });
+  return { ok: true, ticket };
+}

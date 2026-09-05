@@ -3,6 +3,7 @@ import "package:go_router/go_router.dart";
 import "../core/api/api_client.dart";
 import "../core/config/app_config.dart";
 import "../features/auth/login_screen.dart";
+import "../features/staff/desk_home_screen.dart";
 import "../features/staff/driver_home_screen.dart";
 import "../features/staff/principal_home_screen.dart";
 import "../features/staff/teacher_home_screen.dart";
@@ -19,43 +20,44 @@ List<RouteBase> staffRoutes(
   ApiClient api,
   AppConfig config,
   Future<void> Function() onSignedIn,
-) =>
-    [
-      GoRoute(
-        path: "/login",
-        builder: (context, state) => LoginScreen(
-          config: config,
-          api: api,
-          onSignedIn: onSignedIn,
-        ),
-      ),
-      GoRoute(
-        path: "/staff",
-        builder: (context, state) => TeacherHomeScreen(
-          api: api,
-          onLogout: () => context.go("/login"),
-          openRoute: state.uri.queryParameters["open"],
-        ),
-      ),
-      GoRoute(
-        path: "/principal",
-        builder: (context, state) => PrincipalHomeScreen(
-          api: api,
-          onLogout: () => context.go("/login"),
-        ),
-      ),
-      GoRoute(
-        path: "/driver",
-        builder: (context, state) => DriverHomeScreen(
-          api: api,
-          onLogout: () => context.go("/login"),
-        ),
-      ),
-      GoRoute(
-        path: "/wrong-app",
-        builder: (context, state) => WrongAppScreen(
-          audience: AppAudience.staff,
-          api: api,
-        ),
-      ),
-    ];
+) => [
+  GoRoute(
+    path: "/login",
+    builder: (context, state) =>
+        LoginScreen(config: config, api: api, onSignedIn: onSignedIn),
+  ),
+  GoRoute(
+    path: "/staff",
+    builder: (context, state) => TeacherHomeScreen(
+      api: api,
+      onLogout: () => context.go("/login"),
+      openRoute: state.uri.queryParameters["open"],
+    ),
+  ),
+  GoRoute(
+    path: "/principal",
+    builder: (context, state) => PrincipalHomeScreen(
+      api: api,
+      onLogout: () => context.go("/login"),
+      openRoute: state.uri.queryParameters["open"],
+    ),
+  ),
+  GoRoute(
+    path: "/desk",
+    builder: (context, state) => DeskHomeScreen(
+      api: api,
+      onLogout: () => context.go("/login"),
+      openRoute: state.uri.queryParameters["open"],
+    ),
+  ),
+  GoRoute(
+    path: "/driver",
+    builder: (context, state) =>
+        DriverHomeScreen(api: api, onLogout: () => context.go("/login")),
+  ),
+  GoRoute(
+    path: "/wrong-app",
+    builder: (context, state) =>
+        WrongAppScreen(audience: AppAudience.staff, api: api),
+  ),
+];
