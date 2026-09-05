@@ -40,7 +40,7 @@ import { loadStaffAttendance } from "@/lib/staffAttendance";
 import { ensureStaffAttendanceHydratedServer } from "@/lib/staffAttendancePersistence";
 import { classifyClassHolidayDay } from "@/lib/holidayPolicy";
 import { householdWhatsApp, loadSis, type SisStudent } from "@/lib/sis";
-import { computeHouseholdDues, loadFees, openFeeDues } from "@/lib/fees";
+import { computeHouseholdDues, getDayCloseForDate, loadFees, openFeeDues } from "@/lib/fees";
 import { flagFutureDues } from "@/lib/feeDueFuture";
 import { listLiveDefaulters } from "@/lib/playbook";
 import { ensureFeesHydratedServer } from "@/lib/feesPersistence.server";
@@ -61,7 +61,9 @@ import {
   formatAbsentListReply,
   formatAttendanceSummaryReply,
   formatClassDefaultersReply,
+  formatCollectionReply,
   formatHelpReply,
+  TENDER_MODE_LABEL,
   formatSectionProblem,
   formatStudentFeesReply,
   formatStudentMatchesAsk,
@@ -576,6 +578,20 @@ export async function handleErpStaffCommand(
     resolved.studentName = student.fullName;
     resolved.detail = isOfficeLike(roleCodes) || roleCodes.includes("accounts") ? "full" : "basic";
   }
+  if (command.id === "collection_today") {
+    const roleCodes = resolveSessionRoles(rbac, session, masters).map((r) => r.code);
+    if (!isOfficeLike(roleCodes) && !roleCodes.includes("accounts")) {
+      void audit(session, command, parsed.fields, text, "denied", {
+        reason: "scope",
+        channel: inbound.channel,
+      });
+      return {
+        handled: true,
+        audience: "erp_command_denied",
+        text: "The collection report is for the fee desk, office and leadership.",
+      };
+    }
+  }
   if (command.id === "attendance_summary") {
     const roleCodes = resolveSessionRoles(rbac, session, masters).map((r) => r.code);
     if (isOfficeLike(roleCodes)) {
@@ -671,6 +687,8 @@ async function runReadCommand(
       return attendanceSummary(resolved, session, todayIso);
     case "class_defaulters":
       return classDefaulters(resolved, session, todayIso);
+    case "collection_today":
+      return collectionToday(resolved, session, todayIso);
     default:
       return "That command isn't wired up yet.";
   }
@@ -788,6 +806,80 @@ async function attendanceSummary(
     scope: school ? "school" : "mine",
     classes,
     staff,
+  });
+}
+
+async function collectionToday(
+  resolved: Record<string, string>,
+  session: DemoSession,
+  todayIso: string,
+): Promise<string> {
+  await ensureFeesHydratedServer();
+  const fees = loadFees();
+  const ay = session.academicYearCode;
+  const date = resolved.date || todayIso;
+  const live = (fees.vouchers ?? []).filter((v) => !v.voidedAt && v.academicYearCode === ay);
+  const day = live.filter((v) => v.collectionDate === date);
+  const byMode = new Map<string, { paise: number; count: number }>();
+  const cheques = { count: 0, paise: 0 };
+  const cashiers = new Map<string, { paise: number; count: number }>();
+  const bySource = { counter: 0, manualBook: 0, paymentLink: 0 };
+  for (const v of day) {
+    for (const t of v.tenders ?? []) {
+      const label = t.gatewayProvider
+        ? `Online (${t.gatewayProvider.charAt(0).toUpperCase()}${t.gatewayProvider.slice(1)})`
+        : TENDER_MODE_LABEL[t.mode] || t.mode.toUpperCase();
+      const cur = byMode.get(label) ?? { paise: 0, count: 0 };
+      cur.paise += t.amountPaise;
+      cur.count += 1;
+      byMode.set(label, cur);
+      if (t.realisation === "subject_to_clearance") {
+        cheques.count += 1;
+        cheques.paise += t.amountPaise;
+      }
+    }
+    const who = v.cashierName || "—";
+    const c = cashiers.get(who) ?? { paise: 0, count: 0 };
+    c.paise += v.totalPaise;
+    c.count += 1;
+    cashiers.set(who, c);
+    if (v.source === "manual_book") bySource.manualBook += 1;
+    else if (v.source === "payment_link") bySource.paymentLink += 1;
+    else bySource.counter += 1;
+  }
+  const monthPrefix = date.slice(0, 7);
+  const monthToDatePaise = live
+    .filter((v) => v.collectionDate.startsWith(monthPrefix) && v.collectionDate <= date)
+    .reduce((s, v) => s + v.totalPaise, 0);
+  const dc = getDayCloseForDate(date, fees);
+  const monthLabel = new Date(`${date}T00:00:00Z`).toLocaleDateString("en-IN", {
+    month: "long",
+    timeZone: "UTC",
+  });
+  return formatCollectionReply({
+    date,
+    todayIso,
+    receiptCount: day.length,
+    totalPaise: day.reduce((s, v) => s + v.totalPaise, 0),
+    byMode: [...byMode.entries()]
+      .map(([label, v]) => ({ label, ...v }))
+      .sort((a, b) => b.paise - a.paise),
+    chequesPending: cheques,
+    bySource,
+    cashiers: [...cashiers.entries()]
+      .map(([name, v]) => ({ name, ...v }))
+      .sort((a, b) => b.paise - a.paise),
+    dayClose: dc
+      ? {
+          status: dc.status,
+          cashierName: dc.cashierName,
+          physicalCashPaise: dc.physicalCashPaise ?? null,
+          systemCashPaise: dc.systemCashPaise ?? null,
+        }
+      : null,
+    monthToDatePaise,
+    monthLabel,
+    formatInr,
   });
 }
 

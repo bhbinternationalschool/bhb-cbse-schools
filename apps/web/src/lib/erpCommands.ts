@@ -122,6 +122,31 @@ export const ERP_COMMANDS: ErpCommandDef[] = [
     scope: "any",
   },
   {
+    id: "collection_today",
+    title: "Today's fee collection",
+    kind: "read",
+    module: "fees",
+    action: "view",
+    description:
+      "Fees collected on a date: total and receipt count, by payment mode (cash, UPI, card, cheque, online links), cheques awaiting clearance, by counter / paper book / online, top cashiers, day-close status, month so far. Office and leadership only.",
+    examples: [
+      "aaj ka collection",
+      "today's collection",
+      "kal ka collection",
+      "collection report",
+      "aaj kitna cash aaya",
+    ],
+    fields: [
+      {
+        name: "date",
+        type: "date",
+        required: false,
+        description: "YYYY-MM-DD; today when not said. 'kal' / 'yesterday' means yesterday.",
+      },
+    ],
+    scope: "any",
+  },
+  {
     id: "class_defaulters",
     title: "Fee defaulters in a class or section",
     kind: "read",
@@ -402,6 +427,14 @@ const ABSENT_WORDS =
 
 const HELP_WORDS = /^\s*(commands?|command\s+help|cmd|कमांड|\?)\s*$/i;
 
+/**
+ * The day's takings: "aaj ka collection", "today's collection", "collection
+ * report", "aaj kitna cash aaya", "कलेक्शन". Not with a class (a class plus
+ * fee words is the defaulters list) and not a student's name.
+ */
+const COLLECTION_WORDS =
+  /(?<![\p{L}\p{M}\p{N}])(collections?|कलेक्शन|वसूली|vasooli|vasuli|(?:kitna|kitni|how\s+much)\s+(?:cash|paisa|paise|fees?|money)\s+(?:aaya|aayi|aya|mila|mili|collected|came)|day\s*close|cash\s+(?:in\s+hand|today|aaj))(?![\p{L}\p{M}\p{N}])/iu;
+
 /** A class or section plus one of these is the defaulters list. */
 const DEFAULTER_WORDS =
   /(?<![\p{L}\p{M}\p{N}])(defaulters?|bakayedar|bakaayedar|बकायेदार|(?:fees?|dues?)\s+(?:pending|due|baki|bakaya)(?:\s+list)?|(?:fee|fees|dues?)\s+(?:list|report)|(?:kisne|kis\s*kis\s*ne|kaun\s*kaun)\s+fees?\s+nahi|fees?\s+nahi\s+(?:di|diya|diye|bhari)|overdue)(?![\p{L}\p{M}\p{N}])/iu;
@@ -431,6 +464,9 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
   }
   if (DIGEST_WORDS.test(t)) {
     return { commandId: "commands_digest", fields: {}, source: "local" };
+  }
+  if (COLLECTION_WORDS.test(t) && !extractSectionRefs(t).length) {
+    return { commandId: "collection_today", fields: { date: "" }, source: "local" };
   }
   const refs = extractSectionRefs(t);
   const feesQ = parseStudentFeesQuery(t);
@@ -1380,3 +1416,81 @@ export function formatClassDefaultersReply(input: ClassDefaultersInput): string 
   lines.push("", "Reply with a name for the full ledger.");
   return lines.join("\n");
 }
+
+// ─── Today's collection ────────────────────────────────────────────────
+
+export type CollectionModeTotal = { label: string; paise: number; count: number };
+
+export type CollectionInput = {
+  date: string;
+  todayIso: string;
+  receiptCount: number;
+  totalPaise: number;
+  /** Largest first, as the formatter expects. */
+  byMode: CollectionModeTotal[];
+  chequesPending: { count: number; paise: number };
+  bySource: { counter: number; manualBook: number; paymentLink: number };
+  cashiers: { name: string; paise: number; count: number }[];
+  dayClose: { status: string; cashierName: string; physicalCashPaise: number | null; systemCashPaise: number | null } | null;
+  monthToDatePaise: number;
+  monthLabel: string;
+  formatInr: (paise: number) => string;
+};
+
+export function formatCollectionReply(input: CollectionInput): string {
+  const inr = input.formatInr;
+  const when = input.date === input.todayIso ? "today" : shortDate(input.date);
+  const lines: string[] = [`*Fee collection* · ${when}`];
+  if (input.receiptCount === 0) {
+    lines.push("No receipts yet.");
+  } else {
+    lines.push(`*${inr(input.totalPaise)}* · ${input.receiptCount} receipt${input.receiptCount === 1 ? "" : "s"}`);
+    lines.push("", "*By mode*");
+    for (const m of input.byMode) lines.push(`${m.label}   ${inr(m.paise)}  (${m.count})`);
+    if (input.chequesPending.count) {
+      lines.push(`Cheques awaiting clearance: ${input.chequesPending.count} · ${inr(input.chequesPending.paise)}`);
+    }
+    const src: string[] = [];
+    if (input.bySource.counter) src.push(`counter ${input.bySource.counter}`);
+    if (input.bySource.manualBook) src.push(`paper book ${input.bySource.manualBook}`);
+    if (input.bySource.paymentLink) src.push(`online link ${input.bySource.paymentLink}`);
+    if (src.length > 1) lines.push(`Receipts: ${src.join(" · ")}`);
+    if (input.cashiers.length > 1) {
+      lines.push("", "*By cashier*");
+      for (const c of input.cashiers.slice(0, 4)) lines.push(`${c.name}   ${inr(c.paise)}  (${c.count})`);
+    }
+  }
+  lines.push("");
+  if (!input.dayClose) {
+    lines.push(input.receiptCount ? "Day close: not started." : "Day close: —");
+  } else {
+    const dc = input.dayClose;
+    const status =
+      dc.status === "approved"
+        ? "approved ✅"
+        : dc.status === "submitted"
+          ? "submitted, awaiting approval"
+          : dc.status === "rejected"
+            ? "rejected ⚠️"
+            : "draft";
+    let diff = "";
+    if (dc.physicalCashPaise != null && dc.systemCashPaise != null && dc.physicalCashPaise !== dc.systemCashPaise) {
+      const d = dc.physicalCashPaise - dc.systemCashPaise;
+      diff = ` · cash ${d > 0 ? "over" : "short"} by ${inr(Math.abs(d))}`;
+    }
+    lines.push(`Day close: ${status}${dc.cashierName ? ` (${dc.cashierName})` : ""}${diff}`);
+  }
+  lines.push(`${input.monthLabel} so far: ${inr(input.monthToDatePaise)}`);
+  return lines.join("\n");
+}
+
+export const TENDER_MODE_LABEL: Record<string, string> = {
+  cash: "Cash",
+  upi: "UPI",
+  card: "Card",
+  cheque: "Cheque / DD",
+  rtgs: "RTGS",
+  neft: "NEFT",
+  imps: "IMPS",
+  bank: "Bank transfer",
+};
