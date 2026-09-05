@@ -35,6 +35,8 @@ export type ErpAiMessage = {
   guideId?: string;
   pageLabel?: string;
   steps?: string[];
+  /** ERP command desk — a write command waiting for Confirm / Cancel. */
+  confirm?: { token: string; summary: string; yesId: string; noId: string };
 };
 
 export type ErpAiQuickPrompt = {
@@ -77,6 +79,13 @@ function nid() {
 
 /** Catalog of chips — filtered per user via quickPromptsForUser */
 export const ERP_AI_QUICK_PROMPT_CATALOG: ErpAiQuickPrompt[] = [
+  {
+    id: "cmd_help",
+    label: "ERP commands",
+    prompt: "commands",
+    module: "attendance",
+    action: "view",
+  },
   {
     id: "tt_build",
     label: "Build timetable",
