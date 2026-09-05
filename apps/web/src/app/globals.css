@@ -1418,11 +1418,253 @@ h3,
     filter: invert(0.85);
   }
 
+  /* Literal light-theme text colours (audited 2026-09-06 across all 49 ERP
+     routes in both themes): 72 distinct `text-[#hex]` utilities exist,
+     58 of them land under 4.5:1 on the dark card (teal #0f766e,
+     green #15803d, red #dc2626, brick #9a3412, gold #8a5a10, blue #1565c0 …
+     status chips, links and section labels). Generated from the inventory:
+     each is lifted to a lighter tint of the same hue that clears 4.6:1 on
+     --card; greys go to --muted / --foreground. Regenerate with the same
+     inventory when new literals appear (scripts: grep text-\[#). */
+  .dark .text-\[\#0288d1\]:not(.theme-light-island *) {
+    color: #35b6fd;
+  }
+  .dark .text-\[\#0369a1\]:not(.theme-light-island *) {
+    color: #37b6fb;
+  }
+  .dark .text-\[\#047857\]:not(.theme-light-island *) {
+    color: #3af8c2;
+  }
+  .dark .text-\[\#075E54\]:not(.theme-light-island *) {
+    color: #41f1dd;
+  }
+  .dark .text-\[\#0B5C2E\]:not(.theme-light-island *) {
+    color: #49e98e;
+  }
+  .dark .text-\[\#0a4a73\]:not(.theme-light-island *) {
+    color: #43acef;
+  }
+  .dark .text-\[\#0c4a6e\]:not(.theme-light-island *) {
+    color: #47afeb;
+  }
+  .dark .text-\[\#0f766e\]:not(.theme-light-island *) {
+    color: #4ae8dc;
+  }
+  .dark .text-\[\#0f7a4c\]:not(.theme-light-island *) {
+    color: #49e9a4;
+  }
+  .dark .text-\[\#128C7E\]:not(.theme-light-island *) {
+    color: #4ae8d6;
+  }
+  .dark .text-\[\#14532d\]:not(.theme-light-island *) {
+    color: #5bd78c;
+  }
+  .dark .text-\[\#1565c0\]:not(.theme-light-island *) {
+    color: #4794eb;
+  }
+  .dark .text-\[\#15803d\]:not(.theme-light-island *) {
+    color: #50e287;
+  }
+  .dark .text-\[\#166534\]:not(.theme-light-island *) {
+    color: #57db89;
+  }
+  .dark .text-\[\#1a2740\]:not(.theme-light-island *),
+  .dark .text-\[\#263238\]:not(.theme-light-island *),
+  .dark .text-\[\#37474f\]:not(.theme-light-island *) {
+    color: var(--foreground);
+  }
+  .dark .text-\[\#1a73e8\]:not(.theme-light-island *) {
+    color: #468eec;
+  }
+  .dark .text-\[\#2563eb\]:not(.theme-light-island *) {
+    color: #5787f0;
+  }
+  .dark .text-\[\#2e7d32\]:not(.theme-light-island *) {
+    color: #61d167;
+  }
+  .dark .text-\[\#334155\]:not(.theme-light-island *),
+  .dark .text-\[\#455a64\]:not(.theme-light-island *),
+  .dark .text-\[\#5a6a8a\]:not(.theme-light-island *),
+  .dark .text-\[\#5c6478\]:not(.theme-light-island *) {
+    color: var(--muted);
+  }
+  .dark .text-\[\#3730a3\]:not(.theme-light-island *) {
+    color: #8681da;
+  }
+  .dark .text-\[\#3949ab\]:not(.theme-light-island *) {
+    color: #7986d8;
+  }
+  .dark .text-\[\#4c1d95\]:not(.theme-light-island *) {
+    color: #a176e4;
+  }
+  .dark .text-\[\#5a2a7a\]:not(.theme-light-island *) {
+    color: #ad71d6;
+  }
+  .dark .text-\[\#5a3a10\]:not(.theme-light-island *) {
+    color: #e0a352;
+  }
+  .dark .text-\[\#5b21b6\]:not(.theme-light-island *) {
+    color: #a175e6;
+  }
+  .dark .text-\[\#6d28d9\]:not(.theme-light-island *) {
+    color: #a174e6;
+  }
+  .dark .text-\[\#7c3aed\]:not(.theme-light-island *) {
+    color: #a273f2;
+  }
+  .dark .text-\[\#7e22ce\]:not(.theme-light-island *) {
+    color: #b173e8;
+  }
+  .dark .text-\[\#7f1d1d\]:not(.theme-light-island *) {
+    color: #dd6a6a;
+  }
+  .dark .text-\[\#8a5a10\]:not(.theme-light-island *) {
+    color: #eaaa48;
+  }
+  .dark .text-\[\#8a6400\]:not(.theme-light-island *) {
+    color: #ffc733;
+  }
+  .dark .text-\[\#8a6914\]:not(.theme-light-island *) {
+    color: #e5bb4d;
+  }
+  .dark .text-\[\#8a6d12\]:not(.theme-light-island *) {
+    color: #e7c24b;
+  }
+  .dark .text-\[\#8b1a12\]:not(.theme-light-island *) {
+    color: #e95d53;
+  }
+  .dark .text-\[\#8d6e63\]:not(.theme-light-island *) {
+    color: #d17e61;
+  }
+  .dark .text-\[\#92400e\]:not(.theme-light-island *) {
+    color: #ed8545;
+  }
+  .dark .text-\[\#991b1b\]:not(.theme-light-island *) {
+    color: #e36363;
+  }
+  .dark .text-\[\#9a3412\]:not(.theme-light-island *) {
+    color: #ea7148;
+  }
+  .dark .text-\[\#9d174d\]:not(.theme-light-island *) {
+    color: #e65690;
+  }
+  .dark .text-\[\#B71C1C\]:not(.theme-light-island *),
+  .dark .text-\[\#b71c1c\]:not(.theme-light-island *),
+  .dark .text-\[\#b91c1c\]:not(.theme-light-island *) {
+    color: #e76060;
+  }
+  .dark .text-\[\#b0344b\]:not(.theme-light-island *) {
+    color: #d67183;
+  }
+  .dark .text-\[\#b42318\]:not(.theme-light-island *) {
+    color: #e85e54;
+  }
+  .dark .text-\[\#b43c3c\]:not(.theme-light-island *) {
+    color: #d67171;
+  }
+  .dark .text-\[\#b45309\]:not(.theme-light-island *) {
+    color: #f58d3d;
+  }
+  .dark .text-\[\#b54708\]:not(.theme-light-island *) {
+    color: #f6803c;
+  }
+  .dark .text-\[\#c0392b\]:not(.theme-light-island *) {
+    color: #dc6c61;
+  }
+  .dark .text-\[\#c2410c\]:not(.theme-light-island *) {
+    color: #f3733f;
+  }
+  .dark .text-\[\#c62828\]:not(.theme-light-island *) {
+    color: #e06666;
+  }
+  .dark .text-\[\#dc2626\]:not(.theme-light-island *) {
+    color: #e66161;
+  }
+  .dark .text-\[\#e11d48\]:not(.theme-light-island *) {
+    color: #ea5c7b;
+  }
+  .dark .text-\[\#e65100\]:not(.theme-light-island *) {
+    color: #ff7b33;
+  }
+  /* Light literal card/chip backgrounds (cream, tinted alerts, dashboard
+     table heads): under .dark they stayed light while the tokens they hold
+     text in flipped to light values — light-on-light. */
+  .dark .bg-\[\#E8F5E9\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#F1F8F4\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#FFEBEE\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#FFF5F5\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#dcf8c6\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#dcfce7\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#e1f5fe\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#e3f2fd\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#e3f3e8\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#e7f0f8\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#e7f8ef\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#e8eaf6\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#e8eef5\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#e8f5e9\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#eceff1\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#ecfdf5\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#ede9fe\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#eef2f8\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#efeee7\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#f0efe6\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#f0f9ff\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#f0fbf4\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#f0fdf4\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#f1f8e9\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#f5f3ff\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#f6f5ef\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#fafaf5\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#fee2e2\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#fef2f2\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#ffebee\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#fff5f5\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#fff8e1\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[\#fffbeb\]:not(.theme-light-island):not(.theme-light-island *) {
+    background-color: var(--muted-surface);
+  }
+  /* Translucent cream panels (`bg-[rgba(248,248,240,…)]` helper strips,
+     Doc-verify wrapper, CRM chat help, bottom navs) — same failure. */
+  .dark .bg-\[rgba\(246\,245\,239\,0\.6\)\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[rgba\(246\,245\,239\,0\.92\)\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[rgba\(246\,245\,239\,0\.96\)\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[rgba\(248\,248\,240\,0\.6\)\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[rgba\(248\,248\,240\,0\.8\)\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[rgba\(248\,248\,240\,0\.9\)\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[rgba\(248\,248\,240\,0\.97\)\]:not(.theme-light-island):not(.theme-light-island *),
+  .dark .bg-\[rgba\(255\,255\,255\,0\.96\)\]:not(.theme-light-island):not(.theme-light-island *) {
+    background-color: color-mix(in srgb, var(--card) 92%, transparent);
+  }
+  /* `.field` (inputs AND the buttons styled like them, e.g. "Assign roll
+     numbers") is defined once in light colours; the button text token flips
+     while the field stays white. */
+  .dark .field:not(.theme-light-island *) {
+    background: var(--surface-sunken);
+    border-color: var(--border);
+    color: var(--foreground);
+  }
+  /* Solid status buttons (`bg-[var(--success)] text-white` — Call, Approve,
+     WhatsApp): the status tokens are LIGHT in dark mode (#3dd68c, #f0a94e,
+     #6d9bff, #f97066), so white text sinks to ~1.9:1. Ink them dark. */
+  .dark .bg-\[var\(--success\)\],
+  .dark .bg-\[var\(--warning\)\],
+  .dark .bg-\[var\(--info\)\],
+  .dark .bg-\[var\(--danger\)\] {
+    color: #0b1220;
+  }
+
   /* Deliberately-light islands (public gate page, printed posters/passes):
      opt out of the .dark remaps above so they read the same on any device. */
   .dark .theme-light-island,
-  .dark .theme-light-island .text-\[\#203050\] {
+  .dark .theme-light-island .text-\[\#203050\],
+  .dark .theme-light-island .text-\[var\(--brand-deep\)\],
+  .dark .theme-light-island .text-\[var\(--foreground\)\] {
     color: #203050;
+  }
+  .dark .theme-light-island .text-\[var\(--muted\)\],
+  .dark .theme-light-island .text-muted-foreground {
+    color: #5a6a8a;
   }
   .dark .theme-light-island.bg-white,
   .dark .theme-light-island .bg-white {

@@ -25,7 +25,7 @@ function StatIcon({
   const bg: Record<typeof tone, string> = {
     green: "bg-[#e8f5e9] text-[#2e7d32]",
     red: "bg-[#ffebee] text-[#c62828]",
-    amber: "bg-[#fff8e1] text-[#f9a825]",
+    amber: "bg-[#fff8e1] text-[#8a5a10]",
     sky: "bg-[#e1f5fe] text-[#0288d1]",
     blue: "bg-[#e3f2fd] text-[#1565c0]",
     indigo: "bg-[#e8eaf6] text-[#3949ab]",
@@ -70,7 +70,7 @@ function StatRow({ cell, bordered }: { cell: StatCell; bordered?: boolean }) {
         </div>
       </div>
       {clickable ? (
-        <span className="text-[#b0bec5]" aria-hidden>
+        <span className="text-[var(--muted)]" aria-hidden>
           ›
         </span>
       ) : null}
@@ -289,7 +289,7 @@ function ComplianceCard({
   ].sort((a, b) => b.count - a.count);
 
   const tone =
-    readyPct >= 90 ? "#2e7d32" : readyPct >= 50 ? "#f9a825" : "#c62828";
+    readyPct >= 90 ? "var(--success)" : readyPct >= 50 ? "var(--warning)" : "var(--danger)";
 
   return (
     <div className="overflow-hidden rounded-md border border-[var(--border)] bg-[var(--card)] shadow-sm">
@@ -354,7 +354,7 @@ function ComplianceCard({
               >
                 <div
                   className="text-lg font-semibold tabular-nums"
-                  style={{ color: clean ? "#2e7d32" : "#c62828" }}
+                  style={{ color: clean ? "var(--success)" : "var(--danger)" }}
                 >
                   {g.count}
                 </div>
