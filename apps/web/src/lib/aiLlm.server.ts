@@ -1649,3 +1649,34 @@ export async function generateAdmissionsAnswerJson(opts: {
   }
   return { ok: false, error: r.error, engine: r.engine };
 }
+
+/**
+ * ERP command desk — map one staff WhatsApp message to a catalogue command.
+ * Strict JSON contract, validated in `parseErpCommandLlmJson`; anything the
+ * model invents outside the catalogue comes back as a failed parse.
+ */
+export async function generateErpCommandJson(opts: {
+  text: string;
+  commands: import("@/lib/erpCommands").ErpCommandDef[];
+  todayIso: string;
+}): Promise<
+  | { ok: true; parse: import("@/lib/erpCommands").ErpCommandLlmParse; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const { buildErpCommandSystemPrompt, parseErpCommandLlmJson } = await import(
+    "@/lib/erpCommands"
+  );
+  const r = await callLlmJson(
+    {
+      system: buildErpCommandSystemPrompt({ commands: opts.commands, todayIso: opts.todayIso }),
+      userMessage: opts.text.slice(0, 500),
+      maxTokens: 200,
+      temperature: 0,
+      geminiMaxTokens: 512,
+      meta: { route: "erp-command", promptVersion: "v1" },
+    },
+    (text) => parseErpCommandLlmJson(text, opts.commands),
+  );
+  if (r.ok) return { ok: true, parse: r.data, engine: r.engine, generationId: r.generationId };
+  return { ok: false, error: r.error, engine: r.engine };
+}

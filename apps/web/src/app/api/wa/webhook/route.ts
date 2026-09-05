@@ -197,6 +197,10 @@ export async function POST(req: Request) {
       waMessageId: msg.waMessageId,
       profileName: msg.profileName,
       location: msg.location,
+      audio:
+        msg.media?.mediaType === "audio"
+          ? { mediaId: msg.media.mediaId, mimeType: msg.media.mimeType }
+          : null,
     });
     results.push({
       audience: r.audience,

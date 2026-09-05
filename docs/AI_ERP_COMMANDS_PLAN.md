@@ -13,6 +13,13 @@ first and runs only after a "yes".
 | Build, one developer who knows the codebase | 33–42 working days (7–9 weeks) |
 | Money, payroll, masters, results | stay inside the ERP for now (see *Later*) |
 
+## Status
+
+| Date | Done |
+|---|---|
+| 2026-09-05 | **Phase 0, WhatsApp branch shipped.** Command engine (`lib/erpCommands.ts` pure + `lib/erpCommands.server.ts`), staff command branch in the unified WhatsApp bot for owner / staff / teacher flows, voice-note transcription for commands, regex-first parse with LLM fallback (`generateErpCommandJson`), RBAC via the sender's staff record, section scope via `staffAllowedSections`, confirm-card plumbing for future write commands, director pause switch (`commands off` / `commands on`), per-staff hourly cap, audit rows in `erp_commands`. First commands live: **absent list for a section** and **COMMANDS help**. Kill switch: `ERP_WA_COMMANDS=off`. Migration `20260905100000` widens the bot-slice constraint for the new `commands` slice. |
+| next | Mobile command bar, ERP assistant hookup, daily digest to the director, then Phase 1 read commands. |
+
 ## Where commands are given
 
 All three channels feed **one command engine** on the server, so a command means the same
