@@ -48,6 +48,15 @@ import {
 } from "@/lib/timetableSubstitution";
 import { isoDateWeekday } from "@/lib/examTimetable";
 import { subjectLabel } from "@/lib/homework";
+import { ensureStudentLeaveHydratedServer } from "@/lib/studentLeavePersistence";
+import {
+  emptyStudentLeaveState,
+  leaveDayCount,
+  leaveTypeLabel,
+  loadStudentLeave,
+  pendingApproverHint,
+  writeStudentLeaveLocalRaw,
+} from "@/lib/studentLeave";
 import { householdWhatsApp, loadSis, type SisStudent } from "@/lib/sis";
 import { computeHouseholdDues, getDayCloseForDate, loadFees, openFeeDues } from "@/lib/fees";
 import { flagFutureDues } from "@/lib/feeDueFuture";
@@ -73,6 +82,7 @@ import {
   formatCollectionReply,
   formatFreeTeachersReply,
   formatHelpReply,
+  formatPendingLeavesReply,
   periodAtTime,
   TENDER_MODE_LABEL,
   formatSectionProblem,
@@ -603,6 +613,49 @@ export async function handleErpStaffCommand(
       };
     }
   }
+  if (command.id === "pending_leaves") {
+    const roleCodes = resolveSessionRoles(rbac, session, masters).map((r) => r.code);
+    const office = isOfficeLike(roleCodes);
+    const mine = office
+      ? []
+      : staffAllowedSections(inbound.staff, masters, session.academicYearCode, roleCodes);
+    const askedRaw = parsed.fields.section || "";
+    const refs = askedRaw ? extractSectionRefs(askedRaw) : [];
+    if (refs.length) {
+      const res = resolveClassOrSectionRef(refs[0]!, masters);
+      if (!res.ok) {
+        return { handled: true, audience: "erp_command_ask", text: formatSectionProblem(res.reason, res.options, askedRaw) };
+      }
+      let sections = res.sections;
+      if (!office) {
+        const mineIds = new Set(mine.map((s) => s.sectionId));
+        sections = sections.filter((s) => mineIds.has(s.sectionId));
+        if (!sections.length) {
+          void audit(session, command, parsed.fields, text, "denied", { reason: "scope", channel: inbound.channel });
+          return {
+            handled: true,
+            audience: "erp_command_denied",
+            text: formatSectionProblem("not_allowed", mine.map((s) => ({ classId: s.classId, sectionId: s.sectionId, className: s.className, sectionName: s.sectionName, label: s.label })), res.wholeClass ? res.className : res.sections[0]!.label),
+          };
+        }
+      }
+      resolved.scope = "section";
+      resolved.scopeLabel = res.wholeClass ? `Class ${res.className}` : sections[0]!.label;
+      resolved.sectionIds = sections.map((s) => s.sectionId).join(",");
+    } else if (office) {
+      resolved.scope = "school";
+    } else {
+      if (!mine.length) {
+        return {
+          handled: true,
+          audience: "erp_command_denied",
+          text: "Leave requests are shown to class teachers for their sections, and to the office and leadership for the school.",
+        };
+      }
+      resolved.scope = "mine";
+      resolved.sectionIds = mine.map((s) => s.sectionId).join(",");
+    }
+  }
   if (command.id === "free_teachers") {
     resolved.period = (parsed.fields.text || "now").trim().toLowerCase();
   }
@@ -705,6 +758,8 @@ async function runReadCommand(
       return collectionToday(resolved, session, todayIso);
     case "free_teachers":
       return freeTeachers(resolved, resolved.period || "now", session, todayIso);
+    case "pending_leaves":
+      return pendingLeaves(resolved, session, todayIso);
     default:
       return "That command isn't wired up yet.";
   }
@@ -822,6 +877,57 @@ async function attendanceSummary(
     scope: school ? "school" : "mine",
     classes,
     staff,
+  });
+}
+
+async function pendingLeaves(
+  resolved: Record<string, string>,
+  session: DemoSession,
+  todayIso: string,
+): Promise<string> {
+  // Same reset-then-hydrate the app's leave list does, so the answer is what
+  // the database holds rather than what an earlier request left cached.
+  writeStudentLeaveLocalRaw(emptyStudentLeaveState());
+  await ensureStudentLeaveHydratedServer();
+  const ay = session.academicYearCode;
+  const sis = loadSis();
+  const masters = loadMasters();
+  const only = resolved.sectionIds ? new Set(resolved.sectionIds.split(",").filter(Boolean)) : null;
+  const byId = new Map(sis.students.map((st) => [st.id, st]));
+  const inScope = (studentId: string) => {
+    const st = byId.get(studentId);
+    if (!st) return false;
+    return !only || only.has(st.sectionId);
+  };
+  const all = loadStudentLeave().requests.filter(
+    (r) => r.academicYearCode === ay && inScope(r.studentId),
+  );
+  const rows = all
+    .filter((r) => r.status === "pending")
+    .map((r) => {
+      const st = byId.get(r.studentId)!;
+      return {
+        studentName: st.fullName,
+        classLabel: classLabel(masters, st.classId, st.sectionId).replace(" · ", " "),
+        rollNo: st.rollNo,
+        fromDate: r.fromDate,
+        toDate: r.toDate || r.fromDate,
+        days: leaveDayCount(r),
+        typeLabel: leaveTypeLabel(r.leaveType),
+        reason: r.reason || "",
+        requestedAt: r.createdAt,
+        approver: pendingApproverHint(r).replace(/\s*\(.*\)$/, ""),
+      };
+    });
+  const approvedToday = all.filter(
+    (r) => r.status === "approved" && r.fromDate <= todayIso && (r.toDate || r.fromDate) >= todayIso,
+  ).length;
+  return formatPendingLeavesReply({
+    todayIso,
+    scope: (resolved.scope as "school" | "mine" | "section") || "school",
+    scopeLabel: resolved.scopeLabel,
+    rows,
+    approvedToday,
   });
 }
 

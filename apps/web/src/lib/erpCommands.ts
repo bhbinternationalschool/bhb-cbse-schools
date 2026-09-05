@@ -122,6 +122,31 @@ export const ERP_COMMANDS: ErpCommandDef[] = [
     scope: "any",
   },
   {
+    id: "pending_leaves",
+    title: "Pending student leave requests",
+    kind: "read",
+    module: "student_leave",
+    action: "view",
+    description:
+      "Student leave requests awaiting approval — oldest first, with student, class, dates, type, reason and who approves. Optionally one class-section. Teachers see their own sections; office and leadership the whole school.",
+    examples: [
+      "pending leaves",
+      "leave requests",
+      "5A leave requests",
+      "kitni chutti pending hai",
+      "leave approvals",
+    ],
+    fields: [
+      {
+        name: "section",
+        type: "section",
+        required: false,
+        description: "Optional class-section to narrow to, e.g. 5A",
+      },
+    ],
+    scope: "any",
+  },
+  {
     id: "free_teachers",
     title: "Free teachers in a period",
     kind: "read",
@@ -454,7 +479,7 @@ export function resolveCommandDate(text: string, todayIso: string): string {
 
 // \b is ASCII-only in JS, so Hindi words need explicit letter lookarounds.
 const ABSENT_WORDS =
-  /(?<![\p{L}\p{M}\p{N}])(absent|absentee|absentees|gair\s*hazir|gairhazir|गैर\s*हाज़िर|गैरहाजिर|अनुपस्थित|nahi\s+aaya|nahi\s+aaye|नहीं\s+आया|नहीं\s+आए|hazri|haziri|हाज़िरी|हाजिरी|attendance|upasthiti|उपस्थिति)(?![\p{L}\p{M}\p{N}])/iu;
+  /(?<![\p{L}\p{M}\p{N}])(absent|absentee|absentees|gair\s*hazir|gairhazir|गैर\s*हाज़िर|गैरहाजिर|अनुपस्थित|nahi\s+aaya|nahi\s+aaye|नहीं\s+आया|नहीं\s+आए|hazri|haziri|हाज़िरी|हाजिरी|attendance|upasthiti|उपस्थिति|(?:on|pe|par)\s+leave|leave\s+(?:pe|par)|chutti\s+(?:pe|par)|छुट्टी\s+पर)(?![\p{L}\p{M}\p{N}])/iu;
 
 const HELP_WORDS = /^\s*(commands?|command\s+help|cmd|कमांड|\?)\s*$/i;
 
@@ -502,6 +527,16 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
   }
   if (COLLECTION_WORDS.test(t) && !extractSectionRefs(t).length) {
     return { commandId: "collection_today", fields: { date: "" }, source: "local" };
+  }
+  // Leave queue before any fee reading: "pending" and "baki" are fee words
+  // too, but "chutti pending" is about leave.
+  if (LEAVE_WORDS.test(t) && !ABSENT_WORDS.test(t) && !/(?<![\p{L}\p{M}])(fees?|dues?|फीस|बकाया)(?![\p{L}\p{M}])/iu.test(t)) {
+    const lr = extractSectionRefs(t)[0];
+    return {
+      commandId: "pending_leaves",
+      fields: { section: lr ? `${lr.classKey}${lr.sectionName}` : "" },
+      source: "local",
+    };
   }
   const refs = extractSectionRefs(t);
   const feesQ = parseStudentFeesQuery(t);
@@ -711,13 +746,7 @@ export type AbsentListInput = {
 
 function fmtDate(iso: string, todayIso: string): string {
   if (iso === todayIso) return "today";
-  const d = new Date(`${iso}T00:00:00Z`);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString("en-IN", {
-    day: "numeric",
-    month: "short",
-    timeZone: "UTC",
-  });
+  return shortDate(iso);
 }
 
 function nameList(rows: { rollNo: string; fullName: string }[]): string {
@@ -1138,10 +1167,14 @@ function maskMobile(m: string): string {
   return `${d.slice(0, 2)}xxxxxx${d.slice(-2)}`;
 }
 
+const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "2026-09-04" → "4 Sep". Fixed table: Node's en-IN says "Sept", browsers say "Sep". */
 function shortDate(iso: string): string {
-  const d = new Date(`${iso}T00:00:00Z`);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" });
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || "");
+  if (!m) return iso;
+  const month = MONTH_SHORT[parseInt(m[2]!, 10) - 1];
+  return month ? `${parseInt(m[3]!, 10)} ${month}` : iso;
 }
 
 export function formatStudentFeesReply(input: StudentFeesInput): string {
@@ -1532,6 +1565,15 @@ export const TENDER_MODE_LABEL: Record<string, string> = {
 
 // ─── Free teachers in a period ─────────────────────────────────────────
 
+/**
+ * Student leave queue: "pending leaves", "leave requests", "5A leave
+ * requests", "kitni chutti pending hai", "leave approvals". A leave word
+ * plus a queue word; "leave" alone could be a teacher's own leave, which
+ * the staff bot handles.
+ */
+const LEAVE_WORDS =
+  /(?=.*(?<![\p{L}\p{M}\p{N}])(leaves?|chutti|chhutti|छुट्टी|छुट्टियां|avkash|avakash|अवकाश)(?![\p{L}\p{M}\p{N}]))(?=.*(?<![\p{L}\p{M}\p{N}])(pending|requests?|approvals?|approve|queue|list|applications?|kitni|kitne|कितनी|बाकी|baki)(?![\p{L}\p{M}\p{N}]))/iu;
+
 const FREE_WORDS =
   /(?<![\p{L}\p{M}\p{N}])(free|khali|khaali|खाली|available|vacant|substitute|substitution|kaun\s+aa\s+sakta)(?![\p{L}\p{M}\p{N}])/iu;
 
@@ -1637,4 +1679,67 @@ export function periodAtTime(
   const next = sorted.find((p) => toMin(p.startTime) > t);
   if (!next) return { after: true };
   return { no: next.no };
+}
+
+// ─── Pending student leaves ────────────────────────────────────────────
+
+export type PendingLeaveRow = {
+  studentName: string;
+  classLabel: string;
+  rollNo: string;
+  fromDate: string;
+  toDate: string;
+  days: number;
+  typeLabel: string;
+  reason: string;
+  requestedAt: string; // ISO
+  approver: string;
+};
+
+export type PendingLeavesInput = {
+  todayIso: string;
+  scope: "school" | "mine" | "section";
+  scopeLabel?: string;
+  rows: PendingLeaveRow[];
+  approvedToday: number;
+};
+
+function agoLabel(iso: string, todayIso: string): string {
+  const d = iso.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return "";
+  const days = Math.round((Date.parse(`${todayIso}T00:00:00Z`) - Date.parse(`${d}T00:00:00Z`)) / 86_400_000);
+  if (days <= 0) return "today";
+  if (days === 1) return "yesterday";
+  return `${days}d ago`;
+}
+
+export function formatPendingLeavesReply(input: PendingLeavesInput): string {
+  const where =
+    input.scope === "school" ? "school" : input.scope === "section" ? input.scopeLabel || "section" : "your sections";
+  const lines: string[] = [`*Pending leave requests* · ${where}`];
+  if (!input.rows.length) {
+    lines.push("Nothing waiting for approval. ✅");
+  } else {
+    lines.push(`${input.rows.length} waiting · oldest first`);
+    const sorted = [...input.rows].sort((a, b) => a.requestedAt.localeCompare(b.requestedAt));
+    for (const r of sorted.slice(0, 15)) {
+      const span =
+        r.fromDate === r.toDate
+          ? shortDate(r.fromDate)
+          : `${shortDate(r.fromDate)}–${shortDate(r.toDate)} (${r.days}d)`;
+      const reason = r.reason.trim();
+      lines.push(
+        "",
+        `*${r.studentName}* · ${r.classLabel}${r.rollNo ? ` · roll ${r.rollNo}` : ""}`,
+        `${span} · ${r.typeLabel}${reason ? ` · ${reason.length > 60 ? `${reason.slice(0, 57).trimEnd()}…` : reason}` : ""}`,
+        `asked ${agoLabel(r.requestedAt, input.todayIso)} · approver: ${r.approver}`,
+      );
+    }
+    if (sorted.length > 15) lines.push("", `+${sorted.length - 15} more`);
+  }
+  if (input.approvedToday) {
+    lines.push("", `${input.approvedToday} student${input.approvedToday === 1 ? "" : "s"} on approved leave today.`);
+  }
+  lines.push("", "Approve or reject in the ERP: Attendance → Leave.");
+  return lines.join("\n");
 }
