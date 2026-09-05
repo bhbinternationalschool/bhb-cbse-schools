@@ -95,6 +95,18 @@ export const ERP_COMMANDS: ErpCommandDef[] = [
     scope: "own_sections",
   },
   {
+    id: "commands_digest",
+    title: "Today's command desk report (director)",
+    kind: "read",
+    module: "settings",
+    action: "view",
+    description:
+      "Director only: what staff asked the ERP today over WhatsApp, the app and the assistant — counts by command, channel and person, plus anything denied.",
+    examples: ["commands report", "commands digest", "aaj ke commands"],
+    fields: [],
+    scope: "any",
+  },
+  {
     id: "help",
     title: "List available commands",
     kind: "read",
@@ -311,6 +323,9 @@ const ABSENT_WORDS =
 
 const HELP_WORDS = /^\s*(commands?|command\s+help|cmd|कमांड|\?)\s*$/i;
 
+const DIGEST_WORDS =
+  /^\s*(commands?\s+(report|digest|summary|log)|(aaj|today)\s*(ke|ka|'s)?\s*commands?|ai\s+(report|digest))\s*$/i;
+
 /**
  * Regex fast path — no model call for the commands staff send all day.
  * Returns null when nothing matched with confidence; the server then
@@ -321,6 +336,9 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
   if (!t) return null;
   if (HELP_WORDS.test(t)) {
     return { commandId: "help", fields: {}, source: "local" };
+  }
+  if (DIGEST_WORDS.test(t)) {
+    return { commandId: "commands_digest", fields: {}, source: "local" };
   }
   const refs = extractSectionRefs(t);
   if (refs.length && ABSENT_WORDS.test(t)) {
@@ -595,4 +613,172 @@ export function waMarkersToAssistantText(text: string): string {
   return (text || "")
     .replace(/(^|[^*])\*(\S(?:[^*\n]*\S)?)\*(?!\*)/g, "$1**$2**")
     .replace(/(^|[\s(])_([^_\n]+)_(?=$|[\s).,!?])/g, "$1$2");
+}
+
+// ─── Daily digest for the director ─────────────────────────────────────
+
+/** One audit row from module `erp_commands`, as the digest reads it. */
+export type CommandAuditRow = {
+  actorName: string;
+  actorEmail: string | null;
+  action: string;
+  entityId: string;
+  summary: string;
+  after: Record<string, unknown> | null;
+  createdAt: string;
+};
+
+export type CommandDigestStats = {
+  total: number;
+  ok: number;
+  denied: number;
+  errors: number;
+  writes: number;
+  voice: number;
+  byChannel: { channel: string; count: number }[];
+  byCommand: { commandId: string; count: number }[];
+  byActor: { name: string; count: number; denied: number }[];
+  deniedRows: { name: string; text: string; reason: string; at: string }[];
+  writeRows: { name: string; text: string; at: string }[];
+};
+
+function str(v: unknown): string {
+  return typeof v === "string" ? v : "";
+}
+
+function stripSummaryPrefix(summary: string): string {
+  return summary.replace(/^(WhatsApp|App) command \((ok|denied|error)\): /, "");
+}
+
+function countBy<T>(rows: T[], key: (r: T) => string): { k: string; count: number }[] {
+  const m = new Map<string, number>();
+  for (const r of rows) m.set(key(r), (m.get(key(r)) ?? 0) + 1);
+  return [...m.entries()]
+    .map(([k, count]) => ({ k, count }))
+    .sort((a, b) => b.count - a.count || a.k.localeCompare(b.k));
+}
+
+export function summarizeCommandAudit(rows: CommandAuditRow[]): CommandDigestStats {
+  const outcome = (r: CommandAuditRow) => str(r.after?.outcome) || "ok";
+  const denied = rows.filter((r) => outcome(r) === "denied");
+  const errors = rows.filter((r) => outcome(r) === "error");
+  const writes = rows.filter((r) => r.action === "edit" && outcome(r) === "ok");
+  const actorStats = new Map<string, { count: number; denied: number }>();
+  for (const r of rows) {
+    const name = r.actorName || r.actorEmail || "Unknown";
+    const cur = actorStats.get(name) ?? { count: 0, denied: 0 };
+    cur.count += 1;
+    if (outcome(r) === "denied") cur.denied += 1;
+    actorStats.set(name, cur);
+  }
+  const fmtTime = (iso: string) => {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toLocaleTimeString("en-IN", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+      timeZone: "Asia/Kolkata",
+    });
+  };
+  return {
+    total: rows.length,
+    ok: rows.filter((r) => outcome(r) === "ok").length,
+    denied: denied.length,
+    errors: errors.length,
+    writes: writes.length,
+    voice: rows.filter((r) => r.after?.voice === true).length,
+    byChannel: countBy(rows, (r) => str(r.after?.channel) || "whatsapp").map((x) => ({
+      channel: x.k,
+      count: x.count,
+    })),
+    byCommand: countBy(rows, (r) => r.entityId || str(r.after?.command) || "?").map((x) => ({
+      commandId: x.k,
+      count: x.count,
+    })),
+    byActor: [...actorStats.entries()]
+      .map(([name, v]) => ({ name, ...v }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
+    deniedRows: denied.map((r) => ({
+      name: r.actorName || r.actorEmail || "Unknown",
+      text: stripSummaryPrefix(r.summary),
+      reason: str(r.after?.reason) || "denied",
+      at: fmtTime(r.createdAt),
+    })),
+    writeRows: writes.map((r) => ({
+      name: r.actorName || r.actorEmail || "Unknown",
+      text: stripSummaryPrefix(r.summary),
+      at: fmtTime(r.createdAt),
+    })),
+  };
+}
+
+const CHANNEL_LABEL: Record<string, string> = {
+  whatsapp: "WhatsApp",
+  app: "App / assistant",
+};
+
+/**
+ * The director's end-of-day line on the command desk. Short enough to read
+ * on a phone: totals, who used it, what was denied, every write. WhatsApp
+ * markers; the assistant path converts them.
+ */
+export function formatCommandDigest(
+  stats: CommandDigestStats,
+  opts: { date: string; paused: boolean; pausedBy?: string; commands?: ErpCommandDef[] },
+): string {
+  const d = new Date(`${opts.date}T00:00:00Z`);
+  const dateLabel = Number.isNaN(d.getTime())
+    ? opts.date
+    : d.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" });
+  const lines: string[] = [`*ERP commands · ${dateLabel}*`];
+  if (opts.paused) {
+    lines.push(`⏸ Commands are paused${opts.pausedBy ? ` by ${opts.pausedBy}` : ""}.`);
+  }
+  if (stats.total === 0) {
+    lines.push("No commands today.");
+    return lines.join("\n");
+  }
+  const head = [`${stats.total} command${stats.total === 1 ? "" : "s"}`];
+  if (stats.writes) head.push(`${stats.writes} write${stats.writes === 1 ? "" : "s"}`);
+  if (stats.denied) head.push(`${stats.denied} denied`);
+  if (stats.errors) head.push(`${stats.errors} failed`);
+  if (stats.voice) head.push(`${stats.voice} by voice`);
+  lines.push(head.join(" · "));
+  lines.push(
+    stats.byChannel.map((c) => `${CHANNEL_LABEL[c.channel] || c.channel} ${c.count}`).join(" · "),
+  );
+  const title = (id: string) =>
+    (opts.commands ?? ERP_COMMANDS).find((c) => c.id === id)?.title || id;
+  lines.push("", "*By command*");
+  for (const c of stats.byCommand.slice(0, 6)) lines.push(`${c.count} × ${title(c.commandId)}`);
+  lines.push("", "*Who*");
+  for (const a of stats.byActor.slice(0, 6)) {
+    lines.push(`${a.name} ${a.count}${a.denied ? ` (${a.denied} denied)` : ""}`);
+  }
+  if (stats.byActor.length > 6) lines.push(`+${stats.byActor.length - 6} more`);
+  if (stats.writeRows.length) {
+    lines.push("", "*Writes*");
+    for (const w of stats.writeRows.slice(0, 10)) lines.push(`${w.at} ${w.name}: ${w.text}`);
+    if (stats.writeRows.length > 10) lines.push(`+${stats.writeRows.length - 10} more`);
+  }
+  if (stats.deniedRows.length) {
+    lines.push("", "*Denied*");
+    for (const r of stats.deniedRows.slice(0, 5)) {
+      lines.push(`${r.at} ${r.name}: ${r.text} (${r.reason === "scope" ? "not their section" : r.reason === "rbac" ? "no permission" : r.reason})`);
+    }
+    if (stats.deniedRows.length > 5) lines.push(`+${stats.deniedRows.length - 5} more`);
+  }
+  return lines.join("\n");
+}
+
+/** One line, no newlines — for a WhatsApp template parameter or a push body. */
+export function formatCommandDigestOneLine(stats: CommandDigestStats, date: string): string {
+  if (stats.total === 0) return `ERP commands ${date}: none.`;
+  const parts = [`${stats.total} commands`];
+  if (stats.writes) parts.push(`${stats.writes} writes`);
+  if (stats.denied) parts.push(`${stats.denied} denied`);
+  const top = stats.byActor[0];
+  if (top) parts.push(`most by ${top.name} (${top.count})`);
+  return `ERP commands ${date}: ${parts.join(", ")}.`;
 }

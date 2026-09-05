@@ -27,6 +27,10 @@ import {
   resolveCommandDate,
   resolveSectionRef,
   waMarkersToAssistantText,
+  formatCommandDigest,
+  formatCommandDigestOneLine,
+  summarizeCommandAudit,
+  type CommandAuditRow,
   type PendingErpConfirm,
 } from "./erpCommands";
 
@@ -149,6 +153,9 @@ const masters = {
   assert.equal(parseErpCommandLocal("8B hazri")?.commandId, "absent_list");
   assert.equal(parseErpCommandLocal("VIII B me kaun nahi aaya")?.fields.section, "8B");
   assert.equal(parseErpCommandLocal("commands")?.commandId, "help");
+  assert.equal(parseErpCommandLocal("commands report")?.commandId, "commands_digest");
+  assert.equal(parseErpCommandLocal("aaj ke commands")?.commandId, "commands_digest");
+  assert.equal(parseErpCommandLocal("AI report")?.commandId, "commands_digest");
   assert.equal(parseErpCommandLocal("?")?.commandId, "help");
   assert.equal(parseErpCommandLocal("hello sir"), null);
   assert.equal(parseErpCommandLocal("5A"), null, "a bare section with no ask is not a command");
@@ -301,6 +308,84 @@ const masters = {
     "underscores inside words are not italics",
   );
   assert.equal(waMarkersToAssistantText("2 * 3 * 4"), "2 * 3 * 4", "spaced asterisks are arithmetic, not bold");
+}
+
+// ─── director's daily digest ───────────────────────────────────────────
+{
+  const row = (
+    over: Partial<CommandAuditRow> & { after?: Record<string, unknown> | null },
+  ): CommandAuditRow => ({
+    actorName: "Sunita Sharma",
+    actorEmail: null,
+    action: "view",
+    entityId: "absent_list",
+    summary: "WhatsApp command (ok): 5A me aaj kaun absent hai",
+    after: { outcome: "ok", channel: "whatsapp", command: "absent_list" },
+    createdAt: "2026-09-05T04:30:00.000Z",
+    ...over,
+  });
+  const rows: CommandAuditRow[] = [
+    row({}),
+    row({ after: { outcome: "ok", channel: "whatsapp", command: "absent_list", voice: true } }),
+    row({ actorName: "Rakesh Verma", after: { outcome: "ok", channel: "app", command: "absent_list" } }),
+    row({
+      actorName: "Rakesh Verma",
+      entityId: "help",
+      summary: "App command (ok): commands",
+      after: { outcome: "ok", channel: "app", command: "help" },
+    }),
+    row({
+      actorName: "Rakesh Verma",
+      summary: "WhatsApp command (denied): 7B absent",
+      after: { outcome: "denied", reason: "scope", channel: "whatsapp", command: "absent_list" },
+      createdAt: "2026-09-05T06:05:00.000Z",
+    }),
+    row({
+      actorName: "Anita Devi",
+      action: "edit",
+      entityId: "post_homework",
+      summary: "App command (ok): post homework 6B maths ex 4.2",
+      after: { outcome: "ok", channel: "app", command: "post_homework" },
+      createdAt: "2026-09-05T09:40:00.000Z",
+    }),
+  ];
+  const stats = summarizeCommandAudit(rows);
+  assert.equal(stats.total, 6);
+  assert.equal(stats.ok, 5);
+  assert.equal(stats.denied, 1);
+  assert.equal(stats.writes, 1);
+  assert.equal(stats.voice, 1);
+  assert.deepEqual(stats.byChannel, [
+    { channel: "app", count: 3 },
+    { channel: "whatsapp", count: 3 },
+  ]);
+  assert.equal(stats.byCommand[0]!.commandId, "absent_list");
+  assert.equal(stats.byCommand[0]!.count, 4);
+  assert.deepEqual(stats.byActor[0], { name: "Rakesh Verma", count: 3, denied: 1 });
+  assert.equal(stats.deniedRows[0]!.text, "7B absent");
+  assert.equal(stats.deniedRows[0]!.reason, "scope");
+  assert.equal(stats.deniedRows[0]!.at, "11:35 am", "times are shown in IST");
+  assert.equal(stats.writeRows[0]!.text, "post homework 6B maths ex 4.2");
+
+  const text = formatCommandDigest(stats, { date: "2026-09-05", paused: false });
+  assert.ok(text.startsWith("*ERP commands · 5 Sept*") || text.startsWith("*ERP commands · 5 Sep*"), text);
+  assert.ok(text.includes("6 commands · 1 write · 1 denied · 1 by voice"));
+  assert.ok(text.includes("App / assistant 3 · WhatsApp 3"));
+  assert.ok(text.includes("4 × Absent list for a section"));
+  assert.ok(text.includes("Rakesh Verma 3 (1 denied)"));
+  assert.ok(text.includes("*Writes*\n03:10 pm Anita Devi: post homework 6B maths ex 4.2"));
+  assert.ok(text.includes("*Denied*\n11:35 am Rakesh Verma: 7B absent (not their section)"));
+  assert.ok(!text.includes("⏸"));
+
+  const paused = formatCommandDigest(stats, { date: "2026-09-05", paused: true, pausedBy: "Director" });
+  assert.ok(paused.includes("⏸ Commands are paused by Director."));
+
+  const quiet = formatCommandDigest(summarizeCommandAudit([]), { date: "2026-09-05", paused: false });
+  assert.ok(quiet.includes("No commands today."));
+
+  const one = formatCommandDigestOneLine(stats, "2026-09-05");
+  assert.equal(one, "ERP commands 2026-09-05: 6 commands, 1 writes, 1 denied, most by Rakesh Verma (3).");
+  assert.ok(!one.includes("\n"));
 }
 
 console.log("erpCommands.selftest.ts OK");
