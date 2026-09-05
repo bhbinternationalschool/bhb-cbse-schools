@@ -26,8 +26,13 @@ export async function googleSpeechToText(opts: {
     return { ok: false, error: "Speech API key not configured" };
   }
 
-  const encoding =
-    opts.mimeType?.includes("webm") ? "WEBM_OPUS" : "LINEAR16";
+  // WhatsApp voice notes arrive as audio/ogg; codecs=opus at 16 kHz.
+  const mime = (opts.mimeType || "").toLowerCase();
+  const encoding = mime.includes("webm")
+    ? "WEBM_OPUS"
+    : mime.includes("ogg") || mime.includes("opus")
+      ? "OGG_OPUS"
+      : "LINEAR16";
   const lang = opts.languageCode || "hi-IN";
 
   try {

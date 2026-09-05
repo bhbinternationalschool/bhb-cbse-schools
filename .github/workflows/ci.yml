@@ -256,6 +256,7 @@ jobs:
           npm run test:wa-delivery-log
           npm run test:wa-sequences
           npm run test:wa-staff-att-bot
+          npm run test:erp-commands
 
   build:
     name: Production build

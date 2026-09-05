@@ -34,6 +34,7 @@ import { handleWaCrmBotInbound } from "@/lib/waCrmBotServer";
 import { handleWaSisBotInbound } from "@/lib/waSisBotServer";
 import { handleWaSurveyBotInbound } from "@/lib/waSurveyBotServer";
 import { handleWaStaffAttendanceInbound } from "@/lib/waStaffAttendanceBotServer";
+import { handleErpStaffCommand } from "@/lib/erpCommands.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { sendWhatsAppText, waNormalizeLocal10 } from "@/lib/waSend";
 import { sendWhatsAppInteractive } from "@/lib/waInteractive";
@@ -186,6 +187,7 @@ async function delegateActiveFlow(
       address?: string;
       accuracyM?: number;
     };
+    audio?: { mediaId: string; mimeType?: string } | null;
   },
   identity: WaResolvedIdentity,
   session: WaUnifiedSession,
@@ -209,6 +211,40 @@ async function delegateActiveFlow(
         stub: att.stub,
         error: att.error,
       };
+    }
+  }
+
+  // ERP command desk — "5A me aaj kaun absent hai" and friends. Runs before
+  // the keyword bots for every staff kind, and steps aside (handled:false)
+  // for anything that is not clearly a command, so the class channel and
+  // the leadership snapshots keep answering what they answer today.
+  if (flow === "teacher" || flow === "staff" || flow === "owner") {
+    const staffRole =
+      identity.roles.find((r) => r.kind === flow && r.staff) ??
+      identity.roles.find((r) => r.staff);
+    const cmd = await handleErpStaffCommand({
+      mobile10,
+      text: opts.text,
+      flow,
+      staff: staffRole?.staff ?? null,
+      displayName: session.displayName || identity.displayName,
+      audio: opts.audio ?? null,
+    });
+    if (cmd.handled) {
+      const ok = await sendBotReply({
+        mobile10,
+        displayName: session.displayName || identity.displayName,
+        category: categoryForUnifiedAudience(flow, flow),
+        audience: cmd.audience,
+        flow,
+        menu: cmd.menu,
+        text: cmd.text,
+        inbound: {
+          text: opts.text || (opts.audio ? "[voice note]" : ""),
+          waMessageId: opts.waMessageId,
+        },
+      });
+      return { replied: ok, escalate: false, audience: cmd.audience, stub: !ok };
     }
   }
 
@@ -468,6 +504,8 @@ export async function handleWaUnifiedInbound(opts: {
     address?: string;
     accuracyM?: number;
   };
+  /** Voice note (audio media) — transcribed only for staff command flows. */
+  audio?: { mediaId: string; mimeType?: string } | null;
 }): Promise<{
   replied: boolean;
   escalate: boolean;

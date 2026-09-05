@@ -17,6 +17,8 @@ export type WaBotPersistBundle = {
   hub: unknown | null;
   staffAtt: unknown | null;
   complaints: unknown | null;
+  /** ERP command desk — pause switch, pending confirms, hourly usage. */
+  commands: unknown | null;
 };
 
 const LOCAL_FILE = path.join(process.cwd(), ".data", "wa_bot_threads_bundle.json");
@@ -36,6 +38,7 @@ function emptyBundle(): WaBotPersistBundle {
     hub: null,
     staffAtt: null,
     complaints: null,
+    commands: null,
   };
 }
 
@@ -71,6 +74,7 @@ async function loadBundle(): Promise<WaBotPersistBundle> {
         hub: remote.state.hub ?? null,
         staffAtt: remote.state.staffAtt ?? null,
         complaints: remote.state.complaints ?? null,
+        commands: remote.state.commands ?? null,
       };
       loaded = true;
       return cache;
@@ -137,6 +141,7 @@ export async function loadWaBotSlice<T>(
     | "hub"
     | "staffAtt"
     | "complaints"
+    | "commands"
   >,
   fallback: T,
 ): Promise<T> {
@@ -157,6 +162,7 @@ export async function saveWaBotSlice<T>(
     | "hub"
     | "staffAtt"
     | "complaints"
+    | "commands"
   >,
   value: T,
 ): Promise<void> {
