@@ -130,7 +130,7 @@ jobs:
       - name: Test — an ended academic year cannot still be current
         working-directory: apps/web
         run: npm run test:academic-year-resolve
-      - name: Test — an ended academic year cannot still be current
+      - name: Test — idle logout is thirty minutes for every session (standing policy)
         working-directory: apps/web
         run: npm run test:workspace-policy
 
