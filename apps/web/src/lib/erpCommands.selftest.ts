@@ -36,6 +36,7 @@ import {
   formatStudentMatchesAsk,
   formatAttendanceSummaryReply,
   formatClassDefaultersReply,
+  formatCollectionReply,
   resolveClassOrSectionRef,
   type CommandAuditRow,
   type PendingErpConfirm,
@@ -162,6 +163,13 @@ const masters = {
   assert.equal(parseErpCommandLocal("VIII B me kaun nahi aaya")?.fields.section, "8B");
   assert.equal(parseErpCommandLocal("5A में कौन गैरहाजिर है")?.commandId, "absent_list", "Devanagari fee/absent words match without ASCII word boundaries");
   assert.equal(parseErpCommandLocal("7B की उपस्थिति")?.fields.section, "7B");
+  assert.equal(parseErpCommandLocal("aaj ka collection")?.commandId, "collection_today");
+  assert.equal(parseErpCommandLocal("today's collection")?.commandId, "collection_today");
+  assert.equal(parseErpCommandLocal("kal ka collection")?.commandId, "collection_today");
+  assert.equal(parseErpCommandLocal("collection report")?.commandId, "collection_today");
+  assert.equal(parseErpCommandLocal("aaj kitna cash aaya")?.commandId, "collection_today");
+  assert.equal(parseErpCommandLocal("आज का कलेक्शन")?.commandId, "collection_today");
+  assert.equal(parseErpCommandLocal("5A collection"), null, "a class with 'collection' is not the day's takings");
   assert.equal(parseErpCommandLocal("attendance summary")?.commandId, "attendance_summary");
   assert.equal(parseErpCommandLocal("aaj ki attendance")?.commandId, "attendance_summary");
   assert.equal(parseErpCommandLocal("today's attendance")?.commandId, "attendance_summary");
@@ -612,6 +620,52 @@ const masters = {
 
   const limited = formatClassDefaultersReply({ title: "Class V", todayIso: "2026-09-05", wholeClass: true, rows: [], limitedTo: ["V A"], formatInr: inr });
   assert.ok(limited.includes("(your sections only: V A)") && limited.includes("No overdue fees. ✅"), limited);
+}
+
+// ─── collection reply ──────────────────────────────────────────────────
+{
+  const inr = (p: number) => `₹${(p / 100).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+  const base = {
+    date: "2026-09-05",
+    todayIso: "2026-09-05",
+    receiptCount: 23,
+    totalPaise: 18650000,
+    byMode: [
+      { label: "Cash", paise: 9200000, count: 12 },
+      { label: "UPI", paise: 6100000, count: 8 },
+      { label: "Online (Cashfree)", paise: 2350000, count: 2 },
+      { label: "Cheque / DD", paise: 1000000, count: 1 },
+    ],
+    chequesPending: { count: 1, paise: 1000000 },
+    bySource: { counter: 20, manualBook: 1, paymentLink: 2 },
+    cashiers: [
+      { name: "Sunita Sharma", paise: 12000000, count: 15 },
+      { name: "Rakesh Verma", paise: 6650000, count: 8 },
+    ],
+    dayClose: { status: "submitted", cashierName: "Sunita Sharma", physicalCashPaise: 9150000, systemCashPaise: 9200000 },
+    monthToDatePaise: 41200000,
+    monthLabel: "September",
+    formatInr: inr,
+  };
+  const t = formatCollectionReply(base);
+  assert.ok(t.startsWith("*Fee collection* · today\n*₹1,86,500* · 23 receipts"), t);
+  assert.ok(t.includes("*By mode*\nCash   ₹92,000  (12)\nUPI   ₹61,000  (8)\nOnline (Cashfree)   ₹23,500  (2)\nCheque / DD   ₹10,000  (1)"), t);
+  assert.ok(t.includes("Cheques awaiting clearance: 1 · ₹10,000"), t);
+  assert.ok(t.includes("Receipts: counter 20 · paper book 1 · online link 2"), t);
+  assert.ok(t.includes("*By cashier*\nSunita Sharma   ₹1,20,000  (15)"), t);
+  assert.ok(t.includes("Day close: submitted, awaiting approval (Sunita Sharma) · cash short by ₹500"), t);
+  assert.ok(t.endsWith("September so far: ₹4,12,000"), t);
+
+  const empty = formatCollectionReply({ ...base, receiptCount: 0, totalPaise: 0, byMode: [], cashiers: [], dayClose: null, chequesPending: { count: 0, paise: 0 }, bySource: { counter: 0, manualBook: 0, paymentLink: 0 } });
+  assert.ok(empty.includes("No receipts yet.") && empty.includes("Day close: —"), empty);
+
+  const single = formatCollectionReply({ ...base, cashiers: base.cashiers.slice(0, 1), bySource: { counter: 23, manualBook: 0, paymentLink: 0 }, dayClose: { status: "approved", cashierName: "", physicalCashPaise: null, systemCashPaise: null } });
+  assert.ok(!single.includes("*By cashier*"), "one cashier — no breakdown");
+  assert.ok(!single.includes("Receipts:"), "one source — no breakdown");
+  assert.ok(single.includes("Day close: approved ✅"), single);
+
+  const yesterday = formatCollectionReply({ ...base, date: "2026-09-04", dayClose: null });
+  assert.ok(yesterday.startsWith("*Fee collection* · 4 Sep") && yesterday.includes("Day close: not started."), yesterday);
 }
 
 console.log("erpCommands.selftest.ts OK");
