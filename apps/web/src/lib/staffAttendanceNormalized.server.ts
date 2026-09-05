@@ -26,6 +26,7 @@ import {
   staffAttendanceReadFromDbEnabled,
 } from "@/lib/staffAttendanceDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { fetchAllPages, fetchByIds } from "@/lib/supabase/pageAll";
 
 export type StaffAttendanceDeskSyncMeta = {
   registerCount: number;
@@ -234,10 +235,16 @@ export async function pushStaffAttendanceRegistersToDb(
   }
 
   const regIds = new Set(active.map((r) => r.id));
-  const { data: existingMarks } = await sb
-    .from("staff_attendance_desk_marks")
-    .select("id, register_id")
-    .eq("tenant_id", tenantId);
+  // Paged: 1,812 marks already, and one request returns 1,000.
+  const { rows: existingMarks } = await fetchAllPages<{ id: string; register_id: string }>(
+    (from, to) =>
+      sb
+        .from("staff_attendance_desk_marks")
+        .select("id, register_id")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+  );
   const staleMarkIds = (existingMarks ?? [])
     .filter((m) => regIds.has(String(m.register_id)))
     .map((m) => String(m.id));
@@ -275,11 +282,18 @@ export async function fetchStaffAttendanceRegistersFromDb(): Promise<{
   if (!ctx) return { registers: [], meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
-  const { data: headers, error: hErr } = await sb
-    .from("staff_attendance_desk_registers")
-    .select("*")
-    .eq("tenant_id", tenantId)
-    .order("attendance_date", { ascending: false });
+  const headersRes = await fetchAllPages<Record<string, unknown>>((from, to) =>
+    sb
+      .from("staff_attendance_desk_registers")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+  const hErr = headersRes.error ? { message: headersRes.error } : null;
+  const headers = headersRes.rows.sort((a, b) =>
+    String(b.attendance_date ?? "").localeCompare(String(a.attendance_date ?? "")),
+  );
 
   if (hErr) {
     console.warn("[staff-attendance-db] fetch registers failed", hErr.message);
@@ -300,19 +314,26 @@ export async function fetchStaffAttendanceRegistersFromDb(): Promise<{
   }
 
   const ids = headers.map((h) => h.id as string);
-  const [{ data: markRows, error: mErr }, { data: metaRow }] =
+  // Chunked by register and paged — 1,812 marks do not fit one request.
+  const [markRes, { data: metaRow }] =
     await Promise.all([
-      sb
-        .from("staff_attendance_desk_marks")
-        .select("*")
-        .eq("tenant_id", tenantId)
-        .in("register_id", ids),
+      fetchByIds<Record<string, unknown>>(ids, (chunk, from, to) =>
+        sb
+          .from("staff_attendance_desk_marks")
+          .select("*")
+          .eq("tenant_id", tenantId)
+          .in("register_id", chunk)
+          .order("id", { ascending: true })
+          .range(from, to),
+      ),
       sb
         .from("staff_attendance_desk_sync_meta")
         .select(META_SELECT)
         .eq("tenant_id", tenantId)
         .maybeSingle(),
     ]);
+  const markRows = markRes.rows;
+  const mErr = markRes.error ? { message: markRes.error } : null;
 
   if (mErr) {
     console.warn("[staff-attendance-db] fetch marks failed", mErr.message);

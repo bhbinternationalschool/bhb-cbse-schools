@@ -11,6 +11,7 @@ import type {
 } from "@/lib/payments";
 import { paymentsDualWriteDbEnabled } from "@/lib/paymentsDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { fetchAllPages } from "@/lib/supabase/pageAll";
 
 export type PaymentGatewayProvider = "razorpay" | "cashfree" | "demo" | "manual";
 
@@ -252,10 +253,15 @@ export async function pushPaymentLinksToDb(
   }
 
   const linkIds = new Set(active.map((l) => l.id));
-  const { data: existingLines } = await sb
-    .from("payment_desk_link_lines")
-    .select("id, payment_link_id")
-    .eq("tenant_id", tenantId);
+  const { rows: existingLines } = await fetchAllPages<{ id: string; payment_link_id: string }>(
+    (from, to) =>
+      sb
+        .from("payment_desk_link_lines")
+        .select("id, payment_link_id")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+  );
   const staleLineIds = (existingLines ?? [])
     .filter((r) => linkIds.has(String(r.payment_link_id)))
     .map((r) => String(r.id));
@@ -298,11 +304,18 @@ export async function fetchPaymentLinksFromDb(): Promise<{
   if (!ctx) return { links: [], meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
-  const { data: headers, error: hErr } = await sb
-    .from("payment_desk_links")
-    .select("*")
-    .eq("tenant_id", tenantId)
-    .order("created_at", { ascending: false });
+  const headersRes = await fetchAllPages<Record<string, unknown>>((from, to) =>
+    sb
+      .from("payment_desk_links")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+  const hErr = headersRes.error ? { message: headersRes.error } : null;
+  const headers = headersRes.rows.sort((a, b) =>
+    String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")),
+  );
 
   if (hErr) {
     console.warn("[payments-db] fetch failed", hErr.message);
