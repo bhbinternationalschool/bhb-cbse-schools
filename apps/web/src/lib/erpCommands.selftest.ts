@@ -39,6 +39,8 @@ import {
   formatCollectionReply,
   formatFreeTeachersReply,
   formatPendingLeavesReply,
+  formatHomeworkReply,
+  parseHomeworkQuery,
   parseFreeTeachersQuery,
   periodAtTime,
   resolveClassOrSectionRef,
@@ -167,6 +169,15 @@ const masters = {
   assert.equal(parseErpCommandLocal("VIII B me kaun nahi aaya")?.fields.section, "8B");
   assert.equal(parseErpCommandLocal("5A में कौन गैरहाजिर है")?.commandId, "absent_list", "Devanagari fee/absent words match without ASCII word boundaries");
   assert.equal(parseErpCommandLocal("7B की उपस्थिति")?.fields.section, "7B");
+  assert.equal(parseErpCommandLocal("homework posted today for 6B")?.fields.section, "6B");
+  assert.equal(parseErpCommandLocal("6B homework")?.commandId, "homework_posted");
+  assert.equal(parseErpCommandLocal("aaj 6B ka homework")?.fields.section, "6B");
+  assert.equal(parseErpCommandLocal("homework status")?.fields.section, "");
+  assert.equal(parseErpCommandLocal("kal kis class me homework nahi hua")?.commandId, "homework_posted");
+  assert.equal(parseErpCommandLocal("आज 6B का गृहकार्य")?.commandId, "homework_posted");
+  assert.equal(parseHomeworkQuery("Homework: page 42 ex 4.2"), null, "a teacher's post is not a query");
+  assert.equal(parseHomeworkQuery("6B homework maths ch 3 q1-10"), null, "content words → a post, not a query");
+  assert.equal(parseHomeworkQuery("Post homework 6B maths: exercise 4.2, due Monday"), null);
   assert.equal(parseErpCommandLocal("pending leaves")?.commandId, "pending_leaves");
   assert.equal(parseErpCommandLocal("leave requests")?.commandId, "pending_leaves");
   assert.equal(parseErpCommandLocal("5A leave requests")?.fields.section, "5A");
@@ -757,6 +768,42 @@ const masters = {
   assert.ok(none.startsWith("*Pending leave requests* · V A\nNothing waiting for approval. ✅"), none);
   const mine = formatPendingLeavesReply({ todayIso: "2026-09-05", scope: "mine", rows: [], approvedToday: 0 });
   assert.ok(mine.includes("· your sections"));
+}
+
+// ─── homework replies ──────────────────────────────────────────────────
+{
+  const sec = formatHomeworkReply({
+    kind: "section",
+    sectionLabel: "VI B",
+    date: "2026-09-05",
+    todayIso: "2026-09-05",
+    posts: [
+      { subject: "Maths", title: "Exercise 4.2 Q1–10", teacher: "Anita Devi", dueAt: "2026-09-07", requiresSubmit: true },
+      { subject: "Hindi", title: "पाठ 3 प्रश्न-उत्तर", teacher: "Sunita Sharma", dueAt: "", requiresSubmit: false },
+    ],
+    subjectTeachers: [],
+  });
+  assert.ok(sec.startsWith("*Homework VI B* · today\n2 posts"), sec);
+  assert.ok(sec.includes("*Maths* — Anita Devi\nExercise 4.2 Q1–10 · due 7 Sep · submit"), sec);
+  assert.ok(sec.includes("*Hindi* — Sunita Sharma\nपाठ 3 प्रश्न-उत्तर"), sec);
+
+  const none = formatHomeworkReply({
+    kind: "section", sectionLabel: "VI B", date: "2026-09-04", todayIso: "2026-09-05", posts: [],
+    subjectTeachers: [{ subject: "English", teacher: "Rakesh Verma" }, { subject: "Maths", teacher: "Anita Devi" }],
+  });
+  assert.ok(none.startsWith("*Homework VI B* · 4 Sep\nNone posted yet.\n\n*Subject teachers*\nEnglish — Rakesh Verma"), none);
+
+  const ov = formatHomeworkReply({
+    kind: "overview", scope: "school", date: "2026-09-05", todayIso: "2026-09-05",
+    sections: [
+      { label: "V A", count: 2, subjects: ["Maths", "EVS"] },
+      { label: "V B", count: 0, subjects: [] },
+      { label: "VI B", count: 1, subjects: ["Hindi"] },
+    ],
+  });
+  assert.ok(ov.startsWith("*Homework* · school · today\n3 posts across 2 of 3 sections"), ov);
+  assert.ok(ov.includes("*Posted*\nV A  2 (Maths, EVS)\nVI B  1 (Hindi)"), ov);
+  assert.ok(ov.includes("*Nothing yet:* V B"), ov);
 }
 
 console.log("erpCommands.selftest.ts OK");

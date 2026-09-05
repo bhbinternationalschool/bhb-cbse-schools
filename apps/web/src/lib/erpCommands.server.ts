@@ -49,6 +49,8 @@ import {
 import { isoDateWeekday } from "@/lib/examTimetable";
 import { subjectLabel } from "@/lib/homework";
 import { ensureStudentLeaveHydratedServer } from "@/lib/studentLeavePersistence";
+import { ensureHomeworkHydratedServer } from "@/lib/homeworkPersistence";
+import { loadHomework } from "@/lib/homework";
 import {
   emptyStudentLeaveState,
   leaveDayCount,
@@ -82,6 +84,7 @@ import {
   formatCollectionReply,
   formatFreeTeachersReply,
   formatHelpReply,
+  formatHomeworkReply,
   formatPendingLeavesReply,
   periodAtTime,
   TENDER_MODE_LABEL,
@@ -613,6 +616,38 @@ export async function handleErpStaffCommand(
       };
     }
   }
+  if (command.id === "homework_posted") {
+    const roleCodes = resolveSessionRoles(rbac, session, masters).map((r) => r.code);
+    const office = isOfficeLike(roleCodes);
+    const mine = office ? [] : staffAllowedSections(inbound.staff, masters, session.academicYearCode, roleCodes);
+    const askedRaw = parsed.fields.section || "";
+    const refs = askedRaw ? extractSectionRefs(askedRaw) : [];
+    if (refs.length) {
+      const res = resolveSectionRef(refs[0]!, masters);
+      if (!res.ok) {
+        return { handled: true, audience: "erp_command_ask", text: formatSectionProblem(res.reason, res.options, askedRaw) };
+      }
+      if (!office && !mine.some((s) => s.sectionId === res.match.sectionId)) {
+        void audit(session, command, parsed.fields, text, "denied", { reason: "scope", channel: inbound.channel });
+        return {
+          handled: true,
+          audience: "erp_command_denied",
+          text: formatSectionProblem("not_allowed", mine.map((s) => ({ classId: s.classId, sectionId: s.sectionId, className: s.className, sectionName: s.sectionName, label: s.label })), res.match.label),
+        };
+      }
+      resolved.classId = res.match.classId;
+      resolved.sectionId = res.match.sectionId;
+      resolved.sectionLabel = res.match.label;
+    } else if (office) {
+      resolved.scope = "school";
+    } else {
+      if (!mine.length) {
+        return { handled: true, audience: "erp_command_denied", text: "Homework is shown for your own sections; you have none linked. Ask the office to link your classes." };
+      }
+      resolved.scope = "mine";
+      resolved.sectionIds = mine.map((s) => s.sectionId).join(",");
+    }
+  }
   if (command.id === "pending_leaves") {
     const roleCodes = resolveSessionRoles(rbac, session, masters).map((r) => r.code);
     const office = isOfficeLike(roleCodes);
@@ -760,6 +795,8 @@ async function runReadCommand(
       return freeTeachers(resolved, resolved.period || "now", session, todayIso);
     case "pending_leaves":
       return pendingLeaves(resolved, session, todayIso);
+    case "homework_posted":
+      return homeworkPosted(resolved, session, todayIso);
     default:
       return "That command isn't wired up yet.";
   }
@@ -877,6 +914,78 @@ async function attendanceSummary(
     scope: school ? "school" : "mine",
     classes,
     staff,
+  });
+}
+
+async function homeworkPosted(
+  resolved: Record<string, string>,
+  session: DemoSession,
+  todayIso: string,
+): Promise<string> {
+  await ensureHomeworkHydratedServer();
+  const ay = session.academicYearCode;
+  const date = resolved.date || todayIso;
+  const masters = loadMasters();
+  const posts = loadHomework().posts.filter(
+    (p) => p.academicYearCode === ay && p.date === date && p.status === "published",
+  );
+  const teacherName = (id: string, fallback: string) =>
+    (masters.staff ?? []).find((st) => st.id === id)?.fullName || fallback || "—";
+  if (resolved.sectionId) {
+    const mine = posts
+      .filter((p) => p.sectionId === resolved.sectionId)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    const subjectTeachers = (masters.staff ?? [])
+      .filter((st) => st.status === "active")
+      .flatMap((st) =>
+        (st.subjectTeachingLinks ?? [])
+          .filter(
+            (l) =>
+              (!l.academicYearCode || l.academicYearCode === ay) &&
+              l.classId === resolved.classId &&
+              (!l.sectionId || l.sectionId === resolved.sectionId),
+          )
+          .map((l) => ({ subject: subjectLabel(masters, l.subjectId), teacher: st.fullName })),
+      )
+      .sort((a, b) => a.subject.localeCompare(b.subject));
+    return formatHomeworkReply({
+      kind: "section",
+      sectionLabel: (resolved.sectionLabel || "").replace(" · ", " "),
+      date,
+      todayIso,
+      posts: mine.map((p) => ({
+        subject: subjectLabel(masters, p.subjectId),
+        title: p.title,
+        teacher: teacherName(p.teacherStaffId, p.teacherName),
+        dueAt: p.dueAt || "",
+        requiresSubmit: !!p.requiresSubmit,
+      })),
+      subjectTeachers,
+    });
+  }
+  const only = resolved.sectionIds ? new Set(resolved.sectionIds.split(",").filter(Boolean)) : null;
+  const sections = [...masters.classes]
+    .filter((c) => c.isActive !== false)
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+    .flatMap((c) =>
+      masters.sections
+        .filter((sct) => sct.classId === c.id && sct.isActive !== false && (!only || only.has(sct.id)))
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((sct) => {
+          const here = posts.filter((p) => p.sectionId === sct.id);
+          return {
+            label: classLabel(masters, c.id, sct.id).replace(" · ", " "),
+            count: here.length,
+            subjects: [...new Set(here.map((p) => subjectLabel(masters, p.subjectId)))],
+          };
+        }),
+    );
+  return formatHomeworkReply({
+    kind: "overview",
+    scope: resolved.scope === "school" ? "school" : "mine",
+    date,
+    todayIso,
+    sections,
   });
 }
 
