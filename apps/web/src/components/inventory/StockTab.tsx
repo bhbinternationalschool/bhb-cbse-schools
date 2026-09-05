@@ -36,6 +36,7 @@ import {
   type InvBootstrap,
   type InvStockReportRowData,
 } from "@/lib/inventory/types";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 type Section = "onhand" | "assets";
 
@@ -175,7 +176,7 @@ function OnHandSection({ boot }: { boot: InvBootstrap }) {
             : "No stock to show yet."}
         </div>
       ) : (
-        <ErpTableShell density="compact" className="overflow-x-auto">
+        <ErpTableShell density="compact" className="overflow-x-auto" exportAs="stock_on_hand" exportTitle="Stock on hand">
           <ErpTable minWidth="min-w-[900px]">
             <ErpTableHead>
               <tr>
@@ -221,19 +222,15 @@ function OnHandSection({ boot }: { boot: InvBootstrap }) {
                     {formatPaise(r.valuePaise)}
                   </td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">
-                    <Button variant="ghost" size="xs" onClick={() => setCard(r)}>
-                      History
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      onClick={() => setTransfer(r)}
-                    >
-                      Move
-                    </Button>
-                    <Button variant="ghost" size="xs" onClick={() => setCount(r)}>
-                      Count
-                    </Button>
+                    <RowActionMenu
+                      row={r}
+                      label={`Actions for ${r.itemName}`}
+                      actions={[
+                        { id: "history", label: "Stock history", onSelect: (x) => setCard(x) },
+                        { id: "move", label: "Move between locations", onSelect: (x) => setTransfer(x) },
+                        { id: "count", label: "Physical count", onSelect: (x) => setCount(x) },
+                      ]}
+                    />
                   </td>
                 </tr>
               ))}

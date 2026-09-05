@@ -26,6 +26,7 @@ import {
   MastersWorkCard,
 } from "@/components/masters/MastersLayout";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 const inp =
   "w-full rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm";
@@ -302,48 +303,36 @@ export function AdmissionSurveyTeamPanel({
                   </td>
                   <td className="px-2 py-2">
                     {canEdit ? (
-                      <div className="flex flex-wrap gap-2 text-[10px]">
-                        <button
-                          type="button"
-                          className="underline"
-                          onClick={() =>
-                            onCommit(
-                              setSurveyTeamAssigned(state, m.id, !m.assigned),
-                              m.assigned
-                                ? `${m.fullName} removed from app`
-                                : `${m.fullName} assigned — app shows Start`,
-                            )
-                          }
-                        >
-                          {m.assigned ? "Unassign" : "Assign"}
-                        </button>
-                        {m.role !== "leader" ? (
-                          <button
-                            type="button"
-                            className="underline"
-                            onClick={() =>
+                      <RowActionMenu
+                        row={m}
+                        label={`Actions for ${m.fullName}`}
+                        actions={[
+                          {
+                            id: "assign",
+                            label: m.assigned ? "Unassign from the app" : "Assign to the app",
+                            onSelect: (x) =>
                               onCommit(
-                                setSurveyTeamLeader(state, m.id),
-                                `${m.fullName} is team leader`,
-                              )
-                            }
-                          >
-                            Make leader
-                          </button>
-                        ) : null}
-                        <button
-                          type="button"
-                          className="text-[var(--danger)] underline"
-                          onClick={() =>
-                            onCommit(
-                              removeSurveyTeamMember(state, m.id),
-                              `${m.fullName} removed from team`,
-                            )
-                          }
-                        >
-                          Remove
-                        </button>
-                      </div>
+                                setSurveyTeamAssigned(state, x.id, !x.assigned),
+                                x.assigned
+                                  ? `${x.fullName} removed from app`
+                                  : `${x.fullName} assigned — app shows Start`,
+                              ),
+                          },
+                          {
+                            id: "leader",
+                            label: "Make team leader",
+                            hidden: (x) => x.role === "leader",
+                            onSelect: (x) => onCommit(setSurveyTeamLeader(state, x.id), `${x.fullName} is team leader`),
+                          },
+                          {
+                            id: "remove",
+                            label: "Remove from team",
+                            tone: "danger",
+                            separatorAbove: true,
+                            onSelect: (x) => onCommit(removeSurveyTeamMember(state, x.id), `${x.fullName} removed from team`),
+                          },
+                        ]}
+                      />
                     ) : (
                       "—"
                     )}

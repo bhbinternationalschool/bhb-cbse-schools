@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — hold ledger rows carry no staff id; the run detail is where holds are worked
 
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -285,7 +286,7 @@ export function JuneHoldPanel() {
         </button>
       </div>
 
-      <ErpTableShell>
+      <ErpTableShell exportAs="june_holds" exportTitle="Open June holds">
         <div className="border-b border-[var(--border)] px-4 py-3 text-sm font-semibold text-[var(--brand-deep)]">
           Open June holds ({openHolds.length})
         </div>

@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — a copy-out sheet for the UDISE+ portal; each row already links to the pupil and has a Copy control
 
 import { useEffect, useState } from "react";
 import Link from "next/link";

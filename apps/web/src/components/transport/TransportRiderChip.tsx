@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — a rider detail chip, not a list
 
 import { useEffect, useMemo, useState } from "react";
 import {

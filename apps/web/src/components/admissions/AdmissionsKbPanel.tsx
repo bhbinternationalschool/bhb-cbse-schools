@@ -27,6 +27,7 @@ import {
 import { currentAcademicYearCode, type MastersState } from "@/lib/masters";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 const inp = "w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-sm";
 
@@ -331,20 +332,26 @@ export function AdmissionsKbPanel({ masters, canEdit, by }: { masters: MastersSt
                     </td>
                     <td className="px-2 py-2 whitespace-nowrap">
                       {canEdit ? (
-                        <>
-                          <button type="button" className="text-[var(--brand-deep)] underline" onClick={() => setDraft({ id: e.id, kind: e.kind, title: e.title, body: e.body, classScope: e.classScope, validTill: e.validTill, publicSafe: e.publicSafe })}>
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="ml-2 text-[var(--danger)] underline"
-                            onClick={() => {
-                              if (window.confirm("Remove this entry? Sync to AI afterwards to drop it from the index.")) persist(removeKbEntry(state, e.id), "Entry removed — Sync to AI to publish");
-                            }}
-                          >
-                            Remove
-                          </button>
-                        </>
+                        <RowActionMenu
+                          row={e}
+                          label={`Actions for ${e.title}`}
+                          actions={[
+                            {
+                              id: "edit",
+                              label: "Edit entry",
+                              onSelect: (x) => setDraft({ id: x.id, kind: x.kind, title: x.title, body: x.body, classScope: x.classScope, validTill: x.validTill, publicSafe: x.publicSafe }),
+                            },
+                            {
+                              id: "remove",
+                              label: "Remove entry",
+                              tone: "danger",
+                              separatorAbove: true,
+                              onSelect: (x) => {
+                                if (window.confirm("Remove this entry? Sync to AI afterwards to drop it from the index.")) persist(removeKbEntry(state, x.id), "Entry removed — Sync to AI to publish");
+                              },
+                            },
+                          ]}
+                        />
                       ) : null}
                     </td>
                   </tr>

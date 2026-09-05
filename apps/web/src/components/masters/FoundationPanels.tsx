@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — a weekly-off preview table (read-only settings preview)
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { CLOSURE_REASONS, type ClosureReasonCode } from "@/lib/holidayNotice";

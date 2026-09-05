@@ -37,6 +37,7 @@ import { openWaMe } from "@/lib/waMe";
 import { TENANT } from "@/lib/types";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 const inp = "w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-sm";
 const STATUS_LABEL: Record<TestimonialStatus, string> = { requested: "Requested", received: "Received", polished: "Polished", approved: "Approved", declined: "Declined" };
@@ -221,17 +222,19 @@ export function ReferralsPanel({ admissions, sis, canEdit, by }: { admissions: A
                         <td className="px-2 py-1.5 whitespace-nowrap text-[var(--muted)]">{inv?.invitedAt ? inv.invitedAt.slice(0, 10) : "—"}</td>
                         <td className="px-2 py-1.5 whitespace-nowrap">
                           {canEdit ? (
-                            <>
-                              <button type="button" className="text-[var(--brand-deep)] underline" onClick={() => sendInvite(h)}>
-                                Invite (WA)
-                              </button>
-                              <button type="button" className="ml-2 text-[var(--brand-deep)] underline" onClick={() => void navigator.clipboard.writeText(referralLink(code)).then(() => setNotice("Link copied"))}>
-                                Copy link
-                              </button>
-                              <button type="button" className="ml-2 text-[var(--brand-deep)] underline" onClick={() => requestT(h)}>
-                                Ask for story
-                              </button>
-                            </>
+                            <RowActionMenu
+                              row={h}
+                              label={`Actions for ${h.guardianName || h.mobile}`}
+                              actions={[
+                                { id: "invite", label: "Invite on WhatsApp", onSelect: (x) => sendInvite(x) },
+                                {
+                                  id: "copy",
+                                  label: "Copy referral link",
+                                  onSelect: () => void navigator.clipboard.writeText(referralLink(code)).then(() => setNotice("Link copied")),
+                                },
+                                { id: "story", label: "Ask for a testimonial", onSelect: (x) => requestT(x) },
+                              ]}
+                            />
                           ) : null}
                         </td>
                       </tr>

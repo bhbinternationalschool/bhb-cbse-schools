@@ -18,6 +18,7 @@ import {
   type StaffRequestType,
 } from "@/lib/staffHr";
 import { canManageStaffLeave, resolveSessionStaff } from "@/lib/staffResolve";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 const STATUS_LABEL: Record<StaffRequestStatus, string> = {
   open: "Open",
@@ -254,6 +255,18 @@ export function StaffRequestsPanel() {
                         >
                           Save
                         </button>
+                        <RowActionMenu
+                          row={t}
+                          label="Request actions"
+                          actions={[
+                            {
+                              id: "save",
+                              label: "Save resolution note",
+                              onSelect: (x) =>
+                                onSave(x, { resolutionNote: noteDraft[x.id] ?? x.resolutionNote }),
+                            },
+                          ]}
+                        />
                       </div>
                     </td>
                   ) : null}

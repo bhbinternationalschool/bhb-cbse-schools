@@ -45,6 +45,7 @@ import {
   type InvPendingPoLine,
   type InvPurchaseOrder,
 } from "@/lib/inventory/types";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 type Section = "orders" | "receive" | "bills" | "returns";
 
@@ -276,7 +277,7 @@ function OrdersSection({ boot }: { boot: InvBootstrap }) {
           addLabel="New order"
         />
       ) : (
-        <ErpTableShell density="compact" className="overflow-x-auto">
+        <ErpTableShell density="compact" className="overflow-x-auto" exportAs="purchase_orders" exportTitle="Purchase orders">
           <ErpTable minWidth="min-w-[900px]">
             <ErpTableHead>
               <tr>
@@ -324,49 +325,44 @@ function OrdersSection({ boot }: { boot: InvBootstrap }) {
                       {received} / {ordered}
                     </td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
-                      {["draft", "pending_approval", "approved"].includes(o.status) ? (
-                        <Button variant="ghost" size="xs" onClick={() => openEdit(o)}>
-                          Edit
-                        </Button>
-                      ) : null}
-                      {o.status === "draft" && o.needsApproval ? (
-                        <Button
-                          variant="ghost"
-                          size="xs"
-                          onClick={() => decide(o, "submit")}
-                        >
-                          Send for approval
-                        </Button>
-                      ) : null}
-                      {o.status === "draft" && !o.needsApproval ? (
-                        <Button variant="ghost" size="xs" onClick={() => decide(o, "issue")}>
-                          Send to vendor
-                        </Button>
-                      ) : null}
-                      {o.status === "pending_approval" ? (
-                        <Button
-                          variant="ghost"
-                          size="xs"
-                          onClick={() => decide(o, "approve")}
-                        >
-                          Approve
-                        </Button>
-                      ) : null}
-                      {o.status === "approved" ? (
-                        <Button variant="ghost" size="xs" onClick={() => decide(o, "issue")}>
-                          Send to vendor
-                        </Button>
-                      ) : null}
-                      {!["closed", "cancelled"].includes(o.status) ? (
-                        <Button
-                          variant="ghost"
-                          size="xs"
-                          className="text-destructive"
-                          onClick={() => decide(o, "cancel")}
-                        >
-                          Cancel
-                        </Button>
-                      ) : null}
+                      <RowActionMenu
+                        row={o}
+                        label="Purchase order actions"
+                        actions={[
+                          {
+                            id: "edit",
+                            label: "Edit order",
+                            hidden: (x) => !["draft", "pending_approval", "approved"].includes(x.status),
+                            onSelect: (x) => openEdit(x),
+                          },
+                          {
+                            id: "submit",
+                            label: "Send for approval",
+                            hidden: (x) => !(x.status === "draft" && x.needsApproval),
+                            onSelect: (x) => decide(x, "submit"),
+                          },
+                          {
+                            id: "issue",
+                            label: "Send to vendor",
+                            hidden: (x) => !((x.status === "draft" && !x.needsApproval) || x.status === "approved"),
+                            onSelect: (x) => decide(x, "issue"),
+                          },
+                          {
+                            id: "approve",
+                            label: "Approve",
+                            hidden: (x) => x.status !== "pending_approval",
+                            onSelect: (x) => decide(x, "approve"),
+                          },
+                          {
+                            id: "cancel",
+                            label: "Cancel order",
+                            tone: "danger",
+                            separatorAbove: true,
+                            hidden: (x) => ["closed", "cancelled"].includes(x.status),
+                            onSelect: (x) => decide(x, "cancel"),
+                          },
+                        ]}
+                      />
                     </td>
                   </tr>
                 );
@@ -813,7 +809,7 @@ function ReceiveSection({ boot }: { boot: InvBootstrap }) {
           addLabel="Receive goods"
         />
       ) : (
-        <ErpTableShell density="compact" className="overflow-x-auto">
+        <ErpTableShell density="compact" className="overflow-x-auto" exportAs="goods_received" exportTitle="Goods received">
           <ErpTable minWidth="min-w-[900px]">
             <ErpTableHead>
               <tr>
@@ -930,7 +926,7 @@ function ReceiveSection({ boot }: { boot: InvBootstrap }) {
           <summary className="cursor-pointer px-4 py-2.5 text-sm font-semibold text-muted-foreground">
             Cancelled receipts ({cancelledList.length})
           </summary>
-          <ErpTableShell density="compact" className="overflow-x-auto">
+          <ErpTableShell density="compact" className="overflow-x-auto" exportAs="cancelled_receipts" exportTitle="Cancelled receipts">
             <ErpTable minWidth="min-w-[640px]">
               <ErpTableHead>
                 <tr>
@@ -1542,7 +1538,7 @@ function BillsSection() {
           No bills here. They are raised automatically when goods are received.
         </div>
       ) : (
-        <ErpTableShell density="compact" className="overflow-x-auto">
+        <ErpTableShell density="compact" className="overflow-x-auto" exportAs="vendor_bills" exportTitle="Vendor bills">
           <ErpTable minWidth="min-w-[880px]">
             <ErpTableHead>
               <tr>
@@ -1627,7 +1623,7 @@ function BillsSection() {
           <summary className="cursor-pointer px-4 py-2.5 text-sm font-semibold text-muted-foreground">
             Cancelled bills ({cancelledBills.length})
           </summary>
-          <ErpTableShell density="compact" className="overflow-x-auto">
+          <ErpTableShell density="compact" className="overflow-x-auto" exportAs="cancelled_bills" exportTitle="Cancelled bills">
             <ErpTable minWidth="min-w-[560px]">
               <ErpTableHead>
                 <tr>
@@ -1818,7 +1814,7 @@ function ReturnsSection({ boot }: { boot: InvBootstrap }) {
           addLabel="New return"
         />
       ) : (
-        <ErpTableShell density="compact" className="overflow-x-auto">
+        <ErpTableShell density="compact" className="overflow-x-auto" exportAs="purchase_returns" exportTitle="Purchase returns">
           <ErpTable minWidth="min-w-[820px]">
             <ErpTableHead>
               <tr>

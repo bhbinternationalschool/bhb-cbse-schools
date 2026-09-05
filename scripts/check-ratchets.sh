@@ -48,6 +48,19 @@ count_metric() {
     data_layer_whole_state)
       # `body.state` / `{ state }` is the whole-module payload shape.
       code_grep 'body\.state|\{ state \}' "$SRC/lib/data" "$SRC/app/api/data" ;;
+    grids_without_row_menu)
+      # A grid is a file that renders rows; "no menu" is the absence of the
+      # shared trigger. Public / parent / PWA surfaces are not office grids,
+      # and printed sheets, dashboards and confirm dialogs are documents or
+      # summaries, not operational lists — a row menu means nothing there.
+      # NUL-delimited: the checkout path carries a space, and plain xargs
+      # splits on it and greps a path that does not exist (counts 0).
+      grep -lE 'ErpTableBody|<DataTable|<tbody' "$SRC"/components/*/*.tsx 2>/dev/null \
+        | tr '\n' '\0' | xargs -0 grep -LE 'RowActionMenu|rowActions=|DeskListActions' 2>/dev/null \
+        | tr '\n' '\0' | xargs -0 grep -L 'ratchet-allow: grids_without_row_menu' 2>/dev/null \
+        | grep -vE '/components/(ui|pwa|public|parent|login|pay|theme|voice|maps)/' \
+        | grep -vE '(Sheet|Page|Dashboard|Dialog)\.tsx$|ReportsCenterWorkspace|ModuleDashboard' \
+        | wc -l ;;
     raw_hex)
       # Arbitrary hex Tailwind values instead of the design tokens in
       # globals.css — the "six different danger reds" problem. Falls per

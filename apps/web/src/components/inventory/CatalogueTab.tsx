@@ -52,6 +52,7 @@ import {
   type InvItemQuery,
   type InvItemRow,
 } from "@/lib/inventory/types";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 type Draft = Partial<InvItem> & {
   salePriceInput?: string;
@@ -586,7 +587,7 @@ export function CatalogueTab({
           </Button>
         </div>
       ) : (
-        <ErpTableShell density="compact" className="overflow-x-auto">
+        <ErpTableShell density="compact" className="overflow-x-auto" exportAs="store_catalogue" exportTitle="Store catalogue">
           <ErpTable minWidth="min-w-[980px]">
             <ErpTableHead>
               <tr>
@@ -671,9 +672,13 @@ export function CatalogueTab({
                       )}
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <Button variant="ghost" size="xs" onClick={() => openEdit(r)}>
-                        Edit
-                      </Button>
+                      <RowActionMenu
+                        row={r}
+                        label={`Actions for ${r.name}`}
+                        actions={[
+                          { id: "edit", label: "Edit item", onSelect: (x) => openEdit(x) },
+                        ]}
+                      />
                     </td>
                   </tr>
                 );

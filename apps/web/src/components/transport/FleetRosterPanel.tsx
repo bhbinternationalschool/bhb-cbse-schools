@@ -24,6 +24,7 @@ import {
   planAfternoonWaves,
   suggestVehicleSharing,
 } from "@/lib/transportAfternoonWaves";
+import { BulkActionBar, RowActionMenu, RowCheckbox, useRowSelection } from "@/components/ui/erp-grid";
 
 /**
  * Who is on each bus — the list that did not exist.
@@ -434,6 +435,9 @@ function RosterCard({
   // reports room on a bus that is already full.
   const seatsLeft = Math.max(0, roster.seatCapacity - roster.seatsUsed);
   const over = roster.seatsUsed > roster.seatCapacity;
+  const riderKeys = useMemo(() => roster.riders.map((r) => r.studentId), [roster.riders]);
+  const riderSel = useRowSelection(riderKeys);
+  const riderById = (id: string) => roster.riders.find((r) => r.studentId === id);
 
   // Default order is the stop sequence the list already arrives in — that is
   // how the conductor reads it. Sorting is opt-in per column from there.
@@ -621,9 +625,46 @@ function RosterCard({
               Nobody assigned to this bus yet.
             </p>
           ) : (
+            <>
+            <BulkActionBar
+              selection={riderSel}
+              noun="rider"
+              actions={[
+                {
+                  id: "suspend",
+                  label: "Suspend boarding",
+                  onRun: (ids) => {
+                    for (const id of ids) {
+                      const r = riderById(id);
+                      if (r && !r.boardingSuspended) onRiderAction?.("suspend", r, roster.routeId);
+                    }
+                    riderSel.clear();
+                  },
+                },
+                {
+                  id: "resume",
+                  label: "Resume boarding",
+                  onRun: (ids) => {
+                    for (const id of ids) {
+                      const r = riderById(id);
+                      if (r && r.boardingSuspended) onRiderAction?.("resume", r, roster.routeId);
+                    }
+                    riderSel.clear();
+                  },
+                },
+              ]}
+            />
             <ErpTable minWidth="min-w-[46rem]">
               <ErpTableHead>
                 <tr>
+                  <th className="w-10 px-2 py-2">
+                    <RowCheckbox
+                      checked={riderSel.allSelected(sort.rows.map((r) => r.studentId))}
+                      indeterminate={riderSel.someSelected(sort.rows.map((r) => r.studentId))}
+                      onChange={() => riderSel.toggleAll(sort.rows.map((r) => r.studentId))}
+                      label="Select all riders on this bus"
+                    />
+                  </th>
                   <ErpSortTh sort={sort} field="name">Student</ErpSortTh>
                   <ErpSortTh sort={sort} field="classLabel">Class</ErpSortTh>
                   <ErpSortTh sort={sort} field="father">Father</ErpSortTh>
@@ -649,6 +690,13 @@ function RosterCard({
                     key={r.studentId}
                     className="border-t border-[var(--border)]"
                   >
+                    <td className="w-10 px-2 py-1.5">
+                      <RowCheckbox
+                        checked={riderSel.isSelected(r.studentId)}
+                        onChange={() => riderSel.toggle(r.studentId)}
+                        label={`Select ${r.fullName}`}
+                      />
+                    </td>
                     <td className="px-3 py-1.5 font-semibold text-[var(--brand-deep)]">
                       {r.fullName}
                       {r.siblingOnBoard ? (
@@ -835,27 +883,34 @@ function RosterCard({
                             )
                           }
                         />
-                        <RiderBtn
-                          label={
-                            r.serviceMode === "both" ? "One way" : "Both ways"
-                          }
-                          onClick={() => onRiderAction?.("service-mode", r, roster.routeId)}
-                        />
-                        {r.boardingSuspended ? (
-                          <RiderBtn
-                            label="Resume"
-                            onClick={() => onRiderAction?.("resume", r, roster.routeId)}
-                          />
-                        ) : (
-                          <RiderBtn
-                            label="Suspend"
-                            onClick={() => onRiderAction?.("suspend", r, roster.routeId)}
-                          />
-                        )}
-                        <RiderBtn
-                          label="Off bus"
-                          tone="danger"
-                          onClick={() => onRiderAction?.("end", r, roster.routeId)}
+                        <RowActionMenu
+                          row={r}
+                          label="More rider actions"
+                          actions={[
+                            {
+                              id: "mode",
+                              label: r.serviceMode === "both" ? "Switch to one way" : "Switch to both ways",
+                              onSelect: (x) => onRiderAction?.("service-mode", x, roster.routeId),
+                            },
+                            r.boardingSuspended
+                              ? {
+                                  id: "resume",
+                                  label: "Resume boarding",
+                                  onSelect: (x) => onRiderAction?.("resume", x, roster.routeId),
+                                }
+                              : {
+                                  id: "suspend",
+                                  label: "Suspend boarding",
+                                  onSelect: (x) => onRiderAction?.("suspend", x, roster.routeId),
+                                },
+                            {
+                              id: "end",
+                              label: "Take off the bus",
+                              tone: "danger",
+                              separatorAbove: true,
+                              onSelect: (x) => onRiderAction?.("end", x, roster.routeId),
+                            },
+                          ]}
                         />
                       </div>
                     </td>
@@ -863,6 +918,7 @@ function RosterCard({
                 ))}
               </ErpTableBody>
             </ErpTable>
+            </>
           )}
         </div>
       ) : null}

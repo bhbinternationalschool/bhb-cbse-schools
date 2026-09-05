@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — detail tables inside the pupil's profile dialog
 
 import { useEffect, useMemo, useState } from "react";
 import { HOUSEHOLD_CHANNELS, languageLabel, quietHoursLabel } from "@/lib/householdPrefs";

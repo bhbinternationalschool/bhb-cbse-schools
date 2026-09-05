@@ -17,6 +17,7 @@ import {
   type StaffAttendanceState,
 } from "@/lib/staffAttendance";
 import { canManageStaffLeave, resolveSessionStaff } from "@/lib/staffResolve";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 function fmt(iso: string | null): string {
   if (!iso) return "—";
@@ -163,6 +164,7 @@ export function StaffOutdoorDutyPanel() {
                 <th className="px-3 py-2">In</th>
                 <th className="px-3 py-2">Duration</th>
                 <th className="px-3 py-2">GPS</th>
+                <th className="w-10 px-2 py-2" aria-label="Actions" />
               </tr>
             </ErpTableHead>
             <ErpTableBody>
@@ -190,6 +192,9 @@ export function StaffOutdoorDutyPanel() {
                   <td className="px-3 py-2 text-[10px] text-[var(--muted)]">
                     {s.startGeo ? "Out ✓" : "—"}
                     {s.endGeo ? " · In ✓" : ""}
+                  </td>
+                  <td className="px-2 py-1.5 text-right">
+                    <RowActionMenu row={s} label="Staff actions" actions={[{ id: "open", label: "Open staff record", onSelect: (x) => { window.location.href = `/staff/${encodeURIComponent(String(x.staffId))}/edit`; } }]} />
                   </td>
                 </tr>
               ))}

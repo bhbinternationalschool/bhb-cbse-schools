@@ -49,6 +49,7 @@ import {
   ErpTableBody,
   ErpTableHead,
 } from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 const CARD = "rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4";
 const BTN =
@@ -882,24 +883,28 @@ export function ChequesPanel({
                         </button>
                       </span>
                     ) : (
-                      <span className="inline-flex gap-1.5">
-                        <button
-                          type="button"
-                          className={BTN_OUTLINE}
-                          disabled={busy}
-                          onClick={() => setClearing({ ref: c.ref, bankId: banks[0]?.id ?? "", date: todayIso() })}
-                        >
-                          Cleared
-                        </button>
-                        <button
-                          type="button"
-                          className={BTN_OUTLINE}
-                          disabled={busy}
-                          onClick={() => void bounce(c)}
-                        >
-                          <Undo2 className="size-3.5" aria-hidden /> Bounced
-                        </button>
-                      </span>
+                      <RowActionMenu
+                        row={c}
+                        label={`Actions for cheque ${c.ref}`}
+                        actions={[
+                          {
+                            id: "clear",
+                            label: "Mark cleared (into a bank)",
+                            icon: <Check />,
+                            disabled: () => busy,
+                            onSelect: (x) => setClearing({ ref: x.ref, bankId: banks[0]?.id ?? "", date: todayIso() }),
+                          },
+                          {
+                            id: "bounce",
+                            label: "Mark bounced",
+                            icon: <Undo2 />,
+                            tone: "danger",
+                            separatorAbove: true,
+                            disabled: () => busy,
+                            onSelect: (x) => void bounce(x),
+                          },
+                        ]}
+                      />
                     )}
                   </td>
                 </tr>

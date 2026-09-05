@@ -33,6 +33,7 @@ import {
   canManageStaffLeave,
   resolveSessionStaff,
 } from "@/lib/staffResolve";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 type LeaveTab =
   | "request"
@@ -731,6 +732,7 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
                     {t.code}
                   </th>
                 ))}
+                <th className="w-10 px-2 py-2" aria-label="Actions" />
               </tr>
             </ErpTableHead>
             <ErpTableBody>
@@ -787,6 +789,9 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
                       ) : null}
                     </td>
                   ))}
+                  <td className="px-2 py-1.5 text-right">
+                    <RowActionMenu row={staff} label="Staff actions" actions={[{ id: "open", label: "Open staff record", onSelect: (x) => { window.location.href = `/staff/${encodeURIComponent(String(x.id))}/edit`; } }]} />
+                  </td>
                 </tr>
               ))}
               {balances.length === 0 ? (
@@ -835,6 +840,7 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
                 <th className="px-3 py-2">Status</th>
                 <th className="px-3 py-2">Origin</th>
                 <th className="px-3 py-2">By</th>
+                <th className="w-10 px-2 py-2" aria-label="Actions" />
               </tr>
             </ErpTableHead>
             <ErpTableBody>
@@ -859,6 +865,9 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
                       : r.status === "pending_l2"
                         ? r.level1By || r.appliedBy
                         : r.decidedBy || r.appliedBy}
+                  </td>
+                  <td className="px-2 py-1.5 text-right">
+                    <RowActionMenu row={r} label="Staff actions" actions={[{ id: "open", label: "Open staff record", onSelect: (x) => { window.location.href = `/staff/${encodeURIComponent(String(x.staffId))}/edit`; } }]} />
                   </td>
                 </tr>
               ))}

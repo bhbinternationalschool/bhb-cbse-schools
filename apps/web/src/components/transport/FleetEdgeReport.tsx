@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — telemetry report
 
 /**
  * Transport → Fleet Edge report. One screen, scanned top-to-bottom:

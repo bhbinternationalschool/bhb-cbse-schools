@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — assignment summary rows carry no teacher id; edited on the Teaching allocation screen
 
 import { useMemo, useState } from "react";
 import type { MastersState } from "@/lib/masters";
@@ -102,7 +103,7 @@ export function TeacherAssignmentsPanel({
           No assignments match &ldquo;{query}&rdquo;.
         </div>
       ) : (
-        <ErpTableShell>
+        <ErpTableShell exportAs="teacher_assignments" exportTitle="Teacher assignments">
           <ErpTable minWidth="min-w-[560px]">
             <ErpTableHead>
               <tr>

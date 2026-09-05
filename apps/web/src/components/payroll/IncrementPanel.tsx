@@ -28,6 +28,7 @@ import { useDemoSession } from "@/components/shell/SessionContext";
 import type { MastersState } from "@/lib/masters";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 type Mode = "policy" | "ops" | "full";
 
@@ -839,15 +840,20 @@ export function IncrementPanel({ mode = "full" }: { mode?: Mode }) {
                                   {l.skipReason}
                                 </span>
                               ) : selected.status === "draft" ? (
-                                <button
-                                  type="button"
-                                  className="font-semibold text-[var(--brand-deep)] underline-offset-2 hover:underline"
-                                  onClick={() => toggleInclude(l.staffId)}
-                                >
-                                  {l.status === "included"
-                                    ? "Included · exclude"
-                                    : "Excluded · include"}
-                                </button>
+                                <span className="inline-flex items-center gap-1">
+                                  <span className="capitalize">{l.status}</span>
+                                  <RowActionMenu
+                                    row={l}
+                                    label="Increment line actions"
+                                    actions={[
+                                      {
+                                        id: "toggle",
+                                        label: l.status === "included" ? "Exclude from this run" : "Include in this run",
+                                        onSelect: (x) => toggleInclude(x.staffId),
+                                      },
+                                    ]}
+                                  />
+                                </span>
                               ) : (
                                 l.status
                               )}

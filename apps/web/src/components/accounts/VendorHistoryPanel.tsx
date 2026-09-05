@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — a vendor's running statement — rows are ledger lines, not records with actions
 
 /**
  * A vendor's history — what we bought, what we owe, and how old the debt is.
@@ -202,7 +203,7 @@ export function VendorHistoryPanel() {
                 ) : null}
               </div>
 
-              <ErpTableShell className="mt-3 overflow-x-auto" density="compact">
+              <ErpTableShell className="mt-3 overflow-x-auto" density="compact" exportAs="vendor_statement" exportTitle="Vendor statement">
                 <ErpTable minWidth="min-w-[42rem]" className="text-xs">
                   <ErpTableHead>
                     <tr>

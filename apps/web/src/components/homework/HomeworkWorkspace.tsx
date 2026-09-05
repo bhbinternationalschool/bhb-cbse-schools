@@ -57,6 +57,7 @@ import {
   ErpTableHead,
   ErpTableShell,
 } from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 type HwTab =
   | "dashboard"
@@ -1371,7 +1372,7 @@ function RosterSubmitTable({
     );
   }
   return (
-    <ErpTableShell className="overflow-x-auto">
+    <ErpTableShell className="overflow-x-auto" exportAs="homework_completion" exportTitle="Homework completion">
       <ErpTable>
         <ErpTableHead>
           <tr>
@@ -1381,6 +1382,7 @@ function RosterSubmitTable({
                 {p.title.slice(0, 20)}
               </th>
             ))}
+            <th className="w-10 px-2 py-2" aria-label="Actions" />
           </tr>
         </ErpTableHead>
         <ErpTableBody>
@@ -1405,6 +1407,9 @@ function RosterSubmitTable({
                   </td>
                 );
               })}
+              <td className="px-2 py-1.5 text-right">
+                <RowActionMenu row={stu} label="Student actions" actions={[{ id: "open", label: "Open student profile", onSelect: (x) => { window.location.href = `/students/${encodeURIComponent(String(x.id))}/edit`; } }]} />
+              </td>
             </tr>
           ))}
         </ErpTableBody>

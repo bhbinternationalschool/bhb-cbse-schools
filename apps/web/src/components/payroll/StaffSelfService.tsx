@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — a staff member's own advances, read-only by design
 
 import { useEffect, useMemo, useState } from "react";
 import { loadMasters } from "@/lib/masters";
@@ -219,7 +220,7 @@ export function StaffMyAdvances({ staffId }: { staffId: string }) {
         </p>
       </div>
 
-      <ErpTableShell className="overflow-x-auto">
+      <ErpTableShell className="overflow-x-auto" exportAs="my_advances" exportTitle="My advances">
         <ErpTable className="text-xs">
           <ErpTableHead>
             <tr>

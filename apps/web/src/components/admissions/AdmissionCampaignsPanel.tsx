@@ -996,6 +996,19 @@ export function AdmissionCampaignsPanel({
                 exportFileBaseName={`campaign-messages-${selectedCampaign.name}`}
                 exportTitle={`Messages · ${selectedCampaign.name}`}
                 minWidth="min-w-full"
+                rowActions={[
+                  {
+                    id: "wa",
+                    label: "Open in WhatsApp",
+                    disabled: (m) => !m.waMeUrl,
+                    onSelect: (m) => window.open(m.waMeUrl, "_blank", "noopener"),
+                  },
+                  {
+                    id: "copy",
+                    label: "Copy mobile",
+                    onSelect: (m) => void navigator.clipboard.writeText(m.mobile),
+                  },
+                ]}
               />
             )}
           </MastersTableCard>

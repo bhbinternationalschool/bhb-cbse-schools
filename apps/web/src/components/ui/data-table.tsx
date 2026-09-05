@@ -1,12 +1,22 @@
 "use client";
 
-import { ArrowUpDown, ChevronDownIcon, ChevronUpIcon, DownloadIcon } from "lucide-react";
+import { ArrowUpDown, ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import {
+  BulkActionBar,
+  ExportMenu,
+  RowActionMenu,
+  RowCheckbox,
+  useRowSelection,
+  type BulkAction,
+  type ExportFormat,
+  type RowAction,
+  type RowSelection,
+} from "@/components/ui/erp-grid";
 import { SkeletonTable } from "@/components/ui/skeleton";
-import { downloadExcelCsv } from "@/lib/reportExport";
 import { cn } from "@/lib/utils";
 
 export type DataTableColumn<T> = {
@@ -22,9 +32,11 @@ export type DataTableColumn<T> = {
 };
 
 /**
- * Shared table: sorting, client pagination, empty/loading states, optional
- * CSV export — the pieces ErpTable/ErpTableShell left to each of the 53 raw
- * `<table>` call sites to reimplement (or skip) individually.
+ * Shared table: sorting, client pagination, empty/loading states, and the
+ * premium-grid standard — a checkbox on every row with a slide-up bulk bar,
+ * a "…" action menu on every row, and an Export data menu (Excel / CSV /
+ * PDF) of the filtered, sorted rows. The pieces ErpTable/ErpTableShell left
+ * to each of the 53 raw `<table>` call sites to reimplement (or skip).
  */
 export function DataTable<T>({
   columns,
@@ -37,6 +49,18 @@ export function DataTable<T>({
   minWidth = "min-w-[720px]",
   exportFileBaseName,
   exportTitle,
+  exportSubtitle,
+  exportFilterNote,
+  exportFormats,
+  onExportMessage,
+  toolbar,
+  rowActions,
+  rowActionsLabel,
+  selectable = false,
+  selection: selectionProp,
+  bulkActions,
+  selectionNoun,
+  onRowClick,
   className,
 }: {
   columns: DataTableColumn<T>[];
@@ -47,14 +71,36 @@ export function DataTable<T>({
   emptyDescription?: string;
   pageSize?: number;
   minWidth?: string;
-  /** Set to enable the CSV export button; used as the downloaded filename base. */
+  /** Set to enable the Export data menu; used as the downloaded filename base. */
   exportFileBaseName?: string;
   exportTitle?: string;
+  exportSubtitle?: string;
+  exportFilterNote?: string;
+  /** Default: Excel, CSV and PDF. */
+  exportFormats?: ExportFormat[];
+  onExportMessage?: (msg: string) => void;
+  /** Search / filters / contextual actions, rendered in the control row beside Export. */
+  toolbar?: ReactNode;
+  /** The "…" menu every row carries. */
+  rowActions?: RowAction<T>[];
+  rowActionsLabel?: string;
+  /** Checkbox on every row plus a select-all in the header. */
+  selectable?: boolean;
+  /** Bring your own selection (useRowSelection) when the bulk bar lives elsewhere. */
+  selection?: RowSelection;
+  /** Rendered in the slide-up bar whenever rows are ticked. Implies `selectable`. */
+  bulkActions?: BulkAction[];
+  selectionNoun?: string;
+  onRowClick?: (row: T) => void;
   className?: string;
 }) {
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
+  const allKeys = useMemo(() => rows.map(rowKey), [rows, rowKey]);
+  const ownSelection = useRowSelection(allKeys);
+  const selection = selectionProp ?? ownSelection;
+  const withSelection = selectable || !!bulkActions || !!selectionProp;
 
   const sorted = useMemo(() => {
     if (!sortKey) return rows;
@@ -89,44 +135,57 @@ export function DataTable<T>({
     setPage(1);
   }
 
-  function handleExport() {
-    if (!exportFileBaseName) return;
-    downloadExcelCsv({
-      title: exportTitle || exportFileBaseName,
-      columns: columns
-        .filter((c) => c.value)
-        .map((c) => ({
-          key: c.key,
-          header: typeof c.header === "string" ? c.header : c.key,
-          align: c.align,
-        })),
-      rows: sorted.map((row) => {
-        const out: Record<string, string | number | null> = {};
-        for (const c of columns) {
-          if (!c.value) continue;
-          const v = c.value(row);
-          out[c.key] = v ?? "";
-        }
-        return out;
-      }),
-      fileBaseName: exportFileBaseName,
+  const exportColumns = columns
+    .filter((c) => c.value)
+    .map((c) => ({
+      key: c.key,
+      header: typeof c.header === "string" ? c.header : c.key,
+      align: c.align,
+    }));
+  const exportRows = () =>
+    sorted.map((row) => {
+      const out: Record<string, string | number | null> = {};
+      for (const c of columns) {
+        if (!c.value) continue;
+        const v = c.value(row);
+        out[c.key] = v ?? "";
+      }
+      return out;
     });
-  }
+
+  const exportMenu = exportFileBaseName ? (
+    <ExportMenu
+      title={exportTitle || exportFileBaseName}
+      subtitle={exportSubtitle}
+      filterNote={exportFilterNote}
+      columns={exportColumns}
+      rows={exportRows}
+      fileBaseName={exportFileBaseName}
+      formats={exportFormats}
+      onMessage={onExportMessage}
+      compact
+    />
+  ) : null;
 
   if (loading) return <SkeletonTable />;
 
   if (rows.length === 0) {
-    return <EmptyState title={emptyTitle} description={emptyDescription} />;
+    return (
+      <div className={cn("space-y-2", className)}>
+        {toolbar ? <div className="flex flex-wrap items-center gap-2">{toolbar}</div> : null}
+        <EmptyState title={emptyTitle} description={emptyDescription} />
+      </div>
+    );
   }
+
+  const pageKeys = pageRows.map(rowKey);
 
   return (
     <div className={cn("space-y-2", className)}>
-      {exportFileBaseName ? (
-        <div className="flex justify-end">
-          <Button type="button" variant="outline" size="sm" onClick={handleExport}>
-            <DownloadIcon className="size-3.5" />
-            Export CSV
-          </Button>
+      {toolbar || exportMenu ? (
+        <div className="flex flex-wrap items-center gap-2">
+          {toolbar}
+          {exportMenu ? <div className="ml-auto">{exportMenu}</div> : null}
         </div>
       ) : null}
 
@@ -134,6 +193,16 @@ export function DataTable<T>({
         <table className={cn("w-full text-left text-sm", minWidth)}>
           <thead className="border-b border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] text-[11px] uppercase tracking-wide text-muted-foreground">
             <tr>
+              {withSelection ? (
+                <th className="w-10 px-3 py-3">
+                  <RowCheckbox
+                    checked={selection.allSelected(pageKeys)}
+                    indeterminate={selection.someSelected(pageKeys)}
+                    onChange={() => selection.toggleAll(pageKeys)}
+                    label="Select all rows on this page"
+                  />
+                </th>
+              ) : null}
               {columns.map((col) => {
                 const active = sortKey === col.key;
                 return (
@@ -171,28 +240,59 @@ export function DataTable<T>({
                   </th>
                 );
               })}
+              {rowActions?.length ? <th className="w-12 px-2 py-3" aria-label="Actions" /> : null}
             </tr>
           </thead>
           <tbody className="divide-y divide-[rgba(32,48,80,0.08)]">
-            {pageRows.map((row) => (
-              <tr key={rowKey(row)} className="hover:bg-[rgba(32,48,80,0.02)]">
-                {columns.map((col) => (
-                  <td
-                    key={col.key}
-                    className={cn(
-                      "px-4 py-2.5",
-                      col.align === "right" && "text-right",
-                      col.className,
-                    )}
-                  >
-                    {col.render ? col.render(row) : String(col.value?.(row) ?? "")}
-                  </td>
-                ))}
-              </tr>
-            ))}
+            {pageRows.map((row) => {
+              const key = rowKey(row);
+              const picked = withSelection && selection.isSelected(key);
+              return (
+                <tr
+                  key={key}
+                  onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  className={cn(
+                    "hover:bg-[rgba(32,48,80,0.02)]",
+                    picked && "bg-[var(--accent)]",
+                    onRowClick && "cursor-pointer",
+                  )}
+                >
+                  {withSelection ? (
+                    <td className="w-10 px-3 py-2.5">
+                      <RowCheckbox
+                        checked={picked}
+                        onChange={() => selection.toggle(key)}
+                        label={`Select row ${key}`}
+                      />
+                    </td>
+                  ) : null}
+                  {columns.map((col) => (
+                    <td
+                      key={col.key}
+                      className={cn(
+                        "px-4 py-2.5",
+                        col.align === "right" && "text-right",
+                        col.className,
+                      )}
+                    >
+                      {col.render ? col.render(row) : String(col.value?.(row) ?? "")}
+                    </td>
+                  ))}
+                  {rowActions?.length ? (
+                    <td className="w-12 px-2 py-1.5 text-right">
+                      <RowActionMenu row={row} actions={rowActions} label={rowActionsLabel} />
+                    </td>
+                  ) : null}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
+
+      {bulkActions?.length ? (
+        <BulkActionBar selection={selection} actions={bulkActions} noun={selectionNoun} />
+      ) : null}
 
       {pageCount > 1 ? (
         <div className="flex items-center justify-between text-xs text-muted-foreground">

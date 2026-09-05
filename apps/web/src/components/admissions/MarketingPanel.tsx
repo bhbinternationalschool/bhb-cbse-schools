@@ -34,6 +34,7 @@ import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import { buildCrossPostPayload, requestSocialCrossPost, summarizeCrossPostResult } from "@/lib/socialCrossPost";
 import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 const inp = "w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-sm";
 
@@ -290,14 +291,27 @@ export function MarketingPanel({ masters, admissions, canEdit, by }: { masters: 
                       <td className="px-2 py-1.5 whitespace-nowrap">{a.date || "—"}</td>
                       <td className="px-2 py-1.5 whitespace-nowrap">
                         {canEdit ? (
-                          <>
-                            <button type="button" className="text-[var(--brand-deep)] underline" onClick={() => setDraft({ id: a.id, kind: a.kind, academicYearCode: a.academicYearCode, title: a.title, detail: a.detail, metrics: a.metrics.map((m) => `${m.label}: ${m.value}`).join("\n"), date: a.date, publicSafe: a.publicSafe, sourceNote: a.sourceNote })}>
-                              Edit
-                            </button>
-                            <button type="button" className="ml-2 text-[var(--danger)] underline" onClick={() => { if (window.confirm("Remove this achievement?")) persist(removeAchievement(state, a.id), "Removed"); }}>
-                              Remove
-                            </button>
-                          </>
+                          <RowActionMenu
+                            row={a}
+                            label={`Actions for ${a.title}`}
+                            actions={[
+                              {
+                                id: "edit",
+                                label: "Edit achievement",
+                                onSelect: (x) =>
+                                  setDraft({ id: x.id, kind: x.kind, academicYearCode: x.academicYearCode, title: x.title, detail: x.detail, metrics: x.metrics.map((m) => `${m.label}: ${m.value}`).join("\n"), date: x.date, publicSafe: x.publicSafe, sourceNote: x.sourceNote }),
+                              },
+                              {
+                                id: "remove",
+                                label: "Remove",
+                                tone: "danger",
+                                separatorAbove: true,
+                                onSelect: (x) => {
+                                  if (window.confirm("Remove this achievement?")) persist(removeAchievement(state, x.id), "Removed");
+                                },
+                              },
+                            ]}
+                          />
                         ) : null}
                       </td>
                     </tr>

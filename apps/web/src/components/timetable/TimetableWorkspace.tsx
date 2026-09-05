@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — the period grid — cells are slots, not records
 
 import { useEffect, useMemo, useState } from "react";
 import { CalendarClock } from "lucide-react";

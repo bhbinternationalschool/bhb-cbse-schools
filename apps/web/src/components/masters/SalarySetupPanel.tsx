@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — an assignment editor whose Assign / Cancel are draft controls, not row actions
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";

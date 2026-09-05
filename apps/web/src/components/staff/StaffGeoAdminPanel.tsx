@@ -13,6 +13,7 @@ import { MapPin, RefreshCw } from "lucide-react";
 import { normalizeStaffGeoSettings, type StaffGeoConsent, type StaffGeoSettings, type StaffPresence } from "@/lib/staffGeo";
 import { loadMasters } from "@/lib/masters";
 import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 const inp = "w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-sm";
 
@@ -121,7 +122,7 @@ export function StaffGeoAdminPanel({ canEdit }: { canEdit: boolean }) {
           </button>
         </div>
         <div className="mt-2">
-          <ErpTableShell>
+          <ErpTableShell exportAs="staff_gps_presence" exportTitle="Staff GPS presence">
             <ErpTable>
               <ErpTableHead>
                 <tr>
@@ -131,6 +132,7 @@ export function StaffGeoAdminPanel({ canEdit }: { canEdit: boolean }) {
                   <th className="px-2 py-2 text-right">Last ping</th>
                   <th className="px-2 py-2 text-left">Consent</th>
                   <th className="px-2 py-2 text-left">Exempt</th>
+                  <th className="w-10 px-2 py-2" aria-label="Actions" />
                 </tr>
               </ErpTableHead>
               <ErpTableBody>
@@ -151,6 +153,9 @@ export function StaffGeoAdminPanel({ canEdit }: { canEdit: boolean }) {
                             onChange={(e) => patch({ exemptStaffIds: e.target.checked ? [...settings.exemptStaffIds, r.staffId] : settings.exemptStaffIds.filter((x) => x !== r.staffId) })}
                           />
                         ) : r.exempt ? "✓" : ""}
+                      </td>
+                      <td className="px-2 py-1.5 text-right">
+                        <RowActionMenu row={r} label="Staff actions" actions={[{ id: "open", label: "Open staff record", onSelect: (x) => { window.location.href = `/staff/${encodeURIComponent(String(x.staffId))}/edit`; } }]} />
                       </td>
                     </tr>
                   );

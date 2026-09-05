@@ -41,6 +41,7 @@ import {
   type InvAssetStatus,
   type InvBootstrap,
 } from "@/lib/inventory/types";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 type Draft = Partial<InvAssetRow> & {
   costInput?: string;
@@ -241,7 +242,7 @@ export function AssetsSection({ boot }: { boot: InvBootstrap }) {
           </p>
         </div>
       ) : (
-        <ErpTableShell density="compact" className="overflow-x-auto">
+        <ErpTableShell density="compact" className="overflow-x-auto" exportAs="asset_register" exportTitle="Asset register">
           <ErpTable minWidth="min-w-[940px]">
             <ErpTableHead>
               <tr>
@@ -314,26 +315,23 @@ export function AssetsSection({ boot }: { boot: InvBootstrap }) {
                     {a.purchaseCostPaise ? formatPaise(a.purchaseCostPaise) : "—"}
                   </td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      onClick={() => setHistory(a)}
-                    >
-                      History
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      onClick={() =>
-                        setDraft({
-                          ...a,
-                          costInput: paiseToInput(a.purchaseCostPaise),
-                          changeNote: "",
-                        })
-                      }
-                    >
-                      Edit
-                    </Button>
+                    <RowActionMenu
+                      row={a}
+                      label="Asset actions"
+                      actions={[
+                        { id: "history", label: "Movement history", onSelect: (x) => setHistory(x) },
+                        {
+                          id: "edit",
+                          label: "Edit details",
+                          onSelect: (x) =>
+                            setDraft({
+                              ...x,
+                              costInput: paiseToInput(x.purchaseCostPaise),
+                              changeNote: "",
+                            }),
+                        },
+                      ]}
+                    />
                   </td>
                 </tr>
               ))}

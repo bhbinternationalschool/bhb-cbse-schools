@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — reconciliation rows carry bespoke Apply / Promote / Verify controls tied to match state
 
 import { useEffect, useMemo, useState } from "react";
 import { getSessionActor } from "@/lib/sessionActor";

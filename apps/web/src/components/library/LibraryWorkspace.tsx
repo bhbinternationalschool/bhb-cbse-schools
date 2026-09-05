@@ -22,6 +22,7 @@ import {
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 import { DeskListActions } from "@/components/ui/desk-list-actions";
+import { ExportMenu, RowActionMenu } from "@/components/ui/erp-grid";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import { DOC_ACCEPT, DOC_MAX_BYTES } from "@/lib/sis";
 import { DEFAULT_AY, formatInr, loadMasters, type MastersState } from "@/lib/masters";
@@ -812,6 +813,40 @@ export function LibraryWorkspace() {
             </div>
           ) : null}
 
+          <div className="flex justify-end">
+            <ExportMenu
+              title="Library catalogue"
+              subtitle={`${filteredTitles.length} title(s)`}
+              fileBaseName="library_catalogue"
+              columns={[
+                { key: "title", header: "Title", width: 2 },
+                { key: "isbn", header: "ISBN" },
+                { key: "category", header: "Category" },
+                { key: "author", header: "Author", width: 1.5 },
+                { key: "shelf", header: "Rack" },
+                { key: "copies", header: "Copies", align: "right" },
+                { key: "available", header: "Available", align: "right" },
+                { key: "purchase", header: "Purchase" },
+              ]}
+              rows={() =>
+                titleSort.rows.map((t) => ({
+                  title: t.title,
+                  isbn: t.isbn || "",
+                  category: categoryLabel(t.category),
+                  author: t.author || "",
+                  shelf: t.shelf || "",
+                  copies: t.copiesTotal,
+                  available: availableCountForTitle(t.id, state),
+                  purchase: t.purchaseDate || "",
+                }))
+              }
+              onMessage={(msg) => {
+                setNotice(msg);
+                window.setTimeout(() => setNotice(null), 2800);
+              }}
+              compact
+            />
+          </div>
           <ErpTableShell>
             <div className="overflow-x-auto">
               <ErpTable minWidth="min-w-[56rem]">
@@ -856,12 +891,36 @@ export function LibraryWorkspace() {
                         </td>
                         <td className="px-4 py-2 text-xs">{t.purchaseDate || "—"}</td>
                         <td className="px-4 py-2">
-                          <DeskListActions
-                            readOnly={readOnly}
-                            onEdit={() => startEditTitle(t)}
-                            onDelete={() => handleDeleteTitle(t.id)}
-                            deleteConfirm={`Delete "${t.title}" from catalogue?`}
-                          />
+                          <div className="flex items-center justify-end gap-1">
+                            <RowActionMenu
+                              row={t}
+                              label={`Actions for ${t.title}`}
+                              actions={[
+                                {
+                                  id: "issue",
+                                  label: "Issue a copy",
+                                  hidden: () => readOnly,
+                                  onSelect: () => setTab("issue"),
+                                },
+                                {
+                                  id: "history",
+                                  label: "Loan history",
+                                  onSelect: () => setTab("history"),
+                                },
+                                {
+                                  id: "edit",
+                                  label: "Edit details",
+                                  hidden: () => readOnly,
+                                  onSelect: (r) => startEditTitle(r),
+                                },
+                              ]}
+                            />
+                            <DeskListActions
+                              readOnly={readOnly}
+                              onDelete={() => handleDeleteTitle(t.id)}
+                              deleteConfirm={`Delete "${t.title}" from catalogue?`}
+                            />
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -1248,6 +1307,40 @@ export function LibraryWorkspace() {
             </label>
           </div>
 
+          <div className="flex justify-end">
+            <ExportMenu
+              title="Library transactions"
+              subtitle={`${filteredHistory.length} loan(s)${histOpenOnly ? " · open only" : ""}`}
+              fileBaseName="library_transactions"
+              columns={[
+                { key: "title", header: "Title", width: 2 },
+                { key: "accession", header: "Accession" },
+                { key: "borrower", header: "Borrower", width: 1.6 },
+                { key: "type", header: "Type" },
+                { key: "issued", header: "Issued" },
+                { key: "due", header: "Due" },
+                { key: "returned", header: "Returned" },
+                { key: "fine", header: "Fine (₹)", align: "right" },
+              ]}
+              rows={() =>
+                filteredHistory.map((issue) => ({
+                  title: titleForIssue(issue),
+                  accession: accessionForIssue(issue),
+                  borrower: borrowerLabel(issue, { students: sis?.students, staff: staffRoster }),
+                  type: issue.borrowerType,
+                  issued: issue.issuedOn,
+                  due: issue.dueOn,
+                  returned: issue.returnedOn || "Open",
+                  fine: issue.finePaise ? issue.finePaise / 100 : "",
+                }))
+              }
+              onMessage={(msg) => {
+                setNotice(msg);
+                window.setTimeout(() => setNotice(null), 2800);
+              }}
+              compact
+            />
+          </div>
           <ErpTableShell>
             <div className="overflow-x-auto">
               <ErpTable minWidth="min-w-[64rem]">

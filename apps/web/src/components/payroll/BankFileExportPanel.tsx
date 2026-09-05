@@ -22,6 +22,7 @@ import {
   normalizeSalarySettings,
 } from "@/lib/salarySetup";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 export function BankFileExportPanel({
   academicYearCode,
@@ -243,6 +244,7 @@ export function BankFileExportPanel({
                       <th className="py-2 pr-2 font-semibold">IFSC</th>
                       <th className="py-2 pr-2 font-semibold">Amount</th>
                       <th className="py-2 font-semibold">Status</th>
+                      <th className="w-10 px-2 py-2" aria-label="Actions" />
                     </tr>
                   </ErpTableHead>
                   <ErpTableBody>
@@ -273,6 +275,9 @@ export function BankFileExportPanel({
                               {r.issues.join(" · ")}
                             </span>
                           )}
+                        </td>
+                        <td className="px-2 py-1.5 text-right">
+                          <RowActionMenu row={r} label="Staff actions" actions={[{ id: "open", label: "Open staff record", onSelect: (x) => { window.location.href = `/staff/${encodeURIComponent(String(x.staffId))}/edit`; } }]} />
                         </td>
                       </tr>
                     ))}

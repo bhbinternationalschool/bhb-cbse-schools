@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — the counter's sales list opens each receipt on click and has its own void / print controls
 
 /**
  * Counter — sell to a student, staff member or walk-in.
@@ -1864,7 +1865,7 @@ function SalesSection({
           {onlyUnpaid ? "Nothing outstanding." : "No sales yet."}
         </div>
       ) : (
-        <ErpTableShell density="compact" className="overflow-x-auto">
+        <ErpTableShell density="compact" className="overflow-x-auto" exportAs="counter_sales" exportTitle="Counter sales">
           <ErpTable minWidth="min-w-[940px]">
             <ErpTableHead>
               <tr>

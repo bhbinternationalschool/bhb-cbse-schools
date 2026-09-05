@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — a month-by-month plan summary
 
 import { useEffect, useMemo, useState } from "react";
 import { formatInr } from "@/lib/fees";
@@ -445,7 +446,7 @@ export function TransportPlannerPanel({
                     <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--muted)]">
                       Fee months (Fee Take)
                     </p>
-                    <ErpTableShell className="mt-1 overflow-x-auto">
+                    <ErpTableShell className="mt-1 overflow-x-auto" exportAs="transport_plan" exportTitle="Transport plan">
                       <ErpTable minWidth="min-w-[16rem]" className="text-xs">
                         <ErpTableHead>
                           <tr>

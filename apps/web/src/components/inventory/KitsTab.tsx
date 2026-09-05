@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — a kit's line editor inside a form, not a data grid
 
 /**
  * Kits — what a class is supposed to receive.

@@ -24,6 +24,7 @@ import {
   ErpTableHead,
   ErpTableShell,
 } from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 const RECEIPT_ACCEPT = "application/pdf,image/jpeg,image/png";
 const RECEIPT_MAX_BYTES = 15 * 1024 * 1024;
@@ -218,7 +219,7 @@ export function StatutoryRemitPanel() {
 
                 {openId === b.id ? (
                   <div className="mt-3 space-y-3">
-                    <ErpTableShell className="overflow-x-auto">
+                    <ErpTableShell className="overflow-x-auto" exportAs="pf_ecr" exportTitle="PF ECR">
                       <ErpTable minWidth="min-w-[720px]" className="text-[11px]">
                         <ErpTableHead>
                           <tr>
@@ -229,6 +230,7 @@ export function StatutoryRemitPanel() {
                             <th className="px-2 py-1.5 font-medium">EPS</th>
                             <th className="px-2 py-1.5 font-medium">ER</th>
                             <th className="px-2 py-1.5 font-medium">EDLI</th>
+                            <th className="w-10 px-2 py-2" aria-label="Actions" />
                           </tr>
                         </ErpTableHead>
                         <ErpTableBody>
@@ -246,6 +248,9 @@ export function StatutoryRemitPanel() {
                                 {formatInr(Math.max(0, l.pfEmployer - l.epsAmount))}
                               </td>
                               <td className="px-2 py-1.5">{formatInr(l.edliAmount)}</td>
+                              <td className="px-2 py-1.5 text-right">
+                                <RowActionMenu row={l} label="Staff actions" actions={[{ id: "open", label: "Open staff record", onSelect: (x) => { window.location.href = `/staff/${encodeURIComponent(String(x.staffId))}/edit`; } }]} />
+                              </td>
                             </tr>
                           ))}
                         </ErpTableBody>
@@ -260,6 +265,7 @@ export function StatutoryRemitPanel() {
                             <th className="px-2 py-1.5 font-medium">IP contribution</th>
                             <th className="px-2 py-1.5 font-medium">Employer</th>
                             <th className="px-2 py-1.5 font-medium">Total</th>
+                            <th className="w-10 px-2 py-2" aria-label="Actions" />
                           </tr>
                         </ErpTableHead>
                         <ErpTableBody>
@@ -276,6 +282,9 @@ export function StatutoryRemitPanel() {
                                 <td className="px-2 py-1.5">{formatInr(l.esicEmployer)}</td>
                                 <td className="px-2 py-1.5 font-semibold">
                                   {formatInr(l.esicEmployee + l.esicEmployer)}
+                                </td>
+                                <td className="px-2 py-1.5 text-right">
+                                  <RowActionMenu row={l} label="Staff actions" actions={[{ id: "open", label: "Open staff record", onSelect: (x) => { window.location.href = `/staff/${encodeURIComponent(String(x.staffId))}/edit`; } }]} />
                                 </td>
                               </tr>
                             ))}

@@ -27,6 +27,7 @@ import { notifySubstitutes } from "@/lib/timetableSubstitutionAuto";
 import { isoDateWeekday } from "@/lib/examTimetable";
 import type { MastersState } from "@/lib/masters";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 export function SubstitutionPanel(props: {
   masters: MastersState;
@@ -843,14 +844,18 @@ export function SubstitutionPanel(props: {
                       </td>
                       {canEdit ? (
                         <td className="border border-[var(--border)] p-2 text-center">
-                          <button
-                            type="button"
-                            aria-label="Remove row"
-                            className="rounded px-1.5 text-sm font-bold text-[var(--danger)] hover:bg-[var(--danger-soft)]"
-                            onClick={() => removeRow(row.id)}
-                          >
-                            ×
-                          </button>
+                          <RowActionMenu
+                            row={row}
+                            label="Substitution row actions"
+                            actions={[
+                              {
+                                id: "remove",
+                                label: "Remove this substitution",
+                                tone: "danger",
+                                onSelect: (x) => removeRow(x.id),
+                              },
+                            ]}
+                          />
                         </td>
                       ) : null}
                     </tr>

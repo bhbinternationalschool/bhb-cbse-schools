@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — report output with dynamic columns
 
 import { useEffect, useMemo, useState } from "react";
 import { loadMasters, type MastersState } from "@/lib/masters";
