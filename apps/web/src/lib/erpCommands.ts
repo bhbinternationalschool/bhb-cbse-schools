@@ -122,6 +122,32 @@ export const ERP_COMMANDS: ErpCommandDef[] = [
     scope: "any",
   },
   {
+    id: "homework_posted",
+    title: "Homework posted",
+    kind: "read",
+    module: "homework",
+    action: "view",
+    description:
+      "Homework published on a date: for one section, each post by subject with teacher and due date, or 'none yet' with the subject teachers named; with no section, a per-section count and the sections with nothing posted. Teachers get their sections; office and leadership the school. Not for posting homework.",
+    examples: [
+      "homework posted today for 6B",
+      "6B homework",
+      "aaj 6B ka homework",
+      "homework status",
+      "kal kis class me homework nahi hua",
+    ],
+    fields: [
+      { name: "section", type: "section", required: false, description: "Optional class-section, e.g. 6B" },
+      {
+        name: "date",
+        type: "date",
+        required: false,
+        description: "YYYY-MM-DD; today when not said. 'kal' / 'yesterday' means yesterday.",
+      },
+    ],
+    scope: "any",
+  },
+  {
     id: "pending_leaves",
     title: "Pending student leave requests",
     kind: "read",
@@ -527,6 +553,10 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
   }
   if (COLLECTION_WORDS.test(t) && !extractSectionRefs(t).length) {
     return { commandId: "collection_today", fields: { date: "" }, source: "local" };
+  }
+  const hwQ = parseHomeworkQuery(t);
+  if (hwQ) {
+    return { commandId: "homework_posted", fields: { section: hwQ.section, date: "" }, source: "local" };
   }
   // Leave queue before any fee reading: "pending" and "baki" are fee words
   // too, but "chutti pending" is about leave.
@@ -1565,6 +1595,46 @@ export const TENDER_MODE_LABEL: Record<string, string> = {
 
 // ─── Free teachers in a period ─────────────────────────────────────────
 
+const HOMEWORK_WORDS =
+  /(?<![\p{L}\p{M}\p{N}])(homework|home\s*work|hw|गृहकार्य|grihkarya|grih\s*karya|assignments?|diary)(?![\p{L}\p{M}\p{N}])/iu;
+
+const HOMEWORK_QUERY_FILLER = new Set([
+  "homework", "home", "work", "hw", "गृहकार्य", "grihkarya", "grih", "karya", "assignment", "assignments", "diary",
+  "posted", "post", "status", "list", "check", "kaun", "kon", "kis", "kya", "kitne", "kitna", "hua", "hui", "diya", "diye", "di",
+  "gaya", "gayi", "nahi", "nahin", "aaj", "today", "kal", "yesterday", "parso", "dikhao", "show", "batao", "bata", "me", "mein",
+  "ka", "ki", "ke", "ko", "for", "of", "in", "the", "class", "classes", "section", "sections", "school", "all", "sab", "sabhi",
+  "hai", "h", "hain", "tha", "the", "thi", "any", "koi", "given", "done", "which", "what", "todays", "today's",
+  "आज", "कल", "किस", "कौन", "क्या", "हुआ", "दिया", "नहीं", "में", "का", "की", "के", "है", "दिखाओ", "बताओ",
+]);
+
+/**
+ * A question about homework — "homework posted today for 6B", "6B
+ * homework", "aaj 6B ka homework", "homework status", "kal kis class me
+ * homework nahi hua". A teacher's class-channel post ("Homework: page 42
+ * ex 4.2", "6B homework maths ch 3 q1-10") carries content words beyond
+ * the question, so anything with leftover words is NOT a query and goes to
+ * the class channel untouched.
+ */
+export function parseHomeworkQuery(text: string): { section: string } | null {
+  const t = (text || "").trim();
+  if (!t || !HOMEWORK_WORDS.test(t)) return null;
+  if (/[:\n]/.test(t)) return null; // "Homework: ..." is a post
+  const refs = extractSectionRefs(t);
+  let rest = t.toLowerCase();
+  rest = rest
+    .replace(/(?<![\p{L}\p{M}\p{N}])(?:class|grade|std|kaksha|कक्षा)\s*[a-z0-9]+(?:st|nd|rd|th)?\s*(?:-|\s)?\s*(?:section|sec\.?)?\s*[a-h]?(?![\p{L}\p{M}\p{N}])/giu, " ")
+    .replace(/(?<![a-z0-9])(\d{1,2}|[ivx]{1,4}|nursery|lkg|ukg|kg|pg)(?:st|nd|rd|th)?\s*-?\s*[a-h](?![a-z0-9])/g, " ")
+    .replace(/\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b/g, " ");
+  const leftover = rest
+    .replace(/[^\p{L}\p{M}\p{N}\s']/gu, " ")
+    .split(/\s+/)
+    .map((w) => w.replace(/^'+|'+$/g, ""))
+    .filter((w) => w && !HOMEWORK_QUERY_FILLER.has(w) && !/^\d+$/.test(w));
+  if (leftover.length) return null;
+  const r = refs[0];
+  return { section: r ? `${r.classKey}${r.sectionName}` : "" };
+}
+
 /**
  * Student leave queue: "pending leaves", "leave requests", "5A leave
  * requests", "kitni chutti pending hai", "leave approvals". A leave word
@@ -1741,5 +1811,72 @@ export function formatPendingLeavesReply(input: PendingLeavesInput): string {
     lines.push("", `${input.approvedToday} student${input.approvedToday === 1 ? "" : "s"} on approved leave today.`);
   }
   lines.push("", "Approve or reject in the ERP: Attendance → Leave.");
+  return lines.join("\n");
+}
+
+// ─── Homework posted ───────────────────────────────────────────────────
+
+export type HomeworkPostRow = {
+  subject: string;
+  title: string;
+  teacher: string;
+  dueAt: string; // ISO date or ""
+  requiresSubmit: boolean;
+};
+
+export type HomeworkSectionInput = {
+  kind: "section";
+  sectionLabel: string;
+  date: string;
+  todayIso: string;
+  posts: HomeworkPostRow[];
+  /** Subject teachers of the section, for "none yet". */
+  subjectTeachers: { subject: string; teacher: string }[];
+};
+
+export type HomeworkOverviewInput = {
+  kind: "overview";
+  scope: "school" | "mine";
+  date: string;
+  todayIso: string;
+  sections: { label: string; count: number; subjects: string[] }[];
+};
+
+export function formatHomeworkReply(input: HomeworkSectionInput | HomeworkOverviewInput): string {
+  const when = input.date === input.todayIso ? "today" : shortDate(input.date);
+  if (input.kind === "section") {
+    const lines = [`*Homework ${input.sectionLabel}* · ${when}`];
+    if (!input.posts.length) {
+      lines.push("None posted yet.");
+      if (input.subjectTeachers.length) {
+        lines.push("", "*Subject teachers*");
+        for (const st of input.subjectTeachers.slice(0, 10)) lines.push(`${st.subject} — ${st.teacher}`);
+      }
+      return lines.join("\n");
+    }
+    lines.push(`${input.posts.length} post${input.posts.length === 1 ? "" : "s"}`);
+    for (const p of input.posts) {
+      const due = p.dueAt ? ` · due ${shortDate(p.dueAt.slice(0, 10))}` : "";
+      lines.push("", `*${p.subject}* — ${p.teacher}`, `${p.title || "(no title)"}${due}${p.requiresSubmit ? " · submit" : ""}`);
+    }
+    return lines.join("\n");
+  }
+  const lines = [`*Homework* · ${input.scope === "school" ? "school" : "your sections"} · ${when}`];
+  if (!input.sections.length) {
+    lines.push("No active sections found.");
+    return lines.join("\n");
+  }
+  const posted = input.sections.filter((s) => s.count > 0);
+  const none = input.sections.filter((s) => s.count === 0);
+  const total = posted.reduce((n, s) => n + s.count, 0);
+  lines.push(`${total} post${total === 1 ? "" : "s"} across ${posted.length} of ${input.sections.length} sections`);
+  if (posted.length) {
+    lines.push("", "*Posted*");
+    for (const s of posted) lines.push(`${s.label}  ${s.count} (${s.subjects.slice(0, 4).join(", ")}${s.subjects.length > 4 ? ", …" : ""})`);
+  }
+  if (none.length) {
+    lines.push("", `*Nothing yet:* ${none.map((s) => s.label).join(", ")}`);
+  }
+  lines.push("", "Ask a section for details, e.g. _6B homework_.");
   return lines.join("\n");
 }
