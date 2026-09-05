@@ -38,6 +38,7 @@ import {
   formatClassDefaultersReply,
   formatCollectionReply,
   formatFreeTeachersReply,
+  formatPendingLeavesReply,
   parseFreeTeachersQuery,
   periodAtTime,
   resolveClassOrSectionRef,
@@ -166,6 +167,14 @@ const masters = {
   assert.equal(parseErpCommandLocal("VIII B me kaun nahi aaya")?.fields.section, "8B");
   assert.equal(parseErpCommandLocal("5A में कौन गैरहाजिर है")?.commandId, "absent_list", "Devanagari fee/absent words match without ASCII word boundaries");
   assert.equal(parseErpCommandLocal("7B की उपस्थिति")?.fields.section, "7B");
+  assert.equal(parseErpCommandLocal("pending leaves")?.commandId, "pending_leaves");
+  assert.equal(parseErpCommandLocal("leave requests")?.commandId, "pending_leaves");
+  assert.equal(parseErpCommandLocal("5A leave requests")?.fields.section, "5A");
+  assert.equal(parseErpCommandLocal("kitni chutti pending hai")?.commandId, "pending_leaves");
+  assert.equal(parseErpCommandLocal("leave approvals")?.commandId, "pending_leaves");
+  assert.equal(parseErpCommandLocal("कितनी छुट्टी बाकी है")?.commandId, "pending_leaves");
+  assert.equal(parseErpCommandLocal("leave"), null, "'leave' alone is left to the staff bot");
+  assert.equal(parseErpCommandLocal("5A me aaj kaun leave pe hai")?.commandId, "absent_list", "who is absent/on leave in a section is the absent list");
   assert.equal(parseErpCommandLocal("who is free in period 3")?.fields.text, "3");
   assert.equal(parseErpCommandLocal("period 3 me kaun free hai")?.fields.text, "3");
   assert.equal(parseErpCommandLocal("3rd period khali kaun hai")?.fields.text, "3");
@@ -726,6 +735,28 @@ const masters = {
   });
   assert.ok(none.startsWith("*Free in Period 1* · Fri 4 Sep"), none);
   assert.ok(none.includes("No teacher is free this period.") && none.includes("2 teachers absent today; this period is covered."), none);
+}
+
+// ─── pending leaves reply ──────────────────────────────────────────────
+{
+  const rows = [
+    { studentName: "Riya Verma", classLabel: "V A", rollNo: "11", fromDate: "2026-09-08", toDate: "2026-09-10", days: 3, typeLabel: "Sick leave", reason: "Fever", requestedAt: "2026-09-04T10:00:00.000Z", approver: "Class teacher" },
+    { studentName: "Kabir Ali", classLabel: "VI B", rollNo: "9", fromDate: "2026-09-06", toDate: "2026-09-06", days: 1, typeLabel: "Leave", reason: "Family function in Jaipur, will return by Sunday evening train", requestedAt: "2026-09-02T08:00:00.000Z", approver: "Class teacher" },
+    { studentName: "Aarav Sharma", classLabel: "V B", rollNo: "4", fromDate: "2026-09-07", toDate: "2026-09-14", days: 8, typeLabel: "Medical leave", reason: "", requestedAt: "2026-09-05T06:00:00.000Z", approver: "Principal" },
+  ];
+  const t = formatPendingLeavesReply({ todayIso: "2026-09-05", scope: "school", rows, approvedToday: 2 });
+  assert.ok(t.startsWith("*Pending leave requests* · school\n3 waiting · oldest first"), t);
+  assert.ok(t.indexOf("Kabir Ali") < t.indexOf("Riya Verma") && t.indexOf("Riya Verma") < t.indexOf("Aarav Sharma"), "oldest request first");
+  assert.ok(t.includes("*Kabir Ali* · VI B · roll 9\n6 Sep · Leave · Family function in Jaipur, will return by Sunday evening…\nasked 3d ago · approver: Class teacher"), t);
+  assert.ok(t.includes("*Riya Verma* · V A · roll 11\n8 Sep–10 Sep (3d) · Sick leave · Fever\nasked yesterday"), t);
+  assert.ok(t.includes("*Aarav Sharma* · V B · roll 4\n7 Sep–14 Sep (8d) · Medical leave\nasked today · approver: Principal"), t);
+  assert.ok(t.includes("2 students on approved leave today."), t);
+  assert.ok(t.endsWith("Approve or reject in the ERP: Attendance → Leave."));
+
+  const none = formatPendingLeavesReply({ todayIso: "2026-09-05", scope: "section", scopeLabel: "V A", rows: [], approvedToday: 0 });
+  assert.ok(none.startsWith("*Pending leave requests* · V A\nNothing waiting for approval. ✅"), none);
+  const mine = formatPendingLeavesReply({ todayIso: "2026-09-05", scope: "mine", rows: [], approvedToday: 0 });
+  assert.ok(mine.includes("· your sections"));
 }
 
 console.log("erpCommands.selftest.ts OK");
