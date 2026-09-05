@@ -36,7 +36,13 @@ import { staffAllowedSections } from "@/lib/erpChatAccess";
 import { loadServerMasters, loadServerRbac } from "@/lib/api/v1/auth";
 import { ensureAttendanceHydratedServer } from "@/lib/attendancePersistence";
 import { findRegister, loadAttendance } from "@/lib/attendance";
-import { loadSis } from "@/lib/sis";
+import { householdWhatsApp, loadSis, type SisStudent } from "@/lib/sis";
+import { computeHouseholdDues, loadFees, openFeeDues } from "@/lib/fees";
+import { flagFutureDues } from "@/lib/feeDueFuture";
+import { ensureFeesHydratedServer } from "@/lib/feesPersistence.server";
+import { formatInr, loadMasters } from "@/lib/masters";
+import { classLabel } from "@/lib/homework";
+import { isOfficeLike } from "@/lib/erpChatAccess";
 import { writeAudit } from "@/lib/audit.server";
 import { istDateOf } from "@/lib/teaching";
 import { TENANT } from "@/lib/types";
@@ -51,7 +57,11 @@ import {
   formatAbsentListReply,
   formatHelpReply,
   formatSectionProblem,
+  formatStudentFeesReply,
+  formatStudentMatchesAsk,
   looksLikeCommand,
+  matchStudents,
+  parseStudentFeesQuery,
   noteCommandUse,
   parseCommandsSwitch,
   parseConfirmReply,
@@ -334,7 +344,12 @@ export async function handleErpStaffCommand(
     ) {
       parsed = {
         commandId: r.parse.command,
-        fields: { section: r.parse.section, date: r.parse.date, text: r.parse.text },
+        fields: {
+          section: r.parse.section,
+          date: r.parse.date,
+          text: r.parse.text,
+          student: r.parse.student,
+        },
         source: "llm",
       };
     }
@@ -466,6 +481,52 @@ export async function handleErpStaffCommand(
     resolved.sectionId = sectionMatch.sectionId;
     resolved.sectionLabel = sectionMatch.label;
   }
+  if (command.fields.some((f) => f.type === "student")) {
+    const asked = (parsed.fields.student || text).trim();
+    const q = parseStudentFeesQuery(`${asked} fees`) ?? { name: asked };
+    const sis = loadSis();
+    const ay = session.academicYearCode;
+    let sectionId: string | null = null;
+    if (q.section) {
+      const res = resolveSectionRef(q.section, masters);
+      if (res.ok) sectionId = res.match.sectionId;
+    }
+    const roleCodes = resolveSessionRoles(rbac, session, masters).map((r) => r.code);
+    const mine = staffAllowedSections(inbound.staff, masters, ay, roleCodes);
+    const mineIds = new Set(mine.map((s) => s.sectionId));
+    const matches = matchStudents(q, sis.students, { academicYearCode: ay, sectionId });
+    const label = (st: SisStudent) => classLabel(masters, st.classId, st.sectionId);
+    if (matches.length !== 1) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: formatStudentMatchesAsk(
+          matches.map((m) => ({
+            fullName: m.student.fullName,
+            classLabel: label(m.student),
+            rollNo: m.student.rollNo,
+          })),
+          asked,
+        ),
+      };
+    }
+    const student = matches[0]!.student;
+    if (command.scope === "own_sections" && !mineIds.has(student.sectionId)) {
+      void audit(session, command, parsed.fields, text, "denied", {
+        reason: "scope",
+        studentId: student.id,
+        channel: inbound.channel,
+      });
+      return {
+        handled: true,
+        audience: "erp_command_denied",
+        text: `${student.fullName} is in ${label(student)}, which isn't one of your sections. Ask the fee desk or principal.`,
+      };
+    }
+    resolved.studentId = student.id;
+    resolved.studentName = student.fullName;
+    resolved.detail = isOfficeLike(roleCodes) || roleCodes.includes("accounts") ? "full" : "basic";
+  }
   if (command.fields.some((f) => f.type === "date")) {
     resolved.date =
       parsed.fields.date && /^\d{4}-\d{2}-\d{2}$/.test(parsed.fields.date)
@@ -538,6 +599,8 @@ async function runReadCommand(
   switch (command.id) {
     case "absent_list":
       return absentList(resolved, session, todayIso);
+    case "student_fees":
+      return studentFees(resolved, session, todayIso);
     default:
       return "That command isn't wired up yet.";
   }
@@ -577,6 +640,82 @@ async function absentList(
     leave: pick("LE"),
     late: pick("L"),
     halfDay: pick("HD"),
+  });
+}
+
+async function studentFees(
+  resolved: Record<string, string>,
+  session: DemoSession,
+  todayIso: string,
+): Promise<string> {
+  await ensureFeesHydratedServer();
+  const sis = loadSis();
+  const masters = loadMasters();
+  const fees = loadFees();
+  const student = sis.students.find((s) => s.id === resolved.studentId);
+  if (!student) return "That student record has gone missing. Please try again.";
+  const label = (st: SisStudent) => classLabel(masters, st.classId, st.sectionId);
+  const detail = resolved.detail === "full" ? "full" : "basic";
+  const rows = student.householdId
+    ? computeHouseholdDues(student.householdId, sis, masters, fees, {
+        includeFuture: true,
+        academicYearCode: session.academicYearCode,
+      })
+    : [{ student, dues: [] }];
+  const mine = rows.find((r) => r.student.id === student.id)?.dues ?? [];
+  const open = flagFutureDues(openFeeDues(mine).filter((d) => d.balancePaise > 0), todayIso);
+  const dues = open.map((d) => ({
+    label: d.installmentLabel || d.label || "",
+    headName: d.feeHeadName || d.label || "Fee",
+    kind: d.kind,
+    dueOn: d.dueOn || "",
+    balancePaise: d.balancePaise,
+    billedPaise: d.billedPaise,
+    concessionPaise: d.concessionPaise,
+    concessionNames: (d.concessionDetails ?? []).map((c) => c.name).filter(Boolean),
+    future: d.future,
+  }));
+  const siblings = rows
+    .filter((r) => r.student.id !== student.id)
+    .map((r) => ({
+      name: r.student.fullName,
+      classLabel: label(r.student),
+      duePaise: flagFutureDues(openFeeDues(r.dues), todayIso)
+        .filter((d) => !d.future)
+        .reduce((s, d) => s + Math.max(0, d.balancePaise), 0),
+    }));
+  const receipts = (fees.vouchers ?? [])
+    .filter(
+      (v) =>
+        !v.voidedAt &&
+        v.academicYearCode === session.academicYearCode &&
+        v.lines.some((l) => l.studentId === student.id),
+    )
+    .sort((a, b) => (b.collectionDate || "").localeCompare(a.collectionDate || ""));
+  const last = receipts[0];
+  const hh = student.householdId
+    ? sis.households.find((h) => h.id === student.householdId)
+    : undefined;
+  return formatStudentFeesReply({
+    studentName: student.fullName,
+    classLabel: label(student),
+    rollNo: student.rollNo,
+    todayIso,
+    dues,
+    lastReceipt: last
+      ? {
+          receiptNo: last.receiptNo,
+          date: last.collectionDate,
+          amountPaise: last.lines
+            .filter((l) => l.studentId === student.id)
+            .reduce((s, l) => s + l.amountPaise, 0),
+          modes: [...new Set(last.tenders.map((t) => t.mode.toUpperCase()))],
+        }
+      : null,
+    parentMobile: hh ? householdWhatsApp(hh) || hh.mobile : "",
+    siblings,
+    detail,
+    formatInr,
   });
 }
 
