@@ -39,6 +39,15 @@ import { findRegister, loadAttendance, summarizeMarks } from "@/lib/attendance";
 import { loadStaffAttendance } from "@/lib/staffAttendance";
 import { ensureStaffAttendanceHydratedServer } from "@/lib/staffAttendancePersistence";
 import { classifyClassHolidayDay } from "@/lib/holidayPolicy";
+import { loadTimetable, teachingPeriods, WEEKDAY_SHORT } from "@/lib/timetable";
+import { ensureTimetableHydratedServer } from "@/lib/timetablePersistence";
+import {
+  absentTeachersForDate,
+  affectedPeriodsForDate,
+  listSubstitutionsForDate,
+} from "@/lib/timetableSubstitution";
+import { isoDateWeekday } from "@/lib/examTimetable";
+import { subjectLabel } from "@/lib/homework";
 import { householdWhatsApp, loadSis, type SisStudent } from "@/lib/sis";
 import { computeHouseholdDues, getDayCloseForDate, loadFees, openFeeDues } from "@/lib/fees";
 import { flagFutureDues } from "@/lib/feeDueFuture";
@@ -62,7 +71,9 @@ import {
   formatAttendanceSummaryReply,
   formatClassDefaultersReply,
   formatCollectionReply,
+  formatFreeTeachersReply,
   formatHelpReply,
+  periodAtTime,
   TENDER_MODE_LABEL,
   formatSectionProblem,
   formatStudentFeesReply,
@@ -592,6 +603,9 @@ export async function handleErpStaffCommand(
       };
     }
   }
+  if (command.id === "free_teachers") {
+    resolved.period = (parsed.fields.text || "now").trim().toLowerCase();
+  }
   if (command.id === "attendance_summary") {
     const roleCodes = resolveSessionRoles(rbac, session, masters).map((r) => r.code);
     if (isOfficeLike(roleCodes)) {
@@ -689,6 +703,8 @@ async function runReadCommand(
       return classDefaulters(resolved, session, todayIso);
     case "collection_today":
       return collectionToday(resolved, session, todayIso);
+    case "free_teachers":
+      return freeTeachers(resolved, resolved.period || "now", session, todayIso);
     default:
       return "That command isn't wired up yet.";
   }
@@ -806,6 +822,123 @@ async function attendanceSummary(
     scope: school ? "school" : "mine",
     classes,
     staff,
+  });
+}
+
+function istHhmm(now = new Date()): string {
+  const ist = new Date(now.getTime() + 330 * 60_000);
+  return `${String(ist.getUTCHours()).padStart(2, "0")}:${String(ist.getUTCMinutes()).padStart(2, "0")}`;
+}
+
+async function freeTeachers(
+  resolved: Record<string, string>,
+  periodAsk: string,
+  session: DemoSession,
+  todayIso: string,
+): Promise<string> {
+  await Promise.all([ensureTimetableHydratedServer(), ensureStaffAttendanceHydratedServer()]);
+  const ay = session.academicYearCode;
+  const date = resolved.date || todayIso;
+  const masters = loadMasters();
+  const state = loadTimetable();
+  const periods = teachingPeriods(state.bellTemplate);
+  if (!periods.length) return "No bell timetable is set up yet (Timetable → Bell template).";
+  const weekday = isoDateWeekday(date);
+  if (weekday == null) return "I couldn't read that date.";
+  if (state.workingWeekdays?.length && !state.workingWeekdays.includes(weekday)) {
+    return `${WEEKDAY_SHORT[weekday]} ${date === todayIso ? "(today)" : date} is not a working day on the timetable.`;
+  }
+  const periodList = periods.map((p) => `${p.no} (${p.startTime}–${p.endTime})`).join(", ");
+  let periodNo: number;
+  const ask = (periodAsk || "").trim().toLowerCase();
+  if (ask === "now" || ask === "next") {
+    const at = periodAtTime(periods, istHhmm(), ask);
+    if (!at) return "I couldn't work out the current period.";
+    if ("before" in at) return `School hasn't started yet. Periods today: ${periodList}. Ask e.g. _who is free in period 1_.`;
+    if ("after" in at) return `Periods are over for today. Periods: ${periodList}. Ask e.g. _who is free in period 3 tomorrow_.`;
+    periodNo = at.no;
+  } else {
+    const n = parseInt(ask, 10);
+    if (!Number.isFinite(n) || !periods.some((p) => p.no === n)) {
+      return `Which period? Today has ${periodList}.`;
+    }
+    periodNo = n;
+  }
+  const bell = periods.find((p) => p.no === periodNo)!;
+
+  const absent = absentTeachersForDate(masters, ay, date);
+  const absentIds = new Set(absent.map((a) => a.staffId));
+  const grids = state.grids.filter((g) => g.academicYearCode === ay);
+  const busy = new Set<string>();
+  const dayLoad = new Map<string, number>();
+  for (const g of grids) {
+    for (const sl of g.slots) {
+      if (!sl.teacherId || sl.weekday !== weekday) continue;
+      dayLoad.set(sl.teacherId, (dayLoad.get(sl.teacherId) ?? 0) + 1);
+      if (sl.periodNo === periodNo) busy.add(sl.teacherId);
+    }
+  }
+  const subs = listSubstitutionsForDate(ay, date, state);
+  const subLoad = new Map<string, number>();
+  for (const sb of subs) {
+    subLoad.set(sb.substituteTeacherId, (subLoad.get(sb.substituteTeacherId) ?? 0) + 1);
+    if (sb.periodNo === periodNo) busy.add(sb.substituteTeacherId);
+  }
+  const toMin = (v: string) => {
+    const m = /^(\d{1,2}):(\d{2})/.exec(v);
+    return m ? parseInt(m[1]!, 10) * 60 + parseInt(m[2]!, 10) : NaN;
+  };
+  for (const b of state.teacherTimeBlocks ?? []) {
+    if (b.date !== date || b.academicYearCode !== ay) continue;
+    if (toMin(b.startTime) < toMin(bell.endTime) && toMin(b.endTime) > toMin(bell.startTime)) busy.add(b.staffId);
+  }
+  const designationName = (id: string | null) =>
+    (masters.designations ?? []).find((d) => d.id === id)?.name || "";
+  const teaching = (masters.staff ?? []).filter(
+    (st) =>
+      st.status === "active" &&
+      ((st.classTeacherLinks ?? []).length > 0 ||
+        (st.subjectTeachingLinks ?? []).length > 0 ||
+        st.stream === "teaching" ||
+        dayLoad.has(st.id)),
+  );
+  const free = teaching
+    .filter((st) => !busy.has(st.id) && !absentIds.has(st.id))
+    .map((st) => ({
+      name: st.fullName,
+      dayLoad: dayLoad.get(st.id) ?? 0,
+      subLoad: subLoad.get(st.id) ?? 0,
+      designation: designationName(st.designationId),
+    }));
+
+  const staffName = (id: string) => (masters.staff ?? []).find((st) => st.id === id)?.fullName || "—";
+  const affected = affectedPeriodsForDate({ state, academicYearCode: ay, date, absentTeacherIds: [...absentIds] })
+    .filter((a) => a.periodNo === periodNo && !a.examMasked);
+  const subAt = subs.filter((sb) => sb.periodNo === periodNo);
+  const covered = subAt.map((sb) => ({
+    classLabel: classLabel(masters, sb.classId, sb.sectionId).replace(" · ", " "),
+    subject: subjectLabel(masters, sb.subjectId),
+    substitute: staffName(sb.substituteTeacherId),
+  }));
+  const uncovered = affected
+    .filter((a) => !subAt.some((sb) => sb.classId === a.classId && sb.sectionId === a.sectionId))
+    .map((a) => ({
+      classLabel: classLabel(masters, a.classId, a.sectionId).replace(" · ", " "),
+      subject: subjectLabel(masters, a.subjectId),
+      absentTeacher: staffName(a.absentTeacherId),
+    }));
+
+  return formatFreeTeachersReply({
+    date,
+    todayIso,
+    periodNo,
+    periodLabel: bell.label || `Period ${bell.no}`,
+    timeLabel: bell.startTime && bell.endTime ? `${bell.startTime}–${bell.endTime}` : "",
+    weekdayLabel: WEEKDAY_SHORT[weekday] || "",
+    free,
+    absentCount: absent.length,
+    uncovered,
+    covered,
   });
 }
 

@@ -122,6 +122,37 @@ export const ERP_COMMANDS: ErpCommandDef[] = [
     scope: "any",
   },
   {
+    id: "free_teachers",
+    title: "Free teachers in a period",
+    kind: "read",
+    module: "timetable",
+    action: "view",
+    description:
+      "Teachers with no class in a given period on a date (or right now / next period): not on the grid, not substituting, not blocked, not absent — with each one's load that day. Also lists that period's uncovered classes when a teacher is absent.",
+    examples: [
+      "who is free in period 3",
+      "period 3 me kaun free hai",
+      "abhi kaun free hai",
+      "free teachers next period",
+      "kal 5th period kaun khali hai",
+    ],
+    fields: [
+      {
+        name: "text",
+        type: "text",
+        required: true,
+        description: "The period: a number ('period 3', '3rd period'), 'now', or 'next'",
+      },
+      {
+        name: "date",
+        type: "date",
+        required: false,
+        description: "YYYY-MM-DD; today when not said. 'kal' here means tomorrow only if 'tomorrow' is said; otherwise yesterday.",
+      },
+    ],
+    scope: "any",
+  },
+  {
     id: "collection_today",
     title: "Today's fee collection",
     kind: "read",
@@ -464,6 +495,10 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
   }
   if (DIGEST_WORDS.test(t)) {
     return { commandId: "commands_digest", fields: {}, source: "local" };
+  }
+  const freeQ = parseFreeTeachersQuery(t);
+  if (freeQ) {
+    return { commandId: "free_teachers", fields: { text: freeQ, date: "" }, source: "local" };
   }
   if (COLLECTION_WORDS.test(t) && !extractSectionRefs(t).length) {
     return { commandId: "collection_today", fields: { date: "" }, source: "local" };
@@ -1494,3 +1529,112 @@ export const TENDER_MODE_LABEL: Record<string, string> = {
   imps: "IMPS",
   bank: "Bank transfer",
 };
+
+// ─── Free teachers in a period ─────────────────────────────────────────
+
+const FREE_WORDS =
+  /(?<![\p{L}\p{M}\p{N}])(free|khali|khaali|खाली|available|vacant|substitute|substitution|kaun\s+aa\s+sakta)(?![\p{L}\p{M}\p{N}])/iu;
+
+/**
+ * "who is free in period 3", "period 3 me kaun free hai", "abhi kaun free
+ * hai", "free teachers next period", "3rd period khali kaun". Returns the
+ * period as "3", "now" or "next", or null when the message is not this ask.
+ */
+export function parseFreeTeachersQuery(text: string): string | null {
+  const t = (text || "").trim();
+  if (!t || !FREE_WORDS.test(t)) return null;
+  // "fees" / "seat" mentions are other things; a teacher-ish or period-ish
+  // word must be present.
+  if (FEE_WORDS.test(t) && !/period|pd\b|lecture/i.test(t)) return null;
+  const low = t.toLowerCase();
+  const num =
+    /(?:period|pd|lecture|kalansh|कालांश|p)\s*-?\s*(\d{1,2})(?![\d])/i.exec(low) ||
+    /(\d{1,2})\s*(?:st|nd|rd|th|va|wa|वां|वीं)?\s*(?:period|pd|lecture|kalansh|कालांश)/i.exec(low);
+  if (num) return String(parseInt(num[1]!, 10));
+  if (/(?<![\p{L}])(next|agla|agle|अगला|अगले)(?![\p{L}])/iu.test(low)) return "next";
+  if (/(?<![\p{L}])(now|abhi|is\s+waqt|is\s+time|current|अभी|इस\s+समय)(?![\p{L}])/iu.test(low)) return "now";
+  // "kaun free hai" with a teacher word and nothing else → now.
+  if (/teacher|staff|kaun|kon|who|कौन/i.test(low)) return "now";
+  return null;
+}
+
+export type FreeTeacherRow = {
+  name: string;
+  /** Regular periods on this weekday. */
+  dayLoad: number;
+  /** Substitutions already given this date. */
+  subLoad: number;
+  designation: string;
+};
+
+export type FreeTeachersInput = {
+  date: string;
+  todayIso: string;
+  periodNo: number;
+  periodLabel: string;
+  timeLabel: string; // "10:40–11:20"
+  weekdayLabel: string;
+  free: FreeTeacherRow[];
+  absentCount: number;
+  uncovered: { classLabel: string; subject: string; absentTeacher: string }[];
+  covered: { classLabel: string; subject: string; substitute: string }[];
+};
+
+export function formatFreeTeachersReply(input: FreeTeachersInput): string {
+  const when = input.date === input.todayIso ? "today" : `${input.weekdayLabel} ${shortDate(input.date)}`;
+  const lines: string[] = [
+    `*Free in ${input.periodLabel}* · ${when}${input.timeLabel ? ` · ${input.timeLabel}` : ""}`,
+  ];
+  if (!input.free.length) {
+    lines.push("No teacher is free this period.");
+  } else {
+    lines.push(`${input.free.length} free`);
+    const sorted = [...input.free].sort(
+      (a, b) => a.dayLoad + a.subLoad * 2 - (b.dayLoad + b.subLoad * 2) || a.name.localeCompare(b.name),
+    );
+    for (const f of sorted.slice(0, 15)) {
+      const load = [`${f.dayLoad} pd today`];
+      if (f.subLoad) load.push(`${f.subLoad} sub${f.subLoad === 1 ? "" : "s"}`);
+      lines.push(`${f.name}${f.designation ? ` (${f.designation})` : ""}  · ${load.join(", ")}`);
+    }
+    if (sorted.length > 15) lines.push(`+${sorted.length - 15} more`);
+  }
+  if (input.uncovered.length) {
+    lines.push("", `*Uncovered this period* (${input.absentCount} absent today)`);
+    for (const u of input.uncovered) lines.push(`${u.classLabel} ${u.subject} — ${u.absentTeacher} absent`);
+  } else if (input.absentCount) {
+    lines.push("", `${input.absentCount} teacher${input.absentCount === 1 ? "" : "s"} absent today; this period is covered.`);
+  }
+  if (input.covered.length) {
+    lines.push("", "*Substitutions this period*");
+    for (const c of input.covered) lines.push(`${c.classLabel} ${c.subject} → ${c.substitute}`);
+  }
+  return lines.join("\n");
+}
+
+/** Which teaching period contains `hhmm` ("10:45"), or the next one after it. */
+export function periodAtTime(
+  periods: { no: number; startTime: string; endTime: string }[],
+  hhmm: string,
+  mode: "now" | "next",
+): { no: number } | { before: true } | { after: true } | null {
+  const toMin = (v: string) => {
+    const m = /^(\d{1,2}):(\d{2})/.exec(v);
+    return m ? parseInt(m[1]!, 10) * 60 + parseInt(m[2]!, 10) : NaN;
+  };
+  const t = toMin(hhmm);
+  if (!Number.isFinite(t) || !periods.length) return null;
+  const sorted = [...periods].sort((a, b) => toMin(a.startTime) - toMin(b.startTime));
+  if (mode === "now") {
+    const cur = sorted.find((p) => t >= toMin(p.startTime) && t < toMin(p.endTime));
+    if (cur) return { no: cur.no };
+    // Between periods (a break) counts as the period about to start.
+    const next = sorted.find((p) => toMin(p.startTime) > t);
+    if (!next) return { after: true };
+    if (t < toMin(sorted[0]!.startTime)) return { before: true };
+    return { no: next.no };
+  }
+  const next = sorted.find((p) => toMin(p.startTime) > t);
+  if (!next) return { after: true };
+  return { no: next.no };
+}
