@@ -11,6 +11,7 @@ import "presence_screen.dart";
 import "self_attendance_screen.dart";
 import "staff_complaints_screen.dart";
 import "staff_leave_screen.dart";
+import "staff_roster_screen.dart";
 import "student_leave_queue_screen.dart";
 import "transport_requests_screen.dart";
 import "waiting_card.dart";
@@ -133,6 +134,13 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
       Icons.chat_bubble_outline,
       ModuleTone.teal,
       (api) => ChatInboxScreen(api: api),
+    ),
+    _Tile(
+      "Staff contacts",
+      "कर्मचारी",
+      Icons.contact_phone_outlined,
+      ModuleTone.green,
+      (api) => StaffRosterScreen(api: api),
     ),
   ];
 

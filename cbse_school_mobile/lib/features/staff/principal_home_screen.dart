@@ -14,6 +14,7 @@ import "leave_approvals_screen.dart";
 import "marks_screen.dart";
 import "staff_complaints_screen.dart";
 import "staff_leave_screen.dart";
+import "staff_roster_screen.dart";
 import "student_leave_queue_screen.dart";
 import "timetable_screen.dart";
 import "waiting_card.dart";
@@ -556,6 +557,12 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                         label: "Messages",
                         tone: ModuleTone.teal,
                         onTap: () => _push(ChatInboxScreen(api: widget.api)),
+                      ),
+                      _Action(
+                        icon: Icons.contact_phone_outlined,
+                        label: "Staff contacts",
+                        tone: ModuleTone.green,
+                        onTap: () => _push(StaffRosterScreen(api: widget.api)),
                       ),
                       _Action(
                         icon: Icons.beach_access_outlined,

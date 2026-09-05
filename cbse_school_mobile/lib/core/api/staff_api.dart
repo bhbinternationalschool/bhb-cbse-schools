@@ -624,6 +624,38 @@ class HealthList {
   final List<HealthVisitInfo> visits;
 }
 
+// --------------------------------------------------------------------- roster
+
+class StaffRosterRow {
+  StaffRosterRow.fromJson(Map<String, dynamic> j)
+    : id = _s(j, "id"),
+      empCode = _s(j, "empCode"),
+      fullName = _s(j, "fullName"),
+      designation = _s(j, "designation"),
+      mobile = _s(j, "mobile"),
+      hasMobile = _b(j, "hasMobile"),
+      homeKind = _s(j, "homeKind");
+
+  final String id;
+  final String empCode;
+  final String fullName;
+  final String designation;
+  final String mobile;
+  final bool hasMobile;
+  final String homeKind;
+}
+
+class StaffRoster {
+  StaffRoster.fromJson(Map<String, dynamic> j)
+    : total = _i(j, "total"),
+      missingMobile = _i(j, "missingMobile"),
+      staff = _list(j, "staff").map(StaffRosterRow.fromJson).toList();
+
+  final int total;
+  final int missingMobile;
+  final List<StaffRosterRow> staff;
+}
+
 // ------------------------------------------------------------------ approvals
 
 class StaffApprovals {
@@ -881,6 +913,19 @@ extension StaffApi on ApiClient {
 
   Future<StaffApprovals> fetchApprovals() async =>
       StaffApprovals.fromJson(await _getData("/api/v1/staff/approvals"));
+
+  Future<StaffRoster> fetchStaffRoster() async =>
+      StaffRoster.fromJson(await _getData("/api/v1/staff/roster"));
+
+  Future<void> setStaffMobile({
+    required String staffId,
+    required String mobile,
+  }) async {
+    await _postData("/api/v1/staff/roster/mobile", {
+      "staffId": staffId,
+      "mobile": mobile,
+    });
+  }
 
   /// A file behind the ERP's authenticated proxy (student documents),
   /// fetched with the session cookie — the phone's browser has none.

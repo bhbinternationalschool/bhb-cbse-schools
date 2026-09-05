@@ -64,9 +64,22 @@ export async function POST(request: Request) {
     );
   }
 
+  // A demo login pinned to a roster record carries that person's name, not
+  // the demo persona's — audit rows and "entered by" fields read it.
+  let rosterName = "";
+  if (body.staffId?.trim()) {
+    try {
+      const masters = await loadServerMasters();
+      rosterName =
+        masters.staff.find((s) => s.id === body.staffId?.trim())?.fullName || "";
+    } catch {
+      /* keep the demo name */
+    }
+  }
+
   const session: DemoSession = {
     persona,
-    fullName: body.fullName?.trim() || user.fullName,
+    fullName: body.fullName?.trim() || rosterName || user.fullName,
     roleCode:
       ownerRole ||
       (body.staffId && body.roleCode?.trim() ? body.roleCode.trim() : user.roleCode),

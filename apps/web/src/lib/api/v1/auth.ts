@@ -107,6 +107,11 @@ async function loadServerRbac(): Promise<RbacState> {
 const MASTERS_CACHE_TTL_MS = 30_000;
 let mastersCache: { state: MastersState; at: number } | null = null;
 
+/** Drop the cached roster + masters — call after a server-side write to sis_staff. */
+export function invalidateServerMastersCache(): void {
+  mastersCache = null;
+}
+
 export async function loadServerMasters(): Promise<MastersState> {
   const now = Date.now();
   if (mastersCache && now - mastersCache.at < MASTERS_CACHE_TTL_MS) {

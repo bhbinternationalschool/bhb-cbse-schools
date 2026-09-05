@@ -1,6 +1,7 @@
 import "dart:typed_data";
 
 import "package:flutter/material.dart";
+import "package:pdfx/pdfx.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
@@ -244,30 +245,7 @@ class _ReviewScreenState extends State<_ReviewScreen> {
                       child: Image.memory(bytes, fit: BoxFit.contain),
                     ),
                   )
-                : Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.picture_as_pdf_outlined,
-                            size: 48,
-                            color: AppColors.muted,
-                          ),
-                          const SizedBox(height: 10),
-                          Text(
-                            "PDF · ${(bytes.length / 1024).round()} KB. Open it on the desk (Students → ${d.studentName} → Documents) to read the pages; verify here once checked.",
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              fontSize: 12.5,
-                              color: AppColors.muted,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+                : _PdfPane(bytes: bytes),
           ),
           if (d.status == "pending")
             SafeArea(
@@ -302,4 +280,28 @@ class _ReviewScreenState extends State<_ReviewScreen> {
       ),
     );
   }
+}
+
+class _PdfPane extends StatefulWidget {
+  const _PdfPane({required this.bytes});
+
+  final Uint8List bytes;
+
+  @override
+  State<_PdfPane> createState() => _PdfPaneState();
+}
+
+class _PdfPaneState extends State<_PdfPane> {
+  late final PdfControllerPinch _controller = PdfControllerPinch(
+    document: PdfDocument.openData(widget.bytes),
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => PdfViewPinch(controller: _controller);
 }
