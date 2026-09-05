@@ -122,6 +122,31 @@ export const ERP_COMMANDS: ErpCommandDef[] = [
     scope: "any",
   },
   {
+    id: "class_defaulters",
+    title: "Fee defaulters in a class or section",
+    kind: "read",
+    module: "fees",
+    action: "view",
+    description:
+      "Students with overdue fees in one class (all sections) or one section: count, total outstanding, each student with amount and days overdue. Not a single student — that is the pending-fees command.",
+    examples: [
+      "Class 3 defaulters",
+      "5A defaulters",
+      "class 5 ke bakayedar",
+      "fees pending list 7B",
+      "class 3 me kisne fees nahi di",
+    ],
+    fields: [
+      {
+        name: "section",
+        type: "section",
+        required: true,
+        description: "Class, or class and section, e.g. 'class 3' (all sections) or '5A'",
+      },
+    ],
+    scope: "own_sections",
+  },
+  {
     id: "student_fees",
     title: "A student's pending fees",
     kind: "read",
@@ -264,8 +289,9 @@ export function extractSectionRefs(
   };
 
   // class <n> section <x> / class <n> <x> / class <n>
+  // \b is ASCII-only, so the Hindi "कक्षा" needs letter lookarounds.
   const classRe =
-    /\b(?:class|grade|std|kaksha|कक्षा)\s*(\d{1,2}|[ivx]{1,4}|nursery|lkg|ukg|kg|pg)(?:st|nd|rd|th)?\s*(?:-|\s)?\s*(?:section|sec|sec\.)?\s*([a-h])?\b/g;
+    /(?<![\p{L}\p{M}\p{N}])(?:class|grade|std|kaksha|कक्षा)\s*(\d{1,2}|[ivx]{1,4}|nursery|lkg|ukg|kg|pg)(?:st|nd|rd|th)?\s*(?:-|\s)?\s*(?:section|sec|sec\.)?\s*([a-h])?(?![\p{L}\p{M}\p{N}])/gu;
   let m: RegExpExecArray | null;
   while ((m = classRe.exec(low))) {
     push(classKey(m[1]!), (m[2] || "").toUpperCase());
@@ -376,6 +402,10 @@ const ABSENT_WORDS =
 
 const HELP_WORDS = /^\s*(commands?|command\s+help|cmd|कमांड|\?)\s*$/i;
 
+/** A class or section plus one of these is the defaulters list. */
+const DEFAULTER_WORDS =
+  /(?<![\p{L}\p{M}\p{N}])(defaulters?|bakayedar|bakaayedar|बकायेदार|(?:fees?|dues?)\s+(?:pending|due|baki|bakaya)(?:\s+list)?|(?:fee|fees|dues?)\s+(?:list|report)|(?:kisne|kis\s*kis\s*ne|kaun\s*kaun)\s+fees?\s+nahi|fees?\s+nahi\s+(?:di|diya|diye|bhari)|overdue)(?![\p{L}\p{M}\p{N}])/iu;
+
 /**
  * Attendance without a section is the school (or the teacher's sections):
  * "attendance summary", "aaj ki attendance", "today's attendance", "kitne
@@ -402,7 +432,18 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
   if (DIGEST_WORDS.test(t)) {
     return { commandId: "commands_digest", fields: {}, source: "local" };
   }
+  const refs = extractSectionRefs(t);
   const feesQ = parseStudentFeesQuery(t);
+  // A class plus a defaulter word is the class list — unless a name is also
+  // there ("Amay Gupta 4B fees pending" is one student).
+  if (refs.length && DEFAULTER_WORDS.test(t) && !feesQ?.name) {
+    const r = refs[0]!;
+    return {
+      commandId: "class_defaulters",
+      fields: { section: r.sectionName ? `${r.classKey}${r.sectionName}` : r.classKey },
+      source: "local",
+    };
+  }
   if (feesQ) {
     return {
       commandId: "student_fees",
@@ -414,7 +455,6 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
       source: "local",
     };
   }
-  const refs = extractSectionRefs(t);
   if (!refs.length && ATTENDANCE_SUMMARY_WORDS.test(t) && !FEE_WORDS.test(t)) {
     return { commandId: "attendance_summary", fields: { date: "" }, source: "local" };
   }
@@ -881,6 +921,8 @@ const FEE_STOP_WORDS = new Set([
   "dikhao", "dikha", "do", "dena", "check", "what", "is", "are", "how", "much", "today", "aaj",
   "total", "pending", "fee", "fees", "due", "dues", "baki", "bakaya", "bakaaya", "balance",
   "outstanding", "ledger", "amount", "paisa", "paise", "rupees", "rs",
+  "kisne", "kis", "kaun", "nahi", "nahin", "di", "diya", "diye", "bhari", "list", "report",
+  "defaulter", "defaulters", "bakayedar", "bakaayedar", "overdue", "mein", "wale", "walo",
   "बकाया", "फीस", "बाकी", "की", "का", "के", "कितनी", "कितना", "है", "दिखाओ", "बताओ",
 ]);
 
@@ -1231,5 +1273,110 @@ export function formatAttendanceSummaryReply(input: AttendanceSummaryInput): str
       }
     }
   }
+  return lines.join("\n");
+}
+
+// ─── Class / section resolution for class-wide asks ────────────────────
+
+/**
+ * Like resolveSectionRef, but a class with no letter means the whole class:
+ * every active section is returned. Used by class-wide lists.
+ */
+export function resolveClassOrSectionRef(
+  ref: { classKey: string; sectionName: string },
+  masters: Pick<MastersState, "classes" | "sections">,
+):
+  | { ok: true; className: string; classId: string; sections: SectionMatch[]; wholeClass: boolean }
+  | { ok: false; reason: "no_class" | "no_section"; options: SectionMatch[] } {
+  if (ref.sectionName) {
+    const r = resolveSectionRef(ref, masters);
+    if (r.ok) {
+      return { ok: true, className: r.match.className, classId: r.match.classId, sections: [r.match], wholeClass: false };
+    }
+    if (r.reason === "ambiguous") {
+      return { ok: true, className: r.options[0]!.className, classId: r.options[0]!.classId, sections: r.options, wholeClass: false };
+    }
+    return { ok: false, reason: r.reason, options: r.options };
+  }
+  const classes = (masters.classes ?? []).filter(
+    (c) => c.isActive !== false && classKey(c.name) === ref.classKey,
+  );
+  if (!classes.length) return { ok: false, reason: "no_class", options: [] };
+  const sections: SectionMatch[] = [];
+  for (const c of classes) {
+    for (const sct of (masters.sections ?? []).filter((x) => x.classId === c.id && x.isActive !== false)) {
+      sections.push({
+        classId: c.id,
+        sectionId: sct.id,
+        className: c.name,
+        sectionName: sct.name,
+        label: `${c.name} ${sct.name}`.trim(),
+      });
+    }
+  }
+  if (!sections.length) return { ok: false, reason: "no_section", options: [] };
+  return { ok: true, className: classes[0]!.name, classId: classes[0]!.id, sections, wholeClass: true };
+}
+
+// ─── Class defaulters ──────────────────────────────────────────────────
+
+export type DefaulterRow = {
+  sectionLabel: string;
+  rollNo: string;
+  fullName: string;
+  overdueAmountPaise: number;
+  overdueDays: number;
+  earliestDueOn: string;
+  onPlan: boolean;
+};
+
+export type ClassDefaultersInput = {
+  title: string; // "Class V" or "V A"
+  todayIso: string;
+  wholeClass: boolean;
+  rows: DefaulterRow[];
+  /** Sections the reply covers — named when a teacher asked for a whole class but only teaches some of it. */
+  limitedTo?: string[];
+  formatInr: (paise: number) => string;
+};
+
+export function formatClassDefaultersReply(input: ClassDefaultersInput): string {
+  const inr = input.formatInr;
+  const lines: string[] = [`*${input.title}* · defaulters · ${input.todayIso === input.todayIso ? "today" : input.todayIso}`];
+  if (input.limitedTo?.length) lines.push(`(your sections only: ${input.limitedTo.join(", ")})`);
+  if (!input.rows.length) {
+    lines.push("No overdue fees. ✅");
+    return lines.join("\n");
+  }
+  const total = input.rows.reduce((s, r) => s + r.overdueAmountPaise, 0);
+  lines.push(`${input.rows.length} student${input.rows.length === 1 ? "" : "s"} · *${inr(total)}* overdue`);
+  const sorted = [...input.rows].sort(
+    (a, b) => b.overdueAmountPaise - a.overdueAmountPaise || b.overdueDays - a.overdueDays,
+  );
+  const cap = 30;
+  const row = (r: DefaulterRow) => {
+    const since = r.earliestDueOn ? shortDate(r.earliestDueOn) : "";
+    return `${r.rollNo ? `${r.rollNo}. ` : ""}${r.fullName}  ${inr(r.overdueAmountPaise)} · ${r.overdueDays}d${since ? ` (${since})` : ""}${r.onPlan ? " · plan" : ""}`;
+  };
+  if (input.wholeClass) {
+    const bySection = new Map<string, DefaulterRow[]>();
+    for (const r of sorted) bySection.set(r.sectionLabel, [...(bySection.get(r.sectionLabel) ?? []), r]);
+    let shown = 0;
+    for (const [label, rows] of [...bySection.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+      const sub = rows.reduce((s, r) => s + r.overdueAmountPaise, 0);
+      lines.push("", `*${label}* · ${rows.length} · ${inr(sub)}`);
+      for (const r of rows) {
+        if (shown >= cap) break;
+        lines.push(row(r));
+        shown++;
+      }
+    }
+    if (sorted.length > cap) lines.push(`+${sorted.length - cap} more — open Fees → Defaulters for the full list.`);
+  } else {
+    lines.push("");
+    for (const r of sorted.slice(0, cap)) lines.push(row(r));
+    if (sorted.length > cap) lines.push(`+${sorted.length - cap} more — open Fees → Defaulters for the full list.`);
+  }
+  lines.push("", "Reply with a name for the full ledger.");
   return lines.join("\n");
 }
