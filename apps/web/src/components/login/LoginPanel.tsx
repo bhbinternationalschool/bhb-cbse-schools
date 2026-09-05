@@ -116,13 +116,18 @@ export function LoginPanel() {
     if (authErr || !data.session?.access_token) {
       return authErr?.message || "Sign-in failed. Check your details.";
     }
-    const { currentAcademicYearCode } = await import("@/lib/masters");
+    // No academicYearCode here, deliberately. The login page's masters copy
+    // is often empty (fresh device, after an idle logout), and
+    // currentAcademicYearCode() then answers DEFAULT_AY "2025-26" — a real,
+    // CLOSED year the server accepted at face value. Every login started in
+    // 2025-26, the shell aligned to 2026-27 a few seconds later, and the
+    // pages showed last year's students and books in between (2026-09-06).
+    // The server resolves the year from the calendar itself.
     const res = await fetch("/api/auth/session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         accessToken: data.session.access_token,
-        academicYearCode: currentAcademicYearCode(),
       }),
     });
     if (!res.ok) {
@@ -137,10 +142,7 @@ export function LoginPanel() {
     e.preventDefault();
     setError(null);
     startTransition(async () => {
-      const { currentAcademicYearCode, loadMasters } = await import(
-        "@/lib/masters"
-      );
-      const academicYearCode = currentAcademicYearCode();
+      const { loadMasters } = await import("@/lib/masters");
 
       // Production path for staff, parent and field (drivers): real
       // Supabase Auth, sign-in by whichever identifier they picked. Field
@@ -197,9 +199,9 @@ export function LoginPanel() {
         return;
       }
 
+      // Same as the Supabase path above: the server resolves the year.
       const payload: Record<string, string> = {
         persona,
-        academicYearCode,
       };
 
       if (persona === "staff" && identifier.trim()) {

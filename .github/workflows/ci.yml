@@ -130,6 +130,9 @@ jobs:
       - name: Test — an ended academic year cannot still be current
         working-directory: apps/web
         run: npm run test:academic-year-resolve
+      - name: Test — idle logout is thirty minutes for every session (standing policy)
+        working-directory: apps/web
+        run: npm run test:workspace-policy
 
       - name: Test — a list projection never breaks pagination
         working-directory: apps/web
