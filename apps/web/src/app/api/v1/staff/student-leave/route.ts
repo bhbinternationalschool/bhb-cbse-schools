@@ -11,13 +11,9 @@ import {
 } from "@/lib/studentLeave";
 import { loadSis } from "@/lib/sis";
 import { scopeAllows, staffSectionScope } from "@/lib/api/v1/staffScope";
+import { needsLeadership } from "@/lib/api/v1/studentLeaveRules";
 
 export const runtime = "nodejs";
-
-/** Over 3 days, medical or long leave is the principal's call, not the class teacher's. */
-export function needsLeadership(req: { fromDate: string; toDate: string; leaveType: string }): boolean {
-  return leaveDayCount(req) > 3 || req.leaveType === "ML" || req.leaveType === "LL";
-}
 
 /**
  * GET /api/v1/staff/student-leave?status=pending|decided — parents' leave

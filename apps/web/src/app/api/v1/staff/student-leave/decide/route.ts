@@ -19,7 +19,7 @@ import {
 import { loadSis } from "@/lib/sis";
 import { staffSectionScope } from "@/lib/api/v1/staffScope";
 import { sendPushToSubject } from "@/lib/webPush.server";
-import { needsLeadership } from "../route";
+import { needsLeadership } from "@/lib/api/v1/studentLeaveRules";
 
 export const runtime = "nodejs";
 
