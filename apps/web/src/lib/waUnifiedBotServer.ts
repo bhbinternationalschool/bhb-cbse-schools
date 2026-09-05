@@ -223,7 +223,8 @@ async function delegateActiveFlow(
       identity.roles.find((r) => r.kind === flow && r.staff) ??
       identity.roles.find((r) => r.staff);
     const cmd = await handleErpStaffCommand({
-      mobile10,
+      actorKey: mobile10,
+      channel: "whatsapp",
       text: opts.text,
       flow,
       staff: staffRole?.staff ?? null,

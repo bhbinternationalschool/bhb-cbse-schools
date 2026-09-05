@@ -18,7 +18,8 @@ first and runs only after a "yes".
 | Date | Done |
 |---|---|
 | 2026-09-05 | **Phase 0, WhatsApp branch shipped.** Command engine (`lib/erpCommands.ts` pure + `lib/erpCommands.server.ts`), staff command branch in the unified WhatsApp bot for owner / staff / teacher flows, voice-note transcription for commands, regex-first parse with LLM fallback (`generateErpCommandJson`), RBAC via the sender's staff record, section scope via `staffAllowedSections`, confirm-card plumbing for future write commands, director pause switch (`commands off` / `commands on`), per-staff hourly cap, audit rows in `erp_commands`. First commands live: **absent list for a section** and **COMMANDS help**. Kill switch: `ERP_WA_COMMANDS=off`. Migration `20260905100000` widens the bot-slice constraint for the new `commands` slice. |
-| next | Mobile command bar, ERP assistant hookup, daily digest to the director, then Phase 1 read commands. |
+| 2026-09-05 | **Mobile command bar shipped.** `POST /api/v1/commands` runs the same engine for the staff app (keyed by staff id, channel `app`); `StaffCommandBar` (text + on-device Hindi/English speech, one-tap suggestions, Confirm/Cancel for future write cards) sits at the top of the teacher and principal home screens. Migration `20260905100000` applied to the BHB School Supabase project. |
+| next | ERP assistant hookup, daily digest to the director, then Phase 1 read commands. |
 
 ## Where commands are given
 
