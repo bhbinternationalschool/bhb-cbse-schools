@@ -70,6 +70,8 @@ import { householdWhatsApp, loadSis, type SisStudent } from "@/lib/sis";
 import { computeHouseholdDues, getDayCloseForDate, loadFees, openFeeDues } from "@/lib/fees";
 import { flagFutureDues } from "@/lib/feeDueFuture";
 import { listLiveDefaulters } from "@/lib/playbook";
+import { listSectionParentContacts } from "@/lib/homework";
+import { publicOrigin } from "@/lib/birthday.server";
 import { ensureFeesHydratedServer } from "@/lib/feesPersistence.server";
 import { formatInr, loadMasters } from "@/lib/masters";
 import { classLabel } from "@/lib/homework";
@@ -94,7 +96,11 @@ import {
   formatBusManifestReply,
   formatHomeworkReply,
   formatAdmissionsPeriodReply,
+  formatClassMessageCard,
   formatMarkAttendanceCard,
+  messageScriptLanguage,
+  noticeTitleFrom,
+  renderTemplateBody,
   formatPostHomeworkCard,
   isCorrectingAttendance,
   parseAttendanceSpec,
@@ -813,6 +819,68 @@ export async function handleErpStaffCommand(
       resolved.sectionIds = mine.map((s) => s.sectionId).join(",");
     }
   }
+  if (command.id === "class_message" && resolved.sectionId) {
+    const message = (parsed.fields.text || "").trim();
+    if (message.length < 3) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: "What should the parents be told? Put it after a colon:\n_Class 4 parents ko bhejo: kal PTM 9 baje_",
+      };
+    }
+    if (message.length > 700) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: "That message is too long for one WhatsApp notice. Please shorten it to about 700 characters.",
+      };
+    }
+    const { ensureWaTemplatesHydrated } = await import("@/lib/waTemplatesPersistence");
+    const { listApprovedTemplates, loadWaTemplates } = await import("@/lib/waTemplates");
+    await ensureWaTemplatesHydrated();
+    const approved = listApprovedTemplates(loadWaTemplates(), { module: "comms" });
+    const wantLang = messageScriptLanguage(message);
+    const notice =
+      approved.find((tpl) => tpl.familyKey === "comms_notice" && tpl.language === wantLang) ??
+      approved.find((tpl) => tpl.familyKey === "comms_notice") ??
+      null;
+    if (!notice) {
+      return {
+        handled: true,
+        audience: "erp_command_denied",
+        text: "There's no approved WhatsApp notice template yet, and free text can't be sent to parents outside the 24-hour window. Ask the office to get *School notice broadcast* approved in Masters → WhatsApp templates.",
+      };
+    }
+    const contacts = listSectionParentContacts(resolved.sectionId, session.academicYearCode, loadSis());
+    if (!contacts.length) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: `No parent WhatsApp numbers on record for ${resolved.sectionLabel || "that section"}.`,
+      };
+    }
+    const vars: Record<string, string> = {
+      schoolName: TENANT.nameDisplay,
+      noticeTitle: noticeTitleFrom(message),
+      noticeBody: message,
+      guardianName: "Parent",
+      childName: "your child",
+    };
+    resolved.templateId = notice.id;
+    resolved.templateMetaName = notice.metaName || notice.name;
+    resolved.templateLanguage = notice.metaLanguage || notice.language;
+    resolved.templateLabel = `${notice.name} (${notice.language.toUpperCase()})`;
+    resolved.message = message;
+    resolved.vars = JSON.stringify(vars);
+    resolved.mobiles = contacts.map((c) => c.mobile).filter(Boolean).join(",");
+    resolved.cardSummary = formatClassMessageCard({
+      sectionLabel: (resolved.sectionLabel || "").replace(" · ", " "),
+      templateLabel: resolved.templateLabel,
+      rendered: renderTemplateBody(notice.body, vars),
+      familyCount: contacts.length,
+      optedOut: 0,
+    });
+  }
   if (command.id === "mark_attendance" && resolved.sectionId) {
     const ay = session.academicYearCode;
     const date = resolveCommandDate(text, todayIso);
@@ -926,7 +994,9 @@ export async function handleErpStaffCommand(
   if (command.kind === "write") {
     const token = random();
     const summary =
-      command.id === "mark_attendance"
+      command.id === "class_message"
+        ? resolved.cardSummary || command.title
+        : command.id === "mark_attendance"
         ? resolved.cardSummary || command.title
         : command.id === "post_homework"
         ? formatPostHomeworkCard({
@@ -1941,6 +2011,67 @@ async function runConfirmedWrite(
       handled: true,
       audience: "erp_command_post_homework",
       text: `Posted. ${label} ${r.subjectName || ""} homework is live${res.push.sent ? ` · ${res.push.sent} phone${res.push.sent === 1 ? "" : "s"} notified` : ""}.\nUndo it in the ERP: Homework → today's posts.`,
+    };
+  }
+  if (command.id === "class_message") {
+    const roleCodes = resolveSessionRoles(rbac, session, masters).map((x) => x.code);
+    const mine = staffAllowedSections(inbound.staff, masters, session.academicYearCode, roleCodes);
+    if (!isOfficeLike(roleCodes) && !mine.some((x) => x.sectionId === r.sectionId)) {
+      void audit(session, command, pending.fields, pending.originalText, "denied", {
+        reason: "scope_at_confirm",
+        channel: inbound.channel,
+      });
+      return {
+        handled: true,
+        audience: "erp_command_denied",
+        text: "That section is no longer one of yours, so nothing was sent.",
+      };
+    }
+    const mobiles = (r.mobiles || "").split(",").filter(Boolean);
+    if (!mobiles.length || !r.templateMetaName) {
+      return {
+        handled: true,
+        audience: "erp_command_error",
+        text: "That message is no longer valid. Send it again.",
+      };
+    }
+    let vars: Record<string, string> = {};
+    try {
+      vars = JSON.parse(r.vars || "{}") as Record<string, string>;
+    } catch {
+      vars = {};
+    }
+    const { buildWaTemplateBodyComponent } = await import("@/lib/waSend");
+    const { getTemplateById, loadWaTemplates } = await import("@/lib/waTemplates");
+    const tpl = getTemplateById(loadWaTemplates(), r.templateId || "");
+    const { broadcastTemplateToMobiles } = await import("@/lib/waBroadcast.server");
+    const res = await broadcastTemplateToMobiles({
+      mobiles,
+      template: {
+        name: r.templateMetaName,
+        language: r.templateLanguage || "en",
+        components: [buildWaTemplateBodyComponent(tpl?.variables ?? [], vars)],
+      },
+      module: "notices",
+      originUrl: publicOrigin(),
+    });
+    void audit(session, command, pending.fields, pending.originalText, "ok", {
+      channel: inbound.channel,
+      sectionId: r.sectionId,
+      template: r.templateMetaName,
+      recipients: res.recipientCount,
+      sent: res.sent,
+      failed: res.failed,
+      message: r.message,
+    });
+    const label = (r.sectionLabel || "").replace(" · ", " ");
+    const bits = [`Sent to ${res.sent} of ${res.recipientCount} families in ${label}`];
+    if (res.failed) bits.push(`${res.failed} failed`);
+    if (res.skippedOptOut) bits.push(`${res.skippedOptOut} opted out`);
+    return {
+      handled: true,
+      audience: "erp_command_class_message",
+      text: `${bits.join(" · ")}.\nReplies land in the ERP: Comms → WhatsApp inbox.`,
     };
   }
   if (command.id === "mark_attendance") {

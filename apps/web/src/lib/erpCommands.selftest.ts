@@ -58,6 +58,11 @@ import {
   parseAttendanceSpec,
   isCorrectingAttendance,
   formatMarkAttendanceCard,
+  parseClassMessageQuery,
+  messageScriptLanguage,
+  noticeTitleFrom,
+  renderTemplateBody,
+  formatClassMessageCard,
   parseFreeTeachersQuery,
   periodAtTime,
   resolveClassOrSectionRef,
@@ -186,6 +191,11 @@ const masters = {
   assert.equal(parseErpCommandLocal("VIII B me kaun nahi aaya")?.fields.section, "8B");
   assert.equal(parseErpCommandLocal("5A में कौन गैरहाजिर है")?.commandId, "absent_list", "Devanagari fee/absent words match without ASCII word boundaries");
   assert.equal(parseErpCommandLocal("7B की उपस्थिति")?.fields.section, "7B");
+  assert.equal(parseErpCommandLocal("Class 4 parents ko bhejo: kal PTM 9 baje")?.commandId, "class_message");
+  assert.equal(parseErpCommandLocal("message 5A parents: bring sports uniform")?.fields.section, "5A");
+  assert.equal(parseClassMessageQuery("Class 4 parents ko bhejo"), null, "no colon, no message — nothing is sent");
+  assert.equal(parseClassMessageQuery("5A parents"), null);
+  assert.equal(parseClassMessageQuery("Riya Verma ke parents ka number"), null, "asking for a number is not a broadcast");
   assert.equal(parseErpCommandLocal("Mark 5A attendance: absent roll 4, 11, 19")?.commandId, "mark_attendance");
   assert.equal(parseErpCommandLocal("mark 6B attendance all present")?.commandId, "mark_attendance");
   // The read commands must survive unharmed — marking is a whole register.
@@ -1188,6 +1198,54 @@ const masters = {
   assert.ok(allCard.startsWith("*Correct attendance* · VI B · 4 Sep\n30 present of 30"), allCard);
   assert.ok(allCard.includes("Everyone present."), allCard);
   assert.ok(allCard.includes("⚠️ This replaces the register already marked for this date."), allCard);
+}
+
+// ─── class parent message ──────────────────────────────────────────────
+{
+  assert.deepEqual(parseClassMessageQuery("Class 4 parents ko bhejo: kal PTM 9 baje"), {
+    section: "4",
+    message: "kal PTM 9 baje",
+  });
+  assert.deepEqual(parseClassMessageQuery("send 6B parents: fee counter closed on Friday"), {
+    section: "6B",
+    message: "fee counter closed on Friday",
+  });
+  // The words after the colon are what families read — they are never edited.
+  const long = "Kal school 9 baje khulega, sabhi bachche time par aayein, ID card zaroori hai";
+  assert.equal(parseClassMessageQuery(`5A parents ko batao: ${long}`)?.message, long);
+
+  assert.equal(messageScriptLanguage("कल छुट्टी है"), "hi");
+  assert.equal(messageScriptLanguage("holiday tomorrow"), "en");
+  assert.equal(noticeTitleFrom("kal PTM 9 baje. Sabhi aayein."), "kal PTM 9 baje");
+  assert.equal(noticeTitleFrom("x".repeat(80)).length, 58);
+
+  assert.equal(
+    renderTemplateBody("*{{schoolName}}*\n\n*{{noticeTitle}}*\n\n{{noticeBody}}", {
+      schoolName: "BHB",
+      noticeTitle: "PTM",
+      noticeBody: "kal 9 baje",
+    }),
+    "*BHB*\n\n*PTM*\n\nkal 9 baje",
+  );
+  assert.equal(
+    renderTemplateBody("Hello {{guardianName}} — {{unknownVar}}", { guardianName: "Parent" }),
+    "Hello Parent — {{unknownVar}}",
+    "an unfilled placeholder stays visible on the card rather than becoming blank",
+  );
+
+  const card = formatClassMessageCard({
+    sectionLabel: "V A",
+    templateLabel: "School notice broadcast (EN)",
+    rendered: "📢 *BHB*\n\n*kal PTM 9 baje*\n\nkal PTM 9 baje",
+    familyCount: 31,
+    optedOut: 2,
+  });
+  assert.ok(card.startsWith("*Message V A parents*\nTemplate: School notice broadcast (EN)"), card);
+  assert.ok(card.includes("📢 *BHB*"), "the card shows exactly what parents will receive");
+  assert.ok(card.includes("Goes to 31 families."), card);
+  assert.ok(card.includes("2 opted out of WhatsApp and will not receive it."), card);
+  const one = formatClassMessageCard({ sectionLabel: "V A", templateLabel: "t", rendered: "r", familyCount: 1, optedOut: 0 });
+  assert.ok(one.includes("Goes to 1 family.") && !one.includes("opted out"), one);
 }
 
 console.log("erpCommands.selftest.ts OK");

@@ -129,6 +129,26 @@ export const ERP_COMMANDS: ErpCommandDef[] = [
     scope: "any",
   },
   {
+    id: "class_message",
+    title: "Message a class's parents",
+    kind: "write",
+    module: "notices",
+    action: "edit",
+    description:
+      "Send one message to every parent of a class-section, as an approved WhatsApp notice template with your words in it. Free text is never sent raw. The confirm card shows the message exactly as parents will receive it.",
+    examples: [
+      "Class 4 parents ko bhejo: kal PTM 9 baje",
+      "message 5A parents: bring sports uniform tomorrow",
+      "send 6B parents: fee counter closed on Friday",
+      "5A ke parents ko batao: kal chutti hai",
+    ],
+    fields: [
+      { name: "section", type: "section", required: true, description: "Class-section whose parents get it, e.g. 5A" },
+      { name: "text", type: "text", required: true, description: "The message, after a colon" },
+    ],
+    scope: "own_sections",
+  },
+  {
     id: "mark_attendance",
     title: "Mark attendance",
     kind: "write",
@@ -707,6 +727,14 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
   }
   if (COLLECTION_WORDS.test(t) && !extractSectionRefs(t).length) {
     return { commandId: "collection_today", fields: { date: "" }, source: "local" };
+  }
+  const classMsg = parseClassMessageQuery(t);
+  if (classMsg) {
+    return {
+      commandId: "class_message",
+      fields: { section: classMsg.section, text: classMsg.message },
+      source: "local",
+    };
   }
   const attMark = parseMarkAttendanceQuery(t);
   if (attMark) {
@@ -2741,5 +2769,79 @@ export function formatMarkAttendanceCard(input: MarkAttendanceCardInput): string
   block("Half day", input.halfDay);
   if (!named) lines.push("", "Everyone present.");
   if (input.correcting) lines.push("", "⚠️ This replaces the register already marked for this date.");
+  return lines.join("\n");
+}
+
+// ─── Message a class's parents (write) ─────────────────────────────────
+
+const SEND_VERB =
+  /(?<![\p{L}\p{M}\p{N}])(send|message|msg|inform|tell|announce|bhejo|bhej\s*do|batao|bata\s*do|bol\s*do|inform\s*karo|सूचित|भेजो|बताओ)(?![\p{L}\p{M}\p{N}])/iu;
+
+const PARENT_WORD =
+  /(?<![\p{L}\p{M}\p{N}])(parents?|guardians?|families|abhibhavak|अभिभावक|माता-पिता|घरवालon?)(?![\p{L}\p{M}\p{N}])/iu;
+
+export type ClassMessageParse = { section: string; message: string };
+
+/**
+ * "Class 4 parents ko bhejo: kal PTM 9 baje". Needs a sending verb, the
+ * word parents, a section, and the message after a colon — the colon is
+ * what separates the instruction from the words that will reach families,
+ * so it is required rather than guessed at.
+ */
+export function parseClassMessageQuery(text: string): ClassMessageParse | null {
+  const t = (text || "").trim();
+  if (!t || !SEND_VERB.test(t) || !PARENT_WORD.test(t)) return null;
+  const colon = t.search(/[:：]/);
+  if (colon <= 0) return null;
+  const refs = extractSectionRefs(t.slice(0, colon));
+  if (!refs.length) return null;
+  const message = t.slice(colon + 1).trim();
+  if (message.length < 3) return null;
+  const r = refs[0]!;
+  return {
+    section: r.sectionName ? `${r.classKey}${r.sectionName}` : r.classKey,
+    message,
+  };
+}
+
+/** Devanagari in the message means the Hindi template, when one is approved. */
+export function messageScriptLanguage(text: string): "hi" | "en" {
+  return /[\u0900-\u097F]/.test(text || "") ? "hi" : "en";
+}
+
+/**
+ * A notice needs a short title and a body. Staff write one line, so the
+ * title is derived from it and the body stays whole — parents see both.
+ */
+export function noticeTitleFrom(message: string): string {
+  const first = (message || "").split(/\n|;|\.(?=\s|$)/)[0]!.trim() || (message || "").trim();
+  return first.length > 60 ? `${first.slice(0, 57).trimEnd()}…` : first;
+}
+
+/** Fill {{name}} placeholders from a template body. */
+export function renderTemplateBody(body: string, vars: Record<string, string>): string {
+  return (body || "").replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_m, key: string) =>
+    vars[key] !== undefined ? vars[key] : `{{${key}}}`,
+  );
+}
+
+export function formatClassMessageCard(input: {
+  sectionLabel: string;
+  templateLabel: string;
+  rendered: string;
+  familyCount: number;
+  optedOut: number;
+}): string {
+  const lines = [
+    `*Message ${input.sectionLabel} parents*`,
+    `Template: ${input.templateLabel}`,
+    "",
+    input.rendered,
+    "",
+    `Goes to ${input.familyCount} famil${input.familyCount === 1 ? "y" : "ies"}.`,
+  ];
+  if (input.optedOut) {
+    lines.push(`${input.optedOut} opted out of WhatsApp and will not receive it.`);
+  }
   return lines.join("\n");
 }
