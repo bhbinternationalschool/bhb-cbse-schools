@@ -25,7 +25,7 @@ BHB International School
 Fees, attendance, homework and teacher messages for BHB parents, in one app.
 ```
 
-**Full description** (4000 max — this uses 2,059)
+**Full description** (4000 max — this uses 2,060)
 
 ```
 BHB International School's official app for parents and guardians.
@@ -74,7 +74,7 @@ fill in. Staff use a separate app.
 ABOUT THE SCHOOL
 
 BHB International School is at Piyamilan Chauraha, Baniyavapar, Ayar,
-Varanasi, Uttar Pradesh 221202, and is run by Babu Harbans Bahadur Singh
+Varanasi, Uttar Pradesh 221202, and is run by Babu Harbansh Bahadur Singh
 Smriti Vidya Nyas, a trust registered at Varanasi. The school is recognised by
 the State Government of Uttar Pradesh for Nursery to Class VIII.
 
@@ -82,6 +82,14 @@ Office: Monday to Saturday, 8:00 AM – 3:00 PM IST.
 Email: director@bhbinternational.school
 Phone: +91 94519 38805
 ```
+
+> **The trust's name is spelled HARBANSH here, with the h.** That is how the
+> deed of declaration spells it and how the D-U-N-S number was allotted, so it
+> is the developer name Play prints under the app title. The school's website
+> spells it HARBANS, without the h, because that is the PAN spelling and the
+> payment gateway verifies the merchant against the Income Tax database. Both
+> are the same trust; the About page says so. Do not "fix" either one to match
+> the other — correct the PAN first, then the site, then this.
 
 **App icon** — 512×512 PNG, the school crest already used as the launcher icon.
 
