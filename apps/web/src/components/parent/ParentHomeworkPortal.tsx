@@ -144,7 +144,7 @@ export function ParentHomeworkPortal({
                 key={d.id}
                 className="rounded-xl border border-[rgba(197,160,40,0.3)] bg-[#fffbeb] px-3 py-3"
               >
-                <p className="text-[10px] font-bold uppercase tracking-wide text-[#8a6d12]">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-[var(--tone-amber)]">
                   Class diary · {d.date}
                 </p>
                 <p className="mt-1 text-sm font-semibold text-[var(--brand-deep)]">

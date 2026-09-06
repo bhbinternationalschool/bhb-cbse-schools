@@ -1363,7 +1363,7 @@ function RidersPanel(props: RidersPanelProps) {
 
           {selected && selectedRoute && stopId ? (
             <div className="mt-3 rounded-lg border border-[rgba(15,118,110,0.2)] bg-[rgba(15,118,110,0.06)] px-3 py-2 text-xs">
-              <div className="font-bold text-[#0f766e]">Dues preview</div>
+              <div className="font-bold text-[var(--tone-teal)]">Dues preview</div>
               <div className="mt-1 text-[var(--brand-deep)]">
                 New monthly charge: {formatInr(proposedFeePaise)} · expected{" "}
                 {formatInr(expectedFeePaise)} · starts {effectiveFrom}

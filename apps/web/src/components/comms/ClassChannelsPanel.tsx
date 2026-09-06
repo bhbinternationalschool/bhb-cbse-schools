@@ -388,7 +388,7 @@ Then reply: YES`}
                   key={d.id}
                   className="rounded-xl border border-[rgba(197,160,40,0.35)] bg-[rgba(197,160,40,0.08)] p-3"
                 >
-                  <p className="text-[10px] font-bold uppercase text-[#8a6d12]">
+                  <p className="text-[10px] font-bold uppercase text-[var(--tone-amber)]">
                     {d.kind} · {ch?.label || d.channelId}
                   </p>
                   <h4 className="mt-1 text-sm font-semibold text-[var(--brand-deep)]">

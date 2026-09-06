@@ -192,12 +192,12 @@ export function ExamPaperPrintSheet(props: {
                             </p>
                           ) : null}
                           {showAnswers && q.answerKey ? (
-                            <p className="mt-1 text-[11px] font-semibold text-[#0f7a4c] print-hide">
+                            <p className="mt-1 text-[11px] font-semibold text-[var(--success)] print-hide">
                               Key: {q.answerKey}
                             </p>
                           ) : null}
                           {showAnswers && q.markingScheme.length ? (
-                            <ul className="mt-0.5 list-disc pl-4 text-[11px] text-[#0f7a4c] print-hide">
+                            <ul className="mt-0.5 list-disc pl-4 text-[11px] text-[var(--success)] print-hide">
                               {q.markingScheme.map((m, i) => (
                                 <li key={i}>{m}</li>
                               ))}

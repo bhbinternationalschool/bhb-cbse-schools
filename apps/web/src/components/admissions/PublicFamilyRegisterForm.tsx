@@ -441,7 +441,7 @@ export function PublicFamilyRegisterForm({
           priority
           aria-hidden
         />
-        <p className="mt-4 text-sm font-semibold text-[#15803d]">
+        <p className="mt-4 text-sm font-semibold text-[var(--tone-green)]">
           Registration submitted · fee paid
         </p>
         <p className="mt-2 text-[13px] text-[var(--muted)]">

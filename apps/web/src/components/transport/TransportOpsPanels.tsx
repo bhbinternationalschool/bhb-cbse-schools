@@ -1317,7 +1317,7 @@ export function FuelPanel({
             <li key={l.id} className="py-1">
               {l.name}: <strong>{l.qtyOnHand}</strong> {l.fuelType}
               {l.qtyOnHand <= l.minAlert ? (
-                <span className="ml-2 text-[#c2410c]">LOW</span>
+                <span className="ml-2 text-[var(--tone-coral)]">LOW</span>
               ) : null}
             </li>
           ))}

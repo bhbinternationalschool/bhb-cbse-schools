@@ -78,12 +78,12 @@ export function CashfreeCheckoutLauncher({
       >
         {starting ? "Opening secure payment…" : `Pay ${amountLabel}`}
       </button>
-      <p className="mt-3 text-xs text-[#5c6478]">
+      <p className="mt-3 text-xs text-[var(--muted)]">
         {ready
           ? "You will be taken to Cashfree's secure page. UPI, cards and net banking are accepted."
           : "Loading secure payment…"}
       </p>
-      {error ? <p className="mt-3 text-sm text-[#b42318]">{error}</p> : null}
+      {error ? <p className="mt-3 text-sm text-[var(--danger)]">{error}</p> : null}
     </div>
   );
 }

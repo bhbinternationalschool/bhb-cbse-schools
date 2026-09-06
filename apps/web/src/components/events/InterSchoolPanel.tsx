@@ -404,7 +404,7 @@ export function InterSchoolPanel({
             ))}
             {selected && selected.status !== "draft" ? (
               <a
-                className="ml-auto rounded-lg border border-[#128C7E] bg-[#128C7E]/10 px-3 py-1.5 text-xs font-bold text-[#0f766e]"
+                className="ml-auto rounded-lg border border-[#128C7E] bg-[#128C7E]/10 px-3 py-1.5 text-xs font-bold text-[var(--tone-teal)]"
                 href={`https://wa.me/?text=${encodeURIComponent(
                   `${selected.name} — register your students:\n${publicUrl}/register\n\nRules, participants, results and accounts (public):\n${publicUrl}`,
                 )}`}

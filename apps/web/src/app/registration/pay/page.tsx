@@ -75,7 +75,7 @@ export default function RegistrationPayPage() {
   if (gatewayReturn) {
     return (
       <main className="mx-auto max-w-lg px-4 py-16 text-center">
-        <p className="text-sm font-semibold text-[#15803d]">Thank you</p>
+        <p className="text-sm font-semibold text-[var(--tone-green)]">Thank you</p>
         <p className="mt-2 font-mono text-lg text-[var(--brand-deep)]">
           {payload.code}
         </p>
@@ -90,7 +90,7 @@ export default function RegistrationPayPage() {
   if (done) {
     return (
       <main className="mx-auto max-w-lg px-4 py-16 text-center">
-        <p className="text-sm font-semibold text-[#15803d]">Payment recorded</p>
+        <p className="text-sm font-semibold text-[var(--tone-green)]">Payment recorded</p>
         <p className="mt-2 font-mono text-lg text-[var(--brand-deep)]">{done}</p>
         <p className="mt-2 text-[13px] text-[var(--muted)]">
           Thank you. School will confirm registration.

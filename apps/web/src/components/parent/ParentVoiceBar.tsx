@@ -82,7 +82,7 @@ export function ParentVoiceBar({
           onError={(m) => setStatus(m)}
         />
         <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-semibold text-[#0f766e]">
+          <p className="text-[11px] font-semibold text-[var(--tone-teal)]">
             Voice · बोलिए
           </p>
           <p className="truncate text-[10px] text-[var(--muted)]">

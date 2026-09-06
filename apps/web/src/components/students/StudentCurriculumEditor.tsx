@@ -180,7 +180,7 @@ export function StudentCurriculumEditor({
           <span
             className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${
               progress.count === progress.target
-                ? "bg-[rgba(15,118,110,0.12)] text-[#0f766e]"
+                ? "bg-[rgba(15,118,110,0.12)] text-[var(--tone-teal)]"
                 : "bg-[rgba(32,48,80,0.08)] text-[var(--brand-mid)]"
             }`}
           >
@@ -382,7 +382,7 @@ export function StudentCurriculumEditor({
                           </span>{" "}
                           {s.nameEn}
                           {sub ? (
-                            <span className="ml-1.5 rounded bg-[rgba(15,118,110,0.1)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[#0f766e]">
+                            <span className="ml-1.5 rounded bg-[rgba(15,118,110,0.1)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--tone-teal)]">
                               {sub}
                             </span>
                           ) : null}

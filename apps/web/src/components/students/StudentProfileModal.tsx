@@ -505,14 +505,14 @@ export function StudentProfileModal({
                           <td className="px-3 py-2 text-right">
                             {inr(l.billedPaise - l.concessionPaise)}
                           </td>
-                          <td className="px-3 py-2 text-right text-[#0f766e]">
+                          <td className="px-3 py-2 text-right text-[var(--tone-teal)]">
                             {inr(l.paidPaise)}
                           </td>
                           <td
                             className={`px-3 py-2 text-right font-semibold ${
                               l.balancePaise > 0
                                 ? "text-[#c0392b]"
-                                : "text-[#0f766e]"
+                                : "text-[var(--tone-teal)]"
                             }`}
                           >
                             {inr(l.balancePaise)}
@@ -796,7 +796,7 @@ function Stat({
 }) {
   const color =
     tone === "green"
-      ? "text-[#0f766e]"
+      ? "text-[var(--tone-teal)]"
       : tone === "coral"
         ? "text-[#c0392b]"
         : "text-[var(--brand-deep)]";

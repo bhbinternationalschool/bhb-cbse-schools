@@ -265,7 +265,7 @@ export function CurriculumOfficePanel({
     <div className="space-y-4 rounded-xl border border-[rgba(15,118,110,0.25)] bg-[rgba(15,118,110,0.05)] p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <p className="text-sm font-bold text-[#0f766e]">
+          <p className="text-sm font-bold text-[var(--tone-teal)]">
             Office · Curriculum · {clsName}
             {secName ? `-${secName}` : ""}
           </p>
@@ -275,7 +275,7 @@ export function CurriculumOfficePanel({
           </p>
         </div>
         <div className="flex flex-wrap gap-1.5 text-[10px] font-bold uppercase tracking-wide">
-          <span className="rounded bg-[rgba(15,118,110,0.15)] px-2 py-0.5 text-[#0f766e]">
+          <span className="rounded bg-[rgba(15,118,110,0.15)] px-2 py-0.5 text-[var(--tone-teal)]">
             Confirmed {summary.confirmed}
           </span>
           <span className="rounded bg-[rgba(196,149,58,0.2)] px-2 py-0.5 text-[var(--brand-gold)]">
@@ -346,7 +346,7 @@ export function CurriculumOfficePanel({
         </button>
         <button
           type="button"
-          className="rounded-lg border border-[#0f766e] bg-white px-3 py-2 text-xs font-bold text-[#0f766e]"
+          className="rounded-lg border border-[var(--tone-teal)] bg-white px-3 py-2 text-xs font-bold text-[var(--tone-teal)]"
           onClick={saveTemplate}
         >
           Save as class template
@@ -461,7 +461,7 @@ export function CurriculumOfficePanel({
                   <span
                     className={`text-[9px] font-bold uppercase ${
                       st === "confirmed"
-                        ? "text-[#0f766e]"
+                        ? "text-[var(--tone-teal)]"
                         : st === "draft"
                           ? "text-[var(--brand-gold)]"
                           : "text-[var(--muted)]"

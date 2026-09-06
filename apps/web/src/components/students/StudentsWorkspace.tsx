@@ -1580,7 +1580,7 @@ export function StudentsWorkspace() {
               className={`rounded-lg px-3 py-2 text-xs font-bold ${
                 showCurriculumOffice
                   ? "bg-[#0f766e] text-white"
-                  : "border border-[#0f766e] bg-[var(--card)] text-[#0f766e]"
+                  : "border border-[var(--tone-teal)] bg-[var(--card)] text-[var(--tone-teal)]"
               }`}
               onClick={() => setShowCurriculumOffice((v) => !v)}
             >
@@ -1797,7 +1797,7 @@ export function StudentsWorkspace() {
                                 <span
                                   className={`ml-2 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${
                                     enrollmentStatusOf(s) === "confirmed"
-                                      ? "bg-[rgba(15,118,110,0.12)] text-[#0f766e]"
+                                      ? "bg-[rgba(15,118,110,0.12)] text-[var(--tone-teal)]"
                                       : enrollmentStatusOf(s) === "draft"
                                         ? "bg-[rgba(196,149,58,0.15)] text-[var(--brand-gold)]"
                                         : "bg-[rgba(32,48,80,0.08)] text-[var(--muted)]"

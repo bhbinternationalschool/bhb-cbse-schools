@@ -171,11 +171,11 @@ export function ClassResultSheetView({
                       {row.error ? (
                         <span className="text-[var(--muted)]">N/A</span>
                       ) : row.passed ? (
-                        <span className="font-semibold text-[#15803d]">
+                        <span className="font-semibold text-[var(--tone-green)]">
                           Pass
                         </span>
                       ) : (
-                        <span className="font-semibold text-[#b45309]">
+                        <span className="font-semibold text-[var(--warning)]">
                           Fail
                         </span>
                       )}

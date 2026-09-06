@@ -333,7 +333,7 @@ export default function PaySharePage() {
 
         {done ? (
           <div className="mt-6 rounded-xl bg-[rgba(22,163,74,0.1)] px-4 py-4 text-center">
-            <p className="text-sm font-bold text-[#15803d]">Payment received</p>
+            <p className="text-sm font-bold text-[var(--tone-green)]">Payment received</p>
             <p className="mt-1 text-xs text-[var(--brand-deep)]">
               Receipt {done.receiptNo}
             </p>

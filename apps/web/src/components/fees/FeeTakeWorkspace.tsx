@@ -2327,7 +2327,7 @@ function FeeSummaryChip({
   > = {
     paid: {
       box: "border-[#86efac] bg-[#f0fdf4]",
-      label: "text-[#15803d]",
+      label: "text-[var(--tone-green)]",
       value: "text-[#14532d]",
     },
     current: {
@@ -2342,12 +2342,12 @@ function FeeSummaryChip({
     },
     refund: {
       box: "border-[#7dd3fc] bg-[#f0f9ff]",
-      label: "text-[#0369a1]",
+      label: "text-[var(--tone-sky)]",
       value: "text-[#0c4a6e]",
     },
     voucher: {
       box: "border-[#c4b5fd] bg-[#f5f3ff]",
-      label: "text-[#6d28d9]",
+      label: "text-[var(--tone-violet)]",
       value: "text-[#4c1d95]",
     },
   };
@@ -3453,7 +3453,7 @@ function CollectPanel({
               })()}
               <button
                 type="button"
-                className="mt-2 w-full rounded-xl border-2 border-[#128C7E] bg-[#128C7E]/15 px-4 py-2.5 text-xs font-bold text-[#0f766e] hover:bg-[#128C7E]/25 disabled:cursor-not-allowed disabled:opacity-50"
+                className="mt-2 w-full rounded-xl border-2 border-[#128C7E] bg-[#128C7E]/15 px-4 py-2.5 text-xs font-bold text-[var(--tone-teal)] hover:bg-[#128C7E]/25 disabled:cursor-not-allowed disabled:opacity-50"
                 disabled={linkAmountPaise <= 0 || readOnly}
                 onClick={onSendUpiLink}
               >

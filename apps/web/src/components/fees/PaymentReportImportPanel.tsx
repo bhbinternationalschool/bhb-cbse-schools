@@ -169,7 +169,7 @@ export function PaymentReportImportPanel({
         <p className="mt-2 text-sm font-semibold text-[#dc2626]">{error}</p>
       ) : null}
       {lastResult ? (
-        <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap rounded-lg bg-[rgba(22,163,74,0.08)] px-3 py-2 text-sm text-[#15803d]">
+        <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap rounded-lg bg-[rgba(22,163,74,0.08)] px-3 py-2 text-sm text-[var(--tone-green)]">
           {lastResult}
         </pre>
       ) : null}

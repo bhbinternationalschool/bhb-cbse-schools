@@ -279,7 +279,7 @@ export function TransportPlannerPanel({
                 <span
                   className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
                     c.riderCount >= c.seatCapacity
-                      ? "bg-[#c2410c]/15 text-[#c2410c]"
+                      ? "bg-[#c2410c]/15 text-[var(--tone-coral)]"
                       : "bg-[var(--success-soft)] text-[var(--success)]"
                   }`}
                 >

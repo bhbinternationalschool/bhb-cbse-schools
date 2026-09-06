@@ -400,7 +400,7 @@ export function DashboardPanel({ state, onRefresh, tick }: AccountsPanelProps) {
           ) : null}
         </div>
         {dayClosePending ? (
-          <span className="rounded-lg bg-[rgba(197,160,40,0.2)] px-3 py-1.5 text-xs font-bold text-[#8a6d12]">
+          <span className="rounded-lg bg-[rgba(197,160,40,0.2)] px-3 py-1.5 text-xs font-bold text-[var(--tone-amber)]">
             Day close pending approval
           </span>
         ) : (

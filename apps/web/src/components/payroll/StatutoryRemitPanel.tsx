@@ -388,7 +388,7 @@ export function StatutoryRemitPanel() {
                             </p>
                           </>
                         ) : (
-                          <p className="text-[11px] font-medium text-[#15803d]">
+                          <p className="text-[11px] font-medium text-[var(--tone-green)]">
                             Paid {new Date(b.epf.paidAt).toLocaleDateString("en-IN")} · Challan{" "}
                             {b.epf.challanRefNo}
                             {b.epf.receiptFileUrl ? (
@@ -459,7 +459,7 @@ export function StatutoryRemitPanel() {
                         </p>
                       </div>
                     ) : (
-                      <p className="text-[11px] font-medium text-[#15803d]">
+                      <p className="text-[11px] font-medium text-[var(--tone-green)]">
                         Paid {new Date(b.esic.paidAt).toLocaleDateString("en-IN")} · Challan{" "}
                         {b.esic.challanRefNo}
                         {b.esic.receiptFileUrl ? (

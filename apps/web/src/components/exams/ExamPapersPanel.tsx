@@ -758,7 +758,7 @@ export function ExamPapersPanel({
           {canEdit ? (
             <div className="mt-3 flex flex-wrap items-end gap-2 rounded-lg bg-[rgba(124,58,237,0.08)] p-3">
               <div>
-                <p className="text-[12px] font-bold text-[#6d28d9]">
+                <p className="text-[12px] font-bold text-[var(--tone-violet)]">
                   AI paper assistant
                 </p>
                 <p className="text-[11px] text-[var(--muted)]">
@@ -1153,7 +1153,7 @@ function SectionEditor(props: {
             <div className="mt-1 flex flex-wrap justify-end gap-1">
               <button
                 type="button"
-                className="rounded border border-[rgba(124,58,237,0.3)] px-2 py-0.5 text-[11px] font-semibold text-[#6d28d9]"
+                className="rounded border border-[rgba(124,58,237,0.3)] px-2 py-0.5 text-[11px] font-semibold text-[var(--tone-violet)]"
                 onClick={props.onAiMore}
               >
                 + AI Qs
@@ -1296,7 +1296,7 @@ function QuestionEditor(props: {
           <option value="hard">Hard</option>
         </select>
         {q.source === "ai" ? (
-          <span className="rounded-full bg-[rgba(124,58,237,0.12)] px-2 py-0.5 text-[9px] font-semibold text-[#6d28d9]">
+          <span className="rounded-full bg-[rgba(124,58,237,0.12)] px-2 py-0.5 text-[9px] font-semibold text-[var(--tone-violet)]">
             AI
           </span>
         ) : null}

@@ -280,7 +280,7 @@ export function LeadMobileWaCheckPanel({
         id: "wa_unknown",
         label: "WA check inconclusive",
         n: report.waUnknown.length,
-        tone: "bg-[rgba(71,85,105,0.12)] text-[#334155]",
+        tone: "bg-[rgba(71,85,105,0.12)] text-[var(--tone-slate)]",
       },
     ];
 
@@ -345,7 +345,7 @@ export function LeadMobileWaCheckPanel({
 
       {Object.keys(apiByMobile).length > 0 &&
       waNamesAvailable.length === 0 ? (
-        <p className="rounded-md bg-[rgba(71,85,105,0.08)] px-2 py-1 text-[10px] text-[#334155]">
+        <p className="rounded-md bg-[rgba(71,85,105,0.08)] px-2 py-1 text-[10px] text-[var(--tone-slate)]">
           Live check found registration status, but no WhatsApp profile names
           yet (Meta often returns only wa_id). Names appear after a parent
           messages you, or if you use a BSP contacts URL that returns names —
@@ -545,7 +545,7 @@ export function LeadMobileWaCheckPanel({
                             ? "bg-[rgba(21,128,61,0.14)] text-[#166534]"
                             : apiByMobile[number]!.status === "not_on_whatsapp"
                               ? "bg-[rgba(180,35,24,0.1)] text-[var(--danger)]"
-                              : "bg-[rgba(71,85,105,0.12)] text-[#334155]"
+                              : "bg-[rgba(71,85,105,0.12)] text-[var(--tone-slate)]"
                         }`}
                       >
                         {apiByMobile[number]!.status === "on_whatsapp"

@@ -922,7 +922,7 @@ export function TimetableWorkspace() {
                   </p>
                 </div>
                 {examBlocks.length ? (
-                  <div className="mt-2 rounded-lg bg-[rgba(124,58,237,0.1)] px-3 py-2 text-xs text-[#6d28d9]">
+                  <div className="mt-2 rounded-lg bg-[rgba(124,58,237,0.1)] px-3 py-2 text-xs text-[var(--tone-violet)]">
                     {examBlocks.map((block) => (
                       <div key={block.entry.id}>
                         <strong>Exam block:</strong> {block.subjectLabel} ·{" "}
@@ -1043,7 +1043,7 @@ export function TimetableWorkspace() {
                                 }`}
                               >
                                 {examBlock ? (
-                                  <div className="flex min-h-[3.25rem] flex-col justify-center bg-[rgba(124,58,237,0.12)] px-1.5 py-1 text-[#6d28d9]">
+                                  <div className="flex min-h-[3.25rem] flex-col justify-center bg-[rgba(124,58,237,0.12)] px-1.5 py-1 text-[var(--tone-violet)]">
                                     <span className="font-bold">
                                       EXAM · {examBlock.subjectLabel}
                                     </span>
@@ -1352,7 +1352,7 @@ export function TimetableWorkspace() {
                             className="border border-[var(--border)] p-1.5"
                           >
                             {subDuty && masters ? (
-                              <div className="bg-[rgba(190,24,93,0.1)] p-1 text-[#9d174d]">
+                              <div className="bg-[rgba(190,24,93,0.1)] p-1 text-[var(--tone-rose)]">
                                 <div className="font-bold">
                                   SUBSTITUTE ·{" "}
                                   {classSectionLabel(
@@ -1378,7 +1378,7 @@ export function TimetableWorkspace() {
                                   )}{" "}
                                   · {subjectLabel(masters, hit!.subjectId)}
                                 </div>
-                                <div className="text-[9px] text-[#9d174d]">
+                                <div className="text-[9px] text-[var(--tone-rose)]">
                                   Absent on {scheduleDate} —{" "}
                                   {subCover.substituteTeacherId
                                     ? `covered by ${teacherLabel(masters, subCover.substituteTeacherId)}`
@@ -1386,7 +1386,7 @@ export function TimetableWorkspace() {
                                 </div>
                               </div>
                             ) : examBlock && hit && masters ? (
-                              <div className="bg-[rgba(124,58,237,0.1)] p-1 text-[#6d28d9]">
+                              <div className="bg-[rgba(124,58,237,0.1)] p-1 text-[var(--tone-violet)]">
                                 <div className="font-bold">
                                   EXAM · {examBlock.subjectLabel}
                                 </div>

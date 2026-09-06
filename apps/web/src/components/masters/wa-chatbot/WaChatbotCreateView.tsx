@@ -67,7 +67,7 @@ export function WaChatbotCreateView({
             type="button"
             className={`rounded-xl border p-4 text-left ${
               !templateId
-                ? "border-[#0f766e] bg-[rgba(15,118,110,0.06)]"
+                ? "border-[var(--tone-teal)] bg-[rgba(15,118,110,0.06)]"
                 : "border-[var(--border)] bg-[var(--card)]"
             }`}
             onClick={() => setTemplateId("")}
@@ -83,7 +83,7 @@ export function WaChatbotCreateView({
               type="button"
               className={`rounded-xl border p-4 text-left ${
                 templateId === b.id
-                  ? "border-[#0f766e] bg-[rgba(15,118,110,0.06)]"
+                  ? "border-[var(--tone-teal)] bg-[rgba(15,118,110,0.06)]"
                   : "border-[var(--border)] bg-[var(--card)]"
               }`}
               onClick={() => {
@@ -96,7 +96,7 @@ export function WaChatbotCreateView({
               <p className="mt-1 text-[11px] text-[var(--muted)]">
                 {b.description}
               </p>
-              <p className="mt-1 text-[10px] text-[#0f766e]">
+              <p className="mt-1 text-[10px] text-[var(--tone-teal)]">
                 {b.nodes.length} steps
               </p>
             </button>

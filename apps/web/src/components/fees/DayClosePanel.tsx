@@ -41,9 +41,9 @@ function statusLabel(status: DayCloseSession["status"]) {
 function statusClass(status: DayCloseSession["status"]) {
   switch (status) {
     case "approved":
-      return "bg-[#16a34a]/15 text-[#15803d]";
+      return "bg-[#16a34a]/15 text-[var(--tone-green)]";
     case "submitted":
-      return "bg-[rgba(197,160,40,0.2)] text-[#8a6d12]";
+      return "bg-[rgba(197,160,40,0.2)] text-[var(--tone-amber)]";
     case "rejected":
       return "bg-[#dc2626]/12 text-[#dc2626]";
     default:
@@ -379,7 +379,7 @@ export function DayClosePanel({
                     <div className="text-sm font-semibold text-[var(--brand-deep)]">
                       {tenderModeLabel(m.mode)}
                       {m.mode === "cash" ? (
-                        <span className="ml-1.5 text-[10px] font-bold uppercase text-[#15803d]">
+                        <span className="ml-1.5 text-[10px] font-bold uppercase text-[var(--tone-green)]">
                           Count this
                         </span>
                       ) : null}
@@ -439,7 +439,7 @@ export function DayClosePanel({
               </h3>
               <p className="mt-0.5 text-[11px] text-[var(--muted)]">
                 Count notes/coins to match{" "}
-                <span className="font-semibold text-[#15803d]">
+                <span className="font-semibold text-[var(--tone-green)]">
                   system cash {formatInr(systemCash)}
                 </span>
                 {" · "}
@@ -451,7 +451,7 @@ export function DayClosePanel({
                 <span
                   className={`font-semibold ${
                     variance === 0
-                      ? "text-[#15803d]"
+                      ? "text-[var(--tone-green)]"
                       : variance > 0
                         ? "text-[var(--warning)]"
                         : "text-[#dc2626]"
@@ -517,7 +517,7 @@ export function DayClosePanel({
               rejects.
             </p>
           ) : session?.status === "approved" ? (
-            <p className="mt-3 text-xs font-semibold text-[#15803d]">
+            <p className="mt-3 text-xs font-semibold text-[var(--tone-green)]">
               Day closed. Counter cash handed to main safe (demo ledger).
             </p>
           ) : null}
@@ -553,7 +553,7 @@ export function DayClosePanel({
                   <dd
                     className={`font-bold ${
                       session.variancePaise === 0
-                        ? "text-[#15803d]"
+                        ? "text-[var(--tone-green)]"
                         : "text-[#dc2626]"
                     }`}
                   >
@@ -731,7 +731,7 @@ export function DayClosePanel({
                   <span
                     className={`text-xs font-bold ${
                       h.variancePaise === 0
-                        ? "text-[#15803d]"
+                        ? "text-[var(--tone-green)]"
                         : "text-[#dc2626]"
                     }`}
                   >
@@ -780,7 +780,7 @@ function Kpi({
 }) {
   const valueClass =
     accent === "ok"
-      ? "text-[#15803d]"
+      ? "text-[var(--tone-green)]"
       : accent === "short"
         ? "text-[#dc2626]"
         : accent === "excess"

@@ -121,7 +121,7 @@ export function LegacyAdmissionVerifyPanel({
       </div>
 
       {notice ? (
-        <p className="mt-3 rounded-lg bg-[rgba(15,118,110,0.1)] px-3 py-2 text-xs font-medium text-[#0f766e]">
+        <p className="mt-3 rounded-lg bg-[rgba(15,118,110,0.1)] px-3 py-2 text-xs font-medium text-[var(--tone-teal)]">
           {notice}
         </p>
       ) : null}

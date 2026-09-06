@@ -70,7 +70,7 @@ export function WaTemplateVariablesPicker({
       </p>
       {highlighted.length > 0 ? (
         <div className="mt-2">
-          <p className="text-[10px] font-semibold text-[#0f766e]">
+          <p className="text-[10px] font-semibold text-[var(--tone-teal)]">
             In this template
           </p>
           <div className="mt-1 flex flex-wrap gap-1">

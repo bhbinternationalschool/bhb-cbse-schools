@@ -459,11 +459,11 @@ export const ADMISSION_STAGES: {
 export function stageTagClass(stage: AdmissionStage): string {
   switch (stage) {
     case "enquiry":
-      return "bg-[rgba(71,85,105,0.14)] text-[#334155]";
+      return "bg-[rgba(71,85,105,0.14)] text-[var(--tone-slate)]";
     case "applied":
-      return "bg-[rgba(21,128,61,0.16)] text-[#15803d]";
+      return "bg-[rgba(21,128,61,0.16)] text-[var(--tone-green)]";
     case "verified":
-      return "bg-[rgba(21,128,61,0.16)] text-[#15803d]";
+      return "bg-[rgba(21,128,61,0.16)] text-[var(--tone-green)]";
     case "enrolled":
       return "bg-[rgba(21,128,61,0.22)] text-[#166534]";
     case "lost":
@@ -495,7 +495,7 @@ export function convertedLeadRowClass(stage: AdmissionStage): string {
 export function sourceTagClass(source: AdmissionSource): string {
   switch (source) {
     case "walk_in":
-      return "bg-[rgba(15,118,110,0.12)] text-[#0f766e]";
+      return "bg-[rgba(15,118,110,0.12)] text-[var(--tone-teal)]";
     case "field_survey":
       return "bg-[rgba(180,83,9,0.12)] text-[#9a3412]";
     case "website":
@@ -503,11 +503,11 @@ export function sourceTagClass(source: AdmissionSource): string {
     case "google":
       return "bg-[rgba(66,133,244,0.14)] text-[#1a73e8]";
     case "referral":
-      return "bg-[rgba(21,128,61,0.12)] text-[#15803d]";
+      return "bg-[rgba(21,128,61,0.12)] text-[var(--tone-green)]";
     case "social":
       return "bg-[rgba(126,34,206,0.1)] text-[#7e22ce]";
     case "phone":
-      return "bg-[rgba(71,85,105,0.14)] text-[#334155]";
+      return "bg-[rgba(71,85,105,0.14)] text-[var(--tone-slate)]";
     case "whatsapp":
       return "bg-[rgba(37,211,102,0.14)] text-[#128c7e]";
     default:
@@ -577,7 +577,7 @@ export function followUpBucketClass(bucket: LeadFollowUpBucket): string {
     case "due_today":
       return "bg-[rgba(180,83,9,0.14)] text-[#9a3412]";
     case "scheduled":
-      return "bg-[rgba(15,118,110,0.12)] text-[#0f766e]";
+      return "bg-[rgba(15,118,110,0.12)] text-[var(--tone-teal)]";
     default:
       return "bg-[rgba(32,48,80,0.06)] text-[var(--muted)]";
   }

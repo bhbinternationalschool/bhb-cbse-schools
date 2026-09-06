@@ -177,7 +177,7 @@ export function AdmissionDocOcrPanel({ disabled, onApply, onApplyApplication }: 
         <p className="mt-2 text-[10px] text-[var(--muted)]">{notice}</p>
       ) : null}
       {lastConfidence ? (
-        <p className="mt-1 text-[10px] text-[#0f766e]">
+        <p className="mt-1 text-[10px] text-[var(--tone-teal)]">
           {kind === "application_form" ? "Read by" : "Confidence"}: {lastConfidence}
         </p>
       ) : null}

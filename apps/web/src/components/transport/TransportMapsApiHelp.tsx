@@ -9,7 +9,7 @@ export function TransportMapsApiHelp() {
     <div className="rounded-xl border border-[rgba(2,132,199,0.25)] bg-[rgba(2,132,199,0.06)] p-3 text-sm">
       <button
         type="button"
-        className="flex w-full items-center justify-between gap-2 text-left font-semibold text-[#0369a1]"
+        className="flex w-full items-center justify-between gap-2 text-left font-semibold text-[var(--tone-sky)]"
         onClick={() => setOpen((v) => !v)}
       >
         <span>How to enable Google Maps road distance</span>
@@ -23,7 +23,7 @@ export function TransportMapsApiHelp() {
               href="https://console.cloud.google.com/google/maps-apis/overview"
               target="_blank"
               rel="noopener noreferrer"
-              className="font-semibold text-[#0369a1] underline"
+              className="font-semibold text-[var(--tone-sky)] underline"
             >
               Google Cloud Console → Maps APIs
             </a>{" "}

@@ -81,13 +81,13 @@ function addDaysIso(iso: string, days: number): string {
 function kindBadgeTone(kind: CalendarItem["kind"]): string {
   switch (kind) {
     case "event":
-      return "bg-[var(--brand-gold)]/15 text-[#8a6d12]";
+      return "bg-[var(--brand-gold)]/15 text-[var(--tone-amber)]";
     case "holiday":
       return "bg-[var(--ok)]/15 text-[var(--ok)]";
     case "exam":
       return "bg-[rgba(91,33,182,0.12)] text-[#5b21b6]";
     case "ptm":
-      return "bg-[rgba(2,132,199,0.12)] text-[#0369a1]";
+      return "bg-[rgba(2,132,199,0.12)] text-[var(--tone-sky)]";
     default:
       return "bg-[rgba(180,35,24,0.1)] text-[var(--danger)]";
   }

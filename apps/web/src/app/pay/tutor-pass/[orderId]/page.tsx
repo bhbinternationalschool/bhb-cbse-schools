@@ -19,7 +19,7 @@ export default async function TutorPassReturnPage({
   const paid = order?.status === "paid" && order.endsAt;
   return (
     <main className="mx-auto max-w-md px-6 py-16 text-center">
-      <p className="text-sm font-semibold uppercase tracking-wide text-[#5c6478]">{TENANT.nameDisplay}</p>
+      <p className="text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">{TENANT.nameDisplay}</p>
       <h1 className="mt-3 text-2xl font-bold text-[#203050]">
         {paid ? "Tutor pass active" : order ? "Payment being confirmed" : "Order not found"}
       </h1>
@@ -30,7 +30,7 @@ export default async function TutorPassReturnPage({
             ? `We are waiting for the bank to confirm ${formatPaise(order.amountPaise)}. This usually takes under a minute; the pass switches on by itself.`
             : "This link does not match a tutor pass order."}
       </p>
-      <p className="mt-8 text-sm text-[#5c6478]">You can close this page and return to the app.</p>
+      <p className="mt-8 text-sm text-[var(--muted)]">You can close this page and return to the app.</p>
     </main>
   );
 }

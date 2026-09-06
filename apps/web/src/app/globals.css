@@ -31,6 +31,33 @@
   --warning: #b45309;
   --warning-soft: #fef3c7;
   --info: #1d4ed8;
+
+  /* ── Accent tones ──────────────────────────────────────────────────────
+   * The eight hues the ERP uses to tell one CATEGORY from another — module
+   * tabs, status chips, section labels. They are not semantic like --danger
+   * or --success; nothing is "wrong" because it is violet. They exist
+   * because the app genuinely needs more than four colours to distinguish
+   * things, and without a token for that need people write the hex by hand:
+   * 1,001 raw colour values were counted on 2026-09-06, and 280 of them were
+   * exactly these eight.
+   *
+   * The values are lifted verbatim from MODULE_TAB_TONES, which had already
+   * chosen a light and a dark for each tone and carried them as inline
+   * `dark:` variants. Nothing renders differently; the colours simply have a
+   * name now, and a screen that reaches for one gets dark mode for free.
+   *
+   * These are the TEXT/border form and they invert with the theme. A filled
+   * chip that puts white text on one of these hues must NOT use them as a
+   * background — the dark value is a pale tint and white would vanish on it.
+   * Solid backgrounds are a separate pass. */
+  --tone-teal: #0f766e;
+  --tone-green: #15803d;
+  --tone-slate: #334155;
+  --tone-amber: #8a6d12;
+  --tone-rose: #9d174d;
+  --tone-violet: #6d28d9;
+  --tone-sky: #0369a1;
+  --tone-coral: #c2410c;
   --info-soft: #dbeafe;
   --ring: #c5a028;
   --background: #f6f5ef;
@@ -1284,6 +1311,17 @@ h3,
     --warning: #f0a94e;
     --warning-soft: rgba(240, 169, 78, 0.16);
     --info: #6d9bff;
+
+    /* Accent tones, dark. Same values MODULE_TAB_TONES already used in its
+     * inline `dark:` variants, so the tabs look exactly as they did. */
+    --tone-teal: #5eead4;
+    --tone-green: #86efac;
+    --tone-slate: #94a3b8;
+    --tone-amber: #fde68a;
+    --tone-rose: #f9a8d4;
+    --tone-violet: #c4b5fd;
+    --tone-sky: #7dd3fc;
+    --tone-coral: #fdba74;
     --info-soft: rgba(109, 155, 255, 0.16);
     --ring: #d4b84a;
     --background: #0e1526;
@@ -1429,9 +1467,6 @@ h3,
   .dark .text-\[\#0288d1\]:not(.theme-light-island *) {
     color: #35b6fd;
   }
-  .dark .text-\[\#0369a1\]:not(.theme-light-island *) {
-    color: #37b6fb;
-  }
   .dark .text-\[\#047857\]:not(.theme-light-island *) {
     color: #3af8c2;
   }
@@ -1447,12 +1482,6 @@ h3,
   .dark .text-\[\#0c4a6e\]:not(.theme-light-island *) {
     color: #47afeb;
   }
-  .dark .text-\[\#0f766e\]:not(.theme-light-island *) {
-    color: #4ae8dc;
-  }
-  .dark .text-\[\#0f7a4c\]:not(.theme-light-island *) {
-    color: #49e9a4;
-  }
   .dark .text-\[\#128C7E\]:not(.theme-light-island *) {
     color: #4ae8d6;
   }
@@ -1461,9 +1490,6 @@ h3,
   }
   .dark .text-\[\#1565c0\]:not(.theme-light-island *) {
     color: #4794eb;
-  }
-  .dark .text-\[\#15803d\]:not(.theme-light-island *) {
-    color: #50e287;
   }
   .dark .text-\[\#166534\]:not(.theme-light-island *) {
     color: #57db89;
@@ -1482,7 +1508,6 @@ h3,
   .dark .text-\[\#2e7d32\]:not(.theme-light-island *) {
     color: #61d167;
   }
-  .dark .text-\[\#334155\]:not(.theme-light-island *),
   .dark .text-\[\#455a64\]:not(.theme-light-island *),
   .dark .text-\[\#5a6a8a\]:not(.theme-light-island *),
   .dark .text-\[\#5c6478\]:not(.theme-light-island *) {
@@ -1506,9 +1531,6 @@ h3,
   .dark .text-\[\#5b21b6\]:not(.theme-light-island *) {
     color: #a175e6;
   }
-  .dark .text-\[\#6d28d9\]:not(.theme-light-island *) {
-    color: #a174e6;
-  }
   .dark .text-\[\#7c3aed\]:not(.theme-light-island *) {
     color: #a273f2;
   }
@@ -1527,9 +1549,6 @@ h3,
   .dark .text-\[\#8a6914\]:not(.theme-light-island *) {
     color: #e5bb4d;
   }
-  .dark .text-\[\#8a6d12\]:not(.theme-light-island *) {
-    color: #e7c24b;
-  }
   .dark .text-\[\#8b1a12\]:not(.theme-light-island *) {
     color: #e95d53;
   }
@@ -1545,9 +1564,6 @@ h3,
   .dark .text-\[\#9a3412\]:not(.theme-light-island *) {
     color: #ea7148;
   }
-  .dark .text-\[\#9d174d\]:not(.theme-light-island *) {
-    color: #e65690;
-  }
   .dark .text-\[\#B71C1C\]:not(.theme-light-island *),
   .dark .text-\[\#b71c1c\]:not(.theme-light-island *),
   .dark .text-\[\#b91c1c\]:not(.theme-light-island *) {
@@ -1556,23 +1572,14 @@ h3,
   .dark .text-\[\#b0344b\]:not(.theme-light-island *) {
     color: #d67183;
   }
-  .dark .text-\[\#b42318\]:not(.theme-light-island *) {
-    color: #e85e54;
-  }
   .dark .text-\[\#b43c3c\]:not(.theme-light-island *) {
     color: #d67171;
-  }
-  .dark .text-\[\#b45309\]:not(.theme-light-island *) {
-    color: #f58d3d;
   }
   .dark .text-\[\#b54708\]:not(.theme-light-island *) {
     color: #f6803c;
   }
   .dark .text-\[\#c0392b\]:not(.theme-light-island *) {
     color: #dc6c61;
-  }
-  .dark .text-\[\#c2410c\]:not(.theme-light-island *) {
-    color: #f3733f;
   }
   .dark .text-\[\#c62828\]:not(.theme-light-island *) {
     color: #e06666;

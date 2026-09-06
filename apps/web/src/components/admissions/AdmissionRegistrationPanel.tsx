@@ -844,7 +844,7 @@ export function AdmissionRegistrationPanel({
                 ? ""
                 : "s"}{" "}
               · total registration fee{" "}
-              <span className="text-[#0f766e]">
+              <span className="text-[var(--tone-teal)]">
                 {formatInr(familyFeeTotalPaise)}
               </span>
             </p>
@@ -1114,7 +1114,7 @@ export function AdmissionRegistrationPanel({
                     </td>
                     <td className="px-3 py-2 text-[11px] font-semibold">
                       {l.registrationPaymentStatus === "paid" ? (
-                        <span className="text-[#15803d]">Paid</span>
+                        <span className="text-[var(--tone-green)]">Paid</span>
                       ) : l.registrationPaymentStatus === "partial" ? (
                         <span className="text-[#9a3412]">Partial</span>
                       ) : l.registrationPaymentStatus === "pending" ? (
@@ -1213,7 +1213,7 @@ export function AdmissionRegistrationPanel({
                 className={
                   selected.registrationPaymentStatus === "paid" ||
                   selected.registrationFeePaid
-                    ? "text-[#15803d]"
+                    ? "text-[var(--tone-green)]"
                     : selected.registrationPaymentStatus === "waived"
                       ? "text-[var(--muted)]"
                       : "text-[#9a3412]"

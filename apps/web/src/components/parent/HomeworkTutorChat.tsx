@@ -94,7 +94,7 @@ export function HomeworkTutorChat({
     <div className="mt-2">
       <button
         type="button"
-        className="text-xs font-semibold text-[#6d28d9] underline"
+        className="text-xs font-semibold text-[var(--tone-violet)] underline"
         onClick={() => setOpen((v) => !v)}
       >
         {open ? "Hide tutor hints" : "Get tutor hints"}

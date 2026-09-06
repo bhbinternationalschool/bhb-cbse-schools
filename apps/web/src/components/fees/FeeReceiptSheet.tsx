@@ -782,14 +782,14 @@ function FeeReceiptCopy({
                   className="h-14 w-14 shrink-0 rounded border border-white bg-white p-0.5"
                 />
                 <div className="min-w-0 text-[7px] leading-snug text-[var(--brand-deep)]">
-                  <p className="font-bold uppercase text-[#0f766e]">
+                  <p className="font-bold uppercase text-[var(--tone-teal)]">
                     Pay remaining dues
                   </p>
                   <p className="font-semibold tabular-nums">
                     {formatInr(remainingPayAmountPaise || 0)}
                   </p>
                   {remainingPayUrl ? (
-                    <p className="mt-0.5 break-all text-[6px] text-[#0f766e]">
+                    <p className="mt-0.5 break-all text-[6px] text-[var(--tone-teal)]">
                       {remainingPayUrl}
                     </p>
                   ) : null}
@@ -809,7 +809,7 @@ function FeeReceiptCopy({
                   />
                 ) : null}
                 <div className="min-w-0 text-[7px] leading-snug text-[var(--brand-deep)]">
-                  <p className="text-[8px] font-bold uppercase tracking-wide text-[#8a6d12]">
+                  <p className="text-[8px] font-bold uppercase tracking-wide text-[var(--tone-amber)]">
                     Refer a family · earn a fee discount
                   </p>
                   <p className="mt-0.5">
@@ -829,7 +829,7 @@ function FeeReceiptCopy({
                     <span className="font-mono">{referralCode}</span>
                   </p>
                   {referralUrl ? (
-                    <p className="break-all text-[6px] text-[#8a6d12]">
+                    <p className="break-all text-[6px] text-[var(--tone-amber)]">
                       {referralUrl}
                     </p>
                   ) : null}
