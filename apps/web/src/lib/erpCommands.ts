@@ -129,6 +129,26 @@ export const ERP_COMMANDS: ErpCommandDef[] = [
     scope: "any",
   },
   {
+    id: "decide_leave",
+    title: "Approve or reject a leave request",
+    kind: "write",
+    module: "student_leave",
+    action: "edit",
+    description:
+      "Decide a student's pending leave request. Names the student; if they have more than one pending request, it asks which. Approving marks the leave on registers that exist and tells the family.",
+    examples: [
+      "Approve Aarav's leave",
+      "approve leave for Riya Verma",
+      "reject Kabir Ali leave: no medical certificate",
+      "Aarav Sharma ki chutti manjoor karo",
+    ],
+    fields: [
+      { name: "student", type: "student", required: true, description: "The student whose leave is being decided" },
+      { name: "text", type: "text", required: false, description: "Optional note, after a colon" },
+    ],
+    scope: "own_sections",
+  },
+  {
     id: "raise_complaint",
     title: "Log a family's complaint",
     kind: "write",
@@ -765,6 +785,20 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
   }
   if (COLLECTION_WORDS.test(t) && !extractSectionRefs(t).length) {
     return { commandId: "collection_today", fields: { date: "" }, source: "local" };
+  }
+  const leaveDecision = parseDecideLeaveQuery(t);
+  if (leaveDecision) {
+    return {
+      commandId: "decide_leave",
+      fields: {
+        student: leaveDecision.student,
+        text: leaveDecision.note,
+        // The verb rides in `date`, which decide_leave does not otherwise
+        // use, so the pure parse stays a plain field map.
+        date: leaveDecision.approve ? "approve" : "reject",
+      },
+      source: "local",
+    };
   }
   const complaint = parseRaiseComplaintQuery(t);
   if (complaint) {
@@ -3025,4 +3059,122 @@ export function formatRaiseComplaintCard(input: {
     `Filed against ${input.guardianName || "the family"}'s record, as taken by the office.`,
     "The family is not messaged; it goes to the complaints queue.",
   ].join("\n");
+}
+
+// ─── Approve / reject leave (write) ────────────────────────────────────
+
+const APPROVE_WORD =
+  /(?<![\p{L}\p{M}\p{N}])(approve|approved|accept|grant|sanction|manjoor|manzoor|मंजूर|स्वीकृत|allow)(?![\p{L}\p{M}\p{N}])/iu;
+
+const REJECT_WORD =
+  /(?<![\p{L}\p{M}\p{N}])(reject|rejected|decline|deny|refuse|namanjoor|na\s*manjoor|अस्वीकृत|मना)(?![\p{L}\p{M}\p{N}])/iu;
+
+const LEAVE_NOUN =
+  /(?<![\p{L}\p{M}\p{N}])(leave|chutti|chhutti|छुट्टी|avkash|अवकाश)(?![\p{L}\p{M}\p{N}])/iu;
+
+const LEAVE_DECIDE_FILLER = new Set([
+  "approve", "approved", "accept", "grant", "sanction", "manjoor", "manzoor", "allow", "karo", "kar", "do",
+  "reject", "rejected", "decline", "deny", "refuse", "namanjoor", "na",
+  "leave", "leaves", "chutti", "chhutti", "avkash", "request", "requests", "application",
+  "for", "of", "the", "please", "pls", "ki", "ka", "ke", "ko", "s",
+  "मंजूर", "स्वीकृत", "अस्वीकृत", "मना", "छुट्टी", "अवकाश", "की", "का", "के", "करो",
+]);
+
+export type DecideLeaveParse = { student: string; approve: boolean; note: string };
+
+/**
+ * "Approve Aarav's leave", "reject Kabir Ali leave: no medical
+ * certificate", "Aarav Sharma ki chutti manjoor karo". Needs a decision
+ * verb, the word leave, and a name — the pending-leaves *list* command
+ * must not be caught, so a message with no name is not this.
+ */
+export function parseDecideLeaveQuery(text: string): DecideLeaveParse | null {
+  const t = (text || "").trim();
+  if (!t || !LEAVE_NOUN.test(t)) return null;
+  const approve = APPROVE_WORD.test(t);
+  const reject = REJECT_WORD.test(t);
+  if (approve === reject) return null; // neither, or contradictory
+  const colon = t.search(/[:：]/);
+  const head = colon > 0 ? t.slice(0, colon) : t;
+  const note = colon > 0 ? t.slice(colon + 1).trim() : "";
+  const refs = extractSectionRefs(head);
+  let rest = head.toLowerCase();
+  if (refs.length) {
+    rest = rest
+      .replace(/(?<![\p{L}\p{M}\p{N}])(?:class|grade|std|kaksha|कक्षा)\s*[a-z0-9]+(?:st|nd|rd|th)?\s*(?:-|\s)?\s*(?:section|sec\.?)?\s*[a-h]?(?![\p{L}\p{M}\p{N}])/giu, " ")
+      .replace(/(?<![a-z0-9])(\d{1,2}|[ivx]{1,4}|nursery|lkg|ukg|kg|pg)(?:st|nd|rd|th)?\s*-?\s*[a-h](?![a-z0-9])/g, " ");
+  }
+  const words = rest
+    .replace(/[’']s(?![\p{L}])/giu, " ")
+    .replace(/[^\p{L}\p{M}\p{N}\s'.-]/gu, " ")
+    .split(/\s+/)
+    .map((w) => w.replace(/^[.'-]+|[.'-]+$/g, ""))
+    .filter((w) => w && !LEAVE_DECIDE_FILLER.has(w) && !/^\d+$/.test(w));
+  const name = words.join(" ").trim();
+  if (!name || !/[\p{L}\p{M}]{2,}/u.test(name)) return null;
+  const sec = refs[0];
+  return {
+    student: [name, sec ? `${sec.classKey}${sec.sectionName}` : ""].filter(Boolean).join(" "),
+    approve,
+    note,
+  };
+}
+
+export type PendingLeaveOption = {
+  id: string;
+  fromDate: string;
+  toDate: string;
+  typeLabel: string;
+  reason: string;
+};
+
+export function formatLeaveRequestPicker(
+  studentName: string,
+  options: PendingLeaveOption[],
+): string {
+  const lines = [`${studentName} has ${options.length} pending leave requests:`];
+  options.forEach((o, i) => {
+    const span = o.fromDate === o.toDate ? shortDate(o.fromDate) : `${shortDate(o.fromDate)}–${shortDate(o.toDate)}`;
+    lines.push(`${i + 1}. ${span} · ${o.typeLabel}${o.reason ? ` · ${o.reason}` : ""}`);
+  });
+  lines.push("Say the dates to pick one, e.g. _approve Aarav leave 8 Sep_.");
+  return lines.join("\n");
+}
+
+export function formatDecideLeaveCard(input: {
+  approve: boolean;
+  studentName: string;
+  classLabel: string;
+  fromDate: string;
+  toDate: string;
+  days: number;
+  typeLabel: string;
+  reason: string;
+  note: string;
+  approverHint: string;
+  applyDates: number;
+  futureDates: number;
+}): string {
+  const span =
+    input.fromDate === input.toDate
+      ? shortDate(input.fromDate)
+      : `${shortDate(input.fromDate)}–${shortDate(input.toDate)} (${input.days}d)`;
+  const lines = [
+    `*${input.approve ? "Approve" : "Reject"} leave* · ${input.studentName} · ${input.classLabel}`,
+    `${span} · ${input.typeLabel}${input.reason ? ` · ${input.reason}` : ""}`,
+  ];
+  if (input.note) lines.push(`Note: ${input.note}`);
+  lines.push("", `Normally decided by: ${input.approverHint}`);
+  if (input.approve) {
+    if (input.applyDates) {
+      lines.push(`Marks leave on ${input.applyDates} day${input.applyDates === 1 ? "" : "s"} already registered.`);
+    }
+    if (input.futureDates) {
+      lines.push(
+        `${input.futureDates} day${input.futureDates === 1 ? "" : "s"} not yet marked — mark those as usual; the class is not pre-marked.`,
+      );
+    }
+  }
+  lines.push("The family is told either way.");
+  return lines.join("\n");
 }

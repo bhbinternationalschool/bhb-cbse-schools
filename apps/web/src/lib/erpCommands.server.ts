@@ -97,6 +97,8 @@ import {
   formatHomeworkReply,
   formatAdmissionsPeriodReply,
   formatClassMessageCard,
+  formatDecideLeaveCard,
+  formatLeaveRequestPicker,
   formatRaiseComplaintCard,
   formatStaffBroadcastCard,
   guessComplaintCategory,
@@ -823,6 +825,82 @@ export async function handleErpStaffCommand(
       resolved.sectionIds = mine.map((s) => s.sectionId).join(",");
     }
   }
+  if (command.id === "decide_leave" && resolved.studentId) {
+    writeStudentLeaveLocalRaw(emptyStudentLeaveState());
+    await ensureStudentLeaveHydratedServer();
+    const approve = (parsed.fields.date || "approve") === "approve";
+    const pendingReqs = loadStudentLeave().requests.filter(
+      (lr) =>
+        lr.studentId === resolved.studentId &&
+        lr.status === "pending" &&
+        lr.academicYearCode === session.academicYearCode,
+    );
+    if (!pendingReqs.length) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: `${resolved.studentName || "That student"} has no pending leave request.`,
+      };
+    }
+    // Two pending requests for one child is rare but real (a sick day and a
+    // planned trip). Deciding the wrong one is invisible, so ask.
+    let picked = pendingReqs[0]!;
+    if (pendingReqs.length > 1) {
+      const askedDate = resolveCommandDate(text, todayIso);
+      const byDate = pendingReqs.filter(
+        (lr) => askedDate >= lr.fromDate && askedDate <= (lr.toDate || lr.fromDate),
+      );
+      if (byDate.length !== 1) {
+        return {
+          handled: true,
+          audience: "erp_command_ask",
+          text: formatLeaveRequestPicker(
+            resolved.studentName || "This student",
+            pendingReqs.map((lr) => ({
+              id: lr.id,
+              fromDate: lr.fromDate,
+              toDate: lr.toDate || lr.fromDate,
+              typeLabel: leaveTypeLabel(lr.leaveType),
+              reason: lr.reason || "",
+            })),
+          ),
+        };
+      }
+      picked = byDate[0]!;
+    }
+    const student = loadSis().students.find((st) => st.id === resolved.studentId);
+    await ensureAttendanceHydratedServer();
+    const att = loadAttendance();
+    let applyDates = 0;
+    let futureDates = 0;
+    const from = picked.fromDate;
+    const to = picked.toDate || picked.fromDate;
+    for (const d = new Date(`${from}T00:00:00Z`); d <= new Date(`${to}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1)) {
+      const iso = d.toISOString().slice(0, 10);
+      const exists = student
+        ? !!findRegister(picked.academicYearCode, student.sectionId, iso, att)
+        : false;
+      if (exists || iso <= todayIso) applyDates += 1;
+      else futureDates += 1;
+    }
+    resolved.leaveRequestId = picked.id;
+    resolved.approve = approve ? "1" : "";
+    resolved.note = (parsed.fields.text || "").trim();
+    resolved.cardSummary = formatDecideLeaveCard({
+      approve,
+      studentName: resolved.studentName || "",
+      classLabel: student ? classLabel(masters, student.classId, student.sectionId).replace(" · ", " ") : "",
+      fromDate: from,
+      toDate: to,
+      days: leaveDayCount(picked),
+      typeLabel: leaveTypeLabel(picked.leaveType),
+      reason: picked.reason || "",
+      note: resolved.note,
+      approverHint: pendingApproverHint(picked),
+      applyDates: approve ? applyDates : 0,
+      futureDates: approve ? futureDates : 0,
+    });
+  }
   if (command.id === "raise_complaint" && resolved.studentId) {
     const body = (parsed.fields.text || "").trim();
     if (body.length < 3) {
@@ -1099,7 +1177,9 @@ export async function handleErpStaffCommand(
   if (command.kind === "write") {
     const token = random();
     const summary =
-      command.id === "raise_complaint"
+      command.id === "decide_leave"
+        ? resolved.cardSummary || command.title
+        : command.id === "raise_complaint"
         ? resolved.cardSummary || command.title
         : command.id === "staff_broadcast"
         ? resolved.cardSummary || command.title
@@ -2120,6 +2200,47 @@ async function runConfirmedWrite(
       handled: true,
       audience: "erp_command_post_homework",
       text: `Posted. ${label} ${r.subjectName || ""} homework is live${res.push.sent ? ` · ${res.push.sent} phone${res.push.sent === 1 ? "" : "s"} notified` : ""}.\nUndo it in the ERP: Homework → today's posts.`,
+    };
+  }
+  if (command.id === "decide_leave") {
+    if (!r.leaveRequestId) {
+      return {
+        handled: true,
+        audience: "erp_command_error",
+        text: "That leave request is no longer valid. Send the command again.",
+      };
+    }
+    const { decideStudentLeaveServer } = await import("@/lib/studentLeaveDecide.server");
+    const res = await decideStudentLeaveServer({
+      session,
+      masters,
+      requestId: r.leaveRequestId,
+      approve: !!r.approve,
+      note: r.note || "",
+      todayIso: istDateOf(),
+    });
+    if (!res.ok) {
+      void audit(session, command, pending.fields, pending.originalText, "error", {
+        reason: res.error,
+        channel: inbound.channel,
+      });
+      return { handled: true, audience: "erp_command_error", text: `Couldn't record it: ${res.error}` };
+    }
+    void audit(session, command, pending.fields, pending.originalText, "ok", {
+      channel: inbound.channel,
+      requestId: r.leaveRequestId,
+      decision: res.request.status,
+      appliedDates: res.appliedDates.length,
+      pendingDates: res.pendingDates.length,
+    });
+    const bits = [`${res.request.status === "approved" ? "Approved" : "Rejected"} · ${res.studentName}`];
+    if (res.appliedDates.length) bits.push(`marked on ${res.appliedDates.length} day${res.appliedDates.length === 1 ? "" : "s"}`);
+    if (res.pendingDates.length) bits.push(`${res.pendingDates.length} day${res.pendingDates.length === 1 ? "" : "s"} still to be marked`);
+    if (res.pushSent) bits.push("family told");
+    return {
+      handled: true,
+      audience: "erp_command_decide_leave",
+      text: `${bits.join(" · ")}.\nAttendance → Leave in the ERP has the full record.`,
     };
   }
   if (command.id === "raise_complaint") {

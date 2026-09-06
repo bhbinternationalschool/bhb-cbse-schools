@@ -65,6 +65,9 @@ import {
   formatClassMessageCard,
   parseStaffBroadcastQuery,
   formatStaffBroadcastCard,
+  parseDecideLeaveQuery,
+  formatDecideLeaveCard,
+  formatLeaveRequestPicker,
   parseRaiseComplaintQuery,
   guessComplaintCategory,
   complaintSubjectFrom,
@@ -197,6 +200,13 @@ const masters = {
   assert.equal(parseErpCommandLocal("VIII B me kaun nahi aaya")?.fields.section, "8B");
   assert.equal(parseErpCommandLocal("5A में कौन गैरहाजिर है")?.commandId, "absent_list", "Devanagari fee/absent words match without ASCII word boundaries");
   assert.equal(parseErpCommandLocal("7B की उपस्थिति")?.fields.section, "7B");
+  assert.equal(parseErpCommandLocal("Approve Aarav's leave")?.commandId, "decide_leave");
+  assert.equal(parseErpCommandLocal("reject Kabir Ali leave: no medical certificate")?.fields.date, "reject");
+  // Listing pending leaves must never decide one.
+  assert.equal(parseDecideLeaveQuery("pending leaves"), null);
+  assert.equal(parseDecideLeaveQuery("leave requests"), null);
+  assert.equal(parseDecideLeaveQuery("approve leave"), null, "a decision with no name decides nothing");
+  assert.equal(parseErpCommandLocal("pending leaves")?.commandId, "pending_leaves");
   assert.equal(parseErpCommandLocal("Raise complaint for Riya Verma: bus did not come today")?.commandId, "raise_complaint");
   assert.equal(parseErpCommandLocal("complaint for Amay Gupta 4B: fee receipt not received")?.fields.student, "amay gupta 4B");
   assert.equal(parseRaiseComplaintQuery("raise complaint: 7A projector not working"), null, "a facilities issue with no family is not this command");
@@ -1330,6 +1340,71 @@ const masters = {
     card.includes("The family is not messaged; it goes to the complaints queue."),
     "the card says plainly that nothing is sent to the family",
   );
+}
+
+// ─── approve / reject leave ────────────────────────────────────────────
+{
+  assert.deepEqual(parseDecideLeaveQuery("Approve Aarav's leave"), {
+    student: "aarav",
+    approve: true,
+    note: "",
+  });
+  assert.deepEqual(parseDecideLeaveQuery("reject Kabir Ali leave: no medical certificate"), {
+    student: "kabir ali",
+    approve: false,
+    note: "no medical certificate",
+  });
+  assert.deepEqual(parseDecideLeaveQuery("Aarav Sharma ki chutti manjoor karo"), {
+    student: "aarav sharma",
+    approve: true,
+    note: "",
+  });
+  assert.equal(
+    parseDecideLeaveQuery("approve and reject Aarav leave"),
+    null,
+    "a contradictory message decides nothing",
+  );
+
+  const picker = formatLeaveRequestPicker("Aarav Sharma", [
+    { id: "a", fromDate: "2026-09-08", toDate: "2026-09-10", typeLabel: "Sick leave", reason: "Fever" },
+    { id: "b", fromDate: "2026-09-20", toDate: "2026-09-20", typeLabel: "Leave", reason: "" },
+  ]);
+  assert.ok(picker.startsWith("Aarav Sharma has 2 pending leave requests:"), picker);
+  assert.ok(picker.includes("1. 8 Sep–10 Sep · Sick leave · Fever"), picker);
+  assert.ok(picker.includes("2. 20 Sep · Leave"), picker);
+
+  const card = formatDecideLeaveCard({
+    approve: true,
+    studentName: "Aarav Sharma",
+    classLabel: "V A",
+    fromDate: "2026-09-04",
+    toDate: "2026-09-08",
+    days: 5,
+    typeLabel: "Sick leave",
+    reason: "Fever",
+    note: "",
+    approverHint: "Principal (over 3 days / medical / long leave)",
+    applyDates: 2,
+    futureDates: 3,
+  });
+  assert.ok(card.startsWith("*Approve leave* · Aarav Sharma · V A\n4 Sep–8 Sep (5d) · Sick leave · Fever"), card);
+  assert.ok(card.includes("Normally decided by: Principal"), card);
+  assert.ok(card.includes("Marks leave on 2 days already registered."), card);
+  assert.ok(
+    card.includes("3 days not yet marked — mark those as usual; the class is not pre-marked."),
+    "future days are not silently pre-marked for the whole class",
+  );
+  assert.ok(card.includes("The family is told either way."), card);
+
+  const reject = formatDecideLeaveCard({
+    approve: false, studentName: "Kabir Ali", classLabel: "VI B",
+    fromDate: "2026-09-06", toDate: "2026-09-06", days: 1, typeLabel: "Leave",
+    reason: "", note: "no medical certificate", approverHint: "Class teacher (≤3 days)",
+    applyDates: 0, futureDates: 0,
+  });
+  assert.ok(reject.startsWith("*Reject leave* · Kabir Ali · VI B\n6 Sep · Leave"), reject);
+  assert.ok(reject.includes("Note: no medical certificate"), reject);
+  assert.ok(!reject.includes("Marks leave on"), "a rejection touches no register");
 }
 
 console.log("erpCommands.selftest.ts OK");
