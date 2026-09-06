@@ -224,6 +224,9 @@ export function buildFeesDashboardModel(
     overdue: string;
     sortPaise: number;
     daysOverdue: number;
+    /** Carried for the row's WhatsApp action — see DashboardRowAction. */
+    mobile: string;
+    amountPaise: number;
   }[] = [];
   const active = sis.students.filter(
     (s) => s.status === "active" && s.academicYearCode === ay,
@@ -258,6 +261,7 @@ export function buildFeesDashboardModel(
     const overdueDays = open
       .filter((d) => d.dueOn && d.dueOn < today)
       .reduce((max, d) => Math.max(max, daysBetween(d.dueOn, today)), 0);
+    const household = sis.households.find((h) => h.id === student.householdId);
     defaulterRows.push({
       id: student.id,
       rank: "",
@@ -267,6 +271,15 @@ export function buildFeesDashboardModel(
       overdue: overdueDays > 0 ? `${overdueDays} days` : "not yet due",
       sortPaise: openSum,
       daysOverdue: overdueDays,
+      // WhatsApp first, then the household landline number, then the parents.
+      // The same order the counter tries by hand.
+      mobile:
+        household?.whatsappMobile ||
+        household?.mobile ||
+        student.fatherMobile ||
+        student.motherMobile ||
+        "",
+      amountPaise: openSum,
     });
     if (arrSum > 0) {
       arrearsDetailRows.push({
@@ -332,6 +345,38 @@ export function buildFeesDashboardModel(
   // "Other heads" rather than a crowd of unlabelled slivers.
   const headTop = headEntries.slice(0, 6);
   const headRest = headEntries.slice(6).reduce((n, [, p]) => n + p, 0);
+  const headSeriesFor = (from?: string): DashboardChartPoint[] => {
+    const totals = new Map<string, number>();
+    for (const v of vouchers) {
+      if (from && (v.collectionDate || "") < from) continue;
+      for (const line of v.lines) {
+        const head = feeHeadOfLabel(line.label, line.kind);
+        totals.set(head, (totals.get(head) ?? 0) + line.amountPaise);
+      }
+    }
+    const entries = [...totals.entries()]
+      .filter(([, p]) => p > 0)
+      .sort((a, b) => b[1] - a[1]);
+    const top = entries.slice(0, 6);
+    const rest = entries.slice(6).reduce((n, [, p]) => n + p, 0);
+    return [
+      ...top.map(([label, paise], i) => ({
+        label,
+        value: Math.round(paise / 100),
+        color: HEAD_COLORS[i % HEAD_COLORS.length]!,
+      })),
+      ...(rest > 0
+        ? [{ label: "Other heads", value: Math.round(rest / 100), color: "#5c6478" }]
+        : []),
+    ];
+  };
+  const headPaiseFrom = (from?: string) =>
+    vouchers
+      .filter((v) => !from || (v.collectionDate || "") >= from)
+      .reduce(
+        (n, v) => n + v.lines.reduce((m, l) => m + l.amountPaise, 0),
+        0,
+      );
   const headSeries: DashboardChartPoint[] = [
     ...headTop.map(([label, paise], i) => ({
       label,
@@ -482,13 +527,58 @@ export function buildFeesDashboardModel(
     extraCharts: headSeries.length
       ? [
           {
-            title: "Fee head breakdown — session",
+            title: "Fee head breakdown",
             series: headSeries,
             defaultView: "pie" as const,
             center: {
               value: formatInrCompact(headTotalPaise),
               label: "collected",
             },
+            // Four periods, so the panel renders these as a dropdown rather
+            // than a row of buttons (asked for on 2026-09-06).
+            ranges: [
+              {
+                id: "today",
+                label: "Today",
+                title: "Fee head breakdown — today",
+                series: headSeriesFor(today),
+                center: {
+                  value: formatInrCompact(headPaiseFrom(today)),
+                  label: "collected",
+                },
+              },
+              {
+                id: "7d",
+                label: "Last 7 days",
+                title: "Fee head breakdown — last 7 days",
+                series: headSeriesFor(days7[0]),
+                center: {
+                  value: formatInrCompact(headPaiseFrom(days7[0])),
+                  label: "collected",
+                },
+              },
+              {
+                id: "30d",
+                label: "Last 30 days",
+                title: "Fee head breakdown — last 30 days",
+                series: headSeriesFor(days30[0]),
+                center: {
+                  value: formatInrCompact(headPaiseFrom(days30[0])),
+                  label: "collected",
+                },
+              },
+              {
+                id: "all",
+                label: "Whole session",
+                title: "Fee head breakdown — whole session",
+                series: headSeries,
+                center: {
+                  value: formatInrCompact(headTotalPaise),
+                  label: "collected",
+                },
+              },
+            ],
+            rangeDefault: "all",
           },
         ]
       : undefined,
@@ -537,8 +627,12 @@ export function buildFeesDashboardModel(
               { key: "amount", label: "Amount due", align: "right" as const },
             ],
             rows: topDefaulters.map(
-              ({ sortPaise: _s, daysOverdue: _d, ...row }) => row,
+              ({ sortPaise: _s, ...row }) => row,
             ),
+            rowAction: {
+              kind: "whatsapp-defaulter" as const,
+              label: "Send WhatsApp reminder",
+            },
           },
         ]
       : undefined,

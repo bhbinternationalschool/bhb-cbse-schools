@@ -1,5 +1,11 @@
 "use client";
-// ratchet-allow: grids_without_row_menu — the legacy browser-book desk, being retired tab by tab (phase C); its tables are not extended
+// ratchet-allow: grids_without_row_menu — four panels here are LIVE (Banks,
+// Bills & AP, Owner loans, Day close), so "being retired" is no longer the
+// reason (corrected 2026-09-06). Each is a card list with its own controls:
+// clicking a card loads it into the editor above, which is where Save and
+// Delete live. A "…" menu duplicating a click that already selects the row
+// would be a second way to do one thing. Balances shown here come from the
+// server book — see lib/accountsServerBook.ts.
 
 /* ratchet-allow: raw_table — the <table> here is inside an HTML string written into a print popup, not JSX — there is no component to shell */
 

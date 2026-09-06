@@ -29,6 +29,7 @@ import {
   LineChart,
   PieChart,
   Printer,
+  MessageCircle,
   Table2,
   X,
   ChevronRight,
@@ -101,10 +102,24 @@ export type DashboardKpiSection = {
   kpis: DashboardKpi[];
 };
 
+/**
+ * A per-row action on a dashboard table.
+ *
+ * Declared as data, not as a callback: the models are built in plain libs
+ * (feeDashboard, moduleDashboards) that have no business opening a WhatsApp
+ * window. The lib names the intent and carries whatever the action needs on
+ * the row; ModuleDashboardHost, which is a client component, does the work.
+ */
+export type DashboardRowAction = {
+  kind: "whatsapp-defaulter";
+  label: string;
+};
+
 export type DashboardTableBlock = {
   title: string;
   columns: DashboardTableColumn[];
   rows: DashboardTableRow[];
+  rowAction?: DashboardRowAction;
 };
 
 export type ChartView = "bar" | "pie" | "trend";
@@ -127,12 +142,21 @@ export type DashboardChartBlock = {
   center?: DashboardChartCenter;
   /** Preferred initial view (defaults to bar; use trend for time series). */
   defaultView?: ChartView;
+  /** Period switch — same shape the primary chart already uses. */
+  ranges?: DashboardChartRange[];
+  rangeDefault?: string;
 };
 
 export type DashboardChartRange = {
   id: string;
   label: string;
   title: string;
+  /**
+   * Ring centre for this period. Without it a ring switched to "Today" kept
+   * the session total in the middle — the chart said one thing and the number
+   * inside it said another.
+   */
+  center?: DashboardChartCenter;
   series: DashboardChartPoint[];
 };
 
@@ -699,6 +723,8 @@ function DashboardTable({
   empty = "No records yet.",
   onRowClick,
   sortable = false,
+  rowAction,
+  onRowAction,
 }: {
   title: string;
   columns: DashboardTableColumn[];
@@ -707,6 +733,9 @@ function DashboardTable({
   onRowClick?: (row: DashboardTableRow) => void;
   /** Click column headers to sort (KPI detail lists). */
   sortable?: boolean;
+  /** Optional per-row button in a trailing cell. */
+  rowAction?: DashboardRowAction;
+  onRowAction?: (kind: DashboardRowAction["kind"], row: DashboardTableRow) => void;
 }) {
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -779,13 +808,18 @@ function DashboardTable({
                   </th>
                 );
               })}
+              {rowAction ? (
+                <th className="px-4 py-3 text-right text-[12px] font-bold uppercase tracking-[0.06em] text-[var(--muted)]">
+                  <span className="sr-only">{rowAction.label}</span>
+                </th>
+              ) : null}
             </tr>
           </thead>
           <ErpTableBody>
             {rows.length === 0 ? (
               <tr>
                 <td
-                  colSpan={columns.length}
+                  colSpan={columns.length + (rowAction ? 1 : 0)}
                   className="px-4 py-8 text-center text-base text-[var(--muted)]"
                 >
                   {empty}
@@ -812,6 +846,24 @@ function DashboardTable({
                       {row[c.key] ?? "—"}
                     </td>
                   ))}
+                  {rowAction ? (
+                    <td className="px-4 py-3.5 text-right">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          // The row itself may open a drawer; the action is
+                          // its own decision.
+                          e.stopPropagation();
+                          onRowAction?.(rowAction.kind, row);
+                        }}
+                        title={rowAction.label}
+                        aria-label={`${rowAction.label} — ${row.name ?? row.id}`}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--success-soft)] text-[var(--success)] transition hover:brightness-95"
+                      >
+                        <MessageCircle className="h-5 w-5" aria-hidden />
+                      </button>
+                    </td>
+                  ) : null}
                 </tr>
               ))
             )}
@@ -991,6 +1043,7 @@ function ChartPanel({
   const activeRange =
     ranges?.find((r) => r.id === rangeId) ?? ranges?.[0] ?? null;
   const panelTitle = activeRange?.title ?? title;
+  const activeCenter = activeRange?.center ?? center;
   const data = (activeRange?.series ?? series).length
     ? activeRange?.series ?? series
     : [{ label: "—", value: 0 }];
@@ -1006,7 +1059,23 @@ function ChartPanel({
           {panelTitle}
         </h3>
         <div className="flex flex-wrap items-center gap-2">
-          {ranges && ranges.length > 1 ? (
+          {/* Four or more periods stop fitting as buttons on a phone, and a
+              row of five reads as a toolbar rather than a choice. Past three,
+              the same ranges become a select. */}
+          {ranges && ranges.length > 3 ? (
+            <select
+              className="min-h-10 rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] px-3 text-sm font-semibold text-[var(--brand-deep)]"
+              value={rangeId}
+              onChange={(e) => setRangeId(e.target.value)}
+              aria-label="Chart range"
+            >
+              {ranges.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+          ) : ranges && ranges.length > 1 ? (
             <div
               className="inline-flex rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-1"
               role="group"
@@ -1038,7 +1107,7 @@ function ChartPanel({
       <div className="min-h-[220px] rounded-xl bg-[var(--surface-sunken)] p-2 sm:p-3">
         {chartView === "bar" ? <BarChartSvg series={data} /> : null}
         {chartView === "pie" ? (
-          <DonutChartSvg rings={pieRings} center={center} />
+          <DonutChartSvg rings={pieRings} center={activeCenter} />
         ) : null}
         {chartView === "trend" ? <TrendChartSvg series={data} /> : null}
       </div>
@@ -1055,11 +1124,16 @@ export function ModuleDashboardView({
   model,
   onNavigateTab,
   onTableRowClick,
+  onTableRowAction,
   variant = "module",
 }: {
   model: ModuleDashboardModel;
   onNavigateTab?: (tab: string) => void;
   onTableRowClick?: (row: DashboardTableRow) => void;
+  onTableRowAction?: (
+    kind: DashboardRowAction["kind"],
+    row: DashboardTableRow,
+  ) => void;
   variant?: "module" | "school";
 }) {
   const router = useRouter();
@@ -1201,6 +1275,8 @@ export function ModuleDashboardView({
                 rings={c.rings}
                 center={c.center}
                 defaultView={c.defaultView || "trend"}
+                ranges={c.ranges}
+                defaultRangeId={c.rangeDefault}
               />
             ))
           : null}
@@ -1221,6 +1297,8 @@ export function ModuleDashboardView({
               columns={t.columns}
               rows={t.rows}
               onRowClick={onTableRowClick}
+              rowAction={t.rowAction}
+              onRowAction={onTableRowAction}
             />
           ))}
         </div>
