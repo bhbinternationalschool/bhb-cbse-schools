@@ -47,6 +47,13 @@ export type ErpCommandDef = {
    * scope applies.
    */
   scope: "own_sections" | "any";
+  /**
+   * Channels this command answers on. Omitted means every channel.
+   * `post_homework` is app-only: on WhatsApp the class-channel bot has
+   * owned teacher homework posts since before this desk existed, and it
+   * broadcasts to parents as well, so the desk must not intercept them.
+   */
+  channels?: ("whatsapp" | "app")[];
 };
 
 /** Fields as extracted from the message, before ID resolution. */
@@ -120,6 +127,32 @@ export const ERP_COMMANDS: ErpCommandDef[] = [
       },
     ],
     scope: "any",
+  },
+  {
+    id: "post_homework",
+    title: "Post homework",
+    kind: "write",
+    module: "homework",
+    action: "edit",
+    description:
+      "Publish homework for one section and subject. Needs a posting verb, the section, the subject and the text after a colon; a due date is optional. App and ERP assistant only — on WhatsApp the class channel already does this.",
+    examples: [
+      "Post homework 6B maths: exercise 4.2, due Monday",
+      "post homework for 5A english: read chapter 3",
+      "add homework 6B science: diagram of a plant cell, due tomorrow",
+      "6B hindi homework post karo: paath 3 ke prashn",
+    ],
+    fields: [
+      { name: "section", type: "section", required: true, description: "Class-section, e.g. 6B" },
+      {
+        name: "text",
+        type: "text",
+        required: true,
+        description: "Subject, then a colon, then the homework text; optionally 'due <day/date>'",
+      },
+    ],
+    scope: "own_sections",
+    channels: ["app"],
   },
   {
     id: "admissions_week",
@@ -647,6 +680,14 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
   }
   if (COLLECTION_WORDS.test(t) && !extractSectionRefs(t).length) {
     return { commandId: "collection_today", fields: { date: "" }, source: "local" };
+  }
+  const post = parsePostHomeworkQuery(t);
+  if (post) {
+    return {
+      commandId: "post_homework",
+      fields: { section: post.section, text: post.rest },
+      source: "local",
+    };
   }
   const admPeriod = parseAdmissionsQuery(t);
   if (admPeriod) {
@@ -2338,5 +2379,174 @@ export function formatAdmissionsPeriodReply(input: AdmissionsPeriodInput): strin
     lines.push("No follow-up is overdue.");
   }
   lines.push(`Open pipeline: ${input.pipelineOpen} lead${input.pipelineOpen === 1 ? "" : "s"}.`);
+  return lines.join("\n");
+}
+
+// ─── Post homework (write) ─────────────────────────────────────────────
+
+const POST_VERB =
+  /(?<![\p{L}\p{M}\p{N}])(post|add|create|set|publish|upload|lagao|laga\s*do|daalo|daal\s*do|de\s*do|likh\s*do|karo|kar\s*do)(?![\p{L}\p{M}\p{N}])/iu;
+
+export type PostHomeworkParse = {
+  section: string;
+  /** Everything after the section: "maths: exercise 4.2, due Monday". */
+  rest: string;
+};
+
+/**
+ * "Post homework 6B maths: exercise 4.2, due Monday". Requires a posting
+ * verb AND a homework word, so a question ("6B homework") and a plain
+ * class-channel post ("HW 6B maths: …") both stay out of it. The subject,
+ * body and due date are pulled apart by `splitPostHomeworkRest`, which the
+ * server calls once Masters is loaded.
+ */
+export function parsePostHomeworkQuery(text: string): PostHomeworkParse | null {
+  const t = (text || "").trim();
+  if (!t || !HOMEWORK_WORDS.test(t) || !POST_VERB.test(t)) return null;
+  const refs = extractSectionRefs(t);
+  if (!refs.length) return null;
+  const r = refs[0]!;
+
+  // Everything after the first colon is the teacher's own words and is kept
+  // byte for byte — stripping filler across the whole message turned
+  // "paath 3 ke prashn" into "paath 3 prashn", i.e. the desk quietly
+  // rewrote what the parents were about to receive.
+  const colon = t.search(/[:：]/);
+  const head = colon > 0 ? t.slice(0, colon) : t;
+  const body = colon > 0 ? t.slice(colon + 1) : "";
+
+  const cleanedHead = head
+    .replace(new RegExp(POST_VERB.source, "giu"), " ")
+    .replace(new RegExp(HOMEWORK_WORDS.source, "giu"), " ")
+    .replace(/(?<![\p{L}\p{M}\p{N}])(?:class|grade|std|kaksha|कक्षा)\s*[a-z0-9]+(?:st|nd|rd|th)?\s*(?:-|\s)?\s*(?:section|sec\.?)?\s*[a-h]?(?![\p{L}\p{M}\p{N}])/giu, " ")
+    .replace(/(?<![a-zA-Z0-9])(\d{1,2}|[ivxIVX]{1,4}|nursery|lkg|ukg|kg|pg)(?:st|nd|rd|th)?\s*-?\s*[a-hA-H](?![a-zA-Z0-9])/g, " ")
+    .replace(/(?<![\p{L}\p{M}\p{N}])(for|ke\s*liye|ka|ki|ke|me|mein)(?![\p{L}\p{M}\p{N}])/giu, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[:\-–—,.\s]+|[\-–—,.\s]+$/g, "")
+    .trim();
+
+  return {
+    section: r.sectionName ? `${r.classKey}${r.sectionName}` : r.classKey,
+    rest: colon > 0 ? `${cleanedHead}:${body}` : cleanedHead,
+  };
+}
+
+export type PostHomeworkParts = {
+  subjectHint: string;
+  body: string;
+  dueHint: string;
+};
+
+/**
+ * "maths: exercise 4.2, due Monday" → subject "maths", body "exercise
+ * 4.2", due "Monday". Without a colon the subject cannot be told from the
+ * body ("science diagram of a cell" — two words or three?), so the caller
+ * asks for the colon rather than guessing at what parents will receive.
+ */
+export function splitPostHomeworkRest(rest: string): PostHomeworkParts | null {
+  const t = (rest || "").trim();
+  const colon = t.search(/[:：]/);
+  if (colon <= 0) return null;
+  const subjectHint = t.slice(0, colon).trim().replace(/[,.\-–—]+$/, "").trim();
+  let body = t.slice(colon + 1).trim();
+  let dueHint = "";
+  const due = /(?<![\p{L}\p{M}\p{N}])(?:due|by|tak|dedline|deadline|submit\s+by)\s+([^,;.]+)/iu.exec(body);
+  if (due) {
+    dueHint = due[1]!.trim();
+    body = (body.slice(0, due.index) + body.slice(due.index + due[0].length)).trim();
+  }
+  body = body.replace(/[,;\s]+$/, "").replace(/^[,;\s]+/, "").trim();
+  if (!subjectHint || !body) return null;
+  return { subjectHint, body, dueHint };
+}
+
+const WEEKDAY_NAMES: Record<string, number> = {
+  sunday: 0, sun: 0, ravivar: 0, itwar: 0, रविवार: 0,
+  monday: 1, mon: 1, somvar: 1, somwar: 1, सोमवार: 1,
+  tuesday: 2, tue: 2, tues: 2, mangalvar: 2, mangalwar: 2, मंगलवार: 2,
+  wednesday: 3, wed: 3, budhvar: 3, budhwar: 3, बुधवार: 3,
+  thursday: 4, thu: 4, thurs: 4, guruvar: 4, guruwar: 4, गुरुवार: 4,
+  friday: 5, fri: 5, shukravar: 5, shukrawar: 5, शुक्रवार: 5,
+  saturday: 6, sat: 6, shanivar: 6, shaniwar: 6, शनिवार: 6,
+};
+
+/**
+ * A due date always points forward — the opposite of `resolveCommandDate`,
+ * where "kal" means yesterday because you are asking about what happened.
+ * Here "kal" means tomorrow, "Monday" the coming Monday, and a day/month
+ * already past rolls into next year (which is what "due 5 Jan" means in
+ * September). Returns "" when nothing date-like was said.
+ */
+export function parseDueDate(hint: string, todayIso: string): string {
+  const t = (hint || "").trim().toLowerCase();
+  if (!t) return "";
+  const shift = (days: number) => {
+    const d = new Date(`${todayIso}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  };
+  const iso = /(20\d{2}-\d{2}-\d{2})/.exec(t);
+  if (iso) return iso[1]!;
+  if (/(?<![\p{L}\p{M}])(today|aaj|आज)(?![\p{L}\p{M}])/iu.test(t)) return todayIso;
+  if (/(?<![\p{L}\p{M}])(day\s+after|parso|परसों)(?![\p{L}\p{M}])/iu.test(t)) return shift(2);
+  if (/(?<![\p{L}\p{M}])(tomorrow|kal|कल)(?![\p{L}\p{M}])/iu.test(t)) return shift(1);
+  if (/(?<![\p{L}\p{M}])next\s+week(?![\p{L}\p{M}])/iu.test(t)) return shift(7);
+  for (const [name, wd] of Object.entries(WEEKDAY_NAMES)) {
+    const re = new RegExp(`(?<![\\p{L}\\p{M}])${name}(?![\\p{L}\\p{M}])`, "iu");
+    if (!re.test(t)) continue;
+    const todayWd = new Date(`${todayIso}T00:00:00Z`).getUTCDay();
+    const ahead = (wd - todayWd + 7) % 7;
+    // "due Monday" said on a Monday means today, not a week away.
+    return shift(ahead);
+  }
+  const dm = /(?<![\d])(\d{1,2})[/-](\d{1,2})(?:[/-](20\d{2}))?(?![\d])/.exec(t);
+  if (dm) {
+    const day = parseInt(dm[1]!, 10);
+    const mon = parseInt(dm[2]!, 10);
+    if (day >= 1 && day <= 31 && mon >= 1 && mon <= 12) {
+      let year = dm[3] ? parseInt(dm[3]!, 10) : parseInt(todayIso.slice(0, 4), 10);
+      let candidate = `${year}-${String(mon).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      if (!dm[3] && candidate < todayIso) {
+        year += 1;
+        candidate = `${year}-${String(mon).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      }
+      return candidate;
+    }
+  }
+  return "";
+}
+
+/**
+ * First line of the body becomes the post title; the whole text is the
+ * body. Sentences end at a newline, a semicolon, or a full stop followed
+ * by a space — never mid-number, or "exercise 4.2" becomes "exercise 4".
+ */
+export function homeworkTitleFrom(body: string): string {
+  const first = (body || "").split(/\n|;|\.(?=\s|$)/)[0]!.trim();
+  const t = first || (body || "").trim();
+  return t.length > 80 ? `${t.slice(0, 77).trimEnd()}…` : t;
+}
+
+export function formatPostHomeworkCard(input: {
+  sectionLabel: string;
+  subjectName: string;
+  title: string;
+  body: string;
+  dueAt: string;
+  dateIso: string;
+  todayIso: string;
+  parentCount: number;
+}): string {
+  const lines = [
+    `*Post homework* · ${input.sectionLabel} · ${input.subjectName}`,
+    input.body,
+  ];
+  const when = input.dateIso === input.todayIso ? "today" : shortDate(input.dateIso);
+  lines.push(
+    `Dated ${when}${input.dueAt ? ` · due ${shortDate(input.dueAt)}` : " · no due date"}`,
+  );
+  if (input.parentCount) {
+    lines.push(`${input.parentCount} famil${input.parentCount === 1 ? "y" : "ies"} will be notified.`);
+  }
   return lines.join("\n");
 }

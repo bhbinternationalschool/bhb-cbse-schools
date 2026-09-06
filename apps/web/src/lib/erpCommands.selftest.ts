@@ -49,6 +49,11 @@ import {
   formatSchoolSnapshotReply,
   formatAdmissionsPeriodReply,
   parseAdmissionsQuery,
+  parsePostHomeworkQuery,
+  splitPostHomeworkRest,
+  parseDueDate,
+  homeworkTitleFrom,
+  formatPostHomeworkCard,
   parseFreeTeachersQuery,
   periodAtTime,
   resolveClassOrSectionRef,
@@ -177,6 +182,14 @@ const masters = {
   assert.equal(parseErpCommandLocal("VIII B me kaun nahi aaya")?.fields.section, "8B");
   assert.equal(parseErpCommandLocal("5A में कौन गैरहाजिर है")?.commandId, "absent_list", "Devanagari fee/absent words match without ASCII word boundaries");
   assert.equal(parseErpCommandLocal("7B की उपस्थिति")?.fields.section, "7B");
+  assert.equal(parseErpCommandLocal("Post homework 6B maths: exercise 4.2, due Monday")?.commandId, "post_homework");
+  assert.equal(parseErpCommandLocal("Post homework 6B maths: exercise 4.2, due Monday")?.fields.section, "6B");
+  assert.equal(parseErpCommandLocal("add homework 6B science: diagram of a plant cell, due tomorrow")?.commandId, "post_homework");
+  // The read command and the class channel must both survive.
+  assert.equal(parseErpCommandLocal("6B homework")?.commandId, "homework_posted", "a question is still the read command");
+  assert.equal(parsePostHomeworkQuery("HW 6B maths: exercise 4.2"), null, "a plain class-channel post is not the write command");
+  assert.equal(parsePostHomeworkQuery("Homework: page 42 ex 4.2"), null, "no section, no verb — the class channel keeps it");
+  assert.equal(parsePostHomeworkQuery("homework posted today for 6B"), null, "'posted' in a question is not a posting verb with content");
   assert.equal(parseErpCommandLocal("admissions this week")?.fields.text, "week");
   assert.equal(parseErpCommandLocal("admissions report")?.fields.text, "week");
   assert.equal(parseErpCommandLocal("is hafte ke admission")?.commandId, "admissions_week");
@@ -1032,6 +1045,85 @@ const masters = {
   assert.ok(quiet.includes("0 new enquiries"), quiet);
   assert.ok(!quiet.includes("None moved stage"), "nothing arrived — no stage line either");
   assert.ok(!quiet.includes("Classes asked for"), quiet);
+}
+
+// ─── post homework: parsing, due dates, card ───────────────────────────
+{
+  const p = parsePostHomeworkQuery("Post homework 6B maths: exercise 4.2, due Monday");
+  assert.ok(p && p.section === "6B", JSON.stringify(p));
+  assert.equal(p!.rest, "maths: exercise 4.2, due Monday");
+
+  const p2 = parsePostHomeworkQuery("post homework for 5A english: read chapter 3");
+  assert.equal(p2?.rest, "english: read chapter 3");
+  const p3 = parsePostHomeworkQuery("6B hindi homework post karo: paath 3 ke prashn");
+  assert.ok(p3 && p3.section === "6B", JSON.stringify(p3));
+  assert.ok(p3!.rest.startsWith("hindi:"), p3!.rest);
+
+  const parts = splitPostHomeworkRest("maths: exercise 4.2, due Monday");
+  assert.deepEqual(parts, { subjectHint: "maths", body: "exercise 4.2", dueHint: "Monday" });
+  assert.deepEqual(splitPostHomeworkRest("english: read chapter 3"), {
+    subjectHint: "english",
+    body: "read chapter 3",
+    dueHint: "",
+  });
+  assert.deepEqual(splitPostHomeworkRest("science: diagram of a cell by tomorrow"), {
+    subjectHint: "science",
+    body: "diagram of a cell",
+    dueHint: "tomorrow",
+  });
+  assert.equal(splitPostHomeworkRest("science diagram of a cell"), null, "no colon — the caller asks for the format");
+  assert.equal(splitPostHomeworkRest("maths:"), null, "no body");
+
+  // Due dates point FORWARD — the opposite of a report date.
+  const sat = "2026-09-05"; // a Saturday
+  assert.equal(parseDueDate("tomorrow", sat), "2026-09-06");
+  assert.equal(parseDueDate("kal", sat), "2026-09-06", "'kal' in a due date is tomorrow, not yesterday");
+  assert.equal(resolveCommandDate("kal 5A absent", sat), "2026-09-04", "…while a report's 'kal' is still yesterday");
+  assert.equal(parseDueDate("Monday", sat), "2026-09-07");
+  assert.equal(parseDueDate("somvar", sat), "2026-09-07");
+  assert.equal(parseDueDate("saturday", sat), sat, "the same weekday means today, not next week");
+  assert.equal(parseDueDate("day after", sat), "2026-09-07");
+  assert.equal(parseDueDate("next week", sat), "2026-09-12");
+  assert.equal(parseDueDate("12/9", sat), "2026-09-12");
+  assert.equal(parseDueDate("5/1", sat), "2027-01-05", "a day/month already past rolls into next year");
+  assert.equal(parseDueDate("2026-10-01", sat), "2026-10-01");
+  assert.equal(parseDueDate("sometime soon", sat), "", "unreadable → empty, and the caller asks");
+
+  assert.equal(homeworkTitleFrom("exercise 4.2 Q1-10. Show working."), "exercise 4.2 Q1-10");
+  assert.equal(homeworkTitleFrom("read chapter 3"), "read chapter 3");
+  assert.equal(homeworkTitleFrom("x".repeat(100)).length, 78, "long first lines are trimmed with an ellipsis");
+
+  const card = formatPostHomeworkCard({
+    sectionLabel: "VI B",
+    subjectName: "Mathematics",
+    title: "exercise 4.2",
+    body: "exercise 4.2 Q1-10",
+    dueAt: "2026-09-07",
+    dateIso: "2026-09-05",
+    todayIso: "2026-09-05",
+    parentCount: 31,
+  });
+  assert.ok(card.startsWith("*Post homework* · VI B · Mathematics\nexercise 4.2 Q1-10"), card);
+  assert.ok(card.includes("Dated today · due 7 Sep"), card);
+  assert.ok(card.includes("31 families will be notified."), card);
+  const noDue = formatPostHomeworkCard({
+    sectionLabel: "VI B", subjectName: "Hindi", title: "t", body: "b", dueAt: "",
+    dateIso: "2026-09-05", todayIso: "2026-09-05", parentCount: 1,
+  });
+  assert.ok(noDue.includes("no due date") && noDue.includes("1 family will be notified."), noDue);
+}
+
+// ─── channel restrictions ──────────────────────────────────────────────
+{
+  const post = ERP_COMMANDS.find((c) => c.id === "post_homework");
+  assert.ok(post, "post_homework is registered");
+  assert.deepEqual(post!.channels, ["app"], "on WhatsApp the class channel owns teacher homework posts");
+  assert.equal(post!.kind, "write");
+  assert.equal(post!.scope, "own_sections");
+  for (const c of ERP_COMMANDS) {
+    if (c.kind === "write") continue;
+    assert.equal(c.channels, undefined, `${c.id}: read commands answer on every channel`);
+  }
 }
 
 console.log("erpCommands.selftest.ts OK");

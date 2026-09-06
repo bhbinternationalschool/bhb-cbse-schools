@@ -89,6 +89,10 @@ import {
   formatBusManifestReply,
   formatHomeworkReply,
   formatAdmissionsPeriodReply,
+  formatPostHomeworkCard,
+  homeworkTitleFrom,
+  parseDueDate,
+  splitPostHomeworkRest,
   formatSchoolSnapshotReply,
   formatStudentDetailsReply,
   formatPendingLeavesReply,
@@ -410,6 +414,11 @@ export async function handleErpStaffCommand(
 
   const command = findErpCommand(parsed.commandId);
   if (!command) return { handled: false };
+  // A command restricted to other channels steps aside entirely, so
+  // whatever handled that message before this desk existed still does.
+  if (command.channels && !command.channels.includes(inbound.channel)) {
+    return { handled: false };
+  }
 
   // 5. Identity → session → RBAC.
   if (!inbound.staff) {
@@ -467,6 +476,48 @@ export async function handleErpStaffCommand(
   // 6. Resolve fields.
   const resolved: Record<string, string> = {};
   let sectionMatch: SectionMatch | null = null;
+  if (command.id === "post_homework") {
+    const parts = splitPostHomeworkRest(parsed.fields.text || "");
+    if (!parts) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: "Tell me the subject and the work, with a colon between them:\n_Post homework 6B maths: exercise 4.2, due Monday_",
+      };
+    }
+    const subjects = (masters.subjects ?? []).filter((sub) => sub.isActive !== false);
+    const norm = (v: string) => (v || "").trim().toLowerCase().replace(/\s+/g, "");
+    const want = norm(parts.subjectHint);
+    const exact = subjects.filter(
+      (sub) => norm(sub.nameEn) === want || norm(sub.code || "") === want,
+    );
+    const near = exact.length
+      ? exact
+      : subjects.filter(
+          (sub) => norm(sub.nameEn).startsWith(want) || (want.length >= 4 && norm(sub.nameEn).includes(want)),
+        );
+    if (near.length !== 1) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: near.length
+          ? `Which subject? ${near.map((sub) => sub.nameEn).join(", ")}`
+          : `I don't have a subject called "${parts.subjectHint}". Subjects: ${subjects.slice(0, 12).map((sub) => sub.nameEn).join(", ")}`,
+      };
+    }
+    resolved.subjectId = near[0]!.id;
+    resolved.subjectName = near[0]!.nameEn;
+    resolved.body = parts.body;
+    resolved.title = homeworkTitleFrom(parts.body);
+    resolved.dueAt = parts.dueHint ? parseDueDate(parts.dueHint, todayIso) : "";
+    if (parts.dueHint && !resolved.dueAt) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: `I couldn't read "${parts.dueHint}" as a due date. Try _due Monday_, _due tomorrow_ or _due 12/9_.`,
+      };
+    }
+  }
   if (command.id === "class_defaulters") {
     const askedRaw = parsed.fields.section || "";
     const refs = extractSectionRefs(askedRaw || text);
@@ -764,10 +815,22 @@ export async function handleErpStaffCommand(
   // 7. Write commands stop here and wait for the card.
   if (command.kind === "write") {
     const token = random();
-    const summary = `${command.title} — ${Object.entries(resolved)
-      .filter(([k]) => !/Id$/.test(k))
-      .map(([, v]) => v)
-      .join(" · ")}`;
+    const summary =
+      command.id === "post_homework"
+        ? formatPostHomeworkCard({
+            sectionLabel: (resolved.sectionLabel || "").replace(" · ", " "),
+            subjectName: resolved.subjectName || "",
+            title: resolved.title || "",
+            body: resolved.body || "",
+            dueAt: resolved.dueAt || "",
+            dateIso: todayIso,
+            todayIso,
+            parentCount: countSectionFamilies(resolved.sectionId || "", session.academicYearCode),
+          })
+        : `${command.title} — ${Object.entries(resolved)
+            .filter(([k]) => !/Id$/.test(k))
+            .map(([, v]) => v)
+            .join(" · ")}`;
     store = {
       ...store,
       pending: {
@@ -1686,11 +1749,110 @@ async function runConfirmedWrite(
       text: "That command is no longer available.",
     };
   }
+  if (command.channels && !command.channels.includes(inbound.channel)) {
+    return {
+      handled: true,
+      audience: "erp_command_confirm",
+      text: `"${command.title}" isn't available on this channel.`,
+    };
+  }
+  if (!inbound.staff) {
+    return {
+      handled: true,
+      audience: "erp_command_denied",
+      text: "Your number isn't linked to a staff record, so nothing was changed.",
+    };
+  }
+  const [masters, rbac] = await Promise.all([loadServerMasters(), loadServerRbac()]);
+  const session = staffSessionFor(inbound.staff, masters);
+  // Permission is re-checked at confirm time, not trusted from the card:
+  // a role can change in the minutes a card sits waiting.
+  if (!hasPermission(session, masters, command.module, command.action, rbac)) {
+    void audit(session, command, pending.fields, pending.originalText, "denied", {
+      reason: "rbac_at_confirm",
+      channel: inbound.channel,
+    });
+    return {
+      handled: true,
+      audience: "erp_command_denied",
+      text: `Your role no longer includes *${command.module} · ${command.action}*, so nothing was changed.`,
+    };
+  }
+  const r = pending.resolved;
+  if (command.id === "post_homework") {
+    if (r.sectionId) {
+      const roleCodes = resolveSessionRoles(rbac, session, masters).map((x) => x.code);
+      const mine = staffAllowedSections(inbound.staff, masters, session.academicYearCode, roleCodes);
+      if (!isOfficeLike(roleCodes) && !mine.some((x) => x.sectionId === r.sectionId)) {
+        void audit(session, command, pending.fields, pending.originalText, "denied", {
+          reason: "scope_at_confirm",
+          channel: inbound.channel,
+        });
+        return {
+          handled: true,
+          audience: "erp_command_denied",
+          text: "That section is no longer one of yours, so nothing was posted.",
+        };
+      }
+    }
+    const { postHomeworkServer } = await import("@/lib/homeworkPost.server");
+    const res = await postHomeworkServer({
+      session,
+      masters,
+      classId: r.classId || "",
+      sectionId: r.sectionId || "",
+      subjectId: r.subjectId || "",
+      title: r.title || "",
+      bodyEn: r.body || "",
+      dueAt: r.dueAt || "",
+    });
+    if (!res.ok) {
+      void audit(session, command, pending.fields, pending.originalText, "error", {
+        reason: res.error,
+        channel: inbound.channel,
+      });
+      return {
+        handled: true,
+        audience: "erp_command_error",
+        text: `Couldn't post it: ${res.error}`,
+      };
+    }
+    void audit(session, command, pending.fields, pending.originalText, "ok", {
+      channel: inbound.channel,
+      postId: res.post.id,
+      sectionId: res.post.sectionId,
+      subjectId: res.post.subjectId,
+      dueAt: res.post.dueAt || "",
+    });
+    const label = (r.sectionLabel || "").replace(" · ", " ");
+    return {
+      handled: true,
+      audience: "erp_command_post_homework",
+      text: `Posted. ${label} ${r.subjectName || ""} homework is live${res.push.sent ? ` · ${res.push.sent} phone${res.push.sent === 1 ? "" : "s"} notified` : ""}.\nUndo it in the ERP: Homework → today's posts.`,
+    };
+  }
   return {
     handled: true,
     audience: "erp_command_confirm",
-    text: `"${command.title}" is not enabled for WhatsApp yet.`,
+    text: `"${command.title}" is not enabled yet.`,
   };
+}
+
+/** Active families in a section — what "who will be notified" means. */
+function countSectionFamilies(sectionId: string, academicYearCode: string): number {
+  if (!sectionId) return 0;
+  const households = new Set(
+    loadSis()
+      .students.filter(
+        (st) =>
+          st.status === "active" &&
+          st.sectionId === sectionId &&
+          st.academicYearCode === academicYearCode &&
+          st.householdId,
+      )
+      .map((st) => st.householdId),
+  );
+  return households.size;
 }
 
 async function audit(
