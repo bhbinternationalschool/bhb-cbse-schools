@@ -12,6 +12,8 @@ import {
   shouldShowPrincipalCockpit,
 } from "@/components/dashboard/PrincipalCockpit";
 import { buildSchoolDashboard } from "@/lib/moduleDashboards";
+import { useServerBookPosition } from "@/lib/accountsServerBook";
+import { formatInr } from "@/lib/masters";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { isSuperAdminSession } from "@/lib/superAdmin";
 import { AlertBannerList } from "@/components/dashboard/AlertBannerList";
@@ -40,6 +42,10 @@ export function SchoolHomeDashboard() {
   const [atRiskCount, setAtRiskCount] = useState<number | null>(null);
   const [broadcastOpen, setBroadcastOpen] = useState(false);
   const [ledgerNotice, setLedgerNotice] = useState<string | null>(null);
+  // The bank tile is built blank and filled from the server book here. It
+  // used to read the accounts desk, whose bank ledger holds fee receipts only
+  // — see lib/accountsServerBook.ts.
+  const serverBook = useServerBookPosition();
 
   function generateFeeLedger() {
     const result = runFeeReport("fee_reconciliation_pack", {
@@ -106,6 +112,24 @@ export function SchoolHomeDashboard() {
   }
 
   const model = buildSchoolDashboard(session.academicYearCode);
+
+  // Never a desk figure as a stand-in: while the position is loading or if it
+  // cannot be read, the tile keeps its placeholder rather than a wrong number.
+  // The tile lives in the "Finance & store" section, not in model.kpis.
+  const bankKpi =
+    model.kpis?.find((k) => k.id === "bank") ??
+    model.kpiSections
+      ?.flatMap((s) => s.kpis)
+      .find((k) => k.id === "bank");
+  if (bankKpi) {
+    if (serverBook.position) {
+      bankKpi.value = formatInr(serverBook.position.bankPaise);
+      bankKpi.hint = "server book";
+    } else if (serverBook.status === "failed") {
+      bankKpi.value = "—";
+      bankKpi.hint = "server book unavailable";
+    }
+  }
 
   // Statutory (EPF/ESIC) overdue alerts — owner/super-admin only, never principal.
   if (isSuperAdminSession(session)) {

@@ -16,7 +16,12 @@ type Position = {
   ok: boolean;
   cashPaise: number;
   bankPaise: number;
-  banks?: { code: string; name: string; closingPaise: number }[];
+  banks?: {
+    code: string;
+    name: string;
+    closingPaise: number;
+    bankAccountId?: string;
+  }[];
   chequesInHandPaise: number;
   payablesPaise: number;
   receivablesPaise: number;
@@ -63,7 +68,13 @@ export async function patchAccountsDashWithServerBook(
       to: today,
     }),
   ]);
-  if (!cockpit?.ok) return null;
+  if (!cockpit?.ok) {
+    // The server book could not be read. The base model already leaves the
+    // money tiles and the bank rows blank, so returning null leaves them
+    // blank — which is the point. Filling them from the desk book is what
+    // put two different bank balances in front of the office (2026-09-06).
+    return null;
+  }
 
   const todayInPaise = rp?.ok ? rp.report?.totalReceiptsPaise ?? null : null;
 
@@ -95,8 +106,23 @@ export async function patchAccountsDashWithServerBook(
     return k;
   });
 
+  // The dashboard's bank list is built blank for the same reason; fill it
+  // here, matching each desk bank to the ledger account that stands for it.
+  const byDeskId = new Map(
+    (cockpit.banks ?? [])
+      .filter((b) => b.bankAccountId)
+      .map((b) => [String(b.bankAccountId), b.closingPaise] as const),
+  );
+  const tableRows = (model.tableRows ?? []).map((row) => {
+    const paise = byDeskId.get(String(row.id ?? ""));
+    return paise === undefined
+      ? row
+      : { ...row, balance: formatInr(paise) };
+  });
+
   return {
     ...model,
+    tableRows,
     subtitle:
       "Cash, banks, payables and today’s money — read from the server book (same figures as the Server book tab).",
     chartTitle: "Fee counter collections — last 7 days (₹)",

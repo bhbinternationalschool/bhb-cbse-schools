@@ -7,6 +7,10 @@ import Link from "next/link";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { DayClosePanel } from "@/components/fees/DayClosePanel";
 import {
+  serverBankBalancePaise,
+  useServerBookPosition,
+} from "@/lib/accountsServerBook";
+import {
   bankBalancePaise,
   bankMovementExists,
   cashInHandPaise,
@@ -945,6 +949,10 @@ export function BanksPanel({
     ...BANK_PAYMENT_MODES,
   ]);
   const [isActive, setIsActive] = useState(true);
+  // Balances come from the server book, never from the desk's own bank
+  // ledger — that ledger holds fee receipts only and reads several lakh high
+  // (see lib/accountsServerBook.ts).
+  const serverBook = useServerBookPosition();
 
   function resetForm() {
     setEditId("");
@@ -1049,7 +1057,17 @@ export function BanksPanel({
               {b.ifsc ? ` · ${b.ifsc}` : ""}
             </div>
             <div className="mt-2 text-lg font-bold">
-              {formatInr(bankBalancePaise(b.id, state))}
+              {(() => {
+                const paise = serverBankBalancePaise(serverBook.position, b.id);
+                if (paise !== null) return formatInr(paise);
+                // Never the desk figure as a stand-in: an em dash says "not
+                // known yet", a wrong number says something false.
+                return (
+                  <span className="text-[var(--muted)]">
+                    {serverBook.status === "loading" ? "…" : "—"}
+                  </span>
+                );
+              })()}
             </div>
             <div className="mt-2 flex flex-wrap gap-1">
               {b.paymentModes.map((mode) => (

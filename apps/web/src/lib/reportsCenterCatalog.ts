@@ -200,7 +200,10 @@ export const REPORTS_CENTER_MODULES: ReportsCenterModuleDef[] = [
   {
     id: "accounts",
     label: "Accounts",
-    blurb: "Day book · P&L · balance sheet",
+    // No longer "P&L · balance sheet": the financial statements moved to
+    // Accounts → Book reports, which builds them from the server book
+    // (2026-09-06). What is left here are the desk's own registers.
+    blurb: "Day book · cash register · expenses · payables",
     rbacModule: "accounts",
     href: "/accounts?tab=reports",
     embeddable: true,
