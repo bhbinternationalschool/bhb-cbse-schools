@@ -9,7 +9,12 @@ import "../modules/syllabus_scan_screen.dart";
 import "presence_screen.dart";
 import "../modules/teaching_screen.dart";
 import "attendance_screen.dart";
+import "admission_leads_screen.dart";
 import "documents_screen.dart";
+import "fee_counter_screen.dart";
+import "fee_defaulters_screen.dart";
+import "my_collections_screen.dart";
+import "survey_screen.dart";
 import "marks_screen.dart";
 import "payslips_screen.dart";
 import "ptm_teacher_screen.dart";
@@ -30,32 +35,117 @@ String _greeting() {
 }
 
 class _StaffModule {
-  const _StaffModule(this.label, this.icon, this.tone);
+  const _StaffModule(this.label, this.icon, this.tone, this.feature);
 
   final String label;
   final IconData icon;
   final ModuleTone tone;
+
+  /// Mobile feature id from the ERP (Masters → Roles → Mobile app). The tile
+  /// only appears when the server says this person has it.
+  final String feature;
 }
 
 const _staffModules = [
-  _StaffModule("Attendance", Icons.fact_check_outlined, ModuleTone.teal),
-  _StaffModule("Period log", Icons.bookmark_added_outlined, ModuleTone.green),
-  _StaffModule("Homework", Icons.menu_book_outlined, ModuleTone.purple),
-  _StaffModule("Marks", Icons.grading_outlined, ModuleTone.amber),
-  _StaffModule("Timetable", Icons.calendar_view_week_outlined, ModuleTone.blue),
-  _StaffModule("Students", Icons.school_outlined, ModuleTone.green),
-  _StaffModule("Leave requests", Icons.event_busy_outlined, ModuleTone.blue),
-  _StaffModule("Complaints", Icons.report_problem_outlined, ModuleTone.coral),
-  _StaffModule("PTM", Icons.groups_outlined, ModuleTone.purple),
-  _StaffModule("Documents", Icons.folder_open_outlined, ModuleTone.teal),
+  _StaffModule(
+    "Attendance",
+    Icons.fact_check_outlined,
+    ModuleTone.teal,
+    "attendance_mark",
+  ),
+  _StaffModule(
+    "Period log",
+    Icons.bookmark_added_outlined,
+    ModuleTone.green,
+    "period_log",
+  ),
+  _StaffModule(
+    "Homework",
+    Icons.menu_book_outlined,
+    ModuleTone.purple,
+    "homework_post",
+  ),
+  _StaffModule(
+    "Marks",
+    Icons.grading_outlined,
+    ModuleTone.amber,
+    "marks_entry",
+  ),
+  _StaffModule(
+    "Timetable",
+    Icons.calendar_view_week_outlined,
+    ModuleTone.blue,
+    "timetable_view",
+  ),
+  _StaffModule(
+    "Students",
+    Icons.school_outlined,
+    ModuleTone.green,
+    "students_view",
+  ),
+  _StaffModule(
+    "Leave requests",
+    Icons.event_busy_outlined,
+    ModuleTone.blue,
+    "student_leave_decide",
+  ),
+  _StaffModule(
+    "Complaints",
+    Icons.report_problem_outlined,
+    ModuleTone.coral,
+    "complaints_handle",
+  ),
+  _StaffModule("PTM", Icons.groups_outlined, ModuleTone.purple, "ptm_meet"),
+  _StaffModule(
+    "Documents",
+    Icons.folder_open_outlined,
+    ModuleTone.teal,
+    "documents_verify",
+  ),
+  _StaffModule(
+    "Collect fees",
+    Icons.point_of_sale_outlined,
+    ModuleTone.green,
+    "fee_take",
+  ),
+  _StaffModule(
+    "Defaulters",
+    Icons.currency_rupee,
+    ModuleTone.coral,
+    "fee_defaulters",
+  ),
+  _StaffModule(
+    "My collections",
+    Icons.account_balance_wallet_outlined,
+    ModuleTone.teal,
+    "fee_collections",
+  ),
+  _StaffModule(
+    "Admission leads",
+    Icons.how_to_reg_outlined,
+    ModuleTone.blue,
+    "admission_leads",
+  ),
+  _StaffModule(
+    "Field survey",
+    Icons.map_outlined,
+    ModuleTone.amber,
+    "field_survey",
+  ),
   _StaffModule(
     "Scan syllabus",
     Icons.document_scanner_outlined,
     ModuleTone.blue,
+    "syllabus_scan",
   ),
-  _StaffModule("Notices", Icons.campaign_outlined, ModuleTone.pink),
-  _StaffModule("My leave", Icons.event_outlined, ModuleTone.coral),
-  _StaffModule("Payslips", Icons.receipt_long_outlined, ModuleTone.gray),
+  _StaffModule("Notices", Icons.campaign_outlined, ModuleTone.pink, "notices"),
+  _StaffModule("My leave", Icons.event_outlined, ModuleTone.coral, "my_leave"),
+  _StaffModule(
+    "Payslips",
+    Icons.receipt_long_outlined,
+    ModuleTone.gray,
+    "my_payslips",
+  ),
 ];
 
 class TeacherHomeScreen extends StatefulWidget {
@@ -83,6 +173,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
   String? _error;
   String? _pendingRoute;
   int _refresh = 0;
+  StaffFeatureSet _features = const StaffFeatureSet.empty();
 
   @override
   void initState() {
@@ -161,6 +252,14 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
           _summary = summary;
           _refresh += 1;
         });
+      }
+      // Tiles come from the ERP, so switching a feature off there removes it
+      // from the phone on the next open.
+      try {
+        final f = await widget.api.fetchStaffFeatures();
+        if (mounted) setState(() => _features = f);
+      } catch (_) {
+        /* keep whatever we had */
       }
       if (_pendingRoute != null) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -297,6 +396,21 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         await _pushScreen(PtmTeacherScreen(api: widget.api));
       case "Documents":
         await _pushScreen(DocumentsScreen(api: widget.api));
+      case "Collect fees":
+        await _pushScreen(FeeCounterScreen(api: widget.api));
+      case "Defaulters":
+        await _pushScreen(
+          FeeDefaultersScreen(
+            api: widget.api,
+            canCollect: _features.has("fee_take"),
+          ),
+        );
+      case "My collections":
+        await _pushScreen(MyCollectionsScreen(api: widget.api));
+      case "Admission leads":
+        await _pushScreen(AdmissionLeadsScreen(api: widget.api));
+      case "Field survey":
+        await _pushScreen(SurveyScreen(api: widget.api));
     }
   }
 
@@ -611,7 +725,9 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                     crossAxisSpacing: 8,
                     childAspectRatio: 0.82,
                     children: [
-                      for (final m in _staffModules)
+                      for (final m in _staffModules.where(
+                        (m) => _features.has(m.feature),
+                      ))
                         InkWell(
                           borderRadius: BorderRadius.circular(16),
                           onTap: () => _openModule(m.label),

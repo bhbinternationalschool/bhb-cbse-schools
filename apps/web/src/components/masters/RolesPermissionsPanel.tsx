@@ -27,6 +27,7 @@ import {
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { isSuperAdminSession } from "@/lib/superAdmin";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { MobileAccessPanel } from "@/components/masters/MobileAccessPanel";
 import {
   ErpTable,
   ErpTableBody,
@@ -40,7 +41,7 @@ import {
 } from "@/components/masters/MastersLayout";
 import { RowActionMenu } from "@/components/ui/erp-grid";
 
-type RbacTab = "matrix" | "roles" | "assignments" | "summary" | "audit";
+type RbacTab = "matrix" | "mobile" | "roles" | "assignments" | "summary" | "audit";
 
 function emptyScope() {
   return {
@@ -330,6 +331,7 @@ export function RolesPermissionsPanel() {
         onChange={(id) => setTab(id as RbacTab)}
         items={[
           { id: "matrix", label: "Permission matrix", tone: "navy" },
+          { id: "mobile", label: "Mobile app", tone: "sky" },
           { id: "roles", label: "Roles", tone: "teal" },
           { id: "assignments", label: "Assignments", tone: "violet" },
           { id: "summary", label: "Access summary", tone: "amber" },
@@ -425,6 +427,10 @@ export function RolesPermissionsPanel() {
             </div>
           ) : null}
         </MastersWorkCard>
+      ) : null}
+
+      {tab === "mobile" && state ? (
+        <MobileAccessPanel state={state} masters={masters} commit={commit} />
       ) : null}
 
       {tab === "roles" ? (

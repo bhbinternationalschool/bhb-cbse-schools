@@ -175,6 +175,7 @@ export async function POST(request: Request) {
         "office",
         "transport",
         "teacher",
+        "support",
       ];
       const picked = priority.find((c) => codes.includes(c));
       if (picked) roleCode = picked;

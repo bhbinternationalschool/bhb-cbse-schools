@@ -656,6 +656,339 @@ class StaffRoster {
   final List<StaffRosterRow> staff;
 }
 
+// ---------------------------------------------------------------- features
+
+/// Which screens the ERP says this person may open. Empty while loading —
+/// callers should show nothing rather than guess.
+class StaffFeatureSet {
+  StaffFeatureSet.fromJson(Map<String, dynamic> j)
+    : homeKind = _s(j, "homeKind"),
+      fullName = _s(j, "fullName"),
+      features = ((j["features"] as List?) ?? const [])
+          .map((e) => e.toString())
+          .toSet();
+
+  const StaffFeatureSet.empty()
+    : homeKind = "",
+      fullName = "",
+      features = const {};
+
+  final String homeKind;
+  final String fullName;
+  final Set<String> features;
+
+  bool has(String id) => features.contains(id);
+}
+
+// -------------------------------------------------------------------- fees
+
+class CounterDue {
+  CounterDue.fromJson(Map<String, dynamic> j)
+    : dueKey = _s(j, "dueKey"),
+      kind = _s(j, "kind"),
+      label = _s(j, "label"),
+      dueOn = _s(j, "dueOn"),
+      balancePaise = _i(j, "balancePaise"),
+      balanceLabel = _s(j, "balanceLabel");
+
+  final String dueKey;
+  final String kind;
+  final String label;
+  final String dueOn;
+  final int balancePaise;
+  final String balanceLabel;
+}
+
+class FeeStudentHit {
+  FeeStudentHit.fromJson(Map<String, dynamic> j)
+    : id = _s(j, "id"),
+      fullName = _s(j, "fullName"),
+      admissionNo = _s(j, "admissionNo"),
+      classLabel = _s(j, "classLabel"),
+      guardianName = _s(j, "guardianName"),
+      mobile = _s(j, "mobile"),
+      openLabel = _s(j, "openLabel"),
+      openPaise = _i(j, "openPaise"),
+      dueCount = _i(j, "dueCount");
+
+  final String id;
+  final String fullName;
+  final String admissionNo;
+  final String classLabel;
+  final String guardianName;
+  final String mobile;
+  final String openLabel;
+  final int openPaise;
+  final int dueCount;
+}
+
+class FeeChild {
+  FeeChild.fromJson(Map<String, dynamic> j)
+    : studentId = _s(j, "studentId"),
+      fullName = _s(j, "fullName"),
+      classLabel = _s(j, "classLabel"),
+      admissionNo = _s(j, "admissionNo"),
+      isPrimary = _b(j, "isPrimary"),
+      openLabel = _s(j, "openLabel"),
+      openPaise = _i(j, "openPaise"),
+      dues = _list(j, "dues").map(CounterDue.fromJson).toList();
+
+  final String studentId;
+  final String fullName;
+  final String classLabel;
+  final String admissionNo;
+  final bool isPrimary;
+  final String openLabel;
+  final int openPaise;
+  final List<CounterDue> dues;
+}
+
+class TenderModeInfo {
+  TenderModeInfo.fromJson(Map<String, dynamic> j)
+    : value = _s(j, "value"),
+      label = _s(j, "label"),
+      refLabel = _s(j, "refLabel"),
+      needsRef = _b(j, "needsRef"),
+      needsInstrumentDate = _b(j, "needsInstrumentDate");
+
+  final String value;
+  final String label;
+  final String refLabel;
+  final bool needsRef;
+  final bool needsInstrumentDate;
+}
+
+class FeeCounter {
+  FeeCounter.fromJson(Map<String, dynamic> j)
+    : householdId = _s(j, "householdId"),
+      guardianName = _s(j, "guardianName"),
+      mobile = _s(j, "mobile"),
+      collectionDate = _s(j, "collectionDate"),
+      totalLabel = _s(j, "totalLabel"),
+      children = _list(j, "children").map(FeeChild.fromJson).toList(),
+      tenderModes = _list(
+        j,
+        "tenderModes",
+      ).map(TenderModeInfo.fromJson).toList();
+
+  final String householdId;
+  final String guardianName;
+  final String mobile;
+  final String collectionDate;
+  final String totalLabel;
+  final List<FeeChild> children;
+  final List<TenderModeInfo> tenderModes;
+}
+
+class FeeReceipt {
+  FeeReceipt.fromJson(Map<String, dynamic> j)
+    : duplicate = _b(j, "duplicate"),
+      voucherId = _s(j, "voucherId"),
+      receiptNo = _s(j, "receiptNo"),
+      collectionDate = _s(j, "collectionDate"),
+      totalLabel = _s(j, "totalLabel"),
+      guardianName = _s(j, "guardianName"),
+      lines = _list(j, "lines")
+          .map(
+            (l) => (
+              label: _s(l, "label"),
+              studentName: _s(l, "studentName"),
+              amountLabel: _s(l, "amountLabel"),
+            ),
+          )
+          .toList();
+
+  final bool duplicate;
+  final String voucherId;
+  final String receiptNo;
+  final String collectionDate;
+  final String totalLabel;
+  final String guardianName;
+  final List<({String label, String studentName, String amountLabel})> lines;
+}
+
+class CollectionRow {
+  CollectionRow.fromJson(Map<String, dynamic> j)
+    : voucherId = _s(j, "voucherId"),
+      receiptNo = _s(j, "receiptNo"),
+      guardianName = _s(j, "guardianName"),
+      studentNames = _s(j, "studentNames"),
+      totalLabel = _s(j, "totalLabel"),
+      collectedAt = _s(j, "collectedAt"),
+      cashierName = _s(j, "cashierName"),
+      modes = ((j["modes"] as List?) ?? const [])
+          .map((e) => e.toString())
+          .toList();
+
+  final String voucherId;
+  final String receiptNo;
+  final String guardianName;
+  final String studentNames;
+  final String totalLabel;
+  final String collectedAt;
+  final String cashierName;
+  final List<String> modes;
+}
+
+class DayCollections {
+  DayCollections.fromJson(Map<String, dynamic> j)
+    : date = _s(j, "date"),
+      count = _i(j, "count"),
+      totalLabel = _s(j, "totalLabel"),
+      byMode = _list(
+        j,
+        "byMode",
+      ).map((m) => (mode: _s(m, "mode"), label: _s(m, "label"))).toList(),
+      receipts = _list(j, "receipts").map(CollectionRow.fromJson).toList();
+
+  final String date;
+  final int count;
+  final String totalLabel;
+  final List<({String mode, String label})> byMode;
+  final List<CollectionRow> receipts;
+}
+
+class FeeDefaulterChild {
+  FeeDefaulterChild.fromJson(Map<String, dynamic> j)
+    : studentId = _s(j, "studentId"),
+      fullName = _s(j, "fullName"),
+      classLabel = _s(j, "classLabel"),
+      openLabel = _s(j, "openLabel"),
+      overdueDays = _i(j, "overdueDays"),
+      promisedOn = _s(j, "promisedOn"),
+      promiseNote = _s(j, "promiseNote");
+
+  final String studentId;
+  final String fullName;
+  final String classLabel;
+  final String openLabel;
+  final int overdueDays;
+  final String promisedOn;
+  final String promiseNote;
+}
+
+class FeeDefaulterHousehold {
+  FeeDefaulterHousehold.fromJson(Map<String, dynamic> j)
+    : guardianName = _s(j, "guardianName"),
+      mobile = _s(j, "mobile"),
+      openLabel = _s(j, "openLabel"),
+      overdueDays = _i(j, "overdueDays"),
+      children = _list(j, "children").map(FeeDefaulterChild.fromJson).toList();
+
+  final String guardianName;
+  final String mobile;
+  final String openLabel;
+  final int overdueDays;
+  final List<FeeDefaulterChild> children;
+}
+
+class FeeDefaulterList {
+  FeeDefaulterList.fromJson(Map<String, dynamic> j)
+    : householdCount = _i(j, "householdCount"),
+      totalOpenLabel = _s(j, "totalOpenLabel"),
+      households = _list(
+        j,
+        "households",
+      ).map(FeeDefaulterHousehold.fromJson).toList();
+
+  final int householdCount;
+  final String totalOpenLabel;
+  final List<FeeDefaulterHousehold> households;
+}
+
+// -------------------------------------------------------------- admissions
+
+class AdmissionLeadRow {
+  AdmissionLeadRow.fromJson(Map<String, dynamic> j)
+    : id = _s(j, "id"),
+      enquiryNo = _s(j, "enquiryNo"),
+      childName = _s(j, "childName"),
+      guardianName = _s(j, "guardianName"),
+      mobile = _s(j, "mobile"),
+      whatsapp = _s(j, "whatsapp"),
+      stageLabel = _s(j, "stageLabel"),
+      classSought = _s(j, "classSought"),
+      locality = _s(j, "locality"),
+      assignedTo = _s(j, "assignedTo"),
+      mine = _b(j, "mine"),
+      nextFollowUpAt = _s(j, "nextFollowUpAt"),
+      bucket = _s(j, "bucket"),
+      lastOutcome = _s(j, "lastOutcome"),
+      lastChannel = _s(j, "lastChannel"),
+      lastNote = _s(j, "lastNote"),
+      followUpCount = _i(j, "followUpCount");
+
+  final String id;
+  final String enquiryNo;
+  final String childName;
+  final String guardianName;
+  final String mobile;
+  final String whatsapp;
+  final String stageLabel;
+  final String classSought;
+  final String locality;
+  final String assignedTo;
+  final bool mine;
+  final String nextFollowUpAt;
+
+  /// overdue | today | later | none
+  final String bucket;
+  final String lastOutcome;
+  final String lastChannel;
+  final String lastNote;
+  final int followUpCount;
+}
+
+class AdmissionLeadList {
+  AdmissionLeadList.fromJson(Map<String, dynamic> j)
+    : overdue = _i(
+        Map<String, dynamic>.from((j["counts"] as Map?) ?? {}),
+        "overdue",
+      ),
+      dueToday = _i(
+        Map<String, dynamic>.from((j["counts"] as Map?) ?? {}),
+        "today",
+      ),
+      leads = _list(j, "leads").map(AdmissionLeadRow.fromJson).toList();
+
+  final int overdue;
+  final int dueToday;
+  final List<AdmissionLeadRow> leads;
+}
+
+// ------------------------------------------------------------------ survey
+
+class SurveyBeat {
+  SurveyBeat.fromJson(Map<String, dynamic> j)
+    : id = _s(j, "id"),
+      code = _s(j, "code"),
+      name = _s(j, "name"),
+      area = _s(j, "area"),
+      targetHouseholds = _i(j, "targetHouseholds"),
+      captured = _i(j, "captured");
+
+  final String id;
+  final String code;
+  final String name;
+  final String area;
+  final int targetHouseholds;
+  final int captured;
+}
+
+class SurveySetup {
+  SurveySetup.fromJson(Map<String, dynamic> j)
+    : capturedTodayByMe = _i(j, "capturedTodayByMe"),
+      beats = _list(j, "beats").map(SurveyBeat.fromJson).toList(),
+      classes = _list(
+        j,
+        "classes",
+      ).map((c) => (id: _s(c, "id"), name: _s(c, "name"))).toList();
+
+  final int capturedTodayByMe;
+  final List<SurveyBeat> beats;
+  final List<({String id, String name})> classes;
+}
+
 // ------------------------------------------------------------------ approvals
 
 class StaffApprovals {
@@ -925,6 +1258,145 @@ extension StaffApi on ApiClient {
       "staffId": staffId,
       "mobile": mobile,
     });
+  }
+
+  // ---- features, fees, leads, survey ------------------------------------
+
+  Future<StaffFeatureSet> fetchStaffFeatures() async =>
+      StaffFeatureSet.fromJson(await _getData("/api/v1/staff/features"));
+
+  Future<List<FeeStudentHit>> searchFeeStudents(String q) async {
+    final data = await _getData(
+      "/api/v1/staff/fees/search?q=${Uri.encodeQueryComponent(q)}",
+    );
+    return _list(data, "students").map(FeeStudentHit.fromJson).toList();
+  }
+
+  Future<FeeCounter> fetchFeeCounter(String studentId) async =>
+      FeeCounter.fromJson(
+        await _getData("/api/v1/staff/fees/dues?studentId=$studentId"),
+      );
+
+  /// [lines] is (studentId, dueKey, paise); [tenders] is (mode, paise, ref).
+  /// [clientRef] must be stable across retries — the server returns the first
+  /// receipt instead of charging twice.
+  Future<FeeReceipt> collectFee({
+    required String studentId,
+    required String clientRef,
+    required List<({String studentId, String dueKey, int paise})> lines,
+    required List<({String mode, int paise, String ref})> tenders,
+    String note = "",
+  }) async => FeeReceipt.fromJson(
+    await _postData("/api/v1/staff/fees/collect", {
+      "studentId": studentId,
+      "clientRef": clientRef,
+      "note": note,
+      "lines": [
+        for (final l in lines)
+          {
+            "studentId": l.studentId,
+            "dueKey": l.dueKey,
+            "amountPaise": l.paise,
+          },
+      ],
+      "tenders": [
+        for (final t in tenders)
+          {"mode": t.mode, "amountPaise": t.paise, "ref": t.ref},
+      ],
+    }),
+  );
+
+  Future<DayCollections> fetchMyCollections({String date = ""}) async =>
+      DayCollections.fromJson(
+        await _getData(
+          "/api/v1/staff/fees/collections${date.isEmpty ? "" : "?date=$date"}",
+        ),
+      );
+
+  Future<FeeDefaulterList> fetchFeeDefaulters({
+    String q = "",
+    int minRupees = 0,
+  }) async => FeeDefaulterList.fromJson(
+    await _getData(
+      "/api/v1/staff/fees/defaulters?q=${Uri.encodeQueryComponent(q)}&min=$minRupees",
+    ),
+  );
+
+  Future<void> logFeeFollowup({
+    required String studentId,
+    required String channel,
+    required String outcome,
+    String note = "",
+    String promisedOn = "",
+  }) async {
+    await _postData("/api/v1/staff/fees/followup", {
+      "studentId": studentId,
+      "channel": channel,
+      "outcome": outcome,
+      "note": note,
+      "promisedOn": promisedOn,
+    });
+  }
+
+  Future<AdmissionLeadList> fetchAdmissionLeads({
+    String filter = "due",
+    String q = "",
+  }) async => AdmissionLeadList.fromJson(
+    await _getData(
+      "/api/v1/staff/admissions/leads?filter=$filter&q=${Uri.encodeQueryComponent(q)}",
+    ),
+  );
+
+  Future<void> logLeadFollowup({
+    required String leadId,
+    required String channel,
+    required String outcome,
+    String note = "",
+    String nextFollowUpAt = "",
+  }) async {
+    await _postData("/api/v1/staff/admissions/followup", {
+      "leadId": leadId,
+      "channel": channel,
+      "outcome": outcome,
+      "note": note,
+      "nextFollowUpAt": nextFollowUpAt,
+    });
+  }
+
+  Future<SurveySetup> fetchSurveySetup() async =>
+      SurveySetup.fromJson(await _getData("/api/v1/staff/survey/beats"));
+
+  /// Returns the new lead's enquiry number.
+  Future<String> captureSurvey({
+    required String beatId,
+    required String childName,
+    required String guardianName,
+    required String mobile,
+    required String clientRef,
+    String classSoughtId = "",
+    int ageYearsApprox = 0,
+    String gender = "",
+    String locality = "",
+    String address = "",
+    String previousSchool = "",
+    String note = "",
+  }) async {
+    final data = await _postData("/api/v1/staff/survey/capture", {
+      "beatId": beatId,
+      "childName": childName,
+      "guardianName": guardianName,
+      "mobile": mobile,
+      "clientRef": clientRef,
+      "classSoughtId": classSoughtId,
+      "ageYearsApprox": ageYearsApprox,
+      "gender": gender,
+      "locality": locality,
+      "address": address,
+      "previousSchool": previousSchool,
+      "note": note,
+      "parentConsent": true,
+    });
+    return _s(data, "enquiryNo");
   }
 
   /// A file behind the ERP's authenticated proxy (student documents),

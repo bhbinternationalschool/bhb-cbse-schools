@@ -187,6 +187,7 @@ SELFTESTS=(
   test:ai-stream
   test:tutor-plans
   test:staff-home-kind
+  test:mobile-features
   test:cashfree-checkout
   test:teacher-contact
   test:question-bank

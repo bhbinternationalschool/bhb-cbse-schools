@@ -250,6 +250,7 @@ jobs:
           npm run test:ai-stream
           npm run test:tutor-plans
           npm run test:staff-home-kind
+          npm run test:mobile-features
           npm run test:cashfree-checkout
           npm run test:teacher-contact
           npm run test:parent-profile

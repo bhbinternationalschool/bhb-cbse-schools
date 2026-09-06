@@ -4,6 +4,11 @@
  */
 
 import type { MastersState } from "@/lib/masters";
+import {
+  defaultMobileAccess,
+  normalizeMobileAccess,
+  type MobileAccessState,
+} from "@/lib/mobileFeatures";
 import type { StaffRecord } from "@/lib/foundationMasters";
 import { canAccessModuleHref } from "@/lib/moduleRegistry";
 import { getSessionActor } from "@/lib/sessionActor";
@@ -119,6 +124,9 @@ export type RbacState = {
   roles: RbacRole[];
   assignments: UserRoleAssignment[];
   audit: RbacAuditEntry[];
+  /** Which screens each role / person gets in the mobile app. Never widens
+   * the grants above — see lib/mobileFeatures.ts. */
+  mobile: MobileAccessState;
 };
 
 export type SessionLike = {
@@ -619,6 +627,20 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("transport", ["view"]),
       ],
     },
+    {
+      id: "role_support",
+      code: "support",
+      name: "Support staff",
+      isBuiltIn: true,
+      isActive: true,
+      makerChecker: false,
+      note: "Sweeper / gardener / peon — own attendance, leave and payslip only",
+      permissions: [
+        grant("home", ["view"]),
+        grant("notices", ["view"]),
+        grant("notifications", ["view"]),
+      ],
+    },
   ];
 }
 
@@ -628,6 +650,7 @@ export function defaultRbacState(): RbacState {
     roles: defaultBuiltInRoles(),
     assignments: [],
     audit: [],
+    mobile: defaultMobileAccess(),
   };
 }
 
@@ -719,7 +742,13 @@ export function normalizeRbacState(
         detail: String(e?.detail || ""),
       }))
     : [];
-  return { version: 1, roles, assignments, audit };
+  return {
+    version: 1,
+    roles,
+    assignments,
+    audit,
+    mobile: normalizeMobileAccess(raw.mobile),
+  };
 }
 
 export function loadRbac(): RbacState {
@@ -1131,9 +1160,11 @@ export function inferRoleCodes(
   if (/driver/.test(rc)) matched.push("driver");
   if (/parent|guardian/.test(rc)) matched.push("parent");
 
+  let onRoster = false;
   if (masters) {
     const self = resolveStaffForRbac(session, masters);
     if (self) {
+      onRoster = true;
       const des = masters.designations.find((d) => d.id === self.designationId);
       const blob = `${des?.code || ""} ${des?.name || ""}`.toLowerCase();
       if (/prin|principal|hm|head.?master|vice.?principal/.test(blob)) {
@@ -1142,7 +1173,7 @@ export function inferRoleCodes(
       if (/admin|registrar/.test(blob)) matched.push("admin");
       if (/office|clerk/.test(blob)) matched.push("office");
       if (/accounts|accountant|cashier/.test(blob)) matched.push("accounts");
-      if (/driver/.test(blob)) matched.push("driver");
+      if (/driver|conductor|attend[ae]nt/.test(blob)) matched.push("driver");
       if (/teacher|tgt|pgt|prt|faculty/.test(blob)) matched.push("teacher");
       if (self.stream === "teaching" && matched.length === 0) {
         matched.push("teacher");
@@ -1150,8 +1181,16 @@ export function inferRoleCodes(
     }
   }
 
+  // A person we DID find on the roster whose designation matches nothing —
+  // a sweeper, gardener, peon — gets the least we have, not the most. Until
+  // 2026-09-06 they fell through to the blank-login fallback below and every
+  // one of them signed in as principal.
+  if (matched.length === 0 && onRoster) {
+    return ["support"];
+  }
+
   if (matched.length === 0) {
-    // Demo blank staff login is principal
+    // Blank demo staff login (nobody on the roster matched) is principal
     if ((session.persona || "staff") === "staff") matched.push("principal");
     else if (session.persona === "parent") matched.push("parent");
     else if (session.persona === "field") matched.push("driver");

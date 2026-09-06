@@ -26,7 +26,7 @@ export const DESK_SLICE_MODULE_DEFS: DeskSliceModuleDef[] = [
     deskPrefix: "rbac",
     blobTable: "rbac_state",
     sliceKeys: ["roles", "assignments", "audit"],
-    objectSlices: [],
+    objectSlices: ["mobile"],
     signalSlice: "roles",
   },
   {
