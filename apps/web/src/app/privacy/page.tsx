@@ -23,7 +23,7 @@ export default function PrivacyPolicyPage() {
   return (
     <LegalPage
       title="Privacy policy"
-      updated="30 August 2026"
+      updated="6 September 2026"
       current="/privacy"
       summary={
         <p>
@@ -81,12 +81,60 @@ export default function PrivacyPolicyPage() {
             <strong>Device and session data.</strong> A signed sign-in token is
             stored on your device so you stay logged in. It contains no
             password. We use no advertising identifiers, no third-party
-            analytics and no ad networks.
+            analytics and no ad networks. The{" "}
+            <Link
+              className="font-medium text-slate-900 underline underline-offset-4"
+              href="/cookie-policy"
+            >
+              cookie policy
+            </Link>{" "}
+            lists every cookie the website sets, and there are three.
           </li>
         </LegalList>
       </LegalSection>
 
-      <LegalSection n={3} title="Card and bank details are never seen by us">
+      <LegalSection n={3} title="What the app asks your phone for">
+        <p>
+          The parent app asks for three things, each at the moment it is needed
+          and each refusable without losing the rest of the app.
+        </p>
+        <LegalList>
+          <li>
+            <strong>Notifications.</strong> Allowing them stores a push token
+            for that device against your account, so a notice or a fee reminder
+            reaches your phone. It identifies the device, not you, and it is
+            deleted when you sign out of that device or ask us to delete your
+            account.
+          </li>
+          <li>
+            <strong>The microphone — only in the study helper.</strong> Held
+            while you tap the mic to ask a question aloud, and at no other
+            time. Your phone&rsquo;s own speech service turns the speech into
+            text; the app records nothing and uploads no audio, and what reaches
+            the school is the typed-out question. Everything in the study helper
+            works by typing instead.
+          </li>
+          <li>
+            <strong>Photos and files — only when you attach one.</strong> Picked
+            by you, from the picker, when you add a document to a leave
+            application, a complaint or a profile. The app does not read your
+            gallery.
+          </li>
+        </LegalList>
+        <p>
+          The parent app asks for <strong>no location permission at all</strong>
+          — it does not have one to ask for. The staff app is a separate app
+          with a separate listing, and the one-off attendance reading described
+          above is the only location it takes.
+        </p>
+        <p>
+          The app keeps a copy of your child&rsquo;s current school data on the
+          phone so it opens without waiting for the network. Uninstalling the
+          app removes that copy immediately.
+        </p>
+      </LegalSection>
+
+      <LegalSection n={4} title="Card and bank details are never seen by us">
         <p>
           Fee payments are completed on the payment gateway&rsquo;s own secure,
           PCI-DSS compliant page. Your card number, CVV, UPI PIN, net-banking
@@ -101,7 +149,7 @@ export default function PrivacyPolicyPage() {
         </p>
       </LegalSection>
 
-      <LegalSection n={4} title="Who your data is shared with">
+      <LegalSection n={5} title="Who your data is shared with">
         <LegalCallout>
           We do not sell, rent, trade or licence parent data, student profiles
           or transaction records to anyone. We do not share them with
@@ -140,7 +188,7 @@ export default function PrivacyPolicyPage() {
         </LegalList>
       </LegalSection>
 
-      <LegalSection n={5} title="How it is kept secure">
+      <LegalSection n={6} title="How it is kept secure">
         <LegalList>
           <li>
             All traffic between your device and the portal is encrypted in
@@ -164,7 +212,7 @@ export default function PrivacyPolicyPage() {
         </LegalList>
       </LegalSection>
 
-      <LegalSection n={6} title="How long we keep it">
+      <LegalSection n={7} title="How long we keep it">
         <p>
           Student academic and financial records are retained for as long as the
           school&rsquo;s statutory record-keeping obligations require, because a
@@ -175,7 +223,7 @@ export default function PrivacyPolicyPage() {
         </p>
       </LegalSection>
 
-      <LegalSection n={7} title="Children&rsquo;s data">
+      <LegalSection n={8} title="Children&rsquo;s data">
         <p>
           The portal and app are used by parents, guardians and staff, not by
           children directly. Student records shown in them are school records
@@ -184,7 +232,7 @@ export default function PrivacyPolicyPage() {
         </p>
       </LegalSection>
 
-      <LegalSection n={8} title="Your choices and rights">
+      <LegalSection n={9} title="Your choices and rights">
         <LegalList>
           <li>
             You can sign out at any time, which removes the sign-in token from
@@ -215,7 +263,7 @@ export default function PrivacyPolicyPage() {
         </LegalList>
       </LegalSection>
 
-      <LegalSection n={9} title="Changes to this policy">
+      <LegalSection n={10} title="Changes to this policy">
         <p>
           If our practices change we will update this page and move the date at
           the top. Material changes are also announced in the portal&rsquo;s

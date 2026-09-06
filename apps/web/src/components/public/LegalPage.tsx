@@ -22,6 +22,7 @@ const LEGAL_PAGES = [
   { href: "/privacy", label: "Privacy policy" },
   { href: "/terms", label: "Terms & conditions" },
   { href: "/refund-policy", label: "Cancellation & refund policy" },
+  { href: "/cookie-policy", label: "Cookie policy" },
   { href: "/data-deletion", label: "Account & data deletion" },
 ] as const;
 
