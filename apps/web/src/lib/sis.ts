@@ -624,6 +624,27 @@ export function applyAadhaarUdiseVerified(input: {
   };
 }
 
+/**
+ * True for a real UDISE+ portal id, false for the placeholders a spreadsheet
+ * import leaves behind: blank, "NA", a run of asterisks (a masked cell), or a
+ * run of zeros.
+ *
+ * Lives here rather than in udiseCompliance so that the register's filters,
+ * the Overview counts and the UDISE+ worklist all answer "does this child
+ * have a PEN?" the same way. They did not: the filter asked only whether the
+ * cell was blank, so ten students carrying a PEN of "0" or "NA" were counted
+ * as registered by "Missing PEN" and as unregistered by the worklist
+ * (2026-09-06).
+ */
+export function isRealPortalId(raw: string | undefined | null): boolean {
+  const v = String(raw ?? "").trim();
+  if (!v) return false;
+  if (/^na$/i.test(v)) return false;
+  if (/^\*+$/.test(v)) return false;
+  if (/^0+$/.test(v)) return false;
+  return true;
+}
+
 export function isValidPan(value: string): boolean {
   if (!value) return true;
   return /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(value);

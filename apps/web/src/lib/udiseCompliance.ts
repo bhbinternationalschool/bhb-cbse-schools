@@ -4,6 +4,7 @@
  */
 
 import {
+  isRealPortalId,
   displayAadhaar,
   hasStoredAadhaar,
   householdOf,
@@ -202,22 +203,6 @@ export function gapLabel(code: UdiseGapCode): string {
     default:
       return code;
   }
-}
-
-/**
- * True for a real portal id, false for the placeholders a spreadsheet import
- * leaves behind: blank, "NA", a run of asterisks (a masked cell), or a run of
- * zeros. Shared by PEN and APAAR — they used to differ, and only PEN rejected
- * the all-zero form, so an APAAR column full of "0" would have read as issued
- * and shown a false "UDISE OK" (caught by udiseCompliance.selftest).
- */
-function isRealPortalId(raw: string | undefined | null): boolean {
-  const v = (raw || "").trim();
-  if (!v) return false;
-  if (/^na$/i.test(v)) return false;
-  if (/^\*+$/.test(v)) return false;
-  if (/^0+$/.test(v)) return false;
-  return true;
 }
 
 function hasPen(s: SisStudent): boolean {
@@ -466,7 +451,6 @@ export type UdisePenApaarCode = "ok" | "pen_only" | "apaar_only" | "none";
  */
 export function udisePenApaarStatus(s: SisStudent): {
   code: UdisePenApaarCode;
-  /** Empty for "none": a child with neither id gets no badge at all. */
   label: string;
 } {
   const pen = hasPen(s);
@@ -474,7 +458,10 @@ export function udisePenApaarStatus(s: SisStudent): {
   if (pen && apaar) return { code: "ok", label: "UDISE OK" };
   if (pen) return { code: "pen_only", label: "PEN ok · APAAR missing" };
   if (apaar) return { code: "apaar_only", label: "APAAR ok · PEN missing" };
-  return { code: "none", label: "" };
+  // Named rather than left blank (director, 2026-09-06). A blank row reads as
+  // "not looked at yet"; these 43 children have been looked at and the answer
+  // is that the portal holds nothing for them, which is the whole backlog.
+  return { code: "none", label: "No PEN · No APAAR" };
 }
 
 /**
