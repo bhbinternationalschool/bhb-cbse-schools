@@ -129,6 +129,25 @@ export const ERP_COMMANDS: ErpCommandDef[] = [
     scope: "any",
   },
   {
+    id: "pay_link",
+    title: "Send a payment link to a family",
+    kind: "write",
+    module: "fees",
+    action: "edit",
+    description:
+      "Raise a Cashfree payment link for everything one student currently owes and send it to the parent on WhatsApp. Future months are not included. The receipt posts itself when the payment goes through.",
+    examples: [
+      "Payment link for Riya Verma",
+      "send pay link to Aarav Sharma",
+      "Amay Gupta 4B ko payment link bhejo",
+      "fee link for Riya Verma",
+    ],
+    fields: [
+      { name: "student", type: "student", required: true, description: "The student whose dues the link covers" },
+    ],
+    scope: "any",
+  },
+  {
     id: "fee_reminder",
     title: "Send fee reminders to a class's defaulters",
     kind: "write",
@@ -804,6 +823,10 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
   }
   if (COLLECTION_WORDS.test(t) && !extractSectionRefs(t).length) {
     return { commandId: "collection_today", fields: { date: "" }, source: "local" };
+  }
+  const payLink = parsePayLinkQuery(t);
+  if (payLink) {
+    return { commandId: "pay_link", fields: { student: payLink }, source: "local" };
   }
   const feeRem = parseFeeReminderQuery(t);
   if (feeRem) {
@@ -3304,4 +3327,78 @@ export function feeReminderTooSoon(
 ): { skip: boolean; daysAgo: number | null } {
   const ago = daysSince(lastIso, todayIso);
   return { skip: ago !== null && ago < FEE_REMINDER_MIN_DAYS_BETWEEN, daysAgo: ago };
+}
+
+// ─── Payment link for one family (write) ───────────────────────────────
+
+const PAY_LINK_WORD =
+  /(?<![\p{L}\p{M}\p{N}])(pay(?:ment)?\s*link|fee\s*link|payment\s*url|bhugtan\s*link|भुगतान\s*लिंक)(?![\p{L}\p{M}\p{N}])/iu;
+
+const PAY_LINK_FILLER = new Set([
+  "payment", "pay", "link", "links", "fee", "fees", "url", "send", "raise", "create", "generate",
+  "make", "bhejo", "bhej", "do", "banao", "karo", "for", "to", "of", "the", "please", "pls",
+  "ki", "ka", "ke", "ko", "bhugtan", "भुगतान", "लिंक", "भेजो", "की", "का", "के", "को",
+]);
+
+/**
+ * "Payment link for Riya Verma", "send pay link to Aarav Sharma", "Amay
+ * Gupta 4B ko payment link bhejo". Needs the words *payment link* and a
+ * name — a class-wide ask is the fee-reminder command, not one link.
+ */
+export function parsePayLinkQuery(text: string): string | null {
+  const t = (text || "").trim();
+  if (!t || !PAY_LINK_WORD.test(t)) return null;
+  const refs = extractSectionRefs(t);
+  let rest = t.toLowerCase();
+  if (refs.length) {
+    rest = rest
+      .replace(/(?<![\p{L}\p{M}\p{N}])(?:class|grade|std|kaksha|कक्षा)\s*[a-z0-9]+(?:st|nd|rd|th)?\s*(?:-|\s)?\s*(?:section|sec\.?)?\s*[a-h]?(?![\p{L}\p{M}\p{N}])/giu, " ")
+      .replace(/(?<![a-z0-9])(\d{1,2}|[ivx]{1,4}|nursery|lkg|ukg|kg|pg)(?:st|nd|rd|th)?\s*-?\s*[a-h](?![a-z0-9])/g, " ");
+  }
+  const words = rest
+    .replace(/[^\p{L}\p{M}\p{N}\s'.-]/gu, " ")
+    .split(/\s+/)
+    .map((w) => w.replace(/^[.'-]+|[.'-]+$/g, ""))
+    .filter((w) => w && !PAY_LINK_FILLER.has(w) && !/^\d+$/.test(w));
+  const name = words.join(" ").trim();
+  if (!name || !/[\p{L}\p{M}]{2,}/u.test(name)) return null;
+  const sec = refs[0];
+  return [name, sec ? `${sec.classKey}${sec.sectionName}` : ""].filter(Boolean).join(" ");
+}
+
+export function formatPayLinkCard(input: {
+  studentName: string;
+  classLabel: string;
+  guardianName: string;
+  mobileMasked: string;
+  rows: { label: string; headName: string; amountPaise: number }[];
+  totalPaise: number;
+  expiresInDays: number;
+  templateReady: boolean;
+  formatInr: (paise: number) => string;
+}): string {
+  const inr = input.formatInr;
+  const lines = [
+    `*Payment link* · ${input.studentName} · ${input.classLabel}`,
+    `Amount: *${inr(input.totalPaise)}*`,
+    "",
+    "*Covers*",
+  ];
+  const byLabel = new Map<string, number>();
+  for (const r of input.rows) {
+    const key = `${r.label} · ${r.headName}`.replace(/^ · /, "");
+    byLabel.set(key, (byLabel.get(key) ?? 0) + r.amountPaise);
+  }
+  for (const [key, paise] of byLabel) lines.push(`${key}  ${inr(paise)}`);
+  lines.push(
+    "",
+    `Goes to ${input.guardianName || "the parent"} ${input.mobileMasked}`.trim(),
+    `Valid ${input.expiresInDays} days. Future months are not included.`,
+  );
+  lines.push(
+    input.templateReady
+      ? "The receipt is sent automatically once they pay."
+      : "⚠️ No approved pay-link template — the link will be created but not sent; share it yourself.",
+  );
+  return lines.join("\n");
 }

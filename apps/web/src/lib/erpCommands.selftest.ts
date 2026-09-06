@@ -65,6 +65,8 @@ import {
   formatClassMessageCard,
   parseStaffBroadcastQuery,
   formatStaffBroadcastCard,
+  parsePayLinkQuery,
+  formatPayLinkCard,
   parseFeeReminderQuery,
   formatFeeReminderCard,
   inFeeReminderQuietHours,
@@ -206,6 +208,10 @@ const masters = {
   assert.equal(parseErpCommandLocal("VIII B me kaun nahi aaya")?.fields.section, "8B");
   assert.equal(parseErpCommandLocal("5A में कौन गैरहाजिर है")?.commandId, "absent_list", "Devanagari fee/absent words match without ASCII word boundaries");
   assert.equal(parseErpCommandLocal("7B की उपस्थिति")?.fields.section, "7B");
+  assert.equal(parseErpCommandLocal("Payment link for Riya Verma")?.commandId, "pay_link");
+  assert.equal(parseErpCommandLocal("Amay Gupta 4B ko payment link bhejo")?.fields.student, "amay gupta 4B");
+  assert.equal(parsePayLinkQuery("Send fee reminder to class 3 defaulters"), null, "a class-wide chase is not one link");
+  assert.equal(parsePayLinkQuery("payment link"), null, "no name, no link");
   assert.equal(parseErpCommandLocal("Send fee reminder to class 3 defaulters")?.commandId, "fee_reminder");
   assert.equal(parseErpCommandLocal("fee reminder 5A defaulters")?.fields.section, "5A");
   // Looking at defaulters must never start messaging families.
@@ -1476,6 +1482,51 @@ const masters = {
   assert.deepEqual(feeReminderTooSoon("2026-09-05", "2026-09-05"), { skip: true, daysAgo: 0 }, "not twice in one day");
   assert.deepEqual(feeReminderTooSoon("2026-08-30", "2026-09-05"), { skip: true, daysAgo: 6 });
   assert.deepEqual(feeReminderTooSoon("2026-08-29", "2026-09-05"), { skip: false, daysAgo: 7 }, "a week later is allowed");
+}
+
+// ─── payment link ──────────────────────────────────────────────────────
+{
+  assert.equal(parsePayLinkQuery("Payment link for Riya Verma"), "riya verma");
+  assert.equal(parsePayLinkQuery("send pay link to Aarav Sharma"), "aarav sharma");
+  assert.equal(parsePayLinkQuery("fee link for Riya Verma"), "riya verma");
+  assert.equal(parsePayLinkQuery("Amay ki fees pending"), null, "asking the balance never raises a link");
+
+  const inr = (p: number) => `₹${(p / 100).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+  const card = formatPayLinkCard({
+    studentName: "Riya Verma",
+    classLabel: "V A",
+    guardianName: "Suresh Verma",
+    mobileMasked: "98xxxxxx21",
+    rows: [
+      { label: "Jul 2026", headName: "Tuition", amountPaise: 400000 },
+      { label: "Jul 2026", headName: "Transport", amountPaise: 120000 },
+      { label: "Aug 2026", headName: "Tuition", amountPaise: 400000 },
+    ],
+    totalPaise: 920000,
+    expiresInDays: 7,
+    templateReady: true,
+    formatInr: inr,
+  });
+  assert.ok(card.startsWith("*Payment link* · Riya Verma · V A\nAmount: *₹9,200*"), card);
+  assert.ok(card.includes("Jul 2026 · Tuition  ₹4,000"), card);
+  assert.ok(card.includes("Jul 2026 · Transport  ₹1,200"), card);
+  assert.ok(card.includes("Goes to Suresh Verma 98xxxxxx21"), card);
+  assert.ok(
+    card.includes("Valid 7 days. Future months are not included."),
+    "the card says the link is only for what is owed now",
+  );
+  assert.ok(card.includes("The receipt is sent automatically once they pay."), card);
+
+  const noTpl = formatPayLinkCard({
+    studentName: "R", classLabel: "V A", guardianName: "", mobileMasked: "98xxxxxx21",
+    rows: [{ label: "Jul", headName: "Tuition", amountPaise: 100 }], totalPaise: 100,
+    expiresInDays: 7, templateReady: false, formatInr: inr,
+  });
+  assert.ok(
+    noTpl.includes("⚠️ No approved pay-link template — the link will be created but not sent; share it yourself."),
+    "without a template the card does not pretend the parent will receive it",
+  );
+  assert.ok(noTpl.includes("Goes to the parent 98xxxxxx21"), noTpl);
 }
 
 console.log("erpCommands.selftest.ts OK");

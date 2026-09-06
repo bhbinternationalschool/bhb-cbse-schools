@@ -99,6 +99,7 @@ import {
   formatClassMessageCard,
   formatDecideLeaveCard,
   formatFeeReminderCard,
+  formatPayLinkCard,
   formatLeaveRequestPicker,
   formatRaiseComplaintCard,
   formatStaffBroadcastCard,
@@ -828,6 +829,60 @@ export async function handleErpStaffCommand(
       resolved.sectionIds = mine.map((s) => s.sectionId).join(",");
     }
   }
+  if (command.id === "pay_link" && resolved.studentId) {
+    const roleCodes = resolveSessionRoles(rbac, session, masters).map((x) => x.code);
+    if (!isOfficeLike(roleCodes) && !roleCodes.includes("accounts")) {
+      void audit(session, command, parsed.fields, text, "denied", {
+        reason: "scope",
+        channel: inbound.channel,
+      });
+      return {
+        handled: true,
+        audience: "erp_command_denied",
+        text: "Raising payment links is for the fee desk, office and leadership.",
+      };
+    }
+    const { openDuesForPayLink } = await import("@/lib/feePayLink.server");
+    const due = await openDuesForPayLink({
+      studentId: resolved.studentId,
+      academicYearCode: session.academicYearCode,
+      todayIso,
+    });
+    if (!due.ok) {
+      return { handled: true, audience: "erp_command_ask", text: `${due.error}.` };
+    }
+    if (!due.mobile) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: `No parent WhatsApp number on record for ${due.studentName}. Add it in the ERP first.`,
+      };
+    }
+    const { ensureWaTemplatesHydrated } = await import("@/lib/waTemplatesPersistence");
+    const { listApprovedTemplates, loadWaTemplates } = await import("@/lib/waTemplates");
+    await ensureWaTemplatesHydrated();
+    const feeTemplates = listApprovedTemplates(loadWaTemplates(), { module: "fees" });
+    const tpl =
+      feeTemplates.find((x) => x.familyKey === "fees_pay_link" && x.language === "en") ??
+      feeTemplates.find((x) => x.familyKey === "fees_pay_link") ??
+      null;
+    resolved.templateMetaName = tpl ? tpl.metaName || tpl.name : "";
+    resolved.templateLanguage = tpl ? tpl.metaLanguage || tpl.language : "";
+    resolved.templateVariables = (tpl?.variables ?? []).join(",");
+    resolved.totalPaise = String(due.totalPaise);
+    resolved.expiresInDays = "7";
+    resolved.cardSummary = formatPayLinkCard({
+      studentName: due.studentName,
+      classLabel: due.classLabel,
+      guardianName: due.guardianName,
+      mobileMasked: maskMobile10(due.mobile),
+      rows: due.rows,
+      totalPaise: due.totalPaise,
+      expiresInDays: 7,
+      templateReady: !!tpl,
+      formatInr,
+    });
+  }
   if (command.id === "fee_reminder") {
     const roleCodes = resolveSessionRoles(rbac, session, masters).map((x) => x.code);
     if (!isOfficeLike(roleCodes) && !roleCodes.includes("accounts")) {
@@ -1298,7 +1353,9 @@ export async function handleErpStaffCommand(
   if (command.kind === "write") {
     const token = random();
     const summary =
-      command.id === "fee_reminder"
+      command.id === "pay_link"
+        ? resolved.cardSummary || command.title
+        : command.id === "fee_reminder"
         ? resolved.cardSummary || command.title
         : command.id === "decide_leave"
         ? resolved.cardSummary || command.title
@@ -2323,6 +2380,58 @@ async function runConfirmedWrite(
       handled: true,
       audience: "erp_command_post_homework",
       text: `Posted. ${label} ${r.subjectName || ""} homework is live${res.push.sent ? ` · ${res.push.sent} phone${res.push.sent === 1 ? "" : "s"} notified` : ""}.\nUndo it in the ERP: Homework → today's posts.`,
+    };
+  }
+  if (command.id === "pay_link") {
+    if (!r.studentId) {
+      return {
+        handled: true,
+        audience: "erp_command_error",
+        text: "That payment link request is no longer valid. Send it again.",
+      };
+    }
+    const { createAndSendPayLink } = await import("@/lib/feePayLink.server");
+    const res = await createAndSendPayLink({
+      session,
+      masters,
+      studentId: r.studentId,
+      todayIso: istDateOf(),
+      template: r.templateMetaName
+        ? {
+            metaName: r.templateMetaName,
+            language: r.templateLanguage || "en",
+            variables: (r.templateVariables || "").split(",").filter(Boolean),
+          }
+        : null,
+      expiresInDays: 7,
+    });
+    if (!res.ok) {
+      void audit(session, command, pending.fields, pending.originalText, "error", {
+        reason: res.error,
+        channel: inbound.channel,
+        studentId: r.studentId,
+      });
+      return { handled: true, audience: "erp_command_error", text: `Couldn't raise the link: ${res.error}` };
+    }
+    void audit(session, command, pending.fields, pending.originalText, "ok", {
+      channel: inbound.channel,
+      studentId: r.studentId,
+      linkId: res.link.id,
+      linkCode: res.link.code,
+      amountPaise: res.link.amountPaise,
+      gateway: res.gatewayMode,
+      whatsappSent: res.whatsapp.sent,
+    });
+    const bits = [`Link ${res.link.code} raised for ${formatInr(res.link.amountPaise)}`];
+    bits.push(
+      res.whatsapp.sent
+        ? "sent to the parent"
+        : `not sent (${res.whatsapp.error || "no template"}) — share it yourself`,
+    );
+    return {
+      handled: true,
+      audience: "erp_command_pay_link",
+      text: `${bits.join(" · ")}.\n${res.checkoutUrl}\nThe receipt posts itself once they pay.`,
     };
   }
   if (command.id === "fee_reminder") {
