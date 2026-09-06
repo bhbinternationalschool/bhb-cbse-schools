@@ -88,6 +88,7 @@ import {
   formatHelpReply,
   formatBusManifestReply,
   formatHomeworkReply,
+  formatStudentDetailsReply,
   formatPendingLeavesReply,
   formatRouteNotFound,
   periodAtTime,
@@ -604,7 +605,17 @@ export async function handleErpStaffCommand(
     }
     resolved.studentId = student.id;
     resolved.studentName = student.fullName;
-    resolved.detail = isOfficeLike(roleCodes) || roleCodes.includes("accounts") ? "full" : "basic";
+    // Fees detail (concession policy names, sibling line) is a fee-desk
+    // reading. Student details unmask the parents' mobiles for the office
+    // and for the child's own class teacher, who has to be able to call.
+    resolved.detail =
+      command.id === "student_details"
+        ? isOfficeLike(roleCodes) || mineIds.has(student.sectionId)
+          ? "full"
+          : "basic"
+        : isOfficeLike(roleCodes) || roleCodes.includes("accounts")
+          ? "full"
+          : "basic";
   }
   if (command.id === "collection_today") {
     const roleCodes = resolveSessionRoles(rbac, session, masters).map((r) => r.code);
@@ -806,6 +817,8 @@ async function runReadCommand(
       return homeworkPosted(resolved, session, todayIso);
     case "bus_manifest":
       return busManifest(resolved, session, todayIso);
+    case "student_details":
+      return studentDetails(resolved, session);
     default:
       return "That command isn't wired up yet.";
   }
@@ -923,6 +936,65 @@ async function attendanceSummary(
     scope: school ? "school" : "mine",
     classes,
     staff,
+  });
+}
+
+async function studentDetails(
+  resolved: Record<string, string>,
+  session: DemoSession,
+): Promise<string> {
+  await ensureTransportHydratedServer();
+  const sis = loadSis();
+  const masters = loadMasters();
+  const student = sis.students.find((st) => st.id === resolved.studentId);
+  if (!student) return "That student record has gone missing. Please try again.";
+  const hh = student.householdId
+    ? sis.households.find((h) => h.id === student.householdId)
+    : undefined;
+  const siblings = student.householdId
+    ? sis.students.filter(
+        (st) =>
+          st.id !== student.id &&
+          st.householdId === student.householdId &&
+          st.status === "active" &&
+          st.academicYearCode === session.academicYearCode,
+      )
+    : [];
+  const transport = loadTransport();
+  const assignment = (transport.assignments ?? []).find(
+    (a) => a.studentId === student.id && a.effectiveTo == null && !a.boardingSuspended,
+  );
+  const route = assignment
+    ? (transport.routes ?? []).find((r) => r.id === assignment.routeId)
+    : undefined;
+  const stop = route ? (route.stops ?? []).find((sp) => sp.id === assignment!.stopId) : undefined;
+  const routeLabel = route
+    ? [route.busNo ? `Bus ${route.busNo}` : route.code, route.name].filter(Boolean).join(" · ")
+    : student.transportRoute || "";
+  return formatStudentDetailsReply({
+    fullName: student.fullName,
+    classLabel: classLabel(masters, student.classId, student.sectionId).replace(" · ", " "),
+    rollNo: student.rollNo,
+    admissionNo: student.admissionNo,
+    status: student.status,
+    gender: student.gender,
+    dob: student.dob,
+    bloodGroup: student.bloodGroup,
+    guardianName: hh?.guardianName || "",
+    fatherName: student.fatherName,
+    motherName: student.motherName,
+    fatherMobile: student.fatherMobile,
+    motherMobile: student.motherMobile,
+    householdMobile: hh ? householdWhatsApp(hh) || hh.mobile : "",
+    locality: [hh?.locality, hh?.city].filter(Boolean).join(", "),
+    transport: routeLabel ? { routeLabel, stopName: stop?.name || "" } : null,
+    siblings: siblings.map((st) => ({
+      fullName: st.fullName,
+      classLabel: classLabel(masters, st.classId, st.sectionId).replace(" · ", " "),
+    })),
+    hasMedicalNote: !!(student.medicalNotes || "").trim(),
+    isCwsn: !!student.isCwsn,
+    detail: resolved.detail === "full" ? "full" : "basic",
   });
 }
 

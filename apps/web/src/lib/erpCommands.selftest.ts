@@ -44,6 +44,8 @@ import {
   formatBusManifestReply,
   formatRouteNotFound,
   parseBusManifestQuery,
+  formatStudentDetailsReply,
+  parseStudentDetailsQuery,
   parseFreeTeachersQuery,
   periodAtTime,
   resolveClassOrSectionRef,
@@ -172,6 +174,14 @@ const masters = {
   assert.equal(parseErpCommandLocal("VIII B me kaun nahi aaya")?.fields.section, "8B");
   assert.equal(parseErpCommandLocal("5A में कौन गैरहाजिर है")?.commandId, "absent_list", "Devanagari fee/absent words match without ASCII word boundaries");
   assert.equal(parseErpCommandLocal("7B की उपस्थिति")?.fields.section, "7B");
+  assert.equal(parseErpCommandLocal("Riya Verma details")?.fields.student, "riya verma");
+  assert.equal(parseErpCommandLocal("student details Aarav Sharma")?.commandId, "student_details");
+  assert.equal(parseErpCommandLocal("Amay Gupta 4B info")?.fields.student, "amay gupta 4B");
+  assert.equal(parseErpCommandLocal("Riya Verma ki jankari")?.commandId, "student_details");
+  assert.equal(parseErpCommandLocal("who is Kabir Ali")?.fields.student, "kabir ali");
+  assert.equal(parseStudentDetailsQuery("details"), null, "a details word with no name is not this ask");
+  assert.equal(parseStudentDetailsQuery("Amay ki fees pending"), null, "fees wins over details");
+  assert.equal(parseStudentDetailsQuery("Bus 3 details"), null, "a bus ask is not a student ask");
   assert.equal(parseErpCommandLocal("Bus 3 manifest")?.fields.text, "3");
   assert.equal(parseErpCommandLocal("bus 3 ka manifest")?.commandId, "bus_manifest");
   assert.equal(parseErpCommandLocal("route A students")?.fields.text, "A");
@@ -862,6 +872,65 @@ const masters = {
 
   assert.ok(formatRouteNotFound("7", []).includes('"7"'));
   assert.ok(formatRouteNotFound("civil", ["Bus 3 · Civil Lines", "Bus 4 · Civil Court"]).includes("Bus 3 · Civil Lines, Bus 4 · Civil Court"));
+}
+
+// ─── student details reply ─────────────────────────────────────────────
+{
+  const base = {
+    fullName: "Riya Verma",
+    classLabel: "V A",
+    rollNo: "11",
+    admissionNo: "2019/241",
+    status: "active",
+    gender: "F",
+    dob: "2015-04-18",
+    bloodGroup: "B+",
+    guardianName: "Suresh Verma",
+    fatherName: "Suresh Verma",
+    motherName: "Kavita Verma",
+    fatherMobile: "9876543221",
+    motherMobile: "9812345678",
+    householdMobile: "9876543221",
+    locality: "Civil Lines, Bareilly",
+    transport: { routeLabel: "Bus 3 · Civil Lines", stopName: "Sabzi Mandi" },
+    siblings: [{ fullName: "Anaya Verma", classLabel: "I A" }],
+    hasMedicalNote: true,
+    isCwsn: false,
+    detail: "full" as const,
+  };
+  const full = formatStudentDetailsReply(base);
+  assert.ok(full.startsWith("*Riya Verma* · V A · Roll 11\nAdm 2019/241 · Girl · DOB 18 Apr · Blood B+"), full);
+  assert.ok(full.includes("*Contacts*\nFather: Suresh Verma 9876543221\nMother: Kavita Verma 9812345678"), full);
+  assert.ok(!full.includes("Family WhatsApp"), "household number equal to father's is not repeated");
+  assert.ok(full.includes("Address: Civil Lines, Bareilly"), full);
+  assert.ok(full.includes("*Transport:* Bus 3 · Civil Lines · Sabzi Mandi"), full);
+  assert.ok(full.includes("*Siblings:* Anaya Verma (I A)"), full);
+  assert.ok(full.includes("⚠️ medical note on file — open the student profile in the ERP."), full);
+  assert.ok(!full.includes("Guardian:"), "guardian equal to father is not repeated");
+
+  const basic = formatStudentDetailsReply({ ...base, detail: "basic" });
+  assert.ok(basic.includes("Father: Suresh Verma 98xxxxxx21"), basic);
+  assert.ok(basic.includes("Mobiles are masked"), basic);
+
+  const other = formatStudentDetailsReply({
+    ...base,
+    guardianName: "Ram Chacha",
+    householdMobile: "9900112233",
+    transport: null,
+    siblings: [],
+    hasMedicalNote: false,
+    isCwsn: true,
+    status: "left",
+  });
+  assert.ok(other.includes("⚠️ Status: left"), other);
+  assert.ok(other.includes("Family WhatsApp: 9900112233"), other);
+  assert.ok(other.includes("Guardian: Ram Chacha"), other);
+  assert.ok(!other.includes("*Transport:*") && !other.includes("*Siblings:*"), other);
+  assert.ok(other.includes("⚠️ CWSN"), other);
+  // Never leak identity documents or the medical text itself.
+  for (const t of [full, basic, other]) {
+    assert.ok(!/aadhaar|pan\b|medicalNotes|apaar|\bpen\b/i.test(t), "no identity documents in the reply");
+  }
 }
 
 console.log("erpCommands.selftest.ts OK");

@@ -122,6 +122,31 @@ export const ERP_COMMANDS: ErpCommandDef[] = [
     scope: "any",
   },
   {
+    id: "student_details",
+    title: "A student's details",
+    kind: "read",
+    module: "students",
+    action: "view",
+    description:
+      "One student's basics: class, section, roll, admission number, guardian and parent mobiles, transport route and stop, blood group, siblings in school. Never documents, Aadhaar or medical text.",
+    examples: [
+      "Riya Verma details",
+      "student details Aarav Sharma",
+      "Amay Gupta 4B info",
+      "Riya Verma ki jankari",
+      "who is Kabir Ali",
+    ],
+    fields: [
+      {
+        name: "student",
+        type: "student",
+        required: true,
+        description: "Student name as written, plus class-section or roll if given",
+      },
+    ],
+    scope: "any",
+  },
+  {
     id: "bus_manifest",
     title: "Bus route manifest",
     kind: "read",
@@ -579,6 +604,10 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
   }
   if (COLLECTION_WORDS.test(t) && !extractSectionRefs(t).length) {
     return { commandId: "collection_today", fields: { date: "" }, source: "local" };
+  }
+  const detailsQ = parseStudentDetailsQuery(t);
+  if (detailsQ) {
+    return { commandId: "student_details", fields: { student: detailsQ }, source: "local" };
   }
   const busQ = parseBusManifestQuery(t);
   if (busQ) {
@@ -1625,6 +1654,50 @@ export const TENDER_MODE_LABEL: Record<string, string> = {
 
 // ─── Free teachers in a period ─────────────────────────────────────────
 
+const DETAILS_WORDS =
+  /(?<![\p{L}\p{M}\p{N}])(details?|detail|info|information|profile|jankari|jaankari|जानकारी|विवरण|record)(?![\p{L}\p{M}\p{N}])/iu;
+
+const DETAILS_STOP_WORDS = new Set([
+  "details", "detail", "info", "information", "profile", "jankari", "jaankari", "record", "records",
+  "student", "students", "child", "about", "show", "me", "the", "of", "for", "please", "pls",
+  "ki", "ka", "ke", "ko", "batao", "bata", "dikhao", "dikha", "who", "is", "kaun", "kon", "hai",
+  "जानकारी", "विवरण", "छात्र", "की", "का", "के", "दिखाओ", "बताओ", "कौन", "है",
+]);
+
+/**
+ * "Riya Verma details", "student details Aarav Sharma", "Amay Gupta 4B
+ * info", "Riya Verma ki jankari", "who is Kabir Ali". Returns the student
+ * as written (name plus any class / roll), or null. A details word alone,
+ * or with no name left over, is not this ask.
+ */
+export function parseStudentDetailsQuery(text: string): string | null {
+  const t = (text || "").trim();
+  if (!t) return null;
+  const isWhoIs = /^\s*who\s+is\s+\S/i.test(t);
+  if (!isWhoIs && !DETAILS_WORDS.test(t)) return null;
+  if (FEE_WORDS.test(t) || HOMEWORK_WORDS.test(t) || BUS_WORDS.test(t)) return null;
+  const refs = extractSectionRefs(t);
+  let rest = t.toLowerCase();
+  const roll = /(?<![\p{L}\p{M}\p{N}])roll\s*(?:no\.?|number)?\s*(\d{1,3})(?![\p{L}\p{M}\p{N}])/iu.exec(rest);
+  if (roll) rest = rest.replace(roll[0], " ");
+  if (refs.length) {
+    rest = rest
+      .replace(/(?<![\p{L}\p{M}\p{N}])(?:class|grade|std|kaksha|कक्षा)\s*[a-z0-9]+(?:st|nd|rd|th)?\s*(?:-|\s)?\s*(?:section|sec\.?)?\s*[a-h]?(?![\p{L}\p{M}\p{N}])/giu, " ")
+      .replace(/(?<![a-z0-9])(\d{1,2}|[ivx]{1,4}|nursery|lkg|ukg|kg|pg)(?:st|nd|rd|th)?\s*-?\s*[a-h](?![a-z0-9])/g, " ");
+  }
+  const words = rest
+    .replace(/[^\p{L}\p{M}\p{N}\s'.-]/gu, " ")
+    .split(/\s+/)
+    .map((w) => w.replace(/^[.'-]+|[.'-]+$/g, ""))
+    .filter((w) => w && !DETAILS_STOP_WORDS.has(w) && !/^\d+$/.test(w));
+  const name = words.join(" ").trim();
+  if (!name || !/[\p{L}\p{M}]{2,}/u.test(name)) return null;
+  const sec = refs[0];
+  return [name, sec ? `${sec.classKey}${sec.sectionName}` : "", roll ? `roll ${roll[1]}` : ""]
+    .filter(Boolean)
+    .join(" ");
+}
+
 const BUS_WORDS =
   /(?<![\p{L}\p{M}\p{N}])(bus|buses|route|routes|van|manifest|बस|रूट)(?![\p{L}\p{M}\p{N}])/iu;
 
@@ -1992,4 +2065,85 @@ export function formatBusManifestReply(input: BusManifestInput): string {
 export function formatRouteNotFound(asked: string, options: string[]): string {
   if (!options.length) return `No active bus route matches "${asked}".`;
   return `Which route? ${options.join(", ")}`;
+}
+
+// ─── Student details ───────────────────────────────────────────────────
+
+export type StudentDetailsInput = {
+  fullName: string;
+  classLabel: string;
+  rollNo: string;
+  admissionNo: string;
+  status: string;
+  gender: string;
+  dob: string;
+  bloodGroup: string;
+  guardianName: string;
+  fatherName: string;
+  motherName: string;
+  fatherMobile: string;
+  motherMobile: string;
+  householdMobile: string;
+  locality: string;
+  transport: { routeLabel: string; stopName: string } | null;
+  siblings: { fullName: string; classLabel: string }[];
+  hasMedicalNote: boolean;
+  isCwsn: boolean;
+  /** full: office / leadership / this student's own teacher — real mobiles. */
+  detail: "full" | "basic";
+};
+
+export function formatStudentDetailsReply(input: StudentDetailsInput): string {
+  const show = (m: string) => {
+    const d = (m || "").replace(/\D/g, "");
+    if (!d) return "";
+    if (input.detail === "full") return d;
+    return d.length < 6 ? d : `${d.slice(0, 2)}xxxxxx${d.slice(-2)}`;
+  };
+  const lines = [
+    `*${input.fullName}* · ${input.classLabel}${input.rollNo ? ` · Roll ${input.rollNo}` : ""}`,
+  ];
+  const idBits = [
+    input.admissionNo ? `Adm ${input.admissionNo}` : "",
+    input.gender === "M" ? "Boy" : input.gender === "F" ? "Girl" : "",
+    input.dob ? `DOB ${shortDate(input.dob)}` : "",
+    input.bloodGroup ? `Blood ${input.bloodGroup}` : "",
+  ].filter(Boolean);
+  if (idBits.length) lines.push(idBits.join(" · "));
+  if (input.status && input.status !== "active") lines.push(`⚠️ Status: ${input.status}`);
+
+  const contacts: string[] = [];
+  if (input.fatherName || input.fatherMobile) {
+    contacts.push(`Father: ${input.fatherName || "—"}${input.fatherMobile ? ` ${show(input.fatherMobile)}` : ""}`);
+  }
+  if (input.motherName || input.motherMobile) {
+    contacts.push(`Mother: ${input.motherName || "—"}${input.motherMobile ? ` ${show(input.motherMobile)}` : ""}`);
+  }
+  const hh = show(input.householdMobile);
+  if (hh && hh !== show(input.fatherMobile) && hh !== show(input.motherMobile)) {
+    contacts.push(`Family WhatsApp: ${hh}`);
+  }
+  if (contacts.length) {
+    lines.push("", "*Contacts*", ...contacts);
+    if (input.guardianName && input.guardianName !== input.fatherName && input.guardianName !== input.motherName) {
+      lines.push(`Guardian: ${input.guardianName}`);
+    }
+  }
+  if (input.locality) lines.push(`Address: ${input.locality}`);
+
+  if (input.transport) {
+    lines.push(
+      "",
+      `*Transport:* ${input.transport.routeLabel}${input.transport.stopName ? ` · ${input.transport.stopName}` : ""}`,
+    );
+  }
+  if (input.siblings.length) {
+    lines.push("", `*Siblings:* ${input.siblings.map((s) => `${s.fullName} (${s.classLabel})`).join(", ")}`);
+  }
+  const flags: string[] = [];
+  if (input.hasMedicalNote) flags.push("medical note on file");
+  if (input.isCwsn) flags.push("CWSN");
+  if (flags.length) lines.push("", `⚠️ ${flags.join(" · ")} — open the student profile in the ERP.`);
+  if (input.detail === "basic") lines.push("", "_Mobiles are masked; the office can share them._");
+  return lines.join("\n");
 }
