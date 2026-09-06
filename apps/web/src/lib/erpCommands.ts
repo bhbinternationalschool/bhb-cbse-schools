@@ -122,6 +122,32 @@ export const ERP_COMMANDS: ErpCommandDef[] = [
     scope: "any",
   },
   {
+    id: "bus_manifest",
+    title: "Bus route manifest",
+    kind: "read",
+    module: "transport",
+    action: "view",
+    description:
+      "One bus route: stops in boarding order with the children due at each (class and roll), the driver and vehicle, today's boarding marks when any, and suspended riders. Named by bus number, route code or route name.",
+    examples: [
+      "Bus 3 manifest",
+      "bus 3 ka manifest",
+      "route A students",
+      "bus 5 list",
+      "which children are on bus 2",
+    ],
+    fields: [
+      {
+        name: "text",
+        type: "text",
+        required: true,
+        description: "The bus or route as written: 'Bus 3', 'route A', a route code or name",
+      },
+      { name: "date", type: "date", required: false, description: "YYYY-MM-DD; today when not said" },
+    ],
+    scope: "any",
+  },
+  {
     id: "homework_posted",
     title: "Homework posted",
     kind: "read",
@@ -553,6 +579,10 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
   }
   if (COLLECTION_WORDS.test(t) && !extractSectionRefs(t).length) {
     return { commandId: "collection_today", fields: { date: "" }, source: "local" };
+  }
+  const busQ = parseBusManifestQuery(t);
+  if (busQ) {
+    return { commandId: "bus_manifest", fields: { text: busQ, date: "" }, source: "local" };
   }
   const hwQ = parseHomeworkQuery(t);
   if (hwQ) {
@@ -1595,6 +1625,30 @@ export const TENDER_MODE_LABEL: Record<string, string> = {
 
 // ─── Free teachers in a period ─────────────────────────────────────────
 
+const BUS_WORDS =
+  /(?<![\p{L}\p{M}\p{N}])(bus|buses|route|routes|van|manifest|बस|रूट)(?![\p{L}\p{M}\p{N}])/iu;
+
+const BUS_ASK_WORDS =
+  /(?<![\p{L}\p{M}\p{N}])(manifest|list|students?|children|riders?|kaun|kon|who|which|sawari|बच्चे|सूची|छात्र|details?|stops?)(?![\p{L}\p{M}\p{N}])/iu;
+
+/**
+ * "Bus 3 manifest", "bus 3 ka manifest", "route A students", "bus 5 list",
+ * "which children are on bus 2". Returns the bus / route as written, for
+ * the server to match against route code, bus number and route name.
+ * A bus word alone ("bus is late") is not this ask.
+ */
+export function parseBusManifestQuery(text: string): string | null {
+  const t = (text || "").trim();
+  if (!t || !BUS_WORDS.test(t)) return null;
+  if (!BUS_ASK_WORDS.test(t)) return null;
+  const m =
+    /(?<![\p{L}\p{M}\p{N}])(?:bus|route|van|बस|रूट)\s*(?:no\.?|number|#)?\s*([\p{L}\p{N}][\p{L}\p{N}-]{0,15})(?![\p{L}\p{M}\p{N}])/iu.exec(t);
+  if (m && !/^(no|number|list|students?|children|manifest|ka|ki|ke|me|mein|details?)$/i.test(m[1]!)) {
+    return m[1]!;
+  }
+  return null;
+}
+
 const HOMEWORK_WORDS =
   /(?<![\p{L}\p{M}\p{N}])(homework|home\s*work|hw|गृहकार्य|grihkarya|grih\s*karya|assignments?|diary)(?![\p{L}\p{M}\p{N}])/iu;
 
@@ -1879,4 +1933,63 @@ export function formatHomeworkReply(input: HomeworkSectionInput | HomeworkOvervi
   }
   lines.push("", "Ask a section for details, e.g. _6B homework_.");
   return lines.join("\n");
+}
+
+// ─── Bus manifest ──────────────────────────────────────────────────────
+
+export type ManifestStopRow = {
+  name: string;
+  /** Distance from school, e.g. "3.2 km" — stops carry no pickup time. */
+  distanceLabel: string;
+  riders: { fullName: string; classLabel: string; rollNo: string; suspended: boolean; mark: string }[];
+};
+
+export type BusManifestInput = {
+  routeLabel: string; // "Bus 3 · Civil Lines"
+  vehicleReg: string;
+  driver: { name: string; mobile: string };
+  date: string;
+  todayIso: string;
+  stops: ManifestStopRow[];
+  markedCount: number;
+  formatMobile?: (m: string) => string;
+};
+
+export function formatBusManifestReply(input: BusManifestInput): string {
+  const when = input.date === input.todayIso ? "today" : shortDate(input.date);
+  const mob = input.formatMobile ?? ((m: string) => m);
+  const active = input.stops.flatMap((s) => s.riders.filter((r) => !r.suspended));
+  const suspended = input.stops.flatMap((s) => s.riders.filter((r) => r.suspended));
+  const lines = [`*${input.routeLabel}* · ${when}`];
+  const head = [`${active.length} rider${active.length === 1 ? "" : "s"}`, `${input.stops.length} stops`];
+  lines.push(head.join(" · "));
+  if (input.driver.name || input.vehicleReg) {
+    lines.push(
+      `Driver: ${input.driver.name || "—"}${input.driver.mobile ? ` ${mob(input.driver.mobile)}` : ""}${input.vehicleReg ? ` · ${input.vehicleReg}` : ""}`,
+    );
+  }
+  if (!active.length && !suspended.length) {
+    lines.push("", "No students assigned to this route.");
+    return lines.join("\n");
+  }
+  for (const st of input.stops) {
+    const riders = st.riders.filter((r) => !r.suspended);
+    if (!riders.length) continue;
+    lines.push("", `*${st.name}*${st.distanceLabel ? ` · ${st.distanceLabel}` : ""} · ${riders.length}`);
+    for (const r of riders) {
+      lines.push(`${r.fullName} (${r.classLabel}${r.rollNo ? `, ${r.rollNo}` : ""})${r.mark ? ` · ${r.mark}` : ""}`);
+    }
+  }
+  if (input.markedCount) {
+    lines.push("", `${input.markedCount} of ${active.length} marked ${when === "today" ? "today" : "that day"}.`);
+  }
+  if (suspended.length) {
+    lines.push("", `*Boarding suspended:* ${suspended.map((r) => r.fullName).join(", ")}`);
+  }
+  return lines.join("\n");
+}
+
+export function formatRouteNotFound(asked: string, options: string[]): string {
+  if (!options.length) return `No active bus route matches "${asked}".`;
+  return `Which route? ${options.join(", ")}`;
 }

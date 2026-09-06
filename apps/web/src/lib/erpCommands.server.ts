@@ -50,6 +50,8 @@ import { isoDateWeekday } from "@/lib/examTimetable";
 import { subjectLabel } from "@/lib/homework";
 import { ensureStudentLeaveHydratedServer } from "@/lib/studentLeavePersistence";
 import { ensureHomeworkHydratedServer } from "@/lib/homeworkPersistence";
+import { ensureTransportHydratedServer } from "@/lib/transportPersistence";
+import { loadTransport } from "@/lib/transport";
 import { loadHomework } from "@/lib/homework";
 import {
   emptyStudentLeaveState,
@@ -84,8 +86,10 @@ import {
   formatCollectionReply,
   formatFreeTeachersReply,
   formatHelpReply,
+  formatBusManifestReply,
   formatHomeworkReply,
   formatPendingLeavesReply,
+  formatRouteNotFound,
   periodAtTime,
   TENDER_MODE_LABEL,
   formatSectionProblem,
@@ -616,6 +620,9 @@ export async function handleErpStaffCommand(
       };
     }
   }
+  if (command.id === "bus_manifest") {
+    resolved.route = (parsed.fields.text || "").trim();
+  }
   if (command.id === "homework_posted") {
     const roleCodes = resolveSessionRoles(rbac, session, masters).map((r) => r.code);
     const office = isOfficeLike(roleCodes);
@@ -797,6 +804,8 @@ async function runReadCommand(
       return pendingLeaves(resolved, session, todayIso);
     case "homework_posted":
       return homeworkPosted(resolved, session, todayIso);
+    case "bus_manifest":
+      return busManifest(resolved, session, todayIso);
     default:
       return "That command isn't wired up yet.";
   }
@@ -914,6 +923,100 @@ async function attendanceSummary(
     scope: school ? "school" : "mine",
     classes,
     staff,
+  });
+}
+
+function maskMobile10(m: string): string {
+  const d = (m || "").replace(/\D/g, "");
+  return d.length < 6 ? d : `${d.slice(0, 2)}xxxxxx${d.slice(-2)}`;
+}
+
+async function busManifest(
+  resolved: Record<string, string>,
+  session: DemoSession,
+  todayIso: string,
+): Promise<string> {
+  await ensureTransportHydratedServer();
+  const state = loadTransport();
+  const masters = loadMasters();
+  const sis = loadSis();
+  const date = resolved.date || todayIso;
+  const asked = (resolved.route || "").trim().toLowerCase();
+  const routes = (state.routes ?? []).filter((r) => r.isActive !== false);
+  const norm = (v: string) => (v || "").trim().toLowerCase().replace(/\s+/g, "");
+  const exact = routes.filter(
+    (r) =>
+      norm(r.busNo) === norm(asked) ||
+      norm(r.code) === norm(asked) ||
+      norm(r.name) === norm(asked),
+  );
+  const matches = exact.length
+    ? exact
+    : routes.filter(
+        (r) =>
+          norm(r.name).includes(norm(asked)) ||
+          norm(r.code).includes(norm(asked)) ||
+          norm(r.busNo).includes(norm(asked)),
+      );
+  if (matches.length !== 1) {
+    return formatRouteNotFound(
+      resolved.route || "",
+      (matches.length ? matches : routes)
+        .slice(0, 10)
+        .map((r) => [r.busNo ? `Bus ${r.busNo}` : "", r.code, r.name].filter(Boolean).join(" · ")),
+    );
+  }
+  const route = matches[0]!;
+  const live = (state.assignments ?? []).filter(
+    (a) => a.routeId === route.id && a.effectiveTo == null,
+  );
+  // Which year is actually on the bus — the latest year with live riders,
+  // exactly as the driver's manifest endpoint derives it.
+  const ay =
+    live.map((a) => a.academicYearCode).filter(Boolean).sort().pop() || session.academicYearCode;
+  const riders = live.filter((a) => a.academicYearCode === ay);
+  const marks = new Map(
+    (state.boardingEvents ?? [])
+      .filter((e) => e.date === date && e.routeId === route.id)
+      .map((e) => [e.studentId, e.status]),
+  );
+  const byId = new Map(sis.students.map((st) => [st.id, st]));
+  const stops = [...(route.stops ?? [])]
+    .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
+    .map((stop) => ({
+      name: stop.name,
+      distanceLabel: stop.distanceKm > 0 ? `${stop.distanceKm} km` : "",
+      riders: riders
+        .filter((a) => a.stopId === stop.id)
+        .map((a) => {
+          const st = byId.get(a.studentId);
+          const mark = marks.get(a.studentId);
+          return {
+            fullName: st?.fullName || "—",
+            classLabel: st ? classLabel(masters, st.classId, st.sectionId).replace(" · ", " ") : "",
+            rollNo: st?.rollNo || "",
+            suspended: !!a.boardingSuspended,
+            mark: mark === "boarded" ? "boarded" : mark === "absent" ? "absent" : mark ? String(mark) : "",
+          };
+        })
+        .sort((a, b) => a.classLabel.localeCompare(b.classLabel) || a.fullName.localeCompare(b.fullName)),
+    }));
+  const vehicle = (state.vehicles ?? []).find((v) => v.id === route.vehicleId);
+  const driverStaff = vehicle?.driverStaffId
+    ? (masters.staff ?? []).find((st) => st.id === vehicle.driverStaffId)
+    : undefined;
+  return formatBusManifestReply({
+    routeLabel: [route.busNo ? `Bus ${route.busNo}` : route.code, route.name].filter(Boolean).join(" · "),
+    vehicleReg: route.vehicleReg || vehicle?.registrationNo || "",
+    driver: {
+      name: vehicle?.driverName || driverStaff?.fullName || "",
+      mobile: vehicle?.driverMobile || driverStaff?.mobile || "",
+    },
+    date,
+    todayIso,
+    stops,
+    markedCount: riders.filter((a) => marks.has(a.studentId)).length,
+    formatMobile: maskMobile10,
   });
 }
 

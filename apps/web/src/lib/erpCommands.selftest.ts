@@ -41,6 +41,9 @@ import {
   formatPendingLeavesReply,
   formatHomeworkReply,
   parseHomeworkQuery,
+  formatBusManifestReply,
+  formatRouteNotFound,
+  parseBusManifestQuery,
   parseFreeTeachersQuery,
   periodAtTime,
   resolveClassOrSectionRef,
@@ -169,6 +172,12 @@ const masters = {
   assert.equal(parseErpCommandLocal("VIII B me kaun nahi aaya")?.fields.section, "8B");
   assert.equal(parseErpCommandLocal("5A में कौन गैरहाजिर है")?.commandId, "absent_list", "Devanagari fee/absent words match without ASCII word boundaries");
   assert.equal(parseErpCommandLocal("7B की उपस्थिति")?.fields.section, "7B");
+  assert.equal(parseErpCommandLocal("Bus 3 manifest")?.fields.text, "3");
+  assert.equal(parseErpCommandLocal("bus 3 ka manifest")?.commandId, "bus_manifest");
+  assert.equal(parseErpCommandLocal("route A students")?.fields.text, "A");
+  assert.equal(parseErpCommandLocal("which children are on bus 2")?.fields.text, "2");
+  assert.equal(parseBusManifestQuery("Bus 3 is late by 20 minutes"), null, "a delay notice is not a manifest ask");
+  assert.equal(parseBusManifestQuery("bus"), null);
   assert.equal(parseErpCommandLocal("homework posted today for 6B")?.fields.section, "6B");
   assert.equal(parseErpCommandLocal("6B homework")?.commandId, "homework_posted");
   assert.equal(parseErpCommandLocal("aaj 6B ka homework")?.fields.section, "6B");
@@ -804,6 +813,55 @@ const masters = {
   assert.ok(ov.startsWith("*Homework* · school · today\n3 posts across 2 of 3 sections"), ov);
   assert.ok(ov.includes("*Posted*\nV A  2 (Maths, EVS)\nVI B  1 (Hindi)"), ov);
   assert.ok(ov.includes("*Nothing yet:* V B"), ov);
+}
+
+// ─── bus manifest reply ────────────────────────────────────────────────
+{
+  const t = formatBusManifestReply({
+    routeLabel: "Bus 3 · Civil Lines",
+    vehicleReg: "UP80 AB 1234",
+    driver: { name: "Ram Singh", mobile: "9876543210" },
+    date: "2026-09-05",
+    todayIso: "2026-09-05",
+    stops: [
+      {
+        name: "Sabzi Mandi",
+        distanceLabel: "3.2 km",
+        riders: [
+          { fullName: "Aarav Sharma", classLabel: "V A", rollNo: "4", suspended: false, mark: "boarded" },
+          { fullName: "Riya Verma", classLabel: "V A", rollNo: "11", suspended: false, mark: "" },
+        ],
+      },
+      {
+        name: "Gandhi Chowk",
+        distanceLabel: "5 km",
+        riders: [
+          { fullName: "Kabir Ali", classLabel: "VI B", rollNo: "9", suspended: false, mark: "absent" },
+          { fullName: "Old Rider", classLabel: "VII A", rollNo: "2", suspended: true, mark: "" },
+        ],
+      },
+      { name: "Empty Stop", distanceLabel: "6 km", riders: [] },
+    ],
+    markedCount: 2,
+    formatMobile: (m) => `${m.slice(0, 2)}xxxxxx${m.slice(-2)}`,
+  });
+  assert.ok(t.startsWith("*Bus 3 · Civil Lines* · today\n3 riders · 3 stops"), t);
+  assert.ok(t.includes("Driver: Ram Singh 98xxxxxx10 · UP80 AB 1234"), t);
+  assert.ok(t.includes("*Sabzi Mandi* · 3.2 km · 2\nAarav Sharma (V A, 4) · boarded\nRiya Verma (V A, 11)"), t);
+  assert.ok(t.includes("*Gandhi Chowk* · 5 km · 1\nKabir Ali (VI B, 9) · absent"), t);
+  assert.ok(!t.includes("Empty Stop"), "a stop with nobody on it is not listed");
+  assert.ok(t.includes("2 of 3 marked today."), t);
+  assert.ok(t.includes("*Boarding suspended:* Old Rider"), t);
+
+  const empty = formatBusManifestReply({
+    routeLabel: "Bus 9", vehicleReg: "", driver: { name: "", mobile: "" },
+    date: "2026-09-04", todayIso: "2026-09-05", stops: [], markedCount: 0,
+  });
+  assert.ok(empty.startsWith("*Bus 9* · 4 Sep\n0 riders · 0 stops"), empty);
+  assert.ok(empty.includes("No students assigned to this route."), empty);
+
+  assert.ok(formatRouteNotFound("7", []).includes('"7"'));
+  assert.ok(formatRouteNotFound("civil", ["Bus 3 · Civil Lines", "Bus 4 · Civil Court"]).includes("Bus 3 · Civil Lines, Bus 4 · Civil Court"));
 }
 
 console.log("erpCommands.selftest.ts OK");
