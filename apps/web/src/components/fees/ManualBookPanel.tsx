@@ -735,7 +735,7 @@ export function ManualBookPanel({
                                 Sibling
                               </span>
                             ) : siblingCount > 1 ? (
-                              <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--brand-gold)]">
+                              <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--tone-amber)]">
                                 Opened
                               </span>
                             ) : null}

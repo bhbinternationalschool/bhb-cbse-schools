@@ -2139,7 +2139,7 @@ function StudentDetail({
             <h3 className="text-sm font-semibold text-[var(--brand-deep)]">
               <StudentNameLabel student={student} sis={state}>
               {highlight && sibs.length > 0 ? (
-                <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--brand-gold)]">
+                <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--tone-amber)]">
                   Focus
                 </span>
               ) : null}
