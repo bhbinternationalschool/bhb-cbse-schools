@@ -29,6 +29,11 @@ import {
 } from "@/lib/udiseCompliance";
 import { normalizeStudent } from "@/lib/sis";
 import type { SisStudent } from "@/lib/sis";
+import {
+  hasAadhaarOnFile,
+  isMissing,
+  matchesCompleteness,
+} from "@/lib/studentFilters";
 
 /** The default the office runs with: parent Aadhaar demanded for APAAR. */
 const CFG: UdiseComplianceSettings = {
@@ -87,14 +92,16 @@ function student(patch: Partial<SisStudent>): SisStudent {
   assert.equal(udiseEntryStatusLabel(s), "Entered · APAAR missing");
 }
 
-/* ── Neither id: gaps, and NO badge (the office asked for nothing shown) ─── */
+/* ── Neither id: gaps, and the badge names both ──────────────────────────── */
 {
   const s = student({ pen: "", apaarId: "" });
   assert.equal(isUdiseFullyCompliant(s, CFG), false);
   const gaps = computeStudentUdiseGaps(s, CFG);
   assert.ok(gaps.includes("pen") && gaps.includes("apaar"));
   assert.equal(udisePenApaarStatus(s).code, "none");
-  assert.equal(udisePenApaarStatus(s).label, "", "no badge when neither id exists");
+  // Named, not blank: a blank row reads as "not looked at yet", and these are
+  // the children the whole backlog is about.
+  assert.equal(udisePenApaarStatus(s).label, "No PEN · No APAAR");
 }
 
 /* ── APAAR without PEN: unusual, still named rather than shown as OK ─────── */
@@ -114,6 +121,37 @@ for (const junk of ["NA", "na", "0", "000", "***", "  "]) {
     `"${junk}" must not count as a PEN/APAAR`,
   );
   assert.equal(udisePenApaarStatus(s).code, "none");
+  // The register's filters must agree with the badge, or "Missing PEN" lists
+  // a different set of children than the ones the badge marks (2026-09-06).
+  assert.equal(isMissing(s, "pen"), true, `filter: "${junk}" is not a PEN`);
+  assert.equal(isMissing(s, "apaar"), true, `filter: "${junk}" is not an APAAR`);
+  assert.equal(matchesCompleteness(s, "udise_none"), true);
+  assert.equal(matchesCompleteness(s, "udise_ok"), false);
+}
+
+/* ── Every badge state is a filter option, and vice versa ────────────────── */
+{
+  const both = student({ pen: "P1", apaarId: "A1", aadhaarLast4: "1234" });
+  const penOnly = student({ pen: "P1", apaarId: "" });
+  const neitherWithAadhaar = student({ pen: "", apaarId: "", aadhaarLast4: "9999" });
+  const neitherNoAadhaar = student({ pen: "", apaarId: "" });
+
+  assert.equal(matchesCompleteness(both, "udise_ok"), true);
+  assert.equal(matchesCompleteness(penOnly, "udise_ok"), false);
+  assert.equal(matchesCompleteness(penOnly, "has_pen"), true);
+  assert.equal(matchesCompleteness(penOnly, "apaar"), true, "APAAR missing");
+  assert.equal(matchesCompleteness(neitherWithAadhaar, "udise_none"), true);
+  assert.equal(matchesCompleteness(neitherWithAadhaar, "has_aadhaar"), true);
+  assert.equal(matchesCompleteness(neitherWithAadhaar, "aadhaar"), false);
+  assert.equal(matchesCompleteness(neitherNoAadhaar, "has_aadhaar"), false);
+  assert.equal(matchesCompleteness(neitherNoAadhaar, "aadhaar"), true);
+  assert.equal(hasAadhaarOnFile(neitherWithAadhaar), true);
+  assert.equal(hasAadhaarOnFile(neitherNoAadhaar), false);
+
+  // "any" selects everyone — the default must never hide a child.
+  for (const s of [both, penOnly, neitherWithAadhaar, neitherNoAadhaar]) {
+    assert.equal(matchesCompleteness(s, ""), true);
+  }
 }
 
 /* ── A verified Aadhaar alone never clears the worklist ──────────────────── */

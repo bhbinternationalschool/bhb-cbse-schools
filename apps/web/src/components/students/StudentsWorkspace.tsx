@@ -19,6 +19,7 @@ import {
   filtersFromSearchParams,
   filtersToSearchParams,
   isMissing,
+  matchesCompleteness,
   loadFilters,
   loadSavedViews,
   saveFilters,
@@ -603,7 +604,7 @@ export function StudentsWorkspace() {
       predicates.push(matchesAdmissionRange);
     }
     if (missingFilter) {
-      predicates.push((s) => isMissing(s, missingFilter));
+      predicates.push((s) => matchesCompleteness(s, missingFilter));
     }
     if (query.trim()) predicates.push(matchesSearch);
 
