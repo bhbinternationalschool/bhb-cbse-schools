@@ -27,12 +27,13 @@ import {
   X,
 } from "lucide-react";
 import {
+  Fragment,
   useCallback,
   useEffect,
-  useId,
   useMemo,
   useRef,
   useState,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
 
@@ -42,6 +43,7 @@ import {
   downloadXlsxReport,
   type ReportColumn,
 } from "@/lib/reportExport";
+import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import { cn } from "@/lib/utils";
 
 /* ─── Selection ─────────────────────────────────────────────── */
@@ -159,34 +161,53 @@ export function RowCheckbox({
   );
 }
 
-/* ─── Popover plumbing shared by the menus ──────────────────── */
+/* ─── Menu plumbing shared by the menus ─────────────────────── */
 
-function useDismissable(open: boolean, close: () => void) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent | TouchEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) close();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("touchstart", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("touchstart", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open, close]);
-  return ref;
-}
-
+/**
+ * Both menus here are Base UI menus.
+ *
+ * They used to be a `useDismissable` hook and an absolutely-positioned div.
+ * That handled an outside click and Escape and nothing else: no arrow keys
+ * between items, no focus returning to the "…" button when the menu closed,
+ * no typeahead, and a panel clipped by any ancestor with `overflow: hidden`
+ * — which every scrolling table has. This is the one control the premium
+ * grid standard put on every data screen, so it is the one place where
+ * hand-rolled keyboard handling costs the office something on every row.
+ *
+ * Base UI is already the app's primitive library (button, dialog, select,
+ * tabs and four more). Nothing new is added here; a hand-rolled thing is
+ * simply moved onto what was already there.
+ */
 const MENU_PANEL =
-  "absolute right-0 z-40 mt-1 min-w-[12rem] overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] py-1 text-sm shadow-[var(--shadow-2,0_12px_32px_rgba(0,0,0,0.18))]";
+  "z-50 min-w-[12rem] origin-(--transform-origin) overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] py-1 text-sm shadow-[var(--shadow-2,0_12px_32px_rgba(0,0,0,0.18))] outline-none";
 const MENU_ITEM =
-  "flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-[var(--foreground)] hover:bg-[var(--surface-sunken)] disabled:cursor-not-allowed disabled:opacity-40";
+  "flex w-full cursor-default items-center gap-2 px-3 py-2 text-left text-[13px] text-[var(--foreground)] outline-none select-none data-highlighted:bg-[var(--surface-sunken)] data-disabled:cursor-not-allowed data-disabled:opacity-40";
+
+/** Portal + positioner + popup, so each menu says only what differs. */
+function MenuPopup({
+  children,
+  align = "end",
+}: {
+  children: ReactNode;
+  align?: "start" | "center" | "end";
+}) {
+  return (
+    <MenuPrimitive.Portal>
+      {/* Portalled: a menu inside a scrolling table used to be clipped by the
+          table's own overflow, which is why long menus lost their last item. */}
+      <MenuPrimitive.Positioner
+        side="bottom"
+        sideOffset={4}
+        align={align}
+        className="isolate z-50"
+      >
+        <MenuPrimitive.Popup className={MENU_PANEL}>
+          {children}
+        </MenuPrimitive.Popup>
+      </MenuPrimitive.Positioner>
+    </MenuPrimitive.Portal>
+  );
+}
 
 /* ─── Row actions ───────────────────────────────────────────── */
 
@@ -214,53 +235,52 @@ export function RowActionMenu<T>({
   label?: string;
   className?: string;
 }) {
-  const [open, setOpen] = useState(false);
-  const close = useCallback(() => setOpen(false), []);
-  const ref = useDismissable(open, close);
-  const id = useId();
   const visible = actions.filter((a) => !a.hidden?.(row));
   if (visible.length === 0) return null;
 
   return (
-    <div ref={ref} className={cn("relative inline-block text-left", className)}>
-      <button
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-controls={id}
+    <MenuPrimitive.Root>
+      <MenuPrimitive.Trigger
         aria-label={label}
         title={label}
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((o) => !o);
-        }}
-        className="inline-flex size-8 items-center justify-center rounded-lg border border-transparent text-[var(--muted)] hover:border-[var(--border)] hover:bg-[var(--surface-sunken)] hover:text-[var(--brand-deep)]"
+        // Rows are usually clickable themselves (open the record). Opening the
+        // menu must not also open the row.
+        onClick={(e: ReactMouseEvent) => e.stopPropagation()}
+        className={cn(
+          "inline-flex size-8 items-center justify-center rounded-lg border border-transparent text-[var(--muted)] hover:border-[var(--border)] hover:bg-[var(--surface-sunken)] hover:text-[var(--brand-deep)] data-popup-open:border-[var(--border)] data-popup-open:bg-[var(--surface-sunken)]",
+          className,
+        )}
       >
         <MoreHorizontal className="size-4" />
-      </button>
-      {open ? (
-        <div id={id} role="menu" className={MENU_PANEL} onClick={(e) => e.stopPropagation()}>
-          {visible.map((a) => (
-            <div key={a.id}>
-              {a.separatorAbove ? <div className="my-1 border-t border-[var(--border)]" /> : null}
-              <button
-                type="button"
-                role="menuitem"
-                disabled={a.disabled?.(row) ?? false}
-                onClick={() => {
-                  close();
-                  a.onSelect(row);
-                }}
-                className={cn(MENU_ITEM, a.tone === "danger" && "text-[var(--danger)]")}
-              >
-                {a.icon ? <span className="shrink-0 opacity-80 [&>svg]:size-4">{a.icon}</span> : null}
-                {a.label}
-              </button>
-            </div>
-          ))}
-        </div>
-      ) : null}
-    </div>
+      </MenuPrimitive.Trigger>
+      <MenuPopup>
+        {visible.map((a) => (
+          <Fragment key={a.id}>
+            {a.separatorAbove ? (
+              <MenuPrimitive.Separator className="my-1 border-t border-[var(--border)]" />
+            ) : null}
+            <MenuPrimitive.Item
+              disabled={a.disabled?.(row) ?? false}
+              onClick={(e: ReactMouseEvent) => {
+                e.stopPropagation();
+                a.onSelect(row);
+              }}
+              className={cn(
+                MENU_ITEM,
+                a.tone === "danger" && "text-[var(--danger)]",
+              )}
+            >
+              {a.icon ? (
+                <span className="shrink-0 opacity-80 [&>svg]:size-4">
+                  {a.icon}
+                </span>
+              ) : null}
+              {a.label}
+            </MenuPrimitive.Item>
+          </Fragment>
+        ))}
+      </MenuPopup>
+    </MenuPrimitive.Root>
   );
 }
 
@@ -387,14 +407,10 @@ export function ExportMenu({
   compact?: boolean;
   className?: string;
 }) {
-  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<ExportFormat | "">("");
-  const close = useCallback(() => setOpen(false), []);
-  const ref = useDismissable(open, close);
-  const id = useId();
 
   async function run(format: ExportFormat) {
-    close();
+    // Base UI closes the menu on select; nothing to close by hand.
     const data = rows();
     if (data.length === 0) {
       onMessage?.("Nothing to export — no rows match");
@@ -423,36 +439,34 @@ export function ExportMenu({
   ];
 
   return (
-    <div ref={ref} className={cn("relative inline-block text-left", className)}>
-      <button
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-controls={id}
+    <MenuPrimitive.Root>
+      <MenuPrimitive.Trigger
         disabled={busy !== ""}
-        onClick={() => setOpen((o) => !o)}
         className={cn(
           "inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--card)] font-semibold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)] disabled:opacity-60",
           compact ? "px-2 py-1 text-[11px]" : "px-3 py-1.5 text-xs",
+          className,
         )}
       >
         <Download className={compact ? "size-3.5" : "size-4"} />
         {busy ? "Exporting…" : "Export data"}
-      </button>
-      {open ? (
-        <div id={id} role="menu" className={MENU_PANEL}>
-          {ITEMS.filter((i) => formats.includes(i.f)).map((i) => (
-            <button key={i.f} type="button" role="menuitem" onClick={() => void run(i.f)} className={MENU_ITEM}>
-              <span className="shrink-0 opacity-80 [&>svg]:size-4">{i.icon}</span>
-              <span className="flex flex-col">
-                <span className="font-semibold">{i.label}</span>
-                <span className="text-[11px] text-[var(--muted)]">{i.hint}</span>
-              </span>
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
+      </MenuPrimitive.Trigger>
+      <MenuPopup>
+        {ITEMS.filter((i) => formats.includes(i.f)).map((i) => (
+          <MenuPrimitive.Item
+            key={i.f}
+            onClick={() => void run(i.f)}
+            className={MENU_ITEM}
+          >
+            <span className="shrink-0 opacity-80 [&>svg]:size-4">{i.icon}</span>
+            <span className="flex flex-col">
+              <span className="font-semibold">{i.label}</span>
+              <span className="text-[11px] text-[var(--muted)]">{i.hint}</span>
+            </span>
+          </MenuPrimitive.Item>
+        ))}
+      </MenuPopup>
+    </MenuPrimitive.Root>
   );
 }
 
