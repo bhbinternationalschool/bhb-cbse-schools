@@ -65,6 +65,10 @@ import {
   formatClassMessageCard,
   parseStaffBroadcastQuery,
   formatStaffBroadcastCard,
+  parseRaiseComplaintQuery,
+  guessComplaintCategory,
+  complaintSubjectFrom,
+  formatRaiseComplaintCard,
   parseFreeTeachersQuery,
   periodAtTime,
   resolveClassOrSectionRef,
@@ -193,6 +197,10 @@ const masters = {
   assert.equal(parseErpCommandLocal("VIII B me kaun nahi aaya")?.fields.section, "8B");
   assert.equal(parseErpCommandLocal("5A में कौन गैरहाजिर है")?.commandId, "absent_list", "Devanagari fee/absent words match without ASCII word boundaries");
   assert.equal(parseErpCommandLocal("7B की उपस्थिति")?.fields.section, "7B");
+  assert.equal(parseErpCommandLocal("Raise complaint for Riya Verma: bus did not come today")?.commandId, "raise_complaint");
+  assert.equal(parseErpCommandLocal("complaint for Amay Gupta 4B: fee receipt not received")?.fields.student, "amay gupta 4B");
+  assert.equal(parseRaiseComplaintQuery("raise complaint: 7A projector not working"), null, "a facilities issue with no family is not this command");
+  assert.equal(parseRaiseComplaintQuery("complaint"), null);
   assert.equal(parseErpCommandLocal("Staff broadcast: meeting 3 pm in library")?.commandId, "staff_broadcast");
   assert.equal(parseErpCommandLocal("sabhi staff ko bhejo: kal 8 baje aana hai")?.commandId, "staff_broadcast");
   assert.equal(parseStaffBroadcastQuery("Class 4 parents ko bhejo: kal PTM"), null, "a parent audience is not a staff broadcast");
@@ -1282,6 +1290,46 @@ const masters = {
     "without a template the card says WhatsApp is skipped rather than implying it sent",
   );
   assert.ok(noTpl.includes("meeting 3 pm"), "the plain message is still shown");
+}
+
+// ─── log a family's complaint ──────────────────────────────────────────
+{
+  assert.deepEqual(parseRaiseComplaintQuery("Raise complaint for Riya Verma: bus did not come today"), {
+    student: "riya verma",
+    body: "bus did not come today",
+  });
+  assert.deepEqual(parseRaiseComplaintQuery("Riya Verma ki shikayat darj karo: bus late hai"), {
+    student: "riya verma",
+    body: "bus late hai",
+  });
+  // The family's own words are filed unedited.
+  const words = "Bus 20 minute late aayi aur driver ne stop par ruka bhi nahi";
+  assert.equal(parseRaiseComplaintQuery(`complaint for Aarav Sharma: ${words}`)?.body, words);
+
+  assert.equal(guessComplaintCategory("bus did not come today"), "transport");
+  assert.equal(guessComplaintCategory("fee receipt not received"), "fees");
+  assert.equal(guessComplaintCategory("projector not working in class"), "facilities");
+  assert.equal(guessComplaintCategory("teacher was rude"), "staff_behavior");
+  assert.equal(guessComplaintCategory("child got hurt in playground"), "safety");
+  assert.equal(guessComplaintCategory("something else entirely"), "other");
+
+  assert.equal(complaintSubjectFrom("Bus late. Driver rude too."), "Bus late");
+  assert.equal(complaintSubjectFrom("x".repeat(200)).length, 108);
+
+  const card = formatRaiseComplaintCard({
+    studentName: "Riya Verma",
+    classLabel: "V A",
+    guardianName: "Suresh Verma",
+    categoryLabel: "Transport",
+    subject: "bus did not come today",
+    body: "bus did not come today",
+  });
+  assert.ok(card.startsWith("*Log complaint* · Riya Verma · V A\nCategory: Transport"), card);
+  assert.ok(card.includes("Filed against Suresh Verma's record, as taken by the office."), card);
+  assert.ok(
+    card.includes("The family is not messaged; it goes to the complaints queue."),
+    "the card says plainly that nothing is sent to the family",
+  );
 }
 
 console.log("erpCommands.selftest.ts OK");

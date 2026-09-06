@@ -129,6 +129,25 @@ export const ERP_COMMANDS: ErpCommandDef[] = [
     scope: "any",
   },
   {
+    id: "raise_complaint",
+    title: "Log a family's complaint",
+    kind: "write",
+    module: "complaints",
+    action: "edit",
+    description:
+      "Log a complaint a family made by phone or in person, against their child's record, so it enters the same queue as complaints raised from the parent app. Needs the student and the complaint after a colon.",
+    examples: [
+      "Raise complaint for Riya Verma: bus did not come today",
+      "log complaint for Aarav Sharma: canteen food quality",
+      "complaint for Amay Gupta 4B: fee receipt not received",
+    ],
+    fields: [
+      { name: "student", type: "student", required: true, description: "The child the complaint is about" },
+      { name: "text", type: "text", required: true, description: "The complaint, after a colon" },
+    ],
+    scope: "own_sections",
+  },
+  {
     id: "staff_broadcast",
     title: "Broadcast to staff",
     kind: "write",
@@ -746,6 +765,14 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
   }
   if (COLLECTION_WORDS.test(t) && !extractSectionRefs(t).length) {
     return { commandId: "collection_today", fields: { date: "" }, source: "local" };
+  }
+  const complaint = parseRaiseComplaintQuery(t);
+  if (complaint) {
+    return {
+      commandId: "raise_complaint",
+      fields: { student: complaint.student, text: complaint.body },
+      source: "local",
+    };
   }
   const staffMsg = parseStaffBroadcastQuery(t);
   if (staffMsg) {
@@ -2910,4 +2937,92 @@ export function formatStaffBroadcastCard(input: {
       : "Phone notification only — no approved WhatsApp notice template, so WhatsApp is skipped.",
   );
   return lines.join("\n");
+}
+
+// ─── Log a family's complaint (write) ──────────────────────────────────
+
+const COMPLAINT_WORD =
+  /(?<![\p{L}\p{M}\p{N}])(complaints?|shikayat|शिकायत|grievance|issue\s+raised)(?![\p{L}\p{M}\p{N}])/iu;
+
+const COMPLAINT_HEAD_FILLER = new Set([
+  "raise", "raised", "log", "logged", "record", "add", "note", "file", "register", "enter",
+  "complaint", "complaints", "shikayat", "शिकायत", "grievance", "for", "from", "of", "about",
+  "ki", "ka", "ke", "student", "child", "parent", "parents", "please", "pls", "darj", "karo", "kar", "do",
+  "दर्ज", "की", "का", "के", "करो",
+]);
+
+export type RaiseComplaintParse = { student: string; body: string };
+
+/**
+ * "Raise complaint for Riya Verma: bus did not come today". Needs a
+ * complaint word, a name before the colon and the complaint after it. The
+ * words after the colon are the family's own, so they are kept verbatim.
+ */
+export function parseRaiseComplaintQuery(text: string): RaiseComplaintParse | null {
+  const t = (text || "").trim();
+  if (!t || !COMPLAINT_WORD.test(t)) return null;
+  const colon = t.search(/[:：]/);
+  if (colon <= 0) return null;
+  const head = t.slice(0, colon);
+  const body = t.slice(colon + 1).trim();
+  if (body.length < 3) return null;
+  const refs = extractSectionRefs(head);
+  let rest = head.toLowerCase();
+  if (refs.length) {
+    rest = rest
+      .replace(/(?<![\p{L}\p{M}\p{N}])(?:class|grade|std|kaksha|कक्षा)\s*[a-z0-9]+(?:st|nd|rd|th)?\s*(?:-|\s)?\s*(?:section|sec\.?)?\s*[a-h]?(?![\p{L}\p{M}\p{N}])/giu, " ")
+      .replace(/(?<![a-z0-9])(\d{1,2}|[ivx]{1,4}|nursery|lkg|ukg|kg|pg)(?:st|nd|rd|th)?\s*-?\s*[a-h](?![a-z0-9])/g, " ");
+  }
+  const words = rest
+    .replace(/[^\p{L}\p{M}\p{N}\s'.-]/gu, " ")
+    .split(/\s+/)
+    .map((w) => w.replace(/^[.'-]+|[.'-]+$/g, ""))
+    .filter((w) => w && !COMPLAINT_HEAD_FILLER.has(w) && !/^\d+$/.test(w));
+  const name = words.join(" ").trim();
+  if (!name || !/[\p{L}\p{M}]{2,}/u.test(name)) return null;
+  const sec = refs[0];
+  return {
+    student: [name, sec ? `${sec.classKey}${sec.sectionName}` : ""].filter(Boolean).join(" "),
+    body,
+  };
+}
+
+/**
+ * A first guess at the category from the family's words, shown on the card
+ * so the office can see it before it is filed — and changed afterwards in
+ * the complaints workspace, which is the system of record for it.
+ */
+export function guessComplaintCategory(body: string): string {
+  const t = (body || "").toLowerCase();
+  if (/(?<![\p{L}])(bus|van|driver|route|stop|conductor|transport|बस)(?![\p{L}])/iu.test(t)) return "transport";
+  if (/(?<![\p{L}])(fee|fees|receipt|refund|payment|फीस)(?![\p{L}])/iu.test(t)) return "fees";
+  if (/(?<![\p{L}])(teacher|madam|sir|staff|behaviour|behavior|rude|शिक्षक)(?![\p{L}])/iu.test(t)) return "staff_behavior";
+  if (/(?<![\p{L}])(safety|unsafe|injury|hurt|bully|bullying|accident|सुरक्षा)(?![\p{L}])/iu.test(t)) return "safety";
+  if (/(?<![\p{L}])(toilet|washroom|water|fan|light|projector|classroom|canteen|food|building|repair|मरम्मत)(?![\p{L}])/iu.test(t)) return "facilities";
+  if (/(?<![\p{L}])(homework|marks|exam|syllabus|class|study|padhai|पढ़ाई)(?![\p{L}])/iu.test(t)) return "academic";
+  return "other";
+}
+
+export function complaintSubjectFrom(body: string): string {
+  const first = (body || "").split(/\n|;|\.(?=\s|$)/)[0]!.trim() || (body || "").trim();
+  return first.length > 110 ? `${first.slice(0, 107).trimEnd()}…` : first;
+}
+
+export function formatRaiseComplaintCard(input: {
+  studentName: string;
+  classLabel: string;
+  guardianName: string;
+  categoryLabel: string;
+  subject: string;
+  body: string;
+}): string {
+  return [
+    `*Log complaint* · ${input.studentName} · ${input.classLabel}`,
+    `Category: ${input.categoryLabel}`,
+    "",
+    input.body,
+    "",
+    `Filed against ${input.guardianName || "the family"}'s record, as taken by the office.`,
+    "The family is not messaged; it goes to the complaints queue.",
+  ].join("\n");
 }

@@ -97,7 +97,10 @@ import {
   formatHomeworkReply,
   formatAdmissionsPeriodReply,
   formatClassMessageCard,
+  formatRaiseComplaintCard,
   formatStaffBroadcastCard,
+  guessComplaintCategory,
+  complaintSubjectFrom,
   formatMarkAttendanceCard,
   messageScriptLanguage,
   noticeTitleFrom,
@@ -820,6 +823,49 @@ export async function handleErpStaffCommand(
       resolved.sectionIds = mine.map((s) => s.sectionId).join(",");
     }
   }
+  if (command.id === "raise_complaint" && resolved.studentId) {
+    const body = (parsed.fields.text || "").trim();
+    if (body.length < 3) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: "What is the complaint? Put it after a colon:\n_Raise complaint for Riya Verma: bus did not come today_",
+      };
+    }
+    if (body.length > 2000) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: "That complaint is too long to file in one go (2000 characters).",
+      };
+    }
+    const sis = loadSis();
+    const student = sis.students.find((st) => st.id === resolved.studentId);
+    if (!student?.householdId) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: `${resolved.studentName || "That student"} has no family record linked, so a complaint can't be filed against it. Add the household in the ERP first.`,
+      };
+    }
+    const hh = sis.households.find((h) => h.id === student.householdId);
+    const { complaintCategoryLabel } = await import("@/lib/complaints");
+    const category = guessComplaintCategory(body);
+    resolved.householdId = student.householdId;
+    resolved.category = category;
+    resolved.subject = complaintSubjectFrom(body);
+    resolved.body = body;
+    resolved.guardianName = hh?.guardianName || "";
+    resolved.guardianMobile = hh ? householdWhatsApp(hh) || hh.mobile : "";
+    resolved.cardSummary = formatRaiseComplaintCard({
+      studentName: student.fullName,
+      classLabel: classLabel(masters, student.classId, student.sectionId).replace(" · ", " "),
+      guardianName: resolved.guardianName,
+      categoryLabel: complaintCategoryLabel(category as Parameters<typeof complaintCategoryLabel>[0]),
+      subject: resolved.subject,
+      body,
+    });
+  }
   if (command.id === "staff_broadcast") {
     const roleCodes = resolveSessionRoles(rbac, session, masters).map((x) => x.code);
     if (!isOfficeLike(roleCodes)) {
@@ -1053,7 +1099,9 @@ export async function handleErpStaffCommand(
   if (command.kind === "write") {
     const token = random();
     const summary =
-      command.id === "staff_broadcast"
+      command.id === "raise_complaint"
+        ? resolved.cardSummary || command.title
+        : command.id === "staff_broadcast"
         ? resolved.cardSummary || command.title
         : command.id === "class_message"
         ? resolved.cardSummary || command.title
@@ -2072,6 +2120,46 @@ async function runConfirmedWrite(
       handled: true,
       audience: "erp_command_post_homework",
       text: `Posted. ${label} ${r.subjectName || ""} homework is live${res.push.sent ? ` · ${res.push.sent} phone${res.push.sent === 1 ? "" : "s"} notified` : ""}.\nUndo it in the ERP: Homework → today's posts.`,
+    };
+  }
+  if (command.id === "raise_complaint") {
+    if (!r.householdId || !r.body) {
+      return {
+        handled: true,
+        audience: "erp_command_error",
+        text: "That complaint is no longer valid. Send it again.",
+      };
+    }
+    const { appendServerComplaintTicket } = await import("@/lib/complaintsServer");
+    const res = await appendServerComplaintTicket({
+      householdId: r.householdId,
+      studentId: r.studentId || null,
+      raisedByName: r.guardianName || session.fullName,
+      raisedByMobile: r.guardianMobile || "",
+      category: r.category as Parameters<typeof appendServerComplaintTicket>[0]["category"],
+      subject: r.subject || "",
+      description: r.body,
+      // Taken by a staff member on the family's behalf — the same source
+      // the office uses for a walk-in or a phone call.
+      source: "office",
+    });
+    if (!res.ok) {
+      void audit(session, command, pending.fields, pending.originalText, "error", {
+        reason: res.error,
+        channel: inbound.channel,
+      });
+      return { handled: true, audience: "erp_command_error", text: `Couldn't file it: ${res.error}` };
+    }
+    void audit(session, command, pending.fields, pending.originalText, "ok", {
+      channel: inbound.channel,
+      ticketId: res.ticket.id,
+      studentId: r.studentId,
+      category: r.category,
+    });
+    return {
+      handled: true,
+      audience: "erp_command_raise_complaint",
+      text: `Filed. Ref ${res.ticket.id.slice(-6).toUpperCase()} · ${r.studentName || ""} · ${r.category}.\nAssign and resolve it in the ERP: Complaints.`,
     };
   }
   if (command.id === "staff_broadcast") {
