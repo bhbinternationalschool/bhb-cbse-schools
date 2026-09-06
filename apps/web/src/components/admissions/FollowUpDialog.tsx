@@ -15,6 +15,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import { Phone, X } from "lucide-react";
 import {
   FOLLOW_UP_CHANNELS,
@@ -66,14 +67,8 @@ export function FollowUpDialog({
     noteRef.current?.focus();
   }, []);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
+  // Escape belongs to the dialog now; the window listener this replaced
+  // fired for every open modal on the page, not only this one.
   const dialled = useRef(false);
   useEffect(() => {
     // Dial once, and only for a call with a number to dial. Guarded with a
@@ -85,16 +80,10 @@ export function FollowUpDialog({
   }, [channel, lead.mobile]);
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Log a follow-up"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="mt-16 w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-xl">
+    // Base UI: focus trap, scroll lock, Escape. The hand-rolled overlay
+    // had none of them, so Tab left the open form for the page behind it.
+    <Dialog open onOpenChange={(next) => !next && onClose()}>
+      <DialogPopup aria-label="Log a follow-up" className="mt-16 w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-xl">
         <div className="flex items-start justify-between gap-2">
           <div>
             <p className="text-sm font-bold text-[var(--brand-deep)]">
@@ -211,7 +200,7 @@ export function FollowUpDialog({
               channel}
           </span>
         </div>
-      </div>
-    </div>
+      </DialogPopup>
+    </Dialog>
   );
 }

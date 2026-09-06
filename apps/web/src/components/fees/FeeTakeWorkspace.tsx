@@ -3961,6 +3961,14 @@ function ReceiptPreviewModal({
 
   return (
     <div
+      // NOT a Base UI dialog, deliberately. Look at the print: classes — this
+      // overlay turns itself static and transparent so the receipt inside it
+      // prints as an ordinary page. A portalled popup carries its own fixed
+      // positioning, and getting that to print correctly cannot be checked
+      // from a headless browser. Receipts printing wrongly is a mistake this
+      // school has already paid for once (blank sheets from dark mode,
+      // 2026-08-30), so this one is converted only with a real printer in
+      // front of someone. Every other overlay moved on 2026-09-06.
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-[rgba(15,22,40,0.55)] p-4 print:static print:bg-transparent print:p-0"
       role="dialog"
       aria-modal="true"

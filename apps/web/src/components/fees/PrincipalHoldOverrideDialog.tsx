@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import {
   DEFAULT_PRINCIPAL_PIN,
   HOLD_LABELS,
@@ -37,14 +38,7 @@ export function PrincipalHoldOverrideDialog({
   const [error, setError] = useState<string | null>(null);
   const label = block?.label ?? HOLD_LABELS[holdCode];
   const isRehold = mode === "rehold";
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  // Escape belongs to the dialog now.
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -79,13 +73,14 @@ export function PrincipalHoldOverrideDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center">
-      <form
-        onSubmit={submit}
-        className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl"
-        role="dialog"
+    // Base UI: focus trap, scroll lock, Escape. The hand-rolled overlay
+    // had none of them, so Tab left the open form for the page behind it.
+    <Dialog open onOpenChange={(next) => !next && onClose()}>
+      <DialogPopup
         aria-labelledby="hold-override-title"
+        className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl"
       >
+        <form onSubmit={submit}>
         <h2
           id="hold-override-title"
           className="text-lg font-semibold text-[var(--brand-deep)]"
@@ -184,8 +179,9 @@ export function PrincipalHoldOverrideDialog({
             {isRehold ? "Re-hold" : "Unhold"}
           </button>
         </div>
-      </form>
-    </div>
+        </form>
+      </DialogPopup>
+    </Dialog>
   );
 }
 

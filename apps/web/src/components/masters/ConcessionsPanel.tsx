@@ -1,5 +1,6 @@
 "use client";
 // ratchet-allow: grids_without_row_menu — printable concession registers — rows carry no student id to act on
+import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import {
   canApproveConcession,
   canGrantConcession,
@@ -1882,17 +1883,10 @@ function ConcessionStudentListDrawer({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-[var(--overlay)] p-3 sm:items-center"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby={titleId}
-      onClick={onClose}
-    >
-      <div
-        className="max-h-[88vh] w-full max-w-3xl overflow-auto rounded-2xl bg-[var(--brand-cream)] shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
+    // Base UI: focus trap, scroll lock, Escape. The hand-rolled overlay
+    // had none of them, so Tab left the open card for the page behind it.
+    <Dialog open onOpenChange={(next) => !next && onClose()}>
+      <DialogPopup aria-labelledby={titleId} className="max-h-[88vh] w-full max-w-3xl overflow-auto rounded-2xl bg-[var(--brand-cream)] shadow-2xl">
         <div className="sticky top-0 z-10 flex items-start gap-3 border-b border-[var(--border)] bg-[var(--brand-cream)] px-5 py-4">
           <div className="min-w-0 flex-1">
             <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">
@@ -2007,8 +2001,8 @@ function ConcessionStudentListDrawer({
             )}
           </div>
         </div>
-      </div>
-    </div>
+      </DialogPopup>
+    </Dialog>
   );
 }
 

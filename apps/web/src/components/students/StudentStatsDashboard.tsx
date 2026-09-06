@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import Link from "next/link";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import {
@@ -185,17 +186,12 @@ function StudentListDrawer({
     return sec ? `${cls}-${sec}` : cls;
   };
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-[var(--overlay)] p-3 sm:items-center"
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
-      onClick={onClose}
-    >
-      <div
-        className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-lg"
-        onClick={(e) => e.stopPropagation()}
-      >
+    // Base UI: focus is trapped inside, the page behind is locked and
+    // Escape closes. The hand-rolled version had a click-catching
+    // backdrop and nothing else, so Tab walked out of the open card
+    // into the page underneath it.
+    <Dialog open onOpenChange={(next) => !next && onClose()}>
+      <DialogPopup aria-label={title} className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-lg">
         <div className="flex items-center justify-between gap-2 border-b border-[var(--border)] px-4 py-3">
           <div className="text-sm font-semibold text-[var(--brand-deep)]">
             {title}
@@ -250,8 +246,8 @@ function StudentListDrawer({
             </ErpTableBody>
           </ErpTable>
         </div>
-      </div>
-    </div>
+      </DialogPopup>
+    </Dialog>
   );
 }
 

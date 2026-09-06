@@ -510,6 +510,12 @@ export function ErpAiChatbot() {
         width: minimized ? FAB_W : PANEL_W,
         height: minimized ? FAB_H : PANEL_H,
       }}
+      // NOT a Base UI dialog, deliberately. This panel is dragged around the
+      // screen, minimised to a bubble, and read alongside the page it is
+      // answering about — so it must not trap focus or lock the page behind
+      // it, which is exactly what a modal does. Every other overlay in the
+      // app moved onto ui/dialog on 2026-09-06; this one stays a plain
+      // positioned panel because it is not modal in the first place.
       role="dialog"
       aria-label="ERP AI assistant"
     >

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import {
   loadGoogleMaps,
   type GMapsMap,
@@ -163,17 +164,10 @@ export function StopMapPicker({
   }, [point]);
 
   return (
-    <div
-      className="fixed inset-0 z-[90] flex items-end justify-center bg-[rgba(15,23,42,0.55)] p-4 sm:items-center"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="stop-map-title"
-      onClick={onCancel}
-    >
-      <div
-        className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
+    // Base UI: focus trap, scroll lock, Escape. The hand-rolled overlay
+    // had none of them, so Tab left the open card for the page behind it.
+    <Dialog open onOpenChange={(next) => !next && onCancel()}>
+      <DialogPopup aria-labelledby="stop-map-title" className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-2xl">
         <div className="border-b border-[var(--border)] p-4">
           <h2
             id="stop-map-title"
@@ -241,7 +235,7 @@ export function StopMapPicker({
             </button>
           </div>
         </div>
-      </div>
-    </div>
+      </DialogPopup>
+    </Dialog>
   );
 }

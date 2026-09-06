@@ -2,6 +2,7 @@
 // ratchet-allow: grids_without_row_menu — a rider detail chip, not a list
 
 import { useEffect, useMemo, useState } from "react";
+import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import {
   formatInr,
   isFeeDuePaid,
@@ -180,17 +181,12 @@ function TransportScheduleDialog({
   const totalDue = rows.reduce((s, r) => s + r.balancePaise, 0);
 
   return (
-    <div
-      className="fixed inset-0 z-[80] flex items-end justify-center bg-[rgba(15,23,42,0.55)] p-4 sm:items-center"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="transport-schedule-title"
-      onClick={onClose}
-    >
-      <div
-        className="max-h-[90vh] w-full max-w-lg overflow-hidden rounded-2xl border border-[rgba(32,48,80,0.14)] bg-[var(--card)] shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
+    // Base UI: focus is trapped inside, the page behind is locked and
+    // Escape closes. The hand-rolled version had a click-catching
+    // backdrop and nothing else, so Tab walked out of the open card
+    // into the page underneath it.
+    <Dialog open onOpenChange={(next) => !next && onClose()}>
+      <DialogPopup aria-labelledby="transport-schedule-title" className="max-h-[90vh] w-full max-w-lg overflow-hidden rounded-2xl border border-[rgba(32,48,80,0.14)] bg-[var(--card)] shadow-2xl">
         <div className="flex gap-3 border-b border-[rgba(32,48,80,0.08)] p-4 sm:p-5">
           <TransportBusBadge busNo={busNo} routeCode={routeCode} size="md" />
           <div className="min-w-0 flex-1">
@@ -266,8 +262,8 @@ function TransportScheduleDialog({
             Close
           </button>
         </div>
-      </div>
-    </div>
+      </DialogPopup>
+    </Dialog>
   );
 }
 

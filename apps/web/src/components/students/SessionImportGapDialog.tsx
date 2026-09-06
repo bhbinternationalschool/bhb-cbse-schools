@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import type { MastersState } from "@/lib/masters";
 import {
   applySessionGapActions,
@@ -102,13 +103,10 @@ export function SessionImportGapDialog({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-[rgba(32,48,80,0.45)] p-3 sm:items-center"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="session-gap-title"
-    >
-      <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white shadow-lg">
+    // Base UI: focus trap, scroll lock, Escape. The hand-rolled overlay
+    // had none of them, so Tab left the open card for the page behind it.
+    <Dialog open onOpenChange={(next) => !next && onClose()}>
+      <DialogPopup aria-labelledby="session-gap-title" className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white shadow-lg">
         <div className="border-b border-[rgba(32,48,80,0.08)] px-4 py-3">
           <h2
             id="session-gap-title"
@@ -238,7 +236,7 @@ export function SessionImportGapDialog({
             {busy ? "Saving…" : "Apply choices"}
           </button>
         </div>
-      </div>
-    </div>
+      </DialogPopup>
+    </Dialog>
   );
 }

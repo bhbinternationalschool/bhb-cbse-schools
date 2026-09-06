@@ -1,5 +1,6 @@
 "use client";
 
+import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import { useEffect, useMemo, useState } from "react";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import {
@@ -869,16 +870,12 @@ export function StaffAgreementPanel({
       </ErpTableShell>
 
       {editingId && editingAgreement?.status === "draft" && canEdit ? (
-        <div
-          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/45 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="agreement-editor-title"
-          onClick={() => closeEditor()}
-        >
-          <div
+        // Base UI: focus trap, scroll lock, Escape. The hand-rolled overlay
+        // had none of them, so Tab left the open editor for the page behind.
+        <Dialog open onOpenChange={(next) => !next && closeEditor()}>
+          <DialogPopup
+            aria-labelledby="agreement-editor-title"
             className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-[var(--card)] shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-3 border-b border-[var(--border)] px-5 py-4">
               <div>
@@ -997,8 +994,8 @@ export function StaffAgreementPanel({
                 Close
               </button>
             </div>
-          </div>
-        </div>
+          </DialogPopup>
+        </Dialog>
       ) : null}
     </div>
   );

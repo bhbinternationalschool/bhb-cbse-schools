@@ -11,6 +11,13 @@
 import type { ReactNode } from "react";
 import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  Dialog,
+  DialogClose,
+  DialogDescription,
+  DialogSheet,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 /**
  * Shared control styling — deliberately carries NO width.
@@ -325,37 +332,31 @@ export function InvDrawer({
   footer?: ReactNode;
   wide?: boolean;
 }) {
-  if (!open) return null;
+  // Base UI, so the drawer traps focus, locks the page behind it, closes on
+  // Escape and announces itself as a modal. It used to be a plain div with a
+  // click-catching backdrop: Tab walked straight out of the open form into
+  // the page underneath, and Escape did nothing. Forty-nine forms in this
+  // module render through here, so they all gain it at once.
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <button
-        type="button"
-        aria-label="Close"
-        className="absolute inset-0 bg-black/40"
-        onClick={onClose}
-      />
-      <div
-        role="dialog"
+    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+      <DialogSheet
         aria-label={title}
-        className={cn(
-          "relative flex h-full w-full flex-col bg-background shadow-xl",
-          wide ? "max-w-3xl" : "max-w-xl",
-        )}
+        className={wide ? "max-w-3xl" : "max-w-xl"}
       >
         <div className="flex items-start justify-between border-b px-5 py-3">
           <div>
-            <h2 className="text-base font-semibold">{title}</h2>
+            <DialogTitle className="text-base font-semibold">
+              {title}
+            </DialogTitle>
             {subtitle ? (
-              <p className="text-xs text-muted-foreground">{subtitle}</p>
+              <DialogDescription className="text-xs text-muted-foreground">
+                {subtitle}
+              </DialogDescription>
             ) : null}
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-muted"
-          >
+          <DialogClose className="rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-muted">
             Close
-          </button>
+          </DialogClose>
         </div>
         <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
         {footer ? (
@@ -363,7 +364,7 @@ export function InvDrawer({
             {footer}
           </div>
         ) : null}
-      </div>
-    </div>
+      </DialogSheet>
+    </Dialog>
   );
 }
