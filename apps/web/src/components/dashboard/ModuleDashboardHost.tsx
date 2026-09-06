@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   ModuleDashboardView,
+  type DashboardRowAction,
   type DashboardTableRow,
   type ModuleDashboardModel,
 } from "@/components/dashboard/ModuleDashboard";
@@ -94,6 +95,51 @@ export function ModuleDashboardHost({
       model={model}
       onNavigateTab={onNavigateTab}
       onTableRowClick={onTableRowClick}
+      onTableRowAction={runRowAction}
     />
   );
+}
+
+/**
+ * Perform a dashboard row action.
+ *
+ * The models are built in plain libs that must not open windows, so they name
+ * the intent and carry what it needs on the row; the work happens here. Same
+ * message the Defaulters page sends, so a family does not get two differently
+ * worded reminders depending on which screen the office was looking at.
+ */
+async function runRowAction(
+  kind: DashboardRowAction["kind"],
+  row: DashboardTableRow,
+): Promise<void> {
+  if (kind !== "whatsapp-defaulter") return;
+  const [{ composeWhatsAppDefaulterReminder }, { whatsAppPaymentLinkUrl }, { TENANT }] =
+    await Promise.all([
+      import("@/lib/playbook"),
+      import("@/lib/payments"),
+      import("@/lib/types"),
+    ]);
+  const message = composeWhatsAppDefaulterReminder({
+    schoolName: TENANT.nameDisplay,
+    studentName: String(row.name ?? ""),
+    classLabel: String(row.class ?? ""),
+    amountPaise: Number(row.amountPaise ?? 0),
+    overdueDays: Number(row.daysOverdue ?? 0),
+    stageLabel: "Reminder",
+  });
+  const mobile = String(row.mobile ?? "").replace(/\D/g, "");
+  if (mobile.length < 10) {
+    // No number on the household. Copying beats a dead link, and the office
+    // can paste it wherever they do reach this family.
+    try {
+      await navigator.clipboard.writeText(message);
+      window.alert(
+        "No WhatsApp number on this household — the reminder is copied to your clipboard.",
+      );
+    } catch {
+      window.alert("No WhatsApp number on this household.");
+    }
+    return;
+  }
+  window.open(whatsAppPaymentLinkUrl(mobile, message), "_blank", "noopener");
 }
