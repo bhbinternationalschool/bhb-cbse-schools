@@ -12,8 +12,11 @@ import {
   type MobileFeatureId,
 } from "@/lib/mobileFeatures";
 import {
+  appendRbacAudit,
   effectivePermissions,
+  removeUserGrant,
   resolveSessionRoles,
+  setUserGrant,
   type RbacState,
 } from "@/lib/rbac";
 import { MastersWorkCard } from "@/components/masters/MastersLayout";
@@ -33,10 +36,13 @@ export function MobileAccessPanel({
   state,
   masters,
   commit,
+  actorName,
 }: {
   state: RbacState;
   masters: MastersState | null;
   commit: (next: RbacState, msg?: string) => void;
+  /** Who is making the change — stamped on personal grants and the audit. */
+  actorName?: string;
 }) {
   const access = state.mobile ?? defaultMobileAccess();
   const roles = useMemo(
@@ -93,16 +99,74 @@ export function MobileAccessPanel({
     };
     const held = resolveSessionRoles(state, session, masters);
     const perms = effectivePermissions(held) as unknown as Map<string, Set<string>>;
+    // Whatever the office handed this one person counts too — that is the
+    // whole point of a personal grant, and the preview has to say so.
+    const personal = (state.userGrants ?? []).filter(
+      (g) =>
+        g.staffId === staffMember.id &&
+        (!g.expiresOn || g.expiresOn >= new Date().toISOString().slice(0, 10)),
+    );
     return {
       roleCodes: held.map((r) => r.code),
       ...resolveMobileFeatures({
         roleCodes: held.map((r) => r.code),
         staffId: staffMember.id,
         access,
-        can: (m, a) => !!perms.get(m)?.has(a),
+        can: (m, a) =>
+          !!perms.get(m)?.has(a) ||
+          personal.some((g) => g.module === m && g.actions.includes(a)),
       }),
     };
   }, [staffMember, masters, state, access]);
+
+  /** This person's live personal grants, newest first. */
+  const personalGrants = useMemo(() => {
+    if (!staffId) return [];
+    return (state.userGrants ?? [])
+      .filter((g) => g.staffId === staffId)
+      .sort((a, b) => b.grantedAt.localeCompare(a.grantedAt));
+  }, [state.userGrants, staffId]);
+
+  /**
+   * Give one person the module permission a feature needs, without moving the
+   * role. This is how a single teacher ends up on the fee counter while the
+   * rest of the staff room does not.
+   */
+  function grantForFeature(f: MobileFeature) {
+    if (!staffId || !staffMember) return;
+    const existing = personalGrants.find((g) => g.module === f.module);
+    const actions = [...new Set([...(existing?.actions ?? []), f.action])];
+    const withGrant = setUserGrant(state, {
+      staffId,
+      module: f.module,
+      actions,
+      note: `For the ${f.label} feature in the staff app`,
+      grantedBy: actorName || "",
+    });
+    commit(
+      appendRbacAudit(
+        withGrant,
+        actorName || "",
+        "user.grant",
+        `${staffMember.fullName}: ${f.module} · ${actions.join(", ")} (${f.label})`,
+      ),
+      `${staffMember.fullName} can now ${f.action} ${f.module}`,
+    );
+  }
+
+  function dropGrant(id: string) {
+    const g = personalGrants.find((x) => x.id === id);
+    if (!g || !staffMember) return;
+    commit(
+      appendRbacAudit(
+        removeUserGrant(state, id),
+        actorName || "",
+        "user.grant.remove",
+        `${staffMember.fullName}: ${g.module} · ${g.actions.join(", ")}`,
+      ),
+      "Personal permission removed",
+    );
+  }
 
   function setPersonal(id: MobileFeatureId, mode: "role" | "allow" | "deny") {
     if (!staffId) return;
@@ -250,17 +314,28 @@ export function MobileAccessPanel({
                           : "Off"}
                     </span>
                   </span>
-                  <select
-                    className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs"
-                    value={mode}
-                    onChange={(e) =>
-                      setPersonal(f.id, e.target.value as "role" | "allow" | "deny")
-                    }
-                  >
-                    <option value="role">Follow role</option>
-                    <option value="allow">Always on</option>
-                    <option value="deny">Always off</option>
-                  </select>
+                  <div className="flex shrink-0 flex-col items-end gap-1">
+                    <select
+                      className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs"
+                      value={mode}
+                      onChange={(e) =>
+                        setPersonal(f.id, e.target.value as "role" | "allow" | "deny")
+                      }
+                    >
+                      <option value="role">Follow role</option>
+                      <option value="allow">Always on</option>
+                      <option value="deny">Always off</option>
+                    </select>
+                    {blocked ? (
+                      <button
+                        type="button"
+                        className="rounded-lg border border-[var(--border)] px-2 py-1 text-[11px] font-medium hover:bg-[var(--muted-bg,rgba(0,0,0,0.04))]"
+                        onClick={() => grantForFeature(f)}
+                      >
+                        Grant {f.module} · {f.action}
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
               );
             })}
@@ -270,6 +345,49 @@ export function MobileAccessPanel({
             Pick somebody to see what their phone shows today.
           </p>
         )}
+
+        {staffId && personalGrants.length > 0 ? (
+          <div className="mt-4 rounded-lg border border-[var(--border)] p-3">
+            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+              Permissions given to this person alone
+            </h4>
+            <ul className="space-y-1">
+              {personalGrants.map((g) => {
+                const expired =
+                  !!g.expiresOn &&
+                  g.expiresOn < new Date().toISOString().slice(0, 10);
+                return (
+                  <li
+                    key={g.id}
+                    className="flex items-center justify-between gap-3 text-xs"
+                  >
+                    <span>
+                      <span className="font-medium">
+                        {g.module} · {g.actions.join(", ")}
+                      </span>
+                      <span className="block text-[var(--muted)]">
+                        {g.note || "No note"}
+                        {g.grantedBy ? ` · by ${g.grantedBy}` : ""}
+                        {g.expiresOn
+                          ? expired
+                            ? ` · expired ${g.expiresOn}`
+                            : ` · until ${g.expiresOn}`
+                          : ""}
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      className="shrink-0 rounded-lg border border-[var(--border)] px-2 py-1 text-[11px]"
+                      onClick={() => dropGrant(g.id)}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ) : null}
       </MastersWorkCard>
     </div>
   );

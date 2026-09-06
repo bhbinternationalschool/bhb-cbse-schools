@@ -35,10 +35,11 @@ export function hasMobileFeature(
 }
 
 /**
- * 403 unless the office has switched this feature on for this person AND
- * their role still carries the underlying grant. The message says which of
- * the two failed, because the fix is different: one is Masters → Roles →
- * Mobile app, the other is the permission matrix.
+ * 403 unless the office has switched this feature on for this person AND the
+ * permissions they hold still carry the underlying grant. The message says
+ * which of the two failed, because the fix is different: one is Masters →
+ * Roles → Mobile app, the other is the permission matrix — or, for one person
+ * only, a personal grant on that same screen.
  */
 export function assertMobileFeature(
   ctx: ApiAuthContext,
@@ -54,7 +55,7 @@ export function assertMobileFeature(
   if (res.blockedByRbac.includes(feature)) {
     throw new ApiError(
       "forbidden",
-      `${label} is switched on for you in the app, but your role does not have ${meta?.module} ${meta?.action} rights.`,
+      `${label} is switched on for you in the app, but you do not have ${meta?.module} ${meta?.action} rights. The office can add them to your role, or to you alone, in Masters → Roles.`,
       403,
     );
   }

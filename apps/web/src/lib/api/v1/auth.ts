@@ -67,6 +67,7 @@ async function loadServerRbac(): Promise<RbacState> {
         roles,
         assignments: Array.isArray(bundle.assignments) ? bundle.assignments : [],
         audit: Array.isArray(bundle.audit) ? bundle.audit : [],
+        userGrants: Array.isArray(bundle.userGrants) ? bundle.userGrants : [],
         mobile: bundle.mobile,
       } as Partial<RbacState>);
     }

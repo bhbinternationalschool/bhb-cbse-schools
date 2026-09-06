@@ -193,6 +193,7 @@ SELFTESTS=(
   test:question-bank
   test:rbac-infer
   test:rbac-scope
+  test:rbac-user-grants
   test:receipt-lookup
   test:referrals
   test:report-export

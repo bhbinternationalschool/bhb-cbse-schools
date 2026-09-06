@@ -260,6 +260,7 @@ jobs:
           npm run test:question-bank
           npm run test:rbac-infer
           npm run test:rbac-scope
+          npm run test:rbac-user-grants
           npm run test:school-whatsapp
           npm run test:upload-validation
           npm run test:receipt-lookup

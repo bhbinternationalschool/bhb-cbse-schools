@@ -76,6 +76,7 @@ function stateWithAssignment(scope: UserRoleAssignment["scope"]): RbacState {
       },
     ],
     audit: [],
+    userGrants: [],
     mobile: defaultMobileAccess(),
   };
 }
@@ -172,6 +173,7 @@ function stateWithAssignment(scope: UserRoleAssignment["scope"]): RbacState {
     roles: [teacherRole],
     assignments: [],
     audit: [],
+    userGrants: [],
     mobile: defaultMobileAccess(),
   };
   assert.equal(
