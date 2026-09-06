@@ -59,6 +59,7 @@ import {
   StudentAvatar,
   StudentNameLabel,
 } from "@/components/students/StudentAvatar";
+import { UdiseStatusBadge } from "@/components/students/UdiseStatusBadge";
 import { describeFilters, downloadPdfReport, downloadXlsxReport } from "@/lib/reportExport";
 import {
   BulkActionBar,
@@ -1784,6 +1785,7 @@ export function StudentsWorkspace() {
                                 </span>
                               ) : null}
                               </StudentNameLabel>
+                              <UdiseStatusBadge student={s} />
                               {state &&
                               pendingCurriculumRequests(state, s.id).length >
                                 0 ? (
