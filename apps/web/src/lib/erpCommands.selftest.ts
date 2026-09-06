@@ -47,6 +47,8 @@ import {
   formatStudentDetailsReply,
   parseStudentDetailsQuery,
   formatSchoolSnapshotReply,
+  formatAdmissionsPeriodReply,
+  parseAdmissionsQuery,
   parseFreeTeachersQuery,
   periodAtTime,
   resolveClassOrSectionRef,
@@ -175,6 +177,14 @@ const masters = {
   assert.equal(parseErpCommandLocal("VIII B me kaun nahi aaya")?.fields.section, "8B");
   assert.equal(parseErpCommandLocal("5A में कौन गैरहाजिर है")?.commandId, "absent_list", "Devanagari fee/absent words match without ASCII word boundaries");
   assert.equal(parseErpCommandLocal("7B की उपस्थिति")?.fields.section, "7B");
+  assert.equal(parseErpCommandLocal("admissions this week")?.fields.text, "week");
+  assert.equal(parseErpCommandLocal("admissions report")?.fields.text, "week");
+  assert.equal(parseErpCommandLocal("is hafte ke admission")?.commandId, "admissions_week");
+  assert.equal(parseErpCommandLocal("admissions this month")?.fields.text, "month");
+  assert.equal(parseErpCommandLocal("new enquiries today")?.fields.text, "today");
+  assert.equal(parseErpCommandLocal("इस हफ्ते के दाखिले")?.commandId, "admissions_week");
+  assert.equal(parseAdmissionsQuery("admission"), null, "the word alone is not a report ask");
+  assert.equal(parseAdmissionsQuery("Amay ka admission form kaha hai, uske papa ne kal poocha tha"), null, "a long message about one person is not the report");
   assert.equal(parseErpCommandLocal("school snapshot")?.commandId, "school_snapshot");
   assert.equal(parseErpCommandLocal("school status")?.commandId, "school_snapshot");
   assert.equal(parseErpCommandLocal("aaj ka school report")?.commandId, "school_snapshot");
@@ -977,6 +987,51 @@ const masters = {
   assert.ok(quiet.includes("No punches yet (44 active)"), quiet);
   assert.ok(!quiet.includes("follow-up"), "no follow-ups due — the clause is dropped");
   assert.ok(!quiet.includes("Needs attention"), "no alerts — the section is dropped");
+}
+
+// ─── admissions period reply ───────────────────────────────────────────
+{
+  const base = {
+    periodLabel: "last 7 days",
+    fromDate: "2026-08-30",
+    toDate: "2026-09-05",
+    todayIso: "2026-09-05",
+    newEnquiries: 14,
+    bySource: [
+      { label: "Walk-in", count: 6 },
+      { label: "Website", count: 4 },
+      { label: "Referral", count: 3 },
+      { label: "Field survey", count: 1 },
+    ],
+    byClass: [
+      { label: "Nursery", count: 5 },
+      { label: "I", count: 4 },
+      { label: "VI", count: 2 },
+    ],
+    moved: { applied: 5, verified: 2, enrolled: 3, lost: 2 },
+    lostReasons: [{ reason: "Fee too high", count: 2 }],
+    followUps: { overdue: 4, dueToday: 2 },
+    pipelineOpen: 38,
+  };
+  const t = formatAdmissionsPeriodReply(base);
+  assert.ok(t.startsWith("*Admissions* · last 7 days"), t);
+  assert.ok(t.includes("14 new enquiries · Walk-in 6, Website 4, Referral 3, Field survey 1"), t);
+  assert.ok(t.includes("5 applied · 2 verified · 3 enrolled · 2 lost"), t);
+  assert.ok(t.includes("*Classes asked for*\nNursery  5\nI  4\nVI  2"), t);
+  assert.ok(t.includes("*Lost because:* Fee too high (2)"), t);
+  assert.ok(t.includes("⚠️ 4 follow-ups overdue · 2 due today"), t);
+  assert.ok(t.endsWith("Open pipeline: 38 leads."), t);
+
+  const one = formatAdmissionsPeriodReply({ ...base, periodLabel: "today", newEnquiries: 1, bySource: [{ label: "Phone", count: 1 }], byClass: [], moved: { applied: 0, verified: 0, enrolled: 0, lost: 0 }, lostReasons: [], followUps: { overdue: 0, dueToday: 0 }, pipelineOpen: 1 });
+  assert.ok(one.includes("1 new enquiry · Phone 1"), one);
+  assert.ok(one.includes("None moved stage in this period."), one);
+  assert.ok(one.includes("No follow-up is overdue."), one);
+  assert.ok(one.endsWith("Open pipeline: 1 lead."), one);
+
+  const quiet = formatAdmissionsPeriodReply({ ...base, newEnquiries: 0, bySource: [], byClass: [], moved: { applied: 0, verified: 0, enrolled: 0, lost: 0 }, lostReasons: [], followUps: { overdue: 0, dueToday: 0 }, pipelineOpen: 0 });
+  assert.ok(quiet.includes("0 new enquiries"), quiet);
+  assert.ok(!quiet.includes("None moved stage"), "nothing arrived — no stage line either");
+  assert.ok(!quiet.includes("Classes asked for"), quiet);
 }
 
 console.log("erpCommands.selftest.ts OK");

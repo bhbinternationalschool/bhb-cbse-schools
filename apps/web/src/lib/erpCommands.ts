@@ -122,6 +122,31 @@ export const ERP_COMMANDS: ErpCommandDef[] = [
     scope: "any",
   },
   {
+    id: "admissions_week",
+    title: "Admissions this week",
+    kind: "read",
+    module: "admissions",
+    action: "view",
+    description:
+      "New enquiries in a period with where they came from, how many applied, verified, enrolled and lost, the classes most in demand, follow-ups overdue or due today, and the open pipeline. Defaults to the last 7 days; 'this month' or 'today' also work.",
+    examples: [
+      "admissions this week",
+      "admissions report",
+      "is hafte ke admission",
+      "admissions this month",
+      "new enquiries today",
+    ],
+    fields: [
+      {
+        name: "text",
+        type: "text",
+        required: false,
+        description: "Period: 'week' (default), 'month', or 'today'",
+      },
+    ],
+    scope: "any",
+  },
+  {
     id: "school_snapshot",
     title: "School snapshot",
     kind: "read",
@@ -622,6 +647,10 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
   }
   if (COLLECTION_WORDS.test(t) && !extractSectionRefs(t).length) {
     return { commandId: "collection_today", fields: { date: "" }, source: "local" };
+  }
+  const admPeriod = parseAdmissionsQuery(t);
+  if (admPeriod) {
+    return { commandId: "admissions_week", fields: { text: admPeriod }, source: "local" };
   }
   if (SNAPSHOT_WORDS.test(t)) {
     return { commandId: "school_snapshot", fields: {}, source: "local" };
@@ -1675,6 +1704,31 @@ export const TENDER_MODE_LABEL: Record<string, string> = {
 
 // ─── Free teachers in a period ─────────────────────────────────────────
 
+const ADMISSION_WORDS =
+  /(?<![\p{L}\p{M}\p{N}])(admissions?|enquir(?:y|ies)|inquir(?:y|ies)|leads?|daakhil[ae]|dakhil[ae]|दाखिल(?:ा|े|ों)?|प्रवेश|पूछताछ)(?![\p{L}\p{M}\p{N}])/iu;
+
+/**
+ * "admissions this week", "admissions report", "is hafte ke admission",
+ * "admissions this month", "new enquiries today". Returns the period —
+ * "week" (the default), "month" or "today" — or null when the message is
+ * not an admissions ask. A named person ("Amay ka admission form") is not
+ * this: the reply is a count, not a record.
+ */
+export function parseAdmissionsQuery(text: string): "week" | "month" | "today" | null {
+  const t = (text || "").trim();
+  if (!t || !ADMISSION_WORDS.test(t)) return null;
+  if (t.length > 60) return null;
+  const low = t.toLowerCase();
+  if (/(?<![\p{L}\p{M}])(month|mahine|mahina|महीने|महीना)(?![\p{L}\p{M}])/iu.test(low)) return "month";
+  if (/(?<![\p{L}\p{M}])(today|aaj|आज)(?![\p{L}\p{M}])/iu.test(low)) return "today";
+  if (
+    /(?<![\p{L}\p{M}])(week|hafte|hafta|saptah|सप्ताह|हफ्ते|report|summary|status|list|count|kitne|कितने|new|naye|नए)(?![\p{L}\p{M}])/iu.test(low)
+  ) {
+    return "week";
+  }
+  return null;
+}
+
 /**
  * The whole-school one-pager: "school snapshot", "school status", "aaj ka
  * school report", "daily summary", "how is the school doing". Deliberately
@@ -2228,5 +2282,61 @@ export function formatSchoolSnapshotReply(input: SchoolSnapshotInput): string {
     lines.push("", "*Needs attention*");
     for (const al of alerts) lines.push(`• ${al}`);
   }
+  return lines.join("\n");
+}
+
+// ─── Admissions in a period ────────────────────────────────────────────
+
+export type AdmissionsPeriodInput = {
+  periodLabel: string; // "last 7 days"
+  fromDate: string;
+  toDate: string;
+  todayIso: string;
+  newEnquiries: number;
+  bySource: { label: string; count: number }[];
+  byClass: { label: string; count: number }[];
+  moved: { applied: number; verified: number; enrolled: number; lost: number };
+  lostReasons: { reason: string; count: number }[];
+  followUps: { overdue: number; dueToday: number };
+  pipelineOpen: number;
+};
+
+export function formatAdmissionsPeriodReply(input: AdmissionsPeriodInput): string {
+  const lines = [`*Admissions* · ${input.periodLabel}`];
+  lines.push(
+    `${input.newEnquiries} new enquir${input.newEnquiries === 1 ? "y" : "ies"}` +
+      (input.bySource.length
+        ? ` · ${input.bySource.slice(0, 4).map((s) => `${s.label} ${s.count}`).join(", ")}`
+        : ""),
+  );
+  const m = input.moved;
+  if (m.applied || m.verified || m.enrolled || m.lost) {
+    const bits: string[] = [];
+    if (m.applied) bits.push(`${m.applied} applied`);
+    if (m.verified) bits.push(`${m.verified} verified`);
+    if (m.enrolled) bits.push(`${m.enrolled} enrolled`);
+    if (m.lost) bits.push(`${m.lost} lost`);
+    lines.push(bits.join(" · "));
+  } else if (input.newEnquiries) {
+    lines.push("None moved stage in this period.");
+  }
+  if (input.byClass.length) {
+    lines.push("", "*Classes asked for*");
+    for (const c of input.byClass.slice(0, 6)) lines.push(`${c.label}  ${c.count}`);
+  }
+  if (input.lostReasons.length) {
+    lines.push("", `*Lost because:* ${input.lostReasons.slice(0, 3).map((r) => `${r.reason} (${r.count})`).join(", ")}`);
+  }
+  lines.push("");
+  const f = input.followUps;
+  if (f.overdue || f.dueToday) {
+    const bits: string[] = [];
+    if (f.overdue) bits.push(`⚠️ ${f.overdue} follow-up${f.overdue === 1 ? "" : "s"} overdue`);
+    if (f.dueToday) bits.push(`${f.dueToday} due today`);
+    lines.push(bits.join(" · "));
+  } else {
+    lines.push("No follow-up is overdue.");
+  }
+  lines.push(`Open pipeline: ${input.pipelineOpen} lead${input.pipelineOpen === 1 ? "" : "s"}.`);
   return lines.join("\n");
 }

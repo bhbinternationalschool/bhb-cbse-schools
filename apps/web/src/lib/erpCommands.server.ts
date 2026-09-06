@@ -88,6 +88,7 @@ import {
   formatHelpReply,
   formatBusManifestReply,
   formatHomeworkReply,
+  formatAdmissionsPeriodReply,
   formatSchoolSnapshotReply,
   formatStudentDetailsReply,
   formatPendingLeavesReply,
@@ -632,6 +633,18 @@ export async function handleErpStaffCommand(
       };
     }
   }
+  if (command.id === "admissions_week") {
+    const roleCodes = resolveSessionRoles(rbac, session, masters).map((r) => r.code);
+    if (!isOfficeLike(roleCodes) && !roleCodes.includes("admissions")) {
+      void audit(session, command, parsed.fields, text, "denied", { reason: "scope", channel: inbound.channel });
+      return {
+        handled: true,
+        audience: "erp_command_denied",
+        text: "The admissions report is for the admissions desk, office and leadership.",
+      };
+    }
+    resolved.period = (parsed.fields.text || "week").trim().toLowerCase();
+  }
   if (command.id === "school_snapshot") {
     const roleCodes = resolveSessionRoles(rbac, session, masters).map((r) => r.code);
     if (!isOfficeLike(roleCodes)) {
@@ -833,6 +846,8 @@ async function runReadCommand(
       return studentDetails(resolved, session);
     case "school_snapshot":
       return schoolSnapshot(session, todayIso);
+    case "admissions_week":
+      return admissionsPeriod(resolved.period || "week", session, todayIso);
     default:
       return "That command isn't wired up yet.";
   }
@@ -950,6 +965,82 @@ async function attendanceSummary(
     scope: school ? "school" : "mine",
     classes,
     staff,
+  });
+}
+
+async function admissionsPeriod(
+  period: string,
+  session: DemoSession,
+  todayIso: string,
+): Promise<string> {
+  const { ensureAdmissionsHydratedServer } = await import("@/lib/admissionsPersistence");
+  const { loadAdmissions, sourceLabel } = await import("@/lib/admissions");
+  await ensureAdmissionsHydratedServer();
+  const masters = loadMasters();
+  const shift = (days: number) => {
+    const d = new Date(`${todayIso}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  };
+  const fromDate =
+    period === "today" ? todayIso : period === "month" ? `${todayIso.slice(0, 7)}-01` : shift(-6);
+  const periodLabel =
+    period === "today" ? "today" : period === "month" ? "this month" : "last 7 days";
+  const leads = loadAdmissions().leads.filter(
+    (l) => !l.academicYearCode || l.academicYearCode === session.academicYearCode,
+  );
+  const inPeriod = (iso: string) => {
+    const d = (iso || "").slice(0, 10);
+    return !!d && d >= fromDate && d <= todayIso;
+  };
+  const fresh = leads.filter((l) => inPeriod(l.createdAt));
+  const touched = leads.filter((l) => inPeriod(l.updatedAt));
+  const tally = <T>(rows: T[], key: (r: T) => string) => {
+    const m = new Map<string, number>();
+    for (const r of rows) {
+      const k = key(r);
+      if (!k) continue;
+      m.set(k, (m.get(k) ?? 0) + 1);
+    }
+    return [...m.entries()]
+      .map(([label, count]) => ({ label, count }))
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+  };
+  const className = (id: string) =>
+    (masters.classes ?? []).find((c) => c.id === id)?.name || "";
+  // A lead that arrived and moved on within the period counts in both, which
+  // is what "what happened this week" means — not a funnel where each lead
+  // appears once.
+  const movedInto = (stage: string) =>
+    touched.filter((l) => l.stage === stage).length;
+  const open = leads.filter((l) => l.stage !== "enrolled" && l.stage !== "lost");
+  return formatAdmissionsPeriodReply({
+    periodLabel,
+    fromDate,
+    toDate: todayIso,
+    todayIso,
+    newEnquiries: fresh.length,
+    bySource: tally(fresh, (l) => sourceLabel(l.source)),
+    byClass: tally(fresh, (l) => className(l.classSoughtId)),
+    moved: {
+      applied: movedInto("applied"),
+      verified: movedInto("verified"),
+      enrolled: movedInto("enrolled"),
+      lost: movedInto("lost"),
+    },
+    lostReasons: tally(
+      touched.filter((l) => l.stage === "lost"),
+      (l) => (l.lostReason || "").trim() || "not recorded",
+    ).map((r) => ({ reason: r.label, count: r.count })),
+    followUps: {
+      overdue: open.filter(
+        (l) => l.nextFollowUpAt && l.nextFollowUpAt.slice(0, 10) < todayIso,
+      ).length,
+      dueToday: open.filter(
+        (l) => l.nextFollowUpAt && l.nextFollowUpAt.slice(0, 10) === todayIso,
+      ).length,
+    },
+    pipelineOpen: open.length,
   });
 }
 
