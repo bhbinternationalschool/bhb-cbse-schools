@@ -63,6 +63,8 @@ import {
   noticeTitleFrom,
   renderTemplateBody,
   formatClassMessageCard,
+  parseStaffBroadcastQuery,
+  formatStaffBroadcastCard,
   parseFreeTeachersQuery,
   periodAtTime,
   resolveClassOrSectionRef,
@@ -191,6 +193,11 @@ const masters = {
   assert.equal(parseErpCommandLocal("VIII B me kaun nahi aaya")?.fields.section, "8B");
   assert.equal(parseErpCommandLocal("5A में कौन गैरहाजिर है")?.commandId, "absent_list", "Devanagari fee/absent words match without ASCII word boundaries");
   assert.equal(parseErpCommandLocal("7B की उपस्थिति")?.fields.section, "7B");
+  assert.equal(parseErpCommandLocal("Staff broadcast: meeting 3 pm in library")?.commandId, "staff_broadcast");
+  assert.equal(parseErpCommandLocal("sabhi staff ko bhejo: kal 8 baje aana hai")?.commandId, "staff_broadcast");
+  assert.equal(parseStaffBroadcastQuery("Class 4 parents ko bhejo: kal PTM"), null, "a parent audience is not a staff broadcast");
+  assert.equal(parseStaffBroadcastQuery("5A teachers ko bhejo: test hai"), null, "a section means it is about a class");
+  assert.equal(parseStaffBroadcastQuery("staff meeting"), null, "no colon, no message");
   assert.equal(parseErpCommandLocal("Class 4 parents ko bhejo: kal PTM 9 baje")?.commandId, "class_message");
   assert.equal(parseErpCommandLocal("message 5A parents: bring sports uniform")?.fields.section, "5A");
   assert.equal(parseClassMessageQuery("Class 4 parents ko bhejo"), null, "no colon, no message — nothing is sent");
@@ -1246,6 +1253,35 @@ const masters = {
   assert.ok(card.includes("2 opted out of WhatsApp and will not receive it."), card);
   const one = formatClassMessageCard({ sectionLabel: "V A", templateLabel: "t", rendered: "r", familyCount: 1, optedOut: 0 });
   assert.ok(one.includes("Goes to 1 family.") && !one.includes("opted out"), one);
+}
+
+// ─── staff broadcast ───────────────────────────────────────────────────
+{
+  assert.equal(parseStaffBroadcastQuery("Staff broadcast: meeting 3 pm in library"), "meeting 3 pm in library");
+  assert.equal(parseStaffBroadcastQuery("tell all staff: staff meeting at 3pm"), "staff meeting at 3pm");
+  assert.equal(parseStaffBroadcastQuery("broadcast to staff: submit marks by Friday"), "submit marks by Friday");
+  assert.equal(parseStaffBroadcastQuery("staff ko bhejo: hi"), null, "too short to be a message");
+
+  const withTpl = formatStaffBroadcastCard({
+    message: "meeting 3 pm in library",
+    staffCount: 44,
+    templateLabel: "School notice broadcast (EN)",
+    rendered: "📢 *BHB*\n\n*meeting 3 pm in library*\n\nmeeting 3 pm in library",
+  });
+  assert.ok(withTpl.startsWith("*Broadcast to staff*"), withTpl);
+  assert.ok(withTpl.includes("📢 *BHB*"), "the card shows what staff will receive");
+  assert.ok(withTpl.includes("Goes to 44 staff members."), withTpl);
+  assert.ok(withTpl.includes("Phone notification to everyone · WhatsApp via School notice broadcast (EN)."), withTpl);
+
+  const noTpl = formatStaffBroadcastCard({
+    message: "meeting 3 pm", staffCount: 1, templateLabel: "", rendered: "",
+  });
+  assert.ok(noTpl.includes("Goes to 1 staff member."), noTpl);
+  assert.ok(
+    noTpl.includes("Phone notification only — no approved WhatsApp notice template, so WhatsApp is skipped."),
+    "without a template the card says WhatsApp is skipped rather than implying it sent",
+  );
+  assert.ok(noTpl.includes("meeting 3 pm"), "the plain message is still shown");
 }
 
 console.log("erpCommands.selftest.ts OK");

@@ -97,6 +97,7 @@ import {
   formatHomeworkReply,
   formatAdmissionsPeriodReply,
   formatClassMessageCard,
+  formatStaffBroadcastCard,
   formatMarkAttendanceCard,
   messageScriptLanguage,
   noticeTitleFrom,
@@ -819,6 +820,64 @@ export async function handleErpStaffCommand(
       resolved.sectionIds = mine.map((s) => s.sectionId).join(",");
     }
   }
+  if (command.id === "staff_broadcast") {
+    const roleCodes = resolveSessionRoles(rbac, session, masters).map((x) => x.code);
+    if (!isOfficeLike(roleCodes)) {
+      void audit(session, command, parsed.fields, text, "denied", {
+        reason: "scope",
+        channel: inbound.channel,
+      });
+      return {
+        handled: true,
+        audience: "erp_command_denied",
+        text: "Broadcasting to all staff is for the office and leadership.",
+      };
+    }
+    const message = (parsed.fields.text || "").trim();
+    if (message.length < 3) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: "What should the staff be told? Put it after a colon:\n_Staff broadcast: meeting 3 pm in library_",
+      };
+    }
+    if (message.length > 700) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: "That message is too long for one notice. Please shorten it to about 700 characters.",
+      };
+    }
+    const activeStaff = (masters.staff ?? []).filter((st) => st.status === "active");
+    const { ensureWaTemplatesHydrated } = await import("@/lib/waTemplatesPersistence");
+    const { listApprovedTemplates, loadWaTemplates } = await import("@/lib/waTemplates");
+    await ensureWaTemplatesHydrated();
+    const approved = listApprovedTemplates(loadWaTemplates(), { module: "comms" });
+    const wantLang = messageScriptLanguage(message);
+    const notice =
+      approved.find((tpl) => tpl.familyKey === "comms_notice" && tpl.language === wantLang) ??
+      approved.find((tpl) => tpl.familyKey === "comms_notice") ??
+      null;
+    const vars: Record<string, string> = {
+      schoolName: TENANT.nameDisplay,
+      noticeTitle: noticeTitleFrom(message),
+      noticeBody: message,
+    };
+    resolved.message = message;
+    resolved.staffIds = activeStaff.map((st) => st.id).join(",");
+    resolved.mobiles = activeStaff.map((st) => (st.mobile || "").trim()).filter(Boolean).join(",");
+    resolved.templateId = notice?.id || "";
+    resolved.templateMetaName = notice ? notice.metaName || notice.name : "";
+    resolved.templateLanguage = notice ? notice.metaLanguage || notice.language : "";
+    resolved.templateLabel = notice ? `${notice.name} (${notice.language.toUpperCase()})` : "";
+    resolved.vars = JSON.stringify(vars);
+    resolved.cardSummary = formatStaffBroadcastCard({
+      message,
+      staffCount: activeStaff.length,
+      templateLabel: resolved.templateLabel,
+      rendered: notice ? renderTemplateBody(notice.body, vars) : message,
+    });
+  }
   if (command.id === "class_message" && resolved.sectionId) {
     const message = (parsed.fields.text || "").trim();
     if (message.length < 3) {
@@ -994,7 +1053,9 @@ export async function handleErpStaffCommand(
   if (command.kind === "write") {
     const token = random();
     const summary =
-      command.id === "class_message"
+      command.id === "staff_broadcast"
+        ? resolved.cardSummary || command.title
+        : command.id === "class_message"
         ? resolved.cardSummary || command.title
         : command.id === "mark_attendance"
         ? resolved.cardSummary || command.title
@@ -2011,6 +2072,83 @@ async function runConfirmedWrite(
       handled: true,
       audience: "erp_command_post_homework",
       text: `Posted. ${label} ${r.subjectName || ""} homework is live${res.push.sent ? ` · ${res.push.sent} phone${res.push.sent === 1 ? "" : "s"} notified` : ""}.\nUndo it in the ERP: Homework → today's posts.`,
+    };
+  }
+  if (command.id === "staff_broadcast") {
+    const roleCodes = resolveSessionRoles(rbac, session, masters).map((x) => x.code);
+    if (!isOfficeLike(roleCodes)) {
+      void audit(session, command, pending.fields, pending.originalText, "denied", {
+        reason: "scope_at_confirm",
+        channel: inbound.channel,
+      });
+      return {
+        handled: true,
+        audience: "erp_command_denied",
+        text: "Your role no longer allows broadcasting to staff, so nothing was sent.",
+      };
+    }
+    const staffIds = (r.staffIds || "").split(",").filter(Boolean);
+    const mobiles = (r.mobiles || "").split(",").filter(Boolean);
+    if (!staffIds.length) {
+      return {
+        handled: true,
+        audience: "erp_command_error",
+        text: "That broadcast is no longer valid. Send it again.",
+      };
+    }
+    // Phones first: every staff member has the app, and push carries the
+    // message as written whether or not a template exists.
+    const { sendPushToSubjects } = await import("@/lib/webPush.server");
+    const push = await sendPushToSubjects("staff", staffIds, {
+      title: `${session.fullName} · ${TENANT.shortName}`,
+      body: r.message && r.message.length > 200 ? `${r.message.slice(0, 197)}…` : r.message || "",
+      url: "/notices",
+      data: { kind: "broadcast" },
+    }).catch(() => ({ sent: 0, expired: 0, failed: 0 }));
+
+    let wa = { recipientCount: 0, skippedOptOut: 0, sent: 0, failed: 0 };
+    if (r.templateMetaName && mobiles.length) {
+      let vars: Record<string, string> = {};
+      try {
+        vars = JSON.parse(r.vars || "{}") as Record<string, string>;
+      } catch {
+        vars = {};
+      }
+      const { buildWaTemplateBodyComponent } = await import("@/lib/waSend");
+      const { getTemplateById, loadWaTemplates } = await import("@/lib/waTemplates");
+      const tpl = getTemplateById(loadWaTemplates(), r.templateId || "");
+      const { broadcastTemplateToMobiles } = await import("@/lib/waBroadcast.server");
+      wa = await broadcastTemplateToMobiles({
+        mobiles,
+        template: {
+          name: r.templateMetaName,
+          language: r.templateLanguage || "en",
+          components: [buildWaTemplateBodyComponent(tpl?.variables ?? [], vars)],
+        },
+        module: "notices",
+        originUrl: publicOrigin(),
+      });
+    }
+    void audit(session, command, pending.fields, pending.originalText, "ok", {
+      channel: inbound.channel,
+      staffCount: staffIds.length,
+      pushSent: push.sent,
+      waSent: wa.sent,
+      waFailed: wa.failed,
+      template: r.templateMetaName || "(none)",
+      message: r.message,
+    });
+    const bits = [`${push.sent} phone${push.sent === 1 ? "" : "s"} notified`];
+    if (r.templateMetaName) {
+      bits.push(`WhatsApp to ${wa.sent} of ${wa.recipientCount}`);
+      if (wa.failed) bits.push(`${wa.failed} failed`);
+    } else {
+      bits.push("WhatsApp skipped (no approved notice template)");
+    }
+    return {
+      handled: true,
+      audience: "erp_command_staff_broadcast",
+      text: `Sent to ${staffIds.length} staff · ${bits.join(" · ")}.`,
     };
   }
   if (command.id === "class_message") {

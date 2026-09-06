@@ -129,6 +129,25 @@ export const ERP_COMMANDS: ErpCommandDef[] = [
     scope: "any",
   },
   {
+    id: "staff_broadcast",
+    title: "Broadcast to staff",
+    kind: "write",
+    module: "notifications",
+    action: "edit",
+    description:
+      "Send one message to every active staff member — a phone notification to everyone, and WhatsApp as an approved notice template where one is approved. Office and leadership only.",
+    examples: [
+      "Staff broadcast: meeting 3 pm in library",
+      "tell all staff: staff meeting at 3pm",
+      "sabhi staff ko bhejo: kal 8 baje aana hai",
+      "broadcast to staff: submit marks by Friday",
+    ],
+    fields: [
+      { name: "text", type: "text", required: true, description: "The message, after a colon" },
+    ],
+    scope: "any",
+  },
+  {
     id: "class_message",
     title: "Message a class's parents",
     kind: "write",
@@ -727,6 +746,10 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
   }
   if (COLLECTION_WORDS.test(t) && !extractSectionRefs(t).length) {
     return { commandId: "collection_today", fields: { date: "" }, source: "local" };
+  }
+  const staffMsg = parseStaffBroadcastQuery(t);
+  if (staffMsg) {
+    return { commandId: "staff_broadcast", fields: { text: staffMsg }, source: "local" };
   }
   const classMsg = parseClassMessageQuery(t);
   if (classMsg) {
@@ -2843,5 +2866,48 @@ export function formatClassMessageCard(input: {
   if (input.optedOut) {
     lines.push(`${input.optedOut} opted out of WhatsApp and will not receive it.`);
   }
+  return lines.join("\n");
+}
+
+// ─── Staff broadcast (write) ───────────────────────────────────────────
+
+const STAFF_AUDIENCE_WORD =
+  /(?<![\p{L}\p{M}\p{N}])(staff|teachers?|faculty|employees?|karmchari|कर्मचारी|शिक्षकों|स्टाफ)(?![\p{L}\p{M}\p{N}])/iu;
+
+/**
+ * "Staff broadcast: meeting 3 pm in library", "tell all staff: …",
+ * "sabhi staff ko bhejo: …". Needs a staff audience word, a sending verb
+ * or the word broadcast, and the message after a colon. A section in the
+ * message means it is about a class, not the whole staff, so it is left
+ * to the class-message command.
+ */
+export function parseStaffBroadcastQuery(text: string): string | null {
+  const t = (text || "").trim();
+  if (!t || !STAFF_AUDIENCE_WORD.test(t)) return null;
+  const colon = t.search(/[:：]/);
+  if (colon <= 0) return null;
+  const head = t.slice(0, colon);
+  if (!SEND_VERB.test(head) && !/(?<![\p{L}\p{M}\p{N}])broadcast(?![\p{L}\p{M}\p{N}])/iu.test(head)) {
+    return null;
+  }
+  if (PARENT_WORD.test(head)) return null;
+  if (extractSectionRefs(head).length) return null;
+  const message = t.slice(colon + 1).trim();
+  return message.length >= 3 ? message : null;
+}
+
+export function formatStaffBroadcastCard(input: {
+  message: string;
+  staffCount: number;
+  templateLabel: string;
+  rendered: string;
+}): string {
+  const lines = [`*Broadcast to staff*`, "", input.rendered || input.message, ""];
+  lines.push(`Goes to ${input.staffCount} staff member${input.staffCount === 1 ? "" : "s"}.`);
+  lines.push(
+    input.templateLabel
+      ? `Phone notification to everyone · WhatsApp via ${input.templateLabel}.`
+      : "Phone notification only — no approved WhatsApp notice template, so WhatsApp is skipped.",
+  );
   return lines.join("\n");
 }
