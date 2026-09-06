@@ -14,6 +14,7 @@ import { normalizePhotoConsent, type PhotoConsent } from "@/lib/photoConsent";
 import { sanitizeStoredMediaUrl } from "@/lib/media";
 import { normalizeHouseholdLanguage } from "@/lib/householdPrefs";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { stripEmptyList } from "@/lib/wirePayload";
 import {
   currentAcademicYearCode,
   DEFAULT_AY,
@@ -1515,7 +1516,20 @@ export function writeAdmissionsLocalRaw(state: AdmissionsState): void {
   // Memory first and unconditionally, so a cache that cannot hold this
   // still leaves the leads readable for the rest of the session.
   memoryAdmissionsState = normalized;
-  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(normalized));
+  // Cache the wire shape — the same lossless strip the admissions-desk route
+  // sends (rebuildable-empty fields dropped; normalizeAdmissionsState puts
+  // them back on read). 2.6 M chars measured on 2026-09-06, the largest
+  // entry after SIS on an origin already over Chrome's ~5.2 M-char cap.
+  writeCacheOrInvalidate(
+    STORAGE_KEY,
+    JSON.stringify({
+      ...normalized,
+      leads: stripEmptyList(normalized.leads as unknown as Record<string, unknown>[]),
+      households: stripEmptyList(
+        normalized.households as unknown as Record<string, unknown>[],
+      ),
+    }),
+  );
 }
 
 export function admissionsStateIsEmpty(state: AdmissionsState): boolean {

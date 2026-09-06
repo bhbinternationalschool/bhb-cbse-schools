@@ -7,6 +7,7 @@ import { activeSessionCode } from "@/lib/sessionWriteGuard";
 import type { PhotoConsent } from "@/lib/photoConsent";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { stripEmptyDocsList, stripEmptyList } from "@/lib/wirePayload";
 import {
   DEFAULT_AY,
   DEMO_STUDENT_CLASS_BY_NAME,
@@ -1055,6 +1056,36 @@ export function profileCompleteness(student: SisStudent, hh?: Household): number
 const STORAGE_KEY = "bhb_sis_v1";
 
 /**
+ * The cache copy of the roster, in wire shape: empty document slots and
+ * rebuildable-empty fields dropped. loadSis() normalises every record on
+ * read, so the round trip is exact (sisWirePayload.selftest pins it) and the
+ * entry is ~40% smaller — 2.77 M chars measured → ~1.7 M. Chrome caps an
+ * origin's localStorage at ~5.2 M chars and the office browser holds SIS,
+ * admissions, fees, attendance and masters together (7.5 M on 2026-09-06);
+ * the SIS entry was the write that lost, and a lost cache read as 0 students.
+ *
+ * Every writer of STORAGE_KEY goes through here — loadSis's own write-back
+ * included, which used to re-inflate the skeleton on every read.
+ */
+function slimSisJson(state: SisState): string {
+  return JSON.stringify({
+    ...state,
+    households: stripEmptyList(
+      (state.households ?? []) as unknown as Record<string, unknown>[],
+    ),
+    students: stripEmptyList(
+      stripEmptyDocsList(
+        (state.students ?? []) as unknown as Record<string, unknown>[],
+      ),
+    ),
+  });
+}
+
+function writeSisCache(state: SisState): boolean {
+  return writeCacheOrInvalidate(STORAGE_KEY, slimSisJson(state));
+}
+
+/**
  * The roster, held in memory, independent of localStorage.
  *
  * SIS is 2.46 MB. With admissions and ~35 other module desks the origin sits
@@ -1385,7 +1416,11 @@ export function loadSis(): SisState {
       if (next.students.length > 0) {
         next = alignSisToMasters(next, masters);
       }
-      writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
+      // Write back only when normalisation or alignment changed something:
+      // this runs on EVERY read, and re-serialising 2.7 M chars into a full
+      // origin each time is how the cache thrashed.
+      const slim = slimSisJson(next);
+      if (slim !== cachedRaw) writeCacheOrInvalidate(STORAGE_KEY, slim);
       syncSisIntoMasters(next, masters);
       if (next.students.length > 0) {
         void import("@/lib/feeDiscountImportHydrate").then(
@@ -1440,7 +1475,7 @@ export function saveSis(state: SisState) {
     return;
   }
   memorySisState = state;
-  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  writeSisCache(state);
   syncSisIntoMasters(state);
   if (!deskSkipBlobPushClient("sis")) {
     scheduleClientSchoolMirrorSync({ sis: state });
@@ -1504,7 +1539,7 @@ export function writeSisLocalRaw(state: SisState) {
   // hold 2.46 MB. writeCacheOrInvalidate never throws for a full disk, so
   // hydration can no longer be aborted by one.
   memorySisState = next;
-  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
+  writeSisCache(next);
   syncSisIntoMasters(next, loadMasters());
 }
 
