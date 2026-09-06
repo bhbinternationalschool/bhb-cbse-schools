@@ -12,6 +12,7 @@ import "../modules/attendance_history_screen.dart";
 import "../modules/chat_thread_screen.dart";
 import "../modules/complaints_screen.dart";
 import "../modules/ebook_shelf_screen.dart";
+import "../modules/gallery_screen.dart";
 import "../modules/fees_screen.dart";
 import "../modules/homework_screen.dart";
 import "../modules/leave_screen.dart";
@@ -47,6 +48,7 @@ const _modules = [
   _Module("Leave", Icons.event_busy_outlined, ModuleTone.purple),
   _Module("Complaints", Icons.support_agent_outlined, ModuleTone.pink),
   _Module("Receipts", Icons.receipt_long_outlined, ModuleTone.blue),
+  _Module("Gallery", Icons.photo_library_outlined, ModuleTone.teal),
 ];
 
 String _greeting() {
@@ -259,6 +261,8 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       case "Library":
         screen = EbookShelfScreen(api: api);
+      case "Gallery":
+        screen = GalleryScreen(api: api);
       case "Leave":
         screen = LeaveScreen(api: api, child: child);
       case "Receipts":
