@@ -10,10 +10,15 @@ import {
 } from "@/lib/waClassChannelServer";
 import type { ClassChannelIntentKind } from "@/lib/waClassChannelEngine";
 import { waOutboundConfigured } from "@/lib/waSend";
+import { requireWaStaffApi } from "@/lib/apiRouteAuth.server";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(req: Request) {
+  // Channels carry every parent's mobile per section — staff only, like
+  // the WhatsApp hub next door. This route answered anyone before.
+  const auth = await requireWaStaffApi(req);
+  if (!auth.ok) return auth.response;
   // Cheap by default: the roster walk + store write runs at most every 10
   // minutes; POST {action:"sync"} rebuilds on demand.
   await syncClassChannelsIfStale();
@@ -27,6 +32,8 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const auth = await requireWaStaffApi(req);
+  if (!auth.ok) return auth.response;
   let body: {
     action?: string;
     draftId?: string;
