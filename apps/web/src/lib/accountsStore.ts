@@ -61,6 +61,21 @@ const STORAGE_KEY = "bhb_accounts_v1";
 
 let serverAccountsCache: AccountsState | null = null;
 
+/**
+ * The browser copy, kept ONLY when localStorage refused to hold it.
+ *
+ * `writeCacheOrInvalidate` drops the entry when the origin is over quota and
+ * never throws, so without this a hydrated desk vanishes between one read and
+ * the next — and on the fee counter that means the Mode & account list
+ * silently loses its banks. SIS and admissions keep the same fallback.
+ *
+ * Deliberately NOT a mirror of every successful write. A missing key after a
+ * write that SUCCEEDED means someone cleared the store on purpose, and the
+ * honest answer to a read then is "empty" — accounts.selftest pins that, and
+ * caught the first version of this which resurrected a cleared desk.
+ */
+let memoryAccountsState: AccountsState | null = null;
+
 
 /* ─── Empty / normalize / load / save ─────────────────────── */
 
@@ -72,7 +87,8 @@ export function loadAccounts(): AccountsState {
   }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return emptyAccounts();
+    // A cache that could not be written must not read as "no bank accounts".
+    if (!raw) return memoryAccountsState ?? emptyAccounts();
     const parsed = JSON.parse(raw) as Partial<AccountsState>;
     const state: AccountsState = {
       version: 1,
@@ -141,7 +157,7 @@ export function loadAccounts(): AccountsState {
     }
     return synced;
   } catch {
-    return emptyAccounts();
+    return memoryAccountsState ?? emptyAccounts();
   }
 }
 
@@ -149,11 +165,7 @@ export function saveAccounts(state: AccountsState): void {
   if (!assertModulePermission("accounts", "edit", "saveAccounts")) return;
 
   if (typeof window === "undefined") return;
-  try {
-    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify({ ...state, version: 1 }));
-  } catch (e) {
-    console.warn("[accounts] localStorage quota exceeded — relying on server DB sync", e);
-  }
+  rememberIfDropped(state);
   void import("@/lib/accountsPersistence").then(({ scheduleAccountsSync }) => {
     scheduleAccountsSync(state);
   });
@@ -164,11 +176,28 @@ export function writeAccountsLocalRaw(state: AccountsState): void {
     serverAccountsCache = state;
     return;
   }
+  rememberIfDropped(state);
+}
+
+/**
+ * Write the cache; hold the state in memory only if the write was dropped.
+ * A successful write clears the memory copy, so a later deliberate clear
+ * reads as empty rather than resurrecting the desk.
+ */
+function rememberIfDropped(state: AccountsState): void {
+  let stored = false;
   try {
-    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify({ ...state, version: 1 }));
+    stored = writeCacheOrInvalidate(
+      STORAGE_KEY,
+      JSON.stringify({ ...state, version: 1 }),
+    );
   } catch (e) {
-    console.warn("[accounts] localStorage quota exceeded — relying on server DB sync", e);
+    console.warn(
+      "[accounts] localStorage quota exceeded — relying on server DB sync",
+      e,
+    );
   }
+  memoryAccountsState = stored ? null : state;
 }
 
 export function accountsStateIsEmpty(state: AccountsState): boolean {
