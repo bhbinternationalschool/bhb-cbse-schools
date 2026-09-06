@@ -484,13 +484,14 @@ export function UdiseComplianceWorkspace({
           High priority — UDISE+ compliance
         </p>
         <p className="mt-1 text-xs text-[var(--muted)]">
-          Track missing Student Aadhaar, PEN, APAAR, and Parent Aadhaar (required
-          for APAAR). Verifying student Aadhaar alone does not create APAAR —
-          parent Aadhaar must also be on UDISE+, then generate APAAR and re-sync.
-          Fully compliant students leave this worklist. Remind parents on
-          WhatsApp every {settings.reminderIntervalDays} day(s). Full Aadhaar
-          stays visible until verified on UDISE+; then only last 4. PEN locks
-          when verified + PEN present; APAAR locks only once APAAR ID is filled.
+          A child is done when the portal has issued <strong>both</strong> ids —
+          PEN and APAAR. Those students show “UDISE OK” in the register and
+          leave this worklist. Everything else here is what it takes to get
+          there: a student Aadhaar, then a parent Aadhaar, then generate the
+          APAAR on UDISE+ and re-import. Parent Aadhaar stops being chased once
+          the APAAR exists. Remind parents on WhatsApp every{" "}
+          {settings.reminderIntervalDays} day(s). Counts refresh on every
+          import — nothing here is stored.
         </p>
       </div>
 

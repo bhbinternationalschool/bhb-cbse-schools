@@ -204,12 +204,24 @@ export function gapLabel(code: UdiseGapCode): string {
   }
 }
 
-function hasPen(s: SisStudent): boolean {
-  const pen = (s.pen || "").trim();
-  if (!pen || /^na$/i.test(pen) || /^\*+$/.test(pen)) return false;
-  // "0" / "000" is a common import placeholder — not a real PEN.
-  if (/^0+$/.test(pen)) return false;
+/**
+ * True for a real portal id, false for the placeholders a spreadsheet import
+ * leaves behind: blank, "NA", a run of asterisks (a masked cell), or a run of
+ * zeros. Shared by PEN and APAAR — they used to differ, and only PEN rejected
+ * the all-zero form, so an APAAR column full of "0" would have read as issued
+ * and shown a false "UDISE OK" (caught by udiseCompliance.selftest).
+ */
+function isRealPortalId(raw: string | undefined | null): boolean {
+  const v = (raw || "").trim();
+  if (!v) return false;
+  if (/^na$/i.test(v)) return false;
+  if (/^\*+$/.test(v)) return false;
+  if (/^0+$/.test(v)) return false;
   return true;
+}
+
+function hasPen(s: SisStudent): boolean {
+  return isRealPortalId(s.pen);
 }
 
 /** True when student has a UDISE+ Student PEN (registered on portal / SDMS). */
@@ -290,10 +302,12 @@ export function listUdisePortalSearchRows(
  */
 export function udiseEntryStatusLabel(s: SisStudent): string {
   if (hasPen(s)) {
-    if (s.aadhaarVerification === "verified_udise" && (s.apaarId || "").trim()) {
-      return "Entered · verified";
-    }
-    return "Entered (PEN present)";
+    // Keyed off the APAAR alone. It used to also require
+    // `aadhaarVerification === "verified_udise"`, a field with no database
+    // column before 2026-09-06 — so every student read back as merely
+    // "Entered" however complete the portal record was.
+    if (hasApaar(s)) return "Entered · UDISE OK";
+    return "Entered · APAAR missing";
   }
   switch (s.penStatus) {
     case "to_register":
@@ -434,25 +448,58 @@ export function udiseRegisteredSummary(rows: UdiseRegisteredRow[]) {
 }
 
 function hasApaar(s: SisStudent): boolean {
-  const a = (s.apaarId || "").trim();
-  if (!a) return false;
-  if (/^na$/i.test(a)) return false;
-  if (/^\*+$/.test(a)) return false;
-  return true;
+  return isRealPortalId(s.apaarId);
 }
 
-/** Fully compliant — drop from open UDISE+ worklist. */
+export type UdisePenApaarCode = "ok" | "pen_only" | "apaar_only" | "none";
+
+/**
+ * What the UDISE+ portal has issued for this child, as one label.
+ *
+ * The two ids ARE the compliance: a PEN means the child is on the portal, an
+ * APAAR means the portal accepted the child's and the parents' Aadhaar and
+ * minted the academic account. Nothing else is left to chase once both exist.
+ *
+ * Shown in front of the student everywhere the roster is listed, and derived
+ * on every render — never stored — so a re-import that fills a PEN moves the
+ * label the moment it applies.
+ */
+export function udisePenApaarStatus(s: SisStudent): {
+  code: UdisePenApaarCode;
+  /** Empty for "none": a child with neither id gets no badge at all. */
+  label: string;
+} {
+  const pen = hasPen(s);
+  const apaar = hasApaar(s);
+  if (pen && apaar) return { code: "ok", label: "UDISE OK" };
+  if (pen) return { code: "pen_only", label: "PEN ok · APAAR missing" };
+  if (apaar) return { code: "apaar_only", label: "APAAR ok · PEN missing" };
+  return { code: "none", label: "" };
+}
+
+/**
+ * Fully compliant — drop from the open UDISE+ worklist.
+ *
+ * PEN + APAAR, and nothing more. This used to demand four other things, and
+ * on 2026-09-06 that put all 237 active students on the worklist while 100 of
+ * them held both ids. Two of the four could never be satisfied:
+ * `aadhaarVerification` and `udiseInboundTransferPending` had no column in
+ * sis_students until that day's `profile` migration, so every hydrate read
+ * them back as unset no matter what the office had entered.
+ *
+ * The other two were the real modelling error. A student Aadhaar (verified or
+ * not) and a parent Aadhaar are what the PORTAL needs in order to ISSUE an
+ * APAAR. Once the APAAR exists, the portal has already checked them and the
+ * school has nothing left to collect — so requiring them afterwards is asking
+ * the office to chase paperwork for an account that is already open. They
+ * remain gaps, loudly, while the ids are still missing: see
+ * computeStudentUdiseGaps.
+ */
 export function isUdiseFullyCompliant(
   s: SisStudent,
-  settings?: UdiseComplianceSettings,
+  _settings?: UdiseComplianceSettings,
 ): boolean {
-  const cfg = settings ?? loadUdiseComplianceSettings();
-  if (s.aadhaarVerification !== "verified_udise") return false;
-  if (!hasPen(s)) return false;
-  if (!hasApaar(s)) return false;
-  if (cfg.parentAadhaarRequiredForApaar && !hasParentAadhaar(s)) return false;
-  if (s.udiseInboundTransferPending) return false;
-  return true;
+  return hasPen(s) && hasApaar(s);
 }
 
 function hasParentAadhaar(s: SisStudent): boolean {
@@ -474,20 +521,30 @@ export function computeStudentUdiseGaps(
 ): UdiseGapCode[] {
   const cfg = settings ?? loadUdiseComplianceSettings();
   const gaps: UdiseGapCode[] = [];
-  if (
-    !hasStoredAadhaar({ number: s.aadhaarNumber, last4: s.aadhaarLast4 }) &&
-    s.aadhaarVerification !== "verified_udise"
-  ) {
+
+  // Both ids issued: the portal has everything it needed and there is nothing
+  // to call a parent about. Reported as no gaps rather than as a shorter list,
+  // so every counter, export and call list agrees with the "UDISE OK" badge.
+  if (hasPen(s) && hasApaar(s)) return gaps;
+
+  const aadhaarOnFile = hasStoredAadhaar({
+    number: s.aadhaarNumber,
+    last4: s.aadhaarLast4,
+  });
+  if (!aadhaarOnFile) {
     gaps.push("student_aadhaar");
-  } else if (
-    s.aadhaarVerification !== "verified_udise" &&
-    hasStoredAadhaar({ number: s.aadhaarNumber, last4: s.aadhaarLast4 })
-  ) {
+  } else if (s.aadhaarVerification !== "verified_udise") {
     gaps.push("student_aadhaar_unverified");
   }
   if (!hasPen(s)) gaps.push("pen");
   if (!hasApaar(s)) gaps.push("apaar");
-  if (cfg.parentAadhaarRequiredForApaar && !hasParentAadhaar(s)) {
+  // Parent Aadhaar is a prerequisite for GENERATING the APAAR, so it is only
+  // a gap while the APAAR is still missing.
+  if (
+    cfg.parentAadhaarRequiredForApaar &&
+    !hasApaar(s) &&
+    !hasParentAadhaar(s)
+  ) {
     gaps.push("parent_aadhaar");
   }
   if (s.udiseAgeBelowClassAlert) {

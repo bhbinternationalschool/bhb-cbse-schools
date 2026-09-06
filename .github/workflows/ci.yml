@@ -200,6 +200,20 @@ jobs:
           npm run test:sibling-carry-over
           npm run test:udise-upload-store
           npm run test:udise-student-details
+      - name: Test — PEN + APAAR is the whole of UDISE+ compliance
+        working-directory: apps/web
+        run: |
+          npm run test:village-market
+          npm run test:lead-score
+          npm run test:fuel-expense-line
+          npm run test:vendor-history
+          npm run test:site-seo
+          npm run test:approval-gate
+          npm run test:photo-consent
+          npm run test:registration-blockers
+          npm run test:sibling-carry-over
+          npm run test:udise-upload-store
+          npm run test:udise-compliance
           npm run test:lead-worklist
           npm run test:student-import
           npm run test:cash-pool-orphans
