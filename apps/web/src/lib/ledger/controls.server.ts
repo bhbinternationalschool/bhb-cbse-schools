@@ -398,8 +398,19 @@ export type LedgerPosition = {
   asOf: string;
   cashPaise: number;
   bankPaise: number;
-  /** Every bank account with its own balance — the total alone hides a negative one. */
-  banks: { code: string; name: string; closingPaise: number }[];
+  /**
+   * Every bank account with its own balance — the total alone hides a
+   * negative one. `bankAccountId` is the accounts-desk bank this ledger
+   * account stands for (ledger_accounts.bank_account_id), so a screen holding
+   * desk bank rows can show the server balance against each of them without
+   * matching on the name.
+   */
+  banks: {
+    code: string;
+    name: string;
+    closingPaise: number;
+    bankAccountId: string;
+  }[];
   chequesInHandPaise: number;
   payablesPaise: number;
   receivablesPaise: number;
@@ -426,8 +437,18 @@ export async function ledgerPosition(input: {
   const [balances, flagsRes] = await Promise.all([
     periodBalances({ from: input.fyFrom, to: input.asOf }),
     ctx
-      ? ctx.sb.from("ledger_accounts").select("code, is_cash, is_bank").eq("tenant_id", ctx.tenantId)
-      : Promise.resolve({ data: [] as { code: string; is_cash: boolean; is_bank: boolean }[] }),
+      ? ctx.sb
+          .from("ledger_accounts")
+          .select("code, is_cash, is_bank, bank_account_id")
+          .eq("tenant_id", ctx.tenantId)
+      : Promise.resolve({
+          data: [] as {
+            code: string;
+            is_cash: boolean;
+            is_bank: boolean;
+            bank_account_id: string | null;
+          }[],
+        }),
   ]);
   const empty: LedgerPosition = {
     ok: false,
@@ -440,9 +461,20 @@ export async function ledgerPosition(input: {
   if (!balances.ok) return empty;
 
   const flags = new Map(
-    ((flagsRes.data ?? []) as { code: string; is_cash: boolean; is_bank: boolean }[]).map((r) => [
+    (
+      (flagsRes.data ?? []) as {
+        code: string;
+        is_cash: boolean;
+        is_bank: boolean;
+        bank_account_id: string | null;
+      }[]
+    ).map((r) => [
       String(r.code),
-      { isCash: !!r.is_cash, isBank: !!r.is_bank },
+      {
+        isCash: !!r.is_cash,
+        isBank: !!r.is_bank,
+        bankAccountId: String(r.bank_account_id ?? ""),
+      },
     ]),
   );
   const at = (code: string) => balances.rows.find((r) => r.code === code)?.closingPaise ?? 0;
@@ -462,7 +494,12 @@ export async function ledgerPosition(input: {
     bankPaise: bankRows.length ? bankRows.reduce((n, r) => n + r.closingPaise, 0) : at("1010"),
     banks: bankRows
       .filter((r) => r.closingPaise !== 0 || r.debitPaise !== 0 || r.creditPaise !== 0)
-      .map((r) => ({ code: r.code, name: r.name, closingPaise: r.closingPaise })),
+      .map((r) => ({
+        code: r.code,
+        name: r.name,
+        closingPaise: r.closingPaise,
+        bankAccountId: flags.get(r.code)?.bankAccountId ?? "",
+      })),
     chequesInHandPaise: at("1050"),
     payablesPaise: at(L_ACCOUNTS_PAYABLE),
     receivablesPaise: at(L_FEE_RECEIVABLE) + at(L_STORE_RECEIVABLE),

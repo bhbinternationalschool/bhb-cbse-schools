@@ -3,8 +3,6 @@
  */
 
 import {
-  cashInHandPaise,
-  totalBankBalancePaise,
 } from "@/lib/accountsCashBank";
 import {
   coaLedgerRows,
@@ -18,10 +16,7 @@ import {
 import { isExpenseVoucherCancelled } from "@/lib/accountsNormalize";
 import { listUnifiedPayables } from "@/lib/accountsPayables";
 import {
-  balanceSheet,
   groupSummary,
-  profitAndLoss,
-  trialBalance,
 } from "@/lib/accountsReports";
 import { loadAccounts } from "@/lib/accountsStore";
 import {
@@ -175,24 +170,17 @@ export const ACCOUNTS_REPORTS: AccountsReportDef[] = [
     label: "Owner loan register",
     hint: "Loans + EMI schedule",
   },
-  {
-    id: "trial_balance",
-    category: "books",
-    label: "Trial Balance",
-    hint: "As-of date from journal",
-  },
-  {
-    id: "profit_loss",
-    category: "books",
-    label: "Profit & loss",
-    hint: "Income vs expense for period",
-  },
-  {
-    id: "balance_sheet",
-    category: "books",
-    label: "Balance sheet",
-    hint: "Assets · liabilities · equity",
-  },
+  // Trial balance, Profit & loss and Balance sheet are NOT listed here.
+  //
+  // They existed in this catalogue as a second set of financial statements
+  // built from the accounts desk — the same browser book whose bank ledger
+  // holds fee receipts only. Accounts → Book reports builds all three from
+  // the server book, which balances and carries the opening balances, the
+  // old-ERP import, the bank reconciliation and the vehicle loans. Two
+  // balance sheets that disagree is worse than one that is right, so this
+  // catalogue no longer offers its own. `runAccountsReport` still answers
+  // for those ids, with a message saying where the real one lives, in case a
+  // saved link or a bookmark still asks (2026-09-06).
 ];
 
 export type AccountsReportFilters = {
@@ -434,7 +422,11 @@ export function runAccountsReport(
         {
           title: "Cash register",
           subtitle: `${TENANT.shortName} · Accounts`,
-          filterNote: `${note} · On hand ${formatInr(cashInHandPaise(accounts))}`,
+          // No "On hand" total here. The rows below are the desk's own cash
+          // register, which is a true record of what the desk did; the
+          // BALANCE is the server book's to state, and this one read ₹0
+          // because the pools' stored running total never survived a hydrate.
+          filterNote: note,
           columns: [
             { key: "date", header: "Date", width: 0.9 },
             { key: "pool", header: "Pool", width: 1 },
@@ -1076,128 +1068,26 @@ export function runAccountsReport(
         ? { ok: true, message: `Owner loans: ${rows.length} row(s)` }
         : r;
     }
-    case "trial_balance": {
-      const rows = trialBalance(asOf, accounts)
-        .filter((r) => r.debitPaise > 0 || r.creditPaise > 0 || r.balancePaise !== 0)
-        .map((r) => ({
-          code: r.code,
-          name: r.name,
-          group: r.group,
-          debit: formatInr(r.debitPaise),
-          credit: formatInr(r.creditPaise),
-          balance: formatInr(Math.abs(r.balancePaise)),
-        }));
-      const r = exportFilterReport(
-        {
-          title: `Trial balance · as of ${asOf}`,
-          subtitle: `${TENANT.shortName} · Accounts`,
-          filterNote: note,
-          columns: [
-            { key: "code", header: "Code", width: 0.7 },
-            { key: "name", header: "Account", width: 1.4 },
-            { key: "group", header: "Group", width: 0.8 },
-            { key: "debit", header: "Debit", width: 0.9 },
-            { key: "credit", header: "Credit", width: 0.9 },
-            { key: "balance", header: "Balance", width: 0.9 },
-          ],
-          rows,
-          fileBaseName: "accounts_trial_balance",
-        },
-        filters.format,
-      );
-      return r.ok
-        ? { ok: true, message: `Trial balance: ${rows.length} account(s)` }
-        : r;
-    }
-    case "profit_loss": {
-      const pl = profitAndLoss(from, to, accounts);
-      const rows = [
-        ...pl.incomeLines.map((l) => ({
-          group: "Income",
-          code: l.code,
-          name: l.name,
-          amount: formatInr(l.amountPaise),
-        })),
-        ...pl.expenseLines.map((l) => ({
-          group: "Expense",
-          code: l.code,
-          name: l.name,
-          amount: formatInr(l.amountPaise),
-        })),
-        {
-          group: "Net",
-          code: "",
-          name: "Net profit / (loss)",
-          amount: formatInr(pl.netProfitPaise),
-        },
-      ];
-      const r = exportFilterReport(
-        {
-          title: `Profit & loss · ${from} → ${to}`,
-          subtitle: `${TENANT.shortName} · Accounts`,
-          filterNote: `${note} · Income ${formatInr(pl.totalIncomePaise)} · Expense ${formatInr(pl.totalExpensePaise)}`,
-          columns: [
-            { key: "group", header: "Group", width: 0.8 },
-            { key: "code", header: "Code", width: 0.7 },
-            { key: "name", header: "Account", width: 1.4 },
-            { key: "amount", header: "Amount", width: 1 },
-          ],
-          rows,
-          fileBaseName: "accounts_profit_loss",
-        },
-        filters.format,
-      );
-      return r.ok ? { ok: true, message: `P&L ${from} → ${to}` } : r;
-    }
-    case "balance_sheet": {
-      const bs = balanceSheet(asOf, accounts);
-      const rows = [
-        { section: "Assets", item: "Cash in hand", amount: formatInr(bs.assets.cashPaise) },
-        { section: "Assets", item: "Bank balances", amount: formatInr(bs.assets.bankPaise) },
-        {
-          section: "Assets",
-          item: "Other assets",
-          amount: formatInr(bs.assets.otherAssetsPaise),
-        },
-        { section: "Assets", item: "Total assets", amount: formatInr(bs.assets.totalPaise) },
-        {
-          section: "Liabilities",
-          item: "Total liabilities",
-          amount: formatInr(bs.liabilities.totalPaise),
-        },
-        {
-          section: "Equity",
-          item: "Capital",
-          amount: formatInr(bs.equity.capitalPaise),
-        },
-        {
-          section: "Equity",
-          item: "Retained earnings",
-          amount: formatInr(bs.equity.retainedEarningsPaise),
-        },
-        {
-          section: "Equity",
-          item: "Total L + E",
-          amount: formatInr(bs.totalLiabilitiesAndEquityPaise),
-        },
-      ];
-      const r = exportFilterReport(
-        {
-          title: `Balance sheet · as of ${asOf}`,
-          subtitle: `${TENANT.shortName} · Accounts`,
-          filterNote: `${note} · Cash ${formatInr(cashInHandPaise(accounts))} · Bank ${formatInr(totalBankBalancePaise(accounts))} · ${bs.balanced ? "Balanced" : "Out of balance"}`,
-          columns: [
-            { key: "section", header: "Section", width: 1 },
-            { key: "item", header: "Line item", width: 1.4 },
-            { key: "amount", header: "Amount", width: 1 },
-          ],
-          rows,
-          fileBaseName: "accounts_balance_sheet",
-        },
-        filters.format,
-      );
-      return r.ok ? { ok: true, message: `Balance sheet as of ${asOf}` } : r;
-    }
+    // The three financial statements are answered, not built.
+    //
+    // They used to be produced here from the accounts desk — a second trial
+    // balance, P&L and balance sheet sitting beside the server book's own,
+    // disagreeing with it by lakhs because the desk's bank ledger holds fee
+    // receipts only and its cash pools hydrate to zero. Accounts → Book
+    // reports builds all three from the server book, where they balance and
+    // where the opening balances, the old-ERP import, the bank
+    // reconciliation and the vehicle loans actually live (2026-09-06).
+    case "trial_balance":
+    case "profit_loss":
+    case "balance_sheet":
+      return {
+        ok: false,
+        error:
+          "Financial statements are built from the server book — open " +
+          "Accounts → Book reports for the trial balance, Income & " +
+          "Expenditure and balance sheet. The figures there are the ones the " +
+          "trial balance can defend.",
+      };
     default:
       return { ok: false, error: "Unknown report" };
   }

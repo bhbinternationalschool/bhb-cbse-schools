@@ -28,8 +28,6 @@ import {
   type AdmissionStage,
 } from "@/lib/admissions";
 import {
-  bankBalancePaise,
-  totalBankBalancePaise,
 } from "@/lib/accountsCashBank";
 import { listUnifiedPayables } from "@/lib/accountsPayables";
 import { dashboardSnapshot } from "@/lib/accountsReports";
@@ -833,7 +831,6 @@ function accountsDash(): ModuleDashboardModel {
   const state = loadAccounts();
   const snap = dashboardSnapshot(state);
   const todayBook = buildDayBook(todayIso());
-  const bankTotal = totalBankBalancePaise(state);
   const openAp = listUnifiedPayables(state).filter((p) => p.status === "open");
   const vendorName = (vendorId: string) =>
     state.vendors.find((v) => v.id === vendorId)?.name || vendorId || "Payable";
@@ -899,8 +896,12 @@ function accountsDash(): ModuleDashboardModel {
     ...dualRingLayers(
       "Liquidity (₹)",
       [
-        chartPt("Cash", Math.round(snap.cashInHandPaise / 100), "#203050"),
-        chartPt("Banks", Math.round(bankTotal / 100), "#0284c7"),
+        // Cash and bank are left out rather than drawn from the desk book: a
+        // bar is as much a claim as a number, and those two were the claims
+        // that disagreed with the ledger. The tiles above carry the server
+        // figures. What is left here is what the desk genuinely knows about
+        // itself — money owed to the owner and money owed to vendors.
+        chartPt("Owner due", Math.round(snap.ownerDuePaise / 100), "#8a5a10"),
       ],
       "Flows (₹)",
       [
@@ -916,13 +917,16 @@ function accountsDash(): ModuleDashboardModel {
       { key: "bank", label: "Bank" },
       { key: "balance", label: "Balance", align: "right" },
     ],
+    // Balances filled from the server book by accountsServerKpis, for the
+    // same reason the KPI tiles above start blank: the desk's bank ledger
+    // holds fee receipts only and reads lakhs high.
     tableRows: state.bankAccounts
       .filter((b) => b.isActive)
       .map((b) => ({
         id: b.id,
         name: b.name,
         bank: b.bankName || "—",
-        balance: formatInr(bankBalancePaise(b.id, state)),
+        balance: "…",
       })),
     quickLinks: [
       { label: "Day book", tab: "daybook" },
@@ -2685,7 +2689,6 @@ export function buildSchoolDashboard(
     const staffList = masters.staff ?? [];
     const activeStaff = staffList.filter(isStaffActive).length;
 
-    const bankBal = totalBankBalancePaise(loadAccounts());
 
     const funnelChart = ADMISSION_STAGES.map((s) => ({
       label: s.label,
@@ -2863,9 +2866,14 @@ export function buildSchoolDashboard(
               href: "/fees",
             },
             {
+              // Filled after mount from the server book (SchoolHomeDashboard).
+              // It used to read `totalBankBalancePaise` off the accounts desk,
+              // whose bank ledger holds fee receipts only — ₹7.62L against the
+              // ledger's ₹24k on 2026-09-06. Blank until the real figure lands.
               id: "bank",
               label: "Bank balance",
-              value: formatInr(bankBal),
+              value: "…",
+              hint: "reading the server book",
               tone: "teal",
               href: "/accounts",
             },
