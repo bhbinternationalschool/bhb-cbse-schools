@@ -65,6 +65,12 @@ import {
   formatClassMessageCard,
   parseStaffBroadcastQuery,
   formatStaffBroadcastCard,
+  parseFeeReminderQuery,
+  formatFeeReminderCard,
+  inFeeReminderQuietHours,
+  feeReminderTooSoon,
+  daysSince,
+  istHourOf,
   parseDecideLeaveQuery,
   formatDecideLeaveCard,
   formatLeaveRequestPicker,
@@ -200,6 +206,12 @@ const masters = {
   assert.equal(parseErpCommandLocal("VIII B me kaun nahi aaya")?.fields.section, "8B");
   assert.equal(parseErpCommandLocal("5A में कौन गैरहाजिर है")?.commandId, "absent_list", "Devanagari fee/absent words match without ASCII word boundaries");
   assert.equal(parseErpCommandLocal("7B की उपस्थिति")?.fields.section, "7B");
+  assert.equal(parseErpCommandLocal("Send fee reminder to class 3 defaulters")?.commandId, "fee_reminder");
+  assert.equal(parseErpCommandLocal("fee reminder 5A defaulters")?.fields.section, "5A");
+  // Looking at defaulters must never start messaging families.
+  assert.equal(parseFeeReminderQuery("Class 3 defaulters"), null);
+  assert.equal(parseFeeReminderQuery("Amay ki fees pending"), null);
+  assert.equal(parseErpCommandLocal("Class 3 defaulters")?.commandId, "class_defaulters");
   assert.equal(parseErpCommandLocal("Approve Aarav's leave")?.commandId, "decide_leave");
   assert.equal(parseErpCommandLocal("reject Kabir Ali leave: no medical certificate")?.fields.date, "reject");
   // Listing pending leaves must never decide one.
@@ -1405,6 +1417,65 @@ const masters = {
   assert.ok(reject.startsWith("*Reject leave* · Kabir Ali · VI B\n6 Sep · Leave"), reject);
   assert.ok(reject.includes("Note: no medical certificate"), reject);
   assert.ok(!reject.includes("Marks leave on"), "a rejection touches no register");
+}
+
+// ─── fee reminders ─────────────────────────────────────────────────────
+{
+  assert.equal(parseFeeReminderQuery("Send fee reminder to class 3 defaulters"), "3");
+  assert.equal(parseFeeReminderQuery("fee reminder 5A defaulters"), "5A");
+  assert.equal(parseFeeReminderQuery("class 5 ke bakayedar ko fee reminder bhejo"), "5");
+  assert.equal(parseFeeReminderQuery("remind me to call Amay's father"), null, "no class, no send");
+
+  const inr = (p: number) => `₹${(p / 100).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+  const card = formatFeeReminderCard({
+    title: "Class V",
+    templateLabel: "Fee overdue stage reminder (EN)",
+    send: [
+      { studentName: "Aarav Sharma", classLabel: "V A", amountPaise: 840000, overdueDays: 45 },
+      { studentName: "Riya Verma", classLabel: "V A", amountPaise: 400000, overdueDays: 26 },
+    ],
+    tooSoon: [{ studentName: "Kabir Ali", daysAgo: 3 }],
+    optedOut: 1,
+    formatInr: inr,
+  });
+  assert.ok(card.startsWith("*Fee reminder* · Class V\nTemplate: Fee overdue stage reminder (EN)"), card);
+  assert.ok(card.includes("2 families · ₹12,400 overdue"), card);
+  assert.ok(
+    card.includes("Aarav Sharma (V A)  ₹8,400 · 45d"),
+    "each family's own amount is shown, since each gets a different message",
+  );
+  assert.ok(card.includes("*Skipped — reminded this week:* Kabir Ali (3d ago)"), card);
+  assert.ok(card.includes("1 opted out of WhatsApp and will not receive it."), card);
+
+  const none = formatFeeReminderCard({
+    title: "V A", templateLabel: "t", send: [], tooSoon: [], optedOut: 0, formatInr: inr,
+  });
+  assert.ok(none.includes("Nobody to remind right now."), none);
+}
+
+// ─── fee reminder guards: quiet hours and the weekly cap ───────────────
+{
+  // A fee chase must never arrive at night.
+  assert.equal(inFeeReminderQuietHours(20), true, "8 pm is quiet");
+  assert.equal(inFeeReminderQuietHours(23), true);
+  assert.equal(inFeeReminderQuietHours(0), true, "midnight is quiet");
+  assert.equal(inFeeReminderQuietHours(7), true, "7 am is quiet");
+  assert.equal(inFeeReminderQuietHours(8), false, "8 am is the first sendable hour");
+  assert.equal(inFeeReminderQuietHours(19), false, "7 pm is the last sendable hour");
+
+  // IST is UTC+5:30, so 19:00 UTC is past midnight in India.
+  assert.equal(istHourOf(new Date("2026-09-05T03:00:00Z")), 8, "03:00 UTC is 08:30 IST");
+  assert.equal(istHourOf(new Date("2026-09-05T19:00:00Z")), 0, "19:00 UTC is 00:30 IST — quiet");
+  assert.equal(inFeeReminderQuietHours(istHourOf(new Date("2026-09-05T19:00:00Z"))), true);
+
+  // Once a week per family, however many people think of it.
+  assert.equal(daysSince(undefined, "2026-09-05"), null, "never reminded");
+  assert.equal(daysSince("2026-09-05", "2026-09-05"), 0);
+  assert.equal(daysSince("2026-08-29T10:00:00.000Z", "2026-09-05"), 7, "a timestamp is read as its date");
+  assert.deepEqual(feeReminderTooSoon(undefined, "2026-09-05"), { skip: false, daysAgo: null });
+  assert.deepEqual(feeReminderTooSoon("2026-09-05", "2026-09-05"), { skip: true, daysAgo: 0 }, "not twice in one day");
+  assert.deepEqual(feeReminderTooSoon("2026-08-30", "2026-09-05"), { skip: true, daysAgo: 6 });
+  assert.deepEqual(feeReminderTooSoon("2026-08-29", "2026-09-05"), { skip: false, daysAgo: 7 }, "a week later is allowed");
 }
 
 console.log("erpCommands.selftest.ts OK");

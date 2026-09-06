@@ -98,6 +98,7 @@ import {
   formatAdmissionsPeriodReply,
   formatClassMessageCard,
   formatDecideLeaveCard,
+  formatFeeReminderCard,
   formatLeaveRequestPicker,
   formatRaiseComplaintCard,
   formatStaffBroadcastCard,
@@ -179,6 +180,8 @@ type CommandStore = {
   usage: Record<string, number[]>;
   /** IST date the director's daily digest last went out for. */
   digestSentFor?: string;
+  /** householdId → IST date of the last fee reminder, for the weekly cap. */
+  feeRemindedOn?: Record<string, string>;
 };
 
 let memoryStore: CommandStore = {
@@ -825,6 +828,124 @@ export async function handleErpStaffCommand(
       resolved.sectionIds = mine.map((s) => s.sectionId).join(",");
     }
   }
+  if (command.id === "fee_reminder") {
+    const roleCodes = resolveSessionRoles(rbac, session, masters).map((x) => x.code);
+    if (!isOfficeLike(roleCodes) && !roleCodes.includes("accounts")) {
+      void audit(session, command, parsed.fields, text, "denied", {
+        reason: "scope",
+        channel: inbound.channel,
+      });
+      return {
+        handled: true,
+        audience: "erp_command_denied",
+        text: "Sending fee reminders is for the fee desk, office and leadership.",
+      };
+    }
+    const {
+      inFeeReminderQuietHours,
+      istHourNow,
+      planFeeReminders,
+      FEE_REMINDER_QUIET_START,
+      FEE_REMINDER_QUIET_END,
+    } = await import("@/lib/feeReminder.server");
+    const hour = istHourNow();
+    if (inFeeReminderQuietHours(hour)) {
+      return {
+        handled: true,
+        audience: "erp_command_denied",
+        text: `It's ${hour}:00 — fee reminders go out between ${FEE_REMINDER_QUIET_END}:00 and ${FEE_REMINDER_QUIET_START}:00 only. Nothing was sent.`,
+      };
+    }
+    const askedRaw = parsed.fields.section || "";
+    const refs = extractSectionRefs(askedRaw || text);
+    if (!refs.length) {
+      return { handled: true, audience: "erp_command_ask", text: "Which class? e.g. _fee reminder class 3 defaulters_." };
+    }
+    const res = resolveClassOrSectionRef(refs[0]!, masters);
+    if (!res.ok) {
+      return { handled: true, audience: "erp_command_ask", text: formatSectionProblem(res.reason, res.options, askedRaw || text) };
+    }
+    const { ensureWaTemplatesHydrated } = await import("@/lib/waTemplatesPersistence");
+    const { listApprovedTemplates, loadWaTemplates } = await import("@/lib/waTemplates");
+    await ensureWaTemplatesHydrated();
+    const feeTemplates = listApprovedTemplates(loadWaTemplates(), { module: "fees" });
+    const tpl =
+      feeTemplates.find((x) => x.familyKey === "fees_stage_reminder" && x.language === "en") ??
+      feeTemplates.find((x) => x.familyKey === "fees_stage_reminder") ??
+      feeTemplates.find((x) => x.familyKey === "fees_soft_reminder" && x.language === "en") ??
+      feeTemplates.find((x) => x.familyKey === "fees_soft_reminder") ??
+      null;
+    if (!tpl) {
+      return {
+        handled: true,
+        audience: "erp_command_denied",
+        text: "No approved fee reminder template yet, and free text can't reach parents outside the 24-hour window. Ask the office to get *Fee overdue stage reminder* approved in Masters → WhatsApp templates.",
+      };
+    }
+    await ensureFeesHydratedServer();
+    const sis = loadSis();
+    const want = new Set(res.sections.map((x) => x.sectionId));
+    const defaulters = listLiveDefaulters({
+      asOf: todayIso,
+      academicYearCode: session.academicYearCode,
+      sis,
+      masters,
+    }).filter((d) => want.has(d.student.sectionId) && d.overdueDays > 0);
+    if (!defaulters.length) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: `No overdue fees in ${res.wholeClass ? `Class ${res.className}` : res.sections[0]!.label}. Nothing to send. ✅`,
+      };
+    }
+    const recipients = defaulters
+      .map((d) => {
+        const hh = sis.households.find((h) => h.id === d.householdId);
+        return {
+          householdId: d.householdId,
+          mobile: hh ? householdWhatsApp(hh) || hh.mobile : "",
+          guardianName: hh?.guardianName || "",
+          studentName: d.fullName,
+          classLabel: classLabel(masters, d.student.classId, d.student.sectionId).replace(" · ", " "),
+          amountPaise: d.overdueAmountPaise,
+          overdueDays: d.overdueDays,
+        };
+      })
+      .filter((x) => x.mobile);
+    const store2 = await readStore();
+    const plan = await planFeeReminders({
+      recipients,
+      lastRemindedByHousehold: store2.feeRemindedOn ?? {},
+      todayIso,
+    });
+    if (!plan.send.length) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: plan.tooSoon.length
+          ? `Every defaulting family in that class was reminded within the last week. Nothing was sent.`
+          : "No family in that class can be messaged on WhatsApp right now.",
+      };
+    }
+    resolved.title = res.wholeClass ? `Class ${res.className}` : res.sections[0]!.label;
+    resolved.templateMetaName = tpl.metaName || tpl.name;
+    resolved.templateLanguage = tpl.metaLanguage || tpl.language;
+    resolved.templateVariables = (tpl.variables ?? []).join(",");
+    resolved.recipients = JSON.stringify(plan.send);
+    resolved.cardSummary = formatFeeReminderCard({
+      title: resolved.title,
+      templateLabel: `${tpl.name} (${tpl.language.toUpperCase()})`,
+      send: plan.send.map((x) => ({
+        studentName: x.studentName,
+        classLabel: x.classLabel,
+        amountPaise: x.amountPaise,
+        overdueDays: x.overdueDays,
+      })),
+      tooSoon: plan.tooSoon.map((x) => ({ studentName: x.recipient.studentName, daysAgo: x.daysAgo })),
+      optedOut: plan.optedOut.length,
+      formatInr,
+    });
+  }
   if (command.id === "decide_leave" && resolved.studentId) {
     writeStudentLeaveLocalRaw(emptyStudentLeaveState());
     await ensureStudentLeaveHydratedServer();
@@ -1177,7 +1298,9 @@ export async function handleErpStaffCommand(
   if (command.kind === "write") {
     const token = random();
     const summary =
-      command.id === "decide_leave"
+      command.id === "fee_reminder"
+        ? resolved.cardSummary || command.title
+        : command.id === "decide_leave"
         ? resolved.cardSummary || command.title
         : command.id === "raise_complaint"
         ? resolved.cardSummary || command.title
@@ -2200,6 +2323,62 @@ async function runConfirmedWrite(
       handled: true,
       audience: "erp_command_post_homework",
       text: `Posted. ${label} ${r.subjectName || ""} homework is live${res.push.sent ? ` · ${res.push.sent} phone${res.push.sent === 1 ? "" : "s"} notified` : ""}.\nUndo it in the ERP: Homework → today's posts.`,
+    };
+  }
+  if (command.id === "fee_reminder") {
+    let recipients: import("@/lib/feeReminder.server").FeeReminderRecipient[];
+    try {
+      recipients = JSON.parse(r.recipients || "[]") as typeof recipients;
+    } catch {
+      recipients = [];
+    }
+    if (!recipients.length || !r.templateMetaName) {
+      return {
+        handled: true,
+        audience: "erp_command_error",
+        text: "That reminder run is no longer valid. Send the command again.",
+      };
+    }
+    const { inFeeReminderQuietHours, istHourNow, sendFeeReminders } = await import(
+      "@/lib/feeReminder.server"
+    );
+    // Re-checked at confirm: a card can sit past 8 pm before anyone taps it.
+    if (inFeeReminderQuietHours(istHourNow())) {
+      return {
+        handled: true,
+        audience: "erp_command_denied",
+        text: "It's past 8 pm now — nothing was sent. Try again after 8 am.",
+      };
+    }
+    const today = istDateOf();
+    const res = await sendFeeReminders({
+      recipients,
+      template: {
+        metaName: r.templateMetaName,
+        language: r.templateLanguage || "en",
+        variables: (r.templateVariables || "").split(",").filter(Boolean),
+      },
+      todayIso: today,
+    });
+    // Record who was reminded so the weekly cap holds across channels.
+    const st = await readStore();
+    await writeStore({
+      ...st,
+      feeRemindedOn: { ...(st.feeRemindedOn ?? {}), ...res.remindedOn },
+    });
+    void audit(session, command, pending.fields, pending.originalText, "ok", {
+      channel: inbound.channel,
+      title: r.title,
+      template: r.templateMetaName,
+      sent: res.sent,
+      failed: res.failed,
+    });
+    const bits = [`Reminded ${res.sent} famil${res.sent === 1 ? "y" : "ies"} in ${r.title || "that class"}`];
+    if (res.failed) bits.push(`${res.failed} failed`);
+    return {
+      handled: true,
+      audience: "erp_command_fee_reminder",
+      text: `${bits.join(" · ")}.${res.errors.length ? `\nFirst error: ${res.errors[0]}` : ""}\nReplies land in Comms → WhatsApp inbox.`,
     };
   }
   if (command.id === "decide_leave") {

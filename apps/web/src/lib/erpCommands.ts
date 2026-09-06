@@ -129,6 +129,25 @@ export const ERP_COMMANDS: ErpCommandDef[] = [
     scope: "any",
   },
   {
+    id: "fee_reminder",
+    title: "Send fee reminders to a class's defaulters",
+    kind: "write",
+    module: "fees",
+    action: "edit",
+    description:
+      "Send each defaulting family in a class their own fee reminder — their child, their amount, their overdue days — as the approved reminder template. Skips families reminded in the last week, and refuses during quiet hours.",
+    examples: [
+      "Send fee reminder to class 3 defaulters",
+      "fee reminder 5A defaulters",
+      "remind class 3 defaulters",
+      "class 5 ke bakayedar ko fee reminder bhejo",
+    ],
+    fields: [
+      { name: "section", type: "section", required: true, description: "Class, or class and section" },
+    ],
+    scope: "any",
+  },
+  {
     id: "decide_leave",
     title: "Approve or reject a leave request",
     kind: "write",
@@ -785,6 +804,10 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
   }
   if (COLLECTION_WORDS.test(t) && !extractSectionRefs(t).length) {
     return { commandId: "collection_today", fields: { date: "" }, source: "local" };
+  }
+  const feeRem = parseFeeReminderQuery(t);
+  if (feeRem) {
+    return { commandId: "fee_reminder", fields: { section: feeRem }, source: "local" };
   }
   const leaveDecision = parseDecideLeaveQuery(t);
   if (leaveDecision) {
@@ -3177,4 +3200,108 @@ export function formatDecideLeaveCard(input: {
   }
   lines.push("The family is told either way.");
   return lines.join("\n");
+}
+
+// ─── Fee reminders to a class's defaulters (write) ─────────────────────
+
+const REMIND_WORD =
+  /(?<![\p{L}\p{M}\p{N}])(reminders?|remind|yaad\s*dilao|अनुस्मारक|स्मरण|nudge|chase)(?![\p{L}\p{M}\p{N}])/iu;
+
+/**
+ * "Send fee reminder to class 3 defaulters", "fee reminder 5A defaulters",
+ * "class 5 ke bakayedar ko fee reminder bhejo". Needs a reminder word, a
+ * fee word and a class — asking to *see* the defaulters is a different
+ * command and must not start messaging families.
+ */
+export function parseFeeReminderQuery(text: string): string | null {
+  const t = (text || "").trim();
+  if (!t || !REMIND_WORD.test(t)) return null;
+  if (!FEE_WORDS.test(t) && !DEFAULTER_WORDS.test(t)) return null;
+  const refs = extractSectionRefs(t);
+  if (!refs.length) return null;
+  const r = refs[0]!;
+  return r.sectionName ? `${r.classKey}${r.sectionName}` : r.classKey;
+}
+
+export type FeeReminderCardRow = {
+  studentName: string;
+  classLabel: string;
+  amountPaise: number;
+  overdueDays: number;
+};
+
+export function formatFeeReminderCard(input: {
+  title: string;
+  templateLabel: string;
+  send: FeeReminderCardRow[];
+  tooSoon: { studentName: string; daysAgo: number }[];
+  optedOut: number;
+  formatInr: (paise: number) => string;
+}): string {
+  const inr = input.formatInr;
+  const total = input.send.reduce((n, r) => n + r.amountPaise, 0);
+  const lines = [
+    `*Fee reminder* · ${input.title}`,
+    `Template: ${input.templateLabel}`,
+  ];
+  if (!input.send.length) {
+    lines.push("", "Nobody to remind right now.");
+  } else {
+    lines.push(
+      "",
+      `${input.send.length} famil${input.send.length === 1 ? "y" : "ies"} · ${inr(total)} overdue`,
+      "",
+      "*Each family gets their own amount*",
+    );
+    for (const r of input.send.slice(0, 15)) {
+      lines.push(`${r.studentName} (${r.classLabel})  ${inr(r.amountPaise)} · ${r.overdueDays}d`);
+    }
+    if (input.send.length > 15) lines.push(`+${input.send.length - 15} more`);
+  }
+  if (input.tooSoon.length) {
+    lines.push(
+      "",
+      `*Skipped — reminded this week:* ${input.tooSoon
+        .slice(0, 8)
+        .map((t) => `${t.studentName} (${t.daysAgo}d ago)`)
+        .join(", ")}${input.tooSoon.length > 8 ? ` +${input.tooSoon.length - 8} more` : ""}`,
+    );
+  }
+  if (input.optedOut) {
+    lines.push(`${input.optedOut} opted out of WhatsApp and will not receive it.`);
+  }
+  return lines.join("\n");
+}
+
+// ─── Fee reminder guards (pure) ────────────────────────────────────────
+
+/** The school's automation default: nothing goes out 20:00–08:00 IST. */
+export const FEE_REMINDER_QUIET_START = 20;
+export const FEE_REMINDER_QUIET_END = 8;
+export const FEE_REMINDER_MIN_DAYS_BETWEEN = 7;
+
+export function istHourOf(now: Date): number {
+  return new Date(now.getTime() + 330 * 60_000).getUTCHours();
+}
+
+export function inFeeReminderQuietHours(hour: number): boolean {
+  return hour >= FEE_REMINDER_QUIET_START || hour < FEE_REMINDER_QUIET_END;
+}
+
+/** Whole days between two ISO dates; null when the first is missing. */
+export function daysSince(lastIso: string | undefined, todayIso: string): number | null {
+  if (!lastIso) return null;
+  const a = Date.parse(`${lastIso.slice(0, 10)}T00:00:00Z`);
+  const b = Date.parse(`${todayIso}T00:00:00Z`);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  return Math.round((b - a) / 86_400_000);
+}
+
+/** Reminded within the cap → skip, and say how long ago. */
+export function feeReminderTooSoon(
+  lastIso: string | undefined,
+  todayIso: string,
+): { skip: boolean; daysAgo: number | null } {
+  const ago = daysSince(lastIso, todayIso);
+  return { skip: ago !== null && ago < FEE_REMINDER_MIN_DAYS_BETWEEN, daysAgo: ago };
 }
