@@ -157,7 +157,7 @@ export function PublicEnquiryForm({
       <main className="mx-auto flex min-h-screen max-w-lg flex-col px-4 py-10">
         <BrandHeader />
         <div className="mt-8 rounded-2xl border border-[rgba(21,128,61,0.35)] bg-[rgba(21,128,61,0.08)] px-5 py-6 text-center">
-          <p className="text-sm font-semibold text-[#15803d]">Enquiry received</p>
+          <p className="text-sm font-semibold text-[var(--tone-green)]">Enquiry received</p>
           <p className="mt-3 font-mono text-2xl font-bold text-[var(--brand-deep)]">
             {done.enquiryNo}
           </p>

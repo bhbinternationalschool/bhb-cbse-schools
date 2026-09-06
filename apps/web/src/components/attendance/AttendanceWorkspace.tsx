@@ -600,7 +600,7 @@ export function AttendanceWorkspace() {
                   </button>
                   <button
                     type="button"
-                    className="min-h-11 min-w-[7.5rem] flex-1 rounded-xl bg-[#dc2626] px-3 py-2.5 text-sm font-bold text-white disabled:opacity-40 sm:flex-none"
+                    className="min-h-11 min-w-[7.5rem] flex-1 rounded-xl bg-[var(--tone-red-solid)] px-3 py-2.5 text-sm font-bold text-white disabled:opacity-40 sm:flex-none"
                     disabled={holidayBlocks || lockBlocksTeacher}
                     onClick={() => markAll("A")}
                   >
@@ -819,7 +819,7 @@ export function AttendanceWorkspace() {
                     </button>
                     <button
                       type="button"
-                      className="min-h-12 flex-1 rounded-xl bg-[#dc2626] text-sm font-bold text-white disabled:opacity-40"
+                      className="min-h-12 flex-1 rounded-xl bg-[var(--tone-red-solid)] text-sm font-bold text-white disabled:opacity-40"
                       disabled={
                         !sectionId || holidayBlocks || lockBlocksTeacher
                       }

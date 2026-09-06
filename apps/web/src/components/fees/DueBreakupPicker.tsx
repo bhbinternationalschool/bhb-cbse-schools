@@ -162,7 +162,7 @@ export function DueBreakupPicker({
                   <span
                     className={`block text-sm font-bold sm:text-base ${
                       monthAllPaid
-                        ? "text-[#15803d]"
+                        ? "text-[var(--tone-green)]"
                         : "text-[var(--brand-deep)]"
                     }`}
                   >
@@ -176,7 +176,7 @@ export function DueBreakupPicker({
                   <span
                     className={`block text-sm sm:text-sm ${
                       monthAllPaid
-                        ? "font-semibold text-[#15803d]"
+                        ? "font-semibold text-[var(--tone-green)]"
                         : monthOverdue
                           ? "font-semibold text-[#dc2626]"
                           : "text-[var(--muted)]"
@@ -202,7 +202,7 @@ export function DueBreakupPicker({
                   <span
                     className={`block text-sm font-bold sm:text-base ${
                       monthAllPaid
-                        ? "text-[#15803d]"
+                        ? "text-[var(--tone-green)]"
                         : monthOverdue
                           ? "text-[#dc2626]"
                           : "text-[var(--brand-deep)]"
@@ -255,39 +255,39 @@ export function DueBreakupPicker({
                             aria-label={`${headTitle} paid`}
                           />
                           <div className="min-w-0 flex-1">
-                            <div className="text-sm font-medium text-[#15803d] sm:text-base">
+                            <div className="text-sm font-medium text-[var(--tone-green)] sm:text-base">
                               {headTitle}
-                              <span className="ml-1.5 rounded bg-[#16a34a]/15 px-1.5 py-0.5 text-sm font-bold uppercase tracking-wide text-[#15803d]">
+                              <span className="ml-1.5 rounded bg-[#16a34a]/15 px-1.5 py-0.5 text-sm font-bold uppercase tracking-wide text-[var(--tone-green)]">
                                 Paid
                               </span>
                               {d.kind === "special" ? (
-                                <span className="ml-1.5 text-sm font-semibold uppercase tracking-wide text-[#15803d]/80">
+                                <span className="ml-1.5 text-sm font-semibold uppercase tracking-wide text-[var(--tone-green)]/80">
                                   Special
                                 </span>
                               ) : null}
                               {d.kind === "voucher" ? (
-                                <span className="ml-1.5 text-sm font-semibold uppercase tracking-wide text-[#15803d]/80">
+                                <span className="ml-1.5 text-sm font-semibold uppercase tracking-wide text-[var(--tone-green)]/80">
                                   Voucher
                                 </span>
                               ) : null}
                               {d.kind === "plan" ? (
-                                <span className="ml-1.5 text-sm font-semibold uppercase tracking-wide text-[#15803d]/80">
+                                <span className="ml-1.5 text-sm font-semibold uppercase tracking-wide text-[var(--tone-green)]/80">
                                   Plan
                                 </span>
                               ) : null}
                               {d.kind === "store" ? (
-                                <span className="ml-1.5 text-sm font-semibold uppercase tracking-wide text-[#15803d]/80">
+                                <span className="ml-1.5 text-sm font-semibold uppercase tracking-wide text-[var(--tone-green)]/80">
                                   Store
                                 </span>
                               ) : null}
                               {d.kind === "transport" ? (
-                                <span className="ml-1.5 text-sm font-semibold uppercase tracking-wide text-[#15803d]/80">
+                                <span className="ml-1.5 text-sm font-semibold uppercase tracking-wide text-[var(--tone-green)]/80">
                                   Bus
                                 </span>
                               ) : null}
                             </div>
                             {d.kind === "store" && d.storeItems.length > 0 ? (
-                              <ul className="mt-1 space-y-0.5 text-sm text-[#15803d]/90">
+                              <ul className="mt-1 space-y-0.5 text-sm text-[var(--tone-green)]/90">
                                 {d.storeItems.map((it, idx) => (
                                   <li key={`${d.dueKey}-p-${idx}`}>
                                     {it.name}
@@ -297,13 +297,13 @@ export function DueBreakupPicker({
                                 ))}
                               </ul>
                             ) : d.kind === "transport" && d.transport ? (
-                              <div className="text-sm font-semibold text-[#15803d] sm:text-sm">
+                              <div className="text-sm font-semibold text-[var(--tone-green)] sm:text-sm">
                                 {d.transport.routeCode} · {d.transport.busNo} ·{" "}
                                 {d.transport.stopName} · paid{" "}
                                 {formatInr(d.paidPaise)}
                               </div>
                             ) : (
-                              <div className="text-sm font-semibold text-[#15803d] sm:text-sm">
+                              <div className="text-sm font-semibold text-[var(--tone-green)] sm:text-sm">
                                 Paid {formatInr(d.paidPaise)}
                                 {d.concessionPaise
                                   ? ` · −${formatInr(d.concessionPaise)} concession`
@@ -312,7 +312,7 @@ export function DueBreakupPicker({
                               </div>
                             )}
                             {d.concessionDetails?.length ? (
-                              <ul className="mt-1 space-y-0.5 text-sm font-medium text-[#15803d]/85">
+                              <ul className="mt-1 space-y-0.5 text-sm font-medium text-[var(--tone-green)]/85">
                                 {d.concessionDetails.map((c) => (
                                   <li key={`${d.dueKey}-paid-${c.grantId}`}>
                                     Discount · {formatConcessionDetailLine(c)}
@@ -321,7 +321,7 @@ export function DueBreakupPicker({
                               </ul>
                             ) : null}
                           </div>
-                          <div className="shrink-0 text-sm font-bold text-[#15803d] sm:text-base">
+                          <div className="shrink-0 text-sm font-bold text-[var(--tone-green)] sm:text-base">
                             {formatInr(0)}
                           </div>
                         </div>

@@ -45,7 +45,7 @@ export const TRUST_REPORT_CATEGORIES: {
   headerClass: string;
 }[] = [
   { id: "project", title: "Project", headerClass: "bg-[#78350f]" },
-  { id: "site", title: "Site ops", headerClass: "bg-[#0f766e]" },
+  { id: "site", title: "Site ops", headerClass: "bg-[var(--tone-teal-solid)]" },
   { id: "finance", title: "Finance & CWIP", headerClass: "bg-[#1565c0]" },
 ];
 

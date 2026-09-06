@@ -495,12 +495,12 @@ export function WaChatHubPanel({
                         {t.displayName || "Contact"} · {t.mobile}
                       </span>
                       {t.unreadStaff > 0 ? (
-                        <span className="rounded-full bg-[#0f766e] px-1.5 text-[10px] font-bold text-white">
+                        <span className="rounded-full bg-[var(--tone-teal-solid)] px-1.5 text-[10px] font-bold text-white">
                           {t.unreadStaff}
                         </span>
                       ) : null}
                     </span>
-                    <span className="text-[10px] font-medium text-[#0f766e]">
+                    <span className="text-[10px] font-medium text-[var(--tone-teal)]">
                       {t.categoryLabel} · {t.status}
                     </span>
                     <span className="line-clamp-1 text-[11px] text-[var(--muted)]">
@@ -563,7 +563,7 @@ export function WaChatHubPanel({
                     key={m.id}
                     className={`rounded-lg px-2 py-1.5 text-[12px] whitespace-pre-wrap ${
                       m.direction === "in"
-                        ? "bg-[var(--card)] border-l-2 border-[#0f766e]"
+                        ? "bg-[var(--card)] border-l-2 border-[var(--tone-teal)]"
                         : m.role === "staff"
                           ? "bg-[rgba(15,118,110,0.15)]"
                           : "bg-[var(--surface-sunken)] border-l-2 border-[#64748b]"

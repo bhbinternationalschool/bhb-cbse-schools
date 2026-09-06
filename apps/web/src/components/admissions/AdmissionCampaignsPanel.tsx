@@ -650,7 +650,7 @@ export function AdmissionCampaignsPanel({
               {canEdit ? (
                 <button
                   type="button"
-                  className="rounded-lg bg-[#0f766e] px-3 py-2 text-[11px] font-semibold text-white"
+                  className="rounded-lg bg-[var(--tone-teal-solid)] px-3 py-2 text-[11px] font-semibold text-white"
                   onClick={onSaveList}
                 >
                   Save audience list
@@ -888,7 +888,7 @@ export function AdmissionCampaignsPanel({
                         <div className="flex flex-wrap gap-1.5">
                           <button
                             type="button"
-                            className="rounded-md bg-[#0f766e] px-2 py-1 text-[10px] font-semibold text-white"
+                            className="rounded-md bg-[var(--tone-teal-solid)] px-2 py-1 text-[10px] font-semibold text-white"
                             onClick={() => onEnqueue(c.id)}
                           >
                             Enqueue
@@ -965,7 +965,7 @@ export function AdmissionCampaignsPanel({
                   </button>
                   <button
                     type="button"
-                    className="rounded-lg bg-[#15803d] px-3 py-2 text-[11px] font-semibold text-white"
+                    className="rounded-lg bg-[var(--tone-green-solid)] px-3 py-2 text-[11px] font-semibold text-white"
                     onClick={() => onDispatch(true)}
                   >
                     Dispatch + open WhatsApp (≤{WA_ME_BATCH_CAP})

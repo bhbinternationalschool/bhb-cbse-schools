@@ -111,7 +111,7 @@ export function AutomationSetupHelper({
       </button>
       {error ? <p className="text-[10px] text-rose-700">{error}</p> : null}
       {lastExplanation ? (
-        <p className="text-[10px] text-[#0f766e]">{lastExplanation}</p>
+        <p className="text-[10px] text-[var(--tone-teal)]">{lastExplanation}</p>
       ) : null}
     </div>
   );

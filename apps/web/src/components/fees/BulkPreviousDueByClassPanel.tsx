@@ -165,7 +165,7 @@ export function BulkPreviousDueByClassPanel({
         </p>
       ) : null}
       {notice ? (
-        <p className="mt-2 rounded-lg bg-[rgba(22,163,74,0.08)] px-3 py-2 text-sm text-[#15803d]">
+        <p className="mt-2 rounded-lg bg-[rgba(22,163,74,0.08)] px-3 py-2 text-sm text-[var(--tone-green)]">
           {notice}
         </p>
       ) : null}

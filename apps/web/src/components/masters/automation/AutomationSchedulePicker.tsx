@@ -122,7 +122,7 @@ export function AutomationSchedulePicker({
             disabled={readOnly}
             className={`rounded-lg border px-3 py-2 text-left text-[11px] disabled:opacity-50 ${
               triggerType === opt.id
-                ? "border-[#0f766e] bg-[rgba(15,118,110,0.08)] font-semibold text-[var(--brand-deep)]"
+                ? "border-[var(--tone-teal)] bg-[rgba(15,118,110,0.08)] font-semibold text-[var(--brand-deep)]"
                 : "border-[var(--border)] bg-[var(--card)] text-[var(--muted)]"
             }`}
             onClick={() => onTriggerTypeChange?.(opt.id)}
@@ -172,7 +172,7 @@ export function AutomationSchedulePicker({
               </select>
             </label>
           </div>
-          <p className="text-[11px] text-[#0f766e]">
+          <p className="text-[11px] text-[var(--tone-teal)]">
             {describeCronExpr(cronExpr)}
           </p>
           <button
@@ -218,7 +218,7 @@ export function AutomationSchedulePicker({
               ))}
             </select>
           </label>
-          <p className="text-[11px] text-[#0f766e]">
+          <p className="text-[11px] text-[var(--tone-teal)]">
             {describeIntervalMinutes(intervalMinutes)}
           </p>
         </div>

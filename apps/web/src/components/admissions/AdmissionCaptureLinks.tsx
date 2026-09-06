@@ -83,7 +83,7 @@ export function AdmissionCaptureLinks() {
           onClick={() => setKind("register")}
           className={`rounded-lg px-3 py-1.5 text-[12px] font-semibold ${
             kind === "register"
-              ? "bg-[#0f766e] text-white"
+              ? "bg-[var(--tone-teal-solid)] text-white"
               : "border border-[rgba(32,48,80,0.15)] bg-white text-[var(--brand-deep)]"
           }`}
         >

@@ -235,7 +235,7 @@ export function VisitorSelfServiceApp({
             <img src={TENANT.logoCrestUrl} alt="" className="h-11 w-11 object-contain" />
             <div>
               <p className="text-[15px] font-black leading-tight">{TENANT.name}</p>
-              <p className="text-[12px] text-[#5c6478]">
+              <p className="text-[12px] text-[var(--muted)]">
                 {t.appTitle}
                 {gate ? ` · ${t.schoolGate} ${gate}` : ""}
               </p>
@@ -263,30 +263,30 @@ export function VisitorSelfServiceApp({
               <p className="text-lg font-black">{t.welcome}{lookup.suggestedName ? `, ${lookup.suggestedName}` : ""}</p>
               {lookup.parentOf.length > 0 ? (
                 <div className="mt-2 text-sm">
-                  <p className="font-semibold text-[#15803d]">{t.weFound}</p>
+                  <p className="font-semibold text-[var(--tone-green)]">{t.weFound}</p>
                   <p className="mt-1">{t.parentOf}</p>
                   <ul className="mt-1 space-y-1">
                     {lookup.parentOf.map((p) => (
                       <li key={p.admissionNo || p.studentName} className="rounded-lg bg-[#f6f5ef] px-3 py-1.5 font-semibold">
-                        {p.studentName}{p.classLabel ? <span className="ml-2 text-[#5c6478]">· {t.classLabel} {p.classLabel}</span> : null}
+                        {p.studentName}{p.classLabel ? <span className="ml-2 text-[var(--muted)]">· {t.classLabel} {p.classLabel}</span> : null}
                       </li>
                     ))}
                   </ul>
                 </div>
               ) : lookup.leads.length > 0 ? (
                 <div className="mt-2 text-sm">
-                  <p className="font-semibold text-[#15803d]">{t.weFound}</p>
+                  <p className="font-semibold text-[var(--tone-green)]">{t.weFound}</p>
                   <p className="mt-1">{t.admissionLead}</p>
                   <ul className="mt-1 space-y-1">
                     {lookup.leads.map((l, i) => (
                       <li key={i} className="rounded-lg bg-[#f6f5ef] px-3 py-1.5 font-semibold">
-                        {l.childName}{l.classSought ? <span className="ml-2 text-[#5c6478]">· {t.classLabel} {l.classSought}</span> : null}{l.stage ? <span className="ml-2 text-[#5c6478]">· {t.stage}: {l.stage}</span> : null}
+                        {l.childName}{l.classSought ? <span className="ml-2 text-[var(--muted)]">· {t.classLabel} {l.classSought}</span> : null}{l.stage ? <span className="ml-2 text-[var(--muted)]">· {t.stage}: {l.stage}</span> : null}
                       </li>
                     ))}
                   </ul>
                 </div>
               ) : (
-                <p className="mt-2 text-sm text-[#5c6478]">{t.notOnFile}</p>
+                <p className="mt-2 text-sm text-[var(--muted)]">{t.notOnFile}</p>
               )}
             </div>
 
@@ -319,20 +319,20 @@ export function VisitorSelfServiceApp({
 
         {step === "done" && entry ? (
           <section className="space-y-4">
-            <div className="rounded-2xl border-2 border-[#15803d]/40 bg-white p-5 text-center">
-              <p className="text-lg font-black text-[#15803d]">{lookup?.openVisit ? t.alreadyIn : t.checkedIn}</p>
-              <p className="mt-3 text-sm text-[#5c6478]">{t.visitorNo}</p>
+            <div className="rounded-2xl border-2 border-[var(--tone-green)]/40 bg-white p-5 text-center">
+              <p className="text-lg font-black text-[var(--tone-green)]">{lookup?.openVisit ? t.alreadyIn : t.checkedIn}</p>
+              <p className="mt-3 text-sm text-[var(--muted)]">{t.visitorNo}</p>
               <p className="text-4xl font-black tracking-wide">{entry.visitorNo || entry.id.slice(-6).toUpperCase()}</p>
               <p className="mt-2 text-lg font-bold">{entry.visitorName}</p>
-              <p className="text-sm text-[#5c6478]">{purposeLabel(entry.purpose)}{entry.personToMeet ? ` · ${entry.personToMeet}` : ""}</p>
-              {entry.linkedTo ? <p className="mt-1 text-xs text-[#5c6478]">{entry.linkedTo}</p> : null}
-              <p className="mt-3 text-sm"><span className="text-[#5c6478]">{t.inTime}:</span> <b>{fmtTime(entry.inTime)}</b> · {fmtDate(entry.inTime)}</p>
+              <p className="text-sm text-[var(--muted)]">{purposeLabel(entry.purpose)}{entry.personToMeet ? ` · ${entry.personToMeet}` : ""}</p>
+              {entry.linkedTo ? <p className="mt-1 text-xs text-[var(--muted)]">{entry.linkedTo}</p> : null}
+              <p className="mt-3 text-sm"><span className="text-[var(--muted)]">{t.inTime}:</span> <b>{fmtTime(entry.inTime)}</b> · {fmtDate(entry.inTime)}</p>
               {passQr ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={passQr} alt="Visitor QR" className="mx-auto mt-4 h-40 w-40" />
               ) : null}
-              <p className="mt-3 text-xs text-[#5c6478]">{t.showAtGate}</p>
-              <p className="mt-1 text-xs text-[#5c6478]">{t.keepPhone}</p>
+              <p className="mt-3 text-xs text-[var(--muted)]">{t.showAtGate}</p>
+              <p className="mt-1 text-xs text-[var(--muted)]">{t.keepPhone}</p>
             </div>
             <button type="button" className={primary} disabled={busy} onClick={() => void onCheckOut(entry.id)}>{busy ? t.checkingOut : t.checkOut}</button>
             <button type="button" className={secondary} onClick={reset}>{t.startOver}</button>
@@ -351,17 +351,17 @@ export function VisitorSelfServiceApp({
         {step === "checkedOut" && entry ? (
           <section className="space-y-4">
             <div className="rounded-2xl border-2 border-[#203050]/20 bg-white p-5 text-center">
-              <p className="text-lg font-black text-[#15803d]">{t.checkedOut}</p>
-              <p className="mt-3 text-sm text-[#5c6478]">{t.visitorNo}</p>
+              <p className="text-lg font-black text-[var(--tone-green)]">{t.checkedOut}</p>
+              <p className="mt-3 text-sm text-[var(--muted)]">{t.visitorNo}</p>
               <p className="text-3xl font-black">{entry.visitorNo || entry.id.slice(-6).toUpperCase()}</p>
               <p className="mt-2 font-bold">{entry.visitorName}</p>
-              <p className="mt-2 text-sm"><span className="text-[#5c6478]">{t.inTime}:</span> <b>{fmtTime(entry.inTime)}</b> · <span className="text-[#5c6478]">{t.outTime}:</span> <b>{fmtTime(entry.outTime)}</b></p>
+              <p className="mt-2 text-sm"><span className="text-[var(--muted)]">{t.inTime}:</span> <b>{fmtTime(entry.inTime)}</b> · <span className="text-[var(--muted)]">{t.outTime}:</span> <b>{fmtTime(entry.outTime)}</b></p>
             </div>
             <button type="button" className={secondary} onClick={reset}>{t.startOver}</button>
           </section>
         ) : null}
 
-        <p className="mt-auto pt-8 text-center text-[11px] text-[#5c6478]">{t.printedBy}</p>
+        <p className="mt-auto pt-8 text-center text-[11px] text-[var(--muted)]">{t.printedBy}</p>
       </div>
     </main>
   );

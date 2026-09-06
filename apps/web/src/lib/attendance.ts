@@ -1113,7 +1113,7 @@ export function statusTone(status: AttendanceStatus): {
       };
     case "A":
       return {
-        bg: "bg-[#dc2626]",
+        bg: "bg-[var(--tone-red-solid)]",
         text: "text-white",
         ring: "ring-[#dc2626]",
       };

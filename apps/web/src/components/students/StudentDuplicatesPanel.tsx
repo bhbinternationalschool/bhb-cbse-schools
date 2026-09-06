@@ -186,7 +186,7 @@ export function StudentDuplicatesPanel({
       </div>
 
       {notice ? (
-        <div className="rounded-lg bg-[rgba(15,118,110,0.12)] px-3 py-2 text-sm font-medium text-[#0f766e]">
+        <div className="rounded-lg bg-[rgba(15,118,110,0.12)] px-3 py-2 text-sm font-medium text-[var(--tone-teal)]">
           {notice}
         </div>
       ) : null}
@@ -279,7 +279,7 @@ export function StudentDuplicatesPanel({
                               {s.fullName}
                             </span>
                             {isKeep ? (
-                              <span className="rounded bg-[rgba(15,118,110,0.14)] px-1.5 py-0.5 text-[10px] font-bold uppercase text-[#0f766e]">
+                              <span className="rounded bg-[rgba(15,118,110,0.14)] px-1.5 py-0.5 text-[10px] font-bold uppercase text-[var(--tone-teal)]">
                                 Keep
                               </span>
                             ) : null}

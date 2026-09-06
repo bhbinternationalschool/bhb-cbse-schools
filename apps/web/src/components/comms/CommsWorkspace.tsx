@@ -812,7 +812,7 @@ export function CommsWorkspace() {
                       {!readOnly && n.status !== "published" ? (
                         <button
                           type="button"
-                          className="text-[11px] font-semibold text-[#0f766e]"
+                          className="text-[11px] font-semibold text-[var(--tone-teal)]"
                           onClick={() => {
                             const r = setNoticeStatus(n.id, "published");
                             if (r.ok) {
@@ -966,7 +966,7 @@ export function CommsWorkspace() {
                       {!readOnly && n.status !== "published" ? (
                         <button
                           type="button"
-                          className="text-[11px] font-semibold text-[#0f766e]"
+                          className="text-[11px] font-semibold text-[var(--tone-teal)]"
                           onClick={() => {
                             const r = setNewsStatus(n.id, "published");
                             if (r.ok) {
@@ -1266,7 +1266,7 @@ export function CommsWorkspace() {
                         href={log.postUrl}
                         target="_blank"
                         rel="noreferrer"
-                        className="mt-1 inline-block text-[11px] text-[#0f766e]"
+                        className="mt-1 inline-block text-[11px] text-[var(--tone-teal)]"
                       >
                         View post
                       </a>

@@ -162,7 +162,7 @@ function TemplateEditor({
             </span>
           ) : null}
           {mediaNotice ? (
-            <span className="text-[11px] text-[#0f766e]">{mediaNotice}</span>
+            <span className="text-[11px] text-[var(--tone-teal)]">{mediaNotice}</span>
           ) : null}
         </div>
 

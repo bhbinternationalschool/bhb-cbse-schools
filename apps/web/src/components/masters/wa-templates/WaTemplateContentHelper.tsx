@@ -89,7 +89,7 @@ export function WaTemplateContentHelper({
             key={s.id}
             type="button"
             disabled={readOnly}
-            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-1 text-[10px] font-semibold text-[var(--brand-deep)] hover:border-[#0f766e] disabled:opacity-50"
+            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-1 text-[10px] font-semibold text-[var(--brand-deep)] hover:border-[var(--tone-teal)] disabled:opacity-50"
             onClick={() => onApply(s.body, s.footer)}
           >
             {s.label}

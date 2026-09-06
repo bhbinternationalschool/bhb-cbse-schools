@@ -221,7 +221,7 @@ export function DocVerificationQueuePanel({
                     <button
                       type="button"
                       disabled={!!ocrBusy[k]}
-                      className="rounded-lg bg-[#0f766e] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                      className="rounded-lg bg-[var(--tone-teal-solid)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
                       onClick={() => void runVisionScan(it)}
                     >
                       {ocrBusy[k] ? "Scanning…" : "Vision scan"}

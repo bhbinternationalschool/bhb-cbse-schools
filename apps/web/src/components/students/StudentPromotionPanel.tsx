@@ -366,7 +366,7 @@ export function StudentPromotionPanel({
       </button>
 
       {notice ? (
-        <p className="rounded-lg bg-[rgba(15,118,110,0.1)] px-3 py-2 text-sm text-[#0f766e]">
+        <p className="rounded-lg bg-[rgba(15,118,110,0.1)] px-3 py-2 text-sm text-[var(--tone-teal)]">
           {notice}
         </p>
       ) : null}

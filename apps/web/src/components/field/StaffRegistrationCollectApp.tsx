@@ -420,7 +420,7 @@ export function StaffRegistrationCollectApp({
 
       <button
         type="button"
-        className="w-full rounded-2xl bg-[#0f766e] py-3 text-sm font-semibold text-white"
+        className="w-full rounded-2xl bg-[var(--tone-teal-solid)] py-3 text-sm font-semibold text-white"
         onClick={() => void prepareUpi()}
       >
         Show school UPI QR
@@ -454,7 +454,7 @@ export function StaffRegistrationCollectApp({
           />
           <button
             type="button"
-            className="w-full rounded-2xl bg-[#166534] py-3 text-sm font-semibold text-white"
+            className="w-full rounded-2xl bg-[var(--tone-green-deep-solid)] py-3 text-sm font-semibold text-white"
             onClick={confirmPaidAndWhatsApp}
           >
             Capture UPI + WhatsApp receipt

@@ -697,7 +697,7 @@ export function AdmissionFieldSurveyPanel({
             <div className="mb-3 flex flex-wrap gap-2">
               <button
                 type="button"
-                className="rounded-lg bg-[#166534] px-3 py-1.5 text-[11px] font-semibold text-white"
+                className="rounded-lg bg-[var(--tone-green-deep-solid)] px-3 py-1.5 text-[11px] font-semibold text-white"
                 onClick={onCheckIn}
               >
                 Check in{selectedBeat ? ` · ${selectedBeat.name}` : ""}
@@ -825,7 +825,7 @@ export function AdmissionFieldSurveyPanel({
                   }}
                   className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
                     beatFilter === b.id
-                      ? "bg-[#9a3412] text-white"
+                      ? "bg-[var(--tone-brick-solid)] text-white"
                       : b.isActive
                         ? "bg-[rgba(180,83,9,0.12)] text-[#9a3412]"
                         : "bg-[rgba(32,48,80,0.06)] text-[var(--muted)] line-through"
@@ -1294,7 +1294,7 @@ export function AdmissionFieldSurveyPanel({
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              className="rounded-lg bg-[#9a3412] px-4 py-2.5 text-sm font-semibold text-white"
+              className="rounded-lg bg-[var(--tone-brick-solid)] px-4 py-2.5 text-sm font-semibold text-white"
               onClick={submitSurvey}
             >
               {!online
@@ -1341,7 +1341,7 @@ export function AdmissionFieldSurveyPanel({
             <button
               type="button"
               disabled={!online}
-              className="rounded-lg bg-[#166534] px-3 py-2 text-[12px] font-semibold text-white disabled:opacity-40"
+              className="rounded-lg bg-[var(--tone-green-deep-solid)] px-3 py-2 text-[12px] font-semibold text-white disabled:opacity-40"
               onClick={onFlushQueue}
             >
               Sync queue → CRM

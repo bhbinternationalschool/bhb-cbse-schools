@@ -737,7 +737,7 @@ export function DefaultersPlaybook() {
                         <div
                           className={`mt-0.5 text-[10px] font-semibold ${
                             rowLikelihood.tone === "good"
-                              ? "text-[#15803d]"
+                              ? "text-[var(--tone-green)]"
                               : rowLikelihood.tone === "warn"
                                 ? "text-[#8a6400]"
                                 : "text-[var(--danger)]"
@@ -788,7 +788,7 @@ export function DefaultersPlaybook() {
                     <span
                       className={`rounded-md px-2 py-0.5 text-[10px] font-semibold ${
                         likelihood.tone === "good"
-                          ? "bg-[rgba(21,128,61,0.1)] text-[#15803d]"
+                          ? "bg-[rgba(21,128,61,0.1)] text-[var(--tone-green)]"
                           : likelihood.tone === "warn"
                             ? "bg-[rgba(180,131,0,0.12)] text-[#8a6400]"
                             : "bg-[rgba(180,35,24,0.1)] text-[var(--danger)]"
@@ -986,7 +986,7 @@ export function DefaultersPlaybook() {
                             <span
                               className={`text-[10px] font-bold uppercase tracking-wide ${
                                 isUnheld
-                                  ? "text-[#15803d]"
+                                  ? "text-[var(--tone-green)]"
                                   : isHeld
                                     ? "text-[var(--danger)]"
                                     : "text-[var(--muted)]"

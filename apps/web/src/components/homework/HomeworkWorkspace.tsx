@@ -620,7 +620,7 @@ export function HomeworkWorkspace() {
             </select>
           </label>
           {defaultsNote ? (
-            <p className="self-end pb-2 text-xs text-[#0f766e]">{defaultsNote}</p>
+            <p className="self-end pb-2 text-xs text-[var(--tone-teal)]">{defaultsNote}</p>
           ) : null}
         </div>
       }
@@ -804,7 +804,7 @@ export function HomeworkWorkspace() {
                         ) : null}
                         <button
                           type="button"
-                          className="text-xs text-[#0f766e] underline"
+                          className="text-xs text-[var(--tone-teal)] underline"
                           onClick={() =>
                             setNotifyTarget({ kind: "homework", post: p })
                           }
@@ -883,7 +883,7 @@ export function HomeworkWorkspace() {
                     ) : null}
                     <button
                       type="button"
-                      className="text-xs text-[#0f766e] underline"
+                      className="text-xs text-[var(--tone-teal)] underline"
                       onClick={() =>
                         setNotifyTarget({ kind: "diary", diary: d })
                       }

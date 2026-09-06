@@ -96,7 +96,7 @@ export const ADMISSION_REPORT_CATEGORIES: {
   { id: "analytics", title: "Analytics", headerClass: "bg-[#ef6c00]" },
   { id: "crm", title: "CRM follow-up", headerClass: "bg-[#1565c0]" },
   { id: "survey", title: "Field survey", headerClass: "bg-[#c2410c]" },
-  { id: "registration", title: "Registration fee", headerClass: "bg-[#0f766e]" },
+  { id: "registration", title: "Registration fee", headerClass: "bg-[var(--tone-teal-solid)]" },
 ];
 
 export const ADMISSION_REPORTS: AdmissionReportDef[] = [

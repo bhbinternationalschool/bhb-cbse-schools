@@ -173,7 +173,7 @@ export function CrmParentChatWidget({
                     m.role === "parent"
                       ? "ml-auto bg-[var(--brand-deep)] text-white"
                       : m.role === "staff"
-                        ? "bg-[#0f766e] text-white"
+                        ? "bg-[var(--tone-teal-solid)] text-white"
                         : "bg-white text-[var(--brand-deep)] shadow-sm"
                   }`}
                 >

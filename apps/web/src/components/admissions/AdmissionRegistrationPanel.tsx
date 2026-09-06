@@ -844,7 +844,7 @@ export function AdmissionRegistrationPanel({
                 ? ""
                 : "s"}{" "}
               · total registration fee{" "}
-              <span className="text-[#0f766e]">
+              <span className="text-[var(--tone-teal)]">
                 {formatInr(familyFeeTotalPaise)}
               </span>
             </p>
@@ -859,7 +859,7 @@ export function AdmissionRegistrationPanel({
           </div>
           <button
             type="button"
-            className="mt-3 rounded-lg bg-[#0f766e] px-3 py-2 text-[11px] font-semibold text-white"
+            className="mt-3 rounded-lg bg-[var(--tone-teal-solid)] px-3 py-2 text-[11px] font-semibold text-white"
             onClick={onSaveNew}
           >
             Save & take fee →
@@ -1114,7 +1114,7 @@ export function AdmissionRegistrationPanel({
                     </td>
                     <td className="px-3 py-2 text-[11px] font-semibold">
                       {l.registrationPaymentStatus === "paid" ? (
-                        <span className="text-[#15803d]">Paid</span>
+                        <span className="text-[var(--tone-green)]">Paid</span>
                       ) : l.registrationPaymentStatus === "partial" ? (
                         <span className="text-[#9a3412]">Partial</span>
                       ) : l.registrationPaymentStatus === "pending" ? (
@@ -1213,7 +1213,7 @@ export function AdmissionRegistrationPanel({
                 className={
                   selected.registrationPaymentStatus === "paid" ||
                   selected.registrationFeePaid
-                    ? "text-[#15803d]"
+                    ? "text-[var(--tone-green)]"
                     : selected.registrationPaymentStatus === "waived"
                       ? "text-[var(--muted)]"
                       : "text-[#9a3412]"
@@ -1347,7 +1347,7 @@ export function AdmissionRegistrationPanel({
                     </button>
                     <button
                       type="button"
-                      className="rounded-lg bg-[#0f766e] px-3 py-2 text-[11px] font-semibold text-white"
+                      className="rounded-lg bg-[var(--tone-teal-solid)] px-3 py-2 text-[11px] font-semibold text-white"
                       onClick={onCreateUpi}
                     >
                       QR + WhatsApp
@@ -1365,7 +1365,7 @@ export function AdmissionRegistrationPanel({
                     </button>
                     <button
                       type="button"
-                      className="rounded-lg bg-[#0f766e] px-3 py-2 text-[11px] font-semibold text-white"
+                      className="rounded-lg bg-[var(--tone-teal-solid)] px-3 py-2 text-[11px] font-semibold text-white"
                       onClick={onCreateUpi}
                     >
                       QR + WhatsApp (this amount)
@@ -1431,7 +1431,7 @@ export function AdmissionRegistrationPanel({
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
-                      className="rounded-lg bg-[#15803d] px-3 py-1.5 text-[11px] font-semibold text-white"
+                      className="rounded-lg bg-[var(--tone-green-solid)] px-3 py-1.5 text-[11px] font-semibold text-white"
                       onClick={() => onWhatsApp(openPayment)}
                     >
                       WhatsApp to parent
@@ -1476,7 +1476,7 @@ export function AdmissionRegistrationPanel({
               {canEdit ? (
                 <button
                   type="button"
-                  className="rounded-lg bg-[#166534] px-4 py-2.5 text-[12px] font-semibold text-white"
+                  className="rounded-lg bg-[var(--tone-green-deep-solid)] px-4 py-2.5 text-[12px] font-semibold text-white"
                   onClick={onAdmit}
                 >
                   Send to student record

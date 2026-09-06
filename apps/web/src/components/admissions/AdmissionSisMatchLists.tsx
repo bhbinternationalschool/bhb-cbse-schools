@@ -206,9 +206,9 @@ function chipClass(active: boolean, tone: FilterChip["tone"]): string {
   if (active) {
     switch (tone) {
       case "green":
-        return "bg-[#166534] text-white";
+        return "bg-[var(--tone-green-deep-solid)] text-white";
       case "amber":
-        return "bg-[#9a3412] text-white";
+        return "bg-[var(--tone-brick-solid)] text-white";
       case "slate":
         return "bg-[#334155] text-white";
       case "red":
@@ -223,7 +223,7 @@ function chipClass(active: boolean, tone: FilterChip["tone"]): string {
     case "amber":
       return "bg-[rgba(180,83,9,0.12)] text-[#9a3412] hover:brightness-95";
     case "slate":
-      return "bg-[rgba(71,85,105,0.12)] text-[#334155] hover:brightness-95";
+      return "bg-[rgba(71,85,105,0.12)] text-[var(--tone-slate)] hover:brightness-95";
     case "red":
       return "bg-[rgba(180,35,24,0.1)] text-[var(--danger)] hover:brightness-95";
     default:
@@ -308,7 +308,7 @@ export function AdmissionSisMatchLists({
             }
             className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
               openPanel === "admitted"
-                ? "bg-[#166534] text-white"
+                ? "bg-[var(--tone-green-deep-solid)] text-white"
                 : "bg-[rgba(21,128,61,0.15)] text-[#166534] hover:brightness-95"
             }`}
           >
@@ -326,7 +326,7 @@ export function AdmissionSisMatchLists({
             }
             className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
               openPanel === "suspected"
-                ? "bg-[#9a3412] text-white"
+                ? "bg-[var(--tone-brick-solid)] text-white"
                 : "bg-[rgba(180,83,9,0.14)] text-[#9a3412] hover:brightness-95"
             }`}
           >
@@ -460,7 +460,7 @@ function MatchListBody({
                       <span
                         className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${
                           lead.sisStudentStatus === "inactive"
-                            ? "bg-[rgba(71,85,105,0.15)] text-[#334155]"
+                            ? "bg-[rgba(71,85,105,0.15)] text-[var(--tone-slate)]"
                             : "bg-[rgba(21,128,61,0.12)] text-[#166534]"
                         }`}
                       >
@@ -484,13 +484,13 @@ function MatchListBody({
 
                 <div className="mt-2 rounded-md bg-[rgba(15,118,110,0.06)] px-2 py-1.5">
                   <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                    <span className="text-[10px] font-semibold uppercase tracking-wide text-[#0f766e]">
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--tone-teal)]">
                       SIS student
                     </span>
                     {actions.onOpenStudent ? (
                       <button
                         type="button"
-                        className="font-semibold text-[#0f766e] underline-offset-2 hover:underline"
+                        className="font-semibold text-[var(--tone-teal)] underline-offset-2 hover:underline"
                         onClick={() => actions.onOpenStudent!(sid)}
                         title="Open student details"
                       >
@@ -599,7 +599,7 @@ export function LeadSisMatchDetailCard({
         <span
           className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
             lead.sisStudentStatus === "inactive"
-              ? "bg-[rgba(71,85,105,0.15)] text-[#334155]"
+              ? "bg-[rgba(71,85,105,0.15)] text-[var(--tone-slate)]"
               : "bg-[rgba(21,128,61,0.15)] text-[#166534]"
           }`}
         >
@@ -613,7 +613,7 @@ export function LeadSisMatchDetailCard({
           {actions.onOpenStudent ? (
             <button
               type="button"
-              className="font-semibold text-[#0f766e] underline-offset-2 hover:underline"
+              className="font-semibold text-[var(--tone-teal)] underline-offset-2 hover:underline"
               onClick={() => actions.onOpenStudent!(sid)}
             >
               {studentName}

@@ -137,7 +137,7 @@ export function CertificateSheet({ issue }: { issue: CertificateIssue }) {
         )}
 
         {issue.overrideDues ? (
-          <p className="mt-4 text-[10px] text-[#b45309] print-hide">
+          <p className="mt-4 text-[10px] text-[var(--warning)] print-hide">
             Issued with dues override — open balance was{" "}
             {formatInr(issue.openBalancePaise)} at issue.
           </p>

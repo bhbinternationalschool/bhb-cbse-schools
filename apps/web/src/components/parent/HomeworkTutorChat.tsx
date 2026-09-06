@@ -94,7 +94,7 @@ export function HomeworkTutorChat({
     <div className="mt-2">
       <button
         type="button"
-        className="text-xs font-semibold text-[#6d28d9] underline"
+        className="text-xs font-semibold text-[var(--tone-violet)] underline"
         onClick={() => setOpen((v) => !v)}
       >
         {open ? "Hide tutor hints" : "Get tutor hints"}
@@ -153,7 +153,7 @@ export function HomeworkTutorChat({
             <button
               type="button"
               disabled={busy || !input.trim()}
-              className="shrink-0 rounded-lg bg-[#6d28d9] px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+              className="shrink-0 rounded-lg bg-[var(--tone-violet-solid)] px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
               onClick={() => void send()}
             >
               {busy ? "…" : "Ask"}

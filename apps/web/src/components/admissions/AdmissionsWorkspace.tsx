@@ -1276,7 +1276,7 @@ export function AdmissionsWorkspace() {
                 <button
                   type="button"
                   onClick={runSisReconcile}
-                  className="rounded-lg bg-[#0f766e] px-2.5 py-1.5 text-[11px] font-semibold text-white hover:brightness-110"
+                  className="rounded-lg bg-[var(--tone-teal-solid)] px-2.5 py-1.5 text-[11px] font-semibold text-white hover:brightness-110"
                   title="Match open leads against the student register (all sessions) and mark admitted"
                 >
                   Check admitted in SIS
@@ -1637,7 +1637,7 @@ export function AdmissionsWorkspace() {
                               title={l.sisStudentInfo || "Open admitted SIS list"}
                               className={`mt-0.5 ml-1 inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                                 l.sisStudentStatus === "inactive"
-                                  ? "bg-[rgba(71,85,105,0.15)] text-[#334155]"
+                                  ? "bg-[rgba(71,85,105,0.15)] text-[var(--tone-slate)]"
                                   : "bg-[rgba(21,128,61,0.15)] text-[#166534]"
                               }`}
                               onClick={(e) => {
@@ -1685,7 +1685,7 @@ export function AdmissionsWorkspace() {
                           (l.sisStudentId || l.studentId) ? (
                             <button
                               type="button"
-                              className="text-left font-medium text-[#0f766e] underline-offset-2 hover:underline"
+                              className="text-left font-medium text-[var(--tone-teal)] underline-offset-2 hover:underline"
                               title="Open SIS student details"
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -2037,7 +2037,7 @@ export function AdmissionsWorkspace() {
                 hint="Primary mobile identifies the family. Matching an existing number links this child as a sibling."
               >
                 <div className="mb-4 flex flex-wrap items-center gap-2">
-                  <span className="rounded-full bg-[rgba(15,118,110,0.14)] px-2.5 py-1 text-[11px] font-semibold text-[#0f766e]">
+                  <span className="rounded-full bg-[rgba(15,118,110,0.14)] px-2.5 py-1 text-[11px] font-semibold text-[var(--tone-teal)]">
                     Source: Walk-in
                   </span>
                   <Field label="Lead / enquiry date *">
@@ -2693,7 +2693,7 @@ function LeadDetail({
               <span
                 className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${
                   likelihood.tone === "good"
-                    ? "bg-[rgba(21,128,61,0.1)] text-[#15803d]"
+                    ? "bg-[rgba(21,128,61,0.1)] text-[var(--tone-green)]"
                     : likelihood.tone === "warn"
                       ? "bg-[rgba(180,131,0,0.12)] text-[#8a6400]"
                       : "bg-[rgba(180,35,24,0.1)] text-[var(--danger)]"
@@ -2761,7 +2761,7 @@ function LeadDetail({
               {lead.stage === "verified" || lead.stage === "applied" ? (
                 <button
                   type="button"
-                  className="rounded-lg bg-[#0f766e] px-3 py-1.5 text-[11px] font-semibold text-white"
+                  className="rounded-lg bg-[var(--tone-teal-solid)] px-3 py-1.5 text-[11px] font-semibold text-white"
                   onClick={onEnroll}
                 >
                   → Admit to SIS
@@ -3070,7 +3070,7 @@ function LeadDetail({
             <div className="mt-2 flex flex-wrap gap-2">
               <button
                 type="button"
-                className="rounded-lg bg-[#0f766e] px-3 py-2 text-[11px] font-semibold text-white"
+                className="rounded-lg bg-[var(--tone-teal-solid)] px-3 py-2 text-[11px] font-semibold text-white"
                 onClick={submitFollowUp}
               >
                 Save follow-up

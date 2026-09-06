@@ -85,7 +85,7 @@ export default async function CashfreePayPage({
             {row.kind === "fee_link" ? "View receipt" : "Continue"}
           </a>
         ) : null}
-        <p className="mt-8 text-sm text-[#5c6478]">You can close this page and return to the app.</p>
+        <p className="mt-8 text-sm text-[var(--muted)]">You can close this page and return to the app.</p>
       </Shell>
     );
   }
@@ -105,7 +105,7 @@ export default async function CashfreePayPage({
 function Shell({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <main className="mx-auto max-w-md px-6 py-14 text-center">
-      <p className="text-sm font-semibold uppercase tracking-wide text-[#5c6478]">{TENANT.nameDisplay}</p>
+      <p className="text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">{TENANT.nameDisplay}</p>
       <h1 className="mt-3 text-2xl font-bold text-[#203050]">{title}</h1>
       {children}
     </main>

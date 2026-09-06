@@ -363,7 +363,7 @@ export function JuneHoldPanel() {
                   {s.status === "pending_super_admin" && isSuper ? (
                     <button
                       type="button"
-                      className="rounded-lg bg-[#15803d] px-2.5 py-1 text-[11px] font-semibold text-white"
+                      className="rounded-lg bg-[var(--tone-green-solid)] px-2.5 py-1 text-[11px] font-semibold text-white"
                       onClick={() => {
                         const r = superAdminReleaseHolds({
                           settlementId: s.id,

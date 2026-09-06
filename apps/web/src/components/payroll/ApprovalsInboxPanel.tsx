@@ -314,7 +314,7 @@ export function ApprovalsInboxPanel({
                   <div className="mt-2 flex flex-wrap gap-2">
                     <button
                       type="button"
-                      className="rounded-lg bg-[#15803d] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+                      className="rounded-lg bg-[var(--tone-green-solid)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
                       disabled={!isApprover}
                       onClick={() => onApprovePayroll(run)}
                     >
@@ -387,7 +387,7 @@ export function ApprovalsInboxPanel({
                   <div className="mt-2 flex flex-wrap gap-2">
                     <button
                       type="button"
-                      className="rounded-lg bg-[#15803d] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+                      className="rounded-lg bg-[var(--tone-green-solid)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
                       disabled={!isApprover}
                       onClick={() => onApproveIncrement(batch)}
                     >

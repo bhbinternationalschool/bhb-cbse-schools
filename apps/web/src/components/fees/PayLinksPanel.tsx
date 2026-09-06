@@ -200,7 +200,7 @@ export function PayLinksPanel({
                   </span>
                   <StatusPill status={link.status} />
                   {link.gatewayCheckoutUrl ? (
-                    <span className="rounded bg-[rgba(22,163,74,0.12)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#15803d]">
+                    <span className="rounded bg-[rgba(22,163,74,0.12)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--tone-green)]">
                       {link.gatewayMode === "razorpay" ? "Razorpay" : "Cashfree"}
                     </span>
                   ) : null}
@@ -273,7 +273,7 @@ export function PayLinksPanel({
 function StatusPill({ status }: { status: PaymentLink["status"] }) {
   const map: Record<PaymentLink["status"], string> = {
     open: "bg-[rgba(37,99,235,0.12)] text-[var(--info)]",
-    paid: "bg-[rgba(22,163,74,0.12)] text-[#15803d]",
+    paid: "bg-[rgba(22,163,74,0.12)] text-[var(--tone-green)]",
     cancelled: "bg-[rgba(32,48,80,0.08)] text-[var(--muted)]",
     expired: "bg-[rgba(217,119,6,0.12)] text-[var(--warning)]",
   };

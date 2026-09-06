@@ -164,7 +164,7 @@ export function StoreReceiptSheet({
           <p className="text-[13px] font-bold uppercase leading-tight tracking-wide">
             {schoolPrintName()}
           </p>
-          <p className="text-[7px] font-semibold uppercase tracking-[0.16em] text-[#c5a028]">
+          <p className="text-[7px] font-semibold uppercase tracking-[0.16em] text-[var(--brand-gold)]">
             {TENANT.tagline}
           </p>
           <p className="mt-0.5 text-[7px] leading-snug text-[#5a6a8a]">

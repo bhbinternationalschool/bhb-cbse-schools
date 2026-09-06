@@ -1066,7 +1066,7 @@ function RunDetail({
               {canApprove ? (
                 <button
                   type="button"
-                  className="rounded-lg bg-[#15803d] px-2.5 py-1.5 text-[11px] font-semibold text-white"
+                  className="rounded-lg bg-[var(--tone-green-solid)] px-2.5 py-1.5 text-[11px] font-semibold text-white"
                   onClick={() => onApprove(workflowNote)}
                 >
                   Approve now
@@ -1080,7 +1080,7 @@ function RunDetail({
                 <>
                   <button
                     type="button"
-                    className="rounded-lg bg-[#15803d] px-2.5 py-1.5 text-[11px] font-semibold text-white"
+                    className="rounded-lg bg-[var(--tone-green-solid)] px-2.5 py-1.5 text-[11px] font-semibold text-white"
                     onClick={() => onApprove(workflowNote)}
                   >
                     Principal approve

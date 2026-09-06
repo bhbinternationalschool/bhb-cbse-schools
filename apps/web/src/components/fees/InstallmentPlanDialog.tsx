@@ -401,7 +401,7 @@ function ActivePlanPanel({
                 <span>
                   {s.label} · {s.dueOn}
                   {done ? (
-                    <span className="ml-2 text-[10px] font-bold uppercase text-[#15803d]">
+                    <span className="ml-2 text-[10px] font-bold uppercase text-[var(--tone-green)]">
                       Paid
                     </span>
                   ) : null}

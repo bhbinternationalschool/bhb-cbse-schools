@@ -196,7 +196,7 @@ export function HoldStatusBanner({
   if (!check || check.allowed) {
     if (check?.allowed && check.override) {
       return (
-        <p className="rounded-lg bg-[rgba(22,163,74,0.1)] px-3 py-2 text-xs text-[#15803d]">
+        <p className="rounded-lg bg-[rgba(22,163,74,0.1)] px-3 py-2 text-xs text-[var(--tone-green)]">
           Hold overridden until {check.override.expiresOn} ·{" "}
           {check.override.reason}
         </p>

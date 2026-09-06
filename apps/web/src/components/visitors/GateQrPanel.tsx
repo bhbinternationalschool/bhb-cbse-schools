@@ -153,15 +153,15 @@ export function GateQrPanel({ lang }: { lang: VisitorLang }) {
           <img src={TENANT.logoCrestUrl} alt="" className="h-14 w-14 object-contain" />
           <div>
             <p className="text-2xl font-black leading-tight">{TENANT.name}</p>
-            <p className="text-sm font-semibold text-[#5c6478]">Visitor check-in · विज़िटर चेक-इन{gate ? ` · ${gate}` : ""}</p>
+            <p className="text-sm font-semibold text-[var(--muted)]">Visitor check-in · विज़िटर चेक-इन{gate ? ` · ${gate}` : ""}</p>
           </div>
         </div>
 
         <div className="mt-6 grid gap-6 sm:grid-cols-[1fr_auto] sm:items-start">
           <div>
             <p className="text-3xl font-black leading-tight">Scan to check in</p>
-            <p className="text-2xl font-black leading-tight text-[#5c6478]">चेक-इन के लिए स्कैन करें</p>
-            <p className="mt-2 text-sm text-[#5c6478]">{checkInUrl || ""}</p>
+            <p className="text-2xl font-black leading-tight text-[var(--muted)]">चेक-इन के लिए स्कैन करें</p>
+            <p className="mt-2 text-sm text-[var(--muted)]">{checkInUrl || ""}</p>
           </div>
           {qrIn ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -173,13 +173,13 @@ export function GateQrPanel({ lang }: { lang: VisitorLang }) {
 
         <div className="mt-6 grid gap-6 sm:grid-cols-2">
           <ol className="space-y-2 text-[15px]">
-            <p className="mb-1 text-xs font-black uppercase tracking-widest text-[#5c6478]">How it works</p>
+            <p className="mb-1 text-xs font-black uppercase tracking-widest text-[var(--muted)]">How it works</p>
             {GATE_POSTER_STEPS.en.map((s, i) => (
               <li key={i} className="flex gap-2"><span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#203050] text-xs font-black text-white">{i + 1}</span><span>{s}</span></li>
             ))}
           </ol>
           <ol className="space-y-2 text-[15px]">
-            <p className="mb-1 text-xs font-black uppercase tracking-widest text-[#5c6478]">तरीका</p>
+            <p className="mb-1 text-xs font-black uppercase tracking-widest text-[var(--muted)]">तरीका</p>
             {GATE_POSTER_STEPS.hi.map((s, i) => (
               <li key={i} className="flex gap-2"><span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#203050] text-xs font-black text-white">{i + 1}</span><span>{s}</span></li>
             ))}
@@ -197,21 +197,21 @@ export function GateQrPanel({ lang }: { lang: VisitorLang }) {
               )}
               <div>
                 <p className="text-2xl font-black leading-tight">Or check in on WhatsApp</p>
-                <p className="text-xl font-black leading-tight text-[#5c6478]">या WhatsApp से चेक-इन करें</p>
-                <p className="mt-1 text-sm text-[#5c6478]">
+                <p className="text-xl font-black leading-tight text-[var(--muted)]">या WhatsApp से चेक-इन करें</p>
+                <p className="mt-1 text-sm text-[var(--muted)]">
                   +{waNumber} · send <span className="font-mono font-black text-[#203050]">{waStart}</span> · जाते समय <span className="font-mono font-black text-[#203050]">OUT</span> भेजें
                 </p>
               </div>
             </div>
             <div className="mt-4 grid gap-5 sm:grid-cols-2">
               <ol className="space-y-1.5 text-[14px]">
-                <p className="mb-1 text-xs font-black uppercase tracking-widest text-[#5c6478]">On WhatsApp</p>
+                <p className="mb-1 text-xs font-black uppercase tracking-widest text-[var(--muted)]">On WhatsApp</p>
                 {GATE_WA_POSTER_STEPS.en.map((st, i) => (
                   <li key={i} className="flex gap-2"><span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#128C7E] text-xs font-black text-white">{i + 1}</span><span>{st}</span></li>
                 ))}
               </ol>
               <ol className="space-y-1.5 text-[14px]">
-                <p className="mb-1 text-xs font-black uppercase tracking-widest text-[#5c6478]">WhatsApp पर</p>
+                <p className="mb-1 text-xs font-black uppercase tracking-widest text-[var(--muted)]">WhatsApp पर</p>
                 {GATE_WA_POSTER_STEPS.hi.map((st, i) => (
                   <li key={i} className="flex gap-2"><span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#128C7E] text-xs font-black text-white">{i + 1}</span><span>{st}</span></li>
                 ))}
@@ -219,7 +219,7 @@ export function GateQrPanel({ lang }: { lang: VisitorLang }) {
             </div>
           </div>
         ) : (
-          <p className="mt-6 rounded-xl border border-dashed border-[#203050]/25 p-3 text-center text-xs text-[#5c6478] print:hidden">
+          <p className="mt-6 rounded-xl border border-dashed border-[#203050]/25 p-3 text-center text-xs text-[var(--muted)] print:hidden">
             {L ? "WhatsApp QR जोड़ने के लिए ऊपर स्कूल का WhatsApp नंबर लिखें।" : "Enter the school WhatsApp number above to add the WhatsApp check-in QR to this poster."}
           </p>
         )}
@@ -233,12 +233,12 @@ export function GateQrPanel({ lang }: { lang: VisitorLang }) {
           )}
           <div>
             <p className="text-lg font-black">Leaving? Scan to check out</p>
-            <p className="font-black text-[#5c6478]">जाते समय चेक-आउट के लिए स्कैन करें</p>
-            <p className="mt-1 text-xs text-[#5c6478]">Or ask the gate to check you out · या गेट पर चेक-आउट करवाएँ</p>
+            <p className="font-black text-[var(--muted)]">जाते समय चेक-आउट के लिए स्कैन करें</p>
+            <p className="mt-1 text-xs text-[var(--muted)]">Or ask the gate to check you out · या गेट पर चेक-आउट करवाएँ</p>
           </div>
         </div>
 
-        <p className="mt-6 text-center text-xs text-[#5c6478]">
+        <p className="mt-6 text-center text-xs text-[var(--muted)]">
           Please carry a phone with a camera · कृपया कैमरे वाला फ़ोन साथ रखें · If you cannot scan, the gate will check you in · स्कैन न हो पाए तो गेट पर चेक-इन करवाएँ
         </p>
       </div>
@@ -249,13 +249,13 @@ export function GateQrPanel({ lang }: { lang: VisitorLang }) {
             <X className="size-6" aria-hidden />
           </button>
           <p className="text-3xl font-black">{showFull === "in" ? "Scan to check in" : showFull === "out" ? "Scan to check out" : "Check in on WhatsApp"}</p>
-          <p className="mb-6 text-2xl font-black text-[#5c6478]">{showFull === "in" ? "चेक-इन के लिए स्कैन करें" : showFull === "out" ? "चेक-आउट के लिए स्कैन करें" : "WhatsApp से चेक-इन करें"}</p>
+          <p className="mb-6 text-2xl font-black text-[var(--muted)]">{showFull === "in" ? "चेक-इन के लिए स्कैन करें" : showFull === "out" ? "चेक-आउट के लिए स्कैन करें" : "WhatsApp से चेक-इन करें"}</p>
           {(showFull === "in" ? qrIn : showFull === "out" ? qrOut : qrWa) ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={(showFull === "in" ? qrIn : showFull === "out" ? qrOut : qrWa) as string} alt="QR" className="h-[min(70vw,70vh)] w-[min(70vw,70vh)]" />
           ) : null}
           {showFull === "wa" ? <p className="mt-4 text-lg font-bold">+{waNumber} · send {waStart} · जाते समय OUT भेजें</p> : null}
-          <p className="mt-6 text-sm text-[#5c6478]">{TENANT.name}</p>
+          <p className="mt-6 text-sm text-[var(--muted)]">{TENANT.name}</p>
         </div>
       ) : null}
     </div>

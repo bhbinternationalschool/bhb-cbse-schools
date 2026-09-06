@@ -18,10 +18,10 @@ const METRIC_TONES: Record<
   ErpMetricTone,
   { title: string; icon: string }
 > = {
-  green: { title: METRIC_TITLE_CLASS, icon: "bg-[#dcfce7] text-[#15803d]" },
+  green: { title: METRIC_TITLE_CLASS, icon: "bg-[#dcfce7] text-[var(--tone-green)]" },
   rose: { title: METRIC_TITLE_CLASS, icon: "bg-[#fee2e2] text-[#b91c1c]" },
   sky: { title: METRIC_TITLE_CLASS, icon: "bg-[var(--info-soft)] text-[var(--info)]" },
-  violet: { title: METRIC_TITLE_CLASS, icon: "bg-[#ede9fe] text-[#6d28d9]" },
+  violet: { title: METRIC_TITLE_CLASS, icon: "bg-[#ede9fe] text-[var(--tone-violet)]" },
   amber: { title: METRIC_TITLE_CLASS, icon: "bg-[var(--warning-soft)] text-[var(--warning)]" },
   navy: { title: METRIC_TITLE_CLASS, icon: "bg-[rgba(32,48,80,0.1)] text-[var(--brand-deep)]" },
 };

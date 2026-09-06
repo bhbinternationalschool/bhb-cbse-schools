@@ -38,7 +38,7 @@ export const CERTIFICATES_REPORT_CATEGORIES: {
   id: CertificatesReportCategory;
   title: string;
   headerClass: string;
-}[] = [{ id: "registers", title: "Registers", headerClass: "bg-[#0f766e]" }];
+}[] = [{ id: "registers", title: "Registers", headerClass: "bg-[var(--tone-teal-solid)]" }];
 
 export const CERTIFICATES_REPORTS: CertificatesReportDef[] = [
   {

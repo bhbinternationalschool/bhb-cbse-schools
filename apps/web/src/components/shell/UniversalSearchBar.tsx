@@ -390,14 +390,14 @@ export function UniversalSearchBar() {
                       hit.kind === "module"
                         ? "bg-[var(--surface-sunken)] text-[var(--brand-deep)]"
                         : hit.kind === "student"
-                          ? "bg-[rgba(2,132,199,0.12)] text-[#0369a1]"
+                          ? "bg-[rgba(2,132,199,0.12)] text-[var(--tone-sky)]"
                           : hit.kind === "receipt"
                             ? "bg-[rgba(217,119,6,0.12)] text-[var(--warning)]"
                             : hit.kind === "vehicle"
                               ? "bg-[rgba(124,58,237,0.12)] text-[#7c3aed]"
                               : hit.kind === "lead"
                                 ? "bg-[rgba(225,29,72,0.12)] text-[#e11d48]"
-                                : "bg-[rgba(15,118,110,0.12)] text-[#0f766e]"
+                                : "bg-[rgba(15,118,110,0.12)] text-[var(--tone-teal)]"
                     }`}
                   >
                     {kindIcon(hit.kind)}

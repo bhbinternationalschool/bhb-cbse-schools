@@ -1254,7 +1254,7 @@ export function SubjectsPanel({
           <div className="rounded-xl border border-[rgba(15,118,110,0.25)] bg-[rgba(15,118,110,0.06)] p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
-                <h2 className="text-sm font-bold text-[#0f766e]">
+                <h2 className="text-sm font-bold text-[var(--tone-teal)]">
                   {activeGroupDef?.label} · NEP / NCF suggestions
                 </h2>
                 <p className="mt-0.5 text-[11px] leading-snug text-[var(--muted)]">
@@ -1267,7 +1267,7 @@ export function SubjectsPanel({
                 {(classGroup === "SECONDARY" || classGroup === "SENIOR") && (
                   <button
                     type="button"
-                    className="rounded-lg border border-[#0f766e] bg-[var(--card)] px-3 py-2 text-xs font-bold text-[#0f766e]"
+                    className="rounded-lg border border-[var(--tone-teal)] bg-[var(--card)] px-3 py-2 text-xs font-bold text-[var(--tone-teal)]"
                     onClick={seedCartOfferings}
                   >
                     {ncfCartOfferingsReady(state)
@@ -1277,7 +1277,7 @@ export function SubjectsPanel({
                 )}
                 <button
                   type="button"
-                  className="rounded-lg bg-[#0f766e] px-3 py-2 text-xs font-bold text-white disabled:opacity-40"
+                  className="rounded-lg bg-[var(--tone-teal-solid)] px-3 py-2 text-xs font-bold text-white disabled:opacity-40"
                   disabled={nepAnalysis.missingCount === 0}
                   onClick={applyNepPack}
                 >
@@ -1302,7 +1302,7 @@ export function SubjectsPanel({
                       key={t}
                       className="text-[11px] leading-snug text-[var(--brand-deep)]"
                     >
-                      <span className="mr-1 text-[#0f766e]">▸</span>
+                      <span className="mr-1 text-[var(--tone-teal)]">▸</span>
                       {t}
                     </li>
                   ))}
@@ -1347,7 +1347,7 @@ export function SubjectsPanel({
                           ) : null}
                         </span>
                         <span className="flex shrink-0 flex-col items-end gap-0.5">
-                          <span className="rounded bg-[rgba(15,118,110,0.12)] px-1.5 py-0.5 text-[9px] font-bold text-[#0f766e]">
+                          <span className="rounded bg-[rgba(15,118,110,0.12)] px-1.5 py-0.5 text-[9px] font-bold text-[var(--tone-teal)]">
                             {p}/wk
                           </span>
                           <span
@@ -1425,7 +1425,7 @@ export function SubjectsPanel({
                         inactive
                       </span>
                     ) : (
-                      <span className="rounded bg-[rgba(15,118,110,0.12)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[#0f766e]">
+                      <span className="rounded bg-[rgba(15,118,110,0.12)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--tone-teal)]">
                         Offered
                       </span>
                     )}
@@ -1532,7 +1532,7 @@ export function SubjectsPanel({
                           </span>{" "}
                           <span className="text-sm">{s.nameEn}</span>
                           {isGroup ? (
-                            <span className="ml-2 rounded bg-[rgba(15,118,110,0.12)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[#0f766e]">
+                            <span className="ml-2 rounded bg-[rgba(15,118,110,0.12)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--tone-teal)]">
                               Head
                             </span>
                           ) : null}
@@ -1850,7 +1850,7 @@ export function SubjectsPanel({
                               : already
                                 ? "bg-[var(--surface-sunken)] text-[var(--muted)] ring-1 ring-[var(--border)]"
                                 : isGroup
-                                  ? "bg-[rgba(15,118,110,0.12)] text-[#0f766e]"
+                                  ? "bg-[rgba(15,118,110,0.12)] text-[var(--tone-teal)]"
                                   : "bg-[var(--surface)] text-[var(--brand-deep)]"
                           }`}
                         >
@@ -1909,7 +1909,7 @@ export function SubjectsPanel({
                 </button>
                 <button
                   type="button"
-                  className="rounded-lg border border-[rgba(15,118,110,0.35)] px-3 py-2 text-xs font-semibold text-[#0f766e] disabled:opacity-40"
+                  className="rounded-lg border border-[rgba(15,118,110,0.35)] px-3 py-2 text-xs font-semibold text-[var(--tone-teal)] disabled:opacity-40"
                   disabled={!mapClassId}
                   onClick={applySuggestedPeriodsToClass}
                 >
@@ -2009,7 +2009,7 @@ export function NumberSeriesPanel({
                     </p>
                     <div className="mt-1 flex flex-wrap gap-1">
                       {s.resetOnAy ? (
-                        <span className="rounded-full bg-[rgba(15,118,110,0.12)] px-2 py-0.5 text-[10px] font-semibold text-[#0f766e]">
+                        <span className="rounded-full bg-[rgba(15,118,110,0.12)] px-2 py-0.5 text-[10px] font-semibold text-[var(--tone-teal)]">
                           resets each AY
                         </span>
                       ) : null}
@@ -2259,7 +2259,7 @@ function HolidayNotifyButton({ holiday }: { holiday: Holiday }) {
                 <div className="font-semibold">
                   Reach: {preview.recipientCount} families · via {preview.via === "template" ? "approved template" : "free text"}
                 </div>
-                {preview.warning ? <div className="mt-1 text-[#b45309]">{preview.warning}</div> : null}
+                {preview.warning ? <div className="mt-1 text-[var(--warning)]">{preview.warning}</div> : null}
                 <pre className="mt-2 whitespace-pre-wrap font-sans text-[11px] leading-relaxed">{preview.en}</pre>
                 <pre className="mt-2 whitespace-pre-wrap font-sans text-[11px] leading-relaxed">{preview.hi}</pre>
               </div>

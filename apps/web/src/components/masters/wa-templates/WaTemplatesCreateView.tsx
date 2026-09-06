@@ -198,7 +198,7 @@ export function WaTemplatesCreateView({
             <button
               key={opt.id}
               type="button"
-              className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 text-left transition hover:border-[#0f766e] hover:shadow-sm"
+              className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 text-left transition hover:border-[var(--tone-teal)] hover:shadow-sm"
               onClick={() => pickLayout(opt.id)}
             >
               <p className="text-[14px] font-semibold text-[var(--brand-deep)]">

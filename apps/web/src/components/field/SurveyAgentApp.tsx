@@ -247,7 +247,7 @@ export function SurveyAgentApp({ session }: { session: DemoSession }) {
             />
             <button
               type="button"
-              className="w-full rounded-xl bg-[#9a3412] py-3 text-sm font-semibold text-white"
+              className="w-full rounded-xl bg-[var(--tone-brick-solid)] py-3 text-sm font-semibold text-white"
               onClick={claimByMobile}
             >
               Open my survey
@@ -321,7 +321,7 @@ export function SurveyAgentApp({ session }: { session: DemoSession }) {
           <button
             type="button"
             disabled={busy || !beatId}
-            className="w-full rounded-2xl bg-[#166534] py-4 text-base font-semibold text-white disabled:opacity-40"
+            className="w-full rounded-2xl bg-[var(--tone-green-deep-solid)] py-4 text-base font-semibold text-white disabled:opacity-40"
             onClick={() => void onStart()}
           >
             {busy ? "Getting location…" : "Start survey"}
@@ -363,7 +363,7 @@ export function SurveyAgentApp({ session }: { session: DemoSession }) {
               <button
                 type="button"
                 disabled={busy}
-                className="rounded-2xl bg-[#9a3412] py-3 text-sm font-semibold text-white"
+                className="rounded-2xl bg-[var(--tone-brick-solid)] py-3 text-sm font-semibold text-white"
                 onClick={() => void onEnd()}
               >
                 End survey
@@ -374,7 +374,7 @@ export function SurveyAgentApp({ session }: { session: DemoSession }) {
               <button
                 type="button"
                 disabled={busy}
-                className="rounded-2xl bg-[#166534] py-3 text-sm font-semibold text-white"
+                className="rounded-2xl bg-[var(--tone-green-deep-solid)] py-3 text-sm font-semibold text-white"
                 onClick={() => void onResume()}
               >
                 End break
@@ -382,7 +382,7 @@ export function SurveyAgentApp({ session }: { session: DemoSession }) {
               <button
                 type="button"
                 disabled={busy}
-                className="rounded-2xl bg-[#9a3412] py-3 text-sm font-semibold text-white"
+                className="rounded-2xl bg-[var(--tone-brick-solid)] py-3 text-sm font-semibold text-white"
                 onClick={() => void onEnd()}
               >
                 End survey
