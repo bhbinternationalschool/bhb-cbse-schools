@@ -129,6 +129,33 @@ export const ERP_COMMANDS: ErpCommandDef[] = [
     scope: "any",
   },
   {
+    id: "mark_attendance",
+    title: "Mark attendance",
+    kind: "write",
+    module: "attendance",
+    action: "edit",
+    description:
+      "Mark a section's register: name the absentees by roll number or name, and everyone else is marked present. Optionally leave and late. Refuses when the register is already marked unless the message says to correct it.",
+    examples: [
+      "Mark 5A attendance: absent roll 4, 11, 19",
+      "5A attendance absent 4, 11 baaki present",
+      "mark 6B attendance all present",
+      "Mark 5A attendance: absent Riya Verma, late 7",
+      "correct 5A attendance: absent 4",
+    ],
+    fields: [
+      { name: "section", type: "section", required: true, description: "Class-section, e.g. 5A" },
+      {
+        name: "text",
+        type: "text",
+        required: true,
+        description: "Who is absent — roll numbers or names — and optionally leave / late; or 'all present'",
+      },
+      { name: "date", type: "date", required: false, description: "YYYY-MM-DD; today when not said" },
+    ],
+    scope: "own_sections",
+  },
+  {
     id: "post_homework",
     title: "Post homework",
     kind: "write",
@@ -680,6 +707,14 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
   }
   if (COLLECTION_WORDS.test(t) && !extractSectionRefs(t).length) {
     return { commandId: "collection_today", fields: { date: "" }, source: "local" };
+  }
+  const attMark = parseMarkAttendanceQuery(t);
+  if (attMark) {
+    return {
+      commandId: "mark_attendance",
+      fields: { section: attMark.section, text: attMark.spec, date: "" },
+      source: "local",
+    };
   }
   const post = parsePostHomeworkQuery(t);
   if (post) {
@@ -2548,5 +2583,163 @@ export function formatPostHomeworkCard(input: {
   if (input.parentCount) {
     lines.push(`${input.parentCount} famil${input.parentCount === 1 ? "y" : "ies"} will be notified.`);
   }
+  return lines.join("\n");
+}
+
+// ─── Mark attendance (write) ───────────────────────────────────────────
+
+const MARK_VERB =
+  /(?<![\p{L}\p{M}\p{N}])(mark|marking|lagao|laga\s*do|le\s*lo|lelo|bhar\s*do|update|correct|banao)(?![\p{L}\p{M}\p{N}])/iu;
+
+const ABSENT_LIST_WORD =
+  /(?<![\p{L}\p{M}\p{N}])(absent|gair\s*hazir|gairhazir|गैरहाजिर|अनुपस्थित|nahi\s+aaye?|नहीं\s+आए)(?![\p{L}\p{M}\p{N}])/iu;
+
+const ALL_PRESENT =
+  /(?<![\p{L}\p{M}\p{N}])(all\s+present|sab\s+present|sabhi\s+present|full\s+attendance|poori\s+hazri|सब\s+उपस्थित)(?![\p{L}\p{M}\p{N}])/iu;
+
+export type MarkAttendanceParse = {
+  section: string;
+  /** The part naming who is absent / on leave / late, for parsing next. */
+  spec: string;
+};
+
+/**
+ * "Mark 5A attendance: absent roll 4, 11, 19", "5A attendance absent 4, 11
+ * baaki present", "mark 6B attendance all present". Needs an attendance
+ * word, a section, and either an absent list or "all present" — a bare
+ * "5A attendance" is the read command and must stay that way.
+ */
+export function parseMarkAttendanceQuery(text: string): MarkAttendanceParse | null {
+  const t = (text || "").trim();
+  if (!t || !ATTENDANCE_SUMMARY_WORDS.test(t)) return null;
+  const hasList = ABSENT_LIST_WORD.test(t) || ALL_PRESENT.test(t);
+  if (!hasList) return null;
+  // "5A me aaj kaun absent hai" asks a question; it must never mark.
+  if (/[?？]|(?<![\p{L}\p{M}\p{N}])(kaun|kon|who|which|kitne|kitna|list|batao|dikhao|कौन|कितने|दिखाओ|बताओ)(?![\p{L}\p{M}\p{N}])/iu.test(t)) {
+    return null;
+  }
+  if (!MARK_VERB.test(t) && !ALL_PRESENT.test(t) && !/[:：]/.test(t)) {
+    // Without a verb or a colon, require the absent list to look deliberate
+    // ("5A attendance absent 4, 11" is fine; "5A attendance absent" is not).
+    if (!/(?:absent|hazir|हाजिर)[^\n]*?\d/iu.test(t)) return null;
+  }
+  const refs = extractSectionRefs(t);
+  if (!refs.length) return null;
+  const r = refs[0]!;
+  const colon = t.search(/[:：]/);
+  const spec = (colon > 0 ? t.slice(colon + 1) : t).trim();
+  return { section: r.sectionName ? `${r.classKey}${r.sectionName}` : r.classKey, spec };
+}
+
+/**
+ * Whether the message asks to replace a register that already exists.
+ * Checked against the WHOLE message, not just the list: "correct 5A
+ * attendance: absent 4" carries the word before the colon.
+ */
+export function isCorrectingAttendance(text: string): boolean {
+  return /(?<![\p{L}\p{M}\p{N}])(correct|correction|update|again|phir\s*se|dobara|badlo|change|re\s*mark|remark\s+attendance)(?![\p{L}\p{M}\p{N}])/iu.test(
+    text || "",
+  );
+}
+
+export type AttendanceSpec = {
+  allPresent: boolean;
+  /** Roll numbers and/or names, per status. */
+  absent: string[];
+  leave: string[];
+  late: string[];
+  halfDay: string[];
+  /** The message asked to overwrite a register that already exists. */
+  correcting: boolean;
+};
+
+function splitList(raw: string): string[] {
+  return (raw || "")
+    .split(/[,;/]|\band\b|\baur\b|&/i)
+    .map((x) =>
+      x
+        .replace(/(?<![\p{L}\p{M}\p{N}])(roll|rolls|no\.?|number|nos\.?|baaki|baki|rest|others?|present|hain?|hai|और)(?![\p{L}\p{M}\p{N}])/giu, " ")
+        .replace(/[.:]+$/g, "")
+        .replace(/\s+/g, " ")
+        .trim(),
+    )
+    .filter(Boolean);
+}
+
+/**
+ * Pull the per-status lists out of "absent roll 4, 11, 19, late 7". Each
+ * status word starts a list that runs to the next status word. Everyone
+ * not named is present — that is the whole point of the command, and it is
+ * why the confirm card names the absentees back.
+ */
+export function parseAttendanceSpec(spec: string): AttendanceSpec {
+  const t = (spec || "").trim();
+  const out: AttendanceSpec = {
+    allPresent: ALL_PRESENT.test(t),
+    absent: [],
+    leave: [],
+    late: [],
+    halfDay: [],
+    correcting: isCorrectingAttendance(t),
+  };
+  const markers: { key: "absent" | "leave" | "late" | "halfDay"; re: RegExp }[] = [
+    { key: "absent", re: ABSENT_LIST_WORD },
+    { key: "leave", re: /(?<![\p{L}\p{M}\p{N}])(on\s+leave|leave|chutti|छुट्टी)(?![\p{L}\p{M}\p{N}])/iu },
+    { key: "late", re: /(?<![\p{L}\p{M}\p{N}])(late|der\s*se|देर)(?![\p{L}\p{M}\p{N}])/iu },
+    { key: "halfDay", re: /(?<![\p{L}\p{M}\p{N}])(half\s*day|aadha\s*din|आधा\s*दिन)(?![\p{L}\p{M}\p{N}])/iu },
+  ];
+  const hits: { key: "absent" | "leave" | "late" | "halfDay"; start: number; end: number }[] = [];
+  for (const m of markers) {
+    const re = new RegExp(m.re.source, "giu");
+    let hit: RegExpExecArray | null;
+    while ((hit = re.exec(t))) {
+      hits.push({ key: m.key, start: hit.index, end: hit.index + hit[0].length });
+    }
+  }
+  hits.sort((a, b) => a.start - b.start);
+  for (let i = 0; i < hits.length; i++) {
+    const h = hits[i]!;
+    const stop = hits[i + 1]?.start ?? t.length;
+    out[h.key].push(...splitList(t.slice(h.end, stop)));
+  }
+  return out;
+}
+
+export type MarkAttendanceCardRow = { rollNo: string; fullName: string };
+
+export type MarkAttendanceCardInput = {
+  sectionLabel: string;
+  date: string;
+  todayIso: string;
+  total: number;
+  absent: MarkAttendanceCardRow[];
+  leave: MarkAttendanceCardRow[];
+  late: MarkAttendanceCardRow[];
+  halfDay: MarkAttendanceCardRow[];
+  correcting: boolean;
+};
+
+export function formatMarkAttendanceCard(input: MarkAttendanceCardInput): string {
+  const when = input.date === input.todayIso ? "today" : shortDate(input.date);
+  const named = input.absent.length + input.leave.length + input.late.length + input.halfDay.length;
+  const present = input.total - named;
+  const lines = [
+    `*${input.correcting ? "Correct" : "Mark"} attendance* · ${input.sectionLabel} · ${when}`,
+    `${present} present of ${input.total}`,
+  ];
+  const block = (label: string, rows: MarkAttendanceCardRow[]) => {
+    if (!rows.length) return;
+    lines.push(
+      "",
+      `*${label}* (${rows.length})`,
+      ...rows.map((r) => (r.rollNo ? `${r.rollNo}. ${r.fullName}` : r.fullName)),
+    );
+  };
+  block("Absent", input.absent);
+  block("On leave", input.leave);
+  block("Late", input.late);
+  block("Half day", input.halfDay);
+  if (!named) lines.push("", "Everyone present.");
+  if (input.correcting) lines.push("", "⚠️ This replaces the register already marked for this date.");
   return lines.join("\n");
 }

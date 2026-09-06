@@ -54,6 +54,10 @@ import {
   parseDueDate,
   homeworkTitleFrom,
   formatPostHomeworkCard,
+  parseMarkAttendanceQuery,
+  parseAttendanceSpec,
+  isCorrectingAttendance,
+  formatMarkAttendanceCard,
   parseFreeTeachersQuery,
   periodAtTime,
   resolveClassOrSectionRef,
@@ -182,6 +186,15 @@ const masters = {
   assert.equal(parseErpCommandLocal("VIII B me kaun nahi aaya")?.fields.section, "8B");
   assert.equal(parseErpCommandLocal("5A में कौन गैरहाजिर है")?.commandId, "absent_list", "Devanagari fee/absent words match without ASCII word boundaries");
   assert.equal(parseErpCommandLocal("7B की उपस्थिति")?.fields.section, "7B");
+  assert.equal(parseErpCommandLocal("Mark 5A attendance: absent roll 4, 11, 19")?.commandId, "mark_attendance");
+  assert.equal(parseErpCommandLocal("mark 6B attendance all present")?.commandId, "mark_attendance");
+  // The read commands must survive unharmed — marking is a whole register.
+  assert.equal(parseMarkAttendanceQuery("5A me aaj kaun absent hai"), null, "a question never marks");
+  assert.equal(parseMarkAttendanceQuery("5A attendance"), null);
+  assert.equal(parseMarkAttendanceQuery("aaj ki attendance"), null);
+  assert.equal(parseMarkAttendanceQuery("absent list 7B"), null, "asking for the list is not marking it");
+  assert.equal(parseErpCommandLocal("5A me aaj kaun absent hai")?.commandId, "absent_list");
+  assert.equal(parseErpCommandLocal("aaj ki attendance")?.commandId, "attendance_summary");
   assert.equal(parseErpCommandLocal("Post homework 6B maths: exercise 4.2, due Monday")?.commandId, "post_homework");
   assert.equal(parseErpCommandLocal("Post homework 6B maths: exercise 4.2, due Monday")?.fields.section, "6B");
   assert.equal(parseErpCommandLocal("add homework 6B science: diagram of a plant cell, due tomorrow")?.commandId, "post_homework");
@@ -1124,6 +1137,57 @@ const masters = {
     if (c.kind === "write") continue;
     assert.equal(c.channels, undefined, `${c.id}: read commands answer on every channel`);
   }
+}
+
+// ─── mark attendance: parsing and the confirm card ─────────────────────
+{
+  const q = parseMarkAttendanceQuery("Mark 5A attendance: absent roll 4, 11, 19");
+  assert.ok(q && q.section === "5A", JSON.stringify(q));
+  assert.deepEqual(parseAttendanceSpec(q!.spec).absent, ["4", "11", "19"]);
+
+  const mixed = parseMarkAttendanceQuery("Mark 5A attendance: absent Riya Verma, late 7, leave 12");
+  const spec = parseAttendanceSpec(mixed!.spec);
+  assert.deepEqual(spec.absent, ["Riya Verma"]);
+  assert.deepEqual(spec.late, ["7"]);
+  assert.deepEqual(spec.leave, ["12"]);
+
+  const hinglish = parseMarkAttendanceQuery("5A attendance absent 4, 11 baaki present");
+  assert.deepEqual(parseAttendanceSpec(hinglish!.spec).absent, ["4", "11"], "'baaki present' is not a name");
+
+  const all = parseMarkAttendanceQuery("mark 6B attendance all present");
+  assert.equal(parseAttendanceSpec(all!.spec).allPresent, true);
+
+  // "correct" sits before the colon, so the whole message is what decides.
+  assert.equal(isCorrectingAttendance("correct 5A attendance: absent 4"), true);
+  assert.equal(isCorrectingAttendance("Mark 5A attendance: absent 4"), false);
+  assert.equal(isCorrectingAttendance("5A attendance phir se: absent 4"), true);
+
+  const card = formatMarkAttendanceCard({
+    sectionLabel: "V A",
+    date: "2026-09-05",
+    todayIso: "2026-09-05",
+    total: 32,
+    absent: [
+      { rollNo: "4", fullName: "Aarav Sharma" },
+      { rollNo: "11", fullName: "Riya Verma" },
+    ],
+    leave: [{ rollNo: "19", fullName: "Kabir Ali" }],
+    late: [],
+    halfDay: [],
+    correcting: false,
+  });
+  assert.ok(card.startsWith("*Mark attendance* · V A · today\n29 present of 32"), card);
+  assert.ok(card.includes("*Absent* (2)\n4. Aarav Sharma\n11. Riya Verma"), card);
+  assert.ok(card.includes("*On leave* (1)\n19. Kabir Ali"), card);
+  assert.ok(!card.includes("⚠️"), "not a correction");
+
+  const allCard = formatMarkAttendanceCard({
+    sectionLabel: "VI B", date: "2026-09-04", todayIso: "2026-09-05", total: 30,
+    absent: [], leave: [], late: [], halfDay: [], correcting: true,
+  });
+  assert.ok(allCard.startsWith("*Correct attendance* · VI B · 4 Sep\n30 present of 30"), allCard);
+  assert.ok(allCard.includes("Everyone present."), allCard);
+  assert.ok(allCard.includes("⚠️ This replaces the register already marked for this date."), allCard);
 }
 
 console.log("erpCommands.selftest.ts OK");

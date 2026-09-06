@@ -35,7 +35,12 @@ import {
 import { staffAllowedSections } from "@/lib/erpChatAccess";
 import { loadServerMasters, loadServerRbac } from "@/lib/api/v1/auth";
 import { ensureAttendanceHydratedServer } from "@/lib/attendancePersistence";
-import { findRegister, loadAttendance, summarizeMarks } from "@/lib/attendance";
+import {
+  findRegister,
+  loadAttendance,
+  summarizeMarks,
+  type AttendanceStatus,
+} from "@/lib/attendance";
 import { loadStaffAttendance } from "@/lib/staffAttendance";
 import { ensureStaffAttendanceHydratedServer } from "@/lib/staffAttendancePersistence";
 import { classifyClassHolidayDay } from "@/lib/holidayPolicy";
@@ -89,7 +94,10 @@ import {
   formatBusManifestReply,
   formatHomeworkReply,
   formatAdmissionsPeriodReply,
+  formatMarkAttendanceCard,
   formatPostHomeworkCard,
+  isCorrectingAttendance,
+  parseAttendanceSpec,
   homeworkTitleFrom,
   parseDueDate,
   splitPostHomeworkRest,
@@ -805,6 +813,108 @@ export async function handleErpStaffCommand(
       resolved.sectionIds = mine.map((s) => s.sectionId).join(",");
     }
   }
+  if (command.id === "mark_attendance" && resolved.sectionId) {
+    const ay = session.academicYearCode;
+    const date = resolveCommandDate(text, todayIso);
+    const roster = loadSis()
+      .students.filter(
+        (st) =>
+          st.status === "active" &&
+          st.sectionId === resolved.sectionId &&
+          st.academicYearCode === ay,
+      )
+      .sort((a, b) => (parseInt(a.rollNo, 10) || 9999) - (parseInt(b.rollNo, 10) || 9999));
+    if (!roster.length) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: `No active students found in ${resolved.sectionLabel || "that section"}.`,
+      };
+    }
+    await ensureAttendanceHydratedServer();
+    const existing = findRegister(ay, resolved.sectionId, date, loadAttendance());
+    const correcting = isCorrectingAttendance(text);
+    if (existing && !correcting) {
+      const sum = summarizeMarks(existing.marks || []);
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: `${resolved.sectionLabel || "That section"} is already marked for ${date === todayIso ? "today" : date} — present ${sum.present}, absent ${sum.absent}, leave ${sum.leave}, by ${existing.markedBy || "someone"}.\nTo replace it, send the same message starting with *correct*.`,
+      };
+    }
+    const spec = parseAttendanceSpec(parsed.fields.text || text);
+    const byRoll = new Map(roster.map((st) => [String(parseInt(st.rollNo, 10)), st]));
+    const picked = new Map<string, "A" | "LE" | "L" | "HD">();
+    const unresolved: string[] = [];
+    const ambiguous: { token: string; options: string[] }[] = [];
+    const take = (tokens: string[], status: "A" | "LE" | "L" | "HD") => {
+      for (const raw of tokens) {
+        const token = raw.trim();
+        if (!token) continue;
+        if (/^\d{1,3}$/.test(token)) {
+          const st = byRoll.get(String(parseInt(token, 10)));
+          if (!st) unresolved.push(`roll ${token}`);
+          else picked.set(st.id, status);
+          continue;
+        }
+        const hits = matchStudents({ name: token }, roster, { academicYearCode: ay });
+        if (hits.length === 1) picked.set(hits[0]!.student.id, status);
+        else if (hits.length > 1) {
+          ambiguous.push({
+            token,
+            options: hits.map((h) => `${h.student.rollNo}. ${h.student.fullName}`),
+          });
+        } else unresolved.push(token);
+      }
+    };
+    take(spec.absent, "A");
+    take(spec.leave, "LE");
+    take(spec.late, "L");
+    take(spec.halfDay, "HD");
+    if (unresolved.length) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: `I couldn't find ${unresolved.map((u) => `"${u}"`).join(", ")} in ${resolved.sectionLabel || "that section"}. Nothing was marked — check the roll number or use the full name.`,
+      };
+    }
+    if (ambiguous.length) {
+      const a = ambiguous[0]!;
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: `"${a.token}" matches ${a.options.join(", ")}. Nothing was marked — say the roll number instead.`,
+      };
+    }
+    if (!picked.size && !spec.allPresent) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: "Tell me who is absent, or say *all present*:\n_Mark 5A attendance: absent roll 4, 11, 19_",
+      };
+    }
+    const row = (id: string) => {
+      const st = roster.find((x) => x.id === id)!;
+      return { rollNo: st.rollNo, fullName: st.fullName };
+    };
+    const ids = (status: string) => [...picked.entries()].filter(([, v]) => v === status).map(([k]) => k);
+    resolved.date = date;
+    resolved.correcting = correcting ? "1" : "";
+    resolved.marks = JSON.stringify(
+      roster.map((st) => ({ studentId: st.id, status: picked.get(st.id) ?? "P", note: "" })),
+    );
+    resolved.cardSummary = formatMarkAttendanceCard({
+      sectionLabel: (resolved.sectionLabel || "").replace(" · ", " "),
+      date,
+      todayIso,
+      total: roster.length,
+      absent: ids("A").map(row),
+      leave: ids("LE").map(row),
+      late: ids("L").map(row),
+      halfDay: ids("HD").map(row),
+      correcting,
+    });
+  }
   if (command.fields.some((f) => f.type === "date")) {
     resolved.date =
       parsed.fields.date && /^\d{4}-\d{2}-\d{2}$/.test(parsed.fields.date)
@@ -816,7 +926,9 @@ export async function handleErpStaffCommand(
   if (command.kind === "write") {
     const token = random();
     const summary =
-      command.id === "post_homework"
+      command.id === "mark_attendance"
+        ? resolved.cardSummary || command.title
+        : command.id === "post_homework"
         ? formatPostHomeworkCard({
             sectionLabel: (resolved.sectionLabel || "").replace(" · ", " "),
             subjectName: resolved.subjectName || "",
@@ -1829,6 +1941,69 @@ async function runConfirmedWrite(
       handled: true,
       audience: "erp_command_post_homework",
       text: `Posted. ${label} ${r.subjectName || ""} homework is live${res.push.sent ? ` · ${res.push.sent} phone${res.push.sent === 1 ? "" : "s"} notified` : ""}.\nUndo it in the ERP: Homework → today's posts.`,
+    };
+  }
+  if (command.id === "mark_attendance") {
+    if (r.sectionId) {
+      const roleCodes = resolveSessionRoles(rbac, session, masters).map((x) => x.code);
+      const mine = staffAllowedSections(inbound.staff, masters, session.academicYearCode, roleCodes);
+      if (!isOfficeLike(roleCodes) && !mine.some((x) => x.sectionId === r.sectionId)) {
+        void audit(session, command, pending.fields, pending.originalText, "denied", {
+          reason: "scope_at_confirm",
+          channel: inbound.channel,
+        });
+        return {
+          handled: true,
+          audience: "erp_command_denied",
+          text: "That section is no longer one of yours, so nothing was marked.",
+        };
+      }
+    }
+    let marks: { studentId: string; status: AttendanceStatus; note: string }[];
+    try {
+      marks = JSON.parse(r.marks || "[]") as typeof marks;
+    } catch {
+      marks = [];
+    }
+    if (!marks.length) {
+      return {
+        handled: true,
+        audience: "erp_command_error",
+        text: "That register is no longer valid. Send the command again.",
+      };
+    }
+    const { markAttendanceServer } = await import("@/lib/attendanceMark.server");
+    const res = await markAttendanceServer({
+      session,
+      masters,
+      classId: r.classId || "",
+      sectionId: r.sectionId || "",
+      date: r.date || istDateOf(),
+      marks,
+      remark: r.correcting ? "Corrected via ERP command" : "Marked via ERP command",
+    });
+    if (!res.ok) {
+      void audit(session, command, pending.fields, pending.originalText, "error", {
+        reason: res.error,
+        channel: inbound.channel,
+      });
+      return { handled: true, audience: "erp_command_error", text: `Couldn't mark it: ${res.error}` };
+    }
+    const absent = marks.filter((m) => m.status === "A").length;
+    const present = marks.filter((m) => m.status === "P").length;
+    void audit(session, command, pending.fields, pending.originalText, "ok", {
+      channel: inbound.channel,
+      registerId: res.register.id,
+      sectionId: r.sectionId,
+      date: r.date,
+      present,
+      absent,
+      correcting: !!r.correcting,
+    });
+    return {
+      handled: true,
+      audience: "erp_command_mark_attendance",
+      text: `${r.correcting ? "Corrected" : "Marked"}. ${(r.sectionLabel || "").replace(" · ", " ")} · present ${present}, absent ${absent}${res.push.sent ? ` · ${res.push.sent} famil${res.push.sent === 1 ? "y" : "ies"} told` : ""}.\nChange it in the ERP: Attendance → register.`,
     };
   }
   return {
