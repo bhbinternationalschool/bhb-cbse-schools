@@ -403,6 +403,57 @@ class LibraryEbook {
 ///
 /// `configured` false is a real, distinct state — the office has not set the
 /// shelf up — and is shown as such rather than as an empty catalogue.
+/// One picture in a school album.
+class GalleryPhoto {
+  const GalleryPhoto({
+    required this.id,
+    required this.url,
+    required this.caption,
+  });
+
+  factory GalleryPhoto.fromJson(Map<String, dynamic> j) => GalleryPhoto(
+    id: (j["id"] as String?) ?? "",
+    url: (j["url"] as String?) ?? "",
+    caption: (j["caption"] as String?) ?? "",
+  );
+
+  final String id;
+  final String url;
+  final String caption;
+}
+
+/// A published album, with its pictures already in hand — the server sends
+/// them together so a phone on a slow connection makes one call, not one per
+/// album.
+class GalleryAlbum {
+  const GalleryAlbum({
+    required this.id,
+    required this.title,
+    required this.description,
+    required this.coverUrl,
+    required this.publishedAt,
+    required this.photos,
+  });
+
+  factory GalleryAlbum.fromJson(Map<String, dynamic> j) => GalleryAlbum(
+    id: (j["id"] as String?) ?? "",
+    title: (j["title"] as String?) ?? "",
+    description: (j["description"] as String?) ?? "",
+    coverUrl: (j["coverUrl"] as String?) ?? "",
+    publishedAt: (j["publishedAt"] as String?) ?? "",
+    photos: ((j["photos"] as List?) ?? const [])
+        .map((p) => GalleryPhoto.fromJson(p as Map<String, dynamic>))
+        .toList(),
+  );
+
+  final String id;
+  final String title;
+  final String description;
+  final String coverUrl;
+  final String publishedAt;
+  final List<GalleryPhoto> photos;
+}
+
 class EbookShelf {
   const EbookShelf({
     required this.configured,
@@ -2942,6 +2993,15 @@ class ApiClient {
 
   Future<EbookShelf> fetchEbookShelf() async =>
       EbookShelf.fromJson(await _getData("/api/v1/library/ebooks"));
+
+  // ---- gallery ------------------------------------------------------------
+
+  Future<List<GalleryAlbum>> fetchGalleryAlbums() async {
+    final data = await _getData("/api/v1/gallery/albums");
+    return ((data["albums"] as List?) ?? const [])
+        .map((a) => GalleryAlbum.fromJson(a as Map<String, dynamic>))
+        .toList();
+  }
 
   // ---- leave --------------------------------------------------------------
 
