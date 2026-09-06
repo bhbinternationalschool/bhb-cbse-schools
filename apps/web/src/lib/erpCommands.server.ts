@@ -88,6 +88,7 @@ import {
   formatHelpReply,
   formatBusManifestReply,
   formatHomeworkReply,
+  formatSchoolSnapshotReply,
   formatStudentDetailsReply,
   formatPendingLeavesReply,
   formatRouteNotFound,
@@ -631,6 +632,17 @@ export async function handleErpStaffCommand(
       };
     }
   }
+  if (command.id === "school_snapshot") {
+    const roleCodes = resolveSessionRoles(rbac, session, masters).map((r) => r.code);
+    if (!isOfficeLike(roleCodes)) {
+      void audit(session, command, parsed.fields, text, "denied", { reason: "scope", channel: inbound.channel });
+      return {
+        handled: true,
+        audience: "erp_command_denied",
+        text: "The school snapshot is for the office and leadership. You can ask about your own sections, e.g. _5A me aaj kaun absent hai_.",
+      };
+    }
+  }
   if (command.id === "bus_manifest") {
     resolved.route = (parsed.fields.text || "").trim();
   }
@@ -819,6 +831,8 @@ async function runReadCommand(
       return busManifest(resolved, session, todayIso);
     case "student_details":
       return studentDetails(resolved, session);
+    case "school_snapshot":
+      return schoolSnapshot(session, todayIso);
     default:
       return "That command isn't wired up yet.";
   }
@@ -936,6 +950,53 @@ async function attendanceSummary(
     scope: school ? "school" : "mine",
     classes,
     staff,
+  });
+}
+
+async function schoolSnapshot(session: DemoSession, todayIso: string): Promise<string> {
+  const { buildPrincipalSnapshot } = await import("@/lib/principalSnapshot.server");
+  const { countRecentWaFailures } = await import("@/lib/waDeliveryLog.server");
+  const [snapResult, waResult] = await Promise.allSettled([
+    buildPrincipalSnapshot(session.academicYearCode),
+    countRecentWaFailures(24),
+  ]);
+  if (snapResult.status !== "fulfilled") {
+    console.warn("[erpCommands] snapshot failed", snapResult.reason);
+    return "The snapshot couldn't be built just now. Please try again in a minute, or open the ERP home page.";
+  }
+  const snap = snapResult.value;
+  return formatSchoolSnapshotReply({
+    date: snap.attendance.date || todayIso,
+    todayIso,
+    academicYearCode: snap.academicYearCode,
+    fees: {
+      todayPaise: snap.fees.todayCollectionPaise,
+      mtdPaise: snap.fees.mtdCollectionPaise,
+      openDuesPaise: snap.fees.openDuesPaise,
+      defaulterHouseholds: snap.fees.defaulterHouseholds,
+    },
+    attendance: {
+      present: snap.attendance.studentPresent,
+      absent: snap.attendance.studentAbsent,
+      leave: snap.attendance.studentLeave,
+      markedPct: snap.attendance.studentMarkedPct,
+      sectionsMarked: snap.attendance.sectionsMarked,
+      registersPending: snap.alerts.attendanceRegistersPending,
+    },
+    staff: {
+      active: snap.staff.activeCount,
+      present: snap.staff.presentToday,
+      absent: snap.staff.absentToday,
+    },
+    admissions: snap.admissions,
+    alerts: {
+      vaultExpiring30d: snap.alerts.vaultExpiring30d,
+      lowStockSkus: snap.alerts.lowStockSkus,
+      // A failed WhatsApp count is a nice-to-have; the snapshot still
+      // answers without it rather than failing whole.
+      waFailures24h: waResult.status === "fulfilled" ? waResult.value : 0,
+    },
+    formatInr,
   });
 }
 

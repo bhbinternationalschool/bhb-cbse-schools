@@ -122,6 +122,24 @@ export const ERP_COMMANDS: ErpCommandDef[] = [
     scope: "any",
   },
   {
+    id: "school_snapshot",
+    title: "School snapshot",
+    kind: "read",
+    module: "home",
+    action: "view",
+    description:
+      "The whole school in one message: today's and this month's collection, open dues and defaulter households, attendance with registers pending, staff present, the admissions pipeline with follow-ups due, and alerts (expiring documents, low stock, failed WhatsApp sends). Office and leadership only.",
+    examples: [
+      "school snapshot",
+      "school status",
+      "aaj ka school report",
+      "how is the school doing",
+      "daily summary",
+    ],
+    fields: [],
+    scope: "any",
+  },
+  {
     id: "student_details",
     title: "A student's details",
     kind: "read",
@@ -604,6 +622,9 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
   }
   if (COLLECTION_WORDS.test(t) && !extractSectionRefs(t).length) {
     return { commandId: "collection_today", fields: { date: "" }, source: "local" };
+  }
+  if (SNAPSHOT_WORDS.test(t)) {
+    return { commandId: "school_snapshot", fields: {}, source: "local" };
   }
   const detailsQ = parseStudentDetailsQuery(t);
   if (detailsQ) {
@@ -1654,6 +1675,15 @@ export const TENDER_MODE_LABEL: Record<string, string> = {
 
 // ─── Free teachers in a period ─────────────────────────────────────────
 
+/**
+ * The whole-school one-pager: "school snapshot", "school status", "aaj ka
+ * school report", "daily summary", "how is the school doing". Deliberately
+ * narrow — every other command answers one question, and this one answers
+ * all of them at once, so it must not swallow "5A attendance status".
+ */
+const SNAPSHOT_WORDS =
+  /^(?:\s*(?:aaj\s*ka|today'?s?|daily|आज\s*का)\s*)?(?:school|schools|स्कूल|विद्यालय)?\s*(?:snapshot|status|report|summary|dashboard|overview|haal|हाल|रिपोर्ट|सारांश)\s*(?:of\s+(?:the\s+)?school)?\s*$|^\s*how\s+is\s+(?:the\s+)?school\s+doing\s*\??\s*$|^\s*(?:school|स्कूल)\s+(?:snapshot|status|report|summary|kaisa\s+chal\s+raha)\s*\??\s*$/iu;
+
 const DETAILS_WORDS =
   /(?<![\p{L}\p{M}\p{N}])(details?|detail|info|information|profile|jankari|jaankari|जानकारी|विवरण|record)(?![\p{L}\p{M}\p{N}])/iu;
 
@@ -2145,5 +2175,58 @@ export function formatStudentDetailsReply(input: StudentDetailsInput): string {
   if (input.isCwsn) flags.push("CWSN");
   if (flags.length) lines.push("", `⚠️ ${flags.join(" · ")} — open the student profile in the ERP.`);
   if (input.detail === "basic") lines.push("", "_Mobiles are masked; the office can share them._");
+  return lines.join("\n");
+}
+
+// ─── School snapshot ───────────────────────────────────────────────────
+
+export type SchoolSnapshotInput = {
+  date: string;
+  todayIso: string;
+  academicYearCode: string;
+  fees: { todayPaise: number; mtdPaise: number; openDuesPaise: number; defaulterHouseholds: number };
+  attendance: { present: number; absent: number; leave: number; markedPct: number; sectionsMarked: number; registersPending: number };
+  staff: { active: number; present: number; absent: number };
+  admissions: { pipeline: number; enrolled: number; followUpsDue: number };
+  alerts: { vaultExpiring30d: number; lowStockSkus: number; waFailures24h: number };
+  formatInr: (paise: number) => string;
+};
+
+export function formatSchoolSnapshotReply(input: SchoolSnapshotInput): string {
+  const inr = input.formatInr;
+  const when = input.date === input.todayIso ? "today" : shortDate(input.date);
+  const a = input.attendance;
+  const marked = a.present + a.absent + a.leave;
+  const lines = [
+    `*School snapshot* · ${when} · ${input.academicYearCode}`,
+    "",
+    "*Fees*",
+    `Collected ${when === "today" ? "today" : "that day"}: ${inr(input.fees.todayPaise)} · month ${inr(input.fees.mtdPaise)}`,
+    `Open dues: ${inr(input.fees.openDuesPaise)} across ${input.fees.defaulterHouseholds} student${input.fees.defaulterHouseholds === 1 ? "" : "s"}`,
+    "",
+    "*Attendance*",
+    marked
+      ? `Present ${a.markedPct}% (${a.present} / ${marked}) · ${a.sectionsMarked} section${a.sectionsMarked === 1 ? "" : "s"} marked`
+      : "No section marked yet.",
+  ];
+  if (a.registersPending) lines.push(`⚠️ ${a.registersPending} register${a.registersPending === 1 ? "" : "s"} still pending`);
+  lines.push(
+    "",
+    "*Staff*",
+    input.staff.present || input.staff.absent
+      ? `Present ${input.staff.present} · Absent ${input.staff.absent} of ${input.staff.active}`
+      : `No punches yet (${input.staff.active} active)`,
+    "",
+    "*Admissions*",
+    `Pipeline ${input.admissions.pipeline} · enrolled ${input.admissions.enrolled}${input.admissions.followUpsDue ? ` · ${input.admissions.followUpsDue} follow-up${input.admissions.followUpsDue === 1 ? "" : "s"} due` : ""}`,
+  );
+  const alerts: string[] = [];
+  if (input.alerts.vaultExpiring30d) alerts.push(`${input.alerts.vaultExpiring30d} document${input.alerts.vaultExpiring30d === 1 ? "" : "s"} expiring in 30 days`);
+  if (input.alerts.lowStockSkus) alerts.push(`${input.alerts.lowStockSkus} item${input.alerts.lowStockSkus === 1 ? "" : "s"} low on stock`);
+  if (input.alerts.waFailures24h) alerts.push(`${input.alerts.waFailures24h} WhatsApp send${input.alerts.waFailures24h === 1 ? "" : "s"} failed in 24h`);
+  if (alerts.length) {
+    lines.push("", "*Needs attention*");
+    for (const al of alerts) lines.push(`• ${al}`);
+  }
   return lines.join("\n");
 }

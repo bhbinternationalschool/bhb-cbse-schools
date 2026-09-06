@@ -46,6 +46,7 @@ import {
   parseBusManifestQuery,
   formatStudentDetailsReply,
   parseStudentDetailsQuery,
+  formatSchoolSnapshotReply,
   parseFreeTeachersQuery,
   periodAtTime,
   resolveClassOrSectionRef,
@@ -174,6 +175,14 @@ const masters = {
   assert.equal(parseErpCommandLocal("VIII B me kaun nahi aaya")?.fields.section, "8B");
   assert.equal(parseErpCommandLocal("5A में कौन गैरहाजिर है")?.commandId, "absent_list", "Devanagari fee/absent words match without ASCII word boundaries");
   assert.equal(parseErpCommandLocal("7B की उपस्थिति")?.fields.section, "7B");
+  assert.equal(parseErpCommandLocal("school snapshot")?.commandId, "school_snapshot");
+  assert.equal(parseErpCommandLocal("school status")?.commandId, "school_snapshot");
+  assert.equal(parseErpCommandLocal("aaj ka school report")?.commandId, "school_snapshot");
+  assert.equal(parseErpCommandLocal("daily summary")?.commandId, "school_snapshot");
+  assert.equal(parseErpCommandLocal("how is the school doing")?.commandId, "school_snapshot");
+  assert.equal(parseErpCommandLocal("5A attendance")?.commandId, "absent_list", "a section keeps its own command");
+  assert.equal(parseErpCommandLocal("commands report")?.commandId, "commands_digest", "the command-desk report is not the school snapshot");
+  assert.equal(parseErpCommandLocal("collection report")?.commandId, "collection_today");
   assert.equal(parseErpCommandLocal("Riya Verma details")?.fields.student, "riya verma");
   assert.equal(parseErpCommandLocal("student details Aarav Sharma")?.commandId, "student_details");
   assert.equal(parseErpCommandLocal("Amay Gupta 4B info")?.fields.student, "amay gupta 4B");
@@ -931,6 +940,43 @@ const masters = {
   for (const t of [full, basic, other]) {
     assert.ok(!/aadhaar|pan\b|medicalNotes|apaar|\bpen\b/i.test(t), "no identity documents in the reply");
   }
+}
+
+// ─── school snapshot reply ─────────────────────────────────────────────
+{
+  const inr = (p: number) => `₹${(p / 100).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+  const base = {
+    date: "2026-09-05",
+    todayIso: "2026-09-05",
+    academicYearCode: "2026-27",
+    fees: { todayPaise: 18650000, mtdPaise: 41200000, openDuesPaise: 128000000, defaulterHouseholds: 46 },
+    attendance: { present: 611, absent: 34, leave: 5, markedPct: 94, sectionsMarked: 22, registersPending: 2 },
+    staff: { active: 44, present: 40, absent: 1 },
+    admissions: { pipeline: 38, enrolled: 12, followUpsDue: 7 },
+    alerts: { vaultExpiring30d: 3, lowStockSkus: 4, waFailures24h: 11 },
+    formatInr: inr,
+  };
+  const t = formatSchoolSnapshotReply(base);
+  assert.ok(t.startsWith("*School snapshot* · today · 2026-27"), t);
+  assert.ok(t.includes("Collected today: ₹1,86,500 · month ₹4,12,000"), t);
+  assert.ok(t.includes("Open dues: ₹12,80,000 across 46 students"), t);
+  assert.ok(t.includes("Present 94% (611 / 650) · 22 sections marked"), t);
+  assert.ok(t.includes("⚠️ 2 registers still pending"), t);
+  assert.ok(t.includes("Present 40 · Absent 1 of 44"), t);
+  assert.ok(t.includes("Pipeline 38 · enrolled 12 · 7 follow-ups due"), t);
+  assert.ok(t.includes("*Needs attention*\n• 3 documents expiring in 30 days\n• 4 items low on stock\n• 11 WhatsApp sends failed in 24h"), t);
+
+  const quiet = formatSchoolSnapshotReply({
+    ...base,
+    attendance: { present: 0, absent: 0, leave: 0, markedPct: 0, sectionsMarked: 0, registersPending: 0 },
+    staff: { active: 44, present: 0, absent: 0 },
+    admissions: { pipeline: 38, enrolled: 12, followUpsDue: 0 },
+    alerts: { vaultExpiring30d: 0, lowStockSkus: 0, waFailures24h: 0 },
+  });
+  assert.ok(quiet.includes("No section marked yet."), quiet);
+  assert.ok(quiet.includes("No punches yet (44 active)"), quiet);
+  assert.ok(!quiet.includes("follow-up"), "no follow-ups due — the clause is dropped");
+  assert.ok(!quiet.includes("Needs attention"), "no alerts — the section is dropped");
 }
 
 console.log("erpCommands.selftest.ts OK");
