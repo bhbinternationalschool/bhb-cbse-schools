@@ -100,6 +100,29 @@ export function writeCacheOrInvalidate(key: string, value: string): boolean {
       `[storage] ${key} (${Math.round(value.length / 1024)} KB) exceeds this ` +
         "browser's quota — cache dropped. The database write is unaffected.",
     );
+    noteQuotaDropOnce(key);
     return false;
   }
+}
+
+/**
+ * Say it on screen, once per page, when a bulk cache is dropped for quota.
+ * A silent drop is how "student register shows 0" stayed a mystery for a
+ * day (2026-09-06): the console said it, nobody was looking there.
+ */
+let quotaNoticeShown = false;
+function noteQuotaDropOnce(key: string) {
+  if (quotaNoticeShown || typeof window === "undefined") return;
+  quotaNoticeShown = true;
+  void import("@/components/shell/Toast")
+    .then(({ pushToast }) =>
+      pushToast({
+        kind: "info",
+        message:
+          "This browser's storage is full, so some records are held in memory " +
+          `only (${key.replace(/^bhb_|_v\d+$/g, "")}). They reload from the server on the next open; nothing is lost.`,
+        durationMs: 9000,
+      }),
+    )
+    .catch(() => {});
 }

@@ -177,15 +177,25 @@ async function hydrateSisOnce(): Promise<boolean> {
     "@/lib/sisNormalizedClient"
   );
 
-  if (typeof window !== "undefined" && sisSyncRecentlyPushed()) {
-    markDeskHydrated(MODULE);
-    return false;
-  }
-
   const { loadSis, writeSisLocalRaw, emptySisState } =
     await import("@/lib/sis");
   let next = loadSis();
   let changed = false;
+
+  // "We just pushed, so we hold the latest" is only true while we still HOLD
+  // it. After a refresh the browser has no memory copy, and when the origin
+  // is over its localStorage quota there is no cache copy either — so this
+  // skip left the office looking at a register of 0 students until the
+  // 30 s window passed and someone navigated again (2026-09-06). Skip only
+  // when there is actually a roster in hand.
+  if (
+    typeof window !== "undefined" &&
+    sisSyncRecentlyPushed() &&
+    next.students.length > 0
+  ) {
+    markDeskHydrated(MODULE);
+    return false;
+  }
 
   const readFromDb = sisReadFromDbEnabled();
   const { bundle, changed: remoteChanged, ok } = await hydrateSisDeskFromDb(
@@ -201,16 +211,27 @@ async function hydrateSisOnce(): Promise<boolean> {
     return false;
   }
 
-  markDeskHydrated(MODULE);
   const remoteEmpty =
     bundle.households.length === 0 && bundle.students.length === 0;
 
-  if (readFromDb && remoteEmpty) {
-    if (next.students.length > 0 || next.households.length > 0) {
-      next = emptySisState();
-      writeSisLocalRaw(next);
-      changed = true;
+  if (readFromDb && remoteEmpty && (next.students.length > 0 || next.households.length > 0)) {
+    // A school with a roster in hand does not learn from one answer that it
+    // has no students. An empty bundle against a populated browser is a
+    // failed or partial read wearing a 200 — the same shape the transport
+    // desk wipe took on 2026-08-21 — so it is reported and the copy in hand
+    // is kept. A genuinely emptied roster is an explicit, audited action
+    // (wipeRemoteSisRoster), never inferred here. The hydration flag is left
+    // unset so the next navigation asks again.
+    if (typeof window !== "undefined") {
+      const { reportLoadFailure } = await import("@/components/shell/Toast");
+      reportLoadFailure("student records (server answered with none)");
     }
+    return false;
+  }
+
+  markDeskHydrated(MODULE);
+  if (readFromDb && remoteEmpty) {
+    // Nothing locally and nothing remotely: leave the empty state as is.
   } else if (
     (remoteChanged || bundle.students.length > 0) &&
     (bundle.households.length > 0 || bundle.students.length > 0)
