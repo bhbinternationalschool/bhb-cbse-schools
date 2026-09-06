@@ -526,7 +526,7 @@ export function PublicFamilyRegisterForm({
         />
         <button
           type="button"
-          className="w-full rounded-2xl bg-[#166534] py-3.5 text-sm font-semibold text-white"
+          className="w-full rounded-2xl bg-[var(--tone-green-deep-solid)] py-3.5 text-sm font-semibold text-white"
           onClick={onConfirmPaid}
         >
           I have paid · confirm

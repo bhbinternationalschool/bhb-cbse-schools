@@ -257,4 +257,4 @@ export function WaTemplatesListView({
 }
 
 const waBtnTeal =
-  "rounded-lg bg-[#0f766e] px-4 py-2 text-[12px] font-semibold text-white disabled:opacity-50";
+  "rounded-lg bg-[var(--tone-teal-solid)] px-4 py-2 text-[12px] font-semibold text-white disabled:opacity-50";

@@ -58,6 +58,27 @@
   --tone-violet: #6d28d9;
   --tone-sky: #0369a1;
   --tone-coral: #c2410c;
+
+  /* ── Filled-chip tones ─────────────────────────────────────────────────
+   * The same eight hues as a BACKGROUND, with white text on them.
+   *
+   * These deliberately hold ONE value in both themes, which is the whole
+   * reason they are separate from the tokens above. Those invert — the dark
+   * value of --tone-teal is a pale mint, right for text on a dark card and
+   * catastrophic as a fill, because the white label sitting on it would
+   * disappear. A saturated chip reads correctly on a dark page as it is, so
+   * there is nothing to invert.
+   *
+   * Every one clears 4.5:1 against white, measured before adopting them:
+   * teal 5.47, green 5.02, green-deep 7.13, brick 7.31, violet 7.10,
+   * red 4.83. Anything added here must clear it too, or the label on the
+   * chip stops being readable. */
+  --tone-teal-solid: #0f766e;
+  --tone-green-solid: #15803d;
+  --tone-green-deep-solid: #166534;
+  --tone-brick-solid: #9a3412;
+  --tone-violet-solid: #6d28d9;
+  --tone-red-solid: #dc2626;
   --info-soft: #dbeafe;
   --ring: #c5a028;
   --background: #f6f5ef;

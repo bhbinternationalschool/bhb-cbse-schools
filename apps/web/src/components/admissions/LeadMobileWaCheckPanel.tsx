@@ -305,7 +305,7 @@ export function LeadMobileWaCheckPanel({
           type="button"
           disabled={apiBusy || report.byWa.size === 0}
           onClick={() => void runLiveWaCheck()}
-          className="shrink-0 rounded-lg bg-[#166534] px-2.5 py-1.5 text-[11px] font-semibold text-white hover:brightness-110 disabled:opacity-50"
+          className="shrink-0 rounded-lg bg-[var(--tone-green-deep-solid)] px-2.5 py-1.5 text-[11px] font-semibold text-white hover:brightness-110 disabled:opacity-50"
           title={
             apiConfigured === false
               ? "Configure WhatsApp in Masters → Integrations first"
@@ -323,7 +323,7 @@ export function LeadMobileWaCheckPanel({
         waNamesAvailable.length > 0 ? (
           <button
             type="button"
-            className="shrink-0 rounded-lg bg-[#0f766e] px-2.5 py-1.5 text-[11px] font-semibold text-white hover:brightness-110"
+            className="shrink-0 rounded-lg bg-[var(--tone-teal-solid)] px-2.5 py-1.5 text-[11px] font-semibold text-white hover:brightness-110"
             title="Set WhatsApp display name on matching leads — campaigns use this for {{guardianName}}"
             onClick={() => {
               const ok =

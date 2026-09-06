@@ -85,9 +85,9 @@ export const ACCOUNTS_REPORT_CATEGORIES: {
   headerClass: string;
 }[] = [
   { id: "cashflow", title: "Cash & bank", headerClass: "bg-[#1565c0]" },
-  { id: "ledgers", title: "Ledgers & journals", headerClass: "bg-[#6d28d9]" },
+  { id: "ledgers", title: "Ledgers & journals", headerClass: "bg-[var(--tone-violet-solid)]" },
   { id: "expenses", title: "Expenses", headerClass: "bg-[#ef6c00]" },
-  { id: "payables", title: "Payables & loans", headerClass: "bg-[#0f766e]" },
+  { id: "payables", title: "Payables & loans", headerClass: "bg-[var(--tone-teal-solid)]" },
   { id: "books", title: "Financial statements", headerClass: "bg-[#0f2744]" },
 ];
 

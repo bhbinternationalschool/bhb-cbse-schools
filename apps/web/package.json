@@ -63,6 +63,7 @@
     "test:session-year": "npx tsx src/lib/sessionYearResolve.selftest.ts",
     "test:academic-year-resolve": "npx tsx src/lib/academicYearResolve.selftest.ts",
     "test:workspace-policy": "npx tsx src/lib/workspaceSyncPolicy.selftest.ts",
+    "test:tone-tokens": "npx tsx src/lib/toneTokens.selftest.ts",
     "test:masters-read-failure": "npx tsx src/lib/mastersStoredReadFailure.selftest.ts",
     "test:save-full-cache": "npx tsx src/lib/saveSurvivesFullCache.selftest.ts",
     "test:sis-memory-fallback": "npx tsx src/lib/sisMemoryFallback.selftest.ts",

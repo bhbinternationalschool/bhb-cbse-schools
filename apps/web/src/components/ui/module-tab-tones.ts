@@ -26,7 +26,7 @@ export const MODULE_TAB_TONES: Record<
     idle: "bg-[rgba(15,118,110,0.12)] text-[var(--tone-teal)]",
     hover: "hover:bg-[rgba(15,118,110,0.2)]",
     active:
-      "bg-[#0f766e] text-white shadow-[0_3px_12px_rgba(15,118,110,0.35)] ring-2 ring-[#5eead4] ring-offset-2 ring-offset-[var(--surface)]",
+      "bg-[var(--tone-teal-solid)] text-white shadow-[0_3px_12px_rgba(15,118,110,0.35)] ring-2 ring-[#5eead4] ring-offset-2 ring-offset-[var(--surface)]",
     dot: "bg-[#5eead4]",
   },
   slate: {
@@ -47,7 +47,7 @@ export const MODULE_TAB_TONES: Record<
     idle: "bg-[rgba(22,163,74,0.12)] text-[var(--tone-green)]",
     hover: "hover:bg-[rgba(22,163,74,0.2)]",
     active:
-      "bg-[#15803d] text-white shadow-[0_3px_12px_rgba(21,128,61,0.35)] ring-2 ring-[#86efac] ring-offset-2 ring-offset-[var(--surface)]",
+      "bg-[var(--tone-green-solid)] text-white shadow-[0_3px_12px_rgba(21,128,61,0.35)] ring-2 ring-[#86efac] ring-offset-2 ring-offset-[var(--surface)]",
     dot: "bg-[#86efac]",
   },
   rose: {
@@ -61,7 +61,7 @@ export const MODULE_TAB_TONES: Record<
     idle: "bg-[rgba(109,40,217,0.12)] text-[var(--tone-violet)]",
     hover: "hover:bg-[rgba(109,40,217,0.2)]",
     active:
-      "bg-[#6d28d9] text-white shadow-[0_3px_12px_rgba(109,40,217,0.35)] ring-2 ring-[#c4b5fd] ring-offset-2 ring-offset-[var(--surface)]",
+      "bg-[var(--tone-violet-solid)] text-white shadow-[0_3px_12px_rgba(109,40,217,0.35)] ring-2 ring-[#c4b5fd] ring-offset-2 ring-offset-[var(--surface)]",
     dot: "bg-[#c4b5fd]",
   },
   sky: {

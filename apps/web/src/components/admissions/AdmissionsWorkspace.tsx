@@ -1276,7 +1276,7 @@ export function AdmissionsWorkspace() {
                 <button
                   type="button"
                   onClick={runSisReconcile}
-                  className="rounded-lg bg-[#0f766e] px-2.5 py-1.5 text-[11px] font-semibold text-white hover:brightness-110"
+                  className="rounded-lg bg-[var(--tone-teal-solid)] px-2.5 py-1.5 text-[11px] font-semibold text-white hover:brightness-110"
                   title="Match open leads against the student register (all sessions) and mark admitted"
                 >
                   Check admitted in SIS
@@ -2761,7 +2761,7 @@ function LeadDetail({
               {lead.stage === "verified" || lead.stage === "applied" ? (
                 <button
                   type="button"
-                  className="rounded-lg bg-[#0f766e] px-3 py-1.5 text-[11px] font-semibold text-white"
+                  className="rounded-lg bg-[var(--tone-teal-solid)] px-3 py-1.5 text-[11px] font-semibold text-white"
                   onClick={onEnroll}
                 >
                   → Admit to SIS
@@ -3070,7 +3070,7 @@ function LeadDetail({
             <div className="mt-2 flex flex-wrap gap-2">
               <button
                 type="button"
-                className="rounded-lg bg-[#0f766e] px-3 py-2 text-[11px] font-semibold text-white"
+                className="rounded-lg bg-[var(--tone-teal-solid)] px-3 py-2 text-[11px] font-semibold text-white"
                 onClick={submitFollowUp}
               >
                 Save follow-up

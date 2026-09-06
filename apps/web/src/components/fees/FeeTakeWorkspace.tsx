@@ -3426,7 +3426,7 @@ function CollectPanel({
                     className={`mt-4 w-full rounded-xl px-4 py-3 text-sm font-extrabold uppercase tracking-wide transition active:scale-[0.99] disabled:cursor-not-allowed ${
                       matched
                         ? "bg-[#22c55e] text-white shadow-lg hover:bg-[#16a34a]"
-                        : "bg-[#ef4444] text-white hover:bg-[#dc2626] disabled:opacity-90"
+                        : "bg-[#ef4444] text-white hover:bg-[var(--tone-red-solid)] disabled:opacity-90"
                     }`}
                     disabled={!matched || readOnly}
                     onClick={onCollect}

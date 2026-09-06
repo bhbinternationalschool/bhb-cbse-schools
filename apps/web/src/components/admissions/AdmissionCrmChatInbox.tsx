@@ -291,7 +291,7 @@ export function AdmissionCrmChatInbox({
                           {t.parentName || "Parent"} · {t.mobile}
                         </span>
                         {t.unreadStaff > 0 ? (
-                          <span className="rounded-full bg-[#0f766e] px-1.5 text-[10px] font-bold text-white">
+                          <span className="rounded-full bg-[var(--tone-teal-solid)] px-1.5 text-[10px] font-bold text-white">
                             {t.unreadStaff}
                           </span>
                         ) : null}
@@ -361,7 +361,7 @@ export function AdmissionCrmChatInbox({
                           {t.parentName || "Parent"} · {t.mobile}
                         </span>
                         {t.unreadStaff > 0 ? (
-                          <span className="rounded-full bg-[#0f766e] px-1.5 text-[10px] font-bold text-white">
+                          <span className="rounded-full bg-[var(--tone-teal-solid)] px-1.5 text-[10px] font-bold text-white">
                             {t.unreadStaff}
                           </span>
                         ) : null}

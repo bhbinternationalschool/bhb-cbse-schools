@@ -5,7 +5,7 @@ export const botBtnPrimary =
   "rounded-lg bg-[var(--brand-deep)] px-4 py-2 text-[12px] font-semibold text-white disabled:opacity-50";
 
 export const botBtnTeal =
-  "rounded-lg bg-[#0f766e] px-4 py-2 text-[12px] font-semibold text-white disabled:opacity-50";
+  "rounded-lg bg-[var(--tone-teal-solid)] px-4 py-2 text-[12px] font-semibold text-white disabled:opacity-50";
 
 export const botBtnOutline =
   "rounded-lg border border-[rgba(32,48,80,0.2)] px-4 py-2 text-[12px] font-semibold text-[var(--brand-deep)]";

@@ -219,7 +219,7 @@ export function AdmissionSurveyTeamPanel({
               />
               <button
                 type="button"
-                className="mt-2 rounded-lg bg-[#9a3412] px-3 py-2 text-[12px] font-semibold text-white"
+                className="mt-2 rounded-lg bg-[var(--tone-brick-solid)] px-3 py-2 text-[12px] font-semibold text-white"
                 onClick={createExternal}
               >
                 Add external + assign

@@ -64,6 +64,7 @@ SELFTESTS=(
   test:session-year
   test:academic-year-resolve
   test:workspace-policy
+  test:tone-tokens
   test:masters-read-failure
   test:save-full-cache
   test:sis-memory-fallback

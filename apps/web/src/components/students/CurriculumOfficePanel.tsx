@@ -338,7 +338,7 @@ export function CurriculumOfficePanel({
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
-          className="rounded-lg bg-[#0f766e] px-3 py-2 text-xs font-bold text-white"
+          className="rounded-lg bg-[var(--tone-teal-solid)] px-3 py-2 text-xs font-bold text-white"
           onClick={applyBulk}
         >
           Apply to {selectedIds.length > 0 ? selectedIds.length : "all"}{" "}

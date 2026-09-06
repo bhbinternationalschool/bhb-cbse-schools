@@ -781,7 +781,7 @@ export function ExamPapersPanel({
               </select>
               <button
                 type="button"
-                className="rounded-lg bg-[#6d28d9] px-3 py-1.5 text-sm font-bold text-white disabled:opacity-50"
+                className="rounded-lg bg-[var(--tone-violet-solid)] px-3 py-1.5 text-sm font-bold text-white disabled:opacity-50"
                 onClick={() => void onAiFill()}
                 disabled={aiLoading}
               >

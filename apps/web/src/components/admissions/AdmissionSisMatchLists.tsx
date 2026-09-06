@@ -206,9 +206,9 @@ function chipClass(active: boolean, tone: FilterChip["tone"]): string {
   if (active) {
     switch (tone) {
       case "green":
-        return "bg-[#166534] text-white";
+        return "bg-[var(--tone-green-deep-solid)] text-white";
       case "amber":
-        return "bg-[#9a3412] text-white";
+        return "bg-[var(--tone-brick-solid)] text-white";
       case "slate":
         return "bg-[#334155] text-white";
       case "red":
@@ -308,7 +308,7 @@ export function AdmissionSisMatchLists({
             }
             className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
               openPanel === "admitted"
-                ? "bg-[#166534] text-white"
+                ? "bg-[var(--tone-green-deep-solid)] text-white"
                 : "bg-[rgba(21,128,61,0.15)] text-[#166534] hover:brightness-95"
             }`}
           >
@@ -326,7 +326,7 @@ export function AdmissionSisMatchLists({
             }
             className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
               openPanel === "suspected"
-                ? "bg-[#9a3412] text-white"
+                ? "bg-[var(--tone-brick-solid)] text-white"
                 : "bg-[rgba(180,83,9,0.14)] text-[#9a3412] hover:brightness-95"
             }`}
           >

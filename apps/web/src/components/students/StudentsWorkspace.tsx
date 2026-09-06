@@ -1579,7 +1579,7 @@ export function StudentsWorkspace() {
               type="button"
               className={`rounded-lg px-3 py-2 text-xs font-bold ${
                 showCurriculumOffice
-                  ? "bg-[#0f766e] text-white"
+                  ? "bg-[var(--tone-teal-solid)] text-white"
                   : "border border-[var(--tone-teal)] bg-[var(--card)] text-[var(--tone-teal)]"
               }`}
               onClick={() => setShowCurriculumOffice((v) => !v)}

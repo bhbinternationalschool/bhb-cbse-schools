@@ -394,7 +394,7 @@ export function StudentUpgradePanel({
                       ? "bg-[#0284c7] text-white shadow-[0_3px_12px_rgba(2,132,199,0.35)]"
                       : tone === "amber"
                         ? "bg-[#b8860b] text-white shadow-[0_3px_12px_rgba(184,134,11,0.4)]"
-                        : "bg-[#6d28d9] text-white shadow-[0_3px_12px_rgba(109,40,217,0.35)]"
+                        : "bg-[var(--tone-violet-solid)] text-white shadow-[0_3px_12px_rgba(109,40,217,0.35)]"
                     : "text-[var(--muted)] hover:bg-white hover:text-[var(--brand-deep)]"
                 }`}
               >

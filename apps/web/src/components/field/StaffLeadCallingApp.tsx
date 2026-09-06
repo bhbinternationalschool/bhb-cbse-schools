@@ -167,7 +167,7 @@ export function StaffLeadCallingApp({ session }: { session: DemoSession }) {
                     />
                     <button
                       type="button"
-                      className="w-full rounded-lg bg-[#166534] py-2 text-[12px] font-semibold text-white"
+                      className="w-full rounded-lg bg-[var(--tone-green-deep-solid)] py-2 text-[12px] font-semibold text-white"
                       onClick={() => saveFollowUp(l.id)}
                     >
                       Save follow-up

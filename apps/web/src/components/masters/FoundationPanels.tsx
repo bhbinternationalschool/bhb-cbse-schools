@@ -1277,7 +1277,7 @@ export function SubjectsPanel({
                 )}
                 <button
                   type="button"
-                  className="rounded-lg bg-[#0f766e] px-3 py-2 text-xs font-bold text-white disabled:opacity-40"
+                  className="rounded-lg bg-[var(--tone-teal-solid)] px-3 py-2 text-xs font-bold text-white disabled:opacity-40"
                   disabled={nepAnalysis.missingCount === 0}
                   onClick={applyNepPack}
                 >

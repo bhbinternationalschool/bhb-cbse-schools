@@ -159,7 +159,7 @@ export function AdmissionDocOcrPanel({ disabled, onApply, onApplyApplication }: 
         <button
           type="button"
           disabled={disabled || busy || !preview}
-          className="rounded-lg bg-[#0f766e] px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-50"
+          className="rounded-lg bg-[var(--tone-teal-solid)] px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-50"
           onClick={() => void runOcr()}
         >
           {busy ? "Reading…" : kind === "application_form" ? "Read form" : "Run OCR"}

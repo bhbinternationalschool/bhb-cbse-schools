@@ -27,7 +27,7 @@ function btn(
     return "rounded-lg border border-[rgba(180,35,24,0.35)] bg-white px-2 py-1 text-[10px] font-semibold text-[var(--danger)] hover:bg-[rgba(180,35,24,0.06)]";
   }
   if (teal) {
-    return "rounded-lg bg-[#0f766e] px-2 py-1 text-[10px] font-semibold text-white hover:brightness-110";
+    return "rounded-lg bg-[var(--tone-teal-solid)] px-2 py-1 text-[10px] font-semibold text-white hover:brightness-110";
   }
   if (primary) {
     return "rounded-lg bg-[var(--brand-deep)] px-2 py-1 text-[10px] font-semibold text-white hover:brightness-110";
@@ -142,7 +142,7 @@ export function LeadTagListActions({
       {canEdit && suspected && handlers.onVerifyWithSis ? (
         <button
           type="button"
-          className="rounded-lg bg-[#166534] px-2 py-1 text-[10px] font-semibold text-white hover:brightness-110"
+          className="rounded-lg bg-[var(--tone-green-deep-solid)] px-2 py-1 text-[10px] font-semibold text-white hover:brightness-110"
           onClick={() => handlers.onVerifyWithSis!(lead.id)}
           title="Confirm match — update lead from SIS and mark Admitted"
         >

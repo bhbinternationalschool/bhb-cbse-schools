@@ -80,7 +80,7 @@ export const TONE: Record<
   teal: {
     icon: "bg-[rgba(15,118,110,0.12)] text-[var(--tone-teal)]",
     chip: "bg-[rgba(15,118,110,0.1)] text-[var(--tone-teal)]",
-    bar: "bg-[#0f766e]",
+    bar: "bg-[var(--tone-teal-solid)]",
     soft: "from-[rgba(15,118,110,0.08)] to-transparent",
   },
   sky: {

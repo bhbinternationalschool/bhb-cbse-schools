@@ -133,6 +133,9 @@ jobs:
       - name: Test — idle logout is thirty minutes for every session (standing policy)
         working-directory: apps/web
         run: npm run test:workspace-policy
+      - name: Test — accent tone tokens are not used in each other's place
+        working-directory: apps/web
+        run: npm run test:tone-tokens
 
       - name: Test — a list projection never breaks pagination
         working-directory: apps/web
