@@ -80,6 +80,48 @@ function DialogPopup({
   )
 }
 
+/**
+ * An edge-anchored dialog — the right-hand drawer every inventory form uses,
+ * and anything else that wants a sheet rather than a centred card.
+ *
+ * Same primitive as DialogPopup, so it inherits the focus trap, the scroll
+ * lock, Escape and `aria-modal`; only the geometry differs. Kept here beside
+ * the centred one so there is a single dialog module rather than a drawer
+ * that quietly reimplements half of it.
+ */
+function DialogSheet({
+  className,
+  side = "right",
+  children,
+  ...props
+}: AlertDialogPrimitive.Popup.Props & { side?: "right" | "left" }) {
+  return (
+    <DialogPortal>
+      <DialogBackdrop />
+      <AlertDialogPrimitive.Viewport
+        className={cn(
+          "fixed inset-0 z-50 flex",
+          side === "right" ? "justify-end" : "justify-start",
+        )}
+      >
+        <AlertDialogPrimitive.Popup
+          data-slot="dialog-sheet"
+          className={cn(
+            "flex h-full w-full flex-col bg-background shadow-xl outline-none transition-transform duration-150",
+            side === "right"
+              ? "data-[ending-style]:translate-x-full data-[starting-style]:translate-x-full"
+              : "data-[ending-style]:-translate-x-full data-[starting-style]:-translate-x-full",
+            className
+          )}
+          {...props}
+        >
+          {children}
+        </AlertDialogPrimitive.Popup>
+      </AlertDialogPrimitive.Viewport>
+    </DialogPortal>
+  )
+}
+
 function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -158,6 +200,7 @@ export {
   DialogPortal,
   DialogBackdrop,
   DialogPopup,
+  DialogSheet,
   DialogHeader,
   DialogTitle,
   DialogDescription,

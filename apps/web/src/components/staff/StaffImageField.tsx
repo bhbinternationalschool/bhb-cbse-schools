@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import { acceptFor, bucketFor, type MediaVisibility } from "@/lib/media";
 import { uploadMedia } from "@/lib/mediaUpload";
 
@@ -227,14 +228,11 @@ export function StaffImageField({
         />
       </div>
 
-      {camOpen ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--overlay)] p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-label={`Capture ${label}`}
-        >
-          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-[var(--card)] shadow-lg">
+      {/* Base UI: Escape now closes the camera AND stops the stream via
+            closeCam. The hand-rolled overlay had no key handling at all, so a
+            clerk who pressed Escape left the camera running. */}
+        <Dialog open={camOpen} onOpenChange={(next) => !next && closeCam()}>
+          <DialogPopup aria-label={`Capture ${label}`} className="w-full max-w-md overflow-hidden rounded-2xl bg-[var(--card)] shadow-lg p-0">
             <div className="border-b border-[var(--border)] px-4 py-3 text-sm font-semibold text-[var(--brand-deep)]">
               Camera · {label}
             </div>
@@ -262,9 +260,8 @@ export function StaffImageField({
                 Capture
               </button>
             </div>
-          </div>
-        </div>
-      ) : null}
+          </DialogPopup>
+        </Dialog>
     </div>
   );
 }

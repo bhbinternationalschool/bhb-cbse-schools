@@ -1,6 +1,7 @@
 "use client";
 // ratchet-allow: grids_without_row_menu — detail tables inside the pupil's profile dialog
 
+import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import { useEffect, useMemo, useState } from "react";
 import { HOUSEHOLD_CHANNELS, languageLabel, quietHoursLabel } from "@/lib/householdPrefs";
 import Link from "next/link";
@@ -198,16 +199,10 @@ export function StudentProfileModal({
   }, [attendance, student.id, ay]);
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-[rgba(12,18,32,0.55)] p-4 sm:p-8"
-      role="dialog"
-      aria-modal="true"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-3xl rounded-2xl bg-white shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
+    // Base UI: focus trap, scroll lock, Escape. The hand-rolled overlay
+    // had none of them, so Tab left the open card for the page behind it.
+    <Dialog open onOpenChange={(next) => !next && onClose()}>
+      <DialogPopup  className="w-full max-w-3xl rounded-2xl bg-white shadow-2xl">
         <div className="flex items-start gap-4 border-b border-[rgba(32,48,80,0.1)] p-5">
           <StudentAvatar student={student} size={64} />
           <div className="min-w-0 flex-1">
@@ -685,8 +680,8 @@ export function StudentProfileModal({
             </div>
           ) : null}
         </div>
-      </div>
-    </div>
+      </DialogPopup>
+    </Dialog>
   );
 }
 

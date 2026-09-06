@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import {
   cancelInstallmentPlan,
   createInstallmentPlan,
@@ -38,13 +39,7 @@ export function InstallmentPlanDialog({
   onClose: () => void;
   onSaved: (msg: string) => void;
 }) {
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  // Escape belongs to the dialog now.
 
   const fees = loadFees();
   const existing = activePlanForStudent(
@@ -151,11 +146,12 @@ function CreatePlanPanel({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center">
-      <div
-        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-5 shadow-xl"
-        role="dialog"
+    // Base UI: focus trap, scroll lock, Escape. The hand-rolled overlay
+    // had none of them, so Tab left the open form for the page behind it.
+    <Dialog open onOpenChange={(next) => !next && onClose()}>
+      <DialogPopup
         aria-labelledby="plan-title"
+        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-5 shadow-xl"
       >
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -317,8 +313,8 @@ function CreatePlanPanel({
             </div>
           </>
         )}
-      </div>
-    </div>
+      </DialogPopup>
+    </Dialog>
   );
 }
 

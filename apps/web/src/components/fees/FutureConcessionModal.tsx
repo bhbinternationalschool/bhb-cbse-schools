@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import { formatInr } from "@/lib/masters";
 import type { FutureConcessionCandidate } from "@/lib/counterConcession";
 
@@ -17,24 +17,15 @@ export function FutureConcessionModal({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onCancel();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onCancel]);
-
+  // Escape is the dialog's job now — the window-level listener this replaced
+  // fired for every open modal on the page, not just this one.
   const selectedCount = candidates.filter((c) => selectedKeys.has(c.key)).length;
 
   return (
-    <div
-      className="fixed inset-0 z-[80] flex items-end justify-center bg-[rgba(15,23,42,0.55)] p-4 sm:items-center"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="future-concession-title"
-    >
-      <div className="max-h-[90vh] w-full max-w-lg overflow-hidden rounded-2xl border border-[rgba(32,48,80,0.14)] bg-white shadow-2xl">
+    // Base UI: focus trap, scroll lock, Escape. The hand-rolled overlay
+    // had none of them, so Tab left the open form for the page behind it.
+    <Dialog open onOpenChange={(next) => !next && onCancel()}>
+      <DialogPopup aria-labelledby="future-concession-title" className="max-h-[90vh] w-full max-w-lg overflow-hidden rounded-2xl border border-[rgba(32,48,80,0.14)] bg-white shadow-2xl">
         <div className="border-b border-[rgba(32,48,80,0.08)] px-4 py-4 sm:px-5">
           <h2
             id="future-concession-title"
@@ -166,7 +157,7 @@ export function FutureConcessionModal({
               : "Continue collect"}
           </button>
         </div>
-      </div>
-    </div>
+      </DialogPopup>
+    </Dialog>
   );
 }
