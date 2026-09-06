@@ -19,6 +19,7 @@ const LEGAL_NAV = [
   { href: "/terms", label: "Terms & conditions" },
   { href: "/privacy", label: "Privacy policy" },
   { href: "/refund-policy", label: "Cancellation & refund policy" },
+  { href: "/data-deletion", label: "Account & data deletion" },
   { href: "/contact", label: "Contact us" },
 ];
 

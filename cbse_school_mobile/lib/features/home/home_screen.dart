@@ -16,7 +16,6 @@ import "../modules/gallery_screen.dart";
 import "../modules/fees_screen.dart";
 import "../modules/homework_screen.dart";
 import "../modules/leave_screen.dart";
-import "../modules/module_shell.dart";
 import "../modules/notices_screen.dart";
 import "../modules/ptm_screen.dart";
 import "../modules/receipts_screen.dart";
@@ -42,7 +41,10 @@ const _modules = [
   _Module("Tutor", Icons.school_outlined, ModuleTone.amber),
   _Module("Notices", Icons.campaign_outlined, ModuleTone.coral),
   _Module("Transport", Icons.directions_bus_outlined, ModuleTone.pink),
-  _Module("Exams", Icons.workspace_premium_outlined, ModuleTone.amber),
+  // Exams (date sheets, report cards) is deliberately absent. It was a tile
+  // that opened a "coming soon" sheet, and Google Play rejects placeholder
+  // features under Minimum Functionality. Put it back the same day the exams
+  // endpoint returns real published results — not before.
   _Module("Library", Icons.local_library_outlined, ModuleTone.green),
   _Module("PTM", Icons.groups_outlined, ModuleTone.gray),
   _Module("Leave", Icons.event_busy_outlined, ModuleTone.purple),
@@ -253,12 +255,6 @@ class _HomeScreenState extends State<HomeScreen> {
         screen = PtmScreen(api: api, child: child);
       case "Transport":
         screen = TransportScreen(api: api);
-      case "Exams":
-        showComingSoon(
-          context,
-          "Exams",
-          "Date sheets and report cards appear here once the school publishes them.",
-        );
       case "Library":
         screen = EbookShelfScreen(api: api);
       case "Gallery":

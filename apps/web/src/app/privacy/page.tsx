@@ -200,6 +200,18 @@ export default function PrivacyPolicyPage() {
             rather than marketing, so they continue while your child is
             enrolled. We send no promotional messages.
           </li>
+          <li>
+            You may ask us to delete your app account and the data held against
+            it. What goes, what the school must keep, and how to ask are set out
+            on the{" "}
+            <Link
+              className="font-medium text-slate-900 underline underline-offset-4"
+              href="/data-deletion"
+            >
+              account and data deletion page
+            </Link>
+            .
+          </li>
         </LegalList>
       </LegalSection>
 
