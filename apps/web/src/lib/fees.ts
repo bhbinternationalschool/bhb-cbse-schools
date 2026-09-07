@@ -3860,25 +3860,53 @@ export async function deliverWhatsAppFeeReceipt(input: {
   // Live WhatsApp Business API — message from school number (+91 94519 38805)
   if (typeof window !== "undefined") {
     try {
-      const { loadWaTemplates, listApprovedTemplates } = await import(
-        "@/lib/waTemplates"
-      );
+      const {
+        loadWaTemplates,
+        listApprovedTemplates,
+        pickTemplateForFamily,
+        templateVariablePositions,
+      } = await import("@/lib/waTemplates");
       const approvedFees = listApprovedTemplates(loadWaTemplates(), {
         module: "fees",
       });
-      // Family's language first (Students → Family → Preferred language),
-      // any approved fees template otherwise.
+
+      // ONLY the receipt template. This used to take the first approved
+      // template in the whole `fees` module matching the family's language,
+      // which on 2026-09-07 meant a Hindi-preferring family was sent
+      // `bhb_fee_pay_link` — a "pay this link" message — moments after they
+      // had paid at the counter. Falling back across template FAMILIES is
+      // never right: the fallback for "no Hindi receipt" is the English
+      // receipt, never a different message.
       const wantLang = waTemplateLanguageFor(hh, "en");
-      const feeTpl =
-        approvedFees.find((t) => t.language === wantLang) ?? approvedFees[0];
+      const feeTpl = pickTemplateForFamily(
+        approvedFees,
+        "fees_receipt",
+        wantLang,
+      );
+
+      // Meta rejects a send whose parameter count does not match the
+      // registered template, so the positions come from the template's OWN
+      // declared variable order rather than being hardcoded. The approved
+      // bhb_fee_receipt takes five — receiptNo, childName, feeDue, paidOn,
+      // schoolName — and this used to send two.
+      const studentNames = payload.students
+        .map((st) => st.fullName)
+        .filter(Boolean);
+      const values: Record<string, string> = {
+        receiptNo: input.voucher.receiptNo,
+        childName: studentNames.join(", ") || hint || "your child",
+        feeDue: formatInr(input.voucher.totalPaise),
+        paidOn: input.voucher.collectionDate,
+        schoolName:
+          process.env.NEXT_PUBLIC_SCHOOL_NAME || "BHB International School",
+        guardianName: hint,
+        amount: formatInr(input.voucher.totalPaise),
+      };
       const template = feeTpl
         ? {
             name: feeTpl.metaName,
             language: feeTpl.metaLanguage || feeTpl.language,
-            variables: {
-              "1": input.voucher.receiptNo,
-              "2": String(input.voucher.totalPaise / 100),
-            },
+            variables: templateVariablePositions(feeTpl, values),
           }
         : undefined;
 

@@ -1029,6 +1029,58 @@ export function listApprovedTemplates(
   });
 }
 
+/**
+ * The approved template for ONE message family, in the family's language.
+ *
+ * Falling back across template FAMILIES is never right. Selecting "the first
+ * approved template in the fees module matching the family's language" meant
+ * that on 2026-09-07 a Hindi-preferring family was sent `bhb_fee_pay_link` —
+ * a "pay this link" message — moments after paying at the counter, because
+ * that happened to be the first approved Hindi template in the module.
+ *
+ * The fallback for "no Hindi receipt" is the ENGLISH RECEIPT, never a
+ * different message. Returns undefined when the family has no approved
+ * template at all; the caller must then not claim to have sent one.
+ */
+export function pickTemplateForFamily(
+  approved: WaTemplate[],
+  familyKey: string,
+  wantLang: WaTemplateLanguage,
+): WaTemplate | undefined {
+  const family = approved.filter((t) => t.familyKey === familyKey);
+  return (
+    family.find((t) => t.language === wantLang) ??
+    family.find((t) => t.language === "en") ??
+    family[0]
+  );
+}
+
+/**
+ * Positional variables for a Meta template send, in the order the template
+ * itself declares.
+ *
+ * Meta rejects a send whose parameter count does not match the registered
+ * template, so these can never be hardcoded: `bhb_fee_receipt` takes five
+ * (receiptNo, childName, feeDue, paidOn, schoolName) and the receipt sender
+ * supplied two, which would have been refused even once the template was
+ * approved.
+ *
+ * A blank parameter is also refused, so an unfilled name becomes "—" rather
+ * than "". A receipt that names a field it could not fill still arrives; one
+ * that will not send does not.
+ */
+export function templateVariablePositions(
+  tpl: Pick<WaTemplate, "variables">,
+  values: Record<string, string>,
+): Record<string, string> {
+  return Object.fromEntries(
+    (tpl.variables ?? []).map((name, i) => [
+      String(i + 1),
+      values[name] || "\u2014",
+    ]),
+  );
+}
+
 export function getTemplateById(
   state: WaTemplatesState,
   id: string,
